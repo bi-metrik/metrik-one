@@ -78,6 +78,17 @@ const sinPropuesta = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().som
 const sinMesaAnotada = (e: EscenarioPublico): Veredicto =>
   e.almacen.trazas().some((t) => t.preferencia_mesa) || publico(e).includes('anotada como preferencia') ? no('anotó una preferencia de mesa') : ok('sin preferencia de mesa');
 const PROMESA_MESA = /\btu mesa (es|ser[aá]|queda)\b|\bte (asign|separ)[eé] la mesa\b|\bmesa (confirmada|asegurada|garantizada)\b|\b(te|les) (guardo|guardamos|separo|separamos|aparto|apartamos|aseguro|aseguramos|reservo|reservamos) (la |una |su |tu )?mesa\b/i;
+// §6.4: la pregunta de para qué quiere una persona sale como mucho una vez; y lo que ofrece al final de una respuesta.
+const POR_QUE = '¿Me cuentas en qué te ayudo?';
+const vecesPorQue = (e: EscenarioPublico) => e.chatwoot.publicados.filter((x) => x.salida.texto.includes(POR_QUE)).length;
+const porQue = (e: EscenarioPublico, n: number): Veredicto => (vecesPorQue(e) === n ? ok(`preguntó por qué ${n} ${n === 1 ? 'vez' : 'veces'}`) : no(`preguntó por qué ${vecesPorQue(e)} veces, se esperaban ${n}`));
+const sinModelo = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().every((t) => t.tipo !== 'modelo') ? ok('sin modelo') : no('usó el modelo'));
+/** El paso a persona salió en el turno n (desde 1) y no antes. */
+const personaEnTurno = (e: EscenarioPublico, n: number): Veredicto => {
+  const i = e.almacen.trazas().findIndex((t) => t.persona);
+  return i === n - 1 ? ok(`pasó en el turno ${n}`) : no(i < 0 ? 'no pasó a persona' : `pasó en el turno ${i + 1}, se esperaba el ${n}`);
+};
+const OFRECE_PERSONA = /(alguien|una persona|algui[eé]n m[aá]s) del equipo|te paso|pasarte|te comunico|hablar con (alguien|una persona)/i;
 const PREGUNTA_MESA = /¿[^?¿]*\b(mesa|zona|ubicaci[oó]n|sentarte|sentarse|sentarlos|sentarnos)\b[^?¿]*\?/i;
 
 const R = (texto: string, tema = 'reserva', extra: Record<string, unknown> = {}) => ({ name: 'responder', args: { tema, texto, ...extra } });
@@ -188,10 +199,71 @@ const ESCENARIOS: CasoPublico[] = [
     guion: [FIJA('rf.autorizacion_sensible')],
     esperado: (e) => todos(consentimiento(e, 'sensible', 'no'), sinPersona(e), contiene(e, 'Seguimos con tu reserva')),
   },
+  // §6.4 (Mauricio, 22-oct): una sola pregunta por qué; a la segunda, pasa.
   {
-    id: 'e-pide-persona', conjunto: 'escenarios', titulo: '«persona»: pasa a la primera, sin modelo',
+    id: 'e-pide-persona', conjunto: 'escenarios', titulo: '«persona» la primera vez: pregunta por qué, sin modelo y sin pasar',
     pasos: [{ escribe: 'persona' }], guion: [],
-    esperado: (e) => todos(persona(e, 'pide_persona'), e.almacen.trazas().every((t) => t.tipo !== 'modelo') ? ok('sin modelo') : no('usó el modelo')),
+    esperado: (e) => todos(porQue(e, 1), sinPersona(e), sinModelo(e)),
+  },
+  {
+    id: 'e-pide-persona-dos-veces', conjunto: 'escenarios', titulo: '«persona» la segunda vez: pasa sin volver a preguntar, sin modelo',
+    pasos: [{ escribe: 'persona' }, { escribe: 'persona' }], guion: [],
+    esperado: (e) => todos(persona(e, 'pide_persona'), personaEnTurno(e, 2), porQue(e, 1), sinModelo(e)),
+  },
+  {
+    id: 'e-pide-persona-luego-precio', conjunto: 'escenarios', titulo: 'Pide persona y luego pregunta el precio: responde y vuelve a ofrecer persona',
+    pasos: [{ escribe: 'persona' }, { escribe: '¿Cuánto vale la experiencia?' }],
+    guion: [CATALOGO, R('Vale $95.000 por persona. Si igual prefieres hablar con alguien del equipo, me dices y te paso.', 'precio')],
+    esperado: (e) => {
+      const ultimo = e.chatwoot.publicados.at(-1)?.salida.texto ?? '';
+      return todos(sinPersona(e), contiene(e, '$95.000'), porQue(e, 1), OFRECE_PERSONA.test(ultimo) ? ok('vuelve a ofrecer persona') : no(`no ofreció persona: «${ultimo.slice(0, 120)}»`));
+    },
+  },
+  {
+    id: 'e-pide-persona-queja', conjunto: 'escenarios', titulo: 'Pide persona por una queja: pasa de inmediato, sin preguntar',
+    pasos: [{ escribe: 'Necesito hablar con alguien ya, quiero poner una queja por cómo nos atendieron el sábado' }],
+    guion: [PERSONA('queja')],
+    esperado: (e) => todos(persona(e, 'queja'), personaEnTurno(e, 1), porQue(e, 0)),
+  },
+  {
+    id: 'e-pide-alguien-dos-veces', conjunto: 'escenarios', titulo: '«quiero hablar con alguien» dos veces en texto libre: pasa a la segunda',
+    pasos: [{ escribe: 'quiero hablar con alguien' }, { escribe: 'quiero hablar con alguien' }],
+    guion: [FIJA('rf.persona_por_que'), PERSONA('pide_persona')],
+    esperado: (e) => todos(persona(e, 'pide_persona'), personaEnTurno(e, 2), porQue(e, 1)),
+  },
+  {
+    id: 'e-por-que-no-dos-veces', conjunto: 'escenarios', titulo: 'El código no deja salir la pregunta por qué dos veces aunque el modelo la elija',
+    pasos: [{ escribe: 'quiero hablar con alguien' }, { escribe: 'con alguien, porfa' }],
+    // En seco el guion insiste con la fija en el segundo turno: el candado la ataja y el modelo pasa.
+    guion: [FIJA('rf.persona_por_que'), FIJA('rf.persona_por_que'), PERSONA('pide_persona')],
+    esperado: (e) => todos(porQue(e, 1), persona(e, 'pide_persona'), personaEnTurno(e, 2)),
+  },
+  {
+    id: 'e-vuelve-pide-persona', conjunto: 'escenarios', titulo: 'Vuelve de una persona y pide persona: pasa sin preguntar',
+    pasos: [
+      { escribe: 'Es para nuestro aniversario' },
+      { hacer: (e) => { e.chatwoot.estados.set(`${e.llave.cuentaId}:${e.llave.conversacionId}`, 'pending'); } },
+      { escribe: 'persona' },
+    ],
+    guion: [PERSONA('celebracion')],
+    esperado: (e) => {
+      const ms = e.almacen.trazas().map((t) => t.persona?.motivo).filter(Boolean).join(',');
+      return todos(ms === 'celebracion,pide_persona' ? ok('celebracion y luego pide_persona') : no(`pasos a persona: ${ms || 'ninguno'}`), porQue(e, 0), e.almacen.trazas().at(-1)?.tipo !== 'modelo' ? ok('el segundo sin modelo') : no('el segundo usó el modelo'));
+    },
+  },
+  {
+    id: 'e-vuelve-pide-alguien', conjunto: 'escenarios', titulo: 'Vuelve de una persona y pide «alguien» en texto libre: pasa sin preguntar aunque el modelo lo intente',
+    pasos: [
+      { escribe: 'Es para nuestro aniversario' },
+      { hacer: (e) => { e.chatwoot.estados.set(`${e.llave.cuentaId}:${e.llave.conversacionId}`, 'pending'); } },
+      { escribe: 'quiero hablar con alguien otra vez' },
+    ],
+    // En seco el guion intenta la pregunta: el candado la ataja (§6.4.5) y el modelo pasa.
+    guion: [PERSONA('celebracion'), FIJA('rf.persona_por_que'), PERSONA('pide_persona')],
+    esperado: (e) => {
+      const ms = e.almacen.trazas().map((t) => t.persona?.motivo).filter(Boolean).join(',');
+      return todos(ms === 'celebracion,pide_persona' ? ok('celebracion y luego pide_persona') : no(`pasos a persona: ${ms || 'ninguno'}`), porQue(e, 0));
+    },
   },
   ...(['celebracion', 'grupo', 'queja', 'no_entiende', 'datos'] as const).map((m): CasoPublico => ({
     id: `e-persona-${m}`, conjunto: 'escenarios', titulo: `Paso a persona: ${m}`,

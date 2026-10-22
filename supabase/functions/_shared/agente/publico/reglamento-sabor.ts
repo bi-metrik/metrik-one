@@ -74,7 +74,14 @@ export const REGLAMENTO_SABOR: Ficha[] = [
   // §7.7b Seguridad del cliente
   { clave: 'seg.quien_confirma', tipo: 'guia', carga: 'siempre', hacer: 'Cada paso le dice al cliente qué sigue y quién lo confirma: tú tomas los datos; el equipo de Sabor confirma cupo y pago; la reserva queda hecha cuando el pago está aprobado. Ante «¿ya quedó reservado?» o «¿seguro que hay cupo?», la respuesta es honesta: todavía no, lo confirma el equipo.', fuente: 'Diseño §7.7b' },
   // §6.1 Paso a persona
-  persona('pide', 'piden hablar con una persona', 'pasar_a_persona motivo pide_persona, a la primera, sin insistir'),
+  // §6.4 (Mauricio, 22-oct): se pregunta una sola vez por qué; a la segunda, pasa. El código no deja salir
+  // rf.persona_por_que dos veces ni después de volver de una persona.
+  {
+    clave: 'persona.pide', tipo: 'guia', carga: 'siempre',
+    cuando: 'piden hablar con una persona (alguien del equipo, un asesor, un humano)',
+    hacer: 'Si en el mismo mensaje ya dice algo que no resuelves (queja, cambio de función, cancelación, pago, restricción, celebración, grupo), crisis o abuso: pasar_a_persona con ESE motivo, sin preguntar. Si no dice para qué y todavía no le has preguntado: respuesta_fija rf.persona_por_que (una sola vez en la conversación). Si contesta con algo que resuelves (precio, funciones, reglas), contéstalo y al final ofrécele de nuevo pasar con una persona del equipo. Si ya le preguntaste y vuelve a pedir una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona, sin volver a preguntar ni insistir. Si ya lo atendió una persona y lo devolvieron, pasa sin preguntar.',
+    fuente: 'Diseño §6.1 y §6.4 (Mauricio, 2026-10-22)',
+  },
   persona('celebracion', 'es cumpleaños, aniversario o propuesta', 'pasar_a_persona motivo celebracion'),
   persona('grupo', 'es un grupo de 5 o más que quiere sentarse junto en la misma mesa, un grupo desde 12 personas (experiencia privada en otro horario), una empresa, un colegio o un evento privado', 'pasar_a_persona motivo grupo; no prometas la mesa ni la privada: las coordina una persona del equipo (umbrales [KICKOFF 22-oct])'),
   persona('queja', 'hay una queja, un cambio de función, una cancelación o una devolución', 'pasar_a_persona motivo queja'),
@@ -102,6 +109,7 @@ export const REGLAMENTO_SABOR: Ficha[] = [
   rf('rf.toque_viejo', 'Ese resumen ya cambió. Este es el de ahora:', undefined, 'Núcleo'),
   // §6.2 paso 4: mensaje al cliente con lo que va a pasar y cuándo. HUECO §12.4: horario de atención por canal y festivos.
   rf('rf.persona', 'Te paso con una persona del equipo; te escribe por aquí en cuanto pueda (HUECO: horario).', undefined, 'Diseño §6.2.4; horario HUECO §12.4'),
+  rf('rf.persona_por_que', 'Claro, te paso con alguien del equipo. ¿Me cuentas en qué te ayudo? Así le dejo el contexto, o si es algo que yo puedo resolver, lo hago de una vez.', undefined, 'Diseño §6.4.1 (Mauricio, 2026-10-22)'),
   rf('rf.persona.reserva_lista', 'Listo, ya tengo tu reserva. Una persona del equipo te confirma el cupo y el pago por aquí (HUECO: horario).', undefined, 'Diseño §6.1 reserva_lista'),
   rf('rf.persona.restriccion', 'Gracias. Una persona del equipo revisa lo de tu menú y te escribe por aquí.', undefined, 'Diseño §5.3; Anexo 5.3.4'),
   rf('rf.persona.pago', 'Gracias. Una persona del equipo revisa tu pago y te confirma por aquí. Yo no puedo verlo.', undefined, 'Diseño §8.2 (el bot no dice «recibido» ni «aprobado»)'),
