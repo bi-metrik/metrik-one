@@ -18,7 +18,7 @@ import { useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { FileText, MoreHorizontal, Package, Stamp, Upload } from 'lucide-react'
+import { BedDouble, Car, FileText, HeartPulse, MoreHorizontal, Package, Plane, Stamp, Ticket, Upload } from 'lucide-react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { armarAgenda, opcionesDeDias, type Alcance, type SeleccionDia } from '@/lib/viaje/agenda'
 import { cuandoEnPalabras, DEFINICIONES, mensajeAlViajero, textoFaltaFecha, type Hito } from '@/lib/viaje/hitos'
@@ -26,10 +26,23 @@ import { fechaEnPalabras } from '@/lib/viaje/fechas-servicio'
 import { enlaceWhatsApp } from '@/lib/viaje/confirmacion'
 import type { Pendiente, ServicioProximo, Tablero } from '@/lib/viaje/mis-pendientes'
 import type { DatosAgenda } from '@/lib/viaje/mis-pendientes-datos'
-import { COLOR_TIPO, ICONO_TIPO, LineaPendiente, MargenDelMes, ServiciosProximos } from './mis-pendientes'
+import { COLOR_TIPO, LineaPendiente, MargenDelMes, ServiciosProximos } from './mis-pendientes'
 import { adjuntarHito, deshacerHito, marcarHito } from './hitos-actions'
 
-const ICONO_HITO = (h: Hito) => (h.hitoId === 'preregistro_migratorio' ? Stamp : h.servicioId ? ICONO_TIPO[h.tipoServicio] ?? Package : FileText)
+/** Ícono del tipo (los de la cotización); el pre-registro y los hitos del viaje, el suyo. */
+function IconoHito({ h }: { h: Hito }) {
+  const c = 'h-4 w-4'
+  if (h.hitoId === 'preregistro_migratorio') return <Stamp className={c} />
+  if (!h.servicioId) return <FileText className={c} />
+  switch (h.tipoServicio) {
+    case 'vuelo': return <Plane className={c} />
+    case 'hotel': return <BedDouble className={c} />
+    case 'traslado': return <Car className={c} />
+    case 'actividad': return <Ticket className={c} />
+    case 'asistencia': return <HeartPulse className={c} />
+    default: return <Package className={c} />
+  }
+}
 
 export default function Agenda({
   datos,
@@ -178,7 +191,6 @@ function inicialDe(h: Hito, nombres: Readonly<Record<string, string>>): string {
 }
 
 function LineaHito({ h, hoy, vencido, inicial }: { h: Hito; hoy: string; vencido: boolean; inicial: string | null }) {
-  const Icono = ICONO_HITO(h)
   const cuando = cuandoEnPalabras(h, hoy)
   const momento = h.clase === 'fijo' && h.horaObjetivo ? `desde las ${h.horaObjetivo}` : null
   return (
@@ -189,7 +201,7 @@ function LineaHito({ h, hoy, vencido, inicial }: { h: Hito; hoy: string; vencido
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-white" style={{ backgroundColor: h.servicioId ? COLOR_TIPO(h.tipoServicio) : 'var(--tipo-otro)' }} aria-hidden>
-          <Icono className="h-4 w-4" />
+          <IconoHito h={h} />
         </span>
         <div className="min-w-0 flex-1 space-y-0.5">
           <p className="break-words font-medium">{h.titulo}</p>

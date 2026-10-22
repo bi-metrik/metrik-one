@@ -23,7 +23,7 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 const fechaCorta = (f: string) => { const [, m, d] = f.split('-').map(Number); return `${d} ${MESES[m - 1].slice(0, 3)}` }
 
 /** Ícono y color de la cotización (`--tipo-*` de globals.css): el color nunca va solo. */
-export const ICONO_TIPO: Record<string, typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, asistencia: HeartPulse, otro: Package }
+const ICONO_TIPO: Record<string, typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, asistencia: HeartPulse, otro: Package }
 const ETIQUETA_TIPO: Record<string, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', asistencia: 'Asistencia', otro: 'Otro' }
 export const COLOR_TIPO = (tipo: string) => `var(--tipo-${['vuelo', 'hotel', 'traslado', 'actividad'].includes(tipo) ? tipo : 'otro'})`
 
