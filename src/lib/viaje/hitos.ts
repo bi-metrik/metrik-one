@@ -70,15 +70,17 @@ export interface DefinicionHito {
   corto: string
   /** Placeholder de la nota obligatoria. */
   pideNota?: string
+  /** Solo se cierra adjuntando (el check-in: «adjuntar el pasabordo = hecho»). */
+  adjuntoObligatorio?: boolean
 }
 
 export const DEFINICIONES: Record<HitoId, DefinicionHito> = {
   pedir_documentos: { id: 'pedir_documentos', clase: 'movil', evidencia: 'derivada', offsetDias: 0, titulo: 'Pedir los documentos de los viajeros', corto: 'documentos' },
   requisitos_entrada: { id: 'requisitos_entrada', clase: 'movil', evidencia: 'marca', offsetDias: -30, titulo: 'Revisar requisitos de entrada (pasaporte 6 meses, visa, vacuna)', corto: 'requisitos' },
-  asistencia_medica: { id: 'asistencia_medica', clase: 'movil', evidencia: 'adjunto', offsetDias: -7, titulo: 'Emitir la asistencia médica y mandársela al viajero', corto: 'asistencia' },
+  asistencia_medica: { id: 'asistencia_medica', clase: 'movil', evidencia: 'adjunto', offsetDias: -7, titulo: 'Emitir la asistencia médica y mandársela al viajero', corto: 'asistencia', adjuntoObligatorio: true },
   reconfirmar_hotel: { id: 'reconfirmar_hotel', clase: 'movil', evidencia: 'nota', offsetDias: -3, titulo: 'Reconfirmar la reserva con el hotel (no con la plataforma)', corto: 'hotel', pideNota: 'Quién confirmó y por dónde (correo, WhatsApp, llamada)' },
   confirmar_traslado: { id: 'confirmar_traslado', clase: 'movil', evidencia: 'nota', offsetDias: -2, titulo: 'Confirmar el traslado con el proveedor y mandarle al viajero la hora de recogida', corto: 'traslado', pideNota: 'Hora de recogida y contacto del conductor' },
-  checkin_vuelo: { id: 'checkin_vuelo', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Check-in y pasabordo', corto: 'check-in' },
+  checkin_vuelo: { id: 'checkin_vuelo', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Check-in y pasabordo', corto: 'check-in', adjuntoObligatorio: true },
   preregistro_migratorio: { id: 'preregistro_migratorio', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Pre-registro migratorio', corto: 'pre-registro' },
   detalles_tour: { id: 'detalles_tour', clase: 'fijo', evidencia: 'nota', offsetDias: -1, titulo: 'Confirmar con el proveedor del tour los detalles (hora, punto de encuentro) y mandárselos al viajero', corto: 'tour', pideNota: 'Hora y punto de encuentro' },
 }
@@ -358,6 +360,8 @@ export interface Hito {
   negocioId: string
   viaje: string
   cliente: string
+  /** Teléfono del contacto, para el mensaje listo de WhatsApp (lo manda la persona). */
+  telefono: string | null
   esPrueba: boolean
   servicioId: string | null
   servicioNombre: string | null
@@ -492,6 +496,7 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
       negocioId: v.id,
       viaje: v.nombre,
       cliente: v.cliente,
+      telefono: v.clienteTelefono ?? null,
       esPrueba: v.esPrueba,
       servicioId,
       servicioNombre: p.servicio?.nombre ?? null,
@@ -609,6 +614,28 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
     }
   }
   return out
+}
+
+// ── Cerrar un hito ──────────────────────────────────────────────────────────
+
+/**
+ * ¿Se puede cerrar así? «No aplica» exige motivo; los hitos con nota (hora y punto de encuentro,
+ * quién confirmó) la exigen; el check-in y la asistencia solo se cierran adjuntando. Copy para el
+ * toast, tal cual.
+ */
+export function validarCierreHito(
+  h: Pick<Hito, 'hitoId' | 'fechaAncla' | 'marca'>,
+  p: { estado: 'hecho' | 'no_aplica'; nota: string | null; conAdjunto: boolean },
+): { ok: true; nota: string | null } | { ok: false; error: string } {
+  const nota = (p.nota ?? '').trim().slice(0, 500) || null
+  if (!h.fechaAncla) return { ok: false, error: 'Primero pon la fecha del servicio: sin ella este hito no se puede cerrar.' }
+  if (p.estado === 'no_aplica') return nota ? { ok: true, nota } : { ok: false, error: 'Escribe por qué no aplica.' }
+  const def = DEFINICIONES[h.hitoId]
+  if (def.adjuntoObligatorio && !p.conAdjunto && !h.marca?.evidencia_ref) {
+    return { ok: false, error: h.hitoId === 'checkin_vuelo' ? 'Adjunta el pasabordo: adjuntarlo marca el check-in hecho.' : 'Adjunta el voucher: adjuntarlo lo marca hecho.' }
+  }
+  if (def.evidencia === 'nota' && !nota) return { ok: false, error: `Escribe ${(def.pideNota ?? 'el detalle').charAt(0).toLowerCase()}${(def.pideNota ?? 'el detalle').slice(1)}.` }
+  return { ok: true, nota }
 }
 
 // ── En palabras ─────────────────────────────────────────────────────────────
