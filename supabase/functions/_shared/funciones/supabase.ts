@@ -11,6 +11,7 @@ import type { LlaveConversacion } from '../agente/publico/tipos.ts';
 import { codigoDeError } from './tipos.ts';
 import type {
   Alternativa,
+  CampanaDeConversacion,
   CampanasActivas,
   EstadoAsistente,
   CupoPublico,
@@ -70,6 +71,18 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
       const { data, error } = await db.rpc('funcion_campanas_activas', { p_workspace_id: workspaceId });
       if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
       return { ok: true, dato: data as CampanasActivas };
+    },
+
+    async campanaPorAnuncio(workspaceId, adId) {
+      const { data, error } = await db.rpc('funcion_campana_por_anuncio', { p_workspace_id: workspaceId, p_ad_id: adId });
+      if (error) return { ok: false, error: codigoDeError(error.message) };
+      return { ok: true, dato: (data ?? null) as CampanaDeConversacion | null };
+    },
+
+    async campanaPorCodigo(workspaceId, codigo) {
+      const { data, error } = await db.rpc('funcion_campana_por_codigo', { p_workspace_id: workspaceId, p_codigo: codigo });
+      if (error) return { ok: false, error: codigoDeError(error.message) };
+      return { ok: true, dato: (data ?? null) as CampanaDeConversacion | null };
     },
 
     async autorizacionGeneral(llave: LlaveConversacion): Promise<RespuestaAutorizacion> {

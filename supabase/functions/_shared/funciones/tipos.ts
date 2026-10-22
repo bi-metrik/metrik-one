@@ -84,6 +84,17 @@ export interface CampanaActiva {
   funciones_disponibles: number;
 }
 
+/** La campaña de una conversación (P10), por el id del anuncio de donde llegó o por el código que escribió. */
+export interface CampanaDeConversacion {
+  campana_id: string;
+  codigo: string;
+  nombre: string;
+  experiencia: string;
+  estado: string;
+  /** Si el asistente puede ofrecer sus funciones (activa y con la agenda publicada). */
+  activa: boolean;
+}
+
 export interface CampanasActivas {
   total: number;
   campanas: CampanaActiva[];
@@ -216,6 +227,9 @@ export interface PuertoFunciones {
   consultarCupo(workspaceId: string, funcionId: string, personas: number): Promise<ResultadoCupo>;
   verDisponibles(workspaceId: string, codigoCampana: string | null): Promise<Resultado<FuncionDisponible[]>>;
   campanasActivas(workspaceId: string): Promise<Resultado<CampanasActivas>>;
+  /** `null` = ningún anuncio o código asociado a una campaña publicada. */
+  campanaPorAnuncio(workspaceId: string, adId: string): Promise<Resultado<CampanaDeConversacion | null>>;
+  campanaPorCodigo(workspaceId: string, codigo: string): Promise<Resultado<CampanaDeConversacion | null>>;
   /** La ÚLTIMA respuesta a la autorización `general` de la conversación (`null` = nunca respondió). */
   autorizacionGeneral(llave: LlaveConversacion): Promise<RespuestaAutorizacion>;
   apartar(p: PropuestaApartado): Promise<ResultadoApartar>;

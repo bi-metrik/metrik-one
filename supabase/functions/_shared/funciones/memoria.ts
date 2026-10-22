@@ -104,6 +104,7 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
   const reservas: ReservaEnMemoria[] = [];
   const autorizaciones = new Map<string, 'si' | 'no'>();
   const pagos = new Map<string, PagoEnMemoria>();
+  const anuncios = new Map<string, string>(); // ad_id → campana_id
   let n = 0;
   const nuevoId = () => `00000000-0000-4000-9000-${(++n).toString(16).padStart(12, '0')}`;
 
@@ -224,6 +225,16 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
       return { ok: true, dato: { total: lista.length, campanas: lista } };
     },
 
+    async campanaPorAnuncio(workspaceId, adId) {
+      const c = campanas.get(anuncios.get(`${workspaceId}|${adId.trim()}`) ?? '');
+      return { ok: true, dato: c && c.publicada ? campanaJson(c) : null };
+    },
+
+    async campanaPorCodigo(workspaceId, codigo) {
+      const c = [...campanas.values()].find((x) => x.workspaceId === workspaceId && x.codigo === codigo.trim().toUpperCase());
+      return { ok: true, dato: c && c.publicada ? campanaJson(c) : null };
+    },
+
     async autorizacionGeneral(llave): Promise<RespuestaAutorizacion> {
       return autorizaciones.get(llaveTexto(llave)) ?? null;
     },
@@ -263,6 +274,12 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
       return foto(r, false);
     },
   };
+
+  /** `funcion_campana_json` (sin el cierre automático por fecha: el doble no lo necesita). */
+  function campanaJson(c: CampanaEnMemoria) {
+    const estado = c.estado ?? 'activa';
+    return { campana_id: c.id, codigo: c.codigo, nombre: c.nombre, experiencia: c.experiencia, estado, activa: estado === 'activa' && !!c.publicada };
+  }
 
   /** `funcion_reservas_de_un_pago`: del workspace, sin repetidas, de una conversación. */
   const deUnPago = (workspaceId: string, ids: string[]) => {
@@ -348,6 +365,11 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
     },
     agregarCampana(c: CampanaEnMemoria) {
       campanas.set(c.id, { estado: 'activa', publicada: true, permitePagoTotal: true, ...c, codigo: c.codigo.toUpperCase() });
+    },
+    /** Lo que hace el equipo en el ⋮ de la campaña (`funcion_guardar_anuncio`). */
+    asociarAnuncio(campanaId: string, adId: string) {
+      const c = campanas.get(campanaId);
+      if (c) anuncios.set(`${c.workspaceId}|${adId}`, campanaId);
     },
     agregarFuncion(f: FuncionEnMemoria) {
       funciones.set(f.id, { ...f });

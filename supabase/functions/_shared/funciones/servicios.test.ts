@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { apartar, campanasActivas, consultarCupo, generarLinkPago, resumenPago, verFuncionesDisponibles } from './servicios'
+import { apartar, campanaDeLaConversacion, campanasActivas, consultarCupo, generarLinkPago, resumenPago, verFuncionesDisponibles } from './servicios'
 import { cuerpoLinkBold, expiracionBold, pasarelaBold, pasarelaEnMemoria } from './pasarela'
 import { funcionesEnMemoria, type CampanaEnMemoria, type FuncionEnMemoria } from './memoria'
 import { datosDeApartado, puertoFuncionesSupabase, type ClienteFunciones } from './supabase'
@@ -27,6 +27,7 @@ interface Banco {
   autorizar(llave: LlaveConversacion, r: 'si' | 'no'): Promise<void>
   vencer(reservaId: string): Promise<void>
   solicitudDe(reservaId: string): Promise<string | null>
+  asociarAnuncio(campanaId: string, adId: string): Promise<void>
 }
 
 let pg: PGlite
@@ -95,6 +96,7 @@ function bancoMemoria(ws: string): Banco {
     autorizar: async (l, r) => m.autorizar(l, r),
     vencer: async (rid) => m.vencer(rid),
     solicitudDe: async (rid) => m.reservas().find((r) => r.id === rid)?.propuesta?.solicitudCliente ?? null,
+    asociarAnuncio: async (c, ad) => m.asociarAnuncio(c, ad),
   }
 }
 
@@ -149,6 +151,9 @@ function bancoBase(ws: string): Banco {
     },
     async vencer(rid) {
       await pg.query(`update funcion_reservas set vence_at = now() - interval '1 minute' where id = $1`, [rid])
+    },
+    async asociarAnuncio(campanaId, adId) {
+      await pg.query(`insert into funcion_campana_anuncios (workspace_id, campana_id, ad_id) values ($1, $2, $3)`, [ws, campanaId, adId])
     },
     async solicitudDe(rid) {
       return (await pg.query<{ s: string | null }>(`select solicitud_cliente as s from funcion_reservas where id = $1`, [rid])).rows[0]?.s ?? null
@@ -354,6 +359,18 @@ describe.each([
     const doble = pasarelaEnMemoria()
     expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'x')).toEqual({ ok: false, error: 'apartado_vencido' })
     expect(doble.pedidos()).toEqual([])
+  })
+
+  it('P10: la campaña de la conversación, por anuncio o por código; sin publicar o sin dato, null', async () => {
+    const c = await campana({ codigo: `ad-${++n}` })
+    await b.asociarAnuncio(c.id, `1202087654${n}`)
+    const porAnuncio = await campanaDeLaConversacion(b.puerto, b.ws, { adId: `1202087654${n}` })
+    expect(porAnuncio.ok && porAnuncio.dato).toMatchObject({ campana_id: c.id, activa: true })
+    const porCodigo = await campanaDeLaConversacion(b.puerto, b.ws, { adId: 'otro-anuncio', codigo: c.codigo.toLowerCase() })
+    expect(porCodigo.ok && porCodigo.dato?.campana_id).toBe(c.id)
+    const borrador = await campana({ publicada: false })
+    expect(await campanaDeLaConversacion(b.puerto, b.ws, { codigo: borrador.codigo })).toEqual({ ok: true, dato: null })
+    expect(await campanaDeLaConversacion(b.puerto, b.ws, {})).toEqual({ ok: true, dato: null })
   })
 
   it('una mesa o un monto colados por fuera del tipo no viajan; la solicitud llega como texto', async () => {

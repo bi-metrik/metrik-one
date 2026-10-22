@@ -17,6 +17,7 @@
 import type { PasarelaPagos } from './pasarela.ts';
 import type {
   Alternativa,
+  CampanaDeConversacion,
   CampanasActivas,
   LinkPago,
   CupoPublico,
@@ -116,6 +117,26 @@ export async function campanasActivas(
   const r = await puerto.campanasActivas(workspaceId);
   if (!r.ok) return r;
   return { ok: true, dato: { total: r.dato.total, campanas: r.dato.campanas, preguntar: r.dato.total > 1 } };
+}
+
+/**
+ * P10: la campaña de donde viene el cliente, para marcar la conversación. Primero por el id del anuncio (Click to
+ * WhatsApp); si no hay, por el código que el cliente escribió («HP-OCT26»). `null` = no se sabe: el asistente pregunta.
+ */
+export async function campanaDeLaConversacion(
+  puerto: PuertoFunciones,
+  workspaceId: string,
+  o: { adId?: string | null; codigo?: string | null },
+): Promise<Resultado<CampanaDeConversacion | null>> {
+  if (!UUID.test(workspaceId)) return { ok: false, error: 'datos_invalidos' };
+  const ad = texto(o.adId, 100);
+  if (ad && /^[A-Za-z0-9_.:-]{1,100}$/.test(ad)) {
+    const r = await puerto.campanaPorAnuncio(workspaceId, ad);
+    if (!r.ok || r.dato) return r;
+  }
+  const codigo = texto(o.codigo, 20);
+  if (codigo && CODIGO.test(codigo)) return puerto.campanaPorCodigo(workspaceId, codigo);
+  return { ok: true, dato: null };
 }
 
 export async function apartar(puerto: PuertoFunciones, p: PropuestaApartado): Promise<ResultadoApartar> {
