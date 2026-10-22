@@ -1,6 +1,6 @@
 -- ============================================================
--- 20261022170000 — Módulo Funciones: experiencias, campañas, funciones con dos cupos y precios, y reservas con la foto
--- del monto (Sabor & Experiencias, etapa 2)
+-- 20261022170000 — Módulo Funciones: experiencias, campañas, funciones con dos cupos y precios, reservas con la foto
+-- del monto y pagos que cubren una o varias reservas (Sabor & Experiencias, etapa 2)
 -- Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md. Primer cliente previsto:
 -- Sabor & Experiencias, cuyo workspace NO existe.
 --
@@ -13,6 +13,9 @@
 --   · 2026-10-22, jerarquía Experiencia → Campaña → Función. La experiencia es la película (textos); la campaña, una
 --     tanda con su código de atribución, su agenda publicada y sus precios por defecto; la función, un día con su hora,
 --     sus dos cupos y sus reemplazos de precio.
+--   · 2026-10-22, P13: un pago (un link) cubre una o varias reservas de la misma conversación; pagar por función es un
+--     pago de una reserva. Si al llegar el pago una función ya no tiene cupo, la reserva queda `pendiente_persona`: NO
+--     hay devolución automática y solo una persona del equipo sobrevende (hasta `tope_sobreventa`) o devuelve.
 --   · `minutos_apartado` vive en la CAMPAÑA (decisión de Max): cuánto aguanta un apartado sin pago es una condición
 --     comercial de la tanda, como el abono, y puede cambiar entre preventa y temporada regular de la misma película.
 -- Esta versión reemplaza la `20261021120000_modulo_funciones.sql` que nunca se aplicó (esa versión además chocaba
@@ -28,7 +31,7 @@
 -- Qué crea:
 --   1. La llave de módulo `funciones` en las CUATRO listas que repiten el catálogo (`workspace_modulos_modulo`,
 --      `catalogo_servicios_modulo`, `documentos_versiones_modulo` y `proyectar_modulos`).
---   2. Cuatro tablas `funcion_*`:
+--   2. Seis tablas `funcion_*`:
 --        experiencias — la película: nombre, historia, qué incluye, edad mínima, información general.
 --        campanas     — una tanda de una experiencia: código de atribución (único, inmutable al publicar), fechas,
 --                       estado, agenda publicada, minutos de apartado y precios por defecto.
@@ -36,6 +39,9 @@
 --                       aparta hasta aquí), preventa, reemplazos de precio, estado y cierre de venta.
 --        reservas     — con la FOTO del precio (tarifa, precio unitario, total, modalidad, monto a pagar), la campaña
 --                       (la pone la base) y la atribución genérica (`atribucion_fuente`, `atribucion_ref`).
+--        pagos          — un link de pasarela: conversación, estado, monto esperado (la suma, calculada por la base),
+--                         vencimiento, referencia (única por workspace) y el aviso recibido.
+--        pago_reservas  — qué reservas cubre cada pago y cuánto de cada una; una reserva no está en dos pagos pendientes.
 --   3. Las reglas, cada una en UN lugar:
 --        funcion_tarifa(funcion)           el precio que rige: función → campaña. Preventa: el de preventa, y el
 --                                           completo solo como contexto. Abono por persona y si se permite pago total.
@@ -46,8 +52,11 @@
 --        funcion_ocupadas(funcion)          la única suma de ocupadas, para los dos cupos.
 --   4. Las funciones de la base (todas SECURITY DEFINER, `search_path = public`):
 --        para el asistente (solo service_role): funcion_consultar_cupo, funcion_ver_disponibles, funcion_campanas_activas;
---        de los dos: funcion_ocupacion, funcion_tarifa, funcion_apartar, funcion_confirmar_pago, funcion_guardar_restricciones;
---        solo del equipo: funcion_cancelar_reserva, funcion_guardar_experiencia, funcion_guardar_campana,
+--        de los dos: funcion_ocupacion, funcion_tarifa, funcion_apartar, funcion_guardar_restricciones;
+--        pagos: funcion_resumen_pago y funcion_preparar_pago (asistente y equipo), funcion_vincular_link y
+--          funcion_registrar_pago (solo servidor, idempotente por referencia), funcion_resolver_pendiente (solo una
+--          persona del equipo: sobrevender hasta el tope o devolver);
+--        solo del equipo: funcion_confirmar_pago (verificación a mano), funcion_cancelar_reserva, funcion_guardar_experiencia, funcion_guardar_campana,
 --          funcion_publicar_agenda, funcion_crear_funciones (agenda en lote), funcion_editar_funcion,
 --          funcion_eliminar_campana y funcion_eliminar_funcion (con reservas archiva; sin reservas borra).
 --
@@ -71,7 +80,7 @@
 -- Verificación después de aplicar (solo lectura):
 --   select relname, relrowsecurity from pg_class
 --    where relnamespace = 'public'::regnamespace and relname like 'funcion\_%' and relkind = 'r';
---     -> 4 filas, todas con relrowsecurity = true
+--     -> 6 filas, todas con relrowsecurity = true
 --   select t.relname,
 --          has_table_privilege('anon', t.oid, 'select')                 as anon_sel,
 --          has_table_privilege('authenticated', t.oid, 'select')        as auth_sel,
@@ -79,15 +88,17 @@
 --          has_table_privilege('service_role', t.oid, 'update')         as srv_upd
 --     from pg_class t
 --    where t.relnamespace = 'public'::regnamespace and t.relname like 'funcion\_%' and t.relkind = 'r';
---     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 4
+--     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 6
 --   select has_function_privilege('service_role', 'public.funcion_publicar_agenda(uuid)', 'execute');  -> false
+--   select has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute');  -> false
 --   select has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'); -> false
 --   select count(*) from public.workspace_modulos where modulo = 'funciones';                       -> 0
 --   select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false); -> 0
 --
 -- Cómo revertir (nada la usa todavía):
 --   drop trigger funcion_consentimiento_borrado on public.chatwoot_consentimientos;
---   drop table public.funcion_reservas, public.funcion_funciones, public.funcion_campanas, public.funcion_experiencias;
+--   drop table public.funcion_pago_reservas, public.funcion_pagos, public.funcion_reservas, public.funcion_funciones,
+--              public.funcion_campanas, public.funcion_experiencias;
 --   drop function public.funcion_* (todas las de este archivo);
 --   -- y devolver las cuatro listas de llaves al cuerpo de 20260928180000 / 20260929030000.
 -- ============================================================

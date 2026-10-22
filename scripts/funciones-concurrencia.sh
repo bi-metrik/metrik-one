@@ -31,6 +31,8 @@ CAMP=00000000-0000-4000-8000-00000000c031
 F_DOS=00000000-0000-4000-8000-00000000c051
 F_CLAVE=00000000-0000-4000-8000-00000000c052
 F_CONF=00000000-0000-4000-8000-00000000c053
+F_PAGO=00000000-0000-4000-8000-00000000c054
+F_OTRA=00000000-0000-4000-8000-00000000c055
 
 psql_q() { psql "$PGURL" -X -q -t -A -v ON_ERROR_STOP=1 "$@"; }
 
@@ -47,9 +49,13 @@ insert into funcion_campanas (id, workspace_id, experiencia_id, nombre, codigo, 
 insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente) values
   ('$F_DOS', '$WS', '$CAMP', now() + interval '1 day', 7, 5),
   ('$F_CLAVE', '$WS', '$CAMP', now() + interval '1 day 1 hour', 8, 8),
-  ('$F_CONF', '$WS', '$CAMP', now() + interval '1 day 2 hours', 4, 4);
+  ('$F_CONF', '$WS', '$CAMP', now() + interval '1 day 2 hours', 4, 4),
+  ('$F_PAGO', '$WS', '$CAMP', now() + interval '1 day 3 hours', 3, 3),
+  ('$F_OTRA', '$WS', '$CAMP', now() + interval '1 day 4 hours', 10, 10);
 insert into chatwoot_consentimientos (workspace_id, cuenta_id, conversacion_id, canal, tipo, respuesta, texto_clave, texto_version, texto_huella)
-  select '$WS', 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g;
+  select '$WS', 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g
+  union all
+  select '$WS', 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(101, 102) g;
 SQL
 
 # Una sesión que corre $2 dentro de una transacción y la sostiene 0,2 s antes del commit.
@@ -121,6 +127,39 @@ ocupadas_c=$(psql_q -c "select (funcion_ocupacion('$F_CONF')->>'ocupadas')::int"
 echo "C. ${#viejos[@]} apartados vencidos confirmados a la vez con 2 libres: $confirmadas confirmadas, ocupadas $ocupadas_c de 4"
 if [ "$ocupadas_c" -gt 4 ]; then echo "   SOBREVENTA al confirmar" >&2; falla=1; fi
 if [ "$confirmadas" -ne 2 ]; then echo "   se esperaban exactamente 2" >&2; falla=1; fi
+
+# ── D. Dos pagos a la vez sobre la misma función: no se pasa de la capacidad ───────────────────────────────
+# Dos clientes (conversaciones 101 y 102) apartan 1 en F_PAGO (capacidad 3) y 1 en otra función, y cada uno prepara UN
+# pago por sus dos reservas. Sus apartados de F_PAGO vencen y el equipo toma 2 puestos: queda 1 libre. Los dos avisos
+# de pago llegan a la vez: solo uno puede confirmar su reserva de F_PAGO; la otra queda `pendiente_persona`.
+servidor_sql() {
+  psql_q <<SQL
+select set_config('prueba.uid', '', false);
+set role service_role;
+$1;
+SQL
+}
+for c in 101 102; do
+  servidor_sql "select funcion_apartar('$WS', '$F_PAGO', 1, 'total', '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-a', 'asistente')" >/dev/null
+  servidor_sql "select funcion_apartar('$WS', '$F_OTRA', 1, 'total', '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-b', 'asistente')" >/dev/null
+  ids=$(psql_q -c "select string_agg(id::text, ',' order by id) from funcion_reservas where clave_idempotencia in ('p$c-a', 'p$c-b')")
+  pago=$(servidor_sql "select funcion_preparar_pago('$WS', '{$ids}'::uuid[])->>'pago_id'" | tail -1)
+  servidor_sql "select funcion_vincular_link('$pago', 'REF-$c', null)" >/dev/null
+done
+psql_q -c "update funcion_reservas set vence_at = now() - interval '1 minute' where clave_idempotencia in ('p101-a', 'p102-a')" >/dev/null
+apartar_equipo "$F_PAGO" "eq-d-1"
+apartar_equipo "$F_PAGO" "eq-d-2"
+for c in 101 102; do
+  monto=$(psql_q -c "select monto_esperado from funcion_pagos where referencia = 'REF-$c'")
+  ( en_transaccion asistente "select funcion_registrar_pago('$WS', 'REF-$c', 'aprobado', $monto)" || true ) &
+done
+wait
+confirmadas_d=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia in ('p101-a', 'p102-a') and estado = 'confirmada'")
+pendientes_d=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia in ('p101-a', 'p102-a') and estado = 'pendiente_persona'")
+ocupadas_d=$(psql_q -c "select (funcion_ocupacion('$F_PAGO')->>'ocupadas')::int")
+echo "D. dos pagos a la vez con 1 libre en la misma función: $confirmadas_d confirmada(s), $pendientes_d pendiente(s) de persona, ocupadas $ocupadas_d de 3"
+if [ "$ocupadas_d" -gt 3 ]; then echo "   SOBREVENTA con dos pagos" >&2; falla=1; fi
+if [ "$confirmadas_d" -ne 1 ] || [ "$pendientes_d" -ne 1 ]; then echo "   se esperaban 1 confirmada y 1 pendiente de persona" >&2; falla=1; fi
 
 if [ "$falla" -ne 0 ]; then echo "FALLÓ" >&2; exit 1; fi
 echo "Sin sobreventa."

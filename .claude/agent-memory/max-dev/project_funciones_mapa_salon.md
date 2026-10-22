@@ -1,6 +1,6 @@
 ---
 name: funciones-mapa-salon
-description: Módulo funciones de ONE (Sabor etapa 2, PR #1234): migración 20261022170000 SIN aplicar; Experiencia → Campaña → Función; dos cupos; tarifa única y foto del monto; pantallas esperan el panel
+description: Módulo funciones de ONE (Sabor etapa 2, PR #1234): migración 20261022170000 SIN aplicar; Experiencia → Campaña → Función; dos cupos; tarifa única; pagos de varias reservas; pantallas esperan el panel
 metadata:
   type: project
 ---
@@ -21,6 +21,9 @@ recibir ese diseño.
 - Una regla, un lugar: `funcion_tarifa` (precio), `funcion_motivo_asistente` (disponible para el bot),
   `funcion_ocupadas` (la suma de los dos cupos). No duplicar esas reglas en TS salvo en el doble `memoria.ts`, que las
   pruebas de contrato comparan con la base.
+- Pagos (P13): un solo camino, `funcion_preparar_pago` → link → `funcion_registrar_pago` (servidor, idempotente por
+  referencia). Nada automático pasa de la capacidad: lo que llega sin cupo queda `pendiente_persona` y solo una persona
+  sobrevende o devuelve. `expiration_date` de Bold en ms está SIN VERIFICAR (`pasarela.ts`, una sola función).
 - `minutos_apartado` vive en la CAMPAÑA (decisión de Max: es condición comercial de la tanda, como el abono).
 - La app de hoy tiene un puente mínimo (`datos.ts` traduce capacidad→cupo_total y activa→abierta; el alta de funciones
   responde que espera el panel). Se borra con el panel nuevo.
