@@ -6,6 +6,7 @@ import { motivoCorteDeError } from '@/lib/valida/corte-bolsa';
 import { resolverNombresUsuarios } from './_usuarios';
 import { accesoValida as accesoValidaBase } from '@/lib/valida/acceso-servidor';
 import { llamarValida, persistirConsulta, recalcularScoreNegocio } from '@/lib/valida/consulta-servidor';
+import { CODIGO_BUSQUEDA_INCOMPLETA } from '@/lib/valida/mensajes-error';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
@@ -231,6 +232,10 @@ export async function consultarValida(
   if (!resultado.ok) {
     const corte = motivoCorteDeError(resultado.error, prueba);
     if (corte) return { ok: false, error: corte };
+    // La búsqueda en alguna lista no se completó (503 de metrik-valida#66): Valida no la registró
+    // ni la cobró. Por la misma razón del corte no se guarda: una fila `error` en el historial se
+    // leía como un resultado. La pantalla dice «no pudimos revisar todas las listas; intenta de nuevo».
+    if (resultado.error === CODIGO_BUSQUEDA_INCOMPLETA) return { ok: false, error: CODIGO_BUSQUEDA_INCOMPLETA };
   }
 
   const persisted = await persistirConsulta({

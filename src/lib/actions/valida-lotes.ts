@@ -18,7 +18,9 @@ import {
   partesDelPdf,
   recortarAlSaldo,
   textoPausa,
+  celdasFilaResultado,
   type EstadoLote,
+  type FilaResultadoLote,
   type FilaXLSX,
 } from '@/lib/valida/lote';
 import { despertarTrabajador, pausarLote } from '@/lib/valida/lote-servidor';
@@ -447,15 +449,6 @@ export async function pdfLoteValida(
   }
 }
 
-const SEVERIDAD_TEXTO: Record<string, string> = {
-  alto: 'Alto',
-  medio: 'Medio',
-  bajo: 'Bajo',
-  informativo: 'Informativo',
-  sin_hallazgo: 'Sin hallazgo',
-  error: 'Error',
-};
-
 /** Los resultados del lote en un XLSX, una fila por fila del archivo, en su orden. */
 export async function resultadosLoteValida(
   loteId: string,
@@ -466,16 +459,7 @@ export async function resultadosLoteValida(
   const l = await leerLote(svc, acceso.workspaceId, loteId);
   if (!l) return { ok: false, error: 'lote_no_encontrado' };
 
-  type Fila = {
-    posicion: number;
-    entrada: { tipo?: string; nombre?: string; documento?: { tipo?: string; numero?: string } } | null;
-    estado: string;
-    severidad: string | null;
-    total_matches: number | null;
-    valida_consulta_id: string | null;
-    resultado_error: string | null;
-    error_parseo: string | null;
-  };
+  type Fila = FilaResultadoLote;
   const filas: Fila[] = [];
   // PostgREST entrega a lo sumo 1.000 filas por consulta.
   for (let desde = 0; desde < l.total + 1000; desde += 1000) {
@@ -492,17 +476,7 @@ export async function resultadosLoteValida(
 
   const hoja = XLSX.utils.aoa_to_sheet([
     ['fila', 'tipo_persona', 'nombre', 'tipo_documento', 'numero_documento', 'severidad', 'coincidencias', 'consulta_valida', 'observacion'],
-    ...filas.map((f) => [
-      f.posicion + 1, // la fila del XLSX, contando el encabezado
-      f.entrada?.tipo ?? '',
-      f.entrada?.nombre ?? '',
-      f.entrada?.documento?.tipo ?? '',
-      f.entrada?.documento?.numero ?? '',
-      f.estado === 'pendiente' || f.estado === 'en_curso' ? 'Sin consultar' : SEVERIDAD_TEXTO[f.severidad ?? ''] ?? f.severidad ?? '',
-      f.total_matches ?? '',
-      f.valida_consulta_id ?? '',
-      f.error_parseo ?? f.resultado_error ?? '',
-    ]),
+    ...filas.map(celdasFilaResultado),
   ]);
   hoja['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 36 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 38 }, { wch: 40 }];
   const libro = XLSX.utils.book_new();
