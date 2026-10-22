@@ -21,6 +21,9 @@ recibir ese diseño.
 - Una regla, un lugar: `funcion_tarifa` (precio), `funcion_motivo_asistente` (disponible para el bot),
   `funcion_ocupadas` (la suma de los dos cupos). No duplicar esas reglas en TS salvo en el doble `memoria.ts`, que las
   pruebas de contrato comparan con la base.
+- Al asistente NUNCA un número de cupo (acuerdo con su sesión, 22-oct): `estado` y alternativas; los números quedan en
+  `funcion_ocupacion` (equipo). Una prueba recorre las salidas y falla si aparece una llave de cupo.
+- Panel (§4) construido; la ficha nueva y los textos esperan P11 («Publicar y copiar post» solo publica).
 - Pagos (P13): un solo camino, `funcion_preparar_pago` → link → `funcion_registrar_pago` (servidor, idempotente por
   referencia). Nada automático pasa de la capacidad: lo que llega sin cupo queda `pendiente_persona` y solo una persona
   sobrevende o devuelve. `expiration_date` de Bold en ms está SIN VERIFICAR (`pasarela.ts`, una sola función).

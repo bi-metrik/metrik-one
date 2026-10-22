@@ -31,7 +31,7 @@
 -- Qué crea:
 --   1. La llave de módulo `funciones` en las CUATRO listas que repiten el catálogo (`workspace_modulos_modulo`,
 --      `catalogo_servicios_modulo`, `documentos_versiones_modulo` y `proyectar_modulos`).
---   2. Seis tablas `funcion_*`:
+--   2. Siete tablas `funcion_*`:
 --        experiencias — la película: nombre, historia, qué incluye, edad mínima, información general.
 --        campanas     — una tanda de una experiencia: código de atribución (único, inmutable al publicar), fechas,
 --                       estado, agenda publicada, minutos de apartado y precios por defecto.
@@ -42,6 +42,7 @@
 --        pagos          — un link de pasarela: conversación, estado, monto esperado (la suma, calculada por la base),
 --                         vencimiento, referencia (única por workspace) y el aviso recibido.
 --        pago_reservas  — qué reservas cubre cada pago y cuánto de cada una; una reserva no está en dos pagos pendientes.
+--        campana_anuncios — los ids de anuncio de cada campaña (P10): de qué anuncio llega cada cliente.
 --   3. Las reglas, cada una en UN lugar:
 --        funcion_tarifa(funcion)           el precio que rige: función → campaña. Preventa: el de preventa, y el
 --                                           completo solo como contexto. Abono por persona y si se permite pago total.
@@ -51,14 +52,21 @@
 --                                           asistente), consultar_cupo, ver_funciones_disponibles y campanas_activas.
 --        funcion_ocupadas(funcion)          la única suma de ocupadas, para los dos cupos.
 --   4. Las funciones de la base (todas SECURITY DEFINER, `search_path = public`):
---        para el asistente (solo service_role): funcion_consultar_cupo, funcion_ver_disponibles, funcion_campanas_activas;
+--        para el asistente (solo service_role): funcion_consultar_cupo (estado SIN números de cupo y hasta 3
+--          alternativas: «nunca dejar ir a un cliente»), funcion_ver_disponibles, funcion_campanas_activas,
+--          funcion_campana_por_anuncio y funcion_campana_por_codigo (P10);
 --        de los dos: funcion_ocupacion, funcion_tarifa, funcion_apartar, funcion_guardar_restricciones;
 --        pagos: funcion_resumen_pago y funcion_preparar_pago (asistente y equipo), funcion_vincular_link y
 --          funcion_registrar_pago (solo servidor, idempotente por referencia), funcion_resolver_pendiente (solo una
 --          persona del equipo: sobrevender hasta el tope o devolver);
 --        solo del equipo: funcion_confirmar_pago (verificación a mano), funcion_cancelar_reserva, funcion_guardar_experiencia, funcion_guardar_campana,
 --          funcion_publicar_agenda, funcion_crear_funciones (agenda en lote), funcion_editar_funcion,
---          funcion_eliminar_campana y funcion_eliminar_funcion (con reservas archiva; sin reservas borra).
+--          funcion_eliminar_campana y funcion_eliminar_funcion (con reservas archiva; sin reservas borra);
+--        el panel (§4): funcion_panel_campanas, funcion_panel_campana, funcion_cambiar_estado_campana,
+--          funcion_cambiar_estado_funcion, funcion_duplicar_campana y funcion_guardar_anuncio.
+--   5. P6, cierre automático SIN cron: `funcion_estado_campana` CALCULA al leer el estado que se muestra y se usa
+--      (`cerrada` cuando pasó la última función viva, `agotada` cuando todas las futuras están llenas). La columna
+--      `estado` no cambia sola.
 --
 -- Quién escribe: NADIE escribe las tablas directo, ni `authenticated` ni `service_role`. Se leen por workspace con
 -- RLS; toda escritura pasa por las funciones de arriba, que validan las invariantes dentro del candado.
@@ -80,7 +88,7 @@
 -- Verificación después de aplicar (solo lectura):
 --   select relname, relrowsecurity from pg_class
 --    where relnamespace = 'public'::regnamespace and relname like 'funcion\_%' and relkind = 'r';
---     -> 6 filas, todas con relrowsecurity = true
+--     -> 7 filas, todas con relrowsecurity = true
 --   select t.relname,
 --          has_table_privilege('anon', t.oid, 'select')                 as anon_sel,
 --          has_table_privilege('authenticated', t.oid, 'select')        as auth_sel,
@@ -88,7 +96,7 @@
 --          has_table_privilege('service_role', t.oid, 'update')         as srv_upd
 --     from pg_class t
 --    where t.relnamespace = 'public'::regnamespace and t.relname like 'funcion\_%' and t.relkind = 'r';
---     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 6
+--     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 7
 --   select has_function_privilege('service_role', 'public.funcion_publicar_agenda(uuid)', 'execute');  -> false
 --   select has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute');  -> false
 --   select has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'); -> false
@@ -97,7 +105,7 @@
 --
 -- Cómo revertir (nada la usa todavía):
 --   drop trigger funcion_consentimiento_borrado on public.chatwoot_consentimientos;
---   drop table public.funcion_pago_reservas, public.funcion_pagos, public.funcion_reservas, public.funcion_funciones,
+--   drop table public.funcion_campana_anuncios, public.funcion_pago_reservas, public.funcion_pagos, public.funcion_reservas, public.funcion_funciones,
 --              public.funcion_campanas, public.funcion_experiencias;
 --   drop function public.funcion_* (todas las de este archivo);
 --   -- y devolver las cuatro listas de llaves al cuerpo de 20260928180000 / 20260929030000.
