@@ -383,6 +383,70 @@ export function resultadoDeEstado(estado: string | null | undefined): 'aprobado'
   return 'rechazado'
 }
 
+/** `x_cod_transaction_state` de ePayco (ver arriba) → lo que ONE hace con la transacción. */
+const ESTADOS_CONSULTA: Record<string, 'aprobado' | 'pendiente' | 'rechazado' | 'reversado'> = {
+  '1': 'aprobado',
+  '2': 'rechazado',
+  '3': 'pendiente',
+  '4': 'rechazado',
+  '6': 'reversado',
+  '7': 'pendiente',
+  '8': 'pendiente',
+  '9': 'rechazado',
+  '10': 'rechazado',
+  '11': 'rechazado',
+}
+
+/**
+ * La respuesta de la consulta de una transacción (`POST /payment/transaction` de APIFY), leída contra
+ * la colección oficial («Pagos › Consultar Transacción», 2026-10-22):
+ *
+ *   `{ success: true, data: { refPayco, invoice, amount: "20000.00", status: "Pendiente", response,
+ *     codeResponse: 3, codTransactionState: "3", responseReasonText, date: "2021-07-19 11:11:39",
+ *     testMode: "FALSE" } }`
+ *
+ * y la de error: `{ success: false, textResponse: "Transacción no existe", data: { error: {} } }`
+ * (producción respondió así el 2026-10-22 con llaves de otro comercio: «Transacción no relacionada
+ * con el comercio»). Una consulta que no se pudo hacer es un ERROR, nunca un rechazo: antes de este
+ * cambio `data.status` vacío caía en `rechazado` y habría devuelto a enlace un cobro aprobado.
+ *
+ * El estado sale del CÓDIGO (`codTransactionState`, con `codeResponse` de respaldo), los mismos de la
+ * confirmación: `codigo` del rechazo es ese código, para que la conciliación use el mismo id de evento
+ * que la confirmación (`<ref_payco>-<estado>`). Un estado sin código conocido no decide nada (error).
+ * Una transacción de PRUEBA no paga una cuota real, igual que en la confirmación.
+ */
+export function resultadoDeConsultaEpayco(
+  cuerpo: Record<string, unknown>,
+  externalRef: string,
+  opciones: { pruebaCuenta?: boolean } = {},
+): ResultadoCargo {
+  if (cuerpo.success !== true) {
+    return { estado: 'error', mensaje: `ePayco no consultó la transacción: ${detalleDelError(cuerpo)}`, reintentable: true }
+  }
+  const d = (cuerpo.data ?? null) as Record<string, unknown> | null
+  if (!d || typeof d !== 'object') return { estado: 'error', mensaje: 'ePayco consultó la transacción sin datos.', reintentable: true }
+  const ref = externalRef.replace(/^epayco-/, '')
+  const refRespuesta = d.refPayco ?? d.referencePayco
+  if (refRespuesta !== undefined && refRespuesta !== null && String(refRespuesta) !== ref) {
+    return { estado: 'error', mensaje: `ePayco respondió por otra transacción (${String(refRespuesta)}).`, reintentable: false }
+  }
+  if (String(d.testMode ?? d.test ?? '').toUpperCase() === 'TRUE' && !opciones.pruebaCuenta) {
+    return { estado: 'error', mensaje: 'Transacción de prueba: no paga una cuota real.', reintentable: false }
+  }
+  const codigo = String(d.codTransactionState ?? d.codeResponse ?? '').trim()
+  const estado = ESTADOS_CONSULTA[codigo]
+  const texto = String(d.responseReasonText ?? d.status ?? d.response ?? '').trim()
+  if (estado === 'aprobado') {
+    const monto = Number(d.amount)
+    if (!Number.isFinite(monto) || monto <= 0) return { estado: 'error', mensaje: 'ePayco aprobó la transacción sin un monto legible.', reintentable: false }
+    return { estado: 'aprobado', externalRef, fecha: fechaBogota(typeof d.date === 'string' ? d.date : null), monto }
+  }
+  if (estado === 'pendiente') return { estado: 'pendiente', externalRef, detalle: texto || 'Pendiente' }
+  if (estado === 'rechazado') return { estado: 'rechazado', externalRef, codigo, mensaje: texto || 'Rechazada', reintentable: false }
+  if (estado === 'reversado') return { estado: 'error', mensaje: `ePayco reversó la transacción ${ref}: revisar a mano.`, reintentable: false }
+  return { estado: 'error', mensaje: `ePayco devolvió un estado desconocido (${codigo || texto || 'vacío'}).`, reintentable: true }
+}
+
 function fechaBogota(ymdHms: string | null | undefined): string {
   const m = /^(\d{4}-\d{2}-\d{2})/.exec(ymdHms ?? '')
   return m ? m[1] : new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10)
@@ -782,11 +846,7 @@ export function crearAdapterEpayco(deps: DepsEpayco = {}): PasarelaAdapter {
       if (!s.ok) return { estado: 'error', mensaje: s.error, reintentable: s.reintentable }
       const r = await pedir(deps, '/payment/transaction', { bearer: s.token, cuerpo: { referencePayco: externalRef.replace(/^epayco-/, '') } })
       if (!r.ok) return { estado: 'error', mensaje: r.error, reintentable: r.reintentable }
-      const d = (r.cuerpo.data ?? null) as Record<string, unknown> | null
-      const res = resultadoDeEstado(typeof d?.status === 'string' ? d.status : typeof d?.response === 'string' ? d.response : null)
-      if (res === 'aprobado') return { estado: 'aprobado', externalRef, fecha: fechaBogota(typeof d?.date === 'string' ? d.date : null), monto: Number(d?.amount ?? 0) }
-      if (res === 'pendiente') return { estado: 'pendiente', externalRef }
-      return { estado: 'rechazado', externalRef, codigo: String(d?.codeResponse ?? 'rechazada'), mensaje: String(d?.responseReasonText ?? 'Rechazada'), reintentable: false }
+      return resultadoDeConsultaEpayco(r.cuerpo, externalRef, { pruebaCuenta: epaycoEnPruebas(env()) && env().VERCEL_ENV !== 'production' })
     },
     verificarWebhook(cuerpoCrudo) {
       return verificarConfirmacionEpayco(cuerpoCrudo, env())

@@ -10,7 +10,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import { bloqueIndice, bloqueSiempre, perfil } from './reglamento.ts';
-import type { FilaConversacion, LecturaAdjunto, Reglamento, Traza } from './tipos.ts';
+import type { ClaseDocumento, FilaConversacion, LecturaAdjunto, Reglamento, Traza } from './tipos.ts';
 
 export const TOPES_BLOQUE = { nucleo: 800, siempre: 2500, indice: 2000, estado: 600, conversacion: 6000, resultado: 400 };
 const CARACTERES_POR_TOKEN = 4;
@@ -72,12 +72,19 @@ function resumenTraza(t: Traza | null | undefined): string[] {
 
 const PESOS = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 });
 
+const ETIQUETA_CLASE: Record<ClaseDocumento, string> = { viaje: 'del viaje', identidad: 'documento de identidad', pago: 'comprobante de pago', otro: 'otro documento' };
+
 /**
  * Lo leído de un soporte, en una línea: son datos del documento (no órdenes), escapados. Sin lectura todavía, vacío.
  * Pura.
  */
 export function textoLectura(l: LecturaAdjunto | null | undefined): string {
   if (l === undefined) return '';
+  // La lectura de la bandeja (documentos del cliente de una agencia): qué es y lo que dice, con sus palabras.
+  if (l?.clase !== undefined) {
+    if (!l.legible || !l.texto) return ` · (no se pudo leer el archivo${l.motivo ? `: ${l.motivo}` : ''})`;
+    return ` · lo que dice el archivo (${ETIQUETA_CLASE[l.clase]}): ${escapar(l.texto, 900)}`;
+  }
   if (!l || !l.legible) return ` · (no se pudo leer el monto del archivo${l?.motivo ? `: ${l.motivo}` : ''})`;
   const partes = [
     l.monto !== null ? `total $${PESOS.format(l.monto)}` : null,
@@ -85,6 +92,7 @@ export function textoLectura(l: LecturaAdjunto | null | undefined): string {
     l.comercio ? `comercio ${escapar(l.comercio, 80)}` : null,
     l.nit ? `NIT ${l.nit}` : null,
     l.descripcion ? `concepto ${escapar(l.descripcion, 160)}` : null,
+    l.titular_destino ? `el dinero llega a la cuenta de ${escapar(l.titular_destino, 80)}` : null,
   ].filter(Boolean);
   return ` · lo que dice el archivo: ${partes.join(' · ')}`;
 }

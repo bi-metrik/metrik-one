@@ -23,6 +23,7 @@ import { leerCierreGuardado, leerPostventa, sumarDias, diasEntre, pesosCierre } 
 import { leerPaqueteEnviado } from './entrega'
 import { leerPrerreserva } from './confirmacion'
 import type { CuotaPlan } from './plan-pagos'
+import { leerTramos, horaHHMM, type TramoServicio } from './fechas-servicio'
 
 export type Grupo = 'vencido' | 'hoy' | 'semana'
 
@@ -38,6 +39,13 @@ export interface Pendiente {
   negocioId: string
   viaje: string
   accion: Accion
+  /**
+   * Agenda (hitos, 2026-10-22): lo de plata (cuotas, pagos, saldo, aprobaciones de pago) va al final
+   * del día y en gris. «Mis pendientes» sin hitos no lo usa.
+   */
+  plata?: boolean
+  /** Agenda: el día en que la línea aparece, si no es su `fecha` (el paquete, a 7 días de la salida). */
+  fechaAgenda?: string
 }
 
 export interface AprobacionPendiente {
@@ -63,6 +71,14 @@ export interface ServicioPendiente {
   fecha_limite_pago: string | null
   gastos: Array<GastoDelServicio & { fecha?: string | null }>
   aprobaciones: AprobacionDelServicio[]
+  /** Fechas del servicio (2026-10-21). Opcionales: los casos viejos de las pruebas no las traen. */
+  tipo?: string
+  fecha_servicio?: string | null
+  hora_inicio?: string | null
+  fecha_fin?: string | null
+  hora_fin?: string | null
+  tramos?: TramoServicio[] | null
+  responsable_staff_id?: string | null
 }
 
 export interface ViajePendiente {
@@ -110,6 +126,8 @@ const MOTIVO_APROBACION: Record<string, string> = {
   forzar_factura: 'facturar antes de tiempo',
 }
 
+const maxFecha = (a: string, b: string) => (a > b ? a : b)
+
 function esMio(staffId: string | null, persona: Persona): boolean {
   return !!persona.staffId && staffId === persona.staffId
 }
@@ -138,12 +156,14 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
         if (c.estado !== 'vencida' && c.estado !== 'vence_hoy') continue
         add({ grupo: c.estado === 'vencida' ? 'vencido' : 'hoy', fecha: c.fecha, negocioId: v.id, viaje,
           texto: c.estado === 'vencida' ? `Cuota de ${quien} vencida: faltan ${pesosCierre(c.saldo)}.` : `Hoy vence la cuota de ${quien}: ${pesosCierre(c.saldo)}.`,
-          accion: { tipo: 'abrir', label: 'Pegar comprobante' } })
+          accion: { tipo: 'abrir', label: 'Pegar comprobante' }, plata: true })
       }
       if (v.salida && !leerPaqueteEnviado(v.metadata) && v.etapaGates.includes('paquete_enviado')) {
         const g = grupoDe(v.salida, hoy)
         if (g && v.salida >= hoy) add({ grupo: g === 'semana' ? 'semana' : 'hoy', fecha: v.salida, negocioId: v.id, viaje,
-          texto: `Paquete por enviar: ${quien} viaja el ${v.salida.slice(5).split('-').reverse().join('/')}.`, accion: { tipo: 'abrir', label: 'Ver paquete' } })
+          texto: `Paquete por enviar: ${quien} viaja el ${v.salida.slice(5).split('-').reverse().join('/')}.`, accion: { tipo: 'abrir', label: 'Ver paquete' },
+          // Hito «Enviar el paquete de viaje» (−7, móvil): en la agenda sale ese día, no el de la salida.
+          fechaAgenda: maxFecha(hoy, sumarDias(v.salida, -7)) })
       }
       if (v.regreso && leerPostventa(v.metadata).calificacion === null && v.etapaGates.includes('postventa_completa')) {
         const desde = sumarDias(v.regreso, 2)
@@ -154,7 +174,7 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
       if (pre && pre.estado === 'vigente' && pagado === 0 && pre.vence_at.slice(0, 10) <= hoy) {
         add({ grupo: 'hoy', fecha: hoy, negocioId: v.id, viaje,
           texto: `Prerreserva de ${quien} vence hoy a las ${new Date(pre.vence_at).toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Bogota' })}.`,
-          accion: { tipo: 'abrir', label: 'Pegar comprobante' } })
+          accion: { tipo: 'abrir', label: 'Pegar comprobante' }, plata: true })
       }
     }
 
@@ -167,13 +187,13 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
           const g = s.fecha_limite_pago < hoy ? 'vencido' : s.fecha_limite_pago === hoy ? 'hoy' : s.fecha_limite_pago <= sumarDias(hoy, 3) ? 'semana' : null
           if (g) add({ grupo: g, fecha: s.fecha_limite_pago, negocioId: v.id, viaje,
             texto: g === 'vencido' ? `${s.nombre} venció sin pagar.` : g === 'hoy' ? `Paga ${s.nombre}: vence hoy.` : `Paga ${s.nombre}: vence el ${s.fecha_limite_pago.slice(5).split('-').reverse().join('/')}.`,
-            accion: { tipo: 'abrir', label: 'Abrir fila' } })
+            accion: { tipo: 'abrir', label: 'Abrir fila' }, plata: true })
         }
         if (est === 'por_reservar' && (v.etapaNumero ?? 0) >= 5 && !s.fecha_limite_pago) {
           add({ grupo: 'semana', fecha: hoy, negocioId: v.id, viaje, texto: `Reserva ${s.nombre}.`, accion: { tipo: 'abrir', label: 'Abrir fila' } })
         }
         if (est === 'pagado' && v.salida && v.salida >= hoy && v.salida <= sumarDias(hoy, 7)) {
-          add({ grupo: 'semana', fecha: v.salida, negocioId: v.id, viaje, texto: `Confirma ${s.nombre} con el proveedor final.`, accion: { tipo: 'abrir', label: 'Abrir fila' } })
+          add({ grupo: 'semana', fecha: v.salida, negocioId: v.id, viaje, texto: `Confirma ${s.nombre} con el proveedor final.`, accion: { tipo: 'abrir', label: 'Abrir fila' }, fechaAgenda: hoy })
         }
       }
       for (const a of v.aprobaciones) {
@@ -181,7 +201,7 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
         if (diasEntre(a.decidida_at.slice(0, 10), hoy) > 7) continue
         const s = v.servicios.find(x => x.id === a.entidad_id)
         add({ grupo: 'hoy', fecha: a.decidida_at.slice(0, 10), negocioId: v.id, viaje,
-          texto: `No aprobó ${s?.nombre ?? 'el pago'}: ${a.motivo ?? 'sin motivo'}.`, accion: { tipo: 'abrir', label: 'Abrir fila' } })
+          texto: `No aprobó ${s?.nombre ?? 'el pago'}: ${a.motivo ?? 'sin motivo'}.`, accion: { tipo: 'abrir', label: 'Abrir fila' }, plata: true })
       }
     }
 
@@ -194,12 +214,12 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
         const que = s ? `pagar${monto} a ${s.proveedor_nombre?.trim() || s.nombre}` : 'aprobar el plan de pagos'
         add({ id: `apr:${a.id}`, grupo: 'hoy', fecha: hoy, negocioId: v.id, viaje,
           texto: `${a.solicitada_por_nombre ?? 'El equipo'} pide ${que}: ${MOTIVO_APROBACION[a.tipo] ?? a.tipo}.`,
-          accion: { tipo: 'aprobar', label: 'Aprobar', aprobacionId: a.id, servicioId: s?.id ?? null } })
+          accion: { tipo: 'aprobar', label: 'Aprobar', aprobacionId: a.id, servicioId: s?.id ?? null }, plata: true })
       }
       for (const c of cuotas) {
         if (c.estado === 'vencida' && diasEntre(c.fecha, hoy) >= 2) {
           add({ grupo: 'vencido', fecha: c.fecha, negocioId: v.id, viaje,
-            texto: `Cuota vencida: ${v.cliente} · ${pesosCierre(c.saldo)} · hace ${diasEntre(c.fecha, hoy)} días.`, accion: { tipo: 'abrir', label: 'Abrir' } })
+            texto: `Cuota vencida: ${v.cliente} · ${pesosCierre(c.saldo)} · hace ${diasEntre(c.fecha, hoy)} días.`, accion: { tipo: 'abrir', label: 'Abrir' }, plata: true })
         }
       }
       if (v.etapaGates.includes('margen_confirmado') && !leerCierreGuardado(v.metadata).confirmado) {
@@ -209,12 +229,87 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
       }
       if (v.salida && saldo > 0 && v.salida >= hoy && v.salida <= sumarDias(hoy, 7)) {
         add({ grupo: v.salida === hoy ? 'hoy' : 'semana', fecha: v.salida, negocioId: v.id, viaje,
-          texto: `${v.cliente} viaja ${v.salida === hoy ? 'hoy' : `el ${v.salida.slice(5).split('-').reverse().join('/')}`} con saldo de ${pesosCierre(saldo)}.`, accion: { tipo: 'abrir', label: 'Abrir' } })
+          texto: `${v.cliente} viaja ${v.salida === hoy ? 'hoy' : `el ${v.salida.slice(5).split('-').reverse().join('/')}`} con saldo de ${pesosCierre(saldo)}.`, accion: { tipo: 'abrir', label: 'Abrir' }, plata: true, fechaAgenda: hoy })
       }
     }
   }
   const unicos = new Map(out.map(p => [p.id, p]))
   return [...unicos.values()].sort((a, b) => GRUPO_ORDEN[a.grupo] - GRUPO_ORDEN[b.grupo] || (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))
+}
+
+// ── Servicios próximos (fechas de servicio, 2026-10-21) ──────────────────────
+
+/** Desde esta etapa el viaje está confirmado (el cliente aceptó: §4.3 del diseño de hitos). */
+export const ETAPA_VIAJE_CONFIRMADO = 4
+/** Hasta cuántos días adelante se listan los servicios. */
+export const HORIZONTE_SERVICIOS_DIAS = 14
+
+export interface ServicioProximo {
+  id: string
+  negocioId: string
+  viaje: string
+  tipo: string
+  nombre: string
+  /** `null` = «Falta la fecha». */
+  fecha: string | null
+  hora: string | null
+  /** Qué momento del servicio es: «Ida», «Regreso», «Tramo 3», «Check-in», «Check-out». */
+  momento: string | null
+}
+
+function momentosDe(s: ServicioPendiente): Array<{ fecha: string; hora: string | null; momento: string | null }> {
+  const tramos = leerTramos(s.tramos) ?? []
+  if (s.tipo === 'vuelo' && tramos.length > 0) {
+    return tramos.map((t, i) => ({
+      fecha: t.fecha,
+      hora: t.hora_salida,
+      momento: tramos.length === 1 ? 'Ida' : tramos.length === 2 ? (i === 0 ? 'Ida' : 'Regreso') : `Tramo ${i + 1}`,
+    }))
+  }
+  if (!s.fecha_servicio) return []
+  const hotel = s.tipo === 'hotel'
+  const out = [{ fecha: s.fecha_servicio, hora: horaHHMM(s.hora_inicio), momento: hotel ? 'Check-in' : null }]
+  if (s.fecha_fin && s.fecha_fin !== s.fecha_servicio) out.push({ fecha: s.fecha_fin, hora: horaHHMM(s.hora_fin), momento: hotel ? 'Check-out' : 'Termina' })
+  return out
+}
+
+/**
+ * Los servicios próximos de la persona, por fecha y hora: el momento siguiente de cada servicio
+ * (en un vuelo, su próximo tramo; en un hotel, el check-in y luego el check-out) entre hoy y
+ * `HORIZONTE_SERVICIOS_DIAS`. Los que no tienen fecha salen al final como «Falta la fecha», mientras
+ * el viaje no haya regresado.
+ *
+ * Quién ve qué, el mismo criterio de la vista: el responsable del servicio; si no tiene, el de
+ * operaciones del negocio (o, sin él, el área de operaciones). Solo viajes confirmados
+ * (`ETAPA_VIAJE_CONFIRMADO` en adelante) y servicios que no están en «No va».
+ */
+export function serviciosProximosDe(viajes: readonly ViajePendiente[], persona: Persona, hoy: string): ServicioProximo[] {
+  const operaciones = persona.areas.includes('operaciones')
+  const hasta = sumarDias(hoy, HORIZONTE_SERVICIOS_DIAS)
+  const out: ServicioProximo[] = []
+  for (const v of viajes) {
+    const loAprueba = !!persona.staffId && (v.aprobadoresStaffIds ?? []).includes(persona.staffId)
+    if (v.esPrueba && !esMio(v.comercialStaffId, persona) && !esMio(v.operacionesStaffId, persona) && !loAprueba) continue
+    if ((v.etapaNumero ?? 0) < ETAPA_VIAJE_CONFIRMADO) continue
+    const deOperaciones = esMio(v.operacionesStaffId, persona) || (!v.operacionesStaffId && operaciones)
+    for (const s of v.servicios) {
+      if (estadoDelServicio(s, s.gastos, s.aprobaciones) === 'cancelado') continue
+      if (!(s.responsable_staff_id ? esMio(s.responsable_staff_id, persona) : deOperaciones)) continue
+      const base = { id: s.id, negocioId: v.id, viaje: v.nombre, tipo: s.tipo ?? 'otro', nombre: s.nombre }
+      const momentos = momentosDe(s)
+      if (momentos.length === 0) {
+        if (!v.regreso || v.regreso >= hoy) out.push({ ...base, fecha: null, hora: null, momento: null })
+        continue
+      }
+      const siguiente = momentos.find(m => m.fecha >= hoy)
+      if (siguiente && siguiente.fecha <= hasta) out.push({ ...base, ...siguiente })
+    }
+  }
+  return out.sort((a, b) => {
+    if (a.fecha !== b.fecha) return a.fecha === null ? 1 : b.fecha === null ? -1 : a.fecha < b.fecha ? -1 : 1
+    if (a.hora !== b.hora) return a.hora === null ? 1 : b.hora === null ? -1 : a.hora < b.hora ? -1 : 1
+    return a.nombre.localeCompare(b.nombre, 'es')
+  })
 }
 
 /** El próximo hecho, para el vacío: «Lo próximo: cuota de Carolina el vie 30 oct». */

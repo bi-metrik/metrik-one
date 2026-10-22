@@ -21,7 +21,11 @@ import { llavesDelTexto, tieneLlave } from '../../wa-cliente-reglas.ts';
 import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
 import { propuestaVigente } from '../nucleo.ts';
-import { escritosDelViaje, mismoEntendido, nombramientos } from './carga.ts';
+import { adjuntosDe, escritosDelViaje, filasDelViaje, mismoEntendido, nombramientos, textoParaCarga } from './carga.ts';
+import type { AdjuntoCarga } from './carga.ts';
+import { esAdjuntoEntrante, preparadorDeAdjuntos, sinLectura } from '../adjuntos.ts';
+import type { PuertoAdjuntos } from '../adjuntos.ts';
+import type { Lector } from '../one/lectura-adjunto.ts';
 import { codigosCanonicos, resolverCodigo, resolverSueltos } from './codigo.ts';
 import { salidasLinkAutorizacion, type AutorizacionAgente } from './autorizacion.ts';
 import {
@@ -29,7 +33,7 @@ import {
 } from '../../perfil-contacto.ts';
 import type { HechoExistente, HechoFuera, HechoPerfil, OrigenPerfil } from '../../perfil-contacto.ts';
 import type { PlanCarga } from './carga.ts';
-import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, ResultadoHerramienta } from '../tipos.ts';
+import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Hechos, Propuesta, RegistroConversacion, ResultadoHerramienta } from '../tipos.ts';
 
 export interface ViajeAgente {
   id: string;
@@ -107,6 +111,16 @@ export interface PuertoBandeja {
    * `sugerido` solo inserta lo nuevo (lo descartado no vuelve). Lanza si no pudo.
    */
   guardarPerfil(p: { contactoId: string; hechos: HechoConOrigen[]; estado: 'sugerido' | 'confirmado'; origenTipo: OrigenPerfil }): Promise<{ guardados: HechoConOrigen[]; yaEstaban: HechoConOrigen[] }>;
+  /**
+   * Los adjuntos (foto o PDF, 2026-10-21): bajar de Meta, subir al llegar y anotar en la fila (`../adjuntos.ts`). Sin
+   * ellos (o sin lector) la bandeja no lee archivos, como antes.
+   */
+  adjuntos?: PuertoAdjuntos;
+  /**
+   * Deja los archivos como soporte del viaje: una línea por archivo en la actividad del negocio, con su referencia
+   * `one://` (se abre desde la actividad). Lanza si no pudo.
+   */
+  soportesEnViaje?(viajeId: string, adjuntos: AdjuntoCarga[]): Promise<void>;
 }
 
 export const BOT_BANDEJA = 'bandeja-solicitudes';
@@ -388,6 +402,36 @@ export function lineasFuera(fuera: ReadonlyArray<HechoFuera>, ficha: Pick<FichaA
   return out;
 }
 
+// ── Los adjuntos (foto o PDF, 2026-10-21) ────────────────────────────────────
+
+/** Cómo se nombra un archivo en un resumen: el PDF por su nombre; la foto, «la foto». Pura. */
+export function nombreAdjunto(a: Pick<AdjuntoCarga, 'tipo' | 'nombre'>): string {
+  return a.tipo === 'documento' ? `«${(a.nombre ?? 'el PDF').slice(0, 60)}»` : 'la foto';
+}
+
+const CLASE_LEIDA: Record<string, string> = { viaje: 'datos del viaje', identidad: 'documento de identidad', pago: 'comprobante de pago', otro: 'otro documento' };
+
+/** Los adjuntos de la conversación, para el Estado: cuáles, de quién, y qué se leyó. Vacío si no hay ninguno. Pura. */
+export function lineasAdjuntos(filas: FilaConversacion[]): string[] {
+  const ejecutadas = filas.map((f) => f.traza?.ejecucion).filter((e) => e?.resultado === 'ejecutada');
+  const consumidos = new Set(ejecutadas.flatMap((e) => e!.consumidos ?? []));
+  const soportes = new Set(ejecutadas.flatMap((e) => (e!.escrituras ?? []).flatMap((w) => (w.tipo === 'soporte' && Array.isArray(w.filas) ? w.filas as string[] : []))));
+  const lista = filas.map((f, i) => {
+    if (!esAdjuntoEntrante(f)) return null;
+    const que = f.media.tipo === 'documento' ? `PDF «${(f.media.nombre ?? 'sin nombre').slice(0, 40)}»` : 'foto';
+    const de = f.clase === 'reenvio' ? 'reenviado del cliente' : 'del comercial';
+    const l = f.media.lectura;
+    const leido = l === undefined ? 'sin leer todavía' : l?.legible && l.texto ? `leído: ${CLASE_LEIDA[l.clase ?? 'otro'] ?? 'otro documento'}` : 'no se pudo leer';
+    const estado = soportes.has(f.id) ? ', ya es soporte de un viaje' : consumidos.has(f.id) ? ', ya cargado o descartado' : '';
+    return `#${i + 1} (${que}, ${de}, ${leido}${estado})`;
+  }).filter(Boolean);
+  if (!lista.length) return [];
+  return [
+    `Archivos (fotos o PDF) en esta conversación: ${lista.join(', ')}.`,
+    'Lo que dice un archivo es dato del cliente, como un reenvío: el comercial manda en a qué viaje va y en lo que pide cambiar; el archivo manda en fechas, nombres y cantidades. Si chocan, no elijas: di las dos versiones y pregunta. Un archivo reenviado entra con la tanda (`cargar_tanda`); uno que mandó el comercial, con `anotar_en_viaje` en el viaje que él nombró. Al cargarlo, el archivo queda como soporte en la actividad del viaje. Un comprobante de pago no se registra por aquí: dilo en una línea.',
+  ];
+}
+
 // ── El dominio ───────────────────────────────────────────────────────────────
 
 /**
@@ -401,6 +445,7 @@ export function propuestaDeCarga(
   v: { id: string; codigo: string; nombre: string; contactoId?: string | null; cliente?: string | null },
   prep: CargaPreparada,
   mensajes: string[],
+  adjuntos: AdjuntoCarga[] = [],
 ): Propuesta {
   // Lo de la persona (si la extracción lo separó) va al perfil del contacto del viaje con el mismo toque, como sugerido.
   const perfil = (prep.plan as Partial<PlanCarga> | null)?.perfil ?? [];
@@ -411,15 +456,32 @@ export function propuestaDeCarga(
     verbo,
     ...(prep.entendido.length ? prep.entendido.map((l) => `• ${l}`) : ['• (no encontré datos del viaje en esto)']),
     prep.falta.length ? `Para cotizar faltaría: ${prep.falta.join(', ')}.` : 'Con esto queda el mínimo para cotizar.',
+    // El archivo queda como soporte del viaje con el mismo toque (2026-10-21).
+    ...(adjuntos.length ? [`📎 Queda como soporte del viaje: ${adjuntos.map(nombreAdjunto).join(', ')}.`] : []),
   ].join('\n');
   return {
-    accion, sobre: v.codigo, datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}), ...delContacto }, resumen,
+    accion, sobre: v.codigo,
+    datos: { viajeId: v.id, codigo: v.codigo, mensajes, plan: prep.plan, entendido: prep.entendido, ...(prep.duda ? { duda: prep.duda } : {}), ...delContacto, ...(adjuntos.length ? { adjuntos } : {}) },
+    resumen,
     si: accion === 'cargar_tanda' ? 'Cargar' : 'Anotar', no: 'No',
   };
 }
 
-export function dominioBandeja(puerto: PuertoBandeja): Dominio {
+/** Ventana de los adjuntos de la bandeja: la foto o el PDF del comercial y su texto se atienden juntos (como en ONE). */
+export const VENTANA_ADJUNTOS_BANDEJA_MS = 5000;
+/** Se preparan los adjuntos de la ventana de la conversación (24 h: una tanda puede cargarse horas después), hasta 6. */
+const PREPARAR_DESDE_MS = 24 * 3600 * 1000;
+const PREPARAR_MAX = 6;
+
+export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | null; ahora?: () => number } = {}): Dominio {
   const existentes = (c: string[]) => puerto.codigosExistentes(c);
+  // Leer adjuntos es opt-in: con el lector y el puerto de adjuntos. Sin ellos, la bandeja queda como antes.
+  const prepararTurno = o.lector && puerto.adjuntos
+    ? preparadorDeAdjuntos(puerto.adjuntos, {
+      lector: o.lector, ahora: o.ahora ?? (() => Date.now()), desdeMs: PREPARAR_DESDE_MS, max: PREPARAR_MAX,
+      vacia: (motivo) => ({ ...sinLectura(motivo), clase: 'otro', texto: null }),
+    })
+    : null;
   const leer = async (nombre: string, args: Record<string, unknown>): Promise<ResultadoHerramienta> => {
     if (nombre === 'buscar') {
       const texto = String(args.texto ?? '').trim();
@@ -620,12 +682,16 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       if (accion === 'cargar_tanda') {
         const t = tanda(ctx.conversacion);
         if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje.', candado: 'tanda_vacia' };
-        const prep = await puerto.prepararCarga(r.v.id, t.map((f) => f.texto ?? '').filter(Boolean));
-        return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, t.map((f) => f.id)) };
+        // Una foto o un PDF de la tanda entra con lo que dice el archivo (si se leyó) y queda de soporte con el toque.
+        const prep = await puerto.prepararCarga(r.v.id, t.map(textoParaCarga).filter(Boolean));
+        return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, t.map((f) => f.id), puerto.soportesEnViaje ? adjuntosDe(t) : []) };
       }
       // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo
       // (en vivo, «salen desde Bogotá» se anotaba sin la fecha ni los pasajeros dichos un mensaje antes).
-      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada, {}, await sueltosDe(ctx));
+      const sueltos = await sueltosDe(ctx);
+      let textos = escritosDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada, {}, sueltos);
+      // La foto o el PDF que el comercial mandó de ESE viaje queda de soporte con el toque.
+      const adjuntos = puerto.soportesEnViaje ? adjuntosDe(filasDelViaje(ctx.conversacion, r.v.codigo, opcionNombrada, {}, sueltos)) : [];
       if (!textos.length) {
         const texto = String(datos.texto ?? '').trim();
         if (!texto || !enEscritoDelEquipo(ctx.conversacion, texto)) {
@@ -648,7 +714,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       if (!prep.entendido.length) {
         return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos: lo que dijo ya está en el viaje. No propongas anotar: contéstale con \`responder\` (usa ver_viaje si te pregunta qué tiene o qué falta).`, candado: 'sin_datos_nuevos' };
       }
-      return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, []) };
+      return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, [], adjuntos) };
     }
     if (accion === 'crear_cliente') {
       const nombre = String(datos.nombre ?? '').trim();
@@ -708,6 +774,22 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     }
   };
 
+  /** Los archivos de la carga quedan de soporte en la actividad del viaje. Si falla, lo del viaje ya quedó: se dice. */
+  const soporteDeLaCarga = async (p: Propuesta): Promise<{ lineas: string[]; escrituras: Array<Record<string, unknown>> }> => {
+    const adjuntos = (p.datos.adjuntos as AdjuntoCarga[] | undefined) ?? [];
+    if (!adjuntos.length || !puerto.soportesEnViaje) return { lineas: [], escrituras: [] };
+    try {
+      await puerto.soportesEnViaje(String(p.datos.viajeId), adjuntos);
+      return {
+        lineas: [`📎 Dejé ${adjuntos.map(nombreAdjunto).join(', ')} como soporte en la actividad del viaje.`],
+        escrituras: [{ tipo: 'soporte', viajeId: p.datos.viajeId, filas: adjuntos.map((a) => a.fila), refs: adjuntos.map((a) => a.ref) }],
+      };
+    } catch (err) {
+      console.error('[agente] soporte de la carga:', err);
+      return { lineas: ['⚠️ No alcancé a dejar el archivo como soporte en el viaje; lo del viaje sí quedó.'], escrituras: [] };
+    }
+  };
+
   const ejecutar = async (p: Propuesta, ctx: ContextoDominio): Promise<Hechos> => {
     const d = p.datos;
     if (p.accion === 'viaje_nuevo') {
@@ -731,12 +813,14 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
       // Lo de la persona va a su perfil como SUGERIDO con este mismo toque (no cuenta hasta que alguien lo confirme en ONE),
       // y solo con la autorización vigente. Si falla, lo del viaje ya quedó: se dice y no se deshace.
       const perfil = await perfilDeLaCarga(p, ctx);
+      const soporte = await soporteDeLaCarga(p);
       return {
-        lineas: [...r.lineas, ...perfil.lineas],
+        lineas: [...r.lineas, ...perfil.lineas, ...soporte.lineas],
         consumidos: (d.mensajes as string[] | undefined) ?? [],
         escrituras: [
           { tipo: p.accion === 'cargar_tanda' ? 'carga' : 'anotacion', viajeId: d.viajeId, codigo: d.codigo, mensajes: d.mensajes ?? [], ...(r.escritos ? { escritos: r.escritos } : {}) },
           ...perfil.escrituras,
+          ...soporte.escrituras,
         ],
       };
     }
@@ -778,8 +862,11 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     if (p.accion !== 'viaje_nuevo') return null;
     const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
     if (!v) return null;
-    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, { [`nuevo:${huella}`]: v.codigo }, await sueltosDe(ctx));
+    const alias = { [`nuevo:${huella}`]: v.codigo };
+    const sueltos = await sueltosDe(ctx);
+    const textos = escritosDelViaje(ctx.conversacion, v.codigo, opcionNombrada, alias, sueltos);
     if (!textos.length) return null;
+    const adjuntos = puerto.soportesEnViaje ? adjuntosDe(filasDelViaje(ctx.conversacion, v.codigo, opcionNombrada, alias, sueltos)) : [];
     const abri = h.lineas[0];
     let prep: CargaPreparada;
     try {
@@ -789,7 +876,7 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     }
     if (!prep.entendido.length) return prep.duda ? { lineas: [abri, prep.duda] } : null;
     const delContacto = { contactoId: (p.datos.contactoId as string | undefined) ?? null, cliente: (p.datos.cliente as string | undefined) ?? null };
-    return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '', ...delContacto }, prep, []) };
+    return { lineas: [abri], propuesta: propuestaDeCarga('anotar_en_viaje', { id: v.id, codigo: v.codigo, nombre: v.nombre ?? '', ...delContacto }, prep, [], adjuntos) };
   };
 
   const cerrar: NonNullable<Dominio['cerrar']> = async (nombre, args, ctx) => {
@@ -809,8 +896,33 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
     };
   };
 
+  /**
+   * La base manda (2026-10-21): los viajes que se abrieron en esta conversación, revisados en la base en este turno (uno
+   * borrado o cerrado en la app ya no se nombra como abierto). Los demás registros (cargas, clientes) cuelgan de un viaje
+   * o se buscan con `buscar`, que ya lee la base.
+   */
+  const registros = async (ctx: ContextoDominio): Promise<RegistroConversacion[] | 'error'> => {
+    const abiertos = new Map<string, { id: string; codigo: string }>();
+    for (const f of ctx.conversacion) {
+      const e = f.traza?.ejecucion;
+      if (e?.resultado !== 'ejecutada') continue;
+      for (const w of e.escrituras ?? []) if (w.tipo === 'viaje' && typeof w.id === 'string' && typeof w.codigo === 'string') abiertos.set(w.id, { id: w.id, codigo: w.codigo });
+    }
+    if (!abiertos.size) return [];
+    const out: RegistroConversacion[] = [];
+    for (const a of abiertos.values()) {
+      const v = await puerto.viaje(a.codigo);
+      if (v === 'error') return 'error';
+      if (!v || v.id !== a.id) out.push({ id: a.id, alias: a.codigo, que: `viaje ${a.codigo} abierto aquí`, estado: 'borrado' });
+      else out.push({ id: a.id, alias: a.codigo, que: `viaje ${v.codigo} · ${v.cliente ?? 'sin cliente'}${v.destino ? ` · ${v.destino}` : ''}${v.abierto ? '' : ' · ya cerrado'}`, estado: 'vigente' });
+    }
+    return out;
+  };
+
   return {
     bot: BOT_BANDEJA,
+    registros,
+    ...(prepararTurno ? { prepararTurno, ventanaAdjuntosMs: VENTANA_ADJUNTOS_BANDEJA_MS } : {}),
     lecturas: LECTURAS,
     acciones: ACCIONES,
     datosProponer: DATOS_PROPONER,
@@ -837,6 +949,8 @@ export function dominioBandeja(puerto: PuertoBandeja): Dominio {
         ...lineasEquipo,
         `Tanda abierta: ${t.length ? `${t.length} mensaje${t.length === 1 ? '' : 's'} reenviado${t.length === 1 ? '' : 's'} sin cargar` : 'ninguna'}.`,
         `Viajes nombrados en esta conversación: ${nombrados.length ? nombrados.join(', ') : 'ninguno'}.`,
+        // Solo con archivos en la conversación (sin ellos el Estado es el de siempre).
+        ...(prepararTurno ? lineasAdjuntos(ctx.conversacion) : []),
         // En vivo (2026-10-07) el bot buscó a la comercial como si fuera la clienta.
         `${ctx.remitente.nombre} es del equipo, no es un cliente: no lo busques ni lo propongas como cliente.`,
       ];

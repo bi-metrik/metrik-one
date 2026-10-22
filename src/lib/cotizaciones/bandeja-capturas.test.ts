@@ -133,4 +133,13 @@ describe('el pie de la bandeja: los pantallazos que ya están en la cotización'
     ]
     expect(pantallazosEnCotizacion(items)).toEqual(['h1'])
   })
+
+  it('una línea con la tarifa del proveedor o escrita a mano no es un pantallazo (prueba del #1229, punto b)', () => {
+    const items = [
+      { id: 't', tarifa_pax: { casillas: { grupo_completo: { origen: 'tarifario', leidaEn: 'x' } } } },
+      { id: 'm', tarifa_pax: { casillas: { grupo_completo: { origen: 'manual' } } } },
+    ]
+    expect(pantallazosEnCotizacion(items)).toEqual([])
+    expect(pantallazosEnCotizacion([...items, { id: 'p', tarifa_pax: { casillas: { grupo_completo: { huellaImagen: 'h1' } } } }])).toEqual(['h1'])
+  })
 })

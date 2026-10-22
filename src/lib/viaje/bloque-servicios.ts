@@ -8,6 +8,9 @@
 import type { ServicioDelNegocio } from './servicios-viaje-datos'
 import { estadoDelServicio, pagadoDelServicio, valorAPagar, type EstadoServicio, type QuienEdita } from './estado-servicio'
 import type { ConfigReglasPago, MedioPagoProveedor } from './reglas-pago'
+import type { Hito } from './hitos'
+import { fechaEnPalabras } from './fechas-servicio'
+import { serviciosListos, serviciosQueFaltan } from './gate-servicios'
 
 /** Lo que el servidor deja en `config_extra._servicios` del bloque. */
 export interface DatosBloqueServicios {
@@ -24,8 +27,10 @@ export interface DatosBloqueServicios {
   /** F3: cobrado confirmado al cliente y precio aprobado (para «sin abono» en vivo). */
   cobradoCliente?: number
   precioAprobado?: number
-  /** F3: nombre de quien pidió cada aprobación (staff id → nombre). */
+  /** F3: nombre de quien pidió cada aprobación (staff id → nombre). También quién cerró un hito. */
   nombres?: Record<string, string>
+  /** Hitos de gestión de las filas (solo con `config_extra.hitos.activo`): las píldoras y el «Sigue:». */
+  hitos?: Hito[]
 }
 
 export type ColorFecha = 'verde' | 'ambar' | 'rojo'
@@ -140,22 +145,32 @@ export function filtrarTablero(vista: readonly FilaVista[], filtro: FiltroTabler
   }
 }
 
-/** Color de la etapa (Noor §5): rojo con un pago vencido, ámbar si algo vence en 3 días, verde si todo va. */
-export function colorDeLaEtapa(vista: readonly FilaVista[], hoy: string): ColorFecha {
+/** El punto de la etapa: los colores de la fecha y gris («falta algo, sin urgencia»). */
+export type ColorEtapa = ColorFecha | 'gris'
+
+/**
+ * Color de la etapa (Noor §5): rojo con un pago vencido, ámbar si algo vence en 3 días. Verde SOLO
+ * si pasa el gate `servicios_listos` (barrido 2026-10-22): antes el verde medía fechas límite, y
+ * una fila «No aprobado» o sin confirmación salía en verde mientras el gate frenaba. Lo que falta
+ * sin urgencia va en gris.
+ */
+export function colorDeLaEtapa(vista: readonly FilaVista[], hoy: string, exigeConfirmacion = true): ColorEtapa {
   let ambar = false
   for (const v of vista) {
     const f = fechaLimiteEnPalabras(v.servicio.fecha_limite_pago, v.estado, hoy)
     if (f?.color === 'rojo') return 'rojo'
     if (f?.color === 'ambar') ambar = true
   }
-  return ambar ? 'ambar' : 'verde'
+  if (ambar) return 'ambar'
+  return serviciosListos(vista.map(v => v.servicio), exigeConfirmacion) ? 'verde' : 'gris'
 }
 
 /**
  * «Sigue:» del tablero (Noor §5): el pago más urgente; si nada urge, lo siguiente por hacer.
- * `null` cuando todo lo que va está confirmado.
+ * `null` solo cuando pasa el gate `servicios_listos`: lo último que mira es lo que el gate frena
+ * (una fila «No aprobado», por ejemplo), para que el «Sigue:» nunca calle mientras el gate frena.
  */
-export function sigueDelTablero(vista: readonly FilaVista[], hoy: string): { servicioId: string; texto: string } | null {
+export function sigueDelTablero(vista: readonly FilaVista[], hoy: string, hitos: readonly Hito[] = [], exigeConfirmacion = true): { servicioId: string; texto: string } | null {
   const vivas = vista.filter(v => v.estado !== 'cancelado')
   const conFecha = vivas
     .map(v => ({ v, f: fechaLimiteEnPalabras(v.servicio.fecha_limite_pago, v.estado, hoy) }))
@@ -163,17 +178,82 @@ export function sigueDelTablero(vista: readonly FilaVista[], hoy: string): { ser
     .sort((a, b) => (a.v.servicio.fecha_limite_pago ?? '').localeCompare(b.v.servicio.fecha_limite_pago ?? ''))
   const vencida = conFecha.find(x => x.f.color === 'rojo')
   if (vencida) return { servicioId: vencida.v.servicio.id, texto: `${vencida.v.servicio.nombre}: ${minuscula(vencida.f.texto)}.` }
+  // Sin plata vencida, el hito de gestión más urgente (vencido, hoy o mañana) de una fila que va.
+  const vivasIds = new Set(vivas.map(v => v.servicio.id))
+  const hito = hitos
+    .filter(h => h.servicioId && vivasIds.has(h.servicioId) && h.estado === 'pendiente' && h.fechaAviso && h.fechaAviso <= sumarUno(hoy))
+    .sort((a, b) => `${a.fechaAviso}|${a.horaObjetivo ?? '99'}`.localeCompare(`${b.fechaAviso}|${b.horaObjetivo ?? '99'}`))[0]
+  if (hito) {
+    const cuando = hito.vencido ? `venció el ${fechaEnPalabras(hito.fechaAviso!)}` : hito.fechaAviso === hoy ? 'es hoy' : 'es mañana'
+    return { servicioId: hito.servicioId!, texto: `${hito.titulo}: ${cuando}.` }
+  }
   const pronto = conFecha.find(x => x.f.color === 'ambar')
   if (pronto) return { servicioId: pronto.v.servicio.id, texto: `${pronto.v.servicio.nombre}: ${minuscula(pronto.f.texto)}.` }
   const esperando = vivas.find(v => v.estado === 'esperando')
   if (esperando) return { servicioId: esperando.servicio.id, texto: `${esperando.servicio.nombre} está esperando a Edgar.` }
+  const noAprobado = vivas.find(v => v.estado === 'no_aprobado')
+  if (noAprobado) return { servicioId: noAprobado.servicio.id, texto: `${noAprobado.servicio.nombre}: Edgar no aprobó el pago. Pídelo de nuevo o cambia el pago.` }
   const porReservar = vivas.find(v => v.estado === 'por_reservar' && v.aPagar > 0)
   if (porReservar) return { servicioId: porReservar.servicio.id, texto: `Reserva ${porReservar.servicio.nombre}.` }
   const porPagar = vivas.find(v => v.estado === 'reservado' && v.aPagar > 0)
   if (porPagar) return { servicioId: porPagar.servicio.id, texto: `Registra el pago de ${porPagar.servicio.nombre}.` }
-  const sinConfirmar = vivas.find(v => v.estado === 'pagado')
+  const sinConfirmar = exigeConfirmacion ? vivas.find(v => v.estado === 'pagado') : undefined
   if (sinConfirmar) return { servicioId: sinConfirmar.servicio.id, texto: `Adjunta la confirmación del proveedor final de ${sinConfirmar.servicio.nombre}.` }
+  // Lo que el gate frena y nada de lo anterior nombró (un pago incompleto, sin soporte o sin medio).
+  const falta = serviciosQueFaltan(vista.map(v => v.servicio), exigeConfirmacion)[0]
+  if (falta) return { servicioId: falta.servicioId, texto: `${falta.texto}.` }
   return null
+}
+
+const sumarUno = (f: string) => new Date(Date.parse(`${f}T00:00:00Z`) + MS_DIA).toISOString().slice(0, 10)
+
+export type ColorPildora = 'gris' | 'ambar' | 'rojo' | 'verde'
+
+export interface PildoraHito {
+  clave: string
+  texto: string
+  color: ColorPildora
+  /** Al pasar el dedo o tocar: quién y cuándo lo cerró, o qué falta. */
+  detalle: string
+}
+
+function etiquetaCorta(h: Hito): string {
+  switch (h.hitoId) {
+    case 'checkin_vuelo': {
+      const tramo = (h.titulo.split(' · ')[1] ?? '').replace(/^vuelo (de )?/, '')
+      return tramo ? `Check-in ${tramo}` : 'Check-in'
+    }
+    case 'preregistro_migratorio': return `Pre-registro ${h.titulo.split(' · ')[1] ?? ''}`.trim()
+    case 'reconfirmar_hotel': return 'Reconfirmar hotel'
+    case 'confirmar_traslado': return 'Confirmar traslado'
+    case 'detalles_tour': return 'Detalles del tour'
+    case 'asistencia_medica': return 'Asistencia'
+    default: return h.titulo
+  }
+}
+
+/**
+ * Las píldoras de hito de una fila (Noor §3.2): gris falta, ámbar hoy o mañana, rojo vencido o «No
+ * se hizo a tiempo», verde ✓ hecho (quién y cuándo en el detalle).
+ */
+export function pildorasDeHitos(hitos: readonly Hito[], servicioId: string, hoy: string, nombres: Readonly<Record<string, string>> = {}): PildoraHito[] {
+  return hitos.filter(h => h.servicioId === servicioId).map(h => {
+    const et = etiquetaCorta(h)
+    if (h.estado === 'hecho') {
+      const quien = h.marca?.hecho_por ? nombres[h.marca.hecho_por] ?? null : null
+      const cuando = h.marca?.hecho_at ? fechaEnPalabras(h.marca.hecho_at.slice(0, 10)) : null
+      const detalle = h.derivado ? 'Hecho: ya estaba el dato en la fila.' : `Hecho${quien ? ` por ${quien}` : ''}${cuando ? ` el ${cuando}` : ''}${h.marca?.nota ? `: ${h.marca.nota}` : ''}`
+      return { clave: h.llave, texto: `✓ ${et}`, color: 'verde' as const, detalle }
+    }
+    if (h.estado === 'no_aplica') return { clave: h.llave, texto: `${et} · No aplica`, color: 'gris' as const, detalle: h.marca?.nota ?? 'No aplica' }
+    if (h.estado === 'no_se_hizo') return { clave: h.llave, texto: `${et} · No se hizo a tiempo`, color: 'rojo' as const, detalle: 'Pasó la fecha sin hacerse.' }
+    if (h.estado === 'falta_fecha') return { clave: h.llave, texto: `${et} · Falta la fecha`, color: 'gris' as const, detalle: 'Pon la fecha en la hoja de la fila.' }
+    if (h.estado === 'falta_plazo') return { clave: h.llave, texto: `${et} · Falta el plazo`, color: 'gris' as const, detalle: 'El plazo de este destino no está verificado.' }
+    const dia = h.fechaAviso ? fechaEnPalabras(h.fechaAviso) : ''
+    const hora = h.clase === 'fijo' && h.horaObjetivo ? ` ${h.horaObjetivo}` : ''
+    const color: ColorPildora = h.vencido ? 'rojo' : h.fechaAviso && h.fechaAviso <= sumarUno(hoy) ? 'ambar' : 'gris'
+    return { clave: h.llave, texto: `${et} · ${dia}${hora}`, color, detalle: h.vencido ? 'Vencido: está en la agenda.' : 'Pendiente: está en la agenda.' }
+  })
 }
 
 function minuscula(t: string): string {

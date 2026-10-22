@@ -12,6 +12,7 @@
 
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
+import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type ReglaPlan } from './plan-pagos'
 import {
@@ -26,6 +27,7 @@ import {
   type TitularFacturacion,
 } from './confirmacion'
 import { aprobadoresDeLinea } from './estado-servicio'
+import { rastroDeFechasCorregidas } from './servicios-viaje-datos'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 
 // El esquema nuevo (planes, cuotas, aprobaciones, cuenta_recaudo) no está en los tipos generados.
@@ -35,7 +37,11 @@ type Db = any
 // ── Tipos de la vista (los usa la pantalla con `import type`) ────────────────
 
 export interface TarifaConfirmable {
-  itinerarioId: string
+  /**
+   * `null` = la tarifa única implícita de una cotización sin tarifas: su precio es el total de la
+   * cotización (`totalSinTarifas`) y se confirma con `itinerarioId: null`.
+   */
+  itinerarioId: string | null
   nombre: string
   esRecomendada: boolean
   precio: number | null
@@ -265,17 +271,25 @@ export async function cobrosDelNegocio(db: Db, workspaceId: string, negocioId: s
   return ((data ?? []) as CobroLeido[]).filter((c) => !c.anulado_at)
 }
 
+/**
+ * ¿El plan acordado está vigente? Dentro de la regla, sí; fuera, solo con una aprobación `aprobada`
+ * de ESAS cuotas (la huella manda, F2-3). Una sola regla para el gate `plan_pagos_acordado` y el
+ * panel: el panel miraba solo la última aprobación y podía decir «sin aprobar» con una vigente
+ * (barrido 2026-10-22).
+ */
+export async function planVigenteDe(db: Db, negocioId: string, acordado: PlanGuardado | null): Promise<boolean> {
+  if (!acordado) return false
+  if (acordado.dentro_de_regla) return true
+  return !!(await aprobacionVigenteParaHuella(db, negocioId, huellaPlan(acordado.cuotas, acordado.total)))
+}
+
 /** El estado de los tres gates de la etapa Confirmación, leído de la base. */
 export async function estadoConfirmacion(
   db: Db,
   args: { workspaceId: string; negocioId: string; metadata: Record<string, unknown> | null },
 ): Promise<EstadoConfirmacion> {
   const confirmado = !!(args.metadata?.confirmacion_cliente as Record<string, unknown> | undefined)?.registrada_at
-  const plan = await planAcordado(db, args.negocioId)
-  let planVigente = !!plan
-  if (plan && !plan.dentro_de_regla) {
-    planVigente = !!(await aprobacionVigenteParaHuella(db, args.negocioId, huellaPlan(plan.cuotas, plan.total)))
-  }
+  const planVigente = await planVigenteDe(db, args.negocioId, await planAcordado(db, args.negocioId))
   const cobros = await cobrosDelNegocio(db, args.workspaceId, args.negocioId)
   return { confirmado, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte) }
 }
@@ -348,7 +362,13 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
   let errorTarifas: string | null = null
   if (cot) {
     const precios = await preciosDeLasTarifas(db, { workspaceId, cotizacionId: String(cot.id) })
-    if (precios.ok) {
+    if (precios.ok && precios.tarifas.length === 0) {
+      // Sin tarifas (una sola opción por componente): una tarifa única con el total de la
+      // cotización, la misma cifra que fija la aprobación. Sin total, la lista queda vacía.
+      const unica = await totalSinTarifas(db, { workspaceId, cotizacionId: String(cot.id) })
+      if (unica.ok) tarifas = [{ itinerarioId: null, nombre: TARIFA_UNICA, esRecomendada: false, precio: unica.total, motivo: null }]
+      else if (!unica.sinTotal) errorTarifas = unica.error
+    } else if (precios.ok) {
       tarifas = precios.tarifas.map((t) => ({ itinerarioId: t.itinerarioId, nombre: t.nombre ?? 'Tarifa', esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }))
     } else {
       errorTarifas = precios.error
@@ -363,11 +383,7 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
   const hayPago = cobros.some((c) => !!c.fecha && Number(c.monto ?? 0) > 0)
 
   const plan = planes.find((p) => p.estado === 'acordado') ?? planes.find((p) => p.estado === 'propuesta') ?? null
-  let planVigente = planes.some((p) => p.estado === 'acordado')
-  const acordado = planes.find((p) => p.estado === 'acordado')
-  if (acordado && !acordado.dentro_de_regla) {
-    planVigente = !!aprobacion && aprobacion.estado === 'aprobada' && aprobacion.huella === huellaPlan(acordado.cuotas, acordado.total)
-  }
+  const planVigente = await planVigenteDe(db, negocioId, planes.find((p) => p.estado === 'acordado') ?? null)
 
   const etapaConf = etapaDeConfirmacion(etapas)
   const etapaActual = etapas.find((e) => e.id === negocio.etapa_actual_id) ?? null
@@ -580,12 +596,20 @@ export async function aplicarPrerreservaVencida(
     .in('estado', ['acordado', 'propuesta'])
 
   // 3. Servicios: sin pagos se borran; con pagos, «No va».
-  const { data: servicios } = await svc.from('negocio_servicios').select('id').eq('negocio_id', args.negocioId)
-  const ids = ((servicios ?? []) as Array<{ id: string }>).map((s) => s.id)
+  // Las fechas corregidas a mano de las que se borran se PIERDEN a propósito (la versión nueva
+  // tiene ítems con id nuevo y se vuelve a armar): quedan dichas en la Actividad (`rastro`).
+  const { data: servicios } = await svc
+    .from('negocio_servicios')
+    .select('id, nombre, fecha_servicio, fecha_fin, fechas_corregidas_at')
+    .eq('negocio_id', args.negocioId)
+  const filasServicio = (servicios ?? []) as Array<{ id: string; nombre: string; fecha_servicio: string | null; fecha_fin: string | null; fechas_corregidas_at: string | null }>
+  const ids = filasServicio.map((s) => s.id)
+  let rastroFechas: string | null = null
   if (ids.length > 0) {
     const { data: gastos } = await svc.from('gastos').select('servicio_id').in('servicio_id', ids)
     const conPago = new Set(((gastos ?? []) as Array<{ servicio_id: string }>).map((g) => g.servicio_id))
     const borrar = ids.filter((id) => !conPago.has(id))
+    rastroFechas = rastroDeFechasCorregidas(filasServicio.filter((s) => !conPago.has(s.id)))
     if (borrar.length > 0) await svc.from('negocio_servicios').delete().in('id', borrar)
     const noVa = ids.filter((id) => conPago.has(id))
     if (noVa.length > 0) await svc.from('negocio_servicios').update({ estado: 'cancelado' }).in('id', noVa)
@@ -637,6 +661,16 @@ export async function aplicarPrerreservaVencida(
     autor_id: null,
     contenido: `Reproceso: venció la prerreserva sin anticipo. El negocio volvió a ${etapa?.nombre ?? 'Cotización'} y la cotización se armó de nuevo${aceptada?.consecutivo ? ` (venía de ${aceptada.consecutivo})` : ''}.`.slice(0, 280),
   }, 'aplicarPrerreservaVencida')
+  if (rastroFechas) {
+    await registrarActividad(svc, {
+      workspace_id: args.workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: args.negocioId,
+      tipo: 'sistema',
+      autor_id: null,
+      contenido: rastroFechas,
+    }, 'aplicarPrerreservaVencida')
+  }
   return { aplicada: true }
 }
 

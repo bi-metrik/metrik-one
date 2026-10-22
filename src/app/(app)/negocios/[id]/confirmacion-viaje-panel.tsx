@@ -43,7 +43,7 @@ import {
   seccionesDeTerminos,
   type TipoTitular,
 } from '@/lib/viaje/confirmacion'
-import type { VistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import type { TarifaConfirmable, VistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import {
   aplicarPrerreservaSiVencio,
   confirmarClienteViaje,
@@ -108,6 +108,8 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
   }
 
   const tarifaElegida = conf ? vista.tarifas.find((t) => t.itinerarioId === conf.itinerario_id) : null
+  // La tarifa única implícita (sin tarifas) no tiene nombre propio: se muestra el total a secas.
+  const nombreTarifa = conf?.tarifa_nombre ?? (tarifaElegida?.itinerarioId ? tarifaElegida.nombre : null)
   const plan = vista.plan && vista.plan.estado === 'acordado' ? vista.plan : null
 
   return (
@@ -142,7 +144,7 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
         <div className="mt-3 space-y-3">
           <ul className="space-y-1.5">
             <Linea ok>El cliente confirmó el {fechaCorta(conf.fecha)}{conf.pantallazo ? ' (pantallazo)' : ''}</Linea>
-            <Linea ok>Tarifa {conf.tarifa_nombre ?? tarifaElegida?.nombre ?? ''} · {pesos(conf.total)}</Linea>
+            <Linea ok>{nombreTarifa ? `Tarifa ${nombreTarifa}` : 'Total'} · {pesos(conf.total)}</Linea>
             <Linea ok={vista.estado.planVigente}>
               {plan
                 ? `Plan de pagos: ${plan.cuotas.length} cuota${plan.cuotas.length === 1 ? '' : 's'}, ${plan.dentro_de_regla ? 'dentro de la regla' : 'aprobado por dirección'}`
@@ -253,20 +255,27 @@ function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string): 
     ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }]
 }
 
-function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfirmacion; onCerrar: () => void; onConfirmado: () => void }) {
+/** La opción del radio: la tarifa única implícita (`itinerarioId: null`) también se escoge. */
+const TARIFA_UNICA_CLAVE = 'tarifa-unica'
+const claveTarifa = (t: TarifaConfirmable) => t.itinerarioId ?? TARIFA_UNICA_CLAVE
+
+/** Exportada para la prueba de render; en la ficha la abre el panel. */
+export function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfirmacion; onCerrar: () => void; onConfirmado: () => void }) {
   const hoy = todayBogotaISO()
   const nombre = primerNombre(vista.cliente.nombre)
   const [isPending, startTransition] = useTransitionTolerante()
   const intencion = useIntencion()
   const intencionAprob = useIntencion()
 
+  // Sin tarifas (una sola opción por componente) la vista trae una tarifa única con el total de
+  // la cotización y `itinerarioId: null`: queda escogida y se confirma por ese total.
   const tarifasConPrecio = vista.tarifas.filter((t) => t.precio !== null)
   const inicial = tarifasConPrecio.find((t) => t.itinerarioId === vista.cotizacion?.tarifaAceptadaId)
     ?? tarifasConPrecio.find((t) => t.esRecomendada)
     ?? tarifasConPrecio[0]
     ?? null
-  const [tarifaId, setTarifaId] = useState<string | null>(inicial?.itinerarioId ?? null)
-  const tarifa = tarifasConPrecio.find((t) => t.itinerarioId === tarifaId) ?? null
+  const [tarifaId, setTarifaId] = useState<string | null>(inicial ? claveTarifa(inicial) : null)
+  const tarifa = tarifasConPrecio.find((t) => claveTarifa(t) === tarifaId) ?? null
   const total = tarifa?.precio ?? 0
 
   const [fecha, setFecha] = useState(hoy)
@@ -308,7 +317,8 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
     fechaSalida: vista.viaje.fechaSalida,
     fechaRegreso: vista.viaje.fechaRegreso,
     composicion: vista.viaje.composicion,
-    tarifaNombre: tarifa?.nombre ?? null,
+    // La tarifa única no se nombra en el mensaje: el servidor tampoco la nombra.
+    tarifaNombre: tarifa?.itinerarioId ? tarifa.nombre : null,
     total,
     cuotas: normalizarCuotas(cuotas),
     fechaMinimo: v.fechaMinimo,
@@ -410,13 +420,13 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
             <legend className="mb-2 text-sm font-medium text-[#1A1A1A]">¿Qué tarifa escogió?</legend>
             {vista.errorTarifas && <p className="text-sm text-red-600">{vista.errorTarifas}</p>}
             {tarifasConPrecio.length === 0 && !vista.errorTarifas && (
-              <p className="text-sm text-red-600">Esta cotización no tiene tarifas con precio. Ábrela y revísala antes de confirmar.</p>
+              <p className="text-sm text-red-600">Esta cotización no tiene total ni tarifas con precio. Ábrela y revísala antes de confirmar.</p>
             )}
             <div className="space-y-2">
               {vista.tarifas.map((t) => (
-                <label key={t.itinerarioId} className={`flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${tarifaId === t.itinerarioId ? 'border-[#10B981] bg-emerald-50' : 'border-[#E5E7EB]'} ${t.precio === null ? 'opacity-50' : ''}`}>
+                <label key={claveTarifa(t)} className={`flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${tarifaId === claveTarifa(t) ? 'border-[#10B981] bg-emerald-50' : 'border-[#E5E7EB]'} ${t.precio === null ? 'opacity-50' : ''}`}>
                   <span className="flex items-center gap-2">
-                    <input type="radio" name="tarifa" checked={tarifaId === t.itinerarioId} disabled={t.precio === null} onChange={() => setTarifaId(t.itinerarioId)} />
+                    <input type="radio" name="tarifa" checked={tarifaId === claveTarifa(t)} disabled={t.precio === null} onChange={() => setTarifaId(claveTarifa(t))} />
                     {t.esRecomendada ? `Recomendada · ${t.nombre}` : t.nombre}
                   </span>
                   <span className="font-medium">{t.precio !== null ? pesos(t.precio) : t.motivo}</span>

@@ -39,6 +39,7 @@ import {
   CreditCard,
   Wrench,
   Brain,
+  Sparkles,
 } from 'lucide-react'
 import { useState } from 'react'
 import FAB from './fab'
@@ -53,6 +54,15 @@ import type { PlatformAdminState } from '@/lib/actions/platform-admin'
 import type { OpcionesImpersonacion } from '@/lib/actions/impersonation'
 import type { ActiveTimer } from './timer-actions'
 import { rutaPermitida, vitrinasDelEspacio } from '@/lib/modulos/gate'
+import { NOVEDADES } from '@/lib/novedades/novedades'
+import { llaveVistas, marcarVistas, novedadesDelEspacio } from '@/lib/novedades/vistas'
+import {
+  BotonNovedades,
+  NumeritoNovedades,
+  PanelNovedades,
+  etiquetaNovedades,
+  useNovedadesNoVistas,
+} from '@/components/novedades'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -136,6 +146,8 @@ interface AppShellProps {
   timerActivo?: ActiveTimer | null
   /** La biblioteca de fotos de la propuesta de viaje (`/fotos`): solo con plantilla html. */
   bibliotecaFotos?: boolean
+  /** Id del usuario de la sesión: separa el «visto» de Novedades por persona en el navegador. */
+  usuarioId?: string | null
 }
 
 const COLOR_PUNTO = { verde: '#10B981', ambar: '#D97706', rojo: '#DC2626' } as const
@@ -444,6 +456,7 @@ export default function AppShell({
   impersonacion = null,
   timerActivo = null,
   bibliotecaFotos = false,
+  usuarioId = null,
 }: AppShellProps) {
   const pathname = usePathname()
   // Los Link del menu NO precargan al entrar en pantalla (prefetch={false}):
@@ -507,6 +520,17 @@ export default function AppShell({
   }
   const moduloGate = <T extends { href: string }>(items: T[]): T[] =>
     items.filter((i) => rutaPermitida(i.href, ctxGate))
+
+  // ── Novedades ── (`lib/novedades/novedades.ts`). Solo las del producto del espacio; sin
+  // ninguna, no hay entrada. «Visto» vive en el navegador de cada persona.
+  const novedades = novedadesDelEspacio(NOVEDADES, ctxGate)
+  const llaveNovedades = llaveVistas(usuarioId)
+  const novedadesSinVer = useNovedadesNoVistas(llaveNovedades, novedades)
+  const [novedadesAbierto, setNovedadesAbierto] = useState(false)
+  const abrirNovedades = () => {
+    setNovedadesAbierto(true)
+    marcarVistas(llaveNovedades, novedades.map((n) => n.id))
+  }
 
   // En modo vitrina, Números y Tableros se FUERZAN aunque sus módulos (business)
   // estén off — son vitrinas de upsell. Sin esto no aparecen en un workspace
@@ -1056,6 +1080,29 @@ export default function AppShell({
             </div>
           )}
 
+          {/* Novedades — botón (abre un panel, no es una ruta), con el numerito de lo no visto. */}
+          {novedades.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }} data-nav-novedades>
+              <button
+                type="button"
+                onClick={abrirNovedades}
+                title={!sidebarExpanded ? 'Novedades' : undefined}
+                aria-label={etiquetaNovedades(novedadesSinVer)}
+                className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all hover:opacity-90 ${
+                  sidebarExpanded ? '' : 'justify-center'
+                }`}
+                style={{ backgroundColor: 'transparent', color: 'var(--sidebar-muted)' }}
+              >
+                <Sparkles className="h-4 w-4 shrink-0" />
+                {sidebarExpanded && <span className="flex-1 text-left">Novedades</span>}
+                <NumeritoNovedades
+                  cuenta={novedadesSinVer}
+                  className={sidebarExpanded ? '' : 'absolute right-1 top-1'}
+                />
+              </button>
+            </div>
+          )}
+
           {/* Suscripción — al final, separada: lo que el espacio paga, no una herramienta. */}
           {suscripcion && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }} data-nav-suscripcion>
@@ -1218,6 +1265,7 @@ export default function AppShell({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {novedades.length > 0 && <BotonNovedades cuenta={novedadesSinVer} onAbrir={abrirNovedades} />}
             {notificationBell}
             {suscripcion ? (
               // Con Suscripción, el avatar abre el menú de perfil: Suscripción primero, luego salir.
@@ -1372,6 +1420,9 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
           En modo vitrina se oculta: el shell es comercial, no operativo. */}
+      {novedades.length > 0 && (
+        <PanelNovedades abierto={novedadesAbierto} onAbiertoChange={setNovedadesAbierto} lista={novedades} />
+      )}
       {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} timerActivo={timerActivo} />}
       </div>
     </div>

@@ -963,7 +963,8 @@ export async function generateCotizacionPDF(
     return {
       // Hotel y traslado con el nombre de su lectura, no en MAYÚSCULAS (`nombre-visible.ts`).
       nombre: nombreVisibleDeLinea(i),
-      descripcion: i.descripcion ?? null,
+      // Y la descripción igual (prueba del #1229, punto 2: lo que incluye la tarifa no en MAYÚSCULAS).
+      descripcion: descripcionVisibleDeLinea(i),
       precio_venta: Number(i.precio_venta) || 0,
       descuento_porcentaje: descuentoVisible(i),
       cantidad: Number(i.cantidad) || 1,
@@ -1045,7 +1046,8 @@ export async function generateCotizacionPDF(
         items: d.itemIds
           .map(id => porId.get(id))
           .filter((i): i is ItemRow => i !== undefined && aportaDoc(i))
-          .map(paraPlantilla),
+          // El id deja al día a día de la propuesta nueva reconocer la línea que ya es un servicio.
+          .map(i => ({ ...paraPlantilla(i), ...(i.id ? { id: i.id as string } : {}) })),
       }))
     : null
 
@@ -1236,6 +1238,7 @@ export async function generateCotizacionPDF(
       serviciosDoc = serviciosDelDocumento(
         fuente.map(i => ({
           ...paraLecturaDe(i),
+          id: i.id ?? null,
           dia_relativo: i.dia_relativo ?? null,
           ...(i.id && marcas.has(i.id) ? { tarifas: marcas.get(i.id) } : {}),
         })),

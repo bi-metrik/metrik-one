@@ -42,6 +42,7 @@ import {
   ajustesPorDefecto,
   calcularEleccion,
   lecturaDeTarifa,
+  fechaDeActividadNueva,
   ofrecerTarifas,
   origenVigente,
   revisarAjustes,
@@ -422,7 +423,7 @@ async function preparar(ctx: Contexto, elegida?: string | null): Promise<Prepara
   vista.opciones = oferta.opciones
   vista.avisos = oferta.avisos
   vista.calendario = oferta.calendario
-  vista.ajustes = ajustesPorDefecto({ ficha: { tarifaCanal: esTarifaCanal(f.tarifa_canal) ? (f.tarifa_canal as TarifaCanal) : null, ivaIncluido: f.iva_incluido ?? null }, tarifario: rev.tarifario })
+  vista.ajustes = ajustesPorDefecto({ ficha: { tarifaCanal: esTarifaCanal(f.tarifa_canal) ? (f.tarifa_canal as TarifaCanal) : null, ivaIncluido: f.iva_incluido ?? null, ivaDeclarado: f.iva_declarado ?? null }, tarifario: rev.tarifario })
   return { ctx, vista, ficha: f, extraccionId: rev.id, tarifario: rev.tarifario }
 }
 
@@ -491,7 +492,7 @@ function calcular(p: Preparado, eleccion: Eleccion, ajustes: Partial<AjustesDeCo
   if (!composicion) return { error: 'Falta decir a cuántos pasajeros cubre la línea.' }
   if (!vista.calendario || !vista.ajustes) return { error: 'Vuelve a abrir las tarifas.' }
   const elegidas = (Array.isArray(eleccion?.filas) ? eleccion.filas : []).map((f) => vista.opciones.find((o) => o.indice === f?.indice)).filter((o): o is OpcionTarifa => !!o)
-  const defecto = ajustesPorDefecto({ fila: elegidas[0] ?? null, ficha: { tarifaCanal: esTarifaCanal(ficha.tarifa_canal) ? (ficha.tarifa_canal as TarifaCanal) : null, ivaIncluido: ficha.iva_incluido ?? null }, tarifario: p.tarifario })
+  const defecto = ajustesPorDefecto({ fila: elegidas[0] ?? null, ficha: { tarifaCanal: esTarifaCanal(ficha.tarifa_canal) ? (ficha.tarifa_canal as TarifaCanal) : null, ivaIncluido: ficha.iva_incluido ?? null, ivaDeclarado: ficha.iva_declarado ?? null }, tarifario: p.tarifario })
   const aj = revisarAjustes(ajustes ?? null, defecto)
   if (!aj.ok) return { error: aj.error }
   const c = calcularEleccion({ opciones: vista.opciones, eleccion, composicion, calendario: vista.calendario, ajustes: aj.ajustes })
@@ -601,7 +602,16 @@ export async function elegirTarifasDeLinea(
 // ── Crear la línea con la tarifa (brief del 2026-10-21, punto 2) ─────────────
 
 export type ResultadoLineaNueva =
-  | (Extract<ResultadoEleccion, { ok: true }> & { itemId: string; donde: string })
+  | (Extract<ResultadoEleccion, { ok: true }> & {
+      itemId: string
+      donde: string
+      /**
+       * El servicio de la fila («Playa Blanca con almuerzo»), para que el aviso nombre la actividad
+       * y no el grupo genérico «Actividad en Santa Marta» (brief del 2026-10-22, menor). `null` en
+       * hotel y vuelo: ahí el grupo ya dice cuál es.
+       */
+      servicio: string | null
+    })
   | { ok: false; error: string }
 
 /**
@@ -639,16 +649,19 @@ export async function crearLineaConTarifa(
   const tipo = tipoDeLineaDeFicha(ficha, porPasos)
   const ranura = definicionDeTipo(tipo)
   const leidaEn = new Date().toISOString()
-  // Un hotel lleva las fechas del viaje (entrada y salida); un tour o un traslado no inventa su
-  // día: queda «Sin día» y la tarjeta lo pide, como uno escrito a mano sin fecha.
+  // Un hotel lleva las fechas del viaje (entrada y salida). Un tour no inventa su día: lleva la
+  // fecha de la fila o, en un viaje de un día, ese día (prueba del #1229, punto e); si no, queda
+  // «Sin día» y la tarjeta lo pide. La aceptación lo vuelve el «Día del viaje» (editable). Un
+  // traslado no lleva fecha.
   const esHotel = ranura.slug === 'hotel_detalle'
+  const diaDeActividad = ranura.slug === 'actividad_detalle' ? fechaDeActividadNueva(x.elegidas, p.vista.fechas) : null
   const lectura = lecturaDeTarifa({
     ranura,
     calculo: x.calculo,
     elegidas: x.elegidas,
     proveedor: { nombre: ficha.nombre, ciudad: ficha.ciudad ?? null },
     composicion: x.composicion,
-    entrada: esHotel ? p.vista.fechas.entrada : null,
+    entrada: esHotel ? p.vista.fechas.entrada : diaDeActividad,
     salida: esHotel ? p.vista.fechas.salida : null,
     leidaEn,
   })
@@ -702,6 +715,7 @@ export async function crearLineaConTarifa(
     ok: true,
     itemId: aceptada.itemId,
     donde: aceptada.donde,
+    servicio: ranura.slug === 'hotel_detalle' || ranura.slug === 'vuelo_detalle' ? null : (lectura.nombre ?? '').trim() || null,
     confirmada: pendiente === null,
     pendiente,
     moneda: x.calculo.moneda,

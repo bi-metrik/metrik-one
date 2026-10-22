@@ -13,6 +13,8 @@ type Fila = Record<string, unknown>
 
 let tablas: Record<string, Fila[]> = {}
 let secuencia = 0
+/** Tabla cuya lectura falla (barrido 2026-10-22: el gate falla cerrado). */
+let tablaCaida: string | null = null
 
 const WS = '64010015-a9a2-4aca-be83-e456cf217d96'
 const LINEA = 'linea-viaje'
@@ -95,6 +97,7 @@ function constructor(tabla: string) {
   }
 
   const ejecutar = (): { data: unknown; error: { code?: string; message: string } | null; count?: number } => {
+    if (operacion === 'select' && tabla === tablaCaida) return { data: null, error: { message: 'caída' } }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {
@@ -188,6 +191,7 @@ const SOPORTE = `one://ve-documentos/${WS}/negocios/${NEG}/servicios/sv-vuelo/so
 
 function sembrar(opts: { anticipo?: number; activo?: boolean } = {}) {
   secuencia = 0
+  tablaCaida = null
   rol = 'operator'
   areas = ['operaciones']
   staffId = 's-ale'
@@ -401,5 +405,26 @@ describe('gate servicios_listos (F3-7)', () => {
     expect(await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: [] })).toEqual([])
     sembrar({ activo: false })
     expect(await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })).toEqual([])
+  })
+
+  it('con la línea encendida y ningún servicio que vaya, frena (barrido 2026-10-22)', async () => {
+    tablas.negocio_servicios = []
+    const falta = await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })
+    expect(falta.map(f => f.texto)).toEqual(['No hay servicios del viaje registrados.'])
+    // Solo filas «No va»: tampoco hay nada listo.
+    sembrar()
+    tablas.negocio_servicios = tablas.negocio_servicios.filter(s => s.estado === 'cancelado')
+    expect((await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })).map(f => f.texto))
+      .toEqual(['No hay servicios del viaje registrados.'])
+  })
+
+  it('si no puede leer el negocio, los servicios, los pagos o las aprobaciones, frena', async () => {
+    for (const t of ['negocios', 'negocio_servicios', 'gastos', 'aprobaciones_excepcion']) {
+      sembrar()
+      for (const s of tablas.negocio_servicios) s.confirmacion_ref = 'x'
+      tablaCaida = t
+      const falta = await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })
+      expect(falta.map(f => f.texto), t).toEqual(['No se pudieron leer los servicios del viaje. Intenta de nuevo.'])
+    }
   })
 })

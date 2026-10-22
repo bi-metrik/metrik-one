@@ -93,6 +93,12 @@ export interface RepoPagoEnLinea {
    * idempotente.
    */
   trasPagoRegistrado?(cobro: CobroParaPago): Promise<{ revisar: boolean; detalle: string } | null>
+  /**
+   * Un RECHAZO de un cobro de ONE: hoy, el cargo con la tarjeta guardada que ePayco dejó pendiente y
+   * rechazó después (antifraude). `null` = no había un cargo pendiente que cerrar: el rechazo se ignora
+   * como siempre (un enlace sigue sirviendo). Idempotente, como `trasPagoRegistrado`.
+   */
+  trasRechazo?(cobro: CobroParaPago, e: EventoPasarela): Promise<{ revisar: boolean; detalle: string } | null>
 }
 
 export interface SalidaPagoEnLinea {
@@ -221,8 +227,25 @@ export async function registrarPagoAprobado(
   throw new Error(`No se pudo registrar el pago del cobro ${cobro.id}: ${r.error}`)
 }
 
+/**
+ * El rechazo de un cargo que había quedado pendiente: solo con la referencia de ONE (dice el cobro sin
+ * buscar) y un repositorio que sepa cerrarlo. Sin eso, `null` y el rechazo se ignora como antes.
+ */
+async function rechazoDeCargoPendiente(e: EventoPasarela, repo: RepoPagoEnLinea): Promise<Salida | null> {
+  if (!repo.trasRechazo) return null
+  const idCobro = cobroDeReferencia(e.referencia)
+  if (!idCobro) return null
+  const cobro = await repo.cobroPorId(idCobro)
+  if (!cobro || cobro.fecha) return null
+  const r = await repo.trasRechazo(cobro, e)
+  if (!r) return null
+  return { resultado: r.revisar ? 'requiere_revision' : 'ignorado', detalle: r.detalle, cobroId: cobro.id, cobro }
+}
+
 async function procesar(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): Promise<Salida> {
   if (e.tipo === 'rechazado') {
+    const tardio = await rechazoDeCargoPendiente(e, repo)
+    if (tardio) return tardio
     return { resultado: 'ignorado', detalle: 'Pago rechazado por la pasarela: el enlace sigue sirviendo para volver a intentar.', cobroId: null, cobro: null }
   }
   if (e.tipo === 'otro') {

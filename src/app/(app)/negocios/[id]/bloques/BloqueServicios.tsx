@@ -26,6 +26,8 @@ import {
   porcentajePersonal,
   resumenDelTablero,
   sigueDelTablero,
+  pildorasDeHitos,
+  type ColorPildora,
   totalesDelTablero,
   type DatosBloqueServicios,
   type FilaVista,
@@ -50,6 +52,7 @@ import {
   traerServiciosDeCotizacion,
   type CambiosServicio,
 } from '../../servicios-viaje-actions'
+import FechasServicio, { LineaDeFechas } from './FechasServicio'
 
 /**
  * Bloque «Servicios del viaje»: el tablero de Reservas y pagos (F0 + F3). Una fila por servicio
@@ -94,8 +97,15 @@ const PILDORA: Record<EstadoServicio, string> = {
 }
 
 const COLOR_FECHA = { verde: 'text-green-700', ambar: 'text-amber-600', rojo: 'text-red-600' } as const
-const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500' } as const
+const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500', gris: 'bg-muted-foreground/40' } as const
 const FILTROS: FiltroTablero[] = ['todos', 'por_pagar', 'esperando', 'falta_confirmar']
+/** Píldoras de hito (Noor §3.2): el color nunca va solo, el texto dice el estado. */
+const COLOR_PILDORA_HITO: Record<ColorPildora, string> = {
+  gris: 'border-border bg-muted text-muted-foreground',
+  ambar: 'border-amber-300 bg-amber-50 text-amber-800',
+  rojo: 'border-red-300 bg-red-50 text-red-700',
+  verde: 'border-green-300 bg-green-50 text-green-800',
+}
 
 interface BloqueServiciosProps {
   negocioId: string
@@ -160,8 +170,10 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable,
 
   const totales = totalesDelTablero(vista)
   const personal = porcentajePersonal(vista)
-  const sigue = sigueDelTablero(vista, hoy)
-  const color = colorDeLaEtapa(vista, hoy)
+  // El punto y el «Sigue:» con la regla del gate `servicios_listos` (barrido 2026-10-22).
+  const exige = datos.reglas?.exigeConfirmacion ?? true
+  const sigue = sigueDelTablero(vista, hoy, datos.hitos ?? [], exige)
+  const color = colorDeLaEtapa(vista, hoy, exige)
   const visibles = filtrarTablero(vista, filtro)
   return (
     <div className="space-y-3">
@@ -280,6 +292,7 @@ function FilaServicio({
           <p className={`break-words text-sm font-medium ${v.estado === 'cancelado' ? 'line-through text-muted-foreground' : ''}`}>{s.nombre}</p>
           <p className="break-words text-xs text-muted-foreground">{detalle}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+            {v.estado !== 'cancelado' && <LineaDeFechas s={s} />}
             {fecha && <span className={COLOR_FECHA[fecha.color]}>{fecha.texto}</span>}
             <span className="tabular-nums text-muted-foreground">
               Cotizado {formatCOP(s.costo_cotizado)} · Pagado {formatCOP(v.pagado)}
@@ -291,6 +304,15 @@ function FilaServicio({
           <p className="text-[11px] text-muted-foreground">
             {s.gastos.some(g => g.soporte_url) ? '◉' : '○'} soporte · {s.voucher_ref ? '◉' : '○'} voucher · {s.confirmacion_ref ? '◉' : '○'} confirmado
           </p>
+          {datos.hitos && datos.hitos.length > 0 && v.estado !== 'cancelado' && (
+            <span className="flex flex-wrap gap-1" data-pildoras-hito>
+              {pildorasDeHitos(datos.hitos, s.id, hoy, datos.nombres ?? {}).map(p => (
+                <span key={p.clave} title={p.detalle} className={`rounded-full border px-2 py-0.5 text-[11px] ${COLOR_PILDORA_HITO[p.color]}`} data-color={p.color}>
+                  {p.texto}
+                </span>
+              ))}
+            </span>
+          )}
         </div>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PILDORA[v.estado]}`}>{ETIQUETA_ESTADO[v.estado]}</span>
         <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${abierta ? 'rotate-180' : ''}`} />
@@ -392,6 +414,8 @@ function HojaServicio({
       </p>
 
       <Aprobaciones v={v} datos={datos} direccion={direccion} alGuardar={alGuardar} />
+
+      <FechasServicio key={`fechas:${s.fechas_corregidas_at ?? ''}:${s.fecha_servicio ?? ''}:${s.fecha_fin ?? ''}`} s={s} puedeEditar={puedeEditar} nombres={datos.nombres} alGuardar={alGuardar} />
 
       <p className="text-xs font-semibold">1 Reserva</p>
       {campoTexto('Proveedor', 'proveedor_nombre', s.proveedor_nombre, '¿Con quién lo reservaste?')}

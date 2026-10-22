@@ -13,11 +13,13 @@ import {
   tarifasDeLinea,
   tarifasParaLineaNueva,
   type FichaParaLinea,
+  type ResultadoLineaNueva,
   type TarifasDeLinea,
 } from '@/app/(app)/negocios/tarifas-proveedor-actions'
 import { describirOcupacion, formatoMonto, NOMBRE_TIPO, TIPOS_PASAJERO, type TipoPasajero } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   calcularEleccion,
+  IVA_POR_DEFECTO,
   TEXTO_CANAL,
   TEXTO_FUERA,
   textoTemporada,
@@ -113,6 +115,17 @@ export default function TarifasProveedorLinea({
 }
 
 // ── El tercer camino: una línea nueva desde la tarifa ────────────────────────
+
+/**
+ * El aviso al crear la línea: nombra el servicio («Playa Blanca con almuerzo agregada…»), no el
+ * grupo genérico «Actividad en Santa Marta» (brief del 2026-10-22, menor). Sin servicio (hotel,
+ * vuelo), dice dónde quedó, como antes.
+ */
+export function avisoDeLineaAgregada(r: Extract<ResultadoLineaNueva, { ok: true }>): string {
+  const que = r.servicio ? `«${r.servicio}» agregada` : `Línea agregada en ${r.donde}`
+  if (r.confirmada) return `${que}: ${formatoMonto(r.aPagarAgencia ?? r.total, r.moneda)} de costo.`
+  return `${que}. ${r.pendiente ?? 'Falta un dato para confirmar el costo.'}`
+}
 
 export function UsarTarifaDeProveedor({ cotizacionId, onCreada, className }: { cotizacionId: string; onCreada: (itemId: string) => void; className?: string }) {
   const [abierta, setAbierta] = useState(false)
@@ -437,8 +450,8 @@ function Eleccion({ modo, vista, elegido, ocupado, abiertaEn, onListo }: { modo:
       if (modo.tipo === 'nueva') {
         const r = await crearLineaConTarifa(modo.cotizacionId, (elegido ?? vista.proveedor?.id) as string, eleccion, ajustes, t, { idAceptacion: llave.current, medida })
         if (!r.ok) { toast.error(r.error); return }
-        if (r.confirmada) toast.success(`Línea agregada en ${r.donde}: ${formatoMonto(r.aPagarAgencia ?? r.total, r.moneda)} de costo.`)
-        else toast.warning(`Línea agregada en ${r.donde}. ${r.pendiente ?? 'Falta un dato para confirmar el costo.'}`)
+        if (r.confirmada) toast.success(avisoDeLineaAgregada(r))
+        else toast.warning(avisoDeLineaAgregada(r))
         onListo(r.itemId)
         return
       }
@@ -489,22 +502,28 @@ function Eleccion({ modo, vista, elegido, ocupado, abiertaEn, onListo }: { modo:
             {vista.elegida.archivo ? ` de «${vista.elegida.archivo}»` : ''}{vista.elegida.por ? `, elegida por ${vista.elegida.por}` : ''}.
           </p>
         )}
-        {inicio.como && n > 0 && (
+        {inicio.como && inicio.como !== 'varios_servicios' && n > 0 && (
           <p className="m-0 text-muted-foreground" data-preseleccion={inicio.como}>
             {inicio.como === 'unica' ? 'Marcamos la tarifa de cada pasajero.' : 'Marcamos la más barata de cada pasajero. Toca otra para cambiarla.'}
+          </p>
+        )}
+        {/* Servicios distintos (un operador con varias actividades): ONE no elige por precio. */}
+        {inicio.como === 'varios_servicios' && n === 0 && (
+          <p className="m-0 font-medium text-[#1A1A1A]" data-preseleccion="varios_servicios">
+            Este proveedor tiene {inicio.servicios} servicios distintos: toca el que va en la cotización.
           </p>
         )}
 
         <div className="space-y-2" data-opciones-tarifa>
           {gruposDeTarifas(visibles).map((g) => (
             <section key={g.titulo} className="space-y-1">
-              <h3 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{g.titulo}</h3>
+              <h3 className="m-0 text-xs font-semibold text-[#1A1A1A]" data-grupo-tarifas>{g.titulo}</h3>
               <ul className="m-0 list-none space-y-1 p-0">
                 {g.opciones.map((o) => {
                   const m = marcadas[o.indice]
                   const deshabilitada = !o.base
                   const total = totalDeFila(o, c, cal, m)
-                  const quien = [o.ocupacion, o.pasajero, o.temporada ? textoTemporada(o, vista.fechas) : null, o.pax ? `${o.pax} pax` : null].filter(Boolean).join(' · ')
+                  const quien = [o.ocupacion, o.pasajero, o.temporada ? textoTemporada(o, vista.fechas) : null, o.pax].filter(Boolean).join(' · ')
                   return (
                     <li key={o.indice} className={`rounded-md border ${m ? 'border-[#10B981] bg-[rgba(16,185,129,0.06)]' : 'bg-background'} ${o.fueraPor.length ? 'opacity-70' : ''}`} data-opcion-tarifa={o.indice}>
                       <label className="flex min-h-11 cursor-pointer items-center gap-2 px-2.5 py-2">
@@ -621,11 +640,14 @@ function Eleccion({ modo, vista, elegido, ocupado, abiertaEn, onListo }: { modo:
                   )}
                   <label className="flex min-h-8 items-center gap-1">
                     <input type="checkbox" checked={ajustes.ivaIncluido} onChange={(e) => setAjustes((a) => ({ ...a, ivaIncluido: e.target.checked }))} />
-                    El precio ya trae IVA ({ajustes.ivaPct} %)
+                    El precio ya trae IVA ({ajustes.ivaPct ?? IVA_POR_DEFECTO} %)
                   </label>
                 </div>
                 <p className="m-0 text-[10px] text-muted-foreground">
-                  {TEXTO_CANAL[ajustes.canal]}. El costo se guarda sin IVA{vista.ivaDeclarado ? '; la casilla «Calcular con IVA» de la cotización se lo suma porque el proveedor cobra IVA' : ''}.
+                  {TEXTO_CANAL[ajustes.canal]}. El costo se guarda sin IVA
+                  {ajustes.ivaPct === null
+                    ? '; el tarifario no declara IVA, así que «Calcular con IVA» no le suma nada'
+                    : '; la casilla «Calcular con IVA» de la cotización se lo suma porque el proveedor cobra IVA'}.
                 </p>
                 {calculo?.ok && (
                   <div className="space-y-0.5">

@@ -79,7 +79,7 @@ export async function escenarioOne(p: {
   const rol = p.rol ?? 'owner';
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null }),
+    dominio: dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null, empresa: 'Empresa de Prueba' }),
     reglamento: p.reglamento ?? await reglamentoOne('Empresa de Prueba'),
     config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
     ahoraMs: reloj.ahora,

@@ -25,6 +25,7 @@ import type { Quitado, SugeridoAgente } from './extraccion.ts';
 import { textoComparable } from '../../perfil-contacto.ts';
 import type { HechoPerfil } from '../../perfil-contacto.ts';
 import { codigosCanonicos, codigosDelTexto } from './codigo.ts';
+import { esAdjuntoEntrante } from '../adjuntos.ts';
 
 /** Lo que se le pasa a la extracción, como mucho (el mismo tope de la conversación que ve el modelo: 6.000 tokens). */
 export const TOPE_ESCRITOS_CARACTERES = 24_000;
@@ -32,7 +33,45 @@ export const TOPE_ESCRITOS_CARACTERES = 24_000;
 // ── Lo que el comercial escribió de un viaje ─────────────────────────────────
 
 const delEquipo = (f: FilaConversacion) => f.direccion === 'entrante' && f.clase !== 'reenvio';
-const escritoDelEquipo = (f: FilaConversacion) => f.direccion === 'entrante' && (f.clase === 'escrito' || f.clase === 'audio') && !!f.texto?.trim();
+/** Un escrito o audio del equipo con texto, o una foto/PDF que mandó el equipo con algo que decir (pie o lo leído). */
+const escritoDelEquipo = (f: FilaConversacion) => f.direccion === 'entrante'
+  && (((f.clase === 'escrito' || f.clase === 'audio') && !!f.texto?.trim()) || (f.clase !== 'reenvio' && esAdjuntoEntrante(f) && !!textoParaCarga(f)));
+
+// ── Lo que dice un adjunto (foto o PDF), para la carga ───────────────────────
+
+/** Así empieza lo leído de un archivo dentro de lo que va a la extracción (la extracción sabe que es un documento). */
+export const MARCA_ARCHIVO = '[archivo adjunto';
+
+/** ¿Este texto de la carga trae lo leído de un archivo? Pura. */
+export function traeArchivo(texto: string): boolean {
+  return texto.includes(MARCA_ARCHIVO);
+}
+
+/**
+ * Lo que una fila aporta a la carga de un viaje: su texto (el escrito, o el pie de la foto) y, si es una foto o un PDF
+ * ya leído (`../adjuntos.ts`), lo que dice el archivo, marcado como tal. Una fila sin archivo da su texto tal cual (la
+ * carga de texto no cambia). Pura.
+ */
+export function textoParaCarga(f: FilaConversacion): string {
+  const base = (f.texto ?? '').trim();
+  if (!esAdjuntoEntrante(f)) return base;
+  const l = f.media.lectura;
+  if (!l?.legible || !l.texto) return base;
+  const que = f.media.tipo === 'documento' ? `PDF «${(f.media.nombre ?? 'sin nombre').slice(0, 80)}»` : 'foto';
+  const clase = l.clase === 'pago' ? 'comprobante de pago' : l.clase === 'identidad' ? 'documento de identidad' : l.clase === 'viaje' ? 'del viaje' : 'otro documento';
+  return [base, `${MARCA_ARCHIVO} · ${que} · ${clase} · lo que dice el archivo] ${l.texto}`].filter(Boolean).join('\n');
+}
+
+/** Los adjuntos (foto o PDF ya guardados) de estas filas: lo que queda como soporte del viaje con el toque. Pura. */
+export function adjuntosDe(filas: ReadonlyArray<FilaConversacion>): AdjuntoCarga[] {
+  return filas.filter(esAdjuntoEntrante).filter((f) => !!f.media.ref).map((f) => ({
+    fila: f.id, ref: f.media.ref!, tipo: f.media.tipo === 'documento' ? 'documento' as const : 'imagen' as const,
+    nombre: f.media.tipo === 'documento' ? (f.media.nombre ?? null) : null,
+  }));
+}
+
+/** Un archivo que queda como soporte del viaje cuando se carga lo que trae. */
+export interface AdjuntoCarga { fila: string; ref: string; tipo: 'imagen' | 'documento'; nombre: string | null }
 
 /** La opción que el comercial nombró escribiendo («1», «el de san andrés»). Inyectada para no duplicar el candado. */
 type OpcionNombrada = (opciones: ReadonlyArray<{ titulo: string; descripcion?: string }>, texto: string) => number | null;
@@ -94,6 +133,17 @@ export function escritosDelViaje(
   alias: Record<string, string> = {},
   sueltos: Record<string, string> = {},
 ): string[] {
+  return recortar(filasDelViaje(filas, codigo, opcionNombrada, alias, sueltos).map(textoParaCarga));
+}
+
+/** Las filas de `escritosDelViaje` (sin recortar): de ellas salen también los adjuntos que van de soporte. Pura. */
+export function filasDelViaje(
+  filas: FilaConversacion[],
+  codigo: string,
+  opcionNombrada: OpcionNombrada,
+  alias: Record<string, string> = {},
+  sueltos: Record<string, string> = {},
+): FilaConversacion[] {
   const ev = nombramientos(filas, opcionNombrada, alias, sueltos);
   const tramos: Array<[number, number]> = [];
   ev.forEach((x, k) => {
@@ -103,8 +153,7 @@ export function escritosDelViaje(
   // Un mensaje de este turno que nombra OTRO viaje (y no este) es de ese otro.
   const deOtro = new Set(ev.filter((x) => x.clave !== codigo).map((x) => x.i));
   for (const x of ev) if (x.clave === codigo) deOtro.delete(x.i);
-  const elegidas = filas.filter((f, i) => escritoDelEquipo(f) && (tramos.some(([d, h]) => i >= d && i < h) || (!f.turno_id && !deOtro.has(i))));
-  return recortar(elegidas.map((f) => f.texto!.trim()));
+  return filas.filter((f, i) => escritoDelEquipo(f) && (tramos.some(([d, h]) => i >= d && i < h) || (!f.turno_id && !deOtro.has(i))));
 }
 
 function recortar(textos: string[]): string[] {

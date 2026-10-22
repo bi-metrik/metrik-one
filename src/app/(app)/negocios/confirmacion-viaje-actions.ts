@@ -18,7 +18,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { accionIdempotente } from '@/lib/idempotencia/accion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
+import { totalDeTarifa } from '@/lib/viaje/total-confirmacion'
 import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizacion'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
@@ -62,21 +62,6 @@ type Db = any
 type Contexto = ContextoViaje
 const contexto = contextoViaje
 
-/** El total contra el que se mide el plan: el precio de la tarifa elegida (el mismo cálculo que la aprobación). */
-async function totalDeTarifa(db: Db, workspaceId: string, cotizacionId: string, itinerarioId: string | null): Promise<{ ok: true; total: number; nombre: string | null } | { ok: false; error: string }> {
-  const precios = await preciosDeLasTarifas(db, { workspaceId, cotizacionId })
-  if (!precios.ok) return { ok: false, error: precios.error }
-  if (precios.tarifas.length === 0) {
-    const { data } = await db.from('cotizaciones').select('valor_total').eq('id', cotizacionId).maybeSingle()
-    const v = Number((data as { valor_total?: number } | null)?.valor_total ?? 0)
-    return v > 0 ? { ok: true, total: v, nombre: null } : { ok: false, error: 'La cotización no tiene total.' }
-  }
-  const t = itinerarioId ? precios.tarifas.find((x) => x.itinerarioId === itinerarioId) : precios.tarifas.find((x) => x.esRecomendada)
-  if (!t) return { ok: false, error: 'Esa tarifa no iba en la propuesta.' }
-  if (t.precio === null) return { ok: false, error: t.motivo ?? 'No se pudo calcular el precio de esa tarifa.' }
-  return { ok: true, total: t.precio, nombre: t.nombre }
-}
-
 async function cotizacionDelNegocio(db: Db, negocioId: string, cotizacionId: string): Promise<{ id: string; estado: string; tarifa_aceptada_id: string | null; consecutivo: string | null } | null> {
   const { data } = await db.from('cotizaciones').select('*').eq('id', cotizacionId).eq('negocio_id', negocioId).maybeSingle()
   return (data as { id: string; estado: string; tarifa_aceptada_id: string | null; consecutivo: string | null } | null) ?? null
@@ -97,7 +82,7 @@ async function prepararPlan(ctx: Contexto, input: EntradaPlan) {
   if (!cuotas) return { ok: false as const, error: 'Las cuotas no tienen forma de plan (fecha y monto en cada una).' }
   const cot = await cotizacionDelNegocio(ctx.supabase, ctx.negocio.id, input.cotizacionId)
   if (!cot) return { ok: false as const, error: 'Cotización no encontrada en este negocio.' }
-  const total = await totalDeTarifa(ctx.supabase, ctx.workspaceId, cot.id, input.itinerarioId)
+  const total = await totalDeTarifa(ctx.supabase, { workspaceId: ctx.workspaceId, cotizacionId: cot.id, itinerarioId: input.itinerarioId })
   if (!total.ok) return { ok: false as const, error: total.error }
   const { viaje } = await leerViajeDelNegocio(ctx.supabase, ctx.negocio.id)
   const regla = configPlanPagos(ctx.configLinea).regla

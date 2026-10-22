@@ -12,6 +12,7 @@ import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAsignarResponsable } from '@/lib/permissions/asignar-responsable'
 import { puedeAvanzarCruces as puedeAvanzarCrucesConMotivo } from '@/lib/negocios/cruces-avance'
 import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
@@ -28,6 +29,7 @@ import { leerRielCobro } from './riel-cobro'
 import { leerEntregaViaje } from './entrega-viaje'
 import { leerViajeFinal } from './viaje-final'
 import { leerFacturaViaje } from './factura-viaje'
+import { leerSeguimientoViaje } from './seguimiento-viaje'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -129,6 +131,10 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // «Avanzar de todas formas» sobre un cruce: solo la lista `avanzar_cruces.staff_ids`.
   // MISMA función que el guard de `avanzarCrucesConMotivo`.
   let puedeAvanzarCruces = false
+  // Asignar/quitar responsables: owner/admin/supervisor, o la persona en
+  // `config_extra.asignar_responsable.staff_ids`. MISMA función que el guard de
+  // `agregarResponsable`/`quitarResponsable`. Sin config legible, solo el rol.
+  let puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, null)
   // Carpeta del cerebro: el campo solo existe donde el workspace exige la carpeta, y se
   // edita con el MISMO resolvedor que usa `actualizarCarpetaLocalNegocio`.
   const carpetaLocal = { visible: false, puedeEditar: false }
@@ -145,6 +151,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
     puedeAvanzarCruces = puedeAvanzarCrucesConMotivo(staffId, ws?.config_extra ?? null)
+    puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, ws?.config_extra ?? null)
     almacenamientoExterno = esAlmacenamientoExterno(ws?.config_extra ?? null)
     if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
       carpetaLocal.visible = true
@@ -196,13 +203,16 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // Riel de facturación (F5): solo en líneas que facturan por evento (`facturacion.por_titular`).
   // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
   // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
-  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinal] = workspaceId
-    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje)])
-    : [null, null, null, null, null]
-  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal
+  // Seguimiento (F1): la línea «Cotización enviada el …» solo en la etapa con `cotizacion_enviada`.
+  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinalLeido, seguimientoViaje] = workspaceId
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
+    : [null, null, null, null, null, null]
+  const viajeFinal = viajeFinalLeido?.panel ?? null
+  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
     ? (
       <>
         {bannerCierre}
+        {seguimientoViaje}
         {rielCobro}
         {facturaViaje}
         {confirmacionViaje}
@@ -303,8 +313,10 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     registrarPagoEnabled: conciliacionActiva,
     registrarPagoSimple: pagoSimpleActivo,
     puedeCierreNoFacturable: puedeCierreNoFacturable,
+    cierreViaje: viajeFinalLeido?.paraCerrar ?? null,
     puedeOmitirGates: puedeOmitirGates,
     puedeAvanzarCruces: puedeAvanzarCruces,
+    puedeAsignarResponsables: puedeAsignarResponsables,
     puedeResolverAvisoRecaudo: puedeResolverAvisoRecaudo,
     carpetaLocal: carpetaLocal,
     almacenamientoExterno: almacenamientoExterno,

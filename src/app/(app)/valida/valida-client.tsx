@@ -47,6 +47,7 @@ import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/c
 import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
 import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
 import { formatFecha } from '@/lib/dates/bogota'
+import { mensajeErrorValida } from '@/lib/valida/mensajes-error'
 import { PALETA } from '@/lib/marca/paleta'
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
@@ -1567,10 +1568,23 @@ export function HistorialTable({
   );
 }
 
-function ErrorBox({ msg }: { msg: string }) {
+/**
+ * El error de una consulta, un cargue o una descarga, en llano: nunca el código crudo del motor o de
+ * ONE (`mensajeErrorValida`). El código, si lo hay, va pequeño como detalle técnico para soporte.
+ */
+export function ErrorBox({ msg }: { msg: string }) {
+  const { mensaje, codigo } = mensajeErrorValida(msg);
   return (
-    <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
-      <ShieldAlert className="h-4 w-4" /> {msg}
+    <div
+      role="alert"
+      data-error-valida={codigo ?? ''}
+      className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2"
+    >
+      <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p>{mensaje}</p>
+        {codigo && <p className="mt-1 text-[11px] text-[#B91C1C]/70 break-all">Detalle técnico: {codigo}</p>}
+      </div>
     </div>
   );
 }

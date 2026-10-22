@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useAvanceDeEtapa } from '@/hooks/use-avance-de-etapa'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
@@ -54,6 +55,7 @@ import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '../marco-cotizacio
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
+import type { CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
@@ -853,6 +855,7 @@ function SelectorEtapa({
   puedeAvanzarCruces,
   esResponsable = false,
   seguimiento,
+  cierreViaje = null,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -874,13 +877,32 @@ function SelectorEtapa({
   esResponsable?: boolean
   /** Seguimiento de la línea (F1): motivos de pérdida y plazo del aplazamiento. */
   seguimiento?: ConfigSeguimiento
+  /** Cierre del viaje (`cierre_viaje.activo`, etapas 7-9): margen del panel y postventa que falta. */
+  cierreViaje?: CierreParaCerrar | null
 }) {
   const router = useRouter()
   // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
   const intencion = useIntencion()
   // Avanzar escribe (mueve la etapa, avisa, cierra): si la respuesta se pierde, el caso pudo
   // moverse igual. Se relee la ficha; reintentar a ciegas lo intentaría mover otra vez.
-  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
+  const [, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
+  // El botón lo mueve la RESPUESTA de la acción, no el `isPending` de la transición: ese no
+  // termina hasta que la ficha nueva se pinta, y si el repintado no llega el botón se quedaba en
+  // «Cambiando…» hasta recargar (prueba del #1229, punto a). Ver `use-avance-de-etapa.ts`.
+  const avance = useAvanceDeEtapa(etapaActualId ?? null, () => router.refresh())
+  const isPending = avance.ocupado
+  /** Corre una acción de esta barra. `fn` dice si el caso se movió de etapa. */
+  function lanzar(fn: () => Promise<boolean>) {
+    avance.empezar()
+    let movio = false
+    startTransition(async () => {
+      try {
+        movio = await fn()
+      } finally {
+        avance.terminar(movio)
+      }
+    })
+  }
   const [gateModal, setGateModal] = useState<{
     etapaId: string
     bloques: BloqueGateModal[]
@@ -909,7 +931,7 @@ function SelectorEtapa({
       ? window.confirm('Reactivar el negocio? Vuelve al pipeline activo.')
       : true
     if (!ok) return
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await reactivarNegocio(negocioId)
       if (result.error) {
         toast.error('Error: ' + result.error)
@@ -918,6 +940,7 @@ function SelectorEtapa({
       } else {
         toast.success('Negocio reactivado')
       }
+      return false
     })
   }
 
@@ -937,7 +960,7 @@ function SelectorEtapa({
 
   function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
@@ -957,13 +980,15 @@ function SelectorEtapa({
         // El destino REAL lo resuelve el routing en el server; el toast lo nombra
         // (siguienteEtapa por orden puede no ser el destino cuando el routing salta).
         toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`)
+        return true
       }
+      return false
     })
   }
 
   function handleOverride(etapaId: string, motivo: string) {
     setGateModal(null)
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo, undefined, intencion.clave())
       intencion.cerrar()
 
@@ -973,13 +998,14 @@ function SelectorEtapa({
       if (result.error === 'gate_bloqueado') {
         setErrorCarpeta(null)
         setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [], motivo })
-        return
+        return false
       }
       if (result.error) {
         toast.error('Error: ' + result.error)
-      } else {
-        toast.success('Etapa actualizada con override')
+        return false
       }
+      toast.success('Etapa actualizada con override')
+      return true
     })
   }
 
@@ -990,17 +1016,17 @@ function SelectorEtapa({
     if (!gateModal) return
     const intento = gateModal
     setErrorCarpeta(null)
-    startTransition(async () => {
+    lanzar(async () => {
       const guardado = await actualizarCarpetaLocalNegocio(negocioId, carpeta)
       if (guardado.error) {
         setErrorCarpeta(guardado.error)
-        return
+        return false
       }
       const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
-        return
+        return false
       }
       setGateModal(null)
       const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
@@ -1011,13 +1037,14 @@ function SelectorEtapa({
           nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
           confirmacion: result.confirmacion,
         })
-        return
+        return false
       }
       if (result.error) {
         toast.error('La carpeta quedó guardada, pero el negocio no avanzó: ' + result.error)
-        return
+        return false
       }
       toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      return true
     })
   }
 
@@ -1028,17 +1055,17 @@ function SelectorEtapa({
     if (!gateModal) return
     const intento = gateModal
     setErrorAvanceCruce(null)
-    startTransition(async () => {
-      const avance = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
-      if (avance.error) {
-        setErrorAvanceCruce(avance.error)
-        return
+    lanzar(async () => {
+      const excepcion = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
+      if (excepcion.error) {
+        setErrorAvanceCruce(excepcion.error)
+        return false
       }
       const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
-        return
+        return false
       }
       setGateModal(null)
       const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
@@ -1048,13 +1075,14 @@ function SelectorEtapa({
           nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
           confirmacion: result.confirmacion,
         })
-        return
+        return false
       }
       if (result.error) {
         toast.error('El motivo quedó guardado, pero el negocio no avanzó: ' + result.error)
-        return
+        return false
       }
       toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      return true
     })
   }
 
@@ -1113,6 +1141,7 @@ function SelectorEtapa({
             precioAprobado={precioAprobado}
             puedeCierreNoFacturable={puedeCierreNoFacturable}
             motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
+            cierreViaje={cierreViaje}
             onClose={() => setShowCierreDialog(false)}
           />
         )}
@@ -1136,6 +1165,16 @@ function SelectorEtapa({
           </button>
         ) : (
           <>
+            {avance.fase === 'atascado' ? (
+              // El caso avanzó pero la ficha nueva no llegó: se ofrece recargar, no avanzar otra vez.
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+                data-recargar-avance
+              >
+                Avanzado · Recargar
+              </button>
+            ) : (
             <button
               // Con `onClick={handleAvanzar}` React pasa el MouseEvent como primer
               // argumento, y ese argumento ahora es `confirmado`: cada clic normal
@@ -1145,8 +1184,10 @@ function SelectorEtapa({
               disabled={isPending}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
             >
-              {isPending ? (
+              {avance.fase === 'enviando' ? (
                 <span className="text-muted-foreground">Cambiando...</span>
+              ) : avance.fase === 'actualizando' ? (
+                <span className="text-muted-foreground">Avanzado, actualizando...</span>
               ) : (
                 <>
                   <ChevronRight className="h-3 w-3 text-muted-foreground" />
@@ -1154,6 +1195,7 @@ function SelectorEtapa({
                 </>
               )}
             </button>
+            )}
             {puedePausar && (
               <button
                 onClick={() => setShowPausaDialog(true)}
@@ -1221,6 +1263,7 @@ function SelectorEtapa({
           precioAprobado={precioAprobado}
           puedeCierreNoFacturable={puedeCierreNoFacturable}
           motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
+          cierreViaje={cierreViaje}
           onClose={() => setShowCierreDialog(false)}
         />
       )}
@@ -2470,10 +2513,14 @@ interface Props {
   registrarPagoSimple?: boolean
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
+  /** Cierre del viaje para el diálogo de «Cerrar negocio» (barrido ámbar). Ausente = como hoy. */
+  cierreViaje?: CierreParaCerrar | null
   /** Owner/admin o persona en `config_extra.omitir_gate.staff_ids`: ve "Omitir gate". */
   puedeOmitirGates?: boolean
   /** Persona en `config_extra.avanzar_cruces.staff_ids`: ve «Avanzar de todas formas» en un cruce. */
   puedeAvanzarCruces?: boolean
+  /** Owner/admin/supervisor o persona en `config_extra.asignar_responsable.staff_ids`: asigna y quita responsables. */
+  puedeAsignarResponsables?: boolean
   /**
    * El usuario pertenece al area financiera y puede cerrar el aviso de recaudo cambiado.
    * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
@@ -2545,8 +2592,10 @@ export default function NegocioDetailClient({
   registrarPagoEnabled = false,
   registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
+  cierreViaje = null,
   puedeOmitirGates = false,
   puedeAvanzarCruces = false,
+  puedeAsignarResponsables = false,
   puedeResolverAvisoRecaudo = false,
   carpetaLocal,
   almacenamientoExterno = false,
@@ -2776,6 +2825,7 @@ export default function NegocioDetailClient({
             puedeAvanzarCruces={puedeAvanzarCruces}
             esResponsable={currentUserEsResponsable}
             seguimiento={seguimiento}
+            cierreViaje={cierreViaje}
           />
         </div>
         </div>
@@ -2941,7 +2991,7 @@ export default function NegocioDetailClient({
               negocioId={negocio.id}
               responsables={negocio.responsables}
               staffList={staffList}
-              canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+              canEdit={puedeAsignarResponsables}
             />
           </div>
 
