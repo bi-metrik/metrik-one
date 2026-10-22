@@ -1,14 +1,14 @@
 ---
 name: aviso-factura-cuota-cargada
-description: Aviso en la campana al pagador cuando metrik carga la factura de una cuota; migración 20261022153000 SIN aplicar (22-oct); solo la persona designada lo recibe
+description: Aviso en la campana al pagador cuando metrik carga la factura de una cuota; migración 20261022153000 APLICADA en prod (22-oct); solo la persona designada lo recibe
 metadata:
   type: project
 ---
 
 `cargarFacturaCuota` llama `avisarFacturaCargada` (`src/lib/valida-cda/aviso-factura-cuota*.ts`) tras el upsert: tipo
 `factura_cargada`, en el `workspace_pagador_id`, `grupo_clave = factura_cuota:<cuota>`, enlace `/suscripcion?tab=pagos`.
-PR abierto el 2026-10-22, sin mergear; la migración `20261022153000_notificaciones_tipo_factura_cargada.sql` la aplica la
-sesión principal ANTES del merge (sin ella el insert choca con el CHECK y solo se loguea).
+PR #1244 (2026-10-22). La migración `20261022153000_notificaciones_tipo_factura_cargada.sql` ya está aplicada en prod y
+en el ledger con esa versión: no renombrarla (sin ella el insert choca con el CHECK y solo se loguea).
 
 **Why:** Mauricio (22-oct) pidió avisar al pagador al cargar la factura. La pestaña Pagos solo la ve la persona designada
 (`puedeVerSuscripcion`), así que el brief «quien ve Pagos + designado» se reduce al designado; avisar al dueño lo

@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Aviso de factura cargada al pagador](project_aviso_factura_cuota_cargada.md) — 20261022153000 SIN aplicar; solo el designado; activo manda
+- ⚠️⚠️ [Aviso de factura cargada al pagador](project_aviso_factura_cuota_cargada.md) — #1244; 20261022153000 APLICADA; solo el designado; activo manda
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
 - ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — 20261021120000 SIN aplicar; corrección a mano manda; reproceso pierde con rastro
 - [Tablero Novedades (21-oct)](project_novedades_tablero.md) — archivo versionado + panel; visto por ids; el 503 crudo ya lo arregló #1241
@@ -99,6 +99,7 @@
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
+- [Capturas de un componente sin servidor](reference_capturas_componente_sin_servidor.md) — vitest temporal + postcss + Playwright de npx
 - [Reproducir el PDF real solo lectura](reference_reproducir_pdf_real_solo_lectura.md) — supabase-js con fetch solo GET; sin MCP
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear
 
