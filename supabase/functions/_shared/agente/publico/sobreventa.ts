@@ -50,7 +50,7 @@ export function frasesDeSobreventa(texto: string, herramientas: ReadonlyArray<st
   const fuentes = sinTildes(herramientas.join('\n'));
   const errores: string[] = [];
   for (const [re, nombre] of CONFIRMACION) {
-    if (afirmada(t, re)) errores.push(`dijiste ${nombre}: en esta etapa nada queda reservado ni confirmado por el bot; el equipo de Sabor confirma cupo, mesa y pago (si te preguntan, dilo así)`);
+    if (afirmada(t, re)) errores.push(`dijiste ${nombre}: en esta etapa nada queda reservado ni confirmado por el bot; el equipo de Sabor confirma cupo y pago (si te preguntan, dilo así)`);
   }
   for (const [re, nombre] of ESCASEZ) {
     if (afirmada(t, re)) errores.push(`dijiste ${nombre}: no tienes inventario; no fabriques escasez ni urgencia`);

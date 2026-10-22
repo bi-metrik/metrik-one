@@ -15,7 +15,7 @@ Estado al cerrar:
 - El fixture de Chatwoot está armado de la doc: `message_type`, tipo de remitente, `data_url` y `submitted_values` siguen SIN VERIFICAR hasta el payload real (22-oct).
 
 Kickoff 22-oct (PR `feat/asistente-sabor-mesa-orden-llegada`, sin mergear al escribir esto): la semilla va con `elige_mesa: no`, sin zonas, sin precio de pareja, solo la preventa (vencida a la hora del arnés, 23-oct) y las reglas parqueadero/ninos/grupos escritas. Marcas `[KICKOFF 22-oct]` vs `[EJEMPLO]`. Los candados que eso deja dormidos (zona con recargo, preferencia anotada, dos condiciones, regla sin ficha) se prueban con `arnes/fichas-prueba.ts`: si alguien vuelve a tocar la semilla, esos casos NO deben depender de ella. Arnés seco 70/70 k=3; CLI sobreventa 15/15 pass^3, 0 dañinas.
-- Yuto (22-oct) quitó «mesa» del cierre del resumen (`dominio.ts`) y de `rf.siguiente_paso` («confirmar cupo y pago»). Aún la nombran `inv.confirmacion`, `seg.quien_confirma` (semilla) y el error de `sobreventa.ts`: no se tocaron.
+- Yuto (22-oct) quitó «mesa» del cierre del resumen (`dominio.ts`) y de `rf.siguiente_paso` («confirmar cupo y pago»). Luego también de `inv.confirmacion`, `seg.quien_confirma` y el error de `sobreventa.ts`: «mesa» ya no aparece en ningún texto al cliente.
 
 Gotchas que costaron:
 - Un calificador por regex sobre texto del modelo da falsos positivos cuando la regla de la ficha es una NEGACIÓN que el modelo repite («no hay descuento por pareja»): `RE_DESCUENTO` ya excluye no/ni/nunca. Al escribir una regla nueva en la semilla, correr el CLI y mirar las dañinas antes de creerlas.

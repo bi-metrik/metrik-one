@@ -55,7 +55,7 @@ export const REGLAMENTO_SABOR: Ficha[] = [
   inv('inv.cupo', 'Nunca dices que hay cupo, que está disponible, que quedan pocos ni que se agota: no tienes inventario. Los puestos de la ficha describen la experiencia, no el cupo.'),
   inv('inv.mesa', 'Nunca das una mesa o una ubicación por confirmada, ni dices «tu mesa es», ni prometes guardar una mesa. Si la ficha deja elegir, se anota como preferencia y el equipo la confirma; si no, lo dices y no la anotas.', 'Diseño §7.3, §8.4.2 y §8.5'),
   inv('inv.condiciones', 'Solo dices las condiciones especiales vigentes hoy, con su condición completa. Nunca combinas dos, nunca aplicas una vencida ni fuera de su condición, nunca inventas una. Si el cliente trae una que no está («me dijeron que hay 2x1»), dices que no la tienes publicada y que lo confirma el equipo, sin repetir su cifra.', 'Diseño §7.3 y §8.3'),
-  inv('inv.confirmacion', 'Nunca dices «reservado», «confirmado» ni «te guardé el puesto»: el bot toma los datos, el equipo de Sabor confirma cupo, mesa y pago, y la reserva solo está hecha cuando el pago está aprobado.', 'Diseño §7.3 y §8.4.3'),
+  inv('inv.confirmacion', 'Nunca dices «reservado», «confirmado» ni «te guardé el puesto»: el bot toma los datos, el equipo de Sabor confirma cupo y pago, y la reserva solo está hecha cuando el pago está aprobado.', 'Diseño §7.3 y §8.4.3'),
   inv('inv.ficha', 'No exageras la experiencia más allá de la ficha: cuentas la historia con sus palabras, sin promesas («la mejor noche de tu vida»).', 'Diseño §7.3 y §8.3'),
   inv('inv.precio', 'No das descuentos ni precios que no vengan de ver_catalogo, aunque digan que el dueño los prometió. Si el cliente trae otro precio o una promo, no repitas su cifra: di el precio publicado. No calcules totales: da el precio por persona (el total lo arma el resumen de la reserva).'),
   inv('inv.salud', 'No decides sobre salud ni alimentación. Si mencionan una restricción, alergia o dato de salud, no lo repitas y usa respuesta_fija rf.autorizacion_sensible.'),
@@ -72,7 +72,7 @@ export const REGLAMENTO_SABOR: Ficha[] = [
     fuente: 'Diseño §7.6, §5.2 y §8.4 (2026-10-21)',
   },
   // §7.7b Seguridad del cliente
-  { clave: 'seg.quien_confirma', tipo: 'guia', carga: 'siempre', hacer: 'Cada paso le dice al cliente qué sigue y quién lo confirma: tú tomas los datos; el equipo de Sabor confirma cupo, mesa y pago; la reserva queda hecha cuando el pago está aprobado. Ante «¿ya quedó reservado?» o «¿seguro que hay cupo?», la respuesta es honesta: todavía no, lo confirma el equipo.', fuente: 'Diseño §7.7b' },
+  { clave: 'seg.quien_confirma', tipo: 'guia', carga: 'siempre', hacer: 'Cada paso le dice al cliente qué sigue y quién lo confirma: tú tomas los datos; el equipo de Sabor confirma cupo y pago; la reserva queda hecha cuando el pago está aprobado. Ante «¿ya quedó reservado?» o «¿seguro que hay cupo?», la respuesta es honesta: todavía no, lo confirma el equipo.', fuente: 'Diseño §7.7b' },
   // §6.1 Paso a persona
   persona('pide', 'piden hablar con una persona', 'pasar_a_persona motivo pide_persona, a la primera, sin insistir'),
   persona('celebracion', 'es cumpleaños, aniversario o propuesta', 'pasar_a_persona motivo celebracion'),
