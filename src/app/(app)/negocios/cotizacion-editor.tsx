@@ -403,6 +403,11 @@ interface Props {
   pedidoAutorizacion?: { por: string | null; en: string } | null
   /** Con la forma por pasos: el paso con que abre (`?paso=tarifas|revisar`, decisión J). */
   pasoInicial?: 1 | 2 | 3
+  /**
+   * Con la forma por pasos: por qué no se puede ENVIAR mientras el cliente no autorice sus datos
+   * (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Se arma igual; `null` = nada que decir.
+   */
+  motivoAutorizacionDatos?: string | null
 }
 
 /** Lo que la cotización por pasos le pide a la tarjeta de una opción (`TarjetaOpcion.porPasos`). */
@@ -411,7 +416,7 @@ type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1 }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -1084,7 +1089,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     : salida
   const notaMargen = notaDeMargen(salidaVista)
   const motivoMargen = 'motivoBoton' in notaMargen ? notaMargen.motivoBoton : null
-  const motivoBotonEnviar = motivoEnvio ?? motivoMargen
+  // La autorización de datos va primero: es lo primero que revisa el servidor al enviar.
+  const motivoBotonEnviar = motivoAutorizacionDatos ?? motivoEnvio ?? motivoMargen
 
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
@@ -3698,6 +3704,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       noVan.set(g, { itemId: i.id, nombre: resolverRanura(g)?.nombre ?? etiquetaDeRanura(g) })
     }
     return listaUnica({
+      autorizacionDatos: motivoAutorizacionDatos,
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
       capturas: motivoEnvio ? { motivo: motivoEnvio, itemId: desactualizadas[0]?.itemId ?? null } : null,
       tarifas: tarifasDeLaPagina,

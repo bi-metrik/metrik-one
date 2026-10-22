@@ -32,6 +32,7 @@ import { borrarImagenesDeCaptura, imagenesAlBorrarOpcion } from '@/lib/cotizacio
 import { confirmadaVigente, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { precioDeLineaConManuales } from '@/lib/cotizaciones/tarjeta-opcion'
 import { diferirRecalculo } from '@/lib/cotizaciones/recalculo-diferido'
+import { EMBED_NEGOCIO_ENVIO, motivoAutorizacionDeCotizacion, motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -765,6 +766,28 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
+  // Get cotización to find oportunidad_id y negocio_id, con el negocio y las etapas de su línea
+  // (una ida): la autorización de datos del cliente frena ENVIAR (y aprobar), no armar la
+  // cotización (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea
+  // declara el gate. Si el embebido falla, la lectura de siempre y la autorización aparte.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sinTipos = supabase as any
+  const conNegocio = await sinTipos
+    .from('cotizaciones')
+    .select(`oportunidad_id, negocio_id, valor_total, ${EMBED_NEGOCIO_ENVIO}`)
+    .eq('id', id)
+    .single()
+  const { data: cot } = conNegocio.error
+    ? await sinTipos.from('cotizaciones').select('oportunidad_id, negocio_id, valor_total').eq('id', id).single()
+    : conNegocio
+
+  if (!cot) return { success: false, error: 'Cotización no encontrada' }
+
+  const motivoDatos = conNegocio.error
+    ? await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: cot.negocio_id ?? null })
+    : await motivoAutorizacionDeCotizacion(supabase, { workspaceId, negocioId: cot.negocio_id ?? null, negocio: cot.negocio_envio })
+  if (motivoDatos) return { success: false, error: motivoDatos }
+
   // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
   // 2026-09-22). Va antes del margen: con el precio de otros pasajeros, el margen
   // tampoco dice nada.
@@ -777,16 +800,6 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
     servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
   })
   if (motivo) return { success: false, error: motivo }
-
-  // Get cotización to find oportunidad_id y negocio_id
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: cot } = await (supabase as any)
-    .from('cotizaciones')
-    .select('oportunidad_id, negocio_id, valor_total')
-    .eq('id', id)
-    .single()
-
-  if (!cot) return { success: false, error: 'Cotización no encontrada' }
 
   // Check if there's already an "enviada" cotización for this negocio/oportunidad
   const parentField = cot.negocio_id ? 'negocio_id' : 'oportunidad_id'
@@ -840,6 +853,12 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
 export async function aceptarCotizacion(id: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // La autorización de datos frena aprobar, como enviar (`autorizacion-datos/envio.ts`).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: delNegocio } = await (supabase as any).from('cotizaciones').select('negocio_id').eq('id', id).maybeSingle()
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: (delNegocio?.negocio_id ?? null) as string | null })
+  if (motivoDatos) return { success: false, error: motivoDatos }
 
   const motivo = await motivoParaNoSalir(supabase, {
     servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,

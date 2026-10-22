@@ -21,6 +21,7 @@ import { configSeguimiento } from '@/lib/negocios/seguimiento'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import {
   CONFIG_IVA_POR_DEFECTO,
   leerConfigIvaCotizacion,
@@ -314,11 +315,21 @@ export default async function CotizacionNegocioPage({
   // Solo con la forma por pasos: el pedido de autorización que espera al dueño. Apagada, ninguna
   // consulta de más (la carga de la página es la de siempre).
   const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
+  // Con la forma por pasos: la autorización de datos del cliente frena enviar, no armar (reunión
+  // del 2026-10-22). Apagada, ninguna consulta de más; el servidor la exige igual al enviar.
+  const motivoAutorizacionDatos = estadoPasos.encendido
+    ? await (async () => {
+      const { supabase: sbDatos, workspaceId: wsDatos } = await getWorkspace()
+      if (!wsDatos) return null
+      return motivoAutorizacionParaEnviar(sbDatos, { workspaceId: wsDatos, negocioId: id })
+    })().catch(() => null)
+    : null
 
   const editor = (
     <CotizacionEditor
       porPasos={estadoPasos}
       pedidoAutorizacion={pedidoAutorizacion}
+      motivoAutorizacionDatos={motivoAutorizacionDatos}
       pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el

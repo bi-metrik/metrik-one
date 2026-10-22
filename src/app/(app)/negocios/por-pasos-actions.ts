@@ -39,6 +39,7 @@ import { pctTexto } from '@/lib/cotizaciones/piso-salida'
 import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
+import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -649,12 +650,16 @@ export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ p
  * `canal = 'descargado'` es el «Sí, ya se la mandé» tras descargar el PDF (H33).
  */
 export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado'): Promise<ResultadoPorPasos> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
   const foto = await fotoDeTarifas(supabase, cotizacionId)
   if (!foto) return { success: false, error: 'Cotización no encontrada' }
+  // Primero la autorización de datos del cliente: armar sí, enviar no (reunión del 2026-10-22).
+  // Es lo primero que dice la lista única de Revisar.
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: foto.ctx.negocioId })
+  if (motivoDatos) return { success: false, error: motivoDatos }
   const vanAlCliente = foto.filas.filter(f => f.vaEnPropuesta)
   const ids = new Set(
     vanAlCliente.length > 0
