@@ -12,7 +12,7 @@
 
 import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
 import { fechasDelServicio, filasDeServicioDeTarifa, type FilaServicioNueva, type TipoServicio } from './servicios-desde-tarifa'
-import { completadoDeFila, fechasDeFila, type FechasServicio, type TramoServicio } from './fechas-servicio'
+import { completadoDeFila, fechasDeFila, leerTramos, type FechasServicio, type TramoServicio } from './fechas-servicio'
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
 import { GATE_SERVICIOS_LISTOS, faltaParaServiciosListos, type FaltaServicio } from './gate-servicios'
 import { configReglasPago } from './reglas-pago'
@@ -82,11 +82,15 @@ export async function generarServiciosDesdeTarifa(
       itinerarioId = tarifa.id
     }
 
-    const [tipoRanuraPorItem, salidaViaje] = await Promise.all([
+    const [tipoRanuraPorItem, salidaViaje, tramosPorItem] = await Promise.all([
       tiposDeRanura(db, args.cotizacionId),
       salidaDelViaje(db, args.negocioId),
+      tramosDeItems(db, args.cotizacionId),
     ])
-    const nuevas = filasDeServicioDeTarifa({ items: ctx.items, seleccion, params: ctx.params, tipoRanuraPorItem, salidaViaje })
+    // `items.tramos` se lee aquí y no en `contextoDeCotizacion`: esa corre en cada recálculo y la
+    // pantalla la espeja campo a campo (P3); los tramos solo los usa la fila de servicio.
+    const items = ctx.items.map(i => ({ ...i, tramos: tramosPorItem[i.id] ?? null }))
+    const nuevas = filasDeServicioDeTarifa({ items, seleccion, params: ctx.params, tipoRanuraPorItem, salidaViaje })
 
     const { data: existentesRows, error: exErr } = await db
       .from('negocio_servicios')
@@ -151,6 +155,16 @@ function aFila(
   }
 }
 
+/**
+ * `items.tramos` de cada ítem, por id (ida y regreso del vuelo, cada uno con su número). Si no se
+ * puede leer, vacío: el vuelo sale de la lectura, como antes del 2026-10-22.
+ */
+async function tramosDeItems(db: Db, cotizacionId: string): Promise<Record<string, unknown>> {
+  const { data, error } = await db.from('items').select('id, tramos').eq('cotizacion_id', cotizacionId)
+  if (error) return {}
+  return Object.fromEntries(((data ?? []) as Array<{ id: string; tramos?: unknown }>).map(i => [i.id, i.tramos ?? null]))
+}
+
 /** El tipo de la ranura de cada ítem (`items.ranura_id` → `cotizacion_ranuras.tipo`). */
 async function tiposDeRanura(db: Db, cotizacionId: string): Promise<Record<string, string | null>> {
   const [itemsRes, ranurasRes] = await Promise.all([
@@ -198,6 +212,21 @@ export function columnasDeFechas(f: FechasServicio): Record<string, unknown> {
 }
 
 /**
+ * ¿Un vuelo guardado con algún tramo, después del primero, sin número? Son las filas leídas antes
+ * del número por tramo (brief del 2026-10-22): la ida se quedaba con los dos números y el regreso
+ * sin ninguno. Abrir el tablero las vuelve a leer aunque tengan la marca puesta.
+ *
+ * Idempotente sin marca nueva: si el ítem ya da el número, la fila lo gana y deja de calzar aquí;
+ * si no lo da (sin `items.tramos`), releerla no cambia nada y no se escribe (`completadoDeFila`).
+ * Lo corregido a mano ni llega (lo filtra la consulta y el UPDATE).
+ */
+export function vueloSinNumeroDeRegreso(r: { tipo: string; tramos: unknown }): boolean {
+  if (r.tipo !== 'vuelo') return false
+  const tramos = leerTramos(r.tramos)
+  return !!tramos && tramos.length > 1 && tramos.slice(1).some(t => !t.numero_vuelo)
+}
+
+/**
  * Completa las fechas de las filas YA generadas desde su ítem (punto 5 del brief del 2026-10-21):
  * las filas anteriores a las fechas nuevas solo tenían el inicio (y el vuelo, solo la ida).
  *
@@ -206,14 +235,15 @@ export function columnasDeFechas(f: FechasServicio): Record<string, unknown> {
  * también en la condición del UPDATE: si la asesora corrige mientras esto corre, gana ella) ni una
  * fila `origen = 'manual'`. Nunca lanza.
  *
- * @param args.soloSinMarca solo las filas que nunca se completaron (lo que pide abrir el tablero).
+ * @param args.soloSinMarca solo las filas que nunca se completaron (lo que pide abrir el tablero),
+ *   más los vuelos con un tramo después del primero sin número (`vueloSinNumeroDeRegreso`).
  */
 export async function completarFechasDeServicios(
   db: Db,
   args: { workspaceId: string; negocioId: string; salidaViaje?: string | null; soloSinMarca?: boolean },
 ): Promise<{ completadas: number }> {
   try {
-    let q = db
+    const q = db
       .from('negocio_servicios')
       .select('id, item_id, tipo, fecha_servicio, fecha_fin, hora_inicio, hora_fin, tramos, fechas_leidas_at')
       .eq('workspace_id', args.workspaceId)
@@ -221,27 +251,27 @@ export async function completarFechasDeServicios(
       .eq('origen', 'cotizacion')
       .is('fechas_corregidas_at', null)
       .not('item_id', 'is', null)
-    if (args.soloSinMarca) q = q.is('fechas_leidas_at', null)
     const { data: filas, error } = await q
-    if (error || !filas || filas.length === 0) return { completadas: 0 }
-    const rows = filas as Array<{
+    if (error || !filas) return { completadas: 0 }
+    const rows = (filas as Array<{
       id: string; item_id: string; tipo: string; fecha_servicio: string | null; fecha_fin: string | null
       hora_inicio: string | null; hora_fin: string | null; tramos: unknown; fechas_leidas_at: string | null
-    }>
+    }>).filter(r => !args.soloSinMarca || !r.fechas_leidas_at || vueloSinNumeroDeRegreso(r))
+    if (rows.length === 0) return { completadas: 0 }
 
     const [itemsRes, salida] = await Promise.all([
-      db.from('items').select('id, tarifa_pax, dia_relativo').in('id', [...new Set(rows.map(r => r.item_id))]),
+      db.from('items').select('id, tarifa_pax, dia_relativo, tramos').in('id', [...new Set(rows.map(r => r.item_id))]),
       args.salidaViaje !== undefined ? Promise.resolve(args.salidaViaje) : salidaDelViaje(db, args.negocioId),
     ])
     if (itemsRes.error) return { completadas: 0 }
-    const itemDe = new Map(((itemsRes.data ?? []) as Array<{ id: string; tarifa_pax: unknown; dia_relativo: number | null }>).map(i => [i.id, i]))
+    const itemDe = new Map(((itemsRes.data ?? []) as Array<{ id: string; tarifa_pax: unknown; dia_relativo: number | null; tramos?: unknown }>).map(i => [i.id, i]))
 
     const ahora = new Date().toISOString()
     let completadas = 0
     for (const r of rows) {
       const item = itemDe.get(r.item_id)
       const leidas = item
-        ? fechasDelServicio({ tarifa_pax: item.tarifa_pax as never, dia_relativo: item.dia_relativo ?? null }, r.tipo as TipoServicio, salida)
+        ? fechasDelServicio({ tarifa_pax: item.tarifa_pax as never, dia_relativo: item.dia_relativo ?? null, tramos: item.tramos ?? null }, r.tipo as TipoServicio, salida)
         : null
       const cambio = leidas ? completadoDeFila(fechasDeFila(r), leidas) : null
       // Sin cambio y con la marca ya puesta: nada que escribir.

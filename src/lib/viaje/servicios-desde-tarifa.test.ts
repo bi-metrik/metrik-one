@@ -17,7 +17,7 @@ function item(id: string, costo: number, extra: Partial<ItemParaServicio> = {}):
     id, nombre: id.toUpperCase(), grupo: null, opcion_de: null, es_ajuste: false, orden: 1,
     dia_relativo: null, entra_al_precio: null, cantidad: 1, subtotal: costo, numeroDeRubros: 0,
     costoDeRubros: 0, descuento_porcentaje: 0, margen_porcentaje: null, precio_venta: costo * 1.2,
-    precio_manual: false, adicionales: [], pasajeros: null, tarifa_pax: null,
+    precio_manual: false, adicionales: [], pasajeros: null, tarifa_pax: null, tramos: null,
     ...extra,
   }
 }
@@ -122,3 +122,87 @@ describe('tipoDeServicio y fechaIso', () => {
     expect(fechaIso(null)).toBeNull()
   })
 })
+
+// ── Número de vuelo por tramo (2026-10-22) ───────────────────────────────────
+// Datos ficticios. Antes: la ida guardaba «XX 100 · XX 200» y el regreso quedaba sin número.
+
+describe('número de vuelo por tramo', () => {
+  const lectura = (identidad: Record<string, string | null>, campos: { label: string; valor: string }[] = []) => ({
+    casillas: { grupo_completo: { total: 1, moneda: 'COP', identidad, campos } },
+  })
+  const LECTURA_REDONDO = lectura(
+    { aerolinea: 'Aerolínea X', origen: 'BOG', destino: 'CUZ', fecha_salida: '2026-11-23', fecha_regreso: '2026-11-28' },
+    [
+      { label: 'Hora de salida (ida)', valor: '06:50' },
+      { label: 'Hora de llegada (ida)', valor: '09:00' },
+      { label: 'Hora de salida (regreso)', valor: '18:45' },
+      { label: 'Hora de llegada (regreso)', valor: '20:55' },
+      { label: 'Nº de vuelo', valor: 'XX 100 · XX 200' },
+    ],
+  )
+  const equipaje = { personal: true, mano: null, bodega: null }
+  const tramo = (sentido: 'ida' | 'regreso', extra: Record<string, unknown>) => ({
+    sentido, origen: null, destino: null, fecha: null, salida: null, llegada: null, numero: null, escala: null, directo: null, equipaje, ...extra,
+  })
+  const TRAMOS_REDONDO = [
+    tramo('ida', { origen: 'BOG', destino: 'CUZ', fecha: '2026-11-23', salida: '06:50', llegada: '09:00', numero: 'XX 100' }),
+    tramo('regreso', { origen: 'CUZ', destino: 'BOG', fecha: '2026-11-28', salida: '18:45', llegada: '20:55', numero: 'XX 200' }),
+  ]
+  const vuelo = (extra: Partial<ItemParaServicio>) =>
+    filasDeServicioDeTarifa({ items: [item('v', 1_000_000, { grupo: 'vuelo', ...extra })], seleccion: null, params: PARAMS })[0]
+
+  it('un vuelo redondo con items.tramos: ida y regreso, cada uno con su número, sus horas y su ruta', () => {
+    const f = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: TRAMOS_REDONDO })
+    expect(f.tramos).toEqual([
+      { fecha: '2026-11-23', hora_salida: '06:50', hora_llegada: '09:00', origen: 'BOG', destino: 'CUZ', aerolinea: 'Aerolínea X', numero_vuelo: 'XX 100' },
+      { fecha: '2026-11-28', hora_salida: '18:45', hora_llegada: '20:55', origen: 'CUZ', destino: 'BOG', aerolinea: 'Aerolínea X', numero_vuelo: 'XX 200' },
+    ])
+    // Inicio = primer tramo, fin = último: la regla no cambia.
+    expect([f.fecha_servicio, f.hora_inicio, f.fecha_fin, f.hora_fin]).toEqual(['2026-11-23', '06:50', '2026-11-28', '20:55'])
+    expect(f.proveedor_nombre).toBe('Aerolínea X')
+  })
+
+  it('sin items.tramos, igual que hoy: el número completo en la ida y el regreso sin número', () => {
+    const f = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: null })
+    expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
+    expect([f.fecha_servicio, f.fecha_fin]).toEqual(['2026-11-23', '2026-11-28'])
+  })
+
+  it('solo de ida: un tramo con su número', () => {
+    const f = vuelo({
+      tarifa_pax: lectura({ aerolinea: 'Aerolínea X', origen: 'BOG', destino: 'CUZ', fecha_salida: '2026-11-23' }),
+      tramos: [tramo('ida', { origen: 'BOG', destino: 'CUZ', fecha: '2026-11-23', salida: '06:50', numero: 'XX 100' })],
+    })
+    expect(f.tramos).toEqual([
+      { fecha: '2026-11-23', hora_salida: '06:50', hora_llegada: null, origen: 'BOG', destino: 'CUZ', aerolinea: 'Aerolínea X', numero_vuelo: 'XX 100' },
+    ])
+    expect([f.fecha_servicio, f.fecha_fin]).toEqual(['2026-11-23', '2026-11-23'])
+  })
+
+  it('un tramo sin fecha ISO se omite; sin fecha de la ida manda la lectura', () => {
+    const sinFechaRegreso = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: [TRAMOS_REDONDO[0], { ...TRAMOS_REDONDO[1], fecha: '--11-28' }] })
+    expect(sinFechaRegreso.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100'])
+    const sinFechaIda = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: [{ ...TRAMOS_REDONDO[0], fecha: null }, TRAMOS_REDONDO[1]] })
+    expect(sinFechaIda.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
+  })
+
+  it('items.tramos sin ningún número: la ida conserva el de la lectura (no se pierde)', () => {
+    const f = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: TRAMOS_REDONDO.map(t => ({ ...t, numero: null })) })
+    expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
+  })
+
+  it('items.tramos con forma rota (regreso primero) no se usa: manda la lectura', () => {
+    const f = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: [TRAMOS_REDONDO[1], TRAMOS_REDONDO[0]] })
+    expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
+  })
+
+  it('el cuadre Σ costo cotizado = costo directo sigue intacto con items.tramos', () => {
+    const items = [
+      item('v', 1_234_567, { grupo: 'vuelo', orden: 1, tarifa_pax: LECTURA_REDONDO, tramos: TRAMOS_REDONDO }),
+      item('h', 765_433, { grupo: 'hotel', orden: 2 }),
+    ]
+    const filas = filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })
+    expect(filas.reduce((s, f) => s + f.costo_cotizado, 0)).toBe(2_000_000)
+  })
+})
+

@@ -14,7 +14,7 @@ import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import type { DatosBloqueServicios } from './bloque-servicios'
 import { aprobadoresDeLinea, serviciosViajeActivo } from './estado-servicio'
 import { configReglasPago, mediosPagoProveedor, type MedioPagoProveedor } from './reglas-pago'
-import { completarFechasDeServicios, leerServiciosDelNegocio, type ServicioDelNegocio } from './servicios-viaje-datos'
+import { completarFechasDeServicios, leerServiciosDelNegocio, vueloSinNumeroDeRegreso, type ServicioDelNegocio } from './servicios-viaje-datos'
 import { configHitos, type Hito } from './hitos'
 import { hitosDelNegocio } from './hitos-datos'
 
@@ -57,7 +57,8 @@ export async function datosDelTablero(
     plataDelCliente(db, args.workspaceId, args.negocioId).catch(() => ({ cobrado: 0, precio: 0 })),
   ])
   // Filas generadas antes de las fechas completas (2026-10-21): la primera vez que se abre el
-  // tablero ganan fin, horas y tramos desde su ítem. Una sola vez por fila (`fechas_leidas_at`).
+  // tablero ganan fin, horas y tramos desde su ítem. Una sola vez por fila (`fechas_leidas_at`), salvo
+  // el vuelo sin número de regreso (2026-10-22), que se relee hasta que su ítem lo dé.
   let filas = leidas
   if (activo && filas && filas.some(faltaCompletar)) {
     const { completadas } = await completarFechasDeServicios(db, { workspaceId: args.workspaceId, negocioId: args.negocioId, soloSinMarca: true })
@@ -102,6 +103,10 @@ async function hitosDelTablero(db: Db, args: { workspaceId: string; negocioId: s
 }
 
 /** Una fila de la cotización que nunca ganó las fechas completas y nadie corrigió a mano. */
-export function faltaCompletar(f: Pick<ServicioDelNegocio, 'origen' | 'item_id' | 'fechas_leidas_at' | 'fechas_corregidas_at'>): boolean {
-  return f.origen === 'cotizacion' && !!f.item_id && !f.fechas_leidas_at && !f.fechas_corregidas_at
+export function faltaCompletar(
+  f: Pick<ServicioDelNegocio, 'origen' | 'item_id' | 'fechas_leidas_at' | 'fechas_corregidas_at'> & Partial<Pick<ServicioDelNegocio, 'tipo' | 'tramos'>>,
+): boolean {
+  if (f.origen !== 'cotizacion' || !f.item_id || f.fechas_corregidas_at) return false
+  // Un vuelo leído antes del número por tramo (2026-10-22) se vuelve a leer aunque tenga la marca.
+  return !f.fechas_leidas_at || vueloSinNumeroDeRegreso({ tipo: f.tipo ?? '', tramos: f.tramos ?? null })
 }

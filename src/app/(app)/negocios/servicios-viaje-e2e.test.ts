@@ -80,6 +80,11 @@ function constructor(tabla: string) {
   let orden: { col: string; asc: boolean } | null = null
 
   const proyectar = (f: Fila): Fila => {
+    // Los ítems con columnas nombradas salen recortados, como en PostgREST: así se ve fallar un
+    // `select` que olvida una columna (`tramos` al completar, 2026-10-22).
+    if (tabla === 'items' && columnas && !/[*(:]/.test(columnas)) {
+      return Object.fromEntries(columnas.split(',').map(c => c.trim()).map(c => [c, f[c]]))
+    }
     const salida: Fila = { ...f }
     if (columnas.includes('rubros(')) {
       salida.rubros = (tablas.rubros ?? []).filter(r => r.item_id === f.id).map(r => ({ ...r }))
@@ -561,3 +566,92 @@ describe('fechas de los servicios', () => {
     expect(rastro).toBe('Se descartaron fechas corregidas a mano: Hotel Andino (2026-11-11 a 2026-11-14). Si siguen valiendo, escríbelas otra vez en la fila nueva.')
   })
 })
+
+// ── Número de vuelo por tramo (2026-10-22) ───────────────────────────────────
+//
+// La fila de vuelo leída antes del arreglo guardó los dos números en la ida y el regreso sin número,
+// con la marca `fechas_leidas_at` puesta. Abrir el tablero la vuelve a leer desde `items.tramos`.
+
+describe('número de vuelo por tramo', () => {
+  const equipaje = { personal: true, mano: null, bodega: null }
+  const TRAMOS_ITEM = [
+    { sentido: 'ida', origen: 'BOG', destino: 'CUZ', fecha: '2026-11-10', salida: '06:10', llegada: '09:45', numero: 'XX100', escala: null, directo: null, equipaje },
+    { sentido: 'regreso', origen: 'CUZ', destino: 'BOG', fecha: '2026-11-13', salida: '18:30', llegada: '22:05', numero: 'XX200', escala: null, directo: null, equipaje },
+  ]
+  const abrirTablero = () => datosDelTablero(clienteFalso(), {
+    workspaceId: WS, negocioId: NEG, configLinea: { servicios_viaje: { activo: true } }, hayCotizacionAceptada: true,
+    quien: { role: 'operator', areas: ['operaciones'], staffId: 's-ale', aprobadores: [] },
+  })
+
+  beforeEach(() => {
+    sembrarConFechas()
+    const va = tablas.items.find(i => i.id === 'va') as Fila
+    va.tarifa_pax = lectura(
+      { aerolinea: 'Aerolínea X', origen: 'BOG', destino: 'CUZ', fecha_salida: '2026-11-10', fecha_regreso: '2026-11-13' },
+      [
+        { label: 'Hora de salida (ida)', valor: '06:10' },
+        { label: 'Hora de llegada (ida)', valor: '09:45' },
+        { label: 'Hora de salida (regreso)', valor: '18:30' },
+        { label: 'Hora de llegada (regreso)', valor: '22:05' },
+        { label: 'Nº de vuelo', valor: 'XX100 · XX200' },
+      ],
+    )
+  })
+
+  it('aceptar con items.tramos deja ida y regreso cada uno con su número', async () => {
+    ;(tablas.items.find(i => i.id === 'va') as Fila).tramos = TRAMOS_ITEM
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    expect((fila('va').tramos as Array<{ numero_vuelo: string | null }>).map(t => t.numero_vuelo)).toEqual(['XX100', 'XX200'])
+  })
+
+  it('la fila vieja de vuelo, sin corrección a mano, gana el número del regreso al abrir el tablero (una vez)', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    // Como quedó la fila antes del arreglo: los dos números en la ida, el regreso sin número, con marca.
+    expect((fila('va').tramos as Array<{ numero_vuelo: string | null }>).map(t => t.numero_vuelo)).toEqual(['XX100 · XX200', null])
+    Object.assign(fila('va'), { fechas_leidas_at: '2026-10-22T10:00:00Z' })
+    for (const f of servicios()) if (f.item_id !== 'va') f.fechas_leidas_at = '2026-10-22T10:00:00Z'
+    ;(tablas.items.find(i => i.id === 'va') as Fila).tramos = TRAMOS_ITEM
+
+    const tablero = await abrirTablero()
+    expect((fila('va').tramos as Array<{ numero_vuelo: string | null }>).map(t => t.numero_vuelo)).toEqual(['XX100', 'XX200'])
+    expect(tablero.filas.find(f => f.item_id === 'va')?.tramos?.map(t => t.numero_vuelo)).toEqual(['XX100', 'XX200'])
+    expect([fila('va').fecha_servicio, fila('va').fecha_fin, fila('va').hora_fin]).toEqual(['2026-11-10', '2026-11-13', '22:05'])
+
+    // Idempotente: la segunda apertura no reescribe.
+    const marca = fila('va').fechas_leidas_at
+    expect((await completarFechasDeServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, soloSinMarca: true })).completadas).toBe(0)
+    expect(fila('va').fechas_leidas_at).toBe(marca)
+  })
+
+  it('sin items.tramos la fila vieja no cambia al abrir el tablero (no se parte el número)', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    Object.assign(fila('va'), { fechas_leidas_at: '2026-10-22T10:00:00Z' })
+    const antes = JSON.stringify(fila('va'))
+    expect((await completarFechasDeServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, soloSinMarca: true })).completadas).toBe(0)
+    expect(JSON.stringify(fila('va'))).toBe(antes)
+  })
+
+  it('un vuelo corregido a mano no cambia al regenerar ni al completar ni al abrir el tablero', async () => {
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    const r = await actualizarFechasServicio(fila('va').id as string, {
+      tramos: [{ fecha: '2026-11-10', numero_vuelo: 'ZZ1' }, { fecha: '2026-11-13', numero_vuelo: null }],
+    })
+    expect(r).toEqual({ ok: true })
+    ;(tablas.items.find(i => i.id === 'va') as Fila).tramos = TRAMOS_ITEM
+    const antes = JSON.stringify(fila('va').tramos)
+
+    await generarServiciosDesdeTarifa(clienteFalso(), { workspaceId: WS, negocioId: NEG, cotizacionId: COT })
+    await completarFechasDeServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG })
+    await abrirTablero()
+    expect(JSON.stringify(fila('va').tramos)).toBe(antes)
+    expect((fila('va').tramos as Array<{ numero_vuelo: string | null }>).map(t => t.numero_vuelo)).toEqual(['ZZ1', null])
+  })
+
+  it('el cuadre Σ costo cotizado = costo directo de la tarifa sigue intacto (F0-2)', async () => {
+    ;(tablas.items.find(i => i.id === 'va') as Fila).tramos = TRAMOS_ITEM
+    await aceptarCotizacionNegocio(COT, NEG, 'it-eco')
+    const suma = servicios().reduce((a, f) => a + Number(f.costo_cotizado), 0)
+    expect(suma).toBe(1_800_000 + 1_100_000 + 200_000 + 50_000 + 300_000)
+  })
+})
+

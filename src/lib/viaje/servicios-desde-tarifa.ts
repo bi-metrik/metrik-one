@@ -26,6 +26,7 @@ import { lineaConAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { lecturaDeOpcion } from '@/lib/cotizaciones/habitaciones'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
+import { leerTramos as leerTramosDelItem } from '@/lib/cotizaciones/tramos-vuelo'
 import {
   SIN_FECHAS,
   esFechaIso,
@@ -54,13 +55,19 @@ export interface FilaServicioNueva {
   orden: number
 }
 
-/** Lo mínimo del ítem que hace falta aquí (lo trae `contextoDeCotizacion`). */
+/**
+ * Lo mínimo del ítem que hace falta aquí: lo trae `contextoDeCotizacion`, más `items.tramos`, que
+ * `generarServiciosDesdeTarifa` lee aparte (`null` = sin tramos guardados: manda la lectura).
+ */
 export type ItemParaServicio = Pick<
   ItemDeCotizacion,
   | 'id' | 'nombre' | 'grupo' | 'opcion_de' | 'es_ajuste' | 'orden' | 'dia_relativo' | 'entra_al_precio'
   | 'cantidad' | 'subtotal' | 'numeroDeRubros' | 'costoDeRubros' | 'descuento_porcentaje'
   | 'margen_porcentaje' | 'precio_venta' | 'precio_manual' | 'adicionales' | 'pasajeros' | 'tarifa_pax'
->
+> & { tramos?: unknown }
+
+/** Lo del ítem de lo que salen las fechas: la lectura y, en un vuelo, `items.tramos`. */
+type FuenteDeFechas = Pick<ItemParaServicio, 'tarifa_pax'> & { tramos?: unknown }
 
 const MAX_NOMBRE = 200
 
@@ -104,7 +111,7 @@ export function fechaIso(v: unknown): string | null {
 
 type Lectura = NonNullable<ReturnType<typeof lecturaDeOpcion>>
 
-function leer(item: Pick<ItemParaServicio, 'tarifa_pax'>): Lectura | null {
+function leer(item: { tarifa_pax?: unknown }): Lectura | null {
   if (item.tarifa_pax === null || item.tarifa_pax === undefined) return null
   try {
     return lecturaDeOpcion(leerTarifaPax(item.tarifa_pax))
@@ -123,24 +130,39 @@ function campoLeido(lectura: Lectura, etiqueta: string): string | null {
  * Proveedor y fecha leídos del pantallazo de la línea, si los hay. Lo leído PROPONE: la fila
  * dice «Falta el proveedor» cuando no se leyó, y quien reserva lo escribe.
  */
-export function lecturaDelServicio(item: Pick<ItemParaServicio, 'tarifa_pax'>, tipo: TipoServicio): {
+export function lecturaDelServicio(item: FuenteDeFechas, tipo: TipoServicio): {
   proveedor: string | null
   fecha: string | null
 } {
   const lectura = leer(item)
-  if (!lectura) return { proveedor: null, fecha: null }
+  const fecha = fechasLeidas(lectura, tipo, item.tramos).fecha_servicio
+  if (!lectura) return { proveedor: null, fecha }
   const id = lectura.identidad ?? {}
   const proveedor =
     tipo === 'hotel' ? texto(id.hotel)
-      : tipo === 'vuelo' ? texto(id.aerolinea) ?? campoLeido(lectura, 'aerolínea')
+      : tipo === 'vuelo' ? aerolineaLeida(lectura)
         : campoLeido(lectura, 'proveedor')
-  return { proveedor: proveedor ? proveedor.slice(0, MAX_NOMBRE) : null, fecha: fechasLeidas(lectura, tipo).fecha_servicio }
+  return { proveedor: proveedor ? proveedor.slice(0, MAX_NOMBRE) : null, fecha }
+}
+
+/** Los textos de un tramo con el tope de la columna. */
+function recortar(t: TramoServicio): TramoServicio {
+  return {
+    ...t,
+    origen: t.origen?.slice(0, 100) ?? null,
+    destino: t.destino?.slice(0, 100) ?? null,
+    aerolinea: t.aerolinea?.slice(0, 100) ?? null,
+    numero_vuelo: t.numero_vuelo?.slice(0, 100) ?? null,
+  }
 }
 
 /**
  * Los tramos de un vuelo leído: la ida (`fecha_salida`) y, si hay, el regreso (`fecha_regreso`),
  * con sus horas, la ruta, la aerolínea y el número. Sin fecha de ida no hay tramos (no se arma un
  * vuelo que empieza en el regreso). Un regreso anterior a la ida es una lectura rota: se queda la ida.
+ *
+ * Es el camino de un ítem SIN `items.tramos` (`tramosDelItemGuardados`): la lectura trae el número
+ * en un solo campo y aquí no se parte.
  */
 function tramosLeidos(lectura: Lectura): TramoServicio[] {
   const id = lectura.identidad ?? {}
@@ -148,7 +170,7 @@ function tramosLeidos(lectura: Lectura): TramoServicio[] {
   if (!ida) return []
   const origen = texto(id.origen)
   const destino = texto(id.destino)
-  const aerolinea = texto(id.aerolinea) ?? campoLeido(lectura, 'aerolínea')
+  const aerolinea = aerolineaLeida(lectura)
   const tramos: TramoServicio[] = [{
     fecha: ida,
     hora_salida: horaHHMM(campoLeido(lectura, 'Hora de salida (ida)')),
@@ -171,13 +193,52 @@ function tramosLeidos(lectura: Lectura): TramoServicio[] {
       numero_vuelo: null,
     })
   }
-  return tramos.map(t => ({
-    ...t,
-    origen: t.origen?.slice(0, 100) ?? null,
-    destino: t.destino?.slice(0, 100) ?? null,
-    aerolinea: t.aerolinea?.slice(0, 100) ?? null,
-    numero_vuelo: t.numero_vuelo?.slice(0, 100) ?? null,
-  }))
+  return tramos.map(recortar)
+}
+
+function aerolineaLeida(lectura: Lectura | null): string | null {
+  if (!lectura) return null
+  return texto(lectura.identidad?.aerolinea) ?? campoLeido(lectura, 'aerolínea')
+}
+
+/**
+ * Los tramos de un vuelo desde `items.tramos` (brief del 2026-10-22): cada tramo con SU fecha,
+ * sus horas, su ruta y su número. La columna ya trae el número repartido entre ida y regreso con
+ * la regla del documento (`numerosDeVuelo`, `tramos-vuelo.ts`): aquí no se reparte nada, se copia.
+ * La aerolínea sale de la lectura, como en el otro camino.
+ *
+ * `null` = el ítem no tiene `items.tramos` utilizables (o ningún tramo trae fecha ISO): quien llama
+ * cae a la lectura. Las mismas reglas que la lectura: sin fecha de la ida no hay tramos, un tramo
+ * sin fecha se omite y un regreso anterior a la ida se cae. `leerTramos` ya garantiza la ida
+ * primero.
+ *
+ * ⚠️ Si NINGÚN tramo guardado trae su número (la columna no pudo repartirlos), la ida conserva el
+ * número completo de la lectura, como hoy: es lo mismo que hace `tramosDelItem` con
+ * `numerosSinTramo`, y perderlo dejaría al vuelo sin ningún número.
+ */
+function tramosDelItemGuardados(raw: unknown, lectura: Lectura | null): TramoServicio[] | null {
+  const guardados = leerTramosDelItem(raw)
+  if (!guardados) return null
+  const ida = guardados[0]
+  const fechaIda = fechaIso(ida.fecha)
+  if (!fechaIda) return null
+  const aerolinea = aerolineaLeida(lectura)
+  const sinNumeros = guardados.every(t => !texto(t.numero))
+  const tramos: TramoServicio[] = []
+  for (const t of guardados) {
+    const fecha = fechaIso(t.fecha)
+    if (!fecha || fecha < fechaIda) continue
+    tramos.push({
+      fecha,
+      hora_salida: horaHHMM(t.salida),
+      hora_llegada: horaHHMM(t.llegada),
+      origen: texto(t.origen),
+      destino: texto(t.destino),
+      aerolinea,
+      numero_vuelo: texto(t.numero) ?? (t === ida && sinNumeros && lectura ? campoLeido(lectura, 'Nº de vuelo') : null),
+    })
+  }
+  return tramos.map(recortar)
 }
 
 /** La hora de un `fecha_hora` que la trae («2026-11-10T14:30», «2026-11-10 14:30»). */
@@ -187,13 +248,14 @@ function horaDeFechaHora(v: unknown): string | null {
   return m ? horaHHMM(m[1]) : null
 }
 
-function fechasLeidas(lectura: Lectura, tipo: TipoServicio): FechasServicio {
+function fechasLeidas(lectura: Lectura | null, tipo: TipoServicio, tramosDelItem?: unknown): FechasServicio {
+  if (tipo === 'vuelo') {
+    const tramos = tramosDelItemGuardados(tramosDelItem, lectura) ?? (lectura ? tramosLeidos(lectura) : [])
+    return tramos.length > 0 ? fechasDeTramos(tramos) : SIN_FECHAS
+  }
+  if (!lectura) return SIN_FECHAS
   const id = lectura.identidad ?? {}
   switch (tipo) {
-    case 'vuelo': {
-      const tramos = tramosLeidos(lectura)
-      return tramos.length > 0 ? fechasDeTramos(tramos) : SIN_FECHAS
-    }
     case 'hotel': {
       const entra = fechaIso(id.check_in)
       const sale = fechaIso(id.check_out)
@@ -216,12 +278,11 @@ function fechasLeidas(lectura: Lectura, tipo: TipoServicio): FechasServicio {
  * vacías: «Falta la fecha».
  */
 export function fechasDelServicio(
-  item: Pick<ItemParaServicio, 'tarifa_pax' | 'dia_relativo'>,
+  item: FuenteDeFechas & Pick<ItemParaServicio, 'dia_relativo'>,
   tipo: TipoServicio,
   salidaViaje: string | null | undefined,
 ): FechasServicio {
-  const lectura = leer(item)
-  const leidas = lectura ? fechasLeidas(lectura, tipo) : SIN_FECHAS
+  const leidas = fechasLeidas(leer(item), tipo, item.tramos)
   if (leidas.fecha_servicio || (tipo !== 'actividad' && tipo !== 'traslado')) return leidas
   const porDia = fechaPorDiaDelViaje(esFechaIso(salidaViaje) ? salidaViaje : null, item.dia_relativo)
   return porDia ? { ...leidas, fecha_servicio: porDia } : leidas
