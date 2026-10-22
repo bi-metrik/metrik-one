@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️ [Bot ONE registra ingresos (#1231)](project_ingresos_wa_one.md) — cuotas programadas; candado con `respaldo`; depósito propio = ingreso; v4
+- ⚠️⚠️ [Aviso de factura cargada al pagador](project_aviso_factura_cuota_cargada.md) — #1244; 20261022153000 APLICADA; solo el designado; activo manda
 - ⚠️⚠️ [Hitos de gestión y Agenda (Trappvel)](project_hitos_de_gestion.md) — #1245; 20261022090000 dry-run de Mik OK, SIN aplicar; MX sin plazo
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
 - ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — #1236 mergeado (8d29ec61), 20261021120000 APLICADA; corrección a mano manda; reproceso pierde con rastro
