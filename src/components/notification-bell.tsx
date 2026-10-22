@@ -13,6 +13,7 @@ import {
 import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
 import { toast } from 'sonner'
 import { seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
+import { BotonWhatsApp } from '@/components/boton-whatsapp'
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -402,6 +403,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {tiempoRelativo(item.created_at)}
                     </p>
+                    <BotonWhatsApp metadata={item.metadata} />
                   </div>
 
                   {/* Acciones */}
