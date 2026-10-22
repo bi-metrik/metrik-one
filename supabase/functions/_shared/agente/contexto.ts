@@ -85,6 +85,7 @@ export function textoLectura(l: LecturaAdjunto | null | undefined): string {
     l.comercio ? `comercio ${escapar(l.comercio, 80)}` : null,
     l.nit ? `NIT ${l.nit}` : null,
     l.descripcion ? `concepto ${escapar(l.descripcion, 160)}` : null,
+    l.titular_destino ? `el dinero llega a la cuenta de ${escapar(l.titular_destino, 80)}` : null,
   ].filter(Boolean);
   return ` · lo que dice el archivo: ${partes.join(' · ')}`;
 }

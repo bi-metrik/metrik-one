@@ -320,6 +320,13 @@ export const CASOS_ONE: CasoOne[] = [
     esperado: { cobros: [{ cuota: 1, monto: 400000 }] }, viejoOk: false,
   },
   {
+    id: 'g-registra-con-comprobante', titulo: 'el caso real de Mauricio: «registra 400000 en el proyecto de Dimpro» con la foto de un depósito a la cuenta de la empresa → ingreso, sin que corrija', mundo: 'interno',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [{ foto: 'registra 400000 en el proyecto de Dimpro', archivo: 'comprobante-400' }, { toca: 'Marcar pagada' }],
+    objetivo: 'Mandaste el comprobante de un depósito de $400.000 a la cuenta de tu empresa, con el texto «registra 400000 en el proyecto de Dimpro». No corriges nada: si te muestran el resumen para marcar el pago de la cuota, tócalo; si te proponen un gasto, no lo confirmes.',
+    esperado: { cobros: [{ cuota: 1, monto: 400000 }] }, viejoOk: false,
+  },
+  {
     id: 't-no-confirma', titulo: 'cancela en la confirmación: nada se escribe', mundo: 'taller',
     pasos: [{ escribe: 'Registrar gasto' }, { escribe: '24000' }, { elige: 1 }, { toca: 'No', oEscribe: 'cancelar' }],
     esperado: { nada: true }, viejoOk: true,

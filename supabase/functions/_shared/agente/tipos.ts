@@ -48,6 +48,11 @@ export interface LecturaAdjunto {
   comercio: string | null;
   nit: string | null;
   descripcion: string | null;
+  /**
+   * En una consignación, depósito o transferencia: el titular de la cuenta a la que llegó el dinero (2026-10-22). Si es
+   * la empresa del workspace, el dinero ENTRÓ: es un pago recibido, no un gasto. Ausente en lecturas viejas.
+   */
+  titular_destino?: string | null;
   /** Por qué no hay lectura (no se pudo bajar, el modelo no respondió). */
   motivo?: string;
 }
@@ -249,8 +254,12 @@ export interface Dominio {
   /** Descripción de los `datos` de `proponer` por acción (va en la declaración). */
   datosProponer: Record<string, unknown>;
   leer(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<ResultadoHerramienta>;
-  /** Arma la propuesta con datos reales o devuelve el error para el modelo (el candado). */
-  proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }>;
+  /**
+   * Arma la propuesta con datos reales o devuelve el error para el modelo (el candado). `respaldo`: lo que el candado leyó
+   * de la base en este turno y le cuenta al modelo (p. ej. las cuotas pendientes de un ingreso que no cuadra); respalda
+   * esas cifras ante el verificador, igual que el resultado de una lectura.
+   */
+  proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string; respaldo?: unknown }>;
   /** Ejecuta una propuesta tocada. Idempotencia por huella: la asegura el núcleo. Lanza si no pudo. */
   ejecutar(propuesta: Propuesta, ctx: ContextoDominio): Promise<Hechos>;
   /**

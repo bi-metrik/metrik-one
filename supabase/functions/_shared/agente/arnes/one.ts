@@ -213,7 +213,7 @@ export async function archivoSintetico(a: SoporteSintetico | undefined, tipo: 'p
 
 /** En seco, un lector falso que lee lo que se sabe de cada soporte sintético. */
 export const lectorSeco: Lector = async (a) => (a.nombre?.startsWith('comprobante-')
-  ? { legible: true, monto: a.nombre.startsWith('comprobante-400000') ? 400000 : 350000, fecha: '2026-10-21', comercio: 'Banco de Pruebas', nit: null, descripcion: 'depósito electrónico, Documentación gasoducto' }
+  ? { legible: true, monto: a.nombre.startsWith('comprobante-400000') ? 400000 : 350000, fecha: '2026-10-21', comercio: 'Banco de Pruebas', nit: null, descripcion: 'depósito electrónico, Documentación gasoducto', titular_destino: 'Empresa de Prueba S.A.S.' }
   : a.mime === 'application/pdf'
   ? { legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Carrera 7 # 71-21 a Calle 26 # 59-41, Bogotá' }
   : { legible: true, monto: 84500, fecha: '2026-10-20', comercio: 'Ferretería El Tornillo Feliz', nit: '900000000-0', descripcion: 'brochas, rodillo y pintura' });

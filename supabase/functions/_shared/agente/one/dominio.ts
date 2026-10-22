@@ -252,20 +252,46 @@ export function fechaHoyBogota(ms: number): string {
   return new Date(ms - 5 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
+/** El nombre de una empresa sin tildes, puntuación ni sufijo societario («Empresa de Prueba S.A.S.» → «empresa de prueba»). Pura. */
+function nombreSocial(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[.,]/g, ' ')
+    .replace(/\b(s\s*a\s*s|sas|s\s*a|ltda|limitada|s\s*en\s*c|e\s*u|eu|bic)\b/g, ' ')
+    .replace(/[^a-z0-9& ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * ¿Lo leído del soporte es dinero que ENTRÓ a una cuenta de la empresa del workspace (la cuenta destino de un depósito o
+ * una transferencia es suya)? Entonces es un pago recibido, no un gasto (caso real Dimpro, 2026-10-21: el comprobante de
+ * un depósito a la cuenta de la empresa se propuso como gasto). Sin nombre de la empresa o sin titular leído, false. Pura.
+ */
+export function entraALaEmpresa(lectura: LecturaAdjunto | null | undefined, empresa: string | null | undefined): boolean {
+  const titular = lectura?.titular_destino ? nombreSocial(lectura.titular_destino) : '';
+  const propia = empresa ? nombreSocial(empresa) : '';
+  if (titular.length < 3 || propia.length < 3) return false;
+  // Uno dentro del otro por palabras completas («Soena» en «Soena Energía Solar»), con al menos 5 letras el más corto.
+  const dentro = (largo: string, corto: string) => corto.length >= 5 && ` ${largo} `.includes(` ${corto} `);
+  return titular === propia || dentro(titular, propia) || dentro(propia, titular);
+}
+
 const lineaDistinto = (l: LecturaAdjunto, monto: number) => `⚠️ El soporte dice ${formatCOP(l.monto!)}, no ${formatCOP(monto)}`;
 
-/** Los soportes de esta conversación que todavía no son soporte de ningún gasto, con lo leído (para el Estado). Pura. */
-export function fotosSinUsar(filas: FilaConversacion[]): string {
+/**
+ * Los soportes de esta conversación que todavía no son soporte de ningún gasto, con lo leído (para el Estado). Con el nombre
+ * de la empresa, marca el que es dinero que entró a su cuenta (la señal para el modelo: un ingreso, no un gasto). Pura.
+ */
+export function fotosSinUsar(filas: FilaConversacion[], empresa?: string | null): string {
   const usadas = fotosUsadas(filas);
   const n = filas.map((f, i) => {
     if (!esSoporte(f) || usadas.has(f.id)) return null;
     const l = f.media.lectura;
     const que = f.media.tipo === 'documento' ? `PDF${f.media.nombre ? ` «${corto(f.media.nombre, 40)}»` : ''}` : 'foto';
     const leido = l === undefined ? 'sin leer' : l?.legible && l.monto !== null ? `dice ${formatCOP(l.monto)}` : 'no se leyó el monto';
-    return `#${i + 1} (${que}, ${leido})`;
+    const entra = entraALaEmpresa(l, empresa) ? `, DINERO QUE ENTRÓ a la cuenta de la empresa (titular: ${corto(l!.titular_destino!, 60)}): es un pago recibido, no un gasto` : '';
+    return `#${i + 1} (${que}, ${leido}${entra})`;
   }).filter(Boolean);
   return n.length
-    ? `Soportes (fotos o PDF) que todavía no son soporte de ningún gasto: ${n.join(', ')}. Cada uno es el soporte de UN gasto: va en \`soporte\` del gasto que propones.`
+    ? `Soportes (fotos o PDF) que todavía no son soporte de ningún gasto: ${n.join(', ')}. Cada uno es el soporte de UN gasto (o de UN ingreso): va en \`soporte\` de lo que propones.`
     : 'Soportes sin usar: ninguno.';
 }
 
@@ -451,7 +477,7 @@ const DATOS_PROPONER_ONE: Record<string, unknown> = {
   decisor: { type: 'boolean', description: 'contacto_nuevo: true si es quien decide la compra (dueño, gerente, arquitecto a cargo).' },
 };
 
-type Resultado<T> = { ok: true; v: T } | { ok: false; error: string; candado: string };
+type Resultado<T> = { ok: true; v: T } | { ok: false; error: string; candado: string; respaldo?: unknown };
 
 const sinPermiso = (que: string): { ok: false; error: string; candado: string } =>
   ({ ok: false, error: `El rol de quien escribe no permite ${que} por aquí. Dilo en una línea (puede pedírselo a su administrador o hacerlo en la app).`, candado: 'rol' });
@@ -467,7 +493,8 @@ const PREPARAR_MAX = 4;
 
 const sinLectura = (motivo: string): LecturaAdjunto => ({ legible: false, monto: null, fecha: null, comercio: null, nit: null, descripcion: null, motivo });
 
-export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null }): Dominio {
+/** `empresa`: el nombre del workspace (para reconocer un depósito a su propia cuenta). */
+export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null; empresa?: string | null }): Dominio {
   const permisos = permisosDe(o.rol);
   const ahora = o.ahora ?? (() => Date.now());
   // Un archivo se prepara una vez por proceso aunque lo pidan a la vez la espera de la ventana y el turno.
@@ -604,6 +631,15 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       if ('error' in f) return { ok: false, error: f.error, candado: 'foto' };
       foto = f;
     }
+    // Invariante: el comprobante de dinero que ENTRÓ a la cuenta de la empresa no es soporte de un gasto. Qué es (un
+    // ingreso de una cuota, o preguntar) lo decide el modelo con `g.ingreso`; el código solo impide el gasto.
+    if (foto && entraALaEmpresa(foto.lectura, o.empresa)) {
+      return {
+        ok: false,
+        error: `El soporte #${foto.n} es dinero que ENTRÓ a la cuenta de la empresa (titular: ${foto.lectura!.titular_destino}): no es un gasto. Si es el pago de un negocio, propón \`ingreso\` con ese negocio y \`soporte\` = #${foto.n}; si no está claro, pregunta «¿es un pago que recibiste?».`,
+        candado: 'soporte_es_ingreso',
+      };
+    }
     const descripcion = String(d.descripcion ?? '').trim() || null;
     const cc = await puerto.centroCostos({ negocioId: negocio?.id ?? null, descripcion });
     const etiquetaCentro = cc.centro === 'directa_negocio' ? 'Negocio' : cc.centro === 'distribuible_one' ? 'ONE' : cc.centro === 'distribuible_clarity' ? 'Clarity' : cc.centro ? 'Mixto' : null;
@@ -736,14 +772,23 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     const pendientes = await puerto.cobrosPendientes(n.v.id);
     if (pendientes === 'error') return { ok: false, error: 'No pude revisar los cobros pendientes del negocio ahora. Dilo así; no registres nada.', candado: 'cobros_no_leidos' };
     const lista = pendientes.map((c) => `cuota ${c.numeroCuota ?? '?'} de ${formatCOP(c.monto)}${c.fechaEsperada ? ` (esperada el ${c.fechaEsperada})` : ''}`).join('; ');
+    // Las cuotas leídas de la base en este turno respaldan las cifras y fechas que el modelo diga de ellas (el verificador
+    // ataja toda cifra sin respaldo: arnés real 2026-10-22, «$400.000» de la cuota bloqueado y «No pude revisarlo ahora»).
+    const respaldo = {
+      negocio: nombreNegocio(n.v), pago: formatCOP(monto), monto_pago: monto,
+      cuotas_pendientes: pendientes.map((c) => ({
+        cuota: c.numeroCuota, monto: c.monto, monto_cop: formatCOP(c.monto),
+        ...(c.fechaEsperada ? { fecha_esperada: c.fechaEsperada, fecha_corta: fechaCorta(c.fechaEsperada) } : {}),
+      })),
+    };
     if (!pendientes.length) {
-      return { ok: false, error: `${nombreNegocio(n.v)} no tiene cobros programados pendientes en ONE. No lo registres: dilo, y que un pago no programado se registra en la app (o pregunta si es de otro negocio).`, candado: 'sin_cobros_pendientes' };
+      return { ok: false, error: `${nombreNegocio(n.v)} no tiene cobros programados pendientes en ONE. No lo registres: dilo, y que un pago no programado se registra en la app (o pregunta si es de otro negocio).`, candado: 'sin_cobros_pendientes', respaldo };
     }
     const cuotaDicha = String(d.cuota ?? '').trim();
     let cobro: CobroPendiente | undefined;
     if (cuotaDicha) {
       cobro = pendientes.find((c) => c.id === cuotaDicha || String(c.numeroCuota ?? '') === cuotaDicha.replace(/^#|^cuota\s*/i, ''));
-      if (!cobro) return { ok: false, error: `La cuota «${cuotaDicha}» no está pendiente en ${nombreNegocio(n.v)}. Las pendientes: ${lista}.`, candado: 'cuota_inexistente' };
+      if (!cobro) return { ok: false, error: `La cuota «${cuotaDicha}» no está pendiente en ${nombreNegocio(n.v)}. Las pendientes: ${lista}.`, candado: 'cuota_inexistente', respaldo };
     } else {
       // La más vieja que cuadra por monto (las cuotas se pagan en orden).
       cobro = pendientes.find((c) => Math.abs(c.monto - monto) <= 1);
@@ -752,8 +797,8 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     if (!cobro || (Math.abs(cobro.monto - monto) > 1 && !parcial)) {
       return {
         ok: false,
-        error: `El pago de ${formatCOP(monto)} no cuadra con ninguna cuota pendiente de ${nombreNegocio(n.v)}${cobro ? ` (la cuota ${cobro.numeroCuota ?? '?'} es de ${formatCOP(cobro.monto)})` : ''}. Pendientes: ${lista}. No lo registres callado: dilo con las cifras y pregunta si es un pago parcial de una cuota (propón con \`cuota\` y \`parcial: true\`), si es de otro negocio, o si es un pago no programado (ese se registra en la app).`,
-        candado: 'ingreso_no_cuadra',
+        error: `El pago de ${formatCOP(monto)} no cuadra con ninguna cuota pendiente de ${nombreNegocio(n.v)}${cobro ? ` (la cuota ${cobro.numeroCuota ?? '?'} es de ${formatCOP(cobro.monto)})` : ''}. Pendientes: ${lista}. No lo registres callado: dilo con las cifras y pregunta si es un pago parcial de una cuota (propón con \`cuota\` y \`parcial: true\`), si es de otro negocio, o si es un pago no programado (ese se registra en la app). Si la persona YA dijo que no es un abono o que es un pago aparte, no programado, no lo vuelvas a ofrecer: contesta sin opciones que ese pago se registra en la app de ONE.`,
+        candado: 'ingreso_no_cuadra', respaldo,
       };
     }
     if (parcial && monto > cobro.monto + 1) return { ok: false, error: `Un pago parcial no puede ser mayor que la cuota (${formatCOP(cobro.monto)}).`, candado: 'parcial_mayor' };
@@ -824,7 +869,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     };
   }
 
-  async function proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }> {
+  async function proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string; respaldo?: unknown }> {
     if (accion === 'ingreso') {
       const r = await proponerIngreso(datos, ctx);
       return r.ok ? { ok: true, propuesta: r.v } : r;
@@ -950,7 +995,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       return [
         `Su rol permite: ${puede.length ? puede.join(', ') : 'nada por este chat'}.`,
         ultimaLista(ctx.conversacion),
-        fotosSinUsar(ctx.conversacion),
+        fotosSinUsar(ctx.conversacion, o.empresa),
         gastos.length
           ? `Gastos registrados en esta conversación: ${gastos.map((g) => `${g.ref} · ${formatCOP(g.monto)} · ${g.etiqueta} · ${g.soporte ? 'con soporte' : 'sin soporte'}`).join(' | ')}.`
           : 'Gastos registrados en esta conversación: ninguno.',

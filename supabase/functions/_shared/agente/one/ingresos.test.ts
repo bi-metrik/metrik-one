@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { escenarioOne } from './escenario'
 import { modeloGuionado } from '../modelo-guionado'
 import { anunciaQueNoRegistra } from '../nucleo'
-import { fechaCorta, permisosDe } from './dominio'
+import { entraALaEmpresa, fechaCorta, permisosDe } from './dominio'
+import { normalizarLectura } from './lectura-adjunto'
+import { respaldoDe, verificar } from '../verificador'
 import { ROLE_PERMISSIONS } from '../../../../../src/lib/roles'
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto'
 import type { LecturaAdjunto, PedidoModelo } from '../tipos'
@@ -181,5 +183,105 @@ describe('«no es un gasto, es un ingreso» a mitad de la propuesta (el bug del 
 
   it('fechaCorta', () => {
     expect(fechaCorta('2026-10-26')).toBe('26-oct')
+  })
+})
+
+/**
+ * Lo que mostró el arnés con el modelo real (Haiku 5.5) el 2026-10-22 sobre #1231: el verificador no respaldaba las cuotas
+ * (nunca salió «400.000» y un turno cayó en «No pude revisarlo ahora»), el abono negado se volvió a ofrecer, y el
+ * comprobante de un depósito a la cuenta de la empresa se siguió proponiendo como gasto. Datos inventados.
+ */
+const deposito = (monto: number, titular: string | null = 'Empresa de Prueba S.A.S.'): LecturaAdjunto => ({ ...comprobante(monto), titular_destino: titular })
+
+describe('el verificador respalda las cuotas leídas de la base (g-ingreso-no-cuadra, g-ingreso-parcial)', () => {
+  it('las cifras y fechas de las cuotas que devolvió el candado salen, en ese turno y en el siguiente', async () => {
+    const e = await mundo({
+      lectura: comprobante(350000),
+      guion: [
+        { name: 'proponer', args: { accion: 'ingreso', datos: { negocio: 'D1 26 5', soporte: '#1' } } },
+        // Lo que el verificador bloqueaba en el arnés real: «$400.000», «$800.000», «400.000 (26 oct)», «400 mil».
+        { name: 'responder', args: { tema: 'ingreso', texto: 'El comprobante dice $350.000 y no cuadra: la cuota 1 es de 400.000 (26 oct) y la cuota 2 de $800.000 (26 nov); la 1 es de 400 mil. ¿Es un abono a la cuota 1?' } },
+        // Turno siguiente, sin volver a leer: las cuotas siguen respaldadas por lo que el candado leyó antes.
+        { name: 'responder', args: { tema: 'ayuda', texto: 'Entendido: no es un abono a la cuota 1 de $400.000. Un pago aparte, no programado, se registra en la app de ONE.' } },
+      ],
+    })
+    const t1 = await e.foto('ingreso del proyecto de Dimpro', { archivo: FOTO })
+    expect(e.trazas().at(-1)!.verificador ?? []).toEqual([])
+    expect(t1[0].texto).toContain('la cuota 1 es de 400.000 (26 oct)')
+    const t2 = await e.escribe('no es un abono, fue un pago aparte que no estaba programado')
+    expect(e.trazas().at(-1)!.verificador ?? []).toEqual([])
+    expect(t2[0].texto).toContain('se registra en la app de ONE')
+    expect(e.puerto.escrituras).toEqual([])
+  })
+
+  it('el candado le dice al modelo que lo negado no se vuelve a ofrecer', async () => {
+    const e = await mundo({
+      lectura: comprobante(350000),
+      guion: [
+        { name: 'proponer', args: { accion: 'ingreso', datos: { negocio: 'D1 26 5', soporte: '#1' } } },
+        (p) => {
+          expect(JSON.stringify(p.mensajes.at(-1))).toContain('no lo vuelvas a ofrecer')
+          return { name: 'responder', args: { tema: 'ingreso', texto: 'No cuadra con ninguna cuota.' } }
+        },
+      ],
+    })
+    await e.foto('ingreso de dimpro', { archivo: FOTO })
+  })
+
+  it('una cifra que nadie leyó sigue sin salir', () => {
+    const r = respaldoDe([JSON.stringify({ cuotas_pendientes: [{ cuota: 1, monto: 400000, fecha_esperada: '2026-10-26' }] })])
+    expect(verificar('La cuota 1 es de 400 mil, esperada el 26 oct', r)).toEqual([])
+    expect(verificar('La cuota 1 es de 400.000 (26 oct)', r)).toEqual([])
+    expect(verificar('La cuota es de 450 mil', r)).toEqual(['cifra «450 mil» sin respaldo'])
+    expect(verificar('Llama al 300 555 1234', r)).toEqual(['número «300 555 1234» sin respaldo'])
+  })
+})
+
+describe('un depósito a la cuenta de la empresa es un ingreso, no un gasto (g-no-es-gasto, el caso real)', () => {
+  it('el Estado y la línea del archivo lo señalan; un gasto con ese soporte no se arma y el ingreso sí', async () => {
+    const e = await mundo({
+      lectura: deposito(400000),
+      guion: [
+        (p) => {
+          expect(textoDelTurno(p)).toContain('DINERO QUE ENTRÓ a la cuenta de la empresa (titular: Empresa de Prueba S.A.S.)')
+          expect(textoDelTurno(p)).toContain('el dinero llega a la cuenta de "Empresa de Prueba S.A.S."')
+          return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 400000, negocio: 'D1 26 5', categoria: 'otros', soporte: '#1' } } }
+        },
+        (p) => {
+          expect(JSON.stringify(p.mensajes.at(-1))).toContain('no es un gasto')
+          return { name: 'proponer', args: { accion: 'ingreso', datos: { negocio: 'D1 26 5', monto: 400000, soporte: '#1' } } }
+        },
+      ],
+    })
+    const t = await e.foto('registra 400000 en el proyecto de Dimpro', { archivo: FOTO })
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['soporte_es_ingreso'])
+    expect(t[0].texto).toContain('💵 Cuadra con la cuota 1 de $400.000')
+    expect(t[0].texto).not.toContain('Gasto')
+  })
+
+  it('un depósito a la cuenta de OTRO (el pago a un proveedor) sigue siendo gasto', async () => {
+    const e = await mundo({
+      lectura: deposito(400000, 'Ferretería El Tornillo SAS'),
+      guion: [{ name: 'proponer', args: { accion: 'gasto', datos: { monto: 400000, negocio: 'D1 26 5', categoria: 'otros', soporte: '#1' } } }],
+    })
+    const t = await e.foto('registra 400000 en el proyecto de Dimpro', { archivo: FOTO })
+    expect(t[0].texto).toContain('💰 Gasto de $400.000')
+  })
+
+  it('entraALaEmpresa: por nombre social, sin tildes ni sufijo, por palabras completas', () => {
+    const l = (t: string | null) => deposito(1, t)
+    expect(entraALaEmpresa(l('METRIK S.A.S.'), 'MéTRIK')).toBe(true)
+    expect(entraALaEmpresa(l('SOENA ENERGIA SOLAR SAS'), 'Soena')).toBe(true)
+    expect(entraALaEmpresa(l('Empresa de Prueba S.A.S.'), 'Empresa de Prueba')).toBe(true)
+    expect(entraALaEmpresa(l('Dimpro Pruebas S.A.S.'), 'Empresa de Prueba')).toBe(false)
+    expect(entraALaEmpresa(l('Metrikas Ltda'), 'MéTRIK')).toBe(false)
+    expect(entraALaEmpresa(l(null), 'MéTRIK')).toBe(false)
+    expect(entraALaEmpresa(l('METRIK SAS'), null)).toBe(false)
+    expect(entraALaEmpresa(comprobante(1), 'MéTRIK')).toBe(false)
+  })
+
+  it('el lector devuelve el titular de la cuenta destino', () => {
+    expect(normalizarLectura({ legible: true, monto: 400000, fecha: '2026-10-21', comercio: 'Banco', nit: null, descripcion: 'depósito', titular_destino: '  Empresa de Prueba S.A.S. ' }).titular_destino).toBe('Empresa de Prueba S.A.S.')
+    expect(normalizarLectura({ legible: true, monto: 6880 }).titular_destino).toBeNull()
   })
 })

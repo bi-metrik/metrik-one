@@ -399,8 +399,12 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         ? await d.proponer(accion, datos, e.ctx)
         : { ok: false as const, error: `Acción desconocida. Usa una de: ${d.acciones.join(', ')}.`, candado: 'accion_desconocida' };
       traza.ms_herramientas! += Math.round(deps.reloj() - th);
-      traza.herramientas!.push({ nombre, args, ok: p.ok, ...(p.ok ? { datos: p.propuesta.resumen } : { error: p.error }), ms: Math.round(deps.reloj() - th) });
+      const respaldoCandado = !p.ok && 'respaldo' in p ? p.respaldo : undefined;
+      traza.herramientas!.push({ nombre, args, ok: p.ok, ...(p.ok ? { datos: p.propuesta.resumen } : { error: p.error, ...(respaldoCandado !== undefined ? { datos: respaldoCandado } : {}) }), ms: Math.round(deps.reloj() - th) });
       if (!p.ok) {
+        // Lo que el candado leyó de la base (las cuotas de un ingreso que no cuadra) respalda las cifras que el modelo diga
+        // de ese error, en este turno y en los siguientes (queda en `traza.herramientas[].datos`).
+        if (respaldoCandado !== undefined) resultadosTurno.push(JSON.stringify(respaldoCandado));
         traza.candados!.push({ candado: p.candado, detalle: p.error });
         devolver(p.error);
         continue;
