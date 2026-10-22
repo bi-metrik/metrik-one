@@ -2519,6 +2519,8 @@ interface Props {
   puedeOmitirGates?: boolean
   /** Persona en `config_extra.avanzar_cruces.staff_ids`: ve «Avanzar de todas formas» en un cruce. */
   puedeAvanzarCruces?: boolean
+  /** Owner/admin/supervisor o persona en `config_extra.asignar_responsable.staff_ids`: asigna y quita responsables. */
+  puedeAsignarResponsables?: boolean
   /**
    * El usuario pertenece al area financiera y puede cerrar el aviso de recaudo cambiado.
    * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
@@ -2593,6 +2595,7 @@ export default function NegocioDetailClient({
   cierreViaje = null,
   puedeOmitirGates = false,
   puedeAvanzarCruces = false,
+  puedeAsignarResponsables = false,
   puedeResolverAvisoRecaudo = false,
   carpetaLocal,
   almacenamientoExterno = false,
@@ -2988,7 +2991,7 @@ export default function NegocioDetailClient({
               negocioId={negocio.id}
               responsables={negocio.responsables}
               staffList={staffList}
-              canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+              canEdit={puedeAsignarResponsables}
             />
           </div>
 
