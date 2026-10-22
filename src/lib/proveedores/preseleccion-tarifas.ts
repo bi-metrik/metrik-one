@@ -5,14 +5,19 @@
  *     al que va; por habitación, vehículo o grupo, uno solo. Si el viaje cruza temporadas, cada
  *     temporada es su propio puesto. Marcar una fila REEMPLAZA la que ocupaba su puesto: nunca
  *     quedan dos marcadas para lo mismo (el «Viajan 2 adultos y eligiste tarifa para 4» de #1227).
- *   · `preseleccion`: lo que ONE deja marcado al abrir. Por puesto: si queda una sola fila tras el
- *     filtro, esa (con `propuestaDeFila`); con varias, la de menor total. La persona la cambia con
- *     un toque. Nada se guarda sin «Usar».
+ *   · `preseleccion`: lo que ONE deja marcado al abrir. SOLO si todas las filas que quedan tras el
+ *     filtro son el MISMO servicio (misma habitación y plan, o misma actividad: `mismoServicio`) y
+ *     difieren en el tipo de pasajero o la temporada (prueba del #1229, punto 1: en un operador con
+ *     29 actividades se marcaba sola la más barata de TODO el tarifario, un tour nocturno fuera de
+ *     vista, y el pie decía «Usar · $66.000»). Con servicios distintos no se marca nada: la persona
+ *     elige. Dentro del mismo servicio, por puesto: la única fila, o la de menor total (un canal
+ *     neto contra uno al público, dos escalones de pax que cubren al grupo). Nada se guarda sin «Usar».
  *   · `totalDeFila`: «2 × 105.000 = 210.000» para la tarjeta de cada tarifa.
  *   · `gruposDeTarifas`: las filas agrupadas por habitación (categoría) y plan.
  */
 import { formatoMonto, type Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { propuestaDeFila, type CalendarioDelViaje, type FilaElegida, type OpcionTarifa } from './oferta-tarifas'
+import { claveDeServicio, mismoServicio } from './nombre-de-tarifa'
 
 /** El puesto de la fila en la elección (ver arriba). */
 export function cupoDeFila(o: Pick<OpcionTarifa, 'unidad' | 'tipo' | 'temporada'>, cal: Pick<CalendarioDelViaje, 'cruza'> | null): string {
@@ -37,8 +42,14 @@ export function totalDeFila(o: OpcionTarifa, c: Composicion | null, cal: Calenda
 
 export interface Preseleccion {
   marcadas: Record<number, FilaElegida>
-  /** `unica`: una fila por puesto, marcada sola. `mas_barata`: había varias y ganó la de menor total. `null`: nada marcado. */
-  como: 'unica' | 'mas_barata' | null
+  /**
+   * `unica`: una fila por puesto, marcada sola. `mas_barata`: el mismo servicio en varias filas y
+   * ganó la de menor total. `varios_servicios`: quedan servicios distintos y no se marca nada.
+   * `null`: nada marcado (sin fechas, sin filas).
+   */
+  como: 'unica' | 'mas_barata' | 'varios_servicios' | null
+  /** Cuántos servicios distintos quedan tras el filtro (solo con `varios_servicios`). */
+  servicios?: number
 }
 
 /**
@@ -48,7 +59,10 @@ export interface Preseleccion {
  */
 export function preseleccion(opciones: readonly OpcionTarifa[], c: Composicion | null, cal: CalendarioDelViaje | null): Preseleccion {
   if (!cal) return { marcadas: {}, como: null }
-  const sirven = opciones.filter((o) => o.fueraPor.length === 0 && !!o.base && !!o.unidad)
+  // Lo que la persona ve tras el filtro (también una fila sin base: es otro servicio a la vista).
+  const aLaVista = opciones.filter((o) => o.fueraPor.length === 0)
+  if (!mismoServicio(aLaVista)) return { marcadas: {}, como: 'varios_servicios', servicios: Math.max(2, new Set(aLaVista.map(claveDeServicio)).size) }
+  const sirven = aLaVista.filter((o) => !!o.base && !!o.unidad)
   const porPersona = sirven.filter((o) => o.unidad === 'persona')
   const conAdulto = porPersona.some((o) => (o.tipo ?? 'adulto') === 'adulto')
   const candidatas = conAdulto ? porPersona : sirven.filter((o) => o.unidad !== 'persona')
@@ -103,7 +117,8 @@ export interface GrupoDeTarifas {
 export function gruposDeTarifas(opciones: readonly OpcionTarifa[]): GrupoDeTarifas[] {
   const grupos = new Map<string, GrupoDeTarifas>()
   for (const o of opciones) {
-    const titulo = [o.categoria, o.plan].filter(Boolean).join(' · ') || 'Tarifas'
+    // El nombre completo del servicio, sin todo en mayúscula («Playa Blanca con almuerzo»).
+    const titulo = o.servicio || 'Tarifas'
     const g = grupos.get(titulo) ?? { titulo, opciones: [] }
     g.opciones.push(o)
     grupos.set(titulo, g)

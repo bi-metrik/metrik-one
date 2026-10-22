@@ -274,7 +274,7 @@ export default function SeccionExtraccion({
                           {establecimientos.length > 1 && <td className="px-2 py-1">{f.establecimiento ?? '—'}</td>}
                           <td className="px-2 py-1">{f.categoria ?? '—'}</td>
                           <td className="px-2 py-1">{[f.temporada, f.plan].filter(Boolean).join(' · ') || '—'}</td>
-                          <td className="px-2 py-1">{[f.ocupacion, f.pasajero, f.pax ? `${f.pax} pax` : null].filter(Boolean).join(' · ') || '—'}</td>
+                          <td className="px-2 py-1">{[f.ocupacion, f.pasajero, f.pax].filter(Boolean).join(' · ') || '—'}</td>
                           <td className="px-2 py-1 text-right tabular-nums">{f.precio === null ? '—' : f.precio.toLocaleString('es-CO')}</td>
                           <td className="px-2 py-1">
                             <select className="h-7 rounded border bg-background px-1" value={monedas.filas?.[String(f.i)] ?? ''} disabled={!editable} onChange={(e) => cambiarFila(f.i, e.target.value)} data-moneda-fila={f.i}>
