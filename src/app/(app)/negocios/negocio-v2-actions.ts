@@ -202,6 +202,9 @@ import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto
 import { bloqueCobrosCompleto, cobradoConfirmado, resumenDeCobro } from '@/lib/cobros/saldo-negocio'
 import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
+import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
+import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
+import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -8371,6 +8374,55 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // No se traga: si falla, el negocio queda retenido por un gate que la pantalla no
     // ofrece forma de cerrar, y sin este registro nadie sabría por qué.
     if (errCierre) console.error('[getNegocioDetalle] no se pudieron cerrar los gates heredados ya llenos:', errCierre)
+  }
+
+  // ── Autorización, ficha y servicios: el estado lo dice el gate, no la fila ──
+  // Su trabajo no se guarda en el bloque (vive en el contacto o en `negocio_servicios`), así que
+  // nadie marcaba `negocio_bloques.estado`: la autorización firmada seguía en «Pendiente»
+  // (barrido 2026-10-22). Se deriva con la MISMA regla del gate, se pinta y se persiste en los dos
+  // sentidos: una autorización revocada vuelve a pendiente. Ver `estado-bloques-derivado.ts`.
+  {
+    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown> }
+    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[] }> = []
+    const recoger = (lista: ConInstancia[]) => lista.forEach((b, i) => {
+      const tipo = tipoDerivado(b.bloque_definitions?.tipo, b.config_extra)
+      if (!tipo || !b.instancia) return
+      candidatos.push({
+        lista, i, instanciaId: b.instancia.id, actual: b.instancia.estado, tipo,
+        ...(tipo === 'ficha' ? { campos: (b.config_extra.campos ?? []) as CampoContacto[] } : {}),
+      })
+    })
+    recoger(bloquesConExtra as unknown as ConInstancia[])
+    recoger(bloquesEtapasPrevias as unknown as ConInstancia[])
+    if (candidatos.length > 0) {
+      const derivados = await derivarEstadosDeBloques(db(supabase), {
+        workspaceId,
+        negocioId: id,
+        contactoId: base.negocio.contacto_id ?? null,
+        configLinea: lineaConfigExtra,
+        bloques: candidatos,
+      }).catch((e) => {
+        console.error('[getNegocioDetalle] no se pudo derivar el estado de los bloques:', e)
+        return new Map<string, EstadoBloqueDerivado | null>()
+      })
+      const { completar, reabrir } = cambiosDeEstado(candidatos.map(c => ({ ...c, derivado: derivados.get(c.instanciaId) ?? null })))
+      for (const c of candidatos) {
+        const estado = derivados.get(c.instanciaId)
+        if (!estado || (!completar.includes(c.instanciaId) && !reabrir.includes(c.instanciaId))) continue
+        const b = c.lista[c.i]
+        c.lista[c.i] = { ...b, instancia: { ...b.instancia!, estado } }
+      }
+      const ahora = new Date().toISOString()
+      const [errCompletar, errReabrir] = await Promise.all([
+        completar.length > 0
+          ? db(supabase).from('negocio_bloques').update({ estado: 'completo', completado_at: ahora, updated_at: ahora }).in('id', completar).then((r: { error: unknown }) => r.error)
+          : null,
+        reabrir.length > 0
+          ? db(supabase).from('negocio_bloques').update({ estado: 'pendiente', completado_at: null, updated_at: ahora }).in('id', reabrir).then((r: { error: unknown }) => r.error)
+          : null,
+      ])
+      if (errCompletar || errReabrir) console.error('[getNegocioDetalle] no se pudo guardar el estado derivado de los bloques:', errCompletar ?? errReabrir)
+    }
   }
 
   return {
