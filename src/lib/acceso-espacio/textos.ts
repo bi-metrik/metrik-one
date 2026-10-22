@@ -165,19 +165,21 @@ export interface EspacioParaCorreo {
 
 /**
  * `marca`: `valida` solo cuando TODOS los espacios de la persona son de Valida y nada más
- * (`esEspacioSoloValida`); si no, `one`. Los textos del cuerpo son los mismos en los dos casos.
+ * (`esEspacioSoloValida`); si no, `one`. Solo cambia el producto que se nombra (asunto y primera línea).
  */
 export function correoRecuperarEspacio(p: { correo: string; espacios: EspacioParaCorreo[]; marca?: Marca }): CorreoArmado {
   const marca: Marca = p.marca ?? 'one'
   const varios = p.espacios.length > 1
-  const subject = varios ? 'Las direcciones de tus espacios en MéTRIK ONE' : 'La dirección de tu espacio en MéTRIK ONE'
+  // El producto que se nombra en asunto y cuerpo sigue a la marca: «Valida» o «MéTRIK ONE».
+  const producto = MARCAS[marca].nombre
+  const subject = varios ? `Las direcciones de tus espacios en ${producto}` : `La dirección de tu espacio en ${producto}`
   const bloques: Bloque[] = [
     { tipo: 'parrafo', texto: 'Hola:' },
     {
       tipo: 'parrafo',
       texto: varios
-        ? 'Pediste la dirección de tu espacio en MéTRIK ONE. Tienes acceso a estos espacios:'
-        : 'Pediste la dirección de tu espacio en MéTRIK ONE. Es esta:',
+        ? `Pediste la dirección de tu espacio en ${producto}. Tienes acceso a estos espacios:`
+        : `Pediste la dirección de tu espacio en ${producto}. Es esta:`,
     },
     ...p.espacios.map((e): Bloque => ({ tipo: 'espacio', nombre: e.nombre, url: e.url })),
     {

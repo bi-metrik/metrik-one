@@ -257,8 +257,21 @@ describe('textos de cara al cliente', () => {
     conMarca(recuperar, 'one')
     const deValida = correoRecuperarEspacio({ correo: 'ana@acme.example', espacios: [{ nombre: 'ACME', url: 'https://acme.metrikone.co/login' }], marca: 'valida' })
     conMarca(deValida, 'valida')
-    // Los textos del cuerpo no cambian con la marca.
-    expect(deValida.text.split('\n--\n')[0]).toBe(recuperar.text.split('\n--\n')[0])
+    // Con marca Valida, asunto y cuerpo nombran a Valida; con MéTRIK ONE, quedan como estaban.
+    expect(deValida.subject).toBe('La dirección de tu espacio en Valida')
+    expect(deValida.text).toContain('Pediste la dirección de tu espacio en Valida. Es esta:')
+    expect(deValida.text).not.toContain('MéTRIK ONE')
+    expect(recuperar.text).toContain('Pediste la dirección de tu espacio en MéTRIK ONE. Es esta:')
+    const variosValida = correoRecuperarEspacio({
+      correo: 'ana@acme.example',
+      espacios: [
+        { nombre: 'ACME', url: 'https://acme.metrikone.co/login' },
+        { nombre: 'Beta', url: 'https://beta.metrikone.co/login' },
+      ],
+      marca: 'valida',
+    })
+    expect(variosValida.subject).toBe('Las direcciones de tus espacios en Valida')
+    expect(variosValida.text).toContain('Pediste la dirección de tu espacio en Valida. Tienes acceso a estos espacios:')
   })
 
   it('sin léxico vetado de marca', () => {
