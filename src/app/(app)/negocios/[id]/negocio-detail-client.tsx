@@ -55,6 +55,7 @@ import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '../marco-cotizacio
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
+import type { CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
@@ -854,6 +855,7 @@ function SelectorEtapa({
   puedeAvanzarCruces,
   esResponsable = false,
   seguimiento,
+  cierreViaje = null,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -875,6 +877,8 @@ function SelectorEtapa({
   esResponsable?: boolean
   /** Seguimiento de la línea (F1): motivos de pérdida y plazo del aplazamiento. */
   seguimiento?: ConfigSeguimiento
+  /** Cierre del viaje (`cierre_viaje.activo`, etapas 7-9): margen del panel y postventa que falta. */
+  cierreViaje?: CierreParaCerrar | null
 }) {
   const router = useRouter()
   // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
@@ -1137,6 +1141,7 @@ function SelectorEtapa({
             precioAprobado={precioAprobado}
             puedeCierreNoFacturable={puedeCierreNoFacturable}
             motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
+            cierreViaje={cierreViaje}
             onClose={() => setShowCierreDialog(false)}
           />
         )}
@@ -1258,6 +1263,7 @@ function SelectorEtapa({
           precioAprobado={precioAprobado}
           puedeCierreNoFacturable={puedeCierreNoFacturable}
           motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
+          cierreViaje={cierreViaje}
           onClose={() => setShowCierreDialog(false)}
         />
       )}
@@ -2507,6 +2513,8 @@ interface Props {
   registrarPagoSimple?: boolean
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
+  /** Cierre del viaje para el diálogo de «Cerrar negocio» (barrido ámbar). Ausente = como hoy. */
+  cierreViaje?: CierreParaCerrar | null
   /** Owner/admin o persona en `config_extra.omitir_gate.staff_ids`: ve "Omitir gate". */
   puedeOmitirGates?: boolean
   /** Persona en `config_extra.avanzar_cruces.staff_ids`: ve «Avanzar de todas formas» en un cruce. */
@@ -2582,6 +2590,7 @@ export default function NegocioDetailClient({
   registrarPagoEnabled = false,
   registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
+  cierreViaje = null,
   puedeOmitirGates = false,
   puedeAvanzarCruces = false,
   puedeResolverAvisoRecaudo = false,
@@ -2813,6 +2822,7 @@ export default function NegocioDetailClient({
             puedeAvanzarCruces={puedeAvanzarCruces}
             esResponsable={currentUserEsResponsable}
             seguimiento={seguimiento}
+            cierreViaje={cierreViaje}
           />
         </div>
         </div>
