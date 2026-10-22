@@ -23,4 +23,6 @@ soporte» y el bot lo lee; lo que dice la persona manda en destino/qué gasto, e
   modelo piensa. Cualquier dominio nuevo que la declare paga hasta 5 s por foto.
 - Arnés `s-*` (casos-one.ts) listos con un recibo de Uber sintético hecho a mano (`arnes/soportes/pdf-minimo.ts`); el
   2026-10-21 NO se corrieron: no había llave de Anthropic en el entorno del subagente.
-Relacionado: [[agente-one-todo-workspace]], [[nucleo-conversacional]].
+- Desde feat/wa-soportes-trappvel la preparación vive en `agente/adjuntos.ts` (común con la bandeja) y el lector en
+  `crearLector(perfil)`.
+Relacionado: [[agente-one-todo-workspace]], [[nucleo-conversacional]], [[bandeja-adjuntos-trappvel]].
