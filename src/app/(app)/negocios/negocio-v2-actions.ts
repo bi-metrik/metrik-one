@@ -200,6 +200,8 @@ import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servi
 import { cerrarReprocesoSiSeRehizoElTramo } from '@/lib/negocios/cierre-reproceso-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { bloqueCobrosCompleto, cobradoConfirmado, resumenDeCobro } from '@/lib/cobros/saldo-negocio'
+import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
+import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -3428,48 +3430,18 @@ async function cambiarEtapaNegocioConGateSinClave(
     // mayoría ya en Entrega.
     //
     // Un sobrepago (saldo negativo) NO bloquea aquí: solo se compara el faltante.
+    //
+    // Lo que cubre es lo que ENTRÓ (con fecha, sin anular, con la retención de IVA) y está
+    // confirmado por la financiera: la misma cuenta de la tarjeta y del panel de Cierre
+    // económico (`lib/cobros/saldo-cero.ts`). Si no se puede leer, retiene.
     if (etapaGates.includes('saldo_cero')) {
-      const [negPrecioRes, cobrosRes, conciliadoRes] = await Promise.all([
-        db(supabase)
-          .from('negocios')
-          .select('precio_aprobado, precio_estimado')
-          .eq('id', negocioId)
-          .single(),
-        db(supabase)
-          .from('cobros')
-          .select('monto, split_json')
-          .eq('negocio_id', negocioId)
-          .eq('workspace_id', workspaceId)
-          ,
-        db(supabase)
-          .from('negocio_conciliacion')
-          .select('conciliado')
-          .eq('negocio_id', negocioId)
-          .eq('workspace_id', workspaceId)
-          .maybeSingle(),
-      ])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const negPrecio = negPrecioRes.data as any
-      const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
-      // Solo el recaudo CONFIRMADO cubre el saldo (ver `lib/negocios/recaudo-confirmado.ts`).
-      const cobrosSaldo = (cobrosRes.data ?? []) as CobroParaRecaudo[]
-      const conciliadoSaldo = (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true
-      const totalCobrado = sumarRecaudoConfirmado(cobrosSaldo, conciliadoSaldo)
-      const saldo = precio - totalCobrado
-
-      if (saldo > TOLERANCIA_SALDO_COP) {
-        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-        // Nombrar la plata que está registrada pero sin confirmar. Decir solo "faltan $X"
-        // manda a la financiera a buscar un pago que YA está en el sistema esperando su
-        // visto bueno.
-        const sinConfirmar = recaudoPendienteDeConfirmar(cobrosSaldo, conciliadoSaldo)
-        const detalle = sinConfirmar > 0
-          ? ` (hay ${fmt.format(sinConfirmar)} de un reparto sin confirmar por el área financiera)`
-          : ''
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}${detalle}`, es_gate: true }],
-        }
+      const lectura = await leerSaldoCero(db(supabase), { workspaceId, negocioId })
+      if (!lectura.ok) {
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: lectura.error, es_gate: true }] }
+      }
+      const mensaje = mensajeSaldoCero(lectura.saldo)
+      if (mensaje) {
+        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: mensaje, es_gate: true }] }
       }
     }
 
