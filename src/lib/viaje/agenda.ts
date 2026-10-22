@@ -247,7 +247,11 @@ export function resumenDelDia(hitos: readonly Hito[], staffId: string, hoy: stri
   const partes: string[] = []
   if (deHoy.length > 0) partes.push(`Hoy tienes ${deHoy.length} ${deHoy.length === 1 ? 'gestión' : 'gestiones'}: ${conteo(deHoy)}.`)
   if (noHabiles.length > 0) {
-    const finde = noHabiles.some(h => diaSemanaISO(h.fechaAviso!) >= 6) ? 'Este fin de semana' : 'En el festivo'
+    // Los días no hábiles que vienen (sábado, domingo y el festivo pegado): si hay fin de semana,
+    // «Este fin de semana» aunque lo que caiga sea el lunes festivo del puente.
+    let conFinde = false
+    for (let f = manana; !esDiaHabil(f); f = sumarDias(f, 1)) if (diaSemanaISO(f) >= 6) conFinde = true
+    const finde = conFinde ? 'Este fin de semana' : 'En el festivo'
     const detalle = noHabiles.slice(0, 3).map(h => {
       const quien = h.cliente.trim().split(/\s+/)[0]
       const cuando = cuandoEnPalabras(h, hoy)
