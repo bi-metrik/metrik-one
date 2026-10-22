@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useAvanceDeEtapa } from '@/hooks/use-avance-de-etapa'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
@@ -880,7 +881,24 @@ function SelectorEtapa({
   const intencion = useIntencion()
   // Avanzar escribe (mueve la etapa, avisa, cierra): si la respuesta se pierde, el caso pudo
   // moverse igual. Se relee la ficha; reintentar a ciegas lo intentaría mover otra vez.
-  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
+  const [, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
+  // El botón lo mueve la RESPUESTA de la acción, no el `isPending` de la transición: ese no
+  // termina hasta que la ficha nueva se pinta, y si el repintado no llega el botón se quedaba en
+  // «Cambiando…» hasta recargar (prueba del #1229, punto a). Ver `use-avance-de-etapa.ts`.
+  const avance = useAvanceDeEtapa(etapaActualId ?? null, () => router.refresh())
+  const isPending = avance.ocupado
+  /** Corre una acción de esta barra. `fn` dice si el caso se movió de etapa. */
+  function lanzar(fn: () => Promise<boolean>) {
+    avance.empezar()
+    let movio = false
+    startTransition(async () => {
+      try {
+        movio = await fn()
+      } finally {
+        avance.terminar(movio)
+      }
+    })
+  }
   const [gateModal, setGateModal] = useState<{
     etapaId: string
     bloques: BloqueGateModal[]
@@ -909,7 +927,7 @@ function SelectorEtapa({
       ? window.confirm('Reactivar el negocio? Vuelve al pipeline activo.')
       : true
     if (!ok) return
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await reactivarNegocio(negocioId)
       if (result.error) {
         toast.error('Error: ' + result.error)
@@ -918,6 +936,7 @@ function SelectorEtapa({
       } else {
         toast.success('Negocio reactivado')
       }
+      return false
     })
   }
 
@@ -937,7 +956,7 @@ function SelectorEtapa({
 
   function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
@@ -957,13 +976,15 @@ function SelectorEtapa({
         // El destino REAL lo resuelve el routing en el server; el toast lo nombra
         // (siguienteEtapa por orden puede no ser el destino cuando el routing salta).
         toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`)
+        return true
       }
+      return false
     })
   }
 
   function handleOverride(etapaId: string, motivo: string) {
     setGateModal(null)
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo, undefined, intencion.clave())
       intencion.cerrar()
 
@@ -973,13 +994,14 @@ function SelectorEtapa({
       if (result.error === 'gate_bloqueado') {
         setErrorCarpeta(null)
         setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [], motivo })
-        return
+        return false
       }
       if (result.error) {
         toast.error('Error: ' + result.error)
-      } else {
-        toast.success('Etapa actualizada con override')
+        return false
       }
+      toast.success('Etapa actualizada con override')
+      return true
     })
   }
 
@@ -990,17 +1012,17 @@ function SelectorEtapa({
     if (!gateModal) return
     const intento = gateModal
     setErrorCarpeta(null)
-    startTransition(async () => {
+    lanzar(async () => {
       const guardado = await actualizarCarpetaLocalNegocio(negocioId, carpeta)
       if (guardado.error) {
         setErrorCarpeta(guardado.error)
-        return
+        return false
       }
       const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
-        return
+        return false
       }
       setGateModal(null)
       const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
@@ -1011,13 +1033,14 @@ function SelectorEtapa({
           nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
           confirmacion: result.confirmacion,
         })
-        return
+        return false
       }
       if (result.error) {
         toast.error('La carpeta quedó guardada, pero el negocio no avanzó: ' + result.error)
-        return
+        return false
       }
       toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      return true
     })
   }
 
@@ -1028,17 +1051,17 @@ function SelectorEtapa({
     if (!gateModal) return
     const intento = gateModal
     setErrorAvanceCruce(null)
-    startTransition(async () => {
-      const avance = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
-      if (avance.error) {
-        setErrorAvanceCruce(avance.error)
-        return
+    lanzar(async () => {
+      const excepcion = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
+      if (excepcion.error) {
+        setErrorAvanceCruce(excepcion.error)
+        return false
       }
       const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
-        return
+        return false
       }
       setGateModal(null)
       const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
@@ -1048,13 +1071,14 @@ function SelectorEtapa({
           nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
           confirmacion: result.confirmacion,
         })
-        return
+        return false
       }
       if (result.error) {
         toast.error('El motivo quedó guardado, pero el negocio no avanzó: ' + result.error)
-        return
+        return false
       }
       toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      return true
     })
   }
 
@@ -1136,6 +1160,16 @@ function SelectorEtapa({
           </button>
         ) : (
           <>
+            {avance.fase === 'atascado' ? (
+              // El caso avanzó pero la ficha nueva no llegó: se ofrece recargar, no avanzar otra vez.
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+                data-recargar-avance
+              >
+                Avanzado · Recargar
+              </button>
+            ) : (
             <button
               // Con `onClick={handleAvanzar}` React pasa el MouseEvent como primer
               // argumento, y ese argumento ahora es `confirmado`: cada clic normal
@@ -1145,8 +1179,10 @@ function SelectorEtapa({
               disabled={isPending}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
             >
-              {isPending ? (
+              {avance.fase === 'enviando' ? (
                 <span className="text-muted-foreground">Cambiando...</span>
+              ) : avance.fase === 'actualizando' ? (
+                <span className="text-muted-foreground">Avanzado, actualizando...</span>
               ) : (
                 <>
                   <ChevronRight className="h-3 w-3 text-muted-foreground" />
@@ -1154,6 +1190,7 @@ function SelectorEtapa({
                 </>
               )}
             </button>
+            )}
             {puedePausar && (
               <button
                 onClick={() => setShowPausaDialog(true)}

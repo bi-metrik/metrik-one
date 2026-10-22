@@ -42,6 +42,7 @@ const VENCIDO = 'd0000000-0000-4000-8000-000000000005'
 process.env.SUPABASE_SERVICE_ROLE_KEY ??= 'llave-de-prueba-para-firmar'
 
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { buscarProveedoresParaCotizacion, crearLineaConTarifa, tarifasParaLineaNueva } from './tarifas-proveedor-actions'
 
 const fila = (x: Fila) => ({ moneda: 'COP', establecimiento: null, archivo: 'Tarifas Ficticias 2027.pdf', fuente: { pagina: 1, texto: 'cita' }, ...x })
@@ -173,6 +174,30 @@ describe('la línea nace con la tarifa (puntos 2 y 3)', () => {
     expect(await crearLineaConTarifa(COT, SIN_REVISAR, { filas: [{ indice: 0 }] })).toMatchObject({ ok: false })
     expect(await crearLineaConTarifa(COT, VENCIDO, { filas: [{ indice: 0 }] })).toMatchObject({ ok: false, error: expect.stringMatching(/pide el tarifario nuevo/) })
     expect(lineas()).toHaveLength(0)
+  })
+
+  it('prueba del #1229 · el nombre completo y lo que incluye llegan al documento; IVA sin respaldo vacío; un viaje de un día propone el día', async () => {
+    viaje.fechas = { inicio: '2027-02-01', fin: '2027-02-01' }
+    base.tablas.proveedor_extracciones[1].tarifario = {
+      canal: 'neta',
+      impuestos: { iva_declarado: false, iva_incluido: false, iva_pct: null },
+      planes: [{ codigo: 'CA', nombre: 'CON ALMUERZO', incluye: ['ALMUERZO TÍPICO', 'Transporte en lancha'] }],
+      tarifas: [
+        fila({ categoria: 'PLAYA FICTICIA', plan: 'CA', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 95000 }),
+        fila({ categoria: 'TOUR NOCTURNO FICTICIO', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 33000 }),
+      ],
+    }
+    const v = await tarifasParaLineaNueva(COT, OPERADOR)
+    expect(v.ok && v.ajustes?.ivaPct).toBeNull()
+    const r = await crearLineaConTarifa(COT, OPERADOR, { filas: [{ indice: 0 }] }, v.ok ? v.ajustes : null)
+    expect(r).toMatchObject({ ok: true, confirmada: true, total: 190000 })
+    const item = lineas()[0]
+    // Lo que imprime el documento del cliente (`cotizacion-pdf-actions`: nombre y descripción visibles).
+    expect(nombreVisibleDeLinea(item)).toBe('Playa Ficticia con almuerzo')
+    expect(descripcionVisibleDeLinea(item)).toContain('Incluye: almuerzo típico y transporte en lancha.')
+    const t = leerTarifaPax(item.tarifa_pax)
+    expect(t.tarifaExtraida?.iva_pct).toBeNull()
+    expect(item.dia_relativo).toBe(1)
   })
 
   it('una cotización enviada o un rol de solo lectura no crean la línea', async () => {

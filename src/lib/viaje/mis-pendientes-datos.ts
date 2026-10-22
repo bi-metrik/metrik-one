@@ -16,12 +16,14 @@ import { negociosDePruebaOcultos } from '@/lib/negocios/negocios-de-prueba'
 import {
   loProximo,
   pendientesDe,
+  serviciosProximosDe,
   tableroDeMargen,
   type AprobacionPendiente,
   type CierreTablero,
   type Pendiente,
   type Persona,
   type ServicioPendiente,
+  type ServicioProximo,
   type Tablero,
   type ViajePendiente,
 } from './mis-pendientes'
@@ -42,7 +44,7 @@ const fecha = (v: unknown): string | null => (typeof v === 'string' ? /^(\d{4}-\
 
 export type MisPendientes =
   | { activo: false }
-  | { activo: true; hoy: string; persona: Persona; pendientes: Pendiente[]; proximo: { texto: string; fecha: string } | null; tablero: Tablero | null }
+  | { activo: true; hoy: string; persona: Persona; pendientes: Pendiente[]; servicios: ServicioProximo[]; proximo: { texto: string; fecha: string } | null; tablero: Tablero | null }
 
 /** ¿El espacio tiene líneas de viaje? (para mostrar la pestaña sin cargar todo). */
 export async function hayLineasDeViaje(): Promise<boolean> {
@@ -83,7 +85,7 @@ export async function cargarMisPendientes(): Promise<MisPendientes> {
       await db.from('cobros').select('negocio_id, monto, fecha, retencion_iva, anulado_at').in('negocio_id', t),
     )),
     porTandas(ids, async t => filas<ServicioPendiente & { negocio_id: string }>(
-      await db.from('negocio_servicios').select('id, negocio_id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, confirmacion_ref, fecha_limite_pago').in('negocio_id', t),
+      await db.from('negocio_servicios').select('id, negocio_id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, confirmacion_ref, fecha_limite_pago, tipo, fecha_servicio, hora_inicio, fecha_fin, hora_fin, tramos, responsable_staff_id').in('negocio_id', t),
     )),
     porTandas(ids, async t => filas<AprobacionPendiente & { negocio_id: string; solicitada_por: string | null }>(
       await db.from('aprobaciones_excepcion').select('id, negocio_id, tipo, entidad_tipo, entidad_id, estado, motivo, detalle, solicitada_por, decidida_at').in('negocio_id', t).in('estado', ['solicitada', 'rechazada']),
@@ -147,7 +149,7 @@ export async function cargarMisPendientes(): Promise<MisPendientes> {
   })
 
   const tablero = esDireccion ? await cargarTablero(db, workspaceId, lineaIds, staffId ?? null) : null
-  return { activo: true, hoy, persona, pendientes: pendientesDe(viajes, persona, hoy), proximo: loProximo(viajes, hoy), tablero }
+  return { activo: true, hoy, persona, pendientes: pendientesDe(viajes, persona, hoy), servicios: serviciosProximosDe(viajes, persona, hoy), proximo: loProximo(viajes, hoy), tablero }
 }
 
 async function cargarTablero(db: Db, workspaceId: string, lineaIds: string[], staffId: string | null): Promise<Tablero> {
