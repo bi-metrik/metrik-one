@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert, FileText } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import {
   marcarCompletada,
@@ -46,6 +46,7 @@ const TIPO_ICON: Record<string, React.ElementType> = {
   cuenta_cobro_pendiente_aprobacion: CircleDollarSign,
   compliance_hallazgo: ShieldAlert,
   compliance_delta_contraparte: ShieldAlert,
+  factura_cargada: FileText,
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -63,6 +64,7 @@ const TIPO_COLOR: Record<string, string> = {
   cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
   compliance_hallazgo: 'var(--alerta)',
   compliance_delta_contraparte: 'var(--alerta)',
+  factura_cargada: 'var(--acento)',
 }
 
 // ── Componente principal ──────────────────────────────

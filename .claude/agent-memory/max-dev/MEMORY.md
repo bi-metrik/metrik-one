@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Aviso de factura cargada al pagador](project_aviso_factura_cuota_cargada.md) — 20261022153000 SIN aplicar; solo el designado; activo manda
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
 - ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — 20261021120000 SIN aplicar; corrección a mano manda; reproceso pierde con rastro
 - [Tablero Novedades (21-oct)](project_novedades_tablero.md) — archivo versionado + panel; visto por ids; el 503 crudo ya lo arregló #1241

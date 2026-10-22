@@ -7,6 +7,7 @@ import { anclaDeFila, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla
 import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
+import { avisarFacturaCargada } from '@/lib/valida-cda/aviso-factura-cuota-servidor'
 import { BUCKET_DOCUMENTOS_SERVICIO } from '@/lib/valida-api/recibo-manual'
 import { esUuid } from '@/lib/valida-api/reglas'
 import {
@@ -34,6 +35,9 @@ import {
  * Volver a cargar reemplaza la parte que se sube y conserva la otra (el XML puede llegar después del
  * PDF). El reemplazo queda en `activity_log` con el número; el archivo anterior se queda en el bucket
  * bajo su huella.
+ *
+ * Al quedar registrada, la persona designada del espacio que paga recibe un aviso en la campana
+ * (`avisarFacturaCargada`, 2026-10-22). Recargar con el aviso aún pendiente lo actualiza, no lo duplica.
  */
 
 export type ResultadoFacturaCuota = { ok: true; numero: string } | { ok: false; error: string }
@@ -164,6 +168,17 @@ export async function cargarFacturaCuota(formData: FormData): Promise<ResultadoF
       'cargarFacturaCuota',
     )
   }
+
+  // El aviso en la campana de la persona designada del espacio que paga. Nunca lanza: si no sale, la
+  // factura igual quedó y el cliente la ve en Pagos.
+  await avisarFacturaCargada(svc, {
+    workspaceCobradorId: workspaceId,
+    ancla,
+    cuotaId,
+    numeroCuota: cuota.data.numero ?? null,
+    numeroFactura: numero,
+    reemplazo: Boolean(previa.data),
+  })
 
   if (ancla.tipo === 'negocio') revalidatePath(`/negocios/${ancla.id}`)
   return { ok: true, numero }
