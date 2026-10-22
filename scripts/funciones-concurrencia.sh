@@ -53,9 +53,9 @@ insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacida
   ('$F_PAGO', '$WS', '$CAMP', now() + interval '1 day 3 hours', 3, 3),
   ('$F_OTRA', '$WS', '$CAMP', now() + interval '1 day 4 hours', 10, 10);
 insert into chatwoot_consentimientos (workspace_id, cuenta_id, conversacion_id, canal, tipo, respuesta, texto_clave, texto_version, texto_huella)
-  select '$WS', 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g
+  select '$WS'::uuid, 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g
   union all
-  select '$WS', 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(101, 102) g;
+  select '$WS'::uuid, 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(101, 102) g;
 SQL
 
 # Una sesión que corre $2 dentro de una transacción y la sostiene 0,2 s antes del commit.
