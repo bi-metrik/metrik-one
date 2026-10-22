@@ -8,6 +8,7 @@
 - ⚠️⚠️ [Aviso de factura cargada al pagador](project_aviso_factura_cuota_cargada.md) — #1244; 20261022153000 APLICADA; solo el designado; activo manda
 - ⚠️⚠️ [Hitos de gestión y Agenda (Trappvel)](project_hitos_de_gestion.md) — #1245; 20261022090000 dry-run de Mik OK, SIN aplicar; MX sin plazo
 - ⚠️ [Bandeja Trappvel lee foto/PDF + gastos vigentes ONE](project_bandeja_adjuntos_trappvel.md) — soporte = comentario con one://; leer_adjuntos; arnés a-* sin llave
+- ⚠️ [Barrido ámbar del viaje (22-oct)](project_barrido_ambar_viaje.md) — gates con push, nunca return; cotizacion_requerida sin config
 - ⚠️ [Barrido de bloques y gates del viaje](project_barrido_gates_viaje.md) — la ficha ESCRIBE el estado de 3 bloques; saldo_cero cambió para todos
 - ⚠️⚠️ [Fechas completas de los servicios del viaje](project_fechas_servicios_viaje.md) — #1236 mergeado (8d29ec61), 20261021120000 APLICADA; corrección a mano manda; reproceso pierde con rastro
 - [Tablero Novedades (21-oct)](project_novedades_tablero.md) — archivo versionado + panel; visto por ids; el 503 crudo ya lo arregló #1241
