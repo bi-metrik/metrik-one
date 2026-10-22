@@ -51,7 +51,7 @@ export async function apartar(puerto: PuertoFunciones, p: PropuestaApartado): Pr
     documento: texto(p.documento, 40),
     telefono: texto(p.telefono, 40),
     contactoCanal: texto(p.contactoCanal, 200),
-    preferenciaMesa: texto(p.preferenciaMesa, 300),
+    solicitudCliente: texto(p.solicitudCliente, 500),
     huellaPropuesta: huella,
   };
   return puerto.apartar(limpia);

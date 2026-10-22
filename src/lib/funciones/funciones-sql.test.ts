@@ -1,9 +1,10 @@
 /**
- * `20261021120000_modulo_funciones.sql` corrida de verdad en Postgres en memoria (PGlite), encima de la migración real
+ * `20261022170000_modulo_funciones.sql` corrida de verdad en Postgres en memoria (PGlite), encima de la migración real
  * del asistente (`20261021090000_asistente_chatwoot.sql`, de donde sale `chatwoot_consentimientos`).
  *
  * Son las pruebas de §5 del diseño (`proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md`):
- * no sobreventa (1-7), mesas (9-16) y datos y permisos (17-19). La 8 (concurrencia) no se puede probar aquí: PGlite
+ * no sobreventa (1-7), datos y permisos (17-19) y formulario (20). Las de mesas (9-15) salieron con el mapa del salón
+ * (alcance del 2026-10-22); de la 16 queda que no hay por dónde guardar una mesa. La 8 (concurrencia) no se prueba aquí: PGlite
  * tiene UNA conexión y el `for update` nunca espera a nadie. La corre `scripts/funciones-concurrencia.sh` contra un
  * Postgres real en el job «Concurrencia de funciones» del CI; aquí queda solo la ráfaga en serie, que prueba la
  * cuenta pero no el candado.
@@ -20,7 +21,7 @@ const RAIZ = process.cwd()
 const leer = (ruta: string) => readFileSync(join(RAIZ, ruta), 'utf8')
 const ESQUEMA_BASE = leer('src/lib/funciones/__fixtures__/esquema-base.sql')
 const CHATWOOT = leer('supabase/migrations/20261021090000_asistente_chatwoot.sql')
-const FUNCIONES = leer('supabase/migrations/20261021120000_modulo_funciones.sql')
+const FUNCIONES = leer('supabase/migrations/20261022170000_modulo_funciones.sql')
 
 const WS = '00000000-0000-4000-8000-00000000f001'
 const OTRO_WS = '00000000-0000-4000-8000-00000000f002'
@@ -72,48 +73,27 @@ async function siendo<T>(quien: Quien, f: () => Promise<T>): Promise<T> {
   }
 }
 
+const TABLAS = ['funcion_experiencias', 'funcion_funciones', 'funcion_reservas']
+
 interface Escenario {
   experiencia: string
-  montaje: string | null
   funcion: string
-  mesas: Record<string, string>
 }
 
-/** Una experiencia, opcionalmente un montaje con mesas (etiqueta → puestos), y una función mañana. */
-async function escenario(o: {
-  cupo: number
-  mesas?: Record<string, number>
-  minutos?: number | null
-  estado?: string
-  cierraVentaAt?: string | null
-  ws?: string
-}): Promise<Escenario> {
+/** Una experiencia y una función mañana. */
+async function escenario(o: { cupo: number; minutos?: number | null; estado?: string; cierraVentaAt?: string | null; ws?: string }): Promise<Escenario> {
   const ws = o.ws ?? WS
   const experiencia = uuid()
   await q(`insert into funcion_experiencias (id, workspace_id, nombre, minutos_apartado) values ($1, $2, 'Ratatouille', $3)`, [
     experiencia, ws, o.minutos === undefined ? 30 : o.minutos,
   ])
-  let montaje: string | null = null
-  const mesas: Record<string, string> = {}
-  if (o.mesas) {
-    montaje = uuid()
-    await q(`insert into funcion_montajes (id, workspace_id, experiencia_id, nombre) values ($1, $2, $3, 'Salón')`, [montaje, ws, experiencia])
-    let orden = 0
-    for (const [etiqueta, puestos] of Object.entries(o.mesas)) {
-      const id = uuid()
-      mesas[etiqueta] = id
-      await q(`insert into funcion_mesas (id, workspace_id, montaje_id, etiqueta, puestos, orden) values ($1, $2, $3, $4, $5, $6)`, [
-        id, ws, montaje, etiqueta, puestos, orden++,
-      ])
-    }
-  }
   const funcion = uuid()
   await q(
-    `insert into funcion_funciones (id, workspace_id, experiencia_id, montaje_id, inicia_at, cupo_total, estado, cierra_venta_at)
-     values ($1, $2, $3, $4, now() + interval '1 day', $5, $6, $7)`,
-    [funcion, ws, experiencia, montaje, o.cupo, o.estado ?? 'abierta', o.cierraVentaAt ?? null],
+    `insert into funcion_funciones (id, workspace_id, experiencia_id, inicia_at, cupo_total, estado, cierra_venta_at)
+     values ($1, $2, $3, now() + interval '1 day', $4, $5, $6)`,
+    [funcion, ws, experiencia, o.cupo, o.estado ?? 'abierta', o.cierraVentaAt ?? null],
   )
-  return { experiencia, montaje, funcion, mesas }
+  return { experiencia, funcion }
 }
 
 /** Una autorización en `chatwoot_consentimientos` (la escribe el asistente; aquí, el dueño). */
@@ -149,7 +129,7 @@ async function apartarAsistente(funcion: string, personas: number, o: { clave?: 
 async function apartarEquipo(funcion: string, personas: number, clave = `eq-${uuid()}`, ws = WS, perfil = EQUIPO) {
   return siendo({ equipo: perfil }, async () => {
     const r = await q<{ r: { reserva_id: string; estado: string } }>(
-      `select funcion_apartar($1, $2, $3, '{"nombre": "Mesa del equipo"}'::jsonb, $4, 'equipo') as r`,
+      `select funcion_apartar($1, $2, $3, '{"nombre": "Reserva del equipo"}'::jsonb, $4, 'equipo') as r`,
       [ws, funcion, personas, clave],
     )
     return r[0].r
@@ -158,18 +138,12 @@ async function apartarEquipo(funcion: string, personas: number, clave = `eq-${uu
 
 async function ocupacion(funcion: string, quien: Quien = { equipo: EQUIPO }) {
   return siendo(quien, async () => {
-    const r = await q<{ o: { cupo_total: number; ocupadas: number; libres: number; mesas: Array<{ etiqueta: string; ocupados: number; reservas: Array<{ reserva_id: string; personas: number }> }> | null } }>(
+    const r = await q<{ o: { cupo_total: number; ocupadas: number; libres: number } }>(
       `select funcion_ocupacion($1) as o`,
       [funcion],
     )
     return r[0].o
   })
-}
-
-async function asignar(reserva: string, asignaciones: Array<{ mesa_id: string; personas: number }>, perfil = EQUIPO) {
-  return siendo({ equipo: perfil }, () =>
-    q(`select funcion_asignar_mesas($1, $2::jsonb)`, [reserva, JSON.stringify(asignaciones)]),
-  )
 }
 
 async function cancelar(reserva: string) {
@@ -300,17 +274,12 @@ describe('no sobreventa', () => {
     expect(await codigo(apartarEquipo(e.funcion, 1))).toBe('funcion_cerrada')
   })
 
-  it('7. bajar el cupo por debajo de lo ocupado falla; cupo sobre los puestos del montaje falla', async () => {
-    const e = await escenario({ cupo: 6, mesas: { M1: 4, M2: 4 } })
+  it('7. bajar el cupo por debajo de lo ocupado falla; hasta lo ocupado, sí', async () => {
+    const e = await escenario({ cupo: 6 })
     await apartarEquipo(e.funcion, 5)
     expect(await codigo(q(`update funcion_funciones set cupo_total = 4 where id = $1`, [e.funcion]))).toBe('cupo_bajo_ocupacion')
     await q(`update funcion_funciones set cupo_total = 5 where id = $1`, [e.funcion])
-    expect(await codigo(q(`update funcion_funciones set cupo_total = 9 where id = $1`, [e.funcion]))).toBe('cupo_sobre_puestos')
-    const exp = (await q<{ experiencia_id: string }>(`select experiencia_id from funcion_funciones where id = $1`, [e.funcion]))[0].experiencia_id
-    expect(await codigo(q(
-      `insert into funcion_funciones (workspace_id, experiencia_id, montaje_id, inicia_at, cupo_total)
-       values ($1, $2, $3, now() + interval '2 days', 9)`, [WS, exp, e.montaje],
-    ))).toBe('cupo_sobre_puestos')
+    expect((await ocupacion(e.funcion)).libres).toBe(0)
   })
 
   it('8 (en serie). una ráfaga de 30 apartados de 1 sobre cupo 7 deja 7 ocupadas', async () => {
@@ -325,123 +294,33 @@ describe('no sobreventa', () => {
   })
 })
 
-describe('mesas', () => {
-  it('9. asignar dentro de los puestos pasa; pasarse da mesa_llena', async () => {
-    const e = await escenario({ cupo: 8, mesas: { M1: 4, M2: 4 } })
-    const a = await apartarEquipo(e.funcion, 4)
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 4 }])
-    const b = await apartarEquipo(e.funcion, 2)
-    expect(await codigo(asignar(b.reserva_id, [{ mesa_id: e.mesas.M1, personas: 2 }]))).toBe('mesa_llena')
-    const o = await ocupacion(e.funcion)
-    expect(o.mesas!.map((m) => [m.etiqueta, m.ocupados])).toEqual([['M1', 4], ['M2', 0]])
-    expect(o.mesas![0].reservas).toEqual([expect.objectContaining({ reserva_id: a.reserva_id, personas: 4 })])
+describe('sin mesas (alcance del 2026-10-22)', () => {
+  it('lo que pide el cliente es texto libre; una mesa o un puesto no entran por ningún lado', async () => {
+    const e = await escenario({ cupo: 8 })
+    for (const extra of [{ mesa_id: uuid() }, { mesas: [{ mesa_id: uuid(), personas: 2 }] }, { puesto: 'F1' }, { preferencia_mesa: 'frente' }]) {
+      expect(await codigo(apartarAsistente(e.funcion, 2, { datos: extra }))).toBe('dato_no_admitido')
+    }
+    const a = await apartarAsistente(e.funcion, 6, { datos: { solicitud_cliente: 'vamos 6, queremos estar juntos' } })
+    const r = (await q<{ solicitud_cliente: string }>(`select solicitud_cliente from funcion_reservas where id = $1`, [a.reserva_id]))[0]
+    expect(r.solicitud_cliente).toBe('vamos 6, queremos estar juntos')
+    // Ni tablas ni funciones de mesas: el módulo no tiene dónde guardar una.
+    const restos = await q<{ n: string }>(
+      `select relname as n from pg_class where relnamespace = 'public'::regnamespace and relname ~ '^funcion_(montajes|mesas|reserva_mesas)$'
+       union all
+       select proname from pg_proc where pronamespace = 'public'::regnamespace and proname in ('funcion_asignar_mesas', 'funcion_guardar_montaje')`,
+    )
+    expect(restos).toEqual([])
+    const columnas = await q<{ n: string }>(
+      `select column_name as n from information_schema.columns where table_schema = 'public' and table_name like 'funcion\\_%' and column_name ~ '(montaje|mesa|puesto)'`,
+    )
+    expect(columnas).toEqual([])
   })
 
-  it('10. una mesa de otro montaje: mesa_de_otro_montaje', async () => {
-    const e = await escenario({ cupo: 4, mesas: { M1: 4 } })
-    const otro = await escenario({ cupo: 4, mesas: { X1: 4 } })
-    const a = await apartarEquipo(e.funcion, 2)
-    expect(await codigo(asignar(a.reserva_id, [{ mesa_id: otro.mesas.X1, personas: 2 }]))).toBe('mesa_de_otro_montaje')
-    expect((await q(`select 1 from funcion_reserva_mesas where reserva_id = $1`, [a.reserva_id])).length).toBe(0)
-  })
-
-  it('11. repartir 6 en dos mesas de 4 (4 + 2); si no suman 6: personas_no_cuadran', async () => {
-    const e = await escenario({ cupo: 8, mesas: { M1: 4, M2: 4 } })
-    const a = await apartarEquipo(e.funcion, 6)
-    expect(await codigo(asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 4 }, { mesa_id: e.mesas.M2, personas: 1 }]))).toBe('personas_no_cuadran')
-    expect(await codigo(asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 4 }]))).toBe('personas_no_cuadran')
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 4 }, { mesa_id: e.mesas.M2, personas: 2 }])
-    const o = await ocupacion(e.funcion)
-    expect(o.mesas!.map((m) => m.ocupados)).toEqual([4, 2])
-  })
-
-  it('12. dos reservas comparten mesa hasta llenarla', async () => {
-    const e = await escenario({ cupo: 6, mesas: { M1: 4, M2: 2 } })
-    const a = await apartarEquipo(e.funcion, 2)
-    const b = await apartarEquipo(e.funcion, 2)
-    const c = await apartarEquipo(e.funcion, 1)
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 2 }])
-    await asignar(b.reserva_id, [{ mesa_id: e.mesas.M1, personas: 2 }])
-    expect(await codigo(asignar(c.reserva_id, [{ mesa_id: e.mesas.M1, personas: 1 }]))).toBe('mesa_llena')
-    const m1 = (await ocupacion(e.funcion)).mesas!.find((m) => m.etiqueta === 'M1')!
-    expect(m1.ocupados).toBe(4)
-    expect(m1.reservas.map((r) => r.reserva_id).sort()).toEqual([a.reserva_id, b.reserva_id].sort())
-  })
-
-  it('13. mover a otra mesa libera la anterior', async () => {
-    const e = await escenario({ cupo: 8, mesas: { M1: 4, M2: 4 } })
-    const a = await apartarEquipo(e.funcion, 4)
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 4 }])
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M2, personas: 4 }])
-    expect((await ocupacion(e.funcion)).mesas!.map((m) => m.ocupados)).toEqual([0, 4])
-    // Y liberar (asignación vacía) la deja sin mesa.
-    await asignar(a.reserva_id, [])
-    expect((await ocupacion(e.funcion)).mesas!.map((m) => m.ocupados)).toEqual([0, 0])
-  })
-
-  it('14. cancelar o vencer una reserva libera su mesa', async () => {
-    const e = await escenario({ cupo: 8, mesas: { M1: 4, M2: 4 } })
-    const a = await apartarEquipo(e.funcion, 4)
-    const b = await apartarEquipo(e.funcion, 4)
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 4 }])
-    await asignar(b.reserva_id, [{ mesa_id: e.mesas.M2, personas: 4 }])
-    await cancelar(a.reserva_id)
-    await vencer(b.reserva_id)
-    // Vencido sin marcar: la lectura ya no lo sienta.
-    expect((await ocupacion(e.funcion)).mesas!.map((m) => m.ocupados)).toEqual([0, 0])
-    // Al marcarlo (cualquier operación con el candado), la fila de la mesa desaparece.
-    await apartarEquipo(e.funcion, 1)
-    expect(await estado(b.reserva_id)).toBe('vencida')
-    expect((await q(`select 1 from funcion_reserva_mesas where reserva_id in ($1, $2)`, [a.reserva_id, b.reserva_id])).length).toBe(0)
-    expect(await codigo(asignar(b.reserva_id, [{ mesa_id: e.mesas.M2, personas: 4 }]))).toBe('reserva_inactiva')
-  })
-
-  it('15. borrar una mesa con asignaciones futuras, o bajarle los puestos: falla', async () => {
-    const e = await escenario({ cupo: 4, mesas: { M1: 4, M2: 4, M3: 2 } })
-    const a = await apartarEquipo(e.funcion, 3)
-    await asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 3 }])
-    expect(await codigo(q(`delete from funcion_mesas where id = $1`, [e.mesas.M1]))).toBe('mesa_con_asignaciones')
-    expect(await codigo(q(`update funcion_mesas set puestos = 2 where id = $1`, [e.mesas.M1]))).toBe('mesa_con_asignaciones')
-    // Bajarle a 3 (lo asignado) sí; subirla también.
-    await q(`update funcion_mesas set puestos = 3 where id = $1`, [e.mesas.M1])
-    await q(`update funcion_mesas set puestos = 6 where id = $1`, [e.mesas.M1])
-    // Una mesa sin asignaciones se borra, mientras el montaje siga cubriendo el cupo.
-    await q(`delete from funcion_mesas where id = $1`, [e.mesas.M3])
-    // Cambiar el montaje de una función con reservas sentadas: prohibido.
-    const otro = await escenario({ cupo: 4, mesas: { X1: 4 } })
-    expect(await codigo(q(`update funcion_funciones set montaje_id = $2 where id = $1`, [e.funcion, otro.montaje]))).not.toBe('ok')
-  })
-
-  it('la mesa no puede dejar al montaje con menos puestos que el cupo de una función futura', async () => {
-    const e = await escenario({ cupo: 8, mesas: { M1: 4, M2: 4 } })
-    expect(await codigo(q(`update funcion_mesas set puestos = 3 where id = $1`, [e.mesas.M2]))).toBe('cupo_sobre_puestos')
-    expect(await codigo(q(`delete from funcion_mesas where id = $1`, [e.mesas.M2]))).toBe('cupo_sobre_puestos')
-  })
-
-  it('16. apartar no tiene cómo asignar mesa, y funcion_asignar_mesas no es ejecutable con la llave del asistente', async () => {
-    const e = await escenario({ cupo: 4, mesas: { M1: 4 } })
-    expect(await codigo(apartarAsistente(e.funcion, 2, { datos: { mesa_id: e.mesas.M1 } }))).toBe('dato_no_admitido')
-    expect(await codigo(apartarAsistente(e.funcion, 2, { datos: { mesas: [{ mesa_id: e.mesas.M1, personas: 2 }] } }))).toBe('dato_no_admitido')
-    const a = await apartarAsistente(e.funcion, 2, { datos: { preferencia_mesa: 'cerca de la pantalla' } })
-    expect((await q<{ preferencia_mesa: string }>(`select preferencia_mesa from funcion_reservas where id = $1`, [a.reserva_id]))[0].preferencia_mesa).toBe('cerca de la pantalla')
-    expect((await q(`select 1 from funcion_reserva_mesas where reserva_id = $1`, [a.reserva_id])).length).toBe(0)
-    expect(await codigo(siendo('servidor', () =>
-      q(`select funcion_asignar_mesas($1, $2::jsonb)`, [a.reserva_id, JSON.stringify([{ mesa_id: e.mesas.M1, personas: 2 }])]),
-    ))).toMatch(/permission denied/)
-    expect(await codigo(siendo('servidor', () => q(`select funcion_cancelar_reserva($1)`, [a.reserva_id])))).toMatch(/permission denied/)
-    const priv = (await q<{ srv: boolean; auth: boolean }>(
-      `select has_function_privilege('service_role', 'public.funcion_asignar_mesas(uuid, jsonb)', 'execute') as srv,
-              has_function_privilege('authenticated', 'public.funcion_asignar_mesas(uuid, jsonb)', 'execute') as auth`,
-    ))[0]
-    expect(priv).toEqual({ srv: false, auth: true })
-  })
-
-  it('una función sin montaje tiene cupo y reservas, sin mapa', async () => {
+  it('la cancelación del equipo no es ejecutable con la llave del asistente', async () => {
     const e = await escenario({ cupo: 4 })
-    const a = await apartarEquipo(e.funcion, 2)
-    const o = await ocupacion(e.funcion)
-    expect([o.ocupadas, o.mesas]).toEqual([2, null])
-    expect(await codigo(asignar(a.reserva_id, [{ mesa_id: uuid(), personas: 2 }]))).toBe('funcion_sin_montaje')
+    const a = await apartarAsistente(e.funcion, 2)
+    expect(await codigo(siendo('servidor', () => q(`select funcion_cancelar_reserva($1)`, [a.reserva_id])))).toMatch(/permission denied/)
+    expect(await estado(a.reserva_id)).toBe('apartada')
   })
 })
 
@@ -503,21 +382,20 @@ describe('datos y permisos', () => {
   })
 
   it('19. authenticated de otro workspace no ve ni escribe nada; nadie escribe las tablas directo', async () => {
-    const e = await escenario({ cupo: 4, mesas: { M1: 4 } })
+    const e = await escenario({ cupo: 4 })
     const a = await apartarEquipo(e.funcion, 2)
 
     const visibles = await siendo({ equipo: AJENO }, () =>
-      Promise.all(['funcion_experiencias', 'funcion_montajes', 'funcion_mesas', 'funcion_funciones', 'funcion_reservas', 'funcion_reserva_mesas']
-        .map(async (t) => (await q(`select 1 from ${t}`)).length)),
+      Promise.all(TABLAS.map(async (t) => (await q(`select 1 from ${t}`)).length)),
     )
-    expect(visibles).toEqual([0, 0, 0, 0, 0, 0])
+    expect(visibles).toEqual([0, 0, 0])
     const propias = await siendo({ equipo: EQUIPO }, async () => (await q(`select 1 from funcion_reservas where id = $1`, [a.reserva_id])).length)
     expect(propias).toBe(1)
 
     expect(await codigo(siendo({ equipo: AJENO }, () => q(`select funcion_ocupacion($1)`, [e.funcion])))).toBe('funcion_no_existe')
     expect(await codigo(apartarEquipo(e.funcion, 1, `aj-${uuid()}`, WS, AJENO))).toBe('funcion_no_existe')
     expect(await codigo(siendo({ equipo: AJENO }, () => q(`select funcion_cancelar_reserva($1)`, [a.reserva_id])))).toBe('reserva_no_existe')
-    expect(await codigo(asignar(a.reserva_id, [{ mesa_id: e.mesas.M1, personas: 2 }], AJENO))).toBe('reserva_no_existe')
+    expect(await codigo(siendo({ equipo: AJENO }, () => q(`select funcion_confirmar_pago($1, 'verificado_manual')`, [a.reserva_id])))).toBe('reserva_no_existe')
     expect(await estado(a.reserva_id)).toBe('apartada')
 
     // Un rol de solo lectura del mismo workspace ve, pero no escribe.
@@ -529,8 +407,9 @@ describe('datos y permisos', () => {
       expect(await codigo(siendo(quien, () => q(`update funcion_reservas set personas = 1 where id = $1`, [a.reserva_id])))).toMatch(/permission denied/)
       expect(await codigo(siendo(quien, () => q(`delete from funcion_reservas where id = $1`, [a.reserva_id])))).toMatch(/permission denied/)
       expect(await codigo(siendo(quien, () => q(
-        `insert into funcion_reserva_mesas (reserva_id, mesa_id, workspace_id, funcion_id, montaje_id, personas, asignada_por)
-         values ($1, $2, $3, $4, $5, 2, $6)`, [a.reserva_id, e.mesas.M1, WS, e.funcion, e.montaje, EQUIPO])))).toMatch(/permission denied/)
+        `insert into funcion_reservas (workspace_id, funcion_id, personas, canal, origen, clave_idempotencia)
+         values ($1, $2, 2, 'equipo', 'equipo', 'directa')`, [WS, e.funcion])))).toMatch(/permission denied/)
+      expect(await codigo(siendo(quien, () => q(`update funcion_funciones set cupo_total = 100 where id = $1`, [e.funcion])))).toMatch(/permission denied/)
     }
     // anon no ejecuta ninguna RPC del módulo.
     const anon = (await q<{ f: string; x: boolean }>(
@@ -542,7 +421,7 @@ describe('datos y permisos', () => {
   })
 
   it('el asistente solo ve cupo libre y si está agotada, de funciones futuras de su workspace', async () => {
-    const e = await escenario({ cupo: 4, mesas: { M1: 4 } })
+    const e = await escenario({ cupo: 4 })
     await apartarAsistente(e.funcion, 4)
     const c = await siendo('servidor', async () =>
       (await q<{ c: Record<string, unknown> }>(`select funcion_consultar_cupo($1, $2) as c`, [WS, e.funcion]))[0].c,
@@ -579,77 +458,36 @@ describe('20. formulario de alta (F1): pasa por las RPC y respeta los candados',
     siendo({ equipo: perfil }, async () => (await q<{ r: T }>(sql, params))[0].r)
   const experienciaNueva = (nombre = 'Ratatouille', minutos: number | null = 45) =>
     rpc<string>(`select funcion_guardar_experiencia($1, null, $2, $3, true) as r`, [WS, nombre, minutos])
-  const montaje = (exp: string, mesas: unknown[], id: string | null = null) =>
-    rpc<string>(`select funcion_guardar_montaje($1, $2, $3, 'Salón', null, $4::jsonb) as r`, [WS, id, exp, JSON.stringify(mesas)])
-  const crear = (exp: string, mont: string | null, cupo: number, inicios: string[]) =>
-    rpc<string[]>(`select funcion_crear_funciones($1, $2, $3, $4, 'abierta', 120, $5::jsonb) as r`, [WS, exp, mont, cupo, JSON.stringify(inicios)])
+  const crear = (exp: string, cupo: number, inicios: string[]) =>
+    rpc<string[]>(`select funcion_crear_funciones($1, $2, $3, 'abierta', 120, $4::jsonb) as r`, [WS, exp, cupo, JSON.stringify(inicios)])
   const enDias = (d: number, min = 0) => new Date(Date.now() + d * 86_400_000 + min * 60_000).toISOString()
-  const mesasDe = async (m: string) =>
-    Object.fromEntries((await q<{ etiqueta: string; id: string }>(`select etiqueta, id from funcion_mesas where montaje_id = $1`, [m])).map((r) => [r.etiqueta, r.id]))
 
-  it('crea experiencia, montaje con mesas y varias funciones; el cupo no pasa los puestos', async () => {
+  it('crea la experiencia y varias funciones con el mismo cupo y cierre; todo o nada', async () => {
     const exp = await experienciaNueva()
-    const m = await montaje(exp, [
-      { etiqueta: 'M1', puestos: 4, zona: 'frente', condicion: 'cerca de la pantalla', x: 10, y: 10 },
-      { etiqueta: 'M2', puestos: 2 },
-    ])
-    const mesas = await q<{ etiqueta: string; puestos: number; orden: number }>(`select etiqueta, puestos, orden from funcion_mesas where montaje_id = $1 order by orden`, [m])
-    expect(mesas).toEqual([{ etiqueta: 'M1', puestos: 4, orden: 1 }, { etiqueta: 'M2', puestos: 2, orden: 2 }])
-
-    const ids = await crear(exp, m, 6, [enDias(3), enDias(4)])
+    const ids = await crear(exp, 24, [enDias(3), enDias(4)])
     expect(ids).toHaveLength(2)
-    const f = await q<{ cierra: boolean }>(`select cierra_venta_at = inicia_at - interval '120 minutes' as cierra from funcion_funciones where id = $1`, [ids[0]])
-    expect(f[0].cierra).toBe(true)
+    const f = await q<{ cierra: boolean; cupo_total: number }>(`select cierra_venta_at = inicia_at - interval '120 minutes' as cierra, cupo_total from funcion_funciones where id = $1`, [ids[0]])
+    expect(f[0]).toEqual({ cierra: true, cupo_total: 24 })
 
-    // Cupo 7 con 6 puestos: no se crea NINGUNA de las fechas.
     const antes = (await q(`select 1 from funcion_funciones where experiencia_id = $1`, [exp])).length
-    expect(await codigo(crear(exp, m, 7, [enDias(5), enDias(6)]))).toBe('cupo_sobre_puestos')
+    expect(await codigo(crear(exp, 4, [enDias(5), new Date(Date.now() - 60_000).toISOString()]))).toBe('fecha_pasada')
     expect((await q(`select 1 from funcion_funciones where experiencia_id = $1`, [exp])).length).toBe(antes)
-    // Sin montaje, cualquier cupo (la recepción no depende del mapa).
-    expect(await crear(exp, null, 40, [enDias(7)])).toHaveLength(1)
-    expect(await codigo(crear(exp, null, 4, [new Date(Date.now() - 60_000).toISOString()]))).toBe('fecha_pasada')
-    expect(await codigo(crear(exp, null, 4, [enDias(8), enDias(8)]))).toBe('datos_invalidos')
-    expect(await codigo(crear(exp, null, 4, ['el sábado']))).toBe('datos_invalidos')
+    expect(await codigo(crear(exp, 4, [enDias(8), enDias(8)]))).toBe('datos_invalidos')
+    expect(await codigo(crear(exp, 4, ['el sábado']))).toBe('datos_invalidos')
+    expect(await codigo(crear(exp, 0, [enDias(9)]))).toBe('datos_invalidos')
   })
 
-  it('etiquetas únicas y puestos >= 1', async () => {
-    const exp = await experienciaNueva()
-    expect(await codigo(montaje(exp, [{ etiqueta: 'M1', puestos: 4 }, { etiqueta: 'm1 ', puestos: 2 }]))).toBe('etiqueta_repetida')
-    expect(await codigo(montaje(exp, [{ etiqueta: 'M1', puestos: 0 }]))).toBe('puestos_invalidos')
-    expect(await codigo(montaje(exp, [{ etiqueta: '  ', puestos: 2 }]))).toBe('datos_invalidos')
-    expect(await codigo(montaje(exp, []))).toBe('datos_invalidos')
-    expect((await q(`select 1 from funcion_montajes where experiencia_id = $1`, [exp])).length).toBe(0)
-  })
-
-  it('editar: intercambia etiquetas, agrega y quita mesas; los candados de las reservas sentadas siguen', async () => {
-    const exp = await experienciaNueva()
-    const m = await montaje(exp, [{ etiqueta: 'A', puestos: 4 }, { etiqueta: 'B', puestos: 4 }, { etiqueta: 'C', puestos: 2 }])
-    const ids = await mesasDe(m)
-    await montaje(exp, [{ id: ids.A, etiqueta: 'B', puestos: 4 }, { id: ids.B, etiqueta: 'A', puestos: 4 }, { id: ids.C, etiqueta: 'C', puestos: 2 }, { etiqueta: 'D', puestos: 3 }], m)
-    const despues = await mesasDe(m)
-    expect([despues.B, despues.A, Object.keys(despues).length]).toEqual([ids.A, ids.B, 4])
-
-    const [f] = await crear(exp, m, 13, [enDias(2)])
-    const a = await apartarEquipo(f, 2)
-    await asignar(a.reserva_id, [{ mesa_id: ids.C, personas: 2 }])
-    // Quitar la mesa C, que tiene a alguien sentado: no.
-    const sinC = [{ id: ids.A, etiqueta: 'B', puestos: 4 }, { id: ids.B, etiqueta: 'A', puestos: 4 }, { id: despues.D, etiqueta: 'D', puestos: 3 }, { etiqueta: 'E', puestos: 5 }]
-    expect(await codigo(montaje(exp, sinC, m))).toBe('mesa_con_asignaciones')
-    // Bajar puestos tanto que el montaje quede por debajo del cupo 13: no; y nada quedó a medias.
-    const bajo = [{ id: ids.A, etiqueta: 'B', puestos: 1 }, { id: ids.B, etiqueta: 'A', puestos: 4 }, { id: ids.C, etiqueta: 'C', puestos: 2 }, { id: despues.D, etiqueta: 'D', puestos: 3 }]
-    expect(await codigo(montaje(exp, bajo, m))).toBe('cupo_sobre_puestos')
-    expect((await q<{ puestos: number }>(`select puestos from funcion_mesas where id = $1`, [ids.A]))[0].puestos).toBe(4)
-    // Subir una y bajar otra en el mismo guardado, que en total cuadra: sí.
-    const cuadra = [{ id: ids.A, etiqueta: 'B', puestos: 6 }, { id: ids.B, etiqueta: 'A', puestos: 2 }, { id: ids.C, etiqueta: 'C', puestos: 2 }, { id: despues.D, etiqueta: 'D', puestos: 3 }]
-    expect(await codigo(montaje(exp, cuadra, m))).toBe('ok')
-    // Una mesa de otro montaje no se adopta.
-    const otro = await escenario({ cupo: 2, mesas: { X: 2 } })
-    expect(await codigo(montaje(exp, [{ id: otro.mesas.X, etiqueta: 'X', puestos: 2 }], m))).toBe('mesa_de_otro_montaje')
+  it('la experiencia sin minutos de apartado se crea, pero no aparta hasta que se definan', async () => {
+    const exp = await experienciaNueva('Sin regla', null)
+    const [f] = await crear(exp, 10, [enDias(2)])
+    expect(await codigo(apartarEquipo(f, 2))).toBe('sin_regla_apartado')
+    await rpc(`select funcion_guardar_experiencia($1, $2, 'Sin regla', 20, true) as r`, [WS, exp])
+    expect(await codigo(apartarEquipo(f, 2))).toBe('ok')
   })
 
   it('editar la función: cupo, estado y cierre con el candado', async () => {
     const exp = await experienciaNueva()
-    const [f] = await crear(exp, null, 5, [enDias(2)])
+    const [f] = await crear(exp, 5, [enDias(2)])
     await apartarEquipo(f, 4)
     expect(await codigo(rpc(`select funcion_editar_funcion($1, 3, 'abierta', null) as r`, [f]))).toBe('cupo_bajo_ocupacion')
     const o = await rpc<{ cupo_total: number; estado: string }>(`select funcion_editar_funcion($1, 8, 'cerrada', null) as r`, [f])
@@ -660,31 +498,12 @@ describe('20. formulario de alta (F1): pasa por las RPC y respeta los candados',
   it('solo el equipo del workspace, con rol que edita; nunca la llave del asistente', async () => {
     const exp = await experienciaNueva()
     expect(await codigo(rpc(`select funcion_guardar_experiencia($1, null, 'X', 30, true) as r`, [WS], LECTOR))).toBe('sin_permiso')
-    expect(await codigo(rpc(`select funcion_guardar_montaje($1, null, $2, 'S', null, '[{"etiqueta":"M","puestos":2}]'::jsonb) as r`, [WS, exp], AJENO))).toBe('montaje_no_existe')
-    for (const f of ['funcion_guardar_experiencia(uuid, uuid, text, integer, boolean)', 'funcion_guardar_montaje(uuid, uuid, uuid, text, text, jsonb)',
-      'funcion_crear_funciones(uuid, uuid, uuid, integer, text, integer, jsonb)', 'funcion_editar_funcion(uuid, integer, text, timestamptz)']) {
+    expect(await codigo(rpc(`select funcion_crear_funciones($1, $2, 4, 'abierta', null, $3::jsonb) as r`, [WS, exp, JSON.stringify([enDias(2)])], AJENO))).toBe('experiencia_no_existe')
+    for (const f of ['funcion_guardar_experiencia(uuid, uuid, text, integer, boolean)',
+      'funcion_crear_funciones(uuid, uuid, integer, text, integer, jsonb)', 'funcion_editar_funcion(uuid, integer, text, timestamptz)',
+      'funcion_cancelar_reserva(uuid)']) {
       const r = (await q<{ srv: boolean }>(`select has_function_privilege('service_role', 'public.${f}', 'execute') as srv`))[0]
       expect(r.srv, f).toBe(false)
     }
-  })
-})
-
-describe('semilla de PRUEBA (sql/sabor/2026-10-21_montaje-funciones-PRUEBA.sql)', () => {
-  const SEMILLA = leer('sql/sabor/2026-10-21_montaje-funciones-PRUEBA.sql')
-  const WS_PRUEBA = '00000000-0000-4000-8000-00000000f0aa'
-
-  it('se niega en un workspace que no es de pruebas, y en uno de pruebas deja un montaje inventado que cuadra', async () => {
-    await q(`alter table workspaces add column if not exists config_extra jsonb default '{}'::jsonb`)
-    await q(`insert into workspaces (id, slug, config_extra) values ($1, 'pruebas', '{"espacio_de_pruebas": true}')`, [WS_PRUEBA])
-    expect(await codigo(db.exec(SEMILLA.replaceAll('<WORKSPACE_DE_PRUEBA>', WS)))).toMatch(/espacio_de_pruebas/)
-    await db.exec(SEMILLA.replaceAll('<WORKSPACE_DE_PRUEBA>', WS_PRUEBA))
-    const r = await q<{ mesas: number; puestos: number; funciones: number; nombre: string }>(
-      `select (select count(*)::int from funcion_mesas where workspace_id = $1) as mesas,
-              (select sum(puestos)::int from funcion_mesas where workspace_id = $1) as puestos,
-              (select count(*)::int from funcion_funciones where workspace_id = $1) as funciones,
-              (select nombre from funcion_experiencias where workspace_id = $1) as nombre`,
-      [WS_PRUEBA],
-    )
-    expect(r[0]).toEqual({ mesas: 5, puestos: 18, funciones: 2, nombre: '[EJEMPLO] Ratatouille' })
   })
 })

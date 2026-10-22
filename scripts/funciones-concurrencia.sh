@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prueba 8 del diseño de la etapa 2 de Sabor (funciones, cupos y mapa del salón): muchos `apartar` a la vez sobre una
+# Prueba 8 del diseño de la etapa 2 de Sabor (funciones, cupos y reservas): muchos `apartar` a la vez sobre una
 # función de cupo pequeño terminan con ocupadas <= cupo. PGlite (las pruebas de vitest) tiene UNA conexión y no
 # puede probar el `select ... for update`; esto sí: N procesos `psql`, cada uno con su conexión, contra un Postgres
 # real. Cada uno aparta y SOSTIENE la transacción abierta un rato antes del commit: sin el candado, los demás leen la
@@ -19,7 +19,7 @@ case "$PGURL" in
 esac
 
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
-MIGRACION="${1:-$RAIZ/supabase/migrations/20261021120000_modulo_funciones.sql}"
+MIGRACION="${1:-$RAIZ/supabase/migrations/20261022170000_modulo_funciones.sql}"
 N="${FUNCIONES_N:-40}"
 CUPO=5
 TMP="$(mktemp -d)"
@@ -28,11 +28,9 @@ trap 'rm -rf "$TMP"' EXIT
 WS=00000000-0000-4000-8000-00000000c001
 EQUIPO=00000000-0000-4000-8000-00000000c011
 EXP=00000000-0000-4000-8000-00000000c021
-MONTAJE=00000000-0000-4000-8000-00000000c031
-M1=00000000-0000-4000-8000-00000000c041
-M2=00000000-0000-4000-8000-00000000c042
 F_CUPO=00000000-0000-4000-8000-00000000c051
-F_MESAS=00000000-0000-4000-8000-00000000c052
+F_CLAVE=00000000-0000-4000-8000-00000000c052
+F_CONF=00000000-0000-4000-8000-00000000c053
 
 psql_q() { psql "$PGURL" -X -q -t -A -v ON_ERROR_STOP=1 "$@"; }
 
@@ -44,13 +42,11 @@ psql_q >/dev/null <<SQL
 insert into workspaces (id, slug) values ('$WS', 'sabor-prueba');
 insert into profiles values ('$EQUIPO', '$WS', 'operator');
 insert into funcion_experiencias (id, workspace_id, nombre, minutos_apartado) values ('$EXP', '$WS', 'PRUEBA', 30);
-insert into funcion_montajes (id, workspace_id, experiencia_id, nombre) values ('$MONTAJE', '$WS', '$EXP', 'PRUEBA');
-insert into funcion_mesas (id, workspace_id, montaje_id, etiqueta, puestos) values
-  ('$M1', '$WS', '$MONTAJE', 'M1', 4), ('$M2', '$WS', '$MONTAJE', 'M2', 4);
 insert into funcion_funciones (id, workspace_id, experiencia_id, inicia_at, cupo_total)
   values ('$F_CUPO', '$WS', '$EXP', now() + interval '1 day', $CUPO);
-insert into funcion_funciones (id, workspace_id, experiencia_id, montaje_id, inicia_at, cupo_total)
-  values ('$F_MESAS', '$WS', '$EXP', '$MONTAJE', now() + interval '1 day', 8);
+insert into funcion_funciones (id, workspace_id, experiencia_id, inicia_at, cupo_total)
+  values ('$F_CLAVE', '$WS', '$EXP', now() + interval '1 day', 8),
+         ('$F_CONF', '$WS', '$EXP', now() + interval '1 day', 4);
 SQL
 
 # Una sesión del equipo que corre $1 dentro de una transacción y la sostiene 0,2 s antes del commit.
@@ -82,30 +78,37 @@ if [ "$ok_a" -ne "$CUPO" ] || [ "$ocupadas" -ne "$CUPO" ]; then echo "   se espe
 
 # ── B. Idempotencia: la misma clave N veces a la vez = una reserva ─────────────
 for i in $(seq 1 10); do
-  ( como_equipo "select funcion_apartar('$WS', '$F_MESAS', 1, '{}'::jsonb, 'misma-clave', 'equipo')" || true ) &
+  ( como_equipo "select funcion_apartar('$WS', '$F_CLAVE', 1, '{}'::jsonb, 'misma-clave', 'equipo')" || true ) &
 done
 wait
 misma=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia = 'misma-clave'")
 echo "B. misma clave 10 veces a la vez: $misma reserva(s)"
 if [ "$misma" -ne 1 ]; then falla=1; fi
 
-# ── C. Mesa: 8 reservas de 1 se sientan a la vez en M1 (4 puestos) ─────────────
-for i in $(seq 1 7); do
+# ── C. Confirmar a la vez apartados vencidos: solo los que caben ───────────────
+# Cupo 4: 4 apartados de 1 que vencen, 4 nuevos que llenan el cupo y 2 de ellos se cancelan. Quedan 2 libres, y los 4
+# vencidos se confirman a la vez (el pago llegó tarde): pueden entrar 2, nunca más.
+apartar_equipo() {
   psql_q >/dev/null <<SQL
 select set_config('prueba.uid', '$EQUIPO', false);
 set role authenticated;
-select funcion_apartar('$WS', '$F_MESAS', 1, '{}'::jsonb, 'c-$i', 'equipo');
+select funcion_apartar('$WS', '$F_CONF', 1, '{}'::jsonb, '$1', 'equipo');
 SQL
-done
-mapfile -t reservas < <(psql_q -c "select id from funcion_reservas where funcion_id = '$F_MESAS' order by id")
-for r in "${reservas[@]}"; do
-  ( como_equipo "select funcion_asignar_mesas('$r', '[{\"mesa_id\": \"$M1\", \"personas\": 1}]'::jsonb)" || true ) &
+}
+for i in 1 2 3 4; do apartar_equipo "viejo-$i"; done
+psql_q -c "update funcion_reservas set vence_at = now() - interval '1 minute' where clave_idempotencia like 'viejo-%'" >/dev/null
+for i in 1 2 3 4; do apartar_equipo "nuevo-$i"; done
+psql_q -c "update funcion_reservas set estado = 'cancelada' where clave_idempotencia in ('nuevo-1', 'nuevo-2')" >/dev/null
+mapfile -t viejos < <(psql_q -c "select id from funcion_reservas where clave_idempotencia like 'viejo-%' order by id")
+for r in "${viejos[@]}"; do
+  ( como_equipo "select funcion_confirmar_pago('$r', 'verificado_manual')" || true ) &
 done
 wait
-en_m1=$(psql_q -c "select coalesce(sum(personas), 0) from funcion_reserva_mesas where mesa_id = '$M1' and funcion_id = '$F_MESAS'")
-echo "C. ${#reservas[@]} reservas a la mesa M1 (4 puestos) a la vez: $en_m1 sentadas"
-if [ "$en_m1" -gt 4 ]; then echo "   MESA SOBREVENDIDA" >&2; falla=1; fi
-if [ "$en_m1" -ne 4 ]; then echo "   se esperaban exactamente 4" >&2; falla=1; fi
+confirmadas=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia like 'viejo-%' and estado = 'confirmada'")
+ocupadas_c=$(psql_q -c "select (funcion_ocupacion('$F_CONF')->>'ocupadas')::int")
+echo "C. ${#viejos[@]} apartados vencidos confirmados a la vez con 2 libres: $confirmadas confirmadas, ocupadas $ocupadas_c de 4"
+if [ "$ocupadas_c" -gt 4 ]; then echo "   SOBREVENTA al confirmar" >&2; falla=1; fi
+if [ "$confirmadas" -ne 2 ]; then echo "   se esperaban exactamente 2" >&2; falla=1; fi
 
 if [ "$falla" -ne 0 ]; then echo "FALLÓ" >&2; exit 1; fi
 echo "Sin sobreventa."

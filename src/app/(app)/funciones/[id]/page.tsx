@@ -4,13 +4,13 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { leerFuncion } from '@/lib/funciones/datos'
 import { puedeEditarFunciones } from '@/lib/funciones/reglas'
-import { MapaCliente } from './mapa-cliente'
+import { DetalleCliente } from './detalle-cliente'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * `/funciones/[id]`: el mapa de la función (§4.1). Ocupación por mesa y puesto de `funcion_ocupacion`; asignar,
- * mover, repartir y liberar pasan por `funcion_asignar_mesas`, que valida todo dentro del candado de la función.
+ * `/funciones/[id]`: el detalle de la función, con su cupo (`funcion_ocupacion`) y sus reservas activas. Sin mapa: Sabor
+ * no asigna puestos (alcance del 2026-10-22).
  */
 export default async function FuncionPage({ params }: { params: Promise<{ id: string }> }) {
   const { workspaceId, role, supabase, error } = await getWorkspace()
@@ -22,5 +22,5 @@ export default async function FuncionPage({ params }: { params: Promise<{ id: st
   const funcion = await leerFuncion(supabase as unknown as SupabaseClient, id)
   if (!funcion) notFound()
 
-  return <MapaCliente funcion={funcion} puedeEditar={puedeEditarFunciones(role)} />
+  return <DetalleCliente funcion={funcion} puedeEditar={puedeEditarFunciones(role)} />
 }

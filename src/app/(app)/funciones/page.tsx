@@ -9,7 +9,7 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 
 export const dynamic = 'force-dynamic'
 
-/** `/funciones`: las próximas funciones, con la entrada al mapa de cada una, a la lista del día y al formulario. */
+/** `/funciones`: las próximas funciones, con la entrada al detalle de cada una, a la lista del día y al formulario. */
 export default async function FuncionesPage() {
   const { workspaceId, role, supabase, error } = await getWorkspace()
   if (error || !workspaceId) redirect('/')
@@ -25,9 +25,6 @@ export default async function FuncionesPage() {
         <div className="flex flex-wrap gap-2 text-sm">
           <Link href={`/funciones/dia?fecha=${todayBogotaISO()}`} className="rounded-md border border-[#E5E7EB] px-3 py-1.5 hover:bg-gray-50">
             Lista de hoy
-          </Link>
-          <Link href="/funciones/montajes" className="rounded-md border border-[#E5E7EB] px-3 py-1.5 hover:bg-gray-50">
-            Montajes
           </Link>
           {editar && (
             <Link href="/funciones/nueva" className="rounded-md bg-[#10B981] px-3 py-1.5 font-medium text-white hover:bg-[#059669]">
@@ -53,7 +50,7 @@ export default async function FuncionesPage() {
                   </span>
                 </span>
                 <span className="text-xs text-[#6B7280]">
-                  Cupo {f.cupo_total} · {ETIQUETA_ESTADO_FUNCION[f.estado]} · {f.montaje ? `Plano: ${f.montaje}` : 'Sin plano'}
+                  Cupo {f.cupo_total} · {ETIQUETA_ESTADO_FUNCION[f.estado]}
                 </span>
               </Link>
             </li>

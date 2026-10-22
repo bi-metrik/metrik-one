@@ -9,7 +9,7 @@ import {
   Handshake,
   Timer,
   Radar,
-  Armchair,
+  Ticket,
   BarChart3,
   QrCode,
   LayoutDashboard,
@@ -85,7 +85,7 @@ interface WorkspaceModules {
   ferreteria?: boolean
   /** Radar SECOP: convocatorias públicas cruzadas contra los temas del cliente (/radar). */
   radar_secop?: boolean
-  /** Funciones con cupo y mapa del salón (/funciones). Ver `src/lib/funciones/`. */
+  /** Funciones con cupo y reservas (/funciones). Ver `src/lib/funciones/`. */
   funciones?: boolean
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
@@ -343,10 +343,10 @@ const RADAR_NAV_ITEMS = [
   { href: '/radar', label: 'Radar SECOP', icon: Radar, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
-// Funciones: cupo, reservas y mapa del salón (extra inferior, activable por flag). Todos los roles ven; la base
+// Funciones: cupo y reservas (extra inferior, activable por flag). Todos los roles ven; la base
 // decide quién escribe (las RPC de `funcion_*` exigen rol que edita).
 const FUNCIONES_NAV_ITEMS = [
-  { href: '/funciones', label: 'Funciones', icon: Armchair, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+  { href: '/funciones', label: 'Funciones', icon: Ticket, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
 // Compartidos (siempre visibles)

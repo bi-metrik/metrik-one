@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
-import { leerCatalogo } from '@/lib/funciones/datos'
+import { leerExperiencias } from '@/lib/funciones/datos'
 import { puedeEditarFunciones } from '@/lib/funciones/reglas'
 import { FormularioFunciones } from './formulario-funciones'
 
@@ -15,6 +15,6 @@ export default async function NuevaFuncionPage() {
   if (!(await exigirModulo(REQUISITO.funciones)).ok) redirect('/')
   if (!puedeEditarFunciones(role)) redirect('/funciones')
 
-  const catalogo = await leerCatalogo(supabase as unknown as SupabaseClient, workspaceId)
-  return <FormularioFunciones {...catalogo} />
+  const experiencias = await leerExperiencias(supabase as unknown as SupabaseClient, workspaceId)
+  return <FormularioFunciones experiencias={experiencias} />
 }

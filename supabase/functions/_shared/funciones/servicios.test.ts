@@ -11,7 +11,7 @@ import type { LlaveConversacion } from '../agente/publico/tipos'
 /**
  * Los servicios `consultar_cupo` y `apartar` del asistente (§3 del diseño de la etapa 2), corridos dos veces con las
  * MISMAS pruebas: contra el doble en memoria (`memoria.ts`, el del arnés) y contra la base real (la migración
- * `20261021120000_modulo_funciones.sql` en PGlite, por el puerto de producción `supabase.ts` y un cliente que habla
+ * `20261022170000_modulo_funciones.sql` en PGlite, por el puerto de producción `supabase.ts` y un cliente que habla
  * con PGlite como service_role). Si el doble y la base dicen cosas distintas, falla una de las dos.
  */
 
@@ -24,7 +24,7 @@ interface Banco {
   agregarFuncion(f: FuncionEnMemoria): Promise<void>
   autorizar(llave: LlaveConversacion, r: 'si' | 'no'): Promise<void>
   vencer(reservaId: string): Promise<void>
-  mesasDe(reservaId: string): Promise<number>
+  solicitudDe(reservaId: string): Promise<string | null>
 }
 
 let pg: PGlite
@@ -86,7 +86,7 @@ function bancoMemoria(): Banco {
     agregarFuncion: async (f) => m.agregarFuncion(f),
     autorizar: async (l, r) => m.autorizar(l, r),
     vencer: async (rid) => m.vencer(rid),
-    mesasDe: async () => 0,
+    solicitudDe: async (rid) => m.reservas().find((r) => r.id === rid)?.propuesta.solicitudCliente ?? null,
   }
 }
 
@@ -111,8 +111,8 @@ function bancoBase(): Banco {
     async vencer(rid) {
       await pg.query(`update funcion_reservas set vence_at = now() - interval '1 minute' where id = $1`, [rid])
     },
-    async mesasDe(rid) {
-      return (await pg.query(`select 1 from funcion_reserva_mesas where reserva_id = $1`, [rid])).rows.length
+    async solicitudDe(rid) {
+      return (await pg.query<{ s: string | null }>(`select solicitud_cliente as s from funcion_reservas where id = $1`, [rid])).rows[0]?.s ?? null
     },
   }
 }
@@ -122,7 +122,7 @@ const manana = () => new Date(Date.now() + 24 * HORA).toISOString()
 function propuesta(l: LlaveConversacion, funcionId: string, personas: number, extra: Partial<PropuestaApartado> = {}): PropuestaApartado {
   return {
     llave: l, canal: 'instagram', funcionId, personas, nombre: 'Cliente', documento: null, telefono: null,
-    contactoCanal: '@cliente', preferenciaMesa: null, huellaPropuesta: `huella-${id('h')}`, ...extra,
+    contactoCanal: '@cliente', solicitudCliente: null, huellaPropuesta: `huella-${id('h')}`, ...extra,
   }
 }
 
@@ -131,7 +131,7 @@ beforeAll(async () => {
   pg = new PGlite()
   await pg.exec(leer('src/lib/funciones/__fixtures__/esquema-base.sql'))
   await pg.exec(leer('supabase/migrations/20261021090000_asistente_chatwoot.sql'))
-  await pg.exec(leer('supabase/migrations/20261021120000_modulo_funciones.sql'))
+  await pg.exec(leer('supabase/migrations/20261022170000_modulo_funciones.sql'))
   await pg.exec(`insert into workspaces (id, slug) values ('${WS}', 'sabor-prueba'), ('${OTRO_WS}', 'otro')`)
 })
 
@@ -218,27 +218,27 @@ describe.each([
     expect((await apartar(b.puerto, propuesta(await autorizada(), f, 2))).ok).toBe(true)
   })
 
-  it('una mesa colada por fuera del tipo no viaja: aparta sin sentar a nadie', async () => {
+  it('una mesa colada por fuera del tipo no viaja; la solicitud del cliente llega como texto', async () => {
     const f = await funcion({ cupoTotal: 4 })
-    const conMesa = { ...propuesta(await autorizada(), f, 2, { preferenciaMesa: 'cerca de la pantalla' }), mesaId: id('m'), mesas: [{ mesa_id: id('m'), personas: 2 }] }
+    const conMesa = { ...propuesta(await autorizada(), f, 2, { solicitudCliente: 'vamos 6, queremos estar juntos' }), mesaId: id('m'), mesas: [{ mesa_id: id('m'), personas: 2 }] }
     const a = await apartar(b.puerto, conMesa as PropuestaApartado)
     if (!a.ok) throw new Error(a.error)
-    expect(await b.mesasDe(a.reservaId)).toBe(0)
+    expect(await b.solicitudDe(a.reservaId)).toBe('vamos 6, queremos estar juntos')
   })
 })
 
 describe('piezas puras', () => {
-  it('los datos que viajan a la base no tienen campo de mesa', () => {
+  it('los datos que viajan a la base no tienen campo de mesa ni de puesto', () => {
     const p = { ...propuesta(llave(), id('f'), 2), mesaId: 'x' } as PropuestaApartado
     expect(Object.keys(datosDeApartado(p)).sort()).toEqual([
-      'canal', 'chatwoot_conversacion_id', 'chatwoot_cuenta_id', 'contacto_canal', 'documento', 'nombre', 'preferencia_mesa', 'telefono',
+      'canal', 'chatwoot_conversacion_id', 'chatwoot_cuenta_id', 'contacto_canal', 'documento', 'nombre', 'solicitud_cliente', 'telefono',
     ])
   })
 
   it('codigoDeError conoce los códigos de la base y el resto es error_base, no «sin cupo»', () => {
     expect(codigoDeError('sin_cupo')).toBe('sin_cupo')
     expect(codigoDeError('venta_cerrada')).toBe('venta_cerrada')
-    expect(codigoDeError('permission denied for function funcion_asignar_mesas')).toBe('error_base')
+    expect(codigoDeError('permission denied for function funcion_cancelar_reserva')).toBe('error_base')
     expect(codigoDeError(undefined)).toBe('error_base')
   })
 

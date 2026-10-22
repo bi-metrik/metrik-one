@@ -1,4 +1,4 @@
--- Lo mínimo de ONE que necesitan `20261021090000_asistente_chatwoot.sql` y `20261021120000_modulo_funciones.sql`
+-- Lo mínimo de ONE que necesitan `20261021090000_asistente_chatwoot.sql` y `20261022170000_modulo_funciones.sql`
 -- para correr de verdad: roles de Supabase (`service_role` con BYPASSRLS, como allá), `auth.uid()`, workspaces,
 -- perfiles, contactos y su guardián de teléfono, y las tres tablas cuyas listas de módulos reescribe la migración.
 -- Lo usan `funciones-sql.test.ts` y `_shared/funciones/servicios.test.ts` (PGlite) y `scripts/funciones-concurrencia.sh`

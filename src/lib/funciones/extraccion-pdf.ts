@@ -1,14 +1,15 @@
 /**
- * Un PDF de Sabor (el plano del salón o la programación de funciones) → un BORRADOR para el formulario (§4.4 del
- * diseño de la etapa 2; F1 resuelta por Mauricio el 2026-10-21).
+ * Un PDF de Sabor con la programación de funciones → un BORRADOR para el formulario (§4.4 del diseño de la etapa 2;
+ * F1 resuelta por Mauricio el 2026-10-21). Del plano del salón no se extrae nada: el mapa salió de la Fase 1
+ * (alcance del 2026-10-22).
  *
  * Reglas que este módulo hace cumplir:
  *   1. **Nunca guarda.** No importa ningún cliente de la base: devuelve un borrador y nada más. Lo que se guarda es
- *      lo que la persona confirma con el botón del formulario, por las RPC de la migración 20261021120000.
+ *      lo que la persona confirma con el botón del formulario, por las RPC de la migración 20261022170000.
  *   2. **Todo campo dice de dónde viene**: `pdf` (leído y verificado contra el texto) o `no_leido` (vacío). La
  *      pantalla marca los dos.
  *   3. **No se adivina.** Un valor que el modelo devuelve y que no está en el texto del PDF se descarta y queda
- *      `no_leido`: etiquetas, zonas, puestos, cupo, fechas y horas. Una fecha sin año o un día sin mes, vacía. Una
+ *      `no_leido`: el nombre de la experiencia, el cupo, las fechas y las horas. Una fecha sin año o un día sin mes, vacía. Una
  *      hora de 1 a 11 sin «a. m.» / «p. m.», vacía (las 7 pueden ser de la mañana o de la noche).
  *   4. **Sin capa de texto, sin modelo.** Un escaneo no se manda a leer: el borrador sale vacío con el aviso y se
  *      llena a mano. Así la verificación siempre tiene contra qué comparar.
@@ -17,25 +18,12 @@
  * `src/lib/ai/modelo-llm.ts`); las pruebas, un doble que nunca sale a la red.
  */
 
-export type TipoBorrador = 'montaje' | 'funciones'
+/** Hoy un solo tipo; queda como parámetro para que otro PDF (precios, por ejemplo) entre sin cambiar la firma. */
+export type TipoBorrador = 'funciones'
 
 export interface Campo<T> {
   valor: T | null
   origen: 'pdf' | 'no_leido'
-}
-
-export interface MesaBorrador {
-  etiqueta: Campo<string>
-  puestos: Campo<number>
-  zona: Campo<string>
-  condicion: Campo<string>
-}
-
-export interface BorradorMontaje {
-  tipo: 'montaje'
-  nombre: Campo<string>
-  mesas: MesaBorrador[]
-  avisos: string[]
 }
 
 export interface InicioBorrador {
@@ -53,22 +41,19 @@ export interface BorradorFunciones {
   avisos: string[]
 }
 
-export type Borrador = BorradorMontaje | BorradorFunciones
+export type Borrador = BorradorFunciones
 
 /** El modelo: recibe la instrucción y el texto del PDF, devuelve el JSON que leyó (o `null` si no pudo). */
 export type ModeloExtraccion = (p: { instruccion: string; texto: string; tipo: TipoBorrador }) => Promise<unknown>
 
 export const MAXIMO_CARACTERES_TEXTO = 60_000
-const MAXIMO_MESAS = 300
 const MAXIMO_INICIOS = 60
 
 const vacio = <T>(): Campo<T> => ({ valor: null, origen: 'no_leido' })
 const leido = <T>(valor: T): Campo<T> => ({ valor, origen: 'pdf' })
 
 export function borradorVacio(tipo: TipoBorrador, avisos: string[] = []): Borrador {
-  return tipo === 'montaje'
-    ? { tipo, nombre: vacio(), mesas: [], avisos }
-    : { tipo, experiencia: vacio(), cupo: vacio(), inicios: [], avisos }
+  return { tipo, experiencia: vacio(), cupo: vacio(), inicios: [], avisos }
 }
 
 // ── Normalización y búsqueda en el texto ─────────────────────────────────────
@@ -87,7 +72,7 @@ export function contieneFrase(textoNorm: string, frase: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapar(f)}(?![\\p{L}\\p{N}])`, 'u').test(textoNorm)
 }
 
-/** ¿El texto (normalizado) contiene el número como cifra suelta? «4» no está en «14» ni en «4.5». Pura. */
+/** ¿El texto (normalizado) contiene el número como cifra suelta? «24» no está en «124» ni en «24.5». Pura. */
 export function contieneNumero(textoNorm: string, n: number): boolean {
   return new RegExp(`(?<![\\d.,])${n}(?![\\d]|[.,]\\d)`).test(textoNorm)
 }
@@ -167,29 +152,6 @@ function citaVerificada(v: unknown, textoNorm: string): string | null {
   return c && normalizar(c).length >= 2 && textoNorm.includes(normalizar(c)) ? c : null
 }
 
-function borradorMontaje(crudo: Obj, textoNorm: string, avisos: string[]): BorradorMontaje {
-  const mesas: MesaBorrador[] = []
-  const lista = Array.isArray(crudo.mesas) ? crudo.mesas.slice(0, MAXIMO_MESAS) : []
-  for (const m of lista) {
-    if (!esObj(m)) continue
-    const cita = citaVerificada(m.cita, textoNorm)
-    const etiqueta = textoVerificado(m.etiqueta, textoNorm, 40)
-    // Los puestos tienen que estar en la cita de ESA mesa (que está en el texto). Sin cita, en ninguna parte.
-    const p = entero(m.puestos)
-    const puestos: Campo<number> = p !== null && p <= 100 && cita && contieneNumero(normalizar(cita), p) ? leido(p) : vacio()
-    mesas.push({
-      etiqueta,
-      puestos,
-      zona: textoVerificado(m.zona, textoNorm, 80),
-      condicion: textoVerificado(m.condicion, textoNorm, 300),
-    })
-  }
-  if (lista.length > 0 && mesas.every((m) => m.puestos.origen === 'no_leido')) {
-    avisos.push('No se pudo leer cuántos puestos tiene ninguna mesa: escríbelos a mano.')
-  }
-  return { tipo: 'montaje', nombre: textoVerificado(crudo.nombre, textoNorm, 200), mesas, avisos }
-}
-
 function borradorFunciones(crudo: Obj, textoNorm: string, avisos: string[]): BorradorFunciones {
   const inicios: InicioBorrador[] = []
   const lista = Array.isArray(crudo.funciones) ? crudo.funciones.slice(0, MAXIMO_INICIOS) : []
@@ -214,12 +176,6 @@ function borradorFunciones(crudo: Obj, textoNorm: string, avisos: string[]): Bor
 }
 
 export const INSTRUCCION: Record<TipoBorrador, string> = {
-  montaje: `Lees el texto de un PDF con el plano de un salón (mesas de un restaurante o de una experiencia).
-Devuelve SOLO JSON con: "nombre" (el nombre del montaje o del salón, si el texto lo dice) y "mesas": una lista con
-"etiqueta" (como el texto llama a la mesa), "puestos" (cuántas personas, número), "zona" y "condicion" (lo que el
-texto diga de esa ubicación), y "cita" (el fragmento LITERAL del texto de donde sacaste esa mesa).
-Reglas: copia los valores tal cual están en el texto. Si un dato no está, déjalo en null. No calcules, no completes,
-no inventes mesas ni puestos. Nunca pongas precios.`,
   funciones: `Lees el texto de un PDF con la programación de funciones de una experiencia (fechas y horas).
 Devuelve SOLO JSON con: "experiencia" (el nombre de la película o experiencia, si el texto lo dice), "cupo" (cuántas
 personas por función, solo si el texto lo dice), "cupo_cita" (el fragmento literal del cupo) y "funciones": una
@@ -258,5 +214,5 @@ export async function extraerBorrador(p: {
     return borradorVacio(p.tipo, [...avisos, 'No se pudo leer el PDF. Llena el formulario a mano.'])
   }
   const textoNorm = normalizar(recortado)
-  return p.tipo === 'montaje' ? borradorMontaje(crudo, textoNorm, avisos) : borradorFunciones(crudo, textoNorm, avisos)
+  return borradorFunciones(crudo, textoNorm, avisos)
 }

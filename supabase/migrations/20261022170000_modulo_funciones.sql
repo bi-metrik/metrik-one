@@ -1,11 +1,18 @@
 -- ============================================================
--- 20261021120000 — Módulo Funciones: experiencias, montajes, mesas, funciones, reservas y mesas asignadas
--- Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md (etapa 2 de Sabor &
--- Experiencias; Otrosí No. 1, mapa del salón). Primer cliente previsto: Sabor & Experiencias, cuyo workspace NO existe.
+-- 20261022170000 — Módulo Funciones: experiencias, funciones con cupo y reservas (Sabor & Experiencias, etapa 2)
+-- Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md. Primer cliente previsto:
+-- Sabor & Experiencias, cuyo workspace NO existe.
 --
--- ⚠️ DEPENDE de `20261021090000_asistente_chatwoot.sql` (PR #1225, mergeado y SIN aplicar en producción el
--- 2026-10-21): `funcion_reservas.consentimiento_sensible_id` apunta a `chatwoot_consentimientos`, y esta migración
--- le pone un trigger a esa tabla. Se aplica DESPUÉS de esa, nunca antes (el dry-run aborta si la tabla no existe).
+-- Alcance del 2026-10-22 (Mauricio): el MAPA DEL SALÓN SALE de la Fase 1. En el kickoff, Sabor contó que no asigna
+-- puestos: la gente se sienta en orden de llegada y solo a los grupos de 5 o más les guardan mesa, a mano y fuera de
+-- ONE. Por eso aquí no hay montajes, mesas, puestos ni asignación de mesas. Lo que el cliente pide («vamos 6,
+-- queremos estar juntos») queda como texto libre en `funcion_reservas.solicitud_cliente`, sin ninguna lógica.
+-- Esta versión reemplaza la `20261021120000_modulo_funciones.sql` que nunca se aplicó (esa versión además chocaba
+-- con `20261021120000_servicios_fechas_tramos.sql`, ya aplicada).
+--
+-- ⚠️ DEPENDE de `20261021090000_asistente_chatwoot.sql` (PR #1225): `funcion_reservas.consentimiento_sensible_id`
+-- apunta a `chatwoot_consentimientos`, y esta migración le pone un trigger a esa tabla. Se aplica DESPUÉS de esa,
+-- nunca antes (el dry-run aborta si la tabla no existe).
 --
 -- ⚠️ DDL puro: ni una fila de datos y NINGÚN workspace queda con el módulo encendido. Encenderlo en Sabor (crear el
 -- workspace y la fila de `workspace_modulos`) es otra escritura, que autoriza Mauricio (decisión F2 del diseño).
@@ -14,24 +21,20 @@
 --   1. La llave de módulo `funciones` en las CUATRO listas que repiten el catálogo (`workspace_modulos_modulo`,
 --      `catalogo_servicios_modulo`, `documentos_versiones_modulo` y `proyectar_modulos`).
 --      `src/lib/modulos/catalogo.test.ts` lee la última migración que define cada una y falla si se separan.
---   2. Seis tablas `funcion_*`:
+--   2. Tres tablas `funcion_*`:
 --        experiencias   — la película o experiencia; `minutos_apartado` (HUECO 4) sin valor por defecto.
---        montajes       — el plano de una experiencia (puede tener varios).
---        mesas          — una fila por mesa: puestos, zona, condición INFORMATIVA y posición. Sin columna de precio.
---        funciones      — una fecha y hora con cupo; el montaje es opcional (sin montaje hay cupo y reservas, no mapa).
+--        funciones      — una fecha y hora con su cupo (la capacidad de la función).
 --        reservas       — las de ONE, no las de viajes de Trappvel (`reservas` no se toca).
---        reserva_mesas  — en qué mesa(s) se sienta cada reserva; una reserva puede repartirse y una mesa compartirse.
 --   3. Las funciones de la base (todas SECURITY DEFINER, `search_path = public`):
---        funcion_ocupacion            equipo y servidor   cupo, ocupadas, libres y ocupación por mesa
+--        funcion_ocupacion            equipo y servidor   cupo, ocupadas y libres
 --        funcion_consultar_cupo       solo service_role   lo único que ve el asistente: cupo libre y si está agotada
 --        funcion_apartar              equipo y servidor   candado, vence apartados viejos, aparta o `sin_cupo`
 --        funcion_confirmar_pago       equipo y servidor   equipo: `verificado_manual`; servidor: `aprobado`
 --        funcion_cancelar_reserva     solo equipo
---        funcion_asignar_mesas        solo equipo         NO la puede ejecutar service_role (la llave del asistente)
 --        funcion_guardar_restricciones equipo y servidor  solo con autorización `sensible` = `si` de esa conversación
 --      y las del formulario (F1, la única puerta de alta; solo equipo):
---        funcion_guardar_experiencia, funcion_guardar_montaje (con su tabla de mesas), funcion_crear_funciones (una o
---        varias fechas) y funcion_editar_funcion (cupo, estado y cierre de venta, con el candado).
+--        funcion_guardar_experiencia, funcion_crear_funciones (una o varias fechas) y funcion_editar_funcion (cupo,
+--        estado y cierre de venta, con el candado).
 --      El PDF que pre-llena el formulario NO escribe nada: la extracción devuelve un borrador y se guarda lo que la
 --      persona confirma, por estas funciones.
 --
@@ -44,15 +47,18 @@
 -- lo que dejó el primero. Dentro del mismo candado se marcan `vencida` los apartados vencidos de esa función. Orden de
 -- candados siempre igual: primero la función, después la reserva.
 --
+-- Lo que viene después (precio, abono, preventa, campaña, un cupo del asistente distinto de la capacidad) NO está
+-- aquí: espera la decisión de Mauricio. Entra como columnas nuevas de `funcion_funciones` / `funcion_reservas` y
+-- condiciones dentro de `funcion_apartar`, que ya tiene el candado donde se verifican.
+--
 -- Errores: `raise exception '<codigo>'` con `errcode = 'P0001'`; el mensaje ES el código estable (`sin_cupo`,
--- `funcion_cerrada`, `venta_cerrada`, `sin_regla_apartado`, `mesa_llena`, `mesa_de_otro_montaje`,
--- `personas_no_cuadran`, `reserva_inactiva`, `sin_autorizacion`, `sin_autorizacion_sensible`, …) y el detalle humano
--- va en DETAIL.
+-- `funcion_cerrada`, `venta_cerrada`, `sin_regla_apartado`, `reserva_inactiva`, `sin_autorizacion`,
+-- `sin_autorizacion_sensible`, `dato_no_admitido`, …) y el detalle humano va en DETAIL.
 --
 -- Verificación después de aplicar (solo lectura):
 --   select relname, relrowsecurity from pg_class
 --    where relnamespace = 'public'::regnamespace and relname like 'funcion\_%' and relkind = 'r';
---     -> 6 filas, todas con relrowsecurity = true
+--     -> 3 filas, todas con relrowsecurity = true
 --   select t.relname,
 --          has_table_privilege('anon', t.oid, 'select')                 as anon_sel,
 --          has_table_privilege('authenticated', t.oid, 'select')        as auth_sel,
@@ -60,20 +66,19 @@
 --          has_table_privilege('service_role', t.oid, 'update')         as srv_upd
 --     from pg_class t
 --    where t.relnamespace = 'public'::regnamespace and t.relname like 'funcion\_%' and t.relkind = 'r';
---     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 6
---   select has_function_privilege('service_role', 'public.funcion_asignar_mesas(uuid, jsonb)', 'execute');  -> false
+--     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 3
+--   select has_function_privilege('service_role', 'public.funcion_cancelar_reserva(uuid)', 'execute');  -> false
 --   select has_function_privilege('anon', 'public.funcion_apartar(uuid, uuid, integer, jsonb, text, text)', 'execute'); -> false
 --   select count(*) from public.workspace_modulos where modulo = 'funciones';                       -> 0
 --   select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false); -> 0
 --
 -- Cómo revertir (nada la usa todavía):
 --   drop trigger funcion_consentimiento_borrado on public.chatwoot_consentimientos;
---   drop table public.funcion_reserva_mesas, public.funcion_reservas, public.funcion_funciones,
---              public.funcion_mesas, public.funcion_montajes, public.funcion_experiencias;
---   drop function public.funcion_guardar_experiencia, public.funcion_guardar_montaje, public.funcion_crear_funciones,
---     public.funcion_editar_funcion, public.funcion_actor, public.funcion_ocupadas, public.funcion_vencer_apartados, public.funcion_ocupacion,
+--   drop table public.funcion_reservas, public.funcion_funciones, public.funcion_experiencias;
+--   drop function public.funcion_guardar_experiencia, public.funcion_crear_funciones, public.funcion_editar_funcion,
+--     public.funcion_actor, public.funcion_ocupadas, public.funcion_vencer_apartados, public.funcion_ocupacion,
 --     public.funcion_consultar_cupo, public.funcion_apartar, public.funcion_confirmar_pago, public.funcion_cancelar_reserva,
---     public.funcion_asignar_mesas, public.funcion_guardar_restricciones, y las de los triggers;
+--     public.funcion_guardar_restricciones, public.funcion_funciones_candados, public.funcion_consentimiento_borrado;
 --   -- y devolver las cuatro listas de llaves al cuerpo de 20260928180000 / 20260929030000.
 -- ============================================================
 
@@ -172,63 +177,15 @@ comment on table public.funcion_experiencias is
   'Módulo funciones: la película o experiencia. La ficha del asistente (historia, precios, condiciones) vive en el reglamento del bot y anota este id; aquí no se duplica.';
 
 
--- ── 3. Montajes y mesas ──────────────────────────────────────────────────────
-
-create table public.funcion_montajes (
-  id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null,
-  experiencia_id uuid not null,
-  nombre text not null check (length(btrim(nombre)) > 0),
-  notas text,
-  created_at timestamptz not null default now(),
-  constraint funcion_montajes_experiencia foreign key (experiencia_id, workspace_id)
-    references public.funcion_experiencias (id, workspace_id),
-  constraint funcion_montajes_id_ws unique (id, workspace_id),
-  -- Lo usa la llave de `funcion_funciones (montaje_id, experiencia_id)`: una función solo usa un montaje de SU
-  -- experiencia, y un montaje usado por alguna función no se cambia de experiencia (la llave lo impide).
-  constraint funcion_montajes_id_experiencia unique (id, experiencia_id)
-);
-
-create index idx_funcion_montajes_experiencia on public.funcion_montajes (experiencia_id);
-
-create table public.funcion_mesas (
-  id uuid primary key default gen_random_uuid(),
-  workspace_id uuid not null,
-  montaje_id uuid not null,
-  -- Como la llama el equipo ("M1", "Frente 2").
-  etiqueta text not null check (length(btrim(etiqueta)) > 0),
-  -- Los puestos son un número por mesa, no filas por silla (HUECO 2: si Sabor numera sillas, va otra tabla).
-  puestos integer not null check (puestos between 1 and 100),
-  zona text,
-  -- INFORMATIVA: qué tiene de distinto la ubicación, en palabras de Sabor. A propósito no hay columna de precio ni de
-  -- recargo: el precio no cambia según la mesa (decisión de Mauricio, 2026-10-21).
-  condicion text,
-  -- Posición en una cuadrícula relativa de 0 a 100.
-  x numeric(6, 2) not null default 0 check (x between 0 and 100),
-  y numeric(6, 2) not null default 0 check (y between 0 and 100),
-  ancho numeric(6, 2) not null default 8 check (ancho > 0 and ancho <= 100),
-  alto numeric(6, 2) not null default 8 check (alto > 0 and alto <= 100),
-  forma text not null default 'rectangular' check (forma in ('redonda', 'rectangular')),
-  orden integer not null default 0,
-  created_at timestamptz not null default now(),
-  constraint funcion_mesas_montaje foreign key (montaje_id, workspace_id)
-    references public.funcion_montajes (id, workspace_id),
-  -- Diferible: el formulario puede intercambiar dos etiquetas en un mismo guardado (`funcion_guardar_montaje`).
-  constraint funcion_mesas_etiqueta_unica unique (montaje_id, etiqueta) deferrable initially deferred,
-  constraint funcion_mesas_id_montaje unique (id, montaje_id)
-);
-
-
--- ── 4. Funciones ─────────────────────────────────────────────────────────────
+-- ── 3. Funciones ─────────────────────────────────────────────────────────────
 
 create table public.funcion_funciones (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null,
   experiencia_id uuid not null,
-  -- Opcional: sin montaje no hay mapa, pero hay cupo y reservas (la recepción no depende del mapa).
-  montaje_id uuid,
   -- Se muestra y se agrupa en America/Bogota.
   inicia_at timestamptz not null,
+  -- La capacidad de la función. Sabor no asigna puestos: el cupo es todo lo que hay.
   cupo_total integer not null check (cupo_total between 1 and 10000),
   -- abierta: se vende · cerrada: no se vende más, se sigue atendiendo · cancelada.
   estado text not null default 'abierta' check (estado in ('abierta', 'cerrada', 'cancelada')),
@@ -238,17 +195,13 @@ create table public.funcion_funciones (
   updated_at timestamptz not null default now(),
   constraint funcion_funciones_experiencia foreign key (experiencia_id, workspace_id)
     references public.funcion_experiencias (id, workspace_id),
-  constraint funcion_funciones_montaje foreign key (montaje_id, experiencia_id)
-    references public.funcion_montajes (id, experiencia_id),
-  constraint funcion_funciones_id_ws unique (id, workspace_id),
-  constraint funcion_funciones_id_montaje unique (id, montaje_id)
+  constraint funcion_funciones_id_ws unique (id, workspace_id)
 );
 
 create index idx_funcion_funciones_dia on public.funcion_funciones (workspace_id, inicia_at);
-create index idx_funcion_funciones_montaje on public.funcion_funciones (montaje_id) where montaje_id is not null;
 
 
--- ── 5. Reservas ──────────────────────────────────────────────────────────────
+-- ── 4. Reservas ──────────────────────────────────────────────────────────────
 
 create table public.funcion_reservas (
   id uuid primary key default gen_random_uuid(),
@@ -270,8 +223,9 @@ create table public.funcion_reservas (
   vence_at timestamptz,
   pago_estado text not null default 'pendiente'
     check (pago_estado in ('pendiente', 'aprobado', 'verificado_manual', 'rechazado')),
-  -- Lo que pidió el cliente ("cerca de la pantalla"). NUNCA es una asignación: la mesa va en `funcion_reserva_mesas`.
-  preferencia_mesa text check (preferencia_mesa is null or length(preferencia_mesa) <= 300),
+  -- Lo que pidió el cliente, en sus palabras («vamos 6, queremos estar juntos»). Texto libre, SIN ninguna lógica: Sabor
+  -- no asigna puestos (alcance del 2026-10-22) y a los grupos de 5 o más les guarda mesa a mano, fuera de ONE.
+  solicitud_cliente text check (solicitud_cliente is null or length(solicitud_cliente) <= 500),
   -- Restricciones alimentarias: dato sensible. Solo con la autorización `sensible` = `si` de la misma conversación.
   restricciones text check (restricciones is null or length(restricciones) <= 1000),
   consentimiento_sensible_id uuid references public.chatwoot_consentimientos(id),
@@ -286,7 +240,6 @@ create table public.funcion_reservas (
   updated_at timestamptz not null default now(),
   constraint funcion_reservas_funcion foreign key (funcion_id, workspace_id)
     references public.funcion_funciones (id, workspace_id),
-  constraint funcion_reservas_id_funcion unique (id, funcion_id),
   -- El reintento del asistente (misma huella de la propuesta) devuelve la misma reserva.
   constraint funcion_reservas_clave_unica unique (workspace_id, clave_idempotencia),
   constraint funcion_reservas_restricciones_autorizadas
@@ -305,81 +258,37 @@ create index idx_funcion_reservas_consentimiento on public.funcion_reservas (con
   where consentimiento_sensible_id is not null;
 
 
--- ── 6. Mesas asignadas ───────────────────────────────────────────────────────
-
-create table public.funcion_reserva_mesas (
-  reserva_id uuid not null,
-  mesa_id uuid not null,
-  workspace_id uuid not null references public.workspaces(id),
-  funcion_id uuid not null,
-  montaje_id uuid not null,
-  personas integer not null check (personas >= 1),
-  -- Solo un usuario de ONE del workspace asigna: nunca la llave del asistente.
-  asignada_por uuid not null references public.profiles(id),
-  asignada_at timestamptz not null default now(),
-  primary key (reserva_id, mesa_id),
-  -- Las tres llaves hacen estructural que la mesa sea del montaje de la función de la reserva.
-  constraint funcion_reserva_mesas_reserva foreign key (reserva_id, funcion_id)
-    references public.funcion_reservas (id, funcion_id) on delete cascade,
-  constraint funcion_reserva_mesas_funcion foreign key (funcion_id, montaje_id)
-    references public.funcion_funciones (id, montaje_id),
-  constraint funcion_reserva_mesas_mesa foreign key (mesa_id, montaje_id)
-    references public.funcion_mesas (id, montaje_id)
-);
-
-create index idx_funcion_reserva_mesas_mesa on public.funcion_reserva_mesas (funcion_id, mesa_id);
-
-
--- ── 7. RLS y grants ──────────────────────────────────────────────────────────
+-- ── 5. RLS y grants ──────────────────────────────────────────────────────────
 
 alter table public.funcion_experiencias enable row level security;
-alter table public.funcion_montajes enable row level security;
-alter table public.funcion_mesas enable row level security;
 alter table public.funcion_funciones enable row level security;
 alter table public.funcion_reservas enable row level security;
-alter table public.funcion_reserva_mesas enable row level security;
 
 -- Lectura por workspace. Sin políticas de escritura y sin grant de escritura: escriben las funciones de la base.
 create policy funcion_experiencias_lectura on public.funcion_experiencias
-  for select using (workspace_id = (select public.current_user_workspace_id()));
-create policy funcion_montajes_lectura on public.funcion_montajes
-  for select using (workspace_id = (select public.current_user_workspace_id()));
-create policy funcion_mesas_lectura on public.funcion_mesas
   for select using (workspace_id = (select public.current_user_workspace_id()));
 create policy funcion_funciones_lectura on public.funcion_funciones
   for select using (workspace_id = (select public.current_user_workspace_id()));
 create policy funcion_reservas_lectura on public.funcion_reservas
   for select using (workspace_id = (select public.current_user_workspace_id()));
-create policy funcion_reserva_mesas_lectura on public.funcion_reserva_mesas
-  for select using (workspace_id = (select public.current_user_workspace_id()));
 
 revoke all on table public.funcion_experiencias from public, anon, authenticated;
-revoke all on table public.funcion_montajes from public, anon, authenticated;
-revoke all on table public.funcion_mesas from public, anon, authenticated;
 revoke all on table public.funcion_funciones from public, anon, authenticated;
 revoke all on table public.funcion_reservas from public, anon, authenticated;
-revoke all on table public.funcion_reserva_mesas from public, anon, authenticated;
 
 grant select on public.funcion_experiencias to authenticated;
-grant select on public.funcion_montajes to authenticated;
-grant select on public.funcion_mesas to authenticated;
 grant select on public.funcion_funciones to authenticated;
 grant select on public.funcion_reservas to authenticated;
-grant select on public.funcion_reserva_mesas to authenticated;
 
 -- service_role nace con todo por el default de la base: se le deja solo la lectura, para que tampoco la llave del
--- asistente pueda escribir una mesa o una reserva saltándose las invariantes.
+-- asistente pueda escribir una reserva saltándose las invariantes.
 revoke insert, update, delete, truncate on table public.funcion_experiencias from service_role;
-revoke insert, update, delete, truncate on table public.funcion_montajes from service_role;
-revoke insert, update, delete, truncate on table public.funcion_mesas from service_role;
 revoke insert, update, delete, truncate on table public.funcion_funciones from service_role;
 revoke insert, update, delete, truncate on table public.funcion_reservas from service_role;
-revoke insert, update, delete, truncate on table public.funcion_reserva_mesas from service_role;
-grant select on public.funcion_experiencias, public.funcion_montajes, public.funcion_mesas, public.funcion_funciones,
-  public.funcion_reservas, public.funcion_reserva_mesas to service_role;
+grant select on public.funcion_experiencias, public.funcion_funciones, public.funcion_reservas to service_role;
 
 
--- ── 8. Piezas internas: quién llama, ocupación y vencimiento ─────────────────
+-- ── 6. Piezas internas: quién llama, ocupación y vencimiento ─────────────────
 
 -- Quién llama: con sesión (`auth.uid()`), un usuario de ONE, que tiene que estar en el workspace (si no, el objeto
 -- "no existe": no se confirma que exista en otro espacio) y, para escribir, tener un rol que edite. Sin sesión, el
@@ -450,31 +359,9 @@ $$;
 revoke execute on function public.funcion_vencer_apartados(uuid) from public, anon, authenticated, service_role;
 
 
--- ── 9. Triggers: candados del montaje, de la función y de la reserva ─────────
+-- ── 7. Triggers: el cupo de la función y la autorización borrada ─────────────
 
--- Cancelar o vencer libera las mesas: solo `apartada` y `confirmada` ocupan mesa.
-create or replace function public.funcion_reserva_libera_mesas()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if new.estado in ('cancelada', 'vencida') and old.estado is distinct from new.estado then
-    delete from public.funcion_reserva_mesas where reserva_id = new.id;
-  end if;
-  return new;
-end;
-$$;
-
--- PostgreSQL no exige EXECUTE para DISPARAR un trigger: el revoke no la apaga.
-revoke execute on function public.funcion_reserva_libera_mesas() from public, anon, authenticated, service_role;
-
-create trigger trg_funcion_reserva_libera_mesas
-  after update of estado on public.funcion_reservas
-  for each row execute function public.funcion_reserva_libera_mesas();
-
--- La función: cupo dentro de los puestos del montaje, cupo no por debajo de lo ocupado, montaje fijo si hay mesas.
+-- El cupo no baja por debajo de lo ocupado. Corre con la fila de la función ya bloqueada por el UPDATE.
 create or replace function public.funcion_funciones_candados()
 returns trigger
 language plpgsql
@@ -482,112 +369,26 @@ security definer
 set search_path = public
 as $$
 declare
-  v_puestos integer;
   v_ocupadas integer;
 begin
-  if new.montaje_id is not null
-     and (tg_op = 'INSERT' or new.montaje_id is distinct from old.montaje_id or new.cupo_total <> old.cupo_total) then
-    select coalesce(sum(puestos), 0)::integer into v_puestos from public.funcion_mesas where montaje_id = new.montaje_id;
-    if new.cupo_total > v_puestos then
-      raise exception 'cupo_sobre_puestos' using errcode = 'P0001',
-        detail = format('El cupo (%s) pasa los puestos del montaje (%s).', new.cupo_total, v_puestos);
+  if new.cupo_total < old.cupo_total then
+    v_ocupadas := public.funcion_ocupadas(old.id);
+    if new.cupo_total < v_ocupadas then
+      raise exception 'cupo_bajo_ocupacion' using errcode = 'P0001',
+        detail = format('Hay %s personas ocupando; el cupo no puede bajar a %s.', v_ocupadas, new.cupo_total);
     end if;
   end if;
-
-  if tg_op = 'UPDATE' then
-    if new.montaje_id is distinct from old.montaje_id
-       and exists (select 1 from public.funcion_reserva_mesas where funcion_id = old.id) then
-      raise exception 'funcion_con_mesas' using errcode = 'P0001',
-        detail = 'Hay reservas sentadas: primero se liberan las mesas.';
-    end if;
-    if new.cupo_total < old.cupo_total then
-      v_ocupadas := public.funcion_ocupadas(old.id);
-      if new.cupo_total < v_ocupadas then
-        raise exception 'cupo_bajo_ocupacion' using errcode = 'P0001',
-          detail = format('Hay %s personas ocupando; el cupo no puede bajar a %s.', v_ocupadas, new.cupo_total);
-      end if;
-    end if;
-    new.updated_at := now();
-  end if;
+  new.updated_at := now();
   return new;
 end;
 $$;
 
+-- PostgreSQL no exige EXECUTE para DISPARAR un trigger: el revoke no la apaga.
 revoke execute on function public.funcion_funciones_candados() from public, anon, authenticated, service_role;
 
 create trigger trg_funcion_funciones_candados
-  before insert or update on public.funcion_funciones
+  before update on public.funcion_funciones
   for each row execute function public.funcion_funciones_candados();
-
--- La mesa: no se borra ni baja sus puestos por debajo de lo asignado en una función futura, y el montaje no queda con
--- menos puestos que el cupo de sus funciones futuras. Toma el candado de esas funciones (en orden) antes de mirar.
-create or replace function public.funcion_mesas_candados()
-returns trigger
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_montaje uuid := coalesce(new.montaje_id, old.montaje_id);
-  v_puestos_nuevos integer := case when tg_op = 'DELETE' then 0 else new.puestos end;
-  v_asignados integer;
-  v_total integer;
-  v_cupo integer;
-begin
-  if tg_op = 'UPDATE' and new.montaje_id is distinct from old.montaje_id then
-    raise exception 'mesa_cambia_montaje' using errcode = 'P0001', detail = 'Una mesa no se mueve a otro montaje.';
-  end if;
-  if tg_op = 'UPDATE' and new.puestos >= old.puestos then
-    return new;
-  end if;
-
-  perform 1 from public.funcion_funciones
-   where montaje_id = v_montaje and inicia_at > now() and estado <> 'cancelada'
-   order by id
-   for update;
-
-  if tg_op = 'DELETE' and exists (select 1 from public.funcion_reserva_mesas where mesa_id = old.id) then
-    raise exception 'mesa_con_asignaciones' using errcode = 'P0001',
-      detail = format('La mesa %s tiene reservas asignadas.', old.etiqueta);
-  end if;
-
-  select coalesce(max(s.asignados), 0) into v_asignados
-    from (
-      select sum(rm.personas)::integer as asignados
-        from public.funcion_reserva_mesas rm
-        join public.funcion_funciones f on f.id = rm.funcion_id
-        join public.funcion_reservas r on r.id = rm.reserva_id
-       where rm.mesa_id = old.id and f.inicia_at > now()
-         and (r.estado = 'confirmada' or (r.estado = 'apartada' and r.vence_at > now()))
-       group by rm.funcion_id
-    ) s;
-  if v_asignados > v_puestos_nuevos then
-    raise exception 'mesa_con_asignaciones' using errcode = 'P0001',
-      detail = format('La mesa %s tiene %s personas asignadas en una función futura.', old.etiqueta, v_asignados);
-  end if;
-
-  select coalesce(sum(puestos), 0)::integer - old.puestos + v_puestos_nuevos into v_total
-    from public.funcion_mesas where montaje_id = v_montaje;
-  select max(cupo_total) into v_cupo
-    from public.funcion_funciones
-   where montaje_id = v_montaje and inicia_at > now() and estado <> 'cancelada';
-  if v_cupo is not null and v_cupo > v_total then
-    raise exception 'cupo_sobre_puestos' using errcode = 'P0001',
-      detail = format('Una función futura tiene cupo %s y el montaje quedaría con %s puestos.', v_cupo, v_total);
-  end if;
-
-  if tg_op = 'DELETE' then
-    return old;
-  end if;
-  return new;
-end;
-$$;
-
-revoke execute on function public.funcion_mesas_candados() from public, anon, authenticated, service_role;
-
-create trigger trg_funcion_mesas_candados
-  before update or delete on public.funcion_mesas
-  for each row execute function public.funcion_mesas_candados();
 
 -- Supresión de datos: si se borra la autorización sensible, se borran las restricciones que autorizaba.
 create or replace function public.funcion_consentimiento_borrado()
@@ -611,10 +412,10 @@ create trigger funcion_consentimiento_borrado
   for each row execute function public.funcion_consentimiento_borrado();
 
 
--- ── 10. Lecturas ─────────────────────────────────────────────────────────────
+-- ── 8. Lecturas ──────────────────────────────────────────────────────────────
 
--- Cupo total, ocupadas, libres y, si hay montaje, por mesa: puestos, personas asignadas y reservas sentadas.
--- La usan el mapa, la lista del día y (recortada) el asistente.
+-- Cupo total, ocupadas y libres. La usan el detalle de la función y la lista del día; el asistente usa
+-- `funcion_consultar_cupo`, más corta.
 create or replace function public.funcion_ocupacion(p_funcion_id uuid)
 returns jsonb
 language plpgsql
@@ -625,7 +426,6 @@ as $$
 declare
   f record;
   v_ocupadas integer;
-  v_mesas jsonb := null;
 begin
   select fu.*, e.nombre as experiencia_nombre
     into f
@@ -638,30 +438,6 @@ begin
   perform public.funcion_actor(f.workspace_id, false, 'funcion_no_existe');
 
   v_ocupadas := public.funcion_ocupadas(f.id);
-
-  if f.montaje_id is not null then
-    select coalesce(jsonb_agg(jsonb_build_object(
-             'mesa_id', m.id, 'etiqueta', m.etiqueta, 'zona', m.zona, 'condicion', m.condicion,
-             'puestos', m.puestos, 'ocupados', o.ocupados, 'libres', greatest(m.puestos - o.ocupados, 0),
-             'x', m.x, 'y', m.y, 'ancho', m.ancho, 'alto', m.alto, 'forma', m.forma, 'orden', m.orden,
-             'reservas', o.reservas
-           ) order by m.orden, m.etiqueta), '[]'::jsonb)
-      into v_mesas
-      from public.funcion_mesas m
-      cross join lateral (
-        select coalesce(sum(rm.personas), 0)::integer as ocupados,
-               coalesce(jsonb_agg(jsonb_build_object(
-                 'reserva_id', r.id, 'nombre', r.nombre, 'personas', rm.personas,
-                 'estado', r.estado, 'pago_estado', r.pago_estado
-               ) order by rm.asignada_at, r.id), '[]'::jsonb) as reservas
-          from public.funcion_reserva_mesas rm
-          join public.funcion_reservas r on r.id = rm.reserva_id
-         where rm.mesa_id = m.id and rm.funcion_id = f.id
-           and (r.estado = 'confirmada' or (r.estado = 'apartada' and r.vence_at > now()))
-      ) o
-     where m.montaje_id = f.montaje_id;
-  end if;
-
   return jsonb_build_object(
     'funcion_id', f.id,
     'workspace_id', f.workspace_id,
@@ -670,21 +446,19 @@ begin
     'inicia_at', f.inicia_at,
     'estado', f.estado,
     'cierra_venta_at', f.cierra_venta_at,
-    'montaje_id', f.montaje_id,
     'cupo_total', f.cupo_total,
     'ocupadas', v_ocupadas,
-    'libres', greatest(f.cupo_total - v_ocupadas, 0),
-    'mesas', v_mesas
+    'libres', greatest(f.cupo_total - v_ocupadas, 0)
   );
 end;
 $$;
 
--- ejecutable-por-cliente: la lee la pantalla del mapa con la sesión del equipo. Es SECURITY DEFINER y verifica que
+-- ejecutable-por-cliente: la leen el detalle y la lista del día con la sesión del equipo. Es SECURITY DEFINER y verifica que
 -- `auth.uid()` esté en el workspace de la función (`funcion_actor`); con otro workspace responde `funcion_no_existe`.
 revoke execute on function public.funcion_ocupacion(uuid) from public, anon;
 grant execute on function public.funcion_ocupacion(uuid) to authenticated, service_role;
 
--- Lo único que ve el asistente: nunca mesas, puestos por mesa ni datos de otras reservas. Solo funciones futuras y
+-- Lo único que ve el asistente: nunca datos de otras reservas. Solo funciones futuras y
 -- del workspace. `estado` sale `cerrada` si ya pasó `cierra_venta_at` (para el cliente es lo mismo: no se aparta).
 create or replace function public.funcion_consultar_cupo(p_workspace_id uuid, p_funcion_id uuid)
 returns jsonb
@@ -719,10 +493,10 @@ revoke execute on function public.funcion_consultar_cupo(uuid, uuid) from public
 grant execute on function public.funcion_consultar_cupo(uuid, uuid) to service_role;
 
 
--- ── 11. Apartar ──────────────────────────────────────────────────────────────
+-- ── 9. Apartar ───────────────────────────────────────────────────────────────
 
--- Datos admitidos en `p_datos`. A propósito NO hay campo de mesa: una clave de más (`mesa_id`, `mesas`) se rechaza con
--- `dato_no_admitido`, así que ni el asistente ni un error del servidor pueden sentar a nadie al apartar.
+-- Datos admitidos en `p_datos`. A propósito NO hay campo de mesa ni de puesto: una clave de más (`mesa_id`, `mesas`,
+-- `puesto`) se rechaza con `dato_no_admitido`. Lo que pida el cliente va en `solicitud_cliente`, como texto.
 create or replace function public.funcion_apartar(
   p_workspace_id uuid,
   p_funcion_id uuid,
@@ -770,7 +544,7 @@ begin
   select k into v_extra
     from jsonb_object_keys(v_datos) k
    where k <> all (array['nombre', 'documento', 'telefono', 'contacto_canal', 'canal',
-                         'chatwoot_cuenta_id', 'chatwoot_conversacion_id', 'preferencia_mesa'])
+                         'chatwoot_cuenta_id', 'chatwoot_conversacion_id', 'solicitud_cliente'])
    limit 1;
   if v_extra is not null then
     raise exception 'dato_no_admitido' using errcode = 'P0001', detail = v_extra;
@@ -862,12 +636,12 @@ begin
   v_vence := now() + make_interval(mins => e.minutos_apartado);
   insert into public.funcion_reservas (
     workspace_id, funcion_id, personas, contacto_id, nombre, documento, telefono, contacto_canal, canal,
-    chatwoot_cuenta_id, chatwoot_conversacion_id, estado, vence_at, preferencia_mesa, origen, clave_idempotencia,
+    chatwoot_cuenta_id, chatwoot_conversacion_id, estado, vence_at, solicitud_cliente, origen, clave_idempotencia,
     creada_por
   ) values (
     p_workspace_id, f.id, p_personas, v_contacto, v_nombre, nullif(btrim(v_datos->>'documento'), ''), v_tel,
     nullif(btrim(v_datos->>'contacto_canal'), ''), v_canal, v_cuenta, v_conv, 'apartada', v_vence,
-    nullif(btrim(v_datos->>'preferencia_mesa'), ''), p_origen, v_clave, auth.uid()
+    left(nullif(btrim(v_datos->>'solicitud_cliente'), ''), 500), p_origen, v_clave, auth.uid()
   ) returning id into v_id;
 
   return jsonb_build_object('reserva_id', v_id, 'estado', 'apartada', 'vence_at', v_vence, 'repetida', false);
@@ -880,7 +654,7 @@ revoke execute on function public.funcion_apartar(uuid, uuid, integer, jsonb, te
 grant execute on function public.funcion_apartar(uuid, uuid, integer, jsonb, text, text) to authenticated, service_role;
 
 
--- ── 12. Confirmar el pago y cancelar ─────────────────────────────────────────
+-- ── 10. Confirmar el pago y cancelar ─────────────────────────────────────────
 
 create or replace function public.funcion_confirmar_pago(p_reserva_id uuid, p_pago_estado text)
 returns jsonb
@@ -968,7 +742,6 @@ begin
     return jsonb_build_object('reserva_id', r.id, 'estado', 'cancelada', 'repetida', true);
   end if;
 
-  -- El trigger `trg_funcion_reserva_libera_mesas` quita sus mesas.
   update public.funcion_reservas
      set estado = 'cancelada', cancelada_at = now(), cancelada_por = auth.uid(), updated_at = now()
    where id = r.id;
@@ -981,114 +754,7 @@ revoke execute on function public.funcion_cancelar_reserva(uuid) from public, an
 grant execute on function public.funcion_cancelar_reserva(uuid) to authenticated;
 
 
--- ── 13. Asignar mesas (solo el equipo) ───────────────────────────────────────
-
--- Reemplaza las mesas de la reserva por las dadas: `[{"mesa_id": "…", "personas": 4}, …]`. Vacío = liberar. Mover es
--- asignar de nuevo. Todo o nada: si una mesa no cabe, no queda ninguna asignación a medias.
-create or replace function public.funcion_asignar_mesas(p_reserva_id uuid, p_asignaciones jsonb)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_ws uuid;
-  v_funcion uuid;
-  v_asig jsonb := coalesce(p_asignaciones, '[]'::jsonb);
-  f record;
-  r record;
-  m record;
-  v_item jsonb;
-  v_personas integer;
-  v_suma integer := 0;
-  v_n integer;
-  v_distintas integer;
-  v_ocupados integer;
-begin
-  select workspace_id, funcion_id into v_ws, v_funcion from public.funcion_reservas where id = p_reserva_id;
-  if not found then
-    raise exception 'reserva_no_existe' using errcode = 'P0001';
-  end if;
-  -- Nunca la llave del asistente: además de no tener EXECUTE, sin sesión no pasa.
-  if public.funcion_actor(v_ws, true, 'reserva_no_existe') <> 'equipo' then
-    raise exception 'sin_permiso' using errcode = 'P0001';
-  end if;
-  if jsonb_typeof(v_asig) <> 'array' then
-    raise exception 'asignaciones_invalidas' using errcode = 'P0001';
-  end if;
-
-  select * into f from public.funcion_funciones where id = v_funcion for update;
-  perform public.funcion_vencer_apartados(f.id);
-  select * into r from public.funcion_reservas where id = p_reserva_id for update;
-
-  if not (r.estado = 'confirmada' or (r.estado = 'apartada' and r.vence_at > now())) then
-    raise exception 'reserva_inactiva' using errcode = 'P0001',
-      detail = format('La reserva está %s.', r.estado);
-  end if;
-  if f.montaje_id is null then
-    raise exception 'funcion_sin_montaje' using errcode = 'P0001',
-      detail = 'Esta función no tiene plano del salón.';
-  end if;
-
-  v_n := jsonb_array_length(v_asig);
-  for v_item in select value from jsonb_array_elements(v_asig) loop
-    if jsonb_typeof(v_item) <> 'object'
-       or coalesce(v_item->>'mesa_id', '') !~ '^[0-9a-fA-F-]{36}$'
-       or coalesce(v_item->>'personas', '') !~ '^[0-9]{1,4}$'
-       or (v_item->>'personas')::integer < 1 then
-      raise exception 'asignaciones_invalidas' using errcode = 'P0001';
-    end if;
-    v_suma := v_suma + (v_item->>'personas')::integer;
-  end loop;
-  select count(distinct value->>'mesa_id') into v_distintas from jsonb_array_elements(v_asig);
-  if v_distintas <> v_n then
-    raise exception 'asignaciones_invalidas' using errcode = 'P0001', detail = 'Una mesa aparece dos veces.';
-  end if;
-  -- La suma de la reserva en sus mesas es igual a sus personas, o cero (sin mesa).
-  if v_n > 0 and v_suma <> r.personas then
-    raise exception 'personas_no_cuadran' using errcode = 'P0001',
-      detail = format('La reserva es de %s personas y la asignación suma %s.', r.personas, v_suma);
-  end if;
-
-  delete from public.funcion_reserva_mesas where reserva_id = r.id;
-
-  for v_item in select value from jsonb_array_elements(v_asig) loop
-    v_personas := (v_item->>'personas')::integer;
-    select * into m from public.funcion_mesas where id = (v_item->>'mesa_id')::uuid;
-    if not found or m.montaje_id <> f.montaje_id then
-      raise exception 'mesa_de_otro_montaje' using errcode = 'P0001',
-        detail = 'La mesa no es del plano de esta función.';
-    end if;
-    select coalesce(sum(rm.personas), 0)::integer into v_ocupados
-      from public.funcion_reserva_mesas rm
-      join public.funcion_reservas x on x.id = rm.reserva_id
-     where rm.mesa_id = m.id and rm.funcion_id = f.id
-       and (x.estado = 'confirmada' or (x.estado = 'apartada' and x.vence_at > now()));
-    if v_ocupados + v_personas > m.puestos then
-      raise exception 'mesa_llena' using errcode = 'P0001',
-        detail = format('La mesa %s tiene %s puestos libres.', m.etiqueta, greatest(m.puestos - v_ocupados, 0));
-    end if;
-    insert into public.funcion_reserva_mesas
-      (reserva_id, mesa_id, workspace_id, funcion_id, montaje_id, personas, asignada_por)
-    values (r.id, m.id, r.workspace_id, f.id, f.montaje_id, v_personas, auth.uid());
-  end loop;
-
-  return jsonb_build_object(
-    'reserva_id', r.id,
-    'mesas', coalesce((
-      select jsonb_agg(jsonb_build_object('mesa_id', rm.mesa_id, 'personas', rm.personas) order by rm.mesa_id)
-        from public.funcion_reserva_mesas rm where rm.reserva_id = r.id), '[]'::jsonb)
-  );
-end;
-$$;
-
--- ejecutable-por-cliente: solo el equipo con su sesión. NO se concede a service_role: la llave del asistente no
--- puede asignar una mesa (regla 1 de la decisión de Mauricio del 2026-10-21).
-revoke execute on function public.funcion_asignar_mesas(uuid, jsonb) from public, anon, service_role;
-grant execute on function public.funcion_asignar_mesas(uuid, jsonb) to authenticated;
-
-
--- ── 14. Restricciones alimentarias (dato sensible) ───────────────────────────
+-- ── 11. Restricciones alimentarias (dato sensible) ───────────────────────────
 
 -- Texto vacío o nulo = borrar. Con texto, exige la fila de `chatwoot_consentimientos` de tipo `sensible`, respuesta
 -- `si`, del mismo workspace, cuenta y conversación de la reserva, y que no haya un «no» posterior. Una reserva sin
@@ -1154,8 +820,8 @@ revoke execute on function public.funcion_guardar_restricciones(uuid, text, uuid
 grant execute on function public.funcion_guardar_restricciones(uuid, text, uuid) to authenticated, service_role;
 
 
--- ── 15. Alta desde el formulario (F1, resuelta por Mauricio el 2026-10-21) ───
--- El formulario de ONE es la ÚNICA puerta de entrada de experiencias, montajes y funciones. El PDF que lo pre-llena
+-- ── 12. Alta desde el formulario (F1, resuelta por Mauricio el 2026-10-21) ───
+-- El formulario de ONE es la ÚNICA puerta de entrada de experiencias y funciones. El PDF que lo pre-llena
 -- nunca llega aquí: la extracción devuelve un borrador al navegador y lo que se guarda es lo que la persona confirma
 -- con el botón del formulario, por estas funciones. Solo el equipo (con sesión); ninguna se concede a service_role.
 
@@ -1206,158 +872,12 @@ $$;
 revoke execute on function public.funcion_guardar_experiencia(uuid, uuid, text, integer, boolean) from public, anon, service_role;
 grant execute on function public.funcion_guardar_experiencia(uuid, uuid, text, integer, boolean) to authenticated;
 
--- Crea (p_montaje_id nulo) o edita un montaje con su tabla de mesas completa:
---   p_mesas = [{"id"?: uuid, "etiqueta", "puestos", "zona"?, "condicion"?, "x"?, "y"?, "ancho"?, "alto"?, "forma"?}, …]
--- Las mesas con `id` se actualizan, las sin `id` se crean y las que ya no vienen se borran. Los candados de §1.2 los
--- hacen cumplir los triggers de `funcion_mesas` (una mesa con reservas sentadas no se borra ni baja de lo asignado;
--- el montaje no queda con menos puestos que el cupo de una función futura). Orden: altas, subidas, bajadas y bajas,
--- para que un cambio que en total cuadra no falle a mitad de camino.
-create or replace function public.funcion_guardar_montaje(
-  p_workspace_id uuid,
-  p_montaje_id uuid,
-  p_experiencia_id uuid,
-  p_nombre text,
-  p_notas text,
-  p_mesas jsonb
-) returns uuid
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_nombre text := nullif(btrim(coalesce(p_nombre, '')), '');
-  v_mesas jsonb := coalesce(p_mesas, '[]'::jsonb);
-  v_id uuid;
-  v_actual record;
-  v_item jsonb;
-  v_n integer;
-  v_etiquetas integer;
-  v_orden integer := 0;
-  v_nueva uuid;
-  v_nuevas uuid[] := '{}';
-begin
-  if public.funcion_actor(p_workspace_id, true, 'montaje_no_existe') <> 'equipo' then
-    raise exception 'sin_permiso' using errcode = 'P0001';
-  end if;
-  if v_nombre is null or length(v_nombre) > 200 then
-    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'nombre';
-  end if;
-  if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
-    raise exception 'experiencia_no_existe' using errcode = 'P0001';
-  end if;
-  if jsonb_typeof(v_mesas) <> 'array' or jsonb_array_length(v_mesas) = 0 or jsonb_array_length(v_mesas) > 300 then
-    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Un montaje tiene entre 1 y 300 mesas.';
-  end if;
-
-  v_n := jsonb_array_length(v_mesas);
-  for v_item in select value from jsonb_array_elements(v_mesas) loop
-    if jsonb_typeof(v_item) <> 'object' or nullif(btrim(coalesce(v_item->>'etiqueta', '')), '') is null
-       or length(btrim(v_item->>'etiqueta')) > 40 then
-      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Toda mesa lleva etiqueta.';
-    end if;
-    if coalesce(v_item->>'puestos', '') !~ '^[0-9]{1,3}$' or (v_item->>'puestos')::integer not between 1 and 100 then
-      raise exception 'puestos_invalidos' using errcode = 'P0001',
-        detail = format('La mesa %s tiene que tener entre 1 y 100 puestos.', btrim(v_item->>'etiqueta'));
-    end if;
-    if v_item ? 'id' and coalesce(v_item->>'id', '') !~ '^[0-9a-fA-F-]{36}$' then
-      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'id de mesa';
-    end if;
-  end loop;
-  select count(distinct lower(btrim(value->>'etiqueta'))) into v_etiquetas from jsonb_array_elements(v_mesas);
-  if v_etiquetas <> v_n then
-    raise exception 'etiqueta_repetida' using errcode = 'P0001', detail = 'Dos mesas tienen la misma etiqueta.';
-  end if;
-
-  if p_montaje_id is null then
-    if exists (select 1 from jsonb_array_elements(v_mesas) e where e.value ? 'id') then
-      raise exception 'mesa_de_otro_montaje' using errcode = 'P0001';
-    end if;
-    insert into public.funcion_montajes (workspace_id, experiencia_id, nombre, notas)
-    values (p_workspace_id, p_experiencia_id, v_nombre, nullif(btrim(coalesce(p_notas, '')), ''))
-    returning id into v_id;
-  else
-    select * into v_actual from public.funcion_montajes where id = p_montaje_id and workspace_id = p_workspace_id;
-    if not found then
-      raise exception 'montaje_no_existe' using errcode = 'P0001';
-    end if;
-    if v_actual.experiencia_id <> p_experiencia_id
-       and exists (select 1 from public.funcion_funciones where montaje_id = p_montaje_id) then
-      raise exception 'montaje_en_uso' using errcode = 'P0001',
-        detail = 'Un montaje que ya usa una función no se cambia de experiencia.';
-    end if;
-    -- Una mesa con id que no es de este montaje no se "adopta".
-    if exists (
-      select 1 from jsonb_array_elements(v_mesas) e
-       where e.value ? 'id'
-         and not exists (select 1 from public.funcion_mesas m where m.id = (e.value->>'id')::uuid and m.montaje_id = p_montaje_id)
-    ) then
-      raise exception 'mesa_de_otro_montaje' using errcode = 'P0001';
-    end if;
-    update public.funcion_montajes
-       set experiencia_id = p_experiencia_id, nombre = v_nombre, notas = nullif(btrim(coalesce(p_notas, '')), '')
-     where id = p_montaje_id;
-    v_id := p_montaje_id;
-  end if;
-
-  -- Altas.
-  for v_item in select value from jsonb_array_elements(v_mesas) loop
-    v_orden := v_orden + 1;
-    if not (v_item ? 'id') then
-      insert into public.funcion_mesas (workspace_id, montaje_id, etiqueta, puestos, zona, condicion, x, y, ancho, alto, forma, orden)
-      values (p_workspace_id, v_id, btrim(v_item->>'etiqueta'), (v_item->>'puestos')::integer,
-              nullif(btrim(coalesce(v_item->>'zona', '')), ''), nullif(btrim(coalesce(v_item->>'condicion', '')), ''),
-              coalesce((v_item->>'x')::numeric, 0), coalesce((v_item->>'y')::numeric, 0),
-              coalesce((v_item->>'ancho')::numeric, 8), coalesce((v_item->>'alto')::numeric, 8),
-              coalesce(nullif(v_item->>'forma', ''), 'rectangular'), v_orden)
-      returning id into v_nueva;
-      v_nuevas := v_nuevas || v_nueva;
-    end if;
-  end loop;
-
-  -- Cambios de las mesas que siguen, primero las que suben de puestos.
-  for v_item in
-    select e.value from jsonb_array_elements(v_mesas) with ordinality e(value, i)
-      join public.funcion_mesas m on e.value ? 'id' and m.id = (e.value->>'id')::uuid
-     order by ((e.value->>'puestos')::integer - m.puestos) desc, e.i
-  loop
-    update public.funcion_mesas
-       set etiqueta = btrim(v_item->>'etiqueta'), puestos = (v_item->>'puestos')::integer,
-           zona = nullif(btrim(coalesce(v_item->>'zona', '')), ''), condicion = nullif(btrim(coalesce(v_item->>'condicion', '')), ''),
-           x = coalesce((v_item->>'x')::numeric, x), y = coalesce((v_item->>'y')::numeric, y),
-           ancho = coalesce((v_item->>'ancho')::numeric, ancho), alto = coalesce((v_item->>'alto')::numeric, alto),
-           forma = coalesce(nullif(v_item->>'forma', ''), forma)
-     where id = (v_item->>'id')::uuid;
-  end loop;
-  update public.funcion_mesas m
-     set orden = e.i
-    from jsonb_array_elements(v_mesas) with ordinality e(value, i)
-   where e.value ? 'id' and m.id = (e.value->>'id')::uuid;
-
-  -- Bajas: las mesas que ya no vienen.
-  if p_montaje_id is not null then
-    delete from public.funcion_mesas m
-     where m.montaje_id = v_id
-       and m.id <> all (v_nuevas)
-       and m.id not in (select (e.value->>'id')::uuid from jsonb_array_elements(v_mesas) e where e.value ? 'id');
-  end if;
-
-  -- La unicidad de etiquetas es diferible (para poder intercambiarlas): se verifica aquí, no al final de la transacción.
-  set constraints public.funcion_mesas_etiqueta_unica immediate;
-  return v_id;
-end;
-$$;
-
--- ejecutable-por-cliente: el formulario de montajes, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
-revoke execute on function public.funcion_guardar_montaje(uuid, uuid, uuid, text, text, jsonb) from public, anon, service_role;
-grant execute on function public.funcion_guardar_montaje(uuid, uuid, uuid, text, text, jsonb) to authenticated;
-
 -- Crea una o varias funciones de una experiencia (una película suele tener varias fechas y horas), todas con el mismo
--- montaje, cupo, estado y cierre de venta (`p_cierre_minutos_antes` antes de cada inicio; nulo = hasta el inicio).
+-- cupo, estado y cierre de venta (`p_cierre_minutos_antes` antes de cada inicio; nulo = hasta el inicio).
 -- `p_inicios` = ["2026-11-09T19:00:00-05:00", …]. Todo o nada.
 create or replace function public.funcion_crear_funciones(
   p_workspace_id uuid,
   p_experiencia_id uuid,
-  p_montaje_id uuid,
   p_cupo_total integer,
   p_estado text,
   p_cierre_minutos_antes integer,
@@ -1379,11 +899,6 @@ begin
   end if;
   if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
     raise exception 'experiencia_no_existe' using errcode = 'P0001';
-  end if;
-  if p_montaje_id is not null and not exists (
-    select 1 from public.funcion_montajes where id = p_montaje_id and experiencia_id = p_experiencia_id
-  ) then
-    raise exception 'montaje_de_otra_experiencia' using errcode = 'P0001';
   end if;
   if p_cupo_total is null or p_cupo_total < 1 or p_cupo_total > 10000 then
     raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'cupo_total';
@@ -1411,9 +926,8 @@ begin
       raise exception 'fecha_pasada' using errcode = 'P0001',
         detail = to_char(v_inicio at time zone 'America/Bogota', 'YYYY-MM-DD HH24:MI');
     end if;
-    -- El cupo contra los puestos del montaje lo verifica el trigger `trg_funcion_funciones_candados` (cupo_sobre_puestos).
-    insert into public.funcion_funciones (workspace_id, experiencia_id, montaje_id, inicia_at, cupo_total, estado, cierra_venta_at)
-    values (p_workspace_id, p_experiencia_id, p_montaje_id, v_inicio, p_cupo_total, p_estado,
+    insert into public.funcion_funciones (workspace_id, experiencia_id, inicia_at, cupo_total, estado, cierra_venta_at)
+    values (p_workspace_id, p_experiencia_id, v_inicio, p_cupo_total, p_estado,
             case when p_cierre_minutos_antes is null then null else v_inicio - make_interval(mins => p_cierre_minutos_antes) end)
     returning id into v_id;
     v_ids := v_ids || to_jsonb(v_id);
@@ -1423,11 +937,11 @@ end;
 $$;
 
 -- ejecutable-por-cliente: el formulario de funciones, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
-revoke execute on function public.funcion_crear_funciones(uuid, uuid, uuid, integer, text, integer, jsonb) from public, anon, service_role;
-grant execute on function public.funcion_crear_funciones(uuid, uuid, uuid, integer, text, integer, jsonb) to authenticated;
+revoke execute on function public.funcion_crear_funciones(uuid, uuid, integer, text, integer, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_crear_funciones(uuid, uuid, integer, text, integer, jsonb) to authenticated;
 
 -- Cambia cupo, estado y cierre de venta de una función, con el candado de la función tomado (el cupo no baja de lo
--- ocupado ni pasa los puestos: lo dice el trigger). El montaje no se cambia aquí.
+-- ocupado: lo dice el trigger).
 create or replace function public.funcion_editar_funcion(
   p_funcion_id uuid,
   p_cupo_total integer,

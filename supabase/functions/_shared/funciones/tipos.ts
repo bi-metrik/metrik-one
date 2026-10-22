@@ -2,7 +2,7 @@
 // Funciones (cupo y reservas) — los tipos de los servicios del asistente (etapa 2 de Sabor & Experiencias)
 // ------------------------------------------------------------
 // Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md (§3).
-// Base: migración 20261021120000_modulo_funciones.sql (`funcion_consultar_cupo`, `funcion_apartar`).
+// Base: migración 20261022170000_modulo_funciones.sql (`funcion_consultar_cupo`, `funcion_apartar`).
 //
 // PREPARADOS, SIN CONECTAR: `chatwoot-agente` no los importa todavía. Cuando se conecten, entran como un puerto más
 // del asistente (como `AlmacenPublico` en `../agente/publico/puertos.ts`), con `memoria.ts` como doble del arnés.
@@ -10,7 +10,7 @@
 
 import type { Canal, LlaveConversacion } from '../agente/publico/tipos.ts';
 
-/** Lo único que el asistente ve de una función. Nunca mesas, puestos por mesa ni datos de otras reservas. */
+/** Lo único que el asistente ve de una función. Nunca datos de otras reservas. */
 export interface CupoPublico {
   funcion_id: string;
   inicia_at: string;
@@ -23,8 +23,9 @@ export interface CupoPublico {
 /**
  * Lo que el asistente manda a apartar tras el «sí» del cliente sobre la propuesta.
  *
- * A propósito NO hay campo de mesa: la mesa la asigna el equipo de Sabor en ONE (decisión de Mauricio, 2026-10-21).
- * Lo que el cliente pidió va en `preferenciaMesa`, como texto, y nunca es una asignación.
+ * A propósito NO hay campo de mesa ni de puesto: Sabor no asigna puestos (la gente se sienta en orden de llegada y a
+ * los grupos de 5 o más les guarda mesa a mano, fuera de ONE; alcance del 2026-10-22). Lo que el cliente pida («vamos
+ * 6, queremos estar juntos») va en `solicitudCliente`, como texto libre, sin ninguna lógica.
  */
 export interface PropuestaApartado {
   llave: LlaveConversacion;
@@ -36,7 +37,8 @@ export interface PropuestaApartado {
   telefono: string | null;
   /** El usuario del canal (IG, TikTok) cuando no hay teléfono. */
   contactoCanal: string | null;
-  preferenciaMesa: string | null;
+  /** Lo que pide el cliente, en sus palabras. Texto libre: nunca es una mesa ni un puesto. */
+  solicitudCliente: string | null;
   /** La huella de la propuesta vigente: es la clave de idempotencia (el reintento devuelve la misma reserva). */
   huellaPropuesta: string;
 }

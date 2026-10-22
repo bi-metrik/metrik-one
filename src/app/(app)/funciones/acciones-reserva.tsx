@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { cancelarReservaAction, confirmarPagoManualAction } from './actions'
 
-/** Confirmar un pago verificado a mano y cancelar: los botones de la lista del día y del mapa. */
+/** Confirmar un pago verificado a mano y cancelar: los botones de la lista del día y del detalle de la función. */
 export function AccionesReserva(p: { funcionId: string; reservaId: string; estado: string; nombre: string | null }) {
   const [pendiente, empezar] = useTransition()
   const router = useRouter()
@@ -39,7 +39,7 @@ export function AccionesReserva(p: { funcionId: string; reservaId: string; estad
         type="button"
         disabled={pendiente}
         onClick={() => {
-          if (confirm(`¿Cancelar la reserva de ${p.nombre ?? 'esta persona'}? Libera su cupo y su mesa.`)) {
+          if (confirm(`¿Cancelar la reserva de ${p.nombre ?? 'esta persona'}? Libera su cupo.`)) {
             correr(() => cancelarReservaAction(p.funcionId, p.reservaId), 'Reserva cancelada.')
           }
         }}

@@ -53,7 +53,7 @@ export default async function DiaPage({ searchParams }: { searchParams: Promise<
               </p>
             </div>
             <Link href={`/funciones/${o.funcion_id}`} className="text-sm text-[#059669] hover:underline print:hidden">
-              Ir al mapa
+              Ver función
             </Link>
           </header>
           {reservas.length === 0 ? (
@@ -65,8 +65,7 @@ export default async function DiaPage({ searchParams }: { searchParams: Promise<
                   <tr>
                     <th className="px-4 py-2">Nombre</th>
                     <th className="px-2 py-2">Pers.</th>
-                    <th className="px-2 py-2">Mesa(s)</th>
-                    <th className="px-2 py-2">Preferencia</th>
+                    <th className="px-2 py-2">Lo que pidió</th>
                     <th className="px-2 py-2">Restricciones</th>
                     <th className="px-2 py-2">Estado</th>
                     <th className="px-2 py-2">Canal</th>
@@ -78,8 +77,7 @@ export default async function DiaPage({ searchParams }: { searchParams: Promise<
                     <tr key={r.id} className="align-top">
                       <td className="px-4 py-2 font-medium text-[#1A1A1A]">{r.nombre ?? '(sin nombre)'}</td>
                       <td className="px-2 py-2">{r.personas}</td>
-                      <td className="px-2 py-2">{r.mesas.length ? r.mesas.map((m) => `${m.etiqueta} (${m.personas})`).join(', ') : '—'}</td>
-                      <td className="px-2 py-2 text-[#6B7280]">{r.preferencia_mesa ?? ''}</td>
+                      <td className="px-2 py-2 text-[#6B7280]">{r.solicitud_cliente ?? ''}</td>
                       <td className="px-2 py-2">{r.autorizada ? r.restricciones ?? '' : <span className="text-[#6B7280]">sin autorización</span>}</td>
                       <td className="px-2 py-2 text-xs">
                         {ETIQUETA_ESTADO_RESERVA[r.estado]}

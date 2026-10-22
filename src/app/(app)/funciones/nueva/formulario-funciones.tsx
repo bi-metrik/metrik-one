@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import type { ExperienciaCatalogo, MontajeCatalogo } from '@/lib/funciones/datos'
+import type { ExperienciaCatalogo } from '@/lib/funciones/datos'
 import { normalizar, type Borrador } from '@/lib/funciones/extraccion-pdf'
 import { crearFuncionesAction } from '../actions'
 import { AltaExperiencia, bordeMarca, CargarPdf, MarcaCampo, type Marca } from '../formulario-comun'
@@ -19,29 +19,24 @@ let siguiente = 0
 const nuevo = (fecha = '', hora = '', marcas: Inicio['marcas'] = {}): Inicio => ({ clave: `i${++siguiente}`, fecha, hora, marcas })
 
 /**
- * Formulario de funciones (§4.3): experiencia, montaje opcional, cupo, estado, cierre de venta y una o varias
- * fechas y horas (hora de Bogotá). El cupo no puede pasar los puestos del montaje: se dice antes de guardar y la
- * base lo vuelve a verificar. Un PDF de la programación lo pre-llena como borrador.
+ * Formulario de funciones (§4.3): experiencia, cupo (la capacidad de la función), estado, cierre de venta y una o
+ * varias fechas y horas (hora de Bogotá). Un PDF de la programación lo pre-llena como borrador; se guarda solo lo que
+ * la persona confirma con el botón.
  */
-export function FormularioFunciones({ experiencias: iniciales, montajes }: { experiencias: ExperienciaCatalogo[]; montajes: MontajeCatalogo[] }) {
+export function FormularioFunciones({ experiencias: iniciales }: { experiencias: ExperienciaCatalogo[] }) {
   const router = useRouter()
   const [pendiente, empezar] = useTransition()
   const [experiencias, setExperiencias] = useState(iniciales)
   const [experienciaId, setExperienciaId] = useState(iniciales[0]?.id ?? '')
   const [marcaExperiencia, setMarcaExperiencia] = useState<Marca | undefined>()
   const [alta, setAlta] = useState<{ nombre: string; marca?: Marca } | null>(iniciales.length === 0 ? { nombre: '' } : null)
-  const [montajeId, setMontajeId] = useState('')
   const [cupo, setCupo] = useState('')
   const [marcaCupo, setMarcaCupo] = useState<Marca | undefined>()
   const [estado, setEstado] = useState<'abierta' | 'cerrada'>('abierta')
   const [cierre, setCierre] = useState('')
   const [inicios, setInicios] = useState<Inicio[]>([nuevo()])
 
-  const montajesDe = montajes.filter((m) => m.experiencia_id === experienciaId)
-  const montaje = montajesDe.find((m) => m.id === montajeId) ?? null
-  const puestos = montaje ? montaje.mesas.reduce((s, m) => s + m.puestos, 0) : null
   const cupoN = Number(cupo)
-  const cupoSobrePuestos = puestos !== null && cupoN > puestos
   const experiencia = experiencias.find((e) => e.id === experienciaId)
 
   const aplicarBorrador = (b: Borrador) => {
@@ -50,7 +45,6 @@ export function FormularioFunciones({ experiencias: iniciales, montajes }: { exp
       const igual = experiencias.find((e) => normalizar(e.nombre) === normalizar(b.experiencia.valor!))
       if (igual) {
         setExperienciaId(igual.id)
-        setMontajeId('')
         setMarcaExperiencia('pdf')
       } else setAlta({ nombre: b.experiencia.valor, marca: 'pdf' })
     } else setMarcaExperiencia('no_leido')
@@ -68,11 +62,9 @@ export function FormularioFunciones({ experiencias: iniciales, montajes }: { exp
     empezar(async () => {
       if (!experienciaId) return void toast.error('Elige o crea la experiencia.')
       if (!(cupoN >= 1)) return void toast.error('Escribe el cupo total.')
-      if (cupoSobrePuestos) return void toast.error(`El cupo (${cupoN}) pasa los puestos del montaje (${puestos}).`)
       if (incompletos.length > 0) return void toast.error('Cada función necesita fecha y hora.')
       const r = await crearFuncionesAction({
         experiencia_id: experienciaId,
-        montaje_id: montajeId || null,
         cupo_total: cupoN,
         estado,
         cierre_minutos_antes: cierre.trim() ? Math.round(Number(cierre) * 60) : null,
@@ -98,7 +90,6 @@ export function FormularioFunciones({ experiencias: iniciales, montajes }: { exp
             value={experienciaId}
             onChange={(e) => {
               setExperienciaId(e.target.value)
-              setMontajeId('')
               setMarcaExperiencia(undefined)
             }}
             className={`mt-0.5 flex-1 rounded border px-2 py-1 ${bordeMarca(marcaExperiencia)}`}
@@ -126,7 +117,6 @@ export function FormularioFunciones({ experiencias: iniciales, montajes }: { exp
           onCreada={(e) => {
             setExperiencias((xs) => [...xs, e])
             setExperienciaId(e.id)
-            setMontajeId('')
             setMarcaExperiencia(alta.marca)
             setAlta(null)
           }}
@@ -134,17 +124,6 @@ export function FormularioFunciones({ experiencias: iniciales, montajes }: { exp
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <span className="text-xs text-[#6B7280]">Montaje (opcional: sin montaje no hay mapa)</span>
-          <select value={montajeId} onChange={(e) => setMontajeId(e.target.value)} className="mt-0.5 w-full rounded border border-[#E5E7EB] px-2 py-1">
-            <option value="">Sin plano del salón</option>
-            {montajesDe.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.nombre} ({m.mesas.reduce((s, x) => s + x.puestos, 0)} puestos)
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="block">
           <span className="text-xs text-[#6B7280]">
             Cupo total por función <MarcaCampo marca={marcaCupo} />
@@ -157,9 +136,8 @@ export function FormularioFunciones({ experiencias: iniciales, montajes }: { exp
               setCupo(e.target.value)
               setMarcaCupo(undefined)
             }}
-            className={`mt-0.5 w-full rounded border px-2 py-1 ${cupoSobrePuestos ? 'border-red-400' : bordeMarca(marcaCupo)}`}
+            className={`mt-0.5 w-full rounded border px-2 py-1 ${bordeMarca(marcaCupo)}`}
           />
-          {cupoSobrePuestos && <span className="text-xs text-red-600">Pasa los {puestos} puestos del montaje.</span>}
         </label>
         <label className="block">
           <span className="text-xs text-[#6B7280]">Estado</span>

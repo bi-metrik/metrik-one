@@ -19,15 +19,8 @@ import {
   contieneNumero,
   normalizar,
   type BorradorFunciones,
-  type BorradorMontaje,
   type ModeloExtraccion,
 } from './extraccion-pdf'
-
-const PLANO = `Salón Ratatouille — montaje cena
-Mesa M1: 4 puestos, zona frente, cerca de la pantalla
-Mesa M2: 2 puestos, zona barra
-Mesa M3: zona centro
-Las mesas del fondo se arman según la reserva.`
 
 const PROGRAMACION = `Programación Ratatouille
 Cupo por función: 24 personas
@@ -61,35 +54,6 @@ afterEach(() => {
 })
 
 describe('22. lo que no está en el texto queda vacío y marcado', () => {
-  it('plano: etiquetas y puestos verificados contra el texto; lo inventado se descarta', async () => {
-    const { modelo, llamadas } = doble({
-      nombre: 'Salón Ratatouille',
-      mesas: [
-        { etiqueta: 'M1', puestos: 4, zona: 'frente', condicion: 'cerca de la pantalla', cita: 'Mesa M1: 4 puestos, zona frente' },
-        // Puestos inventados: 6 no está en la cita de M2.
-        { etiqueta: 'M2', puestos: 6, zona: 'barra', cita: 'Mesa M2: 2 puestos, zona barra' },
-        // El texto no dice cuántos puestos tiene M3: el modelo «completó» 4.
-        { etiqueta: 'M3', puestos: 4, zona: 'centro', cita: 'Mesa M3: zona centro' },
-        // Una mesa que no existe en el texto, con una cita inventada.
-        { etiqueta: 'M9', puestos: 8, zona: 'terraza', condicion: 'con vista', cita: 'Mesa M9: 8 puestos' },
-        // Sin cita: los puestos no tienen evidencia.
-        { etiqueta: 'M2', puestos: 2 },
-      ],
-    })
-    const b = (await extraerBorrador({ pdf, tipo: 'montaje', modelo, leerTexto: conTexto(PLANO) })) as BorradorMontaje
-    expect(llamadas).toHaveLength(1)
-    expect(b.nombre).toEqual({ valor: 'Salón Ratatouille', origen: 'pdf' })
-    const resumen = b.mesas.map((m) => [m.etiqueta.valor, m.puestos.valor, m.puestos.origen, m.zona.valor, m.condicion.valor])
-    expect(resumen).toEqual([
-      ['M1', 4, 'pdf', 'frente', 'cerca de la pantalla'],
-      ['M2', null, 'no_leido', 'barra', null],
-      ['M3', null, 'no_leido', 'centro', null],
-      [null, null, 'no_leido', null, null],
-      ['M2', null, 'no_leido', null, null],
-    ])
-    expect(b.mesas[3].etiqueta.origen).toBe('no_leido')
-  })
-
   it('funciones: sin año, sin a. m./p. m. o fuera del texto, vacía; el cupo con su cita', async () => {
     const { modelo } = doble({
       experiencia: 'Ratatouille',
@@ -140,18 +104,18 @@ describe('22. lo que no está en el texto queda vacío y marcado', () => {
     expect(horasClaras('a las 7')).toEqual([])
     expect(horasClaras('7:00')).toEqual([])
     expect(horasClaras('12:00 m')).toEqual(['12:00'])
-    expect(contieneNumero(normalizar('mesa de 14 puestos'), 4)).toBe(false)
-    expect(contieneNumero(normalizar('4,5 metros'), 4)).toBe(false)
-    expect(contieneNumero(normalizar('4 puestos'), 4)).toBe(true)
+    expect(contieneNumero(normalizar('cupo de 124 personas'), 24)).toBe(false)
+    expect(contieneNumero(normalizar('24,5 metros'), 24)).toBe(false)
+    expect(contieneNumero(normalizar('24 personas'), 24)).toBe(true)
   })
 })
 
 describe('23. sin capa de texto o sin respuesta del modelo: borrador vacío, nunca un valor por defecto', () => {
   it('un escaneo no se manda al modelo', async () => {
-    const { modelo, llamadas } = doble({ mesas: [{ etiqueta: 'M1', puestos: 4, cita: 'M1' }] })
-    const b = (await extraerBorrador({ pdf, tipo: 'montaje', modelo, leerTexto: conTexto(null) })) as BorradorMontaje
+    const { modelo, llamadas } = doble({ cupo: 24, funciones: [{ fecha: '2026-11-21', hora: '19:30', cita: '21/11/2026 19:30' }] })
+    const b = (await extraerBorrador({ pdf, tipo: 'funciones', modelo, leerTexto: conTexto(null) })) as BorradorFunciones
     expect(llamadas).toHaveLength(0)
-    expect([b.nombre.origen, b.mesas.length]).toEqual(['no_leido', 0])
+    expect([b.experiencia.origen, b.cupo.origen, b.inicios.length]).toEqual(['no_leido', 'no_leido', 0])
     expect(b.avisos[0]).toMatch(/no trae texto/)
   })
 
@@ -170,14 +134,15 @@ describe('23. sin capa de texto o sin respuesta del modelo: borrador vacío, nun
     const doc = await PDFDocument.create()
     const pagina = doc.addPage([600, 400])
     const fuente = await doc.embedFont(StandardFonts.Helvetica)
-    PLANO.split('\n').forEach((linea, i) =>
+    PROGRAMACION.split('\n').forEach((linea, i) =>
       pagina.drawText(linea.replace('—', '-').normalize('NFD').replace(/\p{M}/gu, ''), { x: 30, y: 360 - i * 20, size: 12, font: fuente }),
     )
     const bytes = await doc.save()
-    const { modelo, llamadas } = doble({ mesas: [{ etiqueta: 'M1', puestos: 4, cita: 'Mesa M1: 4 puestos' }] })
-    const b = (await extraerBorrador({ pdf: bytes, tipo: 'montaje', modelo, leerTexto: textoDelPdf })) as BorradorMontaje
-    expect(llamadas[0].texto).toMatch(/Mesa M1: 4 puestos/)
-    expect(b.mesas[0].puestos).toEqual({ valor: 4, origen: 'pdf' })
+    const { modelo, llamadas } = doble({ cupo: 24, cupo_cita: 'Cupo por funcion: 24 personas', funciones: [{ fecha: '2026-11-21', hora: '19:30', cita: '21/11/2026 19:30' }] })
+    const b = (await extraerBorrador({ pdf: bytes, tipo: 'funciones', modelo, leerTexto: textoDelPdf })) as BorradorFunciones
+    expect(llamadas[0].texto).toMatch(/21\/11\/2026 19:30/)
+    expect(b.cupo).toEqual({ valor: 24, origen: 'pdf' })
+    expect(b.inicios[0].fecha).toEqual({ valor: '2026-11-21', origen: 'pdf' })
   })
 
   it('el módulo de extracción no sale a la red ni toca la llave de producción', () => {
@@ -189,7 +154,7 @@ describe('23. sin capa de texto o sin respuesta del modelo: borrador vacío, nun
 
 describe('21. extraer no escribe en ninguna tabla', () => {
   let db: PGlite
-  const TABLAS = ['funcion_experiencias', 'funcion_montajes', 'funcion_mesas', 'funcion_funciones', 'funcion_reservas', 'funcion_reserva_mesas']
+  const TABLAS = ['funcion_experiencias', 'funcion_funciones', 'funcion_reservas']
   const contar = async () => Promise.all(TABLAS.map(async (t) => (await db.query<{ n: number }>(`select count(*)::int as n from ${t}`)).rows[0].n))
 
   beforeAll(async () => {
@@ -197,7 +162,7 @@ describe('21. extraer no escribe en ninguna tabla', () => {
     db = new PGlite()
     await db.exec(leer('src/lib/funciones/__fixtures__/esquema-base.sql'))
     await db.exec(leer('supabase/migrations/20261021090000_asistente_chatwoot.sql'))
-    await db.exec(leer('supabase/migrations/20261021120000_modulo_funciones.sql'))
+    await db.exec(leer('supabase/migrations/20261022170000_modulo_funciones.sql'))
     await db.exec(`insert into workspaces (id, slug) values ('00000000-0000-4000-8000-00000000e001', 'sabor-prueba');
       insert into funcion_experiencias (workspace_id, nombre, minutos_apartado) values ('00000000-0000-4000-8000-00000000e001', 'Ratatouille', 30);`)
   })
@@ -205,12 +170,16 @@ describe('21. extraer no escribe en ninguna tabla', () => {
     await db.close()
   })
 
-  it('las seis tablas quedan igual después de extraer un plano y una programación', async () => {
+  it('las tres tablas quedan igual después de extraer una programación', async () => {
     const antes = await contar()
-    await extraerBorrador({ pdf, tipo: 'montaje', modelo: doble({ mesas: [{ etiqueta: 'M1', puestos: 4, cita: 'Mesa M1: 4 puestos' }] }).modelo, leerTexto: conTexto(PLANO) })
     await extraerBorrador({ pdf, tipo: 'funciones', modelo: doble({ funciones: [{ fecha: '2026-11-21', hora: '19:30', cita: '21/11/2026 19:30' }] }).modelo, leerTexto: conTexto(PROGRAMACION) })
     expect(await contar()).toEqual(antes)
-    expect(antes).toEqual([1, 0, 0, 0, 0, 0])
+    expect(antes).toEqual([1, 0, 0])
+  })
+
+  it('el plano del salón ya no se extrae: el único tipo es la programación', () => {
+    const fuente = readFileSync(join(process.cwd(), 'src/lib/funciones/extraccion-pdf.ts'), 'utf8')
+    expect(fuente).not.toMatch(/mesas|montaje|puestos:/)
   })
 
   it('el módulo no importa ningún cliente de base de datos', () => {

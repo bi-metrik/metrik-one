@@ -133,7 +133,7 @@ jobs:
           node scripts/lint-lineas-cambiadas.mjs "$BASE_REF"
 
   concurrencia-funciones:
-    # Prueba 8 del diseño de la etapa 2 de Sabor: muchos `apartar` (y asignaciones de mesa) a la vez no sobrevenden.
+    # Prueba 8 del diseño de la etapa 2 de Sabor: muchos `apartar` (y confirmaciones de pago) a la vez no sobrevenden.
     # Las pruebas de vitest corren en PGlite, que tiene UNA conexión: el `select ... for update` nunca espera a nadie
     # ahí, así que el candado solo se prueba con un Postgres real y varias conexiones. Sin dependencias de npm: psql
     # ya viene en la imagen de ubuntu-latest.

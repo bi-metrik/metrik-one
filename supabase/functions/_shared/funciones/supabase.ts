@@ -1,8 +1,8 @@
 // ============================================================
-// Funciones — el puerto de producción: RPC de la migración 20261021120000 con la llave de servicio
+// Funciones — el puerto de producción: RPC de la migración 20261022170000 con la llave de servicio
 // ------------------------------------------------------------
 // Se llama con la llave de servicio, nunca desde el navegador. Con esa llave la base deja consultar el cupo y apartar
-// (origen `asistente`), y NO deja asignar mesas ni cancelar (`funcion_asignar_mesas` y `funcion_cancelar_reserva` no
+// (origen `asistente`), y NO deja cancelar ni dar de alta funciones (`funcion_cancelar_reserva` y las del formulario no
 // se conceden a service_role).
 //
 // El cliente es estructural (lo que usa de supabase-js) para que el mismo archivo corra en Deno y en las pruebas.
@@ -25,7 +25,7 @@ export interface ClienteFunciones {
   from(tabla: string): { select(columnas: string): Consulta<unknown[]> };
 }
 
-/** Los datos que viajan a `funcion_apartar`. Sin campo de mesa: la base rechaza uno con `dato_no_admitido`. Pura. */
+/** Los datos que viajan a `funcion_apartar`. Sin campo de mesa ni de puesto: la base rechaza uno con `dato_no_admitido`. Pura. */
 export function datosDeApartado(p: PropuestaApartado): Record<string, unknown> {
   return {
     canal: p.canal,
@@ -35,7 +35,7 @@ export function datosDeApartado(p: PropuestaApartado): Record<string, unknown> {
     documento: p.documento,
     telefono: p.telefono,
     contacto_canal: p.contactoCanal,
-    preferencia_mesa: p.preferenciaMesa,
+    solicitud_cliente: p.solicitudCliente,
   };
 }
 

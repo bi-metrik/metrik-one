@@ -2,7 +2,7 @@
 
 /**
  * Acciones del módulo `funciones`. Todas con el cliente de la SESIÓN (`authenticated`): las tablas no conceden
- * escritura a nadie y cada RPC (`funcion_*`, migración 20261021120000) verifica el workspace, el rol y los candados
+ * escritura a nadie y cada RPC (`funcion_*`, migración 20261022170000) verifica el workspace, el rol y los candados
  * dentro de la base. Aquí solo se valida la forma y se traduce el código de error a llano. El workspace sale de la
  * sesión, nunca del navegador.
  *
@@ -38,21 +38,7 @@ async function llamar<T>(nombre: string, args: Record<string, unknown>, rutas: s
   return { ok: true, dato: data as T }
 }
 
-// ── Reservas y mesas ─────────────────────────────────────────────────────────
-
-/** Reemplaza las mesas de la reserva. Vacío = liberar. Mover = asignar de nuevo. Todo o nada (lo hace la base). */
-export async function asignarMesasAction(
-  funcionId: string,
-  reservaId: string,
-  asignaciones: Array<{ mesa_id: string; personas: number }>,
-): Promise<Resultado> {
-  if (!UUID.test(reservaId) || !UUID.test(funcionId)) return { ok: false, error: 'La reserva no existe.' }
-  if (!Array.isArray(asignaciones) || asignaciones.some((a) => !UUID.test(a.mesa_id) || !Number.isInteger(a.personas) || a.personas < 1)) {
-    return { ok: false, error: 'La asignación de mesas no se entiende.' }
-  }
-  const r = await llamar('funcion_asignar_mesas', { p_reserva_id: reservaId, p_asignaciones: asignaciones }, [`/funciones/${funcionId}`, '/funciones/dia'])
-  return r.ok ? { ok: true } : r
-}
+// ── Reservas ─────────────────────────────────────────────────────────────────
 
 export async function cancelarReservaAction(funcionId: string, reservaId: string): Promise<Resultado> {
   if (!UUID.test(reservaId)) return { ok: false, error: 'La reserva no existe.' }
@@ -70,7 +56,7 @@ export async function confirmarPagoManualAction(funcionId: string, reservaId: st
 /** Una reserva que toma el equipo (teléfono, mostrador): origen `equipo`, con los mismos candados de cupo. */
 export async function apartarEquipoAction(
   funcionId: string,
-  datos: { personas: number; nombre: string; telefono: string; preferencia_mesa: string; clave: string },
+  datos: { personas: number; nombre: string; telefono: string; solicitud_cliente: string; clave: string },
 ): Promise<Resultado> {
   const p = await puerta()
   if (!p.ok) return p
@@ -81,7 +67,7 @@ export async function apartarEquipoAction(
     p_workspace_id: p.ws,
     p_funcion_id: funcionId,
     p_personas: datos.personas,
-    p_datos: { canal: 'equipo', nombre: datos.nombre, telefono: datos.telefono || null, preferencia_mesa: datos.preferencia_mesa || null },
+    p_datos: { canal: 'equipo', nombre: datos.nombre, telefono: datos.telefono || null, solicitud_cliente: datos.solicitud_cliente || null },
     p_clave_idempotencia: datos.clave,
     p_origen: 'equipo',
   })
@@ -103,56 +89,12 @@ export async function guardarExperienciaAction(e: { id: string | null; nombre: s
   return llamar<string>(
     'funcion_guardar_experiencia',
     { p_workspace_id: p.ws, p_experiencia_id: e.id, p_nombre: e.nombre, p_minutos_apartado: e.minutos_apartado, p_activa: true },
-    ['/funciones', '/funciones/nueva', '/funciones/montajes'],
-  )
-}
-
-export interface MesaFormulario {
-  id?: string
-  etiqueta: string
-  puestos: number
-  zona: string
-  condicion: string
-  x: number
-  y: number
-  ancho: number
-  alto: number
-  forma: 'redonda' | 'rectangular'
-}
-
-export async function guardarMontajeAction(m: {
-  id: string | null
-  experiencia_id: string
-  nombre: string
-  notas: string
-  mesas: MesaFormulario[]
-}): Promise<Resultado<string>> {
-  const p = await puerta()
-  if (!p.ok) return p
-  if ((m.id !== null && !UUID.test(m.id)) || !UUID.test(m.experiencia_id)) return { ok: false, error: 'Elige la experiencia.' }
-  if (!Array.isArray(m.mesas) || m.mesas.length === 0) return { ok: false, error: 'Agrega al menos una mesa.' }
-  const mesas = m.mesas.map((x) => ({
-    ...(x.id && UUID.test(x.id) ? { id: x.id } : {}),
-    etiqueta: x.etiqueta,
-    puestos: x.puestos,
-    zona: x.zona,
-    condicion: x.condicion,
-    x: x.x,
-    y: x.y,
-    ancho: x.ancho,
-    alto: x.alto,
-    forma: x.forma,
-  }))
-  return llamar<string>(
-    'funcion_guardar_montaje',
-    { p_workspace_id: p.ws, p_montaje_id: m.id, p_experiencia_id: m.experiencia_id, p_nombre: m.nombre, p_notas: m.notas, p_mesas: mesas },
-    ['/funciones/montajes', '/funciones/nueva'],
+    ['/funciones', '/funciones/nueva'],
   )
 }
 
 export async function crearFuncionesAction(f: {
   experiencia_id: string
-  montaje_id: string | null
   cupo_total: number
   estado: 'abierta' | 'cerrada'
   cierre_minutos_antes: number | null
@@ -160,7 +102,7 @@ export async function crearFuncionesAction(f: {
 }): Promise<Resultado<string[]>> {
   const p = await puerta()
   if (!p.ok) return p
-  if (!UUID.test(f.experiencia_id) || (f.montaje_id !== null && !UUID.test(f.montaje_id))) return { ok: false, error: 'Elige la experiencia.' }
+  if (!UUID.test(f.experiencia_id)) return { ok: false, error: 'Elige la experiencia.' }
   const inicios = f.inicios.map((i) => inicioBogota(i.fecha, i.hora))
   if (inicios.length === 0 || inicios.some((i) => i === null)) return { ok: false, error: 'Cada función necesita fecha y hora.' }
   return llamar<string[]>(
@@ -168,7 +110,6 @@ export async function crearFuncionesAction(f: {
     {
       p_workspace_id: p.ws,
       p_experiencia_id: f.experiencia_id,
-      p_montaje_id: f.montaje_id,
       p_cupo_total: f.cupo_total,
       p_estado: f.estado,
       p_cierre_minutos_antes: f.cierre_minutos_antes,
@@ -191,7 +132,7 @@ export async function editarFuncionAction(f: { id: string; cupo_total: number; e
 // ── PDF → borrador (no escribe) ──────────────────────────────────────────────
 
 /**
- * Lee un PDF y devuelve el BORRADOR del formulario. No toca ninguna tabla ni guarda el PDF (ONE no guarda hoy
+ * Lee el PDF de la programación de funciones y devuelve el BORRADOR del formulario. No toca ninguna tabla ni guarda el PDF (ONE no guarda hoy
  * adjuntos de este tipo, así que se descarta tras extraer). Lo que no se pudo leer llega vacío y marcado.
  */
 export async function extraerPdfAction(form: FormData): Promise<Resultado<Borrador>> {
@@ -199,7 +140,7 @@ export async function extraerPdfAction(form: FormData): Promise<Resultado<Borrad
   if (!p.ok) return p
   const tipo = form.get('tipo')
   const archivo = form.get('pdf')
-  if (tipo !== 'montaje' && tipo !== 'funciones') return { ok: false, error: 'Tipo de PDF desconocido.' }
+  if (tipo !== 'funciones') return { ok: false, error: 'Tipo de PDF desconocido.' }
   if (!(archivo instanceof File) || archivo.size === 0) return { ok: false, error: 'Elige un PDF.' }
   if (archivo.size > BYTES_MAXIMOS_PDF) return { ok: false, error: 'El PDF pesa más de 10 MB.' }
   const bytes = new Uint8Array(await archivo.arrayBuffer())

@@ -19,20 +19,6 @@ const MODELO = 'gemini-2.5-flash'
 const N = (type: string) => ({ type, nullable: true })
 
 const ESQUEMA = {
-  montaje: {
-    type: 'OBJECT',
-    properties: {
-      nombre: N('STRING'),
-      mesas: {
-        type: 'ARRAY',
-        items: {
-          type: 'OBJECT',
-          properties: { etiqueta: N('STRING'), puestos: N('INTEGER'), zona: N('STRING'), condicion: N('STRING'), cita: N('STRING') },
-        },
-      },
-    },
-    required: ['mesas'],
-  },
   funciones: {
     type: 'OBJECT',
     properties: {

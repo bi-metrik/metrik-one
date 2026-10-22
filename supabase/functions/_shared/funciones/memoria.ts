@@ -1,7 +1,7 @@
 // ============================================================
 // Funciones — el doble en memoria del puerto, para el arnés del asistente y las pruebas
 // ------------------------------------------------------------
-// Repite las reglas de `funcion_consultar_cupo` y `funcion_apartar` (migración 20261021120000): ocupan las
+// Repite las reglas de `funcion_consultar_cupo` y `funcion_apartar` (migración 20261022170000): ocupan las
 // confirmadas y las apartadas sin vencer; los apartados vencidos se marcan al apartar; misma clave = misma reserva;
 // cerrada, cancelada o ya empezada = `funcion_cerrada`; pasada la hora de cierre = `venta_cerrada`; sin minutos de
 // apartado = `sin_regla_apartado`; sin la última autorización general en `si` = `sin_autorizacion`.
@@ -106,7 +106,7 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
     autorizar(llave: LlaveConversacion, respuesta: 'si' | 'no') {
       autorizaciones.set(llaveTexto(llave), respuesta);
     },
-    /** Lo que quedó apartado, para que el arnés lo mire (nunca trae mesa: la propuesta no la tiene). */
+    /** Lo que quedó apartado, para que el arnés lo mire (nunca trae mesa ni puesto: la propuesta no los tiene). */
     reservas: () => reservas.map((r) => ({ ...r, propuesta: structuredClone(r.propuesta) })),
     /** Para probar el vencimiento sin reloj: deja vencido un apartado. */
     vencer(reservaId: string) {

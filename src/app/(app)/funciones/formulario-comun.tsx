@@ -32,7 +32,7 @@ export function CargarPdf({ tipo, onBorrador }: { tipo: TipoBorrador; onBorrador
   return (
     <div className="rounded-lg border border-dashed border-[#E5E7EB] bg-white p-3 text-sm">
       <p className="text-[#6B7280]">
-        ¿Tienes {tipo === 'montaje' ? 'el plano del salón' : 'la programación de funciones'} en PDF? Súbelo y ONE pre-llena el formulario. Revisa todo antes de guardar: lo que no se pudo
+        ¿Tienes la programación de funciones en PDF? Súbelo y ONE pre-llena el formulario. Revisa todo antes de guardar: lo que no se pudo
         leer queda vacío.
       </p>
       <div className="mt-2 flex items-center gap-2">
