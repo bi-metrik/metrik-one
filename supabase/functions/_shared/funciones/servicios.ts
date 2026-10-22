@@ -16,6 +16,7 @@
 
 import type { PasarelaPagos } from './pasarela.ts';
 import type {
+  Alternativa,
   CampanasActivas,
   LinkPago,
   CupoPublico,
@@ -47,20 +48,36 @@ const tarifa = (t: TarifaPublica): TarifaPublica => ({
   permite_pago_total: t.permite_pago_total,
 });
 
-export async function consultarCupo(puerto: PuertoFunciones, workspaceId: string, funcionId: string): Promise<ResultadoCupo> {
+const alternativa = (a: Alternativa): Alternativa => ({
+  funcion_id: a.funcion_id,
+  experiencia: a.experiencia,
+  campana: a.campana,
+  campana_codigo: a.campana_codigo,
+  inicia_at: a.inicia_at,
+  inicia_texto: a.inicia_texto,
+  tarifa: tarifa(a.tarifa),
+  alcanza: true,
+  grupo: a.grupo,
+});
+
+/**
+ * El estado de una función para esas personas (sin números de cupo), su tarifa y, si no alcanza, hasta 3
+ * alternativas donde sí caben. Las alternativas las elige la base: el modelo no las inventa.
+ */
+export async function consultarCupo(puerto: PuertoFunciones, workspaceId: string, funcionId: string, personas = 1): Promise<ResultadoCupo> {
   if (!UUID.test(funcionId) || !UUID.test(workspaceId)) return { ok: false, error: 'funcion_no_existe' };
-  const r = await puerto.consultarCupo(workspaceId, funcionId);
+  if (!Number.isInteger(personas) || personas < 1 || personas > 500) return { ok: false, error: 'personas_invalidas' };
+  const r = await puerto.consultarCupo(workspaceId, funcionId, personas);
   if (!r.ok) return r;
   const c = r.cupo;
   const cupo: CupoPublico = {
     funcion_id: c.funcion_id,
     campana_codigo: c.campana_codigo,
     inicia_at: c.inicia_at,
-    disponible: c.disponible,
-    motivo: c.motivo,
-    cupo_libre: c.cupo_libre,
-    agotada: c.agotada,
+    inicia_texto: c.inicia_texto,
+    estado: c.estado,
     tarifa: tarifa(c.tarifa),
+    alternativas: (c.alternativas ?? []).map(alternativa),
   };
   return { ok: true, cupo };
 }
@@ -84,7 +101,7 @@ export async function verFuncionesDisponibles(
       campana: f.campana,
       experiencia: f.experiencia,
       inicia_at: f.inicia_at,
-      cupo_libre: f.cupo_libre,
+      inicia_texto: f.inicia_texto,
       tarifa: tarifa(f.tarifa),
     })),
   };
@@ -128,7 +145,11 @@ export async function apartar(puerto: PuertoFunciones, p: PropuestaApartado): Pr
     atribucion: { fuente: p.atribucion.fuente, ref: texto(p.atribucion.ref, 200) },
     huellaPropuesta: huella,
   };
-  return puerto.apartar(limpia);
+  const r = await puerto.apartar(limpia);
+  if (!r.ok && r.error === 'sin_cupo') {
+    return { ok: false, error: 'sin_cupo', estado: r.estado, alternativas: (r.alternativas ?? []).map(alternativa) };
+  }
+  return r;
 }
 
 const listaDeReservas = (ids: unknown): string[] | null =>

@@ -11,6 +11,7 @@
  *     no publica nada.
  *   · Las horas son de Bogotá (sin horario de verano: UTC−5), sin depender de la zona del proceso.
  */
+import { fechaTexto } from '../../../supabase/functions/_shared/funciones/fecha-texto.ts'
 import { PLANTILLA_POST, SEPARADOR_SECCIONES, type DatosPost, type Herramientas, type Seccion, type SeccionPlantilla } from './post-campana-plantilla'
 
 export type { DatosPost, Seccion } from './post-campana-plantilla'
@@ -31,18 +32,8 @@ export interface PostCampana {
   faltantes: Seccion[]
 }
 
-const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
-const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
-const BOGOTA_MS = -5 * 3_600_000
-
-/** «sábado 24 de octubre, 1:00 p. m.», en hora de Bogotá. Pura. */
-export function diaYHora(iso: string): string {
-  const d = new Date(Date.parse(iso) + BOGOTA_MS)
-  const h = d.getUTCHours()
-  const m = String(d.getUTCMinutes()).padStart(2, '0')
-  const h12 = h % 12 === 0 ? 12 : h % 12
-  return `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}, ${h12}:${m} ${h < 12 ? 'a. m.' : 'p. m.'}`
-}
+/** «sábado 24 de octubre, 1:00 p. m.», en hora de Bogotá. La única versión en TS vive en `_shared/funciones`. Pura. */
+export const diaYHora = fechaTexto
 
 /** «$180.000». Pura. */
 export function pesos(n: number): string {

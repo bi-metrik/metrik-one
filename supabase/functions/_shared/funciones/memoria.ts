@@ -6,6 +6,8 @@
 //     contexto;
 //   · disponible para el asistente (`funcion_motivo_asistente`): campaña activa + agenda publicada + función activa +
 //     futura + venta abierta + cupo del asistente libre;
+//   · el estado para N personas (`funcion_estado_asistente`) y las alternativas (`funcion_alternativas`): hasta 3,
+//     primero la misma campaña por cercanía, después otras experiencias por fecha (la experiencia es su nombre);
 //   · apartar (origen asistente): misma clave = misma foto; `sin_regla_apartado`, `sin_precio`,
 //     `modalidad_no_permitida`, `sin_autorizacion` y `sin_cupo` contra el cupo del asistente; el monto lo calcula aquí,
 //     como la base;
@@ -15,12 +17,14 @@
 // ============================================================
 
 import type { LlaveConversacion } from '../agente/publico/tipos.ts';
+import { fechaTexto } from './fecha-texto.ts';
 import type {
+  Alternativa,
+  EstadoAsistente,
   CampanaActiva,
   CupoPublico,
   FuncionDisponible,
   LineaResumenPago,
-  MotivoNoDisponible,
   PropuestaApartado,
   PuertoFunciones,
   RespuestaAutorizacion,
@@ -88,6 +92,9 @@ interface PagoEnMemoria {
   referencia: string | null;
 }
 
+/** Por qué el asistente no puede ofrecer una función (como `funcion_motivo_asistente`). */
+type MotivoNoDisponible = 'campana_no_activa' | 'funcion_no_activa' | 'funcion_pasada' | 'venta_cerrada' | 'agotada';
+
 const llaveTexto = (l: LlaveConversacion) => `${l.workspaceId}|${l.cuentaId}|${l.conversacionId}`;
 
 export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
@@ -141,26 +148,54 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
     return f && c && c.workspaceId === workspaceId ? { f, c } : null;
   };
 
-  const libres = (f: FuncionEnMemoria) => Math.max(cupoAsistente(f) - ocupadas(f.id), 0);
+  /** `funcion_estado_asistente`. */
+  const estadoDe = (f: FuncionEnMemoria, c: CampanaEnMemoria, personas: number): EstadoAsistente => {
+    const m = motivoDe(f, c);
+    if (m !== null && m !== 'agotada') return 'no_disponible';
+    const o = ocupadas(f.id);
+    if (o + personas <= cupoAsistente(f)) return 'alcanza';
+    if (o + personas <= f.capacidad) return 'llena_para_asistente';
+    return 'llena';
+  };
+
+  /** `funcion_alternativas`. */
+  const alternativasDe = (f: FuncionEnMemoria, c: CampanaEnMemoria, personas: number): Alternativa[] => {
+    const t0 = Date.parse(f.iniciaAt);
+    return [...funciones.values()]
+      .map((f2) => ({ f2, c2: campanas.get(f2.campanaId) }))
+      .filter((x): x is { f2: FuncionEnMemoria; c2: CampanaEnMemoria } => !!x.c2)
+      .filter(({ f2, c2 }) => c2.workspaceId === c.workspaceId && f2.id !== f.id && (c2.id === c.id || c2.experiencia !== c.experiencia)
+        && motivoDe(f2, c2) === null && ocupadas(f2.id) + personas <= cupoAsistente(f2))
+      .map(({ f2, c2 }) => {
+        const misma = c2.id === c.id;
+        const t = Date.parse(f2.iniciaAt);
+        return { f2, c2, misma, orden: misma ? Math.abs(t - t0) : t };
+      })
+      .sort((a, b) => Number(a.misma === false) - Number(b.misma === false) || a.orden - b.orden || a.f2.id.localeCompare(b.f2.id))
+      .slice(0, 3)
+      .map(({ f2, c2, misma }) => ({
+        funcion_id: f2.id, experiencia: c2.experiencia, campana: c2.nombre, campana_codigo: c2.codigo, inicia_at: f2.iniciaAt,
+        inicia_texto: fechaTexto(f2.iniciaAt), tarifa: tarifaDe(f2, c2), alcanza: true as const,
+        grupo: misma ? ('misma_campana' as const) : ('otra_experiencia' as const),
+      }));
+  };
 
   const puerto: PuertoFunciones = {
     resumenPago,
     prepararPago,
     vincularLink,
-    async consultarCupo(workspaceId, funcionId) {
+    async consultarCupo(workspaceId, funcionId, personas) {
       const x = de(workspaceId, funcionId);
       if (!x) return { ok: false, error: 'funcion_no_existe' };
-      const motivo = motivoDe(x.f, x.c);
-      if (motivo === 'oculta') return { ok: false, error: 'funcion_no_existe' };
+      const estado = estadoDe(x.f, x.c, personas);
       const cupo: CupoPublico = {
         funcion_id: x.f.id,
         campana_codigo: x.c.codigo,
         inicia_at: x.f.iniciaAt,
-        disponible: motivo === null,
-        motivo,
-        cupo_libre: motivo === null ? libres(x.f) : 0,
-        agotada: motivo === 'agotada',
+        inicia_texto: fechaTexto(x.f.iniciaAt),
+        estado,
         tarifa: tarifaDe(x.f, x.c),
+        alternativas: estado === 'alcanza' ? [] : alternativasDe(x.f, x.c, personas),
       };
       return { ok: true, cupo };
     },
@@ -173,7 +208,7 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
         .sort((a, b) => Date.parse(a.f.iniciaAt) - Date.parse(b.f.iniciaAt) || a.f.id.localeCompare(b.f.id))
         .map(({ f, c }) => ({
           funcion_id: f.id, campana_codigo: c.codigo, campana: c.nombre, experiencia: c.experiencia,
-          inicia_at: f.iniciaAt, cupo_libre: libres(f), tarifa: tarifaDe(f, c),
+          inicia_at: f.iniciaAt, inicia_texto: fechaTexto(f.iniciaAt), tarifa: tarifaDe(f, c),
         }));
       return { ok: true, dato };
     },
@@ -214,7 +249,9 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
       if (p.modalidad === 'abono' && t.abono_persona != null) abono = t.abono_persona;
       else if (p.modalidad === 'total' && t.permite_pago_total) abono = null;
       else return { ok: false, error: 'modalidad_no_permitida' };
-      if (ocupadas(f.id) + p.personas > cupoAsistente(f)) return { ok: false, error: 'sin_cupo' };
+      if (ocupadas(f.id) + p.personas > cupoAsistente(f)) {
+        return { ok: false, error: 'sin_cupo', estado: estadoDe(f, c, p.personas), alternativas: alternativasDe(f, c, p.personas) };
+      }
       const r: ReservaEnMemoria = {
         id: nuevoId(), funcionId: f.id, campanaId: c.id, personas: p.personas, estado: 'apartada',
         venceAt: ahora() + c.minutosApartado * 60_000, clave: p.huellaPropuesta, origen: 'asistente',

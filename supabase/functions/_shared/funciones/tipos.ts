@@ -26,30 +26,50 @@ export interface TarifaPublica {
   permite_pago_total: boolean;
 }
 
-/** Por qué el asistente no puede ofrecer una función (la regla vive en `funcion_motivo_asistente`). */
-export type MotivoNoDisponible = 'campana_no_activa' | 'funcion_no_activa' | 'funcion_pasada' | 'venta_cerrada' | 'agotada';
+/**
+ * El estado de una función para N personas, SIN números de cupo («Nunca dejar ir a un cliente», Mauricio 2026-10-22):
+ *   · `alcanza`              caben en el cupo del asistente y la función está disponible;
+ *   · `llena_para_asistente` no caben en el cupo del asistente pero sí en la capacidad: el asistente ofrece pasar a
+ *                            una persona, sin prometer el puesto (no cuenta la sobreventa);
+ *   · `llena`                no caben ni en la capacidad;
+ *   · `no_disponible`        pausada, cancelada, pasada, con la venta cerrada o de una campaña no publicada o no activa.
+ */
+export type EstadoAsistente = 'alcanza' | 'llena_para_asistente' | 'llena' | 'no_disponible';
 
-/** Lo que el asistente ve de UNA función. Nunca la capacidad ni datos de otras reservas. */
+/** Una función donde SÍ caben esas personas, con la misma regla de disponibilidad. Sin números de cupo. */
+export interface Alternativa {
+  funcion_id: string;
+  experiencia: string;
+  campana: string;
+  campana_codigo: string;
+  inicia_at: string;
+  /** «sábado 24 de octubre, 1:00 p. m.», hora de Bogotá. */
+  inicia_texto: string;
+  tarifa: TarifaPublica;
+  alcanza: true;
+  grupo: 'misma_campana' | 'otra_experiencia';
+}
+
+/** Lo que el asistente ve de UNA función para N personas. Nunca un número de cupo ni datos de otras reservas. */
 export interface CupoPublico {
   funcion_id: string;
   campana_codigo: string;
   inicia_at: string;
-  disponible: boolean;
-  motivo: MotivoNoDisponible | null;
-  /** Lo libre DEL ASISTENTE (su cupo menos lo ocupado), no la capacidad. */
-  cupo_libre: number;
-  agotada: boolean;
+  inicia_texto: string;
+  estado: EstadoAsistente;
   tarifa: TarifaPublica;
+  /** Hasta 3, solo si el estado no es `alcanza`: primero la misma campaña por cercanía, después otras experiencias. */
+  alternativas: Alternativa[];
 }
 
-/** Una función que el asistente puede ofrecer (`ver_funciones_disponibles`). */
+/** Una función que el asistente puede ofrecer (`ver_funciones_disponibles`). Sin números de cupo. */
 export interface FuncionDisponible {
   funcion_id: string;
   campana_codigo: string;
   campana: string;
   experiencia: string;
   inicia_at: string;
-  cupo_libre: number;
+  inicia_texto: string;
   tarifa: TarifaPublica;
 }
 
@@ -146,7 +166,10 @@ export interface Apartado {
   montoAPagar: number;
 }
 
-export type ResultadoApartar = ({ ok: true } & Apartado) | { ok: false; error: CodigoErrorFunciones };
+/** Si falla por cupo (`sin_cupo`), trae el mismo estado y las mismas alternativas de `consultar_cupo`. */
+export type ResultadoApartar =
+  | ({ ok: true } & Apartado)
+  | { ok: false; error: CodigoErrorFunciones; estado?: EstadoAsistente; alternativas?: Alternativa[] };
 
 export type RespuestaAutorizacion = 'si' | 'no' | null;
 
@@ -190,7 +213,7 @@ export interface LinkPago {
 }
 
 export interface PuertoFunciones {
-  consultarCupo(workspaceId: string, funcionId: string): Promise<ResultadoCupo>;
+  consultarCupo(workspaceId: string, funcionId: string, personas: number): Promise<ResultadoCupo>;
   verDisponibles(workspaceId: string, codigoCampana: string | null): Promise<Resultado<FuncionDisponible[]>>;
   campanasActivas(workspaceId: string): Promise<Resultado<CampanasActivas>>;
   /** La ÚLTIMA respuesta a la autorización `general` de la conversación (`null` = nunca respondió). */

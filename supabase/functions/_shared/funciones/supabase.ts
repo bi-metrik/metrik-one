@@ -10,7 +10,9 @@
 import type { LlaveConversacion } from '../agente/publico/tipos.ts';
 import { codigoDeError } from './tipos.ts';
 import type {
+  Alternativa,
   CampanasActivas,
+  EstadoAsistente,
   CupoPublico,
   FuncionDisponible,
   PagoPreparado,
@@ -21,7 +23,7 @@ import type {
   ResumenPago,
 } from './tipos.ts';
 
-type Respuesta<T> = { data: T | null; error: { message: string } | null };
+type Respuesta<T> = { data: T | null; error: { message: string; details?: string | null } | null };
 
 interface Consulta<T> extends PromiseLike<Respuesta<T>> {
   eq(columna: string, valor: unknown): Consulta<T>;
@@ -52,8 +54,8 @@ export function datosDeApartado(p: PropuestaApartado): Record<string, unknown> {
 
 export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
   return {
-    async consultarCupo(workspaceId, funcionId) {
-      const { data, error } = await db.rpc('funcion_consultar_cupo', { p_workspace_id: workspaceId, p_funcion_id: funcionId });
+    async consultarCupo(workspaceId, funcionId, personas) {
+      const { data, error } = await db.rpc('funcion_consultar_cupo', { p_workspace_id: workspaceId, p_funcion_id: funcionId, p_personas: personas });
       if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
       return { ok: true, cupo: data as CupoPublico };
     },
@@ -115,7 +117,19 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
         p_clave_idempotencia: p.huellaPropuesta,
         p_origen: 'asistente',
       });
-      if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
+      if (error || !data) {
+        const codigo = codigoDeError(error?.message);
+        // Sin cupo: la base manda en DETAIL el mismo estado y las mismas alternativas de `consultar_cupo`.
+        if (codigo === 'sin_cupo' && error?.details) {
+          try {
+            const d = JSON.parse(error.details) as { estado?: EstadoAsistente; alternativas?: Alternativa[] };
+            return { ok: false, error: codigo, estado: d.estado, alternativas: d.alternativas ?? [] };
+          } catch {
+            // Un DETAIL que no es JSON: solo el código.
+          }
+        }
+        return { ok: false, error: codigo };
+      }
       const r = data as {
         reserva_id: string; estado: 'apartada' | 'confirmada' | 'cancelada' | 'vencida'; vence_at: string | null; repetida: boolean;
         campana_id: string; tarifa: 'preventa' | 'completa'; precio_unitario: number; monto_total: number | string;

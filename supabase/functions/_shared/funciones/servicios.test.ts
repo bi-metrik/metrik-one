@@ -55,7 +55,7 @@ function clientePGlite(db: PGlite): ClienteFunciones {
         const r = await comoServidor(() => db.query<{ r: unknown }>(`select public.${nombre}(${lista}) as r`, valores))
         return { data: r.rows[0].r, error: null }
       } catch (e) {
-        return { data: null, error: { message: (e as Error).message } }
+        return { data: null, error: { message: (e as Error).message, details: (e as { detail?: string }).detail ?? null } }
       }
     },
     from(tabla) {
@@ -99,12 +99,17 @@ function bancoMemoria(ws: string): Banco {
 }
 
 function bancoBase(ws: string): Banco {
+  const experiencias = new Map<string, string>()
   return {
     ws,
     puerto: puertoFuncionesSupabase(clientePGlite(pg)),
     async agregarCampana(c) {
-      const exp = hex('e')
-      await pg.query(`insert into funcion_experiencias (id, workspace_id, nombre) values ($1, $2, $3)`, [exp, c.workspaceId, c.experiencia])
+      let exp = experiencias.get(c.experiencia)
+      if (!exp) {
+        exp = hex('e')
+        experiencias.set(c.experiencia, exp)
+        await pg.query(`insert into funcion_experiencias (id, workspace_id, nombre) values ($1, $2, $3)`, [exp, c.workspaceId, c.experiencia])
+      }
       const publicada = c.publicada ?? true
       await pg.query(
         `insert into funcion_campanas (id, workspace_id, experiencia_id, nombre, codigo, estado, agenda_publicada_at, minutos_apartado,
@@ -206,27 +211,33 @@ describe.each([
     return l
   }
 
-  it('consultar_cupo devuelve lo libre del asistente y la tarifa; apartar no sobrevende su cupo', async () => {
+  it('consultar_cupo devuelve un estado y la tarifa, sin números; apartar no sobrevende el cupo del asistente', async () => {
     const c = await campana()
     const f = await funcion(c, { capacidad: 7, cupoAsistente: 5 })
-    const c0 = await consultarCupo(b.puerto, b.ws, f)
-    expect(c0.ok && Object.keys(c0.cupo).sort()).toEqual(['agotada', 'campana_codigo', 'cupo_libre', 'disponible', 'funcion_id', 'inicia_at', 'motivo', 'tarifa'])
-    expect(c0.ok && [c0.cupo.cupo_libre, c0.cupo.disponible, c0.cupo.tarifa.precio_persona]).toEqual([5, true, 180_000])
+    const c0 = await consultarCupo(b.puerto, b.ws, f, 5)
+    expect(c0.ok && Object.keys(c0.cupo).sort()).toEqual(['alternativas', 'campana_codigo', 'estado', 'funcion_id', 'inicia_at', 'inicia_texto', 'tarifa'])
+    expect(c0.ok && [c0.cupo.estado, c0.cupo.tarifa.precio_persona, c0.cupo.alternativas]).toEqual(['alcanza', 180_000, []])
+    const c6 = await consultarCupo(b.puerto, b.ws, f, 6)
+    expect(c6.ok && c6.cupo.estado).toBe('llena_para_asistente')
+    const c8 = await consultarCupo(b.puerto, b.ws, f, 8)
+    expect(c8.ok && c8.cupo.estado).toBe('llena')
 
     const a = await apartar(b.puerto, propuesta(await autorizada(), f, 3))
     expect(a.ok && [a.estado, a.repetida, a.montoTotal, a.montoAPagar, a.campanaId]).toEqual(['apartada', false, 540_000, 540_000, c.id])
-    expect(await apartar(b.puerto, propuesta(await autorizada(), f, 3))).toEqual({ ok: false, error: 'sin_cupo' })
+    expect(await apartar(b.puerto, propuesta(await autorizada(), f, 3))).toMatchObject({ ok: false, error: 'sin_cupo', estado: 'llena_para_asistente' })
     expect((await apartar(b.puerto, propuesta(await autorizada(), f, 2, { modalidad: 'abono' }))).ok).toBe(true)
-    const c1 = await consultarCupo(b.puerto, b.ws, f)
-    expect(c1.ok && [c1.cupo.cupo_libre, c1.cupo.agotada, c1.cupo.motivo]).toEqual([0, true, 'agotada'])
+    const c1 = await consultarCupo(b.puerto, b.ws, f, 1)
+    expect(c1.ok && c1.cupo.estado).toBe('llena_para_asistente')
   })
 
   it('lo que agrega el equipo le resta al asistente', async () => {
     const f = await funcion(await campana(), { capacidad: 10, cupoAsistente: 6 })
     await b.apartarEquipo(f, 4)
-    const c = await consultarCupo(b.puerto, b.ws, f)
-    expect(c.ok && c.cupo.cupo_libre).toBe(2)
-    expect(await apartar(b.puerto, propuesta(await autorizada(), f, 3))).toEqual({ ok: false, error: 'sin_cupo' })
+    const c2 = await consultarCupo(b.puerto, b.ws, f, 2)
+    expect(c2.ok && c2.cupo.estado).toBe('alcanza')
+    const c3 = await consultarCupo(b.puerto, b.ws, f, 3)
+    expect(c3.ok && c3.cupo.estado).toBe('llena_para_asistente')
+    expect(await apartar(b.puerto, propuesta(await autorizada(), f, 3))).toMatchObject({ ok: false, error: 'sin_cupo' })
   })
 
   it('el abono y la preventa: el monto lo calcula ONE', async () => {
@@ -251,8 +262,11 @@ describe.each([
     const a = await apartar(b.puerto, p)
     const r = await apartar(b.puerto, p)
     expect(a.ok && r.ok && r.reservaId === a.reservaId && r.repetida && r.montoTotal === a.montoTotal).toBe(true)
-    const c = await consultarCupo(b.puerto, b.ws, f)
-    expect(c.ok && c.cupo.cupo_libre).toBe(1)
+    // Capacidad 4 y cupo del asistente 4, con 3 apartadas: 2 más no caben ni en la capacidad.
+    const c = await consultarCupo(b.puerto, b.ws, f, 2)
+    expect(c.ok && c.cupo.estado).toBe('llena')
+    const c1 = await consultarCupo(b.puerto, b.ws, f, 1)
+    expect(c1.ok && c1.cupo.estado).toBe('alcanza')
   })
 
   it('sin autorización general (o retirada) no aparta', async () => {
@@ -266,7 +280,8 @@ describe.each([
   it('no ve ni aparta en campaña sin publicar, pausada, ni en función pausada, pasada, con venta cerrada o archivada', async () => {
     const l = await autorizada()
     const oculta = await funcion(await campana({ publicada: false }))
-    expect(await consultarCupo(b.puerto, b.ws, oculta)).toEqual({ ok: false, error: 'funcion_no_existe' })
+    const co = await consultarCupo(b.puerto, b.ws, oculta)
+    expect(co.ok && co.cupo.estado).toBe('no_disponible')
     expect(await apartar(b.puerto, propuesta(l, oculta, 1))).toEqual({ ok: false, error: 'funcion_no_existe' })
     const pausada = await funcion(await campana({ estado: 'pausada' }))
     expect(await apartar(b.puerto, propuesta(l, pausada, 1))).toEqual({ ok: false, error: 'campana_no_activa' })
@@ -276,7 +291,9 @@ describe.each([
     const ventaCerrada = await funcion(activa, { iniciaAt: manana(1), cierraVentaAt: new Date(Date.now() - HORA).toISOString() })
     expect(await apartar(b.puerto, propuesta(l, ventaCerrada, 1))).toEqual({ ok: false, error: 'venta_cerrada' })
     const archivada = await funcion(activa, { iniciaAt: manana(2), archivada: true })
-    expect(await consultarCupo(b.puerto, b.ws, archivada)).toEqual({ ok: false, error: 'funcion_no_existe' })
+    const ca = await consultarCupo(b.puerto, b.ws, archivada)
+    expect(ca.ok && ca.cupo.estado).toBe('no_disponible')
+    expect(await consultarCupo(b.puerto, '00000000-0000-4000-8000-0000000dffff', archivada)).toEqual({ ok: false, error: 'funcion_no_existe' })
   })
 
   it('ver_funciones_disponibles y campanas_activas usan la misma regla', async () => {
@@ -349,6 +366,104 @@ describe.each([
     if (!a.ok) throw new Error(a.error)
     expect(a.montoTotal).toBe(360_000)
     expect(await b.solicitudDe(a.reservaId)).toBe('vamos 6, queremos estar juntos')
+  })
+})
+
+describe('alternativas: el doble da lo mismo que la base', () => {
+  /** El mismo escenario en un banco: una función llena para el asistente y candidatas con etiqueta. */
+  async function escenario(b: Banco) {
+    const base = Date.now() + 48 * HORA
+    const en = (h: number) => new Date(base + h * HORA).toISOString()
+    const ids: Record<string, string> = {}
+    const camp = async (nombre: string, experiencia: string, o: Partial<CampanaEnMemoria> = {}) => {
+      const c: CampanaEnMemoria = { id: hex('c'), workspaceId: b.ws, codigo: `A-${++n}`, nombre, experiencia, minutosApartado: 30, precioPersona: 180_000, abonoPersona: 100_000, ...o }
+      await b.agregarCampana(c)
+      return c
+    }
+    const fun = async (etiqueta: string, c: CampanaEnMemoria, h: number, o: Partial<FuncionEnMemoria> = {}) => {
+      ids[etiqueta] = hex('f')
+      await b.agregarFuncion({ id: ids[etiqueta], campanaId: c.id, iniciaAt: en(h), capacidad: 10, ...o })
+    }
+    const hp = await camp('HP octubre', 'Harry Potter')
+    await fun('pedida', hp, 0, { capacidad: 4, cupoAsistente: 2 })
+    await fun('+2h', hp, 2)
+    await fun('-3h', hp, -3)
+    await fun('+2d', hp, 48)
+    await fun('pausada', hp, 1, { estado: 'pausada' })
+    await fun('archivada', hp, 0.5, { archivada: true })
+    await fun('no-caben', hp, 1.5, { capacidad: 1 })
+    const jack = await camp('Jack noviembre', 'Jack')
+    await fun('jack-1', jack, 24)
+    await fun('jack-2', jack, 5)
+    const oculta = await camp('Borrador', 'Ratatouille', { publicada: false })
+    await fun('oculta', oculta, 3)
+    const misma = await camp('HP otra tanda', 'Harry Potter')
+    await fun('misma-experiencia', misma, 4)
+    await b.apartarEquipo(ids.pedida, 2)
+    const nombre = (id: string) => Object.entries(ids).find(([, v]) => v === id)?.[0] ?? id
+    return { ids, nombre }
+  }
+
+  it('mismo estado, mismas alternativas en el mismo orden, y lo mismo al fallar apartar', async () => {
+    const salidas: unknown[] = []
+    for (const crear of [bancoMemoria, bancoBase]) {
+      const ws = `00000000-0000-4000-8000-0000000e${(++espacios).toString(16).padStart(4, '0')}`
+      await pg.query(`insert into workspaces (id, slug) values ($1, $2)`, [ws, `alt-${espacios}`])
+      const b = crear(ws)
+      const { ids, nombre } = await escenario(b)
+      const c = await consultarCupo(b.puerto, ws, ids.pedida, 2)
+      if (!c.ok) throw new Error(c.error)
+      const l = { workspaceId: ws, cuentaId: 1, conversacionId: ++conv }
+      await b.autorizar(l, 'si')
+      const a = await apartar(b.puerto, propuesta(l, ids.pedida, 2))
+      if (a.ok) throw new Error('apartó una llena')
+      const ver = (alts: typeof c.cupo.alternativas) => alts.map((x) => [nombre(x.funcion_id), x.grupo, x.alcanza, x.inicia_texto, x.tarifa.precio_persona])
+      salidas.push({ estado: c.cupo.estado, alternativas: ver(c.cupo.alternativas), apartar: [a.error, a.estado, ver(a.alternativas ?? [])] })
+      // Sin las tres de la misma campaña, entran las de otras experiencias por fecha (nunca otra tanda de la misma).
+      for (const x of ['+2h', '-3h', '+2d']) await b.apartarEquipo(ids[x], 10)
+      const d = await consultarCupo(b.puerto, ws, ids.pedida, 2)
+      if (!d.ok) throw new Error(d.error)
+      salidas.push(ver(d.cupo.alternativas))
+    }
+    const [memEstado, memSin, baseEstado, baseSin] = salidas
+    expect(memEstado).toEqual(baseEstado)
+    expect(memSin).toEqual(baseSin)
+    expect((memEstado as { estado: string }).estado).toBe('llena_para_asistente')
+    expect((memEstado as { alternativas: unknown[][] }).alternativas.map((x) => x.slice(0, 2))).toEqual([['+2h', 'misma_campana'], ['-3h', 'misma_campana'], ['+2d', 'misma_campana']])
+    expect((memSin as unknown[][]).map((x) => x.slice(0, 2))).toEqual([['jack-2', 'otra_experiencia'], ['jack-1', 'otra_experiencia']])
+  })
+})
+
+describe('ningún servicio del asistente devuelve un número de cupo', () => {
+  it('ni consultar_cupo, ni ver_funciones_disponibles, ni campanas_activas, ni apartar al fallar', async () => {
+    for (const crear of [bancoMemoria, bancoBase]) {
+      const ws = `00000000-0000-4000-8000-0000000e${(++espacios).toString(16).padStart(4, '0')}`
+      await pg.query(`insert into workspaces (id, slug) values ($1, $2)`, [ws, `num-${espacios}`])
+      const b = crear(ws)
+      const c: CampanaEnMemoria = { id: hex('c'), workspaceId: ws, codigo: `N-${++n}`, nombre: 'HP', experiencia: 'HP', minutosApartado: 30, precioPersona: 1000, abonoPersona: 500 }
+      await b.agregarCampana(c)
+      const f = hex('f')
+      await b.agregarFuncion({ id: f, campanaId: c.id, iniciaAt: manana(), capacidad: 4, cupoAsistente: 2 })
+      await b.agregarFuncion({ id: hex('f'), campanaId: c.id, iniciaAt: manana(3), capacidad: 4 })
+      await b.apartarEquipo(f, 2)
+      const l = { workspaceId: ws, cuentaId: 1, conversacionId: ++conv }
+      await b.autorizar(l, 'si')
+      const cupo = await consultarCupo(b.puerto, ws, f, 1)
+      const disponibles = await verFuncionesDisponibles(b.puerto, ws)
+      const activas = await campanasActivas(b.puerto, ws)
+      const fallido = await apartar(b.puerto, propuesta(l, f, 1))
+      if (!cupo.ok || !disponibles.ok || !activas.ok || fallido.ok) throw new Error('el escenario no salió como se esperaba')
+      // Lo que devuelve cada servicio (sin el sobre `{ ok, cupo }` / `{ ok, dato }`).
+      const salidas = [cupo.cupo, disponibles.dato, activas.dato, { estado: fallido.estado, alternativas: fallido.alternativas }]
+      const claves: string[] = []
+      const recorrer = (v: unknown) => {
+        if (Array.isArray(v)) v.forEach(recorrer)
+        else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) { claves.push(k); recorrer(x) }
+      }
+      salidas.forEach(recorrer)
+      expect(claves.length).toBeGreaterThan(10)
+      expect(claves.filter((k) => /cupo|libre|ocupad|capacidad|puesto/i.test(k))).toEqual([])
+    }
   })
 })
 
