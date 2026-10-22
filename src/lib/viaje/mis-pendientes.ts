@@ -23,6 +23,7 @@ import { leerCierreGuardado, leerPostventa, sumarDias, diasEntre, pesosCierre } 
 import { leerPaqueteEnviado } from './entrega'
 import { leerPrerreserva } from './confirmacion'
 import type { CuotaPlan } from './plan-pagos'
+import { leerTramos, horaHHMM, type TramoServicio } from './fechas-servicio'
 
 export type Grupo = 'vencido' | 'hoy' | 'semana'
 
@@ -63,6 +64,14 @@ export interface ServicioPendiente {
   fecha_limite_pago: string | null
   gastos: Array<GastoDelServicio & { fecha?: string | null }>
   aprobaciones: AprobacionDelServicio[]
+  /** Fechas del servicio (2026-10-21). Opcionales: los casos viejos de las pruebas no las traen. */
+  tipo?: string
+  fecha_servicio?: string | null
+  hora_inicio?: string | null
+  fecha_fin?: string | null
+  hora_fin?: string | null
+  tramos?: TramoServicio[] | null
+  responsable_staff_id?: string | null
 }
 
 export interface ViajePendiente {
@@ -215,6 +224,81 @@ export function pendientesDe(viajes: readonly ViajePendiente[], persona: Persona
   }
   const unicos = new Map(out.map(p => [p.id, p]))
   return [...unicos.values()].sort((a, b) => GRUPO_ORDEN[a.grupo] - GRUPO_ORDEN[b.grupo] || (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))
+}
+
+// ── Servicios próximos (fechas de servicio, 2026-10-21) ──────────────────────
+
+/** Desde esta etapa el viaje está confirmado (el cliente aceptó: §4.3 del diseño de hitos). */
+export const ETAPA_VIAJE_CONFIRMADO = 4
+/** Hasta cuántos días adelante se listan los servicios. */
+export const HORIZONTE_SERVICIOS_DIAS = 14
+
+export interface ServicioProximo {
+  id: string
+  negocioId: string
+  viaje: string
+  tipo: string
+  nombre: string
+  /** `null` = «Falta la fecha». */
+  fecha: string | null
+  hora: string | null
+  /** Qué momento del servicio es: «Ida», «Regreso», «Tramo 3», «Check-in», «Check-out». */
+  momento: string | null
+}
+
+function momentosDe(s: ServicioPendiente): Array<{ fecha: string; hora: string | null; momento: string | null }> {
+  const tramos = leerTramos(s.tramos) ?? []
+  if (s.tipo === 'vuelo' && tramos.length > 0) {
+    return tramos.map((t, i) => ({
+      fecha: t.fecha,
+      hora: t.hora_salida,
+      momento: tramos.length === 1 ? 'Ida' : tramos.length === 2 ? (i === 0 ? 'Ida' : 'Regreso') : `Tramo ${i + 1}`,
+    }))
+  }
+  if (!s.fecha_servicio) return []
+  const hotel = s.tipo === 'hotel'
+  const out = [{ fecha: s.fecha_servicio, hora: horaHHMM(s.hora_inicio), momento: hotel ? 'Check-in' : null }]
+  if (s.fecha_fin && s.fecha_fin !== s.fecha_servicio) out.push({ fecha: s.fecha_fin, hora: horaHHMM(s.hora_fin), momento: hotel ? 'Check-out' : 'Termina' })
+  return out
+}
+
+/**
+ * Los servicios próximos de la persona, por fecha y hora: el momento siguiente de cada servicio
+ * (en un vuelo, su próximo tramo; en un hotel, el check-in y luego el check-out) entre hoy y
+ * `HORIZONTE_SERVICIOS_DIAS`. Los que no tienen fecha salen al final como «Falta la fecha», mientras
+ * el viaje no haya regresado.
+ *
+ * Quién ve qué, el mismo criterio de la vista: el responsable del servicio; si no tiene, el de
+ * operaciones del negocio (o, sin él, el área de operaciones). Solo viajes confirmados
+ * (`ETAPA_VIAJE_CONFIRMADO` en adelante) y servicios que no están en «No va».
+ */
+export function serviciosProximosDe(viajes: readonly ViajePendiente[], persona: Persona, hoy: string): ServicioProximo[] {
+  const operaciones = persona.areas.includes('operaciones')
+  const hasta = sumarDias(hoy, HORIZONTE_SERVICIOS_DIAS)
+  const out: ServicioProximo[] = []
+  for (const v of viajes) {
+    const loAprueba = !!persona.staffId && (v.aprobadoresStaffIds ?? []).includes(persona.staffId)
+    if (v.esPrueba && !esMio(v.comercialStaffId, persona) && !esMio(v.operacionesStaffId, persona) && !loAprueba) continue
+    if ((v.etapaNumero ?? 0) < ETAPA_VIAJE_CONFIRMADO) continue
+    const deOperaciones = esMio(v.operacionesStaffId, persona) || (!v.operacionesStaffId && operaciones)
+    for (const s of v.servicios) {
+      if (estadoDelServicio(s, s.gastos, s.aprobaciones) === 'cancelado') continue
+      if (!(s.responsable_staff_id ? esMio(s.responsable_staff_id, persona) : deOperaciones)) continue
+      const base = { id: s.id, negocioId: v.id, viaje: v.nombre, tipo: s.tipo ?? 'otro', nombre: s.nombre }
+      const momentos = momentosDe(s)
+      if (momentos.length === 0) {
+        if (!v.regreso || v.regreso >= hoy) out.push({ ...base, fecha: null, hora: null, momento: null })
+        continue
+      }
+      const siguiente = momentos.find(m => m.fecha >= hoy)
+      if (siguiente && siguiente.fecha <= hasta) out.push({ ...base, ...siguiente })
+    }
+  }
+  return out.sort((a, b) => {
+    if (a.fecha !== b.fecha) return a.fecha === null ? 1 : b.fecha === null ? -1 : a.fecha < b.fecha ? -1 : 1
+    if (a.hora !== b.hora) return a.hora === null ? 1 : b.hora === null ? -1 : a.hora < b.hora ? -1 : 1
+    return a.nombre.localeCompare(b.nombre, 'es')
+  })
 }
 
 /** El próximo hecho, para el vacío: «Lo próximo: cuota de Carolina el vie 30 oct». */

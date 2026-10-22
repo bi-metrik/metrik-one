@@ -50,6 +50,7 @@ import {
   traerServiciosDeCotizacion,
   type CambiosServicio,
 } from '../../servicios-viaje-actions'
+import FechasServicio, { LineaDeFechas } from './FechasServicio'
 
 /**
  * Bloque «Servicios del viaje»: el tablero de Reservas y pagos (F0 + F3). Una fila por servicio
@@ -280,6 +281,7 @@ function FilaServicio({
           <p className={`break-words text-sm font-medium ${v.estado === 'cancelado' ? 'line-through text-muted-foreground' : ''}`}>{s.nombre}</p>
           <p className="break-words text-xs text-muted-foreground">{detalle}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+            {v.estado !== 'cancelado' && <LineaDeFechas s={s} />}
             {fecha && <span className={COLOR_FECHA[fecha.color]}>{fecha.texto}</span>}
             <span className="tabular-nums text-muted-foreground">
               Cotizado {formatCOP(s.costo_cotizado)} · Pagado {formatCOP(v.pagado)}
@@ -392,6 +394,8 @@ function HojaServicio({
       </p>
 
       <Aprobaciones v={v} datos={datos} direccion={direccion} alGuardar={alGuardar} />
+
+      <FechasServicio key={`fechas:${s.fechas_corregidas_at ?? ''}:${s.fecha_servicio ?? ''}:${s.fecha_fin ?? ''}`} s={s} puedeEditar={puedeEditar} nombres={datos.nombres} alGuardar={alGuardar} />
 
       <p className="text-xs font-semibold">1 Reserva</p>
       {campoTexto('Proveedor', 'proveedor_nombre', s.proveedor_nombre, '¿Con quién lo reservaste?')}

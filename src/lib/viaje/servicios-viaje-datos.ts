@@ -11,7 +11,8 @@
  */
 
 import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
-import { filasDeServicioDeTarifa, type FilaServicioNueva } from './servicios-desde-tarifa'
+import { fechasDelServicio, filasDeServicioDeTarifa, type FilaServicioNueva, type TipoServicio } from './servicios-desde-tarifa'
+import { completadoDeFila, fechasDeFila, type FechasServicio, type TramoServicio } from './fechas-servicio'
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
 import { GATE_SERVICIOS_LISTOS, serviciosQueFaltan, type FaltaServicio } from './gate-servicios'
 import { configReglasPago } from './reglas-pago'
@@ -23,7 +24,7 @@ export const MENSAJE_SERVICIOS_CON_PAGOS =
   'Esta cotización ya tiene pagos a proveedores registrados en sus servicios. No se puede corregir: duplícala para cambiarla.'
 
 export type ResultadoGeneracion =
-  | { ok: true; creadas: number; existentes: number; apagado?: false }
+  | { ok: true; creadas: number; existentes: number; completadas?: number; apagado?: false }
   | { ok: true; creadas: 0; existentes: 0; apagado: true }
   | { ok: false; error: string }
 
@@ -81,8 +82,11 @@ export async function generarServiciosDesdeTarifa(
       itinerarioId = tarifa.id
     }
 
-    const tipoRanuraPorItem = await tiposDeRanura(db, args.cotizacionId)
-    const nuevas = filasDeServicioDeTarifa({ items: ctx.items, seleccion, params: ctx.params, tipoRanuraPorItem })
+    const [tipoRanuraPorItem, salidaViaje] = await Promise.all([
+      tiposDeRanura(db, args.cotizacionId),
+      salidaDelViaje(db, args.negocioId),
+    ])
+    const nuevas = filasDeServicioDeTarifa({ items: ctx.items, seleccion, params: ctx.params, tipoRanuraPorItem, salidaViaje })
 
     const { data: existentesRows, error: exErr } = await db
       .from('negocio_servicios')
@@ -93,11 +97,14 @@ export async function generarServiciosDesdeTarifa(
     const yaEstan = new Set(((existentesRows ?? []) as Array<{ item_id: string }>).map(r => r.item_id))
     const faltan = nuevas.filter(f => !yaEstan.has(f.item_id))
     const existentes = nuevas.length - faltan.length
-    if (faltan.length === 0) return { ok: true, creadas: 0, existentes }
+    // Las que ya estaban ganan las fechas nuevas de su ítem (las corregidas a mano, no).
+    const completar = async () =>
+      existentes > 0 ? (await completarFechasDeServicios(db, { workspaceId: args.workspaceId, negocioId: args.negocioId, salidaViaje })).completadas : 0
+    if (faltan.length === 0) return { ok: true, creadas: 0, existentes, completadas: await completar() }
 
     const filas = faltan.map(f => aFila(f, args, itinerarioId))
     const { error: insErr } = await db.from('negocio_servicios').insert(filas)
-    if (!insErr) return { ok: true, creadas: filas.length, existentes }
+    if (!insErr) return { ok: true, creadas: filas.length, existentes, completadas: await completar() }
     if (!esChoqueDeUnico(insErr)) return { ok: false, error: insErr.message }
 
     // Otra llamada insertó algunas entre la lectura y la escritura: una por una, y la que
@@ -134,7 +141,8 @@ function aFila(
     tipo: f.tipo,
     nombre: f.nombre,
     proveedor_nombre: f.proveedor_nombre,
-    fecha_servicio: f.fecha_servicio,
+    ...columnasDeFechas(f),
+    fechas_leidas_at: new Date().toISOString(),
     costo_cotizado: f.costo_cotizado,
     orden: f.orden,
     origen: 'cotizacion',
@@ -161,6 +169,123 @@ async function tiposDeRanura(db: Db, cotizacionId: string): Promise<Record<strin
   return salida
 }
 
+/**
+ * La salida del viaje: `data.fecha_salida` del primer bloque del negocio que la tenga (el de la
+ * etapa 1). `null` si no hay o no se puede leer: entonces el día N de una actividad no da fecha.
+ */
+export async function salidaDelViaje(db: Db, negocioId: string): Promise<string | null> {
+  const { data, error } = await db
+    .from('negocio_bloques')
+    .select('fecha_salida:data->fecha_salida')
+    .eq('negocio_id', negocioId)
+  if (error) return null
+  for (const b of (data ?? []) as Array<{ fecha_salida: unknown }>) {
+    const m = typeof b.fecha_salida === 'string' ? /^(\d{4}-\d{2}-\d{2})/.exec(b.fecha_salida.trim()) : null
+    if (m) return m[1]
+  }
+  return null
+}
+
+/** Columnas de fechas de la fila, tal como se escriben (tramos vacíos = `null`). */
+export function columnasDeFechas(f: FechasServicio): Record<string, unknown> {
+  return {
+    fecha_servicio: f.fecha_servicio,
+    fecha_fin: f.fecha_fin,
+    hora_inicio: f.hora_inicio,
+    hora_fin: f.hora_fin,
+    tramos: f.tramos && f.tramos.length > 0 ? f.tramos : null,
+  }
+}
+
+/**
+ * Completa las fechas de las filas YA generadas desde su ítem (punto 5 del brief del 2026-10-21):
+ * las filas anteriores a las fechas nuevas solo tenían el inicio (y el vuelo, solo la ida).
+ *
+ * Idempotente: escribe solo si lo leído cambia algo, y pone `fechas_leidas_at` para que abrir el
+ * tablero no lo vuelva a intentar. NUNCA toca una fila corregida a mano (`fechas_corregidas_at`,
+ * también en la condición del UPDATE: si la asesora corrige mientras esto corre, gana ella) ni una
+ * fila `origen = 'manual'`. Nunca lanza.
+ *
+ * @param args.soloSinMarca solo las filas que nunca se completaron (lo que pide abrir el tablero).
+ */
+export async function completarFechasDeServicios(
+  db: Db,
+  args: { workspaceId: string; negocioId: string; salidaViaje?: string | null; soloSinMarca?: boolean },
+): Promise<{ completadas: number }> {
+  try {
+    let q = db
+      .from('negocio_servicios')
+      .select('id, item_id, tipo, fecha_servicio, fecha_fin, hora_inicio, hora_fin, tramos, fechas_leidas_at')
+      .eq('workspace_id', args.workspaceId)
+      .eq('negocio_id', args.negocioId)
+      .eq('origen', 'cotizacion')
+      .is('fechas_corregidas_at', null)
+      .not('item_id', 'is', null)
+    if (args.soloSinMarca) q = q.is('fechas_leidas_at', null)
+    const { data: filas, error } = await q
+    if (error || !filas || filas.length === 0) return { completadas: 0 }
+    const rows = filas as Array<{
+      id: string; item_id: string; tipo: string; fecha_servicio: string | null; fecha_fin: string | null
+      hora_inicio: string | null; hora_fin: string | null; tramos: unknown; fechas_leidas_at: string | null
+    }>
+
+    const [itemsRes, salida] = await Promise.all([
+      db.from('items').select('id, tarifa_pax, dia_relativo').in('id', [...new Set(rows.map(r => r.item_id))]),
+      args.salidaViaje !== undefined ? Promise.resolve(args.salidaViaje) : salidaDelViaje(db, args.negocioId),
+    ])
+    if (itemsRes.error) return { completadas: 0 }
+    const itemDe = new Map(((itemsRes.data ?? []) as Array<{ id: string; tarifa_pax: unknown; dia_relativo: number | null }>).map(i => [i.id, i]))
+
+    const ahora = new Date().toISOString()
+    let completadas = 0
+    for (const r of rows) {
+      const item = itemDe.get(r.item_id)
+      const leidas = item
+        ? fechasDelServicio({ tarifa_pax: item.tarifa_pax as never, dia_relativo: item.dia_relativo ?? null }, r.tipo as TipoServicio, salida)
+        : null
+      const cambio = leidas ? completadoDeFila(fechasDeFila(r), leidas) : null
+      // Sin cambio y con la marca ya puesta: nada que escribir.
+      if (!cambio && r.fechas_leidas_at) continue
+      const { data: escritas, error: upErr } = await db
+        .from('negocio_servicios')
+        .update({ ...(cambio ? columnasDeFechas(cambio) : {}), fechas_leidas_at: ahora })
+        .eq('id', r.id)
+        .eq('workspace_id', args.workspaceId)
+        .is('fechas_corregidas_at', null)
+        .select('id')
+      if (upErr) {
+        console.error('[servicios-viaje] no se pudieron completar las fechas:', upErr.message)
+        continue
+      }
+      if (cambio && (escritas ?? []).length > 0) completadas++
+    }
+    return { completadas }
+  } catch (e) {
+    console.error('[servicios-viaje] completar fechas:', e instanceof Error ? e.message : String(e))
+    return { completadas: 0 }
+  }
+}
+
+/**
+ * Antes de borrar filas (prerreserva vencida o aceptación que se corrige): el texto de la
+ * Actividad con las fechas corregidas a mano que se van con ellas, o `null` si no hay ninguna.
+ *
+ * ⚠️ Se pierden a propósito y no se pasan a la versión nueva: los ítems de la versión nueva tienen
+ * id nuevo y la cotización se vuelve a armar (otras fechas, otras capturas). Pegarle una fecha
+ * vieja a «el ítem que se parece» por nombre podría dejar una fecha mala en silencio, que es peor
+ * que «Falta la fecha». El rastro deja dicho qué había para volverlo a escribir si sigue valiendo.
+ */
+export function rastroDeFechasCorregidas(
+  filas: ReadonlyArray<{ nombre: string; fechas_corregidas_at?: string | null; fecha_servicio?: string | null; fecha_fin?: string | null }>,
+): string | null {
+  const corregidas = filas.filter(f => f.fechas_corregidas_at)
+  if (corregidas.length === 0) return null
+  const lista = corregidas
+    .map(f => `${f.nombre} (${f.fecha_servicio ?? 'sin fecha'}${f.fecha_fin && f.fecha_fin !== f.fecha_servicio ? ` a ${f.fecha_fin}` : ''})`)
+    .join('; ')
+  return `Se descartaron fechas corregidas a mano: ${lista}. Si siguen valiendo, escríbelas otra vez en la fila nueva.`.slice(0, 280)
+}
+
 // ── Lectura para el bloque ───────────────────────────────────────────────────
 
 export interface ServicioDelNegocio {
@@ -171,6 +296,16 @@ export interface ServicioDelNegocio {
   localizador: string | null
   estado: EstadoEscrito
   fecha_servicio: string | null
+  /** Fechas nuevas (2026-10-21). Opcionales: las pruebas puras viejas no las traen. */
+  fecha_fin?: string | null
+  hora_inicio?: string | null
+  hora_fin?: string | null
+  tramos?: TramoServicio[] | null
+  item_id?: string | null
+  fechas_leidas_at?: string | null
+  fechas_corregidas_at?: string | null
+  fechas_corregidas_por?: string | null
+  responsable_staff_id?: string | null
   fecha_limite_pago: string | null
   costo_cotizado: number
   valor_por_pagar: number | null
@@ -210,7 +345,7 @@ export async function leerServiciosDelNegocio(
 ): Promise<ServicioDelNegocio[] | null> {
   const { data, error } = await db
     .from('negocio_servicios')
-    .select('id, tipo, nombre, proveedor_nombre, localizador, estado, fecha_servicio, fecha_limite_pago, costo_cotizado, valor_por_pagar, voucher_ref, confirmacion_ref, orden, origen')
+    .select('id, tipo, nombre, proveedor_nombre, localizador, estado, fecha_servicio, fecha_fin, hora_inicio, hora_fin, tramos, item_id, fechas_leidas_at, fechas_corregidas_at, fechas_corregidas_por, responsable_staff_id, fecha_limite_pago, costo_cotizado, valor_por_pagar, voucher_ref, confirmacion_ref, orden, origen')
     .eq('workspace_id', args.workspaceId)
     .eq('negocio_id', args.negocioId)
     .order('orden', { ascending: true })
@@ -234,6 +369,8 @@ export async function leerServiciosDelNegocio(
   const aprob = (aprobRes.data ?? []) as Array<AprobacionDeServicio & { entidad_id: string }>
   return filas.map(f => ({
     ...f,
+    // `time` llega con segundos y `tramos` es jsonb: se leen sin confiar en su forma.
+    ...fechasDeFila(f),
     costo_cotizado: Number(f.costo_cotizado) || 0,
     valor_por_pagar: f.valor_por_pagar === null ? null : Number(f.valor_por_pagar),
     gastos: gastos.filter(g => g.servicio_id === f.id).map(g => ({
@@ -315,11 +452,11 @@ export async function evaluarGateServicios(
 export async function soltarServiciosDeAceptacion(
   db: Db,
   args: { workspaceId: string; negocioId: string },
-): Promise<{ ok: true; borradas: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; borradas: number; rastro?: string | null } | { ok: false; error: string }> {
   // Solo las que nacieron de la cotización: una fila agregada a mano no depende de ella.
   const { data, error } = await db
     .from('negocio_servicios')
-    .select('id')
+    .select('id, nombre, fecha_servicio, fecha_fin, fechas_corregidas_at')
     .eq('workspace_id', args.workspaceId)
     .eq('negocio_id', args.negocioId)
     .eq('origen', 'cotizacion')
@@ -346,5 +483,7 @@ export async function soltarServiciosDeAceptacion(
     .eq('workspace_id', args.workspaceId)
     .in('id', ids)
   if (delErr) return { ok: false, error: delErr.message }
-  return { ok: true, borradas: ids.length }
+  // Quien llama lo deja en la Actividad: las fechas corregidas a mano se van con las filas.
+  const rastro = rastroDeFechasCorregidas((data ?? []) as Array<{ nombre: string; fechas_corregidas_at: string | null; fecha_servicio: string | null; fecha_fin: string | null }>)
+  return { ok: true, borradas: ids.length, rastro }
 }

@@ -26,6 +26,7 @@ import {
   type TitularFacturacion,
 } from './confirmacion'
 import { aprobadoresDeLinea } from './estado-servicio'
+import { rastroDeFechasCorregidas } from './servicios-viaje-datos'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 
 // El esquema nuevo (planes, cuotas, aprobaciones, cuenta_recaudo) no está en los tipos generados.
@@ -580,12 +581,20 @@ export async function aplicarPrerreservaVencida(
     .in('estado', ['acordado', 'propuesta'])
 
   // 3. Servicios: sin pagos se borran; con pagos, «No va».
-  const { data: servicios } = await svc.from('negocio_servicios').select('id').eq('negocio_id', args.negocioId)
-  const ids = ((servicios ?? []) as Array<{ id: string }>).map((s) => s.id)
+  // Las fechas corregidas a mano de las que se borran se PIERDEN a propósito (la versión nueva
+  // tiene ítems con id nuevo y se vuelve a armar): quedan dichas en la Actividad (`rastro`).
+  const { data: servicios } = await svc
+    .from('negocio_servicios')
+    .select('id, nombre, fecha_servicio, fecha_fin, fechas_corregidas_at')
+    .eq('negocio_id', args.negocioId)
+  const filasServicio = (servicios ?? []) as Array<{ id: string; nombre: string; fecha_servicio: string | null; fecha_fin: string | null; fechas_corregidas_at: string | null }>
+  const ids = filasServicio.map((s) => s.id)
+  let rastroFechas: string | null = null
   if (ids.length > 0) {
     const { data: gastos } = await svc.from('gastos').select('servicio_id').in('servicio_id', ids)
     const conPago = new Set(((gastos ?? []) as Array<{ servicio_id: string }>).map((g) => g.servicio_id))
     const borrar = ids.filter((id) => !conPago.has(id))
+    rastroFechas = rastroDeFechasCorregidas(filasServicio.filter((s) => !conPago.has(s.id)))
     if (borrar.length > 0) await svc.from('negocio_servicios').delete().in('id', borrar)
     const noVa = ids.filter((id) => conPago.has(id))
     if (noVa.length > 0) await svc.from('negocio_servicios').update({ estado: 'cancelado' }).in('id', noVa)
@@ -637,6 +646,16 @@ export async function aplicarPrerreservaVencida(
     autor_id: null,
     contenido: `Reproceso: venció la prerreserva sin anticipo. El negocio volvió a ${etapa?.nombre ?? 'Cotización'} y la cotización se armó de nuevo${aceptada?.consecutivo ? ` (venía de ${aceptada.consecutivo})` : ''}.`.slice(0, 280),
   }, 'aplicarPrerreservaVencida')
+  if (rastroFechas) {
+    await registrarActividad(svc, {
+      workspace_id: args.workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: args.negocioId,
+      tipo: 'sistema',
+      autor_id: null,
+      contenido: rastroFechas,
+    }, 'aplicarPrerreservaVencida')
+  }
   return { aplicada: true }
 }
 
