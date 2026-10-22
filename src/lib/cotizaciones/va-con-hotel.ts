@@ -1,14 +1,14 @@
 /**
- * UN TRASLADO POR CADA HOTEL (reunión con Trappvel del 2026-10-22, L1553-1611).
+ * UN TRASLADO POR CADA HOTEL (reunión con Trappvel del 2026-10-22, punto 5).
  *
- * «Deberíamos cotizar un traslado para cada hotel»: con varias opciones de hotel, el traslado del
+ * Cada opción de hotel necesita su traslado: con varias opciones de hotel, el traslado del
  * aeropuerto al Hotel A no sirve para el Hotel B, y hasta hoy la asesora elegía a mano, tarifa por
- * tarifa, qué traslado iba con cada hotel (L1593). Ahora un traslado puede ir CON una opción de
+ * tarifa, qué traslado iba con cada hotel. Ahora un traslado puede ir CON una opción de
  * hotel (`items.tarifa_pax.vaConHotel` = el id de esa opción, sin migración):
  *
  *  · cuenta solo en las tarifas que llevan ese hotel, y viaja con él en las tres tarifas y en el
  *    PDF (que imprime lo que suma cada tarifa);
- *  · un traslado SIN hotel es general («uno de Civitatis para la ciudad», L1611): sirve para
+ *  · un traslado SIN hotel es general (una tarifa por zona de un proveedor de tours): sirve para
  *    cualquier opción de hotel, sin cargarlo tres veces.
  *
  * La regla vive en `itemsDelItinerario` (lo que suma cada tarifa), así que el total, el PDF, el

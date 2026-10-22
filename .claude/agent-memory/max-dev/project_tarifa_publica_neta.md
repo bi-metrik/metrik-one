@@ -21,7 +21,7 @@ Sin migración de esquema: los dos datos nuevos viven en `items.tarifa_pax` (`ti
 - Abierto: IVA del ingreso propio de una Pública (margen 0 → IVA 0; la comisión real no se ve); `costo_cotizado` de una
   Pública en servicios del viaje es el precio público (el cierre lo explica como «dejó más»); pantallazo con dos precios
   NO propone Pública (solo el tarifario).
-- Push denegado por el clasificador en esta sesión («Sensitive-Source Provenance», por haber leído la transcripción del
+- Push denegado por el clasificador en esta sesión («Sensitive-Source Provenance», por haber leído material del
   cliente): el push y el PR los hace la sesión principal.
 
 **How to apply:** antes de tocar el mínimo o el plan de tarifas, leer `tarifa-publica.ts` y `va-con-hotel.ts`; un

@@ -17,7 +17,7 @@ import { claveDeFoto, fotoImprimible, MAX_FOTOS_EXTRA, nombreLlano, objetivo, si
  * (`claveDeFoto('hotel', hotel, ciudad)`) → llave del perfil de la ficha. Es lo que la tarjeta usa
  * para mostrar y subir las fotos (`fotosParaTarjetas`, por id): sin esto el documento las buscaba
  * por el nombre leído y no las encontraba si la llave de la ficha era otra (reunión del 2026-10-22,
- * punto 3: «no aparecieron en los hoteles»).
+ * punto 3: los hoteles salían sin foto).
  */
 export type FichasDeHotel = ReadonlyMap<string, string>
 

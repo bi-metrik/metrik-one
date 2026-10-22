@@ -2,8 +2,8 @@ import 'server-only'
 
 /**
  * La autorización de datos frena ENVIAR la cotización, no armarla (reunión con Trappvel del
- * 2026-10-22, L789-793: «el cliente se puede demorar… deberíamos ir pudiendo avanzar con la
- * cotización»).
+ * 2026-10-22: el cliente puede tardar en autorizar y la agencia necesita ir armando la
+ * cotización mientras tanto).
  *
  * Hasta ese día el gate `autorizacion_datos` estaba en la salida de Solicitud (E1): sin la firma
  * del cliente el negocio no llegaba a Cotización. Ahora el gate pasa a la salida de Cotización

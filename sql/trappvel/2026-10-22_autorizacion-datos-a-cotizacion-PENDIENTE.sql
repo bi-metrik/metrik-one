@@ -5,8 +5,8 @@
 -- sesión principal con el «sí» de Mauricio, DESPUÉS del deploy del PR que lo acompaña.
 --
 -- Encargo: proyectos/trappvel/clarity/briefs/2026-10-22_brief-max-tarifa-publica-neta-y-fallas-reunion.md,
--- punto 4 (reunión del 2026-10-22, L789-793: «el cliente se puede demorar… deberíamos ir
--- pudiendo avanzar con la cotización»).
+-- punto 4 (reunión del 2026-10-22: el cliente puede tardar en autorizar y la agencia necesita ir
+-- armando la cotización mientras tanto).
 --
 -- ── Qué hace ────────────────────────────────────────────────────────────────
 -- En la línea «Viaje a medida» de Trappvel:

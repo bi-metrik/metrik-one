@@ -73,9 +73,9 @@ describe('el gate de la autorización de datos pasa de Solicitud a Cotización',
 
   it('un texto que alguien cambió no se pisa', async () => {
     await sembrar()
-    await db.query(`update public.etapas_negocio set config_extra = jsonb_set(config_extra, '{guia,avanzar}', '"Texto nuevo de Edgar"') where id = $1`, [E1])
+    await db.query(`update public.etapas_negocio set config_extra = jsonb_set(config_extra, '{guia,avanzar}', '"Texto nuevo escrito a mano"') where id = $1`, [E1])
     await db.exec(IDA)
-    expect((await cfg(E1) as typeof E1_CFG).guia.avanzar).toBe('Texto nuevo de Edgar')
+    expect((await cfg(E1) as typeof E1_CFG).guia.avanzar).toBe('Texto nuevo escrito a mano')
   }, 30_000)
 
   it('aborta si la línea no es del workspace medido', async () => {

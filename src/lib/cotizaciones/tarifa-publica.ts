@@ -1,13 +1,13 @@
 /**
- * TARIFA PÚBLICA O NETA (reunión con Trappvel del 2026-10-22, L1675-1851 de la transcripción).
+ * TARIFA PÚBLICA O NETA (reunión con Trappvel del 2026-10-22, punto 1).
  *
- * «Tarifa al público, pum, ya sabemos que es comisionable; y tarifa neta es que ya podemos
- * indicarle un margen de utilidad» (Edgar). Cada línea de costo dice cuál de las dos es:
+ * La tarifa al público ya trae la comisión de la agencia; a la neta es a la que se le pone un
+ * margen de utilidad. Cada línea de costo dice cuál de las dos es:
  *
  *  · **Neta** (por defecto): el precio es lo que cobra el proveedor. Se le pone el margen, como
  *    siempre. Es la de toda línea guardada antes de esto, para que ninguna cotización cambie.
- *  · **Pública**: el precio ya trae la comisión de la agencia (Civitatis, un vuelo a precio
- *    público). El margen de la línea arranca en 0 y el cliente paga el precio público; si alguien
+ *  · **Pública**: el precio ya trae la comisión de la agencia (un proveedor de tours con precio
+ *    comisionable, un vuelo a precio público). El margen de la línea arranca en 0 y el cliente paga el precio público; si alguien
  *    quiere, lo sube a mano.
  *
  * ## Dónde vive
@@ -19,7 +19,7 @@
  * ## El margen mínimo
  *
  * Una línea Pública NO entra en la medida del margen mínimo: su ganancia es la comisión, que ONE
- * no conoce al cotizar. Medirla al 0 % pediría la autorización de Edgar por algo que nadie puede
+ * no conoce al cotizar. Medirla al 0 % pediría la autorización del gerente por algo que nadie puede
  * subir. El mínimo se mide sobre las líneas Netas (`margenMedible`, `itinerarios.ts`); si una
  * tarifa solo tiene Públicas, no hay margen que exigir (`exentaDelMinimo`).
  *

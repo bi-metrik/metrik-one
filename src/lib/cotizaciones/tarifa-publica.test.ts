@@ -155,7 +155,7 @@ describe('las tres opciones respetan el tipo de cada línea', () => {
   })
 })
 
-describe('punto 2 · «¿por qué ahora es en cero?»', () => {
+describe('punto 2 · el margen que aparecía en 0', () => {
   // Lo que pasó en la reunión: a cada opción se le puso margen 0 en su tarjeta (sus precios ya
   // traían la comisión) y después se subió el margen de la cotización a 15 en «Tarifas».
   const aCero = (id: string, costo: number, grupo: string, orden: number) => linea(id, costo, { grupo, orden, margen_porcentaje: 0 })
@@ -195,7 +195,7 @@ describe('punto 2 · «¿por qué ahora es en cero?»', () => {
   })
 
   it('no cuenta como margen propio: el igual al de la cotización, el de precio a mano ni el del proveedor', () => {
-    const delProveedor = linea('decameron', 1_000_000, {
+    const delProveedor = linea('con-comision', 1_000_000, {
       margen_porcentaje: 10,
       tarifa_pax: { confirmada: { margenProveedor: { margenPct: 10, precioCliente: 1_111_111, costoAgencia: 1_000_000 } } },
     })

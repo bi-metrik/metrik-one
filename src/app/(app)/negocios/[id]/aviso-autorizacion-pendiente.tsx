@@ -1,6 +1,6 @@
 /**
  * «Falta la autorización de datos» arriba de la ficha del negocio (reunión con Trappvel del
- * 2026-10-22, L789-793). Desde ese día la autorización ya no frena armar la cotización: frena
+ * 2026-10-22). Desde ese día la autorización ya no frena armar la cotización: frena
  * ENVIARLA y todo lo que viene después (`autorizacion-datos/envio.ts`). Mientras falte, el negocio
  * lo dice aquí, a la vista, para que nadie se entere en el último clic.
  *

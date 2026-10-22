@@ -1,5 +1,5 @@
 /**
- * «¿Por qué ahora es en cero?» (reunión con Trappvel del 2026-10-22, L1977-1991).
+ * El margen que aparecía en 0 en «Tarifas» (reunión con Trappvel del 2026-10-22, punto 2).
  *
  * La causa: el margen de la cotización («uno para las tres tarifas») solo alcanza a las opciones
  * que lo HEREDAN (`items.margen_porcentaje = null`). En la prueba, a cada vuelo, hotel y traslado

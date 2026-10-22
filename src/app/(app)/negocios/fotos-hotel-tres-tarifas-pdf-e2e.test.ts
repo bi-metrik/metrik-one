@@ -1,6 +1,6 @@
 /**
  * Las fotos del hotel en el PDF de «Revisar y enviar» (reunión con Trappvel del 2026-10-22, punto
- * 3: «no aparecieron en los hoteles»). La acción REAL del PDF con el motor html y el HTML REAL de
+ * 3: los hoteles salían sin foto). La acción REAL del PDF con el motor html y el HTML REAL de
  * la propuesta (`prepararPropuestaHtml`, sin Chromium), sobre el doble de Supabase. Datos ficticios.
  *
  * Lo que fallaba, reproducido:
@@ -191,7 +191,8 @@ describe('las fotos de los hoteles de las tres tarifas llegan al PDF', () => {
 })
 
 /**
- * Punto 6 del brief: Edgar pidió un ingreso adicional «sin que esto salga… ya internamente» (L591).
+ * Punto 6 del brief: el gerente de la agencia pidió poder sumar un ingreso adicional interno, que no
+ * se le muestre al cliente.
  * No hay un «% extra sobre el total» aparte: lo que existe es el margen de la cotización (se reparte
  * dentro del precio de cada línea que lo hereda) y el descuento comercial. Se verifica que el margen
  * no aparezca en nada que vea el cliente: ni en el texto del documento ni en las props del PDF.

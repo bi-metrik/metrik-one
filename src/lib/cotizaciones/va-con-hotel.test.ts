@@ -36,7 +36,7 @@ describe('qué suma cada tarifa', () => {
   })
 
   it('un traslado general (uno por zona) sirve para las dos sin cargarlo dos veces', () => {
-    const conGeneral = [VUELO, HOTEL_A, HOTEL_B, { ...TRASLADO_GENERAL, grupo: 'traslado: Civitatis Cancún' }]
+    const conGeneral = [VUELO, HOTEL_A, HOTEL_B, { ...TRASLADO_GENERAL, grupo: 'traslado: Tours de la zona Cancún' }]
     expect(itemsDelItinerario(conGeneral, ['hotel-a'])).toEqual(['vuelo', 'hotel-a', 'traslado-general'])
     expect(itemsDelItinerario(conGeneral, ['hotel-b'])).toEqual(['vuelo', 'hotel-b', 'traslado-general'])
   })
