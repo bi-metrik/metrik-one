@@ -1046,7 +1046,8 @@ export async function generateCotizacionPDF(
         items: d.itemIds
           .map(id => porId.get(id))
           .filter((i): i is ItemRow => i !== undefined && aportaDoc(i))
-          .map(paraPlantilla),
+          // El id deja al día a día de la propuesta nueva reconocer la línea que ya es un servicio.
+          .map(i => ({ ...paraPlantilla(i), ...(i.id ? { id: i.id as string } : {}) })),
       }))
     : null
 
@@ -1237,6 +1238,7 @@ export async function generateCotizacionPDF(
       serviciosDoc = serviciosDelDocumento(
         fuente.map(i => ({
           ...paraLecturaDe(i),
+          id: i.id ?? null,
           dia_relativo: i.dia_relativo ?? null,
           ...(i.id && marcas.has(i.id) ? { tarifas: marcas.get(i.id) } : {}),
         })),

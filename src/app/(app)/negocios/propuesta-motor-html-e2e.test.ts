@@ -14,7 +14,8 @@ import { PDFDocument } from 'pdf-lib'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
-import type { EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
+import { modeloDePropuesta, type EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
+import { htmlDePropuesta } from '@/lib/pdf/html/trappvel/plantilla'
 
 const motor = vi.hoisted(() => ({ llamadas: [] as unknown[], falla: false }))
 
@@ -179,6 +180,69 @@ describe('motor html de la propuesta en la acción del PDF', () => {
     const entrada = motor.llamadas[0] as EntradaModeloPropuesta
     const enElDia = entrada.props.dias?.flatMap(d => d.items).find(i => i.nombre === 'Playa Ficticia con almuerzo')
     expect(enElDia?.descripcion).toBe('Incluye: almuerzo típico y transporte en lancha.')
+  })
+
+  describe('brief del 2026-10-22, punto 1 · una actividad con día sale UNA vez en el día a día', () => {
+    /** La lectura de una actividad como la deja «Usar tarifa de proveedor» (datos ficticios). */
+    const deTarifa = (nombre: string) => ({
+      origen: 'tarifario', leidaEn: `L-${nombre}`, moneda: 'COP', total: 190_000, nombre,
+      descripcion: 'Incluye: almuerzo.', notasCliente: ['Incluye: almuerzo.'],
+      campos: [{ label: 'Proveedor', valor: 'Operador Ficticio' }, { label: 'Actividad', valor: nombre }, { label: 'Ciudad', valor: 'San Andrés' }, { label: 'Fecha', valor: '2026-11-24' }],
+    })
+    /** Lo que el cliente lee: el día a día del modelo y el resumen de la portada. */
+    async function documento() {
+      await generar()
+      const entrada = motor.llamadas[0] as EntradaModeloPropuesta
+      const m = modeloDePropuesta(entrada)
+      const html = htmlDePropuesta(m, { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'Agencia de prueba' })
+      const texto = html.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+      const eventos = (fecha: string) => m.dias.find(d => d.fecha === fecha)?.eventos ?? []
+      return { m, texto, eventos }
+    }
+
+    it('la actividad creada desde la tarifa: un evento el 24-nov y «1 visita» en la portada', async () => {
+      sembrar({ motor: true })
+      ;(base.tablas.items as Fila[]).push(
+        linea('a-playa', 300_000, { nombre: 'Playa Ficticia con almuerzo', descripcion: 'Incluye: almuerzo.', grupo: 'actividad: Actividad en San Andrés', orden: 3, dia_relativo: 2, tarifa_pax: { casillas: { grupo_completo: deTarifa('Playa Ficticia con almuerzo') } } }),
+      )
+      const { texto, eventos } = await documento()
+      expect(eventos('2026-11-24').filter(e => e.tipo === 'actividad').map(e => e.texto)).toEqual(['Playa Ficticia con almuerzo · San Andrés'])
+      expect(texto).toContain('1 visita')
+      expect(texto).not.toContain('2 visitas')
+      // El traslado con día (sembrado el 23-nov) tampoco se cuenta otra vez como visita.
+      expect(eventos('2026-11-23').map(e => e.tipo)).toEqual(['traslado'])
+    })
+
+    it('dos actividades distintas el mismo día: dos eventos y «2 visitas»', async () => {
+      sembrar({ motor: true })
+      ;(base.tablas.items as Fila[]).push(
+        linea('a-playa', 300_000, { nombre: 'Playa Ficticia con almuerzo', grupo: 'actividad: Actividad en San Andrés', orden: 3, dia_relativo: 2, tarifa_pax: { casillas: { grupo_completo: deTarifa('Playa Ficticia con almuerzo') } } }),
+        linea('a-buceo', 200_000, { nombre: 'Buceo Ficticio', grupo: 'actividad: Buceo en San Andrés', orden: 4, dia_relativo: 2, tarifa_pax: { casillas: { grupo_completo: deTarifa('Buceo Ficticio') } } }),
+      )
+      const { texto, eventos } = await documento()
+      expect(eventos('2026-11-24').filter(e => e.tipo === 'actividad')).toHaveLength(2)
+      expect(texto).toContain('2 visitas')
+    })
+
+    it('por pantallazo y escrita a mano tampoco se duplican', async () => {
+      sembrar({ motor: true })
+      const pantallazo = { ...deTarifa('Tour Ficticio en Lancha'), origen: undefined }
+      ;(base.tablas.items as Fila[]).push(
+        linea('a-pantallazo', 300_000, { nombre: 'TOUR FICTICIO EN LANCHA', grupo: 'actividad: Actividad en San Andrés', orden: 3, dia_relativo: 2, tarifa_pax: { casillas: { grupo_completo: pantallazo } } }),
+        linea('a-mano', 100_000, { nombre: 'CENA FICTICIA', grupo: 'actividad: Cena en San Andrés', orden: 4, dia_relativo: 3 }),
+      )
+      const { texto, eventos } = await documento()
+      expect(eventos('2026-11-24').filter(e => e.tipo === 'actividad')).toHaveLength(1)
+      expect(eventos('2026-11-25').filter(e => e.tipo === 'actividad')).toHaveLength(1)
+      expect(texto).toContain('2 visitas')
+    })
+
+    it('un hotel con día asignado (no es un servicio) sigue saliendo en su día', async () => {
+      sembrar({ motor: true })
+      ;(base.tablas.items as Fila[])[0].dia_relativo = 2
+      const { eventos } = await documento()
+      expect(eventos('2026-11-24').map(e => e.texto)).toContain('HOTEL VERDE MAR · SAN ANDRÉS')
+    })
   })
 
   it('si el motor falla, sale el PDF de @react-pdf con un aviso', async () => {

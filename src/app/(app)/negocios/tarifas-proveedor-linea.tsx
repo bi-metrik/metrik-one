@@ -13,6 +13,7 @@ import {
   tarifasDeLinea,
   tarifasParaLineaNueva,
   type FichaParaLinea,
+  type ResultadoLineaNueva,
   type TarifasDeLinea,
 } from '@/app/(app)/negocios/tarifas-proveedor-actions'
 import { describirOcupacion, formatoMonto, NOMBRE_TIPO, TIPOS_PASAJERO, type TipoPasajero } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -114,6 +115,17 @@ export default function TarifasProveedorLinea({
 }
 
 // ── El tercer camino: una línea nueva desde la tarifa ────────────────────────
+
+/**
+ * El aviso al crear la línea: nombra el servicio («Playa Blanca con almuerzo agregada…»), no el
+ * grupo genérico «Actividad en Santa Marta» (brief del 2026-10-22, menor). Sin servicio (hotel,
+ * vuelo), dice dónde quedó, como antes.
+ */
+export function avisoDeLineaAgregada(r: Extract<ResultadoLineaNueva, { ok: true }>): string {
+  const que = r.servicio ? `«${r.servicio}» agregada` : `Línea agregada en ${r.donde}`
+  if (r.confirmada) return `${que}: ${formatoMonto(r.aPagarAgencia ?? r.total, r.moneda)} de costo.`
+  return `${que}. ${r.pendiente ?? 'Falta un dato para confirmar el costo.'}`
+}
 
 export function UsarTarifaDeProveedor({ cotizacionId, onCreada, className }: { cotizacionId: string; onCreada: (itemId: string) => void; className?: string }) {
   const [abierta, setAbierta] = useState(false)
@@ -438,8 +450,8 @@ function Eleccion({ modo, vista, elegido, ocupado, abiertaEn, onListo }: { modo:
       if (modo.tipo === 'nueva') {
         const r = await crearLineaConTarifa(modo.cotizacionId, (elegido ?? vista.proveedor?.id) as string, eleccion, ajustes, t, { idAceptacion: llave.current, medida })
         if (!r.ok) { toast.error(r.error); return }
-        if (r.confirmada) toast.success(`Línea agregada en ${r.donde}: ${formatoMonto(r.aPagarAgencia ?? r.total, r.moneda)} de costo.`)
-        else toast.warning(`Línea agregada en ${r.donde}. ${r.pendiente ?? 'Falta un dato para confirmar el costo.'}`)
+        if (r.confirmada) toast.success(avisoDeLineaAgregada(r))
+        else toast.warning(avisoDeLineaAgregada(r))
         onListo(r.itemId)
         return
       }
