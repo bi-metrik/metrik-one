@@ -24,6 +24,7 @@ import {
   leerRefMedioPagoEpayco,
   refMedioPagoEpayco,
   registrarClienteEpayco,
+  resultadoDeConsultaEpayco,
   resultadoDeEstado,
 } from './epayco'
 import { adapterPara } from './registro'
@@ -505,5 +506,76 @@ describe('borrar la tarjeta al cancelar (7.3)', () => {
     expect((await eliminarTarjetasEpayco('bold:x', { env: ENV_TOKEN, fetch: api.f })).ok).toBe(false)
     expect((await eliminarTarjetasEpayco(REF, { env: {}, fetch: api.f })).ok).toBe(false)
     expect(api.llamadas).toHaveLength(0)
+  })
+})
+
+describe('consultar una transacción (la conciliación de los cargos pendientes)', () => {
+  // El ejemplo de la colección oficial de APIFY («Pagos › Consultar Transacción»), con la referencia nuestra.
+  const doc = (data: Record<string, unknown>) => ({
+    success: true,
+    titleResponse: 'Correcto',
+    textResponse: 'Transacción consultada existosamente',
+    data: {
+      refPayco: 390720992,
+      invoice: REF,
+      amount: '150000.00',
+      currency: 'COP',
+      response: 'Pendiente',
+      date: '2026-10-22 09:28:40',
+      codeResponse: 3,
+      responseReasonText: 'Pendiente por aprobación del comercio',
+      codTransactionState: '3',
+      status: 'Pendiente',
+      testMode: 'FALSE',
+      ...data,
+    },
+  })
+
+  it('el estado sale del código: 1 aprobado (con monto y fecha), 3/7/8 pendiente, 2/4/9/10/11 rechazado con ese código', () => {
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '1', codeResponse: 1, status: 'Aceptada' }), 'epayco-390720992')).toEqual({
+      estado: 'aprobado',
+      externalRef: 'epayco-390720992',
+      fecha: '2026-10-22',
+      monto: 150000,
+    })
+    for (const c of ['3', '7', '8']) expect(resultadoDeConsultaEpayco(doc({ codTransactionState: c }), 'epayco-390720992').estado).toBe('pendiente')
+    for (const c of ['2', '4', '9', '10', '11']) {
+      expect(resultadoDeConsultaEpayco(doc({ codTransactionState: c, responseReasonText: 'Rechazada' }), 'epayco-390720992')).toMatchObject({ estado: 'rechazado', codigo: c })
+    }
+    // Sin `codTransactionState`, `codeResponse`.
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: undefined, codeResponse: 1 }), 'epayco-390720992').estado).toBe('aprobado')
+  })
+
+  it('una consulta que no se pudo hacer es un ERROR, nunca un rechazo (antes caía en rechazado)', () => {
+    // Lo que respondió producción el 2026-10-22 con llaves de otro comercio.
+    const ajena = { success: false, titleResponse: 'Error', textResponse: 'Consulta no valida, Transacción no relacionada con el comercio.', data: { error: {} } }
+    expect(resultadoDeConsultaEpayco(ajena, 'epayco-390720992').estado).toBe('error')
+    expect(resultadoDeConsultaEpayco({ success: false, textResponse: 'Transacción no existe', data: { error: {} } }, 'epayco-1').estado).toBe('error')
+    expect(resultadoDeConsultaEpayco({ success: true }, 'epayco-1').estado).toBe('error')
+    // Aunque la respuesta fallida traiga algo con forma de estado, `success: false` no decide nada.
+    expect(resultadoDeConsultaEpayco({ success: false, data: { codTransactionState: '2', status: 'Rechazada' } }, 'epayco-1').estado).toBe('error')
+    // Un estado que no se conoce, o la reversa: no decide nada solo.
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '', codeResponse: undefined, status: 'Rara' }), 'epayco-390720992').estado).toBe('error')
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '6' }), 'epayco-390720992').estado).toBe('error')
+  })
+
+  it('otra transacción, una de prueba en producción o una aprobada sin monto: error', () => {
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '1', refPayco: 111 }), 'epayco-390720992').estado).toBe('error')
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '1', testMode: 'TRUE' }), 'epayco-390720992').estado).toBe('error')
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '1', testMode: 'TRUE' }), 'epayco-390720992', { pruebaCuenta: true }).estado).toBe('aprobado')
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '1', amount: '' }), 'epayco-390720992').estado).toBe('error')
+  })
+
+  it('el adaptador consulta POST /payment/transaction con la referencia de ePayco y usa esa lectura', async () => {
+    const llamadas: { url: string; cuerpo: unknown }[] = []
+    const fetchDoble = (async (url: string, init: RequestInit) => {
+      llamadas.push({ url, cuerpo: init.body ? JSON.parse(String(init.body)) : null })
+      if (url.endsWith('/login')) return respuesta({ token: 'jwt' })
+      return respuesta({ success: false, textResponse: 'Transacción no existe', data: { error: {} } })
+    }) as unknown as typeof fetch
+    const a = crearAdapterEpayco({ env: { ...ENV, EPAYCO_HABILITADO: '1', EPAYCO_PRODUCCION: '1' }, fetch: fetchDoble })
+    const r = await a.consultar('epayco-390720992')
+    expect(llamadas[1]).toEqual({ url: `${EPAYCO_APIFY_BASE}/payment/transaction`, cuerpo: { referencePayco: '390720992' } })
+    expect(r.estado).toBe('error')
   })
 })

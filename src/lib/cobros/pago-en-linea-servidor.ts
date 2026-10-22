@@ -150,8 +150,19 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
       // vencimiento a la llave de la prueba). No aplica a ningún espacio que no venga del registro.
       const ciclo = detalleCiclo(await abrirCicloSiCorresponde(cobro.id, { db: dbCliente }))
       if (ciclo) partes.push(ciclo)
+      // Un cargo con la tarjeta guardada que ePayco dejó pendiente y aprobó después: cierra el intento,
+      // el registro de Valida y manda el C3. Sin un cargo pendiente, no hace nada. Import dinámico: el
+      // módulo del cargo importa este (ciclo de módulos).
+      const { cerrarCargoAprobadoTardio } = await import('@/lib/valida-registro/cargo-tardio-servidor')
+      const tardio = await cerrarCargoAprobadoTardio({ db: dbCliente }, cobro)
+      if (tardio) partes.push(tardio)
       if (partes.length === 0) return null
       return { revisar: partes.some((p) => p.revisar), detalle: partes.map((p) => p.detalle).join(' ') }
+    },
+
+    async trasRechazo(cobro, e) {
+      const { aplicarRechazoTardio } = await import('@/lib/valida-registro/cargo-tardio-servidor')
+      return aplicarRechazoTardio({ db: dbCliente }, cobro, e)
     },
 
     async anotarEnNegocio(cobro, texto) {
