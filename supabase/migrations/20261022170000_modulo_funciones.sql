@@ -212,6 +212,9 @@ create table public.funcion_campanas (
   precio_preventa_persona integer check (precio_preventa_persona is null or precio_preventa_persona between 1 and 100000000),
   abono_persona integer check (abono_persona is null or abono_persona between 1 and 100000000),
   permite_pago_total boolean not null default true,
+  -- Hasta cuántas personas puede confirmar UNA PERSONA del equipo por encima de la capacidad, al resolver un pago que
+  -- llegó sin cupo (`funcion_resolver_pendiente`). Nulo = sin sobreventa. Nada automático pasa de la capacidad.
+  tope_sobreventa integer check (tope_sobreventa is null or tope_sobreventa between 1 and 10000),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint funcion_campanas_experiencia foreign key (experiencia_id, workspace_id)
@@ -249,13 +252,16 @@ create table public.funcion_funciones (
   precio_preventa_persona integer check (precio_preventa_persona is null or precio_preventa_persona between 1 and 100000000),
   abono_persona integer check (abono_persona is null or abono_persona between 1 and 100000000),
   permite_pago_total boolean,
+  -- Reemplazo del tope de sobreventa de la campaña (nulo = el de la campaña). Si existe, no baja de la capacidad.
+  tope_sobreventa integer check (tope_sobreventa is null or tope_sobreventa between 1 and 10000),
   archivada_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint funcion_funciones_campana foreign key (campana_id, workspace_id)
     references public.funcion_campanas (id, workspace_id),
   constraint funcion_funciones_id_ws unique (id, workspace_id),
-  constraint funcion_funciones_cupo_asistente check (cupo_asistente between 1 and capacidad)
+  constraint funcion_funciones_cupo_asistente check (cupo_asistente between 1 and capacidad),
+  constraint funcion_funciones_tope_sobre_capacidad check (tope_sobreventa is null or tope_sobreventa >= capacidad)
 );
 
 create index idx_funcion_funciones_dia on public.funcion_funciones (workspace_id, inicia_at);
@@ -287,8 +293,18 @@ create table public.funcion_reservas (
   -- De dónde llegó el cliente. Solo lo genérico mientras se verifica el anuncio y el link en Meta y Chatwoot.
   atribucion_fuente text not null check (atribucion_fuente in ('anuncio', 'link_campana', 'preguntado', 'equipo', 'desconocida')),
   atribucion_ref text check (atribucion_ref is null or length(atribucion_ref) <= 200),
-  estado text not null default 'apartada' check (estado in ('apartada', 'confirmada', 'cancelada', 'vencida')),
+  -- `pendiente_persona`: llegó el pago y la función ya no tenía cupo; decide una persona (sobrevender o devolver).
+  -- `requiere_devolucion`: la persona decidió devolver. Ninguno de los dos ocupa cupo.
+  estado text not null default 'apartada'
+    check (estado in ('apartada', 'confirmada', 'cancelada', 'vencida', 'pendiente_persona', 'requiere_devolucion')),
   vence_at timestamptz,
+  -- El apartado se realineó al preparar un pago (UNA sola vez por reserva: si el link vence, se aparta de nuevo).
+  realineada_at timestamptz,
+  -- Confirmada por una persona por encima de la capacidad (hasta el tope), o devuelta: quién y cuándo.
+  sobreventa boolean not null default false,
+  resuelta_por uuid references public.profiles(id),
+  resuelta_at timestamptz,
+  devolucion_monto bigint check (devolucion_monto is null or devolucion_monto >= 0),
   pago_estado text not null default 'pendiente'
     check (pago_estado in ('pendiente', 'aprobado', 'verificado_manual', 'rechazado')),
   -- La FOTO del precio al apartar, calculada por la base con `funcion_tarifa`. Cambiar un precio después no la toca.
@@ -328,6 +344,8 @@ create table public.funcion_reservas (
     check ((chatwoot_cuenta_id is null) = (chatwoot_conversacion_id is null)),
   constraint funcion_reservas_asistente_con_conversacion
     check (origen <> 'asistente' or chatwoot_conversacion_id is not null),
+  constraint funcion_reservas_devolucion check ((estado = 'requiere_devolucion') = (devolucion_monto is not null)),
+  constraint funcion_reservas_sobreventa_resuelta check (not sobreventa or resuelta_por is not null),
   constraint funcion_reservas_monto_total check (monto_total = personas::bigint * precio_unitario),
   constraint funcion_reservas_monto_a_pagar check (
     (modalidad = 'total' and abono_unitario is null and monto_a_pagar = monto_total)
@@ -597,6 +615,41 @@ create trigger trg_funcion_campanas_tarifa
   after update of precio_persona, precio_preventa_persona, abono_persona, permite_pago_total on public.funcion_campanas
   for each row execute function public.funcion_tarifa_cuadra();
 
+-- El tope de sobreventa que rige (función → campaña), si existe, no baja de la capacidad de la función.
+create or replace function public.funcion_tope_cuadra()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_mala record;
+begin
+  select f.id, f.capacidad, coalesce(f.tope_sobreventa, c.tope_sobreventa) as tope into v_mala
+    from public.funcion_funciones f
+    join public.funcion_campanas c on c.id = f.campana_id
+   where (case when tg_table_name = 'funcion_funciones' then f.id = new.id else f.campana_id = new.id end)
+     and f.archivada_at is null
+     and coalesce(f.tope_sobreventa, c.tope_sobreventa) < f.capacidad
+   limit 1;
+  if found then
+    raise exception 'tope_bajo_capacidad' using errcode = 'P0001',
+      detail = format('El tope de sobreventa (%s) no puede ser menor que la capacidad (%s).', v_mala.tope, v_mala.capacidad);
+  end if;
+  return null;
+end;
+$$;
+
+revoke execute on function public.funcion_tope_cuadra() from public, anon, authenticated, service_role;
+
+create trigger trg_funcion_funciones_tope
+  after insert or update of capacidad, tope_sobreventa on public.funcion_funciones
+  for each row execute function public.funcion_tope_cuadra();
+
+create trigger trg_funcion_campanas_tope
+  after update of tope_sobreventa on public.funcion_campanas
+  for each row execute function public.funcion_tope_cuadra();
+
 -- El código de atribución no cambia después de publicar la agenda: ya está en anuncios, links y reservas.
 create or replace function public.funcion_campanas_candados()
 returns trigger
@@ -690,6 +743,8 @@ begin
     'ocupadas', v_ocupadas,
     'libres', greatest(f.capacidad - v_ocupadas, 0),
     'libres_asistente', greatest(f.cupo_asistente - v_ocupadas, 0),
+    'tope_sobreventa', coalesce(f.tope_sobreventa, c.tope_sobreventa),
+    'pendientes_persona', (select count(*) from public.funcion_reservas where funcion_id = f.id and estado = 'pendiente_persona'),
     'disponible_asistente', public.funcion_motivo_asistente(f, c) is null,
     'motivo_asistente', public.funcion_motivo_asistente(f, c),
     'tarifa', public.funcion_tarifa(f.id)
@@ -1041,9 +1096,12 @@ begin
     raise exception 'reserva_no_existe' using errcode = 'P0001';
   end if;
   v_actor := public.funcion_actor(v_ws, true, 'reserva_no_existe');
-  -- El equipo verifica a mano (transferencia, Anexo 2.3); solo la pasarela, desde el servidor, aprueba.
-  if (v_actor = 'equipo' and p_pago_estado is distinct from 'verificado_manual')
-     or (v_actor = 'servidor' and p_pago_estado is distinct from 'aprobado') then
+  -- Solo el equipo, y solo la verificación a mano (transferencia, Anexo 2.3). Lo que aprueba la pasarela entra por
+  -- `funcion_registrar_pago`: un solo camino para los pagos de la pasarela, de una o de varias reservas.
+  if v_actor <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if p_pago_estado is distinct from 'verificado_manual' then
     raise exception 'pago_estado_invalido' using errcode = 'P0001';
   end if;
 
@@ -1054,8 +1112,8 @@ begin
   if r.estado = 'confirmada' then
     return jsonb_build_object('reserva_id', r.id, 'estado', r.estado, 'pago_estado', r.pago_estado, 'repetida', true);
   end if;
-  if r.estado = 'cancelada' then
-    raise exception 'reserva_inactiva' using errcode = 'P0001', detail = 'La reserva está cancelada.';
+  if r.estado in ('cancelada', 'pendiente_persona', 'requiere_devolucion') then
+    raise exception 'reserva_inactiva' using errcode = 'P0001', detail = format('La reserva está %s.', r.estado);
   end if;
   if f.estado = 'cancelada' then
     raise exception 'funcion_cerrada' using errcode = 'P0001', detail = 'La función está cancelada.';
@@ -1080,10 +1138,10 @@ begin
 end;
 $$;
 
--- ejecutable-por-cliente: el equipo confirma con su sesión (`verificado_manual`); la pasarela lo hará desde el servidor
--- (`aprobado`). SECURITY DEFINER y verifica el workspace de la reserva con `funcion_actor`.
-revoke execute on function public.funcion_confirmar_pago(uuid, text) from public, anon;
-grant execute on function public.funcion_confirmar_pago(uuid, text) to authenticated, service_role;
+-- ejecutable-por-cliente: el equipo confirma con su sesión (`verificado_manual`). SECURITY DEFINER y verifica el
+-- workspace de la reserva con `funcion_actor`. La pasarela no entra por aquí (`funcion_registrar_pago`).
+revoke execute on function public.funcion_confirmar_pago(uuid, text) from public, anon, service_role;
+grant execute on function public.funcion_confirmar_pago(uuid, text) to authenticated;
 
 create or replace function public.funcion_cancelar_reserva(p_reserva_id uuid)
 returns jsonb
@@ -1346,7 +1404,7 @@ begin
   if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
     raise exception 'experiencia_no_existe' using errcode = 'P0001';
   end if;
-  perform public.funcion_validar_precios(p_precios, array['precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total']);
+  perform public.funcion_validar_precios(p_precios, array['precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa']);
   v_precio := public.funcion_precio_de(p_precios, 'precio_persona');
   v_preventa := public.funcion_precio_de(p_precios, 'precio_preventa_persona');
   v_abono := public.funcion_precio_de(p_precios, 'abono_persona');
@@ -1361,9 +1419,9 @@ begin
       raise exception 'campana_no_publicada' using errcode = 'P0001', detail = 'Se activa al publicar la agenda.';
     end if;
     insert into public.funcion_campanas (workspace_id, experiencia_id, nombre, codigo, desde, hasta, estado,
-      minutos_apartado, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total)
+      minutos_apartado, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa)
     values (p_workspace_id, p_experiencia_id, v_nombre, v_codigo, p_desde, p_hasta, v_estado,
-      p_minutos_apartado, v_precio, v_preventa, v_abono, v_permite)
+      p_minutos_apartado, v_precio, v_preventa, v_abono, v_permite, public.funcion_precio_de(p_precios, 'tope_sobreventa'))
     returning id into v_id;
   else
     select agenda_publicada_at into v_publicada from public.funcion_campanas
@@ -1378,7 +1436,8 @@ begin
     update public.funcion_campanas
        set experiencia_id = p_experiencia_id, nombre = v_nombre, codigo = v_codigo, desde = p_desde, hasta = p_hasta,
            estado = v_estado, minutos_apartado = p_minutos_apartado, precio_persona = v_precio,
-           precio_preventa_persona = v_preventa, abono_persona = v_abono, permite_pago_total = v_permite
+           precio_preventa_persona = v_preventa, abono_persona = v_abono, permite_pago_total = v_permite,
+           tope_sobreventa = public.funcion_precio_de(p_precios, 'tope_sobreventa')
      where id = p_campana_id;
     v_id := p_campana_id;
   end if;
@@ -1490,7 +1549,7 @@ begin
     raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'cierre de venta';
   end if;
   perform public.funcion_validar_precios(p_precios,
-    array['es_preventa', 'precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total']);
+    array['es_preventa', 'precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa']);
   if jsonb_typeof(v_horarios) <> 'array' or jsonb_array_length(v_horarios) = 0 or jsonb_array_length(v_horarios) > 60 then
     raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Entre 1 y 60 pares de fecha y hora.';
   end if;
@@ -1522,12 +1581,13 @@ begin
 
   foreach v_inicio in array v_inicios loop
     insert into public.funcion_funciones (workspace_id, campana_id, inicia_at, capacidad, cupo_asistente, cierra_venta_at,
-      es_preventa, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total)
+      es_preventa, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa)
     values (p_workspace_id, c.id, v_inicio, p_capacidad, v_cupo_asistente,
       case when p_cierre_minutos_antes is null then null else v_inicio - make_interval(mins => p_cierre_minutos_antes) end,
       coalesce((p_precios->>'es_preventa')::boolean, false),
       public.funcion_precio_de(p_precios, 'precio_persona'), public.funcion_precio_de(p_precios, 'precio_preventa_persona'),
-      public.funcion_precio_de(p_precios, 'abono_persona'), (p_precios->>'permite_pago_total')::boolean)
+      public.funcion_precio_de(p_precios, 'abono_persona'), (p_precios->>'permite_pago_total')::boolean,
+      public.funcion_precio_de(p_precios, 'tope_sobreventa'))
     returning id into v_id;
     v_ids := v_ids || to_jsonb(v_id);
   end loop;
@@ -1575,7 +1635,7 @@ begin
       detail = format('El cupo del asistente va de 1 a la capacidad (%s).', p_capacidad);
   end if;
   perform public.funcion_validar_precios(p_precios,
-    array['es_preventa', 'precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total']);
+    array['es_preventa', 'precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa']);
 
   perform 1 from public.funcion_funciones where id = p_funcion_id for update;
   perform public.funcion_vencer_apartados(p_funcion_id);
@@ -1589,7 +1649,8 @@ begin
            precio_persona = public.funcion_precio_de(p_precios, 'precio_persona'),
            precio_preventa_persona = public.funcion_precio_de(p_precios, 'precio_preventa_persona'),
            abono_persona = public.funcion_precio_de(p_precios, 'abono_persona'),
-           permite_pago_total = (p_precios->>'permite_pago_total')::boolean
+           permite_pago_total = (p_precios->>'permite_pago_total')::boolean,
+           tope_sobreventa = public.funcion_precio_de(p_precios, 'tope_sobreventa')
      where id = p_funcion_id;
   end if;
   return public.funcion_ocupacion(p_funcion_id);
@@ -1667,3 +1728,444 @@ $$;
 -- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace.
 revoke execute on function public.funcion_eliminar_campana(uuid) from public, anon, service_role;
 grant execute on function public.funcion_eliminar_campana(uuid) to authenticated;
+
+
+-- ── 15. Pagos: uno o varios apartados en un solo link (P13, aprobado el 2026-10-22) ──
+-- Un cliente puede apartar varias funciones en la misma conversación (una por una) y pagarlas en UN link o en uno por
+-- función. Hay un solo camino: pagar por función es un pago de una sola reserva.
+--   · `funcion_resumen_pago`   lo que se paga de cada reserva y el total sin las vencidas (nadie suma fuera de la base);
+--   · `funcion_preparar_pago`  candados de las funciones en orden de id; exige apartadas vigentes y fuera de otro pago
+--                              pendiente; realinea UNA vez sus vencimientos y crea el pago con `monto_esperado`;
+--   · `funcion_vincular_link`  guarda la referencia del link de la pasarela (única por workspace);
+--   · `funcion_registrar_pago` el aviso de la pasarela, idempotente por referencia. Aprobado con el monto esperado:
+--                              confirma las que tienen cupo según su origen y deja `pendiente_persona` las que no (SIN
+--                              devolución automática). Fallido o vencido: ninguna. Monto distinto: `revisar`.
+--   · `funcion_resolver_pendiente` (solo una persona del equipo): sobrevender hasta el tope o devolver.
+-- Ningún camino automático pasa de la capacidad.
+
+create table public.funcion_pagos (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id),
+  -- La conversación de donde salió (si salió del asistente). Todas sus reservas son de esa conversación.
+  chatwoot_cuenta_id bigint,
+  chatwoot_conversacion_id bigint,
+  estado text not null default 'pendiente' check (estado in ('pendiente', 'aprobado', 'fallido', 'vencido', 'revisar')),
+  -- La suma de lo que se paga de cada reserva, calculada por la base al preparar el pago.
+  monto_esperado bigint not null check (monto_esperado > 0),
+  vence_at timestamptz not null,
+  pasarela text not null default 'bold' check (pasarela in ('bold')),
+  -- La referencia del link en la pasarela: única por workspace, para que el mismo aviso no se procese dos veces.
+  referencia text check (referencia is null or length(btrim(referencia)) between 1 and 200),
+  link_url text check (link_url is null or length(link_url) <= 1000),
+  monto_recibido bigint check (monto_recibido is null or monto_recibido >= 0),
+  aviso_estado text,
+  aviso_at timestamptz,
+  creado_por uuid references public.profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint funcion_pagos_id_ws unique (id, workspace_id),
+  constraint funcion_pagos_referencia_unica unique (workspace_id, referencia),
+  constraint funcion_pagos_conversacion_completa check ((chatwoot_cuenta_id is null) = (chatwoot_conversacion_id is null))
+);
+
+create table public.funcion_pago_reservas (
+  pago_id uuid not null,
+  reserva_id uuid not null,
+  workspace_id uuid not null,
+  -- Lo que se paga de esa reserva dentro del pago (su `monto_a_pagar` al preparar).
+  monto bigint not null check (monto > 0),
+  -- Verdadero mientras el pago está `pendiente`: el índice de abajo impide que una reserva esté en dos a la vez.
+  pendiente boolean not null default true,
+  primary key (pago_id, reserva_id),
+  constraint funcion_pago_reservas_pago foreign key (pago_id, workspace_id)
+    references public.funcion_pagos (id, workspace_id) on delete cascade,
+  constraint funcion_pago_reservas_reserva foreign key (reserva_id) references public.funcion_reservas (id)
+);
+
+create unique index funcion_pago_reservas_una_pendiente on public.funcion_pago_reservas (reserva_id) where pendiente;
+create index idx_funcion_pago_reservas_reserva on public.funcion_pago_reservas (reserva_id);
+
+alter table public.funcion_pagos enable row level security;
+alter table public.funcion_pago_reservas enable row level security;
+
+create policy funcion_pagos_lectura on public.funcion_pagos
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+create policy funcion_pago_reservas_lectura on public.funcion_pago_reservas
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+
+revoke all on table public.funcion_pagos from public, anon, authenticated;
+revoke all on table public.funcion_pago_reservas from public, anon, authenticated;
+grant select on public.funcion_pagos to authenticated;
+grant select on public.funcion_pago_reservas to authenticated;
+revoke insert, update, delete, truncate on table public.funcion_pagos from service_role;
+revoke insert, update, delete, truncate on table public.funcion_pago_reservas from service_role;
+grant select on public.funcion_pagos, public.funcion_pago_reservas to service_role;
+
+-- Las reservas de un pago, del workspace y de UNA conversación (una sola reserva puede no tener conversación: la tomó
+-- el equipo). Devuelve las funciones distintas, en orden de id, para tomar sus candados en ese orden.
+create or replace function public.funcion_reservas_de_un_pago(p_workspace_id uuid, p_reserva_ids uuid[])
+returns uuid[]
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_n integer := coalesce(array_length(p_reserva_ids, 1), 0);
+  v_encontradas integer;
+  v_conversaciones integer;
+  v_funciones uuid[];
+begin
+  if v_n = 0 or v_n > 20 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Entre 1 y 20 reservas.';
+  end if;
+  if (select count(distinct x) from unnest(p_reserva_ids) x) <> v_n then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Una reserva aparece dos veces.';
+  end if;
+  select count(*), count(distinct (chatwoot_cuenta_id, chatwoot_conversacion_id)),
+         array_agg(distinct funcion_id order by funcion_id)
+    into v_encontradas, v_conversaciones, v_funciones
+    from public.funcion_reservas
+   where workspace_id = p_workspace_id and id = any (p_reserva_ids);
+  if v_encontradas <> v_n then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  if v_conversaciones > 1 or (v_n > 1 and exists (
+    select 1 from public.funcion_reservas where id = any (p_reserva_ids) and chatwoot_conversacion_id is null
+  )) then
+    raise exception 'distinta_conversacion' using errcode = 'P0001',
+      detail = 'Un pago cubre reservas de una sola conversación.';
+  end if;
+  return v_funciones;
+end;
+$$;
+
+revoke execute on function public.funcion_reservas_de_un_pago(uuid, uuid[]) from public, anon, authenticated, service_role;
+
+-- Lo que se paga de cada reserva (personas, precio unitario, tarifa, modalidad, monto a pagar y si sigue vigente) y el
+-- total SIN las vencidas. El asistente muestra esto; no suma.
+create or replace function public.funcion_resumen_pago(p_workspace_id uuid, p_reserva_ids uuid[])
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  perform public.funcion_actor(p_workspace_id, false, 'reserva_no_existe');
+  perform public.funcion_reservas_de_un_pago(p_workspace_id, p_reserva_ids);
+  return (
+    with filas as (
+      select r.id, r.funcion_id, f.inicia_at, r.personas, r.precio_unitario, r.tarifa, r.modalidad, r.monto_a_pagar,
+             (r.estado = 'apartada' and r.vence_at > now()) as vigente, r.estado
+        from public.funcion_reservas r
+        join public.funcion_funciones f on f.id = r.funcion_id
+       where r.id = any (p_reserva_ids)
+    )
+    select jsonb_build_object(
+      'reservas', jsonb_agg(jsonb_build_object(
+        'reserva_id', id, 'funcion_id', funcion_id, 'inicia_at', inicia_at, 'personas', personas,
+        'precio_unitario', precio_unitario, 'tarifa', tarifa, 'modalidad', modalidad, 'monto_a_pagar', monto_a_pagar,
+        'vigente', vigente, 'estado', estado) order by inicia_at, id),
+      'total', coalesce(sum(monto_a_pagar) filter (where vigente), 0),
+      'vencidas', coalesce(jsonb_agg(id) filter (where not vigente), '[]'::jsonb)
+    ) from filas
+  );
+end;
+$$;
+
+-- ejecutable-por-cliente: el asistente (service_role) y el equipo con su sesión; con sesión exige el workspace.
+revoke execute on function public.funcion_resumen_pago(uuid, uuid[]) from public, anon;
+grant execute on function public.funcion_resumen_pago(uuid, uuid[]) to authenticated, service_role;
+
+-- Prepara UN pago para las reservas dadas (de una conversación). Candados de las funciones en orden de id; dentro,
+-- vence los apartados viejos y exige que cada reserva siga `apartada` y vigente (`apartado_vencido`, con su id), que no
+-- esté en otro pago pendiente (`reserva_en_otro_pago`) y que no se haya realineado antes (`ya_realineada`). Realinea el
+-- `vence_at` de todas y el del pago a `ahora + minutos_apartado` (el menor de sus campañas) y crea el pago con
+-- `monto_esperado` = la suma de sus `monto_a_pagar`.
+create or replace function public.funcion_preparar_pago(p_workspace_id uuid, p_reserva_ids uuid[])
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_funciones uuid[];
+  v_fid uuid;
+  v_mala record;
+  v_minutos integer;
+  v_vence timestamptz;
+  v_total bigint;
+  v_cuenta bigint;
+  v_conv bigint;
+  v_pago uuid;
+begin
+  perform public.funcion_actor(p_workspace_id, true, 'reserva_no_existe');
+  v_funciones := public.funcion_reservas_de_un_pago(p_workspace_id, p_reserva_ids);
+
+  -- Candados en orden de id (el mismo orden que `funcion_registrar_pago`): sin interbloqueos.
+  perform 1 from public.funcion_funciones where id = any (v_funciones) order by id for update;
+  foreach v_fid in array v_funciones loop
+    perform public.funcion_vencer_apartados(v_fid);
+  end loop;
+  perform 1 from public.funcion_reservas where id = any (p_reserva_ids) order by id for update;
+
+  select id, estado into v_mala from public.funcion_reservas
+   where id = any (p_reserva_ids) and not (estado = 'apartada' and vence_at > now())
+   order by id limit 1;
+  if found then
+    raise exception '%', case when v_mala.estado in ('vencida', 'apartada') then 'apartado_vencido' else 'reserva_inactiva' end
+      using errcode = 'P0001', detail = v_mala.id::text;
+  end if;
+  select reserva_id into v_fid from public.funcion_pago_reservas
+   where reserva_id = any (p_reserva_ids) and pendiente order by reserva_id limit 1;
+  if found then
+    raise exception 'reserva_en_otro_pago' using errcode = 'P0001', detail = v_fid::text;
+  end if;
+  select id into v_fid from public.funcion_reservas
+   where id = any (p_reserva_ids) and realineada_at is not null order by id limit 1;
+  if found then
+    raise exception 'ya_realineada' using errcode = 'P0001',
+      detail = format('%s: el apartado ya tuvo su link; hay que apartar de nuevo.', v_fid);
+  end if;
+
+  select min(c.minutos_apartado), sum(r.monto_a_pagar), min(r.chatwoot_cuenta_id), min(r.chatwoot_conversacion_id)
+    into v_minutos, v_total, v_cuenta, v_conv
+    from public.funcion_reservas r
+    join public.funcion_campanas c on c.id = r.campana_id
+   where r.id = any (p_reserva_ids);
+  if v_minutos is null then
+    raise exception 'sin_regla_apartado' using errcode = 'P0001';
+  end if;
+  v_vence := now() + make_interval(mins => v_minutos);
+
+  update public.funcion_reservas
+     set vence_at = v_vence, realineada_at = now(), updated_at = now()
+   where id = any (p_reserva_ids);
+  insert into public.funcion_pagos (workspace_id, chatwoot_cuenta_id, chatwoot_conversacion_id, monto_esperado, vence_at, creado_por)
+  values (p_workspace_id, v_cuenta, v_conv, v_total, v_vence, auth.uid())
+  returning id into v_pago;
+  insert into public.funcion_pago_reservas (pago_id, reserva_id, workspace_id, monto)
+  select v_pago, r.id, p_workspace_id, r.monto_a_pagar from public.funcion_reservas r where r.id = any (p_reserva_ids);
+
+  return jsonb_build_object('pago_id', v_pago, 'monto_esperado', v_total, 'vence_at', v_vence,
+    'reservas', (select jsonb_agg(reserva_id order by reserva_id) from public.funcion_pago_reservas where pago_id = v_pago));
+end;
+$$;
+
+-- ejecutable-por-cliente: el asistente (service_role, `generar_link_pago`) y el equipo con su sesión. SECURITY DEFINER;
+-- con sesión exige el workspace y rol que edite.
+revoke execute on function public.funcion_preparar_pago(uuid, uuid[]) from public, anon;
+grant execute on function public.funcion_preparar_pago(uuid, uuid[]) to authenticated, service_role;
+
+-- Guarda la referencia y el link que devolvió la pasarela. Idempotente con la misma referencia.
+create or replace function public.funcion_vincular_link(p_pago_id uuid, p_referencia text, p_link_url text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  p record;
+  v_ref text := nullif(btrim(coalesce(p_referencia, '')), '');
+begin
+  select * into p from public.funcion_pagos where id = p_pago_id for update;
+  if not found then
+    raise exception 'pago_no_existe' using errcode = 'P0001';
+  end if;
+  if v_ref is null then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'referencia';
+  end if;
+  if p.referencia is not null then
+    if p.referencia = v_ref then
+      return jsonb_build_object('pago_id', p.id, 'referencia', p.referencia, 'repetida', true);
+    end if;
+    raise exception 'pago_con_link' using errcode = 'P0001', detail = 'El pago ya tiene otro link.';
+  end if;
+  if p.estado <> 'pendiente' then
+    raise exception 'pago_cerrado' using errcode = 'P0001';
+  end if;
+  update public.funcion_pagos set referencia = v_ref, link_url = nullif(btrim(coalesce(p_link_url, '')), ''), updated_at = now()
+   where id = p.id;
+  return jsonb_build_object('pago_id', p.id, 'referencia', v_ref, 'repetida', false);
+end;
+$$;
+
+-- server-only: la llama solo el servidor (asistente) después de crear el link en la pasarela.
+revoke execute on function public.funcion_vincular_link(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.funcion_vincular_link(uuid, text, text) to service_role;
+
+-- El aviso de la pasarela. Idempotente por referencia: un pago que ya no está `pendiente` no se vuelve a procesar.
+--   aprobado + monto = esperado → en UNA transacción, con los candados de las funciones en orden de id, confirma cada
+--     reserva que tenga cupo según el límite de SU origen; las que no, quedan `pendiente_persona` con el pago
+--     registrado. Sin devolución automática y sin pasar nunca de la capacidad.
+--   fallido o vencido → no confirma ninguna (siguen apartadas hasta su vencimiento).
+--   aprobado con otro monto → `revisar`, no confirma nada (pasa a una persona).
+create or replace function public.funcion_registrar_pago(p_workspace_id uuid, p_referencia text, p_estado text, p_monto_recibido bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  p record;
+  r record;
+  f record;
+  v_funciones uuid[];
+  v_fid uuid;
+  v_limite integer;
+  v_confirmadas jsonb := '[]'::jsonb;
+  v_pendientes jsonb := '[]'::jsonb;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'pago_no_existe') <> 'servidor' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_estado, '') not in ('aprobado', 'fallido', 'vencido') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  select * into p from public.funcion_pagos where workspace_id = p_workspace_id and referencia = btrim(coalesce(p_referencia, ''));
+  if not found then
+    raise exception 'pago_no_existe' using errcode = 'P0001';
+  end if;
+
+  -- Candados: las funciones del pago en orden de id, después el pago.
+  select array_agg(distinct r2.funcion_id order by r2.funcion_id) into v_funciones
+    from public.funcion_pago_reservas pr join public.funcion_reservas r2 on r2.id = pr.reserva_id
+   where pr.pago_id = p.id;
+  perform 1 from public.funcion_funciones where id = any (v_funciones) order by id for update;
+  select * into p from public.funcion_pagos where id = p.id for update;
+  if p.estado <> 'pendiente' then
+    return jsonb_build_object('pago_id', p.id, 'estado', p.estado, 'repetida', true);
+  end if;
+
+  if p_estado in ('fallido', 'vencido') then
+    update public.funcion_pagos
+       set estado = p_estado, aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+     where id = p.id;
+    update public.funcion_pago_reservas set pendiente = false where pago_id = p.id;
+    if p_estado = 'fallido' then
+      update public.funcion_reservas set pago_estado = 'rechazado', updated_at = now()
+       where id in (select reserva_id from public.funcion_pago_reservas where pago_id = p.id) and estado = 'apartada';
+    end if;
+    return jsonb_build_object('pago_id', p.id, 'estado', p_estado, 'repetida', false, 'confirmadas', '[]'::jsonb, 'pendientes', '[]'::jsonb);
+  end if;
+
+  if p_monto_recibido is distinct from p.monto_esperado then
+    update public.funcion_pagos
+       set estado = 'revisar', aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+     where id = p.id;
+    update public.funcion_pago_reservas set pendiente = false where pago_id = p.id;
+    return jsonb_build_object('pago_id', p.id, 'estado', 'revisar', 'repetida', false, 'confirmadas', '[]'::jsonb, 'pendientes', '[]'::jsonb);
+  end if;
+
+  foreach v_fid in array v_funciones loop
+    perform public.funcion_vencer_apartados(v_fid);
+  end loop;
+  for r in
+    select x.* from public.funcion_reservas x
+     where x.id in (select reserva_id from public.funcion_pago_reservas where pago_id = p.id)
+     order by x.funcion_id, x.id
+       for update
+  loop
+    select * into f from public.funcion_funciones where id = r.funcion_id;
+    v_limite := case when r.origen = 'asistente' then f.cupo_asistente else f.capacidad end;
+    if (r.estado = 'apartada' and r.vence_at > now())
+       or (r.estado = 'vencida' and f.estado <> 'cancelada'
+           and public.funcion_ocupadas(f.id) + r.personas <= v_limite) then
+      update public.funcion_reservas
+         set estado = 'confirmada', pago_estado = 'aprobado', confirmada_at = now(), updated_at = now()
+       where id = r.id;
+      v_confirmadas := v_confirmadas || to_jsonb(r.id);
+    else
+      -- Sin cupo (o cancelada mientras tanto): decide una persona. El pago queda registrado.
+      update public.funcion_reservas set estado = 'pendiente_persona', pago_estado = 'aprobado', updated_at = now()
+       where id = r.id;
+      v_pendientes := v_pendientes || to_jsonb(r.id);
+    end if;
+  end loop;
+
+  update public.funcion_pagos
+     set estado = 'aprobado', aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+   where id = p.id;
+  update public.funcion_pago_reservas set pendiente = false where pago_id = p.id;
+  return jsonb_build_object('pago_id', p.id, 'estado', 'aprobado', 'repetida', false,
+    'confirmadas', v_confirmadas, 'pendientes', v_pendientes);
+end;
+$$;
+
+-- server-only: la llama solo el servidor con el aviso de la pasarela (webhook o consulta), con la llave de servicio.
+revoke execute on function public.funcion_registrar_pago(uuid, text, text, bigint) from public, anon, authenticated;
+grant execute on function public.funcion_registrar_pago(uuid, text, text, bigint) to service_role;
+
+-- Una persona del equipo resuelve una reserva `pendiente_persona` (pago aprobado sin cupo):
+--   sobrevender → dentro del candado, confirma si ocupadas + personas ≤ tope de sobreventa (función → campaña); si no
+--                 hay tope, `sin_sobreventa`; si se pasa, `sobre_tope`;
+--   devolver    → `requiere_devolucion`, con el monto pagado de esa reserva.
+-- Queda quién y cuándo. NO se concede a service_role: ni la base ni el asistente sobrevenden solos.
+create or replace function public.funcion_resolver_pendiente(p_reserva_id uuid, p_accion text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+  v_funcion uuid;
+  r record;
+  f record;
+  v_tope integer;
+  v_ocupadas integer;
+  v_monto bigint;
+begin
+  select workspace_id, funcion_id into v_ws, v_funcion from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'reserva_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_accion, '') not in ('sobrevender', 'devolver') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'accion';
+  end if;
+
+  select fu.*, c.tope_sobreventa as tope_campana into f
+    from public.funcion_funciones fu join public.funcion_campanas c on c.id = fu.campana_id
+   where fu.id = v_funcion for update of fu;
+  perform public.funcion_vencer_apartados(v_funcion);
+  select * into r from public.funcion_reservas where id = p_reserva_id for update;
+  if r.estado <> 'pendiente_persona' then
+    raise exception 'reserva_no_pendiente' using errcode = 'P0001', detail = format('La reserva está %s.', r.estado);
+  end if;
+
+  if p_accion = 'sobrevender' then
+    v_tope := coalesce(f.tope_sobreventa, f.tope_campana);
+    if v_tope is null then
+      raise exception 'sin_sobreventa' using errcode = 'P0001', detail = 'La campaña no tiene tope de sobreventa.';
+    end if;
+    v_ocupadas := public.funcion_ocupadas(f.id);
+    if v_ocupadas + r.personas > v_tope then
+      raise exception 'sobre_tope' using errcode = 'P0001',
+        detail = format('Hay %s ocupadas; con %s más pasa el tope de %s.', v_ocupadas, r.personas, v_tope);
+    end if;
+    update public.funcion_reservas
+       set estado = 'confirmada', confirmada_at = now(), confirmada_por = auth.uid(), sobreventa = true,
+           resuelta_por = auth.uid(), resuelta_at = now(), updated_at = now()
+     where id = r.id;
+    return jsonb_build_object('reserva_id', r.id, 'estado', 'confirmada', 'sobreventa', true, 'ocupadas', v_ocupadas + r.personas);
+  end if;
+
+  select pr.monto into v_monto
+    from public.funcion_pago_reservas pr join public.funcion_pagos pg on pg.id = pr.pago_id
+   where pr.reserva_id = r.id and pg.estado = 'aprobado'
+   order by pg.aviso_at desc nulls last limit 1;
+  update public.funcion_reservas
+     set estado = 'requiere_devolucion', devolucion_monto = coalesce(v_monto, r.monto_a_pagar),
+         resuelta_por = auth.uid(), resuelta_at = now(), updated_at = now()
+   where id = r.id;
+  return jsonb_build_object('reserva_id', r.id, 'estado', 'requiere_devolucion', 'devolucion_monto', coalesce(v_monto, r.monto_a_pagar));
+end;
+$$;
+
+-- ejecutable-por-cliente: solo una persona del equipo, con su sesión. NO se concede a service_role.
+revoke execute on function public.funcion_resolver_pendiente(uuid, text) from public, anon, service_role;
+grant execute on function public.funcion_resolver_pendiente(uuid, text) to authenticated;

@@ -290,17 +290,17 @@ describe('no sobreventa', () => {
     const a = await apartarAsistente(e.funcion, 4)
     await vencer(a.reserva_id)
     const b = await apartarAsistente(e.funcion, 2)
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'aprobado') as r`, [a.reserva_id], 'servidor'))).toBe('sin_cupo')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id]))).toBe('sin_cupo')
     await cancelar(b.reserva_id)
-    await rpc(`select funcion_confirmar_pago($1, 'aprobado') as r`, [a.reserva_id], 'servidor')
+    await rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id])
     expect(await estado(a.reserva_id)).toBe('confirmada')
   })
 
-  it('confirmar: el equipo solo verifica a mano y el servidor solo aprueba', async () => {
+  it('confirmar a mano: solo el equipo y solo verificado_manual; la pasarela entra por funcion_registrar_pago', async () => {
     const e = await escenario({ capacidad: 4 })
     const a = await apartarEquipo(e.funcion, 2)
     expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'aprobado') as r`, [a.reserva_id]))).toBe('pago_estado_invalido')
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id], 'servidor'))).toBe('pago_estado_invalido')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id], 'servidor'))).toMatch(/permission denied/)
     await rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id])
     const r = (await q<{ estado: string; pago_estado: string; confirmada_por: string }>(
       `select estado, pago_estado, confirmada_por from funcion_reservas where id = $1`, [a.reserva_id]))[0]
@@ -378,7 +378,7 @@ describe('dos cupos: capacidad y cupo del asistente', () => {
     await vencer(a.reserva_id)
     await apartarEquipo(e.funcion, 1)
     // Ocupadas 1 + 3 = 4 cabe en la capacidad (6) pero no en el cupo del asistente (3).
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'aprobado') as r`, [a.reserva_id], 'servidor'))).toBe('sin_cupo')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id]))).toBe('sin_cupo')
     const b = await apartarEquipo(e.funcion, 4)
     await vencer(b.reserva_id)
     await apartarAsistente(e.funcion, 2)
@@ -705,5 +705,193 @@ describe('datos y permisos', () => {
     await q(`insert into catalogo_servicios (modulo) values ('funciones')`)
     await q(`insert into documentos_contractuales_versiones (modulo) values ('funciones')`)
     expect(await codigo(q(`insert into workspace_modulos (workspace_id, modulo) values ($1, 'sabor')`, [WS]))).toMatch(/workspace_modulos_modulo/)
+  })
+})
+
+describe('pagos: uno o varios apartados en un solo link (P13)', () => {
+  interface Pago { pago_id: string; monto_esperado: number; vence_at: string; reservas: string[] }
+  interface Registro { pago_id: string; estado: string; repetida: boolean; confirmadas: string[]; pendientes: string[] }
+  let refs = 0
+  const preparar = (ids: string[], quien: Quien = 'servidor') => rpc<Pago>(`select funcion_preparar_pago($1, $2::uuid[]) as r`, [WS, ids], quien)
+  const vincular = (pago: string, ref = `LNK_${++refs}`) =>
+    rpc(`select funcion_vincular_link($1, $2, 'https://checkout.ejemplo/x') as r`, [pago, ref], 'servidor').then(() => ref)
+  const registrar = (ref: string, estado: string, monto: number | null) =>
+    rpc<Registro>(`select funcion_registrar_pago($1, $2, $3, $4) as r`, [WS, ref, estado, monto], 'servidor')
+  const resolver = (reserva: string, accion: string, quien: Quien = { equipo: EQUIPO }) =>
+    rpc<{ estado: string; sobreventa?: boolean; devolucion_monto?: number }>(`select funcion_resolver_pendiente($1, $2) as r`, [reserva, accion], quien)
+  const fila = async (id: string) =>
+    (await q<{ estado: string; pago_estado: string; vence_at: string; sobreventa: boolean; resuelta_por: string | null; devolucion_monto: string | null }>(
+      `select estado, pago_estado, vence_at, sobreventa, resuelta_por, devolucion_monto from funcion_reservas where id = $1`, [id]))[0]
+  const pagoEstado = async (id: string) => (await q<{ estado: string }>(`select estado from funcion_pagos where id = $1`, [id]))[0].estado
+
+  /** Dos funciones apartadas por el asistente en la MISMA conversación. */
+  async function dosApartados(o: { capacidad2?: number } = {}) {
+    const e1 = await escenario({ precio: 180_000, abono: 100_000 })
+    const e2 = await escenario({ precio: 150_000, abono: 100_000, capacidad: o.capacidad2 ?? 10 })
+    const conv = ++conversaciones
+    await autorizacion(conv, 'general', 'si')
+    const a1 = await apartarAsistente(e1.funcion, 2, { conv, modalidad: 'abono' })
+    const a2 = await apartarAsistente(e2.funcion, 2, { conv, modalidad: 'total' })
+    return { e1, e2, a1, a2, conv }
+  }
+
+  it('el resumen lo calcula la base: cada reserva con su monto y el total sin las vencidas', async () => {
+    const { a1, a2 } = await dosApartados()
+    const r = await rpc<{ reservas: Array<{ monto_a_pagar: number; vigente: boolean }>; total: number; vencidas: string[] }>(
+      `select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, [a1.reserva_id, a2.reserva_id]], 'servidor')
+    expect([r.total, r.reservas.length, r.vencidas]).toEqual([200_000 + 300_000, 2, []])
+    await vencer(a2.reserva_id)
+    const v = await rpc<{ total: number; vencidas: string[] }>(`select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, [a1.reserva_id, a2.reserva_id]], 'servidor')
+    expect([v.total, v.vencidas]).toEqual([200_000, [a2.reserva_id]])
+    // Reservas de otra conversación no se juntan.
+    const otra = await apartarAsistente((await escenario()).funcion, 1)
+    expect(await codigo(rpc(`select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, [a1.reserva_id, otra.reserva_id]], 'servidor'))).toBe('distinta_conversacion')
+  })
+
+  it('aprobado con el monto esperado confirma todas, en una transacción; el aviso repetido no confirma dos veces', async () => {
+    const { e1, e2, a1, a2 } = await dosApartados()
+    const p = await preparar([a1.reserva_id, a2.reserva_id])
+    expect(p.monto_esperado).toBe(500_000)
+    const ref = await vincular(p.pago_id)
+    const r = await registrar(ref, 'aprobado', 500_000)
+    expect([r.estado, r.repetida, [...r.confirmadas].sort(), r.pendientes]).toEqual(['aprobado', false, [a1.reserva_id, a2.reserva_id].sort(), []])
+    for (const id of [a1.reserva_id, a2.reserva_id]) expect((await fila(id))).toMatchObject({ estado: 'confirmada', pago_estado: 'aprobado' })
+    const otra = await registrar(ref, 'aprobado', 500_000)
+    expect([otra.repetida, otra.estado]).toEqual([true, 'aprobado'])
+    expect([(await ocupacion(e1.funcion)).ocupadas, (await ocupacion(e2.funcion)).ocupadas]).toEqual([2, 2])
+    // Un fallido tardío sobre un pago ya aprobado tampoco cambia nada.
+    expect((await registrar(ref, 'fallido', null)).repetida).toBe(true)
+    expect((await fila(a1.reserva_id)).estado).toBe('confirmada')
+  })
+
+  it('fallido o vencido no confirma ninguna; las reservas siguen apartadas hasta su vencimiento', async () => {
+    for (const estado of ['fallido', 'vencido']) {
+      const { a1, a2 } = await dosApartados()
+      const p = await preparar([a1.reserva_id, a2.reserva_id])
+      const r = await registrar(await vincular(p.pago_id), estado, null)
+      expect([r.estado, r.confirmadas]).toEqual([estado, []])
+      for (const id of [a1.reserva_id, a2.reserva_id]) expect((await fila(id)).estado).toBe('apartada')
+      expect(await pagoEstado(p.pago_id)).toBe(estado)
+    }
+  })
+
+  it('un monto distinto deja el pago en revisar y no confirma nada', async () => {
+    const { a1, a2 } = await dosApartados()
+    const p = await preparar([a1.reserva_id, a2.reserva_id])
+    const r = await registrar(await vincular(p.pago_id), 'aprobado', 200_000)
+    expect([r.estado, r.confirmadas]).toEqual(['revisar', []])
+    expect((await fila(a1.reserva_id)).estado).toBe('apartada')
+  })
+
+  it('no se prepara un pago con una reserva vencida o que ya está en otro pago pendiente', async () => {
+    const { a1, a2 } = await dosApartados()
+    await vencer(a2.reserva_id)
+    const e = await codigo(preparar([a1.reserva_id, a2.reserva_id]))
+    expect(e).toBe('apartado_vencido')
+    const detalle = await siendo('servidor', async () => {
+      try { await q(`select funcion_preparar_pago($1, $2::uuid[])`, [WS, [a1.reserva_id, a2.reserva_id]]) } catch (x) { return (x as { detail?: string }).detail }
+    })
+    expect(detalle).toBe(a2.reserva_id)
+    const b = await dosApartados()
+    await preparar([b.a1.reserva_id])
+    expect(await codigo(preparar([b.a1.reserva_id, b.a2.reserva_id]))).toBe('reserva_en_otro_pago')
+    expect(await codigo(rpc(`select funcion_preparar_pago($1, $2::uuid[]) as r`, [WS, [b.a2.reserva_id]], { equipo: AJENO }))).toBe('reserva_no_existe')
+  })
+
+  it('la realineación iguala los vencimientos (de reservas y pago) y no se repite', async () => {
+    const { a1, a2 } = await dosApartados()
+    await q(`update funcion_reservas set vence_at = now() + interval '3 minutes' where id = $1`, [a1.reserva_id])
+    const p = await preparar([a1.reserva_id, a2.reserva_id])
+    const v1 = (await fila(a1.reserva_id)).vence_at
+    const v2 = (await fila(a2.reserva_id)).vence_at
+    const vp = (await q<{ v: string }>(`select vence_at as v from funcion_pagos where id = $1`, [p.pago_id]))[0].v
+    expect(new Date(v1).getTime()).toBe(new Date(v2).getTime())
+    expect(new Date(v1).getTime()).toBe(new Date(vp).getTime())
+    expect(new Date(v1).getTime() - Date.now()).toBeGreaterThan(25 * 60_000)
+    // El link venció: no se genera otro sobre las mismas reservas.
+    await registrar(await vincular(p.pago_id), 'vencido', null)
+    expect(await codigo(preparar([a1.reserva_id, a2.reserva_id]))).toBe('ya_realineada')
+  })
+
+  it('aprobado con una función sin cupo: confirma las otras y deja esa en pendiente_persona, sin pasar la capacidad', async () => {
+    const { e2, a1, a2 } = await dosApartados({ capacidad2: 2 })
+    const p = await preparar([a1.reserva_id, a2.reserva_id])
+    const ref = await vincular(p.pago_id)
+    // El apartado de la segunda vence y otra persona toma el cupo antes de que llegue el aviso.
+    await vencer(a2.reserva_id)
+    await apartarEquipo(e2.funcion, 2)
+    const r = await registrar(ref, 'aprobado', 500_000)
+    expect([r.confirmadas, r.pendientes]).toEqual([[a1.reserva_id], [a2.reserva_id]])
+    expect((await fila(a2.reserva_id))).toMatchObject({ estado: 'pendiente_persona', pago_estado: 'aprobado' })
+    const o = await ocupacion(e2.funcion)
+    expect([o.ocupadas, o.capacidad]).toEqual([2, 2])
+  })
+
+  /** Una reserva en `pendiente_persona` de `personas` sobre una función llena (el mismo flujo de arriba). */
+  async function pendiente(o: { tope?: number | null; capacidad?: number; personas?: number } = {}) {
+    const capacidad = o.capacidad ?? 2
+    const e = await escenario({ capacidad })
+    if (o.tope !== undefined) await q(`update funcion_campanas set tope_sobreventa = $2 where id = $1`, [e.campana, o.tope])
+    const a = await apartarAsistente(e.funcion, o.personas ?? 2)
+    const p = await preparar([a.reserva_id])
+    const ref = await vincular(p.pago_id)
+    await vencer(a.reserva_id)
+    await apartarEquipo(e.funcion, capacidad)
+    await registrar(ref, 'aprobado', p.monto_esperado)
+    expect((await fila(a.reserva_id)).estado).toBe('pendiente_persona')
+    return { e, a }
+  }
+
+  it('pendiente_persona no ocupa cupo, y la llave del asistente no la resuelve', async () => {
+    const { e, a } = await pendiente({ tope: 6 })
+    expect((await ocupacion(e.funcion)).ocupadas).toBe(2)
+    expect(await codigo(resolver(a.reserva_id, 'sobrevender', 'servidor'))).toMatch(/permission denied/)
+    expect(await codigo(resolver(a.reserva_id, 'sobrevender', { equipo: LECTOR }))).toBe('sin_permiso')
+    expect((await q<{ x: boolean }>(`select has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute') as x`))[0].x).toBe(false)
+  })
+
+  it('sobrevender hasta el tope pasa; uno más da sobre_tope; lo libre del asistente nunca es negativo', async () => {
+    const { e, a } = await pendiente({ tope: 4 })
+    const r = await resolver(a.reserva_id, 'sobrevender')
+    expect([r.estado, r.sobreventa]).toEqual(['confirmada', true])
+    expect((await fila(a.reserva_id))).toMatchObject({ estado: 'confirmada', sobreventa: true, resuelta_por: EQUIPO })
+    const o = await ocupacion(e.funcion)
+    expect([o.ocupadas, o.capacidad, o.libres, o.libres_asistente, o.tope_sobreventa]).toEqual([4, 2, 0, 0, 4])
+    // Otra pendiente de 1 en la misma función: 4 + 1 pasa el tope.
+    const b = await apartarEquipo(e.funcion, 1).catch(() => null)
+    expect(b).toBeNull()
+    const otra = await apartarAsistente((await escenario()).funcion, 1)
+    await q(`update funcion_reservas set funcion_id = $2, campana_id = $3, estado = 'pendiente_persona', pago_estado = 'aprobado' where id = $1`, [otra.reserva_id, e.funcion, e.campana])
+    expect(await codigo(resolver(otra.reserva_id, 'sobrevender'))).toBe('sobre_tope')
+    // Ningún camino automático pasa de la capacidad: el equipo tampoco aparta por encima.
+    expect(await codigo(apartarEquipo(e.funcion, 1))).toBe('sin_cupo')
+  })
+
+  it('sin tope no se sobrevende; el tope no baja de la capacidad', async () => {
+    const { e, a } = await pendiente({ tope: null })
+    expect(await codigo(resolver(a.reserva_id, 'sobrevender'))).toBe('sin_sobreventa')
+    expect(await codigo(q(`update funcion_campanas set tope_sobreventa = 1 where id = $1`, [e.campana]))).toBe('tope_bajo_capacidad')
+    expect(await codigo(q(`update funcion_funciones set tope_sobreventa = 1 where id = $1`, [e.funcion]))).toMatch(/tope_sobre_capacidad/)
+  })
+
+  it('devolver deja requiere_devolucion con el monto y quién; no ocupa cupo', async () => {
+    const { e, a } = await pendiente({ tope: 6 })
+    const r = await resolver(a.reserva_id, 'devolver')
+    expect([r.estado, Number(r.devolucion_monto)]).toEqual(['requiere_devolucion', 200_000])
+    expect((await fila(a.reserva_id))).toMatchObject({ estado: 'requiere_devolucion', resuelta_por: EQUIPO })
+    expect((await ocupacion(e.funcion)).ocupadas).toBe(2)
+    expect(await codigo(resolver(a.reserva_id, 'sobrevender'))).toBe('reserva_no_pendiente')
+  })
+
+  it('solo el servidor registra pagos y vincula links', async () => {
+    const { a1 } = await dosApartados()
+    const p = await preparar([a1.reserva_id])
+    expect(await codigo(rpc(`select funcion_vincular_link($1, 'X', null) as r`, [p.pago_id]))).toMatch(/permission denied/)
+    const ref = await vincular(p.pago_id)
+    expect(await codigo(rpc(`select funcion_registrar_pago($1, $2, 'aprobado', 1) as r`, [WS, ref]))).toMatch(/permission denied/)
+    // La misma referencia en otro pago: no.
+    const b = await dosApartados()
+    const p2 = await preparar([b.a1.reserva_id])
+    expect(await codigo(vincular(p2.pago_id, ref))).toMatch(/funcion_pagos_referencia_unica/)
   })
 })
