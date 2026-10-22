@@ -28,7 +28,7 @@ function consulta(tabla: string) {
     tablas[tabla] ??= []
     if (op === 'insert' || op === 'upsert') {
       const out: Fila[] = []
-      for (const f of (Array.isArray(payload) ? payload : [payload]).map(x => ({ id: `id-${++seq}`, ...x }))) {
+      for (const f of (Array.isArray(payload) ? payload : [payload]).map((x): Fila => ({ id: `id-${++seq}`, ...x }))) {
         if (tabla === 'recordatorios_log' && tablas[tabla].some(e => LLAVE_LOG.every(k => e[k] === f[k]))) {
           if (op === 'upsert' && opciones.ignoreDuplicates) continue
           return { data: null, error: { message: 'duplicate key', code: '23505' } }
