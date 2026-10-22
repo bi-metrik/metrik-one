@@ -4,58 +4,36 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import type { ExperienciaCatalogo } from '@/lib/funciones/datos'
-import { normalizar, type Borrador } from '@/lib/funciones/extraccion-pdf'
 import { crearFuncionesAction } from '../actions'
-import { AltaExperiencia, bordeMarca, CargarPdf, MarcaCampo, type Marca } from '../formulario-comun'
+import { AltaExperiencia } from '../formulario-comun'
 
 interface Inicio {
   clave: string
   fecha: string
   hora: string
-  marcas: { fecha?: Marca; hora?: Marca }
 }
 
 let siguiente = 0
-const nuevo = (fecha = '', hora = '', marcas: Inicio['marcas'] = {}): Inicio => ({ clave: `i${++siguiente}`, fecha, hora, marcas })
+const nuevo = (fecha = '', hora = ''): Inicio => ({ clave: `i${++siguiente}`, fecha, hora })
 
 /**
  * Formulario de funciones (§4.3): experiencia, cupo (la capacidad de la función), estado, cierre de venta y una o
- * varias fechas y horas (hora de Bogotá). Un PDF de la programación lo pre-llena como borrador; se guarda solo lo que
- * la persona confirma con el botón.
+ * varias fechas y horas (hora de Bogotá). La ficha se crea aquí: nada la pre-llena
+ * (Mauricio, 2026-10-22).
  */
 export function FormularioFunciones({ experiencias: iniciales }: { experiencias: ExperienciaCatalogo[] }) {
   const router = useRouter()
   const [pendiente, empezar] = useTransition()
   const [experiencias, setExperiencias] = useState(iniciales)
   const [experienciaId, setExperienciaId] = useState(iniciales[0]?.id ?? '')
-  const [marcaExperiencia, setMarcaExperiencia] = useState<Marca | undefined>()
-  const [alta, setAlta] = useState<{ nombre: string; marca?: Marca } | null>(iniciales.length === 0 ? { nombre: '' } : null)
+  const [alta, setAlta] = useState(iniciales.length === 0)
   const [cupo, setCupo] = useState('')
-  const [marcaCupo, setMarcaCupo] = useState<Marca | undefined>()
   const [estado, setEstado] = useState<'abierta' | 'cerrada'>('abierta')
   const [cierre, setCierre] = useState('')
   const [inicios, setInicios] = useState<Inicio[]>([nuevo()])
 
   const cupoN = Number(cupo)
   const experiencia = experiencias.find((e) => e.id === experienciaId)
-
-  const aplicarBorrador = (b: Borrador) => {
-    if (b.tipo !== 'funciones') return
-    if (b.experiencia.origen === 'pdf' && b.experiencia.valor) {
-      const igual = experiencias.find((e) => normalizar(e.nombre) === normalizar(b.experiencia.valor!))
-      if (igual) {
-        setExperienciaId(igual.id)
-        setMarcaExperiencia('pdf')
-      } else setAlta({ nombre: b.experiencia.valor, marca: 'pdf' })
-    } else setMarcaExperiencia('no_leido')
-    if (b.cupo.origen === 'pdf' && b.cupo.valor) {
-      setCupo(String(b.cupo.valor))
-      setMarcaCupo('pdf')
-    } else if (!cupo) setMarcaCupo('no_leido')
-    if (b.inicios.length > 0) {
-      setInicios(b.inicios.map((i) => nuevo(i.fecha.valor ?? '', i.hora.valor ?? '', { fecha: i.fecha.origen, hora: i.hora.origen })))
-    }
-  }
 
   const incompletos = inicios.filter((i) => !i.fecha || !i.hora)
   const guardar = () =>
@@ -79,20 +57,18 @@ export function FormularioFunciones({ experiencias: iniciales }: { experiencias:
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4 md:p-6 text-sm">
       <h1 className="text-xl font-semibold text-[#1A1A1A]">Nuevas funciones</h1>
-      <CargarPdf tipo="funciones" onBorrador={aplicarBorrador} />
 
       <label className="block">
         <span className="text-xs text-[#6B7280]">
-          Experiencia <MarcaCampo marca={marcaExperiencia} />
+          Experiencia
         </span>
         <div className="flex gap-2">
           <select
             value={experienciaId}
             onChange={(e) => {
               setExperienciaId(e.target.value)
-              setMarcaExperiencia(undefined)
             }}
-            className={`mt-0.5 flex-1 rounded border px-2 py-1 ${bordeMarca(marcaExperiencia)}`}
+            className="mt-0.5 flex-1 rounded border border-[#E5E7EB] px-2 py-1"
           >
             {experiencias.length === 0 && <option value="">(crea una primero)</option>}
             {experiencias.map((e) => (
@@ -101,7 +77,7 @@ export function FormularioFunciones({ experiencias: iniciales }: { experiencias:
               </option>
             ))}
           </select>
-          <button type="button" onClick={() => setAlta(alta ? null : { nombre: '' })} className="rounded border px-2 text-xs">
+          <button type="button" onClick={() => setAlta(!alta)} className="rounded border px-2 text-xs">
             + Nueva
           </button>
         </div>
@@ -111,14 +87,10 @@ export function FormularioFunciones({ experiencias: iniciales }: { experiencias:
       )}
       {alta && (
         <AltaExperiencia
-          key={alta.nombre}
-          nombreInicial={alta.nombre}
-          marca={alta.marca}
           onCreada={(e) => {
             setExperiencias((xs) => [...xs, e])
             setExperienciaId(e.id)
-            setMarcaExperiencia(alta.marca)
-            setAlta(null)
+            setAlta(false)
           }}
         />
       )}
@@ -126,7 +98,7 @@ export function FormularioFunciones({ experiencias: iniciales }: { experiencias:
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="text-xs text-[#6B7280]">
-            Cupo total por función <MarcaCampo marca={marcaCupo} />
+            Cupo total por función
           </span>
           <input
             type="number"
@@ -134,9 +106,8 @@ export function FormularioFunciones({ experiencias: iniciales }: { experiencias:
             value={cupo}
             onChange={(e) => {
               setCupo(e.target.value)
-              setMarcaCupo(undefined)
             }}
-            className={`mt-0.5 w-full rounded border px-2 py-1 ${bordeMarca(marcaCupo)}`}
+            className="mt-0.5 w-full rounded border border-[#E5E7EB] px-2 py-1"
           />
         </label>
         <label className="block">
@@ -159,17 +130,15 @@ export function FormularioFunciones({ experiencias: iniciales }: { experiencias:
             <input
               type="date"
               value={i.fecha}
-              onChange={(e) => setInicios((xs) => xs.map((x) => (x.clave === i.clave ? { ...x, fecha: e.target.value, marcas: { ...x.marcas, fecha: undefined } } : x)))}
-              className={`rounded border px-2 py-1 ${bordeMarca(i.marcas.fecha)}`}
+              onChange={(e) => setInicios((xs) => xs.map((x) => (x.clave === i.clave ? { ...x, fecha: e.target.value } : x)))}
+              className="rounded border border-[#E5E7EB] px-2 py-1"
             />
-            <MarcaCampo marca={i.marcas.fecha} />
             <input
               type="time"
               value={i.hora}
-              onChange={(e) => setInicios((xs) => xs.map((x) => (x.clave === i.clave ? { ...x, hora: e.target.value, marcas: { ...x.marcas, hora: undefined } } : x)))}
-              className={`rounded border px-2 py-1 ${bordeMarca(i.marcas.hora)}`}
+              onChange={(e) => setInicios((xs) => xs.map((x) => (x.clave === i.clave ? { ...x, hora: e.target.value } : x)))}
+              className="rounded border border-[#E5E7EB] px-2 py-1"
             />
-            <MarcaCampo marca={i.marcas.hora} />
             <button type="button" onClick={() => setInicios((xs) => (xs.length > 1 ? xs.filter((x) => x.clave !== i.clave) : xs))} className="text-xs text-[#6B7280] hover:text-red-600">
               Quitar
             </button>

@@ -15,6 +15,9 @@ Función con código de atribución por campaña. Las pantallas nuevas las dise�
 recibir ese diseño.
 
 **How to apply:**
+- La ficha se crea en ONE: sin PDF ni mensaje pegado que pre-llene (Mauricio, 22-oct; se quitó la extracción). No
+  agregar campos a la ficha (menú, dirección, cómo pagar…) hasta que llegue la lista aprobada. El post tiene su
+  plantilla aparte (`post-campana-plantilla.ts`); el mensaje largo de WhatsApp es otro generador, todavía no.
 - Una regla, un lugar: `funcion_tarifa` (precio), `funcion_motivo_asistente` (disponible para el bot),
   `funcion_ocupadas` (la suma de los dos cupos). No duplicar esas reglas en TS salvo en el doble `memoria.ts`, que las
   pruebas de contrato comparan con la base.
