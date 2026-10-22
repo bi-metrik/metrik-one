@@ -14,7 +14,7 @@
 import type { NegocioMem } from '../one/puerto-memoria.ts';
 
 /** Los soportes sintéticos del arnés (`arnes/soportes/`): el recibo de Uber de $6.880 y la foto de una factura de $84.500. */
-export type SoporteSintetico = 'uber' | 'factura' | 'comprobante-400' | 'comprobante-350';
+export type SoporteSintetico = 'uber' | 'uber-vuelta' | 'factura' | 'comprobante-400' | 'comprobante-350';
 
 export interface PasoCasoOne {
   escribe?: string;
@@ -43,6 +43,8 @@ export interface EsperadoOne {
   nada?: boolean;
   /** Cifras o textos que alguna respuesta del bot tiene que decir (el choque de montos se señala, no se elige callado). */
   menciona?: string[];
+  /** Expresiones (regex, sin mayúsculas) que NINGUNA respuesta del bot puede decir («ya están registrados»). */
+  noDice?: string[];
 }
 
 export interface CasoOne {
@@ -61,6 +63,11 @@ export interface CasoOne {
   cuotas?: Array<{ negocio: string; numero: number; monto: number; fechaEsperada: string }>;
   /** Gastos de hoy ya registrados (para las consultas). */
   gastosHoy?: Array<{ monto: number; categoria: string; descripcion: string; negocio: string | null }>;
+  /**
+   * Gastos que la conversación registró (con su toque y su «✅ registrado») y que después se BORRARON de la base: están
+   * en el historial, no en la base (2026-10-21, «la conversación da la intención; la verdad la da la base»).
+   */
+  historialBorrado?: Array<{ monto: number; negocio: string; descripcion: string }>;
 }
 
 const n = (codigo: string, empresa: string | null, nombre: string, etapa = 'venta', contacto: string | null = null): NegocioMem =>
@@ -325,6 +332,28 @@ export const CASOS_ONE: CasoOne[] = [
     pasos: [{ foto: 'registra 400000 en el proyecto de Dimpro', archivo: 'comprobante-400' }, { toca: 'Marcar pagada' }],
     objetivo: 'Mandaste el comprobante de un depósito de $400.000 a la cuenta de tu empresa, con el texto «registra 400000 en el proyecto de Dimpro». No corriges nada: si te muestran el resumen para marcar el pago de la cuota, tócalo; si te proponen un gasto, no lo confirmes.',
     esperado: { cobros: [{ cuota: 1, monto: 400000 }] }, viejoOk: false,
+  },
+  // ── La base manda (2026-10-21, caso real repetido dos veces el mismo día) ──────────────────────────────
+  {
+    id: 'b-borrados-dos-pdf', titulo: 'G1, G2 y G3 en el historial pero borrados de la base; llegan dos PDF juntos y «vuélvelos a cargar»', mundo: 'interno',
+    historialBorrado: [
+      { monto: 27000, negocio: 'V1 26 5', descripcion: 'transportes' },
+      { monto: 6880, negocio: 'V1 26 5', descripcion: 'Uber de ida' },
+      { monto: 20389, negocio: 'V1 26 5', descripcion: 'Uber de vuelta' },
+    ],
+    pasos: [
+      { juntos: [{ pdf: '', archivo: 'uber' }, { pdf: '', archivo: 'uber-vuelta', despuesMs: 2000 }] },
+      { escribe: 'Estos dos cárgalos como gastos nuevos, vuélvelos a cargar' },
+      { escribe: 'Sí' },
+      { toca: 'Registrar' },
+      { toca: 'Registrar' },
+    ],
+    objetivo: 'Los gastos de Uber del proyecto de Vértice (V1 26 5) que habías registrado antes se borraron. Acabas de mandar los dos recibos de Uber en PDF (la ida y la vuelta) y quieres que queden registrados otra vez como gastos nuevos de transporte al negocio V1 26 5, cada uno con su recibo de soporte. Cuando te muestren un resumen con un botón para confirmar, tócalo.',
+    esperado: {
+      gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true }, { monto: 20389, negocio: 'V1 26 5', soporte: true }],
+      noDice: ['ya est[aá]n? registrad', 'no los toco'],
+    },
+    viejoOk: false,
   },
   {
     id: 't-no-confirma', titulo: 'cancela en la confirmación: nada se escribe', mundo: 'taller',

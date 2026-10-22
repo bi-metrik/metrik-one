@@ -4,6 +4,8 @@
 // Uso (la llave llega por GEMINI_API_KEY; nunca se imprime):
 //   deno run -A --node-modules-dir=none supabase/functions/_shared/agente/arnes/correr.ts --salida <dir> [--conjunto 1|2|perfil|todo]
 //     [--solo id1,id2] [--temperatura 0] [--seco] [--humo]
+//   --conjunto adjuntos: fotos y PDF sintéticos en la bandeja (2026-10-21). El lector real va por `fetchModelo` (Haiku
+//   con ANTHROPIC_API_KEY; respaldo Gemini con GEMINI_API_KEY); en --seco, un lector falso.
 // --seco   sin red: modelo falso (prueba de cañería, no mide nada).
 // --humo   UNA llamada mínima a gemini-3.8-flash y sale. Si da 429 o cuota, se para ahí.
 // La base es la de memoria (`PuertoMemoria`); su estado final es la verdad (§3.8). Sin datos reales.
@@ -23,7 +25,11 @@ import type { PrecioModelo } from '../uso.ts';
 import { sumarUso } from '../uso.ts';
 import { calificar, tabla } from './calificar.ts';
 import type { ResultadoCaso } from './calificar.ts';
-import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2, CONJUNTO_PERFIL, CONJUNTO_RESPONSABLE, preguntaQuienLleva } from './conjuntos.ts';
+import { CAMPOS_ARNES, CONJUNTO_1, CONJUNTO_2, CONJUNTO_ADJUNTOS, CONJUNTO_PERFIL, CONJUNTO_RESPONSABLE, preguntaQuienLleva } from './conjuntos.ts';
+import type { PasoGuion } from './conjuntos.ts';
+import { lectorDeDocumentosDeViaje } from '../bandeja/lectura-adjunto.ts';
+import type { ArchivoAdjunto, Lector } from '../one/lectura-adjunto.ts';
+import { solicitudViajeSintetica } from './soportes/pdf-minimo.ts';
 import { reglamentoDePrueba } from '../escenario.ts';
 import { REGLAMENTO_ANEXO_A } from '../bandeja/reglamento-anexo-a.ts';
 import { conPerfil } from '../bandeja/reglamento-perfil.ts';
@@ -88,6 +94,23 @@ async function tocarOEscribir(e: Escenario, titulo: string, oEscribe = 'sí'): P
   }
 }
 
+/** Los archivos sintéticos de la bandeja (sin datos de clientes). */
+async function archivoBandeja(a: NonNullable<PasoGuion['adjunta']>['archivo']): Promise<{ tipo: 'foto' | 'pdf'; nombre?: string; archivo: ArchivoAdjunto }> {
+  if (a === 'solicitud') return { tipo: 'pdf', nombre: 'solicitud-viaje.pdf', archivo: { bytes: solicitudViajeSintetica(), mime: 'application/pdf', nombre: 'solicitud-viaje.pdf' } };
+  const archivo = a === 'pantallazo' ? 'pantallazo-viaje-sintetico.jpg' : 'factura-ferreteria-sintetica.jpg';
+  return { tipo: 'foto', archivo: { bytes: await Deno.readFile(new URL(`./soportes/${archivo}`, import.meta.url)), mime: 'image/jpeg', nombre: archivo } };
+}
+
+/** En seco, un lector falso que «lee» lo que se sabe de cada archivo sintético (prueba de cañería, no mide nada). */
+export const lectorSecoBandeja: Lector = async (a) => {
+  if (a.mime === 'application/pdf') {
+    return { legible: true, clase: 'viaje', texto: 'Solicitud de viaje. Destino: San Andrés. Salida: 8 de enero de 2027, desde Medellín. Regreso: 13 de enero de 2027. Viajeros: Laura (38), Andrés (40), Sofía (9), Tomás (1). Hotel 4 estrellas todo incluido. Presupuesto hasta COP 9.000.000.', monto: null, fecha: null, comercio: null, nit: null, descripcion: null };
+  }
+  return a.nombre?.startsWith('pantallazo')
+    ? { legible: true, clase: 'viaje', texto: 'Queremos ir a Cartagena del 12 al 16 de diciembre de 2026. Somos 2 adultos y un niño de 7 años. Hotel 4 estrellas, todo incluido. Presupuesto: 6 millones en total.', monto: null, fecha: null, comercio: null, nit: null, descripcion: null }
+    : { legible: true, clase: 'pago', texto: 'Factura de Ferretería El Tornillo Feliz por $84.500: brochas, rodillo y pintura.', monto: 84500, fecha: '2026-10-20', comercio: 'Ferretería El Tornillo Feliz', nit: null, descripcion: null };
+};
+
 /** Seco: la extracción no entiende nada (todo por definir). */
 const extraccionSeca: ExtractorMemoria = async ({ campos }) => ({ mensajes: [], citas: [], valores: Object.fromEntries(campos.map((f) => [f.slug, { valor: 'por_definir', frase: '' }])) });
 const extracciones: Array<{ ms: number; ok: boolean }> = [];
@@ -96,9 +119,12 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
   const conExtraccion = caso.extraccion ? { campos: CAMPOS_ARNES, extraer: seco ? extraccionSeca : extraccionGemini(LLAVE, extracciones) } : {};
   // El reglamento que tendrá Trappvel al publicar las fichas del perfil (2026-10-12): todos los casos corren con él.
   const reglamento = await reglamentoDePrueba(conPerfil(REGLAMENTO_ANEXO_A));
+  // El lector de documentos solo en los casos con archivos (los demás corren exactamente como antes).
+  const conArchivos = (caso.pasos ?? []).some((p) => p.adjunta);
+  const lector = conArchivos ? (seco ? lectorSecoBandeja : lectorDeDocumentosDeViaje({ llaveGemini: LLAVE })) : null;
   const e = await escenario({
     modelo: modeloParaCaso(), contactos: caso.contactos, viajes: caso.viajes, reglamento, reloj: () => performance.now(), ...conExtraccion,
-    ...(caso.equipo ? { equipo: caso.equipo } : {}), ...(caso.remitente ? { remitente: caso.remitente } : {}),
+    ...(caso.equipo ? { equipo: caso.equipo } : {}), ...(caso.remitente ? { remitente: caso.remitente } : {}), ...(lector ? { lector } : {}),
   });
   for (const id of caso.autorizados ?? []) e.puerto.autorizaciones.set(id, { estado: 'autorizado', fecha: '2026-10-01T15:00:00Z', menores: false });
   if (caso.semilla) e.semilla(caso.semilla);
@@ -112,6 +138,11 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
         else if (p.reenvia !== undefined) { await e.reenvia(p.reenvia); comercial.push(`(reenvío) ${p.reenvia}`); }
         else if (p.dicta !== undefined) { await e.dicta(p.dicta); comercial.push(`(audio) ${p.dicta}`); }
         else if (p.toca !== undefined) comercial.push(await tocarOEscribir(e, p.toca, p.oEscribe));
+        else if (p.adjunta) {
+          const a = await archivoBandeja(p.adjunta.archivo);
+          await e.adjunta({ tipo: a.tipo, nombre: a.nombre, pie: p.adjunta.pie, reenviado: p.adjunta.reenviado, archivo: a.archivo });
+          comercial.push(`${p.adjunta.reenviado ? '(reenvío) ' : ''}(${a.tipo === 'pdf' ? `PDF ${a.nombre}` : `foto ${p.adjunta.archivo}`})${p.adjunta.pie ? ` ${p.adjunta.pie}` : ''}`);
+        }
       }
     } else {
       const pendientes = [...(caso.mensajesCliente ?? [])];
@@ -154,7 +185,8 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
   } catch (err) {
     error = String(err).slice(0, 300);
   }
-  let r = calificar(caso, e.pasos, e.puerto, e.almacen.trazas(), PRECIOS_312, error);
+  // Solo las trazas del caso: las de la semilla (un registro de antes, ya borrado) no escribieron en esta base.
+  let r = calificar(caso, e.pasos, e.puerto, e.pasos.flatMap((p) => p.trazas), PRECIOS_312, error);
   // r-ignora: además de no abrir, la pregunta tiene que seguir en pie (el último mensaje vuelve a preguntar).
   if (caso.id === 'r-ignora' && r.exito.ok && !preguntaQuienLleva(e.pasos)) r = { ...r, exito: { ok: false, motivo: 'no abrió, pero dejó de preguntar quién lleva el viaje' } };
   return { r, usoSimulador, comercial };
@@ -190,7 +222,7 @@ if (import.meta.main) {
   if (!salida) { console.error('falta --salida <dir>'); Deno.exit(2); }
   const conjunto = arg('--conjunto') ?? 'todo';
   const solo = arg('--solo')?.split(',');
-  const casos = (conjunto === 'responsable' ? CONJUNTO_RESPONSABLE : conjunto === 'perfil' ? CONJUNTO_PERFIL : [
+  const casos = (conjunto === 'adjuntos' ? CONJUNTO_ADJUNTOS : conjunto === 'responsable' ? CONJUNTO_RESPONSABLE : conjunto === 'perfil' ? CONJUNTO_PERFIL : [
     ...(conjunto === '2' ? [] : CONJUNTO_1), ...(conjunto === '1' ? [] : CONJUNTO_2), ...(conjunto === 'todo' ? CONJUNTO_PERFIL : []),
   ]).filter((c) => !solo || solo.includes(c.id));
   const resultados: ResultadoCaso[] = [];

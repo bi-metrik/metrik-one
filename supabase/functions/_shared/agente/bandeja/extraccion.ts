@@ -115,7 +115,7 @@ export function instruccionesCarga(
   yaTiene: Record<string, unknown> = {},
   propuesto: Record<string, unknown> = {},
   chat?: ChatPegado,
-  o: { compacta?: boolean; perfil?: boolean } = {},
+  o: { compacta?: boolean; perfil?: boolean; documentos?: boolean } = {},
 ): string {
   const campos = camposEntendibles(fields);
   const deTexto = campos.filter((f) => f.tipo === 'texto' && !opcionesDe(f).length).map((f) => f.slug);
@@ -130,6 +130,7 @@ export function instruccionesCarga(
     '',
     `Hoy es ${hoyISO} (Bogotá).`,
     ...(chat ? parrafoChat(chat) : []),
+    ...(o.documentos ? PARRAFO_DOCUMENTOS : []),
     ...(sabidos.length ? ['', 'Lo que el viaje YA tiene:', ...sabidos] : ['', 'El viaje todavía no tiene datos.']),
     ...(enEspera.length ? ['', 'Lo que ya le propusiste al comercial y todavía no confirma:', ...enEspera] : []),
     '',
@@ -190,6 +191,19 @@ export function instruccionesCarga(
     ...campos.map((f) => `- ${f.slug}: ${f.label ?? f.slug}${f.ayuda ? ` — ${f.ayuda}` : ''}. Formato: ${formatoDe(f)}.`),
   ].join('\n');
 }
+
+/**
+ * Solo cuando algún mensaje trae lo leído de un archivo (foto o PDF, 2026-10-21): quién manda en qué. Sin archivos, el
+ * prompt es el de siempre.
+ */
+export const PARRAFO_DOCUMENTOS = [
+  '',
+  'Algunos mensajes traen lo que dice un archivo (foto o PDF) que mandó el cliente o el comercial, marcado',
+  '«[archivo adjunto · … · lo que dice el archivo]». Es dato del cliente, como un reenvío, y sostiene valores con sus',
+  'palabras. El archivo manda en los datos duros (fechas exactas, nombres, cantidades, edades); el comercial manda en lo',
+  'que pide cambiar o aclarar. Si el archivo y lo escrito chocan en un dato, no elijas: deja el campo en "' + POR_DEFINIR + '" y',
+  'pregúntalo en dudas con las dos versiones. Un comprobante de pago es «tercero»: no sostiene valores del viaje.',
+];
 
 /** El `responseSchema` de la extracción, generado de la config. */
 export function esquemaCarga(fields: ReadonlyArray<CampoEntendible>, opts: { chat?: boolean; perfil?: boolean } = {}): Record<string, unknown> {
