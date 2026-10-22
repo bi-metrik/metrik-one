@@ -12,6 +12,7 @@
 
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
+import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type ReglaPlan } from './plan-pagos'
 import {
@@ -36,7 +37,11 @@ type Db = any
 // ── Tipos de la vista (los usa la pantalla con `import type`) ────────────────
 
 export interface TarifaConfirmable {
-  itinerarioId: string
+  /**
+   * `null` = la tarifa única implícita de una cotización sin tarifas: su precio es el total de la
+   * cotización (`totalSinTarifas`) y se confirma con `itinerarioId: null`.
+   */
+  itinerarioId: string | null
   nombre: string
   esRecomendada: boolean
   precio: number | null
@@ -357,7 +362,13 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
   let errorTarifas: string | null = null
   if (cot) {
     const precios = await preciosDeLasTarifas(db, { workspaceId, cotizacionId: String(cot.id) })
-    if (precios.ok) {
+    if (precios.ok && precios.tarifas.length === 0) {
+      // Sin tarifas (una sola opción por componente): una tarifa única con el total de la
+      // cotización, la misma cifra que fija la aprobación. Sin total, la lista queda vacía.
+      const unica = await totalSinTarifas(db, { workspaceId, cotizacionId: String(cot.id) })
+      if (unica.ok) tarifas = [{ itinerarioId: null, nombre: TARIFA_UNICA, esRecomendada: false, precio: unica.total, motivo: null }]
+      else if (!unica.sinTotal) errorTarifas = unica.error
+    } else if (precios.ok) {
       tarifas = precios.tarifas.map((t) => ({ itinerarioId: t.itinerarioId, nombre: t.nombre ?? 'Tarifa', esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }))
     } else {
       errorTarifas = precios.error
