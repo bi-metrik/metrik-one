@@ -38,6 +38,21 @@ export function aMayusculas(texto: string | null | undefined): string {
   return valor.toLocaleUpperCase('es-CO')
 }
 
+/**
+ * El nombre o la descripción de una línea de viaje como se GUARDA, según de dónde salió su
+ * lectura (la casilla 1, `grupo_completo`).
+ *
+ * La línea creada con la tarifa de un proveedor (`origen: 'tarifario'`) guarda la capitalización
+ * normal que ya armó el servidor («Playa Blanca con almuerzo», «Incluye: almuerzo.»), no la
+ * mayúscula: el nombre sale de una fila revisada del tarifario, no de lo que se escribió al lado,
+ * y en mayúscula cualquier vista o export que lea la columna lo mostraba gritando (brief del
+ * 2026-10-22, punto 2). Lo demás (pantallazo, a mano) sigue en mayúscula, como siempre.
+ */
+export function textoDeLineaDeViaje(texto: string | null | undefined, origenDeLectura: unknown): string {
+  if (origenDeLectura === 'tarifario') return texto ?? ''
+  return aMayusculas(texto)
+}
+
 /** Lo mínimo que hace falta de un campo declarado para saber si lleva texto libre. */
 interface CampoDeclarado {
   slug?: unknown

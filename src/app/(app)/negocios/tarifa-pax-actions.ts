@@ -52,7 +52,7 @@ import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
 import { esCorregible } from '@/lib/cotizaciones/correcciones'
 import { casillasConEstadia, firmaDeEstadia, lecturaConEstadia } from '@/lib/cotizaciones/estadia'
 import { descripcionDeLinea, descripcionReescribible, validarCorreccion } from '@/lib/cotizaciones/ficha-linea'
-import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { textoDeLineaDeViaje } from '@/lib/negocios/mayusculas'
 import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
@@ -460,7 +460,7 @@ async function guardarLecturaEnItem(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: errNombre } = await (supabase as any)
         .from('items')
-        .update({ nombre: aMayusculas(nombreLeido) })
+        .update({ nombre: textoDeLineaDeViaje(nombreLeido, leida.origen) })
         .eq('id', itemId)
       // El nombre no puede tumbar una lectura que ya quedó guardada: se reporta y se sigue.
       if (errNombre) console.warn('[tarifa-pax] no se pudo escribir el nombre leído:', errNombre.message)
@@ -1991,8 +1991,10 @@ export async function confirmarTarifaPorPasajero(
   // (`descripcionDeLinea`). Y tampoco se pisa si la escribió una persona: hasta el
   // 2026-09-22 esta confirmación la reescribía SIEMPRE, así que volver a pegar un pantallazo
   // se llevaba lo que alguien hubiera corregido a mano (regla 4 del brief).
-  const descripcionNueva = aMayusculas(
+  const origenDeLectura = primera?.origen
+  const descripcionNueva = textoDeLineaDeViaje(
     descripcionDeLinea(ranura, casillas, tarifa.correcciones, item.descripcion),
+    origenDeLectura,
   ) || null
   const reescribeDescripcion = descripcionReescribible(
     item.descripcion,
@@ -2044,11 +2046,12 @@ export async function confirmarTarifaPorPasajero(
   // pantallazo termina impreso al lado de lo que alguien escribió a mano, y una lista que
   // alterna «LATAM BOGOTÁ–PUNTA CANA» con «Hard Rock Punta Cana» se lee como dos
   // cotizaciones distintas. Aquí es seguro por construcción: esta acción solo corre sobre
-  // una línea con RANURA, o sea una línea de viaje.
+  // una línea con RANURA, o sea una línea de viaje. La que nació de la tarifa de un proveedor
+  // guarda la capitalización normal (`textoDeLineaDeViaje`, brief del 2026-10-22, punto 2).
   const { error: errItem } = await sb
     .from('items')
     .update({
-      ...(nombreLeido ? { nombre: aMayusculas(nombreLeido) } : {}),
+      ...(nombreLeido ? { nombre: textoDeLineaDeViaje(nombreLeido, origenDeLectura) } : {}),
       ...(reescribeDescripcion ? { descripcion: descripcionNueva } : {}),
       // La línea es el grupo: el reparto por pasajero lo dicen los rubros y el PDF.
       cantidad: 1,
@@ -2155,7 +2158,7 @@ export async function corregirCampoDeFicha(
   const sincroniza = typeof delSistema === 'string'
     && descripcionReescribible(item.descripcion, delSistema, true)
   const descripcionNueva = sincroniza
-    ? aMayusculas(descripcionDeLinea(ranura, tarifa.casillas ?? {}, siguientes, item.descripcion)) || null
+    ? textoDeLineaDeViaje(descripcionDeLinea(ranura, tarifa.casillas ?? {}, siguientes, item.descripcion), tarifa.casillas?.grupo_completo?.origen) || null
     : null
 
   // La descripción primero: si no se pudo escribir, la marca no se mueve y la línea queda
