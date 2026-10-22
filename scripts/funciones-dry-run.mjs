@@ -9,7 +9,8 @@
 //   node scripts/funciones-dry-run.mjs > /tmp/dry-run-funciones.sql
 //
 // Resultado esperado (en el mensaje del error):
-//   DRYRUN OK {"rpc": 14, "rpc_anon": 0, "tablas_con_rls": 3, "tablas_de_mesas": 0, "cancelar_service_role": false, "workspaces_con_modulo": 0}
+//   DRYRUN OK {"rpc": 26, "rpc_anon": 0, "tablas_con_rls": 4, "tablas_de_mesas": 0, "publicar_service_role": false,
+//              "workspaces_con_modulo": 0, "disponibles_authenticated": false}
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -32,7 +33,8 @@ $mig$;
     'tablas_con_rls', (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname like 'funcion\\_%' and relkind = 'r' and relrowsecurity),
     'rpc', (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname like 'funcion\\_%'),
     'rpc_anon', (select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname like 'funcion\\_%' and has_function_privilege('anon', oid, 'execute')),
-    'cancelar_service_role', has_function_privilege('service_role', 'public.funcion_cancelar_reserva(uuid)', 'execute'),
+    'publicar_service_role', has_function_privilege('service_role', 'public.funcion_publicar_agenda(uuid)', 'execute'),
+    'disponibles_authenticated', has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'),
     'tablas_de_mesas', (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname in ('funcion_montajes', 'funcion_mesas', 'funcion_reserva_mesas')),
     'workspaces_con_modulo', (select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false))
   ) into r;
