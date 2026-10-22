@@ -924,8 +924,17 @@ export async function cobrarAlConfirmar(
   }
 }
 
-/** C3: la confirmación del cobro al correo. Si no sale, se registra; el cobro ya está hecho. */
-async function correoDelCobro(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: number, ultimos4: string) {
+/**
+ * C3: la confirmación del cobro al correo. Si no sale, se registra; el cobro ya está hecho. También la
+ * manda la aprobación TARDÍA de un cobro al confirmar que ePayco dejó pendiente (`cargo-tardio-servidor`):
+ * la misma llave de idempotencia, así que sale una vez.
+ */
+export async function correoDelCobro(
+  deps: Pick<DepsCobroPrueba, 'enviarCorreo' | 'urlCuenta'>,
+  r: Pick<RegistroCobro, 'id' | 'correo' | 'razon_social' | 'slug_creado'>,
+  ahoraMs: number,
+  ultimos4: string,
+): Promise<boolean> {
   const c = correoCobroConfirmado({
     razonSocial: r.razon_social,
     cobradoAt: new Date(ahoraMs).toISOString(),
@@ -942,7 +951,9 @@ async function correoDelCobro(deps: DepsCobroPrueba, r: RegistroCobro, ahoraMs: 
       idempotencyKey: `valida-cobro-confirmado-${r.id}`,
     })
     if (!envio.ok) console.error('[valida-cobro] correo del cobro al confirmar no salió:', r.id, envio.error)
+    return envio.ok
   } catch (e) {
     console.error('[valida-cobro] correo del cobro al confirmar:', r.id, e instanceof Error ? e.message : e)
+    return false
   }
 }

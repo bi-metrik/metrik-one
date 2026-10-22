@@ -264,7 +264,7 @@ export async function cobrarCuotaConTarjeta(
   const fila = previo.data as { id: string; fecha: string | null; anulado_at: string | null; external_ref: string | null } | null
   if (fila?.fecha) return { tipo: 'pagada' }
   if (fila?.anulado_at) return { tipo: 'no_aplica', motivo: 'cobro_anulado' }
-  if (fila?.external_ref?.startsWith('epayco-')) return { tipo: 'pendiente_previo' }
+  if (fila?.external_ref?.startsWith('epayco-')) return conciliarCargoPendiente(deps, adapter, { id: fila.id, external_ref: fila.external_ref })
 
   const monto = Math.round(Number(cuota.data.monto))
   let cobroId = fila?.id ?? null
@@ -399,27 +399,7 @@ export async function cobrarCuotaConTarjeta(
   }
   if (r.estado === 'rechazado') {
     await anotar('rechazado', r.externalRef, `${r.codigo}: ${r.mensaje}`)
-    const primerCobro = cuota.data.numero === 1
-    const ultimo = intento >= CALENDARIO_MORA.intentos.length - 1
-    // Cuota 1: Condiciones 7.5, el plan vuelve a Bold, sin reintento. Las demás: el plan sigue en la
-    // tarjeta (los reintentos de los días 3 y 7) y el paso 6 del cron manda el enlace de esa cuota.
-    if (primerCobro) await db.from('planes_cobro').update({ pasarela: 'bold' }).eq('id', plan.data.id).eq('pasarela', 'epayco')
-    const sigue = primerCobro
-      ? 'Pasa a enlace de pago (primer cobro, sin reintento).'
-      : ultimo
-        ? `Último intento con la tarjeta; queda el enlace de pago y la suspensión el día ${CALENDARIO_MORA.suspension}.`
-        : `Se manda el enlace de pago y se reintenta con la tarjeta el día ${CALENDARIO_MORA.intentos[intento + 1]}.`
-    await anotarEnAncla(
-      db,
-      {
-        ancla,
-        workspaceId: p.cobradorId,
-        tipo: 'cobro_tarjeta_rechazado',
-        texto: `Cobro con tarjeta (ePayco) rechazado en la cuota ${cuota.data.numero}, intento del día ${CALENDARIO_MORA.intentos[intento]}: ${r.mensaje}. ${sigue}`,
-        datos: { cobro_id: cobroId, numero_cuota: cuota.data.numero, intento },
-      },
-      'cobro-token-epayco',
-    )
+    await ramaDeRechazo(db, { cobradorId: p.cobradorId, planCobroId: plan.data.id, ancla, cobroId: cobroId as string, numeroCuota: cuota.data.numero, intento, mensaje: r.mensaje })
     return { tipo: 'rechazado', cobroId: cobroId as string, mensaje: r.mensaje }
   }
   if (r.sinTransaccion) {
@@ -440,6 +420,88 @@ export async function cobrarCuotaConTarjeta(
   }
   await anotar('error', null, r.mensaje)
   return { tipo: 'error', mensaje: r.mensaje }
+}
+
+/**
+ * Lo que sigue a un rechazo del banco, en el momento del cargo o cuando ePayco rechaza DESPUÉS un cargo
+ * que dejó pendiente (la confirmación tardía o la conciliación: `cargo-tardio-servidor.ts`). La fila del
+ * intento ya quedó en `rechazado`: con eso el paso 6 manda el enlace de esa cuota
+ * (`cuotasConTarjetaRechazada`).
+ *   - Cuota 1: Condiciones 7.5, el plan vuelve a Bold, sin reintento.
+ *   - Las demás: el plan sigue en la tarjeta (los reintentos de los días 3 y 7).
+ */
+export async function ramaDeRechazo(
+  dbCliente: SupabaseClient,
+  p: { cobradorId: string; planCobroId: string; ancla: Ancla; cobroId: string; numeroCuota: number; intento: number; mensaje: string; tardio?: boolean },
+): Promise<void> {
+  const db = dbCliente as Db
+  const primerCobro = p.numeroCuota === 1
+  const ultimo = p.intento >= CALENDARIO_MORA.intentos.length - 1
+  if (primerCobro) await db.from('planes_cobro').update({ pasarela: 'bold' }).eq('id', p.planCobroId).eq('pasarela', 'epayco')
+  const sigue = primerCobro
+    ? 'Pasa a enlace de pago (primer cobro, sin reintento).'
+    : ultimo
+      ? `Último intento con la tarjeta; queda el enlace de pago y la suspensión el día ${CALENDARIO_MORA.suspension}.`
+      : `Se manda el enlace de pago y se reintenta con la tarjeta el día ${CALENDARIO_MORA.intentos[p.intento + 1]}.`
+  await anotarEnAncla(
+    db,
+    {
+      ancla: p.ancla,
+      workspaceId: p.cobradorId,
+      tipo: 'cobro_tarjeta_rechazado',
+      texto: `Cobro con tarjeta (ePayco) rechazado${p.tardio ? ' después de quedar pendiente' : ''} en la cuota ${p.numeroCuota}, intento del día ${CALENDARIO_MORA.intentos[p.intento]}: ${p.mensaje}. ${sigue}`,
+      datos: { cobro_id: p.cobroId, numero_cuota: p.numeroCuota, intento: p.intento, ...(p.tardio ? { tardio: true } : {}) },
+    },
+    'cobro-token-epayco',
+  )
+}
+
+/**
+ * Un cargo que ePayco dejó PENDIENTE (p. ej. la revisión antifraude eControl, «Pendiente por aprobación
+ * del comercio») se cierra con la confirmación de ePayco. Si esa confirmación no llega, la cuota quedaba
+ * colgada para siempre: el cobro tiene la referencia y aquí se respondía `pendiente_previo` sin mirar.
+ * Ahora se CONSULTA a ePayco (`adapter.consultar`) y lo que diga entra por el MISMO camino de la
+ * confirmación (`procesarEventoPasarela`) con el MISMO id de evento (`<ref_payco>-<estado>`): si la
+ * confirmación llegó o llega después, es un duplicado y no hace nada dos veces.
+ *   - aprobado: se registra el pago y `trasPagoRegistrado` cierra el intento y el registro;
+ *   - rechazado: el intento pasa a `rechazado` y sigue la rama de rechazo (`trasRechazo`);
+ *   - pendiente, o una consulta que no se pudo hacer: sigue `pendiente_previo`. Nunca se cobra otra vez.
+ */
+async function conciliarCargoPendiente(
+  deps: DepsCobroToken,
+  adapter: PasarelaAdapter,
+  cobro: { id: string; external_ref: string },
+): Promise<ResultadoCobroToken> {
+  let r: Awaited<ReturnType<PasarelaAdapter['consultar']>>
+  try {
+    r = await adapter.consultar(cobro.external_ref)
+  } catch (e) {
+    console.error('[cobro-token] consulta de un cargo pendiente:', cobro.id, e instanceof Error ? e.message : e)
+    return { tipo: 'pendiente_previo' }
+  }
+  if (r.estado !== 'aprobado' && r.estado !== 'rechazado') return { tipo: 'pendiente_previo' }
+  const refPayco = cobro.external_ref.replace(/^epayco-/, '')
+  const codigo = r.estado === 'aprobado' ? '1' : /^\d+$/.test(r.codigo) ? r.codigo : '2'
+  const salida = await procesarEventoPasarela(
+    {
+      tipo: r.estado,
+      eventoId: `${refPayco}-${codigo}`,
+      tipoOriginal: `${codigo} ${r.estado === 'aprobado' ? 'Aceptada' : r.mensaje} (consulta)`.slice(0, 120),
+      transaccionId: refPayco,
+      referenciaPago: cobro.external_ref,
+      // La referencia de ONE dice el cobro: la que se mandó a ePayco tenía la hora del cargo, que aquí no hace falta.
+      referencia: referenciaEnlaceCobro(cobro.id, deps.ahoraMs ?? Date.now()),
+      idEnlace: null,
+      monto: r.estado === 'aprobado' ? r.monto : null,
+      moneda: 'COP',
+      ocurridoAt: r.estado === 'aprobado' ? `${r.fecha}T12:00:00-05:00` : null,
+      crudo: { origen: 'conciliacion_consulta', cobroId: cobro.id },
+    },
+    repoPagoEnLinea(deps.db, 'epayco', adapter),
+    todayBogotaISO(new Date(deps.ahoraMs ?? Date.now())),
+  )
+  if (r.estado === 'aprobado') return { tipo: 'aprobado', cobroId: cobro.id, detalle: salida.detalle }
+  return { tipo: 'rechazado', cobroId: cobro.id, mensaje: r.mensaje }
 }
 
 export interface ResumenCobroToken {
@@ -497,6 +559,8 @@ export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: strin
         break
       }
       const intento = c.numero === 1 ? 0 : intentoDelDia(dias)
+      // `intentoDelDia` da un intento cada día de la mora (el último ya hecho, entre uno y otro): una cuota
+      // con un cargo pendiente pasa por aquí todos los días y `cobrarCuotaConTarjeta` lo concilia.
       if (intento === null) continue
       resumen.revisadas += 1
       try {
