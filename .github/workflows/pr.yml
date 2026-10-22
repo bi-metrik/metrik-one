@@ -164,7 +164,8 @@ jobs:
           psql postgres://postgres:postgres@localhost:5432/postgres -X -q -c 'create database sin_candado'
           MIGRACION=supabase/migrations/20261022170000_modulo_funciones.sql
           test -s "$MIGRACION" || { echo "No existe $MIGRACION: actualiza este paso y scripts/funciones-concurrencia.sh."; exit 1; }
-          perl -0pe 's/\s+for update;/;/g' "$MIGRACION" > "$RUNNER_TEMP/sin-candado.sql"
+          # Quita TODOS los `for update`: los que cierran con `;`, los `for update of <tabla>` y el del `for ... loop`.
+          perl -0pe 's/\s+for update(?: of \w+)?(?=;|\s+loop)//g' "$MIGRACION" > "$RUNNER_TEMP/sin-candado.sql"
           if grep -v '^\s*--' "$RUNNER_TEMP/sin-candado.sql" | grep -q 'for update'; then
             echo "La mutación no quitó todos los candados."; exit 1
           fi
