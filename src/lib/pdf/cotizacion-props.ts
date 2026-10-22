@@ -284,6 +284,8 @@ export interface CotizacionPDFProps {
     /** El ordinal del viaje. Se imprime «Día 3», nunca una fecha. */
     dia: number
     items: {
+      /** La línea (`items.id`). El día a día de la propuesta nueva no la repite si ya es un servicio. */
+      id?: string
       nombre: string
       descripcion: string | null
       precio_venta: number

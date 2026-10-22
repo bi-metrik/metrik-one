@@ -28,6 +28,7 @@ import { leerRielCobro } from './riel-cobro'
 import { leerEntregaViaje } from './entrega-viaje'
 import { leerViajeFinal } from './viaje-final'
 import { leerFacturaViaje } from './factura-viaje'
+import { leerSeguimientoViaje } from './seguimiento-viaje'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -196,13 +197,15 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // Riel de facturación (F5): solo en líneas que facturan por evento (`facturacion.por_titular`).
   // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
   // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
-  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinal] = workspaceId
-    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje)])
-    : [null, null, null, null, null]
-  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal
+  // Seguimiento (F1): la línea «Cotización enviada el …» solo en la etapa con `cotizacion_enviada`.
+  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinal, seguimientoViaje] = workspaceId
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
+    : [null, null, null, null, null, null]
+  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
     ? (
       <>
         {bannerCierre}
+        {seguimientoViaje}
         {rielCobro}
         {facturaViaje}
         {confirmacionViaje}

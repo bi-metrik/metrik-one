@@ -36,7 +36,7 @@ vi.mock('@/app/(app)/negocios/tarifas-proveedor-actions', () => ({
   },
   crearLineaConTarifa: async (...args: unknown[]) => {
     llamadas.crear.push(args)
-    return { ok: true, itemId: 'nuevo-1', donde: 'Actividad en Cartagena · Opción 1', confirmada: true, pendiente: null, moneda: 'COP', total: 210000, aPagarAgencia: null }
+    return { ok: true, itemId: 'nuevo-1', donde: 'Actividad en Cartagena · Opción 1', servicio: 'Tour Ficticio de Bahía', confirmada: true, pendiente: null, moneda: 'COP', total: 210000, aPagarAgencia: null }
   },
   elegirTarifasDeLinea: async (...args: unknown[]) => {
     llamadas.elegir.push(args)
@@ -242,5 +242,17 @@ describe('«Cambiar el costo»: el mismo panel', () => {
     const lista = contenedor.querySelector('[data-opciones-tarifa]')!
     expect(contenedor.querySelectorAll('.overflow-y-auto')).toHaveLength(1)
     expect(origen.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// Brief del 2026-10-22, menor: el aviso nombra la actividad, no el grupo genérico.
+describe('el aviso al agregar la línea', () => {
+  const base = { ok: true as const, itemId: 'i', donde: 'Actividad en Cartagena', confirmada: true, pendiente: null, moneda: 'COP', total: 190000, aPagarAgencia: null }
+  it('con servicio, lo nombra', () => {
+    expect(mod.avisoDeLineaAgregada({ ...base, servicio: 'Playa Ficticia con almuerzo' })).toBe('«Playa Ficticia con almuerzo» agregada: $190.000 de costo.')
+    expect(mod.avisoDeLineaAgregada({ ...base, servicio: 'Playa Ficticia con almuerzo', confirmada: false, pendiente: 'Falta la tasa.' })).toBe('«Playa Ficticia con almuerzo» agregada. Falta la tasa.')
+  })
+  it('sin servicio (hotel), dice dónde quedó, como antes', () => {
+    expect(mod.avisoDeLineaAgregada({ ...base, donde: 'Hotel en Cartagena', servicio: null })).toBe('Línea agregada en Hotel en Cartagena: $190.000 de costo.')
   })
 })

@@ -70,6 +70,11 @@ export interface ServicioDelDocumento extends ServicioPDF {
    * de ida. El modelo le pone la salida de la estadía donde cae esa fecha (`trayectos.ts`).
    */
   fechaIda?: string | null
+  /**
+   * La línea de la que sale. El día a día la usa para no pintar dos veces la misma línea: la que
+   * tiene día asignado llega aquí Y en `props.dias` (brief del 2026-10-22, punto 1).
+   */
+  itemId?: string
 }
 
 /** Un viajero con nombre. `menor` = niño o infante. */
@@ -922,15 +927,23 @@ function diaADia(p: {
   }
 
   // Traslados, trenes y actividades con fecha.
+  const yaEnServicios = new Set<string>()
   for (const s of p.servicios) {
+    if (s.itemId && fechaIso(s.fecha, p.inicio)) yaEnServicios.add(s.itemId)
     const tipo = s.tipo === 'actividad' ? 'actividad' : esTren(s.descripcion) ? 'tren' : 'traslado'
     poner(fechaIso(s.fecha, p.inicio), { tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
   }
 
-  // Los días que alguien asignó (sin tarifas: así llegan hoy en `props.dias`).
+  // Los días que alguien asignó (sin tarifas: así llegan hoy en `props.dias`). La actividad o el
+  // traslado con día asignado YA salió arriba como servicio (el día manda sobre la fecha leída,
+  // `servicios-del-documento.ts`): pintarlo otra vez daba la actividad dos veces y «2 visitas» en
+  // la portada con un solo servicio (brief del 2026-10-22, punto 1). Se reconoce por la línea.
   for (const d of p.props.dias ?? []) {
     const fecha = iso(fechaDelDia(p.inicio, d.dia))
-    for (const it of d.items) poner(fecha, { tipo: 'actividad', hora: null, texto: it.nombre, porTarifa: [] })
+    for (const it of d.items) {
+      if (it.id && yaEnServicios.has(it.id)) continue
+      poner(fecha, { tipo: 'actividad', hora: null, texto: it.nombre, porTarifa: [] })
+    }
   }
 
   const fechas = [...eventos.keys(), ...p.capitulos.map((c) => c.hasta).filter((f): f is string => f !== null)]

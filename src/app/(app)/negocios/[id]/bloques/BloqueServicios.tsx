@@ -97,7 +97,7 @@ const PILDORA: Record<EstadoServicio, string> = {
 }
 
 const COLOR_FECHA = { verde: 'text-green-700', ambar: 'text-amber-600', rojo: 'text-red-600' } as const
-const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500' } as const
+const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500', gris: 'bg-muted-foreground/40' } as const
 const FILTROS: FiltroTablero[] = ['todos', 'por_pagar', 'esperando', 'falta_confirmar']
 /** Píldoras de hito (Noor §3.2): el color nunca va solo, el texto dice el estado. */
 const COLOR_PILDORA_HITO: Record<ColorPildora, string> = {
@@ -170,8 +170,10 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable,
 
   const totales = totalesDelTablero(vista)
   const personal = porcentajePersonal(vista)
-  const sigue = sigueDelTablero(vista, hoy, datos.hitos ?? [])
-  const color = colorDeLaEtapa(vista, hoy)
+  // El punto y el «Sigue:» con la regla del gate `servicios_listos` (barrido 2026-10-22).
+  const exige = datos.reglas?.exigeConfirmacion ?? true
+  const sigue = sigueDelTablero(vista, hoy, datos.hitos ?? [], exige)
+  const color = colorDeLaEtapa(vista, hoy, exige)
   const visibles = filtrarTablero(vista, filtro)
   return (
     <div className="space-y-3">

@@ -602,7 +602,16 @@ export async function elegirTarifasDeLinea(
 // ── Crear la línea con la tarifa (brief del 2026-10-21, punto 2) ─────────────
 
 export type ResultadoLineaNueva =
-  | (Extract<ResultadoEleccion, { ok: true }> & { itemId: string; donde: string })
+  | (Extract<ResultadoEleccion, { ok: true }> & {
+      itemId: string
+      donde: string
+      /**
+       * El servicio de la fila («Playa Blanca con almuerzo»), para que el aviso nombre la actividad
+       * y no el grupo genérico «Actividad en Santa Marta» (brief del 2026-10-22, menor). `null` en
+       * hotel y vuelo: ahí el grupo ya dice cuál es.
+       */
+      servicio: string | null
+    })
   | { ok: false; error: string }
 
 /**
@@ -706,6 +715,7 @@ export async function crearLineaConTarifa(
     ok: true,
     itemId: aceptada.itemId,
     donde: aceptada.donde,
+    servicio: ranura.slug === 'hotel_detalle' || ranura.slug === 'vuelo_detalle' ? null : (lectura.nombre ?? '').trim() || null,
     confirmada: pendiente === null,
     pendiente,
     moneda: x.calculo.moneda,

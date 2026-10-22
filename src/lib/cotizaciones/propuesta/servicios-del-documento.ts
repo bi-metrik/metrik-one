@@ -20,6 +20,8 @@ import type { ServicioDelDocumento } from './modelo-documento'
 import { trayectosDeTraslado } from './trayectos'
 
 export interface ItemDeServicio extends ItemConLectura {
+  /** La línea (`items.id`): el día a día no la pinta dos veces (ver `ServicioDelDocumento.itemId`). */
+  id?: string | null
   /** Día del viaje asignado (1 = el de salida). */
   dia_relativo?: number | null
   /** Índices de tarifa a los que pertenece. Vacío o ausente = todas. */
@@ -32,7 +34,10 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
   for (const item of items) {
     const dia = typeof item.dia_relativo === 'number' && item.dia_relativo >= 1 ? item.dia_relativo : null
     const fechaDelDia = dia !== null && inicioIso ? fechaCorta(sumarDiasCivil(inicioIso, dia - 1)) : null
-    const tarifas = item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}
+    const tarifas = {
+      ...(item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}),
+      ...(item.id ? { itemId: item.id } : {}),
+    }
     const lectura = lecturaDeTraslado(item)
     if (lectura) {
       trayectosDeTraslado(lectura).forEach((t, i) => {
