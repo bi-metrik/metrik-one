@@ -418,6 +418,63 @@ describe('«El cliente confirmó» en una acción (F2-2)', () => {
   })
 })
 
+describe('cotización sin tarifas: una sola opción por componente (2026-10-22)', () => {
+  /** LATAM + hotel + traslado: la única combinación posible. */
+  const TOTAL_UNICO = 2_200_000 + 1_300_000 + 250_000
+
+  function sinTarifas(valorTotal: number) {
+    sembrar()
+    tablas.items = tablas.items.filter((i) => i.id !== 'vb')
+    tablas.cotizacion_itinerarios = []
+    tablas.itinerario_opciones = []
+    tablas.cotizaciones[0].valor_total = valorTotal
+  }
+
+  it('la vista trae una tarifa única con el total de la cotización, sin itinerario', async () => {
+    sinTarifas(TOTAL_UNICO)
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.errorTarifas).toBeNull()
+    expect(vista?.tarifas).toEqual([{ itinerarioId: null, nombre: 'Total de la cotización', esRecomendada: false, precio: TOTAL_UNICO, motivo: null }])
+  })
+
+  it('sin total la lista queda vacía y sin error: la hoja muestra su aviso', async () => {
+    sinTarifas(0)
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.tarifas).toEqual([])
+    expect(vista?.errorTarifas).toBeNull()
+  })
+
+  it('se confirma con itinerarioId null: precio aprobado, plan acordado por ese total, servicios y gates', async () => {
+    sinTarifas(TOTAL_UNICO)
+    const r = await confirmarClienteViaje(entrada({ itinerarioId: null, cuotas: sugerido(TOTAL_UNICO) }))
+    expect(r).toMatchObject({ ok: true, servicios: 3 })
+    expect(tablas.cotizaciones[0].estado).toBe('aceptada')
+    expect(tablas.cotizaciones[0].tarifa_aceptada_id ?? null).toBeNull()
+    expect(neg().precio_aprobado).toBe(TOTAL_UNICO)
+    expect(planes()).toHaveLength(1)
+    expect(planes()[0]).toMatchObject({ estado: 'acordado', total: TOTAL_UNICO })
+    const conf = meta().confirmacion_cliente as Fila
+    expect(conf).toMatchObject({ itinerario_id: null, tarifa_nombre: null, total: TOTAL_UNICO })
+    expect((conf.mensaje as Fila).texto).not.toContain('*Tarifa:*')
+
+    const gates = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })
+    expect(gates).toEqual(['Para pasar a Reservas y pagos falta: el anticipo con su comprobante y la cuenta donde entró.'])
+  })
+
+  it('con el IVA sobre el ingreso propio encima, el plan se mide contra el mismo precio que se aprueba', async () => {
+    sinTarifas(TOTAL_UNICO)
+    tablas.workspaces[0].config_extra = { iva_cotizacion: { base: 'ingreso_propio', en_documento: 'linea_incluida', precio: 'iva_aparte' } }
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    const precio = vista?.tarifas[0]?.precio ?? 0
+    expect(precio).toBeGreaterThan(TOTAL_UNICO)
+
+    const r = await confirmarClienteViaje(entrada({ itinerarioId: null, cuotas: sugerido(precio) }))
+    expect(r.ok).toBe(true)
+    expect(neg().precio_aprobado).toBe(precio)
+    expect(planes()[0]).toMatchObject({ estado: 'acordado', total: precio })
+  })
+})
+
 describe('plan que no suma o fuera de la regla (F2-3)', () => {
   beforeEach(() => sembrar())
 
