@@ -139,7 +139,13 @@ describe('migración de proveedores', () => {
     const c = await uno<{ estado: string; verificada_por: string | null }>(db, `select estado, verificada_por from public.proveedor_cuentas where id = '${id}'`)
     expect(c).toEqual({ estado: 'pendiente', verificada_por: null })
     await db.exec(`update public.proveedor_cuentas set retirada_por = '${ANA}', retirada_at = now() where id = '${id}'`)
-    const rastro = (await db.query<{ evento: string; por: string; antes: { numero?: string } | null }>(`select evento, por, antes from public.proveedor_cuentas_historial where cuenta_id = '${id}' order by created_at, evento`)).rows
+    // PGlite guarda `now()` al milisegundo: dos UPDATE seguidos pueden caer en el mismo instante (en CI pasó con
+    // «verificada» y «cambiada»), y el desempate alfabético por `evento` ponía «cambiada» primero. El empate se rompe por
+    // el ciclo de vida de la cuenta, no por el nombre; un orden de reloj realmente invertido sigue fallando.
+    const rastro = (await db.query<{ evento: string; por: string; antes: { numero?: string } | null }>(
+      `select evento, por, antes from public.proveedor_cuentas_historial where cuenta_id = '${id}'
+       order by created_at, array_position(array['creada', 'verificada', 'cambiada', 'retirada'], evento)`,
+    )).rows
     expect(rastro.map((r) => r.evento)).toEqual(['creada', 'verificada', 'cambiada', 'retirada'])
     expect(rastro[2].antes?.numero).toBe('123-456789-00')
     expect(rastro[2].por).toBe(BETO)
