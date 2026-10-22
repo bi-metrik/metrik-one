@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — PR (a)(b)(c) sin mergear; (d) activar-antes-de-cobrar abierto; llaves .env.local no son de MeTRIK
 - [Número de vuelo por tramo en servicios](project_numero_vuelo_por_tramo.md) — items.tramos leído aparte (no en el contexto: P3); filas viejas se releen por contenido
 - ⚠️ [Bot ONE registra ingresos (#1231)](project_ingresos_wa_one.md) — cuotas programadas; candado con `respaldo`; depósito propio = ingreso; v4

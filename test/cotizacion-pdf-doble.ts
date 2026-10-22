@@ -54,6 +54,25 @@ function constructor(tabla: string) {
       const c = (tablas.cotizaciones ?? []).find(x => x.id === f.cotizacion_id)
       salida.cotizaciones = c ? { estado: c.estado, negocio_id: c.negocio_id ?? null, workspace_id: c.workspace_id ?? null, convencion_margen: c.convencion_margen ?? null } : null
     }
+    // Las etapas de la línea del negocio (`autorizacion-datos/envio.ts`): ¿alguna pide la
+    // autorización de datos? En `negocios` directo, o embebido en la cotización (`negocio_envio`).
+    const etapasDe = (lineaId: unknown) => (tablas.etapas_negocio ?? [])
+      .filter(e => e.linea_id === lineaId)
+      .map(e => ({ config_extra: e.config_extra ?? null }))
+    if (tabla === 'negocios' && columnas.includes('lineas_negocio(etapas_negocio(')) {
+      salida.lineas_negocio = f.linea_id ? { etapas_negocio: etapasDe(f.linea_id) } : null
+    }
+    if (tabla === 'cotizaciones' && columnas.includes('negocio_envio:negocios')) {
+      const n = (tablas.negocios ?? []).find(x => x.id === f.negocio_id)
+      salida.negocio_envio = n
+        ? { linea_id: n.linea_id ?? null, contacto_id: n.contacto_id ?? null, lineas_negocio: n.linea_id ? { etapas_negocio: etapasDe(n.linea_id) } : null }
+        : null
+    }
+    // La ficha fijada en la línea (`items.proveedor_id` → `fotos_perfiles`), para las fotos del PDF.
+    if (tabla === 'items' && columnas.includes('ficha:fotos_perfiles(')) {
+      const p = (tablas.fotos_perfiles ?? []).find(x => x.id === f.proveedor_id)
+      salida.ficha = p ? { tipo: p.tipo, clave: p.clave } : null
+    }
     if (columnas.includes('empresas(')) salida.empresas = null
     if (columnas.includes('oportunidades(')) salida.oportunidades = null
     return salida
