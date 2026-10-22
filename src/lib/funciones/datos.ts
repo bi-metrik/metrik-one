@@ -126,45 +126,99 @@ export async function leerDia(db: SupabaseClient, workspaceId: string, fecha: st
   return filas.filter((f): f is FuncionDelDia => !!f)
 }
 
-export interface FuncionProxima {
-  id: string
-  inicia_at: string
-  estado: EstadoFuncion
-  cupo_total: number
-  experiencia: string
-}
-
-export async function leerProximas(db: SupabaseClient, workspaceId: string, dias = 45): Promise<FuncionProxima[]> {
-  const { data, error } = await db
-    .from('funcion_funciones')
-    .select('id, inicia_at, estado, capacidad, funcion_campanas(funcion_experiencias(nombre))')
-    .eq('workspace_id', workspaceId)
-    .is('archivada_at', null)
-    .gte('inicia_at', new Date(Date.now() - 6 * 3_600_000).toISOString())
-    .lt('inicia_at', new Date(Date.now() + dias * 86_400_000).toISOString())
-    .order('inicia_at', { ascending: true })
-    .limit(200)
-  if (error) throw new Error(`No se pudieron leer las funciones: ${error.message}`)
-  type Fila = { id: string; inicia_at: string; estado: string; capacidad: number; funcion_campanas: { funcion_experiencias: { nombre: string } | null } | null }
-  return ((data ?? []) as unknown as Fila[]).map((f) => ({
-    id: f.id,
-    inicia_at: f.inicia_at,
-    estado: estadoParaPantalla(f.estado),
-    cupo_total: f.capacidad,
-    experiencia: f.funcion_campanas?.funcion_experiencias?.nombre ?? '',
-  }))
-}
-
-export interface ExperienciaCatalogo {
+export interface Experiencia {
   id: string
   nombre: string
-  minutos_apartado: number | null
+  historia: string | null
+  que_incluye: string | null
+  edad_minima: number | null
+  info_general: string | null
   activa: boolean
+  created_at: string
 }
 
-export async function leerExperiencias(db: SupabaseClient, workspaceId: string): Promise<ExperienciaCatalogo[]> {
-  const { data, error } = await db.from('funcion_experiencias').select('id, nombre, activa').eq('workspace_id', workspaceId).order('nombre')
+/** Las experiencias, la más reciente primero (Sabor estrena película cada semana). */
+export async function leerExperiencias(db: SupabaseClient, workspaceId: string): Promise<Experiencia[]> {
+  const { data, error } = await db
+    .from('funcion_experiencias')
+    .select('id, nombre, historia, que_incluye, edad_minima, info_general, activa, created_at')
+    .eq('workspace_id', workspaceId)
+    .order('created_at', { ascending: false })
   if (error) throw new Error(`No se pudieron leer las experiencias: ${error.message}`)
-  // Los minutos de apartado viven ahora en la campaña: la pantalla de hoy no los tiene de dónde leer.
-  return ((data ?? []) as Array<Omit<ExperienciaCatalogo, 'minutos_apartado'>>).map((e) => ({ ...e, minutos_apartado: null }))
+  return (data ?? []) as Experiencia[]
+}
+
+export type EstadoCampana = 'borrador' | 'activa' | 'pausada' | 'cerrada' | 'agotada'
+
+/** Una fila del inicio del panel (`funcion_panel_campanas`): estado efectivo, conteos y precios. */
+export interface CampanaResumen {
+  campana_id: string
+  nombre: string
+  codigo: string
+  experiencia_id: string
+  experiencia: string
+  estado: EstadoCampana
+  desde: string | null
+  hasta: string | null
+  precio_persona: number | null
+  precio_preventa_persona: number | null
+  abono_persona: number | null
+  permite_pago_total: boolean
+  minutos_apartado: number | null
+  tope_sobreventa: number | null
+  funciones: number
+  llenas: number
+  llenas_asistente: number
+  llenas_asistente_semana: number
+  proxima: string | null
+  ultima_capacidad: number | null
+  ultima_cupo_asistente: number | null
+  created_at: string
+}
+
+export async function leerPanelCampanas(db: SupabaseClient, workspaceId: string): Promise<CampanaResumen[]> {
+  const { data, error } = await db.rpc('funcion_panel_campanas', { p_workspace_id: workspaceId })
+  if (error) throw new Error(`No se pudieron leer las campañas: ${error.message}`)
+  return (data ?? []) as CampanaResumen[]
+}
+
+export interface FuncionAgenda {
+  funcion_id: string
+  inicia_at: string
+  inicia_texto: string
+  estado: 'activa' | 'pausada' | 'cancelada'
+  es_preventa: boolean
+  cierra_venta_at: string | null
+  capacidad: number
+  cupo_asistente: number
+  ocupadas: number
+  reservas_activas: number
+  tarifa: { tarifa: 'preventa' | 'completa'; precio_persona: number | null; precio_completo_persona: number | null; abono_persona: number | null; permite_pago_total: boolean }
+}
+
+/** Una campaña con su experiencia, anuncios y agenda (`funcion_panel_campana`). */
+export interface CampanaPanel {
+  campana_id: string
+  nombre: string
+  codigo: string
+  estado: EstadoCampana
+  estado_guardado: 'borrador' | 'activa' | 'pausada' | 'cerrada'
+  publicada: boolean
+  desde: string | null
+  hasta: string | null
+  minutos_apartado: number | null
+  precio_persona: number | null
+  precio_preventa_persona: number | null
+  abono_persona: number | null
+  permite_pago_total: boolean
+  tope_sobreventa: number | null
+  experiencia: { experiencia_id: string; nombre: string; historia: string | null; que_incluye: string | null; edad_minima: number | null; info_general: string | null }
+  anuncios: string[]
+  funciones: FuncionAgenda[]
+}
+
+export async function leerPanelCampana(db: SupabaseClient, campanaId: string): Promise<CampanaPanel | null> {
+  const { data, error } = await db.rpc('funcion_panel_campana', { p_campana_id: campanaId })
+  if (error || !data) return null
+  return data as CampanaPanel
 }

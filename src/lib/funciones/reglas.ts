@@ -74,6 +74,20 @@ const MENSAJES: Record<string, string> = {
   capacidad_bajo_ocupacion: 'Hay más personas reservadas que esa capacidad.',
   cupo_asistente_invalido: 'El cupo del asistente va de 1 a la capacidad.',
   abono_sobre_precio: 'El abono no puede pasar el precio por persona.',
+  campana_no_publicada: 'La campaña se activa al publicar la agenda.',
+  campana_sin_funciones: 'Agrega al menos una función futura antes de publicar.',
+  funcion_sin_precio: 'Hay funciones sin precio por persona.',
+  campana_no_existe: 'La campaña no existe.',
+  campana_cerrada: 'La campaña está cerrada.',
+  codigo_repetido: 'Ese código ya lo usa otra campaña.',
+  codigo_invalido: 'El código va de 2 a 20 letras, números o guiones, sin espacios.',
+  codigo_publicado: 'El código de una campaña publicada no cambia.',
+  horario_repetido: 'Esa fecha y hora ya está en la agenda.',
+  horario_invalido: 'Una línea de la agenda no se entiende.',
+  precio_invalido: 'Los precios van en pesos, sin decimales.',
+  tope_bajo_capacidad: 'El tope de sobreventa no puede ser menor que la capacidad.',
+  anuncio_invalido: 'El id del anuncio va sin espacios.',
+  anuncio_de_otra_campana: 'Ese anuncio ya está asociado a otra campaña.',
   dato_no_admitido: 'Ese dato no se guarda en una reserva.',
 }
 
@@ -90,3 +104,25 @@ export function mensajeDeError(e: { message?: string; details?: string | null } 
 /** Los roles que la base deja escribir (`funcion_actor`). La pantalla solo esconde botones; decide la base. Pura. */
 export const puedeEditarFunciones = (rol: string | null | undefined) =>
   rol === 'owner' || rol === 'admin' || rol === 'supervisor' || rol === 'operator'
+
+/** La insignia de una función, con las palabras de Sabor (§4.5). Pura. */
+export function insigniaFuncion(f: { estado: string; capacidad: number; cupo_asistente: number; ocupadas: number }):
+  'Disponible' | 'Llena para el asistente' | 'Llena' | 'Pausada' | 'Cancelada' {
+  if (f.estado === 'cancelada') return 'Cancelada'
+  if (f.estado === 'pausada') return 'Pausada'
+  if (f.ocupadas >= f.capacidad) return 'Llena'
+  if (f.ocupadas >= f.cupo_asistente) return 'Llena para el asistente'
+  return 'Disponible'
+}
+
+export const ETIQUETA_ESTADO_CAMPANA: Record<string, string> = {
+  borrador: 'Borrador',
+  activa: 'Activa',
+  pausada: 'Pausada',
+  cerrada: 'Cerrada',
+  agotada: 'Agotada',
+}
+
+/** «$180.000». Pura. */
+export const pesos = (n: number | null | undefined) =>
+  n === null || n === undefined ? '—' : `$${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`

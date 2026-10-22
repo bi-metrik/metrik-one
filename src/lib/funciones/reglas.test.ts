@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inicioBogota, mensajeDeError, rangoDiaBogota, reservaActiva } from './reglas'
+import { inicioBogota, insigniaFuncion, mensajeDeError, pesos, rangoDiaBogota, reservaActiva } from './reglas'
 
 describe('reglas del módulo funciones', () => {
   it('reservaActiva usa la misma definición que la base', () => {
@@ -21,5 +21,15 @@ describe('reglas del módulo funciones', () => {
     expect(mensajeDeError({ message: 'sin_cupo', details: 'Quedan 2 puestos.' })).toBe('No hay cupo para esa cantidad de personas. Quedan 2 puestos.')
     expect(mensajeDeError({ message: 'datos_invalidos', details: 'nombre' })).toBe('Revisa los datos del formulario. (nombre)')
     expect(mensajeDeError({ message: 'algo raro de la red' })).toBe('No se pudo guardar. Intenta de nuevo.')
+  })
+
+  it('las insignias de la función, con las palabras de Sabor', () => {
+    const f = { estado: 'activa', capacidad: 35, cupo_asistente: 30, ocupadas: 12 }
+    expect(insigniaFuncion(f)).toBe('Disponible')
+    expect(insigniaFuncion({ ...f, ocupadas: 30 })).toBe('Llena para el asistente')
+    expect(insigniaFuncion({ ...f, ocupadas: 35 })).toBe('Llena')
+    expect(insigniaFuncion({ ...f, estado: 'pausada' })).toBe('Pausada')
+    expect(insigniaFuncion({ ...f, estado: 'cancelada', ocupadas: 35 })).toBe('Cancelada')
+    expect([pesos(180000), pesos(null)]).toEqual(['$180.000', '—'])
   })
 })
