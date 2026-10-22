@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Falso negativo Benedetti en Valida (22-oct)](project_valida_falso_negativo_benedetti.md) — cédula a 1 dígito, no timeout; PR falla cerrada SIN mergear
 - ⚠️⚠️ [Alta autogestionada de Valida (#1095, #1097, #1098)](project_valida_alta_autogestionada.md) — #1097 aplicada y mergeada; PR 1/9 de Valida son parches
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
 - ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
