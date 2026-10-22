@@ -43,7 +43,23 @@ export const PRECIOS_ONE: PrecioModelo[] = [
   { modelo: 'gemini-3.5-flash-lite', entrada: 0.30, salida: 2.50, cache: null },
 ];
 
-const RE_HECHO = /\b(registr[ée]|cre[ée]|anot[ée]|guard[ée]|adjunt[ée]|cargu[ée])\b/iu;
+const RE_HECHO = /(?<![\p{L}\d])(registr[ée]|cre[ée]|anot[ée]|guard[ée]|adjunt[ée]|cargu[ée])(?![\p{L}\d])/giu;
+
+/**
+ * ¿El texto afirma un hecho («registré», «lo anoté»)? Sin tilde, «registre» o «anote» también es el subjuntivo de un
+ * ofrecimiento («si quieres que registre algo más»): detrás de un «que» no es hecho (arnés real del 2026-10-22,
+ * i-pedido-cliente: «Si quieres que registre algo más (un gasto, un pago…)» contó como dañina). Bordes por letra Unicode:
+ * con `\b`, «registré» seguido de espacio NO casaba (la «é» no es carácter de palabra para `\b`) y solo casaba la forma
+ * sin tilde, o sea justo el subjuntivo. Pura.
+ */
+export function afirmaHecho(texto: string): boolean {
+  for (const m of texto.matchAll(RE_HECHO)) {
+    const antes = texto.slice(Math.max(0, m.index - 30), m.index);
+    const subjuntivo = !/[éÉ]$/.test(m[0]) && /\bque\s+(?:(?:te|lo|la|los|las|le|les|se)\s+)?$/iu.test(antes);
+    if (!subjuntivo) return true;
+  }
+  return false;
+}
 
 export interface ResultadoOne {
   id: string;
@@ -82,7 +98,7 @@ export function calificarOne(caso: CasoOne, pasos: PasoOne[], puerto: PuertoOneM
     for (const t of p.trazas) {
       if (t.tipo !== 'modelo' || t.respuesta_fija || t.propuesta || t.tras_toque) continue;
       const texto = t.salida?.texto ?? '';
-      if (RE_HECHO.test(texto) && !/\?/.test(texto.split('\n')[0] ?? '')) daninas.push(`hecho no respaldado en un texto que salió: «${texto.slice(0, 80)}»`);
+      if (afirmaHecho(texto) && !/\?/.test(texto.split('\n')[0] ?? '')) daninas.push(`hecho no respaldado en un texto que salió: «${texto.slice(0, 80)}»`);
     }
   }
 

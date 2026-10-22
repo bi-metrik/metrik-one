@@ -411,6 +411,49 @@ describe('gasto de empresa solo si la persona lo dijo o lo eligió', () => {
   })
 })
 
+describe('r-t-gasolina (arnés real 2026-10-22): una lista del destino ya contestada no respalda un gasto de empresa', () => {
+  const pasosHastaElSegundoGasto = [
+    { name: 'responder', args: { tema: 'gasto', texto: '¿De cuánto fue el gasto?' } },
+    { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $90.000 de gasolina?' } },
+    { name: 'proponer', args: { accion: 'gasto', datos: { monto: 90000, negocio: 'V1 26 5', categoria: 'transporte', descripcion: 'gasolina' } } },
+  ] as const
+
+  it('«Gasto de 18900 sin mas…» dos gastos después de la lista no es «Gasto de empresa»: no hay propuesta', async () => {
+    const modelo = modeloGuionado([
+      ...pasosHastaElSegundoGasto,
+      // Lo que hizo el modelo real: gasto de empresa apuntando al escrito del segundo gasto (#9).
+      (p) => {
+        expect(String(p.mensajes[0].parts[0].text)).toContain('#9 [escrito de Ana Dueña] "Gasto de 18900 sin mas, por ahora no tengo la foto del soporte, te la mando despues"')
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 18900, empresa: true, empresa_dicho_en: '9', categoria: 'otros' } } }
+      },
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $18.900?' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Gasto')
+    await e.escribe('90000 gasolina')
+    await e.elige(1)
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras).toHaveLength(1)
+    const t = await e.escribe('Gasto de 18900 sin mas, por ahora no tengo la foto del soporte, te la mando despues')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    expect(t[0].texto).not.toContain('Gasto de empresa (sin negocio)')
+    expect(t[0].texto).toContain('¿A cuál negocio va el gasto de $18.900?')
+    expect(e.puerto.escrituras).toHaveLength(1)
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('el escrito que SÍ contesta la lista abierta (el primer mensaje después de ella) sigue valiendo', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, empresa_dicho_en: '#3', categoria: 'alimentacion' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Bebidas de 20000')
+    const t = await e.escribe('a ninguno, es de la empresa')
+    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+  })
+})
+
 describe('«de empresa» dicho antes de la lista del destino', () => {
   it('no basta: primero preguntar_destino y la persona toca la opción', async () => {
     const modelo = modeloGuionado([

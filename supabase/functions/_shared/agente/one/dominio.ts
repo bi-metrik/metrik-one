@@ -390,7 +390,7 @@ const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
  * ¿El gasto de empresa tiene de dónde salir? (2026-10-21: en el arnés el modelo lo puso por su cuenta cuando no
  * encontró el negocio, y una vez apuntó `empresa_dicho_en` a «Bebidas de 20000»). `#n` tiene que ser una respuesta de la
  * persona a la pregunta del destino que armó el código (`preguntar_destino`, con su opción «Gasto de empresa»): el toque
- * de esa opción, o un escrito/audio que llega DESPUÉS de esa lista (qué dice lo lee el modelo). Si la persona dijo «de
+ * de esa opción, o el escrito/audio que la CONTESTA (la última lista, el primer mensaje después; qué dice lo lee el modelo). Si la persona dijo «de
  * empresa» antes de cualquier lista, el bot pregunta el destino y ella toca la opción: un paso más, a cambio de que
  * nadie registre a empresa por suposición. Estructural: no lee el texto de la persona. Pura.
  */
@@ -398,8 +398,17 @@ export function empresaDicha(filas: FilaConversacion[], v: unknown): boolean {
   const n = numeroDeFila(v);
   const f = n ? filas[n - 1] : undefined;
   if (!f || f.direccion !== 'entrante' || f.clase === 'reenvio') return false;
-  const lista = filas.slice(0, n! - 1).some((x) => x.direccion === 'saliente' && (x.opciones ?? []).some((o) => o.id.startsWith('ag|c|') && o.titulo === OPCION_EMPRESA));
-  if (!lista) return false;
+  // La lista del destino tiene que ser la ÚLTIMA antes de `#n` y `#n` el PRIMER mensaje de la persona después de ella: la
+  // respuesta a ESA pregunta. Antes bastaba con cualquier lista anterior, ya contestada (arnés real del 2026-10-22,
+  // r-t-gasolina: la lista del gasto de 90.000 se contestó tocando E1 26 1, y dos gastos después «Gasto de 18900 sin
+  // mas…» pasó como respaldo de un gasto de empresa que nadie pidió; Mauricio tocó Registrar).
+  let l = -1;
+  for (let i = n! - 2; i >= 0; i--) {
+    const x = filas[i];
+    if (x.direccion === 'saliente' && (x.opciones ?? []).some((o) => o.id.startsWith('ag|c|'))) { l = i; break; }
+  }
+  if (l < 0 || !(filas[l].opciones ?? []).some((o) => o.id.startsWith('ag|c|') && o.titulo === OPCION_EMPRESA)) return false;
+  if (filas.slice(l + 1, n! - 1).some((x) => x.direccion === 'entrante')) return false;
   if (f.clase === 'toque') return (f.texto ?? '').trim() === OPCION_EMPRESA;
   return ['escrito', 'audio', 'imagen'].includes(f.clase);
 }
