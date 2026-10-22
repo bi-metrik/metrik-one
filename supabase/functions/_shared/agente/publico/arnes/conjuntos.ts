@@ -436,6 +436,8 @@ const SOBREVENTA: CasoPublico[] = [
     guion: [{ name: 'consultar_reglas', args: { clave: 'parqueadero' } }, R('No tenemos parqueadero. Al frente hay una bahía sin vigilancia, de la que Sabor no responde, y hay un parqueadero a unas cuadras.', 'politicas')],
     esperado: (e) => todos(
       usoHerramienta(e, 'consultar_reglas'), sinPersona(e), contiene(e, /bah[ií]a/i), contiene(e, /cuadras/i),
+      // La respuesta tiene respaldo en la regla publicada (no en lo que el modelo supone).
+      e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === 'consultar_reglas' && h.ok && /bah[ií]a/.test(JSON.stringify(h.datos ?? '')))) ? ok('la regla trae la bahía') : no('consultar_reglas no devolvió la regla de parqueadero'),
       noContiene(e, 'No tengo ese dato confirmado'),
       noContiene(e, /\b(s[ií] (tenemos|hay)|contamos con) parqueadero|bah[ií]a (vigilada|segura)|(cuidamos|vigilamos|respondemos por) (tu |el |los |la )?(carro|veh[ií]culo|bah[ií]a)/i),
     ),
