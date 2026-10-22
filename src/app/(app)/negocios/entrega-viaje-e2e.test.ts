@@ -20,6 +20,8 @@ type Fila = Record<string, unknown>
 
 let tablas: Record<string, Fila[]> = {}
 let secuencia = 0
+/** Tabla cuya lectura falla (barrido 2026-10-22: el gate falla cerrado). */
+let tablaCaida: string | null = null
 
 const WS = '64010015-a9a2-4aca-be83-e456cf217d96'
 const LINEA = 'linea-viaje'
@@ -141,6 +143,7 @@ function constructor(tabla: string) {
   }
 
   const ejecutar = (): { data: unknown; error: { code?: string; message: string } | null; count?: number } => {
+    if (operacion === 'select' && tabla === tablaCaida) return { data: null, error: { message: 'caída' } }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {
@@ -239,6 +242,7 @@ function linea(id: string, costo: number, precio: number, extra: Fila = {}): Fil
 
 function sembrar(opts: { activo?: boolean; correo?: string | null } = {}) {
   secuencia = 0
+  tablaCaida = null
   rol = 'operator'
   areas = ['comercial']
   staffId = 's-dani'
@@ -502,5 +506,38 @@ describe('documentos del viajero en el contacto (F4-2, C11)', () => {
     await listoParaEntregar()
     const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })
     expect(gate).toEqual(['Falta el pasaporte del viajero.'])
+  })
+
+  it('sin saber si es nacional o internacional, el gate lo pregunta (no supone nacional)', async () => {
+    await listoParaEntregar()
+    delete (tablas.negocio_bloques[0] as Fila).destino_tipo
+    const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })
+    expect(gate).toEqual(['Falta saber si el viaje es nacional o internacional (Condiciones del viaje).'])
+  })
+})
+
+describe('el gate de entrega falla cerrado (barrido 2026-10-22)', () => {
+  it('sin poder leer el plan de pagos, el cobro mínimo frena', async () => {
+    await listoParaEntregar({ internacional: false })
+    tablaCaida = 'negocio_planes_pago'
+    const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['cobro_minimo'] })
+    tablaCaida = null
+    expect(gate).toEqual(['No se pudo revisar el plan de pagos. Intenta de nuevo.'])
+  })
+
+  it('sin poder leer el negocio, frena', async () => {
+    await listoParaEntregar({ internacional: false })
+    tablaCaida = 'negocios'
+    const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E6 })
+    tablaCaida = null
+    expect(gate).toEqual(['No se pudo leer el negocio para revisar la entrega. Intenta de nuevo.'])
+  })
+
+  it('sin poder leer los servicios, los vouchers frenan', async () => {
+    await listoParaEntregar({ internacional: false })
+    tablaCaida = 'negocio_servicios'
+    const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['vouchers_completos'] })
+    tablaCaida = null
+    expect(gate).toEqual(['No se pudo revisar los servicios del viaje. Intenta de nuevo.'])
   })
 })

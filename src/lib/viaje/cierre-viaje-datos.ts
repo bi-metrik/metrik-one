@@ -6,6 +6,8 @@ import 'server-only'
  */
 
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
+import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
+import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { ivaSobreIngresoPropio, leerConfigIvaCotizacion } from '@/lib/fiscal/iva-cotizacion'
@@ -130,6 +132,11 @@ export interface VistaViajeFinal {
   postventa: Postventa
   faltaPostventa: string | null
   servicios: Array<{ id: string; nombre: string }>
+  /**
+   * El saldo que frena `saldo_cero`, con la MISMA cuenta y la misma base de precio del gate
+   * (`lib/cobros/saldo-cero.ts`): «Saldo pendiente: $X». `null` si está cubierto. Solo en Cierre.
+   */
+  saldoPendiente: string | null
 }
 
 /** `null` con el interruptor apagado o fuera de las etapas 7-9 de la línea. */
@@ -147,15 +154,17 @@ export async function leerVistaViajeFinal(db: Db, workspaceId: string, negocioId
         : null
   if (!fase) return null
   const hoy = todayBogotaISO()
-  const [cierre, { viaje }, contactoRes] = await Promise.all([
+  const [cierre, { viaje }, contactoRes, saldo] = await Promise.all([
     calcularCierreDelNegocio(db, workspaceId, base),
     leerViajeDelNegocio(db, negocioId),
     base.negocio.contacto_id
       ? db.from('contactos').select('nombre, telefono').eq('id', base.negocio.contacto_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    fase === 'cierre' ? leerSaldoCero(db, { workspaceId, negocioId }) : Promise.resolve(null),
   ])
   const contacto = (contactoRes.data ?? null) as { nombre?: string | null; telefono?: string | null } | null
   const nombre = (contacto?.nombre ?? '').trim()
+  const saldoPendiente = !saldo ? null : saldo.ok ? mensajeSaldoCero(saldo.saldo) : saldo.error
   const guardado = leerCierreGuardado(base.negocio.metadata)
   const postventa = leerPostventa(base.negocio.metadata)
   return {
@@ -171,6 +180,7 @@ export async function leerVistaViajeFinal(db: Db, workspaceId: string, negocioId
     postventa,
     faltaPostventa: faltaPostventa(postventa),
     servicios: cierre.filas.map(f => ({ id: f.id, nombre: f.nombre })),
+    saldoPendiente,
   }
 }
 

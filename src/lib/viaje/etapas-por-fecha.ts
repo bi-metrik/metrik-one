@@ -7,7 +7,11 @@
  *     el sistema diga que no; P5) con la traza y un aviso `viaje_sin_listo` a la dirección;
  *   · el día de salida, si el saldo no está en cero, aviso a la comercial y a la dirección:
  *     «{nombre} viaja hoy con saldo de $X» (no frena: no se puede frenar);
- *   · el día después del regreso, sale a la etapa siguiente.
+ *   · el día después del regreso, sale a la etapa siguiente;
+ *   · un viaje que llega a su día de salida ANTES de la etapa anterior a «En viaje» (en
+ *     Confirmación o Reservas, por ejemplo) no se mueve —le falta demasiado—, pero la dirección
+ *     recibe UN aviso `viaje_sin_listo` por salida (barrido 2026-10-22: antes nadie se enteraba).
+ *     Si revisar lo que faltaba falla, se avisa igual en vez de tragarse el error.
  *
  * Idempotente: el update RECLAMA (`.eq('etapa_actual_id', desde)`): dos corridas a la vez mueven
  * una sola vez, y solo quien movió avisa e instancia. Las casillas de la etapa nueva las crea la
@@ -19,6 +23,7 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { instanciarBloquesDeEtapa } from '@/lib/negocios/instanciar-bloques-etapa'
 import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 import { evaluarGateEntrega } from './entrega-datos'
+import { fechaConAnio } from './entrega'
 import { configEtapasPorFecha, movimientoPorFecha, pesosCierre } from './cierre-viaje'
 import { avisoSoloAQuienLleva } from '@/lib/negocios/negocios-de-prueba'
 
@@ -32,6 +37,8 @@ export interface ResumenEtapasPorFecha {
   salieron: number
   sin_listo: number
   con_saldo: number
+  /** Viajes con la salida encima que siguen antes de la etapa anterior a «En viaje». */
+  atascados: number
 }
 
 const TANDA = 150
@@ -60,7 +67,7 @@ async function responsables(svc: Db, negocioId: string): Promise<string[]> {
   return ((data ?? []) as Array<{ profile_id: string | null }>).map((d) => d.profile_id ?? '').filter(Boolean)
 }
 
-async function avisar(svc: Db, n: { id: string; workspace_id: string; linea_id: string | null; metadata: unknown }, destinatarios: string[], contenido: string, motivo: string) {
+async function avisar(svc: Db, n: { id: string; workspace_id: string; linea_id: string | null; metadata: unknown }, destinatarios: string[], contenido: string, motivo: string, extra: Record<string, unknown> = {}) {
   const workspaceId = n.workspace_id
   const negocioId = n.id
   // El viaje de prueba (F8-1) solo le avisa a quien lo lleva o lo aprueba (el respaldo de
@@ -76,13 +83,41 @@ async function avisar(svc: Db, n: { id: string; workspace_id: string; linea_id: 
     entidad_tipo: 'negocio',
     entidad_id: negocioId,
     deep_link: `/negocios/${negocioId}`,
-    metadata: { motivo, negocio_id: negocioId },
+    metadata: { motivo, negocio_id: negocioId, ...extra },
   })))
   if (error) console.error('[etapas por fecha] aviso no salió:', error.message)
 }
 
+/**
+ * ¿El viaje llegó a su salida sin estar siquiera en la etapa anterior a «En viaje»? Ahí el cron no
+ * lo mueve (le faltan etapas enteras), pero tiene que avisar.
+ */
+export function viajeAtascado(p: { etapaNumero: number | null; salida: string | null; hoy: string; entrarEn: number }): boolean {
+  return p.etapaNumero !== null && !!p.salida && p.hoy >= p.salida && p.etapaNumero < p.entrarEn - 1
+}
+
+/** Un aviso por viaje y por fecha de salida: el cron corre cada día y no repite. */
+async function avisarAtascado(
+  svc: Db,
+  n: { id: string; workspace_id: string; linea_id: string | null; nombre: string; metadata: unknown },
+  configLinea: unknown,
+  etapaNombre: string,
+  salida: string,
+  hoy: string,
+): Promise<boolean> {
+  const previo = filas<{ id: string }>(
+    await svc.from('notificaciones').select('id').eq('entidad_id', n.id).eq('tipo', 'viaje_sin_listo').eq('metadata->>motivo', 'viaje_atascado').eq('metadata->>salida', salida),
+    'avisos previos',
+  )
+  if (previo.length > 0) return false
+  const aprobadores = await perfiles(svc, n.workspace_id, (((configLinea as { aprobaciones?: { staff_ids?: unknown } } | null)?.aprobaciones?.staff_ids ?? []) as unknown[]).filter((x): x is string => typeof x === 'string'))
+  const cuando = salida === hoy ? 'sale hoy de viaje' : `debía salir de viaje el ${fechaConAnio(salida)}`
+  await avisar(svc, n, aprobadores, `${n.nombre} ${cuando} y sigue en ${etapaNombre}: no está listo para «En viaje».`, 'viaje_atascado', { salida })
+  return true
+}
+
 export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNegocioId?: string | null }): Promise<ResumenEtapasPorFecha> {
-  const resumen: ResumenEtapasPorFecha = { lineas: 0, negocios: 0, entraron: 0, salieron: 0, sin_listo: 0, con_saldo: 0 }
+  const resumen: ResumenEtapasPorFecha = { lineas: 0, negocios: 0, entraron: 0, salieron: 0, sin_listo: 0, con_saldo: 0, atascados: 0 }
   const lineasRaw = filas<{ id: string; workspace_id: string; config_extra: unknown }>(
     await svc.from('lineas_negocio').select('id, workspace_id, config_extra').not('config_extra->etapas_por_fecha', 'is', null),
     'líneas',
@@ -128,6 +163,10 @@ export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNeg
     const actual = activas.find((e) => e.id === n.etapa_actual_id) ?? null
     const f = fechasDe.get(n.id) ?? { salida: null, regreso: null }
     const mov = movimientoPorFecha({ config: cfg, etapaNumero: actual?.numero ?? null, salida: f.salida, regreso: f.regreso, hoy: opts.hoy })
+    if (!mov && actual && viajeAtascado({ etapaNumero: actual.numero, salida: f.salida, hoy: opts.hoy, entrarEn: cfg.entrar.etapa_numero })) {
+      if (await avisarAtascado(svc, n, linea.config_extra, actual.nombre, f.salida!, opts.hoy)) resumen.atascados++
+      continue
+    }
     if (!mov || !actual) continue
     const destinoNumero = mov === 'entrar' ? cfg.entrar.etapa_numero : cfg.salir.etapa_numero
     const destino = activas.find((e) => e.numero === destinoNumero)
@@ -139,7 +178,7 @@ export async function correrEtapasPorFecha(svc: Db, opts: { hoy: string; soloNeg
           workspaceId: n.workspace_id,
           negocioId: n.id,
           gates: ((actual.config_extra?.gates ?? []) as unknown[]).filter((g): g is string => typeof g === 'string'),
-        }).catch(() => [] as string[])
+        }).catch((e: unknown) => [`No se pudo revisar si estaba listo (${e instanceof Error ? e.message : String(e)}).`])
       : []
 
     // Reclamar: solo quien lo saca de la etapa de origen sigue.

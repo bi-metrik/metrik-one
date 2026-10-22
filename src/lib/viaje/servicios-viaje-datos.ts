@@ -14,7 +14,7 @@ import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itiner
 import { fechasDelServicio, filasDeServicioDeTarifa, type FilaServicioNueva, type TipoServicio } from './servicios-desde-tarifa'
 import { completadoDeFila, fechasDeFila, type FechasServicio, type TramoServicio } from './fechas-servicio'
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
-import { GATE_SERVICIOS_LISTOS, serviciosQueFaltan, type FaltaServicio } from './gate-servicios'
+import { GATE_SERVICIOS_LISTOS, faltaParaServiciosListos, type FaltaServicio } from './gate-servicios'
 import { configReglasPago } from './reglas-pago'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -365,6 +365,12 @@ export async function leerServiciosDelNegocio(
       .in('entidad_id', ids)
       .neq('estado', 'caducada'),
   ])
+  // Sin pagos o sin aprobaciones la fila se pintaría (y el gate la juzgaría) con menos de lo que
+  // tiene: una rechazada perdida deja pasar un pago que Edgar no aprobó. Mejor no saber.
+  if (gastosRes.error || aprobRes.error) {
+    console.error('[servicios-viaje] no se pudieron leer pagos o aprobaciones:', (gastosRes.error ?? aprobRes.error).message)
+    return null
+  }
   const gastos = (gastosRes.data ?? []) as Array<GastoDeServicio & { servicio_id: string }>
   const aprob = (aprobRes.data ?? []) as Array<AprobacionDeServicio & { entidad_id: string }>
   return filas.map(f => ({
@@ -414,6 +420,8 @@ function vigentesPorTipo<T extends AprobacionDeServicio>(filas: readonly T[]): T
 
 // ── Gate `servicios_listos` (F3-7) ───────────────────────────────────────────
 
+const TEXTO_NO_SE_PUDO_LEER = 'No se pudieron leer los servicios del viaje. Intenta de nuevo.'
+
 /**
  * Lo que falta para salir de Reservas y pagos. Opt-in por `etapas_negocio.config_extra.gates`: una
  * etapa sin `servicios_listos` no consulta nada (SOENA, AFI y Termotech no cambian). Con la línea
@@ -424,19 +432,21 @@ export async function evaluarGateServicios(
   args: { workspaceId: string; negocioId: string; gates: readonly string[] },
 ): Promise<FaltaServicio[]> {
   if (!args.gates.includes(GATE_SERVICIOS_LISTOS)) return []
-  const { data } = await db
+  const { data, error } = await db
     .from('negocios')
     .select('linea_id, lineas_negocio(config_extra)')
     .eq('id', args.negocioId)
     .eq('workspace_id', args.workspaceId)
     .maybeSingle()
+  // Falla cerrado (como la autorización de datos): sin saber si la línea lo exige, no se suelta.
+  if (error || !data) return [{ servicioId: '', texto: TEXTO_NO_SE_PUDO_LEER }]
   const linea = (data as { lineas_negocio?: unknown } | null)?.lineas_negocio
   const config = ((Array.isArray(linea) ? linea[0] : linea) as { config_extra?: unknown } | null)?.config_extra ?? null
   if (!serviciosViajeActivo(config)) return []
   const filas = await leerServiciosDelNegocio(db, args)
   // Si no se pudieron leer, la duda frena: no se suelta un viaje sin saber si se pagó.
-  if (filas === null) return [{ servicioId: '', texto: 'No se pudieron leer los servicios del viaje. Intenta de nuevo.' }]
-  return serviciosQueFaltan(filas, configReglasPago(config).exigeConfirmacion)
+  if (filas === null) return [{ servicioId: '', texto: TEXTO_NO_SE_PUDO_LEER }]
+  return faltaParaServiciosListos(filas, configReglasPago(config).exigeConfirmacion)
 }
 
 // ── Corregir una aceptación ──────────────────────────────────────────────────
