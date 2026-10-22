@@ -9,6 +9,7 @@
  */
 
 import type { FilaLotePreparada, TipoDocumento, TipoPersona, ValidaConsultaInput } from '@/lib/actions/valida-consultas'
+import { CODIGO_BUSQUEDA_INCOMPLETA, ROTULO_NO_COMPLETADA, mensajeErrorValida } from './mensajes-error'
 
 // ─── Topes y ritmo ──────────────────────────────────────────────────────────────
 
@@ -221,4 +222,50 @@ export function textoPausa(motivo: string | null, detalle: string | null): strin
     default:
       return detalle ?? 'El cargue está detenido.'
   }
+}
+
+const SEVERIDAD_TEXTO: Record<string, string> = {
+  alto: 'Alto',
+  medio: 'Medio',
+  bajo: 'Bajo',
+  informativo: 'Informativo',
+  sin_hallazgo: 'Sin hallazgo',
+  error: 'Error',
+}
+
+/**
+ * La columna «severidad» del XLSX de resultados. Una búsqueda incompleta no es un resultado
+ * («Error» se leía como uno): se rotula para reintentar.
+ */
+export function textoSeveridadFila(f: { estado: string; severidad: string | null; resultado_error: string | null }): string {
+  if (f.estado === 'pendiente' || f.estado === 'en_curso') return 'Sin consultar'
+  if (f.resultado_error === CODIGO_BUSQUEDA_INCOMPLETA) return ROTULO_NO_COMPLETADA
+  return SEVERIDAD_TEXTO[f.severidad ?? ''] ?? f.severidad ?? ''
+}
+
+export type FilaResultadoLote = {
+  posicion: number
+  entrada: { tipo?: string; nombre?: string; documento?: { tipo?: string; numero?: string } } | null
+  estado: string
+  severidad: string | null
+  total_matches: number | null
+  valida_consulta_id: string | null
+  resultado_error: string | null
+  error_parseo: string | null
+}
+
+/** Una fila del XLSX de resultados del cargue, en el orden del encabezado. */
+export function celdasFilaResultado(f: FilaResultadoLote): Array<string | number> {
+  return [
+    f.posicion + 1, // la fila del XLSX, contando el encabezado
+    f.entrada?.tipo ?? '',
+    f.entrada?.nombre ?? '',
+    f.entrada?.documento?.tipo ?? '',
+    f.entrada?.documento?.numero ?? '',
+    textoSeveridadFila(f),
+    f.total_matches ?? '',
+    f.valida_consulta_id ?? '',
+    // El error de parseo es de ONE y ya viene en frase; el de Valida es un código y se traduce.
+    f.error_parseo ?? (f.resultado_error ? mensajeErrorValida(f.resultado_error).mensaje : ''),
+  ]
 }

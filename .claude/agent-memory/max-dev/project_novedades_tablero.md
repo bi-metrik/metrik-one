@@ -1,6 +1,6 @@
 ---
 name: novedades-tablero
-description: Tablero «Novedades» de ONE (2026-10-21): archivo versionado, panel sin ruta, visto por ids en localStorage; y el 503 busqueda_incompleta de Valida se muestra como código crudo
+description: Tablero «Novedades» de ONE (2026-10-21): archivo versionado, panel sin ruta, visto por ids en localStorage; el hallazgo del 503 busqueda_incompleta quedó resuelto en #1241
 metadata:
   type: project
 ---
@@ -18,7 +18,7 @@ pasa por revisión de Mauricio.
 - `producto` es un `IdModulo`; 'valida' también aplica en modo vitrina. Sin novedades del producto, no hay entrada:
   al crearlo solo los espacios con Valida la ven.
 
-**Hallazgo abierto (no arreglado en ese PR):** el 503 `busqueda_incompleta` de metrik-valida#66 llega a /valida como
+**Hallazgo (RESUELTO por #1241, ver [[valida-mensajes-error]]):** el 503 `busqueda_incompleta` de metrik-valida#66 llega a /valida como
 `ErrorBox` con el código crudo «busqueda_incompleta» (`llamarValida` pasa `body.error` tal cual; no hay mapa de
 mensajes), y se guarda una fila `severidad='error'` en `valida_consultas` aunque Valida no cobró. El lote reintenta
 una vez el 5xx y luego deja la fila en error con el código. No sale como sin hallazgo (bien), pero no explica ni
