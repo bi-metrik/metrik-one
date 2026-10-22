@@ -123,9 +123,13 @@ export function versionEnCadena(id: string, padreDe: Map<string, string | null>)
   return v
 }
 
-/** Mensaje del gate `cotizacion_enviada` (copy de Noor, §2 etapa 3, sin «gate» ni «bloque»). */
+/**
+ * Mensaje del gate `cotizacion_enviada` (copy de Noor, §2 etapa 3, sin «gate» ni «bloque»).
+ * Desde H33 (2026-10-14) descargar el PDF ya no registra el envío: hay que contestar
+ * «Sí, ya se la mandé». El texto lo dice como es hoy (barrido ámbar, 2026-10-22).
+ */
 export const MENSAJE_GATE_COTIZACION_ENVIADA =
-  'La cotización no se ha enviado desde ONE. Envíala o descárgala desde «Revisar y enviar» para que arranque el seguimiento.'
+  'La cotización no se ha enviado desde ONE. Envíala desde «Revisar y enviar», o descárgala y contesta «Sí, ya se la mandé», para que arranque el seguimiento.'
 
 /** Mensaje del cuarto aplazamiento (Vera C10): el negocio no se pierde solo. */
 export function mensajeTopeAplazamientos(maxPausas: number): string {
