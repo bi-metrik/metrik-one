@@ -22,6 +22,19 @@ import { escaparHtml } from '@/lib/usuarios-espacio/correo'
 /** El correo de contacto que se ofrece para dudas. Es el canal oficial de MéTRIK. */
 const CORREO_AYUDA = 'mauricio.moreno@metrik.com.co'
 
+/**
+ * El ícono de marca, hospedado: es el mismo `public/icons/metrik-icono-192.png` del manifiesto de la
+ * app, servido por el dominio de producción. Va por URL, no adjunto. Dirección fija a propósito: un
+ * correo enviado desde un preview o en desarrollo tiene que mostrar el logo igual.
+ */
+export const LOGO_URL = 'https://metrikone.co/icons/metrik-icono-192.png'
+
+/** El pie de marca de los correos de acceso: el tagline canónico y la razón social. */
+export const PIE_MARCA = {
+  linea1: 'MéTRIK ONE · Claridad para decidir',
+  linea2: 'METRIK IA S.A.S. · metrikone.co',
+} as const
+
 // ── Pantalla de metrikone.co/login ───────────────────────────────────────────
 
 export const TEXTOS_LOGIN = {
@@ -73,7 +86,7 @@ function htmlDeBloques(titulo: string, bloques: Bloque[]): string {
       }
       const url = escaparHtml(b.url)
       if (b.tipo === 'boton') {
-        return `<p style="margin:18px 0 0 0;"><a href="${url}" style="display:inline-block;padding:11px 22px;background:${PALETA.acento};color:#FFFFFF;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;">${escaparHtml(b.etiqueta)}</a></p>`
+        return `<p style="margin:18px 0 18px 0;"><a href="${url}" style="display:inline-block;padding:11px 22px;background:${PALETA.acento};color:#FFFFFF;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;">${escaparHtml(b.etiqueta)}</a></p>`
       }
       return `<p style="margin:0 0 10px 0;"><strong>${escaparHtml(b.nombre)}</strong><br><a href="${url}" style="color:${PALETA.acento};">${url}</a></p>`
     })
@@ -86,11 +99,20 @@ function htmlDeBloques(titulo: string, bloques: Bloque[]): string {
     <tr><td align="center">
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#FFFFFF;border-radius:8px;border:1px solid #E5E7EB;">
         <tr><td style="padding:24px 28px 4px 28px;">
-          <div style="font-size:20px;font-weight:700;color:${PALETA.tinta};">MéTRIK ONE</div>
-          <div style="height:2px;width:42px;background:${PALETA.acento};margin-top:4px;"></div>
+          <table role="presentation" cellspacing="0" cellpadding="0"><tr>
+            <td style="padding-right:12px;vertical-align:middle;"><img src="${LOGO_URL}" width="40" height="40" alt="MéTRIK" style="display:block;border:0;outline:none;text-decoration:none;border-radius:8px;"></td>
+            <td style="vertical-align:middle;">
+              <div style="font-size:20px;font-weight:700;color:${PALETA.tinta};">MéTRIK ONE</div>
+              <div style="height:2px;width:42px;background:${PALETA.acento};margin-top:4px;"></div>
+            </td>
+          </tr></table>
         </td></tr>
         <tr><td style="padding:12px 28px 22px 28px;font-size:14px;line-height:1.6;">
           ${cuerpo}
+        </td></tr>
+        <tr><td style="padding:14px 28px 20px 28px;border-top:1px solid #E5E7EB;font-size:11px;line-height:1.5;color:${PALETA.tintaSuave};">
+          <strong style="color:${PALETA.tinta};">${PIE_MARCA.linea1}</strong><br>
+          ${PIE_MARCA.linea2}
         </td></tr>
       </table>
     </td></tr>
@@ -106,6 +128,7 @@ function textoDeBloques(bloques: Bloque[]): string {
       if (b.tipo === 'boton') return `${b.etiqueta}: ${b.url}`
       return `${b.nombre}: ${b.url}`
     })
+    .concat([`--\n${PIE_MARCA.linea1}\n${PIE_MARCA.linea2}`])
     .join('\n\n')
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { slugDeEntrada, urlDelEspacio, urlLoginGeneral } from './direcciones'
 import { LimiteEnMemoria } from './limite'
-import { TEXTOS_LOGIN, correoBienvenidaValida, correoRecuperarEspacio } from './textos'
+import { LOGO_URL, PIE_MARCA, TEXTOS_LOGIN, correoBienvenidaValida, correoRecuperarEspacio } from './textos'
 import {
   VENTANA_RECUPERAR_MS,
   correoSolicitado,
@@ -195,6 +195,21 @@ describe('textos de cara al cliente', () => {
 
   it('un solo espacio: asunto en singular', () => {
     expect(recuperar.subject).toBe('La dirección de tu espacio en MéTRIK ONE')
+  })
+
+  it('los dos correos llevan la marca: logo hospedado arriba y pie de marca, en HTML y en texto', () => {
+    expect(LOGO_URL).toMatch(/^https:\/\/metrikone\.co\/icons\/metrik-icono-192\.png$/)
+    for (const c of [bienvenida, recuperar]) {
+      expect(c.html).toMatch(new RegExp(`<img src="${LOGO_URL.replace(/[.]/g, '\\.')}"[^>]*alt="MéTRIK"`))
+      // El logo va antes del cuerpo y el pie después.
+      expect(c.html.indexOf(LOGO_URL)).toBeLessThan(c.html.indexOf('Hola:'))
+      expect(c.html.indexOf(PIE_MARCA.linea1)).toBeGreaterThan(c.html.indexOf('Hola:'))
+      expect(c.html).toContain(PIE_MARCA.linea2)
+      expect(c.text.endsWith(`--\n${PIE_MARCA.linea1}\n${PIE_MARCA.linea2}`)).toBe(true)
+      // Sin adjuntos ni imágenes embebidas.
+      expect(c.html).not.toContain('data:image')
+      expect(c.html).not.toContain('cid:')
+    }
   })
 
   it('sin léxico vetado de marca', () => {
