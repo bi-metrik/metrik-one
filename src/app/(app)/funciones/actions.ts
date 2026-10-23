@@ -10,7 +10,7 @@ import { revalidatePath } from 'next/cache'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
-import { mensajeDeError } from '@/lib/funciones/reglas'
+import { mensajeDeError, preventaPasaLaFuncion } from '@/lib/funciones/reglas'
 import { codigoCampana, nombreCampana } from '@/lib/funciones/agenda-texto'
 import { leerNegocio, leerPanelCampana, type CampanaPanel, type FichaExperienciaDatos, type Negocio } from '@/lib/funciones/datos'
 
@@ -150,6 +150,8 @@ export interface PreciosCampana {
   abono_persona: number | null
   permite_pago_total: boolean
   tope_sobreventa: number | null
+  /** Plazo del saldo: días antes de la función (1 a 30). */
+  dias_saldo_antes: number
 }
 
 const preciosParaBase = (pr: PreciosCampana) => ({
@@ -158,6 +160,8 @@ const preciosParaBase = (pr: PreciosCampana) => ({
   abono_persona: pesoONulo(pr.abono_persona),
   permite_pago_total: !!pr.permite_pago_total,
   tope_sobreventa: pesoONulo(pr.tope_sobreventa),
+  // Fuera de rango llega tal cual: la base responde `dias_saldo_invalido` y no se inventa un valor.
+  dias_saldo_antes: pr.dias_saldo_antes,
 })
 
 export interface LineaAgenda {
@@ -191,7 +195,7 @@ async function crearLote(db: SupabaseClient, ws: string, campanaId: string, line
 const lineasValidas = (lineas: LineaAgenda[]) =>
   Array.isArray(lineas) && lineas.length > 0 && lineas.length <= 60
   && lineas.every((l) => /^\d{4}-\d{2}-\d{2}$/.test(l.fecha) && /^([01]\d|2[0-3]):[0-5]\d$/.test(l.hora)
-    && (l.preventa_hasta === null || (/^\d{4}-\d{2}-\d{2}$/.test(l.preventa_hasta) && l.preventa_hasta <= l.fecha)))
+    && (l.preventa_hasta === null || (/^\d{4}-\d{2}-\d{2}$/.test(l.preventa_hasta) && !preventaPasaLaFuncion(l.preventa_hasta, l.fecha))))
 
 /**
  * Paso 2 de «Crear una campaña»: «Seguir guarda el borrador». Nombre, fechas y código salen solos (de la experiencia y

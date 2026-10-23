@@ -2,9 +2,9 @@
 // Funciones — los tres textos que salen de la ficha en ONE (P11, §1.8 del diseño de la etapa 2). La LÓGICA.
 // ------------------------------------------------------------
 //   a) generarOferta:          el post de Instagram, con TODAS las funciones a la venta. Límite 2.200 caracteres.
-//   b) generarMensajeDirecto:  la misma oferta por mensaje directo de Instagram, SIN la lista de funciones: nombra la
-//                              campaña y ofrece los horarios aparte. Límite 1.000 BYTES UTF-8 (tildes y ñ ocupan 2,
-//                              emojis 4).
+//   b) generarMensajeDirecto:  la misma oferta por mensaje directo de Instagram, SIN la intro y SIN la lista de
+//                              funciones (23-oct): título, gancho, qué incluye, precio, y nombra la campaña y ofrece
+//                              los horarios aparte. Límite 1.000 BYTES UTF-8 (tildes y ñ ocupan 2, emojis 4).
 //   c) generarBienvenida:      la bienvenida al grupo de WhatsApp de UNA función.
 // QUÉ dicen vive en `textos-plantilla.ts`; aquí se resuelven los valores y las reglas:
 //   · Toda fecha y hora sale de la función (día, hora, llegada −10 min, inicio +10 min) o de su preventa (fecha de
@@ -13,8 +13,10 @@
 //     preventa vigente, el de preventa con su fecha de fin y el regular como contexto; vencida, el regular.
 //   · Los textos libres de la ficha y del lugar van TAL CUAL (con sus emojis). Un campo vacío sale «[FALTA: campo]», va
 //     en `faltantes` y el texto NO se deja copiar.
-//   · El pago va solo por el link de Bold: si un texto libre menciona Nequi o Daviplata, no se deja copiar.
+//   · El pago va solo por el link de Bold: si un texto libre menciona Nequi o Daviplata, sale un AVISO que NO bloquea
+//     copiar (23-oct); el equipo decide.
 //   · Pasado el límite, NO se corta: se dice cuánto sobra y qué partes se podrían recortar, y no se deja copiar.
+//   · El plazo del saldo («paga el saldo N días antes») sale de la campaña (`dias_saldo_antes`).
 // Puras: sin red ni reloj (la hora de «a la venta» llega como `ahoraMs`). Las usan el panel (Next) y, cuando se
 // conecte, el asistente.
 // ============================================================
@@ -70,6 +72,14 @@ export interface TextoGenerado {
   copiable: boolean;
   /** Por qué no se deja copiar, en llano; `null` si se puede. */
   motivo: string | null;
+  /** Lo que conviene revisar pero NO bloquea copiar (Nequi o Daviplata en un texto libre). */
+  avisos: string[];
+}
+
+/** Lo de la campaña que usan los textos de la oferta. */
+export interface CampanaTextos {
+  /** Días antes de la función en que se paga el saldo (≥ 1; la base lo llena con 1). */
+  dias_saldo_antes: number;
 }
 
 const BYTES = new TextEncoder();
@@ -81,8 +91,10 @@ export function pesosTexto(n: number): string {
   return `$${String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
 
-/** Ningún texto lleva otro medio de pago: el pago va solo por el link de Bold (P11). */
+/** El pago va solo por el link de Bold (P11): si un texto libre nombra otro medio, se avisa (no bloquea, 23-oct). */
 const OTRO_PAGO = /nequi|davi\s*plata/i;
+export const AVISO_OTRO_PAGO =
+  'El texto menciona Nequi o Daviplata: el pago va por el link de Bold. Revísalo en la ficha o en el lugar antes de publicar.';
 const mayuscula = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const MINUTO = 60_000;
 
@@ -122,7 +134,6 @@ function medir(
     : [];
   const motivos = [
     faltantes.length > 0 && `Falta en la ficha: ${faltantes.join(', ')}.`,
-    OTRO_PAGO.test(texto) && 'El texto menciona Nequi o Daviplata: el pago va solo por el link de Bold. Quítalo de la ficha o del lugar.',
     sobra > 0 && limite && `Sobran ${sobra} ${limite.unidad} (el límite es ${pesosTexto(limite.maximo).slice(1)}). Se podría recortar: ${recortaria.map((r) => `${r.parte} (${r.medida})`).join(', ')}.`,
   ].filter(Boolean) as string[];
   return {
@@ -135,16 +146,19 @@ function medir(
     recortaria,
     copiable: motivos.length === 0,
     motivo: motivos.length ? motivos.join(' ') : null,
+    avisos: OTRO_PAGO.test(texto) ? [AVISO_OTRO_PAGO] : [],
   };
 }
 
-/** Las partes comunes de la oferta (post y directo) que salen de la ficha y del lugar. */
-function partesComunes(ficha: FichaTextos, negocio: NegocioTextos, f: ReturnType<typeof faltas>) {
+/** Las partes comunes de la oferta (post y directo) que salen de la ficha y del lugar. El directo va sin intro. */
+function partesComunes(ficha: FichaTextos, negocio: NegocioTextos, f: ReturnType<typeof faltas>, conIntro: boolean) {
   const incluye = (ficha.que_incluye ?? []).map((x) => x.trim()).filter(Boolean);
+  const titulo = f.valor(ficha.titulo_oferta, 'título de la oferta');
+  const gancho = f.valor(ficha.frase_gancho, 'frase gancho');
   return {
-    titulo: f.valor(ficha.titulo_oferta, 'título de la oferta'),
-    gancho: f.valor(ficha.frase_gancho, 'frase gancho'),
-    intro: f.valor(ficha.intro, 'intro'),
+    titulo,
+    gancho,
+    intro: conIntro ? f.valor(ficha.intro, 'intro') : null,
     incluye: incluye.length ? incluye : [f.valor(null, 'qué incluye')],
     // Las cuatro de arriba primero: así salen los faltantes en el orden del texto.
     _direccion: () => f.valor(negocio.direccion, 'dirección'),
@@ -156,17 +170,30 @@ function partesComunes(ficha: FichaTextos, negocio: NegocioTextos, f: ReturnType
 const regularDe = (t: TarifaPublica) => (t.tarifa === 'preventa' ? t.precio_completo_persona : t.precio_persona);
 const unicos = <T,>(xs: T[]) => [...new Set(xs)];
 
-/** El abono común de las funciones (o `null` si ninguna se aparta con abono). */
-function lineaAbono(vendibles: FuncionTextos[]): string | null {
+/** El plazo del saldo de la campaña: entero ≥ 1. Si no llega (no debería: la base lo llena con 1), se pide. */
+function plazoSaldo(campana: CampanaTextos, f: ReturnType<typeof faltas>): string {
+  const d = campana.dias_saldo_antes;
+  return Number.isInteger(d) && d >= 1 ? TEXTO_OFERTA.plazoSaldo(d) : f.valor(null, 'días antes para el saldo');
+}
+
+/** El abono común de las funciones (o `null` si ninguna se aparta con abono), con el plazo del saldo de la campaña. */
+function lineaAbono(vendibles: FuncionTextos[], campana: CampanaTextos, f: ReturnType<typeof faltas>): string | null {
   const abonos = unicos(vendibles.map((x) => x.tarifa.abono_persona));
   if (abonos.every((a) => a === null)) return null;
-  return abonos.length === 1 ? TEXTO_OFERTA.abono(pesosTexto(abonos[0]!)) : TEXTO_OFERTA.abonoVarios;
+  const plazo = plazoSaldo(campana, f);
+  return abonos.length === 1 ? TEXTO_OFERTA.abono(pesosTexto(abonos[0]!), plazo) : TEXTO_OFERTA.abonoVarios(plazo);
 }
 
 /** a) El post de Instagram de la campaña: todas las funciones a la venta, con día y hora completos. */
-export function generarOferta(o: { ficha: FichaTextos; negocio: NegocioTextos; funciones: FuncionTextos[]; ahoraMs: number }): TextoGenerado {
+export function generarOferta(o: {
+  ficha: FichaTextos;
+  negocio: NegocioTextos;
+  campana: CampanaTextos;
+  funciones: FuncionTextos[];
+  ahoraMs: number;
+}): TextoGenerado {
   const f = faltas();
-  const c = partesComunes(o.ficha, o.negocio, f);
+  const c = partesComunes(o.ficha, o.negocio, f, true);
   const vendibles = funcionesALaVenta(o.funciones, o.ahoraMs);
   const regulares = unicos(vendibles.map((x) => regularDe(x.tarifa)));
   const unRegular = regulares.length === 1;
@@ -180,12 +207,13 @@ export function generarOferta(o: { ficha: FichaTextos; negocio: NegocioTextos; f
   }
   if (vendibles.length === 0) lineas.push(f.valor(null, 'funciones a la venta'));
   const precios = unRegular ? [TEXTO_OFERTA.regular(f.precio(regulares[0], 'precio regular'))] : [];
+  const abono = lineaAbono(vendibles, o.campana, f);
   const direccion = c._direccion();
   const emojis = c._emojis();
   const agenda = lineas.join('\n');
   const texto = plantillaOferta({
     titulo: c.titulo, gancho: c.gancho, intro: c.intro, incluye: c.incluye,
-    agenda: { tipo: 'funciones', lineas }, precios, abono: lineaAbono(vendibles), direccion, emojis,
+    agenda: { tipo: 'funciones', lineas }, precios, abono, direccion, emojis,
   });
   return medir(texto, f.lista, { unidad: 'caracteres', maximo: LIMITE_POST_CARACTERES }, [
     { parte: 'la intro', texto: (o.ficha.intro ?? '').trim() },
@@ -197,19 +225,19 @@ export function generarOferta(o: { ficha: FichaTextos; negocio: NegocioTextos; f
 }
 
 /**
- * b) La oferta por mensaje directo de Instagram: sin la lista de funciones (nombra la campaña y ofrece los horarios
- * aparte). Los precios van si son los mismos en todas las funciones a la venta; si cambian, se dice que van con cada
+ * b) La oferta por mensaje directo de Instagram: sin la intro y sin la lista de funciones (nombra la campaña y ofrece
+ * los horarios aparte), para quedar con margen bajo los 1.000 bytes (23-oct). Los precios van si son los mismos en todas las funciones a la venta; si cambian, se dice que van con cada
  * horario: ningún número que no sea de todas.
  */
 export function generarMensajeDirecto(o: {
   ficha: FichaTextos;
   negocio: NegocioTextos;
-  campana: { nombre: string };
+  campana: CampanaTextos & { nombre: string };
   funciones: FuncionTextos[];
   ahoraMs: number;
 }): TextoGenerado {
   const f = faltas();
-  const c = partesComunes(o.ficha, o.negocio, f);
+  const c = partesComunes(o.ficha, o.negocio, f, false);
   const vendibles = funcionesALaVenta(o.funciones, o.ahoraMs);
   const precios: string[] = [];
   if (vendibles.length === 0) {
@@ -228,15 +256,15 @@ export function generarMensajeDirecto(o: {
     const regulares = unicos(vendibles.map((x) => regularDe(x.tarifa)));
     precios.push(regulares.length === 1 ? TEXTO_OFERTA.regular(f.precio(regulares[0], 'precio regular')) : TEXTO_OFERTA.regularVarios);
   }
+  const abono = lineaAbono(vendibles, o.campana, f);
   const direccion = c._direccion();
   const emojis = c._emojis();
   const campana = f.valor(o.campana.nombre, 'nombre de la campaña');
   const texto = plantillaOferta({
-    titulo: c.titulo, gancho: c.gancho, intro: c.intro, incluye: c.incluye,
-    agenda: { tipo: 'campana', campana }, precios, abono: lineaAbono(vendibles), direccion, emojis,
+    titulo: c.titulo, gancho: c.gancho, intro: null, incluye: c.incluye,
+    agenda: { tipo: 'campana', campana }, precios, abono, direccion, emojis,
   });
   return medir(texto, f.lista, { unidad: 'bytes', maximo: LIMITE_DIRECTO_BYTES }, [
-    { parte: 'la intro', texto: (o.ficha.intro ?? '').trim() },
     { parte: 'qué incluye', texto: c.incluye.join('\n') },
     { parte: 'la frase gancho', texto: (o.ficha.frase_gancho ?? '').trim() },
     { parte: 'el título', texto: (o.ficha.titulo_oferta ?? '').trim() },

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { leerAgenda } from '@/lib/funciones/agenda-texto'
+import { preventaPasaLaFuncion } from '@/lib/funciones/reglas'
 import type { LineaAgenda } from './actions'
 
 type ModoPreventa = 'ninguna' | 'todas' | 'elegir'
@@ -28,7 +29,7 @@ export function AgendaEditor({ onCambio, ahoraMs }: { onCambio: (lineas: LineaAg
       }),
     [lecturas, modo, preventa, hasta],
   )
-  const preventaPasa = lineas.find((l) => l.preventa_hasta && l.preventa_hasta > l.fecha)
+  const preventaPasa = lineas.find((l) => preventaPasaLaFuncion(l.preventa_hasta, l.fecha))
 
   useEffect(() => {
     if (lecturas.length === 0 || errores > 0 || preventaPasa) return onCambio(null)

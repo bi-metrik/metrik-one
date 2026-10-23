@@ -9,8 +9,12 @@
 // Lo que cambió frente a los mensajes reales, por decisión de Mauricio (P11, 2026-10-23):
 //   · El pago va SOLO por el link de Bold, que llega por el chat: ni Nequi ni Daviplata ni su número.
 //   · «Para reservar» sin «comprobante de pago» (Bold confirma solo).
-//   · Pagos pendientes del grupo: el texto propuesto de §1.8.
-//   · El párrafo de la puerta cerrada sin la frase temática de Jack («Recuerden… ¡Jack tiene todo preparado…»).
+//   · La línea del pago (oferta) y los pagos pendientes del grupo: los textos aprobados de §1.8 (23-oct).
+//   · El párrafo de la puerta cerrada sin la frase temática de Jack («Recuerden… ¡Jack tiene todo preparado…») y la
+//     recepción del lugar sin «nuestro pequeño rincón entre Halloween Town y Christmas Town»: esas frases con tema van
+//     en el saludo temático de cada experiencia; lo del negocio queda sin tema (23-oct).
+//   · El mensaje directo va sin la intro (23-oct): gancho, qué incluye, precio y los horarios aparte.
+//   · «paga el saldo 1 día antes» sale del plazo del saldo de la campaña («N días antes»).
 // Pura: sin red, sin reloj.
 // ============================================================
 
@@ -18,7 +22,8 @@
 export interface PartesOferta {
   titulo: string;
   gancho: string;
-  intro: string;
+  /** `null` en el mensaje directo: va sin la intro (23-oct). */
+  intro: string | null;
   /** Una línea por cosa incluida. */
   incluye: string[];
   /** Post: las funciones (día y hora, y su preventa debajo). Mensaje directo: solo el nombre de la campaña. */
@@ -40,13 +45,16 @@ export const TEXTO_OFERTA = {
   preventaVarias: '🎟️ Preventa en algunos horarios: te contamos el precio con cada horario.',
   regular: (precio: string) => `🎫 Boletería regular: ${precio}`,
   regularVarios: '🎫 Boletería regular: te contamos el precio con cada horario.',
-  abono: (abono: string) => `✨ Reserva con ${abono} por cupo y paga el saldo 1 día antes.`,
-  abonoVarios: '✨ Reserva con un abono por cupo y paga el saldo 1 día antes.',
+  /** «1 día antes» o «N días antes»: el plazo del saldo de la campaña. */
+  plazoSaldo: (dias: number) => (dias === 1 ? '1 día antes' : `${dias} días antes`),
+  abono: (abono: string, plazo: string) => `✨ Reserva con ${abono} por cupo y paga el saldo ${plazo}.`,
+  abonoVarios: (plazo: string) => `✨ Reserva con un abono por cupo y paga el saldo ${plazo}.`,
   /** El mensaje directo no lista funciones (pesa 1.000 bytes como máximo): nombra la campaña y ofrece los horarios. */
   agendaDirecto: (campana: string) => `📅 ${campana}: te compartimos por este chat los horarios disponibles.`,
   direccion: (direccion: string) => `📍 ${direccion}`,
   paraReservar: '📝 Para reservar: nombre completo, cédula, celular y horario elegido.',
-  pago: '💳 Te enviamos el link de pago por este chat.',
+  /** Aprobado tal cual (23-oct), sin punto final. */
+  pago: '💳 Te enviamos el link de pago por este chat',
   cierre: (emojis: string) => `${emojis} ¡Cupos limitados! Elige tu horario y prepárate para una experiencia inolvidable. ✨`,
 };
 

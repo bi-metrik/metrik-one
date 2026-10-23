@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inicioBogota, insigniaFuncion, mensajeDeError, pesos, rangoDiaBogota, reservaActiva } from './reglas'
+import { DIAS_SALDO, diaBogota, diasSaldoValido, inicioBogota, insigniaFuncion, mensajeDeError, pesos, preventaPasaLaFuncion, rangoDiaBogota, reservaActiva } from './reglas'
 
 describe('reglas del módulo funciones', () => {
   it('reservaActiva usa la misma definición que la base', () => {
@@ -31,5 +31,22 @@ describe('reglas del módulo funciones', () => {
     expect(insigniaFuncion({ ...f, estado: 'pausada' })).toBe('Pausada')
     expect(insigniaFuncion({ ...f, estado: 'cancelada', ocupadas: 35 })).toBe('Cancelada')
     expect([pesos(180000), pesos(null)]).toEqual(['$180.000', '—'])
+  })
+
+  it('la fecha de fin de la preventa no pasa el día de Bogotá de la función (el formulario, como la base)', () => {
+    expect(diaBogota('2026-10-24T18:00:00.000Z')).toBe('2026-10-24')
+    // 10:00 p. m. del 24 en Bogotá ya es el 25 en UTC: cuenta el 24.
+    expect(diaBogota('2026-10-25T03:00:00.000Z')).toBe('2026-10-24')
+    expect(preventaPasaLaFuncion('2026-10-25', '2026-10-24')).toBe(true)
+    expect(preventaPasaLaFuncion('2026-10-24', '2026-10-24')).toBe(false)
+    expect(preventaPasaLaFuncion('2026-10-15', '2026-10-24')).toBe(false)
+    expect(preventaPasaLaFuncion(null, '2026-10-24')).toBe(false)
+    expect(preventaPasaLaFuncion('', '2026-10-24')).toBe(false)
+  })
+
+  it('el plazo del saldo: entero de 1 a 30, por defecto 1', () => {
+    expect(DIAS_SALDO.porDefecto).toBe(1)
+    expect([1, 2, 30].map(diasSaldoValido)).toEqual([true, true, true])
+    expect([0, -1, 31, 1.5, null, undefined, Number.NaN].map(diasSaldoValido)).toEqual([false, false, false, false, false, false, false])
   })
 })

@@ -15,6 +15,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
+import { generarMensajeDirecto, generarOferta, type FuncionTextos } from '../../../supabase/functions/_shared/funciones/textos'
+import type { TarifaPublica } from '../../../supabase/functions/_shared/funciones/tipos'
+import { diaBogota, diasSaldoValido, mensajeDeError, preventaPasaLaFuncion } from './reglas'
 
 const RAIZ = process.cwd()
 const leer = (ruta: string) => readFileSync(join(RAIZ, ruta), 'utf8')
@@ -1217,5 +1220,117 @@ describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () =>
     expect(d.funciones[0].es_preventa).toBe(true)
     expect(d.funciones[0].preventa_hasta).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(d.funciones[0].tarifa.tarifa).toBe('preventa')
+  })
+})
+
+describe('el plazo del saldo de la campaña (23-oct): solo el dato y el texto', () => {
+  const guardar = (exp: string, cod: string, precios: unknown, id: string | null = null) =>
+    rpc<string>(`select funcion_guardar_campana($1, $2, $3, 'Jack octubre', $4, null, null, 'borrador', 30, $5::jsonb) as r`,
+      [WS, id, exp, cod, JSON.stringify(precios)])
+  const dias = async (id: string) => (await q<{ d: number }>(`select dias_saldo_antes as d from funcion_campanas where id = $1`, [id]))[0].d
+  const nuevaExperiencia = () => rpc<string>(`select funcion_guardar_experiencia($1, null, '{"nombre": "[PRUEBA] Jack"}'::jsonb) as r`, [WS])
+
+  it('viene lleno con 1, se cambia, sale en los dos paneles y la copia lo conserva', async () => {
+    const exp = await nuevaExperiencia()
+    const cod = codigo_()
+    const id = await guardar(exp, cod, { precio_persona: 180_000 })
+    expect(await dias(id)).toBe(1)
+    await guardar(exp, cod, { precio_persona: 180_000, dias_saldo_antes: 3 }, id)
+    expect(await dias(id)).toBe(3)
+    expect((await rpc<{ dias_saldo_antes: number }>(`select funcion_panel_campana($1) as r`, [id])).dias_saldo_antes).toBe(3)
+    const lista = await rpc<Array<{ campana_id: string; dias_saldo_antes: number }>>(`select funcion_panel_campanas($1) as r`, [WS])
+    expect(lista.find((c) => c.campana_id === id)?.dias_saldo_antes).toBe(3)
+    const copia = await rpc<string>(`select funcion_duplicar_campana($1) as r`, [id])
+    expect(await dias(copia)).toBe(3)
+    // Nulo o ausente = el valor por defecto (1), como los demás datos de la campaña.
+    await guardar(exp, cod, { precio_persona: 180_000, dias_saldo_antes: null }, id)
+    expect(await dias(id)).toBe(1)
+    // Una campaña cargada por SQL sin el dato también queda en 1.
+    const e = await escenario()
+    expect(await dias(e.campana)).toBe(1)
+  })
+
+  it('va de 1 a 30 días, entero: la RPC y la tabla rechazan lo demás, y la pantalla aplica la misma regla', async () => {
+    const exp = await nuevaExperiencia()
+    for (const malo of [0, -1, 31, 1.5, '2', true]) {
+      expect(await codigo(guardar(exp, codigo_(), { precio_persona: 180_000, dias_saldo_antes: malo }))).toBe('dias_saldo_invalido')
+      expect(diasSaldoValido(typeof malo === 'number' ? malo : null)).toBe(false)
+    }
+    for (const bueno of [1, 30]) {
+      expect(await codigo(guardar(exp, codigo_(), { precio_persona: 180_000, dias_saldo_antes: bueno }))).toBe('ok')
+      expect(diasSaldoValido(bueno)).toBe(true)
+    }
+    const e = await escenario()
+    expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = 0 where id = $1`, [e.campana]))).toMatch(/dias_saldo_antes_check/)
+    expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = null where id = $1`, [e.campana]))).toMatch(/null value/)
+    expect(mensajeDeError({ message: 'dias_saldo_invalido' })).toBe('Los días antes para pagar el saldo van de 1 a 30.')
+  })
+
+  it('no construye nada del saldo: ni link, ni pago, ni plazo de link (P14)', () => {
+    expect(FUNCIONES).not.toMatch(/link_saldo|pago_saldo|saldo_vence|vence_link/i)
+  })
+})
+
+describe('la preventa vencida con el interruptor encendido, en los textos (23-oct)', () => {
+  const HOY = `((now() at time zone 'America/Bogota')::date)`
+  const FICHA = {
+    titulo_oferta: '🎃💀 EL EXTRAÑO MUNDO DE JACK', frase_gancho: '¿Qué pasa cuando Halloween y Navidad se encuentran?', intro: 'Intro.',
+    que_incluye: ['🍽️ 5 tiempos'], emojis_tema: '🎃🖤', saludo_grupo: 'Hola', relato_grupo: 'Fin',
+  }
+  const NEGOCIO = { direccion: '[PRUEBA] Calle 1', piso: '2', recepcion: 'R', parqueadero: 'P', firma: 'F' }
+  interface Panel {
+    nombre: string
+    dias_saldo_antes: number
+    funciones: Array<{ inicia_at: string; estado: 'activa'; es_preventa: boolean; ocupadas: number; capacidad: number; tarifa: TarifaPublica }>
+  }
+  /** Los textos con lo que devuelve la base, como los arma la pantalla (`textos-ui.tsx`). */
+  const textos = async (campana: string) => {
+    const c = await rpc<Panel>(`select funcion_panel_campana($1) as r`, [campana])
+    const funciones: FuncionTextos[] = c.funciones.map((f) => ({ inicia_at: f.inicia_at, estado: f.estado, llena: f.ocupadas >= f.capacidad, tarifa: f.tarifa }))
+    const ahoraMs = Date.now()
+    return {
+      c,
+      post: generarOferta({ ficha: FICHA, negocio: NEGOCIO, campana: { dias_saldo_antes: c.dias_saldo_antes }, funciones, ahoraMs }).texto,
+      directo: generarMensajeDirecto({ ficha: FICHA, negocio: NEGOCIO, campana: { nombre: c.nombre, dias_saldo_antes: c.dias_saldo_antes }, funciones, ahoraMs }).texto,
+    }
+  }
+  const precios = { precio: 180_000, preventa: 170_000, abono: 100_000, esPreventa: true }
+
+  it('vencida (ayer), rige el regular aunque el interruptor siga encendido: ni el post ni el directo anuncian preventa', async () => {
+    const e = await escenario({ ...precios, preventaHasta: `${HOY} - 1` })
+    const t = await textos(e.campana)
+    expect(t.c.funciones[0].es_preventa).toBe(true)
+    for (const x of [t.post, t.directo]) {
+      expect(x).not.toMatch(/Preventa|170\.000/)
+      expect(x).toContain('🎫 Boletería regular: $180.000')
+    }
+  })
+
+  it('vigente (hoy, inclusive), el precio de preventa con su fecha de fin y el regular de contexto', async () => {
+    const e = await escenario({ ...precios, preventaHasta: HOY })
+    const t = await textos(e.campana)
+    for (const x of [t.post, t.directo]) {
+      expect(x).toMatch(/🎟️ Preventa: \$170\.000 por persona \(hasta el \d{1,2} de [a-z]+\)/)
+      expect(x).toContain('🎫 Boletería regular: $180.000')
+    }
+  })
+
+  it('el formulario aplica la misma regla que la base para la fecha de fin, también cerca de la medianoche', async () => {
+    const e = await escenario({ precio: 180_000, preventa: 170_000 })
+    // Sábado 24 de octubre de 2099 a las 10:00 p. m. de Bogotá: en UTC ya es el 25. El día que cuenta es el 24.
+    const tarde = uuid()
+    await q(`insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente)
+             values ($1, $2, $3, '2099-10-25T03:00:00Z', 10, 10)`, [tarde, WS, e.campana])
+    for (const f of [e.funcion, tarde]) {
+      const [x] = await q<{ iso: string }>(`select to_char(inicia_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as iso from funcion_funciones where id = $1`, [f])
+      const dia = diaBogota(x.iso)
+      const [antes, despues] = (await q<{ a: string; d: string }>(`select to_char($1::date - 1, 'YYYY-MM-DD') as a, to_char($1::date + 1, 'YYYY-MM-DD') as d`, [dia]))
+        .map((r) => [r.a, r.d])[0]
+      for (const hasta of [antes, dia, despues]) {
+        const base = await codigo(rpc(`select funcion_cambiar_preventa($1, true, $2::date) as r`, [f, hasta]))
+        expect({ hasta, base }).toEqual({ hasta, base: preventaPasaLaFuncion(hasta, dia) ? 'preventa_despues_de_funcion' : 'ok' })
+      }
+    }
+    expect(diaBogota('2099-10-25T03:00:00Z')).toBe('2099-10-24')
   })
 })

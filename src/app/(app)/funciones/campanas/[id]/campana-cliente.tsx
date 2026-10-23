@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { MoreVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CampanaPanel, FuncionAgenda, Negocio } from '@/lib/funciones/datos'
-import { ETIQUETA_ESTADO_CAMPANA, insigniaFuncion, pesos } from '@/lib/funciones/reglas'
+import { DIAS_SALDO, diaBogota, diasSaldoValido, ETIQUETA_ESTADO_CAMPANA, insigniaFuncion, pesos, preventaPasaLaFuncion } from '@/lib/funciones/reglas'
 import { fechaCortaTexto } from '../../../../../../supabase/functions/_shared/funciones/fecha-texto.ts'
 import { generarBienvenida, generarMensajeDirecto, generarOferta } from '../../../../../../supabase/functions/_shared/funciones/textos.ts'
 import {
@@ -43,7 +43,7 @@ type HojaAbierta =
 /**
  * La campaña (§4.2, §4.5, §4.6): estado, código copiable, precios, agenda y el ⋮ de la campaña, con los tres textos de
  * la ficha (P11): el post («Publicar y copiar post» lo copia), el mensaje directo y, en cada función, la bienvenida al
- * grupo. Un texto con «[FALTA: …]», pasado de su límite o con Nequi/Daviplata no se deja copiar.
+ * grupo. Un texto con «[FALTA: …]» o pasado de su límite no se deja copiar; con Nequi/Daviplata solo avisa.
  */
 export function CampanaCliente({ campana: c, negocio, puedeEditar, ahoraMs }: { campana: CampanaPanel; negocio: Negocio; puedeEditar: boolean; ahoraMs: number }) {
   const router = useRouter()
@@ -54,8 +54,8 @@ export function CampanaCliente({ campana: c, negocio, puedeEditar, ahoraMs }: { 
   const vivas = c.funciones.filter((f) => f.estado !== 'cancelada')
   const ultima = c.funciones[c.funciones.length - 1]
   const ficha = fichaParaTextos(c)
-  const oferta = generarOferta({ ficha, negocio, funciones: funcionesParaTextos(c.funciones), ahoraMs })
-  const directo = generarMensajeDirecto({ ficha, negocio, campana: { nombre: c.nombre }, funciones: funcionesParaTextos(c.funciones), ahoraMs })
+  const oferta = generarOferta({ ficha, negocio, campana: { dias_saldo_antes: c.dias_saldo_antes }, funciones: funcionesParaTextos(c.funciones), ahoraMs })
+  const directo = generarMensajeDirecto({ ficha, negocio, campana: { nombre: c.nombre, dias_saldo_antes: c.dias_saldo_antes }, funciones: funcionesParaTextos(c.funciones), ahoraMs })
   const bienvenida = (f: FuncionAgenda) => generarBienvenida({ ficha, negocio, funcion: { inicia_at: f.inicia_at } })
 
   /** «Publicar y copiar post»: copia el post que ya se mostró (dentro del toque) y publica. */
@@ -150,6 +150,7 @@ export function CampanaCliente({ campana: c, negocio, puedeEditar, ahoraMs }: { 
             {c.precio_preventa_persona ? ` · prev ${pesos(c.precio_preventa_persona)}` : ''}
             {c.abono_persona ? ` · abono ${pesos(c.abono_persona)}` : ''}
             {c.permite_pago_total ? '' : ' · sin pago total'}
+            {` · saldo ${c.dias_saldo_antes === 1 ? '1 día' : `${c.dias_saldo_antes} días`} antes`}
           </span>
           {puedeEditar && <button type="button" onClick={() => setHoja({ tipo: 'precios' })} className="text-[#059669] underline">Cambiar</button>}
         </div>
@@ -396,7 +397,7 @@ function MenuCampana(p: {
       const r = await guardarCampanaAction(c.campana_id, {
         experiencia_id: c.experiencia.experiencia_id, nombre, codigo, desde: c.desde, hasta: c.hasta, estado: c.estado_guardado,
         minutos_apartado: c.minutos_apartado,
-        precios: { precio_persona: c.precio_persona, precio_preventa_persona: c.precio_preventa_persona, abono_persona: c.abono_persona, permite_pago_total: c.permite_pago_total, tope_sobreventa: c.tope_sobreventa },
+        precios: { precio_persona: c.precio_persona, precio_preventa_persona: c.precio_preventa_persona, abono_persona: c.abono_persona, permite_pago_total: c.permite_pago_total, tope_sobreventa: c.tope_sobreventa, dias_saldo_antes: c.dias_saldo_antes },
       })
       if (!r.ok) return void toast.error(r.error)
       toast.success('Datos guardados.')
@@ -460,6 +461,7 @@ function HojaPrecios(p: { c: CampanaPanel; onCerrar: () => void; onGuardar: (f: 
   const [total, setTotal] = useState(c.permite_pago_total)
   const [minutos, setMinutos] = useState(String(c.minutos_apartado ?? ''))
   const [tope, setTope] = useState(String(c.tope_sobreventa ?? ''))
+  const [dias, setDias] = useState(String(c.dias_saldo_antes))
   const n = (s: string) => (s.trim() ? Math.round(Number(s.replace(/[.$\s]/g, ''))) : null)
   const campo = 'mt-1 h-11 w-full rounded-md border border-[#E5E7EB] px-3 text-base'
   return (
@@ -469,11 +471,11 @@ function HojaPrecios(p: { c: CampanaPanel; onCerrar: () => void; onGuardar: (f: 
       titulo="Precios y reglas"
       efecto="Las reservas hechas conservan su precio."
       confirmar={{
-        texto: 'Guardar', pendiente: p.pendiente,
+        texto: 'Guardar', pendiente: p.pendiente || !diasSaldoValido(n(dias)),
         onConfirmar: () => p.onGuardar(() => guardarCampanaAction(c.campana_id, {
           experiencia_id: c.experiencia.experiencia_id, nombre: c.nombre, codigo: c.codigo, desde: c.desde, hasta: c.hasta,
           estado: c.estado_guardado, minutos_apartado: n(minutos),
-          precios: { precio_persona: n(precio), precio_preventa_persona: n(preventa), abono_persona: n(abono), permite_pago_total: total, tope_sobreventa: n(tope) },
+          precios: { precio_persona: n(precio), precio_preventa_persona: n(preventa), abono_persona: n(abono), permite_pago_total: total, tope_sobreventa: n(tope), dias_saldo_antes: n(dias) ?? DIAS_SALDO.porDefecto },
         })),
       }}
     >
@@ -484,6 +486,8 @@ function HojaPrecios(p: { c: CampanaPanel; onCerrar: () => void; onGuardar: (f: 
         <label className="flex items-end gap-2 pb-3"><input type="checkbox" checked={total} onChange={(e) => setTotal(e.target.checked)} className="size-5" /> Pago total</label>
         <label>Minutos de apartado<input inputMode="numeric" value={minutos} onChange={(e) => setMinutos(e.target.value)} className={campo} /></label>
         <label>Tope de sobreventa<input inputMode="numeric" value={tope} onChange={(e) => setTope(e.target.value)} className={campo} placeholder="Sin sobreventa" /></label>
+        <label className="col-span-2">Paga el saldo (días antes de la función)<input inputMode="numeric" value={dias} onChange={(e) => setDias(e.target.value)} className={campo} /></label>
+        {!diasSaldoValido(n(dias)) && <p className="col-span-2 text-xs text-red-600">Los días antes para pagar el saldo van de 1 a 30.</p>}
       </div>
     </Hoja>
   )
@@ -523,8 +527,8 @@ function etiquetaPreventa(f: FuncionAgenda): string {
 function HojaPreventa(p: { f: FuncionAgenda; pendiente: boolean; onCerrar: () => void; onGuardar: (on: boolean, hasta: string | null) => void }) {
   const [on, setOn] = useState(p.f.es_preventa)
   const [hasta, setHasta] = useState(p.f.preventa_hasta ?? '')
-  const diaFuncion = new Date(Date.parse(p.f.inicia_at) - 5 * 3_600_000).toISOString().slice(0, 10)
-  const pasa = on && !!hasta && hasta > diaFuncion
+  const diaFuncion = diaBogota(p.f.inicia_at)
+  const pasa = on && preventaPasaLaFuncion(hasta, diaFuncion)
   return (
     <Hoja
       abierta

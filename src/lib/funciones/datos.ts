@@ -177,6 +177,8 @@ export interface CampanaResumen {
   permite_pago_total: boolean
   minutos_apartado: number | null
   tope_sobreventa: number | null
+  /** Plazo del saldo: días antes de la función (1 a 30; la base lo llena con 1). */
+  dias_saldo_antes: number
   funciones: number
   llenas: number
   llenas_asistente: number
@@ -225,6 +227,8 @@ export interface CampanaPanel {
   abono_persona: number | null
   permite_pago_total: boolean
   tope_sobreventa: number | null
+  /** Plazo del saldo: días antes de la función (1 a 30; la base lo llena con 1). */
+  dias_saldo_antes: number
   experiencia: FichaExperienciaDatos & { experiencia_id: string }
   anuncios: string[]
   funciones: FuncionAgenda[]

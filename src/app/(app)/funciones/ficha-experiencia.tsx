@@ -45,7 +45,7 @@ export function FichaExperiencia({ valores, onCambio }: { valores: ValoresFicha;
           <input {...texto('frase_gancho')} className={`${campo} h-11`} placeholder="¿Qué pasa cuando Halloween y Navidad se encuentran? 🎃🎁✨" />
         </label>
         <label className="block">
-          Intro
+          Intro <span className="text-xs text-[#6B7280]">(solo en el post; el mensaje directo va sin ella)</span>
           <textarea {...texto('intro')} rows={4} className={campo} placeholder="Vive una experiencia inmersiva inspirada en…" />
         </label>
         <label className="block">
@@ -67,7 +67,7 @@ export function FichaExperiencia({ valores, onCambio }: { valores: ValoresFicha;
       <fieldset className="space-y-3">
         <legend className="font-medium text-[#1A1A1A]">La bienvenida al grupo de WhatsApp</legend>
         <label className="block">
-          Saludo del grupo <span className="text-xs text-[#6B7280]">(va antes de la fecha y la hora)</span>
+          Saludo del grupo <span className="text-xs text-[#6B7280]">(va antes de la fecha y la hora; aquí van las frases con el tema de la película, como «Jack tiene todo preparado…»)</span>
           <textarea {...texto('saludo_grupo')} rows={6} className={campo} placeholder="🎃💀 ¡Hola, habitantes de Halloween Town…" />
         </label>
         <label className="block">

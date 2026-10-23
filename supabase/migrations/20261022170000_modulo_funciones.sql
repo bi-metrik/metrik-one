@@ -251,6 +251,10 @@ create table public.funcion_campanas (
   -- Hasta cuántas personas puede confirmar UNA PERSONA del equipo por encima de la capacidad, al resolver un pago que
   -- llegó sin cupo (`funcion_resolver_pendiente`). Nulo = sin sobreventa. Nada automático pasa de la capacidad.
   tope_sobreventa integer check (tope_sobreventa is null or tope_sobreventa between 1 and 10000),
+  -- Plazo del saldo (23-oct): cuántos días antes de la función se paga el saldo. Lo dice la oferta («…y paga el saldo
+  -- 1 día antes»). Desde 1: con 0 el saldo se pagaría el mismo día de la función, sin margen para verificar el pago
+  -- antes de abrir la puerta. Hoy es SOLO el dato y el texto: el link del saldo y su vencimiento esperan la P14.
+  dias_saldo_antes integer not null default 1 check (dias_saldo_antes between 1 and 30),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint funcion_campanas_experiencia foreign key (experiencia_id, workspace_id)
@@ -1622,7 +1626,7 @@ revoke execute on function public.funcion_guardar_experiencia(uuid, uuid, jsonb)
 grant execute on function public.funcion_guardar_experiencia(uuid, uuid, jsonb) to authenticated;
 
 -- Crea (p_campana_id nulo) o edita una campaña. `p_precios` = {precio_persona, precio_preventa_persona, abono_persona,
--- permite_pago_total}. El código se guarda en mayúsculas y no cambia después de publicar. `activa` solo con la agenda
+-- permite_pago_total, tope_sobreventa, dias_saldo_antes} (`dias_saldo_antes`: entero de 1 a 30; ausente o nulo = 1). El código se guarda en mayúsculas y no cambia después de publicar. `activa` solo con la agenda
 -- publicada (para eso está `funcion_publicar_agenda`).
 create or replace function public.funcion_guardar_campana(
   p_workspace_id uuid,
@@ -1648,6 +1652,7 @@ declare
   v_preventa integer;
   v_abono integer;
   v_permite boolean;
+  v_dias integer := 1;
   v_publicada timestamptz;
   v_id uuid;
 begin
@@ -1673,7 +1678,14 @@ begin
   if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
     raise exception 'experiencia_no_existe' using errcode = 'P0001';
   end if;
-  perform public.funcion_validar_precios(p_precios, array['precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa']);
+  perform public.funcion_validar_precios(p_precios, array['precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa', 'dias_saldo_antes']);
+  if p_precios ? 'dias_saldo_antes' and jsonb_typeof(p_precios->'dias_saldo_antes') <> 'null' then
+    if jsonb_typeof(p_precios->'dias_saldo_antes') <> 'number' or (p_precios->>'dias_saldo_antes') !~ '^[0-9]{1,2}$'
+       or (p_precios->>'dias_saldo_antes')::integer not between 1 and 30 then
+      raise exception 'dias_saldo_invalido' using errcode = 'P0001', detail = p_precios->>'dias_saldo_antes';
+    end if;
+    v_dias := (p_precios->>'dias_saldo_antes')::integer;
+  end if;
   v_precio := public.funcion_precio_de(p_precios, 'precio_persona');
   v_preventa := public.funcion_precio_de(p_precios, 'precio_preventa_persona');
   v_abono := public.funcion_precio_de(p_precios, 'abono_persona');
@@ -1688,9 +1700,11 @@ begin
       raise exception 'campana_no_publicada' using errcode = 'P0001', detail = 'Se activa al publicar la agenda.';
     end if;
     insert into public.funcion_campanas (workspace_id, experiencia_id, nombre, codigo, desde, hasta, estado,
-      minutos_apartado, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa)
+      minutos_apartado, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa,
+      dias_saldo_antes)
     values (p_workspace_id, p_experiencia_id, v_nombre, v_codigo, p_desde, p_hasta, v_estado,
-      p_minutos_apartado, v_precio, v_preventa, v_abono, v_permite, public.funcion_precio_de(p_precios, 'tope_sobreventa'))
+      p_minutos_apartado, v_precio, v_preventa, v_abono, v_permite, public.funcion_precio_de(p_precios, 'tope_sobreventa'),
+      v_dias)
     returning id into v_id;
   else
     select agenda_publicada_at into v_publicada from public.funcion_campanas
@@ -1706,7 +1720,7 @@ begin
        set experiencia_id = p_experiencia_id, nombre = v_nombre, codigo = v_codigo, desde = p_desde, hasta = p_hasta,
            estado = v_estado, minutos_apartado = p_minutos_apartado, precio_persona = v_precio,
            precio_preventa_persona = v_preventa, abono_persona = v_abono, permite_pago_total = v_permite,
-           tope_sobreventa = public.funcion_precio_de(p_precios, 'tope_sobreventa')
+           tope_sobreventa = public.funcion_precio_de(p_precios, 'tope_sobreventa'), dias_saldo_antes = v_dias
      where id = p_campana_id;
     v_id := p_campana_id;
   end if;
@@ -2513,6 +2527,7 @@ begin
              'precio_persona', b.precio_persona, 'precio_preventa_persona', b.precio_preventa_persona,
              'abono_persona', b.abono_persona, 'permite_pago_total', b.permite_pago_total,
              'minutos_apartado', b.minutos_apartado, 'tope_sobreventa', b.tope_sobreventa,
+             'dias_saldo_antes', b.dias_saldo_antes,
              'funciones', (select count(*) from fun where fun.campana_id = b.id),
              'llenas', (select count(*) from fun where fun.campana_id = b.id and fun.ocupadas >= fun.capacidad),
              'llenas_asistente', (select count(*) from fun where fun.campana_id = b.id and fun.inicia_at > now()
@@ -2561,6 +2576,7 @@ begin
     'minutos_apartado', c.minutos_apartado, 'precio_persona', c.precio_persona,
     'precio_preventa_persona', c.precio_preventa_persona, 'abono_persona', c.abono_persona,
     'permite_pago_total', c.permite_pago_total, 'tope_sobreventa', c.tope_sobreventa,
+    'dias_saldo_antes', c.dias_saldo_antes,
     'experiencia', jsonb_build_object('experiencia_id', e.id, 'nombre', e.nombre, 'titulo_oferta', e.titulo_oferta,
       'frase_gancho', e.frase_gancho, 'intro', e.intro, 'que_incluye', to_jsonb(e.que_incluye),
       'emojis_tema', e.emojis_tema, 'saludo_grupo', e.saludo_grupo, 'relato_grupo', e.relato_grupo,
@@ -2654,7 +2670,8 @@ $$;
 revoke execute on function public.funcion_cambiar_estado_funcion(uuid, text) from public, anon, service_role;
 grant execute on function public.funcion_cambiar_estado_funcion(uuid, text) to authenticated;
 
--- Duplicar una campaña: una campaña nueva en borrador con la misma experiencia, precios, minutos de apartado y tope, y
+-- Duplicar una campaña: una campaña nueva en borrador con la misma experiencia, precios, minutos de apartado, tope y
+-- plazo del saldo, y
 -- la agenda vacía. El código nuevo es el anterior con el primer sufijo libre («HP-OCT26-2», «HP-OCT26-3»…); se
 -- cambia en el ⋮ de la campaña antes de publicar.
 create or replace function public.funcion_duplicar_campana(p_campana_id uuid)
@@ -2687,9 +2704,9 @@ begin
     end if;
   end loop;
   insert into public.funcion_campanas (workspace_id, experiencia_id, nombre, codigo, estado, minutos_apartado,
-    precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa)
+    precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa, dias_saldo_antes)
   values (c.workspace_id, c.experiencia_id, left(c.nombre || ' (copia)', 200), v_codigo, 'borrador', c.minutos_apartado,
-    c.precio_persona, c.precio_preventa_persona, c.abono_persona, c.permite_pago_total, c.tope_sobreventa)
+    c.precio_persona, c.precio_preventa_persona, c.abono_persona, c.permite_pago_total, c.tope_sobreventa, c.dias_saldo_antes)
   returning id into v_id;
   return v_id;
 end;

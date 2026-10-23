@@ -27,6 +27,24 @@ export function inicioBogota(fecha: string, hora: string): string | null {
   return Number.isNaN(d.getTime()) ? null : `${fecha}T${hora}:00-05:00`
 }
 
+/** El día de Bogotá (AAAA-MM-DD) de un instante, como `(inicia_at at time zone 'America/Bogota')::date`. Pura. */
+export function diaBogota(iso: string): string {
+  return new Date(Date.parse(iso) - 5 * 3_600_000).toISOString().slice(0, 10)
+}
+
+/**
+ * La misma regla que la base (`funcion_funciones_preventa_antes`, `preventa_despues_de_funcion`): la fecha de fin de la
+ * preventa (inclusive) no puede ser posterior al día de la función. Sin fecha de fin, no pasa. Pura.
+ */
+export function preventaPasaLaFuncion(preventaHasta: string | null | undefined, diaFuncion: string): boolean {
+  return !!preventaHasta && preventaHasta > diaFuncion
+}
+
+/** El plazo del saldo de una campaña (días antes de la función): entero de 1 a 30, como lo exige la base. Pura. */
+export const DIAS_SALDO = { minimo: 1, maximo: 30, porDefecto: 1 } as const
+export const diasSaldoValido = (n: number | null | undefined): n is number =>
+  typeof n === 'number' && Number.isInteger(n) && n >= DIAS_SALDO.minimo && n <= DIAS_SALDO.maximo
+
 const HORA = new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true })
 const FECHA = new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -91,6 +109,7 @@ const MENSAJES: Record<string, string> = {
   anuncio_invalido: 'El id del anuncio va sin espacios.',
   anuncio_de_otra_campana: 'Ese anuncio ya está asociado a otra campaña.',
   dato_no_admitido: 'Ese dato no se guarda en una reserva.',
+  dias_saldo_invalido: 'Los días antes para pagar el saldo van de 1 a 30.',
 }
 
 /** El código estable del error de la base (el mensaje ES el código) y su texto, con el detalle si lo hay. Pura. */

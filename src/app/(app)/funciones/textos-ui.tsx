@@ -2,7 +2,8 @@
 
 /**
  * Los tres textos de la ficha en el panel (P11): la vista previa con sus conteos y el botón de copiar, que queda
- * deshabilitado si el texto tiene un «[FALTA: …]», pasa su límite o menciona Nequi o Daviplata (lo dice `motivo`).
+ * deshabilitado si el texto tiene un «[FALTA: …]» o pasa su límite (lo dice `motivo`). Si menciona Nequi o Daviplata
+ * sale un aviso que NO bloquea (`avisos`, 23-oct).
  * Los textos los arma `_shared/funciones/textos.ts`, puro, con la tarifa que resolvió la base.
  */
 import type { CampanaPanel, FuncionAgenda } from '@/lib/funciones/datos'
@@ -35,6 +36,7 @@ export function VistaTexto({ generado: g, textoBoton, aviso }: { generado: Texto
       <pre className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-md border border-[#E5E7EB] bg-gray-50 p-3 font-sans text-sm text-[#1A1A1A]">{g.texto}</pre>
       <p className={`text-xs ${g.sobra > 0 ? 'text-red-600' : 'text-[#6B7280]'}`}>{conteo(g)}</p>
       {g.motivo && <p className="text-xs text-red-600">{g.motivo}</p>}
+      {g.avisos.map((a) => <p key={a} className="text-xs text-amber-700">{a}</p>)}
       <button
         type="button"
         disabled={!g.copiable}

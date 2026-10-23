@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import type { CampanaPanel, CampanaResumen, Experiencia, Negocio } from '@/lib/funciones/datos'
-import { pesos } from '@/lib/funciones/reglas'
+import { DIAS_SALDO, diasSaldoValido, pesos } from '@/lib/funciones/reglas'
 import { generarOferta } from '../../../../../../supabase/functions/_shared/funciones/textos.ts'
 import { crearCampanaAction, guardarExperienciaAction, leerTextosCampanaAction, publicarCampanaAction, type LineaAgenda } from '../../actions'
 import { AgendaEditor } from '../../agenda-editor'
@@ -42,13 +42,17 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
   const [abono, setAbono] = useState(String(anterior?.abono_persona ?? ''))
   const [pagoTotal, setPagoTotal] = useState(anterior?.permite_pago_total ?? true)
   const [minutos, setMinutos] = useState(String(anterior?.minutos_apartado ?? ''))
+  const [diasSaldo, setDiasSaldo] = useState(String(anterior?.dias_saldo_antes ?? DIAS_SALDO.porDefecto))
 
   // Paso 3
   const [campanaId, setCampanaId] = useState<string | null>(null)
   const [confirmar, setConfirmar] = useState(false)
   const [textos, setTextos] = useState<{ campana: CampanaPanel; negocio: Negocio } | null>(null)
   const oferta = textos
-    ? generarOferta({ ficha: fichaParaTextos(textos.campana), negocio: textos.negocio, funciones: funcionesParaTextos(textos.campana.funciones), ahoraMs })
+    ? generarOferta({
+        ficha: fichaParaTextos(textos.campana), negocio: textos.negocio, campana: { dias_saldo_antes: textos.campana.dias_saldo_antes },
+        funciones: funcionesParaTextos(textos.campana.funciones), ahoraMs,
+      })
     : null
 
   const numero = (s: string) => (s.trim() ? Math.round(Number(s.replace(/[.$\s]/g, ''))) : null)
@@ -63,6 +67,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
     preventaUsada && !numero(preventa) && 'Hay funciones de preventa: escribe el precio de preventa.',
     numero(abono) !== null && numero(precio) !== null && numero(abono)! > numero(precio)! && 'El abono no puede pasar el precio por persona.',
     numero(abono) === null && !pagoTotal && 'Sin abono, permite el pago total.',
+    !diasSaldoValido(numero(diasSaldo)) && 'Los días antes para pagar el saldo van de 1 a 30.',
   ].filter(Boolean) as string[]
 
   const seguirPaso1 = () =>
@@ -89,6 +94,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
         precios: {
           precio_persona: numero(precio), precio_preventa_persona: numero(preventa), abono_persona: numero(abono),
           permite_pago_total: pagoTotal, tope_sobreventa: anterior?.tope_sobreventa ?? null,
+          dias_saldo_antes: numero(diasSaldo) ?? DIAS_SALDO.porDefecto,
         },
       })
       if (!r.ok) return void toast.error(r.error)
@@ -187,6 +193,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
                   Precios como la campaña anterior: {pesos(numero(precio))}
                   {numero(preventa) ? ` · prev ${pesos(numero(preventa))}` : ''}
                   {numero(abono) ? ` · abono ${pesos(numero(abono))}` : ''}
+                  {` · saldo ${numero(diasSaldo) === 1 ? '1 día' : `${numero(diasSaldo)} días`} antes`}
                 </span>
                 <button type="button" onClick={() => setCambiarPrecios(true)} className="text-[#059669] underline">Cambiar</button>
               </div>
@@ -196,6 +203,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
                 <label>Preventa por persona<input inputMode="numeric" value={preventa} onChange={(e) => setPreventa(e.target.value)} className={campo} placeholder="Opcional" /></label>
                 <label>Abono por persona<input inputMode="numeric" value={abono} onChange={(e) => setAbono(e.target.value)} className={campo} placeholder="Opcional" /></label>
                 <label className="flex items-end gap-2 pb-3"><input type="checkbox" checked={pagoTotal} onChange={(e) => setPagoTotal(e.target.checked)} className="size-5" /> Permite pago total</label>
+                <label className="col-span-2">Paga el saldo (días antes de la función)<input inputMode="numeric" value={diasSaldo} onChange={(e) => setDiasSaldo(e.target.value)} className={campo} /></label>
                 <label className="col-span-2">Minutos que aguanta un apartado sin pago<input inputMode="numeric" value={minutos} onChange={(e) => setMinutos(e.target.value)} className={campo} placeholder="Si aún no se sabe, vacío: no se podrá apartar" /></label>
               </div>
             )}
@@ -213,6 +221,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
               <pre className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-md border border-[#E5E7EB] bg-white p-3 font-sans text-sm text-[#1A1A1A]">{oferta.texto}</pre>
               <p className={`text-xs ${oferta.sobra > 0 ? 'text-red-600' : 'text-[#6B7280]'}`}>{conteo(oferta)}</p>
               {oferta.motivo && <p className="text-xs text-red-600">{oferta.motivo}</p>}
+              {oferta.avisos.map((a) => <p key={a} className="text-xs text-amber-700">{a}</p>)}
             </>
           ) : (
             <p className="text-xs text-[#6B7280]">No se pudo armar el post: búscalo en la campaña.</p>
