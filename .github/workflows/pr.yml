@@ -131,3 +131,48 @@ jobs:
           # lee como un problema del PR y es del propio check.
           git fetch origin "${{ github.base_ref }}" --quiet
           node scripts/lint-lineas-cambiadas.mjs "$BASE_REF"
+
+  concurrencia-funciones:
+    # Prueba 8 del diseño de la etapa 2 de Sabor: muchos `apartar`, confirmaciones y pagos a la vez no sobrevenden.
+    # Las pruebas de vitest corren en PGlite, que tiene UNA conexión: el `select ... for update` nunca espera a nadie
+    # ahí, así que el candado solo se prueba con un Postgres real y varias conexiones. Sin dependencias de npm: psql
+    # ya viene en la imagen de ubuntu-latest.
+    name: Concurrencia de funciones (Postgres real)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sin sobreventa con apartados simultáneos
+        env:
+          PGURL: postgres://postgres:postgres@localhost:5432/postgres
+        run: bash scripts/funciones-concurrencia.sh
+      # Una prueba de concurrencia que nunca se vio fallar no prueba nada: la misma, contra una copia de la migración
+      # SIN ningún `for update`, tiene que sobrevender.
+      - name: Sin el candado, la misma prueba sobrevende
+        run: |
+          psql postgres://postgres:postgres@localhost:5432/postgres -X -q -c 'create database sin_candado'
+          MIGRACION=supabase/migrations/20261022170000_modulo_funciones.sql
+          test -s "$MIGRACION" || { echo "No existe $MIGRACION: actualiza este paso y scripts/funciones-concurrencia.sh."; exit 1; }
+          # Quita TODOS los `for update`: los que cierran con `;`, los `for update of <tabla>` y el del `for ... loop`.
+          perl -0pe 's/\s+for update(?: of \w+)?(?=;|\s+loop)//g' "$MIGRACION" > "$RUNNER_TEMP/sin-candado.sql"
+          if grep -v '^\s*--' "$RUNNER_TEMP/sin-candado.sql" | grep -q 'for update'; then
+            echo "La mutación no quitó todos los candados."; exit 1
+          fi
+          set +e
+          salida=$(PGURL=postgres://postgres:postgres@localhost:5432/sin_candado bash scripts/funciones-concurrencia.sh "$RUNNER_TEMP/sin-candado.sql" 2>&1)
+          set -e
+          echo "$salida"
+          if ! grep -q 'SOBRE' <<<"$salida"; then
+            echo "Sin candado NO sobrevendió: la prueba no está probando el candado."; exit 1
+          fi
