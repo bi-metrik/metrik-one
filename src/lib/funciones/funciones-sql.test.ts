@@ -28,7 +28,7 @@ const EQUIPO = '00000000-0000-4000-8000-00000000f011'
 const LECTOR = '00000000-0000-4000-8000-00000000f012'
 const AJENO = '00000000-0000-4000-8000-00000000f013'
 const HUELLA = 'a'.repeat(64)
-const TABLAS = ['funcion_experiencias', 'funcion_campanas', 'funcion_funciones', 'funcion_reservas']
+const TABLAS = ['funcion_experiencias', 'funcion_campanas', 'funcion_funciones', 'funcion_reservas', 'funcion_negocio']
 
 let db: PGlite
 let n = 0
@@ -96,6 +96,8 @@ interface OpcionesEscenario {
   /** De la función. */
   estado?: 'activa' | 'pausada' | 'cancelada'
   esPreventa?: boolean
+  /** Fecha de fin de la preventa, como expresión SQL de fecha (p. ej. `hoy_bogota() - 1`). */
+  preventaHasta?: string
   cierraVentaAt?: string | null
   reemplazos?: { precio?: number; preventa?: number; abono?: number; permiteTotal?: boolean }
   ws?: string
@@ -121,8 +123,8 @@ async function escenario(o: OpcionesEscenario = {}): Promise<Escenario> {
   const capacidad = o.capacidad ?? 10
   await q(
     `insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente, estado, cierra_venta_at,
-       es_preventa, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total)
-     values ($1, $2, $3, now() + interval '1 day', $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+       es_preventa, preventa_hasta, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total)
+     values ($1, $2, $3, now() + interval '1 day', $4, $5, $6, $7, $8, ${o.preventaHasta ?? 'null'}, $9, $10, $11, $12)`,
     [funcion, ws, campana, capacidad, o.cupoAsistente ?? capacidad, o.estado ?? 'activa', o.cierraVentaAt ?? null, o.esPreventa ?? false,
       o.reemplazos?.precio ?? null, o.reemplazos?.preventa ?? null, o.reemplazos?.abono ?? null, o.reemplazos?.permiteTotal ?? null],
   )
@@ -394,15 +396,15 @@ describe('precios: una tarifa y la foto del monto', () => {
   it('preventa frente a completa, y el reemplazo de la función frente al de la campaña', async () => {
     const completa = await escenario({ precio: 180_000, preventa: 150_000, abono: 100_000 })
     expect((await ocupacion(completa.funcion)).tarifa).toEqual({
-      tarifa: 'completa', precio_persona: 180_000, precio_completo_persona: null, abono_persona: 100_000, permite_pago_total: true,
+      tarifa: 'completa', precio_persona: 180_000, precio_completo_persona: null, preventa_hasta: null, abono_persona: 100_000, permite_pago_total: true,
     })
     const preventa = await escenario({ precio: 180_000, preventa: 150_000, abono: 100_000, esPreventa: true })
     expect((await ocupacion(preventa.funcion)).tarifa).toEqual({
-      tarifa: 'preventa', precio_persona: 150_000, precio_completo_persona: 180_000, abono_persona: 100_000, permite_pago_total: true,
+      tarifa: 'preventa', precio_persona: 150_000, precio_completo_persona: 180_000, preventa_hasta: null, abono_persona: 100_000, permite_pago_total: true,
     })
     const reemplazo = await escenario({ precio: 180_000, abono: 100_000, reemplazos: { precio: 200_000, abono: 120_000, permiteTotal: false } })
     expect((await ocupacion(reemplazo.funcion)).tarifa).toEqual({
-      tarifa: 'completa', precio_persona: 200_000, precio_completo_persona: null, abono_persona: 120_000, permite_pago_total: false,
+      tarifa: 'completa', precio_persona: 200_000, precio_completo_persona: null, preventa_hasta: null, abono_persona: 120_000, permite_pago_total: false,
     })
     // El asistente ve la misma tarifa.
     expect((await consultar(preventa.funcion)).tarifa.precio_completo_persona).toBe(180_000)
@@ -495,7 +497,7 @@ describe('campañas y disponibilidad para el asistente', () => {
   })
 
   it('publicar sin funciones o sin precio falla; publicar deja la campaña activa y visible', async () => {
-    const exp = await rpc<string>(`select funcion_guardar_experiencia($1, null, 'Harry Potter', null, null, null, null) as r`, [WS])
+    const exp = await rpc<string>(`select funcion_guardar_experiencia($1, null, '{"nombre": "Harry Potter"}'::jsonb) as r`, [WS])
     const guardar = (cod: string, precios: unknown) =>
       rpc<string>(`select funcion_guardar_campana($1, null, $2, 'HP octubre', $3, null, null, 'borrador', 30, $4::jsonb) as r`, [WS, exp, cod, JSON.stringify(precios)])
     const vacia = await guardar('HP-VACIA', { precio_persona: 180000 })
@@ -660,7 +662,7 @@ describe('datos y permisos', () => {
     const e = await escenario()
     const a = await apartarEquipo(e.funcion, 2)
     const visibles = await siendo({ equipo: AJENO }, () => Promise.all(TABLAS.map(async (t) => (await q(`select 1 from ${t}`)).length)))
-    expect(visibles).toEqual([0, 0, 0, 0])
+    expect(visibles).toEqual([0, 0, 0, 0, 0])
     expect(await codigo(rpc(`select funcion_ocupacion($1) as r`, [e.funcion], { equipo: AJENO }))).toBe('funcion_no_existe')
     expect(await codigo(apartarEquipo(e.funcion, 1, { perfil: AJENO }))).toBe('funcion_no_existe')
     expect(await codigo(rpc(`select funcion_cancelar_reserva($1) as r`, [a.reserva_id], { equipo: AJENO }))).toBe('reserva_no_existe')
@@ -681,7 +683,8 @@ describe('datos y permisos', () => {
     for (const f of ['funcion_cancelar_reserva(uuid)', 'funcion_guardar_campana(uuid, uuid, uuid, text, text, date, date, text, integer, jsonb)',
       'funcion_publicar_agenda(uuid)', 'funcion_crear_funciones(uuid, uuid, integer, integer, integer, jsonb, jsonb)',
       'funcion_editar_funcion(uuid, integer, integer, text, timestamptz, jsonb)', 'funcion_eliminar_funcion(uuid)', 'funcion_eliminar_campana(uuid)',
-      'funcion_guardar_experiencia(uuid, uuid, text, text, text, integer, text)']) {
+      'funcion_guardar_experiencia(uuid, uuid, jsonb)', 'funcion_guardar_negocio(uuid, jsonb)',
+      'funcion_cambiar_preventa(uuid, boolean, date)']) {
       expect((await q<{ x: boolean }>(`select has_function_privilege('service_role', 'public.${f}', 'execute') as x`))[0].x, f).toBe(false)
     }
   })
@@ -1083,5 +1086,136 @@ describe('el panel: estado efectivo, anuncios, duplicar y cambios de estado', ()
     expect(r).toMatchObject({ estado: 'cancelada', reservas_activas: 1 })
     expect(await codigo(rpc(`select funcion_cambiar_estado_funcion($1, 'activa') as r`, [e.funcion], 'servidor'))).toMatch(/permission denied/)
     expect(await codigo(rpc(`select funcion_cambiar_estado_campana($1, 'cerrada') as r`, [e.campana], { equipo: LECTOR }))).toBe('sin_permiso')
+  })
+})
+
+describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () => {
+  const HOY = `((now() at time zone 'America/Bogota')::date)`
+  const FICHA = {
+    nombre: '[PRUEBA] El extraño mundo de Jack',
+    titulo_oferta: '  🎃💀 EL EXTRAÑO MUNDO DE JACK llega a CENA Y PELÍCULA 🎄🖤\n',
+    frase_gancho: '¿Qué pasa cuando Halloween y Navidad se encuentran? 🎃🎁✨',
+    intro: 'Primera línea.\n\nSegunda   línea con espacios.',
+    que_incluye: ['🍽️ 5 tiempos', '  ', '🥂 2 bebidas'],
+    emojis_tema: '🎃🖤',
+    saludo_grupo: '🎃💀 ¡Hola!',
+    relato_grupo: '💀🎁 ¡Que comience!',
+    edad_minima: 6,
+  }
+  const guardarFicha = (ficha: unknown, id: string | null = null, quien: Quien = { equipo: EQUIPO }) =>
+    rpc<string>(`select funcion_guardar_experiencia($1, $2, $3::jsonb) as r`, [WS, id, JSON.stringify(ficha)], quien)
+
+  it('la experiencia guarda su ficha tal cual: emojis y saltos de adentro, sin las puntas; la lista sin líneas vacías', async () => {
+    const id = await guardarFicha(FICHA)
+    const [e] = await q<Record<string, unknown>>(`select * from funcion_experiencias where id = $1`, [id])
+    expect(e.titulo_oferta).toBe('🎃💀 EL EXTRAÑO MUNDO DE JACK llega a CENA Y PELÍCULA 🎄🖤')
+    expect(e.intro).toBe('Primera línea.\n\nSegunda   línea con espacios.')
+    expect(e.que_incluye).toEqual(['🍽️ 5 tiempos', '🥂 2 bebidas'])
+    expect([e.emojis_tema, e.saludo_grupo, e.relato_grupo, e.edad_minima]).toEqual(['🎃🖤', '🎃💀 ¡Hola!', '💀🎁 ¡Que comience!', 6])
+    // Reemplaza la ficha entera: lo que no viene queda nulo.
+    await guardarFicha({ nombre: 'Otra' }, id)
+    const [d] = await q<Record<string, unknown>>(`select nombre, titulo_oferta, que_incluye, edad_minima from funcion_experiencias where id = $1`, [id])
+    expect(d).toEqual({ nombre: 'Otra', titulo_oferta: null, que_incluye: null, edad_minima: null })
+    expect(Object.keys(e)).not.toContain('info_general')
+    expect(Object.keys(e)).not.toContain('historia')
+  })
+
+  it('la ficha rechaza llaves de más, tipos malos, el servidor y el rol que no edita', async () => {
+    expect(await codigo(guardarFicha({ ...FICHA, condiciones: 'x' }))).toBe('dato_no_admitido')
+    expect(await codigo(guardarFicha({ ...FICHA, que_incluye: 'una sola' }))).toBe('datos_invalidos')
+    expect(await codigo(guardarFicha({ ...FICHA, que_incluye: Array.from({ length: 21 }, (_, i) => `cosa ${i}`) }))).toBe('datos_invalidos')
+    expect(await codigo(guardarFicha({ ...FICHA, nombre: '  ' }))).toBe('datos_invalidos')
+    expect(await codigo(guardarFicha({ ...FICHA, edad_minima: '6' }))).toBe('datos_invalidos')
+    expect(await codigo(guardarFicha(FICHA, null, { equipo: LECTOR }))).toBe('sin_permiso')
+    expect(await codigo(guardarFicha(FICHA, null, 'servidor'))).toMatch(/permission denied/)
+  })
+
+  it('el negocio: una fila por workspace, la escribe solo el equipo y la lee solo su workspace', async () => {
+    const guardar = (datos: unknown, ws = WS, quien: Quien = { equipo: EQUIPO }) =>
+      rpc(`select funcion_guardar_negocio($1, $2::jsonb) as r`, [ws, JSON.stringify(datos)], quien)
+    await guardar({ direccion: 'AK 9 #104A-50, Bogotá', piso: 'Segundo piso', firma: 'El equipo 🕯️✨' })
+    await guardar({ direccion: 'AK 9 #104A-50, Bogotá', piso: 'Segundo piso', recepcion: 'Los recibimos.', parqueadero: 'Bahía\nen frente', firma: 'El equipo 🕯️✨' })
+    const filas = await siendo({ equipo: EQUIPO }, () => q<Record<string, unknown>>(`select direccion, piso, recepcion, parqueadero, firma from funcion_negocio`))
+    expect(filas).toEqual([{ direccion: 'AK 9 #104A-50, Bogotá', piso: 'Segundo piso', recepcion: 'Los recibimos.', parqueadero: 'Bahía\nen frente', firma: 'El equipo 🕯️✨' }])
+    expect(await siendo({ equipo: AJENO }, () => q(`select 1 from funcion_negocio`))).toEqual([])
+    expect(await codigo(guardar({ direccion: 'x' }, WS, { equipo: AJENO }))).toBe('negocio_no_existe')
+    expect(await codigo(guardar({ direccion: 'x' }, WS, { equipo: LECTOR }))).toBe('sin_permiso')
+    expect(await codigo(guardar({ nequi: '322' }))).toBe('dato_no_admitido')
+    expect(await codigo(guardar({ direccion: 'x' }, WS, 'servidor'))).toMatch(/permission denied/)
+    expect(await codigo(siendo({ equipo: EQUIPO }, () => q(`update funcion_negocio set piso = 'x'`)))).toMatch(/permission denied/)
+  })
+
+  it('P4: con el interruptor encendido, la preventa rige hasta su fecha de fin (hoy inclusive) y después rige el regular', async () => {
+    const precios = { precio: 180_000, preventa: 170_000, abono: 100_000, esPreventa: true }
+    const hoy = await escenario({ ...precios, preventaHasta: HOY })
+    const ayer = await escenario({ ...precios, preventaHasta: `${HOY} - 1` })
+    const sinFecha = await escenario(precios)
+    const apagada = await escenario({ ...precios, esPreventa: false })
+    const t = async (f: string) => (await ocupacion(f)).tarifa
+    const [hoyStr] = await q<{ d: string }>(`select to_char(${HOY}, 'YYYY-MM-DD') as d`)
+    expect(await t(hoy.funcion)).toEqual({
+      tarifa: 'preventa', precio_persona: 170_000, precio_completo_persona: 180_000, preventa_hasta: hoyStr.d, abono_persona: 100_000, permite_pago_total: true,
+    })
+    expect(await t(ayer.funcion)).toEqual({
+      tarifa: 'completa', precio_persona: 180_000, precio_completo_persona: null, preventa_hasta: null, abono_persona: 100_000, permite_pago_total: true,
+    })
+    expect((await t(sinFecha.funcion)).tarifa).toBe('preventa')
+    expect((await t(apagada.funcion)).tarifa).toBe('completa')
+    // La foto del apartado sale de la misma regla.
+    const a = await apartarAsistente(ayer.funcion, 2)
+    expect([a.tarifa, a.precio_unitario]).toEqual(['completa', 180_000])
+    const b = await apartarAsistente(hoy.funcion, 2)
+    expect([b.tarifa, b.precio_unitario]).toEqual(['preventa', 170_000])
+    // El asistente ve lo mismo.
+    expect((await consultar(ayer.funcion)).tarifa.tarifa).toBe('completa')
+  })
+
+  it('P4: la fecha de fin de la preventa no pasa el día de la función, por ningún camino', async () => {
+    const e = await escenario({ precio: 180_000, preventa: 170_000 })
+    const preventa = (f: string, on: boolean, hasta: string | null, quien: Quien = { equipo: EQUIPO }) =>
+      rpc<{ tarifa: string; preventa_hasta: string | null }>(`select funcion_cambiar_preventa($1, $2, $3::date) as r`, [f, on, hasta], quien)
+    const [dia] = await q<{ d: string; despues: string }>(
+      `select to_char((inicia_at at time zone 'America/Bogota')::date, 'YYYY-MM-DD') as d,
+              to_char((inicia_at at time zone 'America/Bogota')::date + 1, 'YYYY-MM-DD') as despues
+         from funcion_funciones where id = $1`, [e.funcion])
+    expect(await codigo(preventa(e.funcion, true, dia.despues))).toBe('preventa_despues_de_funcion')
+    expect(await preventa(e.funcion, true, dia.d)).toMatchObject({ tarifa: 'preventa', preventa_hasta: dia.d })
+    // Apagada, la fecha se borra.
+    expect(await preventa(e.funcion, false, dia.d)).toMatchObject({ tarifa: 'completa', preventa_hasta: null })
+    expect((await q<{ h: string | null }>(`select preventa_hasta as h from funcion_funciones where id = $1`, [e.funcion]))[0].h).toBeNull()
+    expect(await codigo(preventa(e.funcion, true, null, { equipo: LECTOR }))).toBe('sin_permiso')
+    expect(await codigo(preventa(e.funcion, true, null, { equipo: AJENO }))).toBe('funcion_no_existe')
+    expect(await codigo(preventa(e.funcion, true, null, 'servidor'))).toMatch(/permission denied/)
+    // La agenda en lote y la edición tampoco la dejan pasar.
+    const lote = (precios: unknown) => rpc(`select funcion_crear_funciones($1, $2, 10, null, null, $3::jsonb, $4::jsonb) as r`,
+      [WS, e.campana, JSON.stringify(precios), JSON.stringify([{ fecha: '2099-10-24', hora: '13:00' }, { fecha: '2099-10-31', hora: '13:00' }])])
+    expect(await codigo(lote({ es_preventa: true, preventa_hasta: '2099-10-25' }))).toBe('preventa_despues_de_funcion')
+    expect(await codigo(lote({ es_preventa: true, preventa_hasta: '2099-02-30' }))).toBe('precio_invalido')
+    expect(await codigo(lote({ es_preventa: true, preventa_hasta: '2099-10-20' }))).toBe('ok')
+    const [creada] = await q<{ es_preventa: boolean; h: string }>(
+      `select es_preventa, to_char(preventa_hasta, 'YYYY-MM-DD') as h from funcion_funciones where campana_id = $1 and inicia_at > now() + interval '1 year' order by inicia_at limit 1`, [e.campana])
+    expect(creada).toEqual({ es_preventa: true, h: '2099-10-20' })
+    expect(await codigo(rpc(`select funcion_editar_funcion($1, 10, 10, 'activa', null, $2::jsonb) as r`,
+      [e.funcion, JSON.stringify({ es_preventa: true, preventa_hasta: dia.despues })]))).toBe('preventa_despues_de_funcion')
+    // Y la tabla, al final: el CHECK.
+    expect(await codigo(q(`update funcion_funciones set es_preventa = true, preventa_hasta = $2::date where id = $1`, [e.funcion, dia.despues]))).toMatch(/funcion_funciones_preventa_antes/)
+  })
+
+  it('con la preventa encendida, el abono tampoco pasa el precio regular que regirá al vencerse', async () => {
+    const e = await escenario({ precio: 180_000, preventa: 170_000, abono: 100_000 })
+    expect(await codigo(q(`update funcion_funciones set es_preventa = true, precio_persona = 90000 where id = $1`, [e.funcion]))).toBe('abono_sobre_precio')
+  })
+
+  it('el panel de la campaña trae la ficha nueva y la preventa de cada función', async () => {
+    const e = await escenario({ precio: 180_000, preventa: 170_000, esPreventa: true, preventaHasta: HOY })
+    await guardarFicha(FICHA, e.experiencia)
+    const d = await rpc<{ experiencia: Record<string, unknown>; funciones: Array<{ es_preventa: boolean; preventa_hasta: string | null; tarifa: { tarifa: string } }> }>(
+      `select funcion_panel_campana($1) as r`, [e.campana])
+    expect(Object.keys(d.experiencia).sort()).toEqual(
+      ['edad_minima', 'emojis_tema', 'experiencia_id', 'frase_gancho', 'intro', 'nombre', 'que_incluye', 'relato_grupo', 'saludo_grupo', 'titulo_oferta'])
+    expect(d.experiencia.que_incluye).toEqual(['🍽️ 5 tiempos', '🥂 2 bebidas'])
+    expect(d.funciones[0].es_preventa).toBe(true)
+    expect(d.funciones[0].preventa_hasta).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(d.funciones[0].tarifa.tarifa).toBe('preventa')
   })
 })

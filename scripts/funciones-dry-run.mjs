@@ -9,7 +9,7 @@
 //   node scripts/funciones-dry-run.mjs > /tmp/dry-run-funciones.sql
 //
 // Resultado esperado (en el mensaje del error):
-//   DRYRUN OK {"rpc": 46, "rpc_anon": 0, "tablas_con_rls": 7, "tablas_de_mesas": 0, "publicar_service_role": false,
+//   DRYRUN OK {"rpc": 49, "rpc_anon": 0, "tablas_con_rls": 8, "tablas_de_mesas": 0, "publicar_service_role": false,
 //              "resolver_service_role": false, "workspaces_con_modulo": 0, "registrar_authenticated": false,
 //              "disponibles_authenticated": false}
 import { readFileSync } from 'node:fs'
