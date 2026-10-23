@@ -254,20 +254,19 @@ describe('el tipo de documento del XLSX llega a Valida con su código', () => {
     { tipo_persona: 'natural', nombre_completo: 'Dani Prueba Cuatro', tipo_documento: 'X', numero_documento: '10000004' },
   ]
 
-  it('CÉDULA va como CC y PP como PAS; TI y X no se mandan, no van al historial y dicen por qué', async () => {
+  it('CÉDULA va como CC, PP como PAS y TI como TI; X no se manda, no va al historial y dice por qué', async () => {
     const preparadas = filasDesdeXlsx(XLSX_TIPOS, new Map(), null)
     const lote = sembrarLote({ filas: preparadas.map((f) => f.input), errores: preparadas.map((f) => f.error) })
     for (let i = 0; i < preparadas.length; i++) await procesarFilaLote(ctx(lote), await reclamar(lote))
 
     const cuerpos = llamadas.map((l) => JSON.parse(l.init.body) as { documento: { tipo: string } })
-    expect(cuerpos.map((c) => c.documento.tipo)).toEqual(['CC', 'PAS'])
-    expect(consultas().map((c) => c.documento_tipo)).toEqual(['CC', 'PAS'])
+    expect(cuerpos.map((c) => c.documento.tipo)).toEqual(['CC', 'PAS', 'TI'])
+    expect(consultas().map((c) => c.documento_tipo)).toEqual(['CC', 'PAS', 'TI'])
 
     const filas = doble.tablas.valida_lote_filas
-    expect(filas.map((f) => f.estado)).toEqual(['hecha', 'hecha', 'error', 'error'])
-    expect(String(filas[2].resultado_error)).toContain('tarjeta de identidad (TI)')
-    expect(String(filas[3].resultado_error)).toContain('Tipo de documento no reconocido: usa CC, CE, NIT o PAS')
-    expect(doble.tablas.valida_lotes[0].severidades).toEqual({ sin_hallazgo: 2, error: 2 })
+    expect(filas.map((f) => f.estado)).toEqual(['hecha', 'hecha', 'hecha', 'error'])
+    expect(String(filas[3].resultado_error)).toContain('Tipo de documento no reconocido: usa CC, CE, NIT, PAS, TI, PPT o RC')
+    expect(doble.tablas.valida_lotes[0].severidades).toEqual({ sin_hallazgo: 3, error: 1 })
   })
 })
 

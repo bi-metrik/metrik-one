@@ -73,23 +73,29 @@ describe('tipo de documento en el parseo del XLSX', () => {
     expect([cc.error, pas.error, nit.error]).toEqual([null, null, null])
   })
 
-  it('TI y X conservan lo que dijo la fila, traen la frase y no gastan consulta', () => {
-    const [ti, x] = filasDesdeXlsx([fila('TI'), fila('x')], new Map(), null)
+  it('TI, PPT y RC se consultan con su código (metrik-valida#70)', () => {
+    const [ti, ppt, rc] = filasDesdeXlsx([fila('Tarjeta de identidad'), fila('ppt'), fila('Registro civil')], new Map(), null)
     expect(ti.input.documento).toEqual({ tipo: 'TI', numero: '10000001' })
+    expect(ppt.input.documento).toEqual({ tipo: 'PPT', numero: '10000001' })
+    expect(rc.input.documento).toEqual({ tipo: 'RC', numero: '10000001' })
+    expect([ti.error, ppt.error, rc.error]).toEqual([null, null, null])
+    expect([filaConsume(ti.input), filaConsume(ppt.input), filaConsume(rc.input)]).toEqual([true, true, true])
+  })
+
+  it('X conserva lo que dijo la fila, trae la frase y no gasta consulta', () => {
+    const [x] = filasDesdeXlsx([fila('x')], new Map(), null)
     expect(x.input.documento).toEqual({ tipo: 'X', numero: '10000001' })
-    expect(ti.error).toContain('tarjeta de identidad (TI)')
     expect(x.error).toContain('Tipo de documento no reconocido')
-    expect(filaConsume(ti.input)).toBe(false)
     expect(filaConsume(x.input)).toBe(false)
   })
 
   it('el aviso previo cuenta las filas que no se consultan y da la fila del XLSX', () => {
-    const filas = filasDesdeXlsx([fila('CC'), fila('X'), fila('PPT'), fila('', '')], new Map(), null)
+    const filas = filasDesdeXlsx([fila('CC'), fila('X'), fila('PPT'), fila('PEP'), fila('', '')], new Map(), null)
     expect(avisoTiposDocumento(filas)).toEqual({
       filas: 2,
       ejemplos: [
         { fila: 3, valor: 'X', mensaje: expect.stringContaining('no reconocido') },
-        { fila: 4, valor: 'PPT', mensaje: expect.stringContaining('(PPT)') },
+        { fila: 5, valor: 'PEP', mensaje: expect.stringContaining('no reconocido') },
       ],
     })
     expect(avisoTiposDocumento(filasDesdeXlsx([fila('CC'), fila('Pasaporte')], new Map(), null))).toBeNull()

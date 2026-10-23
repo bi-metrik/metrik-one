@@ -403,6 +403,9 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onCons
                   <option value="CC">CC</option>
                   <option value="CE">CE</option>
                   <option value="PAS">Pasaporte</option>
+                  <option value="TI">TI</option>
+                  <option value="PPT">PPT</option>
+                  <option value="RC">Registro civil</option>
                 </>
               ) : (
                 <option value="NIT">NIT</option>
@@ -1129,8 +1132,8 @@ function AvisoTipos({
         consulta.
       </p>
       <p className="text-sm text-tinta-suave">
-        En la columna <code className="bg-papel px-1 rounded">tipo_documento</code> usa CC, CE, NIT o PAS. También se
-        entienden «Cédula», «Pasaporte», «PP» o «PA». Si procesas así, esas filas no se consultan ni se cobran.
+        En la columna <code className="bg-papel px-1 rounded">tipo_documento</code> usa CC, CE, NIT, PAS, TI, PPT o RC.
+        También se entienden «Cédula», «Pasaporte», «PP», «PA», «Tarjeta de identidad» o «Registro civil». Si procesas así, esas filas no se consultan ni se cobran.
       </p>
       <ul className="text-xs text-tinta-suave space-y-1">
         {aviso.ejemplos.map((e) => (

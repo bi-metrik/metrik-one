@@ -9,7 +9,7 @@ import {
 
 const tipo = (valor: string, numero = '10000001', persona: 'natural' | 'juridica' = 'natural') => {
   const l = leerTipoDocumento(valor, numero, persona)
-  return l.estado === 'aceptado' || l.estado === 'pendiente' ? l.tipo : l.estado
+  return l.estado === 'aceptado' ? l.tipo : l.estado
 }
 
 describe('tipo de documento de la carga masiva', () => {
@@ -37,14 +37,15 @@ describe('tipo de documento de la carga masiva', () => {
     for (const v of ['NIT', 'nit', 'N.I.T.']) expect(tipo(v, '900000001', 'juridica'), v).toBe('NIT')
   })
 
-  it('TI, PPT y RC se reconocen pero Valida todavía no los acepta: no se convierten en otro tipo', () => {
-    expect(leerTipoDocumento('TI', '10000001', 'natural')).toEqual({ estado: 'pendiente', tipo: 'TI' })
-    expect(leerTipoDocumento('Tarjeta de identidad', '10000001', 'natural')).toEqual({ estado: 'pendiente', tipo: 'TI' })
-    expect(leerTipoDocumento('PPT', '10000001', 'natural')).toEqual({ estado: 'pendiente', tipo: 'PPT' })
-    expect(leerTipoDocumento('Permiso por protección temporal', '10000001', 'natural')).toEqual({ estado: 'pendiente', tipo: 'PPT' })
-    expect(leerTipoDocumento('Registro civil', '10000001', 'natural')).toEqual({ estado: 'pendiente', tipo: 'RC' })
-    expect(mensajeTipoDocumento({ estado: 'pendiente', tipo: 'TI' })).toContain('tarjeta de identidad (TI)')
-    expect(mensajeTipoDocumento({ estado: 'pendiente', tipo: 'TI' })).toContain('no se consultó ni se cobró')
+  it('TI, PPT y RC se aceptan con su código, sin convertirse en otro tipo (metrik-valida#70)', () => {
+    const aceptado = (tipo: string) => ({ estado: 'aceptado', tipo, inferido: false })
+    expect(leerTipoDocumento('TI', '10000001', 'natural')).toEqual(aceptado('TI'))
+    expect(leerTipoDocumento('Tarjeta de identidad', '10000001', 'natural')).toEqual(aceptado('TI'))
+    expect(leerTipoDocumento('PPT', '10000001', 'natural')).toEqual(aceptado('PPT'))
+    expect(leerTipoDocumento('Permiso por protección temporal', '10000001', 'natural')).toEqual(aceptado('PPT'))
+    expect(leerTipoDocumento('Registro civil', '10000001', 'natural')).toEqual(aceptado('RC'))
+    expect(leerTipoDocumento('R.C.', '10000001', 'natural')).toEqual(aceptado('RC'))
+    expect(mensajeTipoDocumento(leerTipoDocumento('TI', '10000001', 'natural'))).toBeNull()
   })
 
   it('lo irreconocible («X», un número en la columna, PEP) dice qué valores usar', () => {
@@ -53,7 +54,7 @@ describe('tipo de documento de la carga masiva', () => {
       expect(l, v).toEqual({ estado: 'no_reconocido', valor: v })
       expect(mensajeTipoDocumento(l)).toBe(MENSAJE_TIPO_NO_RECONOCIDO)
     }
-    expect(MENSAJE_TIPO_NO_RECONOCIDO).toContain('usa CC, CE, NIT o PAS')
+    expect(MENSAJE_TIPO_NO_RECONOCIDO).toContain('usa CC, CE, NIT, PAS, TI, PPT o RC')
   })
 
   it('vacío con número: jurídica → NIT; natural → CC, o PAS si el número trae letras', () => {
@@ -67,8 +68,8 @@ describe('tipo de documento de la carga masiva', () => {
     expect(leerTipoDocumento(null, null, 'juridica')).toEqual({ estado: 'sin_documento' })
   })
 
-  it('solo CC, CE, NIT y PAS se mandan a Valida hoy', () => {
-    expect(['CC', 'CE', 'NIT', 'PAS'].every((t) => tipoAceptadoPorValida(t))).toBe(true)
-    expect(['TI', 'PPT', 'RC', 'CEDULA', 'PP', '', null, undefined].some((t) => tipoAceptadoPorValida(t))).toBe(false)
+  it('solo los siete códigos de Valida se mandan; los alias se normalizan antes', () => {
+    expect(['CC', 'CE', 'NIT', 'PAS', 'TI', 'PPT', 'RC'].every((t) => tipoAceptadoPorValida(t))).toBe(true)
+    expect(['CEDULA', 'PP', 'X', '', null, undefined].some((t) => tipoAceptadoPorValida(t))).toBe(false)
   })
 })

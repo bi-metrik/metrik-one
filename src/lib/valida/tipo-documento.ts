@@ -13,29 +13,17 @@
 import type { TipoDocumento, TipoPersona } from '@/lib/actions/valida-consultas'
 import { CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO, MENSAJES_ERROR_VALIDA } from './mensajes-error'
 
-/** Lo que Valida acepta HOY en `documento.tipo`. */
-export const TIPOS_DOCUMENTO_VALIDA: readonly TipoDocumento[] = ['CC', 'CE', 'NIT', 'PAS']
-
 /**
- * Tipos colombianos reales que ONE reconoce pero que Valida todavía no acepta. Se aceptan en
- * metrik-valida#70; cuando ese PR esté en producción, pasan a `TIPOS_DOCUMENTO_VALIDA` (y al tipo
- * `TipoDocumento`). Hasta entonces la fila NO se convierte en otro tipo a ciegas: no se consulta ni
- * se cobra, y dice por qué.
+ * Lo que Valida acepta en `documento.tipo`. TI, PPT y RC entraron con metrik-valida#70 (2026-10-23);
+ * hasta entonces ONE los reconocía pero no los mandaba.
  */
-export const TIPOS_DOCUMENTO_PENDIENTES = ['TI', 'PPT', 'RC'] as const
-export type TipoDocumentoPendiente = (typeof TIPOS_DOCUMENTO_PENDIENTES)[number]
-
-const NOMBRE_PENDIENTE: Record<TipoDocumentoPendiente, string> = {
-  TI: 'tarjeta de identidad',
-  PPT: 'Permiso por Protección Temporal',
-  RC: 'registro civil',
-}
+export const TIPOS_DOCUMENTO_VALIDA: readonly TipoDocumento[] = ['CC', 'CE', 'NIT', 'PAS', 'TI', 'PPT', 'RC']
 
 /**
  * Formas en que llega cada tipo, ya compactadas (sin tildes, puntos, espacios, guiones ni guiones
  * bajos, en mayúsculas). «C.C.», «c c», «Cédula de ciudadanía» y «CEDULA» dan lo mismo.
  */
-const ALIAS: Readonly<Record<string, TipoDocumento | TipoDocumentoPendiente>> = {
+const ALIAS: Readonly<Record<string, TipoDocumento>> = {
   CC: 'CC',
   CEDULA: 'CC',
   CEDULADECIUDADANIA: 'CC',
@@ -63,8 +51,6 @@ const ALIAS: Readonly<Record<string, TipoDocumento | TipoDocumentoPendiente>> = 
 export type TipoDocumentoLeido =
   /** Un tipo que Valida acepta. `inferido`: la celda venía vacía y se dedujo del tipo de persona. */
   | { estado: 'aceptado'; tipo: TipoDocumento; inferido: boolean }
-  /** Un tipo real que Valida todavía no acepta (TI, PPT, RC). */
-  | { estado: 'pendiente'; tipo: TipoDocumentoPendiente }
   /** Nada que se pueda leer como tipo («X», un número puesto en la columna, «PEP»…). */
   | { estado: 'no_reconocido'; valor: string }
   /** Sin tipo y sin número: la fila consulta solo por nombre, como siempre. */
@@ -79,7 +65,7 @@ export function compactarTipo(valor: string): string {
     .replace(/[.\s\-_]/g, '')
 }
 
-/** ¿Es un tipo que Valida acepta hoy? Lo usa el trabajador para no mandar lo que volvería 400. */
+/** ¿Es un tipo que Valida acepta? Lo usa el trabajador para no mandar lo que volvería 400. */
 export function tipoAceptadoPorValida(tipo: string | null | undefined): tipo is TipoDocumento {
   return (TIPOS_DOCUMENTO_VALIDA as readonly string[]).includes(tipo ?? '')
 }
@@ -108,21 +94,14 @@ export function leerTipoDocumento(
 
   const tipo = ALIAS[compactarTipo(crudo)]
   if (!tipo) return { estado: 'no_reconocido', valor: crudo }
-  if (tipoAceptadoPorValida(tipo)) return { estado: 'aceptado', tipo, inferido: false }
-  return { estado: 'pendiente', tipo: tipo as TipoDocumentoPendiente }
+  return { estado: 'aceptado', tipo, inferido: false }
 }
 
 /** Lo que la fila dice cuando el tipo no se reconoce. */
 export const MENSAJE_TIPO_NO_RECONOCIDO: string = MENSAJES_ERROR_VALIDA[CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO]
 
-/** Lo que la fila dice cuando el tipo es real pero Valida todavía no consulta por él. */
-export function mensajeTipoPendiente(tipo: TipoDocumentoPendiente): string {
-  return `Valida todavía no consulta por ${NOMBRE_PENDIENTE[tipo]} (${tipo}). La fila no se consultó ni se cobró; consúltala por nombre o con otro documento.`
-}
-
 /** El mensaje de la fila, o null si el tipo se puede consultar. */
 export function mensajeTipoDocumento(leido: TipoDocumentoLeido): string | null {
   if (leido.estado === 'no_reconocido') return MENSAJE_TIPO_NO_RECONOCIDO
-  if (leido.estado === 'pendiente') return mensajeTipoPendiente(leido.tipo)
   return null
 }

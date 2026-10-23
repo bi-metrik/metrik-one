@@ -8,7 +8,7 @@
  */
 
 import type { TipoDocumento, TipoPersona, ValidaConsultaInput, ValidaResultado } from '@/lib/actions/valida-consultas'
-import { TIPOS_DOCUMENTO_VALIDA, leerTipoDocumento, type TipoDocumentoPendiente } from './tipo-documento'
+import { leerTipoDocumento } from './tipo-documento'
 
 /** La fila de `valida_consultas` que se mira. */
 export type ConsultaEnError = {
@@ -23,13 +23,16 @@ export type ConsultaEnError = {
 
 export type PlanReproceso =
   | { accion: 'reprocesar'; tipo: TipoDocumento; inferido: boolean; input: ValidaConsultaInput }
-  /** TI, PPT o RC: Valida todavía no los acepta (metrik-valida#70). Se saltan hasta entonces. */
-  | { accion: 'esperar_valida'; tipo: TipoDocumentoPendiente }
   /** No se puede deducir el tipo con seguridad. Se lista aparte, no se consulta. */
   | { accion: 'aparte'; motivo: 'tipo_no_deducible' | 'sin_numero' | 'tipo_persona_invalido' }
 
-/** Lo que se filtra en la base: severidad error y un tipo que Valida no acepta. */
-export const TIPOS_ACEPTADOS_HOY: readonly string[] = TIPOS_DOCUMENTO_VALIDA
+/**
+ * Lo que se filtra en la base: severidad error y un tipo que Valida NO aceptaba cuando la fila
+ * falló. Es la lista de antes de metrik-valida#70, fija a propósito: una fila en error con «TI» es
+ * justo una de las que hay que reprocesar, aunque hoy TI ya se acepte. Una en error con CC, CE, NIT o
+ * PAS falló por otra razón y no es de este reproceso.
+ */
+export const TIPOS_ACEPTADOS_ANTES: readonly string[] = ['CC', 'CE', 'NIT', 'PAS']
 
 /**
  * Qué hacer con una fila.
@@ -51,8 +54,6 @@ export function planReproceso(c: ConsultaEnError): PlanReproceso {
   if (leido.estado === 'aceptado') {
     tipo = leido.tipo
     inferido = leido.inferido
-  } else if (leido.estado === 'pendiente') {
-    return { accion: 'esperar_valida', tipo: leido.tipo }
   } else if (persona === 'juridica' && /^\d[\d.\s-]*$/.test(numero)) {
     tipo = 'NIT'
     inferido = true
@@ -134,7 +135,6 @@ export type ResumenReproceso = {
   revisadas: number
   reprocesadas: number
   siguenEnError: number
-  esperanValida: number
   aparte: string[]
   conHallazgo: string[]
   /** Negocios cuyo score SARLAFT habría que recalcular (el script no lo hace). */
@@ -145,7 +145,7 @@ export type ResumenReproceso = {
 
 /** Clasifica sin llamar a nadie: es el modo de ensayo. */
 export function ensayarReproceso(consultas: readonly ConsultaEnError[]) {
-  const porAccion = { reprocesar: [] as string[], esperar_valida: [] as string[], aparte: [] as string[] }
+  const porAccion = { reprocesar: [] as string[], aparte: [] as string[] }
   for (const c of consultas) porAccion[planReproceso(c).accion].push(c.id)
   return porAccion
 }
@@ -160,7 +160,6 @@ export async function ejecutarReproceso(
     revisadas: consultas.length,
     reprocesadas: 0,
     siguenEnError: 0,
-    esperanValida: 0,
     aparte: [],
     conHallazgo: [],
     negocios: 0,
@@ -170,10 +169,6 @@ export async function ejecutarReproceso(
 
   for (const c of consultas) {
     const plan = planReproceso(c)
-    if (plan.accion === 'esperar_valida') {
-      r.esperanValida += 1
-      continue
-    }
     if (plan.accion === 'aparte') {
       r.aparte.push(c.id)
       continue
