@@ -414,6 +414,12 @@ const ESTADOS_CONSULTA: Record<string, 'aprobado' | 'pendiente' | 'rechazado' | 
  * confirmación: `codigo` del rechazo es ese código, para que la conciliación use el mismo id de evento
  * que la confirmación (`<ref_payco>-<estado>`). Un estado sin código conocido no decide nada (error).
  * Una transacción de PRUEBA no paga una cuota real, igual que en la confirmación.
+ *
+ * `6` (Reversada, «reintegro del dinero al cliente pagador», tabla de códigos de
+ * https://docs.epayco.com/docs/url-de-confirmacion, leída el 2026-10-23) es `reversado`: la plata
+ * volvió al pagador. La documentación no trae otro estado de devolución o reembolso. ePayco NO avisó por
+ * la confirmación el reverso de la 390720992 (2026-10-22): la conciliación lo pregunta
+ * (`reversos-epayco-servidor.ts`).
  */
 export function resultadoDeConsultaEpayco(
   cuerpo: Record<string, unknown>,
@@ -443,7 +449,10 @@ export function resultadoDeConsultaEpayco(
   }
   if (estado === 'pendiente') return { estado: 'pendiente', externalRef, detalle: texto || 'Pendiente' }
   if (estado === 'rechazado') return { estado: 'rechazado', externalRef, codigo, mensaje: texto || 'Rechazada', reintentable: false }
-  if (estado === 'reversado') return { estado: 'error', mensaje: `ePayco reversó la transacción ${ref}: revisar a mano.`, reintentable: false }
+  if (estado === 'reversado') return { estado: 'reversado', externalRef, codigo, mensaje: texto || 'Reversada' }
+  // Sin un código conocido, el texto «Reversada» también vale: la tabla de estados de la documentación
+  // lo nombra así y es la única forma de devolución que reporta ePayco.
+  if (!estado && /^revers/i.test(String(d.status ?? '').trim())) return { estado: 'reversado', externalRef, codigo: '6', mensaje: texto || 'Reversada' }
   return { estado: 'error', mensaje: `ePayco devolvió un estado desconocido (${codigo || texto || 'vacío'}).`, reintentable: true }
 }
 

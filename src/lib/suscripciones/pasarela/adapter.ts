@@ -109,6 +109,17 @@ export type ResultadoCargo =
       reintentable: boolean
     }
   | {
+      /**
+       * La transacción se APROBÓ y después la pasarela devolvió la plata al pagador (ePayco: estado 6,
+       * «Reversada»). Solo lo devuelve `consultar`: un cargo nuevo nunca nace reversado.
+       */
+      estado: 'reversado'
+      externalRef: string
+      /** El código de estado de la pasarela (ePayco: `6`), el mismo de la confirmación. */
+      codigo: string
+      mensaje: string
+    }
+  | {
       estado: 'error'
       mensaje: string
       reintentable: boolean
