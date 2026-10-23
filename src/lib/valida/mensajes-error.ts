@@ -14,6 +14,12 @@
 /** La búsqueda en alguna lista no se completó: Valida no registró ni cobró (metrik-valida#66). */
 export const CODIGO_BUSQUEDA_INCOMPLETA = 'busqueda_incompleta'
 
+/**
+ * La fila del cargue traía un tipo de documento que Valida no acepta y no se consultó. Normalmente la
+ * fila lleva su propia frase (`tipo-documento.ts`); este código es el respaldo si falta.
+ */
+export const CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO = 'tipo_documento_no_aceptado'
+
 export const MENSAJE_GENERICO =
   'No pudimos completar la consulta. Intenta de nuevo; si sigue pasando, escríbenos.'
 
@@ -23,6 +29,8 @@ export const MENSAJES_ERROR_VALIDA: Readonly<Record<string, string>> = {
   valida_tiempo_agotado: 'Valida no respondió a tiempo. Intenta de nuevo en un momento.',
   db_error: 'Valida tuvo un problema interno. Intenta de nuevo; si sigue pasando, escríbenos.',
   persistencia_error: 'La consulta no se pudo guardar y no se cobró. Intenta de nuevo.',
+  [CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO]:
+    'Tipo de documento no reconocido: usa CC, CE, NIT o PAS. La fila no se consultó ni se cobró.',
   validation_error: 'Revisa los datos: el nombre o el documento no tienen un formato válido.',
   invalid_json: 'Revisa los datos: el nombre o el documento no tienen un formato válido.',
   invalid_api_key: 'La conexión de tu espacio con Valida no está activa. Escríbenos para revisarla.',

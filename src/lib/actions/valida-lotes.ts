@@ -12,6 +12,7 @@ import {
   FILAS_PARA_AVISO_CORREO,
   TOPE_FILAS_LOTE,
   autorizadoHasta,
+  avisoTiposDocumento,
   filaConsume,
   filasDesdeXlsx,
   loteActivo,
@@ -19,6 +20,7 @@ import {
   recortarAlSaldo,
   textoPausa,
   celdasFilaResultado,
+  type AvisoTiposDocumento,
   type EstadoLote,
   type FilaResultadoLote,
   type FilaXLSX,
@@ -147,7 +149,12 @@ export type ErrorCrearLote =
   | { ok: false; error: string }
   /** La bolsa no alcanza: `alcanzan` de `consultables` filas. Con `limite` se procesan las primeras. */
   | { ok: false; error: 'saldo_insuficiente'; alcanzan: number; consultables: number; total: number }
-  | { ok: false; error: MotivoCorte; corte: true };
+  | { ok: false; error: MotivoCorte; corte: true }
+  /**
+   * Filas con un tipo de documento que no se va a consultar («X», TI…). Se avisa ANTES de crear el
+   * lote; con `aceptarTiposDocumento` el lote se crea y esas filas salen en error sin cobrarse.
+   */
+  | { ok: false; error: 'tipos_documento'; aviso: AvisoTiposDocumento; total: number };
 
 async function negociosPorCodigo(svc: Svc, workspaceId: string, codigos: string[]): Promise<Map<string, string>> {
   const mapa = new Map<string, string>();
@@ -165,7 +172,12 @@ async function negociosPorCodigo(svc: Svc, workspaceId: string, codigos: string[
 
 export async function crearLoteValida(
   fd: FormData,
-  opts: { negocio_id_lote?: string | null; titulo?: string | null; limite?: number | null } = {},
+  opts: {
+    negocio_id_lote?: string | null;
+    titulo?: string | null;
+    limite?: number | null;
+    aceptarTiposDocumento?: boolean;
+  } = {},
 ): Promise<{ ok: true; lote: LoteVista } | ErrorCrearLote> {
   const acceso = await accesoValida({ consultaNueva: true });
   if (!acceso.ok) return { ok: false, error: acceso.error };
@@ -216,6 +228,13 @@ export async function crearLoteValida(
 
   const { llave } = await credencialValida(workspaceId);
   if (!llave) return { ok: false, error: 'valida_api_key_no_configurada' };
+
+  // El tipo de documento ANTES de arrancar: la persona corrige el archivo o acepta que esas filas no
+  // se consulten. Va antes de la bolsa porque esas filas no gastan consulta.
+  if (!opts.aceptarTiposDocumento) {
+    const aviso = avisoTiposDocumento(filas);
+    if (aviso) return { ok: false, error: 'tipos_documento', aviso, total: totalArchivo };
+  }
 
   // La bolsa ANTES de arrancar: un lote que no alcanza no empieza sin que la persona lo acepte. Sin
   // bolsa (plan mensual, licencia de los CDA) no hay contador que comparar: Valida nunca corta por

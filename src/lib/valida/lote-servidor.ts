@@ -6,7 +6,7 @@ import { soportePasaGate } from '@/lib/modulos/gate'
 import type { ValidaConsultaInput } from '@/lib/actions/valida-consultas'
 import { credencialValida } from './credencial-servidor'
 import { motivoCorteDeError, type MotivoCorte, type PruebaValida } from './corte-bolsa'
-import { CODIGO_BUSQUEDA_INCOMPLETA } from './mensajes-error'
+import { CODIGO_BUSQUEDA_INCOMPLETA, CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO } from './mensajes-error'
 import { llamarValida, persistirConsulta, recalcularScoreNegocio, type RespuestaValida } from './consulta-servidor'
 import {
   FILA_RECLAMO_S,
@@ -15,6 +15,7 @@ import {
   TURNO_RECLAMO_S,
   claveIdempotenciaFila,
   concurrenciaDelLote,
+  filaSeConsulta,
   lotesSimultaneos,
   severidadDelConteo,
   textoPausa,
@@ -233,6 +234,22 @@ export async function procesarFilaLote(ctx: ContextoTurno, fila: FilaLote): Prom
   }
 
   const input = fila.entrada
+
+  // Un tipo de documento que Valida no acepta («X», TI mientras Valida no lo consulte): Valida la
+  // rechazaría con 400 sin cobrar. No se llama ni va al historial; la fila queda en error con la frase
+  // que puso el parseo, que el XLSX de resultados muestra tal cual.
+  if (!filaSeConsulta(input)) {
+    await terminar(svc, fila, {
+      estado: 'error',
+      severidad: 'error',
+      consulta: null,
+      validaId: null,
+      matches: 0,
+      error: fila.error_parseo ?? CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO,
+    })
+    return { tipo: 'hecha', negocioParaScore: null }
+  }
+
   const clave = claveIdempotenciaFila(fila.id)
   let resultado: RespuestaValida = await llamarValida(llave, input, { claveIdempotencia: clave })
   if (!resultado.ok && (resultado.status ?? 0) >= 500) {
