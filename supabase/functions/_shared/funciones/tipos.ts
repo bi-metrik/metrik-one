@@ -21,6 +21,8 @@ export interface TarifaPublica {
   precio_persona: number | null;
   /** Solo en preventa: el precio completo, como contexto («después sube a…»). */
   precio_completo_persona: number | null;
+  /** Solo en preventa: hasta qué día rige (AAAA-MM-DD, inclusive, día de Bogotá); `null` = sin fecha de fin. */
+  preventa_hasta: string | null;
   /** Abono por persona para apartar; `null` = no se aparta con abono. */
   abono_persona: number | null;
   permite_pago_total: boolean;

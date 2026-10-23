@@ -17,7 +17,7 @@
 // ============================================================
 
 import type { LlaveConversacion } from '../agente/publico/tipos.ts';
-import { fechaTexto } from './fecha-texto.ts';
+import { diaBogota, fechaTexto } from './fecha-texto.ts';
 import type {
   Alternativa,
   EstadoAsistente,
@@ -57,6 +57,8 @@ export interface FuncionEnMemoria {
   estado?: 'activa' | 'pausada' | 'cancelada';
   cierraVentaAt?: string | null;
   esPreventa?: boolean;
+  /** Fin de la preventa (AAAA-MM-DD, inclusive, día de Bogotá). */
+  preventaHasta?: string | null;
   precioPersona?: number | null;
   precioPreventaPersona?: number | null;
   abonoPersona?: number | null;
@@ -123,10 +125,13 @@ export function funcionesEnMemoria(o: { ahora?: () => number } = {}) {
   const tarifaDe = (f: FuncionEnMemoria, c: CampanaEnMemoria): TarifaPublica => {
     const completo = f.precioPersona ?? c.precioPersona ?? null;
     const preventa = f.precioPreventaPersona ?? c.precioPreventaPersona ?? null;
+    // P4: con el interruptor encendido, hasta la fecha de fin inclusive (día de Bogotá).
+    const enPreventa = !!f.esPreventa && (!f.preventaHasta || diaBogota(ahora()) <= f.preventaHasta);
     return {
-      tarifa: f.esPreventa ? 'preventa' : 'completa',
-      precio_persona: f.esPreventa ? preventa : completo,
-      precio_completo_persona: f.esPreventa ? completo : null,
+      tarifa: enPreventa ? 'preventa' : 'completa',
+      precio_persona: enPreventa ? preventa : completo,
+      precio_completo_persona: enPreventa ? completo : null,
+      preventa_hasta: enPreventa ? f.preventaHasta ?? null : null,
       abono_persona: f.abonoPersona ?? c.abonoPersona ?? null,
       permite_pago_total: f.permitePagoTotal ?? c.permitePagoTotal ?? true,
     };

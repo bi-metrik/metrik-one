@@ -45,6 +45,7 @@ const tarifa = (t: TarifaPublica): TarifaPublica => ({
   tarifa: t.tarifa,
   precio_persona: t.precio_persona,
   precio_completo_persona: t.precio_completo_persona,
+  preventa_hasta: t.preventa_hasta ?? null,
   abono_persona: t.abono_persona,
   permite_pago_total: t.permite_pago_total,
 });

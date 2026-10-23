@@ -600,8 +600,8 @@ $$;
 revoke execute on function public.funcion_motivo_asistente(public.funcion_funciones, public.funcion_campanas)
   from public, anon, authenticated, service_role;
 
--- La hora de Bogotá en texto, como la escribe Sabor: «sábado 24 de octubre, 1:00 p. m.». La misma forma que `diaYHora`
--- de `src/lib/funciones/post-campana.ts`.
+-- La hora de Bogotá en texto, como la escribe Sabor: «sábado 24 de octubre, 1:00 p. m.». La misma forma que `fechaTexto`
+-- de `supabase/functions/_shared/funciones/fecha-texto.ts` (la de los textos de la oferta y del grupo).
 create or replace function public.funcion_fecha_texto(p timestamptz)
 returns text
 language sql

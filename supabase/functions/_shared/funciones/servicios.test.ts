@@ -7,6 +7,7 @@ import { cuerpoLinkBold, expiracionBold, pasarelaBold, pasarelaEnMemoria } from 
 import { funcionesEnMemoria, type CampanaEnMemoria, type FuncionEnMemoria } from './memoria'
 import { datosDeApartado, puertoFuncionesSupabase, type ClienteFunciones } from './supabase'
 import { codigoDeError, type PropuestaApartado, type PuertoFunciones } from './tipos'
+import { diaBogota } from './fecha-texto'
 import type { LlaveConversacion } from '../agente/publico/tipos'
 
 /**
@@ -125,11 +126,11 @@ function bancoBase(ws: string): Banco {
       const ws = (await pg.query<{ w: string }>(`select workspace_id as w from funcion_campanas where id = $1`, [f.campanaId])).rows[0].w
       await pg.query(
         `insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente, estado, cierra_venta_at,
-           es_preventa, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, archivada_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+           es_preventa, preventa_hasta, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, archivada_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $15, $10, $11, $12, $13, $14)`,
         [f.id, ws, f.campanaId, f.iniciaAt, f.capacidad, f.cupoAsistente ?? f.capacidad, f.estado ?? 'activa', f.cierraVentaAt ?? null,
           f.esPreventa ?? false, f.precioPersona ?? null, f.precioPreventaPersona ?? null, f.abonoPersona ?? null, f.permitePagoTotal ?? null,
-          f.archivada ? new Date().toISOString() : null],
+          f.archivada ? new Date().toISOString() : null, f.preventaHasta ?? null],
       )
     },
     async apartarEquipo(funcionId, personas) {
@@ -249,9 +250,23 @@ describe.each([
     const c = await campana({ precioPreventaPersona: 150_000 })
     const f = await funcion(c, { esPreventa: true })
     const t = await consultarCupo(b.puerto, b.ws, f)
-    expect(t.ok && t.cupo.tarifa).toEqual({ tarifa: 'preventa', precio_persona: 150_000, precio_completo_persona: 180_000, abono_persona: 100_000, permite_pago_total: true })
+    expect(t.ok && t.cupo.tarifa).toEqual({ tarifa: 'preventa', precio_persona: 150_000, precio_completo_persona: 180_000, preventa_hasta: null, abono_persona: 100_000, permite_pago_total: true })
     const a = await apartar(b.puerto, propuesta(await autorizada(), f, 2, { modalidad: 'abono' }))
     expect(a.ok && [a.tarifa, a.precioUnitario, a.montoTotal, a.modalidad, a.montoAPagar]).toEqual(['preventa', 150_000, 300_000, 'abono', 200_000])
+  })
+
+  it('P4: la preventa rige hasta su fecha de fin (hoy inclusive); vencida, rige el regular con el interruptor encendido', async () => {
+    const c = await campana({ precioPreventaPersona: 150_000 })
+    const hoy = diaBogota(Date.now())
+    const ayer = diaBogota(Date.now() - 86_400_000)
+    const vigente = await funcion(c, { esPreventa: true, preventaHasta: hoy })
+    const vencida = await funcion(c, { esPreventa: true, preventaHasta: ayer })
+    const v = await consultarCupo(b.puerto, b.ws, vigente)
+    expect(v.ok && v.cupo.tarifa).toEqual({ tarifa: 'preventa', precio_persona: 150_000, precio_completo_persona: 180_000, preventa_hasta: hoy, abono_persona: 100_000, permite_pago_total: true })
+    const x = await consultarCupo(b.puerto, b.ws, vencida)
+    expect(x.ok && x.cupo.tarifa).toEqual({ tarifa: 'completa', precio_persona: 180_000, precio_completo_persona: null, preventa_hasta: null, abono_persona: 100_000, permite_pago_total: true })
+    const a = await apartar(b.puerto, propuesta(await autorizada(), vencida, 1))
+    expect(a.ok && [a.tarifa, a.precioUnitario]).toEqual(['completa', 180_000])
   })
 
   it('modalidad_no_permitida y sin_precio', async () => {

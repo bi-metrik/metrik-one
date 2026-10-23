@@ -9,6 +9,7 @@ import 'server-only'
  * acota al workspace y `funcion_ocupacion` verifica que la persona sea de ese workspace. Nada aquí escribe.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { TarifaPublica } from '../../../supabase/functions/_shared/funciones/tipos.ts'
 import { rangoDiaBogota, reservaActiva, type EstadoFuncion, type EstadoReserva, type PagoEstado } from './reglas'
 
 export interface Ocupacion {
@@ -188,12 +189,14 @@ export interface FuncionAgenda {
   inicia_texto: string
   estado: 'activa' | 'pausada' | 'cancelada'
   es_preventa: boolean
+  /** Fin de la preventa (AAAA-MM-DD, inclusive, día de Bogotá); `null` = sin fecha. */
+  preventa_hasta: string | null
   cierra_venta_at: string | null
   capacidad: number
   cupo_asistente: number
   ocupadas: number
   reservas_activas: number
-  tarifa: { tarifa: 'preventa' | 'completa'; precio_persona: number | null; precio_completo_persona: number | null; abono_persona: number | null; permite_pago_total: boolean }
+  tarifa: TarifaPublica
 }
 
 /** Una campaña con su experiencia, anuncios y agenda (`funcion_panel_campana`). */
