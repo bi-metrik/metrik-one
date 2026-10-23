@@ -2,6 +2,8 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Consulta sin cobro de Valida y reproceso AFI](project_valida_consulta_sin_cobro.md) — marca firmada; 0041 SIN aplicar; --probar antes de --aplicar
+
 - ⚠️⚠️ [Tipo de documento del lote de Valida](project_valida_lote_tipo_documento.md) — TI/PPT/RC esperan valida#70; reproceso AFI bloqueado: /validate siempre cobra
 
 - ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco no avisa el reverso; conciliación 7d; anula sin tocar suscripción ni ciclo

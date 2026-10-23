@@ -118,10 +118,13 @@ export function moverConteo(severidades: Record<string, number>, nueva: string):
 
 // ─── La corrida, con la red y la base inyectadas ────────────────────────────────
 
-export type RespuestaReproceso = { ok: true; data: ValidaResultado } | { ok: false; error: string; status?: number }
+export type RespuestaReproceso =
+  | { ok: true; data: ValidaResultado }
+  /** `detener`: las siguientes darían lo mismo o costarían plata (p. ej. Valida no confirmó el «sin cobro»). */
+  | { ok: false; error: string; status?: number; detener?: boolean }
 
 export type DependenciasReproceso = {
-  /** POST /api/v1/validate con la llave del espacio y la `Idempotency-Key` dada. */
+  /** POST /api/v1/validate sin cobro, con la llave del espacio y la `Idempotency-Key` dada. */
   llamar: (input: ValidaConsultaInput, clave: string) => Promise<RespuestaReproceso>
   /** Escribe la fila SOLO si sigue en error sin consulta de Valida. Devuelve si la escribió. */
   actualizarConsulta: (id: string, cambios: Record<string, unknown>) => Promise<boolean>
@@ -139,7 +142,7 @@ export type ResumenReproceso = {
   conHallazgo: string[]
   /** Negocios cuyo score SARLAFT habría que recalcular (el script no lo hace). */
   negocios: number
-  /** Se detuvo antes de terminar (bolsa cortada o llave rechazada): las siguientes darían lo mismo. */
+  /** Se detuvo antes de terminar (llave o marca sin cobro rechazada, bolsa cortada, cobro sin confirmar). */
   detenido: string | null
 }
 
@@ -182,8 +185,9 @@ export async function ejecutarReproceso(
     const res = await deps.llamar(plan.input, claveIdempotenciaReproceso(c.id))
     if (!res.ok) {
       r.siguenEnError += 1
-      // 401/402: llave rechazada o bolsa cortada. Todas las siguientes responderían lo mismo.
-      if (res.status === 401 || res.status === 402) {
+      // 401/402/403: llave rechazada, bolsa cortada o marca sin cobro rechazada. Todas las siguientes
+      // responderían lo mismo. `detener`: Valida respondió sin confirmar el «sin cobro».
+      if (res.detener || res.status === 401 || res.status === 402 || res.status === 403) {
         r.detenido = res.error
         break
       }

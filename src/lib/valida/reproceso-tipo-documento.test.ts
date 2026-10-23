@@ -151,6 +151,23 @@ describe('corrida del reproceso', () => {
     expect(r).toMatchObject({ reprocesadas: 0, siguenEnError: 2, detenido: 'bolsa_agotada' })
   })
 
+  it('una respuesta sin confirmar el «sin cobro» o una marca rechazada (403) detienen la corrida', async () => {
+    const sinConfirmar = dobles({
+      [claveIdempotenciaReproceso('a')]: { ok: false, error: 'sin_cobro_no_confirmado', status: 200, detener: true },
+    })
+    const r1 = await ejecutarReproceso([consulta('a', 'CEDULA'), consulta('b', 'CEDULA')], sinConfirmar.deps)
+    expect(sinConfirmar.llamadas).toHaveLength(1)
+    expect(sinConfirmar.escritas.size).toBe(0)
+    expect(r1).toMatchObject({ reprocesadas: 0, siguenEnError: 1, detenido: 'sin_cobro_no_confirmado' })
+
+    const rechazada = dobles({
+      [claveIdempotenciaReproceso('a')]: { ok: false, error: 'sin_cobro_no_autorizado', status: 403 },
+    })
+    const r2 = await ejecutarReproceso([consulta('a', 'CEDULA'), consulta('b', 'CEDULA')], rechazada.deps)
+    expect(rechazada.llamadas).toHaveLength(1)
+    expect(r2.detenido).toBe('sin_cobro_no_autorizado')
+  })
+
   it('el conteo del lote pasa la fila de error a su severidad', () => {
     expect(moverConteo({ error: 2, sin_hallazgo: 1 }, 'alto')).toEqual({ error: 1, sin_hallazgo: 1, alto: 1 })
     expect(moverConteo({ error: 1 }, 'sin_hallazgo')).toEqual({ sin_hallazgo: 1 })
