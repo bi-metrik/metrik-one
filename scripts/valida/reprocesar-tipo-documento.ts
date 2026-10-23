@@ -16,7 +16,7 @@
  * Qué filas: severidad `error` y un `documento_tipo` que Valida no acepta, en el espacio dado.
  *   - Tipo reconocible (CEDULA, CÉDULA, PP, PA, PASAPORTE…): se normaliza con `leerTipoDocumento`,
  *     la misma función del lote.
- *   - TI, PPT, RC: se saltan hasta que Valida los acepte (metrik-valida#70).
+ *   - TI, PPT, RC: se mandan tal cual (Valida los acepta desde metrik-valida#70).
  *   - Irreconocible («X», un NIT puesto en la columna): solo una persona jurídica se deduce con
  *     seguridad (NIT). Las demás se listan aparte.
  *
@@ -36,7 +36,7 @@ import '../_load-env'
 import { createClient } from '@supabase/supabase-js'
 import { leerSecretosWorkspace, secretoConRespaldo } from '../../src/lib/secretos/workspace'
 import {
-  TIPOS_ACEPTADOS_HOY,
+  TIPOS_ACEPTADOS_ANTES,
   ejecutarReproceso,
   ensayarReproceso,
   moverConteo,
@@ -71,7 +71,7 @@ const svc: any = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env
 
 async function leerConsultas(): Promise<ConsultaEnError[]> {
   const out: ConsultaEnError[] = []
-  const lista = `(${TIPOS_ACEPTADOS_HOY.join(',')})`
+  const lista = `(${TIPOS_ACEPTADOS_ANTES.join(',')})`
   for (let desde = 0; ; desde += 1000) {
     const { data, error } = await svc
       .from('valida_consultas')
@@ -169,13 +169,10 @@ async function main() {
     console.log(`Ensayo (no escribe ni consulta). Espacio ${WORKSPACE}.`)
     console.log(`Filas en error con un tipo que Valida no acepta: ${consultas.length}`)
     console.log(`  se reprocesarían: ${ensayo.reprocesar.length}`)
-    console.log(`  esperan a Valida (TI, PPT, RC): ${ensayo.esperar_valida.length}`)
     console.log(`  aparte (tipo no deducible o sin número): ${ensayo.aparte.length}`)
     console.log(`Columnas de constancia en la base: ${(await columnasDeConstancia()) ? 'sí' : 'NO (falta la migración)'}`)
     console.log('ids a reprocesar:')
     for (const id of ensayo.reprocesar) console.log(`  ${id}`)
-    console.log('ids que esperan a Valida:')
-    for (const id of ensayo.esperar_valida) console.log(`  ${id}`)
     console.log('ids aparte:')
     for (const id of ensayo.aparte) console.log(`  ${id}`)
     return
@@ -206,7 +203,6 @@ async function main() {
   })
   console.log(`Reprocesadas: ${r.reprocesadas}`)
   console.log(`Siguen en error: ${r.siguenEnError}`)
-  console.log(`Esperan a Valida (TI, PPT, RC): ${r.esperanValida}`)
   console.log(`Aparte: ${r.aparte.length}${r.aparte.length ? ` (${r.aparte.join(', ')})` : ''}`)
   console.log(`Negocios con score por recalcular: ${r.negocios}`)
   if (r.detenido) console.log(`Detenido por Valida: ${r.detenido}`)

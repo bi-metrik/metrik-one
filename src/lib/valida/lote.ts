@@ -182,11 +182,11 @@ export function filasDesdeXlsx(
       }
     }
 
-    // Un tipo que Valida no acepta se guarda como vino (o con su código, si es TI, PPT o RC): el
-    // trabajador ve que no es de Valida y termina la fila con el mensaje, sin llamar ni cobrar
-    // (`tipoAceptadoPorValida`). La persona ve en el resultado qué escribió y por qué no salió.
+    // Un tipo que Valida no acepta se guarda como vino: el trabajador ve que no es de Valida y termina
+    // la fila con el mensaje, sin llamar ni cobrar (`tipoAceptadoPorValida`). La persona ve en el
+    // resultado qué escribió y por qué no salió.
     const tipoDoc =
-      leido.estado === 'aceptado' || leido.estado === 'pendiente'
+      leido.estado === 'aceptado'
         ? leido.tipo
         : leido.estado === 'no_reconocido'
           ? leido.valor.toUpperCase()

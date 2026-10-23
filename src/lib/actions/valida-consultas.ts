@@ -13,7 +13,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export type TipoPersona = 'natural' | 'juridica';
-export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS';
+export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS' | 'TI' | 'PPT' | 'RC';
 export type Severidad = 'alto' | 'medio' | 'bajo' | 'informativo' | 'sin_hallazgo' | 'error';
 export type TierLista = '1_vinculante' | '2_obligatoria' | '3_referencia' | '4_kyc_nacional';
 
@@ -270,11 +270,11 @@ function hojaValoresPlantilla(sinNegocio: boolean): XLSX.WorkSheet {
     ['nombre_completo', 'Nombre completo o razón social', 'Obligatorio si no hay documento.'],
     [
       'tipo_documento',
-      'CC · CE · NIT · PAS',
+      'CC · CE · NIT · PAS · TI · PPT · RC',
       'CC: cédula de ciudadanía. CE: cédula de extranjería. NIT: personas jurídicas. PAS: pasaporte. ' +
-        'También se entienden «Cédula», «Cédula de extranjería», «Pasaporte», «PP» y «PA». ' +
-        'Vacío con número: natural se consulta como CC (PAS si el número trae letras) y jurídica como NIT. ' +
-        'Valida todavía no consulta por tarjeta de identidad (TI), PPT ni registro civil (RC): esas filas no se consultan ni se cobran.',
+        'TI: tarjeta de identidad. PPT: Permiso por Protección Temporal. RC: registro civil. ' +
+        'También se entienden «Cédula», «Cédula de extranjería», «Pasaporte», «PP», «PA», «Tarjeta de identidad» y «Registro civil». ' +
+        'Vacío con número: natural se consulta como CC (PAS si el número trae letras) y jurídica como NIT.',
     ],
     ['numero_documento', 'Solo el número', 'Sin puntos ni espacios. Para NIT, sin dígito de verificación.'],
   ];

@@ -6,6 +6,7 @@ import {
   ensayarReproceso,
   moverConteo,
   planReproceso,
+  TIPOS_ACEPTADOS_ANTES,
   type ConsultaEnError,
   type RespuestaReproceso,
 } from './reproceso-tipo-documento'
@@ -48,9 +49,14 @@ describe('plan del reproceso', () => {
     })
   })
 
-  it('TI y PPT esperan a Valida', () => {
-    expect(planReproceso(consulta('a', 'TI'))).toEqual({ accion: 'esperar_valida', tipo: 'TI' })
-    expect(planReproceso(consulta('b', 'PPT'))).toEqual({ accion: 'esperar_valida', tipo: 'PPT' })
+  it('TI, PPT y RC se reprocesan con su código (metrik-valida#70)', () => {
+    expect(planReproceso(consulta('a', 'TI'))).toMatchObject({ accion: 'reprocesar', tipo: 'TI', inferido: false })
+    expect(planReproceso(consulta('b', 'PPT'))).toMatchObject({ accion: 'reprocesar', tipo: 'PPT' })
+    expect(planReproceso(consulta('c', 'RC'))).toMatchObject({ accion: 'reprocesar', tipo: 'RC' })
+  })
+
+  it('el filtro de la base es la lista de ANTES de #70: una fila en error con TI sí es de este reproceso', () => {
+    expect(TIPOS_ACEPTADOS_ANTES).toEqual(['CC', 'CE', 'NIT', 'PAS'])
   })
 
   it('X o un NIT en la columna: jurídica se deduce NIT; natural va aparte', () => {
@@ -67,8 +73,7 @@ describe('plan del reproceso', () => {
 
   it('el ensayo solo clasifica ids', () => {
     expect(ensayarReproceso([consulta('a', 'CEDULA'), consulta('b', 'TI'), consulta('c', 'X')])).toEqual({
-      reprocesar: ['a'],
-      esperar_valida: ['b'],
+      reprocesar: ['a', 'b'],
       aparte: ['c'],
     })
   })
@@ -110,6 +115,7 @@ describe('corrida del reproceso', () => {
     expect(d.llamadas).toEqual([
       { clave: 'one-reproceso-tipo-a', tipo: 'CC' },
       { clave: 'one-reproceso-tipo-b', tipo: 'PAS' },
+      { clave: 'one-reproceso-tipo-c', tipo: 'TI' },
     ])
     expect(d.escritas.get('b')).toEqual({
       documento_tipo: 'PAS',
@@ -130,9 +136,8 @@ describe('corrida del reproceso', () => {
     expect(d.lotes).toEqual(['fila-1'])
     expect(r).toEqual({
       revisadas: 4,
-      reprocesadas: 2,
+      reprocesadas: 3,
       siguenEnError: 0,
-      esperanValida: 1,
       aparte: ['d'],
       conHallazgo: ['b'],
       negocios: 1,
