@@ -20,12 +20,19 @@ y tres textos, §1.8 del diseño, que manda sobre lo anterior); P4 (preventa = i
 - Una regla, un lugar: `funcion_tarifa` (precio y preventa vigente por día de Bogotá), `funcion_motivo_asistente`,
   `funcion_ocupadas`. En TS solo el doble `memoria.ts`, que el contrato compara con la base. Los textos usan la tarifa
   que ya resolvió la base, no recalculan.
-- Textos en `_shared/funciones/textos.ts` (lógica) + `textos-plantilla.ts`: solo link de Bold (Nequi/Daviplata
-  bloquean copiar), `[FALTA: …]` bloquea copiar, sobrante no se corta. El DM con la ficha real de Jack queda a ~2
-  bytes de 1.000 según el nombre de campaña: no agregar texto fijo al DM sin medir.
+- Textos en `_shared/funciones/textos.ts` (lógica) + `textos-plantilla.ts`: solo link de Bold; Nequi/Daviplata en un
+  texto libre = `avisos` que NO bloquea (23-oct); `[FALTA: …]` y pasar el límite SÍ bloquean copiar; sobrante no se
+  corta. El DM va SIN la intro (23-oct): con la ficha real de Jack, 771 bytes (con intro eran 965). Las líneas de pago
+  están aprobadas palabra por palabra (oferta sin punto final): no retocarlas.
+- Frases con tema de la película van en `saludo_grupo` de la experiencia; recepción/puerta del negocio sin tema.
+- Plazo del saldo = `funcion_campanas.dias_saldo_antes` (1..30, default 1; viaja dentro de `p_precios` de
+  `funcion_guardar_campana`, como `tope_sobreventa`, para no cambiar la firma). Solo dato + texto: link/pago del saldo
+  esperan la P14. Se eligió ≥ 1 (no 0) para dar margen de verificar el pago antes de la función.
 - Al asistente NUNCA un número de cupo: `estado` y alternativas (prueba que recorre las salidas).
 - Pagos (P13): `funcion_preparar_pago` → link → `funcion_registrar_pago` (servidor, idempotente). Sin cupo al pagar =
   `pendiente_persona`; solo una persona sobrevende o devuelve. `expiration_date` de Bold en ms SIN VERIFICAR.
+- Regla de la fecha de fin de preventa en pantalla: `preventaPasaLaFuncion` + `diaBogota` (`reglas.ts`), contrastadas
+  con la RPC en `funciones-sql.test.ts` (incluye una función a las 10 p. m., que en UTC ya es otro día).
 - La prueba de fechas por patrón vive en `textos.test.ts`: si se agrega una fecha u hora a una plantilla, tiene que
   salir de la función o de la campaña, o la prueba cae.
 - PGlite no prueba el `for update`: la concurrencia real va en el job de CI con Postgres 16 y su mutación sin candado.
