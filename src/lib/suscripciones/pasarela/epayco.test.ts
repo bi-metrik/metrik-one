@@ -554,9 +554,26 @@ describe('consultar una transacción (la conciliación de los cargos pendientes)
     expect(resultadoDeConsultaEpayco({ success: true }, 'epayco-1').estado).toBe('error')
     // Aunque la respuesta fallida traiga algo con forma de estado, `success: false` no decide nada.
     expect(resultadoDeConsultaEpayco({ success: false, data: { codTransactionState: '2', status: 'Rechazada' } }, 'epayco-1').estado).toBe('error')
-    // Un estado que no se conoce, o la reversa: no decide nada solo.
+    // Un estado que no se conoce no decide nada solo.
     expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '', codeResponse: undefined, status: 'Rara' }), 'epayco-390720992').estado).toBe('error')
-    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '6' }), 'epayco-390720992').estado).toBe('error')
+  })
+
+  it('6 (Reversada) es un reverso: la plata volvió al pagador (la 390720992, reversada el 2026-10-22)', () => {
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '6', status: 'Reversada', responseReasonText: 'Reversada' }), 'epayco-390720992')).toEqual({
+      estado: 'reversado',
+      externalRef: 'epayco-390720992',
+      codigo: '6',
+      mensaje: 'Reversada',
+    })
+    // Con `codeResponse` de respaldo, igual.
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: undefined, codeResponse: 6 }), 'epayco-390720992').estado).toBe('reversado')
+    // Sin un código conocido, el texto «Reversada» de la tabla de estados también vale.
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '', codeResponse: undefined, status: 'Reversada' }), 'epayco-390720992')).toMatchObject({ estado: 'reversado', codigo: '6' })
+    // Otra transacción o una de prueba en producción no reversan nada.
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '6', refPayco: 111 }), 'epayco-390720992').estado).toBe('error')
+    expect(resultadoDeConsultaEpayco(doc({ codTransactionState: '6', testMode: 'TRUE' }), 'epayco-390720992').estado).toBe('error')
+    // Una consulta fallida no es un reverso.
+    expect(resultadoDeConsultaEpayco({ success: false, data: { codTransactionState: '6' } }, 'epayco-390720992').estado).toBe('error')
   })
 
   it('otra transacción, una de prueba en producción o una aprobada sin monto: error', () => {

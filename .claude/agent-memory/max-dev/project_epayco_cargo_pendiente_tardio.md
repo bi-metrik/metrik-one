@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Transacción 390720992 (2026-10-22, afi-prueba-produccion-1): ePayco la dejó «Pendiente por aprobación del comercio» a las 05:01 y la aceptó a las 09:28 Bogotá. La confirmación SÍ llegó y registró el pago (`pasarela_eventos` 390720992-1 `registrado`), pero el intento quedó `pendiente`, el registro en `cobro_pendiente` y sin C3. PR `fix/epayco-cargo-pendiente-tardio` arregla (a) cierre tras aprobado, (b) rechazo tardío, (c) conciliación por consulta. SIN mergear al 2026-10-22; el caso puntual de prod se corrige con 2 UPDATE que Mauricio autoriza aparte.
+Transacción 390720992 (2026-10-22, afi-prueba-produccion-1): ePayco la dejó «Pendiente por aprobación del comercio» a las 05:01 y la aceptó a las 09:28 Bogotá. La confirmación SÍ llegó y registró el pago (`pasarela_eventos` 390720992-1 `registrado`), pero el intento quedó `pendiente`, el registro en `cobro_pendiente` y sin C3. PR `fix/epayco-cargo-pendiente-tardio` arregla (a) cierre tras aprobado, (b) rechazo tardío, (c) conciliación por consulta. Mergeado como #1252 (5e07b983); el caso puntual de prod se corrige con 2 UPDATE que Mauricio autoriza aparte.
 
 **Why:** la suscripción se activa ANTES del cobro (paso b de `activarYCobrarReclamado`); el (d), activar solo con el pago aprobado, quedó para Mauricio con Emilio.
 
