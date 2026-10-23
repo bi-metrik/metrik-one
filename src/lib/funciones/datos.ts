@@ -127,13 +127,23 @@ export async function leerDia(db: SupabaseClient, workspaceId: string, fecha: st
   return filas.filter((f): f is FuncionDelDia => !!f)
 }
 
-export interface Experiencia {
-  id: string
+/** La ficha de la experiencia (P11): los textos de la oferta y del grupo, tal cual los escribe Sabor. */
+export interface FichaExperienciaDatos {
   nombre: string
-  historia: string | null
-  que_incluye: string | null
+  titulo_oferta: string | null
+  frase_gancho: string | null
+  intro: string | null
+  que_incluye: string[] | null
+  emojis_tema: string | null
+  saludo_grupo: string | null
+  relato_grupo: string | null
   edad_minima: number | null
-  info_general: string | null
+}
+
+const COLUMNAS_FICHA = 'nombre, titulo_oferta, frase_gancho, intro, que_incluye, emojis_tema, saludo_grupo, relato_grupo, edad_minima'
+
+export interface Experiencia extends FichaExperienciaDatos {
+  id: string
   activa: boolean
   created_at: string
 }
@@ -142,7 +152,7 @@ export interface Experiencia {
 export async function leerExperiencias(db: SupabaseClient, workspaceId: string): Promise<Experiencia[]> {
   const { data, error } = await db
     .from('funcion_experiencias')
-    .select('id, nombre, historia, que_incluye, edad_minima, info_general, activa, created_at')
+    .select(`id, ${COLUMNAS_FICHA}, activa, created_at`)
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
   if (error) throw new Error(`No se pudieron leer las experiencias: ${error.message}`)
@@ -215,7 +225,7 @@ export interface CampanaPanel {
   abono_persona: number | null
   permite_pago_total: boolean
   tope_sobreventa: number | null
-  experiencia: { experiencia_id: string; nombre: string; historia: string | null; que_incluye: string | null; edad_minima: number | null; info_general: string | null }
+  experiencia: FichaExperienciaDatos & { experiencia_id: string }
   anuncios: string[]
   funciones: FuncionAgenda[]
 }
@@ -224,4 +234,25 @@ export async function leerPanelCampana(db: SupabaseClient, campanaId: string): P
   const { data, error } = await db.rpc('funcion_panel_campana', { p_campana_id: campanaId })
   if (error || !data) return null
   return data as CampanaPanel
+}
+
+/** Los datos del lugar (`funcion_negocio`), una fila por workspace. Sin fila = todo vacío (los textos dicen «[FALTA]»). */
+export interface Negocio {
+  direccion: string | null
+  piso: string | null
+  recepcion: string | null
+  parqueadero: string | null
+  firma: string | null
+}
+
+export const NEGOCIO_VACIO: Negocio = { direccion: null, piso: null, recepcion: null, parqueadero: null, firma: null }
+
+export async function leerNegocio(db: SupabaseClient, workspaceId: string): Promise<Negocio> {
+  const { data, error } = await db
+    .from('funcion_negocio')
+    .select('direccion, piso, recepcion, parqueadero, firma')
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  if (error) throw new Error(`No se pudieron leer los datos del lugar: ${error.message}`)
+  return (data as Negocio | null) ?? NEGOCIO_VACIO
 }

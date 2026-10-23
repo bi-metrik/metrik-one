@@ -1,39 +1,82 @@
 'use client'
 
 /**
- * La ficha de la película con los campos que YA tiene la experiencia: nombre, intro (historia), qué incluye, edad
- * mínima e información general. La ficha nueva (menú, parqueadero, dirección, cómo reservar…) espera la aprobación de
- * Mauricio (P11): no se agregan campos aquí. La edad mínima va en fichas: «Sin menores», «Desde 6» u «Otra».
+ * La ficha de la película (P11, §1.8): los textos de la oferta y de la bienvenida al grupo de WhatsApp, en palabras de
+ * Sabor y TAL CUAL (con sus emojis). Salen de sus dos mensajes reales; no hay más campos. La edad mínima va en fichas:
+ * «Sin menores», «Desde 6» u «Otra». Los datos del lugar (dirección, piso, parqueadero, firma) van aparte, una vez por
+ * workspace (`/funciones/lugar`).
  */
-export interface ValoresFicha {
-  nombre: string
-  historia: string | null
-  que_incluye: string | null
-  edad_minima: number | null
-  info_general: string | null
-}
+import type { FichaExperienciaDatos } from '@/lib/funciones/datos'
 
-/** Una ficha vacía; la información general se trae de la última experiencia (§4.3). */
-export const fichaVacia = (infoGeneral: string | null): ValoresFicha => ({ nombre: '', historia: null, que_incluye: null, edad_minima: null, info_general: infoGeneral })
+export type ValoresFicha = FichaExperienciaDatos
+
+export const fichaVacia = (): ValoresFicha => ({
+  nombre: '', titulo_oferta: null, frase_gancho: null, intro: null, que_incluye: null, emojis_tema: null,
+  saludo_grupo: null, relato_grupo: null, edad_minima: null,
+})
+
+/** Los valores de una experiencia guardada, para editarla. */
+export const fichaDe = (e: FichaExperienciaDatos): ValoresFicha => ({
+  nombre: e.nombre, titulo_oferta: e.titulo_oferta, frase_gancho: e.frase_gancho, intro: e.intro, que_incluye: e.que_incluye,
+  emojis_tema: e.emojis_tema, saludo_grupo: e.saludo_grupo, relato_grupo: e.relato_grupo, edad_minima: e.edad_minima,
+})
 
 export function FichaExperiencia({ valores, onCambio }: { valores: ValoresFicha; onCambio: (v: ValoresFicha) => void }) {
-  const poner = (k: keyof ValoresFicha, v: string | number | null) => onCambio({ ...valores, [k]: v })
+  const poner = <K extends keyof ValoresFicha>(k: K, v: ValoresFicha[K]) => onCambio({ ...valores, [k]: v })
+  const texto = (k: 'titulo_oferta' | 'frase_gancho' | 'intro' | 'emojis_tema' | 'saludo_grupo' | 'relato_grupo') =>
+    ({ value: valores[k] ?? '', onChange: (e: { target: { value: string } }) => poner(k, e.target.value || null) })
   const modoEdad = valores.edad_minima === 18 ? 'sin' : valores.edad_minima === 6 ? 'seis' : valores.edad_minima === null ? 'ninguna' : 'otra'
   const campo = 'mt-1 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-base'
   return (
-    <div className="space-y-3 rounded-lg border border-[#E5E7EB] bg-white p-3 text-sm">
+    <div className="space-y-4 rounded-lg border border-[#E5E7EB] bg-white p-3 text-sm">
       <label className="block">
         Película o experiencia
-        <input value={valores.nombre} onChange={(e) => poner('nombre', e.target.value)} className={`${campo} h-11`} placeholder="Harry Potter" />
+        <input value={valores.nombre} onChange={(e) => poner('nombre', e.target.value)} className={`${campo} h-11`} placeholder="El extraño mundo de Jack" />
       </label>
-      <label className="block">
-        Intro
-        <textarea value={valores.historia ?? ''} onChange={(e) => poner('historia', e.target.value || null)} rows={3} className={campo} placeholder="3 a 5 frases de Sabor" />
-      </label>
-      <label className="block">
-        Qué incluye
-        <textarea value={valores.que_incluye ?? ''} onChange={(e) => poner('que_incluye', e.target.value || null)} rows={2} className={campo} />
-      </label>
+
+      <fieldset className="space-y-3">
+        <legend className="font-medium text-[#1A1A1A]">La oferta (post y mensaje directo)</legend>
+        <label className="block">
+          Título de la oferta
+          <input {...texto('titulo_oferta')} className={`${campo} h-11`} placeholder="🎃💀 EL EXTRAÑO MUNDO DE JACK llega a CENA Y PELÍCULA 🎄🖤" />
+        </label>
+        <label className="block">
+          Frase gancho
+          <input {...texto('frase_gancho')} className={`${campo} h-11`} placeholder="¿Qué pasa cuando Halloween y Navidad se encuentran? 🎃🎁✨" />
+        </label>
+        <label className="block">
+          Intro
+          <textarea {...texto('intro')} rows={4} className={campo} placeholder="Vive una experiencia inmersiva inspirada en…" />
+        </label>
+        <label className="block">
+          Qué incluye <span className="text-xs text-[#6B7280]">(una línea por cosa)</span>
+          <textarea
+            value={(valores.que_incluye ?? []).join('\n')}
+            onChange={(e) => poner('que_incluye', e.target.value ? e.target.value.split('\n') : null)}
+            rows={3}
+            className={campo}
+            placeholder={'🍽️ 5 tiempos inspirados en la película\n🥂 2 bebidas especiales\n🎬 Proyección de la película'}
+          />
+        </label>
+        <label className="block">
+          Emojis del tema <span className="text-xs text-[#6B7280]">(cierran la oferta)</span>
+          <input {...texto('emojis_tema')} className={`${campo} h-11 w-32`} placeholder="🎃🖤" />
+        </label>
+      </fieldset>
+
+      <fieldset className="space-y-3">
+        <legend className="font-medium text-[#1A1A1A]">La bienvenida al grupo de WhatsApp</legend>
+        <label className="block">
+          Saludo del grupo <span className="text-xs text-[#6B7280]">(va antes de la fecha y la hora)</span>
+          <textarea {...texto('saludo_grupo')} rows={6} className={campo} placeholder="🎃💀 ¡Hola, habitantes de Halloween Town…" />
+        </label>
+        <label className="block">
+          Relato de cierre <span className="text-xs text-[#6B7280]">(va antes de la firma)</span>
+          <textarea {...texto('relato_grupo')} rows={6} className={campo} placeholder="🎃🎄 ¡Preparen sus mejores sonrisas…" />
+        </label>
+        <p className="text-xs text-[#6B7280]">La fecha, la llegada (10 min antes), el inicio (10 min después), la puerta cerrada y los pagos los pone ONE.</p>
+      </fieldset>
+
       <div>
         <span>Edad mínima</span>
         <div className="mt-1 flex flex-wrap gap-2">
@@ -62,10 +105,6 @@ export function FichaExperiencia({ valores, onCambio }: { valores: ValoresFicha;
           )}
         </div>
       </div>
-      <label className="block">
-        Información general
-        <textarea value={valores.info_general ?? ''} onChange={(e) => poner('info_general', e.target.value || null)} rows={2} className={campo} />
-      </label>
     </div>
   )
 }

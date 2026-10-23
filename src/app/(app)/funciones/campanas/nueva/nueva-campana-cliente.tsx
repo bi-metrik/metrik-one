@@ -4,22 +4,23 @@ import Link from 'next/link'
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import type { CampanaResumen, Experiencia } from '@/lib/funciones/datos'
+import type { CampanaPanel, CampanaResumen, Experiencia, Negocio } from '@/lib/funciones/datos'
 import { pesos } from '@/lib/funciones/reglas'
-import { crearCampanaAction, guardarExperienciaAction, publicarCampanaAction, type LineaAgenda } from '../../actions'
+import { generarOferta } from '../../../../../../supabase/functions/_shared/funciones/textos.ts'
+import { crearCampanaAction, guardarExperienciaAction, leerTextosCampanaAction, publicarCampanaAction, type LineaAgenda } from '../../actions'
 import { AgendaEditor } from '../../agenda-editor'
 import { FichaExperiencia, fichaVacia, type ValoresFicha } from '../../ficha-experiencia'
-import { BotonFijo, Hoja } from '../../panel-ui'
-
-const AVISO_POST = 'El texto del post se activa cuando se apruebe la ficha.'
+import { BotonFijo, copiar, Hoja } from '../../panel-ui'
+import { conteo, fichaParaTextos, funcionesParaTextos } from '../../textos-ui'
 
 /**
  * Crear una campaña en 3 pasos (§4.3), con el botón fijo abajo:
- *   1. Experiencia: una reciente o una nueva, con los campos que ya tiene la experiencia (la ficha nueva espera P11).
- *   2. Agenda y precios: una función por línea (P3), cupos y precios (como la campaña anterior, o los 4 precios).
- *      «Seguir» guarda el borrador: esa es la confirmación.
- *   3. Publicar (P7): un solo botón «Publicar y copiar post» con una confirmación. Hoy solo publica y lo dice: el texto
- *      del post se activa con la ficha (P11).
+ *   1. Experiencia: una reciente o una nueva, con su ficha (P11): los textos de la oferta y del grupo.
+ *   2. Agenda y precios: una función por línea (P3), cupos y precios (como la campaña anterior, o los 4 precios), y
+ *      la preventa con su fecha de fin (P4). «Seguir» guarda el borrador: esa es la confirmación.
+ *   3. Publicar (P7): el post como va a quedar y un solo botón «Publicar y copiar post» con una confirmación, que
+ *      copia ese texto y publica. Con un «[FALTA: …]» (o pasado de 2.200 caracteres) no se copia: se publica sin él o
+ *      se completa la ficha.
  */
 export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { experiencias: Experiencia[]; anterior: CampanaResumen | null; ahoraMs: number }) {
   const router = useRouter()
@@ -28,7 +29,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
 
   // Paso 1
   const [experienciaId, setExperienciaId] = useState<string | null>(experiencias[0]?.id ?? null)
-  const [nueva, setNueva] = useState<ValoresFicha | null>(experiencias.length === 0 ? fichaVacia(null) : null)
+  const [nueva, setNueva] = useState<ValoresFicha | null>(experiencias.length === 0 ? fichaVacia() : null)
 
   // Paso 2
   const [lineas, setLineas] = useState<LineaAgenda[] | null>(null)
@@ -45,6 +46,10 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
   // Paso 3
   const [campanaId, setCampanaId] = useState<string | null>(null)
   const [confirmar, setConfirmar] = useState(false)
+  const [textos, setTextos] = useState<{ campana: CampanaPanel; negocio: Negocio } | null>(null)
+  const oferta = textos
+    ? generarOferta({ ficha: fichaParaTextos(textos.campana), negocio: textos.negocio, funciones: funcionesParaTextos(textos.campana.funciones), ahoraMs })
+    : null
 
   const numero = (s: string) => (s.trim() ? Math.round(Number(s.replace(/[.$\s]/g, ''))) : null)
   const cap = numero(capacidad)
@@ -89,16 +94,21 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
       if (!r.ok) return void toast.error(r.error)
       setCampanaId(r.dato!)
       toast.success('Borrador guardado.')
+      const t = await leerTextosCampanaAction(r.dato!)
+      if (t.ok) setTextos(t.dato!)
       setPaso(3)
     })
 
-  const publicar = () =>
+  /** Copia el post que ya se ve (dentro del toque, antes de esperar a la base) y publica. */
+  const publicar = (conPost: boolean) =>
     empezar(async () => {
       if (!campanaId) return
+      const copiado = conPost && oferta ? copiar(oferta.texto, 'Post copiado.') : null
       const r = await publicarCampanaAction(campanaId)
       setConfirmar(false)
+      await copiado
       if (!r.ok) return void toast.error(r.error)
-      toast.success(`Publicada: ${r.dato?.funciones ?? ''} funciones disponibles para el asistente. ${AVISO_POST}`)
+      toast.success(`Publicada: ${r.dato?.funciones ?? ''} funciones disponibles para el asistente.`)
       router.push(`/funciones/campanas/${campanaId}`)
     })
 
@@ -139,7 +149,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
           {nueva ? (
             <FichaExperiencia valores={nueva} onCambio={setNueva} />
           ) : (
-            <button type="button" onClick={() => setNueva(fichaVacia(experiencias[0]?.info_general ?? null))} className="h-11 w-full rounded-md border border-dashed border-[#E5E7EB] text-sm">
+            <button type="button" onClick={() => setNueva(fichaVacia())} className="h-11 w-full rounded-md border border-dashed border-[#E5E7EB] text-sm">
               + Nueva experiencia
             </button>
           )}
@@ -197,8 +207,16 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
 
       {paso === 3 && (
         <section className="space-y-3">
-          <div className="rounded-lg border border-dashed border-[#E5E7EB] bg-white p-4 text-sm text-[#6B7280]">{AVISO_POST}</div>
-          <p className="text-sm text-[#1A1A1A]">El borrador quedó guardado. Al publicar, sus funciones quedan disponibles para el asistente.</p>
+          <p className="text-sm text-[#1A1A1A]">El borrador quedó guardado. Al publicar, sus funciones quedan disponibles para el asistente y el post queda copiado.</p>
+          {oferta ? (
+            <>
+              <pre className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-md border border-[#E5E7EB] bg-white p-3 font-sans text-sm text-[#1A1A1A]">{oferta.texto}</pre>
+              <p className={`text-xs ${oferta.sobra > 0 ? 'text-red-600' : 'text-[#6B7280]'}`}>{conteo(oferta)}</p>
+              {oferta.motivo && <p className="text-xs text-red-600">{oferta.motivo}</p>}
+            </>
+          ) : (
+            <p className="text-xs text-[#6B7280]">No se pudo armar el post: búscalo en la campaña.</p>
+          )}
         </section>
       )}
 
@@ -220,7 +238,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
           <>
             <button type="button" onClick={() => router.push(`/funciones/campanas/${campanaId}`)} className="h-12 rounded-md border border-[#E5E7EB] px-4 text-sm">Guardar sin publicar</button>
             <button type="button" disabled={pendiente} onClick={() => setConfirmar(true)} className="h-12 flex-1 rounded-md bg-[#10B981] font-medium text-white disabled:opacity-50">
-              Publicar y copiar post
+              {oferta?.copiable ? 'Publicar y copiar post' : 'Publicar'}
             </button>
           </>
         )}
@@ -230,8 +248,12 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
         abierta={confirmar}
         onCerrar={() => setConfirmar(false)}
         titulo="Publicar la campaña"
-        efecto={`Las ${lineas?.length ?? 0} funciones quedan disponibles para el asistente desde ya. Hoy solo se publica: ${AVISO_POST.toLowerCase()}`}
-        confirmar={{ texto: 'Publicar', onConfirmar: publicar, pendiente }}
+        efecto={
+          oferta?.copiable
+            ? `Las ${lineas?.length ?? 0} funciones quedan disponibles para el asistente desde ya, y el post queda copiado para Instagram.`
+            : `Las ${lineas?.length ?? 0} funciones quedan disponibles para el asistente desde ya. El post no se copia: ${oferta?.motivo ?? 'no se pudo armar.'}`
+        }
+        confirmar={{ texto: oferta?.copiable ? 'Publicar y copiar post' : 'Publicar sin el post', onConfirmar: () => publicar(!!oferta?.copiable), pendiente }}
       />
     </div>
   )

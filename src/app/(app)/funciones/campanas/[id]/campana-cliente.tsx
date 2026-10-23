@@ -5,11 +5,14 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { MoreVertical } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CampanaPanel, FuncionAgenda } from '@/lib/funciones/datos'
+import type { CampanaPanel, FuncionAgenda, Negocio } from '@/lib/funciones/datos'
 import { ETIQUETA_ESTADO_CAMPANA, insigniaFuncion, pesos } from '@/lib/funciones/reglas'
+import { fechaCortaTexto } from '../../../../../../supabase/functions/_shared/funciones/fecha-texto.ts'
+import { generarBienvenida, generarMensajeDirecto, generarOferta } from '../../../../../../supabase/functions/_shared/funciones/textos.ts'
 import {
   agregarFuncionesAction,
   cambiarCuposAction,
+  cambiarPreventaAction,
   cambiarEstadoCampanaAction,
   cambiarEstadoFuncionAction,
   duplicarCampanaAction,
@@ -22,21 +25,27 @@ import {
 } from '../../actions'
 import { AgendaEditor } from '../../agenda-editor'
 import { conDeshacer, copiar, Hoja, Insignia } from '../../panel-ui'
-
-const AVISO_POST = 'El texto del post se activa cuando se apruebe la ficha.'
+import { fichaParaTextos, funcionesParaTextos, VistaTexto } from '../../textos-ui'
 
 type HojaAbierta =
   | { tipo: 'precios' }
   | { tipo: 'menu' }
   | { tipo: 'post' }
+  | { tipo: 'directo' }
+  | { tipo: 'bienvenida'; f: FuncionAgenda }
+  | { tipo: 'preventa'; f: FuncionAgenda }
   | { tipo: 'publicar' }
   | { tipo: 'confirmar'; titulo: string; efecto: string; texto: string; peligro?: boolean; accion: () => void }
   | { tipo: 'funcion'; f: FuncionAgenda }
   | { tipo: 'cupo'; f: FuncionAgenda }
   | null
 
-/** La campaña (§4.2, §4.5, §4.6): estado, código copiable, precios, agenda, post y el ⋮ de la campaña. */
-export function CampanaCliente({ campana: c, puedeEditar, ahoraMs }: { campana: CampanaPanel; puedeEditar: boolean; ahoraMs: number }) {
+/**
+ * La campaña (§4.2, §4.5, §4.6): estado, código copiable, precios, agenda y el ⋮ de la campaña, con los tres textos de
+ * la ficha (P11): el post («Publicar y copiar post» lo copia), el mensaje directo y, en cada función, la bienvenida al
+ * grupo. Un texto con «[FALTA: …]», pasado de su límite o con Nequi/Daviplata no se deja copiar.
+ */
+export function CampanaCliente({ campana: c, negocio, puedeEditar, ahoraMs }: { campana: CampanaPanel; negocio: Negocio; puedeEditar: boolean; ahoraMs: number }) {
   const router = useRouter()
   const [pendiente, empezar] = useTransition()
   const [hoja, setHoja] = useState<HojaAbierta>(null)
@@ -44,6 +53,22 @@ export function CampanaCliente({ campana: c, puedeEditar, ahoraMs }: { campana: 
   const [lineas, setLineas] = useState<LineaAgenda[] | null>(null)
   const vivas = c.funciones.filter((f) => f.estado !== 'cancelada')
   const ultima = c.funciones[c.funciones.length - 1]
+  const ficha = fichaParaTextos(c)
+  const oferta = generarOferta({ ficha, negocio, funciones: funcionesParaTextos(c.funciones), ahoraMs })
+  const directo = generarMensajeDirecto({ ficha, negocio, campana: { nombre: c.nombre }, funciones: funcionesParaTextos(c.funciones), ahoraMs })
+  const bienvenida = (f: FuncionAgenda) => generarBienvenida({ ficha, negocio, funcion: { inicia_at: f.inicia_at } })
+
+  /** «Publicar y copiar post»: copia el post que ya se mostró (dentro del toque) y publica. */
+  const publicarYCopiar = (conPost: boolean) =>
+    empezar(async () => {
+      const copiado = conPost ? copiar(oferta.texto, 'Post copiado.') : null
+      const r = await publicarCampanaAction(c.campana_id)
+      setHoja(null)
+      await copiado
+      if (!r.ok) return void toast.error(r.error)
+      toast.success(`Publicada: ${r.dato?.funciones ?? ''} funciones disponibles para el asistente.`)
+      router.refresh()
+    })
 
   const correr = (f: () => Promise<{ ok: boolean; error?: string }>, ok: string, despues?: () => void) =>
     empezar(async () => {
@@ -144,7 +169,7 @@ export function CampanaCliente({ campana: c, puedeEditar, ahoraMs }: { campana: 
                     <div className="truncate text-sm font-medium text-[#1A1A1A] first-letter:uppercase">{f.inicia_texto}</div>
                     <div className="text-xs text-[#6B7280]">
                       {f.ocupadas}/{f.cupo_asistente} asist · {f.ocupadas}/{f.capacidad}
-                      {f.es_preventa ? ' · preventa' : ''}
+                      {f.es_preventa ? ` · ${etiquetaPreventa(f)}` : ''}
                     </div>
                   </Link>
                   <Insignia texto={insignia} />
@@ -190,27 +215,72 @@ export function CampanaCliente({ campana: c, puedeEditar, ahoraMs }: { campana: 
         {puedeEditar && !ultima && agregando && <p className="text-xs text-amber-700">La primera agenda se arma desde «Nueva campaña» (pide el cupo).</p>}
       </section>
 
-      <div className="flex gap-2">
-        <button type="button" onClick={() => setHoja({ tipo: 'post' })} className="h-11 flex-1 rounded-md border border-[#E5E7EB] text-sm">Ver post</button>
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-[#1A1A1A]">Textos de la oferta</h2>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setHoja({ tipo: 'post' })} className="h-11 rounded-md border border-[#E5E7EB] text-sm">Ver post</button>
+          <button type="button" disabled={!directo.copiable} onClick={() => copiar(directo.texto, 'Mensaje directo copiado.')} className="h-11 rounded-md border border-[#E5E7EB] text-sm disabled:opacity-50">
+            Copiar mensaje directo
+          </button>
+        </div>
+        {!directo.copiable && (
+          <button type="button" onClick={() => setHoja({ tipo: 'directo' })} className="text-left text-xs text-red-600 underline">
+            El mensaje directo no se puede copiar todavía: ver por qué
+          </button>
+        )}
         {puedeEditar && !c.publicada && (
-          <button type="button" disabled={vivas.length === 0} onClick={() => setHoja({ tipo: 'publicar' })} className="h-11 flex-1 rounded-md bg-[#10B981] text-sm font-medium text-white disabled:opacity-50">
+          <button type="button" disabled={vivas.length === 0} onClick={() => setHoja({ tipo: 'publicar' })} className="h-11 w-full rounded-md bg-[#10B981] text-sm font-medium text-white disabled:opacity-50">
             Publicar y copiar post
           </button>
         )}
-      </div>
+      </section>
 
       {/* ── Hojas ── */}
-      <Hoja abierta={hoja?.tipo === 'post'} onCerrar={() => setHoja(null)} titulo="Post de Instagram" efecto={AVISO_POST}>
-        <button type="button" disabled className="h-11 w-full rounded-md border border-[#E5E7EB] text-sm opacity-50">Copiar post</button>
+      <Hoja abierta={hoja?.tipo === 'post'} onCerrar={() => setHoja(null)} titulo="Post de Instagram">
+        <VistaTexto generado={oferta} textoBoton="Copiar post" aviso="Post copiado." />
       </Hoja>
+
+      <Hoja abierta={hoja?.tipo === 'directo'} onCerrar={() => setHoja(null)} titulo="Mensaje directo de Instagram">
+        <VistaTexto generado={directo} textoBoton="Copiar mensaje directo" aviso="Mensaje directo copiado." />
+      </Hoja>
+
+      {hoja?.tipo === 'bienvenida' && (
+        <Hoja abierta onCerrar={() => setHoja(null)} titulo={`Bienvenida al grupo · ${hoja.f.inicia_texto}`}>
+          <VistaTexto generado={bienvenida(hoja.f)} textoBoton="Copiar bienvenida al grupo" aviso="Bienvenida copiada." />
+        </Hoja>
+      )}
+
+      {hoja?.tipo === 'preventa' && (
+        <HojaPreventa
+          f={hoja.f}
+          pendiente={pendiente}
+          onCerrar={() => setHoja(null)}
+          onGuardar={(on, hasta) => correr(() => cambiarPreventaAction(c.campana_id, hoja.f.funcion_id, on, hasta), on ? 'Preventa encendida.' : 'Preventa apagada.')}
+        />
+      )}
 
       <Hoja
         abierta={hoja?.tipo === 'publicar'}
         onCerrar={() => setHoja(null)}
         titulo="Publicar la campaña"
-        efecto={`Las ${vivas.length} funciones quedan disponibles para el asistente desde ya. Hoy solo se publica: ${AVISO_POST.toLowerCase()}`}
-        confirmar={{ texto: 'Publicar', pendiente, onConfirmar: () => correr(() => publicarCampanaAction(c.campana_id), `Publicada. ${AVISO_POST}`) }}
-      />
+        efecto={
+          oferta.copiable
+            ? `Las ${vivas.length} funciones quedan disponibles para el asistente desde ya, y el post queda copiado para Instagram.`
+            : `Las ${vivas.length} funciones quedan disponibles para el asistente desde ya. El post no se puede copiar todavía: ${oferta.motivo}`
+        }
+      >
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button type="button" onClick={() => setHoja(null)} className="h-11 rounded-md border border-[#E5E7EB] px-4 text-sm">Volver</button>
+          {!oferta.copiable && (
+            <button type="button" disabled={pendiente} onClick={() => publicarYCopiar(false)} className="h-11 rounded-md border border-[#E5E7EB] px-4 text-sm disabled:opacity-50">
+              Publicar sin el post
+            </button>
+          )}
+          <button type="button" disabled={pendiente || !oferta.copiable} onClick={() => publicarYCopiar(true)} className="h-11 flex-1 rounded-md bg-[#10B981] px-4 text-sm font-medium text-white disabled:opacity-50">
+            Publicar y copiar post
+          </button>
+        </div>
+      </Hoja>
 
       {hoja?.tipo === 'confirmar' && (
         <Hoja
@@ -273,6 +343,12 @@ export function CampanaCliente({ campana: c, puedeEditar, ahoraMs }: { campana: 
               <button type="button" className="h-11 rounded-md border border-[#E5E7EB] text-sm" onClick={() => reactivarFuncion(hoja.f)}>Reactivar</button>
             )}
             <button type="button" className="h-11 rounded-md border border-[#E5E7EB] text-sm" onClick={() => setHoja({ tipo: 'cupo', f: hoja.f })}>Cambiar cupos</button>
+            <button type="button" className="h-11 rounded-md border border-[#E5E7EB] text-sm" onClick={() => setHoja({ tipo: 'preventa', f: hoja.f })}>
+              Preventa{hoja.f.es_preventa ? ` (${etiquetaPreventa(hoja.f)})` : ''}
+            </button>
+            <button type="button" className="h-11 rounded-md border border-[#E5E7EB] text-sm" onClick={() => setHoja({ tipo: 'bienvenida', f: hoja.f })}>
+              Copiar bienvenida al grupo
+            </button>
             {hoja.f.estado !== 'cancelada' && (
               <button type="button" className="h-11 rounded-md border border-red-200 text-sm text-red-700" onClick={() => {
                 const f = hoja.f
@@ -433,6 +509,41 @@ function HojaCupos(p: { c: CampanaPanel; f: FuncionAgenda; pendiente: boolean; o
         <label>Cupo del asistente<input inputMode="numeric" value={asist} onChange={(e) => setAsist(e.target.value)} className={campo} /></label>
       </div>
       {bajaDeLoOcupado && <p className="text-xs text-red-600">Hay {p.f.ocupadas} ocupando: el cupo no puede quedar en {capN}.</p>}
+    </Hoja>
+  )
+}
+
+/** «preventa hasta el 15 de octubre», «preventa vencida» o «preventa» (sin fecha de fin). */
+function etiquetaPreventa(f: FuncionAgenda): string {
+  if (f.tarifa.tarifa !== 'preventa') return 'preventa vencida'
+  return f.preventa_hasta ? `preventa hasta el ${fechaCortaTexto(f.preventa_hasta)}` : 'preventa'
+}
+
+/** P4: el interruptor de preventa de una función, con su fecha de fin (no puede pasar el día de la función). */
+function HojaPreventa(p: { f: FuncionAgenda; pendiente: boolean; onCerrar: () => void; onGuardar: (on: boolean, hasta: string | null) => void }) {
+  const [on, setOn] = useState(p.f.es_preventa)
+  const [hasta, setHasta] = useState(p.f.preventa_hasta ?? '')
+  const diaFuncion = new Date(Date.parse(p.f.inicia_at) - 5 * 3_600_000).toISOString().slice(0, 10)
+  const pasa = on && !!hasta && hasta > diaFuncion
+  return (
+    <Hoja
+      abierta
+      onCerrar={p.onCerrar}
+      titulo={`Preventa · ${p.f.inicia_texto}`}
+      efecto="Encendida, rige el precio de preventa hasta su fecha de fin (inclusive); después, el regular. Las reservas hechas conservan su precio."
+      confirmar={{ texto: 'Guardar', pendiente: p.pendiente || pasa, onConfirmar: () => p.onGuardar(on, on && hasta ? hasta : null) }}
+    >
+      <div className="space-y-3 text-sm">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} className="size-5" /> Preventa encendida</label>
+        {on && (
+          <label className="block">
+            Hasta (inclusive)
+            <input type="date" value={hasta} max={diaFuncion} onChange={(e) => setHasta(e.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#E5E7EB] px-3 text-base" />
+            <span className="text-xs text-[#6B7280]">Vacía: sin fecha de fin.</span>
+          </label>
+        )}
+        {pasa && <p className="text-xs text-red-600">La preventa no puede terminar después de la función.</p>}
+      </div>
     </Hoja>
   )
 }

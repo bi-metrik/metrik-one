@@ -7,14 +7,14 @@ import { toast } from 'sonner'
 import type { CampanaResumen, Experiencia } from '@/lib/funciones/datos'
 import { ETIQUETA_ESTADO_CAMPANA } from '@/lib/funciones/reglas'
 import { guardarExperienciaAction } from '../../actions'
-import { FichaExperiencia, type ValoresFicha } from '../../ficha-experiencia'
+import { FichaExperiencia, fichaDe, type ValoresFicha } from '../../ficha-experiencia'
 import { BotonFijo, Insignia } from '../../panel-ui'
 
-/** La ficha de la película y sus campañas. Solo los campos que ya tiene la experiencia: la ficha nueva espera P11. */
+/** La ficha de la película (P11: los textos de la oferta y del grupo) y sus campañas. */
 export function ExperienciaCliente({ experiencia: e, campanas, puedeEditar }: { experiencia: Experiencia; campanas: CampanaResumen[]; puedeEditar: boolean }) {
   const router = useRouter()
   const [pendiente, empezar] = useTransition()
-  const [v, setV] = useState<ValoresFicha>({ nombre: e.nombre, historia: e.historia, que_incluye: e.que_incluye, edad_minima: e.edad_minima, info_general: e.info_general })
+  const [v, setV] = useState<ValoresFicha>(fichaDe(e))
   const guardar = () =>
     empezar(async () => {
       const r = await guardarExperienciaAction({ id: e.id, ...v })
@@ -32,8 +32,9 @@ export function ExperienciaCliente({ experiencia: e, campanas, puedeEditar }: { 
         <FichaExperiencia valores={v} onCambio={setV} />
       ) : (
         <div className="space-y-2 rounded-lg border border-[#E5E7EB] bg-white p-3 text-sm">
-          <p>{e.historia ?? 'Sin intro.'}</p>
-          <p className="text-[#6B7280]">{e.que_incluye ?? ''}</p>
+          {e.titulo_oferta && <p className="font-medium">{e.titulo_oferta}</p>}
+          <p className="whitespace-pre-wrap">{e.intro ?? 'Sin intro.'}</p>
+          {(e.que_incluye ?? []).map((x) => <p key={x} className="text-[#6B7280]">{x}</p>)}
         </div>
       )}
       <section className="space-y-2">

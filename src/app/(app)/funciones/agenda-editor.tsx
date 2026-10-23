@@ -9,23 +9,31 @@ type ModoPreventa = 'ninguna' | 'todas' | 'elegir'
 /**
  * La agenda de una campaña, una función por línea (P3). ONE lee cada línea al escribirla y muestra su lectura completa
  * (día, fecha, a. m. o p. m.): las horas de 1 a 11 sin «a. m.» se leen como p. m., siempre a la vista. Una línea con
- * error queda en rojo y `onCambio` recibe `null`: no deja seguir.
+ * error queda en rojo y `onCambio` recibe `null`: no deja seguir. La preventa (P4) es un interruptor por función, con
+ * una fecha de fin para las que la llevan; esa fecha no puede pasar el día de ninguna de ellas.
  */
 export function AgendaEditor({ onCambio, ahoraMs }: { onCambio: (lineas: LineaAgenda[] | null) => void; ahoraMs: number }) {
   const [texto, setTexto] = useState('')
   const [modo, setModo] = useState<ModoPreventa>('ninguna')
   const [preventa, setPreventa] = useState<Set<string>>(new Set())
+  const [hasta, setHasta] = useState('')
   const lecturas = useMemo(() => leerAgenda(texto, ahoraMs), [texto, ahoraMs])
   const errores = lecturas.filter((l) => !l.ok).length
+  const lineas = useMemo(
+    () =>
+      lecturas.flatMap((l) => {
+        if (!l.ok) return []
+        const es = modo === 'todas' || (modo === 'elegir' && preventa.has(`${l.fecha} ${l.hora}`))
+        return [{ fecha: l.fecha, hora: l.hora, es_preventa: es, preventa_hasta: es && hasta ? hasta : null }]
+      }),
+    [lecturas, modo, preventa, hasta],
+  )
+  const preventaPasa = lineas.find((l) => l.preventa_hasta && l.preventa_hasta > l.fecha)
 
   useEffect(() => {
-    if (lecturas.length === 0 || errores > 0) return onCambio(null)
-    onCambio(
-      lecturas.flatMap((l) =>
-        l.ok ? [{ fecha: l.fecha, hora: l.hora, es_preventa: modo === 'todas' || (modo === 'elegir' && preventa.has(`${l.fecha} ${l.hora}`)) }] : [],
-      ),
-    )
-  }, [lecturas, errores, modo, preventa, onCambio])
+    if (lecturas.length === 0 || errores > 0 || preventaPasa) return onCambio(null)
+    onCambio(lineas)
+  }, [lecturas.length, errores, preventaPasa, lineas, onCambio])
 
   return (
     <div className="space-y-3">
@@ -87,6 +95,14 @@ export function AgendaEditor({ onCambio, ahoraMs }: { onCambio: (lineas: LineaAg
           </button>
         ))}
       </div>
+      {modo !== 'ninguna' && (
+        <label className="block text-sm">
+          Preventa hasta (inclusive)
+          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="mt-1 h-11 w-full rounded-md border border-[#E5E7EB] px-3 text-base" />
+          <span className="text-xs text-[#6B7280]">Vacía: sin fecha de fin. Después de esa fecha rige el precio regular.</span>
+        </label>
+      )}
+      {preventaPasa && <p className="text-xs text-red-600">La preventa no puede terminar después de una de sus funciones ({preventaPasa.fecha}).</p>}
     </div>
   )
 }

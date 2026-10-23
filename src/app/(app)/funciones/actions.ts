@@ -12,6 +12,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { mensajeDeError } from '@/lib/funciones/reglas'
 import { codigoCampana, nombreCampana } from '@/lib/funciones/agenda-texto'
+import { leerNegocio, leerPanelCampana, type CampanaPanel, type FichaExperienciaDatos, type Negocio } from '@/lib/funciones/datos'
 
 export type Resultado<T = undefined> = { ok: true; dato?: T } | { ok: false; error: string }
 
@@ -76,34 +77,71 @@ export async function apartarEquipoAction(
 
 // ── Panel de campañas (§4): la única puerta de alta ──────────────────────────
 
-const texto = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
 const pesoONulo = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null)
 
-export interface DatosExperiencia {
+export interface DatosExperiencia extends FichaExperienciaDatos {
   id: string | null
-  nombre: string
-  historia: string | null
-  que_incluye: string | null
-  edad_minima: number | null
-  info_general: string | null
 }
 
-/** Crear o editar la experiencia (la película) con los campos que ya tiene. La ficha nueva espera P11. */
+/** Un texto de la ficha tal cual (con emojis y saltos de línea): solo se quitan las puntas; vacío = nulo. */
+const libre = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+
+/**
+ * Crear o editar la experiencia con su ficha (P11): los textos de la oferta y de la bienvenida al grupo. La base
+ * reemplaza la ficha entera y valida largos y llaves (`funcion_guardar_experiencia`).
+ */
 export async function guardarExperienciaAction(e: DatosExperiencia): Promise<Resultado<string>> {
   const p = await puerta()
   if (!p.ok) return p
   if (e.id !== null && !UUID.test(e.id)) return { ok: false, error: 'La experiencia no existe.' }
   if (!e.nombre.trim()) return { ok: false, error: 'Escribe el nombre de la película.' }
+  const incluye = Array.isArray(e.que_incluye) ? e.que_incluye.map(libre).filter((x): x is string => !!x) : []
   const r = await llamar<string>(
     'funcion_guardar_experiencia',
     {
-      p_workspace_id: p.ws, p_experiencia_id: e.id, p_nombre: e.nombre, p_historia: texto(e.historia, 3000),
-      p_que_incluye: texto(e.que_incluye, 2000), p_edad_minima: e.edad_minima, p_info_general: texto(e.info_general, 3000),
+      p_workspace_id: p.ws,
+      p_experiencia_id: e.id,
+      p_ficha: {
+        nombre: e.nombre.trim(), titulo_oferta: libre(e.titulo_oferta), frase_gancho: libre(e.frase_gancho), intro: libre(e.intro),
+        que_incluye: incluye.length ? incluye : null, emojis_tema: libre(e.emojis_tema), saludo_grupo: libre(e.saludo_grupo),
+        relato_grupo: libre(e.relato_grupo), edad_minima: e.edad_minima,
+      },
     },
     ['/funciones'],
   )
   if (r.ok && e.id) revalidatePath(`/funciones/experiencias/${e.id}`)
   return r
+}
+
+/** Los datos del lugar (P11), una vez por workspace: dirección, piso, recepción, parqueadero y firma. */
+export async function guardarNegocioAction(n: Negocio): Promise<Resultado> {
+  const p = await puerta()
+  if (!p.ok) return p
+  const r = await llamar('funcion_guardar_negocio', {
+    p_workspace_id: p.ws,
+    p_datos: { direccion: libre(n.direccion), piso: libre(n.piso), recepcion: libre(n.recepcion), parqueadero: libre(n.parqueadero), firma: libre(n.firma) },
+  }, ['/funciones', '/funciones/lugar'])
+  return r.ok ? { ok: true } : r
+}
+
+/** P4: encender o apagar la preventa de una función, con su fecha de fin (vacía = sin fecha). */
+export async function cambiarPreventaAction(campanaId: string, funcionId: string, esPreventa: boolean, hasta: string | null): Promise<Resultado> {
+  if (!UUID.test(funcionId)) return { ok: false, error: 'La función no existe.' }
+  if (hasta !== null && !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) return { ok: false, error: 'Revisa la fecha de fin de la preventa.' }
+  const r = await llamar('funcion_cambiar_preventa', { p_funcion_id: funcionId, p_es_preventa: esPreventa, p_preventa_hasta: esPreventa ? hasta : null }, [
+    `/funciones/campanas/${campanaId}`, `/funciones/${funcionId}`,
+  ])
+  return r.ok ? { ok: true } : r
+}
+
+/** Lo que necesitan los tres textos de una campaña (P11): la campaña con su ficha y su agenda, y el lugar. */
+export async function leerTextosCampanaAction(campanaId: string): Promise<Resultado<{ campana: CampanaPanel; negocio: Negocio }>> {
+  const p = await puerta()
+  if (!p.ok) return p
+  if (!UUID.test(campanaId)) return { ok: false, error: 'La campaña no existe.' }
+  const [campana, negocio] = await Promise.all([leerPanelCampana(p.db, campanaId), leerNegocio(p.db, p.ws)])
+  if (!campana) return { ok: false, error: 'La campaña no existe.' }
+  return { ok: true, dato: { campana, negocio } }
 }
 
 export interface PreciosCampana {
@@ -126,16 +164,24 @@ export interface LineaAgenda {
   fecha: string
   hora: string
   es_preventa: boolean
+  /** Fin de la preventa (AAAA-MM-DD, inclusive); `null` = sin fecha. Solo con `es_preventa`. */
+  preventa_hasta: string | null
 }
 
-/** Crea funciones en lote, separando las de preventa (`p_precios.es_preventa`) de las que no. */
+/** Crea funciones en lote, un llamado por cada preventa distinta (encendida con su fecha, o apagada). */
 async function crearLote(db: SupabaseClient, ws: string, campanaId: string, lineas: LineaAgenda[], capacidad: number, cupoAsistente: number) {
-  for (const preventa of [true, false]) {
-    const grupo = lineas.filter((l) => l.es_preventa === preventa).map(({ fecha, hora }) => ({ fecha, hora }))
-    if (grupo.length === 0) continue
+  const grupos = new Map<string, { precios: { es_preventa: boolean; preventa_hasta?: string | null }; horarios: Array<{ fecha: string; hora: string }> }>()
+  for (const l of lineas) {
+    const hasta = l.es_preventa ? l.preventa_hasta : null
+    const clave = `${l.es_preventa}|${hasta}`
+    const g = grupos.get(clave) ?? { precios: l.es_preventa ? { es_preventa: true, preventa_hasta: hasta } : { es_preventa: false }, horarios: [] }
+    g.horarios.push({ fecha: l.fecha, hora: l.hora })
+    grupos.set(clave, g)
+  }
+  for (const g of grupos.values()) {
     const { error } = await db.rpc('funcion_crear_funciones', {
       p_workspace_id: ws, p_campana_id: campanaId, p_capacidad: capacidad, p_cupo_asistente: cupoAsistente,
-      p_cierre_minutos_antes: null, p_precios: { es_preventa: preventa }, p_horarios: grupo,
+      p_cierre_minutos_antes: null, p_precios: g.precios, p_horarios: g.horarios,
     })
     if (error) return error
   }
@@ -144,7 +190,8 @@ async function crearLote(db: SupabaseClient, ws: string, campanaId: string, line
 
 const lineasValidas = (lineas: LineaAgenda[]) =>
   Array.isArray(lineas) && lineas.length > 0 && lineas.length <= 60
-  && lineas.every((l) => /^\d{4}-\d{2}-\d{2}$/.test(l.fecha) && /^([01]\d|2[0-3]):[0-5]\d$/.test(l.hora))
+  && lineas.every((l) => /^\d{4}-\d{2}-\d{2}$/.test(l.fecha) && /^([01]\d|2[0-3]):[0-5]\d$/.test(l.hora)
+    && (l.preventa_hasta === null || (/^\d{4}-\d{2}-\d{2}$/.test(l.preventa_hasta) && l.preventa_hasta <= l.fecha)))
 
 /**
  * Paso 2 de «Crear una campaña»: «Seguir guarda el borrador». Nombre, fechas y código salen solos (de la experiencia y
@@ -207,7 +254,7 @@ export async function agregarFuncionesAction(campanaId: string, lineas: LineaAge
   return { ok: true }
 }
 
-/** P7: publicar. Hoy solo publica: copiar el post espera la ficha (P11). */
+/** P7: publicar. El post lo copia la pantalla (P11) antes de llamar aquí, con el texto que ya mostró. */
 export async function publicarCampanaAction(campanaId: string): Promise<Resultado<{ funciones: number }>> {
   if (!UUID.test(campanaId)) return { ok: false, error: 'La campaña no existe.' }
   return llamar<{ funciones: number }>('funcion_publicar_agenda', { p_campana_id: campanaId }, ['/funciones', `/funciones/campanas/${campanaId}`])

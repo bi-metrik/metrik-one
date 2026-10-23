@@ -78,6 +78,8 @@ const MENSAJES: Record<string, string> = {
   campana_sin_funciones: 'Agrega al menos una función futura antes de publicar.',
   funcion_sin_precio: 'Hay funciones sin precio por persona.',
   campana_no_existe: 'La campaña no existe.',
+  preventa_despues_de_funcion: 'La preventa no puede terminar después de la función.',
+  negocio_no_existe: 'Los datos del lugar no existen.',
   campana_cerrada: 'La campaña está cerrada.',
   codigo_repetido: 'Ese código ya lo usa otra campaña.',
   codigo_invalido: 'El código va de 2 a 20 letras, números o guiones, sin espacios.',

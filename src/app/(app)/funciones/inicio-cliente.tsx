@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Plus } from 'lucide-react'
+import { MapPin, Plus } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { CampanaResumen, Experiencia, Ocupacion } from '@/lib/funciones/datos'
 import { ETIQUETA_ESTADO_CAMPANA, fechaBogota, horaBogota, pesos } from '@/lib/funciones/reglas'
@@ -23,11 +23,16 @@ export function InicioCliente(p: {
     <div className="mx-auto max-w-3xl space-y-4 p-4 pb-24 md:p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-[#1A1A1A]">Funciones</h1>
-        {p.puedeEditar && (
-          <Link href="/funciones/campanas/nueva" className="inline-flex h-10 items-center gap-1 rounded-md bg-[#10B981] px-3 text-sm font-medium text-white hover:bg-[#059669]">
-            <Plus className="size-4" /> Nueva campaña
+        <div className="flex items-center gap-2">
+          <Link href="/funciones/lugar" className="inline-flex h-10 items-center gap-1 rounded-md border border-[#E5E7EB] px-3 text-sm text-[#1A1A1A] hover:bg-gray-50">
+            <MapPin className="size-4" /> Datos del lugar
           </Link>
-        )}
+          {p.puedeEditar && (
+            <Link href="/funciones/campanas/nueva" className="inline-flex h-10 items-center gap-1 rounded-md bg-[#10B981] px-3 text-sm font-medium text-white hover:bg-[#059669]">
+              <Plus className="size-4" /> Nueva campaña
+            </Link>
+          )}
+        </div>
       </div>
 
       {llenasSemana > 0 && (
