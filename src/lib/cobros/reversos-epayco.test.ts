@@ -157,7 +157,9 @@ describe('conciliación: ePayco reporta reversado y la confirmación no llegó',
     expect(typeof c.anulado_at).toBe('string')
     expect(c.anulado_por).toBeNull()
     expect(String(c.anulacion_motivo)).toContain('ePayco reversó el pago epayco-390720992')
-    expect(String(c.notas)).toMatch(/^ANULADO 2026-10-23 — ePayco reversó/)
+    // La nota lleva la fecha de la anulación (la del reloj real, no la `hoy` de la prueba): fijarla a un
+    // día la rompía al día siguiente.
+    expect(String(c.notas)).toMatch(new RegExp(`^ANULADO ${String(c.anulado_at).slice(0, 10)} — ePayco reversó`))
     // La fecha del pago se conserva: la cuota no vuelve a cobrarse sola (lo decide una persona).
     expect(c.fecha).toBe('2026-10-22')
 

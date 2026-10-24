@@ -1,13 +1,13 @@
 /**
- * Reproceso de las consultas de la carga masiva que quedaron en error por el tipo de documento
- * (antes del 2026-10-23 el lote mandaba «CEDULA», «PP», «TI»… tal cual y Valida respondía 400).
+ * Las consultas de la carga masiva que quedaron en error por el tipo de documento (antes del
+ * 2026-10-23 el lote mandaba «CEDULA», «PP», «TI»… tal cual y Valida respondía 400).
  *
- * Lo puro del script `scripts/valida/reprocesar-tipo-documento.ts`: qué filas se reprocesan, con qué
- * cuerpo, y qué se escribe en la MISMA fila de `valida_consultas`. Sin red ni base: el script inyecta
- * la llamada a Valida y el cliente de Supabase, y las pruebas, dobles.
+ * Aquí solo vive QUÉ filas son y con qué cuerpo se consultarían. Desde el 2026-10-24 esas filas ya no
+ * se reprocesan en la cuenta del cliente ni se reescriben: se consultan por dentro con la cuenta de
+ * MéTRIK (`scripts/valida/barrido-interno-afi.ts`, lógica en `./barrido-interno`).
  */
 
-import type { TipoDocumento, TipoPersona, ValidaConsultaInput, ValidaResultado } from '@/lib/actions/valida-consultas'
+import type { TipoDocumento, TipoPersona, ValidaConsultaInput } from '@/lib/actions/valida-consultas'
 import { leerTipoDocumento } from './tipo-documento'
 
 /** La fila de `valida_consultas` que se mira. */
@@ -17,8 +17,6 @@ export type ConsultaEnError = {
   nombre_consultado: string | null
   documento_tipo: string | null
   documento_numero: string | null
-  negocio_id: string | null
-  lote_fila_id: string | null
 }
 
 export type PlanReproceso =
@@ -29,8 +27,8 @@ export type PlanReproceso =
 /**
  * Lo que se filtra en la base: severidad error y un tipo que Valida NO aceptaba cuando la fila
  * falló. Es la lista de antes de metrik-valida#70, fija a propósito: una fila en error con «TI» es
- * justo una de las que hay que reprocesar, aunque hoy TI ya se acepte. Una en error con CC, CE, NIT o
- * PAS falló por otra razón y no es de este reproceso.
+ * justo una de las que hay que consultar, aunque hoy TI ya se acepte. Una en error con CC, CE, NIT o
+ * PAS falló por otra razón y no es de este frente.
  */
 export const TIPOS_ACEPTADOS_ANTES: readonly string[] = ['CC', 'CE', 'NIT', 'PAS']
 
@@ -71,76 +69,9 @@ export function planReproceso(c: ConsultaEnError): PlanReproceso {
   }
 }
 
-/** La llave de idempotencia del reproceso: correrlo dos veces no consulta dos veces. */
-export function claveIdempotenciaReproceso(consultaId: string): string {
-  return `one-reproceso-tipo-${consultaId}`
-}
-
-/** Lo que se escribe en la MISMA fila de `valida_consultas` cuando Valida respondió. */
-export function actualizacionConsulta(
-  c: ConsultaEnError,
-  plan: Extract<PlanReproceso, { accion: 'reprocesar' }>,
-  data: ValidaResultado,
-  ahora: Date,
-): Record<string, unknown> {
-  return {
-    documento_tipo: plan.tipo,
-    severidad: data.severidad,
-    total_matches: data.total_matches,
-    matches: data.matches ?? null,
-    valida_consulta_id: data.consulta_id,
-    hash_reporte: data.hash_reporte,
-    // Constancia: la fila conserva su `created_at` (cuando se cargó), pero la consulta a Valida es de
-    // hoy. Sin esto el historial diría que ese resultado salió el día del cargue.
-    reprocesada_at: ahora.toISOString(),
-    reproceso: {
-      motivo: 'tipo_documento',
-      tipo_original: c.documento_tipo,
-      tipo_inferido: plan.inferido,
-      severidad_anterior: 'error',
-      fecha_reporte: data.fecha_reporte ?? null,
-    },
-  }
-}
-
 /** ¿El resultado es un hallazgo que hay que reportar? */
 export function esHallazgo(severidad: string): boolean {
   return severidad === 'alto' || severidad === 'medio' || severidad === 'bajo'
-}
-
-/** El conteo del lote tras pasar una fila de `error` a `nueva`. */
-export function moverConteo(severidades: Record<string, number>, nueva: string): Record<string, number> {
-  const out = { ...severidades }
-  if ((out.error ?? 0) > 0) out.error -= 1
-  if (out.error === 0) delete out.error
-  out[nueva] = (out[nueva] ?? 0) + 1
-  return out
-}
-
-// ─── La corrida, con la red y la base inyectadas ────────────────────────────────
-
-export type RespuestaReproceso = { ok: true; data: ValidaResultado } | { ok: false; error: string; status?: number }
-
-export type DependenciasReproceso = {
-  /** POST /api/v1/validate con la llave del espacio y la `Idempotency-Key` dada. */
-  llamar: (input: ValidaConsultaInput, clave: string) => Promise<RespuestaReproceso>
-  /** Escribe la fila SOLO si sigue en error sin consulta de Valida. Devuelve si la escribió. */
-  actualizarConsulta: (id: string, cambios: Record<string, unknown>) => Promise<boolean>
-  /** Pone al día la fila del lote y el conteo del lote, si la consulta salió de uno. */
-  actualizarFilaLote: (loteFilaId: string, tipo: TipoDocumento, data: ValidaResultado) => Promise<void>
-  ahora?: () => Date
-}
-
-export type ResumenReproceso = {
-  revisadas: number
-  reprocesadas: number
-  siguenEnError: number
-  aparte: string[]
-  conHallazgo: string[]
-  /** Negocios cuyo score SARLAFT habría que recalcular (el script no lo hace). */
-  negocios: number
-  /** Se detuvo antes de terminar (bolsa cortada o llave rechazada): las siguientes darían lo mismo. */
-  detenido: string | null
 }
 
 /** Clasifica sin llamar a nadie: es el modo de ensayo. */
@@ -148,51 +79,4 @@ export function ensayarReproceso(consultas: readonly ConsultaEnError[]) {
   const porAccion = { reprocesar: [] as string[], aparte: [] as string[] }
   for (const c of consultas) porAccion[planReproceso(c).accion].push(c.id)
   return porAccion
-}
-
-/** Reprocesa en serie (son cientos, no miles): una llamada a la vez no aprieta a Valida. */
-export async function ejecutarReproceso(
-  consultas: readonly ConsultaEnError[],
-  deps: DependenciasReproceso,
-): Promise<ResumenReproceso> {
-  const ahora = deps.ahora ?? (() => new Date())
-  const r: ResumenReproceso = {
-    revisadas: consultas.length,
-    reprocesadas: 0,
-    siguenEnError: 0,
-    aparte: [],
-    conHallazgo: [],
-    negocios: 0,
-    detenido: null,
-  }
-  const negocios = new Set<string>()
-
-  for (const c of consultas) {
-    const plan = planReproceso(c)
-    if (plan.accion === 'aparte') {
-      r.aparte.push(c.id)
-      continue
-    }
-
-    const res = await deps.llamar(plan.input, claveIdempotenciaReproceso(c.id))
-    if (!res.ok) {
-      r.siguenEnError += 1
-      // 401/402: llave rechazada o bolsa cortada. Todas las siguientes responderían lo mismo.
-      if (res.status === 401 || res.status === 402) {
-        r.detenido = res.error
-        break
-      }
-      continue
-    }
-
-    const escrita = await deps.actualizarConsulta(c.id, actualizacionConsulta(c, plan, res.data, ahora()))
-    // No escrita: otra corrida ya la puso al día (la llave de idempotencia evitó la consulta doble).
-    if (!escrita) continue
-    if (c.lote_fila_id) await deps.actualizarFilaLote(c.lote_fila_id, plan.tipo, res.data)
-    if (c.negocio_id) negocios.add(c.negocio_id)
-    r.reprocesadas += 1
-    if (esHallazgo(res.data.severidad)) r.conHallazgo.push(c.id)
-  }
-  r.negocios = negocios.size
-  return r
 }

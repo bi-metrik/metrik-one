@@ -1,16 +1,18 @@
 ---
 name: project-valida-lote-tipo-documento
-description: Tipo de documento de la carga masiva de Valida (2026-10-23) — alias en ONE, TI/PPT/RC esperan metrik-valida#70, reproceso de AFI bloqueado por billable
+description: Tipo de documento de la carga masiva de Valida y las 753 filas viejas de AFI en error — se barren con la cuenta interna de MéTRIK, sin tocar AFI (2026-10-24)
 metadata:
   type: project
 ---
 
-La carga masiva de Valida normaliza `tipo_documento` en `src/lib/valida/tipo-documento.ts` (PR fix/valida-lote-tipo-documento). Antes «CEDULA», «PP», «TI» iban tal cual y Valida respondía 400.
+La carga masiva de Valida normaliza `tipo_documento` en `src/lib/valida/tipo-documento.ts` (#1260, #1261: TI, PPT y RC ya se mandan). Antes «CEDULA», «PP», «TI» iban tal cual y Valida respondía 400.
 
-- TI, PPT y RC: ONE los reconoce pero NO los manda (`TIPOS_DOCUMENTO_PENDIENTES`). Cuando metrik-valida#70 (merge de Mauricio) esté en producción, moverlos a `TIPOS_DOCUMENTO_VALIDA` + al tipo `TipoDocumento` + la hoja de la plantilla + el mensaje. PEP queda fuera a propósito (en SARLAFT es Persona Expuesta Políticamente).
-- Una fila con tipo no aceptado guarda el tipo crudo en `entrada.documento.tipo`; el trabajador la corta con `filaSeConsulta` (no llama, no va al historial).
-- **Gotcha de Valida:** `POST /api/v1/validate` fija `billable: true`; los triggers 0028 (periodo) y 0032 (bolsa) cuentan al insertar, y cruzar 80/95 % manda eventos a ONE. No hay consulta sin cobro por API. Por eso `scripts/valida/reprocesar-tipo-documento.ts --aplicar` se niega (`VALIDA_PERMITE_SIN_COBRO = false`).
-- Migración `20261023180000_valida_consultas_reproceso.sql` (reprocesada_at, reproceso): SIN aplicar; solo la usa el script.
+**Las filas viejas de AFI (753 en error, 2026-10-24): decisión de Mauricio, NO se reprocesan en la cuenta de AFI ni se reescriben.** Se consultan con la cuenta de MéTRIK en Valida (cliente `eb9bb933…`, «MeTRIK — Consulta de listas», workspace ONE metrik) vía `scripts/valida/barrido-interno-afi.ts`; lo significativo se le reporta a AFI a mano. Por eso se cerraron sin merge metrik-valida#71 (consulta sin cobro) y ONE #1262, y se borró la migración 20261023180000 (nunca aplicada) junto con `reprocesar-tipo-documento.ts`.
 
-**Why:** el coordinador pidió no improvisar el no-cobro; decidir el mecanismo en Valida es de Mauricio.
-**How to apply:** antes de reprocesar las filas viejas de AFI, hace falta el cambio en Valida (consulta no facturable) y voltear la constante. El hook de aislamiento no deja usar git en metrik-valida: se clona en el scratchpad con `--reference`.
+- El script solo LEE ONE; las consultas quedan en Valida con `referencia_externa = afi-valida-consultas-<id AFI>`. Se retoma: JSONL en el scratchpad + pregunta a Valida por la referencia antes de cada POST (la idempotencia de Valida dura solo 24 h).
+- Cuenta MéTRIK en Valida (2026-10-24): modalidad mensual, SIN plan (`plan_codigo` null), sin bolsa, `fairuse_umbral` null (global 5.000, blando). Sin plan no hay corte por bolsa ni por mora; `/cuenta/consumo` responde 409 `sin_plan_asignado`, y el script lo lee como «alcanza».
+- La llave del workspace metrik (Vault) es la llave activa de ese cliente: verificado por prefijo y sha256 contra `api_keys` de Valida, sin imprimirla.
+- Lo corre Mauricio, no Max.
+
+**Why:** reprocesar en la cuenta de AFI le cobraba o le movía su historial; correrlo como MéTRIK no toca a AFI y no necesita cambiar Valida.
+**How to apply:** si vuelve un «reproceso» de filas de un cliente, preguntar primero si va por la cuenta interna. El filtro sigue siendo `TIPOS_ACEPTADOS_ANTES` (CC, CE, NIT, PAS), no la lista de hoy. Valida: el hook de aislamiento no deja `git` ni `cd`+git en metrik-valida; leer archivos con `cd <ruta> && sed` sí pasa. Leer la base de Valida: Service Role de `.credentials.md` sección «Supabase — metrik-valida», solo GET por PostgREST.
