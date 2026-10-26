@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# Prueba 8 del diseño de la etapa 2 de Sabor (funciones, cupos y reservas): muchos `apartar` a la vez no sobrevenden,
+# con los DOS límites de la función (el del asistente y la capacidad). Y (P14, caso E) el link del saldo y la
+# cancelación de la misma reserva a la vez nunca dejan un link vivo sobre una reserva cancelada. PGlite (las pruebas de vitest) tiene UNA conexión
+# y no puede probar el `select ... for update`; esto sí: N procesos `psql`, cada uno con su conexión, contra un Postgres
+# real. Cada uno aparta y SOSTIENE la transacción abierta un rato antes del commit: sin el candado, los demás leen la
+# ocupación vieja en ese rato y se sobrevende.
+#
+# Uso:
+#   PGURL=postgres://postgres:postgres@localhost:5432/postgres scripts/funciones-concurrencia.sh [migracion.sql]
+# El segundo argumento permite correrla contra una copia de la migración SIN el candado (lo hace el CI) para verla
+# fallar: una prueba de concurrencia que nunca se vio fallar no prueba nada.
+#
+# La base tiene que estar VACÍA: carga el esquema mínimo de prueba y las dos migraciones. Nunca contra producción.
+set -euo pipefail
+
+: "${PGURL:?Falta PGURL (una base de Postgres VACÍA y desechable)}"
+case "$PGURL" in
+  *supabase.co*|*supabase.com*|*pooler*) echo "Esto no se corre contra Supabase." >&2; exit 2 ;;
+esac
+
+RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
+MIGRACION="${1:-$RAIZ/supabase/migrations/20261022170000_modulo_funciones.sql}"
+N="${FUNCIONES_N:-40}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+WS=00000000-0000-4000-8000-00000000c001
+EQUIPO=00000000-0000-4000-8000-00000000c011
+EXP=00000000-0000-4000-8000-00000000c021
+CAMP=00000000-0000-4000-8000-00000000c031
+F_DOS=00000000-0000-4000-8000-00000000c051
+F_CLAVE=00000000-0000-4000-8000-00000000c052
+F_CONF=00000000-0000-4000-8000-00000000c053
+F_PAGO=00000000-0000-4000-8000-00000000c054
+F_OTRA=00000000-0000-4000-8000-00000000c055
+F_SALDO=00000000-0000-4000-8000-00000000c056
+
+psql_q() { psql "$PGURL" -X -q -t -A -v ON_ERROR_STOP=1 "$@"; }
+
+psql_q -f "$RAIZ/src/lib/funciones/__fixtures__/esquema-base.sql" >/dev/null
+psql_q -f "$RAIZ/supabase/migrations/20261021090000_asistente_chatwoot.sql" >/dev/null
+psql_q -f "$MIGRACION" >/dev/null
+
+psql_q >/dev/null <<SQL
+insert into workspaces (id, slug) values ('$WS', 'sabor-prueba');
+insert into profiles values ('$EQUIPO', '$WS', 'operator');
+insert into funcion_experiencias (id, workspace_id, nombre) values ('$EXP', '$WS', 'PRUEBA');
+insert into funcion_campanas (id, workspace_id, experiencia_id, nombre, codigo, estado, agenda_publicada_at, minutos_apartado, precio_persona, abono_persona)
+  values ('$CAMP', '$WS', '$EXP', 'PRUEBA', 'PRUEBA-1', 'activa', now(), 30, 100000, 40000);
+insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente) values
+  ('$F_DOS', '$WS', '$CAMP', now() + interval '1 day', 7, 5),
+  ('$F_CLAVE', '$WS', '$CAMP', now() + interval '1 day 1 hour', 8, 8),
+  ('$F_CONF', '$WS', '$CAMP', now() + interval '1 day 2 hours', 4, 4),
+  ('$F_PAGO', '$WS', '$CAMP', now() + interval '1 day 3 hours', 3, 3),
+  ('$F_OTRA', '$WS', '$CAMP', now() + interval '1 day 4 hours', 10, 10),
+  ('$F_SALDO', '$WS', '$CAMP', now() + interval '3 days', 40, 40);
+insert into chatwoot_consentimientos (workspace_id, cuenta_id, conversacion_id, canal, tipo, respuesta, texto_clave, texto_version, texto_huella)
+  select '$WS'::uuid, 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g
+  union all
+  select '$WS'::uuid, 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(101, 102) g;
+SQL
+
+# Una sesión que corre $2 dentro de una transacción y la sostiene 0,2 s antes del commit.
+#   $1 = equipo | asistente
+en_transaccion() {
+  local rol uid
+  if [ "$1" = equipo ]; then rol=authenticated; uid=$EQUIPO; else rol=service_role; uid=''; fi
+  psql "$PGURL" -X -q -t -A -v ON_ERROR_STOP=1 >/dev/null 2>&1 <<SQL
+select set_config('prueba.uid', '$uid', false);
+set role $rol;
+begin;
+$2;
+select pg_sleep(0.2);
+commit;
+SQL
+}
+
+apartar_equipo() {
+  psql_q >/dev/null 2>&1 <<SQL
+select set_config('prueba.uid', '$EQUIPO', false);
+set role authenticated;
+select funcion_apartar('$WS', '$1', 1, '{}'::jsonb, '$2', 'equipo');
+SQL
+}
+
+falla=0
+
+# ── A. Dos límites: N apartados del ASISTENTE a la vez sobre cupo_asistente 5 y capacidad 7 ──────────────
+for i in $(seq 1 "$N"); do
+  ( if en_transaccion asistente "select funcion_apartar('$WS', '$F_DOS', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $i}'::jsonb, 'a-$i', 'asistente')"; then
+      echo ok > "$TMP/a-$i"; else echo no > "$TMP/a-$i"; fi ) &
+done
+wait
+ok_a=$(grep -l ok "$TMP"/a-* | wc -l | tr -d ' ')
+del_asistente=$(psql_q -c "select (funcion_ocupacion('$F_DOS')->>'ocupadas')::int")
+echo "A. cupo del asistente 5 (capacidad 7), $N apartados del asistente a la vez: $ok_a pasaron, ocupadas $del_asistente"
+if [ "$del_asistente" -gt 5 ]; then echo "   SOBREVENTA del asistente" >&2; falla=1; fi
+if [ "$ok_a" -ne 5 ] || [ "$del_asistente" -ne 5 ]; then echo "   se esperaban exactamente 5" >&2; falla=1; fi
+# El equipo agrega hasta la capacidad: 2 más, y la tercera no.
+equipo_ok=0
+for i in 1 2 3; do if apartar_equipo "$F_DOS" "eq-a-$i"; then equipo_ok=$((equipo_ok + 1)); fi; done
+total_a=$(psql_q -c "select (funcion_ocupacion('$F_DOS')->>'ocupadas')::int")
+echo "   el equipo agrega 3 de a 1: pasaron $equipo_ok, ocupadas $total_a de 7"
+if [ "$equipo_ok" -ne 2 ] || [ "$total_a" -ne 7 ]; then echo "   se esperaban 2 del equipo y 7 en total" >&2; falla=1; fi
+
+# ── B. Idempotencia: la misma clave 10 veces a la vez = una reserva ─────────────────────────────────────────
+for i in $(seq 1 10); do
+  ( en_transaccion equipo "select funcion_apartar('$WS', '$F_CLAVE', 1, '{}'::jsonb, 'misma-clave', 'equipo')" || true ) &
+done
+wait
+misma=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia = 'misma-clave'")
+echo "B. misma clave 10 veces a la vez: $misma reserva(s)"
+if [ "$misma" -ne 1 ]; then falla=1; fi
+
+# ── C. Confirmar a la vez apartados vencidos: solo los que caben ─────────────────────────────────────────────
+# Capacidad 4: 4 apartados de 1 que vencen, 4 nuevos que llenan el cupo y 2 de ellos se cancelan. Quedan 2 libres, y
+# los 4 vencidos se confirman a la vez (el pago llegó tarde): pueden entrar 2, nunca más.
+for i in 1 2 3 4; do apartar_equipo "$F_CONF" "viejo-$i"; done
+psql_q -c "update funcion_reservas set vence_at = now() - interval '1 minute' where clave_idempotencia like 'viejo-%'" >/dev/null
+for i in 1 2 3 4; do apartar_equipo "$F_CONF" "nuevo-$i"; done
+psql_q -c "update funcion_reservas set estado = 'cancelada' where clave_idempotencia in ('nuevo-1', 'nuevo-2')" >/dev/null
+mapfile -t viejos < <(psql_q -c "select id from funcion_reservas where clave_idempotencia like 'viejo-%' order by id")
+for r in "${viejos[@]}"; do
+  ( en_transaccion equipo "select funcion_confirmar_pago('$r', 'verificado_manual', 'total')" || true ) &
+done
+wait
+confirmadas=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia like 'viejo-%' and estado = 'confirmada'")
+ocupadas_c=$(psql_q -c "select (funcion_ocupacion('$F_CONF')->>'ocupadas')::int")
+echo "C. ${#viejos[@]} apartados vencidos confirmados a la vez con 2 libres: $confirmadas confirmadas, ocupadas $ocupadas_c de 4"
+if [ "$ocupadas_c" -gt 4 ]; then echo "   SOBREVENTA al confirmar" >&2; falla=1; fi
+if [ "$confirmadas" -ne 2 ]; then echo "   se esperaban exactamente 2" >&2; falla=1; fi
+
+# ── D. Dos pagos a la vez sobre la misma función: no se pasa de la capacidad ───────────────────────────────
+# Dos clientes (conversaciones 101 y 102) apartan 1 en F_PAGO (capacidad 3) y 1 en otra función, y cada uno prepara UN
+# pago por sus dos reservas. Sus apartados de F_PAGO vencen y el equipo toma 2 puestos: queda 1 libre. Los dos avisos
+# de pago llegan a la vez: solo uno puede confirmar su reserva de F_PAGO; la otra queda `pendiente_persona`.
+servidor_sql() {
+  psql_q <<SQL
+select set_config('prueba.uid', '', false);
+set role service_role;
+$1;
+SQL
+}
+for c in 101 102; do
+  servidor_sql "select funcion_apartar('$WS', '$F_PAGO', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-a', 'asistente')" >/dev/null
+  servidor_sql "select funcion_apartar('$WS', '$F_OTRA', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-b', 'asistente')" >/dev/null
+  ids=$(psql_q -c "select string_agg(id::text, ',' order by id) from funcion_reservas where clave_idempotencia in ('p$c-a', 'p$c-b')")
+  pago=$(servidor_sql "select funcion_preparar_pago('$WS', '{$ids}'::uuid[], 'total')->>'pago_id'" | tail -1)
+  servidor_sql "select funcion_vincular_link('$pago', 'REF-$c', null)" >/dev/null
+done
+psql_q -c "update funcion_reservas set vence_at = now() - interval '1 minute' where clave_idempotencia in ('p101-a', 'p102-a')" >/dev/null
+apartar_equipo "$F_PAGO" "eq-d-1"
+apartar_equipo "$F_PAGO" "eq-d-2"
+for c in 101 102; do
+  monto=$(psql_q -c "select monto_esperado from funcion_pagos where referencia = 'REF-$c'")
+  ( en_transaccion asistente "select funcion_registrar_pago('$WS', 'REF-$c', 'aprobado', $monto)" || true ) &
+done
+wait
+confirmadas_d=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia in ('p101-a', 'p102-a') and estado = 'confirmada'")
+pendientes_d=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia in ('p101-a', 'p102-a') and estado = 'pendiente_persona'")
+ocupadas_d=$(psql_q -c "select (funcion_ocupacion('$F_PAGO')->>'ocupadas')::int")
+echo "D. dos pagos a la vez con 1 libre en la misma función: $confirmadas_d confirmada(s), $pendientes_d pendiente(s) de persona, ocupadas $ocupadas_d de 3"
+if [ "$ocupadas_d" -gt 3 ]; then echo "   SOBREVENTA con dos pagos" >&2; falla=1; fi
+if [ "$confirmadas_d" -ne 1 ] || [ "$pendientes_d" -ne 1 ]; then echo "   se esperaban 1 confirmada y 1 pendiente de persona" >&2; falla=1; fi
+
+# ── E. El link del saldo y la cancelación de la MISMA reserva a la vez (P14) ───────────────────────────────────
+# 10 reservas del equipo confirmadas con solo la reserva pagada (saldo pendiente). Para cada una, a la vez: una persona
+# genera el link del saldo y otra cancela la reserva. Sea cual sea el orden, ninguna reserva cancelada puede quedar con
+# un link de saldo vivo: o el link llega antes y la cancelación lo anula, o la cancelación llega antes y el link no se
+# crea (`reserva_inactiva`). Sin el candado de la reserva, el link se crea sobre la reserva ya cancelada.
+equipo_sql() {
+  psql_q <<SQL
+select set_config('prueba.uid', '$EQUIPO', false);
+set role authenticated;
+$1;
+SQL
+}
+for i in $(seq 1 10); do
+  apartar_equipo "$F_SALDO" "s-$i"
+  rid=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 's-$i'")
+  equipo_sql "select funcion_confirmar_pago('$rid', 'verificado_manual', 'abono')" >/dev/null
+done
+mapfile -t con_saldo < <(psql_q -c "select id from funcion_reservas where clave_idempotencia like 's-%' order by id")
+for r in "${con_saldo[@]}"; do
+  ( en_transaccion equipo "select funcion_preparar_pago_saldo('$WS', '{$r}'::uuid[])" || true ) &
+  ( en_transaccion equipo "select funcion_cancelar_reserva('$r')" || true ) &
+done
+wait
+canceladas_e=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia like 's-%' and estado = 'cancelada'")
+vivos_e=$(psql_q -c "select count(*) from funcion_reservas r join funcion_pago_reservas pr on pr.reserva_id = r.id and pr.pendiente
+                       join funcion_pagos pg on pg.id = pr.pago_id and pg.estado = 'pendiente'
+                      where r.clave_idempotencia like 's-%' and r.estado = 'cancelada'")
+echo "E. ${#con_saldo[@]} links del saldo y cancelaciones de la misma reserva a la vez: $canceladas_e canceladas, $vivos_e con link vivo"
+if [ "$vivos_e" -ne 0 ]; then echo "   LINK VIVO EN RESERVA CANCELADA" >&2; falla=1; fi
+if [ "$canceladas_e" -ne "${#con_saldo[@]}" ]; then echo "   se esperaban todas canceladas" >&2; falla=1; fi
+
+# ── F. [Saldo cobrado] a la vez (26-oct): idempotencia y candado de la reserva ───────────────────────────────────
+# Reservas del equipo de 1 persona ($100.000, pagada la reserva de $40.000): saldo $60.000.
+#   F1: el doble clic, 10 llamadas a la vez con la MISMA clave: una sola fila y las 10 responden bien (la segunda
+#       espera el candado y encuentra la primera). Sin el candado, el índice único deja una fila pero las demás fallan.
+#   F2: dos personas cobran el mismo saldo a la vez con claves DISTINTAS, en 5 reservas: un cobro por reserva y el
+#       otro `sin_saldo`. Sin el candado, el saldo se cobra dos veces.
+cobrar_sql() { echo "select funcion_registrar_saldo_cobrado('$1', 60000, '$2')"; }
+for i in $(seq 1 6); do
+  apartar_equipo "$F_SALDO" "q-$i"
+  rid=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 'q-$i'")
+  equipo_sql "select funcion_confirmar_pago('$rid', 'verificado_manual', 'abono')" >/dev/null
+done
+r1=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 'q-1'")
+for i in $(seq 1 10); do
+  ( if en_transaccion equipo "$(cobrar_sql "$r1" dialogo-f1)"; then echo ok > "$TMP/f1-$i"; else echo no > "$TMP/f1-$i"; fi ) &
+done
+wait
+ok_f1=$(grep -l ok "$TMP"/f1-* | wc -l | tr -d ' ')
+filas_f1=$(psql_q -c "select count(*) from funcion_pagos where clave_idempotencia = 'dialogo-f1'")
+echo "F1. 10 [Saldo cobrado] a la vez con la misma clave: $filas_f1 fila(s), $ok_f1 respuestas bien"
+if [ "$filas_f1" -ne 1 ]; then echo "   SALDO COBRADO DOS VECES con la misma clave" >&2; falla=1; fi
+if [ "$ok_f1" -ne 10 ]; then echo "   CLAVE REPETIDA CON ERROR: el reintento no devolvió el mismo pago" >&2; falla=1; fi
+for i in 2 3 4 5 6; do
+  r=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 'q-$i'")
+  ( en_transaccion equipo "$(cobrar_sql "$r" "persona-a-$i")" || true ) &
+  ( en_transaccion equipo "$(cobrar_sql "$r" "persona-b-$i")" || true ) &
+done
+wait
+dobles_f2=$(psql_q -c "select count(*) from (select pr.reserva_id from funcion_pago_reservas pr join funcion_pagos pg on pg.id = pr.pago_id
+                         join funcion_reservas r on r.id = pr.reserva_id
+                        where pg.medio = 'bold_qr' and r.clave_idempotencia in ('q-2', 'q-3', 'q-4', 'q-5', 'q-6')
+                        group by pr.reserva_id having count(*) > 1) x")
+echo "F2. dos personas cobran el mismo saldo a la vez, en 5 reservas: $dobles_f2 reserva(s) cobradas dos veces"
+if [ "$dobles_f2" -ne 0 ]; then echo "   SALDO COBRADO DOS VECES" >&2; falla=1; fi
+
+if [ "$falla" -ne 0 ]; then echo "FALLÓ" >&2; exit 1; fi
+echo "Sin sobreventa."
