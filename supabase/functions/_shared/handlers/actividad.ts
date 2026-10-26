@@ -13,6 +13,7 @@ import { findNegocios, findNegocioByCode, findActiveNegocios, clienteDelNegocio 
 import { extraerCodigoNegocio } from '../wa-codigo-negocio.ts';
 import { nombreDeViaje } from '../wa-entendimiento-reglas.ts';
 import { completeSession } from '../wa-session.ts';
+import { comentariosDeActividad, filasDeComentarios } from '../comentario-actividad.ts';
 
 const LAST_CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 min
 
@@ -199,22 +200,18 @@ async function persistActividad(
   else if (/visit[eé]|visita|fu[ií]\s+a/i.test(lower)) tipoLabel = '🚗';
   else if (/whatsapp|mensaje|chat/i.test(lower)) tipoLabel = '💬';
 
-  const contenido = `${tipoLabel} ${text}`.slice(0, 280);
-
   // Si no hay autor_id (colaborador WA sin profile), antepone el nombre al texto
-  // para preservar la autoría visible en el timeline.
-  const contenidoFinal = autorId
-    ? contenido
-    : `${tipoLabel} [${user.name}] ${text}`.slice(0, 280);
+  // para preservar la autoría visible en el timeline. `contenido` admite 280 caracteres:
+  // lo largo va completo en varios comentarios seguidos, no cortado.
+  const contenidos = comentariosDeActividad(autorId ? `${tipoLabel} ` : `${tipoLabel} [${user.name}] `, text);
 
-  const { error } = await supabase.from('activity_log').insert({
+  const { error } = await supabase.from('activity_log').insert(filasDeComentarios({
     workspace_id: user.workspace_id,
     entidad_tipo: 'negocio',
     entidad_id: negocioId,
     tipo: 'comentario',
-    contenido: contenidoFinal,
     autor_id: autorId,
-  });
+  }, contenidos));
 
   if (error) {
     console.error('[actividad] insert error:', error);
@@ -227,6 +224,7 @@ async function persistActividad(
     .update({ updated_at: new Date().toISOString() })
     .eq('id', negocioId);
 
-  await ctx.sendMessage(`✅ ${tipoLabel} registrado en ${bold(negocioNombre)}`);
+  const enVarios = contenidos.length > 1 ? `, completo en ${contenidos.length} comentarios seguidos` : '';
+  await ctx.sendMessage(`✅ ${tipoLabel} registrado en ${bold(negocioNombre)}${enVarios}`);
   await completeSession(supabase, session.id);
 }
