@@ -7,6 +7,8 @@
 // ============================================================
 
 import type { CobroPendiente, GastoOne, NegocioOne, PuertoOne, SoporteGuardado, TipoActividad } from './dominio.ts';
+import { EMOJI_ACTIVIDAD } from './dominio.ts';
+import { comentariosDeActividad } from '../../comentario-actividad.ts';
 import type { ArchivoAdjunto } from './lectura-adjunto.ts';
 import type { MediaFila } from '../tipos.ts';
 
@@ -183,9 +185,10 @@ export class PuertoOneMemoria implements PuertoOne {
     return { ok: true, soporte };
   }
 
-  async registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<void> {
+  async registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<{ comentarios: number }> {
     const neg = this.negocios.find((n) => n.id === p.negocioId);
     this.escrituras.push({ tipo: 'actividad', negocio: neg?.codigo ?? null, actividad: p.tipo, texto: p.texto });
+    return { comentarios: comentariosDeActividad(`${EMOJI_ACTIVIDAD[p.tipo]} `, p.texto).length };
   }
 
   async crearContacto(p: { nombre: string; telefono: string | null; cargo: string | null; decisor: boolean }): Promise<{ id: string }> {
