@@ -8,9 +8,10 @@ import 'server-only'
  * Bold manda el aviso a la URL que el dueño configuró en SU panel de Bold. Aquí:
  *   1. La firma se verifica sobre el cuerpo CRUDO con la llave secreta de ESE workspace (o la anterior, unos días
  *      después de un cambio de cuenta). Sin llaves o con firma inválida: 401, sin escribir nada.
- *   2. Ambiente de pruebas: Bold firma con la llave vacía. Se acepta solo si Bold, consultado con la llave de identidad
- *      del workspace, dice que el link es de pruebas (`is_sandbox`) y, si el aviso es de pago aprobado, que está pagado.
- *      Con llaves reales los links no son de pruebas, así que una firma vacía no aprueba nada.
+ *   2. Ambiente de pruebas: Bold firma con la llave vacía. Se acepta solo si se cumplen LAS DOS: el workspace está
+ *      marcado como espacio de pruebas (`config_extra.espacio_de_pruebas = true`) y Bold, consultado con la llave de
+ *      identidad del workspace, dice que el link es de pruebas (`is_sandbox`) y, si el aviso es de pago aprobado, que
+ *      está pagado. En `sabor` o cualquier workspace real se rechaza siempre (condición de la sesión de Sabor, 26-oct).
  *   3. El pago se registra con `funcion_registrar_pago` (idempotente por referencia: el reintento de Bold no paga dos
  *      veces). La referencia es el `LNK_…` del link, que es lo que Bold trae en `data.metadata.reference`.
  *
@@ -37,6 +38,14 @@ export interface DepsWebhookFunciones {
   cliente?: ClienteRpc
   fetch?: typeof fetch
   ahora?: () => number
+  esEspacioDePruebas?: (workspaceId: string) => Promise<boolean>
+}
+
+/** ¿El workspace es un espacio de pruebas? Ante cualquier duda, no. */
+async function espacioDePruebas(workspaceId: string): Promise<boolean> {
+  const { data, error } = await createServiceClient().from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
+  if (error || !data) return false
+  return (data as { config_extra?: { espacio_de_pruebas?: unknown } | null }).config_extra?.espacio_de_pruebas === true
 }
 
 export interface RespuestaWebhook {
@@ -90,7 +99,11 @@ export async function atenderWebhookBoldFunciones(
     (await anteriorVigente(cliente, workspaceId, ahora))
   )
     modo = 'cuenta_anterior'
-  else if (llaves.identidad && (await firmaBoldValida(cuerpoCrudo, firma, ''))) {
+  else if (
+    llaves.identidad &&
+    (await firmaBoldValida(cuerpoCrudo, firma, '')) &&
+    (await (deps.esEspacioDePruebas ?? espacioDePruebas)(workspaceId))
+  ) {
     const link = linkDelCuerpo(cuerpoCrudo)
     const tipo = parsearEventoBold(cuerpoCrudo)?.tipo
     const consulta = link ? await consultarLinkBold(llaves.identidad, link, f) : null

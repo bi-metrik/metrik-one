@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createHmac } from 'node:crypto'
 
-vi.mock('@/lib/supabase/server', () => ({ createServiceClient: () => ({}) }))
+vi.mock('@/lib/supabase/server', () => ({
+  createServiceClient: () => ({ from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { config_extra: {} }, error: null }) }) }) }) }),
+}))
 
 import { atenderWebhookBoldFunciones } from './webhook-bold-funciones'
 
@@ -101,10 +103,12 @@ describe('webhook de Bold por workspace', () => {
     const vacia = firma(c, '')
     const consulta = (d: Record<string, unknown>) => vi.fn(async () => new Response(JSON.stringify(d), { status: 200 }))
 
-    it('se acepta si Bold dice que el link es de pruebas y está pagado', async () => {
+    const pruebas = { esEspacioDePruebas: async () => true }
+
+    it('se acepta en un espacio de pruebas si Bold dice que el link es de pruebas y está pagado', async () => {
       const b = base()
       const f = consulta({ status: 'PAID', is_sandbox: true, total: 120000 })
-      const r = await atenderWebhookBoldFunciones(WS_A, c, vacia, { cliente: b.cliente, fetch: f as unknown as typeof fetch })
+      const r = await atenderWebhookBoldFunciones(WS_A, c, vacia, { ...pruebas, cliente: b.cliente, fetch: f as unknown as typeof fetch })
       expect(r.status).toBe(200)
       expect(r.body.modo).toBe('pruebas')
       const [, init] = f.mock.calls[0] as unknown as [string, RequestInit]
@@ -114,10 +118,19 @@ describe('webhook de Bold por workspace', () => {
     it('se rechaza si el link es real (llaves de producción) o no está pagado', async () => {
       for (const d of [{ status: 'PAID', is_sandbox: false }, { status: 'ACTIVE', is_sandbox: true }]) {
         const b = base()
-        const r = await atenderWebhookBoldFunciones(WS_A, c, vacia, { cliente: b.cliente, fetch: consulta(d) as unknown as typeof fetch })
+        const r = await atenderWebhookBoldFunciones(WS_A, c, vacia, { ...pruebas, cliente: b.cliente, fetch: consulta(d) as unknown as typeof fetch })
         expect(r.status).toBe(401)
         expect(b.registros).toHaveLength(0)
       }
+    })
+
+    it('en un workspace real (sabor) se rechaza SIEMPRE, aunque Bold diga is_sandbox y pagado, sin consultar a Bold', async () => {
+      const b = base()
+      const f = consulta({ status: 'PAID', is_sandbox: true, total: 120000 })
+      const r = await atenderWebhookBoldFunciones(WS_A, c, vacia, { esEspacioDePruebas: async () => false, cliente: b.cliente, fetch: f as unknown as typeof fetch })
+      expect(r).toEqual({ status: 401, body: { ok: false, motivo: 'firma_invalida' } })
+      expect(f).not.toHaveBeenCalled()
+      expect(b.registros).toHaveLength(0)
     })
   })
 
