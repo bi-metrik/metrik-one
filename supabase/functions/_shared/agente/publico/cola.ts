@@ -52,6 +52,11 @@ export interface DepsPublico {
   mensajero: MensajeroChatwoot;
   transcriptor: Transcriptor;
   avisos?: AvisosInternos;
+  /**
+   * Después de cerrar cada turno: el correo si se cayó el modelo (spec 2026-10-26, §4.1; `../caida.ts`). El turno ya
+   * pasó a persona y quedó cerrado; esto no lo cambia ni lo frena.
+   */
+  alertaCaida?: (traza: TrazaPublica, turnoId: string) => Promise<void>;
   llave: LlaveConversacion;
   canal: Canal;
   anuncio7Dias?: boolean;
@@ -64,11 +69,6 @@ export interface DepsPublico {
   dormir: (ms: number) => Promise<void>;
   /** Arnés de operación: una herramienta caída. */
   fallarHerramienta?: () => boolean;
-  /**
-   * Después de cerrar cada turno: el correo si se cayó el modelo (spec 2026-10-26, §4.1; `../caida.ts`). El turno ya
-   * pasó a persona y quedó cerrado; esto no lo cambia ni lo frena.
-   */
-  alertaCaida?: (traza: TrazaPublica, turnoId: string) => Promise<void>;
 }
 
 const DIAS_DE_CONVERSACION = 30;
