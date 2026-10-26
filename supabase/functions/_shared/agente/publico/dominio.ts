@@ -6,7 +6,8 @@
 //
 // Etapa 1 (§8.1), con su candado en código:
 //   · `ver_catalogo`      lectura. Solo experiencias vigentes hoy (Bogotá). Vacío o vencido: error que manda a persona.
-//   · `ver_funciones`     lectura. Solo funciones futuras de esa experiencia; nunca dice «disponible».
+//   · `ver_funciones`     lectura. Solo funciones futuras de esa experiencia, agrupadas por fecha (primero la fecha y
+//                         después el horario, Mauricio 26-oct); nunca dice «disponible».
 //   · `consultar_reglas`  lectura. Solo políticas publicadas (`pol.*`).
 //   · `proponer` (acción `reserva`, = `proponer_reserva` del diseño). No escribe. Exige la autorización `general` (§5.2).
 //     El código arma el resumen desde el catálogo y desde lo que el cliente escribió DESPUÉS del «sí»: un nombre, una
@@ -23,7 +24,7 @@
 // ============================================================
 
 import { RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, estadoAutorizacion, salidaAutorizacion } from './autorizacion.ts';
-import { CLAVES_REGLAS, condicionesVigentes, cuandoBogota, funcionesFuturas, pesos, politicas, vigentes, zonaDe } from './catalogo.ts';
+import { CLAVES_REGLAS, condicionesVigentes, cuandoBogota, funcionesFuturas, funcionesPorFecha, pesos, politicas, vigentes, zonaDe } from './catalogo.ts';
 import type { Experiencia } from './catalogo.ts';
 import { respuestaFija } from '../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Propuesta, Reglamento, ResultadoHerramienta, Salida } from '../tipos.ts';
@@ -174,7 +175,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: 'ver_funciones',
-      description: 'Las funciones futuras de una experiencia (día y hora, hora de Bogotá), con su id. No dice si hay cupo: nunca digas que hay cupo ni que está disponible. «Pa\'l finde» no es una función: muestra las opciones y pregunta cuál.',
+      description: 'Las funciones futuras de una experiencia, agrupadas por fecha (hora de Bogotá): cada fecha con sus horarios y el id de cada uno. Para reservar, pregunta primero la fecha (opciones con solo la fecha, sin horas) y después el horario de esa fecha; si la fecha tiene un solo horario, dilo y no lo preguntes; si el cliente ya dijo fecha y hora, no las vuelvas a preguntar. No dice si hay cupo: nunca digas que hay cupo ni que está disponible. «Pa\'l finde» no es una fecha: muestra las fechas de ese fin de semana y pregunta cuál.',
       parameters: { type: 'object', properties: { experiencia: { type: 'string', description: 'El id de la experiencia que devolvió ver_catalogo.' } }, required: ['experiencia'] },
     },
     {
@@ -244,8 +245,8 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         const exp = String(args.experiencia ?? '');
         if (!vigentes(r, ahora).some((e) => e.id === exp)) return { ok: false, datos: null, error: `«${exp}» no es una experiencia vigente. Usa un id de ver_catalogo.` };
         const fs = funcionesFuturas(r, exp, ahora);
-        if (!fs.length) return { ok: true, datos: { funciones: [], nota: 'No hay funciones futuras publicadas para esta experiencia.' } };
-        return { ok: true, datos: { funciones: fs.map((f) => ({ id: f.id, cuando: cuandoBogota(f.inicio) })) }, sobre: exp };
+        if (!fs.length) return { ok: true, datos: { fechas: [], nota: 'No hay funciones futuras publicadas para esta experiencia.' } };
+        return { ok: true, datos: { fechas: funcionesPorFecha(fs) }, sobre: exp };
       }
       if (nombre === 'consultar_reglas') {
         const clave = String(args.clave ?? '');

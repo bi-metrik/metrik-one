@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { frasesDeSobreventa } from './sobreventa'
 import { preciosSinHerramienta } from './precios'
-import { condicionesVigentes, experiencias, zonaDe } from './catalogo'
+import { condicionesVigentes, experiencias, funcionesPorFecha, zonaDe } from './catalogo'
 import { FIJAS_DEL_MODELO, RF_PRECIO_AUTORIZADO, TOPE_VER_CATALOGO, dominioPublico, fichaParaModelo, lineaPreferenciaMesa } from './dominio'
 import { reglamentoSabor } from './escenario'
 import { sistemaPublico } from './prompt'
 import { REGLAMENTO_SABOR } from './reglamento-sabor'
-import { cataYPelicula, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata, tresExperiencias } from './arnes/fichas-prueba'
+import { cataYPelicula, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, dosHorariosElSabado, sinRegla, soloCata, tresExperiencias } from './arnes/fichas-prueba'
 import { recortarResultado, tokens } from '../contexto'
 import type { ContextoDominio } from '../tipos'
 import type { FilaPublica } from './tipos'
@@ -90,8 +90,8 @@ describe('ficha de función ampliada (§8.3)', () => {
   it('la cata sola no trae nada de cine al modelo', async () => {
     const d = dominioPublico({ reglamento: await reglamentoSabor(soloCata(REGLAMENTO_SABOR)), ahoraMs: () => AHORA, vars: {} })
     expect(JSON.stringify((await d.leer('ver_catalogo', {}, ctx())).datos)).not.toMatch(/pel[ií]cula|\bcine\b|proyecci|pantalla/i)
-    const fs = (await d.leer('ver_funciones', { experiencia: 'ejemplo-cata-1' }, ctx())).datos as { funciones: unknown[] }
-    expect(fs.funciones).toHaveLength(2)
+    const fs = (await d.leer('ver_funciones', { experiencia: 'ejemplo-cata-1' }, ctx())).datos as { fechas: Array<{ horarios: unknown[] }> }
+    expect(fs.fechas.flatMap((x) => x.horarios)).toHaveLength(2)
   })
   it('la guarda de precios acepta montos de condiciones y recargos devueltos, y frena la condición vencida', async () => {
     const r = await reglamentoSabor(conZonaYMesaPedida(conDosCondiciones(REGLAMENTO_SABOR)))
@@ -199,7 +199,7 @@ describe('precios autorizados y preventa (§8.8, Mauricio 2026-10-25)', () => {
     expect(FIJAS_DEL_MODELO).toContain(RF_PRECIO_AUTORIZADO)
     const d = dominioPublico({ reglamento: await reglamentoSabor(), ahoraMs: () => AHORA, vars: {} })
     const c = await d.cerrar!('respuesta_fija', { clave: RF_PRECIO_AUTORIZADO }, ctx())
-    expect(c.ok && c.salidas[0].texto).toBe('Te entiendo. Esos son los precios autorizados por Sabor para esta experiencia, e incluyen todo lo que te conté. Si quieres, te ayudo a escoger la función.')
+    expect(c.ok && c.salidas[0].texto).toBe('Esos son los precios autorizados. Te ayudo a escoger la fecha y después el horario que más te sirva.')
     expect(c.ok && c.privado).toBeFalsy()
     // Un reglamento publicado sin el texto no manda un mensaje vacío.
     const sin = dominioPublico({ reglamento: await reglamentoSabor(REGLAMENTO_SABOR.filter((f) => f.clave !== RF_PRECIO_AUTORIZADO)), ahoraMs: () => AHORA, vars: {} })
@@ -213,5 +213,36 @@ describe('precios autorizados y preventa (§8.8, Mauricio 2026-10-25)', () => {
   it('la ficha de prueba con preventa vigente la muestra el 23-oct con su cierre', async () => {
     const e = experiencias(await reglamentoSabor(conPreventaVigente(REGLAMENTO_SABOR))).find((x) => x.id === 'ejemplo-cena-1')!
     expect(fichaParaModelo(e, AHORA).condiciones_vigentes_hoy).toEqual([expect.objectContaining({ id: 'preventa', tipo: 'descuento', monto: '$20.000 por persona', hasta: '2026-10-29' })])
+  })
+})
+
+describe('primero la fecha y después el horario (Mauricio, 2026-10-26)', () => {
+  it('ver_funciones agrupa por fecha de Bogotá, en orden, con el id de cada horario', async () => {
+    const d = dominioPublico({ reglamento: await reglamentoSabor(dosHorariosElSabado(REGLAMENTO_SABOR)), ahoraMs: () => AHORA, vars: {} })
+    const r = await d.leer('ver_funciones', { experiencia: 'ejemplo-cena-1' }, ctx())
+    const datos = r.datos as { fechas: Array<{ fecha: string; horarios: Array<{ id: string; hora: string }> }> }
+    expect(datos.fechas.map((f) => f.fecha)).toEqual(['sábado, 24 de octubre', 'domingo, 25 de octubre', 'sábado, 31 de octubre'])
+    expect(datos.fechas[0].horarios).toEqual([{ id: 'f-ej-4', hora: expect.stringMatching(/^4:00 p\. ?m\.$/) }, { id: 'f-ej-1', hora: expect.stringMatching(/^7:00 p\. ?m\.$/) }])
+    expect(datos.fechas.slice(1).map((f) => f.horarios.length)).toEqual([1, 1])
+    // La función pasada no sale, y el resultado cabe en el tope general del núcleo.
+    expect(JSON.stringify(datos)).not.toContain('f-ej-0')
+    expect(recortarResultado(datos)).toBe(datos)
+  })
+  it('una fecha de Bogotá no se parte por la zona: las 11 p. m. del sábado son del sábado', () => {
+    const fs = funcionesPorFecha([
+      { id: 'b', experiencia: 'x', inicio: '2026-10-24T23:00:00-05:00' },
+      { id: 'a', experiencia: 'x', inicio: '2026-10-24T13:00:00-05:00' },
+    ])
+    expect(fs).toHaveLength(1)
+    expect(fs[0].horarios.map((h) => h.id)).toEqual(['a', 'b'])
+  })
+  it('el flujo de reserva y la herramienta piden la fecha antes del horario, sin repetir lo que ya dijo', async () => {
+    const s = sistemaPublico(await reglamentoSabor(), { topes: { llamados: 6 } } as never)
+    expect(s).toMatch(/proc\.reserva: Experiencia .*→ fecha → horario, en ese orden/)
+    expect(s).toMatch(/si tiene uno solo, dilo .*y no lo preguntes/)
+    expect(s).toMatch(/Nunca sueltes la lista de fechas con sus horas ni preguntes la hora antes de la fecha/)
+    expect(s).toMatch(/no se lo vuelvas a preguntar/)
+    const d = dominioPublico({ reglamento: await reglamentoSabor(), ahoraMs: () => AHORA, vars: {} })
+    expect(d.lecturas.find((h) => h.name === 'ver_funciones')?.description).toMatch(/primero la fecha .*después el horario/)
   })
 })

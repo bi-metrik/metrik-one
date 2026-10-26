@@ -26,7 +26,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
-import { cataYPelicula, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata } from './fichas-prueba.ts';
+import { cataYPelicula, dosHorariosElSabado, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata } from './fichas-prueba.ts';
 
 export type PasoCaso =
   | { escribe: string | string[]; despuesMs?: number }
@@ -89,7 +89,7 @@ const personaEnTurno = (e: EscenarioPublico, n: number): Veredicto => {
   return i === n - 1 ? ok(`pasó en el turno ${n}`) : no(i < 0 ? 'no pasó a persona' : `pasó en el turno ${i + 1}, se esperaba el ${n}`);
 };
 // §8.8: ante la crítica del precio o el pedido de descuento, la fija; ni negociación ni promesa de consultar.
-const PRECIO_AUTORIZADO = 'Esos son los precios autorizados por Sabor';
+const PRECIO_AUTORIZADO = 'Esos son los precios autorizados. Te ayudo a escoger la fecha y después el horario';
 const NEGOCIA = /te (puedo|podemos|podr[ií]a|podr[ií]amos) (hacer|dar|dejar|conseguir|ofrecer)[^.?!]{0,20}(descuento|rebaja|precio especial|mejor precio)|d[eé]jame (consultar|preguntar|averiguar)|(consulto|pregunto|averiguo) (con|al) (el )?(equipo|jefe|encargad[oa])|a ver qu[eé] (puedo|podemos) hacer|te lo dejo en/i;
 const precioAutorizado = (e: EscenarioPublico): Veredicto => todos(contiene(e, PRECIO_AUTORIZADO), noContiene(e, NEGOCIA), sinPersona(e), sinPropuesta(e));
 const OFRECE_PERSONA = /(alguien|una persona|algui[eé]n m[aá]s) del equipo|te paso|pasarte|te comunico|hablar con (alguien|una persona)/i;
@@ -134,8 +134,8 @@ const ESCENARIOS: CasoPublico[] = [
   {
     id: 'e-funciones', conjunto: 'escenarios', titulo: 'Funciones futuras (nunca «disponible»)',
     pasos: [{ escribe: '¿Qué días tienen funciones?' }],
-    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m., el domingo 25 de octubre a la 1:00 p. m. y el sábado 31 de octubre a las 7:00 p. m. ¿Cuál te sirve?', 'funciones')],
-    esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, /\b24 (de )?oct/i), noContiene(e, /\b17 (de )?oct/i)),
+    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre, el domingo 25 de octubre y el sábado 31 de octubre. ¿Qué fecha te sirve?', 'funciones')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, /\b24\b/), noContiene(e, /\b17 (de )?oct/i)),
   },
   {
     id: 'e-politica', conjunto: 'escenarios', titulo: 'Política publicada por clave',
@@ -155,7 +155,7 @@ const ESCENARIOS: CasoPublico[] = [
       { toca: 'Sí, está bien', oEscribe: 'sí' },
     ],
     guion: [
-      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m. y el domingo 25 de octubre a la 1:00 p. m. ¿Cuál prefieren?', 'reserva'),
+      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre, el domingo 25 de octubre y el sábado 31 de octubre. ¿Qué fecha prefieren?', 'reserva'),
       FIJA('rf.autorizacion'),
       R('¡Gracias! ¿A nombre de quién hago la reserva?'),
       R('Perfecto. ¿Me das tu número de cédula?'),
@@ -382,6 +382,93 @@ const EXPERIENCIAS: CasoPublico[] = [
   },
 ];
 
+// ── Primero la fecha y después el horario (Mauricio, 26-oct) ───────────────────
+// Sobre la ficha [EJEMPLO] con dos horarios el sábado 24 (4:00 y 7:00 p. m.) y uno solo el domingo 25 (1:00 p. m.) y el
+// sábado 31 (7:00 p. m.). Lo que mira cada caso es lo que le llegó al cliente en cada turno (texto y botones).
+
+/** Cuántos mensajes iban publicados al cerrar el primer turno (para separar el turno 1 del 2). */
+const finTurno1 = new WeakMap<EscenarioPublico, number>();
+const MARCAR_TURNO_1: PasoCaso = { hacer: (e) => { finTurno1.set(e, e.chatwoot.publicados.length); } };
+const textoDe = (x: EscenarioPublico['chatwoot']['publicados'][number]) => [x.salida.texto, ...('opciones' in x.salida ? x.salida.opciones.map((o) => o.titulo) : [])].join('\n');
+const turno = (e: EscenarioPublico, n: 1 | 2) => {
+  const corte = finTurno1.get(e) ?? e.chatwoot.publicados.length;
+  return (n === 1 ? e.chatwoot.publicados.slice(0, corte) : e.chatwoot.publicados.slice(corte)).map(textoDe).join('\n');
+};
+const opcionesTurno = (e: EscenarioPublico, n: 1 | 2) => {
+  const corte = finTurno1.get(e) ?? e.chatwoot.publicados.length;
+  return (n === 1 ? e.chatwoot.publicados.slice(0, corte) : e.chatwoot.publicados.slice(corte)).flatMap((x) => ('opciones' in x.salida ? x.salida.opciones.map((o) => o.titulo) : []));
+};
+// Una hora escrita («7:00 p. m.», «7 pm», «a las 7», «19:00»).
+const HORA = /\b\d{1,2}(:\d{2})?\s?(a|p)\.?\s?m\b\.?|\ba las? \d{1,2}\b|\b\d{1,2}:\d{2}\b/i;
+const FECHA = /\b(24|25|31)\b|s[aá]bado|domingo/i;
+const PREGUNTA_HORA = /¿[^?¿]*\b(qu[eé]|cu[aá]l(es)?)\s+(hora|horario)s?\b[^?¿]*\?|¿[^?¿]*\b(hora|horario)\b[^?¿]*(prefier|te sirve|les sirve|quieres|quieren)[^?¿]*\?/i;
+const PREGUNTA_FECHA_U_HORA = /¿[^?¿]*\b(fecha|d[ií]a|hora|horario|cu[aá]ndo)\b[^?¿]*\?/i;
+const sinAutorizacionTodavia = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().some((t) => t.pide_autorizacion) ? no('pidió la autorización antes de tener la función') : ok('sin autorización todavía'));
+const FECHAS_SIN_HORA = R('Tenemos función el sábado 24, el domingo 25 y el sábado 31 de octubre. ¿Qué fecha te sirve?', 'reserva', { opciones: [{ titulo: 'Sábado 24' }, { titulo: 'Domingo 25' }, { titulo: 'Sábado 31' }] });
+/** El turno 1 de «quiero reservar»: pregunta la fecha (la nombra, en texto o botones) y no dice ninguna hora. */
+const preguntaSoloFecha = (e: EscenarioPublico): Veredicto => {
+  const t1 = turno(e, 1);
+  return todos(
+    usoHerramienta(e, 'ver_funciones'),
+    FECHA.test(t1) && (/\?/.test(t1) || opcionesTurno(e, 1).length > 1) ? ok('pregunta la fecha') : no(`no preguntó la fecha: «${t1.slice(-200)}»`),
+    HORA.test(t1) ? no(`dijo horas antes de la fecha: «${t1.match(HORA)?.[0]}»`) : ok('sin horas en el turno 1'),
+    opcionesTurno(e, 1).some((o) => HORA.test(o)) ? no('botones con hora en el turno 1') : ok('botones de solo fecha'),
+  );
+};
+
+const FECHA_HORARIO: CasoPublico[] = [
+  {
+    id: 'f-fecha-luego-horario', conjunto: 'escenarios', titulo: '«Quiero reservar»: pregunta la fecha sin horas y, con dos horarios ese día, pregunta cuál', fichas: dosHorariosElSabado,
+    pasos: [{ escribe: 'Hola, quiero reservar' }, MARCAR_TURNO_1, { toca: 'Sábado 24', oEscribe: 'el sábado 24' }],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, FECHAS_SIN_HORA,
+      R('El sábado 24 hay dos horarios: 4:00 p. m. y 7:00 p. m. ¿Cuál prefieres?', 'reserva', { opciones: [{ titulo: '4:00 p. m.' }, { titulo: '7:00 p. m.' }] }),
+    ],
+    esperado: (e) => {
+      const t2 = turno(e, 2);
+      return todos(
+        preguntaSoloFecha(e),
+        /\b4(:00)?\s?(p\.?\s?m|de la tarde)|\b4:00\b|\b16:00\b/i.test(t2) && /\b7(:00)?\s?(p\.?\s?m|de la noche)|\b7:00\b|\b19:00\b/i.test(t2) ? ok('dice los dos horarios del sábado') : no(`no dio los dos horarios del sábado: «${t2.slice(0, 200)}»`),
+        /\?/.test(t2) || opcionesTurno(e, 2).length > 1 ? ok('pregunta el horario') : no('no preguntó el horario'),
+        /\b1(:00)?\s?p\.?\s?m|\b13:00\b/i.test(t2) ? no('mezcló el horario de otra fecha') : ok('solo los horarios de esa fecha'),
+        sinAutorizacionTodavia(e), sinPropuesta(e), sinPersona(e),
+      );
+    },
+  },
+  {
+    id: 'f-un-solo-horario', conjunto: 'escenarios', titulo: 'Fecha con un solo horario: lo dice y no lo pregunta', fichas: dosHorariosElSabado,
+    pasos: [{ escribe: 'Hola, quiero reservar' }, MARCAR_TURNO_1, { toca: 'Domingo 25', oEscribe: 'el domingo 25' }],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, FECHAS_SIN_HORA,
+      R('El domingo 25 la función es a la 1:00 p. m. ¿Para cuántas personas reservo?', 'reserva'),
+    ],
+    esperado: (e) => {
+      const t2 = turno(e, 2);
+      return todos(
+        preguntaSoloFecha(e),
+        /\b1(:00)?\s?(p\.?\s?m|de la tarde)|\b1:00\b|\b13:00\b/i.test(t2) ? ok('dice la hora del domingo') : no(`no dijo la hora del domingo: «${t2.slice(0, 200)}»`),
+        PREGUNTA_HORA.test(t2) || opcionesTurno(e, 2).some((o) => HORA.test(o)) ? no(`preguntó la hora con un solo horario: «${t2.slice(0, 200)}»`) : ok('no pregunta la hora'),
+        /\b(4|7)(:00)?\s?p\.?\s?m/i.test(t2) ? no('mezcló el horario de otra fecha') : ok('solo el horario de esa fecha'),
+        sinPropuesta(e), sinPersona(e),
+      );
+    },
+  },
+  {
+    id: 'f-ya-dio-fecha-y-hora', conjunto: 'escenarios', titulo: 'Ya dio fecha y hora en su mensaje: no se las vuelve a preguntar', fichas: dosHorariosElSabado,
+    pasos: [{ escribe: 'Hola, quiero reservar para 2 el sábado 24 a las 4 de la tarde' }],
+    guion: [{ varias: [CATALOGO, FUNCIONES] }, FIJA('rf.autorizacion')],
+    esperado: (e) => {
+      const t1 = turno(e, 1);
+      return todos(
+        usoHerramienta(e, 'ver_funciones'),
+        PREGUNTA_FECHA_U_HORA.test(t1) ? no(`volvió a preguntar fecha u hora: «${t1.match(PREGUNTA_FECHA_U_HORA)?.[0]}»`) : ok('no pregunta fecha ni hora'),
+        opcionesTurno(e, 1).some((o) => HORA.test(o) || FECHA.test(o)) ? no('volvió a poner botones de fecha u hora') : ok('sin botones de fecha u hora'),
+        sinPropuesta(e), sinPersona(e),
+      );
+    },
+  },
+];
+
 // ── Adversario ───────────────────────────────────────────────────────────────
 
 const ADVERSARIO: CasoPublico[] = [
@@ -479,7 +566,7 @@ const LENGUAJE: CasoPublico[] = [
   {
     id: 'l-jerga', conjunto: 'lenguaje', titulo: 'Jerga y «el finde»',
     pasos: [{ escribe: 'q mas parce cuanto vale pa 2 el finde' }],
-    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Vale $95.000 por persona. El finde hay función el sábado 24 de octubre a las 7:00 p. m. y el domingo 25 de octubre a la 1:00 p. m. ¿Cuál te sirve?', 'precio')],
+    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Vale $95.000 por persona. El finde hay función el sábado 24 y el domingo 25 de octubre. ¿Qué fecha te sirve?', 'precio')],
     esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, '$95.000')),
   },
   {
@@ -843,7 +930,7 @@ async function webhookDosVeces(): Promise<Veredicto> {
 export const CONJUNTO_REAL: CasoPublico[] = [];
 
 export const CONJUNTOS_PUBLICO: Record<CasoPublico['conjunto'], CasoPublico[]> = {
-  real: CONJUNTO_REAL, escenarios: [...ESCENARIOS, ...EXPERIENCIAS], adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
+  real: CONJUNTO_REAL, escenarios: [...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO], adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
 };
 
-export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...EXPERIENCIAS, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];
+export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];
