@@ -11,20 +11,28 @@ import type { SupabaseClient } from '../types.ts';
 
 const rel = (v: unknown) => (Array.isArray(v) ? v[0] : v) as { nombre?: string | null } | null;
 
-/** El equipo activo, los colaboradores activos y los negocios abiertos (del más reciente al más viejo). */
+/**
+ * El equipo activo, los colaboradores activos, los negocios abiertos (del más reciente al más viejo) y las descripciones
+ * de los gastos de los últimos 180 días (de ahí salen los proveedores). Sin negocios (público) tampoco van los gastos.
+ */
 export async function leerBasePistas(
   supabase: SupabaseClient, workspaceId: string, o: { negocios?: boolean } = {},
 ): Promise<BasePistas> {
   const conNegocios = o.negocios !== false;
-  const [st, co, ne] = await Promise.all([
+  const [st, co, ne, ga] = await Promise.all([
     supabase.from('staff').select('full_name').eq('workspace_id', workspaceId).eq('is_active', true).limit(200),
     supabase.from('wa_collaborators').select('name').eq('workspace_id', workspaceId).eq('is_active', true).limit(200),
     conNegocios
       ? supabase.from('negocios').select('codigo, nombre, empresas(nombre), contactos(nombre)')
         .eq('workspace_id', workspaceId).eq('estado', 'abierto').order('updated_at', { ascending: false }).limit(200)
       : Promise.resolve({ data: [], error: null }),
+    conNegocios
+      ? supabase.from('gastos').select('descripcion').eq('workspace_id', workspaceId)
+        .gte('fecha', new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10))
+        .order('fecha', { ascending: false }).limit(300)
+      : Promise.resolve({ data: [], error: null }),
   ]);
-  for (const r of [st, co, ne]) if (r.error) console.error('[pistas] lectura parcial de la base:', r.error.message);
+  for (const r of [st, co, ne, ga]) if (r.error) console.error('[pistas] lectura parcial de la base:', r.error.message);
   const filas = (d: unknown) => (Array.isArray(d) ? d : []) as Array<Record<string, unknown>>;
   return {
     equipo: filas(st.data).map((x) => String(x.full_name ?? '')),
@@ -34,5 +42,6 @@ export async function leerBasePistas(
       nombre: (n.nombre as string | null) ?? null,
       cliente: rel(n.empresas)?.nombre ?? rel(n.contactos)?.nombre ?? null,
     })),
+    gastos: filas(ga.data).map((x) => String(x.descripcion ?? '')),
   };
 }

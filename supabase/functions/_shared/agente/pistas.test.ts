@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ENCABEZADO_PISTAS, TOPE_PISTAS, formatoDeCodigos, leerConfigTranscripcion, limpiarPista, listaDePistas, nombreCorto,
+  ENCABEZADO_PISTAS, TOPE_PISTAS, formatoDeCodigos, leerConfigTranscripcion, limpiarPista, listaDePistas, nombreCorto, proveedorDeGasto,
   fuentesDeComposicion, pistasDeFunciones, pistasSiEncendidas, textoPistas,
 } from './pistas'
 import type { BasePistas } from './pistas'
@@ -75,9 +75,9 @@ describe('el constructor de pistas (§4.6)', () => {
 
 describe('el interruptor', () => {
   it('apagado por defecto; solo `pistas: true` literal lo prende; el tope va de 5 a 80', () => {
-    expect(leerConfigTranscripcion(undefined)).toEqual({ pistas: false, tope: TOPE_PISTAS })
+    expect(leerConfigTranscripcion(undefined)).toEqual({ pistas: false, tope: TOPE_PISTAS, vocabulario: [] })
     expect(leerConfigTranscripcion({ transcripcion: { pistas: 'true' } }).pistas).toBe(false)
-    expect(leerConfigTranscripcion({ transcripcion: { pistas: true } })).toEqual({ pistas: true, tope: TOPE_PISTAS })
+    expect(leerConfigTranscripcion({ transcripcion: { pistas: true } })).toEqual({ pistas: true, tope: TOPE_PISTAS, vocabulario: [] })
     expect(leerConfigTranscripcion({ transcripcion: { pistas: true, tope: 500 } }).tope).toBe(80)
     expect(leerConfigTranscripcion({ transcripcion: { pistas: true, tope: 1 } }).tope).toBe(5)
   })
@@ -93,7 +93,7 @@ describe('el interruptor', () => {
   })
 
   it('si leer la base falla, se transcribe sin pistas (null), sin lanzar', async () => {
-    const t = await pistasSiEncendidas({ pistas: true, tope: 10 }, async () => { throw new Error('caída') })
+    const t = await pistasSiEncendidas({ pistas: true, tope: 10, vocabulario: [] }, async () => { throw new Error('caída') })
     expect(t).toBeNull()
   })
 
@@ -125,5 +125,36 @@ describe('las fuentes de una composición', () => {
     const fuentes = fuentesDeComposicion({ funciones: [sinPistas, conPistas], parametros: { 'clientes.x': { nombre: 'Henna' } } })
     expect(fuentes.map((x) => x.parametros)).toEqual([{}, { nombre: 'Henna' }])
     expect(await pistasDeFunciones(fuentes, 'ws1')).toEqual(['Taller Henna'])
+  })
+})
+
+describe('marcas y proveedores (caso real 2026-10-26: «suscripción a Resend» se transcribió «Recent Pro»)', () => {
+  it('el proveedor sale de la descripción del gasto: el nombre propio, sin el detalle', () => {
+    expect(proveedorDeGasto('suscripción a Resend')).toBe('Resend')
+    expect(proveedorDeGasto('Vercel Pro (infra MeTRIK, pago PN; USD 20) — agosto')).toBe('Vercel Pro')
+    expect(proveedorDeGasto('Tarifa Bold (2,89% + $900) sobre venta')).toBe('Tarifa Bold')
+    expect(proveedorDeGasto('Supabase (infra MeTRIK, pago PN; USD 44.03)')).toBe('Supabase')
+    expect(proveedorDeGasto('invitacion café cierre')).toBeNull()
+    expect(proveedorDeGasto(null)).toBeNull()
+  })
+
+  it('los proveedores van al final y sin repetir; el vocabulario fijo va primero', () => {
+    const conGastos: BasePistas = { ...base, gastos: ['suscripción a Resend', 'Supabase (infra) — junio', 'Supabase (infra) — julio'] }
+    const l = listaDePistas(conGastos, { vocabulario: ['Tailscale'] })
+    expect(l[0]).toBe('Tailscale')
+    expect(l.slice(-2)).toEqual(['Resend', 'Supabase'])
+  })
+
+  it('en público (sin clientes) el lector no trae gastos, y el vocabulario sí va', () => {
+    const l = listaDePistas({ equipo: ['Gloria'], colaboradores: [], negocios: [] }, { incluirClientes: false, vocabulario: ['Henna'] })
+    expect(l).toEqual(['Henna', 'Gloria'])
+  })
+
+  it('el vocabulario se lee de la configuración: solo cadenas, hasta 40, y llega al bloque', async () => {
+    const c = leerConfigTranscripcion({ transcripcion: { pistas: true, vocabulario: ['Resend', 7, 'Tailscale'] } })
+    expect(c.vocabulario).toEqual(['Resend', 'Tailscale'])
+    expect(leerConfigTranscripcion({ transcripcion: { vocabulario: Array.from({ length: 60 }, (_, i) => `M${i}`) } }).vocabulario).toHaveLength(40)
+    const t = await pistasSiEncendidas(c, async () => ({ base }))
+    expect(t!.split('\n')[1].startsWith('Resend; Tailscale; ')).toBe(true)
   })
 })

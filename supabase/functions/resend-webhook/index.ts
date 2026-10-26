@@ -1,5 +1,6 @@
 // ============================================================
-// resend-webhook — los acuses de Resend vuelven a `avisos_cliente`
+// resend-webhook — los acuses de Resend vuelven a `avisos_cliente` y a
+// `avisos_equipo`, y cada `email.sent` suma al contador de volumen del mes
 // ------------------------------------------------------------
 // EL PROBLEMA QUE CIERRA:
 //   `notificar-etapa` escribe `estado = 'enviado'` en cuanto Resend acepta el
@@ -15,8 +16,21 @@
 //   · email.bounced    -> `estado = 'rebotado'` + `motivo` con el tipo y el
 //                         diagnostico del servidor.
 //   · email.complained -> `queja_at`.      NO toca `estado` (el correo SI llego).
-//   Cualquier otro evento (`email.sent`, `email.opened`, `email.delivery_delayed`,
-//   `contact.*`, `domain.*`) se responde 200 y se ignora.
+//   · email.suppressed -> `estado = 'suprimido'` + motivo (2026-10-26): Resend
+//                         acepto el POST y NO lo mando, el destino esta en su
+//                         lista de supresion.
+//   · email.failed     -> `estado = 'fallido'` + `motivo = resend_failed: <razon>`
+//                         (2026-10-26): acepto el POST y no lo pudo mandar.
+//   Los cinco se aplican a `avisos_cliente` Y a `avisos_equipo` (los correos
+//   internos al equipo), con las mismas guardas. Un correo vive en una sola.
+//
+//   · email.sent       -> NO es un acuse: suma 1 al contador del periodo con la
+//                         RPC `resend_contar_enviado` (deduplicada por svix-id) y,
+//                         si cruza un umbral, avisa a Mauricio UNA vez (ver
+//                         `_shared/volumen-resend.ts`). SIEMPRE 200, aunque el
+//                         conteo falle: un reintento sin fin no arregla un contador.
+//   Cualquier otro evento (`email.opened`, `email.delivery_delayed`, `contact.*`,
+//   `domain.*`) se responde 200 y se ignora.
 //
 // ⚠️⚠️ LA IDEMPOTENCIA Y EL ORDEN VIVEN EN EL `WHERE`, NO EN UN `IF`.
 //   Svix entrega "al menos una vez" y NO garantiza orden (sus reintentos van
@@ -28,22 +42,21 @@
 //   llamada. Comprobar antes con un SELECT no serviria: entre el SELECT y el
 //   UPDATE cabe el otro acuse.
 //
-// ⚠️ UN `email_id` SIN FILA NO ES UN ERROR. Los correos INTERNOS al equipo
-//   (`notificar-etapa` tambien avisa por dentro, y `alertas-plazo` manda los
-//   suyos) no dejan fila en `avisos_cliente`: esa tabla es solo la traza de lo
-//   que se le manda al CLIENTE. Devolver 4xx/5xx por uno de esos haria que Svix
-//   reintente durante horas un acuse que nunca vamos a poder casar, y despues
-//   Resend deshabilita el endpoint por fallar — con lo cual perderiamos tambien
-//   los rebotes que si importan. Se responde 200 y se deja en `console.log`, no
-//   en `console.error`: no hay nada que arreglar.
+// ⚠️ UN `email_id` SIN FILA NO ES UN ERROR. Los correos del auth de Supabase, los
+//   que manda Next (cobros, Valida, invitaciones) y los internos que todavia no
+//   dejan traza no tienen fila en ninguna de las dos tablas. Devolver 4xx/5xx por
+//   uno de esos haria que Svix reintente durante horas un acuse que nunca vamos a
+//   poder casar, y despues Resend deshabilita el endpoint por fallar — con lo cual
+//   perderiamos tambien los rebotes que si importan. Se responde 200 y se deja en
+//   `console.log`, no en `console.error`: no hay nada que arreglar.
 //
 // CUANDO SI SE DEVUELVE ERROR, Y POR QUE:
-//   Solo cuando el evento NO quedo aplicado y un reintento puede arreglarlo:
-//   si la base falla (500) o si el secreto no esta configurado (500). Un 401 por
-//   firma invalida tambien reintenta, y esta bien que lo haga: si esa firma es
-//   nuestra y no la reconocemos, el problema es el secreto y queremos que el
-//   evento siga vivo mientras se corrige. Lo que NUNCA devuelve error es un
-//   evento ya aplicado, uno que no aplica, o uno que no tiene fila.
+//   Solo cuando un ACUSE no quedo aplicado y un reintento puede arreglarlo: si la
+//   base falla (500) o si el secreto no esta configurado (500). Un 401 por firma
+//   invalida tambien reintenta, y esta bien que lo haga: si esa firma es nuestra y
+//   no la reconocemos, el problema es el secreto y queremos que el evento siga
+//   vivo mientras se corrige. Lo que NUNCA devuelve error es un evento ya
+//   aplicado, uno que no aplica, uno que no tiene fila, o un `email.sent`.
 //
 // verify_jwt = false en config.toml: Resend no manda el JWT de Supabase. La
 // autenticidad la valida esta funcion con la firma Svix. Sin ese flag el gateway
@@ -54,10 +67,15 @@
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import {
   actualizacionDeAcuse,
+  esEventoEnviado,
   interpretarAcuse,
   leerCabecerasSvix,
   verificarFirmaSvix,
 } from '../_shared/resend-acuses.ts';
+import { contarEnviado } from '../_shared/volumen-resend.ts';
+import { INTENT_ALARMA_VOLUMEN } from '../_shared/alarma-volumen-resend.ts';
+import { todayBogotaISO } from '../_shared/bogota.ts';
+import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
 
 // Las edge functions no tienen el `Database` generado, y sin el supabase-js
 // resuelve toda fila como `never`. Mismo `any` acotado que usa `notificar-etapa`:
@@ -79,6 +97,13 @@ function json(cuerpo: Record<string, unknown>, status = 200): Response {
   });
 }
 
+/** El canal de alertas internas del bot (`WA_ADMIN_NOTIFY_PHONE`), si existe. */
+function whatsappAdmin(): ((texto: string, variables: Record<string, string | number>) => Promise<void>) | undefined {
+  const telefono = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
+  if (!telefono) return undefined;
+  return (texto, variables) => enviarAvisoInterno(telefono, INTENT_ALARMA_VOLUMEN, texto, variables);
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405);
 
@@ -87,9 +112,10 @@ Deno.serve(async (req) => {
   const cuerpo = await req.text();
 
   const secreto = Deno.env.get('RESEND_WEBHOOK_SECRET');
+  const cabeceras = leerCabecerasSvix(req.headers);
   const firma = await verificarFirmaSvix({
     secreto,
-    cabeceras: leerCabecerasSvix(req.headers),
+    cabeceras,
     cuerpo,
     ahoraMs: Date.now(),
   });
@@ -118,6 +144,20 @@ Deno.serve(async (req) => {
     return json({ ok: true, ignorado: 'json_invalido' });
   }
 
+  if (esEventoEnviado(payload)) {
+    // La firma valida garantiza que vino `svix-id`. `contarEnviado` nunca lanza.
+    const r = await contarEnviado(
+      {
+        svc: getServiceClient(),
+        llaveResend: Deno.env.get('RESEND_API_KEY') ?? '',
+        hoy: () => todayBogotaISO(),
+        whatsapp: whatsappAdmin(),
+      },
+      cabeceras.id ?? '',
+    );
+    return json({ ok: true, ...r });
+  }
+
   const lectura = interpretarAcuse(payload, new Date().toISOString());
   if (!lectura.ok) {
     console.log('[resend-webhook] ignorado: %s', lectura.razon);
@@ -126,43 +166,51 @@ Deno.serve(async (req) => {
 
   const { acuse } = lectura;
   const { set, guarda } = actualizacionDeAcuse(acuse);
+  const svc = getServiceClient();
 
-  let consulta = getServiceClient()
-    .from('avisos_cliente')
-    .update(set)
-    .eq('proveedor_id', acuse.emailId)
-    // `proveedor_id` solo lo tienen las filas de correo, pero declararlo deja
-    // escrito de que canal habla este webhook.
-    .eq('canal', 'email');
+  // Las dos tablas, con la misma escritura y la misma guarda.
+  const aplicar = (tabla: 'avisos_cliente' | 'avisos_equipo') => {
+    let consulta = svc
+      .from(tabla)
+      .update(set)
+      .eq('proveedor_id', acuse.emailId)
+      // `proveedor_id` solo lo tienen las filas de correo, pero declararlo deja
+      // escrito de que canal habla este webhook.
+      .eq('canal', 'email');
+    consulta = guarda.modo === 'es_nulo'
+      ? consulta.is(guarda.columna, null)
+      : consulta.eq(guarda.columna, guarda.valor);
+    return consulta.select('id');
+  };
 
-  consulta = guarda.modo === 'es_nulo'
-    ? consulta.is(guarda.columna, null)
-    : consulta.eq(guarda.columna, guarda.valor);
-
-  const { data, error } = await consulta.select('id, negocio_id');
+  const [cliente, equipo] = await Promise.all([aplicar('avisos_cliente'), aplicar('avisos_equipo')]);
+  const error = cliente.error ?? equipo.error;
 
   if (error) {
     // La base fallo: el acuse NO quedo aplicado y un reintento si puede
-    // arreglarlo. Es el unico caso en que conviene que Svix vuelva.
+    // arreglarlo. Es el unico caso en que conviene que Svix vuelva. Si una de las
+    // dos tablas si se actualizo, el reintento no la pisa: su guarda ya no la
+    // encuentra.
     console.error('[resend-webhook] update fallo (%s %s): %s', acuse.clase, acuse.emailId, error.message);
     return json({ error: 'db_error' }, 500);
   }
 
-  const filas = data?.length ?? 0;
-  if (filas === 0) {
-    // Dos casos legitimos caen aqui y ninguno es un error: un correo INTERNO
-    // (no deja fila en esta tabla) y un acuse repetido que ya se aplico. No se
-    // distinguen desde aqui, y tampoco hace falta: en los dos el resultado
-    // correcto es no hacer nada.
+  const filasCliente = cliente.data?.length ?? 0;
+  const filasEquipo = equipo.data?.length ?? 0;
+  if (filasCliente + filasEquipo === 0) {
+    // Dos casos legitimos caen aqui y ninguno es un error: un correo sin traza
+    // (auth, Next) y un acuse repetido que ya se aplico. No se distinguen desde
+    // aqui, y tampoco hace falta: en los dos el resultado correcto es no hacer nada.
     console.log('[resend-webhook] %s sin fila que actualizar (email_id=%s)', acuse.clase, acuse.emailId);
     return json({ ok: true, aplicado: 0 });
   }
 
   console.log(
-    '[resend-webhook] %s aplicado a %d fila(s): %s',
+    '[resend-webhook] %s aplicado: cliente=%d equipo=%d (email_id=%s)',
     acuse.clase,
-    filas,
-    data.map((f: { id: string; negocio_id: string }) => `${f.id}/${f.negocio_id}`).join(','),
+    filasCliente,
+    filasEquipo,
+    acuse.emailId,
   );
-  return json({ ok: true, aplicado: filas });
+  return json({ ok: true, aplicado: filasCliente + filasEquipo });
 });

@@ -23,6 +23,7 @@ import {
   puedeCancelar,
   textoConfirmacionCobro,
 } from './cobro-prueba'
+import { FROM_FACTURACION } from '@/lib/email/remitente-facturacion'
 import { titularDelCobro } from './metodo-pago'
 import { cancelarSuscripcionEnPrueba } from './suscripcion-prueba-servidor'
 import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
@@ -148,7 +149,8 @@ function urlCuentaPorDefecto(slug: string): string {
   return `https://${slug}.${base}/valida`
 }
 
-const FROM_AVISO = 'Valida · METRIK <facturacion@metrikone.co>'
+// El remitente de cobro de MéTRIK (metrik.com.co), el mismo de la cuenta de cobro y del enlace.
+const FROM_AVISO = FROM_FACTURACION
 
 export async function enviarPorResend(m: CorreoSaliente): Promise<ResultadoEnvio> {
   const key = process.env.RESEND_API_KEY
