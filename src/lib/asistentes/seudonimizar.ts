@@ -112,10 +112,12 @@ const CORREO = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g
 
 /**
  * Tapa teléfonos, correos y nombres. Los nombres se reemplazan por `Persona N` con un número estable por persona
- * (el mismo para el nombre completo y sus palabras). `etiqueta` permite tapar sin numerar (`[cliente]`, en el correo).
+ * (el mismo para el nombre completo y sus palabras). `etiqueta` tapa sin numerar (`[cliente]`, en el correo) y
+ * `soloNombres` deja los números (el correo lleva ids de turno, que tienen tiras de dígitos).
  * Pura.
  */
-export function seudonimizar(texto: string, n: Nombres, etiqueta?: string): string {
+export function seudonimizar(texto: string, n: Nombres, o: { etiqueta?: string; soloNombres?: boolean } = {}): string {
+  const etiqueta = o.etiqueta
   // Primero los nombres (más largos primero, para que «Mariana Restrepo» gane sobre «Mariana»).
   const alias = new Map<string, string>()
   let siguiente = 1
@@ -145,7 +147,7 @@ export function seudonimizar(texto: string, n: Nombres, etiqueta?: string): stri
   for (const r of reemplazos) {
     salida = salida.replace(new RegExp(`(?<![\\p{L}\\d])${r.patron}(?![\\p{L}\\d])`, 'giu'), r.alias)
   }
-  return salida.replace(CORREO, '[correo]').replace(NUMERO, '[número]')
+  return o.soloNombres ? salida : salida.replace(CORREO, '[correo]').replace(NUMERO, '[número]')
 }
 
 /** ¿Quedó algún teléfono (7+ dígitos seguidos o separados) en el texto? Para las pruebas y como última guarda. */
