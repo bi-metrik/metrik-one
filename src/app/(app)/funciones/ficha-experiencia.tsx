@@ -3,7 +3,7 @@
 /**
  * La ficha de la experiencia (P11, §1.8): los textos de la oferta y de la bienvenida al grupo de WhatsApp, en palabras de
  * Sabor y TAL CUAL (con sus emojis). Salen de sus dos mensajes reales; no hay más campos. La edad mínima va en fichas:
- * «Sin menores», «Desde 6» u «Otra». Los datos del lugar (dirección, piso, parqueadero, firma) van aparte, una vez por
+ * «Sin menores», «Desde 6» u «Otra». La puerta cerrada al iniciar es una casilla (solo películas, 26-oct). Los datos del lugar (dirección, piso, parqueadero, firma) van aparte, una vez por
  * workspace (`/funciones/lugar`).
  */
 import type { FichaExperienciaDatos } from '@/lib/funciones/datos'
@@ -12,13 +12,14 @@ export type ValoresFicha = FichaExperienciaDatos
 
 export const fichaVacia = (): ValoresFicha => ({
   nombre: '', titulo_oferta: null, frase_gancho: null, intro: null, que_incluye: null, emojis_tema: null,
-  saludo_grupo: null, relato_grupo: null, edad_minima: null,
+  saludo_grupo: null, relato_grupo: null, edad_minima: null, puerta_cerrada: false,
 })
 
 /** Los valores de una experiencia guardada, para editarla. */
 export const fichaDe = (e: FichaExperienciaDatos): ValoresFicha => ({
   nombre: e.nombre, titulo_oferta: e.titulo_oferta, frase_gancho: e.frase_gancho, intro: e.intro, que_incluye: e.que_incluye,
   emojis_tema: e.emojis_tema, saludo_grupo: e.saludo_grupo, relato_grupo: e.relato_grupo, edad_minima: e.edad_minima,
+  puerta_cerrada: e.puerta_cerrada === true,
 })
 
 export function FichaExperiencia({ valores, onCambio }: { valores: ValoresFicha; onCambio: (v: ValoresFicha) => void }) {
@@ -74,7 +75,19 @@ export function FichaExperiencia({ valores, onCambio }: { valores: ValoresFicha;
           Relato de cierre <span className="text-xs text-[#6B7280]">(va antes de la firma)</span>
           <textarea {...texto('relato_grupo')} rows={6} className={campo} placeholder="🍇 ¡Preparen el paladar…" />
         </label>
-        <p className="text-xs text-[#6B7280]">La fecha, la llegada (10 min antes), el inicio (10 min después), la puerta cerrada y los pagos los pone ONE.</p>
+        <p className="text-xs text-[#6B7280]">La fecha, la llegada (10 min antes), el inicio (10 min después) y los pagos los pone ONE.</p>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={valores.puerta_cerrada}
+            onChange={(e) => poner('puerta_cerrada', e.target.checked)}
+            className="mt-0.5 h-5 w-5 accent-[#10B981]"
+          />
+          <span>
+            Puerta cerrada al iniciar
+            <span className="block text-xs text-[#6B7280]">Para películas: una vez empieza, no entra nadie</span>
+          </span>
+        </label>
       </fieldset>
 
       <div>
