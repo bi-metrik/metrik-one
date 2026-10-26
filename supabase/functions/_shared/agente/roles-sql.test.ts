@@ -28,8 +28,8 @@ const COLAB_OTRO_WS = '00000000-0000-4000-8000-00000000e002'
 
 let db: PGlite
 
-beforeAll(async () => {
-  db = new PGlite()
+/** Lo mínimo de las tablas que ya existen en producción y que la migración referencia, más las dos migraciones previas. */
+async function prepararBase(db: PGlite) {
   // Lo mínimo de las tablas que ya existen en producción y que la migración referencia.
   await db.exec(`
     set time zone 'UTC';
@@ -46,8 +46,13 @@ beforeAll(async () => {
   `)
   await db.exec(leer('20261006213100_wa_conversacion.sql'))
   await db.exec(leer('20261006213200_bot_reglamento_y_uso.sql'))
+}
+
+beforeAll(async () => {
+  db = new PGlite()
+  await prepararBase(db)
   await db.exec(leer(MIGRACION))
-})
+}, 30_000)
 afterAll(async () => { await db.close() })
 
 /** Carga fichas en `bot_parametros` columna por columna, como las semillas (`publico/semilla-sql.ts`). */
@@ -72,6 +77,23 @@ const fichaRol = (funciones: unknown[], extra: Partial<Ficha> = {}): Ficha =>
   ({ clave: 'rol.funciones', tipo: 'alcance', carga: 'siempre', hacer: 'Funciones del rol.', valores: { funciones }, ...extra })
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** El ensayo del PR: el archivo tal cual dentro de un DO que termina en RAISE (no deja nada). */
+const ensayo = (sql: string) => `do $dry$\nbegin\n${sql}\nraise exception 'ensayo ok: la migracion corre completa y se revierte';\nend\n$dry$;`
+
+describe('el ensayo DO $dry$ … RAISE', () => {
+  it('corre el archivo real completo y no deja nada', async () => {
+    const otra = new PGlite()
+    try {
+      await prepararBase(otra)
+      await expect(otra.exec(ensayo(leer(MIGRACION)))).rejects.toThrow(/ensayo ok/)
+      const r = await otra.query<{ t: string | null }>(`select to_regclass('public.asistente_roles')::text as t`)
+      expect(r.rows[0].t).toBeNull()
+    } finally {
+      await otra.close()
+    }
+  }, 30_000)
+})
 
 describe('creación limpia', () => {
   const TABLAS = ['asistente_funciones_empresa', 'asistente_roles', 'asistente_asignaciones', 'asistente_escalamientos', 'asistente_calificaciones', 'asistente_preferencias']
