@@ -20,6 +20,8 @@ import { esSiSolo, seguirTrasToque, toqueDePropuesta, turnoDelModelo, vigenteDe 
 import { leerToque } from './render.ts';
 import { respuestaFija } from './reglamento.ts';
 import type { Almacen, ContextoDominio, FilaConversacion, Mensajero, Traza } from './tipos.ts';
+import { aliasConversacionWa, registrarEscalamiento, traspasoWa } from './persona.ts';
+import type { CanalEscalamiento, EscalamientoWaLink, PuertoEscalamientos } from './persona.ts';
 
 export interface DepsCola extends DepsTurno {
   almacen: Almacen;
@@ -35,6 +37,18 @@ export interface DepsCola extends DepsTurno {
   despuesDelTurno?: (traza: Traza, turno: { turnoId: string }) => Promise<void>;
   /** Espera (reemplazable en pruebas). */
   dormir?: (ms: number) => Promise<void>;
+  /**
+   * El paso a una persona (spec 2026-10-26, §4.2; `persona.ts`): la ficha `rol.escalamiento` del rol (o el WhatsApp de
+   * MeTRIK), para la señal del código (dos «no pude» seguidos, tres correcciones de lo mismo) y la fila de
+   * `asistente_escalamientos`. Sin esto (la bandeja), nada cambia.
+   */
+  persona?: {
+    config: EscalamientoWaLink;
+    empresa: string | null;
+    rolClave: string;
+    canal: CanalEscalamiento;
+    escalamientos?: PuertoEscalamientos | null;
+  };
 }
 
 const VENTANA_RAFAGA_MS = 10 * 60 * 1000;
@@ -82,6 +96,14 @@ async function enviarYCerrar(d: DepsCola, turnoId: string, atendidas: FilaConver
   const tb = d.reloj();
   await d.almacen.cerrarTurno({ turnoId, filas: atendidas.map((f) => f.id), filaTraza: ultima.id, traza: r.traza, salientes });
   r.traza.ms_base = Math.round(d.reloj() - tb);
+  // El traspaso a una persona de este turno deja su fila (a mejor esfuerzo: si no se escribe, el traspaso ya salió).
+  const esc = r.traza.escalamiento;
+  if (d.persona && esc) {
+    await registrarEscalamiento(d.persona.escalamientos, {
+      workspace_id: d.workspaceId, rol_clave: d.persona.rolClave, canal: d.persona.canal,
+      conversacion: await aliasConversacionWa(d.workspaceId, d.phone), motivo: esc.motivo, resumen: esc.resumen ?? esc.motivo, modo: esc.modo,
+    });
+  }
 }
 
 /**
@@ -194,6 +216,9 @@ export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {})
     const despues = pendientes(await d.almacen.leer(d.workspaceId, d.phone, desde)).filter((f) => !ids.has(f.id));
     if (despues.some((f) => esAdjunto(f) && Date.parse(f.created_at) - ultimo <= vAdj)) return await unTurno(d, { esperado: true });
   }
+  // 4c) El paso a una persona: el que pidió el modelo, o el que ofrece el código por su señal (va debajo, aparte). La
+  //     fila de `asistente_escalamientos` la escribe `enviarYCerrar`, después del envío.
+  if (d.persona) traspasoWa(r, filas, d.persona.config, { nombre: d.remitente.nombre, empresa: d.persona.empresa });
   await enviarYCerrar(d, turnoId, pend, r, 'agente.turno');
   if (d.despuesDelTurno) await d.despuesDelTurno(r.traza, { turnoId }).catch((err) => console.error('[agente] después del turno:', err));
   return true;

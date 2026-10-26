@@ -65,6 +65,8 @@ export async function escenarioPublico(p: {
   funciones?: DepsPublico['funciones'];
   catalogo?: DepsPublico['catalogo'];
   rol?: DepsPublico['rol'];
+  /** Dónde quedan los pasos a persona (`asistente_escalamientos`). Sin él, no se escriben (como en el arnés). */
+  escalamientos?: DepsPublico['escalamientos'];
 }): Promise<EscenarioPublico> {
   const reloj = new RelojPublico(undefined, p.vivo ?? false);
   const almacen = new AlmacenPublicoMemoria(reloj, WS_PUBLICO);
@@ -94,6 +96,7 @@ export async function escenarioPublico(p: {
     ...(p.funciones ? { funciones: p.funciones } : {}),
     ...(p.catalogo ? { catalogo: p.catalogo } : {}),
     ...(p.rol ? { rol: p.rol } : {}),
+    ...(p.escalamientos ? { escalamientos: p.escalamientos } : {}),
   };
   const pasos: PasoPublico[] = [];
   let mensajeId = 100;

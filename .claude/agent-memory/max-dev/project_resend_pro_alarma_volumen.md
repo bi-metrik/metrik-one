@@ -1,6 +1,6 @@
 ---
 name: resend-pro-alarma-volumen
-description: Resend Pro (26-oct) - avisos a clientes desde avisos.metrikone.co, suprimido/fallido en el webhook, avisos_equipo y contador email.sent; migración 20261026221500 SIN aplicar
+description: Resend Pro (26-oct) - avisos a clientes desde avisos.metrikone.co, suprimido/fallido en el webhook, avisos_equipo y contador email.sent; migración 20261026221500 APLICADA (26-oct)
 metadata:
   type: project
 ---

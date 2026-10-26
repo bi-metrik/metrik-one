@@ -40,6 +40,8 @@ const FICHA: FichaTextos = {
     '[EJEMPLO] Los esperamos en nuestro pequeño rincón entre Halloween Town y Christmas Town. 🎃🎁✨',
   ].join('\n\n'),
   relato_grupo: '💀🎁 ¡Que comience nuestra extraña y maravillosa celebración!',
+  // Es una película: la proyección necesita el salón oscuro, la puerta se cierra al iniciar (Paula, 26-oct).
+  puerta_cerrada: true,
 }
 
 const NEGOCIO: NegocioTextos = {
@@ -381,6 +383,35 @@ describe('c) la bienvenida al grupo de WhatsApp de una función', () => {
   })
 })
 
+describe('la puerta cerrada es una opción de cada experiencia (26-oct)', () => {
+  const PUERTA = '⏰ ¡MUY IMPORTANTE!\n\nLes recomendamos llegar puntualmente. Para disfrutar de la experiencia completa y ' +
+    'conservar la magia de nuestra celebración, una vez iniciemos cerraremos la puerta de ingreso para evitar interrupciones. 🚪'
+  const LLEGADA = '🕐 LLEGADA: 12:50 p. m.\n✨ INICIAMOS: 1:10 p. m. puntual.'
+  const con = (puerta_cerrada: boolean | null | undefined) =>
+    generarBienvenida({ ficha: { ...FICHA, puerta_cerrada }, negocio: NEGOCIO, funcion: { inicia_at: SAB_1PM } }).texto
+
+  it('marcada: sale el párrafo, justo después de la llegada y antes del lugar', () => {
+    expect(con(true)).toContain(`${LLEGADA}\n\n${PUERTA}\n\n📍 LUGAR`)
+  })
+
+  it('sin marcar, nula o sin el campo (fichas de antes): no sale y la llegada pega con el lugar', () => {
+    const { puerta_cerrada: _, ...sinCampo } = FICHA
+    const sin = generarBienvenida({ ficha: sinCampo, negocio: NEGOCIO, funcion: { inicia_at: SAB_1PM } }).texto
+    for (const t of [con(false), con(null), con(undefined), sin]) {
+      expect(t).not.toContain('MUY IMPORTANTE')
+      expect(t).not.toContain('puerta')
+      expect(t).toContain(`${LLEGADA}\n\n📍 LUGAR`)
+      expect(t).not.toContain('\n\n\n')
+    }
+  })
+
+  it('la llegada 10 minutos antes sale siempre, con o sin puerta', () => {
+    for (const t of [con(true), con(false)]) expect(t).toContain(LLEGADA)
+    // Lo único que cambia es el párrafo de la puerta.
+    expect(con(true).replace(`${PUERTA}\n\n`, '')).toBe(con(false))
+  })
+})
+
 describe('campos vacíos, textos libres y pago', () => {
   const VACIA: FichaTextos = { titulo_oferta: null, frase_gancho: ' ', intro: null, que_incluye: [], emojis_tema: null, saludo_grupo: null, relato_grupo: null }
   const SIN_LUGAR: NegocioTextos = { direccion: null, piso: null, recepcion: null, parqueadero: null, firma: null }
@@ -446,6 +477,8 @@ describe('una cata de vino (26-oct): la experiencia no es una película', () => 
     emojis_tema: '🍷🍇',
     saludo_grupo: '🍷 ¡Hola, amantes del vino!\n\n¡Bienvenidos al grupo oficial de la cata!',
     relato_grupo: '🍇 ¡Que comience nuestra cata!',
+    // Un taller: la puerta no se cierra (Paula, 26-oct).
+    puerta_cerrada: false,
   }
   const CINE = /pel[ií]cula|\bcine\b|proyecci|🎬/i
   const AGENDA_CATA = [funcion(SAB_1PM, preventa('2026-10-15', 150_000)), funcion(DOM_8PM, tarifa({ precio_persona: 160_000, abono_persona: 60_000 }))]
@@ -467,8 +500,9 @@ describe('una cata de vino (26-oct): la experiencia no es una película', () => 
     expect(fechasDelTexto(o.texto, datosAgenda(AGENDA_CATA))).toEqual([])
     expect(d.bytes).toBeLessThanOrEqual(LIMITE_DIRECTO_BYTES)
     expect(b.texto.startsWith(CATA.saludo_grupo!)).toBe(true)
-    // La puerta cerrada no asume una pantalla: termina en «para evitar interrupciones. 🚪».
-    expect(b.texto).toContain('cerraremos la puerta de ingreso para evitar interrupciones. 🚪')
+    // Una cata no cierra la puerta (26-oct): no sale el aviso; la llegada sí.
+    expect(b.texto).not.toContain('puerta')
+    expect(b.texto).toContain('🕐 LLEGADA: 12:50 p. m.')
     expect(fechasDelTexto(b.texto, [{ fecha: '2026-10-24', hora: SAB_1PM }], [0, -10, 10])).toEqual([])
   })
 

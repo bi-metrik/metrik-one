@@ -33,6 +33,14 @@ export const CLAVE_REMITENTE_CORREO = 'remitente_correo';
  * Dominios verificados en Resend para remitentes de workspace.
  * `metrikone.co` admite subdominios (ej. `soena.metrikone.co`); `metrik.com.co`, solo la raíz.
  * Antes de agregar uno aquí, verificarlo en Resend.
+ *
+ * Dar remitente propio a un workspace con `<slug>.metrikone.co` crea registros de Resend
+ * bajo ese nombre (`send.<slug>`, `rsend.<slug>`, `resend._domainkey.<slug>`). Con hijos, el
+ * comodín `*.metrikone.co` deja de aplicarle a `<slug>.metrikone.co` y el espacio deja de
+ * resolver SIN error en ningún log (SOENA, 2026-10-26, ~2 h caído). En el MISMO paso hay que
+ * crear `<slug>` CNAME al destino del ALIAS `*` (leerlo de `vercel dns ls metrikone.co`) y
+ * comprobar con `dig +short <slug>.metrikone.co`. El `vercel dns add` lo corre Mauricio.
+ * Ver docs/gotchas.md.
  */
 export const DOMINIOS_PERMITIDOS: ReadonlyArray<{ dominio: string; subdominios: boolean }> = [
   { dominio: 'metrikone.co', subdominios: true },
