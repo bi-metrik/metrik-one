@@ -1,0 +1,3396 @@
+-- ============================================================
+-- 20261022170000 — Módulo Funciones: experiencias, campañas, funciones con dos cupos y precios, reservas con la foto
+-- del monto y pagos que cubren una o varias reservas (Sabor & Experiencias, etapa 2)
+-- Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md. Primer cliente previsto:
+-- Sabor & Experiencias, cuyo workspace NO existe.
+--
+-- Decisiones de Mauricio que esta migración hace cumplir:
+--   · 2026-10-22, alcance: el MAPA DEL SALÓN SALE de la Fase 1. Sabor no asigna puestos (orden de llegada; a los grupos
+--     de 5 o más les guarda mesa a mano, fuera de ONE). Sin montajes, mesas ni puestos. Lo que pide el cliente es texto
+--     libre en `funcion_reservas.solicitud_cliente`.
+--   · 2026-10-22, «Todo sale y vuelve a ONE»: precios, abono, pago total, cupos y el monto de cada reserva viven aquí.
+--     El asistente los lee de aquí y no hace cuentas: `funcion_apartar` calcula el monto y lo guarda como foto.
+--   · 2026-10-22, jerarquía Experiencia → Campaña → Función. La experiencia es la película (textos); la campaña, una
+--     tanda con su código de atribución, su agenda publicada y sus precios por defecto; la función, un día con su hora,
+--     sus dos cupos y sus reemplazos de precio.
+--   · 2026-10-22, P13: un pago (un link) cubre una o varias reservas de la misma conversación; pagar por función es un
+--     pago de una reserva. Si al llegar el pago una función ya no tiene cupo, la reserva queda `pendiente_persona`: NO
+--     hay devolución automática y solo una persona del equipo sobrevende (hasta `tope_sobreventa`) o devuelve.
+--   · 2026-10-25, P14a a P14c (diseño §1.11): el cobro del saldo con link y su registro en ONE entran; el cliente elige
+--     total o solo la reserva AL PAGAR (no al apartar); el link del saldo vence en el plazo de la campaña y después una
+--     persona manda uno nuevo hasta la función o registra el cobro con el QR de Bold en el evento ([Saldo cobrado]). El
+--     saldo es un pago más (`concepto` saldo); lo pagado y el saldo se calculan (`funcion_saldo`), no se guardan.
+--   · `minutos_apartado` vive en la CAMPAÑA (decisión de Max): cuánto aguanta un apartado sin pago es una condición
+--     comercial de la tanda, como el abono, y puede cambiar entre preventa y temporada regular de la misma película.
+-- Esta versión reemplaza la `20261021120000_modulo_funciones.sql` que nunca se aplicó (esa versión además chocaba
+-- con `20261021120000_servicios_fechas_tramos.sql`, ya aplicada).
+--
+-- ⚠️ DEPENDE de `20261021090000_asistente_chatwoot.sql` (PR #1225): `funcion_reservas.consentimiento_sensible_id`
+-- apunta a `chatwoot_consentimientos`, y esta migración le pone un trigger a esa tabla. Se aplica DESPUÉS de esa,
+-- nunca antes (el dry-run aborta si la tabla no existe).
+--
+-- ⚠️ DDL puro: ni una fila de datos y NINGÚN workspace queda con el módulo encendido. Encenderlo en Sabor (crear el
+-- workspace y la fila de `workspace_modulos`) es otra escritura, que autoriza Mauricio (decisión F2 del diseño).
+--
+-- Qué crea:
+--   1. La llave de módulo `funciones` en las CUATRO listas que repiten el catálogo (`workspace_modulos_modulo`,
+--      `catalogo_servicios_modulo`, `documentos_versiones_modulo` y `proyectar_modulos`).
+--   2. Ocho tablas `funcion_*`:
+--        experiencias — la película y su ficha (P11, §1.8): título de la oferta, frase gancho, intro, qué incluye
+--                       (lista), emojis del tema, saludo y relato del grupo de WhatsApp, edad mínima.
+--        negocio      — una fila por workspace con los datos del lugar (P11): dirección, piso, recepción,
+--                       parqueadero y firma.
+--        campanas     — una tanda de una experiencia: código de atribución (único, inmutable al publicar), fechas,
+--                       estado, agenda publicada, minutos de apartado y precios por defecto.
+--        funciones    — un día con su hora: `capacidad` (el equipo aparta hasta aquí) y `cupo_asistente` (el bot
+--                       aparta hasta aquí), preventa (interruptor y fecha de fin, P4), reemplazos de precio, estado y
+--                       cierre de venta.
+--        reservas     — con la FOTO del precio (tarifa, precio unitario, total, abono por persona, si permite el pago
+--                       total, plazo del saldo), la modalidad que fijó el pago inicial, la campaña (la pone la base) y la
+--                       atribución genérica (`atribucion_fuente`, `atribucion_ref`).
+--        pagos          — un pago de una o varias reservas: `concepto` (inicial o saldo), `medio` (link de Bold, QR de
+--                         Bold en el evento o verificación a mano), conversación, estado, monto esperado (calculado por
+--                         la base), vencimiento del link, referencia (única por workspace), el aviso recibido y quién lo
+--                         registró si fue una persona.
+--        pago_reservas  — qué reservas cubre cada pago y cuánto de cada una; una reserva no está en dos pagos pendientes.
+--        campana_anuncios — los ids de anuncio de cada campaña (P10): de qué anuncio llega cada cliente.
+--   3. Las reglas, cada una en UN lugar:
+--        funcion_tarifa(funcion)           el precio que rige: función → campaña. Preventa (P4): con el interruptor
+--                                           encendido y su fecha de fin sin pasar (día de Bogotá), el de preventa, y
+--                                           el completo solo como contexto; vencida la fecha, el completo. Abono por
+--                                           persona y si se permite pago total.
+--        funcion_motivo_asistente(f, c)    por qué el asistente NO puede ofrecer una función (nulo = disponible):
+--                                           campaña activa + agenda publicada + función activa + futura + venta
+--                                           abierta + cupo del asistente libre > 0. La usan apartar (origen
+--                                           asistente), consultar_cupo, ver_funciones_disponibles y campanas_activas.
+--        funcion_ocupadas(funcion)          la única suma de ocupadas, para los dos cupos.
+--   4. Las funciones de la base (todas SECURITY DEFINER, `search_path = public`):
+--        para el asistente (solo service_role): funcion_consultar_cupo (estado SIN números de cupo y hasta 3
+--          alternativas: «nunca dejar ir a un cliente»), funcion_ver_disponibles, funcion_campanas_activas,
+--          funcion_campana_por_anuncio y funcion_campana_por_codigo (P10);
+--        de los dos: funcion_ocupacion, funcion_tarifa, funcion_apartar, funcion_guardar_restricciones;
+--        pagos: funcion_resumen_pago y funcion_preparar_pago (asistente y equipo; la modalidad se elige aquí),
+--          funcion_vincular_link y funcion_registrar_pago (solo servidor, idempotente por referencia),
+--          funcion_resolver_pendiente (solo una persona del equipo: sobrevender hasta el tope o devolver);
+--        saldo (P14): funcion_saldo y funcion_preparar_pago_saldo (asistente y equipo), funcion_saldos (la lista del
+--          día) y funcion_registrar_saldo_cobrado (solo una persona del equipo: el QR de Bold en el evento);
+--        solo del equipo: funcion_confirmar_pago (verificación a mano), funcion_cancelar_reserva, funcion_guardar_experiencia,
+--          funcion_guardar_negocio, funcion_cambiar_preventa, funcion_guardar_campana,
+--          funcion_publicar_agenda, funcion_crear_funciones (agenda en lote), funcion_editar_funcion,
+--          funcion_eliminar_campana y funcion_eliminar_funcion (con reservas archiva; sin reservas borra);
+--        el panel (§4): funcion_panel_campanas, funcion_panel_campana, funcion_cambiar_estado_campana,
+--          funcion_cambiar_estado_funcion, funcion_duplicar_campana y funcion_guardar_anuncio.
+--   5. P6, cierre automático SIN cron: `funcion_estado_campana` CALCULA al leer el estado que se muestra y se usa
+--      (`cerrada` cuando pasó la última función viva, `agotada` cuando todas las futuras están llenas). La columna
+--      `estado` no cambia sola.
+--
+-- Quién escribe: NADIE escribe las tablas directo, ni `authenticated` ni `service_role`. Se leen por workspace con
+-- RLS; toda escritura pasa por las funciones de arriba, que validan las invariantes dentro del candado.
+--
+-- La ocupación NO se guarda en ningún contador: es la suma de las reservas `confirmada` más las `apartada` con
+-- `vence_at > now()`. Toda operación que cambia la ocupación de una función empieza con
+-- `select … from funcion_funciones where id = $1 for update`: dos apartados a la vez esperan en fila y el segundo ve
+-- lo que dejó el primero. Dentro del mismo candado se marcan `vencida` los apartados vencidos de esa función. Orden de
+-- candados siempre igual: primero la función, después la reserva.
+--
+-- Atribución: el camino pauta → lead → reserva → pago se consulta por campaña con UNA llave, `campana_id`, que la base
+-- copia de la función a la reserva. El diseño exacto del anuncio y del link (Meta, Chatwoot) está en verificación; por
+-- eso aquí solo va lo genérico: `atribucion_fuente` (lista cerrada) y `atribucion_ref` (texto, el id que llegue).
+--
+-- Errores: `raise exception '<codigo>'` con `errcode = 'P0001'`; el mensaje ES el código estable (`sin_cupo`,
+-- `sin_precio`, `modalidad_no_permitida`, `campana_no_publicada`, `campana_no_activa`, `funcion_no_activa`, …) y el
+-- detalle humano va en DETAIL.
+--
+-- Verificación después de aplicar (solo lectura):
+--   select relname, relrowsecurity from pg_class
+--    where relnamespace = 'public'::regnamespace and relname like 'funcion\_%' and relkind = 'r';
+--     -> 8 filas, todas con relrowsecurity = true
+--   select t.relname,
+--          has_table_privilege('anon', t.oid, 'select')                 as anon_sel,
+--          has_table_privilege('authenticated', t.oid, 'select')        as auth_sel,
+--          has_table_privilege('authenticated', t.oid, 'insert')        as auth_ins,
+--          has_table_privilege('service_role', t.oid, 'update')         as srv_upd
+--     from pg_class t
+--    where t.relnamespace = 'public'::regnamespace and t.relname like 'funcion\_%' and t.relkind = 'r';
+--     -> anon_sel false, auth_sel true, auth_ins false y srv_upd false en las 8
+--   select has_function_privilege('service_role', 'public.funcion_publicar_agenda(uuid)', 'execute');  -> false
+--   select has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute');  -> false
+--   select has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'); -> false
+--   select has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint, text)', 'execute'); -> false
+--   select count(*) from public.workspace_modulos where modulo = 'funciones';                       -> 0
+--   select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false); -> 0
+--
+-- Cómo revertir (nada la usa todavía):
+--   drop trigger funcion_consentimiento_borrado on public.chatwoot_consentimientos;
+--   drop table public.funcion_negocio, public.funcion_campana_anuncios, public.funcion_pago_reservas, public.funcion_pagos, public.funcion_reservas, public.funcion_funciones,
+--              public.funcion_campanas, public.funcion_experiencias;
+--   drop function public.funcion_* (todas las de este archivo);
+--   -- y devolver las cuatro listas de llaves al cuerpo de 20260928180000 / 20260929030000.
+-- ============================================================
+
+
+-- ── 1. La llave de módulo nueva en las cuatro listas ─────────────────────────
+
+alter table public.workspace_modulos drop constraint workspace_modulos_modulo;
+alter table public.workspace_modulos add constraint workspace_modulos_modulo check (modulo in ('business', 'valida_consulta', 'valida_api', 'compliance', 'calidad_llamadas', 'cert_qr', 'ferreteria', 'radar_secop', 'funciones'));
+
+alter table public.catalogo_servicios drop constraint catalogo_servicios_modulo;
+alter table public.catalogo_servicios add constraint catalogo_servicios_modulo check (modulo in ('business', 'valida_consulta', 'valida_api', 'compliance', 'calidad_llamadas', 'cert_qr', 'ferreteria', 'radar_secop', 'funciones'));
+
+alter table public.documentos_contractuales_versiones drop constraint documentos_versiones_modulo;
+alter table public.documentos_contractuales_versiones
+  add constraint documentos_versiones_modulo check
+    (modulo in ('business', 'valida_consulta', 'valida_api', 'compliance', 'calidad_llamadas', 'cert_qr', 'ferreteria', 'radar_secop', 'funciones'));
+
+-- Mismo cuerpo que `20260928180000_modulo_radar_secop.sql`; solo cambia el arreglo de llaves.
+-- Sigue siendo `stable` (solo ensayo): encenderla es otra migración.
+create or replace function public.proyectar_modulos(p_workspace_id uuid)
+returns jsonb
+language plpgsql
+stable
+set search_path = ''
+as $$
+declare
+  v_claves_modulo constant text[] :=
+    array['business', 'valida_consulta', 'valida_api', 'compliance', 'calidad_llamadas', 'cert_qr', 'ferreteria', 'radar_secop', 'funciones'];
+  v_hoy jsonb;
+  v_vigentes text[];
+  v_proyectado jsonb;
+  v_cambios jsonb;
+begin
+  select coalesce(w.modules, '{}'::jsonb)
+    into v_hoy
+    from public.workspaces w
+   where w.id = p_workspace_id;
+
+  if not found then
+    raise exception 'proyectar_modulos: el workspace % no existe', p_workspace_id;
+  end if;
+
+  select coalesce(array_agg(distinct wm.modulo), '{}')
+    into v_vigentes
+    from public.workspace_modulos wm
+   where wm.workspace_id = p_workspace_id
+     and wm.activo_desde <= now()
+     and (wm.activo_hasta is null or wm.activo_hasta > now());
+
+  select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+    into v_proyectado
+    from jsonb_each(v_hoy) e
+   where e.key <> all (v_claves_modulo);
+
+  v_proyectado := v_proyectado
+    || coalesce((select jsonb_object_agg(m, true) from unnest(v_vigentes) m), '{}'::jsonb);
+
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'modulo', c,
+           'hoy', coalesce(v_hoy -> c = 'true'::jsonb, false),
+           'proyectado', c = any (v_vigentes)
+         ) order by c), '[]'::jsonb)
+    into v_cambios
+    from unnest(v_claves_modulo) c
+   where coalesce(v_hoy -> c = 'true'::jsonb, false) is distinct from (c = any (v_vigentes));
+
+  return jsonb_build_object(
+    'workspace_id', p_workspace_id,
+    'hoy', v_hoy,
+    'proyectado', v_proyectado,
+    'cambios', v_cambios
+  );
+end;
+$$;
+
+-- server-only: la corren el ensayo de operación y, al encenderla, el cron con service_role.
+revoke execute on function public.proyectar_modulos(uuid) from public, anon, authenticated;
+
+
+-- ── 2. Experiencias: la película ─────────────────────────────────────────────
+
+create table public.funcion_experiencias (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id),
+  nombre text not null check (length(btrim(nombre)) between 1 and 200),
+  -- La ficha (P11, §1.8), en palabras de Sabor y TAL CUAL (con sus emojis). La fuente de los campos son sus dos mensajes
+  -- reales: la oferta y la bienvenida al grupo de WhatsApp de la función. Los textos y el asistente leen de aquí;
+  -- nada se inventa. Nulo = Sabor no lo ha escrito (el texto generado dice «[FALTA: …]» y no se deja copiar).
+  -- Oferta (post de Instagram y mensaje directo):
+  titulo_oferta text check (titulo_oferta is null or length(titulo_oferta) <= 300),
+  frase_gancho text check (frase_gancho is null or length(frase_gancho) <= 500),
+  intro text check (intro is null or length(intro) <= 3000),
+  -- Una línea por cosa incluida («🍽️ 5 tiempos inspirados en la película»), en el orden de Sabor.
+  que_incluye text[] check (que_incluye is null or cardinality(que_incluye) between 1 and 20),
+  -- Los emojis del cierre de la oferta («🎃🖤 ¡Cupos limitados!…»).
+  emojis_tema text check (emojis_tema is null or length(emojis_tema) <= 40),
+  -- Bienvenida al grupo de WhatsApp: el saludo temático (antes de «FECHA Y HORA») y el relato del cierre (antes de la firma).
+  saludo_grupo text check (saludo_grupo is null or length(saludo_grupo) <= 4000),
+  relato_grupo text check (relato_grupo is null or length(relato_grupo) <= 4000),
+  -- Desde qué edad entra (en unas películas no entran menores; en otras, desde los 6). Nulo = no lo dijo Sabor.
+  edad_minima integer check (edad_minima is null or edad_minima between 0 and 99),
+  activa boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint funcion_experiencias_id_ws unique (id, workspace_id)
+);
+
+comment on table public.funcion_experiencias is
+  'Módulo funciones: la película o experiencia y su ficha (P11). Los precios y el código de atribución viven en la campaña.';
+
+
+-- ── 3. Campañas: una tanda de una experiencia ────────────────────────────────
+
+create table public.funcion_campanas (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  experiencia_id uuid not null,
+  nombre text not null check (length(btrim(nombre)) between 1 and 200),
+  -- El código de atribución: corto y fácil de escribir («HP-OCT26»). Único por workspace; inmutable al publicar.
+  codigo text not null check (codigo ~ '^[A-Z0-9][A-Z0-9-]{1,19}$'),
+  desde date,
+  hasta date,
+  estado text not null default 'borrador' check (estado in ('borrador', 'activa', 'pausada', 'cerrada')),
+  -- Antes de publicar, nada de la campaña es visible para el asistente.
+  agenda_publicada_at timestamptz,
+  archivada_at timestamptz,
+  -- Cuánto dura un apartado sin pago. HUECO 4 (lo decide Paula): SIN valor por defecto; nulo = `sin_regla_apartado`.
+  minutos_apartado integer check (minutos_apartado is null or minutos_apartado between 1 and 10080),
+  -- Precios por defecto de sus funciones, en pesos enteros. Cada función puede reemplazarlos.
+  precio_persona integer check (precio_persona is null or precio_persona between 1 and 100000000),
+  precio_preventa_persona integer check (precio_preventa_persona is null or precio_preventa_persona between 1 and 100000000),
+  abono_persona integer check (abono_persona is null or abono_persona between 1 and 100000000),
+  permite_pago_total boolean not null default true,
+  -- Hasta cuántas personas puede confirmar UNA PERSONA del equipo por encima de la capacidad, al resolver un pago que
+  -- llegó sin cupo (`funcion_resolver_pendiente`). Nulo = sin sobreventa. Nada automático pasa de la capacidad.
+  tope_sobreventa integer check (tope_sobreventa is null or tope_sobreventa between 1 and 10000),
+  -- Plazo del saldo (23-oct): cuántos días antes de la función se paga el saldo. Lo dice la oferta («…y paga el saldo
+  -- 1 día antes»). Desde 1: con 0 el saldo se pagaría el mismo día de la función, sin margen para verificar el pago
+  -- antes de abrir la puerta. Cada reserva guarda su foto al apartar; de ahí sale el vencimiento del link del saldo
+  -- (P14c, `funcion_plazo_saldo`).
+  dias_saldo_antes integer not null default 1 check (dias_saldo_antes between 1 and 30),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint funcion_campanas_experiencia foreign key (experiencia_id, workspace_id)
+    references public.funcion_experiencias (id, workspace_id),
+  constraint funcion_campanas_id_ws unique (id, workspace_id),
+  constraint funcion_campanas_codigo_unico unique (workspace_id, codigo),
+  constraint funcion_campanas_fechas check (desde is null or hasta is null or hasta >= desde),
+  constraint funcion_campanas_activa_publicada check (estado <> 'activa' or agenda_publicada_at is not null)
+);
+
+create index idx_funcion_campanas_experiencia on public.funcion_campanas (experiencia_id);
+
+
+-- ── 4. Funciones: un día con su hora ─────────────────────────────────────────
+
+create table public.funcion_funciones (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  campana_id uuid not null,
+  -- Se muestra y se agrupa en America/Bogota.
+  inicia_at timestamptz not null,
+  -- Cuántas personas caben. El equipo aparta hasta aquí. No baja de lo ocupado.
+  capacidad integer not null check (capacidad between 1 and 10000),
+  -- Cuántas puede apartar el asistente (1 ≤ cupo_asistente ≤ capacidad). Sale de la MISMA suma de ocupadas: lo que
+  -- agrega el equipo le resta al asistente. Puede quedar por debajo de lo ocupado: eso solo frena al bot.
+  cupo_asistente integer not null,
+  -- activa: se vende · pausada: el asistente no la ofrece, el equipo sí aparta · cancelada.
+  estado text not null default 'activa' check (estado in ('activa', 'pausada', 'cancelada')),
+  -- Desde cuándo no se aparta más (HUECO 5). Nulo = hasta la hora de inicio.
+  cierra_venta_at timestamptz,
+  -- Preventa (P4): un interruptor que el equipo enciende o apaga en cualquier función (el sistema no calcula «la
+  -- primera semana»). Encendido, rige el precio de preventa (de la función o de la campaña) hasta `preventa_hasta`
+  -- inclusive, en día de Bogotá; vencida esa fecha rige el completo aunque siga encendido. Nulo = sin fecha de fin.
+  es_preventa boolean not null default false,
+  preventa_hasta date,
+  -- Reemplazos opcionales de los precios de la campaña (nulo = el de la campaña). Pesos enteros.
+  precio_persona integer check (precio_persona is null or precio_persona between 1 and 100000000),
+  precio_preventa_persona integer check (precio_preventa_persona is null or precio_preventa_persona between 1 and 100000000),
+  abono_persona integer check (abono_persona is null or abono_persona between 1 and 100000000),
+  permite_pago_total boolean,
+  -- Reemplazo del tope de sobreventa de la campaña (nulo = el de la campaña). Si existe, no baja de la capacidad.
+  tope_sobreventa integer check (tope_sobreventa is null or tope_sobreventa between 1 and 10000),
+  archivada_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint funcion_funciones_campana foreign key (campana_id, workspace_id)
+    references public.funcion_campanas (id, workspace_id),
+  constraint funcion_funciones_id_ws unique (id, workspace_id),
+  constraint funcion_funciones_cupo_asistente check (cupo_asistente between 1 and capacidad),
+  constraint funcion_funciones_tope_sobre_capacidad check (tope_sobreventa is null or tope_sobreventa >= capacidad),
+  -- La preventa no termina después de la función (un mensaje real decía «hasta el 15 de octubre» copiado de otra).
+  constraint funcion_funciones_preventa_antes check (
+    preventa_hasta is null or preventa_hasta <= (inicia_at at time zone 'America/Bogota')::date)
+);
+
+create index idx_funcion_funciones_dia on public.funcion_funciones (workspace_id, inicia_at);
+-- La agenda en lote rechaza duplicados exactos: una campaña no tiene dos funciones vivas a la misma hora.
+create unique index funcion_funciones_horario_unico on public.funcion_funciones (campana_id, inicia_at)
+  where archivada_at is null;
+
+
+-- ── 5. Reservas ──────────────────────────────────────────────────────────────
+
+create table public.funcion_reservas (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  funcion_id uuid not null,
+  -- La campaña de la función, copiada por la base al apartar: la llave de la atribución pauta → reserva → pago.
+  campana_id uuid not null,
+  personas integer not null check (personas between 1 and 500),
+  -- El cliente en la base de clientes (Anexo 2.2, punto 7). Se busca por teléfono y, si no está, se crea.
+  contacto_id uuid references public.contactos(id),
+  -- Como los dio el cliente. HUECO 7 del diseño de etapa 1: para qué se pide la cédula.
+  nombre text check (nombre is null or length(nombre) <= 200),
+  documento text check (documento is null or length(documento) <= 40),
+  telefono text check (telefono is null or length(telefono) <= 40),
+  -- El usuario del canal (IG, TikTok) cuando no hay teléfono.
+  contacto_canal text check (contacto_canal is null or length(contacto_canal) <= 200),
+  canal text not null check (canal in ('instagram', 'tiktok', 'whatsapp', 'otro', 'equipo')),
+  chatwoot_cuenta_id bigint,
+  chatwoot_conversacion_id bigint,
+  -- De dónde llegó el cliente. Solo lo genérico mientras se verifica el anuncio y el link en Meta y Chatwoot.
+  atribucion_fuente text not null check (atribucion_fuente in ('anuncio', 'link_campana', 'preguntado', 'equipo', 'desconocida')),
+  atribucion_ref text check (atribucion_ref is null or length(atribucion_ref) <= 200),
+  -- `pendiente_persona`: llegó el pago y la función ya no tenía cupo; decide una persona (sobrevender o devolver).
+  -- `requiere_devolucion`: la persona decidió devolver. Ninguno de los dos ocupa cupo.
+  estado text not null default 'apartada'
+    check (estado in ('apartada', 'confirmada', 'cancelada', 'vencida', 'pendiente_persona', 'requiere_devolucion')),
+  vence_at timestamptz,
+  -- El apartado se realineó al preparar un pago (UNA sola vez por reserva: si el link vence, se aparta de nuevo).
+  realineada_at timestamptz,
+  -- Confirmada por una persona por encima de la capacidad (hasta el tope), o devuelta: quién y cuándo.
+  sobreventa boolean not null default false,
+  resuelta_por uuid references public.profiles(id),
+  resuelta_at timestamptz,
+  devolucion_monto bigint check (devolucion_monto is null or devolucion_monto >= 0),
+  pago_estado text not null default 'pendiente'
+    check (pago_estado in ('pendiente', 'aprobado', 'verificado_manual', 'rechazado')),
+  -- La FOTO del precio al apartar, calculada por la base con `funcion_tarifa`. Cambiar un precio después no la toca.
+  -- El asistente nunca manda montos. P14b (25-oct): la foto NO lleva la modalidad; el cliente elige total o solo la
+  -- reserva AL PAGAR, y por eso la foto guarda las dos cosas que la deciden: el abono por persona (nulo = no se paga
+  -- con abono) y si se permite el pago total.
+  tarifa text not null check (tarifa in ('preventa', 'completa')),
+  precio_unitario integer not null check (precio_unitario >= 1),
+  monto_total bigint not null,
+  abono_unitario integer check (abono_unitario is null or abono_unitario >= 1),
+  permite_pago_total boolean not null,
+  -- Lo fija el pago inicial (`funcion_preparar_pago` o la verificación a mano), para todas las reservas del pago.
+  -- Nulo = todavía no se eligió. `monto_a_pagar` es lo que cubre el pago inicial: el total o el abono.
+  modalidad text check (modalidad is null or modalidad in ('abono', 'total')),
+  monto_a_pagar bigint,
+  -- La foto del plazo del saldo de la campaña (P14c): el link del saldo vence al final del día de Bogotá que queda
+  -- estos días antes de la función. Cambiar la campaña después no la toca.
+  dias_saldo_antes integer not null check (dias_saldo_antes between 1 and 30),
+  -- Lo que pidió el cliente, en sus palabras («vamos 6, queremos estar juntos»). Texto libre, SIN ninguna lógica.
+  solicitud_cliente text check (solicitud_cliente is null or length(solicitud_cliente) <= 500),
+  -- Restricciones alimentarias: dato sensible. Solo con la autorización `sensible` = `si` de la misma conversación.
+  restricciones text check (restricciones is null or length(restricciones) <= 1000),
+  consentimiento_sensible_id uuid references public.chatwoot_consentimientos(id),
+  origen text not null check (origen in ('asistente', 'equipo')),
+  clave_idempotencia text not null check (length(btrim(clave_idempotencia)) between 1 and 200),
+  creada_por uuid references public.profiles(id),
+  confirmada_at timestamptz,
+  confirmada_por uuid references public.profiles(id),
+  cancelada_at timestamptz,
+  cancelada_por uuid references public.profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint funcion_reservas_funcion foreign key (funcion_id, workspace_id)
+    references public.funcion_funciones (id, workspace_id),
+  constraint funcion_reservas_campana foreign key (campana_id, workspace_id)
+    references public.funcion_campanas (id, workspace_id),
+  -- El reintento del asistente (misma huella de la propuesta) devuelve la misma reserva.
+  constraint funcion_reservas_clave_unica unique (workspace_id, clave_idempotencia),
+  constraint funcion_reservas_restricciones_autorizadas
+    check (restricciones is null or consentimiento_sensible_id is not null),
+  constraint funcion_reservas_apartada_vence check (estado <> 'apartada' or vence_at is not null),
+  constraint funcion_reservas_confirmada_pagada
+    check (estado <> 'confirmada' or pago_estado in ('aprobado', 'verificado_manual')),
+  constraint funcion_reservas_conversacion_completa
+    check ((chatwoot_cuenta_id is null) = (chatwoot_conversacion_id is null)),
+  constraint funcion_reservas_asistente_con_conversacion
+    check (origen <> 'asistente' or chatwoot_conversacion_id is not null),
+  constraint funcion_reservas_devolucion check ((estado = 'requiere_devolucion') = (devolucion_monto is not null)),
+  constraint funcion_reservas_sobreventa_resuelta check (not sobreventa or resuelta_por is not null),
+  constraint funcion_reservas_monto_total check (monto_total = personas::bigint * precio_unitario),
+  -- Alguna forma de pagar tiene que existir: con abono o con el total.
+  constraint funcion_reservas_alguna_modalidad check (abono_unitario is not null or permite_pago_total),
+  constraint funcion_reservas_abono_bajo_precio check (abono_unitario is null or abono_unitario <= precio_unitario),
+  constraint funcion_reservas_monto_a_pagar check (
+    (modalidad is null and monto_a_pagar is null)
+    or (modalidad = 'total' and permite_pago_total and monto_a_pagar = monto_total)
+    or (modalidad = 'abono' and abono_unitario is not null and monto_a_pagar = personas::bigint * abono_unitario)
+  ),
+  -- Una reserva confirmada ya tuvo su pago inicial, y con él su modalidad.
+  constraint funcion_reservas_confirmada_con_modalidad check (estado <> 'confirmada' or modalidad is not null)
+);
+
+create index idx_funcion_reservas_funcion on public.funcion_reservas (funcion_id, estado);
+create index idx_funcion_reservas_campana on public.funcion_reservas (campana_id, created_at);
+create index idx_funcion_reservas_consentimiento on public.funcion_reservas (consentimiento_sensible_id)
+  where consentimiento_sensible_id is not null;
+
+
+-- ── 6. RLS y grants ──────────────────────────────────────────────────────────
+
+alter table public.funcion_experiencias enable row level security;
+alter table public.funcion_campanas enable row level security;
+alter table public.funcion_funciones enable row level security;
+alter table public.funcion_reservas enable row level security;
+
+-- Lectura por workspace. Sin políticas de escritura y sin grant de escritura: escriben las funciones de la base.
+create policy funcion_experiencias_lectura on public.funcion_experiencias
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+create policy funcion_campanas_lectura on public.funcion_campanas
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+create policy funcion_funciones_lectura on public.funcion_funciones
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+create policy funcion_reservas_lectura on public.funcion_reservas
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+
+revoke all on table public.funcion_experiencias from public, anon, authenticated;
+revoke all on table public.funcion_campanas from public, anon, authenticated;
+revoke all on table public.funcion_funciones from public, anon, authenticated;
+revoke all on table public.funcion_reservas from public, anon, authenticated;
+
+grant select on public.funcion_experiencias to authenticated;
+grant select on public.funcion_campanas to authenticated;
+grant select on public.funcion_funciones to authenticated;
+grant select on public.funcion_reservas to authenticated;
+
+-- service_role nace con todo por el default de la base: se le deja solo la lectura, para que tampoco la llave del
+-- asistente pueda escribir una reserva o un precio saltándose las invariantes.
+revoke insert, update, delete, truncate on table public.funcion_experiencias from service_role;
+revoke insert, update, delete, truncate on table public.funcion_campanas from service_role;
+revoke insert, update, delete, truncate on table public.funcion_funciones from service_role;
+revoke insert, update, delete, truncate on table public.funcion_reservas from service_role;
+grant select on public.funcion_experiencias, public.funcion_campanas, public.funcion_funciones, public.funcion_reservas
+  to service_role;
+
+
+-- ── 7. Piezas internas: quién llama, ocupación y vencimiento ─────────────────
+
+-- Quién llama: con sesión (`auth.uid()`), un usuario de ONE, que tiene que estar en el workspace (si no, el objeto
+-- "no existe": no se confirma que exista en otro espacio) y, para escribir, tener un rol que edite. Sin sesión, el
+-- servidor (service_role: el asistente, la pasarela). `anon` no llega aquí: ninguna RPC se le concede.
+create or replace function public.funcion_actor(p_workspace_id uuid, p_escribe boolean, p_no_existe text)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_rol text;
+begin
+  if v_uid is null then
+    return 'servidor';
+  end if;
+  if p_workspace_id is null or public.current_user_workspace_id() is distinct from p_workspace_id then
+    raise exception '%', p_no_existe using errcode = 'P0001';
+  end if;
+  if p_escribe then
+    select role into v_rol from public.profiles where id = v_uid;
+    if v_rol is null or v_rol not in ('owner', 'admin', 'supervisor', 'operator') then
+      raise exception 'sin_permiso' using errcode = 'P0001', detail = 'Tu rol no puede cambiar reservas.';
+    end if;
+  end if;
+  return 'equipo';
+end;
+$$;
+
+revoke execute on function public.funcion_actor(uuid, boolean, text) from public, anon, authenticated, service_role;
+
+-- La única definición de ocupación: confirmadas más apartadas no vencidas. Nadie guarda un contador.
+create or replace function public.funcion_ocupadas(p_funcion_id uuid)
+returns integer
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(sum(r.personas), 0)::integer
+    from public.funcion_reservas r
+   where r.funcion_id = p_funcion_id
+     and (r.estado = 'confirmada' or (r.estado = 'apartada' and r.vence_at > now()));
+$$;
+
+revoke execute on function public.funcion_ocupadas(uuid) from public, anon, authenticated, service_role;
+
+-- Marca `vencida` los apartados vencidos de UNA función. Solo se llama con el candado de esa función tomado.
+create or replace function public.funcion_vencer_apartados(p_funcion_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_n integer;
+begin
+  update public.funcion_reservas
+     set estado = 'vencida', updated_at = now()
+   where funcion_id = p_funcion_id and estado = 'apartada' and vence_at <= now();
+  get diagnostics v_n = row_count;
+  return v_n;
+end;
+$$;
+
+revoke execute on function public.funcion_vencer_apartados(uuid) from public, anon, authenticated, service_role;
+
+
+-- ── 8. Las reglas en un solo lugar: tarifa y disponibilidad para el asistente ───
+
+-- EL ÚNICO lugar donde se resuelve el precio que rige una función («Todo sale y vuelve a ONE»): el reemplazo de la
+-- función → si no, el de la campaña. Preventa (P4): rige el precio de preventa si el interruptor está encendido y su
+-- fecha de fin (`preventa_hasta`, inclusive, día de Bogotá) no pasó; el completo va solo como contexto. Vencida la
+-- fecha rige el completo aunque el interruptor siga encendido. Devuelve también el abono por persona y si se permite
+-- el pago total. Pesos enteros. Si el abono pasa el precio que rige, o (con preventa) el completo que regirá al
+-- vencerse: `abono_sobre_precio` (los triggers no dejan guardar una tarifa así).
+create or replace function public.funcion_tarifa(p_funcion_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  f record;
+  c record;
+  v_completo integer;
+  v_preventa integer;
+  v_rige integer;
+  v_abono integer;
+  v_permite boolean;
+  v_en_preventa boolean;
+begin
+  select * into f from public.funcion_funciones where id = p_funcion_id;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_actor(f.workspace_id, false, 'funcion_no_existe');
+  select * into c from public.funcion_campanas where id = f.campana_id;
+
+  v_en_preventa := f.es_preventa
+    and (f.preventa_hasta is null or (now() at time zone 'America/Bogota')::date <= f.preventa_hasta);
+  v_completo := coalesce(f.precio_persona, c.precio_persona);
+  v_preventa := coalesce(f.precio_preventa_persona, c.precio_preventa_persona);
+  v_rige := case when v_en_preventa then v_preventa else v_completo end;
+  v_abono := coalesce(f.abono_persona, c.abono_persona);
+  v_permite := coalesce(f.permite_pago_total, c.permite_pago_total);
+  if v_abono is not null and v_rige is not null and v_abono > v_rige then
+    raise exception 'abono_sobre_precio' using errcode = 'P0001',
+      detail = format('El abono por persona (%s) pasa el precio que rige (%s).', v_abono, v_rige);
+  end if;
+  if v_abono is not null and f.es_preventa and v_completo is not null and v_abono > v_completo then
+    raise exception 'abono_sobre_precio' using errcode = 'P0001',
+      detail = format('El abono por persona (%s) pasa el precio regular (%s).', v_abono, v_completo);
+  end if;
+
+  return jsonb_build_object(
+    'tarifa', case when v_en_preventa then 'preventa' else 'completa' end,
+    'precio_persona', v_rige,
+    'precio_completo_persona', case when v_en_preventa then v_completo end,
+    'preventa_hasta', case when v_en_preventa then f.preventa_hasta end,
+    'abono_persona', v_abono,
+    'permite_pago_total', v_permite
+  );
+end;
+$$;
+
+-- ejecutable-por-cliente: la leen las pantallas con la sesión del equipo y el servidor. SECURITY DEFINER; con sesión
+-- verifica que `auth.uid()` esté en el workspace de la función (`funcion_actor`).
+revoke execute on function public.funcion_tarifa(uuid) from public, anon;
+grant execute on function public.funcion_tarifa(uuid) to authenticated, service_role;
+
+-- EL ÚNICO lugar de la regla «disponible para el asistente». Devuelve por qué NO (nulo = disponible), en este orden:
+-- archivada, campaña no publicada, campaña no activa, función no activa, función pasada, venta cerrada, agotada (sin
+-- cupo del asistente libre). La usan funcion_apartar (origen asistente), funcion_consultar_cupo,
+-- funcion_ver_disponibles y funcion_campanas_activas.
+create or replace function public.funcion_motivo_asistente(f public.funcion_funciones, c public.funcion_campanas)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when f.archivada_at is not null or c.archivada_at is not null then 'funcion_archivada'
+    when c.agenda_publicada_at is null then 'campana_no_publicada'
+    when c.estado <> 'activa' then 'campana_no_activa'
+    when f.estado <> 'activa' then 'funcion_no_activa'
+    when f.inicia_at <= now() then 'funcion_pasada'
+    when f.cierra_venta_at is not null and f.cierra_venta_at <= now() then 'venta_cerrada'
+    when f.cupo_asistente - public.funcion_ocupadas(f.id) <= 0 then 'agotada'
+    else null
+  end;
+$$;
+
+revoke execute on function public.funcion_motivo_asistente(public.funcion_funciones, public.funcion_campanas)
+  from public, anon, authenticated, service_role;
+
+-- La hora de Bogotá en texto, como la escribe Sabor: «sábado 24 de octubre, 1:00 p. m.». La misma forma que `fechaTexto`
+-- de `supabase/functions/_shared/funciones/fecha-texto.ts` (la de los textos de la oferta y del grupo).
+create or replace function public.funcion_fecha_texto(p timestamptz)
+returns text
+language sql
+stable
+set search_path = public
+as $$
+  select (array['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'])[extract(dow from l)::integer + 1]
+         || ' ' || extract(day from l)::integer || ' de '
+         || (array['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre',
+                   'noviembre', 'diciembre'])[extract(month from l)::integer]
+         || ', ' || (case when extract(hour from l)::integer % 12 = 0 then 12 else extract(hour from l)::integer % 12 end)
+         || ':' || to_char(l, 'MI') || ' ' || case when extract(hour from l) < 12 then 'a. m.' else 'p. m.' end
+    from (select p at time zone 'America/Bogota' as l) x;
+$$;
+
+revoke execute on function public.funcion_fecha_texto(timestamptz) from public, anon, authenticated, service_role;
+
+-- El estado de una campaña tal como se muestra y se usa (P6, cierre automático SIN cron): se CALCULA al leer, la
+-- columna `estado` no cambia sola. `cerrada` si alguien la cerró o si ya pasó su última función viva (con agenda
+-- publicada); `agotada` si está activa y todas sus funciones futuras están llenas (capacidad); `archivada` si se eliminó
+-- con reservas. Si no, su `estado`.
+create or replace function public.funcion_estado_campana(c public.funcion_campanas)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when c.archivada_at is not null then 'archivada'
+    when c.estado = 'cerrada' then 'cerrada'
+    when c.agenda_publicada_at is not null
+         and exists (select 1 from public.funcion_funciones f
+                      where f.campana_id = c.id and f.archivada_at is null and f.estado <> 'cancelada')
+         and not exists (select 1 from public.funcion_funciones f
+                          where f.campana_id = c.id and f.archivada_at is null and f.estado <> 'cancelada' and f.inicia_at > now())
+      then 'cerrada'
+    when c.estado = 'activa'
+         and exists (select 1 from public.funcion_funciones f
+                      where f.campana_id = c.id and f.archivada_at is null and f.estado <> 'cancelada' and f.inicia_at > now())
+         and not exists (select 1 from public.funcion_funciones f
+                          where f.campana_id = c.id and f.archivada_at is null and f.estado <> 'cancelada' and f.inicia_at > now()
+                            and public.funcion_ocupadas(f.id) < f.capacidad)
+      then 'agotada'
+    else c.estado
+  end;
+$$;
+
+revoke execute on function public.funcion_estado_campana(public.funcion_campanas) from public, anon, authenticated, service_role;
+
+
+-- ── 9. Triggers: capacidad, tarifa, código y autorización borrada ────────────
+
+-- La capacidad no baja de lo ocupado (el cupo del asistente sí puede: solo frena al bot). Corre con la fila de la
+-- función ya bloqueada por el UPDATE.
+create or replace function public.funcion_funciones_candados()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ocupadas integer;
+begin
+  if new.capacidad < old.capacidad then
+    v_ocupadas := public.funcion_ocupadas(old.id);
+    if new.capacidad < v_ocupadas then
+      raise exception 'capacidad_bajo_ocupacion' using errcode = 'P0001',
+        detail = format('Hay %s personas ocupando; la capacidad no puede bajar a %s.', v_ocupadas, new.capacidad);
+    end if;
+  end if;
+  if new.campana_id is distinct from old.campana_id then
+    raise exception 'funcion_cambia_campana' using errcode = 'P0001', detail = 'Una función no se mueve de campaña.';
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+-- PostgreSQL no exige EXECUTE para DISPARAR un trigger: el revoke no la apaga.
+revoke execute on function public.funcion_funciones_candados() from public, anon, authenticated, service_role;
+
+create trigger trg_funcion_funciones_candados
+  before update on public.funcion_funciones
+  for each row execute function public.funcion_funciones_candados();
+
+-- La tarifa que rige tiene que cuadrar (el abono no pasa el precio): se verifica con `funcion_tarifa` al crear o
+-- cambiar una función y al cambiar los precios de su campaña (sus funciones futuras y vivas).
+create or replace function public.funcion_tarifa_cuadra()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_table_name = 'funcion_funciones' then
+    perform public.funcion_tarifa(new.id);
+  else
+    perform public.funcion_tarifa(f.id)
+       from public.funcion_funciones f
+      where f.campana_id = new.id and f.inicia_at > now() and f.estado <> 'cancelada' and f.archivada_at is null;
+  end if;
+  return null;
+end;
+$$;
+
+revoke execute on function public.funcion_tarifa_cuadra() from public, anon, authenticated, service_role;
+
+create trigger trg_funcion_funciones_tarifa
+  after insert or update of precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, es_preventa,
+    preventa_hasta
+  on public.funcion_funciones
+  for each row execute function public.funcion_tarifa_cuadra();
+
+create trigger trg_funcion_campanas_tarifa
+  after update of precio_persona, precio_preventa_persona, abono_persona, permite_pago_total on public.funcion_campanas
+  for each row execute function public.funcion_tarifa_cuadra();
+
+-- El tope de sobreventa que rige (función → campaña), si existe, no baja de la capacidad de la función.
+create or replace function public.funcion_tope_cuadra()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_mala record;
+begin
+  select f.id, f.capacidad, coalesce(f.tope_sobreventa, c.tope_sobreventa) as tope into v_mala
+    from public.funcion_funciones f
+    join public.funcion_campanas c on c.id = f.campana_id
+   where (case when tg_table_name = 'funcion_funciones' then f.id = new.id else f.campana_id = new.id end)
+     and f.archivada_at is null
+     and coalesce(f.tope_sobreventa, c.tope_sobreventa) < f.capacidad
+   limit 1;
+  if found then
+    raise exception 'tope_bajo_capacidad' using errcode = 'P0001',
+      detail = format('El tope de sobreventa (%s) no puede ser menor que la capacidad (%s).', v_mala.tope, v_mala.capacidad);
+  end if;
+  return null;
+end;
+$$;
+
+revoke execute on function public.funcion_tope_cuadra() from public, anon, authenticated, service_role;
+
+create trigger trg_funcion_funciones_tope
+  after insert or update of capacidad, tope_sobreventa on public.funcion_funciones
+  for each row execute function public.funcion_tope_cuadra();
+
+create trigger trg_funcion_campanas_tope
+  after update of tope_sobreventa on public.funcion_campanas
+  for each row execute function public.funcion_tope_cuadra();
+
+-- El código de atribución no cambia después de publicar la agenda: ya está en anuncios, links y reservas.
+create or replace function public.funcion_campanas_candados()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.agenda_publicada_at is not null and new.codigo is distinct from old.codigo then
+    raise exception 'codigo_publicado' using errcode = 'P0001',
+      detail = 'El código de una campaña publicada no cambia.';
+  end if;
+  if new.experiencia_id is distinct from old.experiencia_id
+     and exists (select 1 from public.funcion_funciones where campana_id = old.id) then
+    raise exception 'campana_con_funciones' using errcode = 'P0001',
+      detail = 'Una campaña con funciones no cambia de experiencia.';
+  end if;
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+revoke execute on function public.funcion_campanas_candados() from public, anon, authenticated, service_role;
+
+create trigger trg_funcion_campanas_candados
+  before update on public.funcion_campanas
+  for each row execute function public.funcion_campanas_candados();
+
+-- Supresión de datos: si se borra la autorización sensible, se borran las restricciones que autorizaba.
+create or replace function public.funcion_consentimiento_borrado()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.funcion_reservas
+     set restricciones = null, consentimiento_sensible_id = null, updated_at = now()
+   where consentimiento_sensible_id = old.id;
+  return old;
+end;
+$$;
+
+revoke execute on function public.funcion_consentimiento_borrado() from public, anon, authenticated, service_role;
+
+create trigger funcion_consentimiento_borrado
+  before delete on public.chatwoot_consentimientos
+  for each row execute function public.funcion_consentimiento_borrado();
+
+
+-- ── 10. Lecturas ─────────────────────────────────────────────────────────────
+
+-- Capacidad, cupo del asistente, ocupadas (UNA suma para los dos), libres del equipo, libres del asistente, la tarifa
+-- y la campaña. La usan las pantallas del equipo.
+create or replace function public.funcion_ocupacion(p_funcion_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  f public.funcion_funciones;
+  c public.funcion_campanas;
+  v_experiencia text;
+  v_ocupadas integer;
+begin
+  select * into f from public.funcion_funciones where id = p_funcion_id;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_actor(f.workspace_id, false, 'funcion_no_existe');
+  select * into c from public.funcion_campanas where id = f.campana_id;
+  select nombre into v_experiencia from public.funcion_experiencias where id = c.experiencia_id;
+
+  v_ocupadas := public.funcion_ocupadas(f.id);
+  return jsonb_build_object(
+    'funcion_id', f.id,
+    'workspace_id', f.workspace_id,
+    'campana_id', c.id,
+    'campana', c.nombre,
+    'campana_codigo', c.codigo,
+    'experiencia_id', c.experiencia_id,
+    'experiencia', v_experiencia,
+    'inicia_at', f.inicia_at,
+    'estado', f.estado,
+    'cierra_venta_at', f.cierra_venta_at,
+    'archivada', f.archivada_at is not null,
+    'capacidad', f.capacidad,
+    'cupo_asistente', f.cupo_asistente,
+    'ocupadas', v_ocupadas,
+    'libres', greatest(f.capacidad - v_ocupadas, 0),
+    'libres_asistente', greatest(f.cupo_asistente - v_ocupadas, 0),
+    'tope_sobreventa', coalesce(f.tope_sobreventa, c.tope_sobreventa),
+    'pendientes_persona', (select count(*) from public.funcion_reservas where funcion_id = f.id and estado = 'pendiente_persona'),
+    'disponible_asistente', public.funcion_motivo_asistente(f, c) is null,
+    'motivo_asistente', public.funcion_motivo_asistente(f, c),
+    'tarifa', public.funcion_tarifa(f.id)
+  );
+end;
+$$;
+
+-- ejecutable-por-cliente: la leen las pantallas con la sesión del equipo. Es SECURITY DEFINER y verifica que
+-- `auth.uid()` esté en el workspace de la función (`funcion_actor`); con otro workspace responde `funcion_no_existe`.
+revoke execute on function public.funcion_ocupacion(uuid) from public, anon;
+grant execute on function public.funcion_ocupacion(uuid) to authenticated, service_role;
+
+-- «Nunca dejar ir a un cliente» (Mauricio, 2026-10-22): para el asistente, el estado de UNA función para N personas,
+-- sin un solo número de cupo (no puede decir «quedan pocos»):
+--   alcanza              caben en el cupo del asistente y la función está disponible;
+--   llena_para_asistente no caben en el cupo del asistente, pero sí en la capacidad (NO cuenta la sobreventa, que solo
+--                        la decide una persona después del pago): el asistente ofrece pasar a una persona;
+--   llena                no caben ni en la capacidad;
+--   no_disponible        pausada, cancelada, archivada, pasada, con la venta cerrada o de una campaña no publicada o
+--                        no activa.
+-- Los números siguen en `funcion_ocupacion`, que es del equipo.
+create or replace function public.funcion_estado_asistente(f public.funcion_funciones, c public.funcion_campanas, p_personas integer)
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select case
+    when x.motivo is not null and x.motivo <> 'agotada' then 'no_disponible'
+    when x.ocupadas + p_personas <= f.cupo_asistente then 'alcanza'
+    when x.ocupadas + p_personas <= f.capacidad then 'llena_para_asistente'
+    else 'llena'
+  end
+  from (select public.funcion_motivo_asistente(f, c) as motivo, public.funcion_ocupadas(f.id) as ocupadas) x;
+$$;
+
+revoke execute on function public.funcion_estado_asistente(public.funcion_funciones, public.funcion_campanas, integer)
+  from public, anon, authenticated, service_role;
+
+-- Hasta 3 alternativas donde esas personas SÍ caben en el cupo del asistente, con la misma regla de disponibilidad
+-- (`funcion_motivo_asistente`): primero las de la misma campaña, de la más cercana a la más lejana en el tiempo
+-- respecto de la pedida; si faltan, las de campañas de OTRAS experiencias, por fecha. Sin números de cupo.
+create or replace function public.funcion_alternativas(f public.funcion_funciones, c public.funcion_campanas, p_personas integer)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with candidatas as (
+    select f2.id, f2.inicia_at, c2.codigo, c2.nombre as campana, e2.nombre as experiencia,
+           case when c2.id = c.id then 'misma_campana' else 'otra_experiencia' end as grupo,
+           case when c2.id = c.id then 0 else 1 end as orden_grupo,
+           case when c2.id = c.id then abs(extract(epoch from (f2.inicia_at - f.inicia_at)))
+                else extract(epoch from f2.inicia_at) end as orden
+      from public.funcion_funciones f2
+      join public.funcion_campanas c2 on c2.id = f2.campana_id
+      join public.funcion_experiencias e2 on e2.id = c2.experiencia_id
+     where f2.workspace_id = f.workspace_id
+       and f2.id <> f.id
+       and (c2.id = c.id or c2.experiencia_id <> c.experiencia_id)
+       and public.funcion_motivo_asistente(f2, c2) is null
+       and public.funcion_ocupadas(f2.id) + p_personas <= f2.cupo_asistente
+     order by orden_grupo, orden, f2.id
+     limit 3
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'funcion_id', id, 'experiencia', experiencia, 'campana', campana, 'campana_codigo', codigo,
+           'inicia_at', inicia_at, 'inicia_texto', public.funcion_fecha_texto(inicia_at),
+           'tarifa', public.funcion_tarifa(id), 'alcanza', true, 'grupo', grupo
+         ) order by orden_grupo, orden, id), '[]'::jsonb)
+    from candidatas;
+$$;
+
+revoke execute on function public.funcion_alternativas(public.funcion_funciones, public.funcion_campanas, integer)
+  from public, anon, authenticated, service_role;
+
+-- Lo que ve el asistente de UNA función para N personas: el estado (sin números), la tarifa, la hora en texto y, si no
+-- alcanza, las alternativas. Una función de otro workspace «no existe».
+create or replace function public.funcion_consultar_cupo(p_workspace_id uuid, p_funcion_id uuid, p_personas integer default 1)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  f public.funcion_funciones;
+  c public.funcion_campanas;
+  v_estado text;
+begin
+  if p_personas is null or p_personas < 1 or p_personas > 500 then
+    raise exception 'personas_invalidas' using errcode = 'P0001';
+  end if;
+  select * into f from public.funcion_funciones where id = p_funcion_id and workspace_id = p_workspace_id;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  select * into c from public.funcion_campanas where id = f.campana_id;
+  v_estado := public.funcion_estado_asistente(f, c, p_personas);
+  return jsonb_build_object(
+    'funcion_id', f.id,
+    'campana_codigo', c.codigo,
+    'inicia_at', f.inicia_at,
+    'inicia_texto', public.funcion_fecha_texto(f.inicia_at),
+    'estado', v_estado,
+    'tarifa', public.funcion_tarifa(f.id),
+    'alternativas', case when v_estado = 'alcanza' then '[]'::jsonb else public.funcion_alternativas(f, c, p_personas) end
+  );
+end;
+$$;
+
+-- server-only: la llama solo el asistente con la llave de servicio.
+revoke execute on function public.funcion_consultar_cupo(uuid, uuid, integer) from public, anon, authenticated;
+grant execute on function public.funcion_consultar_cupo(uuid, uuid, integer) to service_role;
+
+-- Las funciones que el asistente puede ofrecer, con su tarifa y su hora en texto, en orden de hora. Sin números de cupo. Con `p_codigo_campana`, solo las de
+-- esa campaña (sin distinguir mayúsculas). Solo lectura.
+create or replace function public.funcion_ver_disponibles(p_workspace_id uuid, p_codigo_campana text default null)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+           'funcion_id', f.id,
+           'campana_codigo', c.codigo,
+           'campana', c.nombre,
+           'experiencia', e.nombre,
+           'inicia_at', f.inicia_at,
+           'inicia_texto', public.funcion_fecha_texto(f.inicia_at),
+           'tarifa', public.funcion_tarifa(f.id)
+         ) order by f.inicia_at, f.id), '[]'::jsonb)
+    from public.funcion_funciones f
+    join public.funcion_campanas c on c.id = f.campana_id
+    join public.funcion_experiencias e on e.id = c.experiencia_id
+   where f.workspace_id = p_workspace_id
+     and (p_codigo_campana is null or c.codigo = upper(btrim(p_codigo_campana)))
+     and public.funcion_motivo_asistente(f, c) is null;
+$$;
+
+-- server-only: la llama solo el asistente con la llave de servicio.
+revoke execute on function public.funcion_ver_disponibles(uuid, text) from public, anon, authenticated;
+grant execute on function public.funcion_ver_disponibles(uuid, text) to service_role;
+
+-- Las campañas con agenda publicada y activas, con cuántas funciones disponibles tiene cada una: si hay más de una, el
+-- asistente pregunta a qué viene el cliente. Solo lectura.
+create or replace function public.funcion_campanas_activas(p_workspace_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with activas as (
+    select c.id, c.codigo, c.nombre, e.nombre as experiencia, c.desde, c.hasta,
+           (select count(*)::integer from public.funcion_funciones f
+             where f.campana_id = c.id and public.funcion_motivo_asistente(f, c) is null) as funciones_disponibles
+      from public.funcion_campanas c
+      join public.funcion_experiencias e on e.id = c.experiencia_id
+     where c.workspace_id = p_workspace_id and c.estado = 'activa'
+       and c.agenda_publicada_at is not null and c.archivada_at is null
+       and public.funcion_estado_campana(c) in ('activa', 'agotada')
+  )
+  select jsonb_build_object(
+    'total', (select count(*) from activas),
+    'campanas', coalesce((select jsonb_agg(jsonb_build_object(
+        'campana_id', id, 'codigo', codigo, 'nombre', nombre, 'experiencia', experiencia,
+        'desde', desde, 'hasta', hasta, 'funciones_disponibles', funciones_disponibles) order by codigo) from activas), '[]'::jsonb)
+  );
+$$;
+
+-- server-only: la llama solo el asistente con la llave de servicio.
+revoke execute on function public.funcion_campanas_activas(uuid) from public, anon, authenticated;
+grant execute on function public.funcion_campanas_activas(uuid) to service_role;
+
+
+-- ── 11. Apartar ──────────────────────────────────────────────────────────────
+
+-- Datos admitidos en `p_datos`. A propósito NO hay campo de mesa, de puesto ni de MONTO: una clave de más (`mesa_id`,
+-- `puesto`, `monto_total`, `precio`…) se rechaza con `dato_no_admitido`. El monto lo calcula la base con
+-- `funcion_tarifa` y queda como foto en la reserva.
+-- P14b (25-oct): apartar NO recibe la modalidad. La foto guarda el precio, el total, el abono por persona y si se
+-- permite el pago total; el cliente elige total o solo la reserva al pagar (`funcion_preparar_pago`). Si la función
+-- no tiene ni abono ni pago total: `modalidad_no_permitida`. Sin precio que rija: `sin_precio`, y no aparta.
+-- También queda la foto del plazo del saldo de la campaña (`dias_saldo_antes`).
+-- Origen `asistente`: la función tiene que estar disponible (`funcion_motivo_asistente`, salvo «agotada», que se
+-- decide con las personas) y las personas caber en `cupo_asistente`. Origen `equipo`: puede apartar en una campaña
+-- pausada o en borrador y en una función pausada; las personas caben en `capacidad`. Las dos contra la misma suma.
+create or replace function public.funcion_apartar(
+  p_workspace_id uuid,
+  p_funcion_id uuid,
+  p_personas integer,
+  p_datos jsonb,
+  p_clave_idempotencia text,
+  p_origen text
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor text := public.funcion_actor(p_workspace_id, true, 'funcion_no_existe');
+  v_datos jsonb := coalesce(p_datos, '{}'::jsonb);
+  v_clave text := btrim(coalesce(p_clave_idempotencia, ''));
+  v_extra text;
+  f public.funcion_funciones;
+  c public.funcion_campanas;
+  r record;
+  v_motivo text;
+  v_ocupadas integer;
+  v_cuenta bigint;
+  v_conv bigint;
+  v_canal text;
+  v_fuente text;
+  v_ultima text;
+  v_nombre text;
+  v_tel text;
+  v_contacto uuid;
+  v_id uuid;
+  v_vence timestamptz;
+  v_tarifa jsonb;
+  v_precio integer;
+  v_abono integer;
+  v_permite boolean;
+  v_limite integer;
+begin
+  if p_origen is distinct from (case v_actor when 'equipo' then 'equipo' else 'asistente' end) then
+    raise exception 'origen_invalido' using errcode = 'P0001',
+      detail = 'El equipo aparta con origen equipo y el servidor con origen asistente.';
+  end if;
+  if p_personas is null or p_personas < 1 or p_personas > 500 then
+    raise exception 'personas_invalidas' using errcode = 'P0001';
+  end if;
+  if v_clave = '' or length(v_clave) > 200 then
+    raise exception 'sin_clave_idempotencia' using errcode = 'P0001';
+  end if;
+  if jsonb_typeof(v_datos) <> 'object' then
+    raise exception 'datos_invalidos' using errcode = 'P0001';
+  end if;
+  select k into v_extra
+    from jsonb_object_keys(v_datos) k
+   where k <> all (array['nombre', 'documento', 'telefono', 'contacto_canal', 'canal',
+                         'chatwoot_cuenta_id', 'chatwoot_conversacion_id', 'solicitud_cliente',
+                         'atribucion_fuente', 'atribucion_ref'])
+   limit 1;
+  if v_extra is not null then
+    raise exception 'dato_no_admitido' using errcode = 'P0001', detail = v_extra;
+  end if;
+  if coalesce(v_datos->>'chatwoot_cuenta_id', '0') !~ '^[0-9]{1,18}$'
+     or coalesce(v_datos->>'chatwoot_conversacion_id', '0') !~ '^[0-9]{1,18}$' then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'ids de Chatwoot';
+  end if;
+  v_cuenta := (v_datos->>'chatwoot_cuenta_id')::bigint;
+  v_conv := (v_datos->>'chatwoot_conversacion_id')::bigint;
+  v_canal := coalesce(nullif(btrim(v_datos->>'canal'), ''), case v_actor when 'equipo' then 'equipo' end);
+  v_fuente := coalesce(nullif(btrim(v_datos->>'atribucion_fuente'), ''), case v_actor when 'equipo' then 'equipo' else 'desconocida' end);
+  if v_fuente not in ('anuncio', 'link_campana', 'preguntado', 'equipo', 'desconocida') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'atribucion_fuente';
+  end if;
+
+  -- El candado de la función: todo lo que sigue ve la ocupación quieta.
+  select * into f from public.funcion_funciones
+   where id = p_funcion_id and workspace_id = p_workspace_id
+   for update;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_vencer_apartados(f.id);
+  select * into c from public.funcion_campanas where id = f.campana_id;
+
+  -- Misma clave = la misma reserva y la misma foto, sin volver a contar (aunque el precio haya cambiado).
+  select * into r from public.funcion_reservas
+   where workspace_id = p_workspace_id and clave_idempotencia = v_clave;
+  if found then
+    if r.funcion_id <> f.id or r.personas <> p_personas then
+      raise exception 'clave_reusada' using errcode = 'P0001',
+        detail = 'La clave ya se usó para otra función u otro número de personas.';
+    end if;
+    return jsonb_build_object('reserva_id', r.id, 'estado', r.estado, 'vence_at', r.vence_at, 'repetida', true,
+      'campana_id', r.campana_id, 'tarifa', r.tarifa, 'precio_unitario', r.precio_unitario,
+      'monto_total', r.monto_total, 'monto_reserva', r.personas::bigint * r.abono_unitario,
+      'permite_pago_total', r.permite_pago_total);
+  end if;
+
+  if v_actor = 'servidor' then
+    v_motivo := public.funcion_motivo_asistente(f, c);
+    if v_motivo in ('campana_no_publicada', 'funcion_archivada') then
+      raise exception 'funcion_no_existe' using errcode = 'P0001';
+    end if;
+    if v_motivo is not null and v_motivo <> 'agotada' then
+      raise exception '%', v_motivo using errcode = 'P0001';
+    end if;
+  else
+    if f.archivada_at is not null or c.archivada_at is not null or f.estado = 'cancelada' or c.estado = 'cerrada'
+       or f.inicia_at <= now() then
+      raise exception 'funcion_cerrada' using errcode = 'P0001';
+    end if;
+    if f.cierra_venta_at is not null and f.cierra_venta_at <= now() then
+      raise exception 'venta_cerrada' using errcode = 'P0001';
+    end if;
+  end if;
+  if c.minutos_apartado is null then
+    raise exception 'sin_regla_apartado' using errcode = 'P0001',
+      detail = 'La campaña no tiene definido cuánto dura un apartado sin pago.';
+  end if;
+
+  if v_actor = 'servidor' then
+    if v_canal is null or v_canal not in ('instagram', 'tiktok', 'whatsapp', 'otro') then
+      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'canal';
+    end if;
+    if v_cuenta is null or v_conv is null then
+      raise exception 'sin_autorizacion' using errcode = 'P0001';
+    end if;
+    -- La última respuesta de la conversación manda: un «no» después de un «sí» retira la autorización.
+    select x.respuesta into v_ultima
+      from public.chatwoot_consentimientos x
+     where x.workspace_id = p_workspace_id and x.cuenta_id = v_cuenta and x.conversacion_id = v_conv
+       and x.tipo = 'general'
+     order by x.created_at desc, x.id desc
+     limit 1;
+    if v_ultima is distinct from 'si' then
+      raise exception 'sin_autorizacion' using errcode = 'P0001';
+    end if;
+  elsif v_canal not in ('instagram', 'tiktok', 'whatsapp', 'otro', 'equipo') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'canal';
+  end if;
+
+  -- El precio que rige y las formas de pago (abono, total), antes de contar cupo. La modalidad se elige al pagar.
+  v_tarifa := public.funcion_tarifa(f.id);
+  v_precio := (v_tarifa->>'precio_persona')::integer;
+  if v_precio is null then
+    raise exception 'sin_precio' using errcode = 'P0001', detail = 'La función no tiene precio por persona.';
+  end if;
+  v_abono := (v_tarifa->>'abono_persona')::integer;
+  v_permite := coalesce((v_tarifa->>'permite_pago_total')::boolean, false);
+  if v_abono is null and not v_permite then
+    raise exception 'modalidad_no_permitida' using errcode = 'P0001',
+      detail = 'La función no tiene abono por persona ni permite el pago total.';
+  end if;
+
+  v_ocupadas := public.funcion_ocupadas(f.id);
+  v_limite := case when p_origen = 'asistente' then f.cupo_asistente else f.capacidad end;
+  if v_ocupadas + p_personas > v_limite then
+    -- Al asistente, sin números: el mismo estado y las mismas alternativas de `funcion_consultar_cupo`, en DETAIL
+    -- (JSON), para que no tenga que consultar otra vez. Al equipo, cuántos quedan.
+    if p_origen = 'asistente' then
+      raise exception 'sin_cupo' using errcode = 'P0001',
+        detail = jsonb_build_object('estado', public.funcion_estado_asistente(f, c, p_personas),
+                                    'alternativas', public.funcion_alternativas(f, c, p_personas))::text;
+    end if;
+    raise exception 'sin_cupo' using errcode = 'P0001',
+      detail = format('Quedan %s puestos.', greatest(v_limite - v_ocupadas, 0));
+  end if;
+
+  -- El cliente en la base de clientes: por teléfono, y si no está y hay nombre, se crea.
+  v_nombre := nullif(btrim(v_datos->>'nombre'), '');
+  v_tel := public.limpiar_telefono(nullif(btrim(v_datos->>'telefono'), ''));
+  if v_tel is not null and v_tel <> '' and public.telefono_valido(v_tel) then
+    select ct.id into v_contacto from public.contactos ct
+     where ct.workspace_id = p_workspace_id and ct.telefono = v_tel
+     order by ct.created_at nulls last, ct.id
+     limit 1;
+    if v_contacto is null and v_nombre is not null then
+      insert into public.contactos (workspace_id, nombre, telefono)
+      values (p_workspace_id, left(v_nombre, 200), v_tel)
+      returning id into v_contacto;
+    end if;
+  else
+    v_tel := null;
+  end if;
+
+  v_vence := now() + make_interval(mins => c.minutos_apartado);
+  insert into public.funcion_reservas (
+    workspace_id, funcion_id, campana_id, personas, contacto_id, nombre, documento, telefono, contacto_canal, canal,
+    chatwoot_cuenta_id, chatwoot_conversacion_id, atribucion_fuente, atribucion_ref, estado, vence_at,
+    solicitud_cliente, origen, clave_idempotencia, creada_por,
+    tarifa, precio_unitario, monto_total, abono_unitario, permite_pago_total, dias_saldo_antes
+  ) values (
+    p_workspace_id, f.id, f.campana_id, p_personas, v_contacto, v_nombre, nullif(btrim(v_datos->>'documento'), ''), v_tel,
+    nullif(btrim(v_datos->>'contacto_canal'), ''), v_canal, v_cuenta, v_conv, v_fuente,
+    left(nullif(btrim(v_datos->>'atribucion_ref'), ''), 200), 'apartada', v_vence,
+    left(nullif(btrim(v_datos->>'solicitud_cliente'), ''), 500), p_origen, v_clave, auth.uid(),
+    v_tarifa->>'tarifa', v_precio, p_personas::bigint * v_precio, v_abono, v_permite, c.dias_saldo_antes
+  ) returning id into v_id;
+
+  return jsonb_build_object('reserva_id', v_id, 'estado', 'apartada', 'vence_at', v_vence, 'repetida', false,
+    'campana_id', f.campana_id, 'tarifa', v_tarifa->>'tarifa', 'precio_unitario', v_precio,
+    'monto_total', p_personas::bigint * v_precio, 'monto_reserva', p_personas::bigint * v_abono,
+    'permite_pago_total', v_permite);
+end;
+$$;
+
+-- ejecutable-por-cliente: la usa el equipo con su sesión (origen equipo) y el asistente con service_role (origen
+-- asistente). SECURITY DEFINER: con sesión exige que `auth.uid()` esté en el workspace y tenga rol que edite.
+revoke execute on function public.funcion_apartar(uuid, uuid, integer, jsonb, text, text) from public, anon;
+grant execute on function public.funcion_apartar(uuid, uuid, integer, jsonb, text, text) to authenticated, service_role;
+
+
+-- ── 12. Confirmar el pago y cancelar ─────────────────────────────────────────
+
+-- La verificación a mano (transferencia, Anexo 2.3). P14b: el equipo dice qué pagó el cliente (`total` o `abono`,
+-- de las formas que permite la foto de la reserva), y queda un pago `inicial` aprobado con medio `manual` por ese
+-- monto: así lo pagado y el saldo salen siempre de `funcion_pagos` (`funcion_saldo`), sin un segundo camino.
+-- Si la reserva tiene un link de pago vivo, `reserva_en_otro_pago`: se espera a que venza (o se cancela y se aparta
+-- de nuevo), para no cobrar dos veces.
+create or replace function public.funcion_confirmar_pago(p_reserva_id uuid, p_pago_estado text, p_modalidad text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+  v_funcion uuid;
+  v_actor text;
+  f record;
+  r record;
+  v_ocupadas integer;
+  v_limite integer;
+  v_monto bigint;
+  v_pago uuid;
+begin
+  select workspace_id, funcion_id into v_ws, v_funcion from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  v_actor := public.funcion_actor(v_ws, true, 'reserva_no_existe');
+  -- Solo el equipo, y solo la verificación a mano (transferencia, Anexo 2.3). Lo que aprueba la pasarela entra por
+  -- `funcion_registrar_pago`: un solo camino para los pagos de la pasarela, de una o de varias reservas.
+  if v_actor <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if p_pago_estado is distinct from 'verificado_manual' then
+    raise exception 'pago_estado_invalido' using errcode = 'P0001';
+  end if;
+  if coalesce(p_modalidad, '') not in ('abono', 'total') then
+    raise exception 'modalidad_no_permitida' using errcode = 'P0001';
+  end if;
+
+  select * into f from public.funcion_funciones where id = v_funcion for update;
+  perform public.funcion_vencer_apartados(f.id);
+  select * into r from public.funcion_reservas where id = p_reserva_id for update;
+
+  if r.estado = 'confirmada' then
+    return jsonb_build_object('reserva_id', r.id, 'estado', r.estado, 'pago_estado', r.pago_estado, 'repetida', true);
+  end if;
+  if r.estado in ('cancelada', 'pendiente_persona', 'requiere_devolucion') then
+    raise exception 'reserva_inactiva' using errcode = 'P0001', detail = format('La reserva está %s.', r.estado);
+  end if;
+  if f.estado = 'cancelada' then
+    raise exception 'funcion_cerrada' using errcode = 'P0001', detail = 'La función está cancelada.';
+  end if;
+  if (p_modalidad = 'abono' and r.abono_unitario is null) or (p_modalidad = 'total' and not r.permite_pago_total) then
+    raise exception 'modalidad_no_permitida' using errcode = 'P0001';
+  end if;
+  if exists (select 1 from public.funcion_pago_reservas where reserva_id = r.id and pendiente) then
+    raise exception 'reserva_en_otro_pago' using errcode = 'P0001', detail = 'La reserva tiene un link de pago vivo.';
+  end if;
+  -- Un apartado vencido ya no ocupaba: solo se confirma si cabe en el límite de SU origen (el del asistente para lo
+  -- que apartó el asistente, la capacidad para lo del equipo). Nunca por encima.
+  if r.estado = 'vencida' then
+    v_ocupadas := public.funcion_ocupadas(f.id);
+    v_limite := case when r.origen = 'asistente' then f.cupo_asistente else f.capacidad end;
+    if v_ocupadas + r.personas > v_limite then
+      raise exception 'sin_cupo' using errcode = 'P0001',
+        detail = format('El apartado venció y quedan %s puestos.', greatest(v_limite - v_ocupadas, 0));
+    end if;
+  end if;
+
+  v_monto := case p_modalidad when 'total' then r.monto_total else r.personas::bigint * r.abono_unitario end;
+  update public.funcion_reservas
+     set estado = 'confirmada', pago_estado = p_pago_estado, confirmada_at = now(), confirmada_por = auth.uid(),
+         modalidad = p_modalidad, monto_a_pagar = v_monto, updated_at = now()
+   where id = r.id;
+  insert into public.funcion_pagos (workspace_id, chatwoot_cuenta_id, chatwoot_conversacion_id, concepto, medio, pasarela,
+                                    estado, monto_esperado, monto_recibido, creado_por, registrado_por, registrado_at)
+  values (r.workspace_id, r.chatwoot_cuenta_id, r.chatwoot_conversacion_id, 'inicial', 'manual', null,
+          'aprobado', v_monto, v_monto, auth.uid(), auth.uid(), now())
+  returning id into v_pago;
+  insert into public.funcion_pago_reservas (pago_id, reserva_id, workspace_id, monto, pendiente)
+  values (v_pago, r.id, r.workspace_id, v_monto, false);
+  return jsonb_build_object('reserva_id', r.id, 'estado', 'confirmada', 'pago_estado', p_pago_estado, 'repetida', false,
+    'modalidad', p_modalidad, 'monto_a_pagar', v_monto, 'pago_id', v_pago);
+end;
+$$;
+
+-- ejecutable-por-cliente: el equipo confirma con su sesión (`verificado_manual`). SECURITY DEFINER y verifica el
+-- workspace de la reserva con `funcion_actor`. La pasarela no entra por aquí (`funcion_registrar_pago`).
+revoke execute on function public.funcion_confirmar_pago(uuid, text, text) from public, anon, service_role;
+grant execute on function public.funcion_confirmar_pago(uuid, text, text) to authenticated;
+
+-- Cancelar libera el cupo. P14 (25-oct): si la reserva tiene un link de SALDO vivo, ese pago pasa a `anulado` (con las
+-- demás reservas que cubra: un link es de monto fijo). Si Bold igual lo cobra, `funcion_registrar_pago` lo deja en
+-- `revisar` para una persona. Candados: función → reserva → pago, el mismo orden de siempre.
+create or replace function public.funcion_cancelar_reserva(p_reserva_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+  v_funcion uuid;
+  r record;
+  v_anulados jsonb;
+begin
+  select workspace_id, funcion_id into v_ws, v_funcion from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'reserva_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+
+  perform 1 from public.funcion_funciones where id = v_funcion for update;
+  perform public.funcion_vencer_apartados(v_funcion);
+  select * into r from public.funcion_reservas where id = p_reserva_id for update;
+  if r.estado = 'cancelada' then
+    return jsonb_build_object('reserva_id', r.id, 'estado', 'cancelada', 'repetida', true);
+  end if;
+
+  update public.funcion_reservas
+     set estado = 'cancelada', cancelada_at = now(), cancelada_por = auth.uid(), updated_at = now()
+   where id = r.id;
+  v_anulados := public.funcion_cerrar_links_saldo(array[r.id], 'anulado');
+  return jsonb_build_object('reserva_id', r.id, 'estado', 'cancelada', 'repetida', false, 'pagos_anulados', v_anulados);
+end;
+$$;
+
+-- ejecutable-por-cliente: solo el equipo, con su sesión. SECURITY DEFINER; exige sesión del workspace de la reserva.
+revoke execute on function public.funcion_cancelar_reserva(uuid) from public, anon, service_role;
+grant execute on function public.funcion_cancelar_reserva(uuid) to authenticated;
+
+
+-- ── 13. Restricciones alimentarias (dato sensible) ───────────────────────────
+
+-- Texto vacío o nulo = borrar. Con texto, exige la fila de `chatwoot_consentimientos` de tipo `sensible`, respuesta
+-- `si`, del mismo workspace, cuenta y conversación de la reserva, y que no haya un «no» posterior. Una reserva sin
+-- conversación (la tomó el equipo por fuera del chat) no guarda restricciones mientras Emilio no defina cómo se
+-- registra ese consentimiento (E6).
+create or replace function public.funcion_guardar_restricciones(p_reserva_id uuid, p_texto text, p_consentimiento_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+  r record;
+  c record;
+  v_texto text := nullif(btrim(coalesce(p_texto, '')), '');
+begin
+  select workspace_id into v_ws from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_actor(v_ws, true, 'reserva_no_existe');
+
+  select * into r from public.funcion_reservas where id = p_reserva_id for update;
+
+  if v_texto is null then
+    update public.funcion_reservas
+       set restricciones = null, consentimiento_sensible_id = null, updated_at = now()
+     where id = r.id;
+    return jsonb_build_object('reserva_id', r.id, 'restricciones', null);
+  end if;
+  if r.estado in ('cancelada', 'vencida') then
+    raise exception 'reserva_inactiva' using errcode = 'P0001';
+  end if;
+  if length(v_texto) > 1000 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'restricciones';
+  end if;
+
+  select * into c from public.chatwoot_consentimientos where id = p_consentimiento_id;
+  if not found or c.tipo <> 'sensible' or c.respuesta <> 'si' or c.workspace_id <> r.workspace_id
+     or r.chatwoot_cuenta_id is null or c.cuenta_id <> r.chatwoot_cuenta_id
+     or c.conversacion_id <> r.chatwoot_conversacion_id then
+    raise exception 'sin_autorizacion_sensible' using errcode = 'P0001';
+  end if;
+  if exists (
+    select 1 from public.chatwoot_consentimientos x
+     where x.workspace_id = c.workspace_id and x.cuenta_id = c.cuenta_id and x.conversacion_id = c.conversacion_id
+       and x.tipo = 'sensible' and x.respuesta = 'no' and x.created_at > c.created_at
+  ) then
+    raise exception 'sin_autorizacion_sensible' using errcode = 'P0001', detail = 'La persona retiró la autorización.';
+  end if;
+
+  update public.funcion_reservas
+     set restricciones = v_texto, consentimiento_sensible_id = c.id, updated_at = now()
+   where id = r.id;
+  return jsonb_build_object('reserva_id', r.id, 'restricciones', v_texto);
+end;
+$$;
+
+-- ejecutable-por-cliente: la usa el servidor (asistente) y el equipo con su sesión. SECURITY DEFINER; con sesión exige
+-- el workspace de la reserva y rol que edite.
+revoke execute on function public.funcion_guardar_restricciones(uuid, text, uuid) from public, anon;
+grant execute on function public.funcion_guardar_restricciones(uuid, text, uuid) to authenticated, service_role;
+
+
+-- ── 14. Alta y agenda desde ONE (la única puerta; solo el equipo) ────────────
+-- Nada de esto se concede a service_role: el asistente lee, no da de alta.
+
+-- Un número de pesos de un jsonb de precios: entero 1..100.000.000, o nulo. Si no, `precio_invalido`.
+create or replace function public.funcion_precio_de(p jsonb, k text)
+returns integer
+language plpgsql
+immutable
+set search_path = public
+as $$
+begin
+  if p is null or not (p ? k) or jsonb_typeof(p->k) = 'null' then
+    return null;
+  end if;
+  if jsonb_typeof(p->k) <> 'number' or (p->>k) !~ '^[0-9]{1,9}$' or (p->>k)::integer not between 1 and 100000000 then
+    raise exception 'precio_invalido' using errcode = 'P0001', detail = k;
+  end if;
+  return (p->>k)::integer;
+end;
+$$;
+
+revoke execute on function public.funcion_precio_de(jsonb, text) from public, anon, authenticated, service_role;
+
+-- Los precios que acepta un jsonb (`p_precios`), y nada más.
+create or replace function public.funcion_validar_precios(p jsonb, p_admitidas text[])
+returns void
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  v_extra text;
+begin
+  if p is null then
+    return;
+  end if;
+  if jsonb_typeof(p) <> 'object' then
+    raise exception 'precio_invalido' using errcode = 'P0001';
+  end if;
+  select k into v_extra from jsonb_object_keys(p) k where k <> all (p_admitidas) limit 1;
+  if v_extra is not null then
+    raise exception 'dato_no_admitido' using errcode = 'P0001', detail = v_extra;
+  end if;
+  if p ? 'permite_pago_total' and jsonb_typeof(p->'permite_pago_total') not in ('boolean', 'null') then
+    raise exception 'precio_invalido' using errcode = 'P0001', detail = 'permite_pago_total';
+  end if;
+  if p ? 'es_preventa' and jsonb_typeof(p->'es_preventa') <> 'boolean' then
+    raise exception 'precio_invalido' using errcode = 'P0001', detail = 'es_preventa';
+  end if;
+  if p ? 'preventa_hasta' and jsonb_typeof(p->'preventa_hasta') <> 'null' then
+    if jsonb_typeof(p->'preventa_hasta') <> 'string' or (p->>'preventa_hasta') !~ '^\d{4}-\d{2}-\d{2}$' then
+      raise exception 'precio_invalido' using errcode = 'P0001', detail = 'preventa_hasta';
+    end if;
+    begin
+      perform (p->>'preventa_hasta')::date;
+    exception when others then
+      raise exception 'precio_invalido' using errcode = 'P0001', detail = 'preventa_hasta';
+    end;
+  end if;
+end;
+$$;
+
+revoke execute on function public.funcion_validar_precios(jsonb, text[]) from public, anon, authenticated, service_role;
+
+-- Un texto de la ficha dentro de un jsonb: string o nulo; se guarda TAL CUAL (emojis, saltos de línea y espacios de
+-- adentro), solo sin los espacios y saltos de las puntas. Vacío = nulo.
+create or replace function public.funcion_texto_de(p jsonb, k text, p_max integer)
+returns text
+language plpgsql
+immutable
+set search_path = public
+as $$
+declare
+  v text;
+begin
+  if p is null or not (p ? k) or jsonb_typeof(p->k) = 'null' then
+    return null;
+  end if;
+  if jsonb_typeof(p->k) <> 'string' then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = k;
+  end if;
+  v := nullif(btrim(p->>k, E' \t\r\n'), '');
+  if v is not null and length(v) > p_max then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = format('%s: hasta %s caracteres', k, p_max);
+  end if;
+  return v;
+end;
+$$;
+
+revoke execute on function public.funcion_texto_de(jsonb, text, integer) from public, anon, authenticated, service_role;
+
+-- La ficha de la experiencia (P11, §1.8). `p_ficha` = {nombre, titulo_oferta, frase_gancho, intro, que_incluye (lista
+-- de textos, uno por cosa incluida), emojis_tema, saludo_grupo, relato_grupo, edad_minima}, y ninguna otra llave
+-- (`dato_no_admitido`). Reemplaza la ficha ENTERA: la llave que no viene queda nula. Los textos van tal cual.
+create or replace function public.funcion_guardar_experiencia(
+  p_workspace_id uuid,
+  p_experiencia_id uuid,
+  p_ficha jsonb
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_nombre text;
+  v_extra text;
+  v_edad integer;
+  v_items text[];
+  v_item jsonb;
+  v_texto text;
+  v_id uuid;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'experiencia_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if p_ficha is null or jsonb_typeof(p_ficha) <> 'object' then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'ficha';
+  end if;
+  select k into v_extra from jsonb_object_keys(p_ficha) k
+   where k <> all (array['nombre', 'titulo_oferta', 'frase_gancho', 'intro', 'que_incluye', 'emojis_tema',
+                         'saludo_grupo', 'relato_grupo', 'edad_minima'])
+   limit 1;
+  if v_extra is not null then
+    raise exception 'dato_no_admitido' using errcode = 'P0001', detail = v_extra;
+  end if;
+
+  v_nombre := public.funcion_texto_de(p_ficha, 'nombre', 200);
+  if v_nombre is null then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'nombre';
+  end if;
+  if p_ficha ? 'edad_minima' and jsonb_typeof(p_ficha->'edad_minima') <> 'null' then
+    if jsonb_typeof(p_ficha->'edad_minima') <> 'number' or (p_ficha->>'edad_minima') !~ '^[0-9]{1,2}$' then
+      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'edad_minima';
+    end if;
+    v_edad := (p_ficha->>'edad_minima')::integer;
+  end if;
+  if p_ficha ? 'que_incluye' and jsonb_typeof(p_ficha->'que_incluye') <> 'null' then
+    if jsonb_typeof(p_ficha->'que_incluye') <> 'array' then
+      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'que_incluye';
+    end if;
+    v_items := '{}';
+    for v_item in select value from jsonb_array_elements(p_ficha->'que_incluye') loop
+      if jsonb_typeof(v_item) <> 'string' then
+        raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'que_incluye';
+      end if;
+      v_texto := nullif(btrim(v_item #>> '{}', E' \t\r\n'), '');
+      if v_texto is null then
+        continue;
+      end if;
+      if length(v_texto) > 200 then
+        raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'que_incluye: hasta 200 caracteres por línea';
+      end if;
+      v_items := v_items || v_texto;
+    end loop;
+    if cardinality(v_items) > 20 then
+      raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'que_incluye: hasta 20 líneas';
+    end if;
+    if cardinality(v_items) = 0 then
+      v_items := null;
+    end if;
+  end if;
+
+  if p_experiencia_id is null then
+    insert into public.funcion_experiencias (workspace_id, nombre, titulo_oferta, frase_gancho, intro, que_incluye,
+      emojis_tema, saludo_grupo, relato_grupo, edad_minima)
+    values (p_workspace_id, v_nombre, public.funcion_texto_de(p_ficha, 'titulo_oferta', 300),
+      public.funcion_texto_de(p_ficha, 'frase_gancho', 500), public.funcion_texto_de(p_ficha, 'intro', 3000), v_items,
+      public.funcion_texto_de(p_ficha, 'emojis_tema', 40), public.funcion_texto_de(p_ficha, 'saludo_grupo', 4000),
+      public.funcion_texto_de(p_ficha, 'relato_grupo', 4000), v_edad)
+    returning id into v_id;
+  else
+    update public.funcion_experiencias
+       set nombre = v_nombre,
+           titulo_oferta = public.funcion_texto_de(p_ficha, 'titulo_oferta', 300),
+           frase_gancho = public.funcion_texto_de(p_ficha, 'frase_gancho', 500),
+           intro = public.funcion_texto_de(p_ficha, 'intro', 3000),
+           que_incluye = v_items,
+           emojis_tema = public.funcion_texto_de(p_ficha, 'emojis_tema', 40),
+           saludo_grupo = public.funcion_texto_de(p_ficha, 'saludo_grupo', 4000),
+           relato_grupo = public.funcion_texto_de(p_ficha, 'relato_grupo', 4000),
+           edad_minima = v_edad,
+           updated_at = now()
+     where id = p_experiencia_id and workspace_id = p_workspace_id
+    returning id into v_id;
+    if v_id is null then
+      raise exception 'experiencia_no_existe' using errcode = 'P0001';
+    end if;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- ejecutable-por-cliente: el formulario, con la sesión del equipo. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_guardar_experiencia(uuid, uuid, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_guardar_experiencia(uuid, uuid, jsonb) to authenticated;
+
+-- Crea (p_campana_id nulo) o edita una campaña. `p_precios` = {precio_persona, precio_preventa_persona, abono_persona,
+-- permite_pago_total, tope_sobreventa, dias_saldo_antes} (`dias_saldo_antes`: entero de 1 a 30; ausente o nulo = 1). El código se guarda en mayúsculas y no cambia después de publicar. `activa` solo con la agenda
+-- publicada (para eso está `funcion_publicar_agenda`).
+create or replace function public.funcion_guardar_campana(
+  p_workspace_id uuid,
+  p_campana_id uuid,
+  p_experiencia_id uuid,
+  p_nombre text,
+  p_codigo text,
+  p_desde date,
+  p_hasta date,
+  p_estado text,
+  p_minutos_apartado integer,
+  p_precios jsonb
+) returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_nombre text := nullif(btrim(coalesce(p_nombre, '')), '');
+  v_codigo text := upper(btrim(coalesce(p_codigo, '')));
+  v_estado text := coalesce(p_estado, 'borrador');
+  v_precio integer;
+  v_preventa integer;
+  v_abono integer;
+  v_permite boolean;
+  v_dias integer := 1;
+  v_publicada timestamptz;
+  v_id uuid;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if v_nombre is null or length(v_nombre) > 200 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'nombre';
+  end if;
+  if v_codigo !~ '^[A-Z0-9][A-Z0-9-]{1,19}$' then
+    raise exception 'codigo_invalido' using errcode = 'P0001',
+      detail = 'Entre 2 y 20 letras, números o guiones, sin espacios (por ejemplo HP-OCT26).';
+  end if;
+  if v_estado not in ('borrador', 'activa', 'pausada', 'cerrada') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  if p_minutos_apartado is not null and (p_minutos_apartado < 1 or p_minutos_apartado > 10080) then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'minutos_apartado';
+  end if;
+  if p_desde is not null and p_hasta is not null and p_hasta < p_desde then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'fechas';
+  end if;
+  if not exists (select 1 from public.funcion_experiencias where id = p_experiencia_id and workspace_id = p_workspace_id) then
+    raise exception 'experiencia_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_validar_precios(p_precios, array['precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa', 'dias_saldo_antes']);
+  if p_precios ? 'dias_saldo_antes' and jsonb_typeof(p_precios->'dias_saldo_antes') <> 'null' then
+    if jsonb_typeof(p_precios->'dias_saldo_antes') <> 'number' or (p_precios->>'dias_saldo_antes') !~ '^[0-9]{1,2}$'
+       or (p_precios->>'dias_saldo_antes')::integer not between 1 and 30 then
+      raise exception 'dias_saldo_invalido' using errcode = 'P0001', detail = p_precios->>'dias_saldo_antes';
+    end if;
+    v_dias := (p_precios->>'dias_saldo_antes')::integer;
+  end if;
+  v_precio := public.funcion_precio_de(p_precios, 'precio_persona');
+  v_preventa := public.funcion_precio_de(p_precios, 'precio_preventa_persona');
+  v_abono := public.funcion_precio_de(p_precios, 'abono_persona');
+  v_permite := coalesce((p_precios->>'permite_pago_total')::boolean, true);
+  if exists (select 1 from public.funcion_campanas
+              where workspace_id = p_workspace_id and codigo = v_codigo and id is distinct from p_campana_id) then
+    raise exception 'codigo_repetido' using errcode = 'P0001', detail = v_codigo;
+  end if;
+
+  if p_campana_id is null then
+    if v_estado = 'activa' then
+      raise exception 'campana_no_publicada' using errcode = 'P0001', detail = 'Se activa al publicar la agenda.';
+    end if;
+    insert into public.funcion_campanas (workspace_id, experiencia_id, nombre, codigo, desde, hasta, estado,
+      minutos_apartado, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa,
+      dias_saldo_antes)
+    values (p_workspace_id, p_experiencia_id, v_nombre, v_codigo, p_desde, p_hasta, v_estado,
+      p_minutos_apartado, v_precio, v_preventa, v_abono, v_permite, public.funcion_precio_de(p_precios, 'tope_sobreventa'),
+      v_dias)
+    returning id into v_id;
+  else
+    select agenda_publicada_at into v_publicada from public.funcion_campanas
+     where id = p_campana_id and workspace_id = p_workspace_id and archivada_at is null
+     for update;
+    if not found then
+      raise exception 'campana_no_existe' using errcode = 'P0001';
+    end if;
+    if v_estado = 'activa' and v_publicada is null then
+      raise exception 'campana_no_publicada' using errcode = 'P0001', detail = 'Se activa al publicar la agenda.';
+    end if;
+    update public.funcion_campanas
+       set experiencia_id = p_experiencia_id, nombre = v_nombre, codigo = v_codigo, desde = p_desde, hasta = p_hasta,
+           estado = v_estado, minutos_apartado = p_minutos_apartado, precio_persona = v_precio,
+           precio_preventa_persona = v_preventa, abono_persona = v_abono, permite_pago_total = v_permite,
+           tope_sobreventa = public.funcion_precio_de(p_precios, 'tope_sobreventa'), dias_saldo_antes = v_dias
+     where id = p_campana_id;
+    v_id := p_campana_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_guardar_campana(uuid, uuid, uuid, text, text, date, date, text, integer, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_guardar_campana(uuid, uuid, uuid, text, text, date, date, text, integer, jsonb) to authenticated;
+
+-- Publica la agenda: marca `agenda_publicada_at` (la primera vez) y deja la campaña `activa`. Exige al menos una
+-- función futura y viva, y que todas las futuras y vivas tengan precio resuelto (`funcion_tarifa`). Antes de esto,
+-- nada de la campaña es visible para el asistente.
+create or replace function public.funcion_publicar_agenda(p_campana_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c record;
+  v_sin_precio integer;
+  v_funciones integer;
+begin
+  select * into c from public.funcion_campanas where id = p_campana_id;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(c.workspace_id, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  select * into c from public.funcion_campanas where id = p_campana_id for update;
+  if c.archivada_at is not null or c.estado = 'cerrada' then
+    raise exception 'campana_cerrada' using errcode = 'P0001';
+  end if;
+
+  select count(*)::integer,
+         count(*) filter (where (public.funcion_tarifa(f.id)->>'precio_persona') is null)::integer
+    into v_funciones, v_sin_precio
+    from public.funcion_funciones f
+   where f.campana_id = c.id and f.inicia_at > now() and f.estado <> 'cancelada' and f.archivada_at is null;
+  if v_funciones = 0 then
+    raise exception 'campana_sin_funciones' using errcode = 'P0001', detail = 'Agrega al menos una función futura.';
+  end if;
+  if v_sin_precio > 0 then
+    raise exception 'funcion_sin_precio' using errcode = 'P0001',
+      detail = format('%s función(es) sin precio por persona.', v_sin_precio);
+  end if;
+
+  update public.funcion_campanas
+     set agenda_publicada_at = coalesce(agenda_publicada_at, now()), estado = 'activa'
+   where id = c.id;
+  return jsonb_build_object('campana_id', c.id, 'funciones', v_funciones, 'estado', 'activa');
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_publicar_agenda(uuid) from public, anon, service_role;
+grant execute on function public.funcion_publicar_agenda(uuid) to authenticated;
+
+-- La agenda en lote: una función por cada par EXPLÍCITO fecha + hora de Bogotá,
+--   p_horarios = [{"fecha": "2026-10-24", "hora": "13:00"}, …]
+-- Nunca horas sueltas aplicadas a varios días. Un par repetido en la lista, o que ya existe vivo en la campaña:
+-- `horario_repetido`. Todas con la misma capacidad, cupo del asistente, cierre de venta y `p_precios` = {es_preventa,
+-- preventa_hasta, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total} (reemplazos de la
+-- campaña). La fecha de fin de la preventa no puede pasar ninguna de las funciones: `preventa_despues_de_funcion`.
+-- Todo o nada.
+create or replace function public.funcion_crear_funciones(
+  p_workspace_id uuid,
+  p_campana_id uuid,
+  p_capacidad integer,
+  p_cupo_asistente integer,
+  p_cierre_minutos_antes integer,
+  p_precios jsonb,
+  p_horarios jsonb
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_horarios jsonb := coalesce(p_horarios, '[]'::jsonb);
+  v_item jsonb;
+  v_inicio timestamptz;
+  v_inicios timestamptz[] := '{}';
+  v_ids jsonb := '[]'::jsonb;
+  v_id uuid;
+  v_cupo_asistente integer := coalesce(p_cupo_asistente, p_capacidad);
+  v_preventa boolean;
+  v_hasta date;
+  c record;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  select * into c from public.funcion_campanas
+   where id = p_campana_id and workspace_id = p_workspace_id and archivada_at is null;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  if c.estado = 'cerrada' then
+    raise exception 'campana_cerrada' using errcode = 'P0001';
+  end if;
+  if p_capacidad is null or p_capacidad < 1 or p_capacidad > 10000 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'capacidad';
+  end if;
+  if v_cupo_asistente < 1 or v_cupo_asistente > p_capacidad then
+    raise exception 'cupo_asistente_invalido' using errcode = 'P0001',
+      detail = format('El cupo del asistente va de 1 a la capacidad (%s).', p_capacidad);
+  end if;
+  if p_cierre_minutos_antes is not null and (p_cierre_minutos_antes < 0 or p_cierre_minutos_antes > 20160) then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'cierre de venta';
+  end if;
+  perform public.funcion_validar_precios(p_precios,
+    array['es_preventa', 'preventa_hasta', 'precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa']);
+  v_preventa := coalesce((p_precios->>'es_preventa')::boolean, false);
+  v_hasta := case when v_preventa then (p_precios->>'preventa_hasta')::date end;
+  if jsonb_typeof(v_horarios) <> 'array' or jsonb_array_length(v_horarios) = 0 or jsonb_array_length(v_horarios) > 60 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Entre 1 y 60 pares de fecha y hora.';
+  end if;
+
+  for v_item in select value from jsonb_array_elements(v_horarios) loop
+    if jsonb_typeof(v_item) <> 'object'
+       or (select count(*) from jsonb_object_keys(v_item)) <> 2
+       or coalesce(v_item->>'fecha', '') !~ '^\d{4}-\d{2}-\d{2}$'
+       or coalesce(v_item->>'hora', '') !~ '^([01]\d|2[0-3]):[0-5]\d$' then
+      raise exception 'horario_invalido' using errcode = 'P0001',
+        detail = 'Cada función es un par explícito {fecha: AAAA-MM-DD, hora: HH:MM}.';
+    end if;
+    begin
+      v_inicio := ((v_item->>'fecha') || ' ' || (v_item->>'hora'))::timestamp at time zone 'America/Bogota';
+    exception when others then
+      raise exception 'horario_invalido' using errcode = 'P0001', detail = v_item::text;
+    end;
+    if v_inicio = any (v_inicios) or exists (
+      select 1 from public.funcion_funciones where campana_id = c.id and inicia_at = v_inicio and archivada_at is null
+    ) then
+      raise exception 'horario_repetido' using errcode = 'P0001',
+        detail = format('%s %s', v_item->>'fecha', v_item->>'hora');
+    end if;
+    if v_inicio <= now() then
+      raise exception 'fecha_pasada' using errcode = 'P0001', detail = format('%s %s', v_item->>'fecha', v_item->>'hora');
+    end if;
+    if v_hasta is not null and v_hasta > (v_item->>'fecha')::date then
+      raise exception 'preventa_despues_de_funcion' using errcode = 'P0001',
+        detail = format('%s %s', v_item->>'fecha', v_item->>'hora');
+    end if;
+    v_inicios := v_inicios || v_inicio;
+  end loop;
+
+  foreach v_inicio in array v_inicios loop
+    insert into public.funcion_funciones (workspace_id, campana_id, inicia_at, capacidad, cupo_asistente, cierra_venta_at,
+      es_preventa, preventa_hasta, precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa)
+    values (p_workspace_id, c.id, v_inicio, p_capacidad, v_cupo_asistente,
+      case when p_cierre_minutos_antes is null then null else v_inicio - make_interval(mins => p_cierre_minutos_antes) end,
+      v_preventa, v_hasta,
+      public.funcion_precio_de(p_precios, 'precio_persona'), public.funcion_precio_de(p_precios, 'precio_preventa_persona'),
+      public.funcion_precio_de(p_precios, 'abono_persona'), (p_precios->>'permite_pago_total')::boolean,
+      public.funcion_precio_de(p_precios, 'tope_sobreventa'))
+    returning id into v_id;
+    v_ids := v_ids || to_jsonb(v_id);
+  end loop;
+  return v_ids;
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_crear_funciones(uuid, uuid, integer, integer, integer, jsonb, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_crear_funciones(uuid, uuid, integer, integer, integer, jsonb, jsonb) to authenticated;
+
+-- Cambia los cupos, el estado, el cierre de venta y (si `p_precios` no es nulo) los reemplazos de precio de una
+-- función, con el candado de la función tomado (la capacidad no baja de lo ocupado: lo dice el trigger; la tarifa
+-- tiene que cuadrar).
+create or replace function public.funcion_editar_funcion(
+  p_funcion_id uuid,
+  p_capacidad integer,
+  p_cupo_asistente integer,
+  p_estado text,
+  p_cierra_venta_at timestamptz,
+  p_precios jsonb
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+begin
+  select workspace_id into v_ws from public.funcion_funciones where id = p_funcion_id and archivada_at is null;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'funcion_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_estado, '') not in ('activa', 'pausada', 'cancelada') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  if p_capacidad is null or p_capacidad < 1 or p_capacidad > 10000 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'capacidad';
+  end if;
+  if p_cupo_asistente is null or p_cupo_asistente < 1 or p_cupo_asistente > p_capacidad then
+    raise exception 'cupo_asistente_invalido' using errcode = 'P0001',
+      detail = format('El cupo del asistente va de 1 a la capacidad (%s).', p_capacidad);
+  end if;
+  perform public.funcion_validar_precios(p_precios,
+    array['es_preventa', 'preventa_hasta', 'precio_persona', 'precio_preventa_persona', 'abono_persona', 'permite_pago_total', 'tope_sobreventa']);
+  if coalesce((p_precios->>'es_preventa')::boolean, false) and (p_precios->>'preventa_hasta') is not null
+     and (p_precios->>'preventa_hasta')::date > (select (inicia_at at time zone 'America/Bogota')::date
+                                                   from public.funcion_funciones where id = p_funcion_id) then
+    raise exception 'preventa_despues_de_funcion' using errcode = 'P0001';
+  end if;
+
+  perform 1 from public.funcion_funciones where id = p_funcion_id for update;
+  perform public.funcion_vencer_apartados(p_funcion_id);
+  update public.funcion_funciones
+     set capacidad = p_capacidad, cupo_asistente = p_cupo_asistente, estado = p_estado, cierra_venta_at = p_cierra_venta_at
+   where id = p_funcion_id;
+  -- `p_precios` nulo = los reemplazos de precio no se tocan.
+  if p_precios is not null then
+    update public.funcion_funciones
+       set es_preventa = coalesce((p_precios->>'es_preventa')::boolean, false),
+           preventa_hasta = case when coalesce((p_precios->>'es_preventa')::boolean, false)
+                                 then (p_precios->>'preventa_hasta')::date end,
+           precio_persona = public.funcion_precio_de(p_precios, 'precio_persona'),
+           precio_preventa_persona = public.funcion_precio_de(p_precios, 'precio_preventa_persona'),
+           abono_persona = public.funcion_precio_de(p_precios, 'abono_persona'),
+           permite_pago_total = (p_precios->>'permite_pago_total')::boolean,
+           tope_sobreventa = public.funcion_precio_de(p_precios, 'tope_sobreventa')
+     where id = p_funcion_id;
+  end if;
+  return public.funcion_ocupacion(p_funcion_id);
+end;
+$$;
+
+-- ejecutable-por-cliente: el equipo con su sesión. SECURITY DEFINER; exige el workspace de la función.
+revoke execute on function public.funcion_editar_funcion(uuid, integer, integer, text, timestamptz, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_editar_funcion(uuid, integer, integer, text, timestamptz, jsonb) to authenticated;
+
+-- Eliminar una función: si tiene reservas (de cualquier estado: son historia y atribución), se ARCHIVA; si no, se borra.
+-- Una archivada no se lista ni se vende.
+create or replace function public.funcion_eliminar_funcion(p_funcion_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+begin
+  select workspace_id into v_ws from public.funcion_funciones where id = p_funcion_id;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'funcion_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  perform 1 from public.funcion_funciones where id = p_funcion_id for update;
+  if exists (select 1 from public.funcion_reservas where funcion_id = p_funcion_id) then
+    update public.funcion_funciones set archivada_at = coalesce(archivada_at, now()) where id = p_funcion_id;
+    return 'archivada';
+  end if;
+  delete from public.funcion_funciones where id = p_funcion_id;
+  return 'borrada';
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_eliminar_funcion(uuid) from public, anon, service_role;
+grant execute on function public.funcion_eliminar_funcion(uuid) to authenticated;
+
+-- Eliminar una campaña: si alguna de sus funciones tiene reservas, se archivan la campaña y sus funciones; si no, se
+-- borran sus funciones y la campaña.
+create or replace function public.funcion_eliminar_campana(p_campana_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+begin
+  select workspace_id into v_ws from public.funcion_campanas where id = p_campana_id;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  -- Orden de candados: las funciones primero (las de la campaña, en orden), luego la campaña.
+  perform 1 from public.funcion_funciones where campana_id = p_campana_id order by id for update;
+  perform 1 from public.funcion_campanas where id = p_campana_id for update;
+  if exists (select 1 from public.funcion_reservas where campana_id = p_campana_id) then
+    update public.funcion_funciones set archivada_at = coalesce(archivada_at, now()) where campana_id = p_campana_id;
+    update public.funcion_campanas set archivada_at = coalesce(archivada_at, now()) where id = p_campana_id;
+    return 'archivada';
+  end if;
+  delete from public.funcion_funciones where campana_id = p_campana_id;
+  delete from public.funcion_campanas where id = p_campana_id;
+  return 'borrada';
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_eliminar_campana(uuid) from public, anon, service_role;
+grant execute on function public.funcion_eliminar_campana(uuid) to authenticated;
+
+
+-- ── 15. Pagos: uno o varios apartados en un solo link (P13, aprobado el 2026-10-22) ──
+-- Un cliente puede apartar varias funciones en la misma conversación (una por una) y pagarlas en UN link o en uno por
+-- función. Hay un solo camino: pagar por función es un pago de una sola reserva.
+--   · `funcion_resumen_pago`   lo que se paga de cada reserva y el total sin las vencidas (nadie suma fuera de la base);
+--   · `funcion_preparar_pago`  candados de las funciones en orden de id; exige apartadas vigentes y fuera de otro pago
+--                              pendiente; realinea UNA vez sus vencimientos y crea el pago con `monto_esperado`;
+--   · `funcion_vincular_link`  guarda la referencia del link de la pasarela (única por workspace);
+--   · `funcion_registrar_pago` el aviso de la pasarela, idempotente por referencia. Aprobado con el monto esperado:
+--                              confirma las que tienen cupo según su origen y deja `pendiente_persona` las que no (SIN
+--                              devolución automática). Fallido o vencido: ninguna. Monto distinto: `revisar`.
+--   · `funcion_resolver_pendiente` (solo una persona del equipo): sobrevender hasta el tope o devolver.
+-- Ningún camino automático pasa de la capacidad. El saldo (P14) usa las mismas tablas: sección 15b.
+
+create table public.funcion_pagos (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id),
+  -- La conversación de donde salió (si salió del asistente). Todas sus reservas son de esa conversación.
+  chatwoot_cuenta_id bigint,
+  chatwoot_conversacion_id bigint,
+  -- `anulado`: la base lo cerró antes de que llegara un aviso (se canceló la reserva, o el saldo se cobró en el evento).
+  -- Un `vencido` sin aviso de la pasarela es un link de saldo que se reemplazó por otro (P14c).
+  estado text not null default 'pendiente'
+    check (estado in ('pendiente', 'aprobado', 'fallido', 'vencido', 'revisar', 'anulado')),
+  -- P14 (25-oct): el saldo es un pago más de la misma reserva. `inicial` es el de §1.9 y el ÚNICO que confirma la
+  -- reserva; `saldo` solo suma a lo pagado.
+  concepto text not null default 'inicial' check (concepto in ('inicial', 'saldo')),
+  -- `bold_link`: un link de Bold que avisa la pasarela. `bold_qr`: el saldo cobrado con el QR de Bold en el evento, que
+  -- registra una persona ([Saldo cobrado]). `manual`: el pago inicial verificado a mano (transferencia, Anexo 2.3).
+  medio text not null default 'bold_link' check (medio in ('bold_link', 'bold_qr', 'manual')),
+  -- La suma de lo que se paga de cada reserva, calculada por la base al preparar el pago.
+  monto_esperado bigint not null check (monto_esperado > 0),
+  -- Hasta cuándo vale el link. Solo los links vencen.
+  vence_at timestamptz,
+  pasarela text default 'bold' check (pasarela is null or pasarela = 'bold'),
+  -- La referencia del link en la pasarela: única por workspace, para que el mismo aviso no se procese dos veces.
+  referencia text check (referencia is null or length(btrim(referencia)) between 1 and 200),
+  link_url text check (link_url is null or length(link_url) <= 1000),
+  monto_recibido bigint check (monto_recibido is null or monto_recibido >= 0),
+  aviso_estado text,
+  aviso_at timestamptz,
+  creado_por uuid references public.profiles(id),
+  -- Quién y cuándo, si lo registró una persona (QR en el evento o verificación a mano).
+  registrado_por uuid references public.profiles(id),
+  registrado_at timestamptz,
+  -- [Saldo cobrado] (26-oct): la clave que genera la pantalla al abrir el diálogo. El reintento o el doble clic con la
+  -- misma clave devuelve el mismo pago, sin otra fila (índice único `funcion_pagos_clave_unica`).
+  clave_idempotencia text check (clave_idempotencia is null or length(btrim(clave_idempotencia)) between 1 and 200),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint funcion_pagos_id_ws unique (id, workspace_id),
+  constraint funcion_pagos_referencia_unica unique (workspace_id, referencia),
+  constraint funcion_pagos_conversacion_completa check ((chatwoot_cuenta_id is null) = (chatwoot_conversacion_id is null)),
+  constraint funcion_pagos_link_vence check (medio <> 'bold_link' or vence_at is not null),
+  constraint funcion_pagos_registrado check ((medio = 'bold_link') = (registrado_at is null)),
+  constraint funcion_pagos_registrado_aprobado check (medio = 'bold_link' or (estado = 'aprobado' and registrado_por is not null)),
+  constraint funcion_pagos_medio_concepto check (
+    (medio = 'manual' and concepto = 'inicial') or (medio = 'bold_qr' and concepto = 'saldo') or medio = 'bold_link'),
+  constraint funcion_pagos_pasarela check ((medio = 'manual') = (pasarela is null)),
+  -- Solo lo que registra una persona lleva clave; el QR del evento siempre la lleva.
+  constraint funcion_pagos_clave_registrado check (clave_idempotencia is null or medio <> 'bold_link'),
+  constraint funcion_pagos_qr_con_clave check (medio <> 'bold_qr' or clave_idempotencia is not null)
+);
+
+-- Una clave, un pago por workspace: dos [Saldo cobrado] con la misma clave nunca dejan dos filas, ni aunque lleguen a
+-- la vez (el segundo espera el candado de la reserva y encuentra el primero; sin el candado, choca aquí).
+create unique index funcion_pagos_clave_unica on public.funcion_pagos (workspace_id, clave_idempotencia)
+  where clave_idempotencia is not null;
+
+create table public.funcion_pago_reservas (
+  pago_id uuid not null,
+  reserva_id uuid not null,
+  workspace_id uuid not null,
+  -- Lo que se paga de esa reserva dentro del pago: su `monto_a_pagar` en el pago inicial, su saldo exacto en el del
+  -- saldo, o lo que la persona registró como cobrado.
+  monto bigint not null check (monto > 0),
+  -- Verdadero mientras el pago está `pendiente`: el índice de abajo impide que una reserva esté en dos a la vez.
+  pendiente boolean not null default true,
+  primary key (pago_id, reserva_id),
+  constraint funcion_pago_reservas_pago foreign key (pago_id, workspace_id)
+    references public.funcion_pagos (id, workspace_id) on delete cascade,
+  constraint funcion_pago_reservas_reserva foreign key (reserva_id) references public.funcion_reservas (id)
+);
+
+create unique index funcion_pago_reservas_una_pendiente on public.funcion_pago_reservas (reserva_id) where pendiente;
+create index idx_funcion_pago_reservas_reserva on public.funcion_pago_reservas (reserva_id);
+
+alter table public.funcion_pagos enable row level security;
+alter table public.funcion_pago_reservas enable row level security;
+
+create policy funcion_pagos_lectura on public.funcion_pagos
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+create policy funcion_pago_reservas_lectura on public.funcion_pago_reservas
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+
+revoke all on table public.funcion_pagos from public, anon, authenticated;
+revoke all on table public.funcion_pago_reservas from public, anon, authenticated;
+grant select on public.funcion_pagos to authenticated;
+grant select on public.funcion_pago_reservas to authenticated;
+revoke insert, update, delete, truncate on table public.funcion_pagos from service_role;
+revoke insert, update, delete, truncate on table public.funcion_pago_reservas from service_role;
+grant select on public.funcion_pagos, public.funcion_pago_reservas to service_role;
+
+-- Las reservas de un pago, del workspace y de UNA conversación (una sola reserva puede no tener conversación: la tomó
+-- el equipo). Devuelve las funciones distintas, en orden de id, para tomar sus candados en ese orden.
+create or replace function public.funcion_reservas_de_un_pago(p_workspace_id uuid, p_reserva_ids uuid[])
+returns uuid[]
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_n integer := coalesce(array_length(p_reserva_ids, 1), 0);
+  v_encontradas integer;
+  v_conversaciones integer;
+  v_funciones uuid[];
+begin
+  if v_n = 0 or v_n > 20 then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Entre 1 y 20 reservas.';
+  end if;
+  if (select count(distinct x) from unnest(p_reserva_ids) x) <> v_n then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'Una reserva aparece dos veces.';
+  end if;
+  select count(*), count(distinct (chatwoot_cuenta_id, chatwoot_conversacion_id)),
+         array_agg(distinct funcion_id order by funcion_id)
+    into v_encontradas, v_conversaciones, v_funciones
+    from public.funcion_reservas
+   where workspace_id = p_workspace_id and id = any (p_reserva_ids);
+  if v_encontradas <> v_n then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  if v_conversaciones > 1 or (v_n > 1 and exists (
+    select 1 from public.funcion_reservas where id = any (p_reserva_ids) and chatwoot_conversacion_id is null
+  )) then
+    raise exception 'distinta_conversacion' using errcode = 'P0001',
+      detail = 'Un pago cubre reservas de una sola conversación.';
+  end if;
+  return v_funciones;
+end;
+$$;
+
+revoke execute on function public.funcion_reservas_de_un_pago(uuid, uuid[]) from public, anon, authenticated, service_role;
+
+-- Lo que se paga de cada reserva y la suma SIN las vencidas, con las DOS cifras (P14b, 25-oct): `total` (el precio
+-- completo) y `solo_reserva` (el abono). El asistente pregunta una vez cuál quiere el cliente y no suma: lee.
+--   · por reserva: personas, precio unitario, tarifa, `monto_total`, `monto_reserva` (nulo = sin abono),
+--     `permite_pago_total`, si sigue vigente y su estado;
+--   · la suma: `total`, `solo_reserva` (nulo si alguna vigente no tiene abono) y `modalidades`, las formas que sirven
+--     para TODAS las vigentes (un link fija una sola modalidad). Si `total` no está, no se pregunta: se cobra la reserva.
+create or replace function public.funcion_resumen_pago(p_workspace_id uuid, p_reserva_ids uuid[])
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  perform public.funcion_actor(p_workspace_id, false, 'reserva_no_existe');
+  perform public.funcion_reservas_de_un_pago(p_workspace_id, p_reserva_ids);
+  return (
+    with filas as (
+      select r.id, r.funcion_id, f.inicia_at, r.personas, r.precio_unitario, r.tarifa, r.monto_total,
+             r.personas::bigint * r.abono_unitario as monto_reserva, r.permite_pago_total,
+             (r.estado = 'apartada' and r.vence_at > now()) as vigente, r.estado
+        from public.funcion_reservas r
+        join public.funcion_funciones f on f.id = r.funcion_id
+       where r.id = any (p_reserva_ids)
+    ), suma as (
+      select count(*) filter (where vigente) as vigentes,
+             coalesce(sum(monto_total) filter (where vigente), 0) as total,
+             sum(monto_reserva) filter (where vigente) as solo_reserva,
+             count(*) filter (where vigente and monto_reserva is null) as sin_abono,
+             count(*) filter (where vigente and not permite_pago_total) as sin_total
+        from filas
+    )
+    select jsonb_build_object(
+      'reservas', (select jsonb_agg(jsonb_build_object(
+        'reserva_id', id, 'funcion_id', funcion_id, 'inicia_at', inicia_at, 'personas', personas,
+        'precio_unitario', precio_unitario, 'tarifa', tarifa, 'monto_total', monto_total, 'monto_reserva', monto_reserva,
+        'permite_pago_total', permite_pago_total, 'vigente', vigente, 'estado', estado) order by inicia_at, id) from filas),
+      'total', s.total,
+      'solo_reserva', case when s.vigentes > 0 and s.sin_abono = 0 then s.solo_reserva end,
+      'modalidades', to_jsonb(array_remove(array[
+        case when s.vigentes > 0 and s.sin_total = 0 then 'total' end,
+        case when s.vigentes > 0 and s.sin_abono = 0 then 'abono' end], null)),
+      'vencidas', coalesce((select jsonb_agg(id order by inicia_at, id) from filas where not vigente), '[]'::jsonb)
+    ) from suma s
+  );
+end;
+$$;
+
+-- ejecutable-por-cliente: el asistente (service_role) y el equipo con su sesión; con sesión exige el workspace.
+revoke execute on function public.funcion_resumen_pago(uuid, uuid[]) from public, anon;
+grant execute on function public.funcion_resumen_pago(uuid, uuid[]) to authenticated, service_role;
+
+-- Prepara UN pago para las reservas dadas (de una conversación). Candados de las funciones en orden de id; dentro,
+-- vence los apartados viejos y exige que cada reserva siga `apartada` y vigente (`apartado_vencido`, con su id), que no
+-- esté en otro pago pendiente (`reserva_en_otro_pago`) y que no se haya realineado antes (`ya_realineada`). Realinea el
+-- `vence_at` de todas y el del pago a `ahora + minutos_apartado` (el menor de sus campañas) y crea el pago con
+-- `monto_esperado` = la suma de sus `monto_a_pagar`.
+-- P14b (25-oct): `p_modalidad` (`total` o `abono`) la elige el cliente al pagar y queda fijada, dentro del candado, en
+-- TODAS las reservas del pago, con su `monto_a_pagar`. Si alguna no la permite (sin abono, o sin pago total):
+-- `modalidad_no_permitida`, con su id. Es el pago `inicial`.
+create or replace function public.funcion_preparar_pago(p_workspace_id uuid, p_reserva_ids uuid[], p_modalidad text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_funciones uuid[];
+  v_fid uuid;
+  v_mala record;
+  v_minutos integer;
+  v_vence timestamptz;
+  v_total bigint;
+  v_cuenta bigint;
+  v_conv bigint;
+  v_pago uuid;
+begin
+  perform public.funcion_actor(p_workspace_id, true, 'reserva_no_existe');
+  if coalesce(p_modalidad, '') not in ('abono', 'total') then
+    raise exception 'modalidad_no_permitida' using errcode = 'P0001';
+  end if;
+  v_funciones := public.funcion_reservas_de_un_pago(p_workspace_id, p_reserva_ids);
+
+  -- Candados en orden de id (el mismo orden que `funcion_registrar_pago`): sin interbloqueos.
+  perform 1 from public.funcion_funciones where id = any (v_funciones) order by id for update;
+  foreach v_fid in array v_funciones loop
+    perform public.funcion_vencer_apartados(v_fid);
+  end loop;
+  perform 1 from public.funcion_reservas where id = any (p_reserva_ids) order by id for update;
+
+  select id, estado into v_mala from public.funcion_reservas
+   where id = any (p_reserva_ids) and not (estado = 'apartada' and vence_at > now())
+   order by id limit 1;
+  if found then
+    raise exception '%', case when v_mala.estado in ('vencida', 'apartada') then 'apartado_vencido' else 'reserva_inactiva' end
+      using errcode = 'P0001', detail = v_mala.id::text;
+  end if;
+  select reserva_id into v_fid from public.funcion_pago_reservas
+   where reserva_id = any (p_reserva_ids) and pendiente order by reserva_id limit 1;
+  if found then
+    raise exception 'reserva_en_otro_pago' using errcode = 'P0001', detail = v_fid::text;
+  end if;
+  select id into v_fid from public.funcion_reservas
+   where id = any (p_reserva_ids) and realineada_at is not null order by id limit 1;
+  if found then
+    raise exception 'ya_realineada' using errcode = 'P0001',
+      detail = format('%s: el apartado ya tuvo su link; hay que apartar de nuevo.', v_fid);
+  end if;
+  select id into v_fid from public.funcion_reservas
+   where id = any (p_reserva_ids)
+     and ((p_modalidad = 'abono' and abono_unitario is null) or (p_modalidad = 'total' and not permite_pago_total))
+   order by id limit 1;
+  if found then
+    raise exception 'modalidad_no_permitida' using errcode = 'P0001', detail = v_fid::text;
+  end if;
+
+  update public.funcion_reservas
+     set modalidad = p_modalidad,
+         monto_a_pagar = case p_modalidad when 'total' then monto_total else personas::bigint * abono_unitario end
+   where id = any (p_reserva_ids);
+
+  select min(c.minutos_apartado), sum(r.monto_a_pagar), min(r.chatwoot_cuenta_id), min(r.chatwoot_conversacion_id)
+    into v_minutos, v_total, v_cuenta, v_conv
+    from public.funcion_reservas r
+    join public.funcion_campanas c on c.id = r.campana_id
+   where r.id = any (p_reserva_ids);
+  if v_minutos is null then
+    raise exception 'sin_regla_apartado' using errcode = 'P0001';
+  end if;
+  v_vence := now() + make_interval(mins => v_minutos);
+
+  update public.funcion_reservas
+     set vence_at = v_vence, realineada_at = now(), updated_at = now()
+   where id = any (p_reserva_ids);
+  insert into public.funcion_pagos (workspace_id, chatwoot_cuenta_id, chatwoot_conversacion_id, concepto, medio,
+                                    monto_esperado, vence_at, creado_por)
+  values (p_workspace_id, v_cuenta, v_conv, 'inicial', 'bold_link', v_total, v_vence, auth.uid())
+  returning id into v_pago;
+  insert into public.funcion_pago_reservas (pago_id, reserva_id, workspace_id, monto)
+  select v_pago, r.id, p_workspace_id, r.monto_a_pagar from public.funcion_reservas r where r.id = any (p_reserva_ids);
+
+  return jsonb_build_object('pago_id', v_pago, 'concepto', 'inicial', 'modalidad', p_modalidad, 'monto_esperado', v_total,
+    'vence_at', v_vence,
+    'reservas', (select jsonb_agg(reserva_id order by reserva_id) from public.funcion_pago_reservas where pago_id = v_pago));
+end;
+$$;
+
+-- ejecutable-por-cliente: el asistente (service_role, `generar_link_pago`) y el equipo con su sesión. SECURITY DEFINER;
+-- con sesión exige el workspace y rol que edite.
+revoke execute on function public.funcion_preparar_pago(uuid, uuid[], text) from public, anon;
+grant execute on function public.funcion_preparar_pago(uuid, uuid[], text) to authenticated, service_role;
+
+-- Guarda la referencia y el link que devolvió la pasarela. Idempotente con la misma referencia.
+create or replace function public.funcion_vincular_link(p_pago_id uuid, p_referencia text, p_link_url text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  p record;
+  v_ref text := nullif(btrim(coalesce(p_referencia, '')), '');
+begin
+  select * into p from public.funcion_pagos where id = p_pago_id for update;
+  if not found then
+    raise exception 'pago_no_existe' using errcode = 'P0001';
+  end if;
+  if v_ref is null then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'referencia';
+  end if;
+  if p.referencia is not null then
+    if p.referencia = v_ref then
+      return jsonb_build_object('pago_id', p.id, 'referencia', p.referencia, 'repetida', true);
+    end if;
+    raise exception 'pago_con_link' using errcode = 'P0001', detail = 'El pago ya tiene otro link.';
+  end if;
+  if p.estado <> 'pendiente' then
+    raise exception 'pago_cerrado' using errcode = 'P0001';
+  end if;
+  update public.funcion_pagos set referencia = v_ref, link_url = nullif(btrim(coalesce(p_link_url, '')), ''), updated_at = now()
+   where id = p.id;
+  return jsonb_build_object('pago_id', p.id, 'referencia', v_ref, 'repetida', false);
+end;
+$$;
+
+-- server-only: la llama solo el servidor (asistente) después de crear el link en la pasarela.
+revoke execute on function public.funcion_vincular_link(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.funcion_vincular_link(uuid, text, text) to service_role;
+
+-- El aviso de la pasarela. Idempotente por referencia: un pago que ya no está `pendiente` no se vuelve a procesar.
+--   inicial, aprobado + monto = esperado → en UNA transacción, con los candados de las funciones en orden de id,
+--     confirma cada reserva que tenga cupo según el límite de SU origen; las que no, quedan `pendiente_persona` con el
+--     pago registrado. Sin devolución automática y sin pasar nunca de la capacidad.
+--   saldo, aprobado + monto = esperado → solo suma a lo pagado (`funcion_saldo`): no confirma nada ni cambia la
+--     ocupación. No toma el candado de la función: toma los de sus reservas en orden de id y después el del pago (el
+--     mismo orden función → reserva → pago de la cancelación, que anula el link).
+--   fallido o vencido → no confirma ninguna (siguen apartadas hasta su vencimiento).
+--   aprobado con otro monto → `revisar`, no confirma nada (pasa a una persona).
+--   aprobado sobre un pago que la base ya cerró sin aviso aprobado (`anulado`, `vencido` o `fallido`: la reserva se
+--     canceló, el saldo se cobró en el evento o el link se reemplazó por otro) → `revisar`: llegó plata que nadie
+--     esperaba y la mira una persona. Nunca se ignora en silencio.
+create or replace function public.funcion_registrar_pago(p_workspace_id uuid, p_referencia text, p_estado text, p_monto_recibido bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  p record;
+  r record;
+  f record;
+  v_funciones uuid[];
+  v_fid uuid;
+  v_limite integer;
+  v_confirmadas jsonb := '[]'::jsonb;
+  v_pendientes jsonb := '[]'::jsonb;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'pago_no_existe') <> 'servidor' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_estado, '') not in ('aprobado', 'fallido', 'vencido') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  select * into p from public.funcion_pagos where workspace_id = p_workspace_id and referencia = btrim(coalesce(p_referencia, ''));
+  if not found then
+    raise exception 'pago_no_existe' using errcode = 'P0001';
+  end if;
+
+  if p.concepto = 'saldo' then
+    -- Candados: las reservas del pago en orden de id, después el pago. Sin el de la función.
+    perform 1 from public.funcion_reservas
+     where id in (select reserva_id from public.funcion_pago_reservas where pago_id = p.id)
+     order by id for update;
+  else
+    -- Candados: las funciones del pago en orden de id, después el pago.
+    select array_agg(distinct r2.funcion_id order by r2.funcion_id) into v_funciones
+      from public.funcion_pago_reservas pr join public.funcion_reservas r2 on r2.id = pr.reserva_id
+     where pr.pago_id = p.id;
+    perform 1 from public.funcion_funciones where id = any (v_funciones) order by id for update;
+  end if;
+  select * into p from public.funcion_pagos where id = p.id for update;
+  if p.estado <> 'pendiente' then
+    if p_estado = 'aprobado' and p.estado in ('anulado', 'vencido', 'fallido') and p.aviso_estado is distinct from 'aprobado' then
+      update public.funcion_pagos
+         set estado = 'revisar', aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+       where id = p.id;
+      return jsonb_build_object('pago_id', p.id, 'estado', 'revisar', 'repetida', false, 'concepto', p.concepto,
+        'confirmadas', '[]'::jsonb, 'pendientes', '[]'::jsonb);
+    end if;
+    return jsonb_build_object('pago_id', p.id, 'estado', p.estado, 'repetida', true, 'concepto', p.concepto);
+  end if;
+
+  if p_estado in ('fallido', 'vencido') then
+    update public.funcion_pagos
+       set estado = p_estado, aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+     where id = p.id;
+    update public.funcion_pago_reservas set pendiente = false where pago_id = p.id;
+    if p_estado = 'fallido' and p.concepto = 'inicial' then
+      update public.funcion_reservas set pago_estado = 'rechazado', updated_at = now()
+       where id in (select reserva_id from public.funcion_pago_reservas where pago_id = p.id) and estado = 'apartada';
+    end if;
+    return jsonb_build_object('pago_id', p.id, 'estado', p_estado, 'repetida', false, 'concepto', p.concepto,
+      'confirmadas', '[]'::jsonb, 'pendientes', '[]'::jsonb);
+  end if;
+
+  if p_monto_recibido is distinct from p.monto_esperado then
+    update public.funcion_pagos
+       set estado = 'revisar', aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+     where id = p.id;
+    update public.funcion_pago_reservas set pendiente = false where pago_id = p.id;
+    return jsonb_build_object('pago_id', p.id, 'estado', 'revisar', 'repetida', false, 'concepto', p.concepto,
+      'confirmadas', '[]'::jsonb, 'pendientes', '[]'::jsonb);
+  end if;
+
+  if p.concepto = 'inicial' then
+    foreach v_fid in array v_funciones loop
+      perform public.funcion_vencer_apartados(v_fid);
+    end loop;
+    for r in
+      select x.* from public.funcion_reservas x
+       where x.id in (select reserva_id from public.funcion_pago_reservas where pago_id = p.id)
+       order by x.funcion_id, x.id
+         for update
+    loop
+      select * into f from public.funcion_funciones where id = r.funcion_id;
+      v_limite := case when r.origen = 'asistente' then f.cupo_asistente else f.capacidad end;
+      if (r.estado = 'apartada' and r.vence_at > now())
+         or (r.estado = 'vencida' and f.estado <> 'cancelada'
+             and public.funcion_ocupadas(f.id) + r.personas <= v_limite) then
+        update public.funcion_reservas
+           set estado = 'confirmada', pago_estado = 'aprobado', confirmada_at = now(), updated_at = now()
+         where id = r.id;
+        v_confirmadas := v_confirmadas || to_jsonb(r.id);
+      else
+        -- Sin cupo (o cancelada mientras tanto): decide una persona. El pago queda registrado.
+        update public.funcion_reservas set estado = 'pendiente_persona', pago_estado = 'aprobado', updated_at = now()
+         where id = r.id;
+        v_pendientes := v_pendientes || to_jsonb(r.id);
+      end if;
+    end loop;
+  end if;
+
+  update public.funcion_pagos
+     set estado = 'aprobado', aviso_estado = p_estado, aviso_at = now(), monto_recibido = p_monto_recibido, updated_at = now()
+   where id = p.id;
+  update public.funcion_pago_reservas set pendiente = false where pago_id = p.id;
+  return jsonb_build_object('pago_id', p.id, 'estado', 'aprobado', 'repetida', false, 'concepto', p.concepto,
+    'confirmadas', v_confirmadas, 'pendientes', v_pendientes);
+end;
+$$;
+
+-- server-only: la llama solo el servidor con el aviso de la pasarela (webhook o consulta), con la llave de servicio.
+revoke execute on function public.funcion_registrar_pago(uuid, text, text, bigint) from public, anon, authenticated;
+grant execute on function public.funcion_registrar_pago(uuid, text, text, bigint) to service_role;
+
+-- Una persona del equipo resuelve una reserva `pendiente_persona` (pago aprobado sin cupo):
+--   sobrevender → dentro del candado, confirma si ocupadas + personas ≤ tope de sobreventa (función → campaña); si no
+--                 hay tope, `sin_sobreventa`; si se pasa, `sobre_tope`;
+--   devolver    → `requiere_devolucion`, con el monto pagado de esa reserva.
+-- Queda quién y cuándo. NO se concede a service_role: ni la base ni el asistente sobrevenden solos.
+create or replace function public.funcion_resolver_pendiente(p_reserva_id uuid, p_accion text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+  v_funcion uuid;
+  r record;
+  f record;
+  v_tope integer;
+  v_ocupadas integer;
+  v_monto bigint;
+begin
+  select workspace_id, funcion_id into v_ws, v_funcion from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'reserva_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_accion, '') not in ('sobrevender', 'devolver') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'accion';
+  end if;
+
+  select fu.*, c.tope_sobreventa as tope_campana into f
+    from public.funcion_funciones fu join public.funcion_campanas c on c.id = fu.campana_id
+   where fu.id = v_funcion for update of fu;
+  perform public.funcion_vencer_apartados(v_funcion);
+  select * into r from public.funcion_reservas where id = p_reserva_id for update;
+  if r.estado <> 'pendiente_persona' then
+    raise exception 'reserva_no_pendiente' using errcode = 'P0001', detail = format('La reserva está %s.', r.estado);
+  end if;
+
+  if p_accion = 'sobrevender' then
+    v_tope := coalesce(f.tope_sobreventa, f.tope_campana);
+    if v_tope is null then
+      raise exception 'sin_sobreventa' using errcode = 'P0001', detail = 'La campaña no tiene tope de sobreventa.';
+    end if;
+    v_ocupadas := public.funcion_ocupadas(f.id);
+    if v_ocupadas + r.personas > v_tope then
+      raise exception 'sobre_tope' using errcode = 'P0001',
+        detail = format('Hay %s ocupadas; con %s más pasa el tope de %s.', v_ocupadas, r.personas, v_tope);
+    end if;
+    update public.funcion_reservas
+       set estado = 'confirmada', confirmada_at = now(), confirmada_por = auth.uid(), sobreventa = true,
+           resuelta_por = auth.uid(), resuelta_at = now(), updated_at = now()
+     where id = r.id;
+    return jsonb_build_object('reserva_id', r.id, 'estado', 'confirmada', 'sobreventa', true, 'ocupadas', v_ocupadas + r.personas);
+  end if;
+
+  select pr.monto into v_monto
+    from public.funcion_pago_reservas pr join public.funcion_pagos pg on pg.id = pr.pago_id
+   where pr.reserva_id = r.id and pg.estado = 'aprobado'
+   order by pg.aviso_at desc nulls last limit 1;
+  update public.funcion_reservas
+     set estado = 'requiere_devolucion', devolucion_monto = coalesce(v_monto, r.monto_a_pagar),
+         resuelta_por = auth.uid(), resuelta_at = now(), updated_at = now()
+   where id = r.id;
+  return jsonb_build_object('reserva_id', r.id, 'estado', 'requiere_devolucion', 'devolucion_monto', coalesce(v_monto, r.monto_a_pagar));
+end;
+$$;
+
+-- ejecutable-por-cliente: solo una persona del equipo, con su sesión. NO se concede a service_role.
+revoke execute on function public.funcion_resolver_pendiente(uuid, text) from public, anon, service_role;
+grant execute on function public.funcion_resolver_pendiente(uuid, text) to authenticated;
+
+
+-- ── 15b. El saldo: un pago más de la misma reserva (P14a a P14c, aprobados por Mauricio el 2026-10-25) ──
+-- Diseño §1.11. Si el cliente pagó solo la reserva, el saldo se cobra con un link por el valor exacto del saldo hasta
+-- el plazo de la campaña (foto en la reserva), o en el evento con el QR de Bold ([Saldo cobrado]).
+--   · Lo pagado y el saldo SE CALCULAN, no se guardan (como la ocupación): pagado = suma de los pagos `aprobado` de la
+--     reserva (inicial y saldo); saldo = total de la foto − pagado. `funcion_saldo_de` es el único lugar de la regla.
+--   · Estado del saldo (solo de una reserva `confirmada`; nulo en las demás): `sin_saldo` (el pago inicial cubrió el
+--     total), `pendiente`, `pagado` (lo cubrieron pagos de saldo) o `vencido` (pasó el plazo sin pagar: se cobra en el
+--     evento o una persona manda un link nuevo).
+--   · Plazo (P14c): el link del saldo vence al final del día de Bogotá que queda `dias_saldo_antes` días antes de la
+--     función. Con 1 y una función el sábado 31, vence al terminar el viernes 30 (el sábado 31 a las 00:00).
+--     Después del plazo solo una persona del equipo genera un link nuevo, que vale hasta la hora de la función.
+--   · Candados: el saldo no cambia la ocupación, así que NO toma el candado de la función; toma los de sus reservas en
+--     orden de id y después los de los pagos. Nunca toma una función después de una reserva.
+--   · El link del saldo se puede generar de nuevo (no aparta cupo): el pendiente anterior queda `vencido`. Cancelar la
+--     reserva o cobrar el saldo en el evento deja el link vivo `anulado`. Si Bold igual cobra un link cerrado, el aviso
+--     queda en `revisar` (`funcion_registrar_pago`). SIN VERIFICAR: si la API de Bold permite anular un link antes de
+--     que venza; mientras tanto el link viejo sigue vivo en Bold hasta su `vence_at`.
+
+-- El fin del plazo del saldo: el primer instante del día de Bogotá siguiente al que queda `p_dias` antes de la función.
+create or replace function public.funcion_plazo_saldo(p_inicia_at timestamptz, p_dias integer)
+returns timestamptz
+language sql
+stable
+set search_path = public
+as $$
+  select (((p_inicia_at at time zone 'America/Bogota')::date - p_dias + 1)::timestamp) at time zone 'America/Bogota';
+$$;
+
+revoke execute on function public.funcion_plazo_saldo(timestamptz, integer) from public, anon, authenticated, service_role;
+
+-- EL ÚNICO lugar de la regla del saldo de una reserva. Sin verificación de quién llama: la usan las RPC de abajo.
+create or replace function public.funcion_saldo_de(p_reserva_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  r record;
+  v_pagado bigint;
+  v_con_saldo boolean;
+  v_plazo timestamptz;
+  v_saldo bigint;
+  v_link record;
+begin
+  select x.*, f.inicia_at into r
+    from public.funcion_reservas x join public.funcion_funciones f on f.id = x.funcion_id
+   where x.id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  select coalesce(sum(pr.monto), 0), coalesce(bool_or(pg.concepto = 'saldo'), false)
+    into v_pagado, v_con_saldo
+    from public.funcion_pago_reservas pr join public.funcion_pagos pg on pg.id = pr.pago_id
+   where pr.reserva_id = r.id and pg.estado = 'aprobado';
+  v_plazo := public.funcion_plazo_saldo(r.inicia_at, r.dias_saldo_antes);
+  v_saldo := r.monto_total - v_pagado;
+  select pg.id, pg.link_url, pg.vence_at, pg.monto_esperado into v_link
+    from public.funcion_pago_reservas pr join public.funcion_pagos pg on pg.id = pr.pago_id
+   where pr.reserva_id = r.id and pr.pendiente and pg.concepto = 'saldo'
+   order by pg.created_at desc limit 1;
+  return jsonb_build_object(
+    'reserva_id', r.id,
+    'monto_total', r.monto_total,
+    'pagado', v_pagado,
+    'saldo', v_saldo,
+    'modalidad', r.modalidad,
+    'plazo_at', v_plazo,
+    'estado', case
+      when r.estado <> 'confirmada' then null
+      when v_saldo <= 0 then case when v_con_saldo then 'pagado' else 'sin_saldo' end
+      when now() < v_plazo then 'pendiente'
+      else 'vencido'
+    end,
+    'link', case when v_link.id is null then null else jsonb_build_object(
+      'pago_id', v_link.id, 'url', v_link.link_url, 'vence_at', v_link.vence_at, 'monto', v_link.monto_esperado) end
+  );
+end;
+$$;
+
+revoke execute on function public.funcion_saldo_de(uuid) from public, anon, authenticated, service_role;
+
+-- El saldo de una reserva (el asistente y el equipo). Con sesión exige el workspace de la reserva.
+create or replace function public.funcion_saldo(p_reserva_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+begin
+  select workspace_id into v_ws from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_actor(v_ws, false, 'reserva_no_existe');
+  return public.funcion_saldo_de(p_reserva_id);
+end;
+$$;
+
+-- ejecutable-por-cliente: el equipo con su sesión y el asistente con service_role. SECURITY DEFINER; con sesión exige
+-- que `auth.uid()` sea del workspace de la reserva (`funcion_actor`).
+revoke execute on function public.funcion_saldo(uuid) from public, anon;
+grant execute on function public.funcion_saldo(uuid) to authenticated, service_role;
+
+-- Los saldos de las reservas confirmadas de una función, para la lista del día (una llamada por función, no por reserva).
+create or replace function public.funcion_saldos(p_funcion_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+begin
+  select workspace_id into v_ws from public.funcion_funciones where id = p_funcion_id;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_actor(v_ws, false, 'funcion_no_existe');
+  return coalesce((
+    select jsonb_agg(public.funcion_saldo_de(r.id) order by r.created_at, r.id)
+      from public.funcion_reservas r
+     where r.funcion_id = p_funcion_id and r.estado = 'confirmada'
+  ), '[]'::jsonb);
+end;
+$$;
+
+-- ejecutable-por-cliente: la lista del día, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_saldos(uuid) from public, anon, service_role;
+grant execute on function public.funcion_saldos(uuid) to authenticated;
+
+-- Cierra los links de saldo vivos (`pendiente`) que cubren estas reservas: `vencido` al generar uno nuevo, `anulado`
+-- al cancelar o al cobrar el saldo en el evento. El link cubre a todas sus reservas, así que se cierra entero. El
+-- llamador ya tiene el candado de las reservas; aquí se toman los de los pagos. Devuelve los ids cerrados.
+create or replace function public.funcion_cerrar_links_saldo(p_reserva_ids uuid[], p_estado text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ids uuid[];
+begin
+  if p_estado not in ('vencido', 'anulado') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  select coalesce(array_agg(pg.id order by pg.id), '{}') into v_ids
+    from public.funcion_pagos pg
+   where pg.concepto = 'saldo' and pg.estado = 'pendiente'
+     and pg.id in (select pr.pago_id from public.funcion_pago_reservas pr
+                    where pr.reserva_id = any (p_reserva_ids) and pr.pendiente);
+  -- Los candados de esos pagos, en orden de id (el aviso de la pasarela toma el del pago después de sus reservas).
+  perform 1 from public.funcion_pagos where id = any (v_ids) order by id for update;
+  if cardinality(v_ids) = 0 then
+    return '[]'::jsonb;
+  end if;
+  -- Ya con el candado, solo los que siguen pendientes (un aviso pudo cerrarlos mientras se esperaba).
+  with cerrados as (
+    update public.funcion_pagos set estado = p_estado, updated_at = now()
+     where id = any (v_ids) and estado = 'pendiente'
+    returning id
+  )
+  select coalesce(array_agg(id order by id), '{}') into v_ids from cerrados;
+  update public.funcion_pago_reservas set pendiente = false where pago_id = any (v_ids);
+  return to_jsonb(v_ids);
+end;
+$$;
+
+revoke execute on function public.funcion_cerrar_links_saldo(uuid[], text) from public, anon, authenticated, service_role;
+
+-- Prepara el pago del SALDO de una o varias reservas de la misma conversación (como el pago inicial). Exige reservas
+-- `confirmada`, con saldo mayor a cero (`sin_saldo` si pagaron el total) y de una función viva que no haya empezado
+-- (`funcion_cerrada`, `funcion_pasada`). El asistente solo antes del plazo (`saldo_vencido`); una persona del equipo
+-- también después, hasta la hora de la función. El monto esperado es la suma de los saldos exactos, y el pago vence con
+-- el plazo más cercano de sus reservas (o, pasado el plazo, con la hora de la función). Cierra como `vencido` el link
+-- de saldo anterior de esas reservas. Candados: solo las reservas, en orden de id (y después los pagos viejos).
+create or replace function public.funcion_preparar_pago_saldo(p_workspace_id uuid, p_reserva_ids uuid[])
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_actor text := public.funcion_actor(p_workspace_id, true, 'reserva_no_existe');
+  r record;
+  v_s jsonb;
+  v_saldo bigint;
+  v_plazo timestamptz;
+  v_vence timestamptz;
+  v_total bigint := 0;
+  v_ids uuid[] := '{}';
+  v_montos bigint[] := '{}';
+  v_cuenta bigint;
+  v_conv bigint;
+  v_cerrados jsonb;
+  v_pago uuid;
+begin
+  perform public.funcion_reservas_de_un_pago(p_workspace_id, p_reserva_ids);
+  perform 1 from public.funcion_reservas where id = any (p_reserva_ids) order by id for update;
+
+  for r in
+    select x.id, x.estado, x.chatwoot_cuenta_id, x.chatwoot_conversacion_id, f.inicia_at, f.estado as funcion_estado
+      from public.funcion_reservas x join public.funcion_funciones f on f.id = x.funcion_id
+     where x.id = any (p_reserva_ids)
+     order by x.id
+  loop
+    if r.estado <> 'confirmada' then
+      raise exception 'reserva_inactiva' using errcode = 'P0001', detail = r.id::text;
+    end if;
+    if r.funcion_estado = 'cancelada' then
+      raise exception 'funcion_cerrada' using errcode = 'P0001', detail = r.id::text;
+    end if;
+    if r.inicia_at <= now() then
+      raise exception 'funcion_pasada' using errcode = 'P0001', detail = r.id::text;
+    end if;
+    v_s := public.funcion_saldo_de(r.id);
+    v_saldo := (v_s->>'saldo')::bigint;
+    if v_saldo <= 0 then
+      raise exception 'sin_saldo' using errcode = 'P0001', detail = r.id::text;
+    end if;
+    v_plazo := (v_s->>'plazo_at')::timestamptz;
+    if now() >= v_plazo and v_actor = 'servidor' then
+      raise exception 'saldo_vencido' using errcode = 'P0001', detail = r.id::text;
+    end if;
+    v_vence := least(v_vence, case when now() < v_plazo then v_plazo else r.inicia_at end);
+    v_total := v_total + v_saldo;
+    v_ids := v_ids || r.id;
+    v_montos := v_montos || v_saldo;
+    v_cuenta := coalesce(v_cuenta, r.chatwoot_cuenta_id);
+    v_conv := coalesce(v_conv, r.chatwoot_conversacion_id);
+  end loop;
+
+  v_cerrados := public.funcion_cerrar_links_saldo(p_reserva_ids, 'vencido');
+  insert into public.funcion_pagos (workspace_id, chatwoot_cuenta_id, chatwoot_conversacion_id, concepto, medio,
+                                    monto_esperado, vence_at, creado_por)
+  values (p_workspace_id, v_cuenta, v_conv, 'saldo', 'bold_link', v_total, v_vence, auth.uid())
+  returning id into v_pago;
+  insert into public.funcion_pago_reservas (pago_id, reserva_id, workspace_id, monto)
+  select v_pago, x.id, p_workspace_id, x.monto from unnest(v_ids, v_montos) as x(id, monto);
+
+  return jsonb_build_object('pago_id', v_pago, 'concepto', 'saldo', 'monto_esperado', v_total, 'vence_at', v_vence,
+    'reservas', to_jsonb(v_ids), 'reemplazados', v_cerrados);
+end;
+$$;
+
+-- ejecutable-por-cliente: el asistente (service_role, `generar_link_saldo`) y el equipo con su sesión (regenerar el
+-- link en la lista del día). SECURITY DEFINER; con sesión exige el workspace y rol que edite.
+revoke execute on function public.funcion_preparar_pago_saldo(uuid, uuid[]) from public, anon;
+grant execute on function public.funcion_preparar_pago_saldo(uuid, uuid[]) to authenticated, service_role;
+
+-- [Saldo cobrado]: una persona del equipo registra el saldo cobrado con el QR de Bold en el evento. Queda como un pago
+-- `saldo` más, aprobado, con medio `bold_qr`, el monto, quién y cuándo. El monto va de 1 al saldo (`monto_invalido`):
+-- en el evento se puede cobrar una parte, nunca más del saldo. Deja `anulado` el link de saldo vivo de la reserva (su
+-- monto ya no cuadra). NO se concede a service_role: lo registra una persona.
+-- Idempotente (26-oct, Mauricio): `p_clave` la genera la pantalla una vez por diálogo y la repite en los reintentos.
+-- Dentro del candado de la reserva, la misma clave con la misma reserva y el mismo monto devuelve el mismo pago
+-- (`repetida`) sin crear otra fila, aunque el saldo ya esté en cero; con otra reserva u otro monto, `clave_reusada`.
+-- El candado de la reserva además impide cobrar dos veces el mismo saldo con claves distintas a la vez.
+create or replace function public.funcion_registrar_saldo_cobrado(p_reserva_id uuid, p_monto bigint, p_clave text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_ws uuid;
+  r record;
+  v_saldo bigint;
+  v_anulados jsonb;
+  v_pago uuid;
+  v_clave text := btrim(coalesce(p_clave, ''));
+  v_previo record;
+begin
+  select workspace_id into v_ws from public.funcion_reservas where id = p_reserva_id;
+  if not found then
+    raise exception 'reserva_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(v_ws, true, 'reserva_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if v_clave = '' or length(v_clave) > 200 then
+    raise exception 'sin_clave_idempotencia' using errcode = 'P0001';
+  end if;
+
+  select * into r from public.funcion_reservas where id = p_reserva_id for update;
+  -- La misma clave: el mismo pago, sin otra fila. Se busca DESPUÉS del candado: la llamada simultánea ya terminó.
+  select pg.id, pg.monto_esperado, pr.reserva_id into v_previo
+    from public.funcion_pagos pg join public.funcion_pago_reservas pr on pr.pago_id = pg.id
+   where pg.workspace_id = v_ws and pg.clave_idempotencia = v_clave;
+  if found then
+    if v_previo.reserva_id <> r.id or v_previo.monto_esperado is distinct from p_monto then
+      raise exception 'clave_reusada' using errcode = 'P0001',
+        detail = 'La clave ya se usó para otra reserva u otro monto.';
+    end if;
+    return public.funcion_saldo_de(r.id)
+      || jsonb_build_object('pago_id', v_previo.id, 'links_anulados', '[]'::jsonb, 'repetida', true);
+  end if;
+  if r.estado <> 'confirmada' then
+    raise exception 'reserva_inactiva' using errcode = 'P0001', detail = format('La reserva está %s.', r.estado);
+  end if;
+  v_saldo := (public.funcion_saldo_de(r.id)->>'saldo')::bigint;
+  if v_saldo <= 0 then
+    raise exception 'sin_saldo' using errcode = 'P0001';
+  end if;
+  if p_monto is null or p_monto < 1 or p_monto > v_saldo then
+    raise exception 'monto_invalido' using errcode = 'P0001', detail = format('El saldo es %s.', v_saldo);
+  end if;
+
+  v_anulados := public.funcion_cerrar_links_saldo(array[r.id], 'anulado');
+  insert into public.funcion_pagos (workspace_id, chatwoot_cuenta_id, chatwoot_conversacion_id, concepto, medio, pasarela,
+                                    estado, monto_esperado, monto_recibido, creado_por, registrado_por, registrado_at,
+                                    clave_idempotencia)
+  values (r.workspace_id, r.chatwoot_cuenta_id, r.chatwoot_conversacion_id, 'saldo', 'bold_qr', 'bold',
+          'aprobado', p_monto, p_monto, auth.uid(), auth.uid(), now(), v_clave)
+  returning id into v_pago;
+  insert into public.funcion_pago_reservas (pago_id, reserva_id, workspace_id, monto, pendiente)
+  values (v_pago, r.id, r.workspace_id, p_monto, false);
+
+  return public.funcion_saldo_de(r.id)
+    || jsonb_build_object('pago_id', v_pago, 'links_anulados', v_anulados, 'repetida', false);
+end;
+$$;
+
+-- ejecutable-por-cliente: solo una persona del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que
+-- edite. NO se concede a service_role.
+revoke execute on function public.funcion_registrar_saldo_cobrado(uuid, bigint, text) from public, anon, service_role;
+grant execute on function public.funcion_registrar_saldo_cobrado(uuid, bigint, text) to authenticated;
+
+
+-- ── 16. El panel de campañas (§4, diseño de Noor revisado por Sofía; P6, P7 y P10 aprobados el 2026-10-22) ──
+-- Lecturas para las pantallas del equipo (con el estado efectivo de `funcion_estado_campana`: cierre automático al
+-- leer, sin cron), cambios de estado de un toque, duplicar, y la atribución por anuncio (P10): el equipo asocia ids de
+-- anuncio a una campaña, y el asistente marca la conversación por id de anuncio o por código.
+
+create table public.funcion_campana_anuncios (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null,
+  campana_id uuid not null,
+  -- El id del anuncio (Meta: Click-to-WhatsApp, el `source_id` del referral). Un anuncio es de UNA campaña.
+  ad_id text not null check (ad_id ~ '^[A-Za-z0-9_.:-]{1,100}$'),
+  creado_por uuid references public.profiles(id),
+  created_at timestamptz not null default now(),
+  constraint funcion_campana_anuncios_campana foreign key (campana_id, workspace_id)
+    references public.funcion_campanas (id, workspace_id) on delete cascade,
+  constraint funcion_campana_anuncios_unico unique (workspace_id, ad_id)
+);
+
+create index idx_funcion_campana_anuncios_campana on public.funcion_campana_anuncios (campana_id);
+
+alter table public.funcion_campana_anuncios enable row level security;
+create policy funcion_campana_anuncios_lectura on public.funcion_campana_anuncios
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+revoke all on table public.funcion_campana_anuncios from public, anon, authenticated;
+grant select on public.funcion_campana_anuncios to authenticated;
+revoke insert, update, delete, truncate on table public.funcion_campana_anuncios from service_role;
+grant select on public.funcion_campana_anuncios to service_role;
+
+-- La lista del inicio: las campañas vivas con su estado efectivo, cuántas funciones tienen, cuántas están llenas y
+-- llenas para el asistente (en total y en los próximos 7 días, para el aviso del inicio) y la próxima función.
+create or replace function public.funcion_panel_campanas(p_workspace_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  perform public.funcion_actor(p_workspace_id, false, 'campana_no_existe');
+  return (
+    with base as (
+      select c.*, e.nombre as experiencia, public.funcion_estado_campana(c) as estado_efectivo
+        from public.funcion_campanas c
+        join public.funcion_experiencias e on e.id = c.experiencia_id
+       where c.workspace_id = p_workspace_id and c.archivada_at is null
+    ), fun as (
+      select f.campana_id, f.inicia_at, f.capacidad, f.cupo_asistente, public.funcion_ocupadas(f.id) as ocupadas
+        from public.funcion_funciones f
+       where f.workspace_id = p_workspace_id and f.archivada_at is null and f.estado <> 'cancelada'
+    )
+    select coalesce(jsonb_agg(jsonb_build_object(
+             'campana_id', b.id, 'nombre', b.nombre, 'codigo', b.codigo, 'experiencia_id', b.experiencia_id,
+             'experiencia', b.experiencia, 'estado', b.estado_efectivo, 'desde', b.desde, 'hasta', b.hasta,
+             'precio_persona', b.precio_persona, 'precio_preventa_persona', b.precio_preventa_persona,
+             'abono_persona', b.abono_persona, 'permite_pago_total', b.permite_pago_total,
+             'minutos_apartado', b.minutos_apartado, 'tope_sobreventa', b.tope_sobreventa,
+             'dias_saldo_antes', b.dias_saldo_antes,
+             'funciones', (select count(*) from fun where fun.campana_id = b.id),
+             'llenas', (select count(*) from fun where fun.campana_id = b.id and fun.ocupadas >= fun.capacidad),
+             'llenas_asistente', (select count(*) from fun where fun.campana_id = b.id and fun.inicia_at > now()
+                                    and fun.ocupadas >= fun.cupo_asistente and fun.ocupadas < fun.capacidad),
+             'llenas_asistente_semana', (select count(*) from fun where fun.campana_id = b.id and fun.inicia_at > now()
+                                    and fun.inicia_at <= now() + interval '7 days'
+                                    and fun.ocupadas >= fun.cupo_asistente and fun.ocupadas < fun.capacidad),
+             'proxima', (select min(fun.inicia_at) from fun where fun.campana_id = b.id and fun.inicia_at > now()),
+             'ultima_capacidad', (select fun.capacidad from fun where fun.campana_id = b.id order by fun.inicia_at desc limit 1),
+             'ultima_cupo_asistente', (select fun.cupo_asistente from fun where fun.campana_id = b.id order by fun.inicia_at desc limit 1),
+             'created_at', b.created_at
+           ) order by case b.estado_efectivo when 'activa' then 0 when 'agotada' then 0 when 'borrador' then 1
+                                             when 'pausada' then 2 else 3 end,
+                      b.desde nulls last, b.created_at desc), '[]'::jsonb)
+      from base b
+  );
+end;
+$$;
+
+-- ejecutable-por-cliente: el inicio del panel, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_panel_campanas(uuid) from public, anon, service_role;
+grant execute on function public.funcion_panel_campanas(uuid) to authenticated;
+
+-- Una campaña con su experiencia, su estado efectivo, sus anuncios y su agenda (cada función con su ocupación y su
+-- tarifa; las llenas al final, como pide §4.6).
+create or replace function public.funcion_panel_campana(p_campana_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  c public.funcion_campanas;
+  e record;
+begin
+  select * into c from public.funcion_campanas where id = p_campana_id and archivada_at is null;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  perform public.funcion_actor(c.workspace_id, false, 'campana_no_existe');
+  select * into e from public.funcion_experiencias where id = c.experiencia_id;
+  return jsonb_build_object(
+    'campana_id', c.id, 'nombre', c.nombre, 'codigo', c.codigo, 'estado', public.funcion_estado_campana(c),
+    'estado_guardado', c.estado, 'publicada', c.agenda_publicada_at is not null, 'desde', c.desde, 'hasta', c.hasta,
+    'minutos_apartado', c.minutos_apartado, 'precio_persona', c.precio_persona,
+    'precio_preventa_persona', c.precio_preventa_persona, 'abono_persona', c.abono_persona,
+    'permite_pago_total', c.permite_pago_total, 'tope_sobreventa', c.tope_sobreventa,
+    'dias_saldo_antes', c.dias_saldo_antes,
+    'experiencia', jsonb_build_object('experiencia_id', e.id, 'nombre', e.nombre, 'titulo_oferta', e.titulo_oferta,
+      'frase_gancho', e.frase_gancho, 'intro', e.intro, 'que_incluye', to_jsonb(e.que_incluye),
+      'emojis_tema', e.emojis_tema, 'saludo_grupo', e.saludo_grupo, 'relato_grupo', e.relato_grupo,
+      'edad_minima', e.edad_minima),
+    'anuncios', coalesce((select jsonb_agg(a.ad_id order by a.created_at) from public.funcion_campana_anuncios a
+                           where a.campana_id = c.id), '[]'::jsonb),
+    'funciones', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'funcion_id', x.id, 'inicia_at', x.inicia_at, 'inicia_texto', public.funcion_fecha_texto(x.inicia_at),
+               'estado', x.estado, 'es_preventa', x.es_preventa, 'preventa_hasta', x.preventa_hasta,
+               'cierra_venta_at', x.cierra_venta_at,
+               'capacidad', x.capacidad, 'cupo_asistente', x.cupo_asistente, 'ocupadas', x.ocupadas,
+               'reservas_activas', x.reservas_activas, 'tarifa', public.funcion_tarifa(x.id)
+             ) order by (x.ocupadas >= x.capacidad), x.inicia_at, x.id)
+        from (select f.*, public.funcion_ocupadas(f.id) as ocupadas,
+                     (select count(*) from public.funcion_reservas r where r.funcion_id = f.id
+                        and (r.estado = 'confirmada' or (r.estado = 'apartada' and r.vence_at > now()))) as reservas_activas
+                from public.funcion_funciones f where f.campana_id = c.id and f.archivada_at is null) x
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+-- ejecutable-por-cliente: la pantalla de la campaña, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_panel_campana(uuid) from public, anon, service_role;
+grant execute on function public.funcion_panel_campana(uuid) to authenticated;
+
+-- Pausar, reactivar o cerrar una campaña. `activa` solo si ya tiene la agenda publicada (para eso está publicar).
+create or replace function public.funcion_cambiar_estado_campana(p_campana_id uuid, p_estado text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c record;
+begin
+  select * into c from public.funcion_campanas where id = p_campana_id and archivada_at is null;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(c.workspace_id, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_estado, '') not in ('activa', 'pausada', 'cerrada') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  if p_estado = 'activa' and c.agenda_publicada_at is null then
+    raise exception 'campana_no_publicada' using errcode = 'P0001', detail = 'Se activa al publicar la agenda.';
+  end if;
+  update public.funcion_campanas set estado = p_estado where id = c.id;
+  return jsonb_build_object('campana_id', c.id, 'estado', p_estado, 'antes', c.estado);
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_cambiar_estado_campana(uuid, text) from public, anon, service_role;
+grant execute on function public.funcion_cambiar_estado_campana(uuid, text) to authenticated;
+
+-- Pausar, reactivar o cancelar una función, con su candado. Devuelve cuántas reservas activas tiene (para el aviso
+-- «Tiene N reservas: hay que avisarles»).
+create or replace function public.funcion_cambiar_estado_funcion(p_funcion_id uuid, p_estado text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  f record;
+begin
+  select * into f from public.funcion_funciones where id = p_funcion_id and archivada_at is null;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(f.workspace_id, true, 'funcion_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if coalesce(p_estado, '') not in ('activa', 'pausada', 'cancelada') then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'estado';
+  end if;
+  perform 1 from public.funcion_funciones where id = f.id for update;
+  perform public.funcion_vencer_apartados(f.id);
+  update public.funcion_funciones set estado = p_estado where id = f.id;
+  return jsonb_build_object('funcion_id', f.id, 'estado', p_estado, 'antes', f.estado,
+    'reservas_activas', (select count(*) from public.funcion_reservas r where r.funcion_id = f.id
+                          and (r.estado = 'confirmada' or (r.estado = 'apartada' and r.vence_at > now()))));
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_cambiar_estado_funcion(uuid, text) from public, anon, service_role;
+grant execute on function public.funcion_cambiar_estado_funcion(uuid, text) to authenticated;
+
+-- Duplicar una campaña: una campaña nueva en borrador con la misma experiencia, precios, minutos de apartado, tope y
+-- plazo del saldo, y
+-- la agenda vacía. El código nuevo es el anterior con el primer sufijo libre («HP-OCT26-2», «HP-OCT26-3»…); se
+-- cambia en el ⋮ de la campaña antes de publicar.
+create or replace function public.funcion_duplicar_campana(p_campana_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c record;
+  v_codigo text;
+  v_base text;
+  v_n integer := 2;
+  v_id uuid;
+begin
+  select * into c from public.funcion_campanas where id = p_campana_id;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(c.workspace_id, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  v_base := c.codigo;
+  loop
+    v_codigo := left(v_base, 20 - length('-' || v_n)) || '-' || v_n;
+    exit when not exists (select 1 from public.funcion_campanas where workspace_id = c.workspace_id and codigo = v_codigo);
+    v_n := v_n + 1;
+    if v_n > 99 then
+      raise exception 'codigo_repetido' using errcode = 'P0001';
+    end if;
+  end loop;
+  insert into public.funcion_campanas (workspace_id, experiencia_id, nombre, codigo, estado, minutos_apartado,
+    precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, tope_sobreventa, dias_saldo_antes)
+  values (c.workspace_id, c.experiencia_id, left(c.nombre || ' (copia)', 200), v_codigo, 'borrador', c.minutos_apartado,
+    c.precio_persona, c.precio_preventa_persona, c.abono_persona, c.permite_pago_total, c.tope_sobreventa, c.dias_saldo_antes)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- ejecutable-por-cliente: el panel del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_duplicar_campana(uuid) from public, anon, service_role;
+grant execute on function public.funcion_duplicar_campana(uuid) to authenticated;
+
+-- Asociar o quitar el id de un anuncio a una campaña (P10). Un anuncio es de una sola campaña.
+create or replace function public.funcion_guardar_anuncio(p_campana_id uuid, p_ad_id text, p_quitar boolean default false)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c record;
+  v_ad text := btrim(coalesce(p_ad_id, ''));
+  v_otra uuid;
+begin
+  select * into c from public.funcion_campanas where id = p_campana_id and archivada_at is null;
+  if not found then
+    raise exception 'campana_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(c.workspace_id, true, 'campana_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if v_ad !~ '^[A-Za-z0-9_.:-]{1,100}$' then
+    raise exception 'anuncio_invalido' using errcode = 'P0001', detail = 'Solo letras, números, guiones, puntos o dos puntos.';
+  end if;
+  if p_quitar then
+    delete from public.funcion_campana_anuncios where campana_id = c.id and ad_id = v_ad;
+    return jsonb_build_object('campana_id', c.id, 'ad_id', v_ad, 'quitado', true);
+  end if;
+  select campana_id into v_otra from public.funcion_campana_anuncios where workspace_id = c.workspace_id and ad_id = v_ad;
+  if found and v_otra <> c.id then
+    raise exception 'anuncio_de_otra_campana' using errcode = 'P0001';
+  end if;
+  insert into public.funcion_campana_anuncios (workspace_id, campana_id, ad_id, creado_por)
+  values (c.workspace_id, c.id, v_ad, auth.uid())
+  on conflict (workspace_id, ad_id) do nothing;
+  return jsonb_build_object('campana_id', c.id, 'ad_id', v_ad, 'quitado', false);
+end;
+$$;
+
+-- ejecutable-por-cliente: el ⋮ de la campaña, con la sesión del equipo. SECURITY DEFINER; exige el workspace.
+revoke execute on function public.funcion_guardar_anuncio(uuid, text, boolean) from public, anon, service_role;
+grant execute on function public.funcion_guardar_anuncio(uuid, text, boolean) to authenticated;
+
+-- Para el asistente (P10): la campaña de una conversación, por el id del anuncio de donde llegó o por el código que
+-- escribió el cliente. Nulo = ninguna. `activa` dice si el asistente puede ofrecer sus funciones.
+create or replace function public.funcion_campana_json(c public.funcion_campanas)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'campana_id', c.id, 'codigo', c.codigo, 'nombre', c.nombre,
+    'experiencia', (select e.nombre from public.funcion_experiencias e where e.id = c.experiencia_id),
+    'estado', public.funcion_estado_campana(c),
+    'activa', public.funcion_estado_campana(c) in ('activa', 'agotada') and c.agenda_publicada_at is not null
+  );
+$$;
+
+revoke execute on function public.funcion_campana_json(public.funcion_campanas) from public, anon, authenticated, service_role;
+
+create or replace function public.funcion_campana_por_anuncio(p_workspace_id uuid, p_ad_id text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.funcion_campana_json(c)
+    from public.funcion_campana_anuncios a
+    join public.funcion_campanas c on c.id = a.campana_id
+   where a.workspace_id = p_workspace_id and a.ad_id = btrim(coalesce(p_ad_id, ''))
+     and c.archivada_at is null and c.agenda_publicada_at is not null;
+$$;
+
+-- server-only: la llama solo el asistente con la llave de servicio.
+revoke execute on function public.funcion_campana_por_anuncio(uuid, text) from public, anon, authenticated;
+grant execute on function public.funcion_campana_por_anuncio(uuid, text) to service_role;
+
+create or replace function public.funcion_campana_por_codigo(p_workspace_id uuid, p_codigo text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.funcion_campana_json(c)
+    from public.funcion_campanas c
+   where c.workspace_id = p_workspace_id and c.codigo = upper(btrim(coalesce(p_codigo, '')))
+     and c.archivada_at is null and c.agenda_publicada_at is not null;
+$$;
+
+-- server-only: la llama solo el asistente con la llave de servicio.
+revoke execute on function public.funcion_campana_por_codigo(uuid, text) from public, anon, authenticated;
+grant execute on function public.funcion_campana_por_codigo(uuid, text) to service_role;
+
+
+-- ── 17. El lugar y la preventa por función (P11 y P4, aprobados el 2026-10-23) ──
+
+-- Los datos del lugar, UNA fila por workspace (se llenan una vez, en el ajuste del módulo). La bienvenida al grupo de
+-- WhatsApp y la oferta los leen de aquí. Nulo = no se ha escrito: el texto dice «[FALTA: …]».
+create table public.funcion_negocio (
+  workspace_id uuid primary key references public.workspaces(id),
+  -- «AK 9 #104A-50, Bogotá»: va en la oferta y en la bienvenida.
+  direccion text check (direccion is null or length(direccion) <= 300),
+  -- «Segundo piso»: va en la bienvenida, junto a la dirección.
+  piso text check (piso is null or length(piso) <= 100),
+  -- Cómo los reciben al llegar («en el primer piso encontrarán personal de nuestro staff…»).
+  recepcion text check (recepcion is null or length(recepcion) <= 1500),
+  -- Dónde parquear (la bahía del frente y el parqueadero del centro comercial), en las palabras de Sabor.
+  parqueadero text check (parqueadero is null or length(parqueadero) <= 1500),
+  -- «El equipo de Sabor & Experiencia 🕯️✨»: cierra la bienvenida.
+  firma text check (firma is null or length(firma) <= 300),
+  updated_at timestamptz not null default now()
+);
+
+comment on table public.funcion_negocio is
+  'Módulo funciones: los datos del lugar (dirección, piso, recepción, parqueadero, firma), una fila por workspace (P11).';
+
+alter table public.funcion_negocio enable row level security;
+create policy funcion_negocio_lectura on public.funcion_negocio
+  for select using (workspace_id = (select public.current_user_workspace_id()));
+revoke all on table public.funcion_negocio from public, anon, authenticated;
+grant select on public.funcion_negocio to authenticated;
+revoke insert, update, delete, truncate on table public.funcion_negocio from service_role;
+grant select on public.funcion_negocio to service_role;
+
+-- Guarda los datos del lugar (reemplaza la fila entera: la llave que no viene queda nula). Solo el equipo con sesión.
+-- `p_datos` = {direccion, piso, recepcion, parqueadero, firma}; ninguna otra llave. Los textos van tal cual.
+create or replace function public.funcion_guardar_negocio(p_workspace_id uuid, p_datos jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_extra text;
+begin
+  if public.funcion_actor(p_workspace_id, true, 'negocio_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if p_datos is null or jsonb_typeof(p_datos) <> 'object' then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'datos del lugar';
+  end if;
+  select k into v_extra from jsonb_object_keys(p_datos) k
+   where k <> all (array['direccion', 'piso', 'recepcion', 'parqueadero', 'firma'])
+   limit 1;
+  if v_extra is not null then
+    raise exception 'dato_no_admitido' using errcode = 'P0001', detail = v_extra;
+  end if;
+  insert into public.funcion_negocio (workspace_id, direccion, piso, recepcion, parqueadero, firma, updated_at)
+  values (p_workspace_id, public.funcion_texto_de(p_datos, 'direccion', 300), public.funcion_texto_de(p_datos, 'piso', 100),
+    public.funcion_texto_de(p_datos, 'recepcion', 1500), public.funcion_texto_de(p_datos, 'parqueadero', 1500),
+    public.funcion_texto_de(p_datos, 'firma', 300), now())
+  on conflict (workspace_id) do update
+    set direccion = excluded.direccion, piso = excluded.piso, recepcion = excluded.recepcion,
+        parqueadero = excluded.parqueadero, firma = excluded.firma, updated_at = now();
+end;
+$$;
+
+-- ejecutable-por-cliente: el ajuste del módulo, con la sesión del equipo. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_guardar_negocio(uuid, jsonb) from public, anon, service_role;
+grant execute on function public.funcion_guardar_negocio(uuid, jsonb) to authenticated;
+
+-- P4: encender o apagar la preventa de UNA función, con su fecha de fin (nula = sin fecha). Apagada, la fecha se
+-- borra. La fecha no pasa el día de la función (`preventa_despues_de_funcion`). Devuelve la tarifa que rige después.
+-- Las reservas hechas conservan su precio (la foto).
+create or replace function public.funcion_cambiar_preventa(p_funcion_id uuid, p_es_preventa boolean, p_preventa_hasta date)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  f record;
+begin
+  select * into f from public.funcion_funciones where id = p_funcion_id and archivada_at is null;
+  if not found then
+    raise exception 'funcion_no_existe' using errcode = 'P0001';
+  end if;
+  if public.funcion_actor(f.workspace_id, true, 'funcion_no_existe') <> 'equipo' then
+    raise exception 'sin_permiso' using errcode = 'P0001';
+  end if;
+  if p_es_preventa is null then
+    raise exception 'datos_invalidos' using errcode = 'P0001', detail = 'preventa';
+  end if;
+  if p_es_preventa and p_preventa_hasta is not null
+     and p_preventa_hasta > (f.inicia_at at time zone 'America/Bogota')::date then
+    raise exception 'preventa_despues_de_funcion' using errcode = 'P0001',
+      detail = public.funcion_fecha_texto(f.inicia_at);
+  end if;
+  perform 1 from public.funcion_funciones where id = p_funcion_id for update;
+  update public.funcion_funciones
+     set es_preventa = p_es_preventa, preventa_hasta = case when p_es_preventa then p_preventa_hasta end
+   where id = p_funcion_id;
+  return public.funcion_tarifa(p_funcion_id);
+end;
+$$;
+
+-- ejecutable-por-cliente: el ⋮ de la función, con la sesión del equipo. SECURITY DEFINER; exige el workspace y rol que edite.
+revoke execute on function public.funcion_cambiar_preventa(uuid, boolean, date) from public, anon, service_role;
+grant execute on function public.funcion_cambiar_preventa(uuid, boolean, date) to authenticated;
