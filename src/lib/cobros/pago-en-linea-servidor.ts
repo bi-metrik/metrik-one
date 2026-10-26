@@ -10,6 +10,7 @@ import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activ
 import { abrirCicloSiCorresponde, detalleCiclo } from '@/lib/valida-registro/ciclo-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
+import { anularCobroPorReverso } from './reverso-pasarela-servidor'
 
 /**
  * El lado de Supabase del pago en línea, y `atenderWebhookPasarela`: todo lo que una ruta de webhook
@@ -133,6 +134,27 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
       const exactos = ((porUrl.data ?? []) as FilaCobro[]).filter((f) => adapter.idEnlaceDeUrl?.(f.enlace_pago_url) === idEnlace)
       return exactos.map(aCobro)
     },
+
+    async cobrosPorReferenciaPago(referenciaPago) {
+      const r = await db
+        .from('cobros')
+        .select(COLUMNAS_COBRO)
+        .eq('tipo_cobro', 'programado')
+        .eq('external_ref', referenciaPago)
+        .limit(5)
+      if (r.error) throw new Error(`buscar cobro por referencia de pago: ${r.error.message}`)
+      return ((r.data ?? []) as FilaCobro[]).map(aCobro)
+    },
+
+    // El reverso se anula solo en ePayco (estado 6, que ePayco puede no avisar y la conciliación
+    // pregunta). Bold (VOID_APPROVED) sigue quedando en revisión para anularlo a mano.
+    ...(pasarela === 'epayco'
+      ? {
+          anularPorReverso(cobro: CobroParaPago, e: EventoPasarela) {
+            return anularCobroPorReverso(dbCliente, pasarela, cobro, e)
+          },
+        }
+      : {}),
 
     confirmarPago(c) {
       return confirmarPagoCobroProgramado(dbCliente, c)

@@ -231,6 +231,79 @@ describe('otros eventos', () => {
   })
 })
 
+describe('reverso de un pago ya registrado (ePayco estado 6)', () => {
+  const PAGADO = { fecha: '2026-10-22', externalRef: 'px-TX1', monto: 150000 }
+  function conAnulacion(m: ReturnType<typeof repoEnMemoria>) {
+    const anulaciones: string[] = []
+    m.repo.anularPorReverso = async (c, e) => {
+      const actual = m.cobros.get(c.id)!
+      if (actual.anuladoAt) return { anulado: false, detalle: 'ya anulado por otro camino' }
+      m.cobros.set(c.id, { ...actual, monto: 0, anuladoAt: '2026-10-23T12:00:00Z' })
+      anulaciones.push(`${c.id}|${e.referenciaPago}`)
+      return { anulado: true, detalle: 'cobro anulado; falta decidir la suscripción' }
+    }
+    return anulaciones
+  }
+  const reverso = (extra: Partial<EventoPasarela> = {}) => evento({ tipo: 'anulado', eventoId: 'TX1-6', tipoOriginal: '6 Reversada', monto: null, ...extra })
+
+  it('anula el cobro de ESA transacción y queda en revisión (la suscripción la decide una persona)', async () => {
+    const m = repoEnMemoria([cobro(PAGADO)])
+    const anulaciones = conAnulacion(m)
+    const s = await procesarEventoPasarela(reverso(), m.repo, HOY)
+    expect(s.resultado).toBe('requiere_revision')
+    expect(anulaciones).toEqual([`${COBRO_ID}|px-TX1`])
+    expect(m.cobros.get(COBRO_ID)?.monto).toBe(0)
+    expect(m.notas[0]).toContain('falta decidir la suscripción')
+  })
+
+  it('es idempotente: el mismo reverso por segunda vez (webhook y conciliación) no anula dos veces', async () => {
+    const m = repoEnMemoria([cobro(PAGADO)])
+    const anulaciones = conAnulacion(m)
+    await procesarEventoPasarela(reverso(), m.repo, HOY)
+    const s2 = await procesarEventoPasarela(reverso(), m.repo, HOY)
+    expect(s2.resultado).toBe('duplicado')
+    // Otro id de evento sobre el cobro ya anulado tampoco hace nada.
+    const s3 = await procesarEventoPasarela(reverso({ eventoId: 'otro' }), m.repo, HOY)
+    expect(s3.resultado).toBe('ignorado')
+    expect(anulaciones).toHaveLength(1)
+  })
+
+  it('un cobro ya anulado a mano no se toca (el caso de la 390720992)', async () => {
+    const m = repoEnMemoria([cobro({ ...PAGADO, monto: 0, anuladoAt: '2026-10-22T20:00:00Z' })])
+    const anulaciones = conAnulacion(m)
+    const s = await procesarEventoPasarela(reverso(), m.repo, HOY)
+    expect(s.resultado).toBe('ignorado')
+    expect(anulaciones).toHaveLength(0)
+  })
+
+  it('un cobro sin pago o pagado con otra transacción no se anula: revisión', async () => {
+    for (const c of [cobro(), cobro({ ...PAGADO, externalRef: 'px-OTRA' })]) {
+      const m = repoEnMemoria([c])
+      const anulaciones = conAnulacion(m)
+      const s = await procesarEventoPasarela(reverso(), m.repo, HOY)
+      expect(s.resultado).toBe('requiere_revision')
+      expect(anulaciones).toHaveLength(0)
+    }
+  })
+
+  it('sin la referencia de ONE, encuentra el cobro por la transacción', async () => {
+    const m = repoEnMemoria([cobro(PAGADO)])
+    const anulaciones = conAnulacion(m)
+    m.repo.cobrosPorReferenciaPago = async (ref) => [...m.cobros.values()].filter((c) => c.externalRef === ref)
+    const s = await procesarEventoPasarela(reverso({ referencia: null }), m.repo, HOY)
+    expect(s.resultado).toBe('requiere_revision')
+    expect(anulaciones).toHaveLength(1)
+  })
+
+  it('una pasarela sin anulación automática (Bold) sigue pidiendo revisión sin tocar el cobro', async () => {
+    const m = repoEnMemoria([cobro(PAGADO)])
+    const s = await procesarEventoPasarela(reverso({ tipoOriginal: 'VOID_APPROVED' }), m.repo, HOY)
+    expect(s.resultado).toBe('requiere_revision')
+    expect(s.detalle).toContain('anularlo a mano')
+    expect(m.cobros.get(COBRO_ID)?.monto).toBe(150000)
+  })
+})
+
 describe('lo que sigue a un pago registrado (Plan Anual de Valida CDA)', () => {
   it('se corre al registrar el pago, y su detalle queda en el evento', async () => {
     const m = repoEnMemoria([cobro()])

@@ -42,7 +42,7 @@ import {
   resultadosLoteValida,
   type LoteVista,
 } from '@/lib/actions/valida-lotes';
-import { TOPE_FILAS_LOTE } from '@/lib/valida/lote';
+import { TOPE_FILAS_LOTE, type AvisoTiposDocumento } from '@/lib/valida/lote';
 import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
 import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
 import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
@@ -403,6 +403,9 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onCons
                   <option value="CC">CC</option>
                   <option value="CE">CE</option>
                   <option value="PAS">Pasaporte</option>
+                  <option value="TI">TI</option>
+                  <option value="PPT">PPT</option>
+                  <option value="RC">Registro civil</option>
                 </>
               ) : (
                 <option value="NIT">NIT</option>
@@ -736,6 +739,7 @@ type EstadoCargue =
   | { fase: 'inicial' }
   | { fase: 'preparando' }
   | { fase: 'confirmar_saldo'; alcanzan: number; consultables: number; total: number }
+  | { fase: 'confirmar_tipos'; aviso: AvisoTiposDocumento; total: number }
   | { fase: 'lote'; lote: LoteVista }
   | { fase: 'error'; mensaje: string };
 
@@ -770,6 +774,9 @@ function ConsultaMasivaForm({
   const [accion, setAccion] = useState(false);
   // Lo ya descontado del contador de la bolsa por este lote, para no descontarlo dos veces.
   const descontadas = useRef<Record<string, number>>({});
+  // La persona ya aceptó que las filas con un tipo de documento no reconocido no se consulten: el
+  // paso de la bolsa, si viene después, no vuelve a preguntarlo.
+  const tiposAceptados = useRef(false);
 
   const loteId = estado.fase === 'lote' ? estado.lote.id : null;
   const activo = estado.fase === 'lote' && (estado.lote.estado === 'en_cola' || estado.lote.estado === 'procesando' || estado.lote.estado === 'preparando');
@@ -858,6 +865,7 @@ function ConsultaMasivaForm({
       negocio_id_lote: negocioLote?.id ?? null,
       titulo: titulo.trim() || null,
       limite,
+      aceptarTiposDocumento: tiposAceptados.current,
     });
     if (r.ok) {
       descontadas.current[r.lote.id] = 0;
@@ -869,6 +877,10 @@ function ConsultaMasivaForm({
       setEstado({ fase: 'inicial' });
       return;
     }
+    if ('aviso' in r) {
+      setEstado({ fase: 'confirmar_tipos', aviso: r.aviso, total: r.total });
+      return;
+    }
     if ('alcanzan' in r) {
       setEstado({ fase: 'confirmar_saldo', alcanzan: r.alcanzan, consultables: r.consultables, total: r.total });
       return;
@@ -878,6 +890,7 @@ function ConsultaMasivaForm({
 
   function iniciarCargue(e: React.FormEvent) {
     e.preventDefault();
+    tiposAceptados.current = false;
     void crear(null);
   }
 
@@ -990,6 +1003,16 @@ function ConsultaMasivaForm({
           <p className="text-sm font-semibold text-tinta">Preparando cargue…</p>
           <p className="text-xs text-tinta-suave">Leyendo el archivo, validando filas y revisando tu saldo.</p>
         </div>
+      ) : estado.fase === 'confirmar_tipos' ? (
+        <AvisoTipos
+          aviso={estado.aviso}
+          total={estado.total}
+          onProcesar={() => {
+            tiposAceptados.current = true;
+            void crear(null);
+          }}
+          onCancelar={() => setEstado({ fase: 'inicial' })}
+        />
       ) : estado.fase === 'confirmar_saldo' ? (
         <div data-cargue-saldo className="rounded-lg border border-[#E5E7EB] p-5 space-y-3">
           <p className="text-sm font-semibold text-tinta">
@@ -1086,6 +1109,56 @@ function ConsultaMasivaForm({
           {estado.fase === 'error' && <ErrorBox msg={estado.mensaje} />}
         </form>
       )}
+    </div>
+  );
+}
+
+function AvisoTipos({
+  aviso,
+  total,
+  onProcesar,
+  onCancelar,
+}: {
+  aviso: AvisoTiposDocumento;
+  total: number;
+  onProcesar: () => void;
+  onCancelar: () => void;
+}) {
+  const una = aviso.filas === 1;
+  return (
+    <div data-cargue-tipos className="rounded-lg border border-[#E5E7EB] p-5 space-y-3">
+      <p className="text-sm font-semibold text-tinta">
+        {una ? '1 fila' : `${aviso.filas} filas`} de {total} {una ? 'tiene' : 'tienen'} un tipo de documento que Valida no
+        consulta.
+      </p>
+      <p className="text-sm text-tinta-suave">
+        En la columna <code className="bg-papel px-1 rounded">tipo_documento</code> usa CC, CE, NIT, PAS, TI, PPT o RC.
+        También se entienden «Cédula», «Pasaporte», «PP», «PA», «Tarjeta de identidad» o «Registro civil». Si procesas así, esas filas no se consultan ni se cobran.
+      </p>
+      <ul className="text-xs text-tinta-suave space-y-1">
+        {aviso.ejemplos.map((e) => (
+          <li key={e.fila}>
+            <span className="font-semibold text-tinta">Fila {e.fila}</span> ({e.valor || 'vacío'}): {e.mensaje}
+          </li>
+        ))}
+        {aviso.filas > aviso.ejemplos.length && <li>Y {aviso.filas - aviso.ejemplos.length} más.</li>}
+      </ul>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] transition-colors"
+        >
+          Corregir el archivo
+        </button>
+        <button
+          type="button"
+          onClick={onProcesar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
+        >
+          Procesar de todas formas
+        </button>
+      </div>
     </div>
   );
 }

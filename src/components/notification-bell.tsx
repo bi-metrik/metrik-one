@@ -11,6 +11,7 @@ import {
   type NotificacionItem,
 } from '@/lib/actions/notificaciones'
 import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
+import { mensajeSecundario } from '@/lib/notificaciones/mensaje-secundario'
 import { toast } from 'sonner'
 import { seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
 import { BotonWhatsApp } from '@/components/boton-whatsapp'
@@ -385,6 +386,8 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
             {!loading && pendientes.map((item) => {
               const Icon = TIPO_ICON[item.tipo] ?? Bell
               const color = TIPO_COLOR[item.tipo] ?? 'var(--tinta-suave)'
+              // Quién asignó / por qué llegó: vive en metadata.mensaje, no en el título.
+              const detalle = mensajeSecundario(item.metadata, item.contenido)
 
               return (
                 <div
@@ -407,6 +410,11 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                     <p className="text-[13px] font-medium text-foreground leading-snug">
                       {item.contenido}
                     </p>
+                    {detalle && (
+                      <p className="mt-0.5 text-[12px] text-muted-foreground leading-snug">
+                        {detalle}
+                      </p>
+                    )}
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {tiempoRelativo(item.created_at)}
                     </p>

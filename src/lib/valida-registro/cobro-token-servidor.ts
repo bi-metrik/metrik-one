@@ -402,7 +402,7 @@ export async function cobrarCuotaConTarjeta(
     await ramaDeRechazo(db, { cobradorId: p.cobradorId, planCobroId: plan.data.id, ancla, cobroId: cobroId as string, numeroCuota: cuota.data.numero, intento, mensaje: r.mensaje })
     return { tipo: 'rechazado', cobroId: cobroId as string, mensaje: r.mensaje }
   }
-  if (r.sinTransaccion) {
+  if (r.estado === 'error' && r.sinTransaccion) {
     const fallas = previas + 1
     await anotar('error', null, `no_procesado#${fallas}: ${r.mensaje}`)
     await anotarEnAncla(

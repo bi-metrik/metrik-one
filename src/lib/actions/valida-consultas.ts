@@ -13,7 +13,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export type TipoPersona = 'natural' | 'juridica';
-export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS';
+export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS' | 'TI' | 'PPT' | 'RC';
 export type Severidad = 'alto' | 'medio' | 'bajo' | 'informativo' | 'sin_hallazgo' | 'error';
 export type TierLista = '1_vinculante' | '2_obligatoria' | '3_referencia' | '4_kyc_nacional';
 
@@ -259,6 +259,31 @@ export async function consultarValida(
 
 // ─── Plantilla XLSX ───────────────────────────────────────────────────────
 
+/**
+ * La hoja que dice qué va en cada columna. Hasta el 2026-10-23 la plantilla solo traía ejemplos, y
+ * la columna `tipo_documento` llegaba con «CEDULA», «PP» o «TI», que Valida rechazaba.
+ */
+function hojaValoresPlantilla(sinNegocio: boolean): XLSX.WorkSheet {
+  const filas: string[][] = [
+    ['columna', 'valores aceptados', 'notas'],
+    ['tipo_persona', 'natural · juridica', 'Obligatoria.'],
+    ['nombre_completo', 'Nombre completo o razón social', 'Obligatorio si no hay documento.'],
+    [
+      'tipo_documento',
+      'CC · CE · NIT · PAS · TI · PPT · RC',
+      'CC: cédula de ciudadanía. CE: cédula de extranjería. NIT: personas jurídicas. PAS: pasaporte. ' +
+        'TI: tarjeta de identidad. PPT: Permiso por Protección Temporal. RC: registro civil. ' +
+        'También se entienden «Cédula», «Cédula de extranjería», «Pasaporte», «PP», «PA», «Tarjeta de identidad» y «Registro civil». ' +
+        'Vacío con número: natural se consulta como CC (PAS si el número trae letras) y jurídica como NIT.',
+    ],
+    ['numero_documento', 'Solo el número', 'Sin puntos ni espacios. Para NIT, sin dígito de verificación.'],
+  ];
+  if (!sinNegocio) filas.push(['negocio_codigo', 'Código del negocio (ej. C1 26 1)', 'Opcional.']);
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  ws['!cols'] = [{ wch: 18 }, { wch: 32 }, { wch: 100 }];
+  return ws;
+}
+
 export async function descargarPlantillaValida(
   opts: { sinNegocio?: boolean } = {},
 ): Promise<
@@ -287,6 +312,7 @@ export async function descargarPlantillaValida(
       ? [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }]
       : [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Consultas');
+    XLSX.utils.book_append_sheet(wb, hojaValoresPlantilla(sinNegocio), 'Valores aceptados');
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
     return {

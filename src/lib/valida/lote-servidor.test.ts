@@ -245,6 +245,31 @@ describe('una fila del lote da EXACTAMENTE lo que daba la ruta del navegador', (
   })
 })
 
+describe('el tipo de documento del XLSX llega a Valida con su código', () => {
+  // Datos inventados. Hasta el 2026-10-23 «CEDULA» o «PP» iban tal cual y Valida respondía 400.
+  const XLSX_TIPOS = [
+    { tipo_persona: 'natural', nombre_completo: 'Ana Prueba Uno', tipo_documento: 'CÉDULA', numero_documento: '10000001' },
+    { tipo_persona: 'natural', nombre_completo: 'Beto Prueba Dos', tipo_documento: 'pp', numero_documento: 'AB123456' },
+    { tipo_persona: 'natural', nombre_completo: 'Caro Prueba Tres', tipo_documento: 'TI', numero_documento: '10000003' },
+    { tipo_persona: 'natural', nombre_completo: 'Dani Prueba Cuatro', tipo_documento: 'X', numero_documento: '10000004' },
+  ]
+
+  it('CÉDULA va como CC, PP como PAS y TI como TI; X no se manda, no va al historial y dice por qué', async () => {
+    const preparadas = filasDesdeXlsx(XLSX_TIPOS, new Map(), null)
+    const lote = sembrarLote({ filas: preparadas.map((f) => f.input), errores: preparadas.map((f) => f.error) })
+    for (let i = 0; i < preparadas.length; i++) await procesarFilaLote(ctx(lote), await reclamar(lote))
+
+    const cuerpos = llamadas.map((l) => JSON.parse(l.init.body) as { documento: { tipo: string } })
+    expect(cuerpos.map((c) => c.documento.tipo)).toEqual(['CC', 'PAS', 'TI'])
+    expect(consultas().map((c) => c.documento_tipo)).toEqual(['CC', 'PAS', 'TI'])
+
+    const filas = doble.tablas.valida_lote_filas
+    expect(filas.map((f) => f.estado)).toEqual(['hecha', 'hecha', 'hecha', 'error'])
+    expect(String(filas[3].resultado_error)).toContain('Tipo de documento no reconocido: usa CC, CE, NIT, PAS, TI, PPT o RC')
+    expect(doble.tablas.valida_lotes[0].severidades).toEqual({ sin_hallazgo: 3, error: 1 })
+  })
+})
+
 // ─── 2. Idempotencia ─────────────────────────────────────────────────────────────
 
 describe('una fila nunca se cobra ni se guarda dos veces', () => {

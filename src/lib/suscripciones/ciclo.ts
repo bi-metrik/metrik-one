@@ -404,6 +404,8 @@ export async function correrCicloSuscripcion(
         return { ...base, accion: 'cargo_rechazado', numeroCuota: cuota.numero, cobroId, cobroCreado, estadoDespues: m.estado, detalle }
       }
 
+      // Un reverso solo sale de `consultar` sobre un cargo ya aprobado: aquí no decide nada, como un error.
+      case 'reversado':
       case 'error': {
         await persistir(deps.db, sus, { ...maquina2patch(maquina), ultimo_error: r.mensaje, proximo_cobro: sus.proximo_cobro }, ahoraISO)
         return { ...base, accion: 'error', numeroCuota: cuota.numero, cobroId, cobroCreado, detalle: r.mensaje }

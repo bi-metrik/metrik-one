@@ -10,6 +10,7 @@
 
 import type { FilaLotePreparada, TipoDocumento, TipoPersona, ValidaConsultaInput } from '@/lib/actions/valida-consultas'
 import { CODIGO_BUSQUEDA_INCOMPLETA, ROTULO_NO_COMPLETADA, mensajeErrorValida } from './mensajes-error'
+import { MENSAJE_TIPO_NO_RECONOCIDO, leerTipoDocumento, mensajeTipoDocumento, tipoAceptadoPorValida } from './tipo-documento'
 
 // ─── Topes y ritmo ──────────────────────────────────────────────────────────────
 
@@ -101,9 +102,12 @@ export function claveIdempotenciaFila(filaId: string): string {
 
 /**
  * ¿Esta fila gasta una consulta? Valida rechaza sin cobrar (400) una entrada sin nombre de 2+
- * caracteres ni documento de 3+; todo lo demás se cobra. Es lo que se compara contra la bolsa.
+ * caracteres ni documento de 3+, y el trabajador no manda una con un tipo de documento que Valida no
+ * acepta; todo lo demás se cobra. Es lo que se compara contra la bolsa.
  */
 export function filaConsume(input: ValidaConsultaInput): boolean {
+  // Un tipo de documento que Valida no acepta: el trabajador no la manda (ver `filaSeConsulta`).
+  if (!filaSeConsulta(input)) return false
   const nombre = (input.nombre ?? '').trim()
   const doc = (input.documento?.numero ?? '').trim()
   return nombre.length >= 2 || doc.length >= 3
@@ -156,14 +160,14 @@ export function filasDesdeXlsx(
   return rows.map((fila, idx) => {
     const tipoPersona = String(fila.tipo_persona ?? '').trim().toLowerCase() as TipoPersona
     const nombre = String(fila.nombre_completo ?? '').trim()
-    const tipoDoc = String(fila.tipo_documento ?? '').trim().toUpperCase() as TipoDocumento
     const numDoc = String(fila.numero_documento ?? '').trim()
     const negocioCodigo = String(fila.negocio_codigo ?? '').trim()
 
     const negocioId = negocioCodigo ? codigoToId.get(negocioCodigo) ?? null : negocioIdLote ?? null
 
     const tipoValido = tipoPersona === 'natural' || tipoPersona === 'juridica'
-    const tieneDoc = !!(numDoc && tipoDoc)
+    const leido = leerTipoDocumento(fila.tipo_documento, numDoc, tipoPersona)
+    const tieneDoc = !!numDoc && leido.estado !== 'sin_documento'
 
     // Al menos un dato identificador: nombre o documento (consistente con el motor).
     if (!tipoValido || (!nombre && !tieneDoc)) {
@@ -178,14 +182,49 @@ export function filasDesdeXlsx(
       }
     }
 
+    // Un tipo que Valida no acepta se guarda como vino: el trabajador ve que no es de Valida y termina
+    // la fila con el mensaje, sin llamar ni cobrar (`tipoAceptadoPorValida`). La persona ve en el
+    // resultado qué escribió y por qué no salió.
+    const tipoDoc =
+      leido.estado === 'aceptado'
+        ? leido.tipo
+        : leido.estado === 'no_reconocido'
+          ? leido.valor.toUpperCase()
+          : ''
     const input: ValidaConsultaInput = {
       tipo: tipoPersona,
       ...(nombre ? { nombre } : {}),
-      ...(tieneDoc ? { documento: { tipo: tipoDoc, numero: numDoc } } : {}),
+      ...(tieneDoc ? { documento: { tipo: tipoDoc as TipoDocumento, numero: numDoc } } : {}),
     }
 
-    return { posicion: idx + 1, input, negocio_id: negocioId, error: null }
+    return { posicion: idx + 1, input, negocio_id: negocioId, error: tieneDoc ? mensajeTipoDocumento(leido) : null }
   })
+}
+
+/** ¿La fila se manda a Valida? No, si trae un documento con un tipo que Valida rechazaría (400). */
+export function filaSeConsulta(input: ValidaConsultaInput): boolean {
+  return !input.documento || tipoAceptadoPorValida(input.documento.tipo)
+}
+
+/** Las filas con un tipo de documento que no se va a consultar, para avisar antes de procesar. */
+export type AvisoTiposDocumento = {
+  /** Filas que no se consultan por el tipo de documento. */
+  filas: number
+  /** Hasta 5 ejemplos: la fila del XLSX (contando el encabezado) y lo que decía la columna. */
+  ejemplos: Array<{ fila: number; valor: string; mensaje: string }>
+}
+
+export function avisoTiposDocumento(filas: readonly FilaLotePreparada[]): AvisoTiposDocumento | null {
+  const malas = filas.filter((f) => f.input.documento && !filaSeConsulta(f.input))
+  if (malas.length === 0) return null
+  return {
+    filas: malas.length,
+    ejemplos: malas.slice(0, 5).map((f) => ({
+      fila: f.posicion + 1,
+      valor: f.input.documento?.tipo ?? '',
+      mensaje: f.error ?? MENSAJE_TIPO_NO_RECONOCIDO,
+    })),
+  }
 }
 
 // ─── Estados y pausas ───────────────────────────────────────────────────────────

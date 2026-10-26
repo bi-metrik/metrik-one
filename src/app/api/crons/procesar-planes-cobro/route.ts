@@ -21,6 +21,7 @@ import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros
 import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/renovar-ciclo-servidor'
 import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valida-registro/ciclo-servidor'
 import { cobrarCuotasConTarjeta, type ResumenCobroToken } from '@/lib/valida-registro/cobro-token-servidor'
+import { detectarReversosEpayco, type ResumenReversos } from '@/lib/cobros/reversos-epayco-servidor'
 import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } from '@/lib/valida-registro/cobro-prueba-servidor'
 import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
 
@@ -54,6 +55,9 @@ import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida
 //      sin EPAYCO_HABILITADO (ver `src/lib/valida-registro/cobro-token-servidor.ts`). Sigue el
 //      calendario de mora de Carmen: intentos los dias 0, 3 y 7 desde el vencimiento; nada desde el 10.
 //   7c. Si la tarjeta rechazo algo hoy, otra pasada del paso 6: el enlace de pago sale el mismo dia.
+//   7d. Reversos de ePayco: se le pregunta a ePayco por los cobros pagados con ePayco en los ultimos 60
+//      dias; el que salga reversado (estado 6) se anula y se avisa a MeTRIK por correo interno. No toca
+//      la suscripcion, el ciclo ni la factura (ver `src/lib/cobros/reversos-epayco-servidor.ts`).
 //   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
 //      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
 //      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
@@ -549,6 +553,17 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── 7d. Reversos de ePayco que la confirmación no avisó ──
+  // Antes del 8: un cobro anulado aquí ya no cuenta como el pago que abre el ciclo de esta corrida (el
+  // ciclo que ya estaba abierto no se cierra: eso lo decide una persona).
+  let reversosEpayco: ResumenReversos | null = null
+  let reversosEpaycoError: string | null = null
+  try {
+    reversosEpayco = await detectarReversosEpayco({ db: supabase, hoy: hoyStr, ahoraMs: hoy.getTime() })
+  } catch (err) {
+    reversosEpaycoError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 8. Valida autogestionada: el pago más nuevo de cada plan tiene su ciclo abierto en Valida ──
   // El webhook lo abre en el momento del pago; esto recoge lo que no alcanzó (Valida caída, o un pago
   // registrado a mano). Solo mira espacios del registro autogestionado; idempotente en Valida.
@@ -601,6 +616,8 @@ export async function GET(req: NextRequest) {
     cobro_tarjeta: cobroTarjeta,
     enlaces_tras_rechazo: enlacesTrasRechazo,
     cobro_tarjeta_error: cobroTarjetaError,
+    reversos_epayco: reversosEpayco,
+    reversos_epayco_error: reversosEpaycoError,
     ciclos_valida: ciclosValida,
     ciclos_valida_error: ciclosValidaError,
     aviso_suspension: avisoSuspension,
