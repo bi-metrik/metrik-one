@@ -10,9 +10,10 @@ import { referenciaEnlaceCobro } from './referencia-enlace'
 /**
  * Conciliación de REVERSOS de ePayco (paso 7d del cron `procesar-planes-cobro`).
  *
- * ePayco reversó la 390720992 desde su panel el 2026-10-22 y NO mandó la confirmación del reverso: en
- * `pasarela_eventos` solo quedaron la pendiente (3) y la aceptada (1). Sin esto, ONE seguía contando
- * ese cobro como pagado. Aquí se le PREGUNTA a ePayco (`adapter.consultar`, `POST /payment/transaction`)
+ * ePayco reversó la 390720992 desde su panel el 2026-10-22. Sí mandó la confirmación del reverso
+ * (`pasarela_eventos` 390720992-6, 16:45:13Z; antes se creyó que no), pero nada en la documentación
+ * garantiza que siempre llegue (el reverso que pide la red de procesamiento puede tardar días, y una
+ * confirmación caída no se reintenta para siempre). Esto es la red: se le PREGUNTA a ePayco (`adapter.consultar`, `POST /payment/transaction`)
  * por los cobros que ONE registró como pagados con ePayco en los últimos `DIAS_VENTANA_REVERSOS` días, y
  * el que ePayco reporte como reversado (estado 6) entra por el MISMO camino de la confirmación
  * (`procesarEventoPasarela`, evento `anulado`) con el MISMO id de evento (`<ref_payco>-6`): si la

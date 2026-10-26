@@ -23,6 +23,7 @@ import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valid
 import { cobrarCuotasConTarjeta, type ResumenCobroToken } from '@/lib/valida-registro/cobro-token-servidor'
 import { detectarReversosEpayco, type ResumenReversos } from '@/lib/cobros/reversos-epayco-servidor'
 import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } from '@/lib/valida-registro/cobro-prueba-servidor'
+import { conciliarRegistrosConCobroPendiente, type ResumenRegistrosCobroPendiente } from '@/lib/valida-registro/cargo-tardio-servidor'
 import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
@@ -58,6 +59,9 @@ import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida
 //   7d. Reversos de ePayco: se le pregunta a ePayco por los cobros pagados con ePayco en los ultimos 60
 //      dias; el que salga reversado (estado 6) se anula y se avisa a MeTRIK por correo interno. No toca
 //      la suscripcion, el ciclo ni la factura (ver `src/lib/cobros/reversos-epayco-servidor.ts`).
+//   7e. Valida: el registro que quedo en `cobro_pendiente` con su primer cobro YA pagado (la aprobacion
+//      tardia de ePayco que no alcanzo a cerrarlo) se cierra: intento, registro y el correo C3 una vez.
+//      No llama a ePayco (ver `conciliarRegistrosConCobroPendiente` en `cargo-tardio-servidor.ts`).
 //   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
 //      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
 //      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
@@ -564,6 +568,16 @@ export async function GET(req: NextRequest) {
     reversosEpaycoError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 7e. Valida: registros en cobro_pendiente con el primer cobro ya pagado ──
+  // Después del 7b (que puede registrar la aprobación al conciliar un cargo pendiente) y del 7d.
+  let registrosCobroPendiente: ResumenRegistrosCobroPendiente | null = null
+  let registrosCobroPendienteError: string | null = null
+  try {
+    registrosCobroPendiente = await conciliarRegistrosConCobroPendiente({ db: supabase, ahoraMs: hoy.getTime(), enviarCorreo: enviarPorResend })
+  } catch (err) {
+    registrosCobroPendienteError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 8. Valida autogestionada: el pago más nuevo de cada plan tiene su ciclo abierto en Valida ──
   // El webhook lo abre en el momento del pago; esto recoge lo que no alcanzó (Valida caída, o un pago
   // registrado a mano). Solo mira espacios del registro autogestionado; idempotente en Valida.
@@ -618,6 +632,8 @@ export async function GET(req: NextRequest) {
     cobro_tarjeta_error: cobroTarjetaError,
     reversos_epayco: reversosEpayco,
     reversos_epayco_error: reversosEpaycoError,
+    registros_cobro_pendiente: registrosCobroPendiente,
+    registros_cobro_pendiente_error: registrosCobroPendienteError,
     ciclos_valida: ciclosValida,
     ciclos_valida_error: ciclosValidaError,
     aviso_suspension: avisoSuspension,
