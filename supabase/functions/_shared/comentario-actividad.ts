@@ -61,3 +61,20 @@ export function filasDeComentarios<T extends Record<string, unknown>>(
 ): Array<T & { contenido: string; created_at: string }> {
   return contenidos.map((contenido, i) => ({ ...fila, contenido, created_at: new Date(ahora + i).toISOString() }));
 }
+
+/** Lo que se guarda con una nota: el resumen arriba (si lo hay y no es la nota misma) y la nota entera. Pura. */
+export function textoConNota(resumen: string, nota: string): string {
+  return resumen && resumen !== nota ? `Resumen: ${resumen}\n\nNota tal cual: ${nota}` : nota;
+}
+
+/**
+ * El texto de una actividad en la ruta sin agente (`handlers/actividad.ts`). De una nota de voz se guarda la
+ * transcripción entera, tal cual, con lo que interpretó el parser arriba como resumen (2026-10-26: guardaba solo el
+ * `activity_text` del parser, que de una nota de minutos es un resumen). De un escrito, lo de siempre. Pura.
+ */
+export function textoDeActividad(p: { tipo: string; mensaje: string; interpretado?: string | null }): { texto: string; talCual: boolean } {
+  const mensaje = p.mensaje.trim();
+  const interpretado = (p.interpretado ?? '').trim();
+  if (p.tipo === 'audio' && mensaje) return { texto: textoConNota(interpretado, mensaje), talCual: true };
+  return { texto: interpretado || mensaje, talCual: false };
+}

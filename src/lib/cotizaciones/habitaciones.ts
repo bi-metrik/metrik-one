@@ -145,16 +145,28 @@ export function mismoNombreHotel(a: string, b: string): boolean {
 }
 
 /**
- * ¿Mismo hotel y mismas fechas? Sin los tres datos en las dos, no se afirma.
+ * ¿Mismo hotel y la misma estadía? Sin el hotel en las dos, no se afirma.
+ *
+ * Las fechas se comparan cuando las dos las LEYERON: distintas, son otra opción. Una fecha que
+ * no se leyó no contradice nada (COT-2026-0004, 2026-10-23): la tarjeta de hotel que no muestra
+ * las fechas toma las del viaje (7.4), y esas no entran en `identidad` porque no son de la imagen.
+ * Hasta ese día se exigían las dos fechas en las dos capturas, y los pantallazos «2 adultos» y
+ * «2 adultos + 1 niño» del mismo hotel sin fechas quedaban en dos opciones sueltas: la del niño
+ * pedía «solo adultos» (Falta el costo) y la otra cobraba solo a los adultos.
  *
  * ⚠️ Compara lo que recibe: quien compara contra una opción le pasa `lecturaDeOpcion`, que ya
  * trae las correcciones de la ficha.
  */
 export function mismaOpcionHotel(a: LecturaCasilla, b: LecturaCasilla): boolean {
-  const ka = claveOpcionHotel(a)
-  const kb = claveOpcionHotel(b)
-  if (!ka || !kb) return false
-  return ka.entrada === kb.entrada && ka.salida === kb.salida && mismoNombreHotel(ka.hotel, kb.hotel)
+  const ha = (a.identidad.hotel ?? '').trim()
+  const hb = (b.identidad.hotel ?? '').trim()
+  if (!ha || !hb || !mismoNombreHotel(ha, hb)) return false
+  for (const campo of ['check_in', 'check_out'] as const) {
+    const fa = (a.identidad[campo] ?? '').trim()
+    const fb = (b.identidad[campo] ?? '').trim()
+    if (fa && fb && fa !== fb) return false
+  }
+  return true
 }
 
 /** ¿Mismas fechas? Es lo que decide si dos hoteles compiten en la misma ranura. */
@@ -217,12 +229,36 @@ export function ocupacionDeHabitacion(l: LecturaCasilla): Composicion | null {
   return bebes > 0 ? { adultos: c.adultos, ninos: c.ninos - bebes, infantes: c.infantes + bebes } : c
 }
 
-/** ¿La habitación `a` (solo adultos) sirve para restarle el menor a `r`? */
-function esPar(a: HabitacionRepartida, r: HabitacionRepartida): boolean {
+/**
+ * ¿La habitación `a` (solo adultos) sirve para restarle el menor a `r`? Del mismo tipo de
+ * habitación, o (con `filas`) el único par posible de la opción, ver `parUnico`.
+ */
+function esPar(a: HabitacionRepartida, r: HabitacionRepartida, filas?: readonly HabitacionRepartida[]): boolean {
   if (a.id === r.id || !soloAdultos(a.ocupacion) || !r.ocupacion || soloAdultos(r.ocupacion)) return false
   if (a.ocupacion!.adultos !== r.ocupacion.adultos) return false
-  if (!a.tipoHabitacion || !r.tipoHabitacion) return false
-  return mismoTexto(a.tipoHabitacion, r.tipoHabitacion)
+  if (a.tipoHabitacion && r.tipoHabitacion && mismoTexto(a.tipoHabitacion, r.tipoHabitacion)) return true
+  return !!filas && parUnico(a, r, filas)
+}
+
+/**
+ * COT-2026-0004 (2026-10-23) · el tipo de habitación lo escribe el lector, y del mismo cuarto
+ * escribió «Interior room - no window, two queen beds» en un pantallazo y «Doble habitación sin
+ * ventana» en el otro. Sin par, el niño no se restaba y la captura de solo adultos «sobraba».
+ *
+ * Por eso, aunque el texto no coincida, `a` es el par de `r` cuando:
+ *  · `a` es SOLO para restar (`referencia`): no cobra, existe para dar el precio del menor; una
+ *    habitación que sí cobra con otro tipo (una suite de 2 adultos al lado de una doble con niño)
+ *    nunca se resta;
+ *  · es la única captura de solo adultos con esos adultos en la opción, y `r` la única con menor
+ *    y esos adultos. Con dos posibles no se adivina cuál va con cuál.
+ * La resta negativa ya no parte el precio (`costoPorTipoDeHabitaciones`).
+ */
+function parUnico(a: HabitacionRepartida, r: HabitacionRepartida, filas: readonly HabitacionRepartida[]): boolean {
+  if (a.rol !== 'referencia' || r.rol !== 'habitacion') return false
+  const adultos = r.ocupacion!.adultos
+  const conAdultos = filas.filter(f => f.ocupacion && f.ocupacion.adultos === adultos)
+  return conAdultos.filter(f => soloAdultos(f.ocupacion)).length === 1
+    && conAdultos.filter(f => !soloAdultos(f.ocupacion) && f.rol === 'habitacion').length === 1
 }
 
 /**
@@ -300,7 +336,7 @@ export function repartirHabitaciones(
   let n = 0
   for (const f of filas) {
     if (f.rol === 'habitacion') f.numero = ++n
-    f.sirveParaRestar = filas.some(r => r.rol === 'habitacion' && esPar(f, r))
+    f.sirveParaRestar = filas.some(r => r.rol === 'habitacion' && esPar(f, r, filas))
   }
 
   const cubiertos = cubren()
@@ -382,7 +418,7 @@ export function costoPorTipoDeHabitaciones(r: RepartoHabitaciones): CostoPorTipo
     }
     const menores = (['nino', 'infante'] as TipoPasajero[]).filter(t => cantidadDeTipo(o, t) > 0)
     if (menores.length !== 1) return null
-    const par = r.habitaciones.find(a => esPar(a, h))
+    const par = r.habitaciones.find(a => esPar(a, h, r.habitaciones))
     if (!par) return null
     const diferencia = h.total - par.total
     if (diferencia < 0) return null
@@ -534,7 +570,8 @@ export function recibeHabitaciones(tarifa: TarifaPax): boolean {
 /**
  * La opción del mismo hotel y las mismas fechas a la que se une la captura (regla 1), o `null`.
  * Con varias, la que más habitaciones tiene; empatadas, la primera de la lista (el orden de la
- * cotización). Sin hotel o sin fechas en la captura no se afirma nada.
+ * cotización). Sin hotel en la captura no se afirma nada; sin fechas leídas, decide el hotel
+ * (`mismaOpcionHotel`).
  *
  * Cada candidata se compara con las correcciones de su ficha (`lecturaDeOpcion`). Si una
  * corrección deja dos opciones con la misma clave, NO se fusionan: la captura siguiente cae
@@ -544,7 +581,7 @@ export function opcionDelMismoHotel(
   propia: LecturaCasilla,
   candidatas: readonly CandidataHotel[],
 ): CandidataHotel | null {
-  if (!claveOpcionHotel(propia)) return null
+  if (!(propia.identidad.hotel ?? '').trim()) return null
   let mejor: CandidataHotel | null = null
   let mejorN = 0
   for (const c of candidatas) {

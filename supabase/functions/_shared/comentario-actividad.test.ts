@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { comentariosDeActividad, filasDeComentarios, TOPE_COMENTARIO } from './comentario-actividad'
+import { comentariosDeActividad, filasDeComentarios, textoDeActividad, TOPE_COMENTARIO } from './comentario-actividad'
 
 // `char_length` de Postgres cuenta puntos de código, como `[...s].length`.
 const largo = (s: string) => [...s].length
@@ -94,5 +94,17 @@ describe('nadie corta el contenido de una actividad a 280 en silencio', () => {
   it('no queda ningún `.slice(0, 280)` en las funciones', () => {
     const conCorte = fuentes.filter((p) => readFileSync(p, 'utf8').split('\n').some((l) => /\.slice\(0,\s*280\)/.test(l) && !l.trim().startsWith('//')))
     expect(conCorte).toEqual([])
+  })
+})
+
+describe('textoDeActividad (la ruta sin agente)', () => {
+  it('de una nota de voz: la transcripción tal cual, con lo interpretado arriba', () => {
+    expect(textoDeActividad({ tipo: 'audio', mensaje: ' dictado entero ', interpretado: 'resumen' })).toEqual({ texto: 'Resumen: resumen\n\nNota tal cual: dictado entero', talCual: true })
+    expect(textoDeActividad({ tipo: 'audio', mensaje: 'dictado', interpretado: null })).toEqual({ texto: 'dictado', talCual: true })
+  })
+
+  it('de un escrito: lo interpretado, o el mensaje si no hay', () => {
+    expect(textoDeActividad({ tipo: 'text', mensaje: 'en el S2: llamé', interpretado: 'llamé' })).toEqual({ texto: 'llamé', talCual: false })
+    expect(textoDeActividad({ tipo: 'text', mensaje: 'llamé', interpretado: '' })).toEqual({ texto: 'llamé', talCual: false })
   })
 })
