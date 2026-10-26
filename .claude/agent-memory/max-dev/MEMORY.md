@@ -2,7 +2,8 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — migración 20261026183000 SIN aplicar; huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — migración 20261026183000 APLICADA (26-oct); huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️ [Calificación y resumen diario de asistentes (#1289)](project_calificacion_resumen_asistentes.md) — con_texto SIN prender en Sabor; tokens en `juez`; caida.ts no se importa en src
 - ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
 - ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
