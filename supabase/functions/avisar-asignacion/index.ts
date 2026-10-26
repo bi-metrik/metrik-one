@@ -16,6 +16,7 @@
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { htmlCorreoInterno, REMITENTE_INTERNO } from '../_shared/correo-interno.ts';
 import { textoAvisoAsignacion, type OrigenAsignacion } from '../_shared/aviso-asignacion.ts';
+import { idDeRespuestaResend, registrarAvisoEquipo } from '../_shared/aviso-equipo.ts';
 
 // Sin el `Database` generado (ver `notificar-etapa`): el `any` es el ESQUEMA, no el cliente.
 // deno-lint-ignore no-explicit-any
@@ -96,9 +97,19 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({ from: REMITENTE_INTERNO, to: [correo], subject: t.titulo, html }),
   });
   if (!res.ok) {
-    console.error('[avisar-asignacion] Resend falló:', res.status, await res.text());
+    const detalle = await res.text();
+    console.error('[avisar-asignacion] Resend falló:', res.status, detalle);
+    await registrarAvisoEquipo(supabase, {
+      origen: 'avisar-asignacion', workspaceId: negocio.workspace_id, negocioId: negocio.id,
+      estado: 'fallido', destino: correo, titulo: t.titulo, motivo: `resend_${res.status}: ${detalle}`.slice(0, 200),
+    });
     return json({ error: 'envio_fallido', status: res.status }, 502);
   }
+  // Traza del aviso interno: con el id de Resend, `resend-webhook` le pone entregado, rebotado o suprimido.
+  await registrarAvisoEquipo(supabase, {
+    origen: 'avisar-asignacion', workspaceId: negocio.workspace_id, negocioId: negocio.id,
+    estado: 'enviado', destino: correo, titulo: t.titulo, proveedorId: await idDeRespuestaResend(res),
+  });
   return json({ ok: true, enviados: 1 });
 });
 

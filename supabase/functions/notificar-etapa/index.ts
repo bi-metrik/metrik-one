@@ -34,6 +34,7 @@ import {
 } from '../_shared/recibos-del-aviso.ts';
 import { todayBogotaISO } from '../_shared/bogota.ts';
 import { htmlCorreoInterno } from '../_shared/correo-interno.ts';
+import { idDeRespuestaResend, registrarAvisoEquipo } from '../_shared/aviso-equipo.ts';
 import { marcaDelWorkspace } from '../_shared/marca-workspace.ts';
 import { cabeceraMarcaAvisoHtml, remitenteAvisoEtapa } from '../_shared/remitente-correo.ts';
 import { esDiaHabil, paisDelWorkspace, siguienteDiaHabil } from '../_shared/dias-habiles.ts';
@@ -477,8 +478,29 @@ Deno.serve(async (req: Request) => {
   if (!res.ok) {
     const detail = await res.text();
     console.error('[notificar-etapa] Resend falló:', res.status, detail);
+    await registrarAvisoEquipo(supabase, {
+      origen: 'notificar-etapa',
+      workspaceId: negocio.workspace_id,
+      negocioId: negocio.id,
+      estado: 'fallido',
+      destino: correos,
+      titulo,
+      motivo: `resend_${res.status}: ${detail}`.slice(0, 200),
+    });
     return json({ error: 'envio_fallido', status: res.status }, 502);
   }
+
+  // La traza del aviso interno: con el id de Resend, `resend-webhook` le pone entregado,
+  // rebotado o suprimido. Nunca lanza.
+  await registrarAvisoEquipo(supabase, {
+    origen: 'notificar-etapa',
+    workspaceId: negocio.workspace_id,
+    negocioId: negocio.id,
+    estado: 'enviado',
+    destino: correos,
+    titulo,
+    proveedorId: await idDeRespuestaResend(res),
+  });
 
   return json({
     ok: true,
