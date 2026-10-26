@@ -2,6 +2,8 @@
 
 ## Project memories
 
+- ⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — remitente_correo; logo solo con clave; SOENA: verificar dominio → deploy → clave
+
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — migración 20261026183000 APLICADA (26-oct); huella ≠ bot_reglamentos.huella; staff.id
 - ⚠️ [Calificación y resumen diario de asistentes (#1289)](project_calificacion_resumen_asistentes.md) — con_texto SIN prender en Sabor; tokens en `juez`; caida.ts no se importa en src
 - ⚠️ [Toque de botón de plantilla §4.5 (ag|t|)](project_toque_plantilla.md) — sin el componente con payload Meta devuelve el texto; tope 256 no publicado
@@ -45,11 +47,6 @@
 - ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
 - ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 (tabla + bucket); hoteles NUNCA de Commons
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt
-- ⚠️ [Asignar responsables por lista de staff](project_asignar_responsable_por_staff.md) — asignar_responsable.staff_ids; directorio fuera; RLS sin rol
-- ⚠️ [Operador sin staff no ve negocios (#1205)](project_operador_sin_staff_no_ve.md) — sin mergear; alma-afi tiene 4 staff sin profile (duplicaría)
-- ⚠️ [SOE-026/028: Descargar de Drive y Excel para operator](project_soe026_028_descarga.md) — config SOENA `roles_descarga_negocios_extra` SIN poner; Drive queda en default
-- [SOE-018: supervisor marca bloque restringido (#1203)](project_supervisor_marca_bloque_restringido.md) — pantalla usa canEditBloque; es_multi_pago solo pantalla
-- ⚠️ [SOE-016: responsable automático por etapa](project_responsable_automatico_etapa.md) — sin migración; config SOENA SIN aplicar; crear negocio no cubierto
 - ⚠️⚠️ [Espacio de pruebas trappvel-pruebas](project_espacio_pruebas_trappvel.md) — 2 --apply fallidos; restos 90226eac en prod; ensayo PGlite antes del próximo
 - ⚠️⚠️ [F7/F8 Trappvel: SQL 11→9, clon e interruptores](project_f7_configurar_linea_trappvel.md) — SIN correr; gates 3-4 sin interruptor; cola F5 no filtra es_prueba
 - ⚠️⚠️ [Post-cotización ola 5: F4 entrega y F6 cierre](project_post_cotizacion_f4_f6.md) — #1131 migración contacto_documentos SIN aplicar; pila hasta #1133
@@ -60,14 +57,9 @@
 - ⚠️⚠️ [Cargue masivo de Valida en el servidor](project_valida_lote_servidor.md) — migración 20261015231700 SIN aplicar; cron por minuto; puerta CDA = autorización ≤ 2 h
 - ⚠️ [Latencia del cargue masivo de Valida](project_valida_latencia_masiva.md) — Next encola server actions: lote en serie; ONE pesa más que Valida desde la 0036
 - ⚠️⚠️ [Renovación continua de Valida (fila A)](project_valida_renovacion_continua.md) — paso 6b agrega 1 cuota; script de los 4 CDA SIN correr; ficha sin dias_trial
-- ⚠️⚠️ [SOE-007: devolución de dinero y venta reembolsada](project_devoluciones_dinero_soe007.md) — 20261009210000 APLICADA; devuelto ≥ cobrado sale de ventas; read-only API sí mide
 - ⚠️ [Pegar conversación en el viaje](project_pegar_conversacion.md) — Next importa _shared puro con `.ts`; llave de pruebas sin pago (403)
-- ⚠️⚠️ [SOE-006: histórico de inactivos (#1084)](project_historico_inactivos_soe006.md) — migración 20261008223000 SIN aplicar; promedio del supervisor solo activos (provisional)
 - ⚠️⚠️ [Autorización de datos por link (Trappvel)](project_autorizacion_datos_link.md) — migración 20261008230000 APLICADA (8-oct); marcas manuales no cuentan; directorio sin punto en la lista (N+1)
-- ⚠️⚠️ [SOE-008/009: aviso al cliente una vez por hecho](project_aviso_mismo_hecho.md) — migración huella SIN aplicar; deploy notificar-etapa después
-- ⚠️⚠️ [SOE-006: Correcciones y etapas renombradas](project_correcciones_etapa_retirada.md) — migración SIN aplicar; resolver por momento; sin resolver CUENTA
 - ⚠️ [«Lo que suma» ocultable y tabla apilable (#1192, #1193, #1197, #1198)](project_lo_que_suma_ocultable.md) — pastilla absolute en hueco medido; arnés reproduce a Vera
-- ⚠️⚠️ [SOE-002: segundo pago en dos cifras](project_segundo_pago_dos_cifras.md) — ambas RPC APLICADAS (8-oct); umbral $1.000 en 2 funciones
 - ⚠️⚠️ [Plan Anual CDA (#1065)](project_valida_cda_restriccion_y_plan_anual.md) — migración 20261007210000 SIN aplicar; vigente_hasta=12.1 es null; anexo generado; pendientes #1072
 - ⚠️⚠️ [SOE-001: Seguimiento en 4 etapas de operaciones](project_soe001_seguimiento_operaciones.md) — migración APLICADA (7-oct); SQL de datos SIN aplicar; deploy alertas-plazo antes del SQL
 - ⚠️⚠️ [Tanda bot 2026-10-12 (#1121, #1127)](project_tanda_bot_1012.md) — compacta APAGADA hasta QA real (Google 403); nombre auto: SQL sin aplicar
@@ -81,29 +73,12 @@
 - ⚠️⚠️ [Cotización integrada C0 (igualdad del servidor)](project_cotizacion_integrada_c0.md) — fixture sobre 54568adf NO se regenera; P12 frena por faltaCosto; V1 PW choca con preview=prod
 - ⚠️⚠️ [Época: un deploy ya no recarga](project_epoca_no_recargar_por_deploy.md) — PR que rompe sube EPOCA; fetch propios por `fetchPropio`; techo 8 h diferido
 - ⚠️⚠️ [Tarifas por plan y ruta (SOENA)](project_tarifas_plan_ruta.md) — migraciones APLICADAS; propuesta ya emitida no cambia; PDF aún imprime el plan no ofrecido
-- ⚠️⚠️ [Trial de 5 días del Radar y cobro por ciclo](project_radar_trial_y_cobro.md) — migración SIN aplicar; la gracia de mora pasa de 3 a 5 días en TODOS los productos
-- ⚠️⚠️ [Borrar, editar y escribir en la Actividad](project_actividad_borrar_comentario.md) — DELETE/UPDATE/INSERT aplicadas; force_unlock 20260928150000 SIN aplicar
-- ⚠️⚠️ [Avisos al cliente en día hábil (#935)](project_avisos_dia_habil.md) — migración SIN aplicar; 4 funciones a desplegar; evento se guarda, estado se salta
-- ⚠️ [Avanzar un cruce con motivo](project_avanzar_cruces_con_motivo.md) — #1016; migraciones YA aplicadas, no tocarlas; solo service_role escribe la excepción
-- ⚠️⚠️ [Freno de titulares antes de radicar](project_freno_titulares_antes_de_radicar.md) — migración 20261001100000 SIN aplicar; frena en 6 Y 7
-- ⚠️⚠️ [Datos clave y cruces de titularidad (#886)](project_datos_clave_cruces_titularidad.md) — migración ANTES del merge, backfill DESPUÉS; frena 4 casos
-- ⚠️⚠️ [Webhook de Wompi de Ferretería (#953)](project_ferreteria_webhook_wompi.md) — migración SIN aplicar; crearNegocio sin sesión; payload sin verificar
-- ⚠️⚠️ [Módulo Ferretería dimpro (#905, #917, #920)](project_modulo_ferreteria_dimpro.md) — #917 migración SIN aplicar (escribe datos); #920 tablero Marketplace
-- ⚠️⚠️ [Casilla 5 testigo de la 26 (#918)](project_casilla26_testigo_casilla5.md) — migración SIN aplicar; dígitos de más ≠ mismo número; V0012 solo avisa
-- ⚠️⚠️ [Voto entre fuentes (#895, #896)](project_voto_entre_fuentes.md) — #896 SIN mergear (migración); plantillas NO unificadas a propósito; V0012 frena
-- ⚠️⚠️ [Certificado: departamento, ciudad y dirección](project_certificado_ubicacion.md) — migración SIN aplicar; pruebas con datos inventados (push negado)
-- ⚠️⚠️ [Cierre automático del reproceso](project_cierre_automatico_reproceso.md) — backfill de 21 SIN aplicar; se mide por FLUJO, no por `orden`
-- ⚠️⚠️ [El bloque declara qué documento espera](project_documento_esperado_bloque.md) — config SOENA SIN aplicar; veredicto ASIMÉTRICO a propósito
-- ⚠️⚠️ [Transcripción a ciegas del NIT](project_confirmacion_nit_ciegas.md) — #807: la casilla NO viaja al navegador
 - ⚠️⚠️ [Caché de 5 min de Tableros (#1001)](project_tableros_cache.md) — cifras hasta 5 min atrasadas; ventana en la llave (SWR); guarda verificada antes de guardar
 - ⚠️⚠️ [RPC Comercial SOENA: OFFSET 0 y plan genérico (#1206)](project_perf_fence_venta_mes_soena.md) — pagos = plan genérico de función sql; 20261018190000 SIN aplicar
 - ⚠️⚠️ [El preview abre un workspace (#968)](project_preview_abre_workspace.md) — `?__ws=<slug>`; base de PRODUCCION; sin GEMINI en Preview; login por código
 - ⚠️⚠️ [Pestaña que quedó en otro workspace](project_pestana_desincronizada.md) — el guard va en el MIDDLEWARE
 - ⚠️⚠️ [Cotización Trappvel (30 frentes)](indice_cotizacion_trappvel.md) — ranuras, tarifas, pasajeros, PDF del cliente, captura A/B
-- ⚠️⚠️ [IVA sobre el ingreso propio (Trappvel)](project_iva_ingreso_propio.md) — config viva infla el total hasta el PR de iva_incluido + su SQL
 - ⚠️⚠️ [Margen y recargo configurables (Trappvel)](project_margen_recargo_configurables_trappvel.md) — el guardado de #712 NUNCA escribió (0 filas sin error); exige el CHECK de activity_log ANTES del merge
-- ⚠️⚠️ [Corregir hacia atrás sin área](project_correccion_hacia_atras_sin_area.md) — SOLO SOENA declara el opt-in
-- ⚠️⚠️ [Referencia `one://`](project_referencia_archivos_one.md) — `notificar-etapa` sin redesplegar
 - ⚠️⚠️ [Bot WA sin bandeja: premisas del motor Trappvel](project_wa_bot_sin_bandeja_trappvel.md) — un número, preview de 100, funnelchat es SOENA sin mensajes
 - ⚠️⚠️ [Recordatorios programados por WA (#966)](project_recordatorios_wa.md) — 2 migraciones SIN aplicar; disparo por pg_cron; el webhook no leía `type: 'button'`
 - ⚠️⚠️ [Bandeja WA a negocio existente](project_bandeja_negocio_existente.md) — migración SIN aplicar; conflicto en `_conflictos`; ejecutor Deno sí se prueba

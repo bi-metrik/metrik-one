@@ -12,6 +12,7 @@ import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { correoValido } from './confirmacion'
+import { remitenteCliente } from '../../../supabase/functions/_shared/remitente-correo'
 
 export type EstadoCorreo = { estado: 'enviado' | 'omitido' | 'fallido'; destino: string | null; motivo: string | null }
 
@@ -30,6 +31,20 @@ export function htmlDelMensaje(texto: string): string {
 /** El texto plano del correo: sin los asteriscos de WhatsApp. */
 export function textoPlanoDelMensaje(texto: string): string {
   return texto.replace(/\*([^*\n]+)\*/g, '$1')
+}
+
+/**
+ * «Trappvel vía MéTRIK ONE <noreply@metrikone.co>», o el remitente propio del workspace si declaró
+ * `config_extra.remitente_correo` en un dominio permitido (ver _shared/remitente-correo.ts).
+ */
+export function remitenteViajero(agencia: string, configExtra: unknown): string {
+  const nombre = agencia.replace(/[<>"]/g, '').trim() || 'Tu agencia'
+  return remitenteCliente({
+    configExtra,
+    marca: nombre,
+    porDefecto: `${nombre} vía MéTRIK ONE <noreply@metrikone.co>`,
+    contexto: 'correo-viajero',
+  }).from
 }
 
 export async function enviarCorreoAlViajero(p: {
@@ -68,7 +83,18 @@ export async function enviarCorreoAlViajero(p: {
   const key = process.env.RESEND_API_KEY
   if (!key) return registrar({ estado: 'fallido', destino, motivo: 'sin_resend_api_key' })
 
-  const remitente = `${p.agencia.replace(/[<>"]/g, '').trim() || 'Tu agencia'} vía MéTRIK ONE <noreply@metrikone.co>`
+  // El remitente propio del workspace, si lo declaró. Leerlo nunca frena el correo: ante
+  // cualquier falla sale el remitente de siempre.
+  let configExtra: unknown = null
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ws = await (svc.from('workspaces') as any).select('config_extra').eq('id', p.workspaceId).maybeSingle()
+    if (ws.error) console.error('[correo-viajero] no se pudo leer config_extra, sale el remitente de siempre:', ws.error.message)
+    configExtra = (ws.data as { config_extra?: unknown } | null)?.config_extra ?? null
+  } catch (e) {
+    console.error('[correo-viajero] no se pudo leer config_extra, sale el remitente de siempre:', e instanceof Error ? e.message : String(e))
+  }
+  const remitente = remitenteViajero(p.agencia, configExtra)
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
