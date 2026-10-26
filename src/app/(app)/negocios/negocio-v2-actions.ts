@@ -381,8 +381,8 @@ export type NegocioDetalle = {
     rol: string | null
     segmento: string | null
   } | null
-  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
-  responsables: Array<{ id: string; full_name: string }>
+  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). `rol` = área del responsable. */
+  responsables: Array<{ id: string; full_name: string; rol: string | null }>
   /**
    * Recaudo pendiente para pasar a operaciones. Presente (no null) solo cuando la
    * etapa actual tiene el gate `saldo:handoff` (ej. Documentación). El bloque de
@@ -1283,12 +1283,14 @@ async function getNegocioDetalle(id: string): Promise<{
   // Responsables (multi) desde negocio_responsables (N:M) — fuente de verdad.
   const { data: respRows } = await db(supabase)
     .from('negocio_responsables')
-    .select('staff_id, assigned_at, staff!negocio_responsables_staff_id_fkey(id, full_name)')
+    .select('staff_id, assigned_at, rol, staff!negocio_responsables_staff_id_fkey(id, full_name)')
     .eq('negocio_id', id)
     .order('assigned_at', { ascending: true })
-  const responsables = ((respRows ?? []) as Array<{ staff: { id: string; full_name: string } | null }>)
-    .map((r) => r.staff)
-    .filter((s): s is { id: string; full_name: string } => s !== null)
+  // `rol` ('comercial' | 'operaciones' | null) viaja para que el detalle diga el área.
+  type FilaResp = { rol: string | null; staff: { id: string; full_name: string } | null }
+  const responsables = ((respRows ?? []) as FilaResp[])
+    .filter((r): r is FilaResp & { staff: { id: string; full_name: string } } => r.staff !== null)
+    .map((r) => ({ id: r.staff.id, full_name: r.staff.full_name, rol: r.rol }))
 
   // Día en que este negocio se volvió venta, para el header: el del PRIMER cobro
   // imputado. Se lee de `v_venta_mes_comercial`, que es la definición canónica —la
