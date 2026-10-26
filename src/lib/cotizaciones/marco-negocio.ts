@@ -12,7 +12,8 @@
  * `marco-negocio-datos.ts`.
  *
  * Lo que se decidió (y por qué) — ver el PR del marco:
- * - El presupuesto no está en la solicitud: sale de «Bolsillo declarado» del perfil.
+ * - El presupuesto va en la solicitud si el viaje lo trae; entonces el perfil no repite «Bolsillo declarado»
+ *   (especificación de Noor, 2026-10-26). Sin él, el bolsillo del perfil se sigue viendo.
  * - El código IATA del destino no tiene tabla propia: sale de los vuelos ya leídos de
  *   las cotizaciones ABIERTAS del negocio (no de la que esté abierta en pantalla, para
  *   que las dos pantallas digan lo mismo), y SOLO si el vuelo llega a una ciudad con el
@@ -32,17 +33,37 @@ export const ESTADOS_ABIERTOS = ['borrador', 'enviada', 'aceptada'] as const
 /** Las etapas (por número dentro de la línea) en que la columna lista las cotizaciones. */
 export const ETAPAS_CON_COTIZACIONES: readonly number[] = [2, 3]
 
+/**
+ * Una fila de la tarjeta «Solicitud». `larga`: texto libre (label arriba, valor a lo ancho, recortado a 3 líneas y
+ * desplegable). `detalle`: texto libre debajo del valor, en gris (las edades bajo los pasajeros).
+ */
+export interface FilaSolicitud {
+  clave: 'destino' | 'origen' | 'fechas' | 'pasajeros' | 'grupo' | 'presupuesto' | 'hotel' | 'alimentacion'
+    | 'acomodacion' | 'equipaje' | 'menores' | 'requisitos'
+  label: string
+  valor: string
+  larga?: boolean
+  detalle?: string
+}
+
+/**
+ * Los datos clave de «Condiciones del viaje» (especificación de Noor, 2026-10-26): hasta 12 filas, cada una solo si
+ * tiene valor. Sin filas, la tarjeta dice que el negocio aún no tiene la solicitud.
+ */
 export interface SolicitudDelViaje {
-  destino: string | null
-  /** «Nacional» / «Internacional». */
-  alcance: string | null
-  /** «9 al 13 nov 2026». */
-  fechas: string | null
-  /** «fechas fijas» / «fechas móviles». */
-  tipoDeFechas: string | null
-  /** «2 adultos, 1 niño». */
-  pasajeros: string | null
-  requisitos: string | null
+  filas: FilaSolicitud[]
+  /** La solicitud trae presupuesto: el perfil no repite el «Bolsillo declarado». */
+  tienePresupuesto: boolean
+}
+
+/** Lo que se necesita de un campo de `bloque_configs.config_extra.fields` para nombrar sus opciones. */
+export interface CampoConOpciones {
+  slug: string
+  tipo?: string
+  /** Forma vieja: la lista de valores, o pares. */
+  options?: ReadonlyArray<string | { value: string; label?: string }>
+  /** Forma de la config de Trappvel: pares valor → etiqueta. */
+  opciones?: ReadonlyArray<{ value: string; label?: string }>
 }
 
 export interface PerfilDelCliente {
@@ -93,33 +114,98 @@ function texto(v: unknown): string | null {
   return t === '' ? null : t
 }
 
-const ALCANCE: Record<string, string> = { nacional: 'Nacional', internacional: 'Internacional' }
-const TIPO_FECHAS: Record<string, string> = { fijas: 'fechas fijas', moviles: 'fechas móviles' }
 const TIPO_CLIENTE: Record<string, string> = { leisure: 'Leisure', corporativo: 'Corporativo' }
 const BOLSILLO: Record<string, string> = { economico: 'Económico', medio: 'Medio', alto: 'Alto' }
 
-/** De las filas de `negocio_bloques.data` a la solicitud. El primer valor que aparece gana. */
+/** Los slugs de `negocio_bloques.data` que lee la tarjeta (la lectura los pide uno por uno). */
+export const SLUGS_SOLICITUD = [
+  'destino', 'destino_tipo', 'tipo_viaje', 'ciudad_origen', 'fecha_salida', 'fecha_regreso', 'fechas_tipo',
+  'flexibilidad_fecha', 'adultos', 'ninos', 'infantes', 'numero_pasajeros', 'edades_menores', 'composicion',
+  'presupuesto', 'categoria_hotel', 'plan_alimentacion', 'acomodacion', 'equipaje', 'permiso_salida_menores',
+  'requisitos_especiales',
+] as const
+
+/** «sin_preferencia» → «Sin preferencia»: un valor de opción que no está en la config. */
+function humanizar(v: string): string {
+  const t = v.replace(/_/g, ' ').replace(/\s+/g, ' ').trim()
+  return t ? t[0].toUpperCase() + t.slice(1) : t
+}
+
+function valorCrudo(v: unknown): string | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+  if (typeof v === 'boolean') return v ? 'Sí' : 'No'
+  return texto(v)
+}
+
+/** Etiqueta de un valor según las opciones del campo. Sin opciones conocidas, el texto tal cual. Pura. */
+export function etiquetaDeValor(valor: string, campo: CampoConOpciones | undefined): string {
+  // Una opción escrita solo como valor (`options: ['nacional']` o `{ value }` sin label) no trae etiqueta: se humaniza.
+  const pares: Array<{ value: string; label?: string }> = [
+    ...(campo?.opciones ?? []),
+    ...(campo?.options ?? []).map(o => (typeof o === 'string' ? { value: o } : o)),
+  ]
+  const hit = pares.find(o => String(o.value) === valor)
+  if (hit?.label) return hit.label
+  const esLista = pares.length > 0 || campo?.tipo === 'select' || campo?.tipo === 'radio'
+  // Campo desconocido: solo un valor con cara de slug («todo_incluido») se humaniza; el texto libre va tal cual.
+  if (esLista || (!campo && /^[a-z0-9]+(_[a-z0-9]+)+$/.test(valor))) return humanizar(valor)
+  return valor
+}
+
+const unir = (partes: ReadonlyArray<string | null | undefined>) => partes.filter((x): x is string => !!x).join(' · ') || null
+
+/**
+ * De las filas de `negocio_bloques.data` a la tarjeta «Solicitud». El primer valor que aparece gana (la misma regla de
+ * siempre). `campos`: los fields de la línea, para que los select digan su etiqueta y no su valor.
+ */
 export function solicitudDesdeFilas(
   filas: readonly Record<string, unknown>[],
   viaje: MarcoDelNegocio['viaje'],
+  campos: readonly CampoConOpciones[] = [],
 ): SolicitudDelViaje {
+  const porSlug = new Map<string, CampoConOpciones>()
+  for (const c of campos) if (c?.slug && !porSlug.has(c.slug)) porSlug.set(c.slug, c)
   const primero = (slug: string) => {
     for (const f of filas) {
-      const v = texto(f[slug])
+      const v = valorCrudo(f[slug])
       if (v) return v
     }
     return null
   }
-  const alcance = primero('destino_tipo')
-  const tipoFechas = primero('fechas_tipo')
-  return {
-    destino: viaje.destino,
-    alcance: alcance ? ALCANCE[alcance] ?? alcance : null,
-    fechas: rangoDelViaje(viaje.fechas.inicio, viaje.fechas.fin),
-    tipoDeFechas: tipoFechas ? TIPO_FECHAS[tipoFechas] ?? tipoFechas : null,
-    pasajeros: viaje.composicion ? describirOcupacion(viaje.composicion) : null,
-    requisitos: primero('requisitos_especiales'),
+  const etiqueta = (slug: string) => {
+    const v = primero(slug)
+    return v ? etiquetaDeValor(v, porSlug.get(slug)) : null
   }
+
+  const c = viaje.composicion
+  const numero = primero('numero_pasajeros')
+  const pasajeros = c && c.adultos + c.ninos + c.infantes > 0
+    ? describirOcupacion(c)
+    : numero && Number(numero) > 0 ? `${numero} ${Number(numero) === 1 ? 'pasajero' : 'pasajeros'}` : null
+  const edades = primero('edades_menores')
+  const hayMenores = !!c && c.ninos + c.infantes > 0
+  const presupuesto = etiqueta('presupuesto')
+
+  const candidatas: Array<FilaSolicitud | null> = [
+    fila('destino', 'Destino', unir([viaje.destino, etiqueta('destino_tipo'), etiqueta('tipo_viaje')])),
+    fila('origen', 'Sale de', etiqueta('ciudad_origen')),
+    fila('fechas', 'Fechas', unir([rangoDelViaje(viaje.fechas.inicio, viaje.fechas.fin), etiqueta('fechas_tipo'), etiqueta('flexibilidad_fecha')])),
+    pasajeros ? { clave: 'pasajeros', label: 'Pasajeros', valor: pasajeros, ...(edades ? { detalle: `Edades: ${edades}` } : {}) } : null,
+    fila('grupo', 'Grupo', etiqueta('composicion'), true),
+    fila('presupuesto', 'Presupuesto', presupuesto),
+    fila('hotel', 'Hotel', etiqueta('categoria_hotel')),
+    fila('alimentacion', 'Alimentación', etiqueta('plan_alimentacion')),
+    fila('acomodacion', 'Acomodación', etiqueta('acomodacion'), true),
+    fila('equipaje', 'Equipaje', etiqueta('equipaje')),
+    hayMenores ? fila('menores', 'Menores', etiqueta('permiso_salida_menores')) : null,
+    fila('requisitos', 'Requisitos', etiqueta('requisitos_especiales'), true),
+  ]
+  return { filas: candidatas.filter((f): f is FilaSolicitud => f !== null), tienePresupuesto: !!presupuesto }
+}
+
+function fila(clave: FilaSolicitud['clave'], label: string, valor: string | null, larga = false): FilaSolicitud | null {
+  if (!valor) return null
+  return { clave, label, valor, ...(larga ? { larga: true } : {}) }
 }
 
 /**

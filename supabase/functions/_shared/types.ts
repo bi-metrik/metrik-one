@@ -169,7 +169,10 @@ export type UserRole = 'owner' | 'admin' | 'operator' | 'supervisor' | 'contador
 
 export interface WaUser {
   workspace_id: string;
+  /** `profiles.id` (= auth) del staff que escribe. Ausente en colaboradores y en staff sin perfil. */
   user_id?: string;
+  /** `staff.id` de quien escribe, resuelto por teléfono en `wa-identificar.ts`. Ausente en colaboradores. */
+  staff_id?: string;
   phone: string;
   name: string;
   role: UserRole;

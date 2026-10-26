@@ -41,7 +41,7 @@ import {
   crucesQueSeAvanzan,
 } from '@/lib/negocios/cruces-avance'
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
-import { ordenarResponsables, textoResponsable, type ResponsableConRol } from './responsables-rol'
+import { lineaAsignador, ordenarResponsables, textoResponsable, type ResponsableConRol } from './responsables-rol'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { RecaudoCambiadoBanner, type AvisoRecaudoVista } from './recaudo-cambiado-banner'
@@ -353,6 +353,17 @@ function StageBadge({ stage }: { stage: string | null }) {
 
 // ── Selector de responsable ──────────────────────────────────────────────────
 
+/** Nombre del responsable y, debajo, quién lo asignó («Asignó Edgar Alarcón · 23 oct»), si se sabe. */
+function NombreResponsable({ r }: { r: ResponsableConRol }) {
+  const linea = lineaAsignador(r.asignacion)
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="min-w-0 break-words text-xs text-foreground">{textoResponsable(r)}</span>
+      {linea && <span className="min-w-0 break-words text-[10px] leading-tight text-muted-foreground">{linea.texto}</span>}
+    </span>
+  )
+}
+
 function ResponsableSelector({
   negocioId,
   responsables,
@@ -442,11 +453,11 @@ function ResponsableSelector({
     return (
       <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
         {ordenados.map(r => (
-          <span key={r.id} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+          <span key={r.id} title={lineaAsignador(r.asignacion)?.title} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
               {getInitials(r.full_name)}
             </span>
-            <span className="min-w-0 break-words text-xs text-foreground">{textoResponsable(r)}</span>
+            <NombreResponsable r={r} />
           </span>
         ))}
       </div>
@@ -456,11 +467,11 @@ function ResponsableSelector({
   return (
     <div className="relative flex min-w-0 flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
       {ordenados.map(r => (
-        <div key={r.id} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
+        <div key={r.id} title={lineaAsignador(r.asignacion)?.title} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
             {getInitials(r.full_name)}
           </span>
-          <span className="min-w-0 break-words text-foreground">{textoResponsable(r)}</span>
+          <NombreResponsable r={r} />
           <button
             onClick={e => handleRemove(e, r.id)}
             disabled={isPending}

@@ -18,6 +18,9 @@ import { PGlite } from '@electric-sql/pglite'
 import { textoAvisoAsignacion } from '../../../supabase/functions/_shared/aviso-asignacion.ts'
 
 const MIGRACION = readFileSync(join(process.cwd(), 'supabase/migrations/20261016193000_aviso_asignacion_responsable.sql'), 'utf8')
+// El origen de la asignación (bot, regla por etapa): columnas nuevas + la función del trigger con el texto por origen.
+const MIGRACION_ORIGEN = readFileSync(join(process.cwd(), 'supabase/migrations/20261026090000_negocio_responsables_asignado_origen.sql'), 'utf8')
+const ETAPA = '00000000-0000-4000-8000-00000000f070'
 
 const WS = '00000000-0000-4000-8000-00000000f001'
 const WS_APAGADO = '00000000-0000-4000-8000-00000000f002'
@@ -38,6 +41,8 @@ const ESQUEMA = `
   create table public.workspaces (id uuid primary key, slug text, config_extra jsonb default '{}');
   create table public.staff (id uuid primary key, workspace_id uuid, full_name text, is_active boolean default true, profile_id uuid);
   create table public.negocios (id uuid primary key, workspace_id uuid, codigo text, nombre text, estado text default 'abierto');
+  create table public.etapas_negocio (id uuid primary key, nombre text);
+  insert into public.etapas_negocio values ('${ETAPA}', 'Cotización');
   create table public.negocio_responsables (
     negocio_id uuid, staff_id uuid, assigned_at timestamptz default now(), assigned_by uuid, rol text,
     primary key (negocio_id, staff_id)
@@ -86,13 +91,14 @@ const filas = async <T,>(sql: string) => (await db.query<T>(sql)).rows
 const avisos = () => filas<{ destinatario_id: string; contenido: string; metadata: { mensaje: string; rol: string | null }; deep_link: string }>(
   `select destinatario_id, contenido, metadata, deep_link from notificaciones order by created_at`)
 const llamadas = () => filas<{ url: string; body: Record<string, unknown> }>('select url, body from net.llamadas')
-const asignar = (negocio: string, staff: string, por: string | null, rol: string | null = 'comercial') =>
-  db.query('insert into negocio_responsables (negocio_id, staff_id, assigned_by, rol) values ($1, $2, $3, $4)', [negocio, staff, por, rol])
+const asignar = (negocio: string, staff: string, por: string | null, rol: string | null = 'comercial', origen: string | null = null, etapa: string | null = null) =>
+  db.query('insert into negocio_responsables (negocio_id, staff_id, assigned_by, rol, asignado_origen, asignado_etapa_id) values ($1, $2, $3, $4, $5, $6)', [negocio, staff, por, rol, origen, etapa])
 
 beforeAll(async () => {
   db = new PGlite()
   await db.exec(ESQUEMA)
   await db.exec(MIGRACION)
+  await db.exec(MIGRACION_ORIGEN)
 }, 60_000)
 
 beforeEach(async () => {
@@ -160,5 +166,29 @@ describe('aviso de asignación (trigger sobre negocio_responsables)', () => {
   it('la función no queda ejecutable por anon', async () => {
     const [r] = await filas<{ puede: boolean }>(`select has_function_privilege('anon', 'public.avisar_asignacion_responsable()', 'execute') as puede`)
     expect(r.puede).toBe(false)
+  })
+
+  it('el bot de WhatsApp sin persona: «El bot de WhatsApp te dejó…», igual que el correo', async () => {
+    await asignar(NEG, EDGAR, null, 'comercial', 'bot_whatsapp')
+    const [a] = await avisos()
+    expect(a.metadata.mensaje).toBe('El bot de WhatsApp te dejó como responsable (comercial) de este negocio.')
+    expect(a.metadata.mensaje).toBe(textoAvisoAsignacion({ codigo: 'M1 26 4', nombre: 'SAN ANDRÉS', rol: 'comercial', quienAsigna: null, origen: 'bot_whatsapp' }).mensaje)
+  })
+
+  it('la regla por etapa dice la etapa; sin rol, sin paréntesis', async () => {
+    await asignar(NEG, EDGAR, null, null, 'regla_etapa', ETAPA)
+    const [a] = await avisos()
+    expect(a.metadata.mensaje).toBe('Quedaste como responsable de este negocio al entrar a la etapa Cotización.')
+    expect(a.metadata.mensaje).toBe(textoAvisoAsignacion({ codigo: 'M1 26 4', nombre: 'SAN ANDRÉS', rol: null, quienAsigna: null, origen: 'regla_etapa', etapa: 'Cotización' }).mensaje)
+  })
+
+  it('con persona manda la persona (el bot eligiendo por quien escribe = persona)', async () => {
+    await asignar(NEG, EDGAR, TATI_P, 'comercial', 'persona')
+    const [a] = await avisos()
+    expect(a.metadata.mensaje).toBe('Tatiana Ríos te dejó como responsable (comercial) de este negocio.')
+  })
+
+  it('el check de asignado_origen rechaza valores fuera de la lista', async () => {
+    await expect(asignar(NEG, EDGAR, null, 'comercial', 'cron')).rejects.toThrow(/asignado_origen_check/)
   })
 })

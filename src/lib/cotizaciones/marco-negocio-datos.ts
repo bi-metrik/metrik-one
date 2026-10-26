@@ -17,7 +17,9 @@ import {
   iataDelDestino,
   muestraCotizaciones,
   perfilDesdeCustomData,
+  SLUGS_SOLICITUD,
   solicitudDesdeFilas,
+  type CampoConOpciones,
   type EtapaDelNegocio,
   type MarcoDelNegocio,
 } from './marco-negocio'
@@ -55,11 +57,8 @@ export async function leerMarcoDelNegocio(supabase: unknown, workspaceId: string
   const [filasViaje, contacto, cots] = await Promise.all([
     sb
       .from('negocio_bloques')
-      .select(
-        'adultos:data->adultos, ninos:data->ninos, infantes:data->infantes, '
-        + 'fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso, destino:data->destino, '
-        + 'destino_tipo:data->destino_tipo, fechas_tipo:data->fechas_tipo, requisitos_especiales:data->requisitos_especiales',
-      )
+      // Los slugs de la tarjeta «Solicitud» (`SLUGS_SOLICITUD`): la composición, las fechas y el destino salen de aquí.
+      .select(SLUGS_SOLICITUD.map(slug => `${slug}:data->${slug}`).join(', '))
       .eq('negocio_id', negocioId) as Promise<Resultado<Record<string, unknown>[]>>,
     neg.data.contacto_id
       ? sb
@@ -104,9 +103,20 @@ export async function leerMarcoDelNegocio(supabase: unknown, workspaceId: string
     negocioId,
     viaje,
     iataDestino,
-    solicitud: solicitudDesdeFilas(filas, viaje),
+    // Los fields de la línea (ya leídos para saber si cotiza viajes) dan la etiqueta de cada opción.
+    solicitud: solicitudDesdeFilas(filas, viaje, camposDeLaLinea((bloques.data ?? []).map(b => b.fields))),
     perfil: perfilDesdeCustomData(contacto.data?.custom_data),
     cotizaciones: muestraCotizaciones(etapa) && !cots.error ? abiertas : null,
     puedeCrearCotizacion: !abiertas.some(c => c.estado === 'aceptada'),
   }
+}
+
+/** Los fields de los bloques de la línea, aplanados. Lo que no tenga `slug` se ignora. */
+function camposDeLaLinea(listas: readonly unknown[]): CampoConOpciones[] {
+  const out: CampoConOpciones[] = []
+  for (const l of listas) {
+    if (!Array.isArray(l)) continue
+    for (const f of l) if (f && typeof f === 'object' && typeof (f as { slug?: unknown }).slug === 'string') out.push(f as CampoConOpciones)
+  }
+  return out
 }
