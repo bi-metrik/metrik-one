@@ -189,18 +189,63 @@ describe('actividad, contacto y consultas', () => {
     expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'llamada', texto: 'llamé a Alfa para revisar el cobro' }])
   })
 
-  it('una actividad larga (una nota de voz de minutos) se guarda entera y lo dice antes y después del toque', async () => {
-    // El caso del 2026-10-26: 4.451 caracteres transcritos completos y en el timeline quedaron 279, sin aviso.
+  it('un texto largo escrito por el modelo va en varios comentarios, sin prometer que es «completo»', async () => {
     const largo = Array.from({ length: 40 }, (_, i) => `En el evento, punto ${i + 1}: la cocina trabaja con siete personas de planta.`).join(' ')
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: largo } } },
     ])
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
     const t = await e.escribe(largo)
-    expect(t[0].texto).toContain('Es largo: la guardo completa, en varios comentarios seguidos.\n¿La registro?')
+    expect(t[0].texto).toMatch(/Es largo: va en \d+ comentarios seguidos\.\n¿La registro\?$/)
+    expect(t[0].texto).not.toMatch(/complet/i)
     const fin = await e.toca('Registrar')
-    expect(fin.map((s) => s.texto).join('\n')).toMatch(/✅ 🤝 Actividad registrada en A1 26 1 · Alfa Grupo — Concesión de prueba, completa en \d+ comentarios seguidos\./)
+    expect(fin.map((s) => s.texto).join('\n')).toMatch(/✅ 🤝 Actividad registrada en A1 26 1 · Alfa Grupo — Concesión de prueba, en \d+ comentarios seguidos\./)
     expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'reunion', texto: largo }])
+  })
+
+  it('una nota de voz se guarda tal cual: el resumen del modelo va arriba, nunca en lugar de la nota', async () => {
+    // El caso del 2026-10-26: 4.459 caracteres dictados; el modelo veía solo los primeros 1.200 y guardó su resumen de
+    // unos 650, diciendo «Esta versión tiene el mensaje completo».
+    const dictado = Array.from({ length: 60 }, (_, i) => `En el evento, punto ${i + 1}: la cocina trabaja con siete personas de planta.`).join(' ')
+    const resumen = 'Evento del viernes: cocina con siete personas de planta.'
+    const modelo = modeloGuionado([
+      // Sin `nota`: el código no deja guardar el resumen en lugar de lo dictado.
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: resumen } } },
+      { name: 'proponer', args: { accion: 'actividad', texto: 'Esta versión tiene el mensaje completo.', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: resumen, nota: '#1' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.dicta(dictado)
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['nota_de_voz_sin_referencia'])
+    expect(t[0].texto).toContain('Esta versión tiene el mensaje completo.')
+    expect(t[0].texto).toMatch(/📝 Tu nota de voz #1 va tal cual, entero, en \d+ comentarios seguidos\.\n¿La registro\?$/)
+    const fin = await e.toca('Registrar')
+    expect(fin.map((s) => s.texto).join('\n')).toMatch(/✅ 🤝 Actividad registrada en A1 26 1 · Alfa Grupo — Concesión de prueba, con tu nota #1 tal cual en \d+ comentarios seguidos\./)
+    expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'reunion', texto: `Resumen: ${resumen}\n\nNota tal cual: ${dictado}` }])
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('sin la nota, el bot no dice que guarda el mensaje completo', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'actividad', texto: 'Esta versión tiene el mensaje completo.', datos: { negocio: 'A1 26 1', tipo: 'llamada', texto: 'Llamé a Alfa por el cobro.' } } },
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'llamada', texto: 'Llamé a Alfa por el cobro.' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.escribe('anota en el A1 26 1 que llamé a Alfa para revisar el cobro, que quedó de pagar el viernes')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['texto_contra_propuesta'])
+    expect(t[0].texto).not.toMatch(/complet/i)
+    expect(t[0].texto).toContain('«Llamé a Alfa por el cobro.»')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('`nota` solo apunta a un audio o un escrito de la persona', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'nota', texto: 'x', nota: '#9' } } },
+      { name: 'responder', args: { tema: 'actividad', texto: '¿Qué nota registro?' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('registra la nota')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['nota_no_es_de_la_persona'])
+    expect(e.puerto.escrituras).toEqual([])
   })
 
   it('contacto nuevo: el teléfono tiene que estar escrito y no ser de otro', async () => {

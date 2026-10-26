@@ -1,6 +1,6 @@
 ---
 name: asignado-origen-y-remitente-bot
-description: wa_identify_user sin user_id dejaba al remitente del bot sin staff en todo workspace; asignado_origen + asignado_etapa_id (20261026090000 SIN aplicar, antes del merge)
+description: wa_identify_user sin user_id dejaba al remitente del bot sin staff en todo workspace; asignado_origen + asignado_etapa_id (20261026090000 APLICADA 2026-10-26, con ledger)
 metadata:
   type: project
 ---
@@ -14,7 +14,7 @@ resolviendo el staff por `phone_whatsapp` (rama feat/trappvel-asignado-por-y-pan
 bot sin `assigned_by`). Al encenderlo cambian comportamientos ya «probados» con null: ver la lista en el PR.
 
 **How to apply:**
-- La migración 20261026090000 (asignado_origen + asignado_etapa_id + trigger) va ANTES del merge y del deploy de
+- La migración 20261026090000 (asignado_origen + asignado_etapa_id + trigger) ya está APLICADA (2026-10-26); iba ANTES del merge y del deploy de
   wa-webhook: el upsert de `asignarResponsableCon` escribe las columnas y sin ellas el responsable no queda.
 - `asignado_etapa_id` no estaba en el brief (solo `asignado_origen`): se agregó para nombrar la etapa en el detalle.
 - El rol del remitente sigue roto (la RPC no lo devuelve): todo staff no principal = operator. No se tocó.

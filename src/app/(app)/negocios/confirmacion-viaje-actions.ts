@@ -50,6 +50,7 @@ import {
 } from '@/lib/viaje/confirmacion-datos'
 import { enviarCorreoAlViajero, trazarWhatsAppManual } from '@/lib/viaje/correo-viajero'
 import { contextoViaje, nombreYCorreo, type ContextoViaje } from '@/lib/viaje/contexto-viaje'
+import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
 import { cambiarEtapaNegocio } from './negocio-v2-actions'
 
@@ -303,6 +304,14 @@ async function confirmarClienteViajeSinClave(input: EntradaConfirmacion): Promis
   // Ya confirmado: una segunda confirmación no rehace nada (un cambio de plan es otra acción).
   const previa = (ctx.negocio.metadata?.confirmacion_cliente ?? null) as ConfirmacionGuardada | null
   if (previa?.registrada_at) return { ok: false, error: 'Este negocio ya tiene la confirmación del cliente registrada.' }
+
+  // Sin la autorización de datos del cliente no se confirma: confirmar le manda el mensaje con el
+  // plan y nacen las reservas y los cobros (reunión del 2026-10-22). Antes solo frenaba si la
+  // cotización faltaba por aprobar; con la cotización ya aprobada (o la autorización revocada
+  // después) pasaba. El mismo motivo que «Enviar» (`autorizacion-datos/envio.ts`), y antes de
+  // escribir nada.
+  const motivoDatos = await motivoAutorizacionParaEnviar(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId: input.negocioId })
+  if (motivoDatos) return { ok: false, error: motivoDatos }
 
   const p = await prepararPlan(ctx, input)
   if (!p.ok) return { ok: false, error: p.error }

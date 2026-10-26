@@ -206,7 +206,7 @@ import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
 import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
-import { lineaExigeAutorizacion } from '@/lib/autorizacion-datos/envio'
+import { autorizacionEstaPendiente, faltaAutorizacionDelNegocio, lineaExigeAutorizacion, MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import type { QuienAsigno } from './[id]/responsables-rol'
@@ -6753,6 +6753,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
    * envía (reunión del 2026-10-22). La ficha lo dice arriba.
    */
   autorizacionPendiente?: boolean
+  /** Con la autorización pendiente, lo mismo que responde «Enviar» (`MENSAJE_ENVIO`). */
+  motivoAutorizacion?: string | null
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -8442,7 +8444,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (errCierre) console.error('[getNegocioDetalle] no se pudieron cerrar los gates heredados ya llenos:', errCierre)
   }
 
-  let autorizacionPendiente = false
+  // ── ¿Falta la autorización de datos? ──
+  // Con la MISMA regla que frena «Enviar», «Aprobar» y el gate (`faltaAutorizacionDelNegocio`), sin
+  // depender de que el bloque se pinte: el de «Autorización de datos» vive en Solicitud y, como su
+  // trabajo no queda en `negocio_bloques.data`, el historial lo salta mientras falte la firma. Antes
+  // la bandera salía de los candidatos de abajo y en Cotización quedaba siempre en `false`
+  // (prueba con clics del 2026-10-25): el aviso desaparecía justo cuando más hacía falta.
+  // Si no se puede leer, no se afirma nada aquí; «Enviar» igual falla cerrado.
+  const faltaAutorizacion = base.exigeAutorizacionDatos
+    ? faltaAutorizacionDelNegocio(db(supabase), { workspaceId, negocioId: id, contactoId: base.negocio.contacto_id ?? null })
+      .catch((e: unknown) => {
+        console.error('[getNegocioDetalle] no se pudo revisar la autorización de datos:', e)
+        return 'error' as const
+      })
+    : null
   // ── Autorización, ficha y servicios: el estado lo dice el gate, no la fila ──
   // Su trabajo no se guarda en el bloque (vive en el contacto o en `negocio_servicios`), así que
   // nadie marcaba `negocio_bloques.estado`: la autorización firmada seguía en «Pendiente»
@@ -8468,11 +8483,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         contactoId: base.negocio.contacto_id ?? null,
         configLinea: lineaConfigExtra,
         bloques: candidatos,
+        ...(faltaAutorizacion ? { faltaAutorizacion } : {}),
       }).catch((e) => {
         console.error('[getNegocioDetalle] no se pudo derivar el estado de los bloques:', e)
         return new Map<string, EstadoBloqueDerivado | null>()
       })
-      autorizacionPendiente = candidatos.some(c => c.tipo === 'autorizacion' && derivados.get(c.instanciaId) === 'pendiente')
       const { completar, reabrir } = cambiosDeEstado(candidatos.map(c => ({ ...c, derivado: derivados.get(c.instanciaId) ?? null })))
       for (const c of candidatos) {
         const estado = derivados.get(c.instanciaId)
@@ -8493,13 +8508,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
   }
 
+  const faltaLeida = faltaAutorizacion ? await faltaAutorizacion : null
+  const autorizacionPendiente = autorizacionEstaPendiente(faltaLeida)
+
   return {
     negocio: base.negocio,
     noAplica,
     datosClave: await datosClavePromesa,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
-    autorizacionPendiente: base.exigeAutorizacionDatos && autorizacionPendiente,
+    autorizacionPendiente,
+    motivoAutorizacion: autorizacionPendiente && faltaLeida ? MENSAJE_ENVIO[faltaLeida] : null,
     etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente

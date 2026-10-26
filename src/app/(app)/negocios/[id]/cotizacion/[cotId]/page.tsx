@@ -319,8 +319,9 @@ export default async function CotizacionNegocioPage({
   // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
   // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.
   const vistaDelNegocio = lineasPorTipo ? await cargarVistaNegocio(id) : null
+  // El mismo texto que respondería «Enviar» (con menores en el viaje, el de menores).
   const motivoAutorizacionDatos = estadoPasos.encendido && vistaDelNegocio?.autorizacionPendiente === true
-    ? MENSAJE_ENVIO_PENDIENTE
+    ? (vistaDelNegocio.motivoAutorizacion ?? MENSAJE_ENVIO_PENDIENTE)
     : null
 
   const editor = (

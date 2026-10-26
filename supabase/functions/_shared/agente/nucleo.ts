@@ -443,6 +443,12 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver('No se envió: el texto dice que no lo registras y abajo iba la propuesta para registrarlo. Si no se registra, contesta con `responder` sin propuesta; si es otra cosa (p. ej. un ingreso y no un gasto), propón eso.');
         continue;
       }
+      const contradice = texto ? deps.dominio.revisarTextoPropuesta?.(texto, p.propuesta) ?? null : null;
+      if (contradice) {
+        traza.candados!.push({ candado: 'texto_contra_propuesta', detalle: texto.slice(0, 200) });
+        devolver(contradice);
+        continue;
+      }
       // Del respaldo no sale texto arriba de una propuesta (`respaldoEstricto`): su declaración no lo trae, y si igual lo
       // escribe, se ignora. Lo decide quién escribió el llamado, no lo que dice.
       if (texto && c.respaldoEstricto && c.respaldo && res.mensaje.modelo === c.respaldo.modelo && c.respaldo.modelo !== c.principal.modelo) {

@@ -59,6 +59,7 @@ vi.mock('@/lib/ai/extract-fields', () => ({
   extractFieldsFromDocument: (...a: any[]) => extraerMock(...a),
 }))
 let archivoEnStorage: Blob | null = null
+let autorizada = false
 
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../../test/exigir-modulo-doble')).dobleExigirModulo())
@@ -68,7 +69,10 @@ vi.mock('@/lib/modulos/exigir-modulo', async () =>
 function clienteFalso() {
   return {
     from: (tabla: string) => constructor(tabla),
-    rpc: async () => ({ data: null, error: null }),
+    // La autorización de datos del contacto (`autorizacion_datos_estado`): la regla vive en la RPC.
+    rpc: async (fn: string) => fn === 'autorizacion_datos_estado'
+      ? { data: { existe: true, vigente: { generales: autorizada } }, error: null }
+      : { data: null, error: null },
     storage: { from: () => ({ download: async () => (archivoEnStorage ? { data: archivoEnStorage, error: null } : { data: null, error: { message: 'no' } }) }) },
   }
 }
@@ -97,7 +101,9 @@ function constructor(tabla: string) {
     if (columnas.includes('rubros(')) salida.rubros = (tablas.rubros ?? []).filter(r => r.item_id === f.id).map(r => ({ ...r }))
     if (columnas.includes('lineas_negocio(')) {
       const l = (tablas.lineas_negocio ?? []).find(x => x.id === f.linea_id)
-      salida.lineas_negocio = l ? { config_extra: l.config_extra } : null
+      // Las etapas de la línea, para saber si alguna pide la autorización de datos (`envio.ts`).
+      const etapas = columnas.includes('etapas_negocio(') ? { etapas_negocio: (tablas.etapas_negocio ?? []).filter(e => e.linea_id === f.linea_id).map(e => ({ config_extra: e.config_extra })) } : {}
+      salida.lineas_negocio = l ? { config_extra: l.config_extra, ...etapas } : null
     }
     if (columnas.includes('itinerario_opciones(')) {
       salida.itinerario_opciones = (tablas.itinerario_opciones ?? []).filter(o => o.itinerario_id === f.id).map(o => ({ item_id: o.item_id }))
@@ -204,6 +210,7 @@ import { planSugerido, sumarDiasCivil, type CuotaPlan } from '@/lib/viaje/plan-p
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { reiniciarModulo } from '../../../../test/exigir-modulo-doble'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
+import { MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
 
 // ── Escenario sintético: Cusco, dos tarifas ──────────────────────────────────
 
@@ -792,5 +799,38 @@ describe('riel de cobro: lectura del comprobante (F2-4)', () => {
 
   it('un archivo de otro espacio no se lee', async () => {
     expect((await leerComprobantePago(NEG, { ...SOPORTE, storage_path: 'otro-ws/x.png' })).ok).toBe(false)
+  })
+})
+
+describe('sin la autorización de datos no se confirma (2026-10-25)', () => {
+  // La línea pide la autorización en Cotización, como después del SQL del #1257.
+  const conGate = () => {
+    sembrar()
+    autorizada = false
+    tablas.etapas_negocio[0].config_extra = { gates: ['autorizacion_datos'] }
+  }
+  beforeEach(conGate)
+
+  it('sin firma: no confirma, con el motivo de «Enviar», y no escribe nada', async () => {
+    const r = await confirmarClienteViaje(entrada())
+    expect(r).toEqual({ ok: false, error: MENSAJE_ENVIO.generales })
+    expect(planes()).toHaveLength(0)
+    expect(meta().confirmacion_cliente).toBeUndefined()
+    expect(tablas.cotizaciones[0].estado).toBe('enviada')
+  })
+
+  it('con la cotización ya aprobada tampoco (antes pasaba: solo frenaba la aprobación)', async () => {
+    tablas.cotizaciones[0].estado = 'aceptada'
+    tablas.cotizaciones[0].tarifa_aceptada_id = 'it-rec'
+    const r = await confirmarClienteViaje(entrada())
+    expect(r.ok).toBe(false)
+    expect(meta().confirmacion_cliente).toBeUndefined()
+  })
+
+  it('firmada: confirma como siempre', async () => {
+    autorizada = true
+    const r = await confirmarClienteViaje(entrada())
+    expect(r.ok).toBe(true)
+    expect(meta().confirmacion_cliente).toBeDefined()
   })
 })

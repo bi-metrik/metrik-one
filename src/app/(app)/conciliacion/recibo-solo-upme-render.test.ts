@@ -35,6 +35,7 @@ const pagoMixto = (p: Partial<PagoConRecibo> = {}): PagoConRecibo => ({
   recibo_url: null,
   recibos: [],
   valor_upme: 701_812,
+  rc3: { comprobante: 701_812, ya_acusado: 0 },
   componentes_pendientes: [],
   no_aplica_motivo: null,
   facturado: true,
@@ -59,9 +60,21 @@ describe('el formulario del recibo: la tarifa UPME, no el pago', () => {
 
     // Intl en es-CO separa miles con punto; el símbolo puede ir pegado o no.
     expect(html).toMatch(/Valor del recibo \$\s?701\.812/)
-    expect(html).toContain('porción UPME de este pago de')
+    // SOE-029: el valor sale del comprobante UPME del negocio, y es uno por negocio.
+    expect(html).toMatch(/comprobante de pago UPME del negocio \(\$\s?701\.812\)/)
+    expect(html).toContain('un solo recibo por negocio')
+    expect(html).toContain('Este pago fue de')
     expect(html).toContain('1.339.312')
     expect(html).toContain('se abona solo a la factura')
+  })
+
+  it('con recibos anteriores, dice cuánto del comprobante ya estaba acusado', () => {
+    const html = texto(renderToStaticMarkup(React.createElement(ResumenReciboUpme, {
+      pago: pagoMixto({ valor_upme: 701_767, rc3: { comprobante: 701_812, ya_acusado: 45 } }),
+    })))
+
+    expect(html).toMatch(/Valor del recibo \$\s?701\.767/)
+    expect(html).toMatch(/\(\$\s?701\.812\) menos \$\s?45 ya acusados/)
   })
 
   it('en un pago de pura tarifa no habla de un honorario que no tiene', () => {

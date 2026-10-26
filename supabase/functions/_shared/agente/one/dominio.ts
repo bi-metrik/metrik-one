@@ -386,6 +386,46 @@ function ultimoTextoDelEquipo(filas: FilaConversacion[]): string | null {
   return f?.texto?.trim() ?? null;
 }
 
+/** El último mensaje del equipo que no es un toque, con su #n. Pura. */
+function ultimoDelEquipo(filas: FilaConversacion[]): { fila: FilaConversacion; n: number } | null {
+  for (let i = filas.length - 1; i >= 0; i--) {
+    const f = filas[i];
+    if (f.direccion === 'entrante' && f.clase !== 'toque' && (f.texto ?? '').trim()) return { fila: f, n: i + 1 };
+  }
+  return null;
+}
+
+/**
+ * La nota `#n` que la persona pide registrar: su audio (transcrito) o su escrito, con el texto entero de la fila. Un
+ * reenvío no: es del cliente, no una nota del equipo. Sin `nota`, `v: null`. Pura.
+ */
+export function notaDe(filas: FilaConversacion[], v: unknown): { v: { n: number; texto: string; audio: boolean } | null } | { error: string } {
+  if (v === undefined || v === null || v === '') return { v: null };
+  const n = numeroDeFila(v);
+  const f = n ? filas[n - 1] : undefined;
+  const texto = (f?.texto ?? '').trim();
+  if (!f || f.direccion !== 'entrante' || !['audio', 'escrito'].includes(f.clase) || !texto) {
+    return { error: `«${String(v)}» no es un audio ni un escrito de la persona en esta conversación. \`nota\` es el #n de una línea «[audio de …]» o «[escrito de …]».` };
+  }
+  return { v: { n: n!, texto, audio: f.clase === 'audio' } };
+}
+
+/** Lo que se guarda con una nota: el resumen del modelo arriba (si lo hay y no es la nota misma) y la nota entera. Pura. */
+export function textoConNota(resumen: string, nota: string): string {
+  return resumen && resumen !== nota ? `Resumen: ${resumen}\n\nNota tal cual: ${nota}` : nota;
+}
+
+/**
+ * ¿El texto que va arriba de la propuesta dice que se guarda el mensaje completo cuando no es así? (2026-10-26: «Esta
+ * versión tiene el mensaje completo» sobre un resumen de 650 de 4.459 caracteres). Es una invariante sobre lo que dice el
+ * bot de su propia propuesta: «completo» solo es cierto si va la nota de la persona tal cual. Pura.
+ */
+export function prometeCompletoSinNota(texto: string, p: Pick<Propuesta, 'accion' | 'datos'>): boolean {
+  if (p.accion !== 'actividad' || typeof p.datos.nota === 'number') return false;
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\b(complet[oa]s?|enter[oa]s?|integr[oa]s?|tal cual|sin cortes?|textual(mente)?)\b/.test(t);
+}
+
 const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 
 /**
@@ -529,7 +569,8 @@ const DATOS_PROPONER_ONE: Record<string, unknown> = {
   cuota: { type: 'string', description: 'ingreso: opcional. La cuota que la persona eligió (su número, «1»), si el sistema mostró varias o el pago es parcial.' },
   parcial: { type: 'boolean', description: 'ingreso: true solo si la persona dijo que es un pago PARCIAL de esa cuota (abono por menos).' },
   tipo: { type: 'string', enum: [...TIPOS_ACTIVIDAD], description: 'actividad: qué fue.' },
-  texto: { type: 'string', description: 'actividad: lo que pasó, con las palabras de la persona.' },
+  texto: { type: 'string', description: 'actividad: lo que pasó, con las palabras de la persona. Con `nota`: un resumen corto (opcional) que queda arriba de la nota.' },
+  nota: { type: 'string', description: 'actividad: el #n del audio o del escrito de la persona que pide registrar (una nota dictada). Se guarda ese mensaje entero, tal cual: la conversación te muestra solo el principio de uno largo. Obligatorio si la actividad sale de una nota de voz.' },
   nombre: { type: 'string', description: 'contacto_nuevo: el nombre completo.' },
   telefono: { type: 'string', description: 'contacto_nuevo: el celular, solo si la persona lo escribió.' },
   cargo: { type: 'string', description: 'contacto_nuevo: el cargo o el rol, si lo dijo.' },
@@ -886,20 +927,36 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     };
   }
 
-  async function proponerActividad(d: Record<string, unknown>): Promise<Resultado<Propuesta>> {
-    const texto = String(d.texto ?? '').trim();
+  async function proponerActividad(d: Record<string, unknown>, ctx: ContextoDominio): Promise<Resultado<Propuesta>> {
+    const resumenModelo = String(d.texto ?? '').trim();
+    const nota = notaDe(ctx.conversacion, d.nota);
+    if ('error' in nota) return { ok: false, error: nota.error, candado: 'nota_no_es_de_la_persona' };
+    // Una nota de voz se guarda tal cual (2026-10-26: de 4.459 caracteres dictados quedó el resumen del modelo, unos
+    // 650, y el bot dijo «tiene el mensaje completo»). El modelo ve solo el principio de un audio largo: lo que se guarda
+    // lo saca el código de la fila, no lo reescribe el modelo.
+    if (!nota.v) {
+      const ultimo = ultimoDelEquipo(ctx.conversacion);
+      if (ultimo?.fila.clase === 'audio') {
+        return { ok: false, error: `La actividad sale de la nota de voz #${ultimo.n}: pon \`nota: "#${ultimo.n}"\` y se guarda entera, tal cual. En \`texto\` va, si sirve, un resumen corto que queda arriba.`, candado: 'nota_de_voz_sin_referencia' };
+      }
+    }
+    const texto = nota.v ? textoConNota(resumenModelo, nota.v.texto) : resumenModelo;
     if (!texto) return { ok: false, error: 'Falta el texto de la actividad (lo que pasó, con las palabras de la persona).', candado: 'sin_texto' };
     const tipo = (TIPOS_ACTIVIDAD as readonly string[]).includes(String(d.tipo)) ? String(d.tipo) as TipoActividad : 'nota';
     const n = await negocioReal(d.negocio);
     if (!n.ok) return n;
+    const comentarios = comentariosDeActividad(`${EMOJI_ACTIVIDAD[tipo]} `, texto).length;
     return {
       ok: true,
       v: {
         accion: 'actividad',
-        datos: { negocio_id: n.v.id, negocio: n.v.codigo, etiqueta: nombreNegocio(n.v), tipo, texto },
+        datos: { negocio_id: n.v.id, negocio: n.v.codigo, etiqueta: nombreNegocio(n.v), tipo, texto, nota: nota.v?.n ?? null },
         resumen: `${EMOJI_ACTIVIDAD[tipo]} Actividad en ${nombreNegocio(n.v)}:\n«${corto(texto, 400)}»\n`
-          // El «…» de arriba es solo de este resumen: lo que se guarda es el texto entero.
-          + (comentariosDeActividad(`${EMOJI_ACTIVIDAD[tipo]} `, texto).length > 1 ? 'Es largo: la guardo completa, en varios comentarios seguidos.\n' : '')
+          // El «…» de arriba es solo de este resumen: lo que se guarda es el texto entero. «Completa» solo se dice de la
+          // nota de la persona; de un texto que escribió el modelo, no (puede ser un resumen).
+          + (nota.v
+            ? `📝 Tu ${nota.v.audio ? 'nota de voz' : 'mensaje'} #${nota.v.n} va tal cual, entero${comentarios > 1 ? `, en ${comentarios} comentarios seguidos` : ''}.\n`
+            : comentarios > 1 ? `Es largo: va en ${comentarios} comentarios seguidos.\n` : '')
           + '¿La registro?',
         sobre: n.v.codigo, si: 'Registrar', no: 'No',
       },
@@ -940,7 +997,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       : accion === 'adjuntar_soporte' ? await proponerSoporte(datos, ctx)
       : accion === 'corregir_gasto' ? await proponerCorreccion(datos, ctx)
       // `ingreso` se atiende arriba (sus permisos son otros).
-        : accion === 'actividad' ? await proponerActividad(datos)
+        : accion === 'actividad' ? await proponerActividad(datos, ctx)
           : accion === 'contacto_nuevo' ? await proponerContacto(datos, ctx)
             : { ok: false as const, error: `Acción desconocida. Usa una de: ${ACCIONES_ONE.join(', ')}.`, candado: 'accion_desconocida' };
     return r.ok ? { ok: true, propuesta: r.v } : r;
@@ -992,7 +1049,10 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     }
     if (p.accion === 'actividad') {
       const r = await puerto.registrarActividad({ negocioId: String(d.negocio_id), tipo: d.tipo as TipoActividad, texto: String(d.texto) });
-      const enVarios = r.comentarios > 1 ? `, completa en ${r.comentarios} comentarios seguidos` : '';
+      const conNota = typeof d.nota === 'number';
+      const enVarios = conNota
+        ? `, con tu nota #${d.nota} tal cual${r.comentarios > 1 ? ` en ${r.comentarios} comentarios seguidos` : ''}`
+        : r.comentarios > 1 ? `, en ${r.comentarios} comentarios seguidos` : '';
       return { lineas: [`✅ ${EMOJI_ACTIVIDAD[d.tipo as TipoActividad] ?? '📝'} Actividad registrada en ${String(d.etiqueta)}${enVarios}.`], escrituras: [{ tipo: 'actividad', negocio: d.negocio, texto: d.texto }] };
     }
     if (p.accion === 'contacto_nuevo') {
@@ -1040,6 +1100,9 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     // La base manda (2026-10-21): los gastos que la conversación dice que se registraron, revisados en este turno.
     registros: async (ctx) => registrosDeGastos(await gastosVigentes(ctx)),
     revisarRespuesta: (s) => listaDeDestinoDelModelo(s),
+    revisarTextoPropuesta: (texto, p) => prometeCompletoSinNota(texto, p)
+      ? 'No se envió: el texto dice que va el mensaje completo, y lo que se guarda es el `texto` que escribiste tú. Si la persona pidió registrar su nota, pon `nota: "#n"` (va tal cual); si no, quita esa frase.'
+      : null,
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',
