@@ -27,7 +27,21 @@ import { revisarCupo } from './agente/uso.ts';
 import { completarTexto } from './wa-conversacion.ts';
 import { staffIdDelRemitente } from './wa-bandeja.ts';
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
+import { leerConfigTranscripcion, pistasSiEncendidas } from './agente/pistas.ts';
+import { leerBasePistas } from './agente/pistas-supabase.ts';
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
+
+/**
+ * Las pistas para transcribir la nota de voz (spec 2026-10-26, §4.6): solo con `bot_conversacional.transcripcion.pistas
+ * = true`. Apagado devuelve `null` sin una consulta y la transcripción queda como siempre. Las funciones del rol
+ * aportarán las suyas por su gancho cuando entre el componedor (#1285); hoy no hay ninguna.
+ */
+function pistasDeLaNota(supabase: SupabaseClient, user: WaUser): Promise<string | null> {
+  return pistasSiEncendidas(
+    leerConfigTranscripcion(user.modulos?.bot_conversacional),
+    async () => ({ base: await leerBasePistas(supabase, user.workspace_id) }),
+  );
+}
 
 /** Lo que el agente NO toma aunque esté prendido. Pura. */
 export function fueraDelAgente(message: Pick<IncomingMessage, 'type' | 'text' | 'interactive_reply' | 'reenviado'>): boolean {
@@ -56,7 +70,8 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
 
   // Un audio se transcribe antes del turno (el del equipo es un escrito dictado; el reenviado, dato del cliente).
   if (message.type === 'audio' && message.audio_id) {
-    const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true });
+    const pistas = await pistasDeLaNota(supabase, user);
+    const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true, pistas });
     if (r.text) await completarTexto(supabase, message.wa_message_id, r.text);
   }
 
@@ -133,7 +148,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
 
     // Un audio se transcribe antes del turno (lo que dice es un escrito dictado).
     if (message.type === 'audio' && message.audio_id) {
-      const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true });
+      const pistas = await pistasDeLaNota(supabase, user);
+      const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true, pistas });
       if (r.text) await completarTexto(supabase, message.wa_message_id, r.text);
     }
     // La misma telemetría del bot de siempre (y el tope de mensajes por hora la cuenta).
