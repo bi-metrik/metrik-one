@@ -8,7 +8,7 @@ import { ExperienciaCliente } from './experiencia-cliente'
 
 export const dynamic = 'force-dynamic'
 
-/** `/funciones/experiencias/[id]`: la ficha de la película (los campos que ya tiene) y sus campañas (§4.1). */
+/** `/funciones/experiencias/[id]`: la ficha de la experiencia (los campos que ya tiene) y sus campañas (§4.1). */
 export default async function ExperienciaPage({ params }: { params: Promise<{ id: string }> }) {
   const { workspaceId, role, supabase, error } = await getWorkspace()
   if (error || !workspaceId) redirect('/')

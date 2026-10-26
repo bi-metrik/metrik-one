@@ -1,11 +1,11 @@
 ---
 name: funciones-mapa-salon
-description: Módulo funciones de ONE (Sabor etapa 2, PR #1234): migración 20261022170000 SIN aplicar; campañas, cupos, tarifa con preventa, pagos, saldo (P14), panel, ficha P11 y tres textos
+description: Módulo funciones de ONE (Sabor etapa 2, PR #1234): migración 20261022170000 APLICADA (26-oct); campañas, cupos, tarifa con preventa, pagos, saldo (P14), panel, ficha P11 y tres textos
 metadata:
   type: project
 ---
 
-PR #1234 (rama `feat/funciones-mapa-salon`). Migración `20261022170000_modulo_funciones.sql` **SIN aplicar**; va
+PR #1234 (rama `feat/funciones-mapa-salon`). Migración `20261022170000_modulo_funciones.sql` **APLICADA en prod (26-oct): no editarla**; va
 DESPUÉS de `20261021090000_asistente_chatwoot.sql` (#1225; main la da por aplicada, confirmarlo en el ledger).
 Dry-run: `node scripts/funciones-dry-run.mjs` (esperado al 25-oct: 56 RPC, 8 tablas con RLS; corre en PGlite con los
 fixtures, así se prueba antes de pasarlo).
@@ -25,7 +25,11 @@ y tres textos, §1.8 del diseño, que manda sobre lo anterior); P4 (preventa = i
   texto libre = `avisos` que NO bloquea (23-oct); `[FALTA: …]` y pasar el límite SÍ bloquean copiar; sobrante no se
   corta. El DM va SIN la intro (23-oct): con la ficha real de Jack, 771 bytes (con intro eran 965). Las líneas de pago
   están aprobadas palabra por palabra (oferta sin punto final): no retocarlas.
-- Frases con tema de la película van en `saludo_grupo` de la experiencia; recepción/puerta del negocio sin tema.
+- Frases con tema van en `saludo_grupo` de la experiencia; recepción/puerta del negocio sin tema.
+- El módulo NO es solo cine (26-oct, Mauricio): Sabor hace también catas de vino y clases de sushi. Textos visibles
+  y parte fija de la plantilla dicen «experiencia»; la puerta cerrada perdió «durante la proyección. 🎬». Caso de cata
+  (12 cupos) en `textos.test.ts`, `funciones-sql.test.ts` y caso G de `funciones-concurrencia.sh`, con regex anti-cine.
+  Rama `feat/funciones-texto-experiencia` (sin push). `_shared/agente/publico` (asistente) sigue con ejemplos de cine.
 - Plazo del saldo = `funcion_campanas.dias_saldo_antes` (1..30, default 1; viaja dentro de `p_precios` de
   `funcion_guardar_campana`, como `tope_sobreventa`, para no cambiar la firma). Se eligió ≥ 1 (no 0) para dar margen
   de verificar el pago antes de la función. La reserva guarda su FOTO (`funcion_reservas.dias_saldo_antes`).

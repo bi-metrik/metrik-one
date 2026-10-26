@@ -13,6 +13,8 @@
 //   · El párrafo de la puerta cerrada sin la frase temática de Jack («Recuerden… ¡Jack tiene todo preparado…») y la
 //     recepción del lugar sin «nuestro pequeño rincón entre Halloween Town y Christmas Town»: esas frases con tema van
 //     en el saludo temático de cada experiencia; lo del negocio queda sin tema (23-oct).
+//   · La puerta cerrada termina en «para evitar interrupciones. 🚪», sin «durante la proyección. 🎬» (26-oct): Sabor también hace
+//     catas de vino y clases de sushi, y la parte fija no puede asumir cine.
 //   · El mensaje directo va sin la intro (23-oct): gancho, qué incluye, precio y los horarios aparte.
 //   · «paga el saldo 1 día antes» sale del plazo del saldo de la campaña («N días antes»).
 // Pura: sin red, sin reloj.
@@ -100,7 +102,7 @@ export const TEXTO_BIENVENIDA = {
   puerta: [
     '⏰ ¡MUY IMPORTANTE!',
     'Les recomendamos llegar puntualmente. Para disfrutar de la experiencia completa y conservar la magia de nuestra ' +
-      'celebración, una vez iniciemos cerraremos la puerta de ingreso para evitar interrupciones durante la proyección. 🎬🚪',
+      'celebración, una vez iniciemos cerraremos la puerta de ingreso para evitar interrupciones. 🚪',
   ].join('\n\n'),
   lugar: '📍 LUGAR',
   parqueadero: '🚗 PARQUEADERO',

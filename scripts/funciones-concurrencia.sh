@@ -35,6 +35,9 @@ F_CONF=00000000-0000-4000-8000-00000000c053
 F_PAGO=00000000-0000-4000-8000-00000000c054
 F_OTRA=00000000-0000-4000-8000-00000000c055
 F_SALDO=00000000-0000-4000-8000-00000000c056
+EXP_CATA=00000000-0000-4000-8000-00000000c022
+CAMP_CATA=00000000-0000-4000-8000-00000000c032
+F_CATA=00000000-0000-4000-8000-00000000c057
 
 psql_q() { psql "$PGURL" -X -q -t -A -v ON_ERROR_STOP=1 "$@"; }
 
@@ -55,6 +58,12 @@ insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacida
   ('$F_PAGO', '$WS', '$CAMP', now() + interval '1 day 3 hours', 3, 3),
   ('$F_OTRA', '$WS', '$CAMP', now() + interval '1 day 4 hours', 10, 10),
   ('$F_SALDO', '$WS', '$CAMP', now() + interval '3 days', 40, 40);
+-- G. Una cata de vino (26-oct): una experiencia sin nada de cine, con 12 cupos.
+insert into funcion_experiencias (id, workspace_id, nombre) values ('$EXP_CATA', '$WS', 'Cata de vinos del Valle de Uco');
+insert into funcion_campanas (id, workspace_id, experiencia_id, nombre, codigo, estado, agenda_publicada_at, minutos_apartado, precio_persona, abono_persona)
+  values ('$CAMP_CATA', '$WS', '$EXP_CATA', 'Cata de vinos del Valle de Uco', 'CATA-1', 'activa', now(), 30, 150000, 50000);
+insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente)
+  values ('$F_CATA', '$WS', '$CAMP_CATA', now() + interval '2 days', 12, 12);
 insert into chatwoot_consentimientos (workspace_id, cuenta_id, conversacion_id, canal, tipo, respuesta, texto_clave, texto_version, texto_huella)
   select '$WS'::uuid, 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g
   union all
@@ -229,6 +238,20 @@ dobles_f2=$(psql_q -c "select count(*) from (select pr.reserva_id from funcion_p
                         group by pr.reserva_id having count(*) > 1) x")
 echo "F2. dos personas cobran el mismo saldo a la vez, en 5 reservas: $dobles_f2 reserva(s) cobradas dos veces"
 if [ "$dobles_f2" -ne 0 ]; then echo "   SALDO COBRADO DOS VECES" >&2; falla=1; fi
+
+# ── G. Una cata de vino (26-oct): N apartados del asistente a la vez sobre sus 12 cupos ────────────────────────
+# Sabor no solo hace cena y película: la cata usa la misma base y el mismo candado. Las conversaciones 1..N ya dijeron
+# «sí» a la autorización general; cada una aparta 1 cupo con su propia clave.
+for i in $(seq 1 "$N"); do
+  ( if en_transaccion asistente "select funcion_apartar('$WS', '$F_CATA', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $i}'::jsonb, 'cata-$i', 'asistente')"; then
+      echo ok > "$TMP/g-$i"; else echo no > "$TMP/g-$i"; fi ) &
+done
+wait
+ok_g=$(grep -l ok "$TMP"/g-* | wc -l | tr -d ' ')
+ocupadas_g=$(psql_q -c "select (funcion_ocupacion('$F_CATA')->>'ocupadas')::int")
+echo "G. cata de vino con 12 cupos, $N apartados del asistente a la vez: $ok_g pasaron, ocupadas $ocupadas_g de 12"
+if [ "$ocupadas_g" -gt 12 ]; then echo "   SOBREVENTA en la cata" >&2; falla=1; fi
+if [ "$ok_g" -ne 12 ] || [ "$ocupadas_g" -ne 12 ]; then echo "   se esperaban exactamente 12" >&2; falla=1; fi
 
 if [ "$falla" -ne 0 ]; then echo "FALLÓ" >&2; exit 1; fi
 echo "Sin sobreventa."

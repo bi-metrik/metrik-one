@@ -10,7 +10,7 @@ import { guardarExperienciaAction } from '../../actions'
 import { FichaExperiencia, fichaDe, type ValoresFicha } from '../../ficha-experiencia'
 import { BotonFijo, Insignia } from '../../panel-ui'
 
-/** La ficha de la película (P11: los textos de la oferta y del grupo) y sus campañas. */
+/** La ficha de la experiencia (P11: los textos de la oferta y del grupo) y sus campañas. */
 export function ExperienciaCliente({ experiencia: e, campanas, puedeEditar }: { experiencia: Experiencia; campanas: CampanaResumen[]; puedeEditar: boolean }) {
   const router = useRouter()
   const [pendiente, empezar] = useTransition()
