@@ -40,8 +40,16 @@ export function preventaPasaLaFuncion(preventaHasta: string | null | undefined, 
   return !!preventaHasta && preventaHasta > diaFuncion
 }
 
-/** El plazo del saldo de una campaña (días antes de la función): entero de 1 a 30, como lo exige la base. Pura. */
-export const DIAS_SALDO = { minimo: 1, maximo: 30, porDefecto: 1 } as const
+/**
+ * El plazo del saldo de una campaña (días antes de la función): entero de 0 a 30, como lo exige la base. 0 = hasta que
+ * empieza la función (Mauricio, 26-oct: «que todo el mundo llegue con la función totalmente paga»). Pura.
+ */
+export const DIAS_SALDO = { minimo: 0, maximo: 30, porDefecto: 1 } as const
+/** La ayuda del campo del plazo del saldo en el panel. */
+export const AYUDA_DIAS_SALDO = '0 = hasta que empieza la función'
+/** «saldo 1 día antes», «saldo 3 días antes» o «saldo hasta que empieza», para el resumen de la campaña. */
+export const resumenPlazoSaldo = (dias: number | null | undefined) =>
+  dias === 0 ? 'saldo hasta que empieza' : `saldo ${dias === 1 ? '1 día' : `${dias} días`} antes`
 export const diasSaldoValido = (n: number | null | undefined): n is number =>
   typeof n === 'number' && Number.isInteger(n) && n >= DIAS_SALDO.minimo && n <= DIAS_SALDO.maximo
 
@@ -109,7 +117,7 @@ const MENSAJES: Record<string, string> = {
   anuncio_invalido: 'El id del anuncio va sin espacios.',
   anuncio_de_otra_campana: 'Ese anuncio ya está asociado a otra campaña.',
   dato_no_admitido: 'Ese dato no se guarda en una reserva.',
-  dias_saldo_invalido: 'Los días antes para pagar el saldo van de 1 a 30.',
+  dias_saldo_invalido: 'Los días antes para pagar el saldo van de 0 a 30 (0 = hasta que empieza la función).',
   sin_saldo: 'La reserva no tiene saldo pendiente.',
   saldo_vencido: 'Pasó el plazo del saldo: una persona del equipo manda un link nuevo o se cobra en el evento.',
   monto_invalido: 'El monto va de $1 hasta el saldo.',
@@ -164,7 +172,10 @@ export function textoSaldo(
   if (!s || s.estado === null) return { texto: 'Saldo sin leer', cobrar: false }
   if (s.estado === 'sin_saldo') return { texto: 'Pagó el total', cobrar: false }
   if (s.estado === 'pagado') return { texto: 'Saldo pagado', cobrar: false }
-  const plazo = DIA_CORTO.format(new Date(Date.parse(s.plazo_at) - 1))
+  // Con 1 o más días el plazo es una medianoche de Bogotá (vale hasta el día anterior); con 0 es la hora de la función.
+  const ms = Date.parse(s.plazo_at)
+  const medianoche = (ms - 5 * 3_600_000) % 86_400_000 === 0
+  const plazo = medianoche ? DIA_CORTO.format(new Date(ms - 1)) : `${DIA_CORTO.format(new Date(ms))}, ${horaBogota(s.plazo_at)}`
   return s.estado === 'pendiente'
     ? { texto: `Saldo ${pesos(s.saldo)} · paga hasta el ${plazo}`, cobrar: true }
     : { texto: `Saldo ${pesos(s.saldo)} · venció el plazo (${plazo}): se cobra en el evento`, cobrar: true }

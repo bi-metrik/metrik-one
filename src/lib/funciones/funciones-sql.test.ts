@@ -1,6 +1,7 @@
 /**
  * `20261022170000_modulo_funciones.sql` corrida de verdad en Postgres en memoria (PGlite), encima de la migración real
- * del asistente (`20261021090000_asistente_chatwoot.sql`, de donde sale `chatwoot_consentimientos`).
+ * del asistente (`20261021090000_asistente_chatwoot.sql`, de donde sale `chatwoot_consentimientos`), y con las que la
+ * cambian después (`20261026210000_funciones_saldo_plazo_cero.sql`: plazo del saldo 0 = hasta que empieza).
  *
  * Pruebas de §5 del diseño (`proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md`) y de
  * las decisiones de Mauricio del 2026-10-22: sin mapa, dos cupos, precios con la foto del monto, y la jerarquía
@@ -24,6 +25,7 @@ const leer = (ruta: string) => readFileSync(join(RAIZ, ruta), 'utf8')
 const ESQUEMA_BASE = leer('src/lib/funciones/__fixtures__/esquema-base.sql')
 const CHATWOOT = leer('supabase/migrations/20261021090000_asistente_chatwoot.sql')
 const FUNCIONES = leer('supabase/migrations/20261022170000_modulo_funciones.sql')
+const SALDO_PLAZO_CERO = leer('supabase/migrations/20261026210000_funciones_saldo_plazo_cero.sql')
 
 const WS = '00000000-0000-4000-8000-00000000f001'
 const OTRO_WS = '00000000-0000-4000-8000-00000000f002'
@@ -240,6 +242,7 @@ beforeAll(async () => {
   await db.exec(ESQUEMA_BASE)
   await db.exec(CHATWOOT)
   await db.exec(FUNCIONES)
+  await db.exec(SALDO_PLAZO_CERO)
   await db.exec(`
     insert into public.workspaces (id, slug) values ('${WS}', 'sabor-prueba'), ('${OTRO_WS}', 'otro');
     insert into public.profiles values ('${EQUIPO}', '${WS}', 'operator'), ('${LECTOR}', '${WS}', 'read_only'),
@@ -1289,20 +1292,29 @@ describe('el plazo del saldo de la campaña (23-oct): el dato de la campaña', (
     expect(await dias(e.campana)).toBe(1)
   })
 
-  it('va de 1 a 30 días, entero: la RPC y la tabla rechazan lo demás, y la pantalla aplica la misma regla', async () => {
+  it('va de 0 a 30 días, entero: la RPC y la tabla rechazan lo demás, y la pantalla aplica la misma regla', async () => {
     const exp = await nuevaExperiencia()
-    for (const malo of [0, -1, 31, 1.5, '2', true]) {
+    for (const malo of [-1, 31, 1.5, '2', true]) {
       expect(await codigo(guardar(exp, codigo_(), { precio_persona: 180_000, dias_saldo_antes: malo }))).toBe('dias_saldo_invalido')
       expect(diasSaldoValido(typeof malo === 'number' ? malo : null)).toBe(false)
     }
-    for (const bueno of [1, 30]) {
+    for (const bueno of [0, 1, 30]) {
       expect(await codigo(guardar(exp, codigo_(), { precio_persona: 180_000, dias_saldo_antes: bueno }))).toBe('ok')
       expect(diasSaldoValido(bueno)).toBe(true)
     }
+    // 0 se guarda como 0 (no como el valor por defecto) y la reserva lo toma en su foto.
+    const cero = await guardar(exp, codigo_(), { precio_persona: 180_000, dias_saldo_antes: 0 })
+    expect(await dias(cero)).toBe(0)
     const e = await escenario()
-    expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = 0 where id = $1`, [e.campana]))).toMatch(/dias_saldo_antes_check/)
+    expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = 0 where id = $1`, [e.campana]))).toBe('ok')
+    expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = -1 where id = $1`, [e.campana]))).toMatch(/dias_saldo_antes_check/)
+    expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = 31 where id = $1`, [e.campana]))).toMatch(/dias_saldo_antes_check/)
     expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = null where id = $1`, [e.campana]))).toMatch(/null value/)
-    expect(mensajeDeError({ message: 'dias_saldo_invalido' })).toBe('Los días antes para pagar el saldo van de 1 a 30.')
+    const r = await apartarAsistente(e.funcion, 1)
+    expect((await q<{ d: number }>(`select dias_saldo_antes as d from funcion_reservas where id = $1`, [r.reserva_id]))[0].d).toBe(0)
+    expect(await codigo(q(`update funcion_reservas set dias_saldo_antes = 31 where id = $1`, [r.reserva_id]))).toMatch(/funcion_reservas_dias_saldo_antes_check/)
+    expect(await codigo(q(`update funcion_reservas set dias_saldo_antes = -1 where id = $1`, [r.reserva_id]))).toMatch(/funcion_reservas_dias_saldo_antes_check/)
+    expect(mensajeDeError({ message: 'dias_saldo_invalido' })).toBe('Los días antes para pagar el saldo van de 0 a 30 (0 = hasta que empieza la función).')
   })
 })
 
@@ -1366,6 +1378,62 @@ describe('el saldo: un pago más de la misma reserva (P14a a P14c, 25-oct)', () 
     expect(await plazo('2026-10-31T13:00:00-05:00', 1)).toBe('2026-10-31T05:00:00.000Z')
     expect(await plazo('2026-10-31T22:00:00-05:00', 1)).toBe('2026-10-31T05:00:00.000Z')
     expect(await plazo('2026-10-31T13:00:00-05:00', 3)).toBe('2026-10-29T05:00:00.000Z')
+    // 0 (26-oct): la hora de inicio, también de noche y a medianoche.
+    expect(await plazo('2026-10-31T13:00:00-05:00', 0)).toBe('2026-10-31T18:00:00.000Z')
+    expect(await plazo('2026-10-31T22:00:00-05:00', 0)).toBe('2026-11-01T03:00:00.000Z')
+    expect(await plazo('2026-10-31T00:00:00-05:00', 0)).toBe('2026-10-31T05:00:00.000Z')
+  })
+
+  describe('con plazo 0: hasta que empieza la función (Mauricio, 26-oct)', () => {
+    /** Una reserva con saldo de $120.000 en una función que empieza en `minutos`, con la foto del plazo en `dias`. */
+    async function enMinutos(minutos: number, dias: number) {
+      const { e, a } = await conAbono()
+      await q(`update funcion_funciones set inicia_at = now() + make_interval(mins => $2) where id = $1`, [e.funcion, minutos])
+      await q(`update funcion_reservas set dias_saldo_antes = $2 where id = $1`, [a.reserva_id, dias])
+      const inicia = (await q<{ i: string }>(`select inicia_at as i from funcion_funciones where id = $1`, [e.funcion]))[0].i
+      return { e, a, inicia: new Date(inicia).getTime() }
+    }
+
+    it('el plazo es inicia_at: 3 horas antes el saldo está pendiente y el servidor saca el link, que vence en inicia_at', async () => {
+      const { a, inicia } = await enMinutos(180, 0)
+      const s = await saldo(a.reserva_id)
+      expect(new Date(s.plazo_at).getTime()).toBe(inicia)
+      expect(s.estado).toBe('pendiente')
+      const p = await prepararSaldo([a.reserva_id])
+      expect(Number(p.monto_esperado)).toBe(120_000)
+      expect(new Date(p.vence_at).getTime()).toBe(inicia)
+      expect((await saldo(a.reserva_id, 'servidor')).link?.pago_id).toBe(p.pago_id)
+    })
+
+    it('un minuto antes de empezar el servidor todavía saca el link; el link vence en inicia_at', async () => {
+      const { a, inicia } = await enMinutos(1, 0)
+      expect((await saldo(a.reserva_id)).estado).toBe('pendiente')
+      expect(new Date((await prepararSaldo([a.reserva_id])).vence_at).getTime()).toBe(inicia)
+    })
+
+    it('después de inicia_at el saldo está vencido y nadie saca link: funcion_pasada (se cobra en el evento)', async () => {
+      const { a } = await enMinutos(-1, 0)
+      expect((await saldo(a.reserva_id)).estado).toBe('vencido')
+      expect(await codigo(prepararSaldo([a.reserva_id]))).toBe('funcion_pasada')
+      expect(await codigo(prepararSaldo([a.reserva_id], { equipo: EQUIPO }))).toBe('funcion_pasada')
+    })
+
+    it('regresión con 1: el plazo sigue siendo el fin del día anterior; a minutos de la función ya pasó', async () => {
+      // La función de `conAbono` es mañana: con 1 día el saldo sigue pendiente y el link vence a la medianoche de hoy.
+      const { e, a } = await conAbono()
+      const inicia = (await q<{ i: string }>(`select inicia_at as i from funcion_funciones where id = $1`, [e.funcion]))[0].i
+      const esperado = (await q<{ p: string }>(`select funcion_plazo_saldo($1::timestamptz, 1) as p`, [inicia]))[0].p
+      const s = await saldo(a.reserva_id)
+      expect([s.estado, new Date(s.plazo_at).getTime()]).toEqual(['pendiente', new Date(esperado).getTime()])
+      expect(new Date((await prepararSaldo([a.reserva_id])).vence_at).getTime()).toBe(new Date(esperado).getTime())
+      expect(new Date(esperado).getTime()).toBeLessThan(new Date(inicia).getTime())
+      // A un minuto de la función, con 1 día, el plazo (medianoche de hoy) ya pasó: el servidor no saca link y una persona
+      // sí, hasta inicia_at. Con 1 minuto y no con 3 horas: solo cruzaría la medianoche en el último minuto del día.
+      const tarde = await enMinutos(1, 1)
+      expect((await saldo(tarde.a.reserva_id)).estado).toBe('vencido')
+      expect(await codigo(prepararSaldo([tarde.a.reserva_id]))).toBe('saldo_vencido')
+      expect(new Date((await prepararSaldo([tarde.a.reserva_id], { equipo: EQUIPO })).vence_at).getTime()).toBe(tarde.inicia)
+    })
   })
 
   it('un pago de saldo aprobado no cambia la ocupación ni el estado de la reserva; el aviso repetido no suma dos veces', async () => {

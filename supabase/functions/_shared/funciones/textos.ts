@@ -170,10 +170,10 @@ function partesComunes(ficha: FichaTextos, negocio: NegocioTextos, f: ReturnType
 const regularDe = (t: TarifaPublica) => (t.tarifa === 'preventa' ? t.precio_completo_persona : t.precio_persona);
 const unicos = <T,>(xs: T[]) => [...new Set(xs)];
 
-/** El plazo del saldo de la campaña: entero ≥ 1. Si no llega (no debería: la base lo llena con 1), se pide. */
+/** El plazo del saldo de la campaña: entero de 0 a 30 (0 = hasta que empieza). Si no llega (no debería: la base lo llena con 1), se pide. */
 function plazoSaldo(campana: CampanaTextos, f: ReturnType<typeof faltas>): string {
   const d = campana.dias_saldo_antes;
-  return Number.isInteger(d) && d >= 1 ? TEXTO_OFERTA.plazoSaldo(d) : f.valor(null, 'días antes para el saldo');
+  return Number.isInteger(d) && d >= 0 ? TEXTO_OFERTA.plazoSaldo(d) : f.valor(null, 'días antes para el saldo');
 }
 
 /** El abono común de las funciones (o `null` si ninguna se aparta con abono), con el plazo del saldo de la campaña. */

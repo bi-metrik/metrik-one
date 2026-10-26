@@ -47,8 +47,8 @@ export const TEXTO_OFERTA = {
   preventaVarias: '🎟️ Preventa en algunos horarios: te contamos el precio con cada horario.',
   regular: (precio: string) => `🎫 Boletería regular: ${precio}`,
   regularVarios: '🎫 Boletería regular: te contamos el precio con cada horario.',
-  /** «1 día antes» o «N días antes»: el plazo del saldo de la campaña. */
-  plazoSaldo: (dias: number) => (dias === 1 ? '1 día antes' : `${dias} días antes`),
+  /** «1 día antes», «N días antes» o, con 0, «antes de que empiece la experiencia»: el plazo del saldo de la campaña. */
+  plazoSaldo: (dias: number) => (dias === 0 ? 'antes de que empiece la experiencia' : dias === 1 ? '1 día antes' : `${dias} días antes`),
   abono: (abono: string, plazo: string) => `✨ Reserva con ${abono} por cupo y paga el saldo ${plazo}.`,
   abonoVarios: (plazo: string) => `✨ Reserva con un abono por cupo y paga el saldo ${plazo}.`,
   /** El mensaje directo no lista funciones (pesa 1.000 bytes como máximo): nombra la campaña y ofrece los horarios. */

@@ -199,14 +199,18 @@ describe('a) la oferta: el post de Instagram con todas las funciones', () => {
     expect(con(1).texto).toContain('✨ Reserva con $100.000 por cupo y paga el saldo 1 día antes.')
     expect(con(3).texto).toContain('✨ Reserva con $100.000 por cupo y paga el saldo 3 días antes.')
     expect(con(3).texto).not.toContain('1 día antes')
+    // 0 = hasta que empieza la función (26-oct): sin «0 días».
+    expect(con(0).texto).toContain('✨ Reserva con $100.000 por cupo y paga el saldo antes de que empiece la experiencia.')
+    expect(con(0).texto).not.toMatch(/0 días/)
+    expect(con(0).copiable).toBe(true)
     // Con abonos distintos entre funciones, el plazo también es el de la campaña.
     const varios = generarOferta({
       ficha: FICHA, negocio: NEGOCIO, campana: { dias_saldo_antes: 2 }, ahoraMs: AHORA,
       funciones: [funcion(SAB_1PM), funcion(DOM_8PM, tarifa({ abono_persona: 120_000 }))],
     })
     expect(varios.texto).toContain('✨ Reserva con un abono por cupo y paga el saldo 2 días antes.')
-    // Un plazo que la base no deja guardar (0, decimal) no se inventa: sale «[FALTA: …]» y no se copia.
-    for (const malo of [0, 1.5]) {
+    // Un plazo que la base no deja guardar (negativo, decimal) no se inventa: sale «[FALTA: …]» y no se copia.
+    for (const malo of [-1, 1.5]) {
       const g = con(malo)
       expect(g.faltantes).toEqual(['días antes para el saldo'])
       expect(g.copiable).toBe(false)
