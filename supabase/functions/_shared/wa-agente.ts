@@ -24,13 +24,31 @@ import { turnoOne } from './agente/one/turno-con-rol.ts';
 import { resolverRol, rolPrevio } from './agente/roles.ts';
 import type { RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
-import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
+import { alertarCaidaWa, almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
 import { revisarCupo } from './agente/uso.ts';
 import { completarTexto } from './wa-conversacion.ts';
 import { staffIdDelRemitente } from './wa-bandeja.ts';
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
+import { fuentesDeComposicion, leerConfigTranscripcion, pistasDeFunciones, pistasSiEncendidas } from './agente/pistas.ts';
+import type { Composicion } from './agente/componer.ts';
+import { leerBasePistas } from './agente/pistas-supabase.ts';
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
+
+/**
+ * Las pistas para transcribir la nota de voz (spec 2026-10-26, §4.6): solo con `bot_conversacional.transcripcion.pistas
+ * = true`. Apagado devuelve `null` sin una consulta y la transcripción queda como siempre. Con la composición del turno
+ * (el rol o el cargo de quien escribe), las funciones que quedaron aportan las suyas por su gancho `pistas`.
+ */
+function pistasDeLaNota(supabase: SupabaseClient, user: WaUser, composicion?: Composicion): Promise<string | null> {
+  return pistasSiEncendidas(
+    leerConfigTranscripcion(user.modulos?.bot_conversacional),
+    async () => ({
+      base: await leerBasePistas(supabase, user.workspace_id),
+      extras: composicion ? await pistasDeFunciones(fuentesDeComposicion(composicion), user.workspace_id) : [],
+    }),
+  );
+}
 
 /** Lo que el agente NO toma aunque esté prendido. Pura. */
 export function fueraDelAgente(message: Pick<IncomingMessage, 'type' | 'text' | 'interactive_reply' | 'reenviado'>): boolean {
@@ -59,7 +77,8 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
 
   // Un audio se transcribe antes del turno (el del equipo es un escrito dictado; el reenviado, dato del cliente).
   if (message.type === 'audio' && message.audio_id) {
-    const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true });
+    const pistas = await pistasDeLaNota(supabase, user);
+    const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true, pistas });
     if (r.text) await completarTexto(supabase, message.wa_message_id, r.text);
   }
 
@@ -83,10 +102,13 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
     phone: message.phone.replace(/\D/g, ''),
     remitente: { nombre: user.name || 'el comercial', rol: user.collaborator_id ? 'colaborador' : user.role },
     nuevoId: () => crypto.randomUUID(),
-    despuesDelTurno: async () => {
+    despuesDelTurno: async (traza, turno) => {
       const { data: ws } = await supabase.from('workspaces').select('slug').eq('id', user.workspace_id).maybeSingle();
+      const workspaceNombre = String(ws?.slug ?? user.workspace_id);
+      // El correo si se cayeron los modelos (spec 2026-10-26, §4.1). Nunca lanza.
+      await alertarCaidaWa(supabase, almacen, traza, { workspaceId: user.workspace_id, workspaceNombre, canal: 'bandeja', phone: message.phone, turnoId: turno.turnoId });
       await revisarCupo(cupoSupabase(supabase, almacen), {
-        workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
+        workspaceId: user.workspace_id, workspaceNombre, cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
       });
     },
   });
@@ -153,7 +175,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
 
     // Un audio se transcribe antes del turno (lo que dice es un escrito dictado).
     if (message.type === 'audio' && message.audio_id) {
-      const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true });
+      const pistas = await pistasDeLaNota(supabase, user, turno.composicion);
+      const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true, pistas });
       if (r.text) await completarTexto(supabase, message.wa_message_id, r.text);
     }
     // La misma telemetría del bot de siempre (y el tope de mensajes por hora la cuenta).
@@ -175,7 +198,11 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       phone,
       remitente: { nombre: user.name || 'quien escribe', rol: user.collaborator_id ? 'colaborador' : user.role },
       nuevoId: () => crypto.randomUUID(),
-      despuesDelTurno: async () => {
+      despuesDelTurno: async (traza, turno) => {
+        // El correo si se cayeron los modelos (spec 2026-10-26, §4.1). Nunca lanza.
+        await alertarCaidaWa(supabase, almacen, traza, {
+          workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), canal: 'one', phone, turnoId: turno.turnoId,
+        });
         await revisarCupo(cupoSupabase(supabase, almacen), {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
         });

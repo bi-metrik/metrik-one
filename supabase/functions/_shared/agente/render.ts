@@ -19,6 +19,11 @@ export const META = {
 export const BOTON_LISTA = 'Ver opciones';
 export const PREFIJO_CONVERSACION = 'ag|c|';
 export const PREFIJO_PROPUESTA = 'ag|p|';
+/**
+ * El payload de los botones de respuesta rápida de NUESTRAS plantillas: `ag|t|<plantilla>|<accion>` (spec 2026-10-26,
+ * asistentes-roles-y-funciones §4.5). Se arma con `payloadPlantilla`; nunca a mano.
+ */
+export const PREFIJO_PLANTILLA = 'ag|t|';
 
 export interface OpcionModelo { titulo: string; descripcion?: string }
 
@@ -115,8 +120,16 @@ export function botonesPropuesta(huella: string, si: string, no: string): Opcion
   ];
 }
 
-/** Lee el id de un toque del agente. */
-export function leerToque(id: string | null | undefined): { clase: 'propuesta'; huella: string; si: boolean } | { clase: 'conversacion' } | null {
+export type Toque =
+  | { clase: 'propuesta'; huella: string; si: boolean }
+  | { clase: 'conversacion' }
+  | { clase: 'plantilla'; plantilla: string; accion: string };
+
+/**
+ * Lee el id de un toque del agente. `null` = no es del agente y sigue por el camino de siempre: otro botón, un payload
+ * sin prefijo o el `rec_ok` de los recordatorios (#966, que el webhook resuelve antes de llegar aquí).
+ */
+export function leerToque(id: string | null | undefined): Toque | null {
   if (!id) return null;
   if (id.startsWith(PREFIJO_PROPUESTA)) {
     const [huella, accion] = id.slice(PREFIJO_PROPUESTA.length).split('|');
@@ -124,5 +137,52 @@ export function leerToque(id: string | null | undefined): { clase: 'propuesta'; 
     return { clase: 'propuesta', huella, si: accion === 'si' };
   }
   if (id.startsWith(PREFIJO_CONVERSACION)) return { clase: 'conversacion' };
+  if (id.startsWith(PREFIJO_PLANTILLA)) {
+    const partes = id.slice(PREFIJO_PLANTILLA.length).split('|');
+    if (partes.length !== 2 || !partes.every((x) => CLAVE_PLANTILLA.test(x))) return null;
+    return { clase: 'plantilla', plantilla: partes[0], accion: partes[1] };
+  }
   return null;
+}
+
+// ── El botón de una plantilla nuestra (§4.5) ──────────────────────────────────
+
+/**
+ * Nombre de la plantilla y acción: minúsculas, dígitos y guion bajo, como pide Meta para el nombre de una plantilla
+ * («Lowercase, alphanumeric characters and underscores only», Template components). Sin `|`, que separa las partes.
+ */
+const CLAVE_PLANTILLA = /^[a-z0-9_]+$/;
+
+/**
+ * Largo máximo del payload. Meta NO publica un tope para el `payload` de un botón de respuesta rápida de plantilla
+ * (revisado el 2026-10-26 en la referencia de la Message API y en la de la versión anterior: «Developer-defined payload
+ * that is returned when the button is clicked», sin largo). El único tope publicado para el id de un botón es el de los
+ * botones de respuesta: «Maximum 256 characters»
+ * (https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/interactive-reply-buttons-messages).
+ * Se usa ese, el mismo de `META.idBoton`.
+ */
+export const MAX_PAYLOAD_PLANTILLA = META.idBoton;
+
+/**
+ * Arma el payload de un botón de una plantilla nuestra: `ag|t|<plantilla>|<accion>`. Lanza si la plantilla o la acción
+ * no son claves válidas o si el payload pasa del tope: es un error de quien construye la plantilla, no del usuario. Pura.
+ */
+export function payloadPlantilla(plantilla: string, accion: string): string {
+  if (!CLAVE_PLANTILLA.test(plantilla)) throw new Error(`payloadPlantilla: «${plantilla}» no es un nombre de plantilla (minúsculas, dígitos y _)`);
+  if (!CLAVE_PLANTILLA.test(accion)) throw new Error(`payloadPlantilla: «${accion}» no es una acción (minúsculas, dígitos y _)`);
+  const p = `${PREFIJO_PLANTILLA}${plantilla}|${accion}`;
+  if (p.length > MAX_PAYLOAD_PLANTILLA) throw new Error(`payloadPlantilla: ${p.length} caracteres; el máximo es ${MAX_PAYLOAD_PLANTILLA}`);
+  return p;
+}
+
+/**
+ * El componente que se manda con la plantilla para que el botón `index` devuelva ese payload. Sin él, Meta devuelve
+ * como payload el TEXTO del botón (ejemplo de la doc: `"payload": "Unsubscribe", "text": "Unsubscribe"`) y el agente
+ * no lo reconoce. Forma de `TemplateComponent` (`wa-respond.ts`), declarada aquí para no importar la red. Pura.
+ */
+export function componenteBotonPlantilla(plantilla: string, accion: string, index: number): {
+  type: 'button'; sub_type: 'quick_reply'; index: string; parameters: Array<{ type: 'payload'; payload: string }>;
+} {
+  if (!Number.isInteger(index) || index < 0 || index > 9) throw new Error(`componenteBotonPlantilla: índice ${index} fuera de 0..9`);
+  return { type: 'button', sub_type: 'quick_reply', index: String(index), parameters: [{ type: 'payload', payload: payloadPlantilla(plantilla, accion) }] };
 }

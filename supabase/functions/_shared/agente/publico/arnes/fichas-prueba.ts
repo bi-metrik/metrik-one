@@ -16,6 +16,8 @@
 //                            vigente y su edad mínima de 18);
 //   · `cataYPelicula`       la cata y la cena de película vigentes a la vez (las dos con horario el sábado 24);
 //   · `tresExperiencias`    las dos y una clase de sushi (para medir el tope del resultado de `ver_catalogo`).
+// Primero la fecha y después el horario (Mauricio, 26-oct):
+//   · `dosHorariosElSabado` la cena de película con dos horarios el sábado 24 y uno solo el 25 y el 31.
 // Datos [EJEMPLO] inventados. Puro.
 // ============================================================
 
@@ -101,3 +103,11 @@ export const cataYPelicula = (fichas: Ficha[]): Ficha[] => [...fichas, ...FICHAS
 
 /** Tres experiencias vigentes: la cena de película, la cata y la clase de sushi. */
 export const tresExperiencias = (fichas: Ficha[]): Ficha[] => [...fichas, ...FICHAS_CATA, ...FICHAS_SUSHI];
+
+/**
+ * Primero la fecha y después el horario (Mauricio, 26-oct): la cena de película con un segundo horario el sábado 24
+ * (4:00 p. m. además de las 7:00 p. m.). Quedan tres fechas: el sábado 24 con dos horarios, y el domingo 25 (1:00 p. m.)
+ * y el sábado 31 (7:00 p. m.) con uno solo. [EJEMPLO] inventado.
+ */
+export const dosHorariosElSabado = (fichas: Ficha[]): Ficha[] =>
+  [...fichas, ejemplo('fun.ejemplo-4', { tipo: 'funcion', id: 'f-ej-4', experiencia: 'ejemplo-cena-1', inicio: '2026-10-24T16:00:00-05:00' })];

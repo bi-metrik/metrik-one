@@ -5,7 +5,8 @@ import type { Funcion } from '../funciones/tipos'
 import { declaraciones } from '../herramientas'
 import { modeloGuionado } from '../modelo-guionado'
 import { dominioYReglamento } from './cola'
-import { escenarioPublico } from './escenario'
+import { WS_PUBLICO, escenarioPublico } from './escenario'
+import { pistasDeFunciones } from '../pistas'
 import { TODOS_LOS_CASOS } from './arnes/conjuntos'
 import { correrCaso } from './arnes/correr-caso'
 
@@ -60,4 +61,38 @@ describe('la igualdad del arnés de Sabor: el rol compuesto con todas las funcio
       expect(de(con)).toEqual(de(sin))
     }, 30_000)
   }
+})
+
+describe('las funciones del rol aportan pistas a la transcripción (gancho Funcion.pistas, §4.6)', () => {
+  const CON_PISTAS: Funcion = {
+    ...f('clientes.prueba_pistas', { lecturas: ['ver_funciones'] }),
+    pistas: async (c) => ['Cata de vinos', `Experiencia ${String(c.parametros.experiencia)}`],
+  }
+  // Pide algo que el rol no trae: el componedor la deja fuera y sus pistas no entran.
+  const FUERA: Funcion = { ...f('clientes.prueba_fuera', {}), requiere: ['clientes.no_esta'], pistas: async () => ['No debe aparecer'] }
+  const CATALOGO = catalogoDe([...FUNCIONES_COMUNES, PRUEBA_FICHA, CON_PISTAS, FUERA])
+  const FUNCIONES = [{ funcion: 'clientes.prueba_pistas', parametros: { experiencia: 'Noche de Henna' } }, { funcion: 'clientes.prueba_fuera', parametros: {} }]
+  const modelo = () => modeloGuionado([{ name: 'responder', args: { tema: 'saludo', texto: '¡Hola! ¿En qué te ayudo?' } }])
+
+  it('con el interruptor y un rol: el transcriptor recibe las funciones compuestas y sus pistas salen con sus parámetros', async () => {
+    const e = await escenarioPublico({ modelo: modelo(), funciones: FUNCIONES, catalogo: CATALOGO, config: { transcripcion: { pistas: true, tope: 40 } } })
+    await e.audio('quiero la cata')
+    expect(e.transcriptor.pedidos).toHaveLength(1)
+    const fuentes = e.transcriptor.pedidos[0].fuentesDePistas
+    expect(fuentes).toBeDefined()
+    expect(await pistasDeFunciones(fuentes!, WS_PUBLICO)).toEqual(['Cata de vinos', 'Experiencia Noche de Henna'])
+  })
+
+  it('con el interruptor apagado (por defecto): el transcriptor recibe lo mismo que antes, sin fuentes', async () => {
+    const e = await escenarioPublico({ modelo: modelo(), funciones: FUNCIONES, catalogo: CATALOGO })
+    await e.audio('quiero la cata')
+    expect(e.transcriptor.pedidos).toHaveLength(1)
+    expect('fuentesDePistas' in e.transcriptor.pedidos[0]).toBe(false)
+  })
+
+  it('con el interruptor y sin rol: tampoco hay fuentes', async () => {
+    const e = await escenarioPublico({ modelo: modelo(), config: { transcripcion: { pistas: true, tope: 40 } } })
+    await e.audio('quiero la cata')
+    expect('fuentesDePistas' in e.transcriptor.pedidos[0]).toBe(false)
+  })
 })

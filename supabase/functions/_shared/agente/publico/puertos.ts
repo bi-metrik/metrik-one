@@ -10,6 +10,7 @@
 // Producción: `produccion.ts`. Pruebas y arnés: `memoria.ts`.
 // ============================================================
 
+import type { FuentePistaDelTurno } from '../pistas.ts';
 import type { Salida } from '../tipos.ts';
 import type { Canal, FilaPublica, LlaveConversacion, TipoAutorizacion, TrazaPublica } from './tipos.ts';
 
@@ -62,7 +63,11 @@ export interface MensajeroChatwoot {
 }
 
 export interface Transcriptor {
-  transcribir(a: { url: string; extension?: string | null }): Promise<{ texto: string | null; error?: string }>;
+  /**
+   * `fuentesDePistas`: las funciones del rol del turno con su gancho `pistas` (spec 2026-10-26, §4.6). Solo llega con
+   * `transcripcion.pistas = true` y un rol; el transcriptor las junta con `pistasDeFunciones` (`../pistas.ts`).
+   */
+  transcribir(a: { url: string; extension?: string | null; fuentesDePistas?: FuentePistaDelTurno[] }): Promise<{ texto: string | null; error?: string }>;
 }
 
 export interface AvisosInternos {
