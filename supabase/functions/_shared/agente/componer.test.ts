@@ -13,6 +13,7 @@ import { modeloGuionado } from './modelo-guionado'
 import { dominioPublico } from './publico/dominio'
 import { reglamentoSabor } from './publico/escenario'
 import type { ContextoDominio, Dominio, Propuesta } from './tipos'
+import { ESCALAMIENTO_METRIK, dominioPersona } from './persona'
 
 /**
  * La prueba de permisos del componedor (spec 2026-10-26, §2.6 punto 5): para cada cargo de ONE y para un rol de prueba
@@ -25,10 +26,13 @@ const NEGOCIOS = [
 ]
 const ctx: ContextoDominio = { workspaceId: 'w', phone: 'p', remitente: { nombre: 'x', rol: 'owner' }, conversacion: [], resultadosPrevios: [] }
 const motorOne = (funciones?: string[], rol = 'owner') => dominioOne(new PuertoOneMemoria({ negocios: NEGOCIOS }), { rol, ...(funciones ? { funciones } : {}) })
+/** Como en producción (`one/turno-con-rol.ts`): el motor ONE más el del paso a persona (`comun.persona`, §4.2). */
+const personaDe = (m: Dominio) => dominioPersona({ config: ESCALAMIENTO_METRIK, empresa: 'Empresa de Prueba', base: m })
+const componerConPersona = (m: Dominio, funciones: Parameters<typeof componerOne>[1]) => componerOne(m, funciones, () => {}, personaDe(m))
 
 /** Lo que ve el modelo: los nombres de las herramientas declaradas (núcleo incluido) y las acciones de `proponer`. */
 async function loQueVe(cargo: string) {
-  const c = componerOne(motorOne(funcionesDelCargo(cargo), cargo), funcionesDelCargo(cargo), () => {})
+  const c = componerConPersona(motorOne(funcionesDelCargo(cargo), cargo), funcionesDelCargo(cargo))
   const r = await reglamentoOneDelTurno(await reglamentoOne('Empresa de Prueba'), c)
   const decl = declaraciones(c.dominio, r)
   const proponer = decl.find((d) => d.name === 'proponer')
@@ -41,15 +45,15 @@ async function loQueVe(cargo: string) {
 const LECTURAS_NEGOCIO = ['buscar_negocios', 'negocios_abiertos', 'ver_negocio']
 const TODAS_ACCIONES = ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'ingreso', 'actividad', 'contacto_nuevo']
 
-describe('el dominio ONE por cargo: herramientas exactas', () => {
+describe('el dominio ONE por cargo: herramientas exactas (con `pasar_a_persona`, común, en todo rol)', () => {
   const esperado: Record<string, { herramientas: string[]; acciones: string[] }> = {
-    owner: { herramientas: [...LECTURAS_NEGOCIO, 'gastos_recientes', 'preguntar_destino', 'proponer', 'responder'], acciones: TODAS_ACCIONES },
-    admin: { herramientas: [...LECTURAS_NEGOCIO, 'gastos_recientes', 'preguntar_destino', 'proponer', 'responder'], acciones: TODAS_ACCIONES },
-    supervisor: { herramientas: [...LECTURAS_NEGOCIO, 'preguntar_destino', 'proponer', 'responder'], acciones: ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'ingreso', 'actividad'] },
-    operator: { herramientas: [...LECTURAS_NEGOCIO, 'preguntar_destino', 'proponer', 'responder'], acciones: ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'actividad'] },
-    contador: { herramientas: [...LECTURAS_NEGOCIO, 'gastos_recientes', 'preguntar_destino', 'responder'], acciones: [] },
-    read_only: { herramientas: ['gastos_recientes', 'responder'], acciones: [] },
-    desconocido: { herramientas: ['responder'], acciones: [] },
+    owner: { herramientas: [...LECTURAS_NEGOCIO, 'gastos_recientes', 'preguntar_destino', 'pasar_a_persona', 'proponer', 'responder'], acciones: TODAS_ACCIONES },
+    admin: { herramientas: [...LECTURAS_NEGOCIO, 'gastos_recientes', 'preguntar_destino', 'pasar_a_persona', 'proponer', 'responder'], acciones: TODAS_ACCIONES },
+    supervisor: { herramientas: [...LECTURAS_NEGOCIO, 'preguntar_destino', 'pasar_a_persona', 'proponer', 'responder'], acciones: ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'ingreso', 'actividad'] },
+    operator: { herramientas: [...LECTURAS_NEGOCIO, 'preguntar_destino', 'pasar_a_persona', 'proponer', 'responder'], acciones: ['gasto', 'adjuntar_soporte', 'corregir_gasto', 'actividad'] },
+    contador: { herramientas: [...LECTURAS_NEGOCIO, 'gastos_recientes', 'preguntar_destino', 'pasar_a_persona', 'responder'], acciones: [] },
+    read_only: { herramientas: ['gastos_recientes', 'pasar_a_persona', 'responder'], acciones: [] },
+    desconocido: { herramientas: ['pasar_a_persona', 'responder'], acciones: [] },
   }
   for (const [cargo, e] of Object.entries(esperado)) {
     it(`${cargo}: ${e.herramientas.join(', ')}${e.acciones.length ? ` · acciones ${e.acciones.join(', ')}` : ''}`, async () => {
@@ -57,9 +61,15 @@ describe('el dominio ONE por cargo: herramientas exactas', () => {
     })
   }
 
-  it('antes del componedor, todos los cargos veían todo (el dominio entero): el dueño sigue viendo exactamente eso', async () => {
+  it('antes del componedor, todos los cargos veían todo (el dominio entero): el dueño sigue viendo exactamente eso, más el paso a persona', async () => {
     const entero = declaraciones(motorOne(), await reglamentoOne('Empresa de Prueba'))
-    expect(entero.map((d) => d.name)).toEqual((await loQueVe('owner')).herramientas)
+    expect(entero.map((d) => d.name)).toEqual((await loQueVe('owner')).herramientas.filter((n) => n !== 'pasar_a_persona'))
+  })
+
+  it('un cargo desconocido sigue siendo el bot ONE (las banderas del dominio no cambian por el motor persona)', () => {
+    const m = motorOne([], 'raro')
+    const c = componerConPersona(m, [])
+    expect([c.dominio.bot, c.dominio.reenvios, c.dominio.propuestaVenceConRespuesta]).toEqual([m.bot, m.reenvios, m.propuestaVenceConRespuesta])
   })
 
   it('el mapa reproduce permisosDe en los seis cargos y en uno desconocido (incluido ver plata)', () => {
@@ -148,6 +158,14 @@ describe('el catálogo cubre cada herramienta de cada motor una sola vez', () =>
     const m = motorOne()
     const delMotor = [...m.lecturas.map((x) => x.name), ...m.acciones, ...(m.cierres ?? []).map((x) => x.name)]
     expect(Object.keys(c.duenas).sort()).toEqual([...delMotor].sort())
+  })
+
+  it('motor persona: su único cierre, `pasar_a_persona`, es de `comun.persona`', () => {
+    const m = motorOne()
+    const c = componerConPersona(m, [])
+    expect(c.errores).toEqual([])
+    expect(c.duenas).toEqual({ pasar_a_persona: 'comun.persona' })
+    expect(c.declaradas).toEqual({ lecturas: [], cierres: ['pasar_a_persona'], acciones: [] })
   })
 
   it('motor publico: las comunes ponen `pasar_a_persona`; el resto lo reparte la sesión de Sabor (clientes.*)', async () => {

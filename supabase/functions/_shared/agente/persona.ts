@@ -136,7 +136,10 @@ export function escalamientoDe<E extends Escalamiento>(r: Pick<Reglamento, 'fich
   const plantilla = typeof v.plantilla === 'string' && v.plantilla.includes('{resumen}') ? v.plantilla.trim() : d.plantilla;
   const propio = numero && numero !== d.numero;
   const atiende = typeof v.atiende === 'string' && v.atiende.trim() ? v.atiende.trim() : (propio ? 'alguien del equipo' : d.atiende);
-  const boton = typeof v.boton === 'string' && v.boton.trim() ? cortarEnPalabra(v.boton.trim(), TOPE_BOTON) : (propio ? BOTON_POR_DEFECTO : d.boton);
+  // El botón va hasta 20 caracteres (Meta): uno más largo no se corta a media frase, rige el genérico.
+  const pedido = typeof v.boton === 'string' ? v.boton.trim() : '';
+  if ([...pedido].length > TOPE_BOTON) log(`rol.escalamiento con un botón de más de ${TOPE_BOTON} caracteres («${pedido}»): va «${BOTON_POR_DEFECTO}»`);
+  const boton = pedido && [...pedido].length <= TOPE_BOTON ? pedido : (pedido || propio ? BOTON_POR_DEFECTO : d.boton);
   return { modo: 'wa_link', numero: numero || d.numero, atiende, plantilla, boton, umbrales } as E;
 }
 
