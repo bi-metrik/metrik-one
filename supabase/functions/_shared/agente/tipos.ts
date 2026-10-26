@@ -314,6 +314,11 @@ export interface Dominio {
    * lista para elegir a qué negocio va un gasto (con «Gasto de empresa») solo la arma el código (`preguntar_destino`).
    */
   revisarRespuesta?(salida: Salida, ctx: ContextoDominio): string | null;
+  /**
+   * Revisa el `texto` que el modelo pone arriba de una propuesta, contra la propuesta misma (2026-10-26). Devuelve el error
+   * para el modelo, o null. En ONE: no dice que guarda «el mensaje completo» si lo que va es un texto suyo y no la nota.
+   */
+  revisarTextoPropuesta?(texto: string, propuesta: Propuesta): string | null;
   cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
     | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
     | { ok: false; error: string; candado: string }
