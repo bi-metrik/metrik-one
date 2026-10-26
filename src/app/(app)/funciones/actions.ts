@@ -147,7 +147,7 @@ export async function guardarExperienciaAction(e: DatosExperiencia): Promise<Res
   const p = await puerta()
   if (!p.ok) return p
   if (e.id !== null && !UUID.test(e.id)) return { ok: false, error: 'La experiencia no existe.' }
-  if (!e.nombre.trim()) return { ok: false, error: 'Escribe el nombre de la película.' }
+  if (!e.nombre.trim()) return { ok: false, error: 'Escribe el nombre de la experiencia.' }
   const incluye = Array.isArray(e.que_incluye) ? e.que_incluye.map(libre).filter((x): x is string => !!x) : []
   const r = await llamar<string>(
     'funcion_guardar_experiencia',

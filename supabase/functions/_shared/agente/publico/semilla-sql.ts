@@ -21,7 +21,7 @@ export function semillaSqlSabor(fichas: Ficha[] = REGLAMENTO_SABOR): string {
   return `-- Reglamento del asistente público de Sabor & Experiencias, borrador etapa 1 — SOLO PARA UN WORKSPACE DE PRUEBA.
 --
 -- GENERADO desde supabase/functions/_shared/agente/publico/reglamento-sabor.ts (semilla-sql.ts). No se edita a mano.
--- NO es una migración y NO se aplica en producción sobre Sabor: la película, los precios y las fechas son [EJEMPLO]
+-- NO es una migración y NO se aplica en producción sobre Sabor: las experiencias, los precios y las fechas son [EJEMPLO]
 -- inventado (la forma de la ficha y las reglas marcadas [KICKOFF 22-oct] sí vienen de Sabor, sin el visto de Paula),
 -- los textos de aviso y autorización son borrador (falta el visto de Emilio) y hay HUECOS de Sabor (nombre, tono,
 -- horario, políticas).

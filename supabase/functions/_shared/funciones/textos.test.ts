@@ -434,3 +434,46 @@ describe('campos vacíos, textos libres y pago', () => {
     expect([pesosTexto(170_000), pesosTexto(1_800_000), pesosTexto(950)]).toEqual(['$170.000', '$1.800.000', '$950'])
   })
 })
+
+describe('una cata de vino (26-oct): la experiencia no es una película', () => {
+  // Sabor también hace catas de vino, clases de sushi y otras experiencias con horarios, precios y cupo (visita del
+  // 23-oct). Ficha de EJEMPLO, sin nada de cine: lo que diga el texto de cine solo puede venir de la parte fija.
+  const CATA: FichaTextos = {
+    titulo_oferta: '🍷🍇 CATA DE VINOS DEL VALLE DE UCO llega a BOGOTÁ ✨',
+    frase_gancho: '¿Listo para recorrer Mendoza copa a copa? 🍷✨',
+    intro: '[EJEMPLO] Una noche guiada por un sommelier, con cinco vinos de altura y su maridaje.',
+    que_incluye: ['🍷 5 vinos del Valle de Uco', '🧀 Tabla de quesos y maridaje', '👩‍🍳 Guía de un sommelier'],
+    emojis_tema: '🍷🍇',
+    saludo_grupo: '🍷 ¡Hola, amantes del vino!\n\n¡Bienvenidos al grupo oficial de la cata!',
+    relato_grupo: '🍇 ¡Que comience nuestra cata!',
+  }
+  const CINE = /pel[ií]cula|\bcine\b|proyecci|🎬/i
+  const AGENDA_CATA = [funcion(SAB_1PM, preventa('2026-10-15', 150_000)), funcion(DOM_8PM, tarifa({ precio_persona: 160_000, abono_persona: 60_000 }))]
+
+  it('la oferta, el mensaje directo y la bienvenida salen completos y ninguno menciona película, cine ni proyección', () => {
+    const o = generarOferta({ ficha: CATA, negocio: NEGOCIO, campana: CAMPANA, funciones: AGENDA_CATA, ahoraMs: AHORA })
+    const d = generarMensajeDirecto({
+      ficha: CATA, negocio: NEGOCIO, campana: { nombre: 'Cata de vinos del Valle de Uco · octubre', ...CAMPANA }, funciones: AGENDA_CATA, ahoraMs: AHORA,
+    })
+    const b = generarBienvenida({ ficha: CATA, negocio: NEGOCIO, funcion: { inicia_at: SAB_1PM } })
+    for (const g of [o, d, b]) {
+      expect(g.faltantes).toEqual([])
+      expect(g.copiable).toBe(true)
+      expect(g.texto).not.toMatch(CINE)
+    }
+    expect(o.texto.startsWith(`${CATA.titulo_oferta}\n\n${CATA.frase_gancho}\n\n${CATA.intro}`)).toBe(true)
+    expect(o.texto).toContain('✨ INCLUYE:\n🍷 5 vinos del Valle de Uco\n🧀 Tabla de quesos y maridaje\n👩‍🍳 Guía de un sommelier')
+    expect(o.texto).toContain('🍷🍇 ¡Cupos limitados!')
+    expect(fechasDelTexto(o.texto, datosAgenda(AGENDA_CATA))).toEqual([])
+    expect(d.bytes).toBeLessThanOrEqual(LIMITE_DIRECTO_BYTES)
+    expect(b.texto.startsWith(CATA.saludo_grupo!)).toBe(true)
+    // La puerta cerrada no asume una pantalla: termina en «para evitar interrupciones. 🚪».
+    expect(b.texto).toContain('cerraremos la puerta de ingreso para evitar interrupciones. 🚪')
+    expect(fechasDelTexto(b.texto, [{ fecha: '2026-10-24', hora: SAB_1PM }], [0, -10, 10])).toEqual([])
+  })
+
+  it('la prueba muerde: una ficha con «película» sí la detecta', () => {
+    const conCine = generarOferta({ ficha: { ...CATA, intro: 'Cena y película' }, negocio: NEGOCIO, campana: CAMPANA, funciones: AGENDA_CATA, ahoraMs: AHORA })
+    expect(conCine.texto).toMatch(CINE)
+  })
+})

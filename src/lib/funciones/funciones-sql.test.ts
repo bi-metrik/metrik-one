@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { generarMensajeDirecto, generarOferta, type FuncionTextos } from '../../../supabase/functions/_shared/funciones/textos'
+import { generarBienvenida, generarMensajeDirecto, generarOferta, type FuncionTextos } from '../../../supabase/functions/_shared/funciones/textos'
 import type { TarifaPublica } from '../../../supabase/functions/_shared/funciones/tipos'
 import { diaBogota, diasSaldoValido, mensajeDeError, preventaPasaLaFuncion } from './reglas'
 
@@ -1610,5 +1610,91 @@ describe('la preventa vencida con el interruptor encendido, en los textos (23-oc
       }
     }
     expect(diaBogota('2099-10-25T03:00:00Z')).toBe('2099-10-24')
+  })
+})
+
+describe('una cata de vino (26-oct): la misma base para una experiencia que no es una película', () => {
+  // Sabor también hace catas de vino, clases de sushi y otras experiencias con horarios, precios y cupo (visita del
+  // 23-oct). Aquí nada es de cine: la ficha se guarda por la RPC del panel, la campaña y la función se cargan como el
+  // dueño, y se aparta por los dos caminos (asistente y equipo) hasta llenar los 12 cupos.
+  const CATA = {
+    nombre: '[PRUEBA] Cata de vinos del Valle de Uco',
+    titulo_oferta: '🍷🍇 CATA DE VINOS DEL VALLE DE UCO llega a BOGOTÁ ✨',
+    frase_gancho: '¿Listo para recorrer Mendoza copa a copa? 🍷✨',
+    intro: 'Una noche guiada por un sommelier, con cinco vinos de altura y su maridaje.',
+    que_incluye: ['🍷 5 vinos del Valle de Uco', '🧀 Tabla de quesos y maridaje', '👩‍🍳 Guía de un sommelier'],
+    emojis_tema: '🍷🍇',
+    saludo_grupo: '🍷 ¡Hola, amantes del vino!\n\n¡Bienvenidos al grupo oficial de la cata!',
+    relato_grupo: '🍇 ¡Que comience nuestra cata!',
+    edad_minima: 18,
+  }
+  const NEGOCIO = { direccion: '[PRUEBA] Calle 1, Bogotá', piso: 'Segundo piso', recepcion: 'Los recibimos en la entrada.', parqueadero: 'Bahía en frente.', firma: 'El equipo' }
+  const CINE = /pel[ií]cula|\bcine\b|proyecci|🎬/i
+  interface PanelCata {
+    nombre: string
+    dias_saldo_antes: number
+    experiencia: typeof CATA
+    funciones: Array<{ id: string; inicia_at: string; estado: 'activa'; ocupadas: number; capacidad: number; tarifa: TarifaPublica }>
+  }
+
+  /** La cata: experiencia por la RPC de la ficha; campaña activa y publicada ($150.000, abono $50.000); 12 cupos. */
+  async function cata() {
+    const experiencia = await rpc<string>(`select funcion_guardar_experiencia($1, null, $2::jsonb) as r`, [WS, JSON.stringify(CATA)])
+    const campana = uuid()
+    const funcion = uuid()
+    await q(
+      `insert into funcion_campanas (id, workspace_id, experiencia_id, nombre, codigo, estado, agenda_publicada_at, minutos_apartado, precio_persona, abono_persona)
+       values ($1, $2, $3, 'Cata de vinos del Valle de Uco · noviembre', $4, 'activa', now(), 30, 150000, 50000)`,
+      [campana, WS, experiencia, codigo_()],
+    )
+    await q(
+      `insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacidad, cupo_asistente)
+       values ($1, $2, $3, now() + interval '2 days', 12, 12)`,
+      [funcion, WS, campana],
+    )
+    return { experiencia, campana, funcion }
+  }
+
+  it('apartar llena los 12 cupos sin pasarse: 5 del asistente, 4 del equipo y 3 del asistente; uno más da sin_cupo', async () => {
+    const c = await cata()
+    const a = await apartarAsistente(c.funcion, 5)
+    expect([a.estado, a.campana_id, a.precio_unitario, a.monto_total, a.monto_reserva]).toEqual(['apartada', c.campana, 150_000, 750_000, 250_000])
+    expect((await apartarEquipo(c.funcion, 4)).estado).toBe('apartada')
+    let o = await ocupacion(c.funcion)
+    expect([o.capacidad, o.ocupadas, o.libres]).toEqual([12, 9, 3])
+    expect(await codigo(apartarAsistente(c.funcion, 4))).toBe('sin_cupo')
+    expect((await apartarAsistente(c.funcion, 3)).estado).toBe('apartada')
+    o = await ocupacion(c.funcion)
+    expect([o.capacidad, o.ocupadas, o.libres, o.libres_asistente]).toEqual([12, 12, 0, 0])
+    expect(await codigo(apartarAsistente(c.funcion, 1))).toBe('sin_cupo')
+    expect(await codigo(apartarEquipo(c.funcion, 1))).toBe('sin_cupo')
+    // Cancelar una reserva devuelve sus cupos, y la ocupación vuelve a cuadrar.
+    await cancelar(a.reserva_id)
+    expect((await ocupacion(c.funcion)).ocupadas).toBe(7)
+    expect((await apartarEquipo(c.funcion, 5)).estado).toBe('apartada')
+    expect((await ocupacion(c.funcion)).libres).toBe(0)
+  })
+
+  it('la oferta, el mensaje directo y la bienvenida con la ficha que devuelve la base no mencionan película, cine ni proyección', async () => {
+    const c = await cata()
+    const p = await rpc<PanelCata>(`select funcion_panel_campana($1) as r`, [c.campana])
+    expect(p.experiencia.nombre).toBe(CATA.nombre)
+    expect(p.experiencia.que_incluye).toEqual(CATA.que_incluye)
+    const ficha = p.experiencia
+    const funciones: FuncionTextos[] = p.funciones.map((f) => ({ inicia_at: f.inicia_at, estado: f.estado, llena: f.ocupadas >= f.capacidad, tarifa: f.tarifa }))
+    const ahoraMs = Date.now()
+    const textos = [
+      generarOferta({ ficha, negocio: NEGOCIO, campana: { dias_saldo_antes: p.dias_saldo_antes }, funciones, ahoraMs }),
+      generarMensajeDirecto({ ficha, negocio: NEGOCIO, campana: { nombre: p.nombre, dias_saldo_antes: p.dias_saldo_antes }, funciones, ahoraMs }),
+      generarBienvenida({ ficha, negocio: NEGOCIO, funcion: { inicia_at: p.funciones[0].inicia_at } }),
+    ]
+    for (const t of textos) {
+      expect(t.faltantes).toEqual([])
+      expect(t.texto).not.toMatch(CINE)
+    }
+    expect(textos[0].texto).toContain('🎫 Boletería regular: $150.000')
+    expect(textos[0].texto).toContain('✨ Reserva con $50.000 por cupo y paga el saldo 1 día antes.')
+    expect(textos[1].texto).toContain('📅 Cata de vinos del Valle de Uco · noviembre: te compartimos por este chat los horarios disponibles.')
+    expect(textos[2].texto).toContain('cerraremos la puerta de ingreso para evitar interrupciones. 🚪')
   })
 })

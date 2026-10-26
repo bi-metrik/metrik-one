@@ -26,7 +26,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
-import { conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla } from './fichas-prueba.ts';
+import { cataYPelicula, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata } from './fichas-prueba.ts';
 
 export type PasoCaso =
   | { escribe: string | string[]; despuesMs?: number }
@@ -122,7 +122,7 @@ const ESCENARIOS: CasoPublico[] = [
   {
     id: 'e-primer-mensaje', conjunto: 'escenarios', titulo: 'Primer mensaje: aviso de bot y términos, con su prueba',
     pasos: [{ escribe: 'hola' }],
-    guion: [R('¡Hola! ¿Te cuento de la experiencia de esta semana?', 'saludo')],
+    guion: [R('¡Hola! ¿Te cuento de nuestras experiencias?', 'saludo')],
     esperado: (e) => todos(contiene(e, 'asistente virtual de Sabor'), consentimiento(e, 'aviso', 'informado'), nPublicados(e, 1)),
   },
   {
@@ -315,6 +315,70 @@ const ESCENARIOS: CasoPublico[] = [
     pasos: [{ escribe: 'Buenas, info por favor' }],
     guion: [CATALOGO, R('Esta semana tenemos [EJEMPLO] Cena de película: La cocina del chef ratón, a $95.000 por persona.', 'experiencia')],
     esperado: (e) => todos(nPublicados(e, 1), contiene(e, 'asistente virtual')),
+  },
+];
+
+// ── Experiencias que no son de cine (Mauricio, 26-oct) ─────────────────────────
+// Sabor también hace catas, clases y otras experiencias, y todas funcionan igual: el asistente no supone película. Sobre
+// la cata [EJEMPLO] de `fichas-prueba.ts` (sola en el catálogo) ningún mensaje al cliente puede nombrar cine; con la
+// cata y la cena de película vigentes a la vez, un «quiero reservar» sin decir cuál se contesta preguntando cuál.
+
+const CINE = /pel[ií]cula|\bcine\b|proyecci[oó]n|pantalla/i;
+const sinCine = (e: EscenarioPublico): Veredicto => noContiene(e, CINE);
+const CATA = 'ejemplo-cata-1';
+
+const EXPERIENCIAS: CasoPublico[] = [
+  {
+    id: 'x-cata-que-hay', conjunto: 'escenarios', titulo: 'Solo la cata: «¿qué experiencias tienen?» sin nombrar cine', fichas: soloCata,
+    pasos: [{ escribe: '¿Qué experiencias tienen?' }],
+    guion: [CATALOGO, R('Tenemos [EJEMPLO] Cata de vinos: cinco cepas de Mendoza: una sommelier guía la cata de cinco vinos argentinos, con tabla de quesos y charcutería.', 'experiencia')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, /cata/i), sinCine(e), sinPersona(e)),
+  },
+  {
+    id: 'x-cata-precio', conjunto: 'escenarios', titulo: 'Solo la cata: el precio, del catálogo', fichas: soloCata,
+    pasos: [{ escribe: '¿Cuánto vale la cata de vinos?' }],
+    guion: [CATALOGO, R('Vale $120.000 por persona. Ahora tiene un descuento por preventa de $15.000 por persona, hasta el 30 de octubre.', 'precio')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$120.000'), sinCine(e), sinPersona(e)),
+  },
+  {
+    id: 'x-cata-preventa', conjunto: 'escenarios', titulo: 'Solo la cata: la preventa vigente, con su monto y su cierre', fichas: soloCata,
+    pasos: [{ escribe: '¿Tienen algún descuento en la cata?' }],
+    guion: [CATALOGO, R('Sí: la cata tiene un descuento por preventa de $15.000 por persona, hasta el 30 de octubre. El precio es $120.000 por persona.', 'precio')],
+    esperado: (e) => todos(
+      usoHerramienta(e, 'ver_catalogo'), contiene(e, /preventa/i), contiene(e, /\$?15[.,]000|15 mil/), contiene(e, /\b30 (de )?oct|30\/10|2026-10-30/i), sinCine(e), sinPersona(e),
+    ),
+  },
+  {
+    id: 'x-cata-ninos', conjunto: 'escenarios', titulo: 'Solo la cata: niños, con la edad de su ficha (mayores de 18)', fichas: soloCata,
+    pasos: [{ escribe: '¿Puedo llevar a mi hijo de 10 años a la cata?' }],
+    guion: [{ varias: [CATALOGO, { name: 'consultar_reglas', args: { clave: 'ninos' } }] }, R('La cata es solo para mayores de 18 años, porque se sirve alcohol, así que tu hijo no podría entrar.', 'politicas')],
+    esperado: (e) => todos(contiene(e, /\b18\b/), noContiene(e, /(s[ií],? )?(puede|pueden|puedes) (entrar|ir|llevarlo)\b(?![^.]*\bno\b)/i), sinCine(e), sinPersona(e), sinPropuesta(e)),
+  },
+  {
+    id: 'x-cata-persona', conjunto: 'escenarios', titulo: 'Solo la cata: celebración, pasa a persona sin nombrar cine', fichas: soloCata,
+    pasos: [{ escribe: 'Es para el cumpleaños de mi esposo, queremos ir a la cata. ¿Le pueden tener algo especial?' }],
+    guion: [PERSONA('celebracion', 'cumpleaños en la cata')],
+    esperado: (e) => todos(persona(e, 'celebracion'), sinCine(e)),
+  },
+  {
+    id: 'x-cata-o-pelicula', conjunto: 'escenarios', titulo: 'Cata y cena de película vigentes: «quiero reservar para el sábado» pregunta cuál, sin suponer la película', fichas: cataYPelicula,
+    pasos: [{ escribe: 'Hola, quiero reservar para el sábado' }],
+    guion: [CATALOGO, R('Para el sábado tenemos dos experiencias: [EJEMPLO] Cata de vinos: cinco cepas de Mendoza y [EJEMPLO] Cena de película: La cocina del chef ratón. ¿Cuál de las dos quieres?', 'reserva')],
+    esperado: (e) => {
+      const consultadas = new Set(e.almacen.trazas().flatMap((t) => (t.herramientas ?? []).filter((h) => h.nombre === 'ver_funciones' && h.ok).map((h) => String((h.args as Record<string, unknown> | null)?.experiencia ?? ''))));
+      const ultimo = e.chatwoot.publicados.at(-1);
+      const pregunta = ultimo ? [ultimo.salida.texto, ...('opciones' in ultimo.salida ? ultimo.salida.opciones.map((o) => o.titulo) : [])].join('\n') : '';
+      return todos(
+        usoHerramienta(e, 'ver_catalogo'), contiene(e, /cata/i), contiene(e, /pel[ií]cula|chef rat[oó]n/i),
+        // Las dos fichas le llegan completas al modelo (el tope propio de ver_catalogo; con el general de 400 se cortaba).
+        e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === 'ver_catalogo' && (h.datos as { recortado?: boolean } | null)?.recortado))
+          ? no('ver_catalogo llegó recortado') : ok('ver_catalogo completo'),
+        /\?/.test(pregunta) && /cata/i.test(pregunta) && /pel[ií]cula|chef rat[oó]n|cena/i.test(pregunta) ? ok('pregunta cuál, nombrando las dos') : no(`no preguntó cuál: «${pregunta.slice(0, 160)}»`),
+        consultadas.has('ejemplo-cena-1') && !consultadas.has(CATA) ? no('mostró solo los horarios de la película') : ok('no supuso la película'),
+        e.almacen.trazas().some((t) => t.pide_autorizacion) ? no('pidió la autorización sin saber la experiencia') : ok('sin autorización todavía'),
+        sinPropuesta(e), sinPersona(e),
+      );
+    },
   },
 ];
 
@@ -664,9 +728,9 @@ const OPERACION: CasoPublico[] = [
     esperado: (e) => todos(nPublicados(e, 0), e.chatwoot.notas.some((n) => n.texto.includes('ventana')) ? ok('nota de ventana') : no('sin nota')),
   },
   {
-    id: 'o-catalogo-vacio', conjunto: 'operacion', titulo: 'Catálogo vacío o vencido: nunca la película anterior, a persona',
+    id: 'o-catalogo-vacio', conjunto: 'operacion', titulo: 'Catálogo vacío o vencido: nunca la experiencia anterior, a persona',
     fichas: (f) => f.filter((x) => x.clave !== 'cat.ejemplo-cena-1'),
-    pasos: [{ escribe: '¿qué película hay?' }],
+    pasos: [{ escribe: '¿qué experiencia hay?' }],
     guion: [CATALOGO, PERSONA('falla', 'no hay catálogo vigente')],
     esperado: (e) => todos(persona(e, 'falla'), noContiene(e, 'semana pasada')),
   },
@@ -779,7 +843,7 @@ async function webhookDosVeces(): Promise<Veredicto> {
 export const CONJUNTO_REAL: CasoPublico[] = [];
 
 export const CONJUNTOS_PUBLICO: Record<CasoPublico['conjunto'], CasoPublico[]> = {
-  real: CONJUNTO_REAL, escenarios: ESCENARIOS, adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
+  real: CONJUNTO_REAL, escenarios: [...ESCENARIOS, ...EXPERIENCIAS], adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
 };
 
-export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];
+export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...EXPERIENCIAS, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];

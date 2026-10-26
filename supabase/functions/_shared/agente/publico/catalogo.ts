@@ -2,8 +2,9 @@
 // Asistente público — el catálogo, las funciones y las políticas, leídos del reglamento publicado (§7, §8.1)
 // ------------------------------------------------------------
 // El contenido variable (precios, fechas, funciones, dirección, políticas) nunca va en el prompt: vive en fichas del
-// reglamento y llega por herramienta. Así Sabor cambia la película de la semana publicando una versión nueva del
-// reglamento, sin desplegar. Las fichas:
+// reglamento y llega por herramienta. Así Sabor cambia o agrega experiencias (cenas con película, catas, clases…)
+// publicando una versión nueva del reglamento, sin desplegar. Todas usan la misma ficha: el código no distingue tipos.
+// Las fichas:
 //   · `cat.<id>`  experiencia (valores.tipo = 'experiencia'): nombre, incluye, precio por persona, abono, duración,
 //                 edad sugerida, dirección, vigencia (`vigente_desde`/`vigente_hasta`, fechas de Bogotá), versión.
 //   · `fun.<id>`  función (valores.tipo = 'funcion'): experiencia e inicio (ISO con zona).
@@ -129,7 +130,7 @@ export function zonaDe(e: Pick<Experiencia, 'ubicaciones'>, texto: string | null
   return e.ubicaciones.find((u) => t.includes(` ${u.zona.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')} `)) ?? null;
 }
 
-/** Las vigentes hoy (hora de Bogotá). Una vencida no sale nunca (§8.1: nunca la película anterior). Pura. */
+/** Las vigentes hoy (hora de Bogotá). Una vencida no sale nunca (§8.1: nunca la experiencia anterior). Pura. */
 export function vigentes(r: Reglamento, ahoraMs: number): Experiencia[] {
   const hoy = hoyBogota(ahoraMs);
   return experiencias(r).filter((e) => e.vigenteDesde <= hoy && hoy <= e.vigenteHasta);
