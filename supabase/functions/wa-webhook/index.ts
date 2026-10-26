@@ -46,6 +46,8 @@ import { atenderAvisoDatos, cerrarAviso } from '../_shared/aviso-datos-bot-flujo
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
 import { contestarNoSoportado, textoNoSoportado } from '../_shared/wa-no-soportado.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
+import { confirmarRecordatorio } from '../_shared/wa-recordatorios.ts';
+import { esConfirmacionDeRecordatorio } from '../_shared/wa-recordatorios-reglas.ts';
 import { identificarRemitente } from '../_shared/wa-identificar.ts';
 import { atenderEscrito } from '../_shared/wa-interprete.ts';
 import { aLetraLatina } from '../_shared/texto-latino.ts';
@@ -120,6 +122,24 @@ Deno.serve(async (req) => {
         return new Response('OK', { status: 200 });
       }
       const message = entrante.mensaje;
+
+      // La confirmacion de un recordatorio: boton de respuesta rapida de una PLANTILLA, que
+      // llega como `type: 'button'` con su payload. Sale aqui y NO pasa por `processMessage`:
+      // no es una conversacion con el bot, no abre sesion y no depende de que el numero este
+      // registrado en `staff`. Que el payload sea nuestro se decide sin tocar la base
+      // (`esConfirmacionDeRecordatorio` es puro), asi que un boton ajeno sigue su camino.
+      if (message.type === 'button' && esConfirmacionDeRecordatorio(message.interactive_reply)) {
+        enBackground(
+          confirmarRecordatorio(getServiceClient(), message.phone, message.interactive_reply)
+            .then((r) => {
+              if (!r.confirmado) {
+                console.warn(`[wa-webhook] confirmacion de recordatorio sin efecto: ${r.motivo}`);
+              }
+            })
+            .catch((err) => console.error('[wa-webhook] Recordatorio error:', err)),
+        );
+        return new Response('OK', { status: 200 });
+      }
 
       // Un toque de boton puede ser la aceptacion de un documento, y un texto puede ser el «acepto»
       // escrito del aviso de datos del bot: se guarda el cuerpo tal cual llego y su firma, que es lo

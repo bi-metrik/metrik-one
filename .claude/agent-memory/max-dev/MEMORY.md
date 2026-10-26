@@ -101,6 +101,7 @@
 - ⚠️⚠️ [Corregir hacia atrás sin área](project_correccion_hacia_atras_sin_area.md) — SOLO SOENA declara el opt-in
 - ⚠️⚠️ [Referencia `one://`](project_referencia_archivos_one.md) — `notificar-etapa` sin redesplegar
 - ⚠️⚠️ [Bot WA sin bandeja: premisas del motor Trappvel](project_wa_bot_sin_bandeja_trappvel.md) — un número, preview de 100, funnelchat es SOENA sin mensajes
+- ⚠️⚠️ [Recordatorios programados por WA (#966)](project_recordatorios_wa.md) — 2 migraciones SIN aplicar; disparo por pg_cron; el webhook no leía `type: 'button'`
 - ⚠️⚠️ [Bandeja WA a negocio existente](project_bandeja_negocio_existente.md) — migración SIN aplicar; conflicto en `_conflictos`; ejecutor Deno sí se prueba
 - ⚠️⚠️ [Varios viajes y guardianes N1-N9 (bandeja WA)](project_bandeja_varios_viajes.md) — solo encabezado exacto mueve la caja; edad no clasifica; con la llave encendida manda la bandeja (2026-10-01)
 - ⚠️⚠️ [Entendimiento de la bandeja WA (#960)](project_entendimiento_bandeja_wa.md) — guardianes 1-oct SIN mergear; SQL no_definido SIN aplicar; sugerido sin confirmar se reemplaza
