@@ -57,6 +57,11 @@ export interface DepsPublico {
   mensajero: MensajeroChatwoot;
   transcriptor: Transcriptor;
   avisos?: AvisosInternos;
+  /**
+   * Después de cerrar cada turno: el correo si se cayó el modelo (spec 2026-10-26, §4.1; `../caida.ts`). El turno ya
+   * pasó a persona y quedó cerrado; esto no lo cambia ni lo frena.
+   */
+  alertaCaida?: (traza: TrazaPublica, turnoId: string) => Promise<void>;
   llave: LlaveConversacion;
   canal: Canal;
   anuncio7Dias?: boolean;
@@ -652,6 +657,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   if (errores.length) traza.error = [traza.error, ...errores].filter(Boolean).join('; ');
 
   await d.almacen.cerrarTurno({ turnoId, filas: pend.map((f) => f.id), filaTraza: ultima.id, traza });
+  if (d.alertaCaida) await d.alertaCaida(traza, turnoId).catch((err) => console.error('[asistente] alerta de caída:', err));
   return true;
 }
 

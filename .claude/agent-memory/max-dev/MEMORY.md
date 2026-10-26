@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — #1282 mergeado (20261026183000); componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
 - ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
 - ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel

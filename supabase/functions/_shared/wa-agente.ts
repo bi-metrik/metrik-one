@@ -25,7 +25,7 @@ import { escalamientosSupabase } from './agente/persona-produccion.ts';
 import { resolverRol, rolPrevio } from './agente/roles.ts';
 import type { RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
-import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
+import { alertarCaidaWa, almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
 import { revisarCupo } from './agente/uso.ts';
 import { completarTexto } from './wa-conversacion.ts';
@@ -84,10 +84,13 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
     phone: message.phone.replace(/\D/g, ''),
     remitente: { nombre: user.name || 'el comercial', rol: user.collaborator_id ? 'colaborador' : user.role },
     nuevoId: () => crypto.randomUUID(),
-    despuesDelTurno: async () => {
+    despuesDelTurno: async (traza, turno) => {
       const { data: ws } = await supabase.from('workspaces').select('slug').eq('id', user.workspace_id).maybeSingle();
+      const workspaceNombre = String(ws?.slug ?? user.workspace_id);
+      // El correo si se cayeron los modelos (spec 2026-10-26, §4.1). Nunca lanza.
+      await alertarCaidaWa(supabase, almacen, traza, { workspaceId: user.workspace_id, workspaceNombre, canal: 'bandeja', phone: message.phone, turnoId: turno.turnoId });
       await revisarCupo(cupoSupabase(supabase, almacen), {
-        workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
+        workspaceId: user.workspace_id, workspaceNombre, cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
       });
     },
   });
@@ -180,7 +183,11 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       phone,
       remitente: { nombre: user.name || 'quien escribe', rol: user.collaborator_id ? 'colaborador' : user.role },
       nuevoId: () => crypto.randomUUID(),
-      despuesDelTurno: async () => {
+      despuesDelTurno: async (traza, turno) => {
+        // El correo si se cayeron los modelos (spec 2026-10-26, §4.1). Nunca lanza.
+        await alertarCaidaWa(supabase, almacen, traza, {
+          workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), canal: 'one', phone, turnoId: turno.turnoId,
+        });
         await revisarCupo(cupoSupabase(supabase, almacen), {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
         });

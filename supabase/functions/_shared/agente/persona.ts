@@ -19,6 +19,7 @@
 // si no, se OFRECE (el mismo botón, con la pregunta), nunca dos turnos seguidos.
 // ============================================================
 
+import { aliasConversacionWa } from './caida.ts';
 import { cortarEnPalabra } from './render.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion, Reglamento, Salida, Traza } from './tipos.ts';
 
@@ -405,13 +406,10 @@ export async function registrarEscalamiento(p: PuertoEscalamientos | null | unde
 }
 
 /**
- * El alias de una conversación de WhatsApp que no deja ver el teléfono: «wa-» + 10 hex del sha-256 de
- * `<workspace>:<teléfono>`. Es el mismo de los correos de caída (§4.1), para cruzar los dos.
+ * El alias de una conversación de WhatsApp que no deja ver el teléfono: el mismo de los correos de caída (§4.1,
+ * `caida.ts`), para cruzar los dos.
  */
-export async function aliasConversacionWa(workspaceId: string, phone: string): Promise<string> {
-  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${workspaceId}:${phone.replace(/\D/g, '')}`)));
-  return `wa-${[...h.slice(0, 5)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
-}
+export { aliasConversacionWa };
 
 // ── Chatwoot (chatwoot_equipo): equipo, horario y la cabecera de la nota ─────
 

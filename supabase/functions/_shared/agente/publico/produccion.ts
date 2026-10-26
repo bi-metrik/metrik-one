@@ -9,15 +9,21 @@
 //   etiquetar y cambiar el estado en la cuenta real; plan B: token de un usuario de servicio con el rol más bajo que
 //   alcance (es otro valor de `CHATWOOT_API_TOKEN_<SLUG>`, sin cambiar código).
 // · `puertosEntradaSupabase`: lo que necesita la petición del webhook (`entrada.ts`).
+// · `alertaCaidaChatwoot` y `avisosPorCorreo` (spec 2026-10-26, §4.1): el correo si se cae el modelo y el aviso del
+//   presupuesto diario, por correo a MéTRIK (Resend) y ya no por WhatsApp.
 // Los secretos los pasa quien llama (la función los lee de `Deno.env`); este archivo no lee el entorno.
 // ============================================================
 
 import type { SupabaseClient } from '../../types.ts';
 import type { Salida } from '../tipos.ts';
+import { CORREO_MAURICIO, enviarCorreoInterno, htmlDeTexto } from '../../correo-interno.ts';
+import { alertarSiCaido, caidaDelTurno } from '../caida.ts';
+import type { PuertosCaida } from '../caida.ts';
+import { inicioDiaBogota } from './topes.ts';
 import type { PrecioModelo } from '../uso.ts';
 import { leerConfigPublico } from './config.ts';
 import type { EntranteNuevo, PuertosEntrada, WorkspacePublico } from './entrada.ts';
-import type { AlmacenPublico, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
+import type { AlmacenPublico, AvisosInternos, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
 import type { FilaPublica, LlaveConversacion, TrazaPublica } from './tipos.ts';
 import { llaveTexto } from './tipos.ts';
 
@@ -246,5 +252,65 @@ export function puertosEntradaSupabase(supabase: SupabaseClient, secreto: (slug:
     },
     ahoraS: () => Math.floor(Date.now() / 1000),
     reloj: () => performance.now(),
+  };
+}
+
+// ── Avisos internos por correo (spec 2026-10-26, §4.1) ───────────────────────
+
+/** Un resumen corto de un texto (para la llave de Resend). */
+async function resumen(texto: string): Promise<string> {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto)));
+  return [...h.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * El aviso del presupuesto diario por correo a MéTRIK (antes por WhatsApp a `WA_ADMIN_NOTIFY_PHONE`, que se perdía fuera
+ * de la ventana de 24 h). El candado de la cola ya avisa una vez por umbral y día; la llave de Resend también.
+ */
+export function avisosPorCorreo(p: { workspaceNombre: string; llaveResend: string; ahoraMs?: () => number }): AvisosInternos {
+  return {
+    async avisar(texto) {
+      const dia = inicioDiaBogota((p.ahoraMs ?? Date.now)()).slice(0, 10);
+      const r = await enviarCorreoInterno({
+        to: CORREO_MAURICIO,
+        subject: `Presupuesto del asistente: ${p.workspaceNombre}`,
+        text: texto,
+        html: htmlDeTexto(texto),
+        idempotencyKey: `asistente-presupuesto/${p.workspaceNombre}/${dia}/${await resumen(texto)}`,
+      }, { llave: p.llaveResend });
+      if (!r.ok) console.error('[asistente] no salió el aviso del presupuesto:', r.error);
+    },
+  };
+}
+
+/**
+ * Los puertos del correo de caída en Chatwoot: los candados del almacén, las conversaciones con un turno caído en la
+ * última hora (`chatwoot_conversacion`, índice parcial de las trazas del modelo) y Resend.
+ */
+export function caidaChatwootSupabase(supabase: SupabaseClient, almacen: Pick<AlmacenPublico, 'tomarCandado' | 'soltarCandado'>, workspaceId: string, llaveResend: string): PuertosCaida {
+  return {
+    tomarCandado: (k, s) => almacen.tomarCandado(k, s),
+    soltarCandado: (k) => almacen.soltarCandado(k),
+    async sinRespuesta(desdeIso) {
+      const { data, error } = await supabase.from('chatwoot_conversacion').select('cuenta_id, conversacion_id')
+        .eq('workspace_id', workspaceId).gte('created_at', desdeIso).eq('traza->>tipo', 'modelo').like('traza->>error', 'falla:%').limit(2000);
+      if (error) return null;
+      return new Set(((data ?? []) as Fila[]).map((x) => `${x.cuenta_id}:${x.conversacion_id}`)).size;
+    },
+    enviarCorreo: (m) => enviarCorreoInterno(m, { llave: llaveResend }),
+  };
+}
+
+/** El gancho `alertaCaida` de la cola pública: el correo si se cayó el modelo. Nunca lanza. */
+export function alertaCaidaChatwoot(
+  supabase: SupabaseClient, almacen: Pick<AlmacenPublico, 'tomarCandado' | 'soltarCandado'>,
+  p: { llave: LlaveConversacion; workspaceNombre: string; llaveResend: string },
+): (traza: TrazaPublica, turnoId: string) => Promise<void> {
+  return async (traza, turnoId) => {
+    if (!caidaDelTurno(traza)) return;
+    await alertarSiCaido(caidaChatwootSupabase(supabase, almacen, p.llave.workspaceId, p.llaveResend), traza, {
+      workspaceId: p.llave.workspaceId, workspaceNombre: p.workspaceNombre, canal: 'chatwoot',
+      conversacion: `cw:${llaveTexto(p.llave)}`, turnoId, ahoraMs: Date.now(),
+    });
   };
 }

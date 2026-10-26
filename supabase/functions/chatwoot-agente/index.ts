@@ -14,13 +14,12 @@
 //   CHATWOOT_API_TOKEN_<SLUG>        el token del Agent Bot (o de un usuario de servicio, D7).
 //   ANTHROPIC_API_KEY                Claude Haiku 5.5 (sin respaldo de Gemini, D1).
 //   <audio.llave_env>                Gemini del plan PAGO para las notas de voz (por defecto GEMINI_API_KEY_PAGO).
-//   WA_ADMIN_NOTIFY_PHONE            alertas de presupuesto a MéTRIK (las de siempre).
+//   RESEND_API_KEY                   correo a MéTRIK: caída del modelo y presupuesto del día (spec 2026-10-26, §4.1).
 // Interruptores: `config_extra.bot_conversacional.chatwoot.activo` (sin él, 200 y nada) y la ficha `bot.encendido`
 // del reglamento publicado (bot `asistente-publico`). Quitar el Agent Bot del inbox en Chatwoot también lo apaga.
 // ============================================================
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
-import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
 import { modeloAnthropic } from '../_shared/agente/modelo-anthropic.ts';
 import { modeloGemini } from '../_shared/agente/modelo-gemini.ts';
 import { cargarReglamento } from '../_shared/agente/produccion.ts';
@@ -29,7 +28,9 @@ import { variableSecreta } from '../_shared/agente/publico/config.ts';
 import { BOT_PUBLICO } from '../_shared/agente/publico/dominio.ts';
 import { recibir } from '../_shared/agente/publico/entrada.ts';
 import type { Atender } from '../_shared/agente/publico/entrada.ts';
-import { almacenChatwootSupabase, mensajeroChatwootApi, preciosSupabase, puertosEntradaSupabase } from '../_shared/agente/publico/produccion.ts';
+import {
+  alertaCaidaChatwoot, almacenChatwootSupabase, avisosPorCorreo, mensajeroChatwootApi, preciosSupabase, puertosEntradaSupabase,
+} from '../_shared/agente/publico/produccion.ts';
 import { transcribirAudio } from '../_shared/agente/publico/transcribir.ts';
 import { NOTA_SIN_ROL, turnoPublico } from '../_shared/agente/publico/turno-con-rol.ts';
 import { resolverRol } from '../_shared/agente/roles.ts';
@@ -104,7 +105,7 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     return;
   }
   const llaveAudio = Deno.env.get(c.audio.llaveEnv) ?? '';
-  const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') ?? '').replace(/\D/g, '');
+  const llaveResend = Deno.env.get('RESEND_API_KEY') ?? '';
   await atenderConversacion({
     modelo, reglamento, config: c,
     ...(turno.funciones ? { funciones: turno.funciones, rol: turno.rol } : {}),
@@ -116,7 +117,10 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
         ...(mismoHost(x.url, c.apiUrl) ? { cabecerasDescarga: { api_access_token: token } } : {}),
       }),
     },
-    avisos: { avisar: async (t) => { if (admin) await enviarAvisoInterno(admin, 'asistente_presupuesto', t, { workspace: a.workspace.slug }); } },
+    // A MéTRIK por correo (spec 2026-10-26, §4.1): el presupuesto del día y, si se cae el modelo, el aviso inmediato. La
+    // conversación igual pasa a una persona en Chatwoot (el respaldo de Sabor, decisión del 26-oct).
+    avisos: avisosPorCorreo({ workspaceNombre: a.workspace.slug, llaveResend }),
+    alertaCaida: alertaCaidaChatwoot(supabase, almacenChatwootSupabase(supabase), { llave: a.llave, workspaceNombre: a.workspace.slug, llaveResend }),
     llave: a.llave, canal: a.canal, anuncio7Dias: a.anuncio7Dias, workspaceNombre: a.workspace.slug,
     precios: await preciosSupabase(supabase),
     ahoraMs: () => Date.now(),
