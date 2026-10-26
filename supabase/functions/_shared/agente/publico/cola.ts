@@ -31,6 +31,9 @@ import type { ContextoDominio, Dominio, Modelo, Reglamento, RolTraza, Salida } f
 import { componerDominio, fichasDelTurno } from '../componer.ts';
 import { ESCALAMIENTO_CHATWOOT_HOY, MOTIVO_LLANO, dentroDeHorario, equipoDe, escalamientoDe, notaComun, registrarEscalamiento, resumenTraspaso, senalDelCodigo, turnosDe } from '../persona.ts';
 import type { EscalamientoChatwoot, PuertoEscalamientos } from '../persona.ts';
+import type { Composicion } from '../componer.ts';
+import { fuentesDeComposicion } from '../pistas.ts';
+import type { FuentePistaDelTurno } from '../pistas.ts';
 import type { Catalogo } from '../funciones/catalogo.ts';
 import type { FuncionPrendida } from '../funciones/tipos.ts';
 import {
@@ -237,14 +240,34 @@ function ctxDe(d: DepsPublico, filas: FilaPublica[]): ContextoDominio {
   return { workspaceId: d.llave.workspaceId, phone: llaveTexto(d.llave), remitente: REMITENTE, conversacion: filas, resultadosPrevios };
 }
 
+/** El dominio público entero y, con un rol, su composición (motor `publico`). Pura. */
+function composicionPublica(d: DepsPublico, log?: (m: string) => void): { base: Dominio; c: Composicion | null } {
+  const base = dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta });
+  if (!d.funciones) return { base, c: null };
+  return {
+    base,
+    c: componerDominio({ motores: { [MOTOR_PUBLICO]: base }, funciones: d.funciones, ...(d.catalogo ? { catalogo: d.catalogo } : {}), ...(log ? { log } : {}) }),
+  };
+}
+
+/**
+ * Las funciones del rol que aportan pistas a la transcripción (spec 2026-10-26, §4.6): solo con
+ * `transcripcion.pistas = true` y un rol. Apagado, `undefined`: el transcriptor recibe lo mismo que antes.
+ */
+export function fuentesDePistasDelTurno(d: DepsPublico): FuentePistaDelTurno[] | undefined {
+  if (d.config.transcripcion?.pistas !== true || !d.funciones) return undefined;
+  // Sin log: lo que el componedor deja fuera ya lo anota el turno del modelo.
+  const { c } = composicionPublica(d, () => {});
+  return c ? fuentesDeComposicion(c) : undefined;
+}
+
 /**
  * El dominio y el reglamento del turno: el público entero o, con un rol, recortado a sus funciones por el componedor
  * (motor `publico`). El reglamento del rol pierde las fichas de las funciones que no tiene.
  */
 export function dominioYReglamento(d: DepsPublico): { dominio: Dominio; reglamento: Reglamento } {
-  const base = dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta });
-  if (!d.funciones) return { dominio: base, reglamento: d.reglamento };
-  const c = componerDominio({ motores: { [MOTOR_PUBLICO]: base }, funciones: d.funciones, ...(d.catalogo ? { catalogo: d.catalogo } : {}) });
+  const { base, c } = composicionPublica(d);
+  if (!c) return { dominio: base, reglamento: d.reglamento };
   // La huella se queda la de la versión publicada (la traza dice qué versión atendió; lo recortado es función de ella).
   return { dominio: c.dominio, reglamento: { ...d.reglamento, fichas: fichasDelTurno(d.reglamento.fichas, c, d.catalogo ? { catalogo: d.catalogo } : {}) } };
 }
@@ -381,8 +404,9 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
     } else {
       const t0 = d.reloj();
       let fallidos = 0;
+      const fuentesDePistas = fuentesDePistasDelTurno(d);
       for (const a of audios) {
-        const t = await d.transcriptor.transcribir({ url: a.adjunto!.url!, extension: a.adjunto?.extension });
+        const t = await d.transcriptor.transcribir({ url: a.adjunto!.url!, extension: a.adjunto?.extension, ...(fuentesDePistas ? { fuentesDePistas } : {}) });
         if (t.texto) {
           await d.almacen.completarTexto(a.id, t.texto);
           a.texto = t.texto;

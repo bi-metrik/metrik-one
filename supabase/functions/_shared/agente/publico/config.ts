@@ -16,6 +16,8 @@
 
 import type { Canal, MotivoPersona } from './tipos.ts';
 import { MOTIVOS_PERSONA } from './tipos.ts';
+import { leerConfigTranscripcion, TOPE_PISTAS } from '../pistas.ts';
+import type { ConfigTranscripcion } from '../pistas.ts';
 
 export type Esfuerzo = 'low' | 'medium' | 'high';
 
@@ -51,6 +53,11 @@ export interface ConfigPublico {
   corteTotalMs: number;
   rafagaMs: number;
   audio: { modelo: string; llaveEnv: string; maxBytes: number };
+  /**
+   * Pistas para transcribir (spec 2026-10-26, §4.6): `bot_conversacional.transcripcion` (el mismo interruptor del
+   * workspace que ONE, fuera de `chatwoot`). Apagado por defecto.
+   */
+  transcripcion: ConfigTranscripcion;
   /** El link de términos y política de datos. HUECO: lo publica Sabor (§5.1). */
   terminosUrl: string;
   /** Links que el asistente puede escribir (además del de términos). */
@@ -85,6 +92,7 @@ export const CONFIG_PUBLICO_POR_DEFECTO: ConfigPublico = {
   corteTotalMs: 20000,
   rafagaMs: 2500,
   audio: { modelo: 'gemini-3.5-flash-lite', llaveEnv: 'GEMINI_API_KEY_PAGO', maxBytes: 20 * 1024 * 1024 },
+  transcripcion: { pistas: false, tope: TOPE_PISTAS },
   terminosUrl: TERMINOS_EJEMPLO,
   enlacesPermitidos: [],
   presupuestoDiarioUsd: null,
@@ -173,6 +181,7 @@ export function leerConfigPublico(botConversacional: unknown): ConfigPublico {
       llaveEnv: texto(audio.llave_env, d.audio.llaveEnv),
       maxBytes: numero(audio.max_bytes, d.audio.maxBytes, 1024, 20 * 1024 * 1024),
     },
+    transcripcion: leerConfigTranscripcion(botConversacional),
     terminosUrl: enlace(c.terminos_url) ?? d.terminosUrl,
     enlacesPermitidos: Array.isArray(c.enlaces_permitidos) ? c.enlaces_permitidos.map(enlace).filter((x): x is string => !!x) : [],
     presupuestoDiarioUsd: typeof presupuesto === 'number' && Number.isFinite(presupuesto) && presupuesto > 0 ? presupuesto : null,
