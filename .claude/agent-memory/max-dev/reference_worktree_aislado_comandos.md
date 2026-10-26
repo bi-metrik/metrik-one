@@ -17,3 +17,4 @@ El guardia del worktree aislado rechaza un Bash si no puede probar que no corre 
   y evita falsos rojos; es gitignored, no hay que limpiarlo.
 - `git worktree add` desde el repo principal lo rechaza el guardia (cambia de cwd al checkout compartido): si el
   brief pide «tu propio worktree», crear la rama en el worktree aislado propio (`git checkout -b <rama> origin/main`).
+- También rechaza: rutas en variables de shell (`f=...; python3 ... $f`) y varios `npx` con rutas `(app)` encadenados con `;`/`echo $?`. Un comando por llamada, ruta literal entre comillas (25-oct).

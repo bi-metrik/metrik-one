@@ -16,8 +16,7 @@ import { MENSAJE_TIPO_NO_RECONOCIDO, leerTipoDocumento, mensajeTipoDocumento, ti
 
 /**
  * Filas por lote. 10.000 porque:
- *   - el XLSX de 10.000 filas pesa ~0,5 MB, lejos del tope de 5 MB del archivo y del de 20 MB de los
- *     server actions;
+ *   - el XLSX de 10.000 filas pesa ~0,5 MB, lejos del tope de 4 MB del archivo (`TOPE_BYTES_ARCHIVO_LOTE`);
  *   - con 8 filas a la vez y ~0,5 s por fila (Valida p50 0,39 s + tres escrituras en ONE) son ~10–17
  *     filas por segundo: 10.000 filas en 10–17 minutos, dentro del día y de la autorización de 2 h;
  *   - el PDF del lote sale en partes de 500 (tope de `POST /reporte-lote` de Valida): 20 partes;
@@ -25,6 +24,21 @@ import { MENSAJE_TIPO_NO_RECONOCIDO, leerTipoDocumento, mensajeTipoDocumento, ti
  * Más que eso pide partir el archivo: un lote más grande ocupa su turno más tiempo sin dar nada a cambio.
  */
 export const TOPE_FILAS_LOTE = 10_000
+
+/**
+ * Peso máximo del archivo del cargue: 4 MB (2026-10-26). Vercel corta el cuerpo de una petición a una
+ * función en 4,5 MB, con el multipart incluido, ANTES de que llegue al server action. Con el tope de
+ * antes (5 MB) un archivo de entre 4,5 y 5 MB recibía un 413 sin explicación. 4 MB deja margen para
+ * el multipart y los demás campos; 10.000 filas pesan ~0,5 MB.
+ */
+export const TOPE_BYTES_ARCHIVO_LOTE = 4 * 1024 * 1024
+
+/** Lo que se le dice a la persona si el archivo pasa el tope. null = cabe. Lo usan el navegador y el servidor. */
+export function errorTamanoArchivoLote(bytes: number): string | null {
+  if (bytes <= TOPE_BYTES_ARCHIVO_LOTE) return null
+  const mb = (bytes / (1024 * 1024)).toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  return `El archivo pesa ${mb} MB y el máximo por cargue es 4 MB. Deja solo la hoja con las columnas de la plantilla o divide el archivo en varios.`
+}
 
 /** Filas a la vez POR LOTE. Valida aguanta 20 por cliente (su guía de concurrencia); 8 deja holgura. */
 export const CONCURRENCIA_POR_LOTE = 8
@@ -39,13 +53,60 @@ export const LOTES_SIMULTANEOS = 3
 export const TURNO_MS = 60_000
 
 /**
- * Lo que dura el turno en la base: el turno, más lo que tardan en terminar las filas en vuelo
- * (30 s de tope de Valida + un reintento), más holgura. Vencido, otro trabajador toma el lote.
+ * `maxDuration` de `POST /api/v1/validate` en metrik-valida (`app/api/v1/validate/route.ts`). Pasado
+ * ese tiempo Vercel MATA la función: una llamada de Valida no puede seguir corriendo (ni cobrar) más
+ * allá. Si Valida lo sube, hay que subirlo aquí.
  */
-export const TURNO_RECLAMO_S = 150
+export const VALIDA_MAX_DURATION_S = 60
 
-/** Lo que dura el reclamo de una fila: el tope de Valida (30 s), un reintento y holgura. */
-export const FILA_RECLAMO_S = 120
+/**
+ * Tope de cada llamada a Valida desde el cargue masivo: el `maxDuration` de Valida más holgura
+ * (2026-10-25). Con el tope de 30 s de la consulta puntual, ONE abandonaba una llamada que Valida
+ * seguía corriendo: si Valida terminaba, la consulta quedaba COBRADA en Valida y la fila en error en
+ * ONE, sin resultado. Con un tope mayor que el `maxDuration`, cuando ONE se rinde la llamada de Valida
+ * ya terminó o murió, así que el reintento con la misma `Idempotency-Key` no corre a la par de ella:
+ * o repite la respuesta guardada sin cobrar, o es la única que corre.
+ */
+export const TIMEOUT_VALIDA_LOTE_MS = (VALIDA_MAX_DURATION_S + 10) * 1000
+
+/**
+ * 429 `rate_limit` de Valida (tope de ritmo por cliente, metrik-valida#78; apagado hasta que Mauricio lo
+ * encienda). Valida no registró ni cobró nada: se espera lo que diga `Retry-After` (a lo sumo
+ * TOPE_ESPERA_RITMO_S; 2 s si no lo trae) y se reintenta con la MISMA llave, hasta MAX_REINTENTOS_RITMO
+ * veces. Si sigue en 429, la fila vuelve a la cola sin error y el corredor espera antes de tomar otra.
+ */
+export const TOPE_ESPERA_RITMO_S = 20
+export const MAX_REINTENTOS_RITMO = 2
+
+/** Milisegundos a esperar ante un 429; null si no es un 429. */
+export function esperaRitmoMs(r: { ok: boolean; status?: number; retryAfterS?: number }): number | null {
+  if (r.ok || r.status !== 429) return null
+  const s = typeof r.retryAfterS === 'number' && Number.isFinite(r.retryAfterS) ? r.retryAfterS : 2
+  return Math.min(TOPE_ESPERA_RITMO_S, Math.max(1, Math.ceil(s))) * 1000
+}
+
+/**
+ * Lo que dura el reclamo de una fila: dos llamadas con su tope (2 × 70 s), la espera del reintento,
+ * las esperas de un 429 (2 × 20 s) y holgura. Vencido, otro trabajador la retoma con la misma llave.
+ */
+export const FILA_RECLAMO_S = 210
+
+/**
+ * Lo que dura el turno en la base: el turno (60 s), más lo que puede tardar en terminar una fila en
+ * vuelo (dos llamadas con su tope y las esperas de un 429), más holgura. Vencido, otro trabajador toma
+ * el lote.
+ */
+export const TURNO_RECLAMO_S = 270
+
+/**
+ * ¿Se reintenta (una vez, con la misma llave) una llamada a Valida que no dio resultado? Un 5xx, un
+ * tope de tiempo o un error de red: Valida no guardó nada, o guardó y la llave hace que repita la
+ * respuesta sin cobrar. Un 4xx no: la respuesta no cambia reintentando.
+ */
+export function llamadaReintentable(r: { ok: boolean; status?: number }): boolean {
+  if (r.ok) return false
+  return r.status === undefined || r.status >= 500
+}
 
 /** Consultas por PDF del lote: el tope de `POST /api/v1/reporte-lote` de Valida. */
 export const CONSULTAS_POR_PDF = 500

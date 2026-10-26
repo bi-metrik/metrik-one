@@ -42,7 +42,7 @@ import {
   resultadosLoteValida,
   type LoteVista,
 } from '@/lib/actions/valida-lotes';
-import { TOPE_FILAS_LOTE, type AvisoTiposDocumento } from '@/lib/valida/lote';
+import { TOPE_FILAS_LOTE, errorTamanoArchivoLote, type AvisoTiposDocumento } from '@/lib/valida/lote';
 import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
 import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
 import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
@@ -833,8 +833,20 @@ function ConsultaMasivaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loteId, activo]);
 
+  // El peso se mira en el navegador, ANTES de subir: Vercel corta en 4,5 MB y la persona veía un error
+  // sin explicación. El servidor lo vuelve a mirar (`crearLoteValida`).
+  function elegirArchivo(f: File | null) {
+    const error = f ? errorTamanoArchivoLote(f.size) : null;
+    if (error) {
+      setArchivo(null);
+      setEstado({ fase: 'error', mensaje: error });
+      return;
+    }
+    setArchivo(f);
+  }
+
   const drop = useFileDrop({
-    onFiles: f => setArchivo(f[0] ?? null),
+    onFiles: f => elegirArchivo(f[0] ?? null),
     disabled: estado.fase === 'preparando' || activo,
   });
 
@@ -856,6 +868,11 @@ function ConsultaMasivaForm({
   async function crear(limite: number | null) {
     if (!archivo) {
       setEstado({ fase: 'error', mensaje: 'Selecciona un archivo XLSX' });
+      return;
+    }
+    const errorTamano = errorTamanoArchivoLote(archivo.size);
+    if (errorTamano) {
+      setEstado({ fase: 'error', mensaje: errorTamano });
       return;
     }
     setEstado({ fase: 'preparando' });
@@ -1086,13 +1103,13 @@ function ConsultaMasivaForm({
                   ? archivo.name
                   : 'Arrastra o selecciona un archivo XLSX'}
               </p>
-              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 5 MB / {TOPE_FILAS_LOTE.toLocaleString('es-CO')} filas</p>
+              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 4 MB / {TOPE_FILAS_LOTE.toLocaleString('es-CO')} filas</p>
             </div>
             <input
               id="archivo-batch"
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              onChange={e => elegirArchivo(e.target.files?.[0] ?? null)}
               className="hidden"
             />
           </label>

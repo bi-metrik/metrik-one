@@ -73,12 +73,38 @@ describe('el formulario del recibo: la tarifa UPME, no el pago', () => {
     expect(html).not.toContain('honorario')
   })
 
-  it('la fila de un pago mixto dice cuánto es la tarifa, al lado del monto', () => {
-    const html = texto(renderToStaticMarkup(React.createElement(FilaPago, { pago: pagoMixto(), onCambio: () => {} })))
+  // SOE-029: con el total en grande, Tesorería creyó que el recibo salía por el pago
+  // entero y dejó de emitirlos. La cifra grande es la del recibo.
+  it('la fila de un pago mixto pone en grande el valor del recibo y lo consignado en chico', () => {
+    const html = renderToStaticMarkup(React.createElement(FilaPago, { pago: pagoMixto(), onCambio: () => {} }))
+    const t = texto(html)
 
-    expect(html).toContain('tarifa UPME')
-    expect(html).toContain('701.812')
-    expect(html).toContain('Emitir recibo')
+    expect(t).toMatch(/Recibo por \$\s?701\.812 consignó \$\s?1\.339\.312/)
+    // La cifra en negrilla es la porción UPME, no el monto del pago.
+    expect(html).toMatch(/font-bold[^>]*>\$\s?701\.812</)
+    expect(html).not.toMatch(/font-bold[^>]*>\$\s?1\.339\.312</)
+    expect(t).not.toContain('tarifa UPME')
+    expect(t).toContain('Emitir recibo')
+  })
+
+  it('la fila de un pago de pura tarifa no repite lo consignado', () => {
+    const t = texto(renderToStaticMarkup(React.createElement(FilaPago, {
+      pago: pagoMixto({ monto: 701_812, valor_upme: 701_812 }), onCambio: () => {},
+    })))
+
+    expect(t).toMatch(/Recibo por \$\s?701\.812/)
+    expect(t).not.toContain('consignó')
+  })
+
+  it('la fila sin porción UPME sigue mostrando el monto del pago, sin etiqueta', () => {
+    for (const valor_upme of [null, 0]) {
+      const html = renderToStaticMarkup(React.createElement(FilaPago, {
+        pago: pagoMixto({ valor_upme }), onCambio: () => {},
+      }))
+      expect(html).toMatch(/font-bold[^>]*>\$\s?1\.339\.312</)
+      expect(texto(html)).not.toContain('Recibo por')
+      expect(texto(html)).not.toContain('consignó')
+    }
   })
 })
 

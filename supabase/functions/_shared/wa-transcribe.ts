@@ -34,16 +34,21 @@ export interface TranscribeResult {
 }
 
 /**
- * Opciones para quien no es el flujo de gastos. Sin ellas, todo queda como siempre.
+ * Opciones de transcripcion. Sin ellas, la salida es amplia y un corte se rechaza.
  *
- * La bandeja de solicitudes las usa porque una nota de voz de un comercial describiendo un
- * viaje es larga: con 512 tokens de salida se cortaba, y un corte con `finishReason` distinto
- * de STOP solo se registraba como aviso. Media transcripcion aceptada en silencio es un falso
- * verde (motor-solicitud-viaje.md, §3): con `exigirFinCompleto` se rechaza.
+ * Antes el valor por defecto era 512 tokens de salida y un corte con `finishReason` distinto de
+ * STOP solo se registraba como aviso: una nota de voz larga llegaba a medias al bot de atencion,
+ * a la ruta de respaldo y a Cardumen sin que nadie lo supiera. Media transcripcion aceptada en
+ * silencio es un falso verde (motor-solicitud-viaje.md, §3), asi que ahora es el comportamiento
+ * por defecto para todas las rutas, no algo que cada una deba acordarse de pedir.
  */
+export const MAX_SALIDA_TRANSCRIPCION = 8192;
+
 export interface OpcionesTranscripcion {
   prompt?: string;
+  /** Por defecto `MAX_SALIDA_TRANSCRIPCION`. */
   maxOutputTokens?: number;
+  /** Por defecto true: un corte devuelve error, no texto. */
   exigirFinCompleto?: boolean;
 }
 
@@ -139,7 +144,7 @@ async function geminiTranscribe(
       ],
       generationConfig: {
         temperature: 0.1,
-        maxOutputTokens: opciones.maxOutputTokens ?? 512,
+        maxOutputTokens: opciones.maxOutputTokens ?? MAX_SALIDA_TRANSCRIPCION,
       },
     }),
   });
@@ -160,14 +165,11 @@ async function geminiTranscribe(
   }
 
   const finishReason = data.candidates?.[0]?.finishReason;
-  if (finishReason && finishReason !== 'STOP') {
-    console.warn(`[wa-transcribe] Gemini finishReason: ${finishReason}`);
-    if (opciones.exigirFinCompleto) {
-      return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason}` };
+  if (finishReason !== 'STOP') {
+    console.warn(`[wa-transcribe] Gemini finishReason: ${finishReason ?? '(ausente)'}`);
+    if (opciones.exigirFinCompleto ?? true) {
+      return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
     }
-  }
-  if (opciones.exigirFinCompleto && finishReason !== 'STOP') {
-    return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();

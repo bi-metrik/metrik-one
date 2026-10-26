@@ -24,6 +24,7 @@ import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
 import { esAdjuntoEntrante, preparadorDeAdjuntos } from '../adjuntos.ts';
 import { BOT_ONE } from './reglamento.ts';
+import { comentariosDeActividad } from '../../comentario-actividad.ts';
 
 export { BOT_ONE };
 
@@ -106,7 +107,8 @@ export interface PuertoOne {
   guardarAdjunto(filaId: string, archivo: ArchivoAdjunto): Promise<string | null>;
   /** Deja en la fila de la conversación lo preparado del archivo (`ref`, `lectura`). Nunca lanza. */
   anotarMedia(filaId: string, media: MediaFila): Promise<void>;
-  registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<void>;
+  /** Lo que no cabe en un comentario (280 caracteres) va completo en varios seguidos; devuelve cuántos quedaron. */
+  registrarActividad(p: { negocioId: string; tipo: TipoActividad; texto: string }): Promise<{ comentarios: number }>;
   /**
    * Los cobros programados del negocio que siguen sin pagar (`tipo_cobro = 'programado'`, sin `fecha`, sin anular), las
    * cuotas más viejas primero. Se leen en el turno: la base manda.
@@ -895,7 +897,10 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       v: {
         accion: 'actividad',
         datos: { negocio_id: n.v.id, negocio: n.v.codigo, etiqueta: nombreNegocio(n.v), tipo, texto },
-        resumen: `${EMOJI_ACTIVIDAD[tipo]} Actividad en ${nombreNegocio(n.v)}:\n«${corto(texto, 400)}»\n¿La registro?`,
+        resumen: `${EMOJI_ACTIVIDAD[tipo]} Actividad en ${nombreNegocio(n.v)}:\n«${corto(texto, 400)}»\n`
+          // El «…» de arriba es solo de este resumen: lo que se guarda es el texto entero.
+          + (comentariosDeActividad(`${EMOJI_ACTIVIDAD[tipo]} `, texto).length > 1 ? 'Es largo: la guardo completa, en varios comentarios seguidos.\n' : '')
+          + '¿La registro?',
         sobre: n.v.codigo, si: 'Registrar', no: 'No',
       },
     };
@@ -986,8 +991,9 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       return { lineas, escrituras: [{ tipo: 'cobro', id: d.cobro_id, monto: Number(d.monto), negocio: d.negocio, etiqueta: d.etiqueta, soporte: r.soporte === 'guardado', ...(r.soporte === 'guardado' ? { foto: d.foto } : {}) }] };
     }
     if (p.accion === 'actividad') {
-      await puerto.registrarActividad({ negocioId: String(d.negocio_id), tipo: d.tipo as TipoActividad, texto: String(d.texto) });
-      return { lineas: [`✅ ${EMOJI_ACTIVIDAD[d.tipo as TipoActividad] ?? '📝'} Actividad registrada en ${String(d.etiqueta)}.`], escrituras: [{ tipo: 'actividad', negocio: d.negocio, texto: d.texto }] };
+      const r = await puerto.registrarActividad({ negocioId: String(d.negocio_id), tipo: d.tipo as TipoActividad, texto: String(d.texto) });
+      const enVarios = r.comentarios > 1 ? `, completa en ${r.comentarios} comentarios seguidos` : '';
+      return { lineas: [`✅ ${EMOJI_ACTIVIDAD[d.tipo as TipoActividad] ?? '📝'} Actividad registrada en ${String(d.etiqueta)}${enVarios}.`], escrituras: [{ tipo: 'actividad', negocio: d.negocio, texto: d.texto }] };
     }
     if (p.accion === 'contacto_nuevo') {
       const r = await puerto.crearContacto({ nombre: String(d.nombre), telefono: (d.telefono as string | null) ?? null, cargo: (d.cargo as string | null) ?? null, decisor: d.decisor === true });
