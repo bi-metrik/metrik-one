@@ -16,8 +16,7 @@ import { MENSAJE_TIPO_NO_RECONOCIDO, leerTipoDocumento, mensajeTipoDocumento, ti
 
 /**
  * Filas por lote. 10.000 porque:
- *   - el XLSX de 10.000 filas pesa ~0,5 MB, lejos del tope de 5 MB del archivo y del de 20 MB de los
- *     server actions;
+ *   - el XLSX de 10.000 filas pesa ~0,5 MB, lejos del tope de 4 MB del archivo (`TOPE_BYTES_ARCHIVO_LOTE`);
  *   - con 8 filas a la vez y ~0,5 s por fila (Valida p50 0,39 s + tres escrituras en ONE) son ~10–17
  *     filas por segundo: 10.000 filas en 10–17 minutos, dentro del día y de la autorización de 2 h;
  *   - el PDF del lote sale en partes de 500 (tope de `POST /reporte-lote` de Valida): 20 partes;
@@ -25,6 +24,21 @@ import { MENSAJE_TIPO_NO_RECONOCIDO, leerTipoDocumento, mensajeTipoDocumento, ti
  * Más que eso pide partir el archivo: un lote más grande ocupa su turno más tiempo sin dar nada a cambio.
  */
 export const TOPE_FILAS_LOTE = 10_000
+
+/**
+ * Peso máximo del archivo del cargue: 4 MB (2026-10-26). Vercel corta el cuerpo de una petición a una
+ * función en 4,5 MB, con el multipart incluido, ANTES de que llegue al server action. Con el tope de
+ * antes (5 MB) un archivo de entre 4,5 y 5 MB recibía un 413 sin explicación. 4 MB deja margen para
+ * el multipart y los demás campos; 10.000 filas pesan ~0,5 MB.
+ */
+export const TOPE_BYTES_ARCHIVO_LOTE = 4 * 1024 * 1024
+
+/** Lo que se le dice a la persona si el archivo pasa el tope. null = cabe. Lo usan el navegador y el servidor. */
+export function errorTamanoArchivoLote(bytes: number): string | null {
+  if (bytes <= TOPE_BYTES_ARCHIVO_LOTE) return null
+  const mb = (bytes / (1024 * 1024)).toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  return `El archivo pesa ${mb} MB y el máximo por cargue es 4 MB. Deja solo la hoja con las columnas de la plantilla o divide el archivo en varios.`
+}
 
 /** Filas a la vez POR LOTE. Valida aguanta 20 por cliente (su guía de concurrencia); 8 deja holgura. */
 export const CONCURRENCIA_POR_LOTE = 8
