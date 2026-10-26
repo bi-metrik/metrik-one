@@ -4,10 +4,10 @@
 
 - ⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — remitente_correo; logo solo con clave; SOENA: verificar dominio → deploy → clave
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
-- ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — migración 20261026183000 APLICADA (26-oct); huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — 20261026183000 APLICADA; componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id
 - ⚠️ [Calificación y resumen diario de asistentes (#1289)](project_calificacion_resumen_asistentes.md) — con_texto SIN prender en Sabor; tokens en `juez`; caida.ts no se importa en src
 - ⚠️ [Toque de botón de plantilla §4.5 (ag|t|)](project_toque_plantilla.md) — sin el componente con payload Meta devuelve el texto; tope 256 no publicado
-- ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho #1285 sin conectar; arnés lo corre Mauricio
+- ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho conectado en #1285 (fuentesDeComposicion); arnés lo corre Mauricio
 - ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
 - ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null

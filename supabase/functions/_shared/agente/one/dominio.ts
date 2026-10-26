@@ -163,6 +163,23 @@ export function permisosDe(rol: string): Permisos {
   }
 }
 
+/**
+ * Los permisos desde las funciones `equipo.*` del turno (spec 2026-10-26, §2.6): con las de un cargo
+ * (`cargos.ts`, `FUNCIONES_POR_CARGO`) da exactamente `permisosDe(cargo)`. El motor sigue frenando por permiso al
+ * proponer y al leer: es la tercera llave, detrás de no declarar y de la segunda llave del componedor. Pura.
+ */
+export function permisosDeFunciones(funciones: Iterable<string>): Permisos {
+  const s = new Set(funciones);
+  return {
+    escribir: s.has('equipo.gastos') && s.has('equipo.actividades'),
+    ingresos: s.has('equipo.ingresos'),
+    contactos: s.has('equipo.contactos'),
+    negocios: s.has('equipo.consulta_negocio'),
+    plata: s.has('equipo.ver_plata'),
+    gastos: s.has('equipo.consulta_gastos'),
+  };
+}
+
 // ── Cómo se nombra un negocio ────────────────────────────────────────────────
 
 const corto = (s: string, max: number) => ([...s].length <= max ? s : `${[...s].slice(0, max - 1).join('')}…`);
@@ -572,6 +589,16 @@ const DATOS_PROPONER_ONE: Record<string, unknown> = {
   decisor: { type: 'boolean', description: 'contacto_nuevo: true si es quien decide la compra (dueño, gerente, arquitecto a cargo).' },
 };
 
+/** Qué propiedades de `datos` usa cada acción (el componedor declara solo las de las acciones del rol). */
+export const DATOS_POR_ACCION_ONE: Record<string, string[]> = {
+  gasto: ['monto', 'negocio', 'empresa', 'empresa_dicho_en', 'categoria', 'descripcion', 'soporte'],
+  adjuntar_soporte: ['soporte', 'gasto', 'monto_distinto'],
+  corregir_gasto: ['monto', 'soporte', 'gasto'],
+  ingreso: ['monto', 'negocio', 'soporte', 'cuota', 'parcial'],
+  actividad: ['negocio', 'tipo', 'texto', 'nota'],
+  contacto_nuevo: ['nombre', 'telefono', 'cargo', 'decisor'],
+};
+
 type Resultado<T> = { ok: true; v: T } | { ok: false; error: string; candado: string; respaldo?: unknown };
 
 const sinPermiso = (que: string): { ok: false; error: string; candado: string } =>
@@ -586,9 +613,13 @@ export const VENTANA_ADJUNTOS_ONE_MS = 5000;
 const PREPARAR_DESDE_MS = 60 * 60 * 1000;
 const PREPARAR_MAX = 4;
 
-/** `empresa`: el nombre del workspace (para reconocer un depósito a su propia cuenta). */
-export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null; empresa?: string | null }): Dominio {
-  const permisos = permisosDe(o.rol);
+/**
+ * `empresa`: el nombre del workspace (para reconocer un depósito a su propia cuenta). `funciones`: las funciones
+ * `equipo.*` del turno (un cargo o un rol, `cargos.ts`); con ellas los permisos salen de las funciones, sin ellas, del
+ * cargo (`permisosDe`, como siempre). Este dominio declara todo: lo que ve el modelo lo recorta el componedor.
+ */
+export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null; empresa?: string | null; funciones?: Iterable<string> }): Dominio {
+  const permisos = o.funciones ? permisosDeFunciones(o.funciones) : permisosDe(o.rol);
   const ahora = o.ahora ?? (() => Date.now());
   // Baja, sube y lee los soportes recientes que todavía no se prepararon (`../adjuntos.ts`, común con la bandeja).
   const prepararTurno = preparadorDeAdjuntos(puerto, {

@@ -3,7 +3,7 @@
 // ------------------------------------------------------------
 // Gemini transcribe mejor los nombres y los códigos si sabe cuáles pueden aparecer. Las pistas salen de la base del
 // workspace en el momento (lector en `pistas-supabase.ts`) y de las funciones del rol por su gancho `pistas` (el de
-// `agente/funciones/tipos.ts` del componedor, #1285):
+// `agente/funciones/tipos.ts`; la composición del turno las entrega con `fuentesDeComposicion`):
 //   · nombres del equipo y de los colaboradores;
 //   · clientes de los negocios abiertos (la empresa, o el contacto si es persona natural) y el nombre corto del negocio;
 //   · el FORMATO de los códigos («I1 26 5») con los prefijos de empresa en uso, nunca la lista de códigos;
@@ -184,19 +184,37 @@ export async function pistasSiEncendidas(
   }
 }
 
-// ── El gancho de las funciones (#1285) ────────────────────────────────────────
+// ── El gancho de las funciones (componedor) ────────────────────────────────────────
 
 /**
- * La forma del gancho que declara una función del componedor (`Funcion.pistas`, `agente/funciones/tipos.ts` en #1285).
- * Estructural, para no depender de ese PR: cuando entre, una `Funcion` encaja aquí tal cual.
+ * La forma del gancho que declara una función del componedor (`Funcion.pistas`, `agente/funciones/tipos.ts`).
+ * Estructural: una `Funcion` encaja aquí tal cual (lo comprueba `pistas.test.ts`).
  */
 export interface FuenteDePistas {
   pistas?(ctx: { workspaceId: string; parametros: Record<string, unknown> }): Promise<string[]>;
 }
 
+/** Una función del turno con los parámetros con que la empresa la prendió. */
+export interface FuentePistaDelTurno {
+  funcion: FuenteDePistas;
+  parametros: Record<string, unknown>;
+}
+
+/**
+ * Las fuentes de pistas de una composición (`componerDominio`, `componer.ts`): cada función que quedó en el turno
+ * (comunes incluidas), con sus parámetros. Las que el componedor dejó fuera (sin motor, sin lo que requieren) no
+ * aportan. Estructural, para no importar el componedor. Pura.
+ */
+export function fuentesDeComposicion(c: {
+  funciones: Array<FuenteDePistas & { clave: string }>;
+  parametros: Record<string, Record<string, unknown>>;
+}): FuentePistaDelTurno[] {
+  return c.funciones.map((funcion) => ({ funcion, parametros: c.parametros[funcion.clave] ?? {} }));
+}
+
 /** Junta lo que aportan las funciones del rol. La que falla o no tiene gancho no aporta; nunca lanza. */
 export async function pistasDeFunciones(
-  funciones: Array<{ funcion: FuenteDePistas; parametros: Record<string, unknown> }>,
+  funciones: FuentePistaDelTurno[],
   workspaceId: string,
 ): Promise<string[]> {
   const partes = await Promise.all(funciones.map(async ({ funcion, parametros }) => {

@@ -154,7 +154,7 @@ export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {})
     const acuse = abre && await d.almacen.tomarCandado(clavesCola(d.workspaceId, d.phone).acuse, 60);
     const r: SalidaTurno = {
       salida: acuse ? { tipo: 'texto', texto: respuestaFija(d.reglamento, 'rf.acuse_reenvio') } : null,
-      traza: { tipo: 'reenvio', bot: d.dominio.bot, respuesta_fija: acuse ? 'rf.acuse_reenvio' : null },
+      traza: { tipo: 'reenvio', bot: d.dominio.bot, ...(d.rol ? { rol: d.rol } : {}), respuesta_fija: acuse ? 'rf.acuse_reenvio' : null },
     };
     await enviarYCerrar(d, turnoId, pend, r, 'agente.reenvio');
     // Una foto o un PDF reenviado se guarda y se lee AL LLEGAR (2026-10-21, bandeja): cuando el comercial pida cargar la

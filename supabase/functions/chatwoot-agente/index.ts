@@ -32,7 +32,10 @@ import {
   alertaCaidaChatwoot, almacenChatwootSupabase, avisosPorCorreo, mensajeroChatwootApi, preciosSupabase, puertosEntradaSupabase,
 } from '../_shared/agente/publico/produccion.ts';
 import { transcribirAudio } from '../_shared/agente/publico/transcribir.ts';
-import { pistasSiEncendidas } from '../_shared/agente/pistas.ts';
+import { NOTA_SIN_ROL, turnoPublico } from '../_shared/agente/publico/turno-con-rol.ts';
+import { resolverRol } from '../_shared/agente/roles.ts';
+import { pistasDeFunciones, pistasSiEncendidas } from '../_shared/agente/pistas.ts';
+import type { FuentePistaDelTurno } from '../_shared/agente/pistas.ts';
 import { leerBasePistas } from '../_shared/agente/pistas-supabase.ts';
 import type { Modelo } from '../_shared/agente/tipos.ts';
 import type { SupabaseClient } from '../_shared/types.ts';
@@ -65,16 +68,33 @@ function modeloDe(a: Atender): Modelo | null {
 
 async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
   const c = a.workspace.config;
-  const reglamento = await cargarReglamento(supabase, a.workspace.id, BOT_PUBLICO, c.reglamentoId);
-  if (!reglamento) {
-    console.warn(`[chatwoot-agente] ${a.workspace.slug} sin reglamento publicado de ${BOT_PUBLICO}: no contesta`);
-    return;
-  }
   const token = Deno.env.get(variableSecreta('CHATWOOT_API_TOKEN', a.workspace.slug)) ?? '';
   if (!token) {
     console.error(`[chatwoot-agente] falta ${variableSecreta('CHATWOOT_API_TOKEN', a.workspace.slug)}: no contesta`);
     return;
   }
+  // Con roles (spec 2026-10-26): el rol asignado al inbox ('cw:<cuenta>:<inbox>'). Sin roles en este canal, o sin la
+  // migración, el reglamento de siempre y el dominio público entero.
+  const turno = await turnoPublico({
+    resolver: () => resolverRol(supabase, {
+      workspaceId: a.workspace.id, canal: 'chatwoot', inbox: a.inboxId === null ? null : `cw:${a.llave.cuentaId}:${a.inboxId}`,
+    }),
+    reglamentoDelRol: (clave, id) => cargarReglamento(supabase, a.workspace.id, `rol:${clave}`, id),
+    reglamentoDeHoy: () => cargarReglamento(supabase, a.workspace.id, BOT_PUBLICO, c.reglamentoId),
+  });
+  if (turno.tipo === 'nada') {
+    console.warn(`[chatwoot-agente] ${a.workspace.slug} sin reglamento publicado de ${BOT_PUBLICO}: no contesta`);
+    return;
+  }
+  if (turno.tipo === 'persona') {
+    // El inbox usa roles y no tiene uno activo: el respaldo de Sabor es una persona en Chatwoot (decisión del 26-oct).
+    console.warn(`[chatwoot-agente] ${a.workspace.slug}: sin rol activo para el inbox (${turno.motivo}), pasa a una persona`);
+    const m = mensajeroChatwootApi({ apiUrl: c.apiUrl, token });
+    await m.nota(a.llave, NOTA_SIN_ROL);
+    await m.abrir(a.llave);
+    return;
+  }
+  const reglamento = turno.reglamento;
   const modelo = modeloDe(a);
   if (!modelo) {
     console.error(`[chatwoot-agente] sin llave del modelo (${c.modelo.proveedor}): no contesta (sin respaldo, D1)`);
@@ -83,21 +103,26 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
   const llaveAudio = Deno.env.get(c.audio.llaveEnv) ?? '';
   const llaveResend = Deno.env.get('RESEND_API_KEY') ?? '';
   // Pistas para transcribir (spec 2026-10-26, §4.6), solo con `bot_conversacional.transcripcion.pistas = true` y una
-  // vez por atención. Aquí habla un cliente: van el equipo y lo que aporten las funciones del rol (la experiencia
-  // vigente, cuando entre el componedor #1285), nunca los otros clientes ni los negocios (`incluirClientes: false`).
+  // vez por atención. Aquí habla un cliente: van el equipo y lo que aporten las funciones del rol del inbox por su
+  // gancho `pistas` (la cola le pasa al transcriptor las funciones que compuso, `fuentesDePistas`), nunca los otros
+  // clientes ni los negocios (`incluirClientes: false`).
   let pistas: Promise<string | null> | null = null;
-  const pistasDeLaNota = () => pistas ??= pistasSiEncendidas(
+  const pistasDeLaNota = (fuentes: FuentePistaDelTurno[] | undefined) => pistas ??= pistasSiEncendidas(
     c.transcripcion,
-    async () => ({ base: await leerBasePistas(supabase, a.workspace.id, { negocios: false }) }),
+    async () => ({
+      base: await leerBasePistas(supabase, a.workspace.id, { negocios: false }),
+      extras: await pistasDeFunciones(fuentes ?? [], a.workspace.id),
+    }),
     { incluirClientes: false },
   );
   await atenderConversacion({
     modelo, reglamento, config: c,
+    ...(turno.funciones ? { funciones: turno.funciones, rol: turno.rol } : {}),
     almacen: almacenChatwootSupabase(supabase),
     mensajero: mensajeroChatwootApi({ apiUrl: c.apiUrl, token }),
     transcriptor: {
       transcribir: async (x) => transcribirAudio(x, {
-        llave: llaveAudio, modelo: c.audio.modelo, maxBytes: c.audio.maxBytes, pistas: await pistasDeLaNota(),
+        llave: llaveAudio, modelo: c.audio.modelo, maxBytes: c.audio.maxBytes, pistas: await pistasDeLaNota(x.fuentesDePistas),
         ...(mismoHost(x.url, c.apiUrl) ? { cabecerasDescarga: { api_access_token: token } } : {}),
       }),
     },

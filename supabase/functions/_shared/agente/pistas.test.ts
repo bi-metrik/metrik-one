@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   ENCABEZADO_PISTAS, TOPE_PISTAS, formatoDeCodigos, leerConfigTranscripcion, limpiarPista, listaDePistas, nombreCorto,
-  pistasDeFunciones, pistasSiEncendidas, textoPistas,
+  fuentesDeComposicion, pistasDeFunciones, pistasSiEncendidas, textoPistas,
 } from './pistas'
 import type { BasePistas } from './pistas'
+import type { Funcion } from './funciones/tipos'
 import { CONFIG_PUBLICO_POR_DEFECTO, leerConfigPublico } from './publico/config'
 
 const base: BasePistas = {
@@ -103,7 +104,7 @@ describe('el interruptor', () => {
   })
 })
 
-describe('el gancho de las funciones (#1285)', () => {
+describe('el gancho de las funciones', () => {
   it('junta lo que aportan; la que falla o no tiene gancho no aporta', async () => {
     const r = await pistasDeFunciones([
       { funcion: { pistas: async (c) => [`Servicio de ${c.workspaceId}`, String(c.parametros.x)] }, parametros: { x: 'Henna' } },
@@ -111,5 +112,18 @@ describe('el gancho de las funciones (#1285)', () => {
       { funcion: { pistas: async () => { throw new Error('no') } }, parametros: {} },
     ], 'ws1')
     expect(r).toEqual(['Servicio de ws1', 'Henna'])
+  })
+})
+
+describe('las fuentes de una composición', () => {
+  it('cada función que quedó, con sus parámetros; una Funcion del componedor encaja en el gancho', async () => {
+    const conPistas: Funcion = {
+      clave: 'clientes.x', familia: 'clientes', queHace: '', herramientas: {}, candados: [], fichas: [],
+      pistas: async (c) => [`Taller ${String(c.parametros.nombre)}`],
+    }
+    const sinPistas: Funcion = { clave: 'comun.persona', familia: 'comun', queHace: '', herramientas: {}, candados: [], fichas: [], comun: true }
+    const fuentes = fuentesDeComposicion({ funciones: [sinPistas, conPistas], parametros: { 'clientes.x': { nombre: 'Henna' } } })
+    expect(fuentes.map((x) => x.parametros)).toEqual([{}, { nombre: 'Henna' }])
+    expect(await pistasDeFunciones(fuentes, 'ws1')).toEqual(['Taller Henna'])
   })
 })

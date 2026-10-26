@@ -27,7 +27,13 @@ import { esSiSolo, propuestaVigente, toqueDePropuesta, turnoDelModelo } from '..
 import type { DepsTurno, SalidaTurno } from '../nucleo.ts';
 import { leerToque, cortarEnPalabra } from '../render.ts';
 import type { PrecioModelo } from '../uso.ts';
-import type { ContextoDominio, Modelo, Reglamento, Salida } from '../tipos.ts';
+import type { ContextoDominio, Dominio, Modelo, Reglamento, RolTraza, Salida } from '../tipos.ts';
+import { componerDominio, fichasDelTurno } from '../componer.ts';
+import type { Composicion } from '../componer.ts';
+import { fuentesDeComposicion } from '../pistas.ts';
+import type { FuentePistaDelTurno } from '../pistas.ts';
+import type { Catalogo } from '../funciones/catalogo.ts';
+import type { FuncionPrendida } from '../funciones/tipos.ts';
 import {
   RF_BIENVENIDA, autorizacionEnEspera, conAviso, estadoAutorizacion, salidaAutorizacion, eventoAutorizacion, huellaTexto, motivoAviso, respuestaA, textoFijo, versionDe,
 } from './autorizacion.ts';
@@ -69,9 +75,21 @@ export interface DepsPublico {
   dormir: (ms: number) => Promise<void>;
   /** Arnés de operación: una herramienta caída. */
   fallarHerramienta?: () => boolean;
+  /**
+   * Con roles (spec 2026-10-26): las funciones del rol del inbox (ya intersecadas con las prendidas). El dominio del
+   * turno es el público recortado a ellas por el componedor; `reglamento` es entonces la versión del rol. Sin esto,
+   * el dominio público entero, como siempre.
+   */
+  funciones?: Array<string | FuncionPrendida>;
+  /** El catálogo para componer (en las pruebas, uno con funciones de prueba). Sin él, el del código. */
+  catalogo?: Catalogo;
+  /** El rol del turno, para la traza (§2.9). */
+  rol?: RolTraza | null;
 }
 
 const DIAS_DE_CONVERSACION = 30;
+/** El id del motor del asistente público en el componedor (`../funciones/tipos.ts`). */
+export const MOTOR_PUBLICO = 'publico';
 const REMITENTE = { nombre: 'el cliente', rol: 'cliente' };
 
 export function clavesPublico(l: LlaveConversacion) {
@@ -190,7 +208,7 @@ interface Resultado {
 
 const sinTurno = (d: DepsPublico, extra: Partial<TrazaPublica> = {}): TrazaPublica => ({
   tipo: 'sin_turno', bot: dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: {} }).bot,
-  reglamento: { id: d.reglamento.id, version: d.reglamento.version, huella: d.reglamento.huella }, canal: d.canal, ...extra,
+  reglamento: { id: d.reglamento.id, version: d.reglamento.version, huella: d.reglamento.huella }, ...(d.rol ? { rol: d.rol } : {}), canal: d.canal, ...extra,
 });
 
 function ctxDe(d: DepsPublico, filas: FilaPublica[]): ContextoDominio {
@@ -200,11 +218,45 @@ function ctxDe(d: DepsPublico, filas: FilaPublica[]): ContextoDominio {
   return { workspaceId: d.llave.workspaceId, phone: llaveTexto(d.llave), remitente: REMITENTE, conversacion: filas, resultadosPrevios };
 }
 
+/** El dominio público entero y, con un rol, su composición (motor `publico`). Pura. */
+function composicionPublica(d: DepsPublico, log?: (m: string) => void): { base: Dominio; c: Composicion | null } {
+  const base = dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta });
+  if (!d.funciones) return { base, c: null };
+  return {
+    base,
+    c: componerDominio({ motores: { [MOTOR_PUBLICO]: base }, funciones: d.funciones, ...(d.catalogo ? { catalogo: d.catalogo } : {}), ...(log ? { log } : {}) }),
+  };
+}
+
+/**
+ * Las funciones del rol que aportan pistas a la transcripción (spec 2026-10-26, §4.6): solo con
+ * `transcripcion.pistas = true` y un rol. Apagado, `undefined`: el transcriptor recibe lo mismo que antes.
+ */
+export function fuentesDePistasDelTurno(d: DepsPublico): FuentePistaDelTurno[] | undefined {
+  if (d.config.transcripcion?.pistas !== true || !d.funciones) return undefined;
+  // Sin log: lo que el componedor deja fuera ya lo anota el turno del modelo.
+  const { c } = composicionPublica(d, () => {});
+  return c ? fuentesDeComposicion(c) : undefined;
+}
+
+/**
+ * El dominio y el reglamento del turno: el público entero o, con un rol, recortado a sus funciones por el componedor
+ * (motor `publico`). El reglamento del rol pierde las fichas de las funciones que no tiene.
+ */
+export function dominioYReglamento(d: DepsPublico): { dominio: Dominio; reglamento: Reglamento } {
+  const { base, c } = composicionPublica(d);
+  if (!c) return { dominio: base, reglamento: d.reglamento };
+  // La huella se queda la de la versión publicada (la traza dice qué versión atendió; lo recortado es función de ella).
+  return { dominio: c.dominio, reglamento: { ...d.reglamento, fichas: fichasDelTurno(d.reglamento.fichas, c, d.catalogo ? { catalogo: d.catalogo } : {}) } };
+}
+
 function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
+  const dr = dominioYReglamento(d);
   return {
     modelo: d.modelo,
-    dominio: dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta }),
-    reglamento: d.reglamento,
+    dominio: dr.dominio,
+    reglamento: dr.reglamento,
+    ...(d.rol ? { rol: d.rol } : {}),
     config: configNucleo(d.config, turnoMs),
     ahoraMs: d.ahoraMs,
     reloj: d.reloj,
@@ -315,8 +367,9 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
     } else {
       const t0 = d.reloj();
       let fallidos = 0;
+      const fuentesDePistas = fuentesDePistasDelTurno(d);
       for (const a of audios) {
-        const t = await d.transcriptor.transcribir({ url: a.adjunto!.url!, extension: a.adjunto?.extension });
+        const t = await d.transcriptor.transcribir({ url: a.adjunto!.url!, extension: a.adjunto?.extension, ...(fuentesDePistas ? { fuentesDePistas } : {}) });
         if (t.texto) {
           await d.almacen.completarTexto(a.id, t.texto);
           a.texto = t.texto;

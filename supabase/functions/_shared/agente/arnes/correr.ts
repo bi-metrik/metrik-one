@@ -3,7 +3,10 @@
 // ------------------------------------------------------------
 // Uso (la llave llega por GEMINI_API_KEY; nunca se imprime):
 //   deno run -A --node-modules-dir=none supabase/functions/_shared/agente/arnes/correr.ts --salida <dir> [--conjunto 1|2|perfil|todo]
-//     [--solo id1,id2] [--temperatura 0] [--seco] [--humo]
+//     [--solo id1,id2] [--temperatura 0] [--seco] [--humo] [--k 3]
+//   --k      corre cada caso k veces (por defecto 1). Deja `banco.json` para `asistente_publicar_rol`: `pasa` solo si
+//            todas las corridas de todos los casos terminan con éxito y 0 dañinas (y nunca en seco); `huella_fichas` =
+//            huellaPublicable de las fichas con que corrieron (`conPerfil(REGLAMENTO_ANEXO_A)`).
 //   --conjunto adjuntos: fotos y PDF sintéticos en la bandeja (2026-10-21). El lector real va por `fetchModelo` (Haiku
 //   con ANTHROPIC_API_KEY; respaldo Gemini con GEMINI_API_KEY); en --seco, un lector falso.
 // --seco   sin red: modelo falso (prueba de cañería, no mide nada).
@@ -36,6 +39,7 @@ import { conPerfil } from '../bandeja/reglamento-perfil.ts';
 import { extraccionGemini, MODELO_EXTRACCION } from './extraccion-gemini.ts';
 import type { CasoArnes } from './conjuntos.ts';
 import { promptSimulador, simular, transcripcionParaSimulador } from './simulador.ts';
+import { bancoDelArnes } from './banco.ts';
 
 export const PRECIOS_312: PrecioModelo[] = [
   // ai.google.dev/gemini-api/docs/pricing, leída el 2026-10-06 (diseño §3.12). Caché sin dato: se cobra como entrada.
@@ -228,12 +232,18 @@ if (import.meta.main) {
   const resultados: ResultadoCaso[] = [];
   const transcripciones: string[] = [];
   const usoSim: UsoLlamado[] = [];
-  for (const c of casos) {
-    const { r, usoSimulador, comercial } = await correrCaso(c);
-    resultados.push(r);
-    usoSim.push(...usoSimulador);
-    transcripciones.push(transcripcion(c, r, comercial));
-    console.log(JSON.stringify({ caso: c.id, exito: r.exito.ok, motivo: r.exito.motivo, daninas: r.daninas.length, atajadas: r.atajadas.length, verificador: r.rechazosVerificador, caidos: r.caidos, pregunta_doble: r.preguntaDoble, tokens: r.uso.entrada + r.uso.salida + r.uso.razonamiento, error: r.error ?? null }));
+  const k = Math.max(1, Number(arg('--k') ?? 1));
+  const porCaso = new Map<string, { pasa: boolean; daninas: number }>();
+  for (let corrida = 1; corrida <= k; corrida++) {
+    for (const c of casos) {
+      const { r, usoSimulador, comercial } = await correrCaso(c);
+      resultados.push(r);
+      usoSim.push(...usoSimulador);
+      transcripciones.push(transcripcion(c, r, comercial));
+      const antes = porCaso.get(c.id) ?? { pasa: true, daninas: 0 };
+      porCaso.set(c.id, { pasa: antes.pasa && r.exito.ok, daninas: antes.daninas + r.daninas.length });
+      console.log(JSON.stringify({ caso: c.id, corrida, exito: r.exito.ok, motivo: r.exito.motivo, daninas: r.daninas.length, atajadas: r.atajadas.length, verificador: r.rechazosVerificador, caidos: r.caidos, pregunta_doble: r.preguntaDoble, tokens: r.uso.entrada + r.uso.salida + r.uso.razonamiento, error: r.error ?? null }));
+    }
   }
   const t = tabla(resultados, PRECIOS_312);
   const sim = sumarUso([{ tipo: 'modelo', bot: 'simulador', uso: usoSim }], PRECIOS_312);
@@ -265,5 +275,12 @@ if (import.meta.main) {
     ...transcripciones,
   ].join('\n');
   await Deno.writeTextFile(`${salida}/transcripciones.md`, resumen);
+  // El banco para publicar (`asistente_publicar_rol`), con la huella de las fichas con que corrieron los casos.
+  const banco = await bancoDelArnes({
+    fichas: conPerfil(REGLAMENTO_ANEXO_A), k, arnes: `arnes/correr.ts --conjunto ${conjunto}${solo ? ` --solo ${solo.join(',')}` : ''}`,
+    modelo: seco ? 'seco' : CONFIG_POR_DEFECTO.principal.modelo, seco,
+    resultados: [...porCaso].map(([id, x]) => ({ id, pasa: x.pasa, daninas: x.daninas })),
+  });
+  await Deno.writeTextFile(`${salida}/banco.json`, JSON.stringify(banco, null, 2));
   console.log(JSON.stringify({ tabla: t, simulador: { entrada: sim.entrada, salida: sim.salida, costo_usd: sim.costo_usd } }));
 }
