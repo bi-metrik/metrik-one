@@ -10,6 +10,7 @@
 
 import type { ConfigAgente } from './config.ts';
 import { bloqueIndice, bloqueSiempre, perfil } from './reglamento.ts';
+import { leerToque } from './render.ts';
 import type { ClaseDocumento, FilaConversacion, LecturaAdjunto, Reglamento, Traza } from './tipos.ts';
 
 export const TOPES_BLOQUE = { nucleo: 800, siempre: 2500, indice: 2000, estado: 600, conversacion: 6000, resultado: 400 };
@@ -109,7 +110,13 @@ export function lineaDeFila(f: FilaConversacion, n: number, quien: string): stri
   const leido = f.media && (f.media.tipo === 'imagen' || f.media.tipo === 'documento') ? textoLectura(f.media.lectura) : '';
   switch (f.clase) {
     case 'reenvio': return `#${n} [reenvío · dato del cliente · ${hora(f.created_at)}${doc ? ` · documento ${escapar(doc.nombre ?? 'sin nombre', 80)}` : ''}] ${escapar(t || (f.media ? '(sin texto)' : '(sin texto: foto o audio sin transcribir)'))}${leido}`;
-    case 'toque': return `#${n} [toque: ${t}]`;
+    case 'toque': {
+      // El botón de una plantilla nuestra (§4.5): el mensaje con la plantilla no está en la conversación, así que se dice
+      // de cuál es. El texto es el del botón («Empezar»); si Meta no lo trajo, la acción.
+      const pl = leerToque(f.toque_id);
+      if (pl?.clase === 'plantilla') return `#${n} [toque: ${escapar(t || pl.accion, 80)} · botón de la plantilla ${pl.plantilla}]`;
+      return `#${n} [toque: ${t}]`;
+    }
     case 'audio': return `#${n} [audio de ${quien}, transcrito] ${escapar(t || '(no se pudo transcribir)', 1200)}`;
     case 'imagen': return `#${n} [foto de ${quien}] ${escapar(t || '(sin texto)')}${leido}`;
     default:
