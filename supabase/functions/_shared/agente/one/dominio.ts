@@ -478,28 +478,36 @@ const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
  * ¿El gasto de empresa tiene de dónde salir? (2026-10-21: en el arnés el modelo lo puso por su cuenta cuando no
  * encontró el negocio, y una vez apuntó `empresa_dicho_en` a «Bebidas de 20000»). `#n` tiene que ser una respuesta de la
  * persona a la pregunta del destino que armó el código (`preguntar_destino`, con su opción «Gasto de empresa»): el toque
- * de esa opción, o el escrito/audio que la CONTESTA (la última lista, el primer mensaje después; qué dice lo lee el modelo). Si la persona dijo «de
- * empresa» antes de cualquier lista, el bot pregunta el destino y ella toca la opción: un paso más, a cambio de que
- * nadie registre a empresa por suposición. Estructural: no lee el texto de la persona. Pura.
+ * de esa opción, o un escrito/audio posterior a esa lista que lo DICE («empresa», «ninguno», «sin negocio» o el número
+ * de la opción). Si la persona dijo «de empresa» antes de cualquier lista, el bot pregunta el destino y ella toca la
+ * opción: un paso más, a cambio de que nadie registre a empresa por suposición.
+ *
+ * Antes valía el primer mensaje después de la lista, dijera lo que dijera, y ningún otro (caso real 2026-10-26, gasto
+ * de Resend: la persona contestó la lista con «se realizó el día de ayer», el modelo apuntó ahí y salió «Gasto de
+ * empresa» sin que nadie lo dijera; luego dijo «sería un gasto de empresa» y el candado lo rechazó por no ser el primero,
+ * y le volvió a mostrar la lista). Lee el texto solo para eso: que la persona haya dicho empresa. Pura.
  */
 export function empresaDicha(filas: FilaConversacion[], v: unknown): boolean {
   const n = numeroDeFila(v);
   const f = n ? filas[n - 1] : undefined;
   if (!f || f.direccion !== 'entrante' || f.clase === 'reenvio') return false;
-  // La lista del destino tiene que ser la ÚLTIMA antes de `#n` y `#n` el PRIMER mensaje de la persona después de ella: la
-  // respuesta a ESA pregunta. Antes bastaba con cualquier lista anterior, ya contestada (arnés real del 2026-10-22,
-  // r-t-gasolina: la lista del gasto de 90.000 se contestó tocando E1 26 1, y dos gastos después «Gasto de 18900 sin
-  // mas…» pasó como respaldo de un gasto de empresa que nadie pidió; Mauricio tocó Registrar).
+  // La lista del destino tiene que ser la ÚLTIMA antes de `#n`: una lista ya superada por otra no respalda nada (arnés
+  // real del 2026-10-22, r-t-gasolina: «Gasto de 18900 sin mas…» dos gastos después pasó como respaldo).
   let l = -1;
   for (let i = n! - 2; i >= 0; i--) {
     const x = filas[i];
     if (x.direccion === 'saliente' && (x.opciones ?? []).some((o) => o.id.startsWith('ag|c|'))) { l = i; break; }
   }
-  if (l < 0 || !(filas[l].opciones ?? []).some((o) => o.id.startsWith('ag|c|') && o.titulo === OPCION_EMPRESA)) return false;
-  if (filas.slice(l + 1, n! - 1).some((x) => x.direccion === 'entrante')) return false;
-  if (f.clase === 'toque') return (f.texto ?? '').trim() === OPCION_EMPRESA;
-  return ['escrito', 'audio', 'imagen'].includes(f.clase);
+  const opciones = l < 0 ? [] : (filas[l].opciones ?? []).filter((o) => o.id.startsWith('ag|c|'));
+  const k = opciones.findIndex((o) => o.titulo === OPCION_EMPRESA);
+  if (k < 0) return false;
+  const texto = (f.texto ?? '').trim();
+  if (f.clase === 'toque') return texto === OPCION_EMPRESA;
+  if (!['escrito', 'audio', 'imagen'].includes(f.clase)) return false;
+  return DICE_EMPRESA.test(texto) || texto === String(k + 1);
 }
+
+const DICE_EMPRESA = /empresa|\bning[uú]n[oa]?\b|sin negocio/i;
 
 /** ¿El teléfono está escrito por el equipo en la conversación? (solo dígitos; el valor tiene que existir). Pura. */
 export function telefonoEnLaConversacion(filas: FilaConversacion[], telefono: string): boolean {
