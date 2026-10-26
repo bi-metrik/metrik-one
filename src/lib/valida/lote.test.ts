@@ -9,6 +9,8 @@ import {
   lotesSimultaneos,
   partesDelPdf,
   recortarAlSaldo,
+  errorTamanoArchivoLote,
+  TOPE_BYTES_ARCHIVO_LOTE,
   llamadaReintentable,
   FILA_RECLAMO_S,
   TIMEOUT_VALIDA_LOTE_MS,
@@ -125,5 +127,21 @@ describe('topes del cargue masivo frente al maxDuration de Valida', () => {
     expect(llamadaReintentable({ ok: false, status: 400 })).toBe(false)
     expect(llamadaReintentable({ ok: false, status: 402 })).toBe(false)
     expect(llamadaReintentable({ ok: true, status: 200 })).toBe(false)
+  })
+})
+
+describe('peso del archivo del cargue frente al tope de Vercel (4,5 MB por petición)', () => {
+  const MB = 1024 * 1024
+
+  it('el tope deja margen bajo los 4,5 MB de Vercel para el multipart', () => {
+    expect(TOPE_BYTES_ARCHIVO_LOTE).toBeLessThanOrEqual(4.5 * MB - 256 * 1024)
+  })
+
+  it('hasta 4 MB cabe; más, mensaje claro con el peso', () => {
+    expect(errorTamanoArchivoLote(500 * 1024)).toBeNull()
+    expect(errorTamanoArchivoLote(4 * MB)).toBeNull()
+    expect(errorTamanoArchivoLote(4.6 * MB)).toBe(
+      'El archivo pesa 4,6 MB y el máximo por cargue es 4 MB. Deja solo la hoja con las columnas de la plantilla o divide el archivo en varios.',
+    )
   })
 })

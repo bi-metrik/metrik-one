@@ -11,6 +11,7 @@ import {
   CONSULTAS_POR_PDF,
   FILAS_PARA_AVISO_CORREO,
   TOPE_FILAS_LOTE,
+  errorTamanoArchivoLote,
   autorizadoHasta,
   avisoTiposDocumento,
   filaConsume,
@@ -186,7 +187,8 @@ export async function crearLoteValida(
 
   const file = fd.get('archivo');
   if (!(file instanceof File)) return { ok: false, error: 'archivo_no_provisto' };
-  if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_excede_5mb' };
+  const errorTamano = errorTamanoArchivoLote(file.size);
+  if (errorTamano) return { ok: false, error: errorTamano };
 
   let rows: FilaXLSX[];
   try {
