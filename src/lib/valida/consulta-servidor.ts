@@ -19,7 +19,7 @@ export const TIMEOUT_VALIDA_MS = 30_000
 
 export type RespuestaValida =
   | { ok: true; data: ValidaResultado }
-  | { ok: false; error: string; status?: number }
+  | { ok: false; error: string; status?: number; retryAfterS?: number }
 
 /**
  * `POST /api/v1/validate`. `claveIdempotencia` (solo el cargue masivo) va en `Idempotency-Key`:
@@ -45,7 +45,14 @@ export async function llamarValida(
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      return { ok: false, error: body.error ?? `HTTP ${res.status}`, status: res.status }
+      // Retry-After en segundos (429 rate_limit y 402 de bolsa con cobro en curso).
+      const espera = Number(res.headers?.get?.('retry-after'))
+      return {
+        ok: false,
+        error: body.error ?? `HTTP ${res.status}`,
+        status: res.status,
+        ...(Number.isFinite(espera) && espera >= 0 ? { retryAfterS: espera } : {}),
+      }
     }
     const data = (await res.json()) as ValidaResultado
     return { ok: true, data }

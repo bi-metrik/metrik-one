@@ -70,16 +70,33 @@ export const VALIDA_MAX_DURATION_S = 60
 export const TIMEOUT_VALIDA_LOTE_MS = (VALIDA_MAX_DURATION_S + 10) * 1000
 
 /**
- * Lo que dura el reclamo de una fila: dos llamadas con su tope (2 × 70 s), la espera del reintento y
- * holgura. Vencido, otro trabajador la retoma con la misma llave.
+ * 429 `rate_limit` de Valida (tope de ritmo por cliente, metrik-valida#78; apagado hasta que Mauricio lo
+ * encienda). Valida no registró ni cobró nada: se espera lo que diga `Retry-After` (a lo sumo
+ * TOPE_ESPERA_RITMO_S; 2 s si no lo trae) y se reintenta con la MISMA llave, hasta MAX_REINTENTOS_RITMO
+ * veces. Si sigue en 429, la fila vuelve a la cola sin error y el corredor espera antes de tomar otra.
  */
-export const FILA_RECLAMO_S = 180
+export const TOPE_ESPERA_RITMO_S = 20
+export const MAX_REINTENTOS_RITMO = 2
+
+/** Milisegundos a esperar ante un 429; null si no es un 429. */
+export function esperaRitmoMs(r: { ok: boolean; status?: number; retryAfterS?: number }): number | null {
+  if (r.ok || r.status !== 429) return null
+  const s = typeof r.retryAfterS === 'number' && Number.isFinite(r.retryAfterS) ? r.retryAfterS : 2
+  return Math.min(TOPE_ESPERA_RITMO_S, Math.max(1, Math.ceil(s))) * 1000
+}
+
+/**
+ * Lo que dura el reclamo de una fila: dos llamadas con su tope (2 × 70 s), la espera del reintento,
+ * las esperas de un 429 (2 × 20 s) y holgura. Vencido, otro trabajador la retoma con la misma llave.
+ */
+export const FILA_RECLAMO_S = 210
 
 /**
  * Lo que dura el turno en la base: el turno (60 s), más lo que puede tardar en terminar una fila en
- * vuelo (dos llamadas con su tope), más holgura. Vencido, otro trabajador toma el lote.
+ * vuelo (dos llamadas con su tope y las esperas de un 429), más holgura. Vencido, otro trabajador toma
+ * el lote.
  */
-export const TURNO_RECLAMO_S = 240
+export const TURNO_RECLAMO_S = 270
 
 /**
  * ¿Se reintenta (una vez, con la misma llave) una llamada a Valida que no dio resultado? Un 5xx, un
