@@ -13,7 +13,7 @@ import { copiar } from './panel-ui'
 export const fichaParaTextos = (c: CampanaPanel): FichaTextos => ({
   titulo_oferta: c.experiencia.titulo_oferta, frase_gancho: c.experiencia.frase_gancho, intro: c.experiencia.intro,
   que_incluye: c.experiencia.que_incluye, emojis_tema: c.experiencia.emojis_tema, saludo_grupo: c.experiencia.saludo_grupo,
-  relato_grupo: c.experiencia.relato_grupo,
+  relato_grupo: c.experiencia.relato_grupo, puerta_cerrada: c.experiencia.puerta_cerrada,
 })
 
 export const funcionesParaTextos = (fs: FuncionAgenda[]): FuncionTextos[] =>

@@ -15,6 +15,8 @@
 //     en el saludo temático de cada experiencia; lo del negocio queda sin tema (23-oct).
 //   · La puerta cerrada termina en «para evitar interrupciones. 🚪», sin «durante la proyección. 🎬» (26-oct): Sabor también hace
 //     catas de vino y clases de sushi, y la parte fija no puede asumir cine.
+//   · La puerta cerrada sale solo si la experiencia la tiene marcada (26-oct, Mauricio y Paula: «aplica solo a las
+//     películas… En los talleres no aplica»). La llegada 10 minutos antes sigue fija en todas.
 //   · El mensaje directo va sin la intro (23-oct): gancho, qué incluye, precio y los horarios aparte.
 //   · «paga el saldo 1 día antes» sale del plazo del saldo de la campaña («N días antes»).
 // Pura: sin red, sin reloj.
@@ -93,6 +95,8 @@ export interface PartesBienvenida {
   parqueadero: string;
   relato: string;
   firma: string;
+  /** Si va el párrafo de la puerta cerrada (la experiencia la tiene marcada). */
+  puertaCerrada: boolean;
 }
 
 export const TEXTO_BIENVENIDA = {
@@ -128,7 +132,7 @@ export function plantillaBienvenida(p: PartesBienvenida): string {
     p.saludo,
     `${t.fecha}\n${p.dia} | ${p.hora}`,
     `${t.llegada(p.llegada)}\n${t.inicio(p.inicio)}`,
-    t.puerta,
+    p.puertaCerrada ? t.puerta : null,
     `${t.lugar}\n${p.direccion} – ${p.piso}`,
     p.recepcion,
     `${t.parqueadero}\n\n${p.parqueadero}`,
@@ -137,5 +141,7 @@ export function plantillaBienvenida(p: PartesBienvenida): string {
     t.importante,
     p.relato,
     `${t.despedida}\n${p.firma}`,
-  ].join('\n\n');
+  ]
+    .filter((x): x is string => x !== null)
+    .join('\n\n');
 }
