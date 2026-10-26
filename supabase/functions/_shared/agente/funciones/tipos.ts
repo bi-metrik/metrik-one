@@ -71,6 +71,24 @@ export interface Funcion {
    * del equipo, códigos, servicios del portafolio). Lo llamará la pieza de transcripción; aquí solo se declara.
    */
   pistas?(ctx: ContextoPistas): Promise<string[]>;
+  /**
+   * Gancho de la nota del paso a persona en Chatwoot (§4.2, `../persona.ts`, `notaComun`): las líneas que esta función
+   * aporta en el medio de la nota (la reserva tomada, la autorización de datos…), entre «Pidió» y «Consultó». Sin
+   * ninguna función que lo declare, va el bloque del motor (hoy, el de Sabor en `publico/cola.ts`, `bloqueNotaPublico`).
+   */
+  notaPersona?(ctx: ContextoNotaPersona): string[];
+}
+
+/** Lo que recibe el gancho de la nota del paso a persona. */
+export interface ContextoNotaPersona {
+  motivo: string;
+  pidio: string;
+  /** La conversación (filas del canal, con su traza). */
+  filas: unknown[];
+  /** Lo que la propuesta vigente o la confirmada dejó en `datos` (la reserva), o null. */
+  reserva: Record<string, unknown> | null;
+  /** Los parámetros con que la empresa prendió la función. */
+  parametros: Record<string, unknown>;
 }
 
 /** Lo que dice la RPC `asistente_resolver_rol` de cada función del rol (prendida en la empresa). */

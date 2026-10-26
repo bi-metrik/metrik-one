@@ -12,6 +12,7 @@
 // ============================================================
 
 import { sendButtons, sendList, sendTextoConId, sendTypingIndicator } from '../wa-respond.ts';
+import { sendCtaUrl } from '../wa-respond.ts';
 import { crearContactoConGuardian, fichasPorLlave, fichasPorNombre } from '../wa-cliente.ts';
 import type { Llave } from '../wa-cliente-reglas.ts';
 import {
@@ -84,6 +85,8 @@ export function mensajeroWa(): Mensajero {
     async enviar(phone: string, s: Salida, ctx) {
       const envio = { origen: 'bot' as const, workspaceId: ctx.workspaceId, intent: ctx.intent };
       if (s.tipo === 'texto') return await sendTextoConId(phone, s.texto, envio);
+      // El botón con link (paso a una persona, §4.2): `interactive.type = "cta_url"`, cuerpo ≤ 1024 y botón ≤ 20.
+      if (s.tipo === 'enlace') return await sendCtaUrl(phone, s.texto, s.boton, s.url, envio);
       if (s.tipo === 'botones') return await sendButtons(phone, s.texto, s.opciones.map((o) => ({ id: o.id, title: o.titulo })), envio);
       return await sendList(phone, s.texto, s.boton, s.opciones.map((o) => ({ id: o.id, title: o.titulo, ...(o.descripcion ? { description: o.descripcion } : {}) })), envio);
     },

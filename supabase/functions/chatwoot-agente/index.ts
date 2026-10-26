@@ -33,6 +33,8 @@ import { almacenChatwootSupabase, mensajeroChatwootApi, preciosSupabase, puertos
 import { transcribirAudio } from '../_shared/agente/publico/transcribir.ts';
 import { NOTA_SIN_ROL, turnoPublico } from '../_shared/agente/publico/turno-con-rol.ts';
 import { resolverRol } from '../_shared/agente/roles.ts';
+import { registrarEscalamiento } from '../_shared/agente/persona.ts';
+import { escalamientosSupabase } from '../_shared/agente/persona-produccion.ts';
 import type { Modelo } from '../_shared/agente/tipos.ts';
 import type { SupabaseClient } from '../_shared/types.ts';
 
@@ -88,6 +90,11 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     const m = mensajeroChatwootApi({ apiUrl: c.apiUrl, token });
     await m.nota(a.llave, NOTA_SIN_ROL);
     await m.abrir(a.llave);
+    // Cada traspaso deja su fila (spec 2026-10-26, §4.2), a mejor esfuerzo.
+    await registrarEscalamiento(escalamientosSupabase(supabase), {
+      workspace_id: a.workspace.id, rol_clave: 'sin_rol', canal: 'chatwoot', conversacion: `cw:${a.llave.cuentaId}:${a.llave.conversacionId}`,
+      motivo: turno.motivo, resumen: 'el inbox no tiene un rol activo (o no se pudo leer)', modo: 'pasado',
+    });
     return;
   }
   const reglamento = turno.reglamento;
@@ -116,6 +123,8 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     reloj: () => performance.now(),
     nuevoId: () => crypto.randomUUID(),
     dormir: (ms) => new Promise((r) => setTimeout(r, ms)),
+    // Cada paso a persona deja su fila en `asistente_escalamientos` (spec 2026-10-26, §4.2), a mejor esfuerzo.
+    escalamientos: escalamientosSupabase(supabase),
   });
 }
 
