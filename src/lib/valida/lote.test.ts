@@ -9,6 +9,12 @@ import {
   lotesSimultaneos,
   partesDelPdf,
   recortarAlSaldo,
+  llamadaReintentable,
+  FILA_RECLAMO_S,
+  TIMEOUT_VALIDA_LOTE_MS,
+  TURNO_MS,
+  TURNO_RECLAMO_S,
+  VALIDA_MAX_DURATION_S,
 } from './lote'
 
 describe('autorización del lote', () => {
@@ -99,5 +105,25 @@ describe('tipo de documento en el parseo del XLSX', () => {
       ],
     })
     expect(avisoTiposDocumento(filasDesdeXlsx([fila('CC'), fila('Pasaporte')], new Map(), null))).toBeNull()
+  })
+})
+
+describe('topes del cargue masivo frente al maxDuration de Valida', () => {
+  it('el tope de la llamada pasa el maxDuration de Valida: el reintento nunca corre a la par de la primera', () => {
+    expect(TIMEOUT_VALIDA_LOTE_MS).toBeGreaterThan(VALIDA_MAX_DURATION_S * 1000)
+  })
+
+  it('el reclamo de la fila cubre dos llamadas con su tope y la espera; el del turno, el turno y una fila en vuelo', () => {
+    expect(FILA_RECLAMO_S * 1000).toBeGreaterThanOrEqual(2 * TIMEOUT_VALIDA_LOTE_MS + 2_000)
+    expect(TURNO_RECLAMO_S * 1000).toBeGreaterThanOrEqual(TURNO_MS + 2 * TIMEOUT_VALIDA_LOTE_MS + 2_000)
+  })
+
+  it('se reintenta un 5xx, un tope o un error de red (sin status); nunca un 4xx', () => {
+    expect(llamadaReintentable({ ok: false, status: 503 })).toBe(true)
+    expect(llamadaReintentable({ ok: false, status: 500 })).toBe(true)
+    expect(llamadaReintentable({ ok: false })).toBe(true)
+    expect(llamadaReintentable({ ok: false, status: 400 })).toBe(false)
+    expect(llamadaReintentable({ ok: false, status: 402 })).toBe(false)
+    expect(llamadaReintentable({ ok: true, status: 200 })).toBe(false)
   })
 })

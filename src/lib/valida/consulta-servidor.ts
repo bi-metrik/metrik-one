@@ -28,7 +28,7 @@ export type RespuestaValida =
 export async function llamarValida(
   apiKey: string,
   input: ValidaConsultaInput,
-  opts: { claveIdempotencia?: string } = {},
+  opts: { claveIdempotencia?: string; timeoutMs?: number } = {},
 ): Promise<RespuestaValida> {
   try {
     const headers: Record<string, string> = {
@@ -41,7 +41,7 @@ export async function llamarValida(
       headers,
       body: JSON.stringify(input),
       cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_VALIDA_MS),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_VALIDA_MS),
     })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
