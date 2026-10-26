@@ -188,18 +188,30 @@ function igualesEnTiempoConstante(a: string, b: string): boolean {
 export type Acuse =
   | { clase: 'entregado'; emailId: string; ocurridoEn: string }
   | { clase: 'rebotado'; emailId: string; ocurridoEn: string; motivo: string }
-  | { clase: 'queja'; emailId: string; ocurridoEn: string };
+  | { clase: 'queja'; emailId: string; ocurridoEn: string }
+  | { clase: 'suprimido'; emailId: string; ocurridoEn: string; motivo: string }
+  | { clase: 'fallido'; emailId: string; ocurridoEn: string; motivo: string };
 
 export type LecturaAcuse =
   | { ok: true; acuse: Acuse }
   | { ok: false; razon: string };
 
-/** Los tres eventos que este webhook aplica. El resto se ignora con 200. */
+/** Los eventos que este webhook aplica a la traza. `email.sent` no es un acuse: lo cuenta
+ *  el contador de volumen (`esEventoEnviado`). El resto se ignora con 200. */
 const CLASE_POR_TIPO: Record<string, Acuse['clase']> = {
   'email.delivered': 'entregado',
   'email.bounced': 'rebotado',
   'email.complained': 'queja',
+  // Resend aceptó el POST y NO lo mandó: el destinatario está en su lista de supresión.
+  'email.suppressed': 'suprimido',
+  // Resend aceptó el POST y no lo pudo mandar (cuota, dominio, llave, destinatario inválido).
+  'email.failed': 'fallido',
 };
+
+/** `email.sent`: Resend aceptó el envío. Es la fuente del contador de volumen del mes. */
+export function esEventoEnviado(payload: unknown): boolean {
+  return !!payload && typeof payload === 'object' && (payload as Record<string, unknown>).type === 'email.sent';
+}
 
 export function interpretarAcuse(payload: unknown, ahoraISO: string): LecturaAcuse {
   if (!payload || typeof payload !== 'object') return { ok: false, razon: 'payload_invalido' };
@@ -216,6 +228,12 @@ export function interpretarAcuse(payload: unknown, ahoraISO: string): LecturaAcu
 
   if (clase === 'rebotado') {
     return { ok: true, acuse: { clase, emailId, ocurridoEn, motivo: motivoDeRebote(data.bounce) } };
+  }
+  if (clase === 'suprimido') {
+    return { ok: true, acuse: { clase, emailId, ocurridoEn, motivo: motivoDeSupresion(data.suppressed) } };
+  }
+  if (clase === 'fallido') {
+    return { ok: true, acuse: { clase, emailId, ocurridoEn, motivo: motivoDeFalla(data.failed) } };
   }
   return { ok: true, acuse: { clase, emailId, ocurridoEn } };
 }
@@ -284,6 +302,26 @@ function primerDiagnostico(b: Record<string, unknown>): string {
   return '';
 }
 
+/** `suprimido: OnAccountSuppressionList: <mensaje>`. El tipo es lo accionable: hoy Resend solo
+ *  documenta la lista de la cuenta, que se limpia a mano en su panel. */
+export function motivoDeSupresion(suppressed: unknown): string {
+  const s = (suppressed && typeof suppressed === 'object' ? suppressed : {}) as Record<string, unknown>;
+  const partes = [s.type, s.message].filter((v): v is string => typeof v === 'string' && !!v.trim()).map(normalizar);
+  return recortar(partes.length ? `suprimido: ${partes.join(': ')}` : 'suprimido');
+}
+
+/** `resend_failed: reached_daily_quota`. Mismo prefijo `resend_` que usan los rechazos del POST
+ *  (`resend_422`), porque es la misma clase de problema: trabajo nuestro, no del destinatario. */
+export function motivoDeFalla(failed: unknown): string {
+  const f = (failed && typeof failed === 'object' ? failed : {}) as Record<string, unknown>;
+  const razon = typeof f.reason === 'string' ? normalizar(f.reason) : '';
+  return recortar(razon ? `resend_failed: ${razon}` : 'resend_failed');
+}
+
+function recortar(texto: string): string {
+  return texto.length <= MOTIVO_MAX ? texto : `${texto.slice(0, MOTIVO_MAX - 1)}…`;
+}
+
 function normalizar(texto: string): string {
   return texto.replace(/\s+/g, ' ').trim();
 }
@@ -337,6 +375,20 @@ export function actualizacionDeAcuse(acuse: Acuse): Actualizacion {
         // mismo correo, manda el PRIMERO, que es el que el servidor emitio.
         guarda: { columna: 'estado', modo: 'igual_a', valor: 'enviado' },
       };
+    case 'suprimido':
+    case 'fallido':
+      return {
+        // Las dos dicen «no salió» sobre una fila que dice `enviado`, y por eso van con la
+        // MISMA guarda del rebote: solo una fila `enviado` cambia, un reintento no hace nada,
+        // y un `delivered` imposible después no la toca (no escribe `estado`).
+        //   · suprimido: el destinatario está en la lista de supresión de Resend. Trabajo del
+        //     equipo, como un rebote: conseguir otra dirección o sacarla de la lista.
+        //   · fallido: el estado que ya existía para «se intentó y el proveedor no lo mandó»
+        //     (trabajo nuestro: cuota, dominio, llave). Es exactamente lo que dice
+        //     `email.failed`, solo que llega después del 200 y no en el POST.
+        set: { estado: acuse.clase, motivo: acuse.motivo },
+        guarda: { columna: 'estado', modo: 'igual_a', valor: 'enviado' },
+      };
     case 'queja':
       return {
         // Una queja NO cambia `estado`: el correo SI llego, y por eso se puede
@@ -379,12 +431,11 @@ export const MOTIVO_REBOTE_RECONSTRUIDO =
  * cualquier correo que el cliente haya abierto quedaria sin `entregado_at` — que
  * es justo el caso de los que mejor salieron.
  *
- * ⚠️ `suppressed` devuelve `null` A PROPOSITO, y no porque no importe: significa
- * que Resend acepto el POST y despues NO lo envio, porque la direccion estaba en
- * la lista de supresion. La fila diria `enviado` sobre un correo que no salio.
- * No se mapea aqui porque el vocabulario de `estado` no tiene un lugar para eso
- * y elegirle uno a ojo seria inventar; el backfill lo CUENTA aparte para que la
- * decision la tome una persona con el numero delante.
+ * ⚠️ `suppressed` devuelve `null` en el BACKFILL: significa que Resend acepto el
+ * POST y despues NO lo envio, porque la direccion estaba en la lista de supresion.
+ * Desde el 2026-10-26 el webhook en vivo lo aplica (`estado = 'suprimido'`); el
+ * backfill lo sigue CONTANDO aparte para que el historico lo decida una persona
+ * con el numero delante.
  */
 export function acuseDesdeLastEvent(
   lastEvent: string | null | undefined,

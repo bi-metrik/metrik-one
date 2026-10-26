@@ -12,7 +12,7 @@ import 'server-only'
 import { randomBytes, createHash, randomUUID } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { marcaDelWorkspace, type MarcaWorkspace } from '@/lib/marca/marca-workspace'
-import { remitenteCliente } from '../../../supabase/functions/_shared/remitente-correo'
+import { remitenteAvisosPorDefecto, remitenteCliente } from '../../../supabase/functions/_shared/remitente-correo'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { formatFecha, todayBogotaISO } from '@/lib/dates/bogota'
 import { subirAOne } from '@/lib/almacenamiento/one'
@@ -170,7 +170,7 @@ async function enviarPorResend(m: { from: string; to: string; replyTo: string | 
 }
 
 /**
- * «Trappvel vía MéTRIK ONE <noreply@metrikone.co>»: el cliente reconoce a su agencia, no a MéTRIK.
+ * «Trappvel vía MéTRIK ONE <avisos@avisos.metrikone.co>»: el cliente reconoce a su agencia, no a MéTRIK.
  * Si el workspace declaró `config_extra.remitente_correo` (dominio permitido), sale desde ahí.
  */
 export function remitente(marca: MarcaWorkspace, configExtra: unknown = null): string {
@@ -178,7 +178,7 @@ export function remitente(marca: MarcaWorkspace, configExtra: unknown = null): s
   return remitenteCliente({
     configExtra,
     marca: nombre,
-    porDefecto: `${nombre} vía MéTRIK ONE <noreply@metrikone.co>`,
+    porDefecto: remitenteAvisosPorDefecto(`${nombre} vía MéTRIK ONE`),
     contexto: 'autorizacion-datos',
   }).from
 }

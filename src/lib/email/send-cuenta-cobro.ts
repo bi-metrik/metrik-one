@@ -18,7 +18,9 @@ import { downloadDriveFile, getAccessToken } from '@/lib/google-drive'
 import { formatCOP } from '@/lib/cobros/format'
 import { PALETA } from '@/lib/marca/paleta'
 
-export const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrik.com.co>'
+import { FROM_FACTURACION } from './remitente-facturacion'
+
+export { FROM_FACTURACION }
 const REPLY_TO_MAURICIO = 'mauricio.moreno@metrik.com.co'
 const BCC_MAURICIO = 'mauricio.moreno@metrik.com.co'
 

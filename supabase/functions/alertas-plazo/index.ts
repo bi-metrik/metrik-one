@@ -29,6 +29,7 @@
 
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { todayBogotaISO } from '../_shared/bogota.ts';
+import { idDeRespuestaResend, registrarAvisoEquipo } from '../_shared/aviso-equipo.ts';
 import { esDiaHabil, paisDelWorkspace } from '../_shared/dias-habiles.ts';
 import { destinatariosDelHito, type AlertasPlazoConfig } from '../_shared/alertas-plazo-destinatarios.ts';
 
@@ -168,9 +169,29 @@ Deno.serve(async (req: Request) => {
         // antes de que el correo salga es la forma de perder un aviso para siempre.
         const detail = await res.text();
         console.error('[alertas-plazo] Resend fallo:', res.status, detail);
+        await registrarAvisoEquipo(supabase, {
+          origen: 'alertas-plazo',
+          workspaceId: linea.workspace_id,
+          estado: 'fallido',
+          destino: correos,
+          titulo,
+          motivo: `resend_${res.status}: ${detail}`.slice(0, 200),
+        });
         reporte.push({ linea: linea.nombre, hito, casos: casos.length, error: `resend_${res.status}` });
         continue;
       }
+
+      // Traza del aviso interno (un correo agrupa varios negocios: `negocio_id` va null).
+      // Con el id de Resend, `resend-webhook` le pone entregado, rebotado o suprimido.
+      await registrarAvisoEquipo(supabase, {
+        origen: 'alertas-plazo',
+        workspaceId: linea.workspace_id,
+        negocioId: casos.length === 1 ? casos[0].negocio_id : null,
+        estado: 'enviado',
+        destino: correos,
+        titulo,
+        proveedorId: await idDeRespuestaResend(res),
+      });
 
       const { error: errLog } = await supabase.from('alertas_plazo_log').insert(
         casos.map((c) => ({

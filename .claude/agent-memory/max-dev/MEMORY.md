@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 SIN aplicar; no mergear sin DNS
 - ⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — remitente_correo; logo solo con clave; SOENA: verificar dominio → deploy → clave
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — 20261026183000 APLICADA; componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id

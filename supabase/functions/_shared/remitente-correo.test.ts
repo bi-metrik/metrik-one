@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cabeceraMarcaAvisoHtml,
+  DIRECCION_AVISOS_CLIENTE,
   dominioPermitido,
   logoParaCorreo,
   remitenteAvisoEtapa,
+  remitenteAvisosPorDefecto,
   remitenteCliente,
   remitenteConfigurado,
 } from './remitente-correo';
@@ -17,6 +19,7 @@ describe('dominioPermitido', () => {
   it('metrikone.co y sus subdominios, metrik.com.co solo la raíz', () => {
     expect(dominioPermitido('avisos@metrikone.co')).toBe(true);
     expect(dominioPermitido('avisos@soena.metrikone.co')).toBe(true);
+    expect(dominioPermitido('avisos@avisos.metrikone.co')).toBe(true);
     expect(dominioPermitido('Avisos@SOENA.MetrikOne.co')).toBe(true);
     expect(dominioPermitido('facturacion@metrik.com.co')).toBe(true);
     expect(dominioPermitido('x@envios.metrik.com.co')).toBe(false);
@@ -31,11 +34,11 @@ describe('dominioPermitido', () => {
 describe('remitenteAvisoEtapa (notificar-etapa)', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('sin la clave el from es IDÉNTICO al de siempre', () => {
+  it('sin la clave sale de avisos.metrikone.co con el nombre de siempre', () => {
     const espia = vi.spyOn(console, 'error').mockImplementation(() => {});
     for (const configExtra of [null, {}, { email_respuesta: 'hola@soena.co' }]) {
       const r = remitenteAvisoEtapa({ marca: 'SOENA', configExtra });
-      expect(r).toEqual({ from: 'SOENA (via MeTRIK) <noreply@metrikone.co>', propio: false });
+      expect(r).toEqual({ from: 'SOENA (via MeTRIK) <avisos@avisos.metrikone.co>', propio: false });
     }
     expect(espia).not.toHaveBeenCalled();
   });
@@ -65,7 +68,7 @@ describe('remitenteAvisoEtapa (notificar-etapa)', () => {
       configExtra: { remitente_correo: { nombre: 'SOENA', direccion: 'avisos@gruposoena.com' } },
       contexto: 'workspace w1',
     });
-    expect(r).toEqual({ from: 'SOENA (via MeTRIK) <noreply@metrikone.co>', propio: false });
+    expect(r).toEqual({ from: 'SOENA (via MeTRIK) <avisos@avisos.metrikone.co>', propio: false });
     expect(espia).toHaveBeenCalledOnce();
     expect(String(espia.mock.calls[0][0])).toContain('gruposoena.com');
     expect(String(espia.mock.calls[0][0])).toContain('workspace w1');
@@ -75,9 +78,19 @@ describe('remitenteAvisoEtapa (notificar-etapa)', () => {
     const espia = vi.spyOn(console, 'error').mockImplementation(() => {});
     for (const crudo of ['avisos@soena.metrikone.co', { direccion: 42 }, { nombre: 'x' }]) {
       const r = remitenteAvisoEtapa({ marca: 'SOENA', configExtra: { remitente_correo: crudo } });
-      expect(r.from).toBe('SOENA (via MeTRIK) <noreply@metrikone.co>');
+      expect(r.from).toBe('SOENA (via MeTRIK) <avisos@avisos.metrikone.co>');
     }
     expect(espia).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('remitenteAvisosPorDefecto', () => {
+  it('el nombre visible de cada envío, la dirección del subdominio de avisos', () => {
+    expect(DIRECCION_AVISOS_CLIENTE).toBe('avisos@avisos.metrikone.co');
+    expect(remitenteAvisosPorDefecto('Trappvel vía MéTRIK ONE')).toBe('Trappvel vía MéTRIK ONE <avisos@avisos.metrikone.co>');
+    expect(remitenteAvisosPorDefecto('  ')).toBe('avisos@avisos.metrikone.co');
+    // La dirección por defecto también tiene que pasar la lista de dominios permitidos.
+    expect(dominioPermitido(DIRECCION_AVISOS_CLIENTE)).toBe(true);
   });
 });
 
