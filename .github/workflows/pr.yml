@@ -180,3 +180,8 @@ jobs:
           if ! grep -q 'LINK VIVO' <<<"$salida"; then
             echo "Sin candado el link del saldo no chocó con la cancelación: el caso E no está probando el candado."; exit 1
           fi
+          # Caso F: sin el candado de la reserva, la misma clave a la vez falla (el índice deja una fila) y dos claves
+          # distintas cobran el mismo saldo dos veces.
+          if ! grep -q 'CLAVE REPETIDA CON ERROR' <<<"$salida" || ! grep -q 'SALDO COBRADO DOS VECES' <<<"$salida"; then
+            echo "Sin candado [Saldo cobrado] no chocó: el caso F no está probando el candado."; exit 1
+          fi

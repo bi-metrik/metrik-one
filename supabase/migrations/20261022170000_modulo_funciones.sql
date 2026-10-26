@@ -116,7 +116,7 @@
 --   select has_function_privilege('service_role', 'public.funcion_publicar_agenda(uuid)', 'execute');  -> false
 --   select has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute');  -> false
 --   select has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'); -> false
---   select has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint)', 'execute'); -> false
+--   select has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint, text)', 'execute'); -> false
 --   select count(*) from public.workspace_modulos where modulo = 'funciones';                       -> 0
 --   select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false); -> 0
 --
@@ -2126,6 +2126,9 @@ create table public.funcion_pagos (
   -- Quién y cuándo, si lo registró una persona (QR en el evento o verificación a mano).
   registrado_por uuid references public.profiles(id),
   registrado_at timestamptz,
+  -- [Saldo cobrado] (26-oct): la clave que genera la pantalla al abrir el diálogo. El reintento o el doble clic con la
+  -- misma clave devuelve el mismo pago, sin otra fila (índice único `funcion_pagos_clave_unica`).
+  clave_idempotencia text check (clave_idempotencia is null or length(btrim(clave_idempotencia)) between 1 and 200),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint funcion_pagos_id_ws unique (id, workspace_id),
@@ -2136,8 +2139,16 @@ create table public.funcion_pagos (
   constraint funcion_pagos_registrado_aprobado check (medio = 'bold_link' or (estado = 'aprobado' and registrado_por is not null)),
   constraint funcion_pagos_medio_concepto check (
     (medio = 'manual' and concepto = 'inicial') or (medio = 'bold_qr' and concepto = 'saldo') or medio = 'bold_link'),
-  constraint funcion_pagos_pasarela check ((medio = 'manual') = (pasarela is null))
+  constraint funcion_pagos_pasarela check ((medio = 'manual') = (pasarela is null)),
+  -- Solo lo que registra una persona lleva clave; el QR del evento siempre la lleva.
+  constraint funcion_pagos_clave_registrado check (clave_idempotencia is null or medio <> 'bold_link'),
+  constraint funcion_pagos_qr_con_clave check (medio <> 'bold_qr' or clave_idempotencia is not null)
 );
+
+-- Una clave, un pago por workspace: dos [Saldo cobrado] con la misma clave nunca dejan dos filas, ni aunque lleguen a
+-- la vez (el segundo espera el candado de la reserva y encuentra el primero; sin el candado, choca aquí).
+create unique index funcion_pagos_clave_unica on public.funcion_pagos (workspace_id, clave_idempotencia)
+  where clave_idempotencia is not null;
 
 create table public.funcion_pago_reservas (
   pago_id uuid not null,
@@ -2862,7 +2873,11 @@ grant execute on function public.funcion_preparar_pago_saldo(uuid, uuid[]) to au
 -- `saldo` más, aprobado, con medio `bold_qr`, el monto, quién y cuándo. El monto va de 1 al saldo (`monto_invalido`):
 -- en el evento se puede cobrar una parte, nunca más del saldo. Deja `anulado` el link de saldo vivo de la reserva (su
 -- monto ya no cuadra). NO se concede a service_role: lo registra una persona.
-create or replace function public.funcion_registrar_saldo_cobrado(p_reserva_id uuid, p_monto bigint)
+-- Idempotente (26-oct, Mauricio): `p_clave` la genera la pantalla una vez por diálogo y la repite en los reintentos.
+-- Dentro del candado de la reserva, la misma clave con la misma reserva y el mismo monto devuelve el mismo pago
+-- (`repetida`) sin crear otra fila, aunque el saldo ya esté en cero; con otra reserva u otro monto, `clave_reusada`.
+-- El candado de la reserva además impide cobrar dos veces el mismo saldo con claves distintas a la vez.
+create or replace function public.funcion_registrar_saldo_cobrado(p_reserva_id uuid, p_monto bigint, p_clave text)
 returns jsonb
 language plpgsql
 security definer
@@ -2874,6 +2889,8 @@ declare
   v_saldo bigint;
   v_anulados jsonb;
   v_pago uuid;
+  v_clave text := btrim(coalesce(p_clave, ''));
+  v_previo record;
 begin
   select workspace_id into v_ws from public.funcion_reservas where id = p_reserva_id;
   if not found then
@@ -2882,8 +2899,23 @@ begin
   if public.funcion_actor(v_ws, true, 'reserva_no_existe') <> 'equipo' then
     raise exception 'sin_permiso' using errcode = 'P0001';
   end if;
+  if v_clave = '' or length(v_clave) > 200 then
+    raise exception 'sin_clave_idempotencia' using errcode = 'P0001';
+  end if;
 
   select * into r from public.funcion_reservas where id = p_reserva_id for update;
+  -- La misma clave: el mismo pago, sin otra fila. Se busca DESPUÉS del candado: la llamada simultánea ya terminó.
+  select pg.id, pg.monto_esperado, pr.reserva_id into v_previo
+    from public.funcion_pagos pg join public.funcion_pago_reservas pr on pr.pago_id = pg.id
+   where pg.workspace_id = v_ws and pg.clave_idempotencia = v_clave;
+  if found then
+    if v_previo.reserva_id <> r.id or v_previo.monto_esperado is distinct from p_monto then
+      raise exception 'clave_reusada' using errcode = 'P0001',
+        detail = 'La clave ya se usó para otra reserva u otro monto.';
+    end if;
+    return public.funcion_saldo_de(r.id)
+      || jsonb_build_object('pago_id', v_previo.id, 'links_anulados', '[]'::jsonb, 'repetida', true);
+  end if;
   if r.estado <> 'confirmada' then
     raise exception 'reserva_inactiva' using errcode = 'P0001', detail = format('La reserva está %s.', r.estado);
   end if;
@@ -2897,21 +2929,23 @@ begin
 
   v_anulados := public.funcion_cerrar_links_saldo(array[r.id], 'anulado');
   insert into public.funcion_pagos (workspace_id, chatwoot_cuenta_id, chatwoot_conversacion_id, concepto, medio, pasarela,
-                                    estado, monto_esperado, monto_recibido, creado_por, registrado_por, registrado_at)
+                                    estado, monto_esperado, monto_recibido, creado_por, registrado_por, registrado_at,
+                                    clave_idempotencia)
   values (r.workspace_id, r.chatwoot_cuenta_id, r.chatwoot_conversacion_id, 'saldo', 'bold_qr', 'bold',
-          'aprobado', p_monto, p_monto, auth.uid(), auth.uid(), now())
+          'aprobado', p_monto, p_monto, auth.uid(), auth.uid(), now(), v_clave)
   returning id into v_pago;
   insert into public.funcion_pago_reservas (pago_id, reserva_id, workspace_id, monto, pendiente)
   values (v_pago, r.id, r.workspace_id, p_monto, false);
 
-  return public.funcion_saldo_de(r.id) || jsonb_build_object('pago_id', v_pago, 'links_anulados', v_anulados);
+  return public.funcion_saldo_de(r.id)
+    || jsonb_build_object('pago_id', v_pago, 'links_anulados', v_anulados, 'repetida', false);
 end;
 $$;
 
 -- ejecutable-por-cliente: solo una persona del equipo, con su sesión. SECURITY DEFINER; exige el workspace y rol que
 -- edite. NO se concede a service_role.
-revoke execute on function public.funcion_registrar_saldo_cobrado(uuid, bigint) from public, anon, service_role;
-grant execute on function public.funcion_registrar_saldo_cobrado(uuid, bigint) to authenticated;
+revoke execute on function public.funcion_registrar_saldo_cobrado(uuid, bigint, text) from public, anon, service_role;
+grant execute on function public.funcion_registrar_saldo_cobrado(uuid, bigint, text) to authenticated;
 
 
 -- ── 16. El panel de campañas (§4, diseño de Noor revisado por Sofía; P6, P7 y P10 aprobados el 2026-10-22) ──

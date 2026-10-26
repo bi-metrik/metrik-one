@@ -1,6 +1,6 @@
 'use client'
 
-import { useTransition } from 'react'
+import { useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { pesos, textoSaldo } from '@/lib/funciones/reglas'
@@ -23,6 +23,9 @@ export function AccionesReserva({ funcionId, reserva: r }: Props) {
   const [pendiente, empezar] = useTransition()
   const router = useRouter()
   const saldo = textoSaldo(r.saldo, r.estado)
+  // La clave del cobro en curso: se genera al abrir el diálogo y se repite si el envío falla y se reintenta con el
+  // mismo monto (la base devuelve el mismo pago). Un monto distinto es otro cobro: clave nueva. Se borra al salir bien.
+  const cobro = useRef<{ clave: string; monto: number } | null>(null)
   const nombre = r.nombre ?? 'esta reserva'
 
   const correr = <T,>(f: () => Promise<{ ok: boolean; error?: string; dato?: T }>, ok: (dato?: T) => string) =>
@@ -41,11 +44,21 @@ export function AccionesReserva({ funcionId, reserva: r }: Props) {
   }
 
   const cobrarSaldo = () => {
-    if (!r.saldo) return
+    // El botón está deshabilitado mientras envía; esto cubre el clic que entra antes del re-render.
+    if (!r.saldo || pendiente) return
     const pedido = prompt(`Saldo cobrado con el QR de Bold para ${nombre}. Monto en pesos (el saldo es ${pesos(r.saldo.saldo)}):`, String(r.saldo.saldo))
     if (pedido === null) return
     const monto = Number(pedido.replace(/[^\d]/g, ''))
-    correr(() => registrarSaldoCobradoAction(funcionId, r.id, monto), () => `Saldo cobrado: ${pesos(monto)}.`)
+    if (!cobro.current || cobro.current.monto !== monto) cobro.current = { clave: crypto.randomUUID(), monto }
+    const { clave } = cobro.current
+    empezar(async () => {
+      const x = await registrarSaldoCobradoAction(funcionId, r.id, monto, clave)
+      if (x.ok) {
+        cobro.current = null
+        toast.success(`Saldo cobrado: ${pesos(monto)}.`)
+        router.refresh()
+      } else toast.error(x.error ?? 'No se pudo. Intenta de nuevo: no se cobra dos veces.')
+    })
   }
 
   const linkSaldo = () => {

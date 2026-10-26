@@ -1325,8 +1325,13 @@ describe('el saldo: un pago más de la misma reserva (P14a a P14c, 25-oct)', () 
     rpc<{ estado: string; repetida: boolean; concepto: string; confirmadas?: string[] }>(
       `select funcion_registrar_pago($1, $2, $3, $4) as r`, [WS, ref, estado, monto], 'servidor')
   const saldo = (reserva: string, quien: Quien = { equipo: EQUIPO }) => rpc<Saldo>(`select funcion_saldo($1) as r`, [reserva], quien)
-  const cobrado = (reserva: string, monto: number, quien: Quien = { equipo: EQUIPO }) =>
-    rpc<Saldo & { pago_id: string; links_anulados: string[] }>(`select funcion_registrar_saldo_cobrado($1, $2) as r`, [reserva, monto], quien)
+  /** [Saldo cobrado]; cada llamada con una clave nueva salvo que se pase una (la del diálogo de la pantalla). */
+  const cobrado = (reserva: string, monto: number, quien: Quien = { equipo: EQUIPO }, clave = `qr-${uuid()}`) =>
+    rpc<Saldo & { pago_id: string; links_anulados: string[]; repetida: boolean }>(
+      `select funcion_registrar_saldo_cobrado($1, $2, $3) as r`, [reserva, monto, clave], quien)
+  const pagosQr = async (reserva: string) =>
+    (await q<{ n: number }>(`select count(*)::int as n from funcion_pago_reservas pr join funcion_pagos pg on pg.id = pr.pago_id
+                              where pr.reserva_id = $1 and pg.medio = 'bold_qr'`, [reserva]))[0].n
   const pagoEstado = async (id: string) => (await q<{ estado: string }>(`select estado from funcion_pagos where id = $1`, [id]))[0].estado
   const num = (s: Saldo) => [Number(s.monto_total), Number(s.pagado), Number(s.saldo), s.estado]
 
@@ -1481,6 +1486,30 @@ describe('el saldo: un pago más de la misma reserva (P14a a P14c, 25-oct)', () 
     expect(num(await cobrado(a.reserva_id, 70_000))).toEqual([200_000, 200_000, 0, 'pagado'])
     expect(await codigo(cobrado(a.reserva_id, 1))).toBe('sin_saldo')
     expect(await estado(a.reserva_id)).toBe('confirmada')
+  })
+
+  it('[Saldo cobrado] es idempotente: la misma clave repetida devuelve el mismo pago sin otra fila; con otro monto u otra reserva, clave_reusada', async () => {
+    const { a } = await conAbono()
+    const { a: otra } = await conAbono()
+    const clave = `dialogo-${uuid()}`
+    const primero = await cobrado(a.reserva_id, 50_000, { equipo: EQUIPO }, clave)
+    expect([primero.repetida, Number(primero.saldo)]).toEqual([false, 70_000])
+    // El doble clic o el reintento tras un corte: mismo pago, mismo saldo, una sola fila.
+    const repetido = await cobrado(a.reserva_id, 50_000, { equipo: EQUIPO }, ` ${clave} `)
+    expect([repetido.repetida, repetido.pago_id, Number(repetido.saldo), Number(repetido.pagado)]).toEqual([true, primero.pago_id, 70_000, 130_000])
+    expect(await pagosQr(a.reserva_id)).toBe(1)
+    expect(await codigo(cobrado(a.reserva_id, 70_000, { equipo: EQUIPO }, clave))).toBe('clave_reusada')
+    expect(await codigo(cobrado(otra.reserva_id, 50_000, { equipo: EQUIPO }, clave))).toBe('clave_reusada')
+    expect(await codigo(cobrado(a.reserva_id, 1_000, { equipo: EQUIPO }, ' '))).toBe('sin_clave_idempotencia')
+    // Con el saldo ya en cero, repetir la clave sigue devolviendo el mismo pago (no `sin_saldo`).
+    const resto = `dialogo-${uuid()}`
+    expect(Number((await cobrado(a.reserva_id, 70_000, { equipo: EQUIPO }, resto)).saldo)).toBe(0)
+    expect((await cobrado(a.reserva_id, 70_000, { equipo: EQUIPO }, resto)).repetida).toBe(true)
+    expect(await pagosQr(a.reserva_id)).toBe(2)
+    // La base no deja dos filas con la misma clave ni por fuera de la RPC.
+    expect(await codigo(q(`update funcion_pagos set clave_idempotencia = $1 where clave_idempotencia = $2`, [resto, clave])))
+      .toMatch(/funcion_pagos_clave_unica/)
+    expect((await q<{ x: boolean }>(`select has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint, text)', 'execute') as x`))[0].x).toBe(false)
   })
 
   it('la verificación a mano también es un pago: con abono deja saldo; con un link vivo no se verifica', async () => {

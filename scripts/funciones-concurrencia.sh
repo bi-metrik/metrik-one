@@ -195,5 +195,40 @@ echo "E. ${#con_saldo[@]} links del saldo y cancelaciones de la misma reserva a 
 if [ "$vivos_e" -ne 0 ]; then echo "   LINK VIVO EN RESERVA CANCELADA" >&2; falla=1; fi
 if [ "$canceladas_e" -ne "${#con_saldo[@]}" ]; then echo "   se esperaban todas canceladas" >&2; falla=1; fi
 
+# ── F. [Saldo cobrado] a la vez (26-oct): idempotencia y candado de la reserva ───────────────────────────────────
+# Reservas del equipo de 1 persona ($100.000, pagada la reserva de $40.000): saldo $60.000.
+#   F1: el doble clic, 10 llamadas a la vez con la MISMA clave: una sola fila y las 10 responden bien (la segunda
+#       espera el candado y encuentra la primera). Sin el candado, el índice único deja una fila pero las demás fallan.
+#   F2: dos personas cobran el mismo saldo a la vez con claves DISTINTAS, en 5 reservas: un cobro por reserva y el
+#       otro `sin_saldo`. Sin el candado, el saldo se cobra dos veces.
+cobrar_sql() { echo "select funcion_registrar_saldo_cobrado('$1', 60000, '$2')"; }
+for i in $(seq 1 6); do
+  apartar_equipo "$F_SALDO" "q-$i"
+  rid=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 'q-$i'")
+  equipo_sql "select funcion_confirmar_pago('$rid', 'verificado_manual', 'abono')" >/dev/null
+done
+r1=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 'q-1'")
+for i in $(seq 1 10); do
+  ( if en_transaccion equipo "$(cobrar_sql "$r1" dialogo-f1)"; then echo ok > "$TMP/f1-$i"; else echo no > "$TMP/f1-$i"; fi ) &
+done
+wait
+ok_f1=$(grep -l ok "$TMP"/f1-* | wc -l | tr -d ' ')
+filas_f1=$(psql_q -c "select count(*) from funcion_pagos where clave_idempotencia = 'dialogo-f1'")
+echo "F1. 10 [Saldo cobrado] a la vez con la misma clave: $filas_f1 fila(s), $ok_f1 respuestas bien"
+if [ "$filas_f1" -ne 1 ]; then echo "   SALDO COBRADO DOS VECES con la misma clave" >&2; falla=1; fi
+if [ "$ok_f1" -ne 10 ]; then echo "   CLAVE REPETIDA CON ERROR: el reintento no devolvió el mismo pago" >&2; falla=1; fi
+for i in 2 3 4 5 6; do
+  r=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 'q-$i'")
+  ( en_transaccion equipo "$(cobrar_sql "$r" "persona-a-$i")" || true ) &
+  ( en_transaccion equipo "$(cobrar_sql "$r" "persona-b-$i")" || true ) &
+done
+wait
+dobles_f2=$(psql_q -c "select count(*) from (select pr.reserva_id from funcion_pago_reservas pr join funcion_pagos pg on pg.id = pr.pago_id
+                         join funcion_reservas r on r.id = pr.reserva_id
+                        where pg.medio = 'bold_qr' and r.clave_idempotencia in ('q-2', 'q-3', 'q-4', 'q-5', 'q-6')
+                        group by pr.reserva_id having count(*) > 1) x")
+echo "F2. dos personas cobran el mismo saldo a la vez, en 5 reservas: $dobles_f2 reserva(s) cobradas dos veces"
+if [ "$dobles_f2" -ne 0 ]; then echo "   SALDO COBRADO DOS VECES" >&2; falla=1; fi
+
 if [ "$falla" -ne 0 ]; then echo "FALLÓ" >&2; exit 1; fi
 echo "Sin sobreventa."

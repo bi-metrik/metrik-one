@@ -115,6 +115,8 @@ const MENSAJES: Record<string, string> = {
   monto_invalido: 'El monto va de $1 hasta el saldo.',
   funcion_pasada: 'La función ya empezó.',
   reserva_en_otro_pago: 'La reserva tiene un link de pago vivo: espera a que venza antes de verificar a mano.',
+  clave_reusada: 'Ese intento ya se registró con otros datos (otro monto u otra reserva). Recarga la página e intenta de nuevo.',
+  sin_clave_idempotencia: 'Recarga la página e intenta de nuevo.',
 }
 
 /** El código estable del error de la base (el mensaje ES el código) y su texto, con el detalle si lo hay. Pura. */

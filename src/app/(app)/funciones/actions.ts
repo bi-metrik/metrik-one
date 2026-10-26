@@ -57,11 +57,15 @@ export async function confirmarPagoManualAction(funcionId: string, reservaId: st
   return r.ok ? { ok: true } : r
 }
 
-/** [Saldo cobrado] (P14c): el saldo cobrado con el QR de Bold en el evento. El monto va de 1 al saldo (lo revisa la base). */
-export async function registrarSaldoCobradoAction(funcionId: string, reservaId: string, monto: number): Promise<Resultado> {
+/**
+ * [Saldo cobrado] (P14c): el saldo cobrado con el QR de Bold en el evento. El monto va de 1 al saldo (lo revisa la base).
+ * `clave` la genera la pantalla una vez por cobro y la repite en los reintentos: la misma clave no cobra dos veces.
+ */
+export async function registrarSaldoCobradoAction(funcionId: string, reservaId: string, monto: number, clave: string): Promise<Resultado> {
   if (!UUID.test(reservaId)) return { ok: false, error: 'La reserva no existe.' }
   if (!Number.isSafeInteger(monto) || monto < 1) return { ok: false, error: 'Escribe el monto cobrado, en pesos y sin decimales.' }
-  const r = await llamar('funcion_registrar_saldo_cobrado', { p_reserva_id: reservaId, p_monto: monto }, [`/funciones/${funcionId}`, '/funciones/dia'])
+  if (!UUID.test(clave)) return { ok: false, error: 'Recarga la página e intenta de nuevo.' }
+  const r = await llamar('funcion_registrar_saldo_cobrado', { p_reserva_id: reservaId, p_monto: monto, p_clave: clave }, [`/funciones/${funcionId}`, '/funciones/dia'])
   return r.ok ? { ok: true } : r
 }
 

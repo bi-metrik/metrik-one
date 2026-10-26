@@ -39,7 +39,7 @@ $mig$;
     'disponibles_authenticated', has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'),
     'resolver_service_role', has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute'),
     'registrar_authenticated', has_function_privilege('authenticated', 'public.funcion_registrar_pago(uuid, text, text, bigint)', 'execute'),
-    'saldo_cobrado_service_role', has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint)', 'execute'),
+    'saldo_cobrado_service_role', has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint, text)', 'execute'),
     'tablas_de_mesas', (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname in ('funcion_montajes', 'funcion_mesas', 'funcion_reserva_mesas')),
     'workspaces_con_modulo', (select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false))
   ) into r;

@@ -37,6 +37,9 @@ y tres textos, §1.8 del diseño, que manda sobre lo anterior); P4 (preventa = i
 - `pasarelaDelWorkspace` (src/lib/funciones/pasarela-servidor.ts) devuelve null hasta el frente de la pasarela.
 - El job de CI quita los `for update` con un perl que solo ve los que cierran en `;` o `loop`: un `for update` dentro
   de un subquery (`... for update) x`) rompe la mutación. Candado aparte con `perform ... for update;`.
+- [Saldo cobrado] es idempotente (26-oct): `p_clave` + índice único parcial en funcion_pagos. Con índice único, una
+  prueba de «sin candado deja >1 fila con la misma clave» es imposible: el caso F mide la respuesta del reintento y el
+  cobro doble con claves distintas.
 - `pasarelaEnMemoria` numera las referencias globalmente: la base exige referencia única por workspace.
 - Al asistente NUNCA un número de cupo: `estado` y alternativas (prueba que recorre las salidas).
 - Pagos (P13): `funcion_preparar_pago` → link → `funcion_registrar_pago` (servidor, idempotente). Sin cupo al pagar =
