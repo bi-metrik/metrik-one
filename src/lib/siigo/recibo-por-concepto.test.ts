@@ -74,6 +74,8 @@ let bloquesArchivados: string[]
 let entradasDelHistorial: Record<string, unknown>[]
 /** Si cada archivado pidió conservar la copia de Storage para el cliente. */
 let copiasParaElCliente: unknown[]
+/** Si está puesto, es lo que el plan del RC-3 del negocio responde para cada cobro. */
+let rc3DelPlan: ((cobroId: string) => { ok: true; valor: number } | { ok: false; mensaje: string; bloqueo: boolean }) | null
 
 function servicioFalso() {
   const from = (tabla: string) => {
@@ -140,6 +142,17 @@ function servicioFalso() {
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => servicioFalso(),
   createClient: async () => servicioFalso(),
+}))
+
+// SOE-029: cuánto acusa el RC-3 lo decide el plan del negocio (`rc3-negocio`, con sus
+// propias pruebas). Aquí cada pago se toma como titular de su porción UPME, que es lo que
+// estas pruebas del recibo por concepto necesitan.
+vi.mock('./rc3-negocio-servidor', () => ({
+  valorRc3DelCobro: async (_svc: unknown, _ws: string, _neg: string, cobroId: string) => {
+    if (rc3DelPlan) return rc3DelPlan(cobroId)
+    const fila = reparto[cobroId] && !sinReparto.has(cobroId) ? reparto[cobroId] : null
+    return { ok: true, valor: fila ? fila.a_tarifa : Number(cobros[cobroId]?.monto ?? 0) }
+  },
 }))
 
 /** El comprobante que la configuración de la línea trae por defecto (el de hoy). */
@@ -248,6 +261,7 @@ beforeEach(() => {
   bloquesArchivados = []
   entradasDelHistorial = []
   copiasParaElCliente = []
+  rc3DelPlan = null
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -608,3 +622,37 @@ describe('el PDF de cada componente', () => {
     expect(bloquesArchivados).toEqual(['recibo_caja_upme', 'recibo_caja_terceros'])
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SOE-029: el RC-3 acusa lo que diga el plan del negocio (comprobante UPME), no a_tarifa
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('el RC-3 sale por el valor del comprobante UPME del negocio', () => {
+  it('a Siigo viaja el valor del comprobante, no la franja a_tarifa del pago', async () => {
+    rc3DelPlan = () => ({ ok: true, valor: 598_707 })
+    const r = await emitirReciboDeCobro(WS, PURO_TARIFA, null, { ...POR_COMPONENTE, soloComponentes: ['pasante'] })
+
+    expect(r.ok).toBe(true)
+    expect(documentosUsados).toEqual([202])
+    expect(valoresUsados).toEqual([598_707])
+    expect(recibosDelCobro(cobros[PURO_TARIFA].siigo_recibo)[0].valor).toBe(598_707)
+  })
+
+  it('pedido solo el RC-3 en un pago que no es el titular: no hay POST y se dice por qué', async () => {
+    rc3DelPlan = () => ({ ok: false, mensaje: 'va en el recibo del negocio', bloqueo: false })
+    const r = await emitirReciboDeCobro(WS, PURO_TARIFA, null, { ...POR_COMPONENTE, soloComponentes: ['pasante'] })
+
+    expect(r).toEqual({ ok: false, motivo: 'rc3_del_negocio', mensaje: 'va en el recibo del negocio', bloqueo: false })
+    expect(clavesUsadas).toEqual([])
+  })
+
+  it('emisión completa en un pago que no es el titular: sale el honorario y la tarifa no', async () => {
+    rc3DelPlan = () => ({ ok: false, mensaje: 'va en el recibo del negocio', bloqueo: false })
+    const r = await emitirReciboDeCobro(WS, MIXTO, null, POR_COMPONENTE)
+
+    expect(r.ok).toBe(true)
+    expect(documentosUsados).toEqual([101])
+    expect(valoresUsados).toEqual([400_000])
+  })
+})
+

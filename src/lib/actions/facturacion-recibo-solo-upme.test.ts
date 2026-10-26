@@ -18,6 +18,9 @@
  *   - sin `soloComponentes: ['pasante']`   → "pide SOLO el componente pasante"
  *   - sin la lectura de `a_tarifa`          → "un pago sin tarifa UPME se rechaza"
  *   - sin exigir `recibo_por_concepto.pasante` → las dos de la línea mal declarada
+ *
+ * SOE-029 (2026-10-26): cuánto y en qué pago lo decide el plan del negocio
+ * (`planRc3DelNegocio`, real aquí; solo la lectura de la base se dobla).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -33,9 +36,10 @@ const LINEA_SOENA = {
   },
 }
 
-/** Lo que devuelve la base para la línea y para el reparto del pago. Cambia por prueba. */
+/** Lo que devuelve la base para la línea. Cambia por prueba. */
 let configLinea: Record<string, unknown>
-let reparto: { a_tarifa: number } | null
+/** Lo que la base dice del RC-3 del negocio: comprobante, techo y pagos. */
+let entradaRc3: Parameters<typeof import('@/lib/siigo/rc3-negocio')['planRc3DelNegocio']>[0]
 /** Cada llamada a la emisión, con sus opciones. Vacío = no se tocó Siigo. */
 let llamadas: Array<{ cobroId: string; opciones: Record<string, unknown> }>
 
@@ -54,6 +58,11 @@ vi.mock('@/lib/siigo/recibos', () => ({
   },
 }))
 
+vi.mock('@/lib/siigo/rc3-negocio-servidor', async () => {
+  const { planRc3DelNegocio } = await vi.importActual<typeof import('@/lib/siigo/rc3-negocio')>('@/lib/siigo/rc3-negocio')
+  return { cargarPlanRc3: async () => planRc3DelNegocio(entradaRc3) }
+})
+
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     from: (tabla: string) => {
@@ -65,7 +74,6 @@ vi.mock('@/lib/supabase/server', () => ({
         limit: async () => ({ data: [], error: null }),
         maybeSingle: async () => {
           if (tabla === 'lineas_negocio') return { data: { config_extra: configLinea }, error: null }
-          if (tabla === 'v_cobro_valor') return { data: reparto, error: null }
           return { data: null, error: null }
         },
         single: async () => ({ data: { linea_id: 'lin-1' }, error: null }),
@@ -79,7 +87,14 @@ import { emitirReciboDeNegocio } from './facturacion-actions'
 
 beforeEach(() => {
   configLinea = LINEA_SOENA
-  reparto = { a_tarifa: 701_812 }
+  entradaRc3 = {
+    comprobante: { estado: 'ok', valor: 701_812 },
+    techoTarifa: 701_812,
+    pagos: [
+      { id: 'c-mixto', fecha: '2026-09-20', aTarifa: 701_812, marca: null, noAplica: false },
+      { id: 'c-v0513', fecha: '2026-09-21', aTarifa: 0, marca: null, noAplica: false },
+    ],
+  }
   llamadas = []
 })
 
@@ -101,7 +116,6 @@ describe('emitirReciboDeNegocio — solo el recibo de la tarifa UPME', () => {
   })
 
   it('un pago sin tarifa UPME (todo honorario) se rechaza SIN tocar la emisión', async () => {
-    reparto = { a_tarifa: 0 }
     const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-v0513' })
 
     expect(r.ok).toBe(false)
@@ -110,7 +124,7 @@ describe('emitirReciboDeNegocio — solo el recibo de la tarifa UPME', () => {
   })
 
   it('un pago sin reparto se rechaza: no se adivina cuánto es tarifa', async () => {
-    reparto = null
+    // Sin fila en el reparto la porción UPME del pago es 0 para el plan: no es titular.
     const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-x' })
 
     expect(r.ok).toBe(false)
@@ -131,6 +145,65 @@ describe('emitirReciboDeNegocio — solo el recibo de la tarifa UPME', () => {
     const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-mixto' })
 
     expect(r.ok).toBe(false)
+    expect(llamadas).toEqual([])
+  })
+})
+
+describe('emitirReciboDeNegocio — el RC-3 sale del comprobante UPME, uno por negocio (SOE-029)', () => {
+  it('sin valor en el comprobante bloquea con el mensaje claro, SIN tocar la emisión', async () => {
+    entradaRc3 = { ...entradaRc3, comprobante: { estado: 'falta' } }
+    const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-mixto' })
+
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toBe('Falta el valor del comprobante de pago UPME: revisa el bloque del comprobante en el negocio.')
+    expect(llamadas).toEqual([])
+  })
+
+  it('con dos pagos, el primero no emite: va en el del negocio', async () => {
+    entradaRc3 = {
+      comprobante: { estado: 'ok', valor: 701_812 },
+      techoTarifa: 701_812,
+      pagos: [
+        { id: 'c-a', fecha: '2026-09-10', aTarifa: 45, marca: null, noAplica: false },
+        { id: 'c-b', fecha: '2026-09-20', aTarifa: 701_767, marca: null, noAplica: false },
+      ],
+    }
+    const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-a' })
+
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('va en el recibo del negocio')
+    expect(llamadas).toEqual([])
+  })
+
+  it('sin cobroId, el recibo va en el pago titular', async () => {
+    entradaRc3 = {
+      comprobante: { estado: 'ok', valor: 701_812 },
+      techoTarifa: 701_812,
+      pagos: [
+        { id: 'c-a', fecha: '2026-09-10', aTarifa: 45, marca: null, noAplica: false },
+        { id: 'c-b', fecha: '2026-09-20', aTarifa: 701_767, marca: null, noAplica: false },
+      ],
+    }
+    const r = await emitirReciboDeNegocio('neg-1')
+
+    expect(r.ok).toBe(true)
+    expect(llamadas.map(l => l.cobroId)).toEqual(['c-b'])
+  })
+
+  it('si lo emitido ya cubre el comprobante, no se ofrece otro', async () => {
+    entradaRc3 = {
+      comprobante: { estado: 'ok', valor: 978_707 },
+      techoTarifa: 978_870,
+      pagos: [
+        { id: 'c-1', fecha: '2026-09-10', aTarifa: 978_865, noAplica: false,
+          marca: [{ numero: 'RC-3-9', siigo_id: 's', valor: 978_865, componente: 'pasante' }] },
+        { id: 'c-2', fecha: '2026-09-20', aTarifa: 5, marca: null, noAplica: false },
+      ],
+    }
+    const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-2' })
+
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('ya tiene su recibo')
     expect(llamadas).toEqual([])
   })
 })
