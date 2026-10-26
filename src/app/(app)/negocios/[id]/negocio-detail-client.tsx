@@ -2547,6 +2547,11 @@ interface Props {
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
   /**
+   * Falta la autorización de datos del cliente y la línea la pide (reunión del 2026-10-22). La
+   * ficha ya lo dice en `banner`; esto lo lee la página de la cotización para su lista de Revisar.
+   */
+  autorizacionPendiente?: boolean
+  /**
    * Negocio de viaje (Trappvel): el viaje con su IATA en el encabezado y la solicitud, el
    * perfil y las cotizaciones abiertas en el panel. Ausente en toda otra línea (R6).
    */

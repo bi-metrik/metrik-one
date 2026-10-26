@@ -21,6 +21,7 @@ import { configSeguimiento } from '@/lib/negocios/seguimiento'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { MENSAJE_ENVIO_PENDIENTE } from '@/lib/autorizacion-datos/mensajes'
 import {
   CONFIG_IVA_POR_DEFECTO,
   leerConfigIvaCotizacion,
@@ -314,11 +315,19 @@ export default async function CotizacionNegocioPage({
   // Solo con la forma por pasos: el pedido de autorización que espera al dueño. Apagada, ninguna
   // consulta de más (la carga de la página es la de siempre).
   const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
+  // La carga del negocio que pinta el marco (cotización de viaje): se lee UNA vez, aquí, y de ella
+  // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
+  // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.
+  const vistaDelNegocio = lineasPorTipo ? await cargarVistaNegocio(id) : null
+  const motivoAutorizacionDatos = estadoPasos.encendido && vistaDelNegocio?.autorizacionPendiente === true
+    ? MENSAJE_ENVIO_PENDIENTE
+    : null
 
   const editor = (
     <CotizacionEditor
       porPasos={estadoPasos}
       pedidoAutorizacion={pedidoAutorizacion}
+      motivoAutorizacionDatos={motivoAutorizacionDatos}
       pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
@@ -357,7 +366,7 @@ export default async function CotizacionNegocioPage({
   // es el editor; lo demás sale de la MISMA carga que usa la página del negocio. Fuera del
   // flujo de viaje, o si la carga no trae viaje, la pantalla de siempre (R6).
   if (lineasPorTipo) {
-    const vista = await cargarVistaNegocio(id)
+    const vista = vistaDelNegocio
     if (vista?.viaje) {
       // El proveedor deja que la columna de la derecha pinte el total que el editor acaba de
       // leer, sin esperar el refresco (`total-vivo.tsx`).

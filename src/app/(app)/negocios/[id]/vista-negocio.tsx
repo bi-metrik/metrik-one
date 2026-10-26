@@ -10,6 +10,7 @@ import { leerMarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio-datos'
 import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
+import { AvisoAutorizacionPendiente } from './aviso-autorizacion-pendiente'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import { puedeAsignarResponsable } from '@/lib/permissions/asignar-responsable'
@@ -208,10 +209,14 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
     : [null, null, null, null, null, null]
   const viajeFinal = viajeFinalLeido?.panel ?? null
-  const banner = bannerCierre || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
+  // La autorización de datos pendiente: se cotiza, no se envía (reunión del 2026-10-22). Solo con
+  // el negocio abierto.
+  const avisoAutorizacion = data.autorizacionPendiente === true && !data.negocio.cierre_motivo ? <AvisoAutorizacionPendiente /> : null
+  const banner = bannerCierre || avisoAutorizacion || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
     ? (
       <>
         {bannerCierre}
+        {avisoAutorizacion}
         {seguimientoViaje}
         {rielCobro}
         {facturaViaje}
@@ -321,6 +326,8 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     carpetaLocal: carpetaLocal,
     almacenamientoExterno: almacenamientoExterno,
     banner: banner,
+    /** La autorización de datos del cliente falta (la línea la pide): se cotiza, no se envía. */
+    autorizacionPendiente: data.autorizacionPendiente === true,
     extras: extras,
     viaje,
   }

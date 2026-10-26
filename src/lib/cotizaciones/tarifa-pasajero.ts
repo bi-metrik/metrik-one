@@ -32,6 +32,7 @@ import { leerCorrecciones, type Correcciones } from './correcciones'
 import { firmaDeEstadia } from './estadia'
 import { registroDeReserva, resumenDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
 import { leerOrigenTarifaExtraida, type OrigenTarifaExtraida } from './origen-tarifa'
+import { leerTipoTarifa, type DecisionTipoTarifa } from './tarifa-publica'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -1865,6 +1866,17 @@ export interface TarifaPax {
    * ni fotos ni proveedor. Ausente = como siempre.
    */
   fichaDescartada?: string
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Ausente = Neta, como toda
+   * línea anterior a esto.
+   */
+  tipoTarifa?: DecisionTipoTarifa
+  /**
+   * El traslado (o servicio) que va con UNA opción de hotel: el id de esa opción (reunión del
+   * 2026-10-22, punto 5, `va-con-hotel.ts`). Solo cuenta en las tarifas que llevan ese hotel.
+   * Ausente = general: sirve para cualquier hotel, como siempre.
+   */
+  vaConHotel?: string
 }
 
 /** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
@@ -2102,6 +2114,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const costosAMano = leerCostosAMano(r.costosAMano)
   const tarifaExtraida = leerOrigenTarifaExtraida(r.tarifaExtraida)
   const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
+  const tipoTarifa = leerTipoTarifa(r.tipoTarifa)
+  const vaConHotel = typeof r.vaConHotel === 'string' && r.vaConHotel.trim() ? r.vaConHotel.slice(0, 100) : null
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -2128,6 +2142,10 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(tarifaExtraida ? { tarifaExtraida } : {}),
     // Igual: sin «No es este» en la tarjeta la llave no aparece.
     ...(fichaDescartada ? { fichaDescartada } : {}),
+    // Igual: sin decisión de tarifa pública o neta la llave no aparece (es Neta).
+    ...(tipoTarifa ? { tipoTarifa } : {}),
+    // Igual: un servicio general (sin hotel) no lleva la llave.
+    ...(vaConHotel ? { vaConHotel } : {}),
   }
 }
 

@@ -16,6 +16,7 @@ import {
   cascadaDeItinerario,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  exentaDelMinimo,
   margenMedible,
   normalizarGrupo,
   ranurasConAlternativas,
@@ -140,8 +141,15 @@ export interface TarifaCalculada extends TarifaDeLaPantalla {
   esPrincipal: boolean
   precio: number
   costo: number
-  /** El margen real medible (sin costo o sin precio, `null`). */
+  /**
+   * El margen real medible (sin costo o sin precio, `null`). Sin las líneas de tarifa pública
+   * (`tarifa-publica.ts`): es el que se juzga contra el mínimo.
+   */
   margenReal: number | null
+  /** Cuántas líneas de tarifa pública suma esta tarifa (no entran en `margenReal`). */
+  publicas: number
+  /** Todo lo que cobra es de tarifa pública: no hay margen que exigir. */
+  exenta: boolean
   /** La opción que cobra en cada servicio con opciones. */
   opcionPorServicio: Record<string, string>
   /** «Recomendada» o «Económica» si es idéntica a una que va antes; `null` si no. */
@@ -170,6 +178,8 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
       precio: cascada.precioVenta,
       costo: cascada.costoDeVenta,
       margenReal: margenMedible(cascada),
+      publicas: cascada.publicas.lineas,
+      exenta: exentaDelMinimo(cascada),
       opcionPorServicio,
       igualA: null as string | null,
       cascada,

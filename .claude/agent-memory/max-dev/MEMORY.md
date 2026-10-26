@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
 
 - ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco no avisa el reverso; conciliación 7d; anula sin tocar suscripción ni ciclo
