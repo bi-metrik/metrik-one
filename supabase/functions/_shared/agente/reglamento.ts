@@ -122,6 +122,33 @@ export async function huellaDe(fichas: Ficha[]): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Canónico de las fichas como las publica la base, gemelo de `asistente_huella_fichas` (migración
+ * 20261026183000_asistentes_roles.sql). No es `canonico`: aquella ordena por `localeCompare` y deja los `null`, y la
+ * base guarda las fichas con `jsonb_strip_nulls`. Aquí: campos `null`/`undefined` fuera (a cualquier profundidad de
+ * objeto) y `fuente: ''` como sin fuente, fichas por clave y llaves en orden de código, JSON sin espacios. Pura.
+ */
+export function canonicoPublicable(fichas: Ficha[]): string {
+  const porCodigo = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const limpio = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(limpio);
+    if (v && typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      return Object.fromEntries(Object.keys(o).filter((k) => o[k] !== null && o[k] !== undefined).sort(porCodigo).map((k) => [k, limpio(o[k])]));
+    }
+    return v;
+  };
+  // `fuente: ''` cuenta como sin fuente: las semillas la guardan como `fuente || null` (p. ej. el Anexo A).
+  const sinFuenteVacia = (f: Ficha) => (f.fuente === '' ? { ...f, fuente: null } : f);
+  return JSON.stringify([...fichas].sort((a, b) => porCodigo(a.clave, b.clave)).map(sinFuenteVacia).map(limpio));
+}
+
+/** La huella que pide `asistente_publicar_rol` en `banco.huella_fichas`: sha256 de `canonicoPublicable`. */
+export async function huellaPublicable(fichas: Ficha[]): Promise<string> {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicoPublicable(fichas)));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** Una ficha bien formada (lo que se carga de la base pasa por aquí). */
 export function fichaValida(v: unknown): Ficha | null {
   const o = v && typeof v === 'object' ? v as Record<string, unknown> : null;
