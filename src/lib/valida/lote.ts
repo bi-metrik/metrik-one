@@ -39,13 +39,43 @@ export const LOTES_SIMULTANEOS = 3
 export const TURNO_MS = 60_000
 
 /**
- * Lo que dura el turno en la base: el turno, más lo que tardan en terminar las filas en vuelo
- * (30 s de tope de Valida + un reintento), más holgura. Vencido, otro trabajador toma el lote.
+ * `maxDuration` de `POST /api/v1/validate` en metrik-valida (`app/api/v1/validate/route.ts`). Pasado
+ * ese tiempo Vercel MATA la función: una llamada de Valida no puede seguir corriendo (ni cobrar) más
+ * allá. Si Valida lo sube, hay que subirlo aquí.
  */
-export const TURNO_RECLAMO_S = 150
+export const VALIDA_MAX_DURATION_S = 60
 
-/** Lo que dura el reclamo de una fila: el tope de Valida (30 s), un reintento y holgura. */
-export const FILA_RECLAMO_S = 120
+/**
+ * Tope de cada llamada a Valida desde el cargue masivo: el `maxDuration` de Valida más holgura
+ * (2026-10-25). Con el tope de 30 s de la consulta puntual, ONE abandonaba una llamada que Valida
+ * seguía corriendo: si Valida terminaba, la consulta quedaba COBRADA en Valida y la fila en error en
+ * ONE, sin resultado. Con un tope mayor que el `maxDuration`, cuando ONE se rinde la llamada de Valida
+ * ya terminó o murió, así que el reintento con la misma `Idempotency-Key` no corre a la par de ella:
+ * o repite la respuesta guardada sin cobrar, o es la única que corre.
+ */
+export const TIMEOUT_VALIDA_LOTE_MS = (VALIDA_MAX_DURATION_S + 10) * 1000
+
+/**
+ * Lo que dura el reclamo de una fila: dos llamadas con su tope (2 × 70 s), la espera del reintento y
+ * holgura. Vencido, otro trabajador la retoma con la misma llave.
+ */
+export const FILA_RECLAMO_S = 180
+
+/**
+ * Lo que dura el turno en la base: el turno (60 s), más lo que puede tardar en terminar una fila en
+ * vuelo (dos llamadas con su tope), más holgura. Vencido, otro trabajador toma el lote.
+ */
+export const TURNO_RECLAMO_S = 240
+
+/**
+ * ¿Se reintenta (una vez, con la misma llave) una llamada a Valida que no dio resultado? Un 5xx, un
+ * tope de tiempo o un error de red: Valida no guardó nada, o guardó y la llave hace que repita la
+ * respuesta sin cobrar. Un 4xx no: la respuesta no cambia reintentando.
+ */
+export function llamadaReintentable(r: { ok: boolean; status?: number }): boolean {
+  if (r.ok) return false
+  return r.status === undefined || r.status >= 500
+}
 
 /** Consultas por PDF del lote: el tope de `POST /api/v1/reporte-lote` de Valida. */
 export const CONSULTAS_POR_PDF = 500

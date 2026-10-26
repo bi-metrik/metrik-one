@@ -13,9 +13,11 @@ import {
   FILAS_PARA_AVISO_CORREO,
   TURNO_MS,
   TURNO_RECLAMO_S,
+  TIMEOUT_VALIDA_LOTE_MS,
   claveIdempotenciaFila,
   concurrenciaDelLote,
   filaSeConsulta,
+  llamadaReintentable,
   lotesSimultaneos,
   severidadDelConteo,
   textoPausa,
@@ -212,8 +214,10 @@ async function devolver(svc: Svc, fila: FilaLote): Promise<void> {
  * agrega es la idempotencia: la `Idempotency-Key` de la fila y la fila como llave única del historial.
  *
  * Diferencias con la ruta del navegador, todas para no cobrar ni ensuciar:
- *   - un 5xx de Valida se reintenta UNA vez con la misma llave (Valida no guardó nada; si lo hizo,
- *     repite la respuesta sin cobrar). Antes quedaba como fila en error;
+ *   - un 5xx, un tope de tiempo o un error de red se reintenta UNA vez con la misma llave (Valida no
+ *     guardó nada; si lo hizo, repite la respuesta sin cobrar). El tope de la llamada pasa el
+ *     `maxDuration` de Valida (`TIMEOUT_VALIDA_LOTE_MS`): el reintento nunca corre a la par de la
+ *     primera. Antes un tope de 30 s dejaba la fila en error y la consulta cobrada en Valida;
  *   - un 401/402 que no es corte de la bolsa (llave revocada, paquete vencido sin pago) detiene el
  *     lote: todas las filas siguientes responderían lo mismo. Antes se guardaba una fila en error por
  *     cada una (no se cobraban);
@@ -251,10 +255,11 @@ export async function procesarFilaLote(ctx: ContextoTurno, fila: FilaLote): Prom
   }
 
   const clave = claveIdempotenciaFila(fila.id)
-  let resultado: RespuestaValida = await llamarValida(llave, input, { claveIdempotencia: clave })
-  if (!resultado.ok && (resultado.status ?? 0) >= 500) {
+  const opciones = { claveIdempotencia: clave, timeoutMs: TIMEOUT_VALIDA_LOTE_MS }
+  let resultado: RespuestaValida = await llamarValida(llave, input, opciones)
+  if (llamadaReintentable(resultado)) {
     await dormir(ESPERA_REINTENTO_MS)
-    resultado = await llamarValida(llave, input, { claveIdempotencia: clave })
+    resultado = await llamarValida(llave, input, opciones)
   }
 
   if (!resultado.ok) {

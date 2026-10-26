@@ -313,13 +313,40 @@ describe('una fila nunca se cobra ni se guarda dos veces', () => {
     expect(consultas()[0].severidad).toBe('sin_hallazgo')
   })
 
-  it('un tope de tiempo NO se reintenta (Valida pudo seguir y cobrar): queda en error, como siempre', async () => {
+  it('un tope de tiempo se reintenta UNA vez con la misma llave: la fila recibe su resultado', async () => {
+    // El tope del lote (70 s) pasa el maxDuration de Valida (60 s): cuando ONE se rinde, la primera
+    // llamada ya terminó o murió. Si terminó y cobró, la llave hace que Valida repita la respuesta.
     fetchFalso.mockImplementationOnce(async () => {
       throw new DOMException('The operation timed out.', 'TimeoutError')
     })
     const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
     await procesarFilaLote(ctx(lote), await reclamar(lote))
-    expect(fetchFalso).toHaveBeenCalledTimes(1)
+    expect(fetchFalso).toHaveBeenCalledTimes(2)
+    expect(consultas()).toHaveLength(1)
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
+    expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'hecha' })
+  })
+
+  it('un error de red también se reintenta con la misma llave', async () => {
+    fetchFalso.mockImplementationOnce(async () => {
+      throw new TypeError('fetch failed')
+    })
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(llamadas.filter((l) => !l.url.includes('resend'))).toHaveLength(1)
+    expect(fetchFalso).toHaveBeenCalledTimes(2)
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
+  })
+
+  it('si el reintento también se agota, la fila queda en error (una sola consulta en el historial)', async () => {
+    const tope = async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError')
+    }
+    fetchFalso.mockImplementationOnce(tope).mockImplementationOnce(tope)
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(fetchFalso).toHaveBeenCalledTimes(2)
+    expect(consultas()).toHaveLength(1)
     expect(consultas()[0].severidad).toBe('error')
     expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'error', resultado_error: 'valida_tiempo_agotado' })
   })
