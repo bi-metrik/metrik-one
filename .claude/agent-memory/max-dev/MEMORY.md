@@ -5,6 +5,7 @@
 - ⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — remitente_correo; logo solo con clave; SOENA: verificar dominio → deploy → clave
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — 20261026183000 APLICADA; componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️⚠️ [Paso a una persona §4.2 (comun.persona)](project_paso_a_persona.md) — motor `persona` aparte; deploy de wa-webhook da el botón a TODOS; Sabor sin rol igual byte a byte
 - ⚠️ [Calificación y resumen diario de asistentes (#1289)](project_calificacion_resumen_asistentes.md) — con_texto SIN prender en Sabor; tokens en `juez`; caida.ts no se importa en src
 - ⚠️ [Toque de botón de plantilla §4.5 (ag|t|)](project_toque_plantilla.md) — sin el componente con payload Meta devuelve el texto; tope 256 no publicado
 - ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho conectado en #1285 (fuentesDeComposicion); arnés lo corre Mauricio

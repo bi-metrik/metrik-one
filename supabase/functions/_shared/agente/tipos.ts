@@ -144,7 +144,13 @@ export interface Opcion { id: string; titulo: string; descripcion?: string }
 export type Salida =
   | { tipo: 'texto'; texto: string }
   | { tipo: 'botones'; texto: string; opciones: Opcion[] }
-  | { tipo: 'lista'; texto: string; boton: string; opciones: Opcion[] };
+  | { tipo: 'lista'; texto: string; boton: string; opciones: Opcion[] }
+  /**
+   * Un botón que abre un link (spec 2026-10-26, §4.2: el paso a una persona en ONE abre el WhatsApp de MeTRIK con el
+   * mensaje escrito). En WhatsApp sale como `interactive.type = "cta_url"` (cuerpo ≤ 1024, botón ≤ 20); en Chatwoot,
+   * como texto con el link debajo. Lo arma siempre el código, nunca el modelo.
+   */
+  | { tipo: 'enlace'; texto: string; boton: string; url: string };
 
 export interface Mensajero {
   /** Marca leído y enciende «escribiendo…» (una sola llamada a Meta). Nunca lanza. */
@@ -405,5 +411,12 @@ export interface Traza {
   adjuntos?: Array<Record<string, unknown>> | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
   salidas_extra?: Salida[] | null;
+  /**
+   * El traspaso a una persona de este turno (spec 2026-10-26, §4.2), si lo hubo: `ofrecido` (sin que la persona lo
+   * pidiera; nunca dos turnos seguidos), `link` (lo pidió: el botón al WhatsApp) o `pasado` (Chatwoot). `senal`: quién lo
+   * disparó, el modelo (motivo) o el código (dos «no pude» seguidos, tres correcciones de lo mismo). `resumen`: una
+   * línea armada por el código, sin datos sensibles (la misma de `asistente_escalamientos`).
+   */
+  escalamiento?: { modo: 'ofrecido' | 'pasado' | 'link'; motivo: string; senal: 'modelo' | 'codigo'; resumen?: string } | null;
   error?: string | null;
 }

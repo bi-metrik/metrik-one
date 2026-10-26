@@ -21,6 +21,7 @@ import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { lectorDeDocumentosDeViaje } from './agente/bandeja/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
 import { turnoOne } from './agente/one/turno-con-rol.ts';
+import { escalamientosSupabase } from './agente/persona-produccion.ts';
 import { resolverRol, rolPrevio } from './agente/roles.ts';
 import type { RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
@@ -164,6 +165,7 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       // Un reglamento propio publicado (`bot_reglamentos`, bot 'one') reemplaza al del código.
       reglamentoDeHoy: async () => (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId)) ?? await reglamentoOne(String(ws?.name ?? 'la empresa')),
       motor: (funciones) => dominioOne(puerto, { rol: user.role, lector, empresa, funciones }),
+      empresa,
     });
     if (turno.tipo === 'parar') {
       // El workspace usa roles y quien escribe no tiene uno activo: lo fijo, sin modelo y sin el dominio completo.
@@ -189,6 +191,9 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       dominio: turno.dominio,
       reglamento: turno.reglamento,
       rol: turno.rol,
+      // El paso a una persona (spec 2026-10-26, §4.2): el botón al WhatsApp de MeTRIK (o al de la ficha del rol), la
+      // señal del código y la fila de `asistente_escalamientos`.
+      persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one', escalamientos: escalamientosSupabase(supabase) },
       config,
       ahoraMs: () => Date.now(),
       reloj: () => performance.now(),

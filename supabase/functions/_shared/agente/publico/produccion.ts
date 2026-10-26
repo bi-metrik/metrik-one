@@ -139,8 +139,12 @@ export async function preciosSupabase(supabase: SupabaseClient): Promise<PrecioM
 
 // ── Chatwoot ─────────────────────────────────────────────────────────────────
 
-/** El cuerpo de un mensaje de Chatwoot desde la salida del núcleo (`input_select` con los ids del código). Pura. */
+/**
+ * El cuerpo de un mensaje de Chatwoot desde la salida del núcleo (`input_select` con los ids del código). Un `enlace`
+ * (§4.2) sale como texto con el link debajo: Chatwoot no tiene el botón de URL de WhatsApp. Pura.
+ */
 export function cuerpoMensajeChatwoot(s: Salida, privado = false): Record<string, unknown> {
+  if (s.tipo === 'enlace') return { content: `${s.texto}\n${s.url}`, message_type: 'outgoing', private: privado };
   const base = { content: s.texto, message_type: 'outgoing', private: privado };
   if (s.tipo === 'texto' || privado) return base;
   return { ...base, content_type: 'input_select', content_attributes: { items: s.opciones.map((o) => ({ title: o.titulo, value: o.id })) } };
