@@ -65,8 +65,8 @@ function vista(tarifas: TarifaConfirmable[], extra: Partial<VistaConfirmacion> =
   }
 }
 
-function render(v: VistaConfirmacion): string {
-  return renderToStaticMarkup(React.createElement(HojaConfirmacion, { vista: v, onCerrar: () => {}, onConfirmado: () => {} }))
+function render(v: VistaConfirmacion, motivoAutorizacion: string | null = null): string {
+  return renderToStaticMarkup(React.createElement(HojaConfirmacion, { vista: v, onCerrar: () => {}, onConfirmado: () => {}, motivoAutorizacion }))
 }
 
 function texto(html: string): string {
@@ -75,7 +75,7 @@ function texto(html: string): string {
 
 /** Los botones «Confirmar y enviar…» / motivo de apagado (el pie de la hoja). */
 function botonPrincipal(html: string): { texto: string; apagado: boolean } {
-  const m = [...html.matchAll(/<button([^>]*)>([^<]*)<\/button>/g)].find((b) => /Confirmar y enviar|Escoge la tarifa|Faltan|Sobran|Fuera de la regla|Hay una cuota/.test(b[2]))
+  const m = [...html.matchAll(/<button([^>]*)>([^<]*)<\/button>/g)].find((b) => /Confirmar y enviar|Falta la autorización|Escoge la tarifa|Faltan|Sobran|Fuera de la regla|Hay una cuota/.test(b[2]))
   if (!m) throw new Error('no se encontró el botón de confirmar')
   return { texto: m[2], apagado: /\sdisabled=""/.test(m[1]) }
 }
@@ -124,5 +124,25 @@ describe('cotización con tarifas: como antes', () => {
     expect(botonPrincipal(html).apagado).toBe(false)
     const marcadas = [...html.matchAll(/<label[^>]*>(?:(?!<\/label>).)*name="tarifa" checked=""(?:(?!<\/label>).)*<\/label>/g)].map((m) => texto(m[0]))
     expect(marcadas).toEqual([`Recomendada · Recomendada ${pesos(TOTAL)}`])
+  })
+})
+
+describe('sin la autorización de datos del cliente (2026-10-25)', () => {
+  const MOTIVO = 'Falta que el cliente autorice el tratamiento de sus datos: la cotización se puede armar, pero no enviar.'
+  const tarifas: TarifaConfirmable[] = [{ itinerarioId: 'it-rec', nombre: 'Recomendada', esRecomendada: true, precio: TOTAL, motivo: null }]
+
+  it('la hoja lo dice arriba, antes del formulario, y el botón queda apagado', () => {
+    const html = render(vista(tarifas), MOTIVO)
+    const aviso = html.indexOf('data-confirmacion-sin-autorizacion')
+    expect(aviso).toBeGreaterThan(-1)
+    expect(aviso).toBeLessThan(html.indexOf('¿Qué tarifa escogió?'))
+    expect(texto(html)).toContain(MOTIVO)
+    expect(botonPrincipal(html)).toEqual({ texto: 'Falta la autorización de datos', apagado: true })
+  })
+
+  it('firmada: ni aviso ni botón apagado', () => {
+    const html = render(vista(tarifas))
+    expect(html).not.toContain('data-confirmacion-sin-autorizacion')
+    expect(botonPrincipal(html).apagado).toBe(false)
   })
 })

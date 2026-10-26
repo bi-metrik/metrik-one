@@ -56,6 +56,20 @@ interface Props {
   vista: VistaConfirmacion
   puedeConfirmar: boolean
   esDireccion: boolean
+  /**
+   * Falta la autorización de datos del cliente: el mismo motivo con que el servidor rechaza
+   * confirmar (`autorizacion-datos/envio.ts`). Se dice antes de llenar la hoja, no en el último clic.
+   */
+  motivoAutorizacion?: string | null
+}
+
+/** El motivo de la autorización pendiente, arriba de la hoja y en el panel. */
+function AvisoAutorizacion({ motivo }: { motivo: string }) {
+  return (
+    <p role="status" data-confirmacion-sin-autorizacion className="rounded-lg border border-[#F0D9B5] bg-[#FBF1E2] px-3 py-2 text-sm text-[#191713]">
+      {motivo}
+    </p>
+  )
 }
 
 const BOTON = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium disabled:opacity-50'
@@ -71,7 +85,7 @@ function Linea({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   )
 }
 
-export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDireccion }: Props) {
+export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDireccion, motivoAutorizacion = null }: Props) {
   const router = useRouter()
   const [abierta, setAbierta] = useState(false)
   const [isPending, startTransition] = useTransitionTolerante()
@@ -131,6 +145,7 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
           <p className="text-sm text-[#6B7280]">
             El cliente todavía no ha confirmado. Cuando te diga que sí por WhatsApp, regístralo aquí: ONE arma el plan de pagos y los servicios.
           </p>
+          {puedeConfirmar && motivoAutorizacion && <AvisoAutorizacion motivo={motivoAutorizacion} />}
           {puedeConfirmar && (
             <button type="button" className={BOTON_PRIMARIO} onClick={() => setAbierta(true)}>
               El cliente confirmó
@@ -191,6 +206,7 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
       {abierta && (
         <HojaConfirmacion
           vista={vista}
+          motivoAutorizacion={motivoAutorizacion}
           onCerrar={() => setAbierta(false)}
           onConfirmado={() => { setAbierta(false); router.refresh() }}
         />
@@ -260,7 +276,7 @@ const TARIFA_UNICA_CLAVE = 'tarifa-unica'
 const claveTarifa = (t: TarifaConfirmable) => t.itinerarioId ?? TARIFA_UNICA_CLAVE
 
 /** Exportada para la prueba de render; en la ficha la abre el panel. */
-export function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfirmacion; onCerrar: () => void; onConfirmado: () => void }) {
+export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutorizacion = null }: { vista: VistaConfirmacion; onCerrar: () => void; onConfirmado: () => void; motivoAutorizacion?: string | null }) {
   const hoy = todayBogotaISO()
   const nombre = primerNombre(vista.cliente.nombre)
   const [isPending, startTransition] = useTransitionTolerante()
@@ -330,8 +346,10 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: Vis
     agencia: vista.agencia,
   }), [vista, tarifa, total, cuotas, v.fechaMinimo, hoy, extra])
 
-  const puedeConfirmarYa = !!tarifa && v.cuadra && !v.despuesDelViaje && (v.dentroDeRegla || aprobadaParaEste)
-  const motivoApagado = !tarifa
+  const puedeConfirmarYa = !motivoAutorizacion && !!tarifa && v.cuadra && !v.despuesDelViaje && (v.dentroDeRegla || aprobadaParaEste)
+  const motivoApagado = motivoAutorizacion
+    ? 'Falta la autorización de datos'
+    : !tarifa
     ? 'Escoge la tarifa'
     : v.diferencia > 0
       ? `Faltan ${pesos(v.diferencia)}`
@@ -415,6 +433,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: Vis
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+          {motivoAutorizacion && <AvisoAutorizacion motivo={motivoAutorizacion} />}
           {/* 1. Tarifa */}
           <fieldset>
             <legend className="mb-2 text-sm font-medium text-[#1A1A1A]">¿Qué tarifa escogió?</legend>

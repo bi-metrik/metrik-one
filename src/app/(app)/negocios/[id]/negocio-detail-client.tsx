@@ -2551,6 +2551,8 @@ interface Props {
    * ficha ya lo dice en `banner`; esto lo lee la página de la cotización para su lista de Revisar.
    */
   autorizacionPendiente?: boolean
+  /** Con la autorización pendiente, lo mismo que responde «Enviar» (`autorizacion-datos/envio.ts`). */
+  motivoAutorizacion?: string | null
   /**
    * Negocio de viaje (Trappvel): el viaje con su IATA en el encabezado y la solicitud, el
    * perfil y las cotizaciones abiertas en el panel. Ausente en toda otra línea (R6).
