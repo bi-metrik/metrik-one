@@ -31,7 +31,7 @@ GEMINI_API_KEY_PRUEBAS=… deno run -A --node-modules-dir=none supabase/function
 GEMINI_API_KEY_PRUEBAS=… deno run -A --node-modules-dir=none supabase/functions/_shared/agente/arnes/audios/correr.ts --salida /tmp/arnes-audios
 ```
 
-- Corre cada nota con pistas y sin pistas, 3 veces (`--k`), con `gemini-2.5-flash-lite` (ONE hoy) y `gemini-3.5-flash-lite` (público). Son 240 llamadas.
+- Corre cada nota con pistas y sin pistas, 3 veces (`--k`), con `gemini-2.5-flash-lite` (ONE hasta el 2026-10-26) y `gemini-3.5-flash-lite` (ONE desde el 2026-10-26 y público). Son 240 llamadas.
 - Deja `resultado.json` y `tabla.txt`: una tabla general y una por workspace, los nombres y códigos fallados, y cada inserción falsa.
 - Toma la nota real (`reales/<id>.ogg`) si existe y si no la sintética. Para usar solo las reales: `--fuente reales`.
 - En seco, sin red: `--seco`.

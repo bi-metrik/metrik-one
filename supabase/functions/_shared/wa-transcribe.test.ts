@@ -33,6 +33,12 @@ describe('transcribeAudio sin opciones no acepta media transcripción', () => {
     expect(cuerpo(f).generationConfig.maxOutputTokens).toBe(MAX_SALIDA_TRANSCRIPCION)
   })
 
+  it('transcribe con gemini-3.5-flash-lite si no hay secreto que lo cambie (2026-10-26)', async () => {
+    const f = gemini('STOP')
+    await transcribeAudio('a1')
+    expect(String(f.mock.calls[0][0])).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent')
+  })
+
   it('un corte por tope de salida devuelve error, no el texto cortado', async () => {
     gemini('MAX_TOKENS')
     expect(await transcribeAudio('a1')).toEqual({ text: null, error: 'GEMINI_INCOMPLETO: finishReason MAX_TOKENS' })
