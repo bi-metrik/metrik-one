@@ -12,6 +12,9 @@
 
 export const URL_GEMINI_MODELOS = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+/** El modelo de audio de ONE y la bandeja si no se fija `GEMINI_AUDIO_MODEL` (Sprint 2, Yuto: Flash-Lite). */
+export const MODELO_AUDIO_ONE = 'gemini-2.5-flash-lite';
+
 /** Prompt neutro: no presupone gastos ni ningun tema. */
 export const PROMPT_TRANSCRIPCION_LITERAL =
   'Transcribe este audio de WhatsApp en espanol, palabra por palabra. Responde SOLO con la transcripcion textual, sin explicaciones, sin comillas, sin resumir y sin formato adicional. Si el audio es inaudible o vacio, responde INAUDIBLE.';
@@ -34,6 +37,20 @@ export interface PedidoTranscripcion {
   maxSalida: number;
   /** `null` = la del proveedor (público no la fija). */
   temperatura: number | null;
+}
+
+/**
+ * El texto de la respuesta de `generateContent`, con las reglas de producción: un bloqueo, un corte (finishReason
+ * distinto de STOP), una respuesta vacía o INAUDIBLE no son texto. Pura.
+ */
+export function textoDeRespuesta(d: unknown): { texto: string } | { error: string } {
+  const r = d as { promptFeedback?: { blockReason?: string }; candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }> };
+  if (r?.promptFeedback?.blockReason) return { error: `GEMINI_BLOCKED: ${r.promptFeedback.blockReason}` };
+  const fin = r?.candidates?.[0]?.finishReason;
+  if (fin !== 'STOP') return { error: `GEMINI_INCOMPLETO: finishReason ${fin ?? '(ausente)'}` };
+  const texto = (r?.candidates?.[0]?.content?.parts ?? []).map((p) => p?.text ?? '').join('').trim();
+  if (!texto || texto === 'INAUDIBLE') return { error: `GEMINI_RESULT: ${texto || '(empty response)'}` };
+  return { texto };
 }
 
 /** La URL y el `RequestInit` de `generateContent` con el audio en línea. La llave, solo en la cabecera. Pura. */
