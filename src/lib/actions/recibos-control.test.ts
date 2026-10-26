@@ -25,6 +25,12 @@ let bloquesRut: Fila[]
 let lineas: Fila[]
 /** `v_cobro_valor`: el reparto canónico. Vacío = el panel ni lo consulta. */
 let reparto: Fila[]
+/** Instancias del bloque `comprobante_pago_upme` (SOE-029: de ahí sale el RC-3). */
+let comprobantes: Fila[]
+/** `v_negocio_valor.techo_tarifa` por negocio. */
+let techos: Fila[]
+const comprobante = (valor: unknown, negocio = 'neg-1') =>
+  ({ negocio_id: negocio, data: { campos: { valor_pagado: { value: valor } } } })
 
 const sesion = vi.hoisted(() => ({ staffId: 's1' }))
 vi.mock('@/lib/actions/get-workspace', () => ({
@@ -69,15 +75,17 @@ vi.mock('@/lib/supabase/server', () => ({
       }
     },
     from: (tabla: string) => {
+      let slug: unknown = null
       const fuente = tabla === 'cobros' ? () => cobros
         : tabla === 'negocios' ? () => negocios
-        : tabla === 'negocio_bloques' ? () => bloquesRut
+        : tabla === 'negocio_bloques' ? () => (slug === 'comprobante_pago_upme' ? comprobantes : bloquesRut)
+        : tabla === 'v_negocio_valor' ? () => techos
         : tabla === 'lineas_negocio' ? () => lineas
         : tabla === 'v_cobro_valor' ? () => reparto
         : () => contactos
       const chain = {
         select: (cols: string) => { selects[tabla] = cols; return chain },
-        eq: () => chain,
+        eq: (c: string, v: unknown) => { if (c === 'bloque_configs.slug') slug = v; return chain },
         is: () => chain,
         not: () => chain,
         in: () => chain,
@@ -125,6 +133,10 @@ beforeEach(() => {
     metadata: { siigo_cliente: { siigo_id: 'cli-1', identificacion: '1110584384' } },
   }]
   bloquesRut = []
+  // c1 ya tiene un recibo por el total (RC-1-65) que acusó su porción UPME; lo que falta
+  // del comprobante es exactamente la porción de c2.
+  comprobantes = [comprobante(1_339_312)]
+  techos = []
   // La línea de SOENA tal como está en producción (leída el 2026-09-22): el honorario se
   // abona a la factura y la tarifa UPME sale con su RC-3.
   lineas = [LINEA_SOENA]
@@ -283,6 +295,7 @@ describe('getControlRecibos — un pago mixto a medias sigue pendiente', () => {
   beforeEach(() => {
     lineas = [LINEA_POR_CONCEPTO]
     reparto = [REPARTO_MIXTO]
+    comprobantes = [comprobante(301_812)]
     // Solo salió el del honorario: el de terceros falló y hay que reintentarlo.
     cobros[0].siigo_recibo = [
       { numero: 'RC-1-70', archivo_url: 'https://drive/rc70', componente: 'honorario' },
@@ -363,6 +376,7 @@ describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se a
       { cobro_id: 'c2', a_tramo1: 450_000, a_tramo2: 0, a_tarifa: 0, excedente: 0 },
     ]
     cobros[0].siigo_recibo = null
+    comprobantes = [comprobante(701_812)]
   })
 
   it('un pago de puro honorario NO aparece en «Sin recibo»: no tiene nada que emitir', async () => {
@@ -380,6 +394,7 @@ describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se a
 
   it('un pago mixto se emite por su porción UPME, sin aviso sobre el honorario', async () => {
     reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    comprobantes = [comprobante(383_062)]
     const { data } = await getControlRecibos()
 
     const c1 = data!.pagos.find(p => p.cobro_id === 'c1')!
@@ -393,6 +408,7 @@ describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se a
 
   it('el ABONO no aparece como recibo: un mixto con abono y RC-3 lista solo el RC-3', async () => {
     reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    comprobantes = [comprobante(383_062)]
     cobros[0].siigo_recibo = [
       { numero: 'RC-1-90', archivo_url: null, componente: 'honorario', tipo: 'abono', factura: { numero: 'FV-2-540', siigo_id: 'x' } },
       { numero: 'RC-3-12', archivo_url: 'https://drive/rc3', componente: 'pasante' },
@@ -406,6 +422,7 @@ describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se a
 
   it('con el abono hecho y la tarifa sin recibo, sigue pendiente y ofrece EMITIR (no «completar»)', async () => {
     reparto[0] = { cobro_id: 'c1', a_tramo1: 318_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    comprobantes = [comprobante(383_062)]
     cobros[0].siigo_recibo = [
       { numero: 'RC-1-90', archivo_url: null, componente: 'honorario', tipo: 'abono', factura: { numero: 'FV-2-540', siigo_id: 'x' } },
     ]
@@ -441,6 +458,7 @@ describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se a
 
   it('un «a mano» del honorario va como AVISO en la fila del RC-3, que se sigue pudiendo emitir', async () => {
     reparto[0] = { cobro_id: 'c1', a_tramo1: 268_750, a_tramo2: 0, a_tarifa: 383_062, excedente: 0 }
+    comprobantes = [comprobante(383_062)]
     cobros[0].siigo_recibo = [{
       componente: 'honorario', abono_a_mano: { motivo: 'retencion', detalle: '…' }, valor: 268_750, at: '', por: null,
     }]
@@ -487,6 +505,73 @@ describe('getControlRecibos — el panel es de la tarifa UPME; el honorario se a
     expect(c1.estado).toBe('pendiente')
     expect(c1.valor_upme).toBeNull()
     expect(c1.faltantes).toEqual(['el reparto del pago (cuánto es tarifa UPME)'])
+  })
+})
+
+/**
+ * SOE-029 (Mauricio, 2026-10-26: «que salga del comprobante UPME»): el RC-3 es UNO por
+ * negocio, sale por `valor_pagado` del comprobante menos lo ya emitido, y la fila muestra
+ * la misma cifra que el servidor va a emitir (`planRc3DelNegocio`).
+ */
+describe('getControlRecibos — el RC-3 sale del comprobante UPME, uno por negocio', () => {
+  beforeEach(() => {
+    cobros = [
+      { id: 'a', negocio_id: 'neg-1', monto: 450_045, fecha: '2026-09-10', siigo_recibo: null, recibo_no_aplica: null },
+      { id: 'b', negocio_id: 'neg-1', monto: 701_767, fecha: '2026-09-20', siigo_recibo: null, recibo_no_aplica: null },
+    ]
+    reparto = [
+      { cobro_id: 'a', a_tramo1: 450_000, a_tramo2: 0, a_tarifa: 45, excedente: 0 },
+      { cobro_id: 'b', a_tramo1: 0, a_tramo2: 0, a_tarifa: 701_767, excedente: 0 },
+    ]
+    techos = [{ negocio_id: 'neg-1', techo_tarifa: 701_812 }]
+    comprobantes = [comprobante('701.812')]
+  })
+
+  it('V0633: dos pagos no salen en pedazos — uno lleva el RC-3 por el comprobante, el otro va en ese', async () => {
+    const { data } = await getControlRecibos()
+    const a = data!.pagos.find(p => p.cobro_id === 'a')!
+    const b = data!.pagos.find(p => p.cobro_id === 'b')!
+
+    expect(b.estado).toBe('pendiente')
+    expect(b.valor_upme).toBe(701_812)
+    expect(b.rc3).toEqual({ comprobante: 701_812, ya_acusado: 0 })
+    expect(a.estado).toBe('no_aplica')
+    expect(a.valor_upme).toBeNull()
+    expect(a.no_aplica_motivo).toContain('va en el RC-3 del negocio')
+    expect(data!.totales.pendientes).toBe(1)
+    expect(data!.totales.valor_pendiente).toBe(701_812)
+  })
+
+  it('V0572: el comprobante difiere de la tarifa confirmada — manda el comprobante', async () => {
+    cobros = [cobros[1]]
+    reparto = [{ cobro_id: 'b', a_tramo1: 0, a_tramo2: 0, a_tarifa: 978_870, excedente: 0 }]
+    techos = [{ negocio_id: 'neg-1', techo_tarifa: 978_870 }]
+    comprobantes = [comprobante(978_707)]
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos[0].valor_upme).toBe(978_707)
+  })
+
+  it('con un RC-3 parcial ya emitido, la fila ofrece solo lo que falta del comprobante', async () => {
+    cobros[0].siigo_recibo = [{ numero: 'RC-3-20', archivo_url: null, componente: 'pasante', valor: 45 }]
+    const { data } = await getControlRecibos()
+
+    const b = data!.pagos.find(p => p.cobro_id === 'b')!
+    expect(b.valor_upme).toBe(701_767)
+    expect(b.rc3).toEqual({ comprobante: 701_812, ya_acusado: 45 })
+    expect(data!.pagos.find(p => p.cobro_id === 'a')!.estado).toBe('con_recibo')
+  })
+
+  it('sin valor en el comprobante, el pago queda pendiente y FRENADO: no cae a la tarifa', async () => {
+    comprobantes = [{ negocio_id: 'neg-1', data: { campos: {} } }]
+    const { data } = await getControlRecibos()
+
+    const b = data!.pagos.find(p => p.cobro_id === 'b')!
+    expect(b.estado).toBe('pendiente')
+    expect(b.valor_upme).toBeNull()
+    expect(b.faltantes).toEqual(['el valor del comprobante de pago UPME (revisa el bloque del comprobante en el negocio)'])
+    expect(data!.totales.emitibles).toBe(0)
+    expect(data!.totales.valor_pendiente).toBe(0)
   })
 })
 
