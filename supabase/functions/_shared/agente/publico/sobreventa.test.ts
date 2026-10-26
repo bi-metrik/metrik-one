@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { frasesDeSobreventa } from './sobreventa'
 import { preciosSinHerramienta } from './precios'
 import { condicionesVigentes, experiencias, zonaDe } from './catalogo'
-import { FIJAS_DEL_MODELO, RF_PRECIO_AUTORIZADO, dominioPublico, fichaParaModelo, lineaPreferenciaMesa } from './dominio'
+import { FIJAS_DEL_MODELO, RF_PRECIO_AUTORIZADO, TOPE_VER_CATALOGO, dominioPublico, fichaParaModelo, lineaPreferenciaMesa } from './dominio'
 import { reglamentoSabor } from './escenario'
 import { sistemaPublico } from './prompt'
 import { REGLAMENTO_SABOR } from './reglamento-sabor'
-import { conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla } from './arnes/fichas-prueba'
+import { cataYPelicula, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata, tresExperiencias } from './arnes/fichas-prueba'
 import { recortarResultado, tokens } from '../contexto'
 import type { ContextoDominio } from '../tipos'
 import type { FilaPublica } from './tipos'
@@ -76,6 +76,23 @@ describe('ficha de función ampliada (§8.3)', () => {
       expect(tokens(JSON.stringify(d))).toBeLessThan(400)
     }
   })
+  it('ver_catalogo entra completo con dos y tres experiencias vigentes (su tope propio; el general de 400 las cortaba)', async () => {
+    for (const [fichas, n] of [[soloCata(REGLAMENTO_SABOR), 1], [cataYPelicula(REGLAMENTO_SABOR), 2], [tresExperiencias(REGLAMENTO_SABOR), 3]] as const) {
+      const d = dominioPublico({ reglamento: await reglamentoSabor([...fichas]), ahoraMs: () => AHORA, vars: {} })
+      const r = await d.leer('ver_catalogo', {}, ctx())
+      const datos = r.datos as { experiencias: unknown[] }
+      expect(datos.experiencias).toHaveLength(n)
+      expect(d.topesResultado?.ver_catalogo).toBe(TOPE_VER_CATALOGO)
+      expect(recortarResultado(datos, d.topesResultado?.ver_catalogo)).toBe(datos)
+      if (n > 1) expect(recortarResultado(datos)).not.toBe(datos)
+    }
+  })
+  it('la cata sola no trae nada de cine al modelo', async () => {
+    const d = dominioPublico({ reglamento: await reglamentoSabor(soloCata(REGLAMENTO_SABOR)), ahoraMs: () => AHORA, vars: {} })
+    expect(JSON.stringify((await d.leer('ver_catalogo', {}, ctx())).datos)).not.toMatch(/pel[ií]cula|\bcine\b|proyecci|pantalla/i)
+    const fs = (await d.leer('ver_funciones', { experiencia: 'ejemplo-cata-1' }, ctx())).datos as { funciones: unknown[] }
+    expect(fs.funciones).toHaveLength(2)
+  })
   it('la guarda de precios acepta montos de condiciones y recargos devueltos, y frena la condición vencida', async () => {
     const r = await reglamentoSabor(conZonaYMesaPedida(conDosCondiciones(REGLAMENTO_SABOR)))
     const e = experiencias(r).find((x) => x.id === 'ejemplo-cena-1')!
@@ -91,7 +108,7 @@ describe('dominio: reglas, mesa y resumen (§8.3, §8.4, §8.5)', () => {
     const d = dominioPublico({ reglamento: await reglamentoSabor(), ahoraMs: () => AHORA, vars: {} })
     const texto = async (clave: string) => String(((await d.leer('consultar_reglas', { clave }, ctx())).datos as { politica?: string }).politica)
     expect(await texto('parqueadero')).toMatch(/no tiene parqueadero.*bahía sin vigilancia.*no responde.*unas cuadras/)
-    expect(await texto('ninos')).toMatch(/Depende de la película.*menores de 6 años no entran a ninguna/)
+    expect(await texto('ninos')).toMatch(/Depende de la experiencia.*menores de 6 años no entran a ninguna/)
     expect(await texto('grupos')).toMatch(/5 o más.*guarda una mesa.*persona del equipo.*Desde 12 personas.*privada en otro horario/)
   })
   it('consultar_reglas: clave sin ficha devuelve sin_dato; la duda abierta dice rf.duda_abierta', async () => {

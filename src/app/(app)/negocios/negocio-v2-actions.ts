@@ -209,6 +209,7 @@ import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-
 import { autorizacionEstaPendiente, faltaAutorizacionDelNegocio, lineaExigeAutorizacion, MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import type { QuienAsigno } from './[id]/responsables-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -383,7 +384,7 @@ export type NegocioDetalle = {
     segmento: string | null
   } | null
   /** Multi-responsable (fuente de verdad: negocio_responsables N:M). `rol` = área del responsable. */
-  responsables: Array<{ id: string; full_name: string; rol: string | null }>
+  responsables: Array<{ id: string; full_name: string; rol: string | null; asignacion?: QuienAsigno }>
   /**
    * Recaudo pendiente para pasar a operaciones. Presente (no null) solo cuando la
    * etapa actual tiene el gate `saldo:handoff` (ej. Documentación). El bloque de
@@ -1226,6 +1227,51 @@ export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
 
 // ── Detalle de un negocio ─────────────────────────────────────────────────────
 
+/**
+ * Quién asignó a cada responsable y cómo (`assigned_by`, `asignado_origen`, `asignado_etapa_id`; migración
+ * 20261026090000), por `staff_id`. Lectura APARTE de la de los responsables a propósito: si la columna todavía no existe
+ * o la lectura falla, el detalle sigue mostrando a los responsables, solo sin la línea de quién los asignó.
+ * El nombre del asignador sale del staff de ESTE workspace cuyo `profile_id` es `assigned_by` (el UNIQUE de
+ * `staff.profile_id` es global: sin el filtro, un platform_admin saldría con su staff de otro workspace).
+ */
+async function leerAsignacionesResponsables(
+  supabase: unknown, negocioId: string, workspaceId: string,
+): Promise<Map<string, QuienAsigno>> {
+  const out = new Map<string, QuienAsigno>()
+  const { data, error } = await db(supabase)
+    .from('negocio_responsables')
+    .select('staff_id, assigned_at, assigned_by, asignado_origen, etapas_negocio(nombre), staff!negocio_responsables_staff_id_fkey(profile_id)')
+    .eq('negocio_id', negocioId)
+  if (error) {
+    console.error('[negocio] sin quién asignó a los responsables:', error.message)
+    return out
+  }
+  type Fila = {
+    staff_id: string; assigned_at: string | null; assigned_by: string | null; asignado_origen: string | null
+    etapas_negocio: { nombre: string | null } | null; staff: { profile_id: string | null } | null
+  }
+  const filas = (data ?? []) as Fila[]
+  const perfiles = [...new Set(filas.map((f) => f.assigned_by).filter((x): x is string => !!x))]
+  const nombres = new Map<string, string>()
+  if (perfiles.length > 0) {
+    const { data: st } = await db(supabase).from('staff').select('profile_id, full_name')
+      .eq('workspace_id', workspaceId).in('profile_id', perfiles)
+    for (const x of (st ?? []) as Array<{ profile_id: string; full_name: string | null }>) {
+      if (x.full_name) nombres.set(x.profile_id, x.full_name)
+    }
+  }
+  for (const f of filas) {
+    out.set(f.staff_id, {
+      assigned_at: f.assigned_at,
+      origen: f.asignado_origen,
+      asignadoPor: f.assigned_by ? nombres.get(f.assigned_by) ?? null : null,
+      seAsigno: !!f.assigned_by && f.assigned_by === f.staff?.profile_id,
+      etapa: f.etapas_negocio?.nombre ?? null,
+    })
+  }
+  return out
+}
+
 async function getNegocioDetalle(id: string): Promise<{
   negocio: NegocioDetalle
   bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }>
@@ -1294,6 +1340,8 @@ async function getNegocioDetalle(id: string): Promise<{
   const responsables = ((respRows ?? []) as FilaResp[])
     .filter((r): r is FilaResp & { staff: { id: string; full_name: string } } => r.staff !== null)
     .map((r) => ({ id: r.staff.id, full_name: r.staff.full_name, rol: r.rol }))
+  const asignaciones = await leerAsignacionesResponsables(supabase, id, workspaceId)
+  const responsablesConAsignacion = responsables.map((r) => ({ ...r, ...(asignaciones.has(r.id) ? { asignacion: asignaciones.get(r.id)! } : {}) }))
 
   // Día en que este negocio se volvió venta, para el header: el del PRIMER cobro
   // imputado. Se lee de `v_venta_mes_comercial`, que es la definición canónica —la
@@ -1345,7 +1393,7 @@ async function getNegocioDetalle(id: string): Promise<{
   const negocioMetadata = (negocioRaw.metadata ?? {}) as Record<string, unknown>
   const negocioTyped = {
     ...negocioRaw,
-    responsables,
+    responsables: responsablesConAsignacion,
     campanas_contacto: campanasContacto,
     fecha_venta: fechaVenta,
   } as unknown as NegocioDetalle

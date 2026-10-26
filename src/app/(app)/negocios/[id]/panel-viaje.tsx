@@ -1,10 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { ClipboardList, FileText, Plus, UserRound } from 'lucide-react'
 import { ESTADO_COTIZACION_CONFIG } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/cobros/format'
-import { fechaCortaBogota, type MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
+import { fechaCortaBogota, type FilaSolicitud, type MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
 import { totalParaLaLista, useTotalVivo } from '@/app/(app)/negocios/total-vivo'
 
 /**
@@ -18,7 +19,48 @@ function Fila({ label, children }: { label: string; children: React.ReactNode })
   return (
     <div className="flex items-baseline justify-between gap-3">
       <dt className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 flex-1 text-right text-xs">{children}</dd>
+      <dd className="min-w-0 flex-1 break-words text-right text-xs">{children}</dd>
+    </div>
+  )
+}
+
+/**
+ * Texto libre recortado a 3 líneas; al tocarlo se despliega completo, sin modal (a 375 px un párrafo de requisitos no
+ * cabe en una fila de dos columnas).
+ */
+function TextoDesplegable({ texto, className = '' }: { texto: string; className?: string }) {
+  const [abierto, setAbierto] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => setAbierto(a => !a)}
+      aria-expanded={abierto}
+      className={`block w-full whitespace-pre-line break-words text-left ${abierto ? '' : 'line-clamp-3'} ${className}`}
+    >
+      {texto}
+    </button>
+  )
+}
+
+/** Fila de texto libre: label arriba y el valor a todo el ancho. */
+function FilaLarga({ label, texto }: { label: string; texto: string }) {
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-xs">
+        <TextoDesplegable texto={texto} />
+      </dd>
+    </div>
+  )
+}
+
+function FilaDeLaSolicitud({ f }: { f: FilaSolicitud }) {
+  if (f.larga) return <FilaLarga label={f.label} texto={f.valor} />
+  if (!f.detalle) return <Fila label={f.label}>{f.valor}</Fila>
+  return (
+    <div>
+      <Fila label={f.label}>{f.valor}</Fila>
+      <TextoDesplegable texto={f.detalle} className="mt-0.5 text-[11px] text-muted-foreground" />
     </div>
   )
 }
@@ -35,8 +77,6 @@ function Encabezado({ icono, titulo }: { icono: React.ReactNode; titulo: string 
 export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNegocio; cotActualId: string | null }) {
   const s = viaje.solicitud
   const p = viaje.perfil
-  const destino = [s.destino, s.alcance?.toLowerCase()].filter(Boolean).join(' · ') || null
-  const fechas = [s.fechas, s.tipoDeFechas].filter(Boolean).join(' · ') || null
   // El total que el editor acaba de leer, si es más nuevo que el de la página (`total-vivo.tsx`).
   const totalVivo = useTotalVivo()
 
@@ -44,12 +84,9 @@ export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNego
     <>
       <section className="rounded-lg border border-border bg-card p-3" data-panel-solicitud>
         <Encabezado icono={<ClipboardList className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />} titulo="Solicitud" />
-        {destino || fechas || s.pasajeros || s.requisitos ? (
-          <dl className="space-y-1">
-            {destino && <Fila label="Destino">{destino}</Fila>}
-            {fechas && <Fila label="Fechas">{fechas}</Fila>}
-            {s.pasajeros && <Fila label="Pasajeros">{s.pasajeros}</Fila>}
-            {s.requisitos && <Fila label="Requisitos">{s.requisitos}</Fila>}
+        {s.filas.length > 0 ? (
+          <dl className="space-y-1.5">
+            {s.filas.map(f => <FilaDeLaSolicitud key={f.clave} f={f} />)}
           </dl>
         ) : (
           <p className="text-xs text-muted-foreground">El negocio todavía no tiene la solicitud del viaje.</p>
@@ -62,7 +99,8 @@ export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNego
           <dl className="space-y-1">
             {p.tipo && <Fila label="Tipo">{p.tipo}</Fila>}
             {p.conQuienViaja && <Fila label="Viaja con">{p.conQuienViaja}</Fila>}
-            {p.bolsillo && <Fila label="Bolsillo declarado">{p.bolsillo}</Fila>}
+            {/* Con presupuesto en la solicitud, el bolsillo sería el mismo dato dos veces. */}
+            {p.bolsillo && !s.tienePresupuesto && <Fila label="Bolsillo declarado">{p.bolsillo}</Fila>}
             {p.preferencias && <Fila label="Preferencias">{p.preferencias}</Fila>}
             {p.notas && <Fila label="Notas">{p.notas}</Fila>}
           </dl>
