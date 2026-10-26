@@ -24,6 +24,7 @@ import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
 import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
 import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
 import { noEsEsteProveedor } from '@/app/(app)/negocios/tarifas-proveedor-actions'
+import { asociarConHotel } from '@/app/(app)/negocios/por-pasos-actions'
 import { origenVigente } from '@/lib/cotizaciones/origen-tarifa'
 import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
 import type { CategoriaFoto } from '@/lib/fotos/categoria'
@@ -199,6 +200,7 @@ export default function TarjetaOpcion({
   actividad = null,
   porPasos = null,
   autorizador = null,
+  hotelesDelViaje = [],
 }: {
   itemId: string
   numero: number
@@ -238,6 +240,11 @@ export default function TarjetaOpcion({
    * 6: un solo montaje). Antes vivía en `respaldo` y una línea confirmada no lo veía nunca.
    */
   cambiarCosto?: ReactNode
+  /**
+   * Las opciones de hotel de la cotización, para «Va con el hotel» de un traslado (reunión del
+   * 2026-10-22, punto 5, `va-con-hotel.ts`). Solo por pasos; vacío, no se ofrece.
+   */
+  hotelesDelViaje?: { id: string; nombre: string }[]
   /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
   nota: ReactNode
   /** «Hotel en Providencia»: el bloque, como lo nombra la hoja del cliente. */
@@ -677,12 +684,25 @@ export default function TarjetaOpcion({
             onCambio={onCambio}
             autorizador={autorizador}
             apilable={porPasos !== null}
+            tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
+            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
           />
 
           {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
               «Usar tarifa de proveedor»; con él, «Cambiar el costo». */}
           {editable && cambiarCosto}
           {!confirmada && respaldo}
+
+          {/* Un traslado va con UNA opción de hotel o sirve para todas (reunión del 2026-10-22). */}
+          {esTraslado && porPasos !== null && hotelesDelViaje.length > 1 && (
+            <VaConHotel
+              itemId={itemId}
+              editable={editable}
+              hoteles={hotelesDelViaje}
+              actual={tarifa.vaConHotel ?? null}
+              onCambio={onCambio}
+            />
+          )}
 
           {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
@@ -1277,5 +1297,44 @@ function PideHabitacion({ itemId, texto, onCambio }: { itemId: string; texto: st
       </label>
       {rechazo && <p className="m-0 text-xs font-medium text-[#B3382C]">{rechazo}</p>}
     </div>
+  )
+}
+
+/**
+ * «Va con el hotel»: el traslado cuenta solo en las tarifas que llevan esa opción de hotel; en
+ * «Sirve para cualquier hotel» es general (una tarifa por zona, para las tres opciones).
+ */
+function VaConHotel({ itemId, editable, hoteles, actual, onCambio }: {
+  itemId: string
+  editable: boolean
+  hoteles: { id: string; nombre: string }[]
+  actual: string | null
+  onCambio: () => void
+}) {
+  const [isPending, startTransition] = useTransitionTolerante()
+  const vigente = actual && hoteles.some(h => h.id === actual) ? actual : ''
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-[13px]" data-va-con-hotel={vigente || 'general'}>
+      <span className="font-semibold">Va con</span>
+      <select
+        aria-label="Con qué hotel va este traslado"
+        value={vigente}
+        disabled={!editable || isPending}
+        onChange={e => {
+          const v = e.target.value || null
+          startTransition(async () => {
+            const r = await asociarConHotel(itemId, v)
+            if (!r.success) { toast.error(r.error); return }
+            toast.success(v ? 'El traslado va con ese hotel en las tarifas que lo llevan.' : 'El traslado sirve para cualquier hotel.')
+            onCambio()
+          })
+        }}
+        className="max-w-full rounded-lg border border-[#CFCAC0] bg-white px-2 py-1 text-[13px]"
+      >
+        <option value="">Cualquier hotel (general)</option>
+        {hoteles.map(h => <option key={h.id} value={h.id}>{h.nombre}</option>)}
+      </select>
+      <span className="text-xs text-[#6E6A62]">Cada tarifa toma el traslado de su hotel.</span>
+    </label>
   )
 }

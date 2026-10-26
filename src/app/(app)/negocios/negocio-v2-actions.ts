@@ -206,6 +206,7 @@ import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
 import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
+import { lineaExigeAutorizacion } from '@/lib/autorizacion-datos/envio'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
@@ -381,8 +382,8 @@ export type NegocioDetalle = {
     rol: string | null
     segmento: string | null
   } | null
-  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
-  responsables: Array<{ id: string; full_name: string }>
+  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). `rol` = área del responsable. */
+  responsables: Array<{ id: string; full_name: string; rol: string | null }>
   /**
    * Recaudo pendiente para pasar a operaciones. Presente (no null) solo cuando la
    * etapa actual tiene el gate `saldo:handoff` (ej. Documentación). El bloque de
@@ -1231,6 +1232,8 @@ async function getNegocioDetalle(id: string): Promise<{
   etapasLinea: EtapaNegocio[]
   etapasNoAplican: EtapaNoAplica[]
   blockIdByConfigId: Record<string, string>
+  /** La línea declara el gate `autorizacion_datos` en alguna etapa (`autorizacion-datos/envio.ts`). */
+  exigeAutorizacionDatos: boolean
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -1283,12 +1286,14 @@ async function getNegocioDetalle(id: string): Promise<{
   // Responsables (multi) desde negocio_responsables (N:M) — fuente de verdad.
   const { data: respRows } = await db(supabase)
     .from('negocio_responsables')
-    .select('staff_id, assigned_at, staff!negocio_responsables_staff_id_fkey(id, full_name)')
+    .select('staff_id, assigned_at, rol, staff!negocio_responsables_staff_id_fkey(id, full_name)')
     .eq('negocio_id', id)
     .order('assigned_at', { ascending: true })
-  const responsables = ((respRows ?? []) as Array<{ staff: { id: string; full_name: string } | null }>)
-    .map((r) => r.staff)
-    .filter((s): s is { id: string; full_name: string } => s !== null)
+  // `rol` ('comercial' | 'operaciones' | null) viaja para que el detalle diga el área.
+  type FilaResp = { rol: string | null; staff: { id: string; full_name: string } | null }
+  const responsables = ((respRows ?? []) as FilaResp[])
+    .filter((r): r is FilaResp & { staff: { id: string; full_name: string } } => r.staff !== null)
+    .map((r) => ({ id: r.staff.id, full_name: r.staff.full_name, rol: r.rol }))
 
   // Día en que este negocio se volvió venta, para el header: el del PRIMER cobro
   // imputado. Se lee de `v_venta_mes_comercial`, que es la definición canónica —la
@@ -1347,6 +1352,7 @@ async function getNegocioDetalle(id: string): Promise<{
 
   // Cargar etapas de la línea para la barra de progreso
   let etapasLinea: EtapaNegocio[] = []
+  let exigeAutorizacionDatos = false
   let etapasNoAplican: EtapaNoAplica[] = []
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
@@ -1371,6 +1377,7 @@ async function getNegocioDetalle(id: string): Promise<{
       negocioTyped.etapa_actual_id ?? null,
     )
 
+    exigeAutorizacionDatos = lineaExigeAutorizacion((etapas ?? []) as { config_extra?: unknown }[])
     etapasLinea = ((etapas ?? []) as Record<string, unknown>[]).map(e => ({
       id: e.id as string,
       linea_id: e.linea_id as string,
@@ -2155,6 +2162,7 @@ async function getNegocioDetalle(id: string): Promise<{
     etapasLinea,
     etapasNoAplican,
     blockIdByConfigId: Object.fromEntries(blockIdByConfigId),
+    exigeAutorizacionDatos,
   }
 }
 
@@ -6692,6 +6700,11 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   etapasNoAplican: EtapaNoAplica[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
   datosPorSlug: Record<string, Record<string, unknown>>
+  /**
+   * La línea pide la autorización de datos y el cliente todavía no la dio: se cotiza, pero no se
+   * envía (reunión del 2026-10-22). La ficha lo dice arriba.
+   */
+  autorizacionPendiente?: boolean
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -8381,6 +8394,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (errCierre) console.error('[getNegocioDetalle] no se pudieron cerrar los gates heredados ya llenos:', errCierre)
   }
 
+  let autorizacionPendiente = false
   // ── Autorización, ficha y servicios: el estado lo dice el gate, no la fila ──
   // Su trabajo no se guarda en el bloque (vive en el contacto o en `negocio_servicios`), así que
   // nadie marcaba `negocio_bloques.estado`: la autorización firmada seguía en «Pendiente»
@@ -8410,6 +8424,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         console.error('[getNegocioDetalle] no se pudo derivar el estado de los bloques:', e)
         return new Map<string, EstadoBloqueDerivado | null>()
       })
+      autorizacionPendiente = candidatos.some(c => c.tipo === 'autorizacion' && derivados.get(c.instanciaId) === 'pendiente')
       const { completar, reabrir } = cambiosDeEstado(candidatos.map(c => ({ ...c, derivado: derivados.get(c.instanciaId) ?? null })))
       for (const c of candidatos) {
         const estado = derivados.get(c.instanciaId)
@@ -8436,6 +8451,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     datosClave: await datosClavePromesa,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
+    autorizacionPendiente: base.exigeAutorizacionDatos && autorizacionPendiente,
     etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente

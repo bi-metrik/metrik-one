@@ -33,9 +33,11 @@
 
 import {
   itemsDelItinerario,
+  itemsFijos,
   ranurasConAlternativas,
   type ItemConGrupo,
 } from './itinerarios'
+import { cabeConLosHoteles, hotelesAsociados, opcionParaLosHoteles } from './va-con-hotel'
 import { claveTarifa, esRecomendada, NOMBRES_TARIFA, recomendadaDe, type NombreTarifa } from './tarifas'
 
 /** Una tarifa como la ve el plan. */
@@ -194,13 +196,20 @@ export function planDeTarifas(args: {
   const todosLosCandidatos = new Set(ranuras.flatMap(r => r.candidatos))
   const candidatosAntes = new Set([...ranurasAntes.values()].flatMap(r => r.candidatos))
   const seleccionFinal = new Map<Trabajo, string[]>()
+  // El traslado que va con un hotel (reunión del 2026-10-22, `va-con-hotel.ts`). Sin asociaciones,
+  // vacío: el plan es exactamente el de siempre.
+  const asociados = hotelesAsociados(despues.items)
+  const asociadosAntes = hotelesAsociados(antes.items)
+  const fijosGenerales = asociados.size === 0 ? [] : itemsFijos(despues.items).filter(id => !asociados.has(id))
   for (const t of trabajo) {
     const elegidas: string[] = []
+    /** Lo que eligió el plan en cada servicio, y si fue la propuesta de ONE (no una elección). */
+    const porServicio: { r: (typeof ranuras)[number]; elegida: string; propuesta: boolean }[] = []
     for (const r of ranuras) {
       const propuestaAhora = propuestaDeOne(t.nombre, r.candidatos, costoDe)
       const previa = ranurasAntes.get(r.grupo)
       // Un servicio que antes no tenía opciones (o no existía): no había nada escogido. Propone ONE.
-      if (!previa) { elegidas.push(propuestaAhora); continue }
+      if (!previa) { elegidas.push(propuestaAhora); porServicio.push({ r, elegida: propuestaAhora, propuesta: true }); continue }
       const candAntes = previa.candidatos
       const cambiaron = candAntes.length !== r.candidatos.length || candAntes.some(id => !r.candidatos.includes(id))
       // Lo que cuenta: lo que la tarifa nombra ahora. Si no nombra nada: si nombraba una opción
@@ -214,16 +223,34 @@ export function planDeTarifas(args: {
         if (contaba !== null && !r.candidatos.includes(contaba)) contaba = null
       }
       let elegida: string
+      let propuesta = false
       if (contaba === null) {
         elegida = propuestaAhora
+        propuesta = true
       } else if (cambiaron && propuestaDeOne(t.nombre, candAntes, costoAntesDe) === contaba) {
         // El servicio ganó o perdió opciones y la tarifa seguía con la propuesta de ONE: se
         // rehace. Si la asesora ya había escogido otra, se respeta.
         elegida = propuestaAhora
+        propuesta = true
       } else {
         elegida = contaba
       }
       elegidas.push(elegida)
+      porServicio.push({ r, elegida, propuesta })
+    }
+    // Con traslados que van con un hotel: en cada servicio que no se cruza, el de los hoteles de
+    // ESTA tarifa. Se cambia lo propuesto por ONE, lo que ya no cabe (cambió el hotel) y lo de un
+    // servicio cuyas asociaciones cambiaron; una elección de la asesora que cabe, se respeta.
+    if (asociados.size > 0) {
+      const hoteles = new Set([...fijosGenerales, ...porServicio.filter(x => x.r.combinable).map(x => x.elegida)])
+      porServicio.forEach((x, i) => {
+        if (x.r.combinable || !x.r.candidatos.some(id => asociados.has(id))) return
+        const cambioLaAsociacion = x.r.candidatos.some(id => asociados.get(id) !== asociadosAntes.get(id))
+        const cabe = cabeConLosHoteles(x.elegida, asociados, hoteles)
+        if (cabe && !x.propuesta && !cambioLaAsociacion) return
+        const suya = opcionParaLosHoteles(x.r.candidatos, asociados, hoteles)
+        if (suya) elegidas[i] = suya
+      })
     }
     // Lo nombrado fuera de los servicios con opciones se conserva (un servicio de una sola
     // opción, o una línea que ya no está): no cambia lo que suma y no hay por qué borrarlo.

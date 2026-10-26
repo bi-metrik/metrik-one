@@ -21,6 +21,7 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
+import { EMBED_NEGOCIO_ENVIO, motivoAutorizacionDeCotizacion, motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
@@ -96,6 +97,11 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
 export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // La autorización de datos del cliente frena ENVIAR (y aprobar), no armar la cotización
+  // (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea declara el gate.
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId })
+  if (motivoDatos) return { success: false as const, error: motivoDatos }
 
   // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
   // 2026-09-22). Antes del margen: con el precio de otros pasajeros, el margen no dice nada.
@@ -217,6 +223,8 @@ export async function aceptarCotizacionNegocio(
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
+  // La autorización de datos del cliente frena ENVIAR (y aprobar), no armar la cotización
+  // (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea declara el gate.
   // Desde borrador, «Aprobar» se salta el envío (`skip_enviar`): la misma regla que
   // «Enviar». Una que ya salió (`enviada`) se aprueba igual: registra lo que el cliente
   // aceptó.
@@ -230,14 +238,25 @@ export async function aceptarCotizacionNegocio(
   })
   if (motivo) return { success: false as const, error: motivo }
 
-  // Obtener valor_total y estado de la cotización
-  const { data: cot, error: cotErr } = await supabase
+  // Obtener valor_total y estado de la cotización, con el negocio y las etapas de su línea en la
+  // MISMA ida: la autorización de datos del cliente frena aprobar, como enviar (reunión del
+  // 2026-10-22, `autorizacion-datos/envio.ts`). Si el embebido falla, la lectura de siempre y la
+  // autorización por separado.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const conNegocio = await (supabase as any)
     .from('cotizaciones')
-    .select('valor_total, estado, consecutivo')
+    .select(`valor_total, estado, consecutivo, ${EMBED_NEGOCIO_ENVIO}`)
     .eq('id', cotizacionId)
     .single()
+  const { data: cot, error: cotErr } = conNegocio.error
+    ? await supabase.from('cotizaciones').select('valor_total, estado, consecutivo').eq('id', cotizacionId).single()
+    : conNegocio
 
   if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
+  const motivoDatos = conNegocio.error
+    ? await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId })
+    : await motivoAutorizacionDeCotizacion(supabase, { workspaceId, negocioId, negocio: (cot as { negocio_envio?: unknown }).negocio_envio })
+  if (motivoDatos) return { success: false as const, error: motivoDatos }
   const estadoCot = (cot as { estado: string }).estado
   if (estadoCot !== 'enviada' && estadoCot !== 'borrador') {
     return { success: false as const, error: 'Solo se pueden aprobar cotizaciones en borrador o enviadas' }

@@ -41,6 +41,7 @@ import {
   crucesQueSeAvanzan,
 } from '@/lib/negocios/cruces-avance'
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
+import { ordenarResponsables, textoResponsable, type ResponsableConRol } from './responsables-rol'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { RecaudoCambiadoBanner, type AvisoRecaudoVista } from './recaudo-cambiado-banner'
@@ -359,7 +360,7 @@ function ResponsableSelector({
   canEdit,
 }: {
   negocioId: string
-  responsables: Array<{ id: string; full_name: string }>
+  responsables: ResponsableConRol[]
   staffList: Array<{ id: string; full_name: string }>
   canEdit: boolean
 }) {
@@ -426,11 +427,8 @@ function ResponsableSelector({
       .toUpperCase()
   }
 
-  // Truncate name for display
-  function truncName(name: string, max = 12): string {
-    if (name.length <= max) return name
-    return name.slice(0, max).trimEnd() + '...'
-  }
+  // Ficha: «Comercial · Tatiana Cortés» con el nombre completo. Comercial, luego operaciones, luego sin rol.
+  const ordenados = ordenarResponsables(responsables)
 
   // Solo se pueden agregar quienes no son ya responsables
   const asignadosIds = new Set(responsables.map(r => r.id))
@@ -442,13 +440,13 @@ function ResponsableSelector({
     // Read-only: chips de responsables (o nada)
     if (responsables.length === 0) return null
     return (
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
-        {responsables.map(r => (
-          <span key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+      <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+        {ordenados.map(r => (
+          <span key={r.id} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
               {getInitials(r.full_name)}
             </span>
-            <span className="text-xs text-foreground">{truncName(r.full_name)}</span>
+            <span className="min-w-0 break-words text-xs text-foreground">{textoResponsable(r)}</span>
           </span>
         ))}
       </div>
@@ -456,17 +454,17 @@ function ResponsableSelector({
   }
 
   return (
-    <div className="relative flex flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
-      {responsables.map(r => (
-        <div key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
+    <div className="relative flex min-w-0 flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
+      {ordenados.map(r => (
+        <div key={r.id} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
             {getInitials(r.full_name)}
           </span>
-          <span className="text-foreground">{truncName(r.full_name)}</span>
+          <span className="min-w-0 break-words text-foreground">{textoResponsable(r)}</span>
           <button
             onClick={e => handleRemove(e, r.id)}
             disabled={isPending}
-            className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground transition-colors disabled:opacity-60"
+            className="ml-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground transition-colors disabled:opacity-60"
             title="Quitar responsable"
           >
             <X className="h-3 w-3" />
@@ -2548,6 +2546,11 @@ interface Props {
   banner?: React.ReactNode
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
+  /**
+   * Falta la autorización de datos del cliente y la línea la pide (reunión del 2026-10-22). La
+   * ficha ya lo dice en `banner`; esto lo lee la página de la cotización para su lista de Revisar.
+   */
+  autorizacionPendiente?: boolean
   /**
    * Negocio de viaje (Trappvel): el viaje con su IATA en el encabezado y la solicitud, el
    * perfil y las cotizaciones abiertas en el panel. Ausente en toda otra línea (R6).

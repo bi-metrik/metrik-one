@@ -26,6 +26,14 @@ export interface Novedad {
 
 export const NOVEDADES: readonly Novedad[] = [
   {
+    id: 'valida-carga-masiva-tipo-documento',
+    fecha: '2026-10-23',
+    titulo: 'La carga masiva entiende el tipo de documento',
+    texto:
+      'En la columna tipo_documento ya puedes escribir «Cédula», «Pasaporte», «PP» o «PA»: Valida los lee como CC o PAS. Si un tipo no se reconoce, te avisamos antes de procesar el archivo, y esa fila no se consulta ni se cobra.',
+    producto: 'valida',
+  },
+  {
     id: 'valida-consultas-mas-seguras',
     fecha: '2026-10-21',
     titulo: 'Consultas más seguras',

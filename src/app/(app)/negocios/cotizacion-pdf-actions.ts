@@ -89,7 +89,7 @@ import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
 import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
-import { fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
+import { claveDeHotel, fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
 import type { OpcionalDelDocumento } from '@/lib/fotos/catalogo-propuesta'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
@@ -453,11 +453,21 @@ export async function generateCotizacionPDF(
     // que el PDF dejaria de generarse. Misma tolerancia que en duplicar.
     // Los rubros viajan con la línea para saber si el costo por pasajero confirmado sigue
     // siendo su costo: si alguien los editó después, el reparto ya no se imprime.
-    const { data: itemsData } = await supabase
+    // La ficha FIJADA en la línea (`items.proveedor_id`) viaja con ella, en la MISMA ida: es la
+    // llave de las fotos del hotel que muestra y guarda su tarjeta (reunión del 2026-10-22, punto
+    // 3). Si el embebido falla (relación ausente), la lectura de siempre: el PDF no se queda sin
+    // líneas por una foto.
+    // `items.proveedor_id` → `fotos_perfiles` no está en los tipos generados: sin tipar.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sinTipos = supabase as any
+    const conFicha = await sinTipos
       .from('items')
-      .select('*, rubros(*)')
+      .select('*, rubros(*), ficha:fotos_perfiles(tipo, clave)')
       .eq('cotizacion_id', cotizacionId)
       .order('orden')
+    const itemsData = conFicha.error
+      ? (await supabase.from('items').select('*, rubros(*)').eq('cotizacion_id', cotizacionId).order('orden')).data
+      : conFicha.data
     items = (itemsData ?? []) as unknown as ItemRow[]
   }
 
@@ -880,6 +890,8 @@ export async function generateCotizacionPDF(
       orden: i.orden ?? 0,
       dia_relativo: i.dia_relativo ?? null,
       entra_al_precio: i.entra_al_precio ?? null,
+      // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+      tarifa_pax: i.tarifa_pax,
     }))).length === 0
   const bloques = unaSolaManera ? null : bloquesLeidos
   const idsDeLaUnica = unaSolaManera ? new Set(bloquesLeidos![0].itemIds) : null
@@ -1033,6 +1045,8 @@ export async function generateCotizacionPDF(
       dia_relativo: i.dia_relativo ?? null,
       mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
       entra_al_precio: i.entra_al_precio ?? null,
+      // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+      tarifa_pax: i.tarifa_pax,
       es_ajuste: i.es_ajuste ?? false,
       orden: i.orden ?? 0,
     }))
@@ -1132,6 +1146,8 @@ export async function generateCotizacionPDF(
   let viajePDF: CotizacionPDFProps['viaje'] = null
   // Motor `html`: los traslados, trenes y actividades que @react-pdf no recibe (pendiente del PR 1).
   let serviciosDoc: ServicioDelDocumento[] = []
+  /** Llave del hotel en el documento → llave de la ficha fijada en su línea (`catalogo-propuesta.ts`). */
+  const fichasDeHotel = new Map<string, string>()
   // Motor `html`: la ciudad y el día de cada plan opcional, para ponerlo en los días libres.
   let lugaresOpcionalesDoc: LugarDeOpcional[] = []
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
@@ -1199,6 +1215,15 @@ export async function generateCotizacionPDF(
       hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
+    // La ficha fijada en cada línea de hotel: sus fotos son las que la tarjeta muestra y guarda.
+    for (const i of itemPorId.values()) {
+      const ficha = (i as { ficha?: { tipo?: unknown; clave?: unknown } | null }).ficha
+      if (!ficha || ficha.tipo !== 'hotel' || typeof ficha.clave !== 'string' || !ficha.clave) continue
+      for (const h of hotelesDeItems([paraLecturaDe(i)])) {
+        const k = claveDeHotel(h)
+        if (k && !fichasDeHotel.has(k)) fichasDeHotel.set(k, ficha.clave)
+      }
+    }
     // Las fotos de la biblioteca (`foto-hotel-documento.ts`): la del perfil del hotel manda; la vieja
     // de la opción solo si el perfil no tiene una imprimible. Con @react-pdf, además, cada plan
     // opcional con foto en su perfil la lleva (el motor html las pone él mismo, con sus extras).
@@ -1206,7 +1231,7 @@ export async function generateCotizacionPDF(
     const opcionalesConFoto = motorHtml ? [] : opcionalesDoc
     if (plantillaUsaFotosDeCiudad(templateSlug) && (hotelesDelDocumento.length > 0 || opcionalesConFoto.length > 0)) {
       const enBiblioteca = tienePropuestaHtml(templateSlug) && workspaceId
-        ? await (await import('@/lib/fotos/catalogo-propuesta')).fotosDeBibliotecaDelDocumento(supabase, workspaceId, hotelesDelDocumento, opcionalesConFoto).catch(() => null)
+        ? await (await import('@/lib/fotos/catalogo-propuesta')).fotosDeBibliotecaDelDocumento(supabase, workspaceId, hotelesDelDocumento, opcionalesConFoto, fichasDeHotel).catch(() => null)
         : null
       if (hotelesDelDocumento.length > 0) {
         hotelesDelDocumento = await fotosDeHotelesDelDocumento(hotelesDelDocumento, {
@@ -1387,6 +1412,7 @@ export async function generateCotizacionPDF(
         servicios: serviciosDoc,
         lugaresDeOpcionales: lugaresOpcionalesDoc,
         opcionales: opcionalesDoc,
+        fichasDeHotel,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         staffId: staffId ?? null,
         workspaceId,
@@ -1491,6 +1517,8 @@ async function propuestaConMotorHtml(
     lugaresDeOpcionales: LugarDeOpcional[]
     /** Cada plan opcional con su ciudad: la llave de su foto en la biblioteca. */
     opcionales: OpcionalDelDocumento[]
+    /** La ficha fijada en la línea de cada hotel (`catalogo-propuesta.ts`). */
+    fichasDeHotel?: ReadonlyMap<string, string>
     documentoCliente: unknown
     staffId: string | null
     workspaceId: string
@@ -1511,7 +1539,7 @@ async function propuestaConMotorHtml(
   // La biblioteca de fotos del espacio: ciudades sin foto en el banco, el perfil de cada hotel y
   // de cada plan opcional (por su llave o un alias). Sin filas o sin la migración, `null`: como antes.
   const { catalogoParaLaPropuesta } = await import('@/lib/fotos/catalogo-propuesta')
-  const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props, e.opcionales).catch(() => null)
+  const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props, e.opcionales, e.fichasDeHotel ?? new Map()).catch(() => null)
   const { pdfDePropuestaHtml } = await import('@/lib/pdf/html/propuesta-html')
   const { pdf, medidas } = await pdfDePropuestaHtml(
     {

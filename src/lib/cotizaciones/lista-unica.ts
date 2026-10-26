@@ -38,6 +38,11 @@ export interface ListaUnica {
 }
 
 export interface EntradaDeLista {
+  /**
+   * El cliente no ha autorizado sus datos (reunión del 2026-10-22, `autorizacion-datos/envio.ts`):
+   * la cotización se arma, pero no se envía. Es lo primero que rechaza el servidor.
+   */
+  autorizacionDatos?: string | null
   /** P12 · las opciones que van al cliente sin un precio por pasajero. */
   sinPrecio: readonly OpcionSinPrecio[]
   /** El texto de `motivoParaNoEnviar` (capturas de otros pasajeros) y la primera línea que lo causa. */
@@ -79,8 +84,9 @@ export const LISTA_VACIA = 'Nada impide enviar y no hay nada por revisar.'
 
 export function listaUnica(e: EntradaDeLista): ListaUnica {
   const impide: RenglonDeLista[] = []
-  // El orden del servidor: `enviarPorPasos` (P12), y luego `enviarCotizacion` (capturas,
-  // Recomendada, falta un costo, margen).
+  // El orden del servidor: `enviarPorPasos` (autorización de datos, P12), y luego
+  // `enviarCotizacion` (capturas, Recomendada, falta un costo, margen).
+  if (e.autorizacionDatos) impide.push({ clave: 'autorizacion-datos', texto: e.autorizacionDatos, ir: null })
   const p12 = motivoSinPrecioPorPasajero(e.sinPrecio)
   if (p12) impide.push({ clave: 'precio-por-pasajero', texto: p12, ir: e.sinPrecio[0] ? { a: 'opcion', itemId: e.sinPrecio[0].id } : null })
   if (e.capturas) impide.push({ clave: 'capturas', texto: e.capturas.motivo, ir: e.capturas.itemId ? { a: 'opcion', itemId: e.capturas.itemId } : null })

@@ -38,6 +38,10 @@ import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES 
 import { pctTexto } from '@/lib/cotizaciones/piso-salida'
 import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
+import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
+import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,6 +82,12 @@ export async function elegirOpcionEnTarifa(
   if (!ranura) return { success: false, error: 'Ese servicio no tiene opciones entre qué escoger.' }
   if (!ranura.candidatos.includes(itemId)) return { success: false, error: 'Esa opción no es de este servicio.' }
   const anterior = ranura.candidatos.find(id => cab.seleccion.includes(id)) ?? null
+  // El traslado que va con OTRA opción de hotel no cabe en esta tarifa (`va-con-hotel.ts`): el plan
+  // lo cambiaría solo por el de su hotel y la elección se perdería sin aviso.
+  const hotelDelTraslado = hotelesAsociados(antes.ctx.items).get(itemId)
+  if (hotelDelTraslado && !itemsDelItinerario(antes.ctx.items, cab.seleccion).includes(hotelDelTraslado)) {
+    return { success: false, error: 'Esa opción va con otro hotel, y en esta tarifa va otro. Cambia el hotel de la tarifa, o deja la opción como general en su tarjeta.' }
+  }
 
   if (anterior !== itemId) {
     const { error: errDel } = await supabase
@@ -359,6 +369,75 @@ export async function margenPorPasos(
 }
 
 /**
+ * «Va con el hotel…» de un traslado (reunión del 2026-10-22, punto 5, `va-con-hotel.ts`): la
+ * opción queda atada a UNA opción de hotel y cuenta solo en las tarifas que la llevan; `null` la
+ * deja general (sirve para cualquier hotel). Después, cada tarifa toma el traslado de su hotel.
+ */
+export async function asociarConHotel(
+  itemId: string,
+  hotelId: string | null,
+): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const de = await cotizacionDeItem(supabase, itemId)
+  if (!de) return { success: false, error: 'Opción no encontrada' }
+  const guard = await exigirPorPasos(supabase, de.cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, de.cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const item = antes.ctx.items.find(i => i.id === itemId)
+  if (!item) return { success: false, error: 'Opción no encontrada' }
+  if (resolverRanura(item.grupo ?? '')?.definicion.slug === 'hotel_detalle') return { success: false, error: 'Un hotel no va con otro hotel.' }
+  if (hotelId !== null) {
+    const hotel = antes.ctx.items.find(i => i.id === hotelId)
+    if (!hotel || resolverRanura(hotel.grupo ?? '')?.definicion.slug !== 'hotel_detalle') return { success: false, error: 'Esa opción de hotel ya no está en la cotización. Recarga.' }
+  }
+  const { data: fila, error: errLeer } = await supabase.from('items').select('tarifa_pax').eq('id', itemId).maybeSingle()
+  if (errLeer || !fila) return { success: false, error: 'No se pudo leer la opción. Vuelve a intentarlo.' }
+  const actual = leerTarifaPax(fila.tarifa_pax)
+  if ((actual.vaConHotel ?? null) === hotelId) return { success: true, valorTotal: null }
+  const siguiente = { ...actual, actualizadaEn: new Date().toISOString() }
+  if (hotelId === null) delete siguiente.vaConHotel
+  else siguiente.vaConHotel = hotelId
+  const { error: errUpd } = await supabase.from('items').update({ tarifa_pax: siguiente as never }).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId: de.cotizacionId, antes, staffId })
+  if (!c.success) return c
+  return { success: true, valorTotal: c.valorTotal }
+}
+
+/**
+ * «Que usen el margen de la cotización» (reunión del 2026-10-22, punto 2, `margen-propio.ts`): las
+ * opciones Netas con un margen propio escrito por una persona vuelven a heredar el de la
+ * cotización. Las Públicas, las de precio a mano y las del margen del proveedor no se tocan, aunque
+ * el navegador las mande: el servidor vuelve a decidir cuáles son.
+ */
+export async function margenDeLaCotizacionEnOpciones(
+  cotizacionId: string,
+  itemIds: string[],
+): Promise<ResultadoPorPasos<{ cambiadas: number; valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!Array.isArray(itemIds) || itemIds.length === 0 || itemIds.length > 200) return { success: false, error: 'No hay opciones que cambiar.' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const pedidas = new Set(itemIds.filter(id => typeof id === 'string'))
+  const propias = lineasConMargenPropio(
+    antes.ctx.items.filter(i => pedidas.has(i.id)),
+    Number(antes.ctx.params.margenPct) || 0,
+    antes.ctx.params.convencionMargen,
+  ).map(i => i.id)
+  if (propias.length === 0) return { success: false, error: 'Esas opciones ya usan el margen de la cotización.' }
+  const { error: errUpd } = await supabase.from('items').update({ margen_porcentaje: null }).eq('cotizacion_id', cotizacionId).in('id', propias)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return c
+  return { success: true, cambiadas: propias.length, valorTotal: c.valorTotal }
+}
+
+/**
  * «+ Otra opción» de un servicio: una opción vacía en ese servicio, para pegarle su pantallazo, y
  * las tres tarifas con la propuesta de ONE para él.
  */
@@ -617,12 +696,16 @@ export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ p
  * `canal = 'descargado'` es el «Sí, ya se la mandé» tras descargar el PDF (H33).
  */
 export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado'): Promise<ResultadoPorPasos> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
   const foto = await fotoDeTarifas(supabase, cotizacionId)
   if (!foto) return { success: false, error: 'Cotización no encontrada' }
+  // Primero la autorización de datos del cliente: armar sí, enviar no (reunión del 2026-10-22).
+  // Es lo primero que dice la lista única de Revisar.
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: foto.ctx.negocioId })
+  if (motivoDatos) return { success: false, error: motivoDatos }
   const vanAlCliente = foto.filas.filter(f => f.vaEnPropuesta)
   const ids = new Set(
     vanAlCliente.length > 0
