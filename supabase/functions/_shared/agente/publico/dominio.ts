@@ -42,6 +42,12 @@ export const RF_DUDA_ABIERTA = 'rf.duda_abierta';
 export const RF_PERSONA_POR_QUE = 'rf.persona_por_que';
 /** §8.8: ante «¿por qué ese precio?», «está muy caro» o «hazme un descuento», los precios son los autorizados. */
 export const RF_PRECIO_AUTORIZADO = 'rf.precio_autorizado';
+/**
+ * Tope del resultado de `ver_catalogo` (tokens del núcleo, 4 caracteres por token). Una experiencia ocupa ~250-300: con
+ * el tope general de 400, dos vigentes a la vez (una cata y una cena de película) se cortaban a la mitad. Medido el
+ * 2026-10-26: una 245-294, dos 521, tres 728. 1500 deja entrar completas unas cinco.
+ */
+export const TOPE_VER_CATALOGO = 1500;
 export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO, RF_PERSONA_POR_QUE, RF_PRECIO_AUTORIZADO] as const;
 
 /** Motivos que sí se repiten: la persona lo vuelve a pedir, o es otra reserva, o es urgente. */
@@ -207,6 +213,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
 
   return {
     bot: BOT_PUBLICO,
+    topesResultado: { ver_catalogo: TOPE_VER_CATALOGO },
     lecturas,
     acciones: ['reserva'],
     datosProponer: {

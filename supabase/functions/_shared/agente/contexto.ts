@@ -166,11 +166,11 @@ export function mensajeDelTurno(p: {
   ].join('\n\n');
 }
 
-/** Un resultado de herramienta recortado a su tope (400 tokens). */
-export function recortarResultado(v: unknown): unknown {
+/** Un resultado de herramienta recortado a su tope (400 tokens, o el que el dominio declare para esa lectura). */
+export function recortarResultado(v: unknown, tope: number = TOPES_BLOQUE.resultado): unknown {
   const s = JSON.stringify(v ?? null);
-  if (tokens(s) <= TOPES_BLOQUE.resultado) return v;
-  return { recortado: true, texto: s.slice(0, TOPES_BLOQUE.resultado * CARACTERES_POR_TOKEN - 20) };
+  if (tokens(s) <= tope) return v;
+  return { recortado: true, texto: s.slice(0, tope * CARACTERES_POR_TOKEN - 20) };
 }
 
 export function fechaBogota(ahoraMs: number): string {

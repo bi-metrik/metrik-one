@@ -258,6 +258,12 @@ export interface Dominio {
    * Sin la bandera (la bandeja) la propuesta sigue viva mientras la conversación no consulte otra cosa (`sobre`).
    */
   propuestaVenceConRespuesta?: boolean;
+  /**
+   * Tope en tokens del resultado de una lectura, por nombre, cuando no cabe en el de todas (`TOPES_BLOQUE.resultado`,
+   * 400). El asistente público lo sube para `ver_catalogo`: una ficha de experiencia ocupa ~250-300 y con dos vigentes
+   * a la vez el resultado se cortaba a la mitad (medido el 2026-10-26).
+   */
+  topesResultado?: Record<string, number>;
   /** Las herramientas de lectura del dominio. */
   lecturas: DeclaracionHerramienta[];
   /** Las acciones de `proponer`. */

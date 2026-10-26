@@ -344,7 +344,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
           r2 = { ok: false, datos: null, error: `No pude consultar ahora (${String(err).slice(0, 80)}). No digas que no existe: di que no pudiste revisar.` };
         }
         const reglas = fichasDeHerramienta(r, nombre);
-        const datos = recortarResultado(r2.datos);
+        const datos = recortarResultado(r2.datos, d.topesResultado?.[nombre]);
         traza.herramientas!.push({ nombre, args, ok: r2.ok, datos, ...(r2.privado !== undefined ? { privado: r2.privado } : {}), ...(r2.sobre !== undefined ? { sobre: r2.sobre } : {}), error: r2.error, ms: Math.round(deps.reloj() - ti) });
         // Lo que se leyó en este turno también respalda la propuesta del mismo turno.
         e.ctx.resultadosPrevios.push({ herramienta: nombre, args, datos: r2.datos, privado: r2.privado });
