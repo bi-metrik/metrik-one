@@ -3,6 +3,9 @@
 // ============================================================
 
 import { getMediaUrl, downloadMediaBinary } from './wa-media.ts';
+import { PROMPT_TRANSCRIPCION_LITERAL, pedidoTranscripcion, promptConPistas } from './transcripcion.ts';
+
+export { PROMPT_TRANSCRIPCION_LITERAL };
 
 // Sprint 2 (Yuto): default to Flash-Lite (3.3x cheaper audio input, still multimodal).
 // Override with GEMINI_AUDIO_MODEL env var for instant rollback to flash.
@@ -50,11 +53,12 @@ export interface OpcionesTranscripcion {
   maxOutputTokens?: number;
   /** Por defecto true: un corte devuelve error, no texto. */
   exigirFinCompleto?: boolean;
+  /**
+   * El bloque «Palabras que pueden aparecer» (spec 2026-10-26, §4.6), armado por `textoPistas` (`agente/pistas.ts`)
+   * con la base del workspace. Ausente o vacío = el prompt de siempre, sin un carácter de diferencia.
+   */
+  pistas?: string | null;
 }
-
-/** Prompt neutro: no presupone gastos ni ningun tema. */
-export const PROMPT_TRANSCRIPCION_LITERAL =
-  'Transcribe este audio de WhatsApp en espanol, palabra por palabra. Responde SOLO con la transcripcion textual, sin explicaciones, sin comillas, sin resumir y sin formato adicional. Si el audio es inaudible o vacio, responde INAUDIBLE.';
 
 /**
  * Download WhatsApp audio message and transcribe with Gemini.
@@ -122,32 +126,21 @@ async function geminiTranscribe(
 
   // Se queda en Gemini a propósito (migración a Claude Haiku 5.5, 2026-10-20): Haiku 5.5 no recibe audio, y no hay
   // otro proveedor de voz a texto aprobado. Por eso usa el fetch de siempre y no `fetchModelo` (_shared/llm-anthropic.ts).
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-
-  console.log(`[wa-transcribe] Calling Gemini with mime_type=${mimeType}, base64 length=${base64Audio.length}`);
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: opciones.prompt ?? 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.',
-            },
-            {
-              inline_data: { mime_type: mimeType, data: base64Audio },
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: opciones.maxOutputTokens ?? MAX_SALIDA_TRANSCRIPCION,
-      },
-    }),
+  // La llave va en la cabecera `x-goog-api-key` (2026-10-26), no en la URL: así no queda en ningún log de la URL.
+  const prompt = opciones.prompt ?? 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.';
+  const { url, init } = pedidoTranscripcion({
+    modelo: GEMINI_MODEL,
+    llave: apiKey,
+    prompt: promptConPistas(prompt, opciones.pistas),
+    mime: mimeType,
+    base64: base64Audio,
+    maxSalida: opciones.maxOutputTokens ?? MAX_SALIDA_TRANSCRIPCION,
+    temperatura: 0.1,
   });
+
+  console.log(`[wa-transcribe] Calling Gemini with mime_type=${mimeType}, base64 length=${base64Audio.length}${opciones.pistas ? ', con pistas' : ''}`);
+
+  const res = await fetch(url, init);
 
   if (!res.ok) {
     const errBody = await res.text();

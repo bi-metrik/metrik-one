@@ -32,6 +32,8 @@ import {
   alertaCaidaChatwoot, almacenChatwootSupabase, avisosPorCorreo, mensajeroChatwootApi, preciosSupabase, puertosEntradaSupabase,
 } from '../_shared/agente/publico/produccion.ts';
 import { transcribirAudio } from '../_shared/agente/publico/transcribir.ts';
+import { pistasSiEncendidas } from '../_shared/agente/pistas.ts';
+import { leerBasePistas } from '../_shared/agente/pistas-supabase.ts';
 import type { Modelo } from '../_shared/agente/tipos.ts';
 import type { SupabaseClient } from '../_shared/types.ts';
 
@@ -80,13 +82,22 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
   }
   const llaveAudio = Deno.env.get(c.audio.llaveEnv) ?? '';
   const llaveResend = Deno.env.get('RESEND_API_KEY') ?? '';
+  // Pistas para transcribir (spec 2026-10-26, §4.6), solo con `bot_conversacional.transcripcion.pistas = true` y una
+  // vez por atención. Aquí habla un cliente: van el equipo y lo que aporten las funciones del rol (la experiencia
+  // vigente, cuando entre el componedor #1285), nunca los otros clientes ni los negocios (`incluirClientes: false`).
+  let pistas: Promise<string | null> | null = null;
+  const pistasDeLaNota = () => pistas ??= pistasSiEncendidas(
+    c.transcripcion,
+    async () => ({ base: await leerBasePistas(supabase, a.workspace.id, { negocios: false }) }),
+    { incluirClientes: false },
+  );
   await atenderConversacion({
     modelo, reglamento, config: c,
     almacen: almacenChatwootSupabase(supabase),
     mensajero: mensajeroChatwootApi({ apiUrl: c.apiUrl, token }),
     transcriptor: {
-      transcribir: (x) => transcribirAudio(x, {
-        llave: llaveAudio, modelo: c.audio.modelo, maxBytes: c.audio.maxBytes,
+      transcribir: async (x) => transcribirAudio(x, {
+        llave: llaveAudio, modelo: c.audio.modelo, maxBytes: c.audio.maxBytes, pistas: await pistasDeLaNota(),
         ...(mismoHost(x.url, c.apiUrl) ? { cabecerasDescarga: { api_access_token: token } } : {}),
       }),
     },
