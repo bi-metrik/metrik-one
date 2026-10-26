@@ -14,7 +14,9 @@ import {
   TURNO_MS,
   TURNO_RECLAMO_S,
   TIMEOUT_VALIDA_LOTE_MS,
+  MAX_REINTENTOS_RITMO,
   claveIdempotenciaFila,
+  esperaRitmoMs,
   concurrenciaDelLote,
   filaSeConsulta,
   llamadaReintentable,
@@ -75,6 +77,8 @@ export type ResultadoFila =
   | { tipo: 'corte'; motivo: MotivoCorte }
   | { tipo: 'rechazo'; error: string }
   | { tipo: 'reintentar'; error: string }
+  /** Valida respondió 429 aun tras esperar: la fila volvió a la cola sin error; el corredor espera. */
+  | { tipo: 'ritmo'; esperaMs: number }
 
 export type ContextoTurno = {
   svc: Svc
@@ -260,6 +264,18 @@ export async function procesarFilaLote(ctx: ContextoTurno, fila: FilaLote): Prom
   if (llamadaReintentable(resultado)) {
     await dormir(ESPERA_REINTENTO_MS)
     resultado = await llamarValida(llave, input, opciones)
+  }
+  // 429: Valida no registró ni cobró. Se espera su Retry-After y se reintenta con la misma llave.
+  for (let i = 0; i < MAX_REINTENTOS_RITMO; i++) {
+    const espera = esperaRitmoMs(resultado)
+    if (espera === null) break
+    await dormir(espera)
+    resultado = await llamarValida(llave, input, opciones)
+  }
+  const esperaFinal = esperaRitmoMs(resultado)
+  if (esperaFinal !== null) {
+    await devolver(svc, fila)
+    return { tipo: 'ritmo', esperaMs: esperaFinal }
   }
 
   if (!resultado.ok) {
@@ -500,6 +516,11 @@ export async function correrTurno(
         // Una falla de la base a mitad de la fila: queda reclamada y vuelve cuando venza el reclamo.
         console.error(`[valida-lotes] ${lote.id} fila ${fila.posicion}:`, (e as Error)?.message ?? e)
         return
+      }
+      if (r.tipo === 'ritmo') {
+        // La fila volvió a la cola: este corredor baja el ritmo antes de tomar otra.
+        await (opciones.dormir ?? dormirReal)(r.esperaMs)
+        continue
       }
       if (r.tipo === 'corte') detener ??= { motivo: r.motivo, detalle: null }
       else if (r.tipo === 'rechazo') detener ??= { motivo: 'valida_rechazo', detalle: r.error }

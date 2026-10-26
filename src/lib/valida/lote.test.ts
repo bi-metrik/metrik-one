@@ -17,6 +17,9 @@ import {
   TURNO_MS,
   TURNO_RECLAMO_S,
   VALIDA_MAX_DURATION_S,
+  MAX_REINTENTOS_RITMO,
+  TOPE_ESPERA_RITMO_S,
+  esperaRitmoMs,
 } from './lote'
 
 describe('autorización del lote', () => {
@@ -116,8 +119,9 @@ describe('topes del cargue masivo frente al maxDuration de Valida', () => {
   })
 
   it('el reclamo de la fila cubre dos llamadas con su tope y la espera; el del turno, el turno y una fila en vuelo', () => {
-    expect(FILA_RECLAMO_S * 1000).toBeGreaterThanOrEqual(2 * TIMEOUT_VALIDA_LOTE_MS + 2_000)
-    expect(TURNO_RECLAMO_S * 1000).toBeGreaterThanOrEqual(TURNO_MS + 2 * TIMEOUT_VALIDA_LOTE_MS + 2_000)
+    const ritmo = MAX_REINTENTOS_RITMO * TOPE_ESPERA_RITMO_S * 1000
+    expect(FILA_RECLAMO_S * 1000).toBeGreaterThanOrEqual(2 * TIMEOUT_VALIDA_LOTE_MS + 2_000 + ritmo)
+    expect(TURNO_RECLAMO_S * 1000).toBeGreaterThanOrEqual(TURNO_MS + 2 * TIMEOUT_VALIDA_LOTE_MS + 2_000 + ritmo)
   })
 
   it('se reintenta un 5xx, un tope o un error de red (sin status); nunca un 4xx', () => {
@@ -143,5 +147,19 @@ describe('peso del archivo del cargue frente al tope de Vercel (4,5 MB por petic
     expect(errorTamanoArchivoLote(4.6 * MB)).toBe(
       'El archivo pesa 4,6 MB y el máximo por cargue es 4 MB. Deja solo la hoja con las columnas de la plantilla o divide el archivo en varios.',
     )
+  })
+})
+
+describe('429 de Valida (tope de ritmo)', () => {
+  it('espera lo que dice Retry-After, con tope de 20 s y 2 s si no lo trae', () => {
+    expect(esperaRitmoMs({ ok: false, status: 429, retryAfterS: 3 })).toBe(3_000)
+    expect(esperaRitmoMs({ ok: false, status: 429, retryAfterS: 0.2 })).toBe(1_000)
+    expect(esperaRitmoMs({ ok: false, status: 429, retryAfterS: 600 })).toBe(20_000)
+    expect(esperaRitmoMs({ ok: false, status: 429 })).toBe(2_000)
+  })
+  it('solo el 429', () => {
+    expect(esperaRitmoMs({ ok: false, status: 402, retryAfterS: 5 })).toBeNull()
+    expect(esperaRitmoMs({ ok: false, status: 503 })).toBeNull()
+    expect(esperaRitmoMs({ ok: true, status: 200 })).toBeNull()
   })
 })
