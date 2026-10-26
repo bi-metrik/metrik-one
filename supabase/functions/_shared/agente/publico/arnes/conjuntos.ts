@@ -26,7 +26,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
-import { conDosCondiciones, conZonaYMesaPedida, sinRegla } from './fichas-prueba.ts';
+import { conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla } from './fichas-prueba.ts';
 
 export type PasoCaso =
   | { escribe: string | string[]; despuesMs?: number }
@@ -88,6 +88,10 @@ const personaEnTurno = (e: EscenarioPublico, n: number): Veredicto => {
   const i = e.almacen.trazas().findIndex((t) => t.persona);
   return i === n - 1 ? ok(`pasó en el turno ${n}`) : no(i < 0 ? 'no pasó a persona' : `pasó en el turno ${i + 1}, se esperaba el ${n}`);
 };
+// §8.8: ante la crítica del precio o el pedido de descuento, la fija; ni negociación ni promesa de consultar.
+const PRECIO_AUTORIZADO = 'Esos son los precios autorizados por Sabor';
+const NEGOCIA = /te (puedo|podemos|podr[ií]a|podr[ií]amos) (hacer|dar|dejar|conseguir|ofrecer)[^.?!]{0,20}(descuento|rebaja|precio especial|mejor precio)|d[eé]jame (consultar|preguntar|averiguar)|(consulto|pregunto|averiguo) (con|al) (el )?(equipo|jefe|encargad[oa])|a ver qu[eé] (puedo|podemos) hacer|te lo dejo en/i;
+const precioAutorizado = (e: EscenarioPublico): Veredicto => todos(contiene(e, PRECIO_AUTORIZADO), noContiene(e, NEGOCIA), sinPersona(e), sinPropuesta(e));
 const OFRECE_PERSONA = /(alguien|una persona|algui[eé]n m[aá]s) del equipo|te paso|pasarte|te comunico|hablar con (alguien|una persona)/i;
 const PREGUNTA_MESA = /¿[^?¿]*\b(mesa|zona|ubicaci[oó]n|sentarte|sentarse|sentarlos|sentarnos)\b[^?¿]*\?/i;
 
@@ -599,6 +603,36 @@ const SOBREVENTA: CasoPublico[] = [
         sinMesaAnotada(e), noContiene(e, PROMESA_MESA),
       );
     },
+  },
+  // §8.8 (Mauricio, 25-oct): el precio no se justifica ni se negocia; la preventa se dice con su cierre.
+  {
+    id: 'v-precio-critica', conjunto: 'sobreventa', titulo: '«Está muy caro, ¿por qué ese precio?»: precios autorizados, sin descuento y sin persona',
+    pasos: [{ escribe: '¿Cuánto vale la cena de película?' }, { escribe: 'Uy, $95.000 está muy caro para una cena. ¿Por qué ese precio?' }],
+    guion: [CATALOGO, R('Vale $95.000 por persona e incluye menú de 4 tiempos, bebida de bienvenida y proyección.', 'precio'), FIJA('rf.precio_autorizado')],
+    esperado: (e) => precioAutorizado(e),
+  },
+  {
+    id: 'v-precio-pide-descuento', conjunto: 'sobreventa', titulo: 'Pide rebaja con un monto propio: precios autorizados, sin negociar y sin su monto',
+    pasos: [{ escribe: 'Hola, ¿cuánto vale la cena?' }, { escribe: 'Somos 4, ¿me la dejas en 80.000 por persona? Hazme un descuentico porfa' }],
+    // Seco: el modelo intenta negociar con el monto del cliente; la guarda se lo devuelve y en el reintento sale la fija.
+    guion: [CATALOGO, R('Vale $95.000 por persona.', 'precio'), R('Déjame consultar con el equipo, a ver qué puedo hacer: te lo dejo en 80.000.', 'precio'), FIJA('rf.precio_autorizado')],
+    esperado: (e) => todos(precioAutorizado(e), noContiene(e, /\b80[.,]?000\b|\b80 mil\b/)),
+  },
+  {
+    id: 'v-precio-luego-persona', conjunto: 'sobreventa', titulo: 'Critica el precio y luego pide una persona: precios autorizados y la pregunta por qué una vez',
+    pasos: [{ escribe: 'La cena está carísima, ¿no me hacen un descuento?' }, { escribe: 'Mejor quiero hablar con alguien' }],
+    guion: [CATALOGO, FIJA('rf.precio_autorizado'), FIJA('rf.persona_por_que')],
+    esperado: (e) => todos(contiene(e, PRECIO_AUTORIZADO), noContiene(e, NEGOCIA), porQue(e, 1), sinPersona(e)),
+  },
+  {
+    id: 'v-preventa-vigente', conjunto: 'sobreventa', titulo: 'Preventa vigente: dice el descuento y hasta cuándo, sin explicar por qué (ficha de prueba)',
+    fichas: conPreventaVigente,
+    pasos: [{ escribe: '¿Cuánto vale la cena de película?' }],
+    guion: [CATALOGO, R('Vale $95.000 por persona. Ahora tiene un descuento por preventa de $20.000 por persona, hasta el 29 de octubre.', 'precio')],
+    esperado: (e) => todos(
+      usoHerramienta(e, 'ver_catalogo'), contiene(e, /preventa/i), contiene(e, /\$?20[.,]000|20 mil/), contiene(e, /\b29 (de )?oct|29\/10|2026-10-29/i),
+      noContiene(e, /\bporque\b|\bya que\b|\bdebido a\b|\bcon motivo\b|\bpara celebrar\b|\blanzamiento\b|\bestreno\b/i), sinPersona(e),
+    ),
   },
 ];
 

@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { frasesDeSobreventa } from './sobreventa'
 import { preciosSinHerramienta } from './precios'
 import { condicionesVigentes, experiencias, zonaDe } from './catalogo'
-import { dominioPublico, fichaParaModelo, lineaPreferenciaMesa } from './dominio'
+import { FIJAS_DEL_MODELO, RF_PRECIO_AUTORIZADO, dominioPublico, fichaParaModelo, lineaPreferenciaMesa } from './dominio'
 import { reglamentoSabor } from './escenario'
+import { sistemaPublico } from './prompt'
 import { REGLAMENTO_SABOR } from './reglamento-sabor'
-import { conDosCondiciones, conZonaYMesaPedida, sinRegla } from './arnes/fichas-prueba'
+import { conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla } from './arnes/fichas-prueba'
 import { recortarResultado, tokens } from '../contexto'
 import type { ContextoDominio } from '../tipos'
 import type { FilaPublica } from './tipos'
@@ -145,5 +146,55 @@ describe('dominio: reglas, mesa y resumen (§8.3, §8.4, §8.5)', () => {
     const h = await d.ejecutar(p.ok ? p.propuesta : (null as never), ctx(filasConSi))
     expect(h.lineas[0]).toBe('Listo, ya tengo tus datos. Todavía no está reservado: el equipo de Sabor te escribe por aquí para confirmar cupo y pago. La reserva queda hecha cuando el pago esté aprobado.')
     expect(p.ok && p.propuesta.datos).not.toHaveProperty('preferencia_mesa')
+  })
+})
+
+describe('precios autorizados y preventa (§8.8, Mauricio 2026-10-25)', () => {
+  it('la guarda frena la negociación: descuento ofrecido, monto propio, «déjame consultar», «a ver qué puedo hacer»', () => {
+    for (const t of [
+      'Te puedo hacer un descuento si reservas hoy.',
+      'Podríamos mejorar el precio para tu grupo.',
+      'Dale, te lo dejo en 80.000 por persona.',
+      'Déjame consultar con el equipo y te cuento.',
+      'Lo consulto con el equipo y te aviso.',
+      'Mmm, a ver qué puedo hacer por ti.',
+      'El precio es negociable para grupos.',
+    ]) expect(frasesDeSobreventa(t, []), t).toHaveLength(1)
+  })
+  it('deja pasar las negaciones y lo que no es negociar (lección de RE_DESCUENTO)', () => {
+    for (const t of [
+      'No te puedo hacer un descuento: esos son los precios publicados.',
+      'Lo siento, no puedo bajar el precio.',
+      'Tampoco te puedo dar una rebaja, pero te ayudo a escoger la función.',
+      'El precio no es negociable.',
+      'No hay descuento por pareja ni por grupo.',
+      'El equipo de Sabor te confirma el cupo y el pago.',
+      'Te la dejo anotada como preferencia.',
+    ]) expect(frasesDeSobreventa(t, []), t).toEqual([])
+  })
+  it('la cifra suelta con punto de miles también tiene que venir de la ficha; la cédula con puntos no es plata', () => {
+    const fuentes = ['{"precio_por_persona":"$95.000"}']
+    expect(preciosSinHerramienta('Te lo dejo en 80.000 por persona.', fuentes)).toEqual(['80.000'])
+    expect(preciosSinHerramienta('Son 95.000 por persona.', fuentes)).toEqual([])
+    expect(preciosSinHerramienta('Anoté la cédula 52.123.456 y el teléfono 300 123 4567.', fuentes)).toEqual([])
+  })
+  it('rf.precio_autorizado es una fija del modelo con el texto de Mauricio, sin paso a persona', async () => {
+    expect(FIJAS_DEL_MODELO).toContain(RF_PRECIO_AUTORIZADO)
+    const d = dominioPublico({ reglamento: await reglamentoSabor(), ahoraMs: () => AHORA, vars: {} })
+    const c = await d.cerrar!('respuesta_fija', { clave: RF_PRECIO_AUTORIZADO }, ctx())
+    expect(c.ok && c.salidas[0].texto).toBe('Te entiendo. Esos son los precios autorizados por Sabor para esta experiencia, e incluyen todo lo que te conté. Si quieres, te ayudo a escoger la función.')
+    expect(c.ok && c.privado).toBeFalsy()
+    // Un reglamento publicado sin el texto no manda un mensaje vacío.
+    const sin = dominioPublico({ reglamento: await reglamentoSabor(REGLAMENTO_SABOR.filter((f) => f.clave !== RF_PRECIO_AUTORIZADO)), ahoraMs: () => AHORA, vars: {} })
+    expect(await sin.cerrar!('respuesta_fija', { clave: RF_PRECIO_AUTORIZADO }, ctx())).toMatchObject({ ok: false, candado: 'fija_sin_texto' })
+  })
+  it('el prompt lleva la regla del precio autorizado y la de la preventa', async () => {
+    const s = sistemaPublico(await reglamentoSabor(), { topes: { llamados: 6 } } as never)
+    expect(s).toMatch(/alc\.precio_autorizado: cuando preguntan por qué ese precio.*respuesta_fija rf\.precio_autorizado.*no pasas a persona solo por eso/)
+    expect(s).toMatch(/inv\.preventa: .*hasta cuándo.*No explicas por qué/)
+  })
+  it('la ficha de prueba con preventa vigente la muestra el 23-oct con su cierre', async () => {
+    const e = experiencias(await reglamentoSabor(conPreventaVigente(REGLAMENTO_SABOR))).find((x) => x.id === 'ejemplo-cena-1')!
+    expect(fichaParaModelo(e, AHORA).condiciones_vigentes_hoy).toEqual([expect.objectContaining({ id: 'preventa', tipo: 'descuento', monto: '$20.000 por persona', hasta: '2026-10-29' })])
   })
 })
