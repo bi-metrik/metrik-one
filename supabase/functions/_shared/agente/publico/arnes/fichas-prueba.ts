@@ -7,7 +7,9 @@
 //   · `conZonaYMesaPedida`  `elige_mesa: se_pide` y una zona frente a la pantalla con recargo (la preferencia de mesa
 //                            anotada y el recargo dicho con su monto de la ficha);
 //   · `conDosCondiciones`   dos descuentos vigentes no acumulables (no se suman);
-//   · `sinRegla(clave)`     una regla sin ficha (consultar_reglas devuelve sin_dato → duda abierta y persona).
+//   · `sinRegla(clave)`     una regla sin ficha (consultar_reglas devuelve sin_dato → duda abierta y persona);
+//   · `conPreventaVigente`  la preventa abierta a la hora del arnés (23-oct), con su cierre el 29-oct (§8.8: el bot dice
+//                            el descuento y hasta cuándo, sin explicar por qué).
 // Datos [EJEMPLO] inventados. Puro.
 // ============================================================
 
@@ -38,3 +40,10 @@ export const conDosCondiciones = (fichas: Ficha[]): Ficha[] => conValores(fichas
 
 /** Sin la ficha de esa regla: `consultar_reglas` devuelve `sin_dato`. */
 export const sinRegla = (clave: string) => (fichas: Ficha[]): Ficha[] => fichas.filter((f) => f.clave !== `pol.${clave}`);
+
+/** La preventa vigente el 23-oct: $20.000 por persona hasta el 29-oct (cierre). Monto y fechas [EJEMPLO]. */
+export const conPreventaVigente = (fichas: Ficha[]): Ficha[] => conValores(fichas, {
+  condiciones: [
+    { id: 'preventa', tipo: 'descuento', monto: 20000, unidad: 'por persona', condicion: 'reservar antes del cierre de la preventa, para cualquier número de personas', desde: '2026-10-22', hasta: '2026-10-29', acumulable: false },
+  ],
+});

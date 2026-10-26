@@ -15,7 +15,7 @@
 //   · `pasar_a_persona`   cierre. `motivo` de lista cerrada; la nota y las etiquetas las arma el código; no repite un
 //     motivo en la misma conversación (sin bucles, §6.1), salvo que la persona lo pida otra vez.
 //   · `respuesta_fija`    cierre. El modelo elige cuál y el código la manda tal cual (§7): la autorización (Sí / No), la
-//     autorización del dato sensible, o «no compartas datos de tarjeta».
+//     autorización del dato sensible, «no compartas datos de tarjeta», o «esos son los precios autorizados» (§8.8).
 //   · `responder`         del núcleo, con su verificador (cifras, fechas y links con respaldo; 600 caracteres).
 // Etapa 2 (§8.2): `consultar_cupo`, `apartar`, `generar_link_pago` y `verificar_pago` quedan DECLARADAS Y APAGADAS en
 // `HERRAMIENTAS_ETAPA_2`: no se le muestran al modelo, y si las nombra, el núcleo responde que no existen.
@@ -40,7 +40,9 @@ export const RF_SIGUIENTE_PASO = 'rf.siguiente_paso';
 export const RF_DUDA_ABIERTA = 'rf.duda_abierta';
 /** §6.4.1: antes de pasar a quien pide una persona, una sola pregunta por qué. */
 export const RF_PERSONA_POR_QUE = 'rf.persona_por_que';
-export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO, RF_PERSONA_POR_QUE] as const;
+/** §8.8: ante «¿por qué ese precio?», «está muy caro» o «hazme un descuento», los precios son los autorizados. */
+export const RF_PRECIO_AUTORIZADO = 'rf.precio_autorizado';
+export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO, RF_PERSONA_POR_QUE, RF_PRECIO_AUTORIZADO] as const;
 
 /** Motivos que sí se repiten: la persona lo vuelve a pedir, o es otra reserva, o es urgente. */
 const REPETIBLES: MotivoPersona[] = ['pide_persona', 'reserva_lista', 'datos', 'crisis', 'duda_abierta'];
@@ -191,7 +193,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: RESPUESTA_FIJA,
-      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures. ${RF_PERSONA_POR_QUE}: si pide una persona sin decir para qué (una sola vez por conversación; si ya la mandaste o ya lo atendió una persona, usa pasar_a_persona).`,
+      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures. ${RF_PERSONA_POR_QUE}: si pide una persona sin decir para qué (una sola vez por conversación; si ya la mandaste o ya lo atendió una persona, usa pasar_a_persona). ${RF_PRECIO_AUTORIZADO}: si pregunta por qué ese precio, dice que está caro o pide un descuento o una rebaja (no negocies ni pases a persona solo por eso).`,
       parameters: {
         type: 'object',
         properties: {
@@ -354,6 +356,12 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
           if (volvioDePersona(filas)) return { ok: false, error: 'Ya lo atendió una persona y lo devolvieron: si pide una persona, pasar_a_persona motivo pide_persona, sin preguntar.', candado: 'persona_por_que_tras_persona' };
           if (porQueYaSalio(filas)) return { ok: false, error: 'Ya le preguntaste por qué quiere una persona: no lo vuelvas a preguntar. Si pide una persona, pasar_a_persona motivo pide_persona.', candado: 'persona_por_que_repetida' };
           return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_PERSONA_POR_QUE) }] };
+        }
+        if (clave === RF_PRECIO_AUTORIZADO) {
+          // Un reglamento publicado antes del 25-oct no la trae: sin texto no sale un mensaje vacío.
+          const texto = respuestaFija(r, RF_PRECIO_AUTORIZADO);
+          if (!texto) return { ok: false, error: 'Sin ese texto: contesta con responder que esos son los precios publicados, sin negociar ni prometer descuentos.', candado: 'fija_sin_texto' };
+          return { ok: true, salidas: [{ tipo: 'texto', texto }] };
         }
         if (clave === RF_CUPO) return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_CUPO) }] };
         if (clave === RF_PREFERENCIA_MESA) {
