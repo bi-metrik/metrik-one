@@ -35,6 +35,7 @@ import {
 import { todayBogotaISO } from '../_shared/bogota.ts';
 import { htmlCorreoInterno } from '../_shared/correo-interno.ts';
 import { marcaDelWorkspace } from '../_shared/marca-workspace.ts';
+import { cabeceraMarcaAvisoHtml, remitenteAvisoEtapa } from '../_shared/remitente-correo.ts';
 import { esDiaHabil, paisDelWorkspace, siguienteDiaHabil } from '../_shared/dias-habiles.ts';
 import {
   type AvisoPrevio,
@@ -1338,7 +1339,10 @@ async function enviarAlCliente(
 
   // La columna es `name` (SOE-010: pedir `nombre` hacia fallar la consulta en silencio
   // y todo correo salia como «tu proveedor»). El helper registra el error si lo hay.
-  const { marca, configExtra } = await marcaDelWorkspace(supabase, negocio.workspace_id);
+  const { marca, configExtra, logoUrl } = await marcaDelWorkspace(supabase, negocio.workspace_id);
+  // SOE-010: remitente propio del workspace (`config_extra.remitente_correo`). Sin la clave,
+  // o con un dominio no permitido, sale el de siempre byte a byte.
+  const remitente = remitenteAvisoEtapa({ marca, configExtra, contexto: `workspace ${negocio.workspace_id}` });
 
   // ── A dónde contesta el cliente ────────────────────────────────────────────
   // Primero el COMERCIAL del negocio: es quien lo conoce y quien va a responderle.
@@ -1417,7 +1421,7 @@ async function enviarAlCliente(
 <html lang="es"><body style="margin:0;padding:24px;background:#F5F4F2;font-family:Helvetica,Arial,sans-serif;color:#1A1A1A">
   <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:28px">
     ${avisoPrueba}
-    <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(marca)}</p>
+    ${cabeceraMarcaAvisoHtml({ marca, logoUrl, propio: remitente.propio, escapar })}
     <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
     ${cuerpoHtml}
     ${lineaCasoHtml(negocio.codigo, escapar)}
@@ -1433,7 +1437,7 @@ async function enviarAlCliente(
     method: 'POST',
     headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: `${marca} (via MeTRIK) <noreply@metrikone.co>`,
+      from: remitente.from,
       to: esPrueba ? pruebaTo : [destinatarioReal],
       ...(copiaA ? { bcc: [copiaA] } : {}),
       ...(replyTo ? { reply_to: replyTo } : {}),

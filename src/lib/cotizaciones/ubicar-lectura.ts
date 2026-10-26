@@ -88,6 +88,36 @@ export function lugaresCompatibles(a: string | null | undefined, b: string | nul
   return contiene(x.nombre, y.nombre) || contiene(y.nombre, x.nombre)
 }
 
+/**
+ * Lo que NO hace de dos lugares el mismo destino aunque los dos lo nombren: un país grande. Que
+ * «Cartagena / Colombia» y «San Andrés / Colombia» compartan «Colombia» no los vuelve opciones.
+ * Una isla que es país (Curazao, Aruba) sí es el destino, y no está aquí.
+ */
+const PAISES_QUE_NO_SON_DESTINO: ReadonlySet<string> = new Set([
+  'colombia', 'mexico', 'estados unidos', 'eeuu', 'usa', 'espana', 'francia', 'italia', 'alemania', 'portugal',
+  'reino unido', 'peru', 'brasil', 'argentina', 'chile', 'ecuador', 'europa',
+])
+
+/**
+ * ¿Dos hoteles pueden estar en el mismo destino? Como `lugaresCompatibles` y, además, por
+ * partes: el lector escribe la ciudad del hotel como «zona / ciudad» («Otrobanda / Curacao»,
+ * «Willemstad / Curacao») o sola («Curacao»). Basta con que una parte de uno sea (o contenga,
+ * palabra por palabra) una parte del otro. COT-2026-0004 (2026-10-23): Renaissance en Otrobanda
+ * abría «Hotel 3» y Dreams en Willemstad «Hotel 2», cuando eran tres alternativas de Curazao.
+ */
+export function lugaresDeHotelCompatibles(a: string | null | undefined, b: string | null | undefined): boolean | null {
+  const entero = lugaresCompatibles(a, b)
+  if (entero !== false) return entero
+  const partes = (t: string | null | undefined) => (t ?? '')
+    .split(/[/,|·]| - /)
+    .map(p => lugarComparable(p)?.nombre ?? null)
+    .filter((p): p is string => !!p && !PAISES_QUE_NO_SON_DESTINO.has(p))
+  const pa = partes(a)
+  const pb = partes(b)
+  const contiene = (grande: string, chico: string) => ` ${grande} `.includes(` ${chico} `)
+  return pa.some(x => pb.some(y => contiene(x, y) || contiene(y, x)))
+}
+
 const RANURA_HOTEL = 'hotel_detalle'
 
 export function ubicarLectura(args: {
@@ -133,13 +163,16 @@ export function ubicarLectura(args: {
         sinFechas.push(r.grupo)
         continue
       }
-      if (leidas.some(l => mismasFechasHotel(l, lectura)) && lugaresCompatibles(r.lugar, lugarLeido) !== false) {
+      if (leidas.some(l => mismasFechasHotel(l, lectura)) && lugaresDeHotelCompatibles(r.lugar, lugarLeido) !== false) {
         return { como: 'hermana', grupo: r.grupo }
       }
     }
+    const sinFechaLeida = ranurasConLugar(vivas, 'hotel').filter(r => sinFechas.includes(r.grupo))
+    // Sin fechas que comparar, el lugar, por partes: un barrio y su ciudad son el mismo destino.
+    const mismoDestino = lugarLeido ? sinFechaLeida.find(r => lugaresDeHotelCompatibles(r.lugar, lugarLeido) === true) : null
+    if (mismoDestino) return { como: 'hermana', grupo: mismoDestino.grupo }
     const captura: CapturaDetectada = { tipo, lugar: lugarLeido, origen: pistas.origen, destino: pistas.destino }
-    const u = ubicarCaptura(captura, ranurasConLugar(vivas, 'hotel')
-      .filter(r => sinFechas.includes(r.grupo))
+    const u = ubicarCaptura(captura, sinFechaLeida
       .map(r => ({ grupo: r.grupo, tipo, lugar: r.lugar, origen: r.origen, destino: r.destino })))
     return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
   }

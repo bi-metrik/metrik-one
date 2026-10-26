@@ -90,10 +90,18 @@ interface BloqueDocumentoProps {
     // extraído y el operador debe corregirlo sin reprocesar el documento. Sin este
     // flag, el modo visible es 100% readonly (comportamiento histórico).
     editar_extraidos?: boolean
-    /** Opt-in: en modo visible (etapas posteriores), un rol gerencial
-     *  (owner/admin/supervisor) puede corregir TODOS los campos extraídos
-     *  (no solo los de alerta_revision). Cada corrección queda marcada. */
+    /** Opt-in: en modo visible (etapas posteriores) se pueden corregir TODOS los campos
+     *  extraídos (no solo los de alerta_revision) y reemplazar el archivo. Pese al nombre,
+     *  no es solo gerencial: lo usan owner/admin/supervisor y el operator RESPONSABLE,
+     *  con el área que el servidor ya resolvió (`_areaReadonly`). Cada corrección queda
+     *  marcada, con causa. */
     corregir_campos_gerencial?: boolean
+    /**
+     * Lo pone el SERVIDOR en una copia de solo lectura: el nombre de la etapa donde vive
+     * el original. La copia no recibe archivos ni correcciones, así que dice dónde
+     * cambiarlo («Historial de etapas anteriores»).
+     */
+    _origenEtapaNombre?: string
     /**
      * Lo pone el SERVIDOR: el área del usuario no cubre el stage de la etapa donde
      * vive este bloque, y tampoco entra por la excepción de corrección hacia atrás.
@@ -761,6 +769,14 @@ function DialogoDevolucion({
 
 // ── Componente principal ─────────────────────────────────────────────────────
 
+/** Nombre de la etapa del original de una copia, o su número si el servidor no lo resolvió. */
+function nombreEtapaOrigen(configExtra: { _origenEtapaNombre?: string; source_etapa_orden?: unknown }): string {
+  if (configExtra._origenEtapaNombre) return `«${configExtra._origenEtapaNombre}»`
+  return typeof configExtra.source_etapa_orden === 'number'
+    ? `la etapa ${configExtra.source_etapa_orden}`
+    : 'una etapa anterior'
+}
+
 export default function BloqueDocumento({
   negocioBloqueId,
   negocioId,
@@ -1325,6 +1341,15 @@ export default function BloqueDocumento({
             <span className="ml-auto text-[11px] text-muted-foreground italic">Sin archivo</span>
           )}
         </div>
+        {/* Copia de solo lectura: la corrección se hace en el original. Sin este aviso, quien
+            podía corregirlo veía solo Ver y Descargar y no sabía a dónde ir (SOE-028). Solo a
+            quien puede corregir algo; ver y descargar no necesitan instrucciones. */}
+        {soloLecturaPorCopia && driveUrl && (puedeCorregirDocumentos(userRole) || esResponsable === true) && (
+          <p data-copia-origen className="text-[11px] text-muted-foreground">
+            Es una copia del documento de {nombreEtapaOrigen(configExtra)}. Para reemplazarlo o
+            corregirlo, ábrelo en «Historial de etapas anteriores».
+          </p>
+        )}
 
         <DialogoDevolucion
           abierto={dialogoDevolucion}
