@@ -7,8 +7,7 @@ import { MODELO_AUDIO_ONE, PROMPT_TRANSCRIPCION_LITERAL, pedidoTranscripcion, pr
 
 export { PROMPT_TRANSCRIPCION_LITERAL };
 
-// Sprint 2 (Yuto): default to Flash-Lite (3.3x cheaper audio input, still multimodal).
-// Override with GEMINI_AUDIO_MODEL env var for instant rollback to flash.
+// El modelo sale de `MODELO_AUDIO_ONE` (transcripcion.ts). El secreto GEMINI_AUDIO_MODEL lo cambia sin desplegar.
 const GEMINI_MODEL = Deno.env.get('GEMINI_AUDIO_MODEL') || MODELO_AUDIO_ONE;
 
 // WhatsApp sends audio/ogg; codecs=opus — normalize to base mime

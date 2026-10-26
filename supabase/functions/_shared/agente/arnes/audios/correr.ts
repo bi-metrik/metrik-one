@@ -10,13 +10,14 @@
 //             prueba el pipeline y el reporte, no mide a nadie)
 //
 // La llave entra SOLO por `GEMINI_API_KEY_PRUEBAS` (nunca la de producción, nunca de un archivo); sin ella no corre.
-// Modelos por defecto: el de ONE hoy (`MODELO_AUDIO_ONE`, wa-transcribe.ts) y el que configura público para audios
-// (`CONFIG_PUBLICO_POR_DEFECTO.audio.modelo`, publico/config.ts). Deja `resultado.json` (cada intento con su
+// Modelos por defecto: el de ONE hasta el 2026-10-26 (`MODELO_AUDIO_ONE_ANTERIOR`), el de ONE hoy (`MODELO_AUDIO_ONE`,
+// wa-transcribe.ts) y el que configura público para audios (`CONFIG_PUBLICO_POR_DEFECTO.audio.modelo`, publico/config.ts),
+// sin repetir. Deja `resultado.json` (cada intento con su
 // transcripción y su medida, más los agregados) y `tabla.txt`.
 // Las notas: `audios/reales/<id>.ogg` (GRABAR.md) o `audios/sinteticos/<id>.sintetico.ogg` (generar.ts).
 // ============================================================
 
-import { MODELO_AUDIO_ONE, textoDeRespuesta } from '../../../transcripcion.ts';
+import { MODELO_AUDIO_ONE, MODELO_AUDIO_ONE_ANTERIOR, textoDeRespuesta } from '../../../transcripcion.ts';
 import { CONFIG_PUBLICO_POR_DEFECTO } from '../../publico/config.ts';
 import { correr, pedidoDe, reporte } from './corrida.ts';
 import type { Trabajo } from './corrida.ts';
@@ -68,7 +69,7 @@ if (import.meta.main) {
     Deno.exit(2);
   }
   const k = Number(arg('--k') ?? 3);
-  const modelos = (arg('--modelos') ?? `${MODELO_AUDIO_ONE},${CONFIG_PUBLICO_POR_DEFECTO.audio.modelo}`).split(',').filter(Boolean);
+  const modelos = [...new Set((arg('--modelos') ?? `${MODELO_AUDIO_ONE_ANTERIOR},${MODELO_AUDIO_ONE},${CONFIG_PUBLICO_POR_DEFECTO.audio.modelo}`).split(',').filter(Boolean))];
   const paralelo = Number(arg('--paralelo') ?? 2);
   const fuente = arg('--fuente') ?? 'auto';
   const solo = arg('--solo')?.split(',');
