@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- [SOE-028: operadora corrige desde el historial (#1296)](project_soe028_operadora_corrige_historial.md) — historial sin _esResponsable; copia ≠ areas_editoras del original
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — migración 20261026183000 APLICADA (26-oct); huella ≠ bot_reglamentos.huella; staff.id
 - ⚠️ [Calificación y resumen diario de asistentes (#1289)](project_calificacion_resumen_asistentes.md) — con_texto SIN prender en Sabor; tokens en `juez`; caida.ts no se importa en src
