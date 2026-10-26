@@ -2,7 +2,7 @@
 tipo: spec
 fecha: 2026-10-26
 autor: Max (Tech Lead)
-estado: borrador para aprobación de Mauricio. No se construye nada hasta que la apruebe.
+estado: rev 2 (26-oct). Incorpora las respuestas de Mauricio del 26-oct (§6.1) y su decisión de lanzar los tres asistentes sobre el modelo de roles, Sabor incluido desde su salida. No se construye nada hasta que apruebe esta versión.
 base_codigo: origin/main 78f06453 (26-oct-2026). Todas las citas `archivo:línea` son de ese commit.
 fuentes:
   - Diseño aprobado «ADN del asistente MeTRIK» (26-oct, rev 57, los 7 puntos), con su diagnóstico (22-oct) y su estado del arte (22-oct)
@@ -20,17 +20,22 @@ fuentes:
 
 **Casi todo ya existe.** El núcleo de hoy ya trabaja así por dentro: el modelo solo puede llamar las herramientas que le declara el dominio, y el núcleo rechaza las demás (`nucleo.ts:338`, `nucleo.ts:421`). El reglamento ya se guarda por versiones con marcha atrás (`bot_reglamentos`). Lo que falta es pasar de «un dominio por producto, armado a mano» a «un rol armado con funciones del catálogo», y guardar en la base quién usa qué rol. Lo demás es nuevo: el resumen diario, la calificación de conversaciones, el correo cuando se caen los modelos, el traspaso a una persona en ONE y la prueba de transcripción.
 
-**En qué orden (por las fechas de los clientes).**
-1. **Sabor sale el jue 29-oct sobre lo que ya está en `publico/`, sin esperar la arquitectura nueva.** Es un solo rol en su propio canal (Chatwoot) y ya tiene dominio, candados, autorizaciones y arnés en `main`. Lo que falta para esa fecha son, sobre todo, insumos y operación, no código (§5.1). Lo único de código que recomiendo antes del 29: que el aviso de falla del modelo y del presupuesto salga por correo y no por WhatsApp.
-2. **Entre el 29-oct y el 13-nov:** la etapa 2 de Sabor (cupos, reservas y pago, PR #1234), con el cobro del saldo antes de la experiencia como pieza crítica, cualquier experiencia (cine, cata, taller) tratada igual y la experiencia reconocida por el anuncio o la publicación de origen. En paralelo, el modelo de roles, el toque de los botones de plantilla, el traspaso en ONE, el resumen diario y la calificación.
-3. **Imperviun y Laura arrancan con su firma.** El asistente de Imperviun ya está construido en el PR #1235 (sin mergear, con migración sin aplicar). Lo que propongo es reutilizar ese código como las funciones de dos roles, no reescribirlo. Laura es lo más apretado: su contrato pide el espacio listo 5 días hábiles después de la firma, y ONE no tiene todavía dónde guardar citas, cuotas por clienta ni portafolio con precios.
+**Decisión del 26-oct.** Mauricio decidió que los tres asistentes (Sabor, Imperviun y Laura) salgan sobre el modelo de roles y funciones, y Sabor también desde su salida. Ya no existe la fase «Sabor sale sobre `publico/` y pasa a roles después del 13-nov». Las fechas de Sabor no cambian.
 
-**Qué necesito de ti** (detalle y mi recomendación en §6):
-1. Sabor sale sin modelo de respaldo, como decidiste el 20-oct. ¿Lo mantenemos para el 29-oct, aunque el ADN pida respaldo en otro proveedor? Recomiendo que sí: sale sin respaldo, con correo inmediato y paso a persona si el modelo falla.
-2. Imperviun: el ADN dice que el recolector abre la jornada con una plantilla diaria, y el diseño de Imperviun (D9, 21-oct) la dejó por fuera de la Fase 1. ¿Cuál manda?
-3. El PR #1235 de Imperviun: ¿lo reutilizamos dentro del modelo de roles antes del merge (lo que recomiendo) o se mergea tal cual?
-4. Laura: ¿arrancamos su módulo de datos cuando mandes el ZapSign, o esperamos la firma?
-5. Seis preguntas más, de menor peso, en §6.2.
+**En qué orden (por las fechas de los clientes).**
+1. **Antes del jue 29-oct: el núcleo de roles y Sabor como su primer rol.** Entran la migración de roles (§2.8), el componedor (§2.6) y las funciones `clientes.*` de la etapa 1, que despachan al código que ya está en `publico/` sin cambiarle el comportamiento. Sabor sale a clientes reales el 29-oct como el rol `asesor_vendedor`, publicado con su banco del arnés y asignado por su inbox de Chatwoot. El arnés de Sabor tiene que dar lo mismo sobre el rol compuesto que sobre el dominio de hoy. Su respaldo es una persona de Sabor en Chatwoot: si el modelo se cae, o aparece cualquier señal de escalamiento, la conversación pasa a un agente humano dentro de Chatwoot, y a MéTRIK le llega un correo inmediato si fue caída del modelo (§4.1). Siguen haciendo falta los insumos y la operación de Sabor (§5.1).
+2. **Entre el 29-oct y el 13-nov:** la etapa 2 de Sabor (cupos, reservas y pago, PR #1234) entra como versión nueva del mismo rol, con sus funciones nuevas. La pieza crítica es el cobro del saldo antes de la experiencia; además, cualquier experiencia (cine, cata, taller) se trata igual y se reconoce la experiencia por el anuncio o la publicación de origen. En prueba el lun 9-nov y con el espacio completo el vie 13-nov. En paralelo: el dominio ONE de hoy partido por cargo, el toque de los botones de plantilla (PR #966), el traspaso en ONE, el resumen diario y la calificación.
+3. **Laura, desde ya y sin esperar la firma:** se someten a Meta sus plantillas (resumen de los lunes y recordatorio de deudas) y se prepara la migración del módulo de citas, portafolio y cuotas. Con la firma quedan los 5 días hábiles para cargar su espacio y publicar su rol `mano_derecha`.
+4. **Imperviun, con su firma:** el asistente del PR #1235 se reutiliza dentro del modelo de roles antes de su merge, partido en las funciones de dos roles (mano derecha y recolector), sin reescribirlo. La apertura diaria por plantilla del recolector se construye y entra apagada; se prende después.
+
+**Lo que decidiste el 26-oct** (detalle en §6.1):
+1. Sabor no tiene modelo de respaldo en otro proveedor: su respaldo es una persona de Sabor en Chatwoot. Se mantiene el correo inmediato si se cae el modelo.
+2. Imperviun: la apertura diaria por plantilla entra apagada y se prende después.
+3. El PR #1235 se reutiliza dentro del modelo de roles antes de su merge.
+4. Laura se adelanta ya, sin esperar la firma.
+5. Los tres asistentes salen sobre el modelo de roles, Sabor desde el 29-oct.
+
+Quedan abiertas siete preguntas de menor peso en §6.2.
 
 **Lo que no hace este documento.** No toca código, no aplica migraciones y no escribe en producción. El SQL va como borrador (§2.8). Las consultas a producción que hacen falta están escritas en §7, para que las corra la sesión principal.
 
@@ -73,10 +78,10 @@ Leyenda: **tal cual** = sirve sin cambios. **Generalizar** = existe para un caso
 | **Se pasan el trabajo por la base** | Ya pasa así: la bandeja y ONE escriben en las tablas de negocio y las pantallas lo leen | Tal cual, como regla (§2.7) |
 | **Cuatro señales para parar y pasar a una persona** | Público: `pasar_a_persona` con 14 motivos, nota privada, etiqueta y `toggle_status` en Chatwoot (`publico/dominio.ts:192-205`, `publico/tipos.ts:57-64`). ONE y la bandeja: no tienen a quién pasar. El único aviso a MéTRIK es el del cupo (`agente/uso.ts:86`) | Generalizar desde público; nuevo en ONE (§4.2) |
 | **Resumen diario por correo (Resend)** | No existe. Los avisos internos salen por WhatsApp (`enviarAvisoInterno`, `agente/produccion.ts:135`; `chatwoot-agente/index.ts:92`) y se pierden fuera de la ventana de 24 h (25 perdidos, diagnóstico F8) | Nuevo (§4.3) |
-| **Correo inmediato si caen principal y respaldo** | ONE y la bandeja: Haiku 5.5 de principal y Gemini de respaldo, ya en proveedores distintos (`agente/modelo-gemini.ts:16-19`). Si caen los dos, la persona recibe `rf.modelo_caido` y nadie se entera (`nucleo.ts:256-260`). Sabor: sin respaldo por decisión (`agente/modelo-anthropic.ts:1-12`); si falla, pasa a persona (`publico/cola.ts:264-270`) | Nuevo: el correo (§4.1) |
+| **Correo inmediato si caen principal y respaldo** | ONE y la bandeja: Haiku 5.5 de principal y Gemini de respaldo, ya en proveedores distintos (`agente/modelo-gemini.ts:16-19`). Si caen los dos, la persona recibe `rf.modelo_caido` y nadie se entera (`nucleo.ts:256-260`). Sabor: sin modelo de respaldo (`agente/modelo-anthropic.ts:1-12`); si falla, pasa a persona (`publico/cola.ts:264-270`). Decisión del 26-oct: ese es su respaldo, una persona de Sabor en Chatwoot | Nuevo: el correo (§4.1) |
 | **Calificación diaria de conversaciones** | No existe. El arnés califica casos sintéticos (`agente/arnes/calificar.ts:65`) | Nuevo (§4.4) |
 | **Arnés: cada caso 3 veces, solo se despliega si pasa siempre** | Público corre pass^k por el CLI (`publico/arnes/correr.ts`). El arnés del núcleo corre conjuntos, pero sin pass^k como puerta (`agente/arnes/correr.ts:1-14`) | Generalizar |
-| **Toque de botones de plantilla** (`type:"button"`) | **No llega.** `mensajeConTelefono` no construye `type: 'button'` y cae en el `return null` de «tipo no soportado» (`_shared/wa-webhook-payload.ts:384`). Lo de después ya lo soporta: `claseDelEntrante` lo cuenta como toque (`wa-conversacion.ts:71`) y el agente lo mira (`wa-agente.ts:106`). El arreglo ya está escrito en el PR #966, mezclado con dos migraciones | Generalizar: sacarlo de #966 a un PR propio (§4.5) |
+| **Toque de botones de plantilla** (`type:"button"`) | **No llega.** `mensajeConTelefono` no construye `type: 'button'` y cae en el `return null` de «tipo no soportado» (`_shared/wa-webhook-payload.ts:384`). Lo de después ya lo soporta: `claseDelEntrante` lo cuenta como toque (`wa-conversacion.ts:71`) y el agente lo mira (`wa-agente.ts:106`). El arreglo ya está escrito en el PR #966, junto con los recordatorios (apagados) y sus dos migraciones | Tal cual al mergear #966, que Mauricio pidió mergear el 26-oct (§4.5) |
 | **Métricas por rol** | El uso del mes sale de las trazas (`agente/uso.ts:41`, RPC `bot_uso_mes`). Costo por modelo con `bot_modelo_precios` | Generalizar: métricas por rol (§2.9) |
 | **Cupo** | 800 turnos por workspace, con aviso a MéTRIK por WhatsApp (`config.ts:76`, `uso.ts:86-102`). #1235 lo cuenta en mensajes, como dicen los contratos | Generalizar desde #1235 |
 
@@ -157,7 +162,7 @@ Cada función declara: `clave`, `familia` (equipo o clientes), sus herramientas,
 |---|---|---|---|---|
 | `recolector.llegada_obra` | acción `llegada`; lectura `obras_activas` | hora del servidor, no la del texto; el mismo día; máximo dos obras por día; vence a medianoche de Bogotá; sin ubicación (D10) | PR #1235 (C5, C7) | I |
 | `recolector.mis_jornadas` | lectura de sus propios días | sin pesos (la guarda del texto los rechaza); nunca datos de otros | PR #1235 (`operario.ts`, `sinPesos`) | I |
-| `recolector.apertura_diaria` | plantilla de utilidad que abre la jornada; el toque abre la ventana | día hábil; solo a inscritos con autorización; una por día | No existe (el envío por plantilla está en #966, sin mergear) | I (si se decide, §6.1-2) |
+| `recolector.apertura_diaria` | plantilla de utilidad que abre la jornada; el toque abre la ventana | día hábil; solo a inscritos con autorización; una por día | No existe (el envío por plantilla está en #966, sin mergear) | I: entra apagada y se prende después (decisión del 26-oct, §6.1-2) |
 
 **Familia clientes** (clientes de la empresa, muchas veces desconocidos):
 
@@ -492,7 +497,7 @@ Salen de las trazas (`wa_conversacion.traza`, `chatwoot_conversacion.traza`), de
 | Canal | `chatwoot`: Agent Bot por webhook (`chatwoot-agente?ws=<slug>`). Instagram primero, luego TikTok; WhatsApp después del acuerdo escrito del 3-nov (diseño de la etapa 1, D15). No es el número de Agus |
 | Funciones, etapa 1 (29-oct) | `clientes.ficha`, `clientes.reglas`, `clientes.autorizacion`, `clientes.toma_datos` (pasa a persona con `reserva_lista`), `clientes.precio_autorizado`, `comun.persona` |
 | Funciones, etapa 2 (9-nov) | más `clientes.cupo` (con margen bajo la capacidad, A6), `clientes.apartar`, `clientes.cobro_link` (Bold con las llaves de Sabor, A9; abono configurable, A11), `clientes.cobro_saldo` y `clientes.origen` |
-| Escalamiento | `pasar_a_persona` en Chatwoot con los 14 motivos (`publico/tipos.ts:61-64`): nota privada, etiqueta, `toggle_status` a `open`. Persona pedida: pregunta una vez por qué (§6.4 del diseño, #1256). Pendiente: quién recibe cada motivo y el horario (HUECO de Paula; `persona.horario` vacío = variante sin horario) |
+| Escalamiento | Es también su respaldo (decisión del 26-oct): ante la caída del modelo o cualquier señal de escalamiento (§4.2), la conversación pasa a un agente humano de Sabor dentro de Chatwoot con `pasar_a_persona` y los 14 motivos (`publico/tipos.ts:61-64`): nota privada, etiqueta, `toggle_status` a `open`. Si fue caída del modelo, además sale el correo inmediato a MéTRIK (§4.1). Persona pedida: pregunta una vez por qué (§6.4 del diseño, #1256). Pendiente: quién recibe cada motivo y el horario (HUECO de Paula; `persona.horario` vacío = variante sin horario) |
 | Saludo y plantilla | Primer contacto: `rf.bienvenida`, que dice que es un asistente virtual, con su nombre y el link de términos (`publico/autorizacion.ts:22`). Sin plantilla: el cliente escribe primero, y escribirle primero para vender es marketing (COP 46,02). El nombre lo da Paula antes del 29-oct (pendiente del kickoff) |
 | Autorización de datos | General de un toque antes de pedir nombre, cédula y teléfono; sensible aparte y facultativa para restricciones alimentarias. Prueba inmutable en `chatwoot_consentimientos`. Textos: Emilio, antes del 29-oct. Términos publicados por Sabor (el link aún es de ejemplo: `publico/config.ts:74`) |
 | Métricas del rol | Las comunes, más: exactitud del catálogo contra la ficha (100 %), paso a persona correcto (≥ 95 %), tiempo interno p90 ≤ 5 s (diseño §10.2) y, desde la etapa 2, reservas pagadas por el link y reservas con el saldo en cero al empezar la experiencia |
@@ -523,12 +528,13 @@ Salen de las trazas (`wa_conversacion.traza`, `chatwoot_conversacion.traza`), de
    - El alcance contractual del link del saldo sigue pendiente del otrosí (diseño de la etapa 2, §1.11-1).
 4. **Pedidos en sala y cuenta por persona** son un proyecto posterior, fuera de esta especificación: el modelo no debe cerrar ni prometer pedidos, consumos ni cuentas en sala.
 
-**Cómo entra al modelo de roles.** Después del 13-nov, no antes. Al 29-oct y al 9-nov, Sabor corre con su dominio actual (`dominioPublico`) y su reglamento `asistente-publico`. Cuando exista el componedor:
-- sus herramientas se reparten en las funciones `clientes.*` sin cambiar comportamiento;
-- se registra el rol con el puntero a su versión;
-- se prueba que el arnés de Sabor da lo mismo antes y después.
+**Cómo entra al modelo de roles.** Desde su salida el 29-oct (decisión del 26-oct). Sabor es el primer rol que corre sobre el componedor:
+- las herramientas de `dominioPublico` se reparten en las funciones `clientes.*` de la etapa 1, que despachan al mismo código de `publico/`, sin cambiar comportamiento;
+- se registra el rol `asesor_vendedor` (bot `rol:asesor_vendedor`), se publica su reglamento con `asistente_publicar_rol` y su banco del arnés, y se asigna por el inbox de Chatwoot;
+- el arnés de Sabor (escenarios, adversario, lenguaje, sobreventa, operación y el conjunto real) tiene que dar lo mismo sobre el rol compuesto que sobre `dominioPublico`, con pass^3 y 0 dañinas. Si no da lo mismo, no sale;
+- la etapa 2 (9-nov) no es una migración del rol: es una versión nueva del mismo rol con `clientes.cupo`, `clientes.apartar`, `clientes.cobro_link`, `clientes.cobro_saldo` y `clientes.origen` agregadas, prendidas en la empresa y publicadas con su banco.
 
-Así la arquitectura no pone en riesgo dos fechas de contrato.
+Mientras el componedor no tenga filas de un workspace, ese workspace sigue con el enrutamiento de hoy. Eso protege a ONE y a la bandeja de Trappvel, no a Sabor: Sabor sale ya sobre el rol.
 
 ### 3.2 Imperviun (I1 26 5): mano derecha y recolector
 
@@ -543,20 +549,21 @@ Así la arquitectura no pone en riesgo dos fechas de contrato.
 | Quién | Liliana y quien Imperviun habilite como gestión (cada usuario adicional, $50.000/mes) | Los operarios registrados con su número y su valor de jornada |
 | Asignación | `staff` de Liliana → `mano_derecha` (o `cargo: owner` y `admin`) | `cargo` de colaborador con `tipo = 'operario'` → `recolector`. En el modelo nuevo, una fila `colaborador` por operario, que carga la oficina al registrarlo |
 | Canal | `wa_one` (el número de Agus) | `wa_one` |
-| Funciones | `equipo.gastos_obra`, `equipo.ingresos`, `equipo.facturas`, `equipo.correcciones`, `equipo.consulta_negocio` (cierre de obra), `equipo.asistencia`, `equipo.cupo`, `comun.persona` | `recolector.llegada_obra`, `recolector.mis_jornadas` y, si se decide (§6.1-2), `recolector.apertura_diaria` |
+| Funciones | `equipo.gastos_obra`, `equipo.ingresos`, `equipo.facturas`, `equipo.correcciones`, `equipo.consulta_negocio` (cierre de obra), `equipo.asistencia`, `equipo.cupo`, `comun.persona` | `recolector.llegada_obra`, `recolector.mis_jornadas` y `recolector.apertura_diaria`, prendida en la empresa pero apagada al arranque (§6.1-2) |
 | Lo que no ve | Lo retenido (se maneja en la plataforma, D1); no crea obras | Plata, datos de otros, resultados de obra (la guarda `sinPesos` del #1235). Su pantallazo lo contesta el código, sin modelo |
 | Escalamiento | Botón al WhatsApp de MeTRIK (de Mauricio) con el mensaje escrito (§4.2) | A «la oficina», sin nombrar a Liliana (diseño de Imperviun §3.3). El número lo define Imperviun en la ficha. Pregunta abierta §6.2-a |
 | Saludo | Primer mensaje del día: saludo por hora con su nombre; tutea si ella tutea | Inscripción por saludo: se presenta, confirma y pide la autorización. Después, de usted; corto |
-| Plantilla | No hace falta: ella escribe primero | Si se aprueba `recolector.apertura_diaria`: utilidad, tres versiones (una por saludo), nombre y empresa como variables, botones `[Empezar]` `[Hoy no]`. Las obras van libres dentro de la ventana, porque cambian y la plantilla no |
+| Plantilla | No hace falta: ella escribe primero | `recolector.apertura_diaria` (apagada al arranque; se prende después): utilidad, tres versiones (una por saludo), nombre y empresa como variables, botones `[Empezar]` `[Hoy no]`. Las obras van libres dentro de la ventana, porque cambian y la plantilla no |
 | Autorización | La de usuaria de ONE | Aviso corto con `[Acepto]` antes de la primera llegada; sin autorización no se guarda la jornada. Ya existe: `aviso-datos-bot*` y `wa_collaborators.consent_accepted_at`. Texto final: Emilio |
 | Métricas | Resolución y fricción por pago registrado; correcciones; consultas | Llegadas marcadas ÷ operarios inscritos por día hábil; toques por llegada (meta: uno) |
 | Casos del arnés | Los 39 del #1235 (`arnes/obras.ts`), con las metas de §7 del diseño: cero escrituras sin toque, cero cifras sin respaldo, cero gastos de un operario, cero consultas de asistencia desde un operario. Más los 5 casos del criterio de recepción (Anexo 2.7) de punta a punta | Los del #1235 del operario, más: toque de plantilla (`type:"button"`), «Hoy no», toque de ayer y una tercera obra en el día |
 
-**Cómo entra al modelo de roles (recomendación).** No reescribir #1235. Antes de su merge:
-1. Rebasar #1235 sobre `main`.
+**Cómo entra al modelo de roles (decidido el 26-oct, §6.1-3).** No se reescribe #1235: se reutiliza dentro del modelo de roles antes de su merge.
+1. Poner #1235 al día con `main` (merge, sin rebase ni force).
 2. Partir `obras.ts` y `operario.ts` en las funciones de la tabla, que despachan a ese mismo código.
 3. Cambiar el enrutamiento: de `obras = true` y `wa_collaborators.tipo` a `asistente_asignaciones`.
 4. Correr el arnés de obras: tiene que dar lo mismo.
+5. Construir `recolector.apertura_diaria` y dejarla apagada al arranque; se prende después (§6.1-2).
 
 Es lo que hace que «armar el rol con funciones» se pruebe con un caso real y no en teoría.
 
@@ -625,7 +632,7 @@ No se construye hasta que se contrate. Se deja aquí porque es la prueba de que 
 3. **Un correo por incidente**, no uno por turno. Candado `agente:caido:<workspace>:<ventana de 30 min>` con `tomar_candado`, el mismo patrón del cupo (`uso.ts:95`), e `Idempotency-Key` en Resend. Si sigue caído, un recordatorio por hora.
 4. **La persona no queda colgada.** En público ya pasa a persona con `falla`. En ONE, `rf.modelo_caido` deja la propuesta vigente (`nucleo.ts:256-260`); se le suma el botón de traspaso (§4.2) si es el segundo «no pude» seguido.
 5. **Los avisos internos pasan de WhatsApp a correo.** El cupo (`produccion.ts:135`) y el presupuesto diario de público (`chatwoot-agente/index.ts:92`) salen hoy por `enviarAvisoInterno` y se pierden fuera de la ventana de 24 h (diagnóstico F8, 25 perdidos). Mismo puerto (`AvisosInternos`, `publico/puertos.ts:68`) con otra implementación.
-6. **Respaldo para Sabor.** Ver §6.1-1.
+6. **Respaldo para Sabor (decidido el 26-oct, §6.1-1).** No hay modelo de respaldo en otro proveedor. El respaldo es una persona de Sabor en Chatwoot: si el modelo se cae, el turno pasa a un agente humano con `pasar_a_persona` y motivo `falla` (nota privada, etiqueta y `open`), como ya hace `publico/cola.ts:264-270`. El correo inmediato de esta sección se manda igual. Es lo que da trabajar sobre la plataforma del tercero: Chatwoot ya trae la bandeja humana.
 
 **Casos de prueba.**
 - Principal 529 y respaldo 403: un correo con los dos motivos.
@@ -646,7 +653,7 @@ No se construye hasta que se contrate. Se deja aquí porque es la prueba de que 
 | Un cliente pregunta algo que no está en la base | La función (`sin_dato` → `duda_abierta`) | Ya existe en público (`publico/dominio.ts:173`) |
 
 **Qué hace, según `rol.escalamiento`.**
-- **`chatwoot_equipo` (Sabor).** Ya existe tal cual: nota privada, etiqueta y `open`. Se agrega la fila en `asistente_escalamientos`.
+- **`chatwoot_equipo` (Sabor).** Pasa directo, sin ofrecer: con cualquiera de las cuatro señales, y también si se cae el modelo, la conversación pasa a un agente humano de Sabor en Chatwoot (decisión del 26-oct). Ya existe tal cual: nota privada, etiqueta y `open`. Se agrega la fila en `asistente_escalamientos` con `modo = 'pasado'`.
 - **`wa_link` (ONE: Imperviun gestión, Laura, el equipo de hoy).**
   - El asistente **ofrece** («¿Quieres hablar con alguien de MeTRIK?»), nunca dos veces seguidas.
   - Si la persona lo pide de forma explícita, manda de una un **botón de enlace** a `https://wa.me/573159509103?text=<mensaje>`. El mensaje lo arma el código: «Hola, soy <nombre> de <empresa>. El asistente no pudo con: <resumen en una línea>».
@@ -724,16 +731,16 @@ Si no se puede, va el enlace en el texto (WhatsApp lo vuelve clicable). Pidió Y
 - Cuando alguien toca una respuesta rápida de una plantilla, Meta manda `type: "button"` con `button.payload` y `button.text`, no `interactive.button_reply`.
 - `mensajeConTelefono` no tiene esa rama y devuelve `null` (`_shared/wa-webhook-payload.ts:384`); el tipo `MetaMensaje` ni siquiera declara `button` (`wa-webhook-payload.ts:33-44`). El toque se pierde.
 
-**El arreglo ya existe en el PR #966** (rama `worktree-agente-24aead2e4686`): declara `button` en `MetaMensaje`, lo suma a `textoLegible` y construye el mensaje con `type: 'button'` e `interactive_reply = payload`. Ese PR trae además dos migraciones de recordatorios.
+**El arreglo ya existe en el PR #966** (rama `worktree-agente-24aead2e4686`): declara `button` en `MetaMensaje`, lo suma a `textoLegible` y construye el mensaje con `type: 'button'` e `interactive_reply = payload`. Ese PR trae además el motor de recordatorios por plantilla, apagado, y sus dos migraciones (`20260930140000` y `20260930140100`).
 
 **Propuesta.**
-1. **PR propio, sin migración,** con solo ese cambio de `wa-webhook-payload.ts` y sus pruebas.
+1. **#966 se mergea completo, con los recordatorios apagados.** Mauricio pidió mergear los PR pendientes el 26-oct, así que ya no se saca el arreglo a un PR propio. Sus migraciones se aplican antes del merge; el envío programado y su registro (el «ledger») quedan en `main` listos para el recolector de Imperviun y los recordatorios de Laura.
 2. **Prefijo para el payload de nuestras plantillas:** `ag|t|<plantilla>|<accion>`, por ejemplo `ag|t|jornada_v1|empezar`. Hoy `leerToque` solo conoce propuesta (`ag|p|`) y conversación (`ag|c|`) (`agente/render.ts:119-128`). Con el prefijo nuevo:
    - devuelve `{ clase: 'plantilla', plantilla, accion }`;
    - el agente lo toma, en vez de soltarlo al bot de siempre (`wa-agente.ts:106`);
    - entra al turno como un toque con su texto («Empezar»).
    - Un payload ajeno (otra plantilla, sin prefijo) sigue por el camino de hoy.
-3. **Lo que no hace este PR:** mandar plantillas. El envío programado con su registro (el «ledger») es la parte de #966 que se rescata cuando se decida el primer recolector o los recordatorios de Laura (§5).
+3. **El prefijo va en un PR aparte, sin migración,** después de #966. Ese PR no manda plantillas: encender los recordatorios de #966 es un paso aparte, por workspace.
 
 **Casos de prueba.**
 - Payload real de Meta de una respuesta rápida: llega con `type: 'button'`, el payload y el `wa_message_id`.
@@ -783,67 +790,81 @@ Fixture: el payload de la doc de Meta, marcado como «armado de la doc», hasta 
 
 ## 5. Fases ordenadas por las fechas de los clientes
 
-No hay estimaciones de duración: el orden sale de las fechas de los contratos.
+No hay estimaciones de duración: el orden sale de las fechas de los contratos y de la decisión del 26-oct de lanzar los tres asistentes sobre el modelo de roles.
 
-### 5.1 Antes del jue 29-oct: Sabor sale a clientes reales sobre `publico/`
+### 5.1 Antes del jue 29-oct: el núcleo de roles, y Sabor sale a clientes reales como su primer rol
 
-**Respuesta a la pregunta:** sí se logra sobre lo que ya existe en `publico/`, sin esperar la arquitectura de roles. La etapa 1 está completa en `main`. Lo que falta es, sobre todo, insumos, operación y verificación.
+Sabor ya no sale sobre `publico/` tal cual: sale como el rol `asesor_vendedor` compuesto con funciones (§3.1). El código de `publico/` se reutiliza dentro de las funciones; lo que se agrega antes del 29 es el núcleo de roles.
+
+**Código (Max):**
+
+| # | Qué | Bloquea la salida |
+|---|---|---|
+| 1 | Migración de roles (§2.8), con su ensayo `DO $dry$ … RAISE`, aplicada antes del merge por la sesión principal. Antes, la prueba en PGlite de que la huella del arnés y la de `bot_publicar_reglamento` coinciden (§2.8, supuesto 6) | Sí |
+| 2 | Componedor (§2.6) con la prueba de permisos, y la resolución por asignación (§2.5) con el inbox de Chatwoot. Sin filas en las tablas nuevas, ONE y la bandeja de Trappvel siguen con el enrutamiento de hoy: sus tests y arneses pasan en el mismo PR | Sí |
+| 3 | Funciones de la etapa 1 de Sabor: `clientes.ficha`, `clientes.reglas`, `clientes.autorizacion`, `clientes.toma_datos`, `clientes.precio_autorizado` y `comun.persona`, que despachan al código de `publico/`. `chatwoot-agente` arma el turno con el rol compuesto | Sí |
+| 4 | Arnés de Sabor igual sobre el rol compuesto que sobre `dominioPublico`, pass^3 y 0 dañinas, con el conjunto real (fila 11) | Sí |
+| 5 | Escalamiento de Sabor como respaldo: la caída del modelo o cualquier señal de escalamiento pasa a un agente humano en Chatwoot y queda en `asistente_escalamientos` (§4.2) | Sí |
+| 6 | Correo inmediato si se cae el modelo y aviso del presupuesto por correo (§4.1, puntos 2 y 5), para `chatwoot-agente` | Sí (decisión del 26-oct: se mantiene el correo) |
+
+**Insumos y operación:**
 
 | # | Qué | Quién | Bloquea la salida |
 |---|---|---|---|
-| 1 | Confirmar que existe el workspace de Sabor en ONE y que la migración `20261021090000` está aplicada (consultas 7.1 y 7.2) | Sesión principal | Sí |
-| 2 | Secretos por slug (`CHATWOOT_WEBHOOK_SECRET_<SLUG>`, `CHATWOOT_API_TOKEN_<SLUG>`, `GEMINI_API_KEY_PAGO`) y despliegue de `chatwoot-agente` | Sesión principal (los despliegues no se delegan) | Sí |
-| 3 | Agent Bot creado en la cuenta Chatwoot de Sabor, apuntando a `chatwoot-agente?ws=<slug>`, en el inbox de Instagram | Mauricio con Paula | Sí |
-| 4 | Payload real de Chatwoot capturado y convertido en fixture; verificar `message_type`, remitente, `data_url` y si el token del Agent Bot puede crear notas privadas y cambiar el estado (D7) | Max | Sí |
-| 5 | Ficha real de la película de la semana (plantilla), nombre del asistente, horario de quien atiende y quién recibe cada motivo | Paula | Sí: ficha y nombre. No: horario (hay variante sin horario) |
-| 6 | Términos y aviso de datos con el visto de Emilio, publicados por Sabor (link real en `terminos_url`) | Emilio, Sabor | Sí (criterio de salida 6 del diseño) |
-| 7 | Reglamento de Sabor publicado en `bot_reglamentos` (bot `asistente-publico`), con la ficha real y el banco del arnés | Sesión principal publica; Max entrega el SQL | Sí |
-| 8 | Arnés real: conjunto real con las conversaciones de Paula, anonimizadas, más los conjuntos de hoy, pass^3 con 0 dañinas (D11) | Max | Sí |
-| 9 | Prueba con el equipo de Sabor sin hallazgos altos abiertos | Sabor, Max | Sí |
-| 10 | Presupuesto diario configurado (D12, Carmen) | Carmen, Mauricio | Sí (criterio 9) |
-| 11 | Aviso de falla del modelo y de presupuesto **por correo** (§4.1, puntos 2 y 5), solo para `chatwoot-agente` | Max, PR pequeño sin migración | No es criterio del diseño de Sabor, pero es requisito del ADN. Recomiendo que salga antes del 29 |
+| 7 | Confirmar que existe el workspace de Sabor en ONE y que la migración `20261021090000` está aplicada (consultas 7.1 y 7.2) | Sesión principal | Sí |
+| 8 | Secretos por slug (`CHATWOOT_WEBHOOK_SECRET_<SLUG>`, `CHATWOOT_API_TOKEN_<SLUG>`, `GEMINI_API_KEY_PAGO`) y despliegue de `chatwoot-agente` | Sesión principal (los despliegues no se delegan) | Sí |
+| 9 | Agent Bot creado en la cuenta Chatwoot de Sabor, apuntando a `chatwoot-agente?ws=<slug>`, en el inbox de Instagram, y un equipo humano de Sabor que reciba los traspasos | Mauricio con Paula | Sí |
+| 10 | Payload real de Chatwoot capturado y convertido en fixture; verificar `message_type`, remitente, `data_url` y si el token del Agent Bot puede crear notas privadas y cambiar el estado (D7). Con el respaldo en una persona, este punto es el que sostiene la caída del modelo | Max | Sí |
+| 11 | Arnés real: conjunto real con las conversaciones de Paula, anonimizadas | Max | Sí |
+| 12 | Ficha real de la experiencia de la semana (plantilla), nombre del asistente, horario de quien atiende y quién recibe cada motivo | Paula | Sí: ficha y nombre. No: horario (hay variante sin horario) |
+| 13 | Términos y aviso de datos con el visto de Emilio, publicados por Sabor (link real en `terminos_url`) | Emilio, Sabor | Sí (criterio de salida 6 del diseño) |
+| 14 | Funciones de la etapa 1 prendidas en `asistente_funciones_empresa`; rol `asesor_vendedor` publicado con `asistente_publicar_rol` (bot `rol:asesor_vendedor`) y su banco; puntero movido; asignación del inbox; rol activo | Max entrega el SQL; la sesión principal lo corre | Sí |
+| 15 | Prueba con el equipo de Sabor sin hallazgos altos abiertos, incluido un traspaso por caída del modelo | Sabor, Max | Sí |
+| 16 | Presupuesto diario configurado (D12, Carmen) | Carmen, Mauricio | Sí (criterio 9) |
 
-El resto del ADN no bloquea el 29-oct: roles, resumen diario, calificación, traspaso en ONE y botón de plantilla.
+**En paralelo, sin bloquear la salida de Sabor: Laura, desde ya** (decisión del 26-oct, §6.1-4):
+- someter a Meta las plantillas de utilidad del resumen de los lunes y del recordatorio de deudas (Yuto);
+- preparar la migración del módulo de citas, portafolio y cuotas (§3.3), con su ensayo, sin aplicar hasta que Mauricio lo decida.
 
-### 5.2 Del 29-oct al lun 9-nov: Sabor etapa 2 en prueba, y el núcleo de roles
+No bloquean el 29-oct: el dominio ONE partido por cargo, el resumen diario, la calificación, el traspaso en ONE y el prefijo de los botones de plantilla.
+
+### 5.2 Del 29-oct al lun 9-nov: Sabor etapa 2 en prueba, como versión nueva del rol
 
 - **Sabor etapa 2** (fecha de contrato, 9-nov en prueba):
-  - PR #1234 (sin el mapa del salón, ya decidido el 22-oct);
-  - migración aplicada antes del merge;
-  - encender `consultar_cupo`, `apartar`, `generar_link_pago` y `verificar_pago` en `publico/` (hoy apagadas, `publico/dominio.ts:51-56`);
+  - PR #1234 (sin el mapa del salón, ya decidido el 22-oct), con su migración aplicada antes del merge;
+  - las funciones `clientes.cupo`, `clientes.apartar` y `clientes.cobro_link`, sobre las herramientas hoy apagadas de `publico/` (`publico/dominio.ts:51-56`), prendidas en la empresa;
   - el cobro del saldo antes de la experiencia (`clientes.cobro_saldo`), que es lo crítico para Sabor;
   - la experiencia genérica (columna `tipo` y textos sin «película») y el origen del mensaje (`clientes.origen`), en cuanto Yuto confirme qué dato llega (§3.1);
-  - llaves de Bold de Sabor.
+  - llaves de Bold de Sabor;
+  - versión nueva del rol `asesor_vendedor` publicada con su banco. Marcha atrás = volver el puntero a la versión del 29-oct.
 - **En paralelo, sin tocar a Sabor:**
-  1. PR del botón de plantilla (§4.5), sin migración.
+  1. Merge de #966 con los recordatorios apagados (§4.5) y, después, el PR del prefijo `ag|t|`, sin migración.
   2. Correo inmediato también en ONE y la bandeja (§4.1), y los avisos del cupo por correo.
-  3. Migración de roles (§2.8) aplicada antes del merge, y el componedor (§2.6) con la prueba de permisos. Primer consumidor: el dominio ONE de hoy partido por cargo, con la evaluación de ONE en verde.
+  3. El dominio ONE de hoy partido por cargo sobre el componedor, con la evaluación de ONE en verde.
   4. Traspaso en ONE con el botón de enlace (§4.2).
   5. Resumen diario (§4.3) y calificación (§4.4), al principio solo con Sabor, que tiene autorización contractual (cláusulas 3.6 y 5.6).
 
 ### 5.3 Vie 13-nov: Sabor con el espacio completo
 
 - La lista del día, el resumen semanal, la exportación CSV y la base de clientes (frente de ONE de Sabor, CONTEXT).
-- Después de esta fecha, y no antes, Sabor pasa al modelo de roles (§3.1), con el arnés igual antes y después.
+- Sabor corre sobre el modelo de roles desde el 29-oct: esta fecha no trae ningún cambio de arquitectura.
 
-### 5.4 Con la firma de Laura (lo que llegue primero entre Laura e Imperviun)
+### 5.4 Con la firma de Laura
 
-Laura tiene el contrato listo en ZapSign y los plazos más cortos (workspace a 5 días hábiles de la firma), así que lo más probable es que llegue antes que Imperviun, que espera el RUT.
-- **Antes de la firma**, si Mauricio lo aprueba (§6.1-4):
-  - someter a Meta las plantillas de utilidad del resumen de los lunes y del recordatorio de deudas (Yuto);
-  - preparar la migración del módulo de citas (§3.3).
+Laura tiene el contrato listo en ZapSign y los plazos más cortos (workspace a 5 días hábiles de la firma). Las plantillas de Meta y la migración del módulo de citas van adelantadas desde el 26-oct (§5.1).
 - **Dentro de los 5 días hábiles:**
+  - migración del módulo de citas aplicada;
   - workspace;
   - portafolio y saldos cargados (sesión del paso 2);
-  - rol `mano_derecha` con sus funciones, publicado con su banco;
+  - funciones del frente 1 prendidas y rol `mano_derecha` publicado con su banco;
   - su número asignado.
 - **Semana 2:** prueba real; recepción con 5 citas al 80 %.
 - **Transcripción con pistas** (§4.6): entra aquí, porque las notas de voz son el camino principal de Laura.
 
 ### 5.5 Con la firma de Imperviun
 
-- **Paso 3 (8 días hábiles):** migración de obras aplicada; #1235 y #1237 rebasados sobre `main`, con el asistente partido en funciones y el enrutamiento por asignación (§3.2); workspace con obras, rubros y operarios.
-- **Paso 4 (semana 3):** prueba con Liliana y los operarios. Si se aprueba la apertura diaria (§6.1-2), plantilla aprobada por Meta y envío por plantilla rescatado de #966. Recepción con los 5 casos del Anexo 2.7.
+- **Paso 3 (8 días hábiles):** migración de obras aplicada; #1235 y #1237 al día con `main`, con el asistente partido en funciones y el enrutamiento por asignación (§3.2, decisión del 26-oct); workspace con obras, rubros y operarios.
+- **Paso 4 (semana 3):** prueba con Liliana y los operarios. La apertura diaria del recolector va construida y apagada (§6.1-2); se prende después, cuando estén la plantilla aprobada por Meta y el envío por plantilla de #966. Recepción con los 5 casos del Anexo 2.7.
 
 ### 5.6 Sin fecha: Laura frente 2
 
@@ -853,14 +874,15 @@ Se cotiza aparte (cláusula 3.12). Reutiliza las funciones `clientes.*`, agrega 
 
 ## 6. Riesgos y preguntas abiertas
 
-### 6.1 Las que necesito para empezar
+### 6.1 Decisiones tomadas (Mauricio, 26-oct)
 
-| # | Pregunta | Mi recomendación | Por qué |
+| # | Pregunta | Decisión (26-oct) | Qué cambia en este documento |
 |---|---|---|---|
-| 1 | Sabor sale sin respaldo (D1, 20-oct) y el ADN pide respaldo en otro proveedor. ¿Qué rige el 29-oct? | Sale **sin respaldo**, con correo inmediato y paso a persona con `falla`. El respaldo (Gemini) se enciende cuando pase el mismo arnés de Sabor | En un bot de clientes, el respaldo decide turnos frente a terceros con otro modelo que no se ha probado con la ficha de Sabor. Hoy, si Haiku falla, el cliente igual llega a una persona |
-| 2 | Imperviun: ¿la apertura diaria con plantilla (ADN) entra en la Fase 1, contra la decisión D9 del 21-oct? | Que entre como opción de la empresa, **apagada en el arranque**, y se prenda cuando estén el botón de plantilla y la plantilla aprobada. A Liliana se le cuenta antes | El ADN (26-oct) es posterior a D9 y pone a Imperviun de ejemplo. El costo es bajo (utilidad, COP 2,95 por mensaje). El contrato dice que el operario «escribe en qué obra está», así que arrancar sin plantilla cumple y no se arriesga la fecha |
-| 3 | PR #1235: ¿se reutiliza dentro del modelo de roles antes del merge, o se mergea tal cual con `obras = true`? | Reutilizar: mismo código, partido en funciones, y el enrutamiento por asignación | Si se mergea tal cual, tendremos un tercer interruptor ad hoc (`obras`) y habrá que migrarlo después con Imperviun ya en producción |
-| 4 | Laura: ¿se prepara su módulo (citas, portafolio, cuotas) cuando mandes el ZapSign, o con la firma? | Cuando mandes el ZapSign. Las plantillas de Meta, ya | 5 días hábiles desde la firma no alcanzan para modelar, probar y cargar sin preparar antes. Si no firma, lo preparado sirve para el frente 2 y para otros negocios de servicios |
+| 1 | Sabor sale sin modelo de respaldo (D1, 20-oct) y el ADN pide respaldo en otro proveedor. ¿Qué rige? | **No hay modelo de respaldo en otro proveedor.** El respaldo es una persona real de Sabor en Chatwoot: si el modelo se cae, o aparece cualquier señal de escalamiento, el asistente pasa la conversación a un agente humano dentro de Chatwoot. Se mantiene el correo inmediato si se cae el modelo. En palabras de Mauricio: «es lo potente de trabajar desde la plataforma del tercero» | §3.1 (escalamiento), §4.1 (punto 6 y casos), §4.2 (`chatwoot_equipo` pasa directo), §5.1 (filas 5, 6, 9, 10 y 15) |
+| 2 | Imperviun: ¿la apertura diaria con plantilla (ADN) entra en la Fase 1, contra la decisión D9 del 21-oct? | **Entra apagada y se prende después** | §2.2, §3.2 y §5.5 |
+| 3 | PR #1235: ¿se reutiliza dentro del modelo de roles antes del merge, o se mergea tal cual con `obras = true`? | **Se reutiliza** dentro del modelo de roles antes de su merge | §3.2 y §5.5 |
+| 4 | Laura: ¿se prepara su módulo cuando se mande el ZapSign, o con la firma? | **Se adelanta ya, sin esperar la firma:** se someten sus plantillas a Meta y se prepara la migración del módulo de citas | §5.1 (en paralelo) y §5.4 |
+| 5 | (Dirección nueva) ¿Sabor sale sobre `publico/` y pasa a roles después del 13-nov? | **No. Los tres asistentes salen sobre el modelo de roles y funciones, Sabor incluido desde su salida.** «Tenemos el tiempo suficiente para hacerlo sin contratiempos.» Las fechas de Sabor no cambian: 29-oct, 9-nov y 13-nov | §0, §3.1, §5 completo y §6.3 |
 
 ### 6.2 Las de menor peso
 
@@ -880,10 +902,11 @@ Se cotiza aparte (cláusula 3.12). Reutiliza las funciones `clientes.*`, agrega 
 |---|---|
 | Tocar el núcleo rompe la bandeja de Trappvel o el ONE de todos, que están en producción | El componedor es aditivo y el núcleo no cambia. Los tests y los arneses de bandeja, ONE y público tienen que pasar en el mismo PR. Sin filas en las tablas nuevas, rige el enrutamiento de hoy |
 | Filtrar herramientas por cargo cambia lo que ve el modelo en ONE | Volver a correr la evaluación de ONE antes del merge; el rol se fija al empezar la conversación (caché y razonamiento) |
-| #1234, #1235, #1237 y #966 llevan días sin mergear, con migraciones sin aplicar, y van a chocar con el componedor | Orden de merge explícito en §5. Cada uno se rebasa antes de su fecha; `git merge origin/main` sin force si hay conflicto |
+| El núcleo de roles entra antes de la salida de Sabor (29-oct), y Sabor sale sobre él | Las funciones de Sabor despachan al código de `publico/` que ya pasa su arnés; el rol no sale si su arnés no da lo mismo que sobre `dominioPublico` (pass^3, 0 dañinas). El respaldo ante cualquier falla es una persona de Sabor en Chatwoot, con correo inmediato. Marcha atrás de una versión del rol = mover el puntero |
+| #1234, #1235, #1237 y #966 llevan días sin mergear, con migraciones sin aplicar, y van a chocar con el componedor | Orden de merge explícito en §5. Cada uno se pone al día con `main` antes de su fecha, por merge, sin rebase ni force |
 | Meta rechaza o recategoriza una plantilla como marketing | Tres versiones por saludo, sin la presentación de Agus (reglas de Yuto del 23-oct). Si se recategoriza, se avisa antes de mandar más |
 | Un número en dos workspaces (Liliana lleva varias empresas): hoy se toma el primero sin preguntar | Para Imperviun basta verificar que su número solo esté ahí (consulta 7.5). La solución de fondo queda fuera de este documento |
-| Sabor depende de insumos de Paula (ficha, nombre, términos) y de Emilio | Las filas 5 y 6 de §5.1 bloquean. Cada día de atraso corre la fecha (Anexo 2, numeral 2.6 del contrato de Sabor) |
+| Sabor depende de insumos de Paula (ficha, nombre, términos, equipo humano en Chatwoot) y de Emilio | Las filas 9, 12 y 13 de §5.1 bloquean. Cada día de atraso corre la fecha (Anexo 2, numeral 2.6 del contrato de Sabor) |
 | Las pistas de transcripción meten nombres que no se dijeron | La prueba mide la inserción falsa y no se adoptan si la sube |
 | El juez diario cuesta y se equivoca | Se mide en el resumen; calibración con 50 revisiones; no reemplaza al arnés |
 | Huella del banco: TypeScript y SQL pueden calcular distinto | Se prueba en PGlite antes de construir (§2.8) |
@@ -903,7 +926,7 @@ from workspaces where slug ilike '%sabor%' or name ilike '%sabor%';
 select to_regclass('public.chatwoot_conversacion')    as chatwoot_conversacion,      -- 20261021090000 (Sabor etapa 1)
        to_regclass('public.chatwoot_consentimientos') as chatwoot_consentimientos,
        to_regclass('public.llegadas_obra')            as llegadas_obra,              -- 20261021183000 (Imperviun, #1235)
-       to_regclass('public.wa_recordatorios')         as wa_recordatorios;           -- 20260930140000 (#966); nombre SIN VERIFICAR
+       to_regclass('public.wa_recordatorios')         as wa_recordatorios;           -- 20260930140000 (#966); nombre leído del archivo de la migración
 
 -- 7.3 Reglamentos publicados hoy (qué bots y versiones existen).
 select w.slug, r.bot, r.version, r.publicado_por, r.publicado_at, r.banco is not null as con_banco
@@ -942,7 +965,7 @@ group by w.slug order by turnos desc;
 4. El tipo de mensaje interactivo con botón de URL para el enlace a WhatsApp (§4.2).
 5. Que la llave de staff para las asignaciones sea `profiles.id` (consulta 7.6).
 6. Que la huella del arnés y la de `bot_publicar_reglamento` coincidan (§2.8).
-7. El nombre de la tabla de recordatorios del #966 en la consulta 7.2.
+7. ~~El nombre de la tabla de recordatorios del #966 en la consulta 7.2.~~ Verificado en la rama del PR: `wa_recordatorios` y `wa_recordatorio_eventos`.
 8. Que el webhook de estados de Meta guarde la categoría de cobro para la métrica de costo (§2.9).
 9. Que los contratos de Imperviun y de Laura permitan calificar sus conversaciones con IA (§6.2-c).
 10. Qué dato de origen entregan Meta y Chatwoot para saber de qué anuncio o publicación viene un mensaje: anuncios que abren WhatsApp (`referral`), anuncios de Instagram, y publicaciones orgánicas de Instagram y TikTok (§3.1-2). Lo revisa Yuto con un payload real de la cuenta de Sabor.
