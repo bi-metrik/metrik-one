@@ -30,6 +30,13 @@ export const CLAVES_BOLD = {
   secretaAnterior: 'bold_secret_key_anterior',
 } as const;
 
+/**
+ * Marca de ESPACIO DE PRUEBAS para la firma vacía del ambiente de pruebas de Bold: `ws:<id>:espacio_de_pruebas = 'si'`
+ * en Vault. Vive en Vault y no en `config_extra` porque esa columna la escribe cualquier miembro por la API; Vault solo
+ * lo escribe el servidor (y la bóveda de la pantalla solo acepta las claves de su catálogo, donde esta no está).
+ */
+export const CLAVE_ESPACIO_DE_PRUEBAS = 'espacio_de_pruebas';
+
 /** Cuánto sigue valiendo la secreta anterior después de un cambio de cuenta (los reintentos de Bold duran ~37 h). */
 export const DIAS_SECRETA_ANTERIOR = 7;
 
@@ -40,6 +47,8 @@ export interface LlavesBold {
   identidad?: string | null;
   secreta?: string | null;
   secretaAnterior?: string | null;
+  /** El workspace está marcado como espacio de pruebas en Vault (`CLAVE_ESPACIO_DE_PRUEBAS`). */
+  espacioDePruebas?: boolean;
 }
 
 type Fetch = typeof fetch;
@@ -109,6 +118,7 @@ export async function llavesBoldDelWorkspace(cliente: ClienteRpc, workspaceId: s
     identidad: texto(crudo[CLAVES_BOLD.identidad]),
     secreta: texto(crudo[CLAVES_BOLD.secreta]),
     secretaAnterior: texto(crudo[CLAVES_BOLD.secretaAnterior]),
+    espacioDePruebas: crudo[CLAVE_ESPACIO_DE_PRUEBAS] === 'si',
   };
 }
 
