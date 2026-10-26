@@ -362,7 +362,9 @@ export async function crearNegocio(
   // la fila con su rol, la línea en el timeline y `responsable_id`. El aviso a la persona lo da el trigger de la tabla.
   const resp = p.responsable ?? (p.staffId ? { staffId: p.staffId, asignadoPor: await profileDeStaff(supabase, p.staffId) } : null);
   if (resp) {
-    const r = await asignarResponsableCon(supabase, { negocioId, staffId: resp.staffId, assignedBy: resp.asignadoPor }, async (fila) => {
+    // Origen (migración 20261026090000): con perfil de quien escribe es una persona («Edgar te dejó…»); sin él, el bot.
+    const origen = resp.asignadoPor ? 'persona' : 'bot_whatsapp';
+    const r = await asignarResponsableCon(supabase, { negocioId, staffId: resp.staffId, assignedBy: resp.asignadoPor, origen }, async (fila) => {
       const { error: eL } = await supabase.from('activity_log').insert(fila);
       if (eL) console.error(`[wa-entendimiento] negocio ${negocioId} sin la línea del responsable:`, eL.message);
     });
