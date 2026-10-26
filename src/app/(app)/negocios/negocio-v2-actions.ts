@@ -157,6 +157,7 @@ import {
 } from '@/lib/contactos/campanas'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
+import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
 import { formulariosOrigenDeCopias, historialSinOrigenesGenerables, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
@@ -8330,6 +8331,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       ) {
         enrichedConfigExtra.devolucion_habilitada = true
       }
+    }
+    // Copia de solo lectura de un documento: no recibe archivos ni correcciones (el servidor
+    // las rechaza en `documento-actions.destinoDeEscritura`), así que la pantalla dice DÓNDE
+    // está el original para cambiarlo. Sin el nombre de la etapa, la copia solo podía decir
+    // «etapa 6», y quien la mira no sabe cuál es (SOENA, SOE-028).
+    if (defTipo === 'documento' && copiaDeSoloLectura(configExtra)) {
+      const ordenOrigen = configExtra.source_etapa_orden
+      const etapaOrigen = base.etapasLinea.find(e => e.orden === ordenOrigen)
+      if (etapaOrigen?.nombre) enrichedConfigExtra._origenEtapaNombre = etapaOrigen.nombre
     }
     // Corrección del valor aprobado: capacidad declarada por persona en el
     // workspace, NO derivada del rol (ver `corregirAprobacion`). Se resuelve
