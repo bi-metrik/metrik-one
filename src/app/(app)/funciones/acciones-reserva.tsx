@@ -3,47 +3,111 @@
 import { useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { cancelarReservaAction, confirmarPagoManualAction } from './actions'
+import { pesos, textoSaldo } from '@/lib/funciones/reglas'
+import type { ReservaVista } from '@/lib/funciones/datos'
+import { cancelarReservaAction, confirmarPagoManualAction, regenerarLinkSaldoAction, registrarSaldoCobradoAction } from './actions'
 
-/** Confirmar un pago verificado a mano y cancelar: los botones de la lista del día y del detalle de la función. */
-export function AccionesReserva(p: { funcionId: string; reservaId: string; estado: string; nombre: string | null }) {
+type Props = {
+  funcionId: string
+  reserva: Pick<ReservaVista, 'id' | 'estado' | 'nombre' | 'personas' | 'abono_unitario' | 'permite_pago_total' | 'saldo'>
+}
+
+/**
+ * Los botones de una reserva en la lista del día y en el detalle de la función:
+ *   · «Pago verificado» (transferencia revisada a mano), diciendo si pagó el total o solo la reserva (P14b);
+ *   · [Saldo cobrado] con el QR de Bold en el evento y «Link del saldo» (uno nuevo; el anterior vence), P14c;
+ *   · cancelar.
+ * La base decide todo (montos, plazo, permisos); aquí solo se pregunta y se muestra el resultado.
+ */
+export function AccionesReserva({ funcionId, reserva: r }: Props) {
   const [pendiente, empezar] = useTransition()
   const router = useRouter()
+  const saldo = textoSaldo(r.saldo, r.estado)
+  const nombre = r.nombre ?? 'esta reserva'
 
-  const correr = (f: () => Promise<{ ok: boolean; error?: string }>, ok: string) =>
+  const correr = <T,>(f: () => Promise<{ ok: boolean; error?: string; dato?: T }>, ok: (dato?: T) => string) =>
     empezar(async () => {
-      const r = await f()
-      if (r.ok) {
-        toast.success(ok)
+      const x = await f()
+      if (x.ok) {
+        toast.success(ok(x.dato))
         router.refresh()
-      } else toast.error(r.error ?? 'No se pudo.')
+      } else toast.error(x.error ?? 'No se pudo.')
     })
 
+  const verificar = (modalidad: 'total' | 'abono', etiqueta: string) => {
+    if (confirm(`¿El pago de ${nombre} ya está verificado (transferencia revisada) y fue ${etiqueta}?`)) {
+      correr(() => confirmarPagoManualAction(funcionId, r.id, modalidad), () => 'Pago verificado: reserva confirmada.')
+    }
+  }
+
+  const cobrarSaldo = () => {
+    if (!r.saldo) return
+    const pedido = prompt(`Saldo cobrado con el QR de Bold para ${nombre}. Monto en pesos (el saldo es ${pesos(r.saldo.saldo)}):`, String(r.saldo.saldo))
+    if (pedido === null) return
+    const monto = Number(pedido.replace(/[^\d]/g, ''))
+    correr(() => registrarSaldoCobradoAction(funcionId, r.id, monto), () => `Saldo cobrado: ${pesos(monto)}.`)
+  }
+
+  const linkSaldo = () => {
+    if (!confirm(`¿Generar un link nuevo del saldo de ${nombre}? Si había uno, deja de valer.`)) return
+    correr(
+      () => regenerarLinkSaldoAction(funcionId, r.id),
+      (d) => {
+        if (d?.url) void navigator.clipboard?.writeText(d.url)
+        return d ? `Link del saldo por ${pesos(d.monto)} copiado.` : 'Link del saldo listo.'
+      },
+    )
+  }
+
+  const boton = 'rounded border px-2 py-0.5 text-xs disabled:opacity-50'
   return (
-    <span className="inline-flex gap-1 print:hidden">
-      {p.estado === 'apartada' && (
+    <span className="inline-flex flex-wrap gap-1 print:hidden">
+      {r.estado === 'apartada' && r.permite_pago_total && (
+        <button type="button" disabled={pendiente} onClick={() => verificar('total', 'por el total')} className={`${boton} border-[#10B981] text-[#059669] hover:bg-emerald-50`}>
+          Pagó el total
+        </button>
+      )}
+      {r.estado === 'apartada' && r.abono_unitario !== null && (
         <button
           type="button"
           disabled={pendiente}
-          onClick={() => {
-            if (confirm(`¿El pago de ${p.nombre ?? 'esta reserva'} ya está verificado (transferencia revisada)?`)) {
-              correr(() => confirmarPagoManualAction(p.funcionId, p.reservaId), 'Pago verificado: reserva confirmada.')
-            }
-          }}
-          className="rounded border border-[#10B981] px-2 py-0.5 text-xs text-[#059669] hover:bg-emerald-50 disabled:opacity-50"
+          onClick={() => verificar('abono', `solo la reserva (${pesos(r.abono_unitario! * r.personas)})`)}
+          className={`${boton} border-[#10B981] text-[#059669] hover:bg-emerald-50`}
         >
-          Pago verificado
+          Pagó la reserva
         </button>
+      )}
+      {saldo?.cobrar && (
+        <>
+          <button type="button" disabled={pendiente} onClick={cobrarSaldo} className={`${boton} border-[#10B981] text-[#059669] hover:bg-emerald-50`}>
+            Saldo cobrado
+          </button>
+          <button type="button" disabled={pendiente} onClick={linkSaldo} className={`${boton} border-[#E5E7EB] text-[#6B7280] hover:bg-gray-50`}>
+            Link del saldo
+          </button>
+          {r.saldo?.link?.url && (
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(r.saldo!.link!.url!)
+                toast.success('Link del saldo copiado.')
+              }}
+              className={`${boton} border-[#E5E7EB] text-[#6B7280] hover:bg-gray-50`}
+            >
+              Copiar link
+            </button>
+          )}
+        </>
       )}
       <button
         type="button"
         disabled={pendiente}
         onClick={() => {
-          if (confirm(`¿Cancelar la reserva de ${p.nombre ?? 'esta persona'}? Libera su cupo.`)) {
-            correr(() => cancelarReservaAction(p.funcionId, p.reservaId), 'Reserva cancelada.')
+          if (confirm(`¿Cancelar la reserva de ${r.nombre ?? 'esta persona'}? Libera su cupo.`)) {
+            correr(() => cancelarReservaAction(funcionId, r.id), () => 'Reserva cancelada.')
           }
         }}
-        className="rounded border border-[#E5E7EB] px-2 py-0.5 text-xs text-[#6B7280] hover:bg-gray-50 disabled:opacity-50"
+        className={`${boton} border-[#E5E7EB] text-[#6B7280] hover:bg-gray-50`}
       >
         Cancelar
       </button>

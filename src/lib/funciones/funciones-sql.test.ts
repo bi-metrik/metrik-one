@@ -154,8 +154,9 @@ interface Apartado {
   tarifa: string
   precio_unitario: number
   monto_total: number
-  modalidad: string
-  monto_a_pagar: number
+  /** P14b: la foto no lleva modalidad; trae las dos cifras que el cliente elige al pagar. */
+  monto_reserva: number | null
+  permite_pago_total: boolean
 }
 
 let conversaciones = 1000
@@ -163,7 +164,7 @@ let conversaciones = 1000
 async function apartarAsistente(
   funcion: string,
   personas: number,
-  o: { clave?: string; conv?: number; datos?: Record<string, unknown>; modalidad?: string; ws?: string } = {},
+  o: { clave?: string; conv?: number; datos?: Record<string, unknown>; ws?: string } = {},
 ): Promise<Apartado> {
   let conv = o.conv
   if (conv === undefined) {
@@ -173,19 +174,19 @@ async function apartarAsistente(
   const datos = { canal: 'instagram', chatwoot_cuenta_id: 1, chatwoot_conversacion_id: conv, nombre: 'Cliente', ...o.datos }
   return siendo('servidor', async () => {
     const r = await q<{ r: Apartado }>(
-      `select funcion_apartar($1, $2, $3, $4, $5::jsonb, $6, 'asistente') as r`,
-      [o.ws ?? WS, funcion, personas, o.modalidad ?? 'total', JSON.stringify(datos), o.clave ?? `clave-${uuid()}`],
+      `select funcion_apartar($1, $2, $3, $4::jsonb, $5, 'asistente') as r`,
+      [o.ws ?? WS, funcion, personas, JSON.stringify(datos), o.clave ?? `clave-${uuid()}`],
     )
     return r[0].r
   })
 }
 
 /** Aparta como el equipo (origen equipo). */
-async function apartarEquipo(funcion: string, personas: number, o: { clave?: string; ws?: string; perfil?: string; modalidad?: string } = {}): Promise<Apartado> {
+async function apartarEquipo(funcion: string, personas: number, o: { clave?: string; ws?: string; perfil?: string } = {}): Promise<Apartado> {
   return siendo({ equipo: o.perfil ?? EQUIPO }, async () => {
     const r = await q<{ r: Apartado }>(
-      `select funcion_apartar($1, $2, $3, $4, '{"nombre": "Reserva del equipo"}'::jsonb, $5, 'equipo') as r`,
-      [o.ws ?? WS, funcion, personas, o.modalidad ?? 'total', o.clave ?? `eq-${uuid()}`],
+      `select funcion_apartar($1, $2, $3, '{"nombre": "Reserva del equipo"}'::jsonb, $4, 'equipo') as r`,
+      [o.ws ?? WS, funcion, personas, o.clave ?? `eq-${uuid()}`],
     )
     return r[0].r
   })
@@ -289,7 +290,6 @@ describe('no sobreventa', () => {
     expect([a.repetida, b.repetida]).toEqual([false, true])
     expect((await ocupacion(e.funcion)).ocupadas).toBe(3)
     expect(await codigo(apartarAsistente(e.funcion, 2, { clave: 'huella-propuesta-1', conv }))).toBe('clave_reusada')
-    expect(await codigo(apartarAsistente(e.funcion, 3, { clave: 'huella-propuesta-1', conv, modalidad: 'abono' }))).toBe('clave_reusada')
   })
 
   it('5. confirmar un apartado vencido cuyo cupo ya se tomó: sin_cupo; con cupo libre, confirma', async () => {
@@ -297,18 +297,18 @@ describe('no sobreventa', () => {
     const a = await apartarAsistente(e.funcion, 4)
     await vencer(a.reserva_id)
     const b = await apartarAsistente(e.funcion, 2)
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id]))).toBe('sin_cupo')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [a.reserva_id]))).toBe('sin_cupo')
     await cancelar(b.reserva_id)
-    await rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id])
+    await rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [a.reserva_id])
     expect(await estado(a.reserva_id)).toBe('confirmada')
   })
 
   it('confirmar a mano: solo el equipo y solo verificado_manual; la pasarela entra por funcion_registrar_pago', async () => {
     const e = await escenario({ capacidad: 4 })
     const a = await apartarEquipo(e.funcion, 2)
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'aprobado') as r`, [a.reserva_id]))).toBe('pago_estado_invalido')
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id], 'servidor'))).toMatch(/permission denied/)
-    await rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id])
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'aprobado', 'total') as r`, [a.reserva_id]))).toBe('pago_estado_invalido')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [a.reserva_id], 'servidor'))).toMatch(/permission denied/)
+    await rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [a.reserva_id])
     const r = (await q<{ estado: string; pago_estado: string; confirmada_por: string }>(
       `select estado, pago_estado, confirmada_por from funcion_reservas where id = $1`, [a.reserva_id]))[0]
     expect(r).toEqual({ estado: 'confirmada', pago_estado: 'verificado_manual', confirmada_por: EQUIPO })
@@ -386,12 +386,12 @@ describe('dos cupos: capacidad y cupo del asistente', () => {
     await vencer(a.reserva_id)
     await apartarEquipo(e.funcion, 1)
     // Ocupadas 1 + 3 = 4 cabe en la capacidad (6) pero no en el cupo del asistente (3).
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [a.reserva_id]))).toBe('sin_cupo')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [a.reserva_id]))).toBe('sin_cupo')
     const b = await apartarEquipo(e.funcion, 4)
     await vencer(b.reserva_id)
     await apartarAsistente(e.funcion, 2)
     // Del equipo: 1 + 2 + 4 = 7 no cabe en 6. Con 1 + 2 + 3 sí cabría; aquí no.
-    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual') as r`, [b.reserva_id]))).toBe('sin_cupo')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [b.reserva_id]))).toBe('sin_cupo')
   })
 })
 
@@ -415,26 +415,31 @@ describe('precios: una tarifa y la foto del monto', () => {
 
   it('el total y el abono los calcula la base', async () => {
     const e = await escenario({ precio: 180_000, abono: 100_000 })
-    const t = await apartarAsistente(e.funcion, 3, { modalidad: 'total' })
-    expect([t.tarifa, t.precio_unitario, t.monto_total, t.modalidad, t.monto_a_pagar]).toEqual(['completa', 180_000, 540_000, 'total', 540_000])
-    const a = await apartarAsistente(e.funcion, 2, { modalidad: 'abono' })
-    expect([a.monto_total, a.modalidad, a.monto_a_pagar]).toEqual([360_000, 'abono', 200_000])
-    const fila = (await q<{ monto_total: string; monto_a_pagar: string; abono_unitario: number }>(
-      `select monto_total, monto_a_pagar, abono_unitario from funcion_reservas where id = $1`, [a.reserva_id]))[0]
-    expect([Number(fila.monto_total), Number(fila.monto_a_pagar), fila.abono_unitario]).toEqual([360_000, 200_000, 100_000])
+    const t = await apartarAsistente(e.funcion, 3)
+    expect([t.tarifa, t.precio_unitario, t.monto_total, Number(t.monto_reserva), t.permite_pago_total]).toEqual(['completa', 180_000, 540_000, 300_000, true])
+    const a = await apartarAsistente(e.funcion, 2)
+    expect([a.monto_total, Number(a.monto_reserva)]).toEqual([360_000, 200_000])
+    // P14b: la foto guarda el abono por persona y si se permite el total; la modalidad queda vacía hasta pagar.
+    const fila = (await q<{ monto_total: string; monto_a_pagar: string | null; abono_unitario: number; permite_pago_total: boolean; modalidad: string | null; dias_saldo_antes: number }>(
+      `select monto_total, monto_a_pagar, abono_unitario, permite_pago_total, modalidad, dias_saldo_antes from funcion_reservas where id = $1`, [a.reserva_id]))[0]
+    expect([Number(fila.monto_total), fila.monto_a_pagar, fila.abono_unitario, fila.permite_pago_total, fila.modalidad, fila.dias_saldo_antes])
+      .toEqual([360_000, null, 100_000, true, null, 1])
   })
 
-  it('modalidad_no_permitida y sin_precio: no aparta', async () => {
+  it('modalidad_no_permitida (sin abono ni pago total) y sin_precio: no aparta', async () => {
+    const ninguna = await escenario({ abono: null, permiteTotal: false })
+    expect(await codigo(apartarAsistente(ninguna.funcion, 2))).toBe('modalidad_no_permitida')
+    expect(await codigo(apartarEquipo(ninguna.funcion, 2))).toBe('modalidad_no_permitida')
+    // Con una sola forma de pago sí aparta: la modalidad se revisa al pagar.
     const sinAbono = await escenario({ abono: null })
-    expect(await codigo(apartarAsistente(sinAbono.funcion, 2, { modalidad: 'abono' }))).toBe('modalidad_no_permitida')
+    expect((await apartarAsistente(sinAbono.funcion, 1)).monto_reserva).toBeNull()
     const sinTotal = await escenario({ permiteTotal: false })
-    expect(await codigo(apartarEquipo(sinTotal.funcion, 2, { modalidad: 'total' }))).toBe('modalidad_no_permitida')
-    expect(await codigo(apartarEquipo(sinTotal.funcion, 2, { modalidad: 'cuotas' }))).toBe('modalidad_no_permitida')
+    expect((await apartarEquipo(sinTotal.funcion, 1)).permite_pago_total).toBe(false)
     const sinPrecio = await escenario({ precio: null, abono: null })
     expect(await codigo(apartarAsistente(sinPrecio.funcion, 2))).toBe('sin_precio')
     const preventaSinPrecio = await escenario({ esPreventa: true })
     expect(await codigo(apartarEquipo(preventaSinPrecio.funcion, 2))).toBe('sin_precio')
-    for (const f of [sinAbono, sinTotal, sinPrecio, preventaSinPrecio]) expect((await ocupacion(f.funcion)).ocupadas).toBe(0)
+    for (const f of [ninguna, sinPrecio, preventaSinPrecio]) expect((await ocupacion(f.funcion)).ocupadas).toBe(0)
   })
 
   it('la foto no cambia al editar el precio; la misma clave devuelve la misma foto', async () => {
@@ -723,7 +728,8 @@ describe('pagos: uno o varios apartados en un solo link (P13)', () => {
   interface Pago { pago_id: string; monto_esperado: number; vence_at: string; reservas: string[] }
   interface Registro { pago_id: string; estado: string; repetida: boolean; confirmadas: string[]; pendientes: string[] }
   let refs = 0
-  const preparar = (ids: string[], quien: Quien = 'servidor') => rpc<Pago>(`select funcion_preparar_pago($1, $2::uuid[]) as r`, [WS, ids], quien)
+  const preparar = (ids: string[], quien: Quien = 'servidor', modalidad = 'total') =>
+    rpc<Pago>(`select funcion_preparar_pago($1, $2::uuid[], $3) as r`, [WS, ids, modalidad], quien)
   const vincular = (pago: string, ref = `LNK_${++refs}`) =>
     rpc(`select funcion_vincular_link($1, $2, 'https://checkout.ejemplo/x') as r`, [pago, ref], 'servidor').then(() => ref)
   const registrar = (ref: string, estado: string, monto: number | null) =>
@@ -741,33 +747,66 @@ describe('pagos: uno o varios apartados en un solo link (P13)', () => {
     const e2 = await escenario({ precio: 150_000, abono: 100_000, capacidad: o.capacidad2 ?? 10 })
     const conv = ++conversaciones
     await autorizacion(conv, 'general', 'si')
-    const a1 = await apartarAsistente(e1.funcion, 2, { conv, modalidad: 'abono' })
-    const a2 = await apartarAsistente(e2.funcion, 2, { conv, modalidad: 'total' })
+    const a1 = await apartarAsistente(e1.funcion, 2, { conv })
+    const a2 = await apartarAsistente(e2.funcion, 2, { conv })
     return { e1, e2, a1, a2, conv }
   }
 
-  it('el resumen lo calcula la base: cada reserva con su monto y el total sin las vencidas', async () => {
+  it('el resumen lo calcula la base: las dos cifras (total y solo la reserva) por reserva y la suma, sin las vencidas', async () => {
     const { a1, a2 } = await dosApartados()
-    const r = await rpc<{ reservas: Array<{ monto_a_pagar: number; vigente: boolean }>; total: number; vencidas: string[] }>(
-      `select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, [a1.reserva_id, a2.reserva_id]], 'servidor')
-    expect([r.total, r.reservas.length, r.vencidas]).toEqual([200_000 + 300_000, 2, []])
+    type Resumen = { reservas: Array<{ monto_total: number; monto_reserva: number | null; vigente: boolean }>; total: number; solo_reserva: number | null; modalidades: string[]; vencidas: string[] }
+    const resumen = (ids: string[]) => rpc<Resumen>(`select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, ids], 'servidor')
+    const r = await resumen([a1.reserva_id, a2.reserva_id])
+    expect([r.total, r.solo_reserva, r.modalidades, r.reservas.length, r.vencidas]).toEqual([360_000 + 300_000, 200_000 + 200_000, ['total', 'abono'], 2, []])
+    expect(r.reservas.map((x) => [x.monto_total, x.monto_reserva])).toEqual([[360_000, 200_000], [300_000, 200_000]])
     await vencer(a2.reserva_id)
-    const v = await rpc<{ total: number; vencidas: string[] }>(`select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, [a1.reserva_id, a2.reserva_id]], 'servidor')
-    expect([v.total, v.vencidas]).toEqual([200_000, [a2.reserva_id]])
+    const v = await resumen([a1.reserva_id, a2.reserva_id])
+    expect([v.total, v.solo_reserva, v.vencidas]).toEqual([360_000, 200_000, [a2.reserva_id]])
     // Reservas de otra conversación no se juntan.
     const otra = await apartarAsistente((await escenario()).funcion, 1)
-    expect(await codigo(rpc(`select funcion_resumen_pago($1, $2::uuid[]) as r`, [WS, [a1.reserva_id, otra.reserva_id]], 'servidor'))).toBe('distinta_conversacion')
+    expect(await codigo(resumen([a1.reserva_id, otra.reserva_id]))).toBe('distinta_conversacion')
+    // Si una no permite el total (o no tiene abono), esa cifra no sirve para el link conjunto: no se pregunta.
+    const sinTotal = await escenario({ permiteTotal: false })
+    const sinAbono = await escenario({ abono: null })
+    const conv = ++conversaciones
+    await autorizacion(conv, 'general', 'si')
+    const x = await apartarAsistente(sinTotal.funcion, 1, { conv })
+    const y = await apartarAsistente(sinAbono.funcion, 1, { conv })
+    expect((await resumen([x.reserva_id])).modalidades).toEqual(['abono'])
+    const ambas = await resumen([x.reserva_id, y.reserva_id])
+    expect([ambas.modalidades, ambas.solo_reserva, ambas.total]).toEqual([[], null, 200_000])
+  })
+
+  it('P14b: la modalidad se fija al pagar, la misma para todas las reservas del pago; la que no la permite frena el pago', async () => {
+    const { a1, a2 } = await dosApartados()
+    const p = await preparar([a1.reserva_id, a2.reserva_id], 'servidor', 'abono')
+    expect([p.monto_esperado]).toEqual([400_000])
+    const filas = await q<{ modalidad: string; monto_a_pagar: string }>(
+      `select modalidad, monto_a_pagar from funcion_reservas where id = any ($1::uuid[]) order by id`, [[a1.reserva_id, a2.reserva_id]])
+    expect(filas.map((x) => [x.modalidad, Number(x.monto_a_pagar)])).toEqual([['abono', 200_000], ['abono', 200_000]])
+    const montos = await q<{ monto: string }>(`select monto from funcion_pago_reservas where pago_id = $1`, [p.pago_id])
+    expect(montos.map((x) => Number(x.monto))).toEqual([200_000, 200_000])
+    // Sin abono no se cobra «solo la reserva»; sin pago total no se cobra el total; otra palabra tampoco. Nada cambia.
+    const sinAbono = await apartarAsistente((await escenario({ abono: null })).funcion, 1)
+    const sinTotal = await apartarAsistente((await escenario({ permiteTotal: false })).funcion, 1)
+    expect(await codigo(preparar([sinAbono.reserva_id], 'servidor', 'abono'))).toBe('modalidad_no_permitida')
+    expect(await codigo(preparar([sinTotal.reserva_id], 'servidor', 'total'))).toBe('modalidad_no_permitida')
+    expect(await codigo(preparar([sinTotal.reserva_id], 'servidor', 'cuotas'))).toBe('modalidad_no_permitida')
+    const intacta = (await q<{ modalidad: string | null; realineada_at: string | null }>(
+      `select modalidad, realineada_at from funcion_reservas where id = $1`, [sinTotal.reserva_id]))[0]
+    expect(intacta).toEqual({ modalidad: null, realineada_at: null })
+    expect((await preparar([sinTotal.reserva_id], 'servidor', 'abono')).monto_esperado).toBe(40_000)
   })
 
   it('aprobado con el monto esperado confirma todas, en una transacción; el aviso repetido no confirma dos veces', async () => {
     const { e1, e2, a1, a2 } = await dosApartados()
     const p = await preparar([a1.reserva_id, a2.reserva_id])
-    expect(p.monto_esperado).toBe(500_000)
+    expect(p.monto_esperado).toBe(660_000)
     const ref = await vincular(p.pago_id)
-    const r = await registrar(ref, 'aprobado', 500_000)
+    const r = await registrar(ref, 'aprobado', 660_000)
     expect([r.estado, r.repetida, [...r.confirmadas].sort(), r.pendientes]).toEqual(['aprobado', false, [a1.reserva_id, a2.reserva_id].sort(), []])
     for (const id of [a1.reserva_id, a2.reserva_id]) expect((await fila(id))).toMatchObject({ estado: 'confirmada', pago_estado: 'aprobado' })
-    const otra = await registrar(ref, 'aprobado', 500_000)
+    const otra = await registrar(ref, 'aprobado', 660_000)
     expect([otra.repetida, otra.estado]).toEqual([true, 'aprobado'])
     expect([(await ocupacion(e1.funcion)).ocupadas, (await ocupacion(e2.funcion)).ocupadas]).toEqual([2, 2])
     // Un fallido tardío sobre un pago ya aprobado tampoco cambia nada.
@@ -800,13 +839,13 @@ describe('pagos: uno o varios apartados en un solo link (P13)', () => {
     const e = await codigo(preparar([a1.reserva_id, a2.reserva_id]))
     expect(e).toBe('apartado_vencido')
     const detalle = await siendo('servidor', async () => {
-      try { await q(`select funcion_preparar_pago($1, $2::uuid[])`, [WS, [a1.reserva_id, a2.reserva_id]]) } catch (x) { return (x as { detail?: string }).detail }
+      try { await q(`select funcion_preparar_pago($1, $2::uuid[], 'total')`, [WS, [a1.reserva_id, a2.reserva_id]]) } catch (x) { return (x as { detail?: string }).detail }
     })
     expect(detalle).toBe(a2.reserva_id)
     const b = await dosApartados()
     await preparar([b.a1.reserva_id])
     expect(await codigo(preparar([b.a1.reserva_id, b.a2.reserva_id]))).toBe('reserva_en_otro_pago')
-    expect(await codigo(rpc(`select funcion_preparar_pago($1, $2::uuid[]) as r`, [WS, [b.a2.reserva_id]], { equipo: AJENO }))).toBe('reserva_no_existe')
+    expect(await codigo(rpc(`select funcion_preparar_pago($1, $2::uuid[], 'total') as r`, [WS, [b.a2.reserva_id]], { equipo: AJENO }))).toBe('reserva_no_existe')
   })
 
   it('la realineación iguala los vencimientos (de reservas y pago) y no se repite', async () => {
@@ -831,7 +870,7 @@ describe('pagos: uno o varios apartados en un solo link (P13)', () => {
     // El apartado de la segunda vence y otra persona toma el cupo antes de que llegue el aviso.
     await vencer(a2.reserva_id)
     await apartarEquipo(e2.funcion, 2)
-    const r = await registrar(ref, 'aprobado', 500_000)
+    const r = await registrar(ref, 'aprobado', 660_000)
     expect([r.confirmadas, r.pendientes]).toEqual([[a1.reserva_id], [a2.reserva_id]])
     expect((await fila(a2.reserva_id))).toMatchObject({ estado: 'pendiente_persona', pago_estado: 'aprobado' })
     const o = await ocupacion(e2.funcion)
@@ -989,7 +1028,7 @@ describe('nunca dejar ir a un cliente: estado y alternativas para el asistente',
       await autorizacion(conv, 'general', 'si', WS4)
       return siendo('servidor', async () => {
         try {
-          await q(`select funcion_apartar($1, $2, 1, 'total', $3::jsonb, $4, 'asistente')`,
+          await q(`select funcion_apartar($1, $2, 1, $3::jsonb, $4, 'asistente')`,
             [WS4, e.funcion, JSON.stringify({ canal: 'instagram', chatwoot_cuenta_id: 1, chatwoot_conversacion_id: conv }), `x-${uuid()}`])
           return null
         } catch (x) {
@@ -1223,7 +1262,7 @@ describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () =>
   })
 })
 
-describe('el plazo del saldo de la campaña (23-oct): solo el dato y el texto', () => {
+describe('el plazo del saldo de la campaña (23-oct): el dato de la campaña', () => {
   const guardar = (exp: string, cod: string, precios: unknown, id: string | null = null) =>
     rpc<string>(`select funcion_guardar_campana($1, $2, $3, 'Jack octubre', $4, null, null, 'borrador', 30, $5::jsonb) as r`,
       [WS, id, exp, cod, JSON.stringify(precios)])
@@ -1265,9 +1304,219 @@ describe('el plazo del saldo de la campaña (23-oct): solo el dato y el texto', 
     expect(await codigo(q(`update funcion_campanas set dias_saldo_antes = null where id = $1`, [e.campana]))).toMatch(/null value/)
     expect(mensajeDeError({ message: 'dias_saldo_invalido' })).toBe('Los días antes para pagar el saldo van de 1 a 30.')
   })
+})
 
-  it('no construye nada del saldo: ni link, ni pago, ni plazo de link (P14)', () => {
-    expect(FUNCIONES).not.toMatch(/link_saldo|pago_saldo|saldo_vence|vence_link/i)
+describe('el saldo: un pago más de la misma reserva (P14a a P14c, 25-oct)', () => {
+  interface Pago { pago_id: string; monto_esperado: number; vence_at: string; reservas: string[]; reemplazados?: string[] }
+  interface Saldo {
+    reserva_id: string; monto_total: number; pagado: number; saldo: number; modalidad: string | null; plazo_at: string
+    estado: 'sin_saldo' | 'pendiente' | 'pagado' | 'vencido' | null; link: { pago_id: string; url: string | null; vence_at: string; monto: number } | null
+  }
+  let refs = 0
+  const preparar = (ids: string[], modalidad: string) =>
+    rpc<Pago>(`select funcion_preparar_pago($1, $2::uuid[], $3) as r`, [WS, ids, modalidad], 'servidor')
+  const prepararSaldo = (ids: string[], quien: Quien = 'servidor') =>
+    rpc<Pago>(`select funcion_preparar_pago_saldo($1, $2::uuid[]) as r`, [WS, ids], quien)
+  const vincular = (pago: string) => {
+    const ref = `SALDO_${++refs}`
+    return rpc(`select funcion_vincular_link($1, $2, 'https://checkout.ejemplo/' || $2) as r`, [pago, ref], 'servidor').then(() => ref)
+  }
+  const registrar = (ref: string, estado: string, monto: number | null) =>
+    rpc<{ estado: string; repetida: boolean; concepto: string; confirmadas?: string[] }>(
+      `select funcion_registrar_pago($1, $2, $3, $4) as r`, [WS, ref, estado, monto], 'servidor')
+  const saldo = (reserva: string, quien: Quien = { equipo: EQUIPO }) => rpc<Saldo>(`select funcion_saldo($1) as r`, [reserva], quien)
+  const cobrado = (reserva: string, monto: number, quien: Quien = { equipo: EQUIPO }) =>
+    rpc<Saldo & { pago_id: string; links_anulados: string[] }>(`select funcion_registrar_saldo_cobrado($1, $2) as r`, [reserva, monto], quien)
+  const pagoEstado = async (id: string) => (await q<{ estado: string }>(`select estado from funcion_pagos where id = $1`, [id]))[0].estado
+  const num = (s: Saldo) => [Number(s.monto_total), Number(s.pagado), Number(s.saldo), s.estado]
+
+  /** Una reserva de 2 personas ($100.000 c/u, abono $40.000) confirmada con el pago de la reserva por link: saldo $120.000. */
+  async function conAbono(o: OpcionesEscenario = {}) {
+    const e = await escenario(o)
+    const conv = ++conversaciones
+    await autorizacion(conv, 'general', 'si')
+    const a = await apartarAsistente(e.funcion, 2, { conv })
+    const p = await preparar([a.reserva_id], 'abono')
+    await registrar(await vincular(p.pago_id), 'aprobado', p.monto_esperado)
+    expect(await estado(a.reserva_id)).toBe('confirmada')
+    return { e, a, conv }
+  }
+
+  it('pagado más saldo es el total: la reserva pagó $80.000 de $200.000 y su saldo es $120.000, pendiente hasta el plazo', async () => {
+    const { a } = await conAbono()
+    const s = await saldo(a.reserva_id)
+    expect(num(s)).toEqual([200_000, 80_000, 120_000, 'pendiente'])
+    expect(s.modalidad).toBe('abono')
+    expect(Number(s.pagado) + Number(s.saldo)).toBe(Number(s.monto_total))
+    expect(s.link).toBeNull()
+    // El asistente lee lo mismo; otro workspace no la ve.
+    expect(num(await saldo(a.reserva_id, 'servidor'))).toEqual(num(s))
+    expect(await codigo(saldo(a.reserva_id, { equipo: AJENO }))).toBe('reserva_no_existe')
+  })
+
+  it('el plazo: fin del día de Bogotá N días antes de la función, también para una función de noche', async () => {
+    const plazo = async (inicia: string, dias: number) =>
+      new Date((await q<{ p: string }>(`select funcion_plazo_saldo($1::timestamptz, $2) as p`, [inicia, dias]))[0].p).toISOString()
+    // Sábado 31 de octubre, 1:00 p. m. y 10:00 p. m. (en UTC ya es domingo): vence al terminar el viernes 30.
+    expect(await plazo('2026-10-31T13:00:00-05:00', 1)).toBe('2026-10-31T05:00:00.000Z')
+    expect(await plazo('2026-10-31T22:00:00-05:00', 1)).toBe('2026-10-31T05:00:00.000Z')
+    expect(await plazo('2026-10-31T13:00:00-05:00', 3)).toBe('2026-10-29T05:00:00.000Z')
+  })
+
+  it('un pago de saldo aprobado no cambia la ocupación ni el estado de la reserva; el aviso repetido no suma dos veces', async () => {
+    const { e, a } = await conAbono()
+    const antes = await ocupacion(e.funcion)
+    const p = await prepararSaldo([a.reserva_id])
+    expect(Number(p.monto_esperado)).toBe(120_000)
+    const ref = await vincular(p.pago_id)
+    expect((await saldo(a.reserva_id)).link).toMatchObject({ pago_id: p.pago_id, url: `https://checkout.ejemplo/${ref}` })
+    const r = await registrar(ref, 'aprobado', 120_000)
+    expect([r.estado, r.concepto, r.confirmadas]).toEqual(['aprobado', 'saldo', []])
+    expect(num(await saldo(a.reserva_id))).toEqual([200_000, 200_000, 0, 'pagado'])
+    expect((await registrar(ref, 'aprobado', 120_000)).repetida).toBe(true)
+    expect(Number((await saldo(a.reserva_id)).pagado)).toBe(200_000)
+    const fila = (await q<{ estado: string; pago_estado: string }>(`select estado, pago_estado from funcion_reservas where id = $1`, [a.reserva_id]))[0]
+    expect(fila).toEqual({ estado: 'confirmada', pago_estado: 'aprobado' })
+    const despues = await ocupacion(e.funcion)
+    expect([despues.ocupadas, despues.libres]).toEqual([antes.ocupadas, antes.libres])
+  })
+
+  it('el monto distinto deja el pago en revisar y no suma a lo pagado', async () => {
+    const { a } = await conAbono()
+    const p = await prepararSaldo([a.reserva_id])
+    expect((await registrar(await vincular(p.pago_id), 'aprobado', 100_000)).estado).toBe('revisar')
+    expect(num(await saldo(a.reserva_id))).toEqual([200_000, 80_000, 120_000, 'pendiente'])
+  })
+
+  it('no hay saldo de una reserva que pagó el total, ni de una cancelada, ni de una función que ya empezó', async () => {
+    const e = await escenario()
+    const t = await apartarAsistente(e.funcion, 2)
+    const pt = await preparar([t.reserva_id], 'total')
+    await registrar(await vincular(pt.pago_id), 'aprobado', pt.monto_esperado)
+    expect(num(await saldo(t.reserva_id))).toEqual([200_000, 200_000, 0, 'sin_saldo'])
+    expect(await codigo(prepararSaldo([t.reserva_id]))).toBe('sin_saldo')
+    const { a: cancelada } = await conAbono()
+    await cancelar(cancelada.reserva_id)
+    expect(await codigo(prepararSaldo([cancelada.reserva_id]))).toBe('reserva_inactiva')
+    expect((await saldo(cancelada.reserva_id)).estado).toBeNull()
+    const { e: e2, a: empezo } = await conAbono()
+    await q(`update funcion_funciones set inicia_at = now() - interval '1 minute' where id = $1`, [e2.funcion])
+    expect(await codigo(prepararSaldo([empezo.reserva_id], { equipo: EQUIPO }))).toBe('funcion_pasada')
+    // Un apartado sin pagar tampoco tiene saldo que cobrar.
+    const apartada = await apartarAsistente((await escenario()).funcion, 1)
+    expect(await codigo(prepararSaldo([apartada.reserva_id]))).toBe('reserva_inactiva')
+    expect((await saldo(apartada.reserva_id)).estado).toBeNull()
+  })
+
+  it('un link nuevo deja vencido al anterior; si Bold igual cobra el viejo, queda en revisar', async () => {
+    const { a } = await conAbono()
+    const p1 = await prepararSaldo([a.reserva_id])
+    const ref1 = await vincular(p1.pago_id)
+    const p2 = await prepararSaldo([a.reserva_id])
+    expect(p2.reemplazados).toEqual([p1.pago_id])
+    expect(await pagoEstado(p1.pago_id)).toBe('vencido')
+    expect((await saldo(a.reserva_id)).link?.pago_id).toBe(p2.pago_id)
+    // Sigue valiendo «una reserva en un solo pago pendiente».
+    expect((await q<{ n: number }>(`select count(*)::int as n from funcion_pago_reservas where reserva_id = $1 and pendiente`, [a.reserva_id]))[0].n).toBe(1)
+    const tardio = await registrar(ref1, 'aprobado', 120_000)
+    expect([tardio.estado, tardio.repetida]).toEqual(['revisar', false])
+    expect(Number((await saldo(a.reserva_id)).pagado)).toBe(80_000)
+  })
+
+  it('el link vence en el plazo; pasado el plazo el asistente no genera otro, una persona sí, hasta la hora de la función', async () => {
+    const { e, a } = await conAbono()
+    const p = await prepararSaldo([a.reserva_id])
+    const s = await saldo(a.reserva_id)
+    expect(new Date(p.vence_at).getTime()).toBe(new Date(s.plazo_at).getTime())
+    // La foto del plazo de ESTA reserva pasa a 5 días: el plazo ya pasó.
+    await q(`update funcion_reservas set dias_saldo_antes = 5 where id = $1`, [a.reserva_id])
+    expect((await saldo(a.reserva_id)).estado).toBe('vencido')
+    expect(await codigo(prepararSaldo([a.reserva_id]))).toBe('saldo_vencido')
+    expect(await codigo(prepararSaldo([a.reserva_id], { equipo: LECTOR }))).toBe('sin_permiso')
+    const persona = await prepararSaldo([a.reserva_id], { equipo: EQUIPO })
+    const inicia = (await q<{ i: string }>(`select inicia_at as i from funcion_funciones where id = $1`, [e.funcion]))[0].i
+    expect(new Date(persona.vence_at).getTime()).toBe(new Date(inicia).getTime())
+  })
+
+  it('el plazo sale de la foto de la reserva aunque cambie la campaña', async () => {
+    const { e, a } = await conAbono()
+    await q(`update funcion_campanas set dias_saldo_antes = 5 where id = $1`, [e.campana])
+    const s = await saldo(a.reserva_id)
+    expect(s.estado).toBe('pendiente')
+    expect((await q<{ d: number }>(`select dias_saldo_antes as d from funcion_reservas where id = $1`, [a.reserva_id]))[0].d).toBe(1)
+    // Una reserva nueva toma el plazo nuevo.
+    const nueva = await apartarAsistente(e.funcion, 1)
+    expect((await q<{ d: number }>(`select dias_saldo_antes as d from funcion_reservas where id = $1`, [nueva.reserva_id]))[0].d).toBe(5)
+  })
+
+  it('cancelar con un link de saldo vivo lo anula; si Bold igual lo cobra, queda en revisar para una persona', async () => {
+    const { a } = await conAbono()
+    const p = await prepararSaldo([a.reserva_id])
+    const ref = await vincular(p.pago_id)
+    const c = await siendo({ equipo: EQUIPO }, async () => (await q<{ r: { pagos_anulados: string[] } }>(`select funcion_cancelar_reserva($1) as r`, [a.reserva_id]))[0].r)
+    expect(c.pagos_anulados).toEqual([p.pago_id])
+    expect(await pagoEstado(p.pago_id)).toBe('anulado')
+    const r = await registrar(ref, 'aprobado', 120_000)
+    expect(r.estado).toBe('revisar')
+    expect(await estado(a.reserva_id)).toBe('cancelada')
+  })
+
+  it('[Saldo cobrado] con el QR de Bold: un pago saldo más, con quién y cuándo; anula el link vivo; nunca más del saldo', async () => {
+    const { a } = await conAbono()
+    const p = await prepararSaldo([a.reserva_id])
+    await vincular(p.pago_id)
+    expect(await codigo(cobrado(a.reserva_id, 120_001))).toBe('monto_invalido')
+    expect(await codigo(cobrado(a.reserva_id, 0))).toBe('monto_invalido')
+    expect(await codigo(cobrado(a.reserva_id, 120_000, 'servidor'))).toMatch(/permission denied/)
+    expect(await codigo(cobrado(a.reserva_id, 120_000, { equipo: LECTOR }))).toBe('sin_permiso')
+    expect(await codigo(cobrado(a.reserva_id, 120_000, { equipo: AJENO }))).toBe('reserva_no_existe')
+    // En el evento se cobra una parte y después el resto.
+    const parte = await cobrado(a.reserva_id, 50_000)
+    expect(num(parte)).toEqual([200_000, 130_000, 70_000, 'pendiente'])
+    expect(parte.links_anulados).toEqual([p.pago_id])
+    expect(await pagoEstado(p.pago_id)).toBe('anulado')
+    const fila = (await q<{ concepto: string; medio: string; estado: string; registrado_por: string; registrado_at: string | null; vence_at: string | null }>(
+      `select concepto, medio, estado, registrado_por, registrado_at, vence_at from funcion_pagos where id = $1`, [parte.pago_id]))[0]
+    expect([fila.concepto, fila.medio, fila.estado, fila.registrado_por, !!fila.registrado_at, fila.vence_at]).toEqual(['saldo', 'bold_qr', 'aprobado', EQUIPO, true, null])
+    expect(num(await cobrado(a.reserva_id, 70_000))).toEqual([200_000, 200_000, 0, 'pagado'])
+    expect(await codigo(cobrado(a.reserva_id, 1))).toBe('sin_saldo')
+    expect(await estado(a.reserva_id)).toBe('confirmada')
+  })
+
+  it('la verificación a mano también es un pago: con abono deja saldo; con un link vivo no se verifica', async () => {
+    const e = await escenario()
+    const a = await apartarEquipo(e.funcion, 2)
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'cuotas') as r`, [a.reserva_id]))).toBe('modalidad_no_permitida')
+    await rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'abono') as r`, [a.reserva_id])
+    expect(num(await saldo(a.reserva_id))).toEqual([200_000, 80_000, 120_000, 'pendiente'])
+    const manual = (await q<{ medio: string; concepto: string; pasarela: string | null }>(
+      `select pg.medio, pg.concepto, pg.pasarela from funcion_pagos pg join funcion_pago_reservas pr on pr.pago_id = pg.id where pr.reserva_id = $1`, [a.reserva_id]))[0]
+    expect(manual).toEqual({ medio: 'manual', concepto: 'inicial', pasarela: null })
+    // Una persona genera el link del saldo para una reserva sin conversación.
+    expect(Number((await prepararSaldo([a.reserva_id], { equipo: EQUIPO })).monto_esperado)).toBe(120_000)
+    // Con el link del pago inicial vivo, la verificación a mano espera (no se cobra dos veces).
+    const b = await apartarAsistente(e.funcion, 1)
+    await preparar([b.reserva_id], 'total')
+    expect(await codigo(rpc(`select funcion_confirmar_pago($1, 'verificado_manual', 'total') as r`, [b.reserva_id]))).toBe('reserva_en_otro_pago')
+  })
+
+  it('un link de saldo puede cubrir varias reservas de la conversación, con la suma de los saldos exactos', async () => {
+    const e1 = await escenario()
+    const e2 = await escenario({ precio: 150_000, abono: 50_000 })
+    const conv = ++conversaciones
+    await autorizacion(conv, 'general', 'si')
+    const a1 = await apartarAsistente(e1.funcion, 2, { conv })
+    const a2 = await apartarAsistente(e2.funcion, 1, { conv })
+    const p = await preparar([a1.reserva_id, a2.reserva_id], 'abono')
+    await registrar(await vincular(p.pago_id), 'aprobado', p.monto_esperado)
+    const s = await prepararSaldo([a1.reserva_id, a2.reserva_id])
+    expect(Number(s.monto_esperado)).toBe(120_000 + 100_000)
+    const montos = await q<{ reserva_id: string; monto: string }>(`select reserva_id, monto from funcion_pago_reservas where pago_id = $1 order by monto`, [s.pago_id])
+    expect(montos.map((x) => Number(x.monto))).toEqual([100_000, 120_000])
+    // La lista del día lee los saldos de una función en una sola llamada.
+    const lista = await rpc<Saldo[]>(`select funcion_saldos($1) as r`, [e1.funcion])
+    expect(lista.map((x) => [x.reserva_id, Number(x.saldo), x.link?.pago_id])).toEqual([[a1.reserva_id, 120_000, s.pago_id]])
+    expect(await codigo(rpc(`select funcion_saldos($1) as r`, [e1.funcion], 'servidor'))).toMatch(/permission denied/)
   })
 })
 

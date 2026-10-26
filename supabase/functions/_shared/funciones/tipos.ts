@@ -3,7 +3,11 @@
 // ------------------------------------------------------------
 // Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-etapa2-funciones-mapa.md (§3).
 // Base: migración 20261022170000_modulo_funciones.sql (`funcion_consultar_cupo`, `funcion_ver_disponibles`,
-// `funcion_campanas_activas`, `funcion_apartar`).
+// `funcion_campanas_activas`, `funcion_apartar`, los pagos y el saldo).
+//
+// P14b (Mauricio, 2026-10-25): el cliente elige total o solo la reserva AL PAGAR, no al apartar. `apartar` ya no lleva
+// modalidad; `resumen_pago` trae las dos cifras y `generar_link_pago(reserva_ids, modalidad)` la fija para todas las
+// reservas del link. El saldo (P14a, P14c) es un pago más: `saldo` y `generar_link_saldo`.
 //
 // «Todo sale y vuelve a ONE» (Mauricio, 2026-10-22): el precio, el abono, los cupos y el monto de cada reserva los
 // calcula la base. El asistente los LEE de aquí y no hace cuentas: la propuesta no lleva montos.
@@ -102,6 +106,7 @@ export interface CampanasActivas {
   campanas: CampanaActiva[];
 }
 
+/** Lo que paga el cliente en el pago inicial: `total` o solo la reserva (`abono`). Se elige al pagar (P14b). */
 export type Modalidad = 'abono' | 'total';
 
 /** De dónde llegó el cliente (lo genérico; el anuncio y el link exactos están en verificación con Meta y Chatwoot). */
@@ -118,7 +123,6 @@ export interface PropuestaApartado {
   canal: Canal;
   funcionId: string;
   personas: number;
-  modalidad: Modalidad;
   nombre: string | null;
   documento: string | null;
   telefono: string | null;
@@ -155,6 +159,9 @@ export const ERRORES_FUNCIONES = [
   'ya_realineada',
   'pago_con_link',
   'pasarela_fallo',
+  'sin_saldo',
+  'saldo_vencido',
+  'funcion_cerrada',
 ] as const;
 
 /** `error_base`: cualquier otra falla (red, permiso, un código que este módulo no conoce). No es un «no hay cupo». */
@@ -164,7 +171,7 @@ export type Resultado<T> = { ok: true; dato: T } | { ok: false; error: CodigoErr
 
 export type ResultadoCupo = { ok: true; cupo: CupoPublico } | { ok: false; error: CodigoErrorFunciones };
 
-/** La foto del apartado, calculada por la base. */
+/** La foto del apartado, calculada por la base. Sin modalidad: las dos cifras que el cliente elige al pagar. */
 export interface Apartado {
   reservaId: string;
   /** `apartada` en un apartado nuevo; en un reintento, el estado que tenga hoy la reserva. */
@@ -175,8 +182,9 @@ export interface Apartado {
   tarifa: 'preventa' | 'completa';
   precioUnitario: number;
   montoTotal: number;
-  modalidad: Modalidad;
-  montoAPagar: number;
+  /** Solo la reserva: personas × abono por persona. `null` = la función no se paga con abono. */
+  montoReserva: number | null;
+  permitePagoTotal: boolean;
 }
 
 /** Si falla por cupo (`sin_cupo`), trae el mismo estado y las mismas alternativas de `consultar_cupo`. */
@@ -194,17 +202,27 @@ export interface LineaResumenPago {
   personas: number;
   precio_unitario: number;
   tarifa: 'preventa' | 'completa';
-  modalidad: Modalidad;
-  monto_a_pagar: number;
+  /** El total de la reserva. */
+  monto_total: number;
+  /** Solo la reserva (el abono); `null` = sin abono. */
+  monto_reserva: number | null;
+  permite_pago_total: boolean;
   /** Sigue apartada y sin vencer: se puede cobrar. */
   vigente: boolean;
   estado: string;
 }
 
-/** Lo que el asistente muestra antes de pedir el pago: cada reserva y el total SIN las vencidas. No suma: lee. */
+/**
+ * Lo que el asistente muestra antes de pedir el pago: cada reserva y la suma SIN las vencidas, con las dos cifras.
+ * No suma: lee. `modalidades` son las que sirven para TODAS las vigentes: si `total` no está, no se pregunta; si
+ * `abono` no está, no se ofrece «solo la reserva».
+ */
 export interface ResumenPago {
   reservas: LineaResumenPago[];
   total: number;
+  /** `null` si alguna vigente no tiene abono. */
+  solo_reserva: number | null;
+  modalidades: Modalidad[];
   vencidas: string[];
 }
 
@@ -214,6 +232,23 @@ export interface PagoPreparado {
   monto_esperado: number;
   vence_at: string;
   reservas: string[];
+}
+
+/**
+ * El saldo de una reserva (`funcion_saldo`). Pagado y saldo los calcula la base; el asistente no resta.
+ * `estado` es nulo si la reserva no está confirmada.
+ */
+export interface SaldoReserva {
+  reserva_id: string;
+  monto_total: number;
+  pagado: number;
+  saldo: number;
+  modalidad: Modalidad | null;
+  /** Hasta cuándo vale el link del saldo: el fin del día de Bogotá N días antes de la función (P14c). */
+  plazo_at: string;
+  estado: 'sin_saldo' | 'pendiente' | 'pagado' | 'vencido' | null;
+  /** El link del saldo vivo, si hay. */
+  link: { pago_id: string; url: string | null; vence_at: string; monto: number } | null;
 }
 
 /** El link listo para mandar al cliente. */
@@ -237,8 +272,11 @@ export interface PuertoFunciones {
   apartar(p: PropuestaApartado): Promise<ResultadoApartar>;
   /** Solo reservas de una conversación (`distinta_conversacion` si no). */
   resumenPago(workspaceId: string, reservaIds: string[]): Promise<Resultado<ResumenPago>>;
-  /** Candados, realineación (una vez por reserva) y el pago con `monto_esperado`. */
-  prepararPago(workspaceId: string, reservaIds: string[]): Promise<Resultado<PagoPreparado>>;
+  /** Candados, modalidad para todas, realineación (una vez por reserva) y el pago con `monto_esperado`. */
+  prepararPago(workspaceId: string, reservaIds: string[], modalidad: Modalidad): Promise<Resultado<PagoPreparado>>;
+  /** El pago del saldo: reservas confirmadas con saldo, antes del plazo; el link anterior queda vencido. */
+  prepararPagoSaldo(workspaceId: string, reservaIds: string[]): Promise<Resultado<PagoPreparado>>;
+  saldo(reservaId: string): Promise<Resultado<SaldoReserva>>;
   /** Guarda la referencia y el link que devolvió la pasarela. */
   vincularLink(pagoId: string, referencia: string, url: string): Promise<Resultado<null>>;
 }

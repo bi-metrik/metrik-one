@@ -22,7 +22,10 @@ import type {
   RespuestaAutorizacion,
   ResultadoApartar,
   ResumenPago,
+  SaldoReserva,
 } from './tipos.ts';
+
+const numONulo = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 type Respuesta<T> = { data: T | null; error: { message: string; details?: string | null } | null };
 
@@ -104,14 +107,36 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
       const { data, error } = await db.rpc('funcion_resumen_pago', { p_workspace_id: workspaceId, p_reserva_ids: reservaIds });
       if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
       const r = data as ResumenPago;
-      return { ok: true, dato: { ...r, total: Number(r.total) } };
+      return {
+        ok: true,
+        dato: {
+          reservas: (r.reservas ?? []).map((l) => ({ ...l, monto_total: Number(l.monto_total), monto_reserva: numONulo(l.monto_reserva) })),
+          total: Number(r.total),
+          solo_reserva: numONulo(r.solo_reserva),
+          modalidades: r.modalidades ?? [],
+          vencidas: r.vencidas ?? [],
+        },
+      };
     },
 
-    async prepararPago(workspaceId, reservaIds) {
-      const { data, error } = await db.rpc('funcion_preparar_pago', { p_workspace_id: workspaceId, p_reserva_ids: reservaIds });
+    async prepararPago(workspaceId, reservaIds, modalidad) {
+      const { data, error } = await db.rpc('funcion_preparar_pago', { p_workspace_id: workspaceId, p_reserva_ids: reservaIds, p_modalidad: modalidad });
       if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
       const r = data as PagoPreparado;
-      return { ok: true, dato: { ...r, monto_esperado: Number(r.monto_esperado) } };
+      return { ok: true, dato: { pago_id: r.pago_id, monto_esperado: Number(r.monto_esperado), vence_at: r.vence_at, reservas: r.reservas } };
+    },
+
+    async prepararPagoSaldo(workspaceId, reservaIds) {
+      const { data, error } = await db.rpc('funcion_preparar_pago_saldo', { p_workspace_id: workspaceId, p_reserva_ids: reservaIds });
+      if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
+      const r = data as PagoPreparado;
+      return { ok: true, dato: { pago_id: r.pago_id, monto_esperado: Number(r.monto_esperado), vence_at: r.vence_at, reservas: r.reservas } };
+    },
+
+    async saldo(reservaId) {
+      const { data, error } = await db.rpc('funcion_saldo', { p_reserva_id: reservaId });
+      if (error || !data) return { ok: false, error: codigoDeError(error?.message) };
+      return { ok: true, dato: saldoDeLaBase(data) };
     },
 
     async vincularLink(pagoId, referencia, url) {
@@ -125,7 +150,6 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
         p_workspace_id: p.llave.workspaceId,
         p_funcion_id: p.funcionId,
         p_personas: p.personas,
-        p_modalidad: p.modalidad,
         p_datos: datosDeApartado(p),
         p_clave_idempotencia: p.huellaPropuesta,
         p_origen: 'asistente',
@@ -146,7 +170,7 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
       const r = data as {
         reserva_id: string; estado: 'apartada' | 'confirmada' | 'cancelada' | 'vencida'; vence_at: string | null; repetida: boolean;
         campana_id: string; tarifa: 'preventa' | 'completa'; precio_unitario: number; monto_total: number | string;
-        modalidad: 'abono' | 'total'; monto_a_pagar: number | string;
+        monto_reserva: number | string | null; permite_pago_total: boolean;
       };
       return {
         ok: true,
@@ -158,9 +182,24 @@ export function puertoFuncionesSupabase(db: ClienteFunciones): PuertoFunciones {
         tarifa: r.tarifa,
         precioUnitario: Number(r.precio_unitario),
         montoTotal: Number(r.monto_total),
-        modalidad: r.modalidad,
-        montoAPagar: Number(r.monto_a_pagar),
+        montoReserva: numONulo(r.monto_reserva),
+        permitePagoTotal: r.permite_pago_total,
       };
     },
+  };
+}
+
+/** El saldo como lo devuelve la base (`funcion_saldo`, `funcion_saldos`), con los montos en número. Pura. */
+export function saldoDeLaBase(data: unknown): SaldoReserva {
+  const r = data as SaldoReserva;
+  return {
+    reserva_id: r.reserva_id,
+    monto_total: Number(r.monto_total),
+    pagado: Number(r.pagado),
+    saldo: Number(r.saldo),
+    modalidad: r.modalidad ?? null,
+    plazo_at: r.plazo_at,
+    estado: r.estado ?? null,
+    link: r.link ? { pago_id: r.link.pago_id, url: r.link.url ?? null, vence_at: r.link.vence_at, monto: Number(r.link.monto) } : null,
   };
 }

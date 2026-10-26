@@ -110,6 +110,11 @@ const MENSAJES: Record<string, string> = {
   anuncio_de_otra_campana: 'Ese anuncio ya está asociado a otra campaña.',
   dato_no_admitido: 'Ese dato no se guarda en una reserva.',
   dias_saldo_invalido: 'Los días antes para pagar el saldo van de 1 a 30.',
+  sin_saldo: 'La reserva no tiene saldo pendiente.',
+  saldo_vencido: 'Pasó el plazo del saldo: una persona del equipo manda un link nuevo o se cobra en el evento.',
+  monto_invalido: 'El monto va de $1 hasta el saldo.',
+  funcion_pasada: 'La función ya empezó.',
+  reserva_en_otro_pago: 'La reserva tiene un link de pago vivo: espera a que venza antes de verificar a mano.',
 }
 
 /** El código estable del error de la base (el mensaje ES el código) y su texto, con el detalle si lo hay. Pura. */
@@ -143,6 +148,27 @@ export const ETIQUETA_ESTADO_CAMPANA: Record<string, string> = {
   cerrada: 'Cerrada',
   agotada: 'Agotada',
 }
+
+/**
+ * Lo que dice la lista del día del saldo de una reserva (P14). Las cifras y el estado los calcula la base
+ * (`funcion_saldos`); aquí solo se ponen en palabras. `cobrar` = hay saldo para [Saldo cobrado] y para un link nuevo.
+ * Pura.
+ */
+export function textoSaldo(
+  s: { saldo: number; estado: 'sin_saldo' | 'pendiente' | 'pagado' | 'vencido' | null; plazo_at: string } | null,
+  estadoReserva: string,
+): { texto: string; cobrar: boolean } | null {
+  if (estadoReserva !== 'confirmada') return null
+  if (!s || s.estado === null) return { texto: 'Saldo sin leer', cobrar: false }
+  if (s.estado === 'sin_saldo') return { texto: 'Pagó el total', cobrar: false }
+  if (s.estado === 'pagado') return { texto: 'Saldo pagado', cobrar: false }
+  const plazo = DIA_CORTO.format(new Date(Date.parse(s.plazo_at) - 1))
+  return s.estado === 'pendiente'
+    ? { texto: `Saldo ${pesos(s.saldo)} · paga hasta el ${plazo}`, cobrar: true }
+    : { texto: `Saldo ${pesos(s.saldo)} · venció el plazo (${plazo}): se cobra en el evento`, cobrar: true }
+}
+
+const DIA_CORTO = new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: 'numeric', month: 'short' })
 
 /** «$180.000». Pura. */
 export const pesos = (n: number | null | undefined) =>

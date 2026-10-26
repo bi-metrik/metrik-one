@@ -2,12 +2,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { apartar, campanaDeLaConversacion, campanasActivas, consultarCupo, generarLinkPago, resumenPago, verFuncionesDisponibles } from './servicios'
+import { apartar, campanaDeLaConversacion, campanasActivas, consultarCupo, generarLinkPago, generarLinkSaldo, resumenPago, saldoReserva, verFuncionesDisponibles } from './servicios'
 import { cuerpoLinkBold, expiracionBold, pasarelaBold, pasarelaEnMemoria } from './pasarela'
 import { funcionesEnMemoria, type CampanaEnMemoria, type FuncionEnMemoria } from './memoria'
 import { datosDeApartado, puertoFuncionesSupabase, type ClienteFunciones } from './supabase'
 import { codigoDeError, type PropuestaApartado, type PuertoFunciones } from './tipos'
-import { diaBogota } from './fecha-texto'
+import { diaBogota, plazoSaldo } from './fecha-texto'
 import type { LlaveConversacion } from '../agente/publico/tipos'
 
 /**
@@ -29,6 +29,10 @@ interface Banco {
   vencer(reservaId: string): Promise<void>
   solicitudDe(reservaId: string): Promise<string | null>
   asociarAnuncio(campanaId: string, adId: string): Promise<void>
+  /** El aviso aprobado de la pasarela, con el monto esperado. */
+  aprobar(pagoId: string, referencia: string): Promise<void>
+  /** Cambia la foto del plazo del saldo de una reserva (para probar el plazo vencido sin reloj). */
+  cambiarPlazo(reservaId: string, dias: number): Promise<void>
 }
 
 let pg: PGlite
@@ -98,6 +102,8 @@ function bancoMemoria(ws: string): Banco {
     vencer: async (rid) => m.vencer(rid),
     solicitudDe: async (rid) => m.reservas().find((r) => r.id === rid)?.propuesta?.solicitudCliente ?? null,
     asociarAnuncio: async (c, ad) => m.asociarAnuncio(c, ad),
+    aprobar: async (pagoId) => m.aprobarPago(pagoId),
+    cambiarPlazo: async (rid, dias) => m.cambiarPlazo(rid, dias),
   }
 }
 
@@ -116,10 +122,10 @@ function bancoBase(ws: string): Banco {
       const publicada = c.publicada ?? true
       await pg.query(
         `insert into funcion_campanas (id, workspace_id, experiencia_id, nombre, codigo, estado, agenda_publicada_at, minutos_apartado,
-           precio_persona, precio_preventa_persona, abono_persona, permite_pago_total)
-         values ($1, $2, $3, $4, upper($5), $6, $7, $8, $9, $10, $11, $12)`,
+           precio_persona, precio_preventa_persona, abono_persona, permite_pago_total, dias_saldo_antes)
+         values ($1, $2, $3, $4, upper($5), $6, $7, $8, $9, $10, $11, $12, $13)`,
         [c.id, c.workspaceId, exp, c.nombre, c.codigo, c.estado ?? (publicada ? 'activa' : 'borrador'), publicada ? new Date().toISOString() : null,
-          c.minutosApartado, c.precioPersona, c.precioPreventaPersona ?? null, c.abonoPersona ?? null, c.permitePagoTotal ?? true],
+          c.minutosApartado, c.precioPersona, c.precioPreventaPersona ?? null, c.abonoPersona ?? null, c.permitePagoTotal ?? true, c.diasSaldoAntes ?? 1],
       )
     },
     async agregarFuncion(f) {
@@ -138,7 +144,7 @@ function bancoBase(ws: string): Banco {
       await pg.query(`insert into profiles values ($1, $2, 'operator')`, [perfil, ws])
       await pg.exec(`select set_config('prueba.uid', '${perfil}', false); set role authenticated`)
       try {
-        await pg.query(`select funcion_apartar($1, $2, $3, 'total', '{}'::jsonb, $4, 'equipo')`, [ws, funcionId, personas, `eq-${hex('a')}`])
+        await pg.query(`select funcion_apartar($1, $2, $3, '{}'::jsonb, $4, 'equipo')`, [ws, funcionId, personas, `eq-${hex('a')}`])
       } finally {
         await pg.exec(`reset role; select set_config('prueba.uid', '', false)`)
       }
@@ -159,6 +165,14 @@ function bancoBase(ws: string): Banco {
     async solicitudDe(rid) {
       return (await pg.query<{ s: string | null }>(`select solicitud_cliente as s from funcion_reservas where id = $1`, [rid])).rows[0]?.s ?? null
     },
+    async aprobar(pagoId, referencia) {
+      const monto = (await pg.query<{ m: string }>(`select monto_esperado as m from funcion_pagos where id = $1`, [pagoId])).rows[0].m
+      const r = await clientePGlite(pg).rpc('funcion_registrar_pago', { p_workspace_id: ws, p_referencia: referencia, p_estado: 'aprobado', p_monto_recibido: Number(monto) })
+      if (r.error) throw new Error(r.error.message)
+    },
+    async cambiarPlazo(rid, dias) {
+      await pg.query(`update funcion_reservas set dias_saldo_antes = $2 where id = $1`, [rid, dias])
+    },
   }
 }
 
@@ -166,7 +180,7 @@ const manana = (h = 0) => new Date(Date.now() + 24 * HORA + h * HORA).toISOStrin
 
 function propuesta(l: LlaveConversacion, funcionId: string, personas: number, extra: Partial<PropuestaApartado> = {}): PropuestaApartado {
   return {
-    llave: l, canal: 'instagram', funcionId, personas, modalidad: 'total', nombre: 'Cliente', documento: null, telefono: null,
+    llave: l, canal: 'instagram', funcionId, personas, nombre: 'Cliente', documento: null, telefono: null,
     contactoCanal: '@cliente', solicitudCliente: null, atribucion: { fuente: 'desconocida', ref: null },
     huellaPropuesta: `huella-${hex('b')}`, ...extra,
   }
@@ -229,9 +243,9 @@ describe.each([
     expect(c8.ok && c8.cupo.estado).toBe('llena')
 
     const a = await apartar(b.puerto, propuesta(await autorizada(), f, 3))
-    expect(a.ok && [a.estado, a.repetida, a.montoTotal, a.montoAPagar, a.campanaId]).toEqual(['apartada', false, 540_000, 540_000, c.id])
+    expect(a.ok && [a.estado, a.repetida, a.montoTotal, a.montoReserva, a.permitePagoTotal, a.campanaId]).toEqual(['apartada', false, 540_000, 300_000, true, c.id])
     expect(await apartar(b.puerto, propuesta(await autorizada(), f, 3))).toMatchObject({ ok: false, error: 'sin_cupo', estado: 'llena_para_asistente' })
-    expect((await apartar(b.puerto, propuesta(await autorizada(), f, 2, { modalidad: 'abono' }))).ok).toBe(true)
+    expect((await apartar(b.puerto, propuesta(await autorizada(), f, 2))).ok).toBe(true)
     const c1 = await consultarCupo(b.puerto, b.ws, f, 1)
     expect(c1.ok && c1.cupo.estado).toBe('llena_para_asistente')
   })
@@ -251,8 +265,8 @@ describe.each([
     const f = await funcion(c, { esPreventa: true })
     const t = await consultarCupo(b.puerto, b.ws, f)
     expect(t.ok && t.cupo.tarifa).toEqual({ tarifa: 'preventa', precio_persona: 150_000, precio_completo_persona: 180_000, preventa_hasta: null, abono_persona: 100_000, permite_pago_total: true })
-    const a = await apartar(b.puerto, propuesta(await autorizada(), f, 2, { modalidad: 'abono' }))
-    expect(a.ok && [a.tarifa, a.precioUnitario, a.montoTotal, a.modalidad, a.montoAPagar]).toEqual(['preventa', 150_000, 300_000, 'abono', 200_000])
+    const a = await apartar(b.puerto, propuesta(await autorizada(), f, 2))
+    expect(a.ok && [a.tarifa, a.precioUnitario, a.montoTotal, a.montoReserva, a.permitePagoTotal]).toEqual(['preventa', 150_000, 300_000, 200_000, true])
   })
 
   it('P4: la preventa rige hasta su fecha de fin (hoy inclusive); vencida, rige el regular con el interruptor encendido', async () => {
@@ -269,9 +283,17 @@ describe.each([
     expect(a.ok && [a.tarifa, a.precioUnitario]).toEqual(['completa', 180_000])
   })
 
-  it('modalidad_no_permitida y sin_precio', async () => {
+  it('modalidad_no_permitida (al apartar sin ninguna forma de pago; al pagar, la que la función no tiene) y sin_precio', async () => {
+    const ninguna = await funcion(await campana({ abonoPersona: null, permitePagoTotal: false }))
+    expect(await apartar(b.puerto, propuesta(await autorizada(), ninguna, 1))).toEqual({ ok: false, error: 'modalidad_no_permitida' })
     const sinAbono = await funcion(await campana({ abonoPersona: null }))
-    expect(await apartar(b.puerto, propuesta(await autorizada(), sinAbono, 1, { modalidad: 'abono' }))).toEqual({ ok: false, error: 'modalidad_no_permitida' })
+    const a = await apartar(b.puerto, propuesta(await autorizada(), sinAbono, 1))
+    if (!a.ok) throw new Error(a.error)
+    expect([a.montoReserva, a.permitePagoTotal]).toEqual([null, true])
+    const doble = pasarelaEnMemoria()
+    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'abono', 'x')).toEqual({ ok: false, error: 'modalidad_no_permitida' })
+    expect(doble.pedidos()).toEqual([])
+    expect((await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'total', 'x')).ok).toBe(true)
     const sinPrecio = await funcion(await campana({ precioPersona: null, abonoPersona: null }))
     expect(await apartar(b.puerto, propuesta(await autorizada(), sinPrecio, 1))).toEqual({ ok: false, error: 'sin_precio' })
   })
@@ -332,16 +354,22 @@ describe.each([
     expect(despues.ok && despues.dato.preguntar).toBe(despues.ok && despues.dato.total > 1)
   })
 
-  it('el resumen de pago lo arma ONE: cada reserva con su monto y el total sin las vencidas', async () => {
+  it('el resumen de pago lo arma ONE: las dos cifras (total y solo la reserva) por reserva y en la suma, sin las vencidas', async () => {
     const l = await autorizada()
-    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 2, { modalidad: 'abono' }))
+    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 2))
     const c = await apartar(b.puerto, propuesta(l, await funcion(await campana({ precioPersona: 150_000 }), { iniciaAt: manana(5) }), 2))
     if (!a.ok || !c.ok) throw new Error('no apartó')
     const r = await resumenPago(b.puerto, b.ws, [a.reservaId, c.reservaId])
-    expect(r.ok && [r.dato.total, r.dato.reservas.map((x) => x.monto_a_pagar), r.dato.vencidas]).toEqual([200_000 + 300_000, [200_000, 300_000], []])
+    expect(r.ok && [r.dato.total, r.dato.solo_reserva, r.dato.modalidades, r.dato.vencidas]).toEqual([360_000 + 300_000, 200_000 + 200_000, ['total', 'abono'], []])
+    expect(r.ok && r.dato.reservas.map((x) => [x.monto_total, x.monto_reserva, x.permite_pago_total])).toEqual([[360_000, 200_000, true], [300_000, 200_000, true]])
     await b.vencer(c.reservaId)
     const v = await resumenPago(b.puerto, b.ws, [a.reservaId, c.reservaId])
-    expect(v.ok && [v.dato.total, v.dato.vencidas]).toEqual([200_000, [c.reservaId]])
+    expect(v.ok && [v.dato.total, v.dato.solo_reserva, v.dato.vencidas]).toEqual([360_000, 200_000, [c.reservaId]])
+    // Una reserva sin pago total: la suma no ofrece el total (no se pregunta).
+    const sinTotal = await apartar(b.puerto, propuesta(l, await funcion(await campana({ permitePagoTotal: false }), { iniciaAt: manana(7) }), 1))
+    if (!sinTotal.ok) throw new Error(sinTotal.error)
+    const st = await resumenPago(b.puerto, b.ws, [a.reservaId, sinTotal.reservaId])
+    expect(st.ok && [st.dato.modalidades, st.dato.solo_reserva]).toEqual([['abono'], 300_000])
     const otra = await apartar(b.puerto, propuesta(await autorizada(), await funcion(await campana()), 1))
     if (!otra.ok) throw new Error(otra.error)
     expect(await resumenPago(b.puerto, b.ws, [a.reservaId, otra.reservaId])).toEqual({ ok: false, error: 'distinta_conversacion' })
@@ -349,21 +377,22 @@ describe.each([
 
   it('generar_link_pago: un link de monto fijo que vence con sus apartados realineados; no dos veces sobre lo mismo', async () => {
     const l = await autorizada()
-    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 2, { modalidad: 'abono' }))
+    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana()), 2))
     const c = await apartar(b.puerto, propuesta(l, await funcion(await campana(), { iniciaAt: manana(6) }), 1))
     if (!a.ok || !c.ok) throw new Error('no apartó')
     const doble = pasarelaEnMemoria()
-    const link = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId, c.reservaId], 'Sabor: 2 funciones')
+    // P14b: el cliente eligió «solo la reserva»: vale para las dos reservas del link.
+    const link = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId, c.reservaId], 'abono', 'Sabor: 2 funciones')
     if (!link.ok) throw new Error(link.error)
-    expect(link.dato.monto).toBe(200_000 + 180_000)
+    expect(link.dato.monto).toBe(200_000 + 100_000)
     const [pedido] = doble.pedidos()
     expect(pedido.cuerpo).toEqual({
-      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 380_000 }, description: 'Sabor: 2 funciones',
+      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 300_000 }, description: 'Sabor: 2 funciones',
       expiration_date: Date.parse(link.dato.venceAt),
     })
     expect(Date.parse(link.dato.venceAt) - Date.now()).toBeGreaterThan(25 * 60_000)
     // Las dos ya están en un pago pendiente.
-    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [c.reservaId], 'x')).toEqual({ ok: false, error: 'reserva_en_otro_pago' })
+    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [c.reservaId], 'total', 'x')).toEqual({ ok: false, error: 'reserva_en_otro_pago' })
   })
 
   it('generar_link_pago con un apartado vencido: apartado_vencido, y la pasarela ni se llama', async () => {
@@ -372,8 +401,58 @@ describe.each([
     if (!a.ok) throw new Error(a.error)
     await b.vencer(a.reservaId)
     const doble = pasarelaEnMemoria()
-    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'x')).toEqual({ ok: false, error: 'apartado_vencido' })
+    expect(await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'total', 'x')).toEqual({ ok: false, error: 'apartado_vencido' })
     expect(doble.pedidos()).toEqual([])
+  })
+
+  it('el saldo (P14): pagar solo la reserva deja saldo; su link es por el saldo exacto, vence en el plazo y se puede generar de nuevo', async () => {
+    const l = await autorizada()
+    const iniciaAt = manana(8)
+    const a = await apartar(b.puerto, propuesta(l, await funcion(await campana(), { iniciaAt }), 2))
+    if (!a.ok) throw new Error(a.error)
+    const doble = pasarelaEnMemoria()
+    // Sin pagar no hay saldo que cobrar.
+    expect(await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'x')).toEqual({ ok: false, error: 'reserva_inactiva' })
+    const inicial = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'abono', 'Reserva')
+    if (!inicial.ok) throw new Error(inicial.error)
+    await b.aprobar(inicial.dato.pagoId, inicial.dato.referencia)
+    const s = await saldoReserva(b.puerto, a.reservaId)
+    expect(s.ok && [s.dato.monto_total, s.dato.pagado, s.dato.saldo, s.dato.estado, s.dato.modalidad, s.dato.link]).toEqual([360_000, 200_000, 160_000, 'pendiente', 'abono', null])
+    expect(s.ok && Date.parse(s.dato.plazo_at)).toBe(Date.parse(plazoSaldo(iniciaAt, 1)))
+    const l1 = await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'Saldo')
+    if (!l1.ok) throw new Error(l1.error)
+    expect([l1.dato.monto, Date.parse(l1.dato.venceAt)]).toEqual([160_000, Date.parse(plazoSaldo(iniciaAt, 1))])
+    expect(doble.pedidos().at(-1)?.cuerpo.amount.total_amount).toBe(160_000)
+    // Un link nuevo deja vencido al anterior: el vivo es el nuevo.
+    const l2 = await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'Saldo')
+    if (!l2.ok) throw new Error(l2.error)
+    const vivo = await saldoReserva(b.puerto, a.reservaId)
+    expect(vivo.ok && vivo.dato.link?.pago_id).toBe(l2.dato.pagoId)
+    await b.aprobar(l2.dato.pagoId, l2.dato.referencia)
+    const pagado = await saldoReserva(b.puerto, a.reservaId)
+    expect(pagado.ok && [pagado.dato.pagado, pagado.dato.saldo, pagado.dato.estado, pagado.dato.link]).toEqual([360_000, 0, 'pagado', null])
+    expect(await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [a.reservaId], 'x')).toEqual({ ok: false, error: 'sin_saldo' })
+  })
+
+  it('el saldo (P14): quien pagó el total no tiene saldo; pasado el plazo el asistente no genera link', async () => {
+    const l = await autorizada()
+    const f = await funcion(await campana(), { iniciaAt: manana(9) })
+    const t = await apartar(b.puerto, propuesta(l, f, 1))
+    const r = await apartar(b.puerto, propuesta(await autorizada(), f, 1))
+    if (!t.ok || !r.ok) throw new Error('no apartó')
+    const doble = pasarelaEnMemoria()
+    const pt = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [t.reservaId], 'total', 'x')
+    const pr = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'abono', 'x')
+    if (!pt.ok || !pr.ok) throw new Error('sin link')
+    await b.aprobar(pt.dato.pagoId, pt.dato.referencia)
+    await b.aprobar(pr.dato.pagoId, pr.dato.referencia)
+    const st = await saldoReserva(b.puerto, t.reservaId)
+    expect(st.ok && [st.dato.saldo, st.dato.estado]).toEqual([0, 'sin_saldo'])
+    expect(await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [t.reservaId], 'x')).toEqual({ ok: false, error: 'sin_saldo' })
+    await b.cambiarPlazo(r.reservaId, 30)
+    const sv = await saldoReserva(b.puerto, r.reservaId)
+    expect(sv.ok && [sv.dato.saldo, sv.dato.estado]).toEqual([80_000, 'vencido'])
+    expect(await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'x')).toEqual({ ok: false, error: 'saldo_vencido' })
   })
 
   it('P10: la campaña de la conversación, por anuncio o por código; sin publicar o sin dato, null', async () => {
@@ -537,6 +616,18 @@ describe('piezas puras', () => {
     ])
   })
 
+  it('el plazo del saldo en TS es el de la base, también de noche y cerca de la medianoche', async () => {
+    const casos: Array<[string, number]> = [
+      ['2026-10-31T13:00:00-05:00', 1], ['2026-10-31T22:00:00-05:00', 1], ['2026-10-31T00:30:00-05:00', 1],
+      ['2026-11-01T23:59:00-05:00', 3], ['2026-12-01T10:00:00-05:00', 30],
+    ]
+    for (const [inicia, dias] of casos) {
+      const base = (await pg.query<{ p: string }>(`select funcion_plazo_saldo($1::timestamptz, $2) as p`, [inicia, dias])).rows[0].p
+      expect([inicia, dias, plazoSaldo(inicia, dias)]).toEqual([inicia, dias, new Date(base).toISOString()])
+    }
+    expect(plazoSaldo('2026-10-31T13:00:00-05:00', 1)).toBe('2026-10-31T05:00:00.000Z')
+  })
+
   it('codigoDeError conoce los códigos de la base y el resto es error_base', () => {
     expect(codigoDeError('sin_cupo')).toBe('sin_cupo')
     expect(codigoDeError('modalidad_no_permitida')).toBe('modalidad_no_permitida')
@@ -548,7 +639,8 @@ describe('piezas puras', () => {
     m.autorizar(l, 'si')
     expect(await apartar(m.puerto, propuesta(l, 'no-es-uuid', 1))).toEqual({ ok: false, error: 'funcion_no_existe' })
     expect(await apartar(m.puerto, propuesta(l, hex('f'), 0))).toEqual({ ok: false, error: 'personas_invalidas' })
-    expect(await apartar(m.puerto, propuesta(l, hex('f'), 1, { modalidad: 'cuotas' as never }))).toEqual({ ok: false, error: 'modalidad_no_permitida' })
+    expect(await generarLinkPago(m.puerto, pasarelaEnMemoria().pasarela, l.workspaceId, [hex('a')], 'cuotas' as never, 'x')).toEqual({ ok: false, error: 'modalidad_no_permitida' })
+    expect(await saldoReserva(m.puerto, 'no-es-uuid')).toEqual({ ok: false, error: 'reserva_no_existe' })
     expect(await apartar(m.puerto, propuesta(l, hex('f'), 1, { atribucion: { fuente: 'equipo' as never, ref: null } }))).toEqual({ ok: false, error: 'datos_invalidos' })
     expect(await apartar(m.puerto, propuesta(l, hex('f'), 1, { huellaPropuesta: ' ' }))).toEqual({ ok: false, error: 'datos_invalidos' })
   })

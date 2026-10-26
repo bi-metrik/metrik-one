@@ -40,3 +40,13 @@ export function fechaCortaTexto(fecha: string): string {
 export function fechaTexto(iso: string): string {
   return `${diaTexto(iso)}, ${horaTexto(iso)}`;
 }
+
+/**
+ * El fin del plazo del saldo (P14c): el primer instante del día de Bogotá siguiente al que queda `dias` antes de la
+ * función. Con 1 y una función el sábado 31, el sábado 31 a las 00:00 (el link vale todo el viernes 30). La misma
+ * regla que `funcion_plazo_saldo` de la base; las pruebas comparan las dos.
+ */
+export function plazoSaldo(iniciaIso: string, dias: number): string {
+  const dia = diaBogota(Date.parse(iniciaIso));
+  return new Date(Date.parse(`${dia}T00:00:00-05:00`) - (dias - 1) * 86_400_000).toISOString();
+}

@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { leerDia } from '@/lib/funciones/datos'
-import { ETIQUETA_ESTADO_FUNCION, ETIQUETA_ESTADO_RESERVA, ETIQUETA_PAGO, fechaBogota, horaBogota, puedeEditarFunciones, rangoDiaBogota } from '@/lib/funciones/reglas'
+import { ETIQUETA_ESTADO_FUNCION, ETIQUETA_ESTADO_RESERVA, ETIQUETA_PAGO, fechaBogota, horaBogota, puedeEditarFunciones, rangoDiaBogota, textoSaldo } from '@/lib/funciones/reglas'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { AccionesReserva } from '../acciones-reserva'
 
@@ -13,7 +13,8 @@ export const dynamic = 'force-dynamic'
 /**
  * `/funciones/dia?fecha=AAAA-MM-DD`: la lista del día para la cocina y el servicio (Anexo 2.2, punto 8), agrupada
  * por función, legible impresa. Las restricciones alimentarias salen SOLO si están autorizadas: la base no deja
- * guardarlas de otra forma, y si no hay autorización la fila dice «sin autorización».
+ * guardarlas de otra forma, y si no hay autorización la fila dice «sin autorización». El saldo de cada reserva
+ * confirmada (P14) sale de la base; el equipo lo cobra con el QR de Bold ([Saldo cobrado]) o manda un link nuevo.
  */
 export default async function DiaPage({ searchParams }: { searchParams: Promise<{ fecha?: string }> }) {
   const { workspaceId, role, supabase, error } = await getWorkspace()
@@ -83,11 +84,17 @@ export default async function DiaPage({ searchParams }: { searchParams: Promise<
                         {ETIQUETA_ESTADO_RESERVA[r.estado]}
                         <br />
                         <span className="text-[#6B7280]">{ETIQUETA_PAGO[r.pago_estado]}</span>
+                        {textoSaldo(r.saldo, r.estado) && (
+                          <>
+                            <br />
+                            <span className="font-medium text-[#1A1A1A]">{textoSaldo(r.saldo, r.estado)!.texto}</span>
+                          </>
+                        )}
                       </td>
                       <td className="px-2 py-2 text-xs text-[#6B7280]">{r.canal}</td>
                       {editar && (
                         <td className="px-2 py-2 print:hidden">
-                          <AccionesReserva funcionId={o.funcion_id} reservaId={r.id} estado={r.estado} nombre={r.nombre} />
+                          <AccionesReserva funcionId={o.funcion_id} reserva={r} />
                         </td>
                       )}
                     </tr>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIAS_SALDO, diaBogota, diasSaldoValido, inicioBogota, insigniaFuncion, mensajeDeError, pesos, preventaPasaLaFuncion, rangoDiaBogota, reservaActiva } from './reglas'
+import { DIAS_SALDO, diaBogota, diasSaldoValido, inicioBogota, insigniaFuncion, mensajeDeError, pesos, preventaPasaLaFuncion, rangoDiaBogota, reservaActiva, textoSaldo } from './reglas'
 
 describe('reglas del módulo funciones', () => {
   it('reservaActiva usa la misma definición que la base', () => {
@@ -48,5 +48,20 @@ describe('reglas del módulo funciones', () => {
     expect(DIAS_SALDO.porDefecto).toBe(1)
     expect([1, 2, 30].map(diasSaldoValido)).toEqual([true, true, true])
     expect([0, -1, 31, 1.5, null, undefined, Number.NaN].map(diasSaldoValido)).toEqual([false, false, false, false, false, false, false])
+  })
+
+  it('el saldo en palabras (P14): solo de las confirmadas; el plazo es el último día que vale el link', () => {
+    // Plazo = sábado 31 a las 00:00 de Bogotá: el link vale hasta el viernes 30.
+    const base = { saldo: 120_000, plazo_at: '2026-10-31T05:00:00.000Z' }
+    const pendiente = textoSaldo({ ...base, estado: 'pendiente' }, 'confirmada')
+    expect(pendiente?.cobrar).toBe(true)
+    expect(pendiente?.texto).toMatch(/^Saldo \$120\.000 · paga hasta el vie/)
+    expect(pendiente?.texto).toMatch(/30/)
+    expect(textoSaldo({ ...base, estado: 'vencido' }, 'confirmada')?.texto).toMatch(/venció el plazo.*se cobra en el evento/)
+    expect(textoSaldo({ ...base, saldo: 0, estado: 'sin_saldo' }, 'confirmada')).toEqual({ texto: 'Pagó el total', cobrar: false })
+    expect(textoSaldo({ ...base, saldo: 0, estado: 'pagado' }, 'confirmada')).toEqual({ texto: 'Saldo pagado', cobrar: false })
+    expect(textoSaldo(null, 'confirmada')).toEqual({ texto: 'Saldo sin leer', cobrar: false })
+    expect(textoSaldo({ ...base, estado: 'pendiente' }, 'apartada')).toBeNull()
+    expect(mensajeDeError({ message: 'monto_invalido', details: 'El saldo es 120000.' })).toBe('El monto va de $1 hasta el saldo. El saldo es 120000.')
   })
 })

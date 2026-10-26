@@ -9,9 +9,10 @@
 //   node scripts/funciones-dry-run.mjs > /tmp/dry-run-funciones.sql
 //
 // Resultado esperado (en el mensaje del error):
-//   DRYRUN OK {"rpc": 49, "rpc_anon": 0, "tablas_con_rls": 8, "tablas_de_mesas": 0, "publicar_service_role": false,
+//   DRYRUN OK {"rpc": 56, "rpc_anon": 0, "tablas_con_rls": 8, "tablas_de_mesas": 0, "publicar_service_role": false,
 //              "resolver_service_role": false, "workspaces_con_modulo": 0, "registrar_authenticated": false,
-//              "disponibles_authenticated": false}
+//              "disponibles_authenticated": false, "saldo_cobrado_service_role": false}
+// (56 desde el 25-oct: el saldo, P14, suma 7 funciones; antes eran 49.)
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -38,6 +39,7 @@ $mig$;
     'disponibles_authenticated', has_function_privilege('authenticated', 'public.funcion_ver_disponibles(uuid, text)', 'execute'),
     'resolver_service_role', has_function_privilege('service_role', 'public.funcion_resolver_pendiente(uuid, text)', 'execute'),
     'registrar_authenticated', has_function_privilege('authenticated', 'public.funcion_registrar_pago(uuid, text, text, bigint)', 'execute'),
+    'saldo_cobrado_service_role', has_function_privilege('service_role', 'public.funcion_registrar_saldo_cobrado(uuid, bigint)', 'execute'),
     'tablas_de_mesas', (select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname in ('funcion_montajes', 'funcion_mesas', 'funcion_reserva_mesas')),
     'workspaces_con_modulo', (select count(*) from public.workspaces where coalesce(modules->'funciones' = 'true'::jsonb, false))
   ) into r;

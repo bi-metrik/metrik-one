@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prueba 8 del diseño de la etapa 2 de Sabor (funciones, cupos y reservas): muchos `apartar` a la vez no sobrevenden,
-# con los DOS límites de la función (el del asistente y la capacidad). PGlite (las pruebas de vitest) tiene UNA conexión
+# con los DOS límites de la función (el del asistente y la capacidad). Y (P14, caso E) el link del saldo y la
+# cancelación de la misma reserva a la vez nunca dejan un link vivo sobre una reserva cancelada. PGlite (las pruebas de vitest) tiene UNA conexión
 # y no puede probar el `select ... for update`; esto sí: N procesos `psql`, cada uno con su conexión, contra un Postgres
 # real. Cada uno aparta y SOSTIENE la transacción abierta un rato antes del commit: sin el candado, los demás leen la
 # ocupación vieja en ese rato y se sobrevende.
@@ -33,6 +34,7 @@ F_CLAVE=00000000-0000-4000-8000-00000000c052
 F_CONF=00000000-0000-4000-8000-00000000c053
 F_PAGO=00000000-0000-4000-8000-00000000c054
 F_OTRA=00000000-0000-4000-8000-00000000c055
+F_SALDO=00000000-0000-4000-8000-00000000c056
 
 psql_q() { psql "$PGURL" -X -q -t -A -v ON_ERROR_STOP=1 "$@"; }
 
@@ -51,7 +53,8 @@ insert into funcion_funciones (id, workspace_id, campana_id, inicia_at, capacida
   ('$F_CLAVE', '$WS', '$CAMP', now() + interval '1 day 1 hour', 8, 8),
   ('$F_CONF', '$WS', '$CAMP', now() + interval '1 day 2 hours', 4, 4),
   ('$F_PAGO', '$WS', '$CAMP', now() + interval '1 day 3 hours', 3, 3),
-  ('$F_OTRA', '$WS', '$CAMP', now() + interval '1 day 4 hours', 10, 10);
+  ('$F_OTRA', '$WS', '$CAMP', now() + interval '1 day 4 hours', 10, 10),
+  ('$F_SALDO', '$WS', '$CAMP', now() + interval '3 days', 40, 40);
 insert into chatwoot_consentimientos (workspace_id, cuenta_id, conversacion_id, canal, tipo, respuesta, texto_clave, texto_version, texto_huella)
   select '$WS'::uuid, 1, g, 'instagram', 'general', 'si', 'rf.autorizacion', 'v1', repeat('a', 64) from generate_series(1, $N) g
   union all
@@ -77,7 +80,7 @@ apartar_equipo() {
   psql_q >/dev/null 2>&1 <<SQL
 select set_config('prueba.uid', '$EQUIPO', false);
 set role authenticated;
-select funcion_apartar('$WS', '$1', 1, 'total', '{}'::jsonb, '$2', 'equipo');
+select funcion_apartar('$WS', '$1', 1, '{}'::jsonb, '$2', 'equipo');
 SQL
 }
 
@@ -85,7 +88,7 @@ falla=0
 
 # ── A. Dos límites: N apartados del ASISTENTE a la vez sobre cupo_asistente 5 y capacidad 7 ──────────────
 for i in $(seq 1 "$N"); do
-  ( if en_transaccion asistente "select funcion_apartar('$WS', '$F_DOS', 1, 'total', '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $i}'::jsonb, 'a-$i', 'asistente')"; then
+  ( if en_transaccion asistente "select funcion_apartar('$WS', '$F_DOS', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $i}'::jsonb, 'a-$i', 'asistente')"; then
       echo ok > "$TMP/a-$i"; else echo no > "$TMP/a-$i"; fi ) &
 done
 wait
@@ -103,7 +106,7 @@ if [ "$equipo_ok" -ne 2 ] || [ "$total_a" -ne 7 ]; then echo "   se esperaban 2 
 
 # ── B. Idempotencia: la misma clave 10 veces a la vez = una reserva ─────────────────────────────────────────
 for i in $(seq 1 10); do
-  ( en_transaccion equipo "select funcion_apartar('$WS', '$F_CLAVE', 1, 'total', '{}'::jsonb, 'misma-clave', 'equipo')" || true ) &
+  ( en_transaccion equipo "select funcion_apartar('$WS', '$F_CLAVE', 1, '{}'::jsonb, 'misma-clave', 'equipo')" || true ) &
 done
 wait
 misma=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia = 'misma-clave'")
@@ -119,7 +122,7 @@ for i in 1 2 3 4; do apartar_equipo "$F_CONF" "nuevo-$i"; done
 psql_q -c "update funcion_reservas set estado = 'cancelada' where clave_idempotencia in ('nuevo-1', 'nuevo-2')" >/dev/null
 mapfile -t viejos < <(psql_q -c "select id from funcion_reservas where clave_idempotencia like 'viejo-%' order by id")
 for r in "${viejos[@]}"; do
-  ( en_transaccion equipo "select funcion_confirmar_pago('$r', 'verificado_manual')" || true ) &
+  ( en_transaccion equipo "select funcion_confirmar_pago('$r', 'verificado_manual', 'total')" || true ) &
 done
 wait
 confirmadas=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia like 'viejo-%' and estado = 'confirmada'")
@@ -140,10 +143,10 @@ $1;
 SQL
 }
 for c in 101 102; do
-  servidor_sql "select funcion_apartar('$WS', '$F_PAGO', 1, 'total', '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-a', 'asistente')" >/dev/null
-  servidor_sql "select funcion_apartar('$WS', '$F_OTRA', 1, 'total', '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-b', 'asistente')" >/dev/null
+  servidor_sql "select funcion_apartar('$WS', '$F_PAGO', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-a', 'asistente')" >/dev/null
+  servidor_sql "select funcion_apartar('$WS', '$F_OTRA', 1, '{\"canal\": \"instagram\", \"chatwoot_cuenta_id\": 1, \"chatwoot_conversacion_id\": $c}'::jsonb, 'p$c-b', 'asistente')" >/dev/null
   ids=$(psql_q -c "select string_agg(id::text, ',' order by id) from funcion_reservas where clave_idempotencia in ('p$c-a', 'p$c-b')")
-  pago=$(servidor_sql "select funcion_preparar_pago('$WS', '{$ids}'::uuid[])->>'pago_id'" | tail -1)
+  pago=$(servidor_sql "select funcion_preparar_pago('$WS', '{$ids}'::uuid[], 'total')->>'pago_id'" | tail -1)
   servidor_sql "select funcion_vincular_link('$pago', 'REF-$c', null)" >/dev/null
 done
 psql_q -c "update funcion_reservas set vence_at = now() - interval '1 minute' where clave_idempotencia in ('p101-a', 'p102-a')" >/dev/null
@@ -160,6 +163,37 @@ ocupadas_d=$(psql_q -c "select (funcion_ocupacion('$F_PAGO')->>'ocupadas')::int"
 echo "D. dos pagos a la vez con 1 libre en la misma función: $confirmadas_d confirmada(s), $pendientes_d pendiente(s) de persona, ocupadas $ocupadas_d de 3"
 if [ "$ocupadas_d" -gt 3 ]; then echo "   SOBREVENTA con dos pagos" >&2; falla=1; fi
 if [ "$confirmadas_d" -ne 1 ] || [ "$pendientes_d" -ne 1 ]; then echo "   se esperaban 1 confirmada y 1 pendiente de persona" >&2; falla=1; fi
+
+# ── E. El link del saldo y la cancelación de la MISMA reserva a la vez (P14) ───────────────────────────────────
+# 10 reservas del equipo confirmadas con solo la reserva pagada (saldo pendiente). Para cada una, a la vez: una persona
+# genera el link del saldo y otra cancela la reserva. Sea cual sea el orden, ninguna reserva cancelada puede quedar con
+# un link de saldo vivo: o el link llega antes y la cancelación lo anula, o la cancelación llega antes y el link no se
+# crea (`reserva_inactiva`). Sin el candado de la reserva, el link se crea sobre la reserva ya cancelada.
+equipo_sql() {
+  psql_q <<SQL
+select set_config('prueba.uid', '$EQUIPO', false);
+set role authenticated;
+$1;
+SQL
+}
+for i in $(seq 1 10); do
+  apartar_equipo "$F_SALDO" "s-$i"
+  rid=$(psql_q -c "select id from funcion_reservas where clave_idempotencia = 's-$i'")
+  equipo_sql "select funcion_confirmar_pago('$rid', 'verificado_manual', 'abono')" >/dev/null
+done
+mapfile -t con_saldo < <(psql_q -c "select id from funcion_reservas where clave_idempotencia like 's-%' order by id")
+for r in "${con_saldo[@]}"; do
+  ( en_transaccion equipo "select funcion_preparar_pago_saldo('$WS', '{$r}'::uuid[])" || true ) &
+  ( en_transaccion equipo "select funcion_cancelar_reserva('$r')" || true ) &
+done
+wait
+canceladas_e=$(psql_q -c "select count(*) from funcion_reservas where clave_idempotencia like 's-%' and estado = 'cancelada'")
+vivos_e=$(psql_q -c "select count(*) from funcion_reservas r join funcion_pago_reservas pr on pr.reserva_id = r.id and pr.pendiente
+                       join funcion_pagos pg on pg.id = pr.pago_id and pg.estado = 'pendiente'
+                      where r.clave_idempotencia like 's-%' and r.estado = 'cancelada'")
+echo "E. ${#con_saldo[@]} links del saldo y cancelaciones de la misma reserva a la vez: $canceladas_e canceladas, $vivos_e con link vivo"
+if [ "$vivos_e" -ne 0 ]; then echo "   LINK VIVO EN RESERVA CANCELADA" >&2; falla=1; fi
+if [ "$canceladas_e" -ne "${#con_saldo[@]}" ]; then echo "   se esperaban todas canceladas" >&2; falla=1; fi
 
 if [ "$falla" -ne 0 ]; then echo "FALLÓ" >&2; exit 1; fi
 echo "Sin sobreventa."

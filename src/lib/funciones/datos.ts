@@ -9,7 +9,8 @@ import 'server-only'
  * acota al workspace y `funcion_ocupacion` verifica que la persona sea de ese workspace. Nada aquí escribe.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { TarifaPublica } from '../../../supabase/functions/_shared/funciones/tipos.ts'
+import type { SaldoReserva, TarifaPublica } from '../../../supabase/functions/_shared/funciones/tipos.ts'
+import { saldoDeLaBase } from '../../../supabase/functions/_shared/funciones/supabase.ts'
 import { rangoDiaBogota, reservaActiva, type EstadoFuncion, type EstadoReserva, type PagoEstado } from './reglas'
 
 export interface Ocupacion {
@@ -39,6 +40,11 @@ export interface ReservaVista {
   canal: string
   telefono: string | null
   origen: 'asistente' | 'equipo'
+  /** La foto: si se paga con abono (por persona) y si se permite el total. Deciden qué ofrece «Pago verificado». */
+  abono_unitario: number | null
+  permite_pago_total: boolean
+  /** El saldo calculado por la base (`funcion_saldos`); solo de las confirmadas. */
+  saldo: SaldoReserva | null
 }
 
 export interface FuncionDelDia {
@@ -47,7 +53,7 @@ export interface FuncionDelDia {
 }
 
 const COLUMNAS_RESERVA =
-  'id, nombre, personas, estado, pago_estado, vence_at, solicitud_cliente, restricciones, consentimiento_sensible_id, canal, telefono, origen'
+  'id, nombre, personas, estado, pago_estado, vence_at, solicitud_cliente, restricciones, consentimiento_sensible_id, canal, telefono, origen, abono_unitario, permite_pago_total'
 
 type FilaReserva = {
   id: string
@@ -62,9 +68,11 @@ type FilaReserva = {
   canal: string
   telefono: string | null
   origen: 'asistente' | 'equipo'
+  abono_unitario: number | null
+  permite_pago_total: boolean
 }
 
-function vistaReserva(r: FilaReserva): ReservaVista {
+function vistaReserva(r: FilaReserva, saldo: SaldoReserva | null = null): ReservaVista {
   return {
     id: r.id,
     nombre: r.nombre,
@@ -78,6 +86,9 @@ function vistaReserva(r: FilaReserva): ReservaVista {
     canal: r.canal,
     telefono: r.telefono,
     origen: r.origen,
+    abono_unitario: r.abono_unitario,
+    permite_pago_total: r.permite_pago_total,
+    saldo,
   }
 }
 
@@ -91,17 +102,22 @@ export async function leerOcupacion(db: SupabaseClient, funcionId: string): Prom
   return { ...o, cupo_total: o.capacidad, estado: estadoParaPantalla(o.estado) }
 }
 
-/** Las reservas ACTIVAS de una función (las que ocupan cupo). */
+/** Las reservas ACTIVAS de una función (las que ocupan cupo), con el saldo de las confirmadas (una llamada). */
 export async function leerReservasActivas(db: SupabaseClient, funcionId: string): Promise<ReservaVista[]> {
-  const { data, error } = await db
-    .from('funcion_reservas')
-    .select(COLUMNAS_RESERVA)
-    .eq('funcion_id', funcionId)
-    .in('estado', ['apartada', 'confirmada'])
-    .order('created_at', { ascending: true })
+  const [{ data, error }, saldos] = await Promise.all([
+    db
+      .from('funcion_reservas')
+      .select(COLUMNAS_RESERVA)
+      .eq('funcion_id', funcionId)
+      .in('estado', ['apartada', 'confirmada'])
+      .order('created_at', { ascending: true }),
+    db.rpc('funcion_saldos', { p_funcion_id: funcionId }),
+  ])
   if (error) throw new Error(`No se pudieron leer las reservas: ${error.message}`)
+  // Sin saldos (falla la lectura) la lista sigue: cada fila dice «saldo sin leer» en vez de inventar un cero.
+  const porReserva = new Map(((saldos.data ?? []) as unknown[]).map((x) => saldoDeLaBase(x)).map((x) => [x.reserva_id, x]))
   const ahora = Date.now()
-  return ((data ?? []) as unknown as FilaReserva[]).filter((r) => reservaActiva(r, ahora)).map(vistaReserva)
+  return ((data ?? []) as unknown as FilaReserva[]).filter((r) => reservaActiva(r, ahora)).map((r) => vistaReserva(r, porReserva.get(r.id) ?? null))
 }
 
 export async function leerFuncion(db: SupabaseClient, funcionId: string): Promise<FuncionDelDia | null> {

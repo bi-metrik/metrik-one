@@ -1,6 +1,7 @@
 /**
  * La firma del servicio `apartar` no tiene campo de mesa, de puesto ni de monto: Sabor no asigna puestos (alcance del
- * 2026-10-22) y el monto lo calcula la base («Todo sale y vuelve a ONE», Mauricio 2026-10-22).
+ * 2026-10-22) y el monto lo calcula la base («Todo sale y vuelve a ONE», Mauricio 2026-10-22). Tampoco tiene modalidad
+ * desde el 2026-10-25 (P14b): el cliente elige total o solo la reserva al pagar, en `generar_link_pago`.
  *
  * Vive en `src/` y no junto al servicio a propósito: `tsc` (job «Tipos y pruebas») revisa `src/` y lo que importa,
  * y `supabase/functions/` queda fuera de su tsconfig. Si alguien le agrega `mesaId`, `puesto` o `montoTotal` a
@@ -15,7 +16,6 @@ const base: PropuestaApartado = {
   canal: 'instagram',
   funcionId: '00000000-0000-4000-8000-000000000002',
   personas: 2,
-  modalidad: 'abono',
   nombre: 'Ana',
   documento: null,
   telefono: null,
@@ -25,7 +25,7 @@ const base: PropuestaApartado = {
   huellaPropuesta: 'h',
 }
 
-describe('la propuesta de apartado no lleva mesa, puesto ni monto', () => {
+describe('la propuesta de apartado no lleva mesa, puesto, monto ni modalidad', () => {
   it('un literal con mesa no compila', () => {
     const p: PropuestaApartado = {
       ...base,
@@ -50,6 +50,15 @@ describe('la propuesta de apartado no lleva mesa, puesto ni monto', () => {
       // @ts-expect-error la propuesta no tiene campo de monto
       montoTotal: 360_000,
     }
-    expect(p.modalidad).toBe('abono')
+    expect(p.huellaPropuesta).toBe('h')
+  })
+
+  it('P14b: un literal con modalidad tampoco compila; se elige al pagar', () => {
+    const p: PropuestaApartado = {
+      ...base,
+      // @ts-expect-error la propuesta no tiene modalidad (va en generar_link_pago)
+      modalidad: 'abono',
+    }
+    expect(p.personas).toBe(2)
   })
 })

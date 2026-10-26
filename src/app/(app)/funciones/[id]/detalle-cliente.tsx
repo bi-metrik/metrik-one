@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import type { FuncionDelDia } from '@/lib/funciones/datos'
-import { ETIQUETA_ESTADO_FUNCION, ETIQUETA_ESTADO_RESERVA, ETIQUETA_PAGO, fechaBogota, horaBogota } from '@/lib/funciones/reglas'
+import { ETIQUETA_ESTADO_FUNCION, ETIQUETA_ESTADO_RESERVA, ETIQUETA_PAGO, fechaBogota, horaBogota, textoSaldo } from '@/lib/funciones/reglas'
 import { apartarEquipoAction, editarFuncionAction } from '../actions'
 import { AccionesReserva } from '../acciones-reserva'
 
@@ -54,12 +54,13 @@ export function DetalleCliente({ funcion, puedeEditar }: { funcion: FuncionDelDi
                     <span className="font-medium text-[#1A1A1A]">
                       {r.nombre ?? '(sin nombre)'} · {r.personas} {r.personas === 1 ? 'persona' : 'personas'}
                     </span>
-                    {puedeEditar && <AccionesReserva funcionId={o.funcion_id} reservaId={r.id} estado={r.estado} nombre={r.nombre} />}
+                    {puedeEditar && <AccionesReserva funcionId={o.funcion_id} reserva={r} />}
                   </div>
                   <div className="text-xs text-[#6B7280]">
                     {ETIQUETA_ESTADO_RESERVA[r.estado]} · {ETIQUETA_PAGO[r.pago_estado]} · {r.canal}
                     {r.telefono ? ` · ${r.telefono}` : ''}
                   </div>
+                  {textoSaldo(r.saldo, r.estado) && <div className="text-xs">{textoSaldo(r.saldo, r.estado)!.texto}</div>}
                   {r.solicitud_cliente && <div className="text-xs">Pidió: {r.solicitud_cliente}</div>}
                   <div className="text-xs">{r.autorizada ? `Restricciones: ${r.restricciones ?? '—'}` : <span className="text-[#6B7280]">Restricciones: sin autorización</span>}</div>
                 </li>

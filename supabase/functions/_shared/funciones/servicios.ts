@@ -11,7 +11,10 @@
 //     `sin_autorizacion` y no aparta. La base lo vuelve a verificar dentro del candado.
 //   · `apartar` arma la propuesta campo por campo: lo que el llamador agregue por fuera del tipo (una mesa, un monto)
 //     no viaja. El monto lo calcula la base y vuelve en el resultado.
-//   · Ninguno confirma: `confirmada` solo llega por `funcion_confirmar_pago` (la pasarela o el equipo).
+//   · Ninguno confirma: `confirmada` solo llega por `funcion_registrar_pago` (la pasarela) o `funcion_confirmar_pago`
+//     (el equipo).
+//   · P14b: la modalidad (total o solo la reserva) va en `generar_link_pago`, no en `apartar`. P14a/P14c: el saldo
+//     tiene su lectura (`saldo_reserva`) y su link (`generar_link_saldo`).
 // ============================================================
 
 import type { PasarelaPagos } from './pasarela.ts';
@@ -20,6 +23,7 @@ import type {
   CampanaDeConversacion,
   CampanasActivas,
   LinkPago,
+  Modalidad,
   CupoPublico,
   FuncionDisponible,
   PropuestaApartado,
@@ -28,6 +32,7 @@ import type {
   ResultadoApartar,
   ResultadoCupo,
   ResumenPago,
+  SaldoReserva,
   TarifaPublica,
 } from './tipos.ts';
 
@@ -143,7 +148,6 @@ export async function campanaDeLaConversacion(
 export async function apartar(puerto: PuertoFunciones, p: PropuestaApartado): Promise<ResultadoApartar> {
   if (!UUID.test(p.funcionId) || !UUID.test(p.llave.workspaceId)) return { ok: false, error: 'funcion_no_existe' };
   if (!Number.isInteger(p.personas) || p.personas < 1 || p.personas > 500) return { ok: false, error: 'personas_invalidas' };
-  if (p.modalidad !== 'abono' && p.modalidad !== 'total') return { ok: false, error: 'modalidad_no_permitida' };
   const huella = texto(p.huellaPropuesta, 200);
   if (!huella) return { ok: false, error: 'datos_invalidos' };
   if (!p.atribucion || !FUENTES.includes(p.atribucion.fuente)) return { ok: false, error: 'datos_invalidos' };
@@ -158,7 +162,6 @@ export async function apartar(puerto: PuertoFunciones, p: PropuestaApartado): Pr
     canal: p.canal,
     funcionId: p.funcionId,
     personas: p.personas,
-    modalidad: p.modalidad,
     nombre: texto(p.nombre, 200),
     documento: texto(p.documento, 40),
     telefono: texto(p.telefono, 40),
@@ -179,7 +182,10 @@ const listaDeReservas = (ids: unknown): string[] | null =>
     ? (ids as string[])
     : null;
 
-/** Lo que se paga de cada reserva y el total sin las vencidas, de la base. El asistente lo muestra; no suma. */
+/**
+ * Lo que se paga de cada reserva y la suma sin las vencidas, con las dos cifras (`total` y `solo_reserva`) y las
+ * `modalidades` que sirven para todas. El asistente pregunta una vez cuál quiere el cliente; no suma.
+ */
 export async function resumenPago(puerto: PuertoFunciones, workspaceId: string, reservaIds: string[]): Promise<Resultado<ResumenPago>> {
   const ids = listaDeReservas(reservaIds);
   if (!UUID.test(workspaceId) || !ids) return { ok: false, error: 'datos_invalidos' };
@@ -187,22 +193,16 @@ export async function resumenPago(puerto: PuertoFunciones, workspaceId: string, 
 }
 
 /**
- * Un link de pago para una o varias reservas de la misma conversación (P13). Un pago por función son N llamadas con
- * una reserva cada una. Por dentro: `prepararPago` (candados, realineación una sola vez, monto de la base) → la
- * pasarela crea el link de monto fijo que vence con el pago → `vincularLink` guarda la referencia.
- * Si la pasarela falla, el pago queda preparado sin link y el servicio responde `pasarela_fallo`: sus reservas ya se
- * realinearon, así que para reintentar hay que apartar de nuevo (lo mismo que si el link vence).
+ * El pago ya preparado por la base → la pasarela crea el link de monto fijo que vence con el pago → `vincularLink`.
+ * Lo usan los servicios del asistente y la pantalla del equipo (regenerar el link del saldo en la lista del día).
  */
-export async function generarLinkPago(
-  puerto: PuertoFunciones,
+export async function crearLinkDelPago(
+  puerto: Pick<PuertoFunciones, 'vincularLink'>,
   pasarela: PasarelaPagos,
-  workspaceId: string,
-  reservaIds: string[],
+  p: Resultado<{ pago_id: string; monto_esperado: number; vence_at: string }>,
   descripcion: string,
+  quien: string,
 ): Promise<Resultado<LinkPago>> {
-  const ids = listaDeReservas(reservaIds);
-  if (!UUID.test(workspaceId) || !ids) return { ok: false, error: 'datos_invalidos' };
-  const p = await puerto.prepararPago(workspaceId, ids);
   if (!p.ok) return p;
   const link = await pasarela.crearLink({
     pagoId: p.dato.pago_id,
@@ -211,7 +211,7 @@ export async function generarLinkPago(
     descripcion: texto(descripcion, 100) ?? 'Reserva',
   });
   if (!link.ok) {
-    console.error('[funciones/generar_link_pago] la pasarela falló:', link.error);
+    console.error(`[funciones/${quien}] la pasarela falló:`, link.error);
     return { ok: false, error: 'pasarela_fallo' };
   }
   const v = await puerto.vincularLink(p.dato.pago_id, link.referencia, link.url);
@@ -220,4 +220,49 @@ export async function generarLinkPago(
     ok: true,
     dato: { pagoId: p.dato.pago_id, referencia: link.referencia, url: link.url, monto: Number(p.dato.monto_esperado), venceAt: p.dato.vence_at },
   };
+}
+
+/**
+ * Un link de pago para una o varias reservas de la misma conversación (P13). Un pago por función son N llamadas con
+ * una reserva cada una. `modalidad` (P14b) la elige el cliente al pagar, entre las `modalidades` de `resumen_pago`, y
+ * vale para todas las reservas del link. Por dentro: `prepararPago` (candados, modalidad, realineación una sola vez,
+ * monto de la base) → la pasarela crea el link de monto fijo que vence con el pago → `vincularLink` guarda la referencia.
+ * Si la pasarela falla, el pago queda preparado sin link y el servicio responde `pasarela_fallo`: sus reservas ya se
+ * realinearon, así que para reintentar hay que apartar de nuevo (lo mismo que si el link vence).
+ */
+export async function generarLinkPago(
+  puerto: PuertoFunciones,
+  pasarela: PasarelaPagos,
+  workspaceId: string,
+  reservaIds: string[],
+  modalidad: Modalidad,
+  descripcion: string,
+): Promise<Resultado<LinkPago>> {
+  const ids = listaDeReservas(reservaIds);
+  if (!UUID.test(workspaceId) || !ids) return { ok: false, error: 'datos_invalidos' };
+  if (modalidad !== 'abono' && modalidad !== 'total') return { ok: false, error: 'modalidad_no_permitida' };
+  return crearLinkDelPago(puerto, pasarela, await puerto.prepararPago(workspaceId, ids, modalidad), descripcion, 'generar_link_pago');
+}
+
+/**
+ * El link del SALDO (P14a, P14c) para una o varias reservas confirmadas de la misma conversación: por el saldo exacto
+ * que calcula la base, y vence en el plazo de la campaña. Se puede generar de nuevo: el link anterior queda vencido.
+ * Pasado el plazo responde `saldo_vencido` (solo una persona del equipo manda otro, o se cobra en el evento).
+ */
+export async function generarLinkSaldo(
+  puerto: PuertoFunciones,
+  pasarela: PasarelaPagos,
+  workspaceId: string,
+  reservaIds: string[],
+  descripcion: string,
+): Promise<Resultado<LinkPago>> {
+  const ids = listaDeReservas(reservaIds);
+  if (!UUID.test(workspaceId) || !ids) return { ok: false, error: 'datos_invalidos' };
+  return crearLinkDelPago(puerto, pasarela, await puerto.prepararPagoSaldo(workspaceId, ids), descripcion, 'generar_link_saldo');
+}
+
+/** Lo pagado, el saldo, su plazo y su estado, de la base. El asistente lo lee; no resta. */
+export async function saldoReserva(puerto: PuertoFunciones, reservaId: string): Promise<Resultado<SaldoReserva>> {
+  if (!UUID.test(reservaId)) return { ok: false, error: 'reserva_no_existe' };
+  return puerto.saldo(reservaId);
 }

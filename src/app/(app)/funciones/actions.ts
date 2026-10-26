@@ -13,6 +13,10 @@ import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos
 import { mensajeDeError, preventaPasaLaFuncion } from '@/lib/funciones/reglas'
 import { codigoCampana, nombreCampana } from '@/lib/funciones/agenda-texto'
 import { leerNegocio, leerPanelCampana, type CampanaPanel, type FichaExperienciaDatos, type Negocio } from '@/lib/funciones/datos'
+import { pasarelaDelWorkspace } from '@/lib/funciones/pasarela-servidor'
+import { createServiceClient } from '@/lib/supabase/server'
+import { crearLinkDelPago } from '../../../../supabase/functions/_shared/funciones/servicios.ts'
+import { codigoDeError, type Modalidad } from '../../../../supabase/functions/_shared/funciones/tipos.ts'
 
 export type Resultado<T = undefined> = { ok: true; dato?: T } | { ok: false; error: string }
 
@@ -42,11 +46,57 @@ export async function cancelarReservaAction(funcionId: string, reservaId: string
   return r.ok ? { ok: true } : r
 }
 
-/** El equipo verifica a mano un pago (transferencia, Anexo 2.3). `aprobado` solo lo marca la pasarela. */
-export async function confirmarPagoManualAction(funcionId: string, reservaId: string): Promise<Resultado> {
+/**
+ * El equipo verifica a mano un pago (transferencia, Anexo 2.3), diciendo qué pagó el cliente: el total o solo la
+ * reserva (P14b). `aprobado` solo lo marca la pasarela. Queda como un pago inicial con medio `manual`.
+ */
+export async function confirmarPagoManualAction(funcionId: string, reservaId: string, modalidad: Modalidad): Promise<Resultado> {
   if (!UUID.test(reservaId)) return { ok: false, error: 'La reserva no existe.' }
-  const r = await llamar('funcion_confirmar_pago', { p_reserva_id: reservaId, p_pago_estado: 'verificado_manual' }, [`/funciones/${funcionId}`, '/funciones/dia'])
+  if (modalidad !== 'total' && modalidad !== 'abono') return { ok: false, error: mensajeDeError({ message: 'modalidad_no_permitida' }) }
+  const r = await llamar('funcion_confirmar_pago', { p_reserva_id: reservaId, p_pago_estado: 'verificado_manual', p_modalidad: modalidad }, [`/funciones/${funcionId}`, '/funciones/dia'])
   return r.ok ? { ok: true } : r
+}
+
+/** [Saldo cobrado] (P14c): el saldo cobrado con el QR de Bold en el evento. El monto va de 1 al saldo (lo revisa la base). */
+export async function registrarSaldoCobradoAction(funcionId: string, reservaId: string, monto: number): Promise<Resultado> {
+  if (!UUID.test(reservaId)) return { ok: false, error: 'La reserva no existe.' }
+  if (!Number.isSafeInteger(monto) || monto < 1) return { ok: false, error: 'Escribe el monto cobrado, en pesos y sin decimales.' }
+  const r = await llamar('funcion_registrar_saldo_cobrado', { p_reserva_id: reservaId, p_monto: monto }, [`/funciones/${funcionId}`, '/funciones/dia'])
+  return r.ok ? { ok: true } : r
+}
+
+/**
+ * Un link NUEVO del saldo de una reserva (P14c): antes del plazo o después, hasta la hora de la función; el anterior
+ * queda vencido. La base prepara el pago con la sesión de la persona (que es la que puede pasar del plazo) y la
+ * pasarela crea el link; la referencia la guarda el servidor (`funcion_vincular_link` es solo de service_role).
+ * Sin pasarela conectada lo dice ANTES de preparar nada.
+ */
+export async function regenerarLinkSaldoAction(funcionId: string, reservaId: string): Promise<Resultado<{ url: string; monto: number; venceAt: string }>> {
+  const p = await puerta()
+  if (!p.ok) return p
+  if (!UUID.test(reservaId)) return { ok: false, error: 'La reserva no existe.' }
+  const pasarela = await pasarelaDelWorkspace(p.ws)
+  if (!pasarela) return { ok: false, error: 'La pasarela de pagos todavía no está conectada: cobra el saldo con el QR de Bold en el evento.' }
+  const { data, error } = await p.db.rpc('funcion_preparar_pago_saldo', { p_workspace_id: p.ws, p_reserva_ids: [reservaId] })
+  if (error || !data) return { ok: false, error: mensajeDeError(error) }
+  const pago = data as { pago_id: string; monto_esperado: number | string; vence_at: string }
+  const servicio = createServiceClient() as unknown as SupabaseClient
+  const link = await crearLinkDelPago(
+    {
+      async vincularLink(pagoId, referencia, url) {
+        const v = await servicio.rpc('funcion_vincular_link', { p_pago_id: pagoId, p_referencia: referencia, p_link_url: url })
+        return v.error ? { ok: false, error: codigoDeError(v.error.message) } : { ok: true, dato: null }
+      },
+    },
+    pasarela,
+    { ok: true, dato: { pago_id: pago.pago_id, monto_esperado: Number(pago.monto_esperado), vence_at: pago.vence_at } },
+    'Saldo de la reserva',
+    'regenerar_link_saldo',
+  )
+  revalidatePath(`/funciones/${funcionId}`)
+  revalidatePath('/funciones/dia')
+  if (!link.ok) return { ok: false, error: link.error === 'pasarela_fallo' ? 'La pasarela no creó el link. Intenta de nuevo o cobra con el QR en el evento.' : mensajeDeError({ message: link.error }) }
+  return { ok: true, dato: { url: link.dato.url, monto: link.dato.monto, venceAt: link.dato.venceAt } }
 }
 
 /** Una reserva que toma el equipo (teléfono, mostrador): origen `equipo`, con los mismos candados de cupo. */
@@ -59,12 +109,11 @@ export async function apartarEquipoAction(
   if (!UUID.test(funcionId)) return { ok: false, error: 'La función no existe.' }
   if (!Number.isInteger(datos.personas) || datos.personas < 1) return { ok: false, error: 'Escribe cuántas personas.' }
   if (!datos.nombre.trim()) return { ok: false, error: 'Escribe el nombre de quien reserva.' }
-  // La pantalla de hoy no pregunta la modalidad: aparta con pago total (si la campaña no lo permite, la base lo dice).
+  // P14b: apartar no lleva modalidad; el total o solo la reserva se eligen al pagar («Pago verificado»).
   const { error } = await p.db.rpc('funcion_apartar', {
     p_workspace_id: p.ws,
     p_funcion_id: funcionId,
     p_personas: datos.personas,
-    p_modalidad: 'total',
     p_datos: { canal: 'equipo', nombre: datos.nombre, telefono: datos.telefono || null, solicitud_cliente: datos.solicitud_cliente || null },
     p_clave_idempotencia: datos.clave,
     p_origen: 'equipo',

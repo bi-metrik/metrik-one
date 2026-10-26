@@ -79,15 +79,17 @@ export function pasarelaBold(enviar: (cuerpo: CuerpoLinkBold) => Promise<{ refer
   };
 }
 
-/** El doble en memoria: guarda cada pedido (ya con el cuerpo de Bold) y devuelve una referencia `LNK_n`. */
+/** Cuenta los links de TODOS los dobles: la referencia es única por workspace en la base, como en Bold. */
+let enlacesDelDoble = 0;
+
+/** El doble en memoria: guarda cada pedido (ya con el cuerpo de Bold) y devuelve una referencia `LNK_n` que no se repite. */
 export function pasarelaEnMemoria(o: { falla?: boolean } = {}) {
   const pedidos: Array<{ pedido: PedidoLink; cuerpo: CuerpoLinkBold }> = [];
-  let n = 0;
   const pasarela: PasarelaPagos = {
     async crearLink(p) {
       if (o.falla) return { ok: false, error: 'pasarela caída (doble)' };
       pedidos.push({ pedido: p, cuerpo: cuerpoLinkBold(p) });
-      const referencia = `LNK_${++n}`;
+      const referencia = `LNK_${++enlacesDelDoble}`;
       return { ok: true, referencia, url: `https://checkout.ejemplo/${referencia}` };
     },
   };
