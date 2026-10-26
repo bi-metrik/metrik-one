@@ -166,10 +166,31 @@ export function pesos(x: number): string {
   return `$${Math.round(x).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
 
+/** «sábado 24 de octubre» en hora de Bogotá. Pura. */
+export function fechaBogota(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' }).replace(/ | /g, ' ');
+}
+
+/** «7:00 p. m.» en hora de Bogotá. Pura. */
+export function horaBogota(iso: string): string {
+  return new Date(iso).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true }).replace(/ | /g, ' ');
+}
+
 /** «sábado 24 de octubre, 7:00 p. m.» en hora de Bogotá. Pura. */
 export function cuandoBogota(iso: string): string {
-  const d = new Date(iso);
-  const dia = d.toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' });
-  const hora = d.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true });
-  return `${dia}, ${hora}`.replace(/ | /g, ' ');
+  return `${fechaBogota(iso)}, ${horaBogota(iso)}`;
+}
+
+/**
+ * Las funciones agrupadas por fecha de Bogotá, en orden (Mauricio, 26-oct: primero la fecha y después el horario). Así
+ * el modelo ve cuántos horarios tiene cada fecha sin contar. Pura.
+ */
+export function funcionesPorFecha(fs: Funcion[]): Array<{ fecha: string; horarios: Array<{ id: string; hora: string }> }> {
+  const grupos: Array<{ fecha: string; horarios: Array<{ id: string; hora: string }> }> = [];
+  for (const f of [...fs].sort((a, b) => Date.parse(a.inicio) - Date.parse(b.inicio))) {
+    const fecha = fechaBogota(f.inicio);
+    const g = grupos.find((x) => x.fecha === fecha) ?? (grupos.push({ fecha, horarios: [] }), grupos.at(-1)!);
+    g.horarios.push({ id: f.id, hora: horaBogota(f.inicio) });
+  }
+  return grupos;
 }
