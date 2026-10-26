@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { createPortal } from 'react-dom'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -11,6 +12,7 @@ import {
 } from '../negocio-v2-actions'
 import { RAZONES_PERDIDA_NEGOCIO, RAZONES_DESCARTE_LEAD, MOTIVOS_CANCELACION } from '@/lib/negocios/constants'
 import { permiteCompletar, permiteCierreNoFacturable as puedeOfrecerNoFacturable, type EtapaCierre } from '@/lib/negocios/etapa-cierre'
+import { pesosCierre, type CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -42,19 +44,31 @@ interface CierreNegocioDialogProps {
    * Esto es UX, no seguridad: el guard real vive en `completarNegocio`.
    */
   puedeCierreNoFacturable?: boolean
+  /**
+   * Motivos de la línea con el seguimiento encendido (F1-4, Vera C10): los cinco de Noor,
+   * cada uno sobre un `value` global. Ausente = la lista global de siempre.
+   */
+  motivosPerdida?: ReadonlyArray<{ value: string; label: string }>
+  /**
+   * Línea con `cierre_viaje.activo` (barrido ámbar, 2026-10-22): el resumen muestra el margen del
+   * panel de Cierre económico, y lo que falta de postventa se dice en el primer paso y deshabilita
+   * el cierre. Ausente = como hoy (SOENA/AFI/Termotech). El servidor sigue frenando igual.
+   */
+  cierreViaje?: CierreParaCerrar | null
   onClose: () => void
 }
 
 // ── Stage: VENTA — Desistir del negocio ─────────────────────────────────────
 
-function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; esBuzonLeads?: boolean; onClose: () => void }) {
+function PerderForm({ negocioId, esBuzonLeads, motivosPerdida, onClose }: { negocioId: string; esBuzonLeads?: boolean; motivosPerdida?: ReadonlyArray<{ value: string; label: string }>; onClose: () => void }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [razon, setRazon] = useState('')
   const [notas, setNotas] = useState('')
   // Desde el buzón (Recepción) se descarta un lead → razones de triage; en el
   // resto de la venta → razones de pérdida comercial.
-  const razones = esBuzonLeads ? RAZONES_DESCARTE_LEAD : RAZONES_PERDIDA_NEGOCIO
+  const razones = esBuzonLeads ? RAZONES_DESCARTE_LEAD : (motivosPerdida ?? RAZONES_PERDIDA_NEGOCIO)
+  const conSeguimiento = !esBuzonLeads && !!motivosPerdida
 
   const handleConfirm = () => {
     if (!razon) return
@@ -63,7 +77,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
       if (res.error) {
         toast.error(res.error)
       } else {
-        toast.success('Negocio marcado como desistido')
+        toast.success(conSeguimiento ? 'Se perdió. Quedó el motivo.' : 'Negocio marcado como desistido')
         onClose()
         router.refresh()
       }
@@ -74,7 +88,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
     <>
       <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : 'Desistir del negocio'}</h3>
       <p className="text-xs text-tinta-suave">
-        {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : 'Selecciona la razon principal'}
+        {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : conSeguimiento ? '¿Por qué se perdió?' : 'Selecciona la razon principal'}
       </p>
 
       <div className="space-y-1.5 mt-3">
@@ -124,7 +138,7 @@ function PerderForm({ negocioId, esBuzonLeads, onClose }: { negocioId: string; e
 
 function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () => void }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [motivo, setMotivo] = useState('')
   const [descripcion, setDescripcion] = useState('')
 
@@ -202,30 +216,35 @@ function CancelarForm({ negocioId, onClose }: { negocioId: string; onClose: () =
   )
 }
 
-// ── Stage: COBRO — Completar proyecto ───────────────────────────────────────
+// ── Stage: COBRO — Cerrar el negocio ────────────────────────────────────────
 
-function CompletarForm({
+export function CompletarForm({
   negocioId,
   resumenFinanciero,
   precioAprobado,
   permiteCierreNoFacturable,
+  cierreViaje = null,
   onClose,
 }: {
   negocioId: string
   resumenFinanciero: { totalCobrado: number; porCobrar: number; costosEjecutados: number }
   precioAprobado: number | null
   permiteCierreNoFacturable: boolean
+  cierreViaje?: CierreParaCerrar | null
   onClose: () => void
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [step, setStep] = useState<1 | 2>(1)
   const [lecciones, setLecciones] = useState('')
   const [cerrarSinFactura, setCerrarSinFactura] = useState(false)
   const [motivoNoFacturable, setMotivoNoFacturable] = useState('')
   const [notaNoFacturable, setNotaNoFacturable] = useState('')
 
-  const margen = resumenFinanciero.totalCobrado - resumenFinanciero.costosEjecutados
+  // En viaje, el margen es el del panel de Cierre económico (resta el IVA sobre el ingreso propio
+  // y no suma horas): dos cifras distintas para el mismo viaje confundían a la dirección.
+  const margen = cierreViaje ? cierreViaje.margenReal : resumenFinanciero.totalCobrado - resumenFinanciero.costosEjecutados
+  const faltaPostventa = cierreViaje?.faltaPostventa ?? null
   const requiereNota = motivoNoFacturable === 'otro'
   const cierreNoFacturableValido = !cerrarSinFactura
     || (!!motivoNoFacturable && (!requiereNota || !!notaNoFacturable.trim()))
@@ -245,7 +264,7 @@ function CompletarForm({
       if (res.error) {
         toast.error(res.error)
       } else {
-        toast.success('Proyecto completado')
+        toast.success('Negocio cerrado')
         onClose()
         router.refresh()
       }
@@ -255,11 +274,16 @@ function CompletarForm({
   if (step === 1) {
     return (
       <>
-        <h3 className="text-sm font-bold text-tinta">Cerrar proyecto</h3>
+        <h3 className="text-sm font-bold text-tinta">Cerrar negocio</h3>
+        {faltaPostventa && (
+          <p data-falta-postventa className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            Antes de cerrar: {faltaPostventa}
+          </p>
+        )}
         <textarea
           value={lecciones}
           onChange={e => setLecciones(e.target.value)}
-          placeholder="Que aprendiste de este proyecto? Que mejorarias?"
+          placeholder="¿Qué aprendiste de este negocio? ¿Qué mejorarías?"
           rows={4}
           className="mt-3 w-full rounded-md border border-[#E5E7EB] px-3 py-2 text-sm resize-none focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15"
         />
@@ -310,7 +334,7 @@ function CompletarForm({
           </button>
           <button
             onClick={() => setStep(2)}
-            disabled={!cierreNoFacturableValido}
+            disabled={!cierreNoFacturableValido || !!faltaPostventa}
             className="flex-1 rounded-lg bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             Ver resumen
@@ -325,16 +349,35 @@ function CompletarForm({
     <>
       <h3 className="text-sm font-bold text-tinta">Resumen financiero</h3>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <FinCard label="Precio aprobado" value={formatCOP(precioAprobado ?? 0)} />
-        <FinCard label="Total cobrado" value={formatCOP(resumenFinanciero.totalCobrado)} />
-        <FinCard label="Costos ejecutados" value={formatCOP(resumenFinanciero.costosEjecutados)} />
-        <FinCard
-          label="Margen"
-          value={`${margen >= 0 ? '+' : ''}${formatCOP(margen)}`}
-          highlight={margen}
-        />
-      </div>
+      {cierreViaje ? (
+        // Las mismas cifras y el mismo formato del panel de Cierre económico.
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <FinCard label="Precio aprobado" value={pesosCierre(precioAprobado ?? 0)} />
+          <FinCard label="Total cobrado" value={pesosCierre(resumenFinanciero.totalCobrado)} />
+          <FinCard label="Costo real" value={pesosCierre(cierreViaje.costoReal)} />
+          <FinCard
+            label="Margen real"
+            value={`${pesosCierre(margen)}${cierreViaje.margenRealPct !== null ? ` (${cierreViaje.margenRealPct} %)` : ''}`}
+            highlight={margen}
+            dataMargen
+          />
+          {cierreViaje.iva > 0 && (
+            <p className="col-span-2 text-[11px] text-tinta-suave">Descuenta {pesosCierre(cierreViaje.iva)} de IVA sobre el ingreso propio.</p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <FinCard label="Precio aprobado" value={formatCOP(precioAprobado ?? 0)} />
+          <FinCard label="Total cobrado" value={formatCOP(resumenFinanciero.totalCobrado)} />
+          <FinCard label="Costos ejecutados" value={formatCOP(resumenFinanciero.costosEjecutados)} />
+          <FinCard
+            label="Margen"
+            value={`${margen >= 0 ? '+' : ''}${formatCOP(margen)}`}
+            highlight={margen}
+            dataMargen
+          />
+        </div>
+      )}
 
       {cerrarSinFactura && (
         <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -356,7 +399,7 @@ function CompletarForm({
         </button>
         <button
           onClick={handleConfirm}
-          disabled={isPending}
+          disabled={isPending || !!faltaPostventa}
           className="flex-1 rounded-lg bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:opacity-50"
         >
           {isPending ? 'Cerrando...' : 'Confirmar cierre'}
@@ -366,9 +409,9 @@ function CompletarForm({
   )
 }
 
-function FinCard({ label, value, highlight }: { label: string; value: string; highlight?: number }) {
+function FinCard({ label, value, highlight, dataMargen }: { label: string; value: string; highlight?: number; dataMargen?: boolean }) {
   return (
-    <div className="rounded-lg border border-[#E5E7EB] p-3">
+    <div className="rounded-lg border border-[#E5E7EB] p-3" {...(dataMargen ? { 'data-margen': value } : {})}>
       <p className="text-[10px] text-tinta-suave">{label}</p>
       <p className={`text-sm font-bold mt-0.5 tabular-nums ${
         highlight !== undefined
@@ -393,6 +436,8 @@ export default function CierreNegocioDialog({
   resumenFinanciero,
   precioAprobado,
   puedeCierreNoFacturable = false,
+  motivosPerdida,
+  cierreViaje = null,
   onClose,
 }: CierreNegocioDialogProps) {
   // El stage dice QUIEN trabaja la etapa, no si el proceso termina ahi. Con la linea
@@ -434,7 +479,7 @@ export default function CierreNegocioDialog({
           no facturable y en pantallas bajas se salia del viewport. */}
       <div className="my-auto flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto rounded-xl bg-white shadow-xl p-6 space-y-1">
         {stage === 'venta' && !showCompletar && (
-          <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} onClose={onClose} />
+          <PerderForm negocioId={negocioId} esBuzonLeads={esBuzonLeads} motivosPerdida={motivosPerdida} onClose={onClose} />
         )}
         {showCancelar && (
           <CancelarForm negocioId={negocioId} onClose={onClose} />
@@ -445,6 +490,7 @@ export default function CierreNegocioDialog({
             resumenFinanciero={resumenFinanciero}
             precioAprobado={precioAprobado}
             permiteCierreNoFacturable={puedeOfrecerNoFacturable(etapaParaCierre, lineaDeclaraCierre) && puedeCierreNoFacturable}
+            cierreViaje={cierreViaje}
             onClose={onClose}
           />
         )}

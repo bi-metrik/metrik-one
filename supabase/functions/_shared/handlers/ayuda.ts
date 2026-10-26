@@ -2,11 +2,13 @@
 // Handler: AYUDA + UNCLEAR (MVP)
 // ============================================================
 
-import type { HandlerContext } from '../types.ts';
+import type { HandlerContext, SupabaseClient } from '../types.ts';
 import { completeSession } from '../wa-session.ts';
+import { bandejaActiva, leerConfigBandeja, textoGuiaBandeja } from '../wa-bandeja-reglas.ts';
+import type { ConfigBandeja } from '../wa-bandeja-reglas.ts';
 
-export async function handleAyuda(ctx: HandlerContext): Promise<void> {
-  const msg = `👋 Soy tu asistente MéTRIK ONE. Escríbeme con naturalidad:
+/** La ayuda de siempre, tal cual (bandeja apagada). */
+export const TEXTO_AYUDA_BOT = `👋 Soy tu asistente MéTRIK ONE. Escríbeme con naturalidad:
 
 💰 *Gastos:* "Gasté 180 mil en materiales para Pérez" · "Pagué 50K en almuerzo"
 
@@ -18,7 +20,43 @@ export async function handleAyuda(ctx: HandlerContext): Promise<void> {
 
 Los cobros, cambios de etapa y horas se gestionan desde la app.`;
 
-  await ctx.sendMessage(msg);
+/**
+ * La ayuda de siempre con la bandeja encendida: los mismos ejemplos, pero con el prefijo que los
+ * lleva al bot. Sin él, «Gasté 180 mil…» o «Mis números» caen en la bandeja (`decidirRuta`).
+ */
+export function textoAyudaBotConBandeja(config: Pick<ConfigBandeja, 'prefijosBot' | 'prefijosConsulta'>): string {
+  const b = config.prefijosConsulta[0] ?? 'bot';
+  const g = config.prefijosBot.find(p => !config.prefijosConsulta.includes(p)) ?? 'gasto';
+  return `*Lo de siempre*, empezando con «${g}» o «${b}»:
+
+💰 *Gastos:* "${g} 180 mil en materiales para Pérez" · "${g} 50K en almuerzo"
+
+📝 *Actividad:* "${b} llamé a Pérez" · "${b} reunión con Torres ayer" · "${b} nota: revisión pendiente"
+
+👤 *Contactos:* "${b} nuevo contacto Juan Pérez 3001234567"
+
+📊 *Consulta:* "${b} mis números" · "${b} ¿quién me debe?" · "${b} qué negocios tengo"
+
+Los cobros, cambios de etapa y horas se gestionan desde la app.`;
+}
+
+/** `config_extra` del workspace; si no se puede leer, la config por defecto (la guía sale igual). */
+async function configBandeja(supabase: SupabaseClient, workspaceId: string): Promise<ConfigBandeja> {
+  const { data, error } = await supabase.from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle();
+  if (error) console.error('[ayuda] no se pudo leer config_extra, uso la config por defecto:', error.message);
+  return leerConfigBandeja(data?.config_extra ?? null);
+}
+
+/** Con la bandeja encendida: la guía de la bandeja arriba y la ayuda de siempre abajo. Apagada: como siempre. */
+export async function textoAyuda(ctx: Pick<HandlerContext, 'user' | 'supabase'>): Promise<string> {
+  const modules = (ctx.user.modulos?.modules ?? null) as Record<string, unknown> | null;
+  if (!bandejaActiva(modules)) return TEXTO_AYUDA_BOT;
+  const config = await configBandeja(ctx.supabase, ctx.user.workspace_id);
+  return `${textoGuiaBandeja(config)}\n\n${textoAyudaBotConBandeja(config)}`;
+}
+
+export async function handleAyuda(ctx: HandlerContext): Promise<void> {
+  await ctx.sendMessage(await textoAyuda(ctx));
   await completeSession(ctx.supabase, ctx.session.id);
 }
 

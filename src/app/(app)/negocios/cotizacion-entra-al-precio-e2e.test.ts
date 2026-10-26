@@ -381,15 +381,17 @@ describe('(a) sugerencia con precio que NO entra al precio', () => {
 })
 
 describe('(b) la misma sugerencia marcada que SÍ entra al precio', () => {
-  it('suma al total, y se sigue imprimiendo como «no incluida»: la contradicción que avisa el editor', async () => {
+  it('suma al total y se imprime incluida, no como «no incluida» (D1 del brief del 2026-10-05)', async () => {
     sembrar({ saona: { dia_relativo: 1 }, traslado: { dia_relativo: 1 } })
     const { totalEnPantalla, subtotalPDF, texto } = await medir()
 
     expect(totalEnPantalla).toBe(TOTAL_CON_TODAS)
     expect(subtotalPDF).toBe(TOTAL_CON_TODAS)
-    expect(seccionSugeridos(texto)).toContain('Tour Isla Catalina')
-    // La columna impresa queda corta exactamente en lo que cobra la sugerencia.
-    expect((subtotalPDF ?? 0) - sumaDeLaColumnaPorDias(texto)).toBe(PRECIO_CATALINA)
+    // Hasta el 2026-10-05 la columna quedaba corta en PRECIO_CATALINA y Catalina salía como «no
+    // incluida» mientras se cobraba. Ahora la columna cuadra.
+    expect(seccionSugeridos(texto)).not.toContain('Tour Isla Catalina')
+    expect(sumaDeLaColumnaPorDias(texto)).toBe(subtotalPDF)
+    expect(PRECIO_CATALINA).toBeGreaterThan(0)
   }, 30_000)
 })
 
@@ -531,6 +533,12 @@ describe('el interruptor desde la server action: guarda, protege y recalcula', (
     const res = await actualizarRanuraDeItem('catalina', { grupo: 'vuelo' })
     expect(res.success).toBe(false)
     expect((tablas.items.find(i => i.id === 'catalina') as Fila).grupo).toBe('excursion')
+  })
+
+  it('un vuelo que no va sí cambia a otra ranura de vuelo (brief del 2026-10-08)', async () => {
+    sembrar({ avianca: { entra_al_precio: false } })
+    const res = await actualizarRanuraDeItem('avianca', { grupo: 'vuelo 2' })
+    expect(res).toEqual({ success: true })
   })
 
   it('CONTROL · cambiarle el grupo a otro que tampoco se combina sí pasa', async () => {

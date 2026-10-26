@@ -66,6 +66,13 @@ export type EstadoSujeto =
   | 'habilitado'
   /** Liberado, pero el oficial lo dejó bajo observación. */
   | 'en_seguimiento'
+  /**
+   * Su última consulta trajo hallazgo y el oficial todavía no decidió sobre ella
+   * (P1, 2026-10-20). Antes salía "Sin consultar" o, si tenía una limpia vigente
+   * de antes, "Habilitado": compras leía "puede contratarse" sobre alguien con
+   * un hallazgo abierto.
+   */
+  | 'en_revision'
   /** Estuvo habilitado y la vigencia caducó. Nadie lo tocó: caducó solo. */
   | 'vencido'
   /** El oficial lo rechazó. Solo otra decisión suya lo levanta. */
@@ -74,6 +81,7 @@ export type EstadoSujeto =
 export const ESTADOS_SUJETO: readonly EstadoSujeto[] = [
   'habilitado',
   'en_seguimiento',
+  'en_revision',
   'vencido',
   'inhabilitado',
   'sin_consultar',
@@ -83,6 +91,7 @@ export const ESTADO_SUJETO_LABEL: Readonly<Record<EstadoSujeto, string>> = {
   sin_consultar: 'Sin consultar',
   habilitado: 'Habilitado',
   en_seguimiento: 'Habilitado en seguimiento',
+  en_revision: 'En revisión del oficial',
   vencido: 'Vencido',
   inhabilitado: 'Inhabilitado',
 };
@@ -96,6 +105,9 @@ export const ESTADO_SUJETO_ACCION: Readonly<Record<EstadoSujeto, string>> = {
   sin_consultar: 'Falta consultarlo antes de vincularlo.',
   habilitado: 'Puede contratarse.',
   en_seguimiento: 'Puede contratarse, con las condiciones que fijó el oficial.',
+  // No dice "hallazgo" ni nombra la lista: al ejecutor le basta saber que no
+  // contrata todavía; qué salió es del oficial.
+  en_revision: 'No contratar todavía: el oficial está revisando esta contraparte.',
   vencido: 'No contratar hasta revalidar.',
   inhabilitado: 'No contratar.',
 };
@@ -131,6 +143,88 @@ export type ConsultaLimpia = {
   /** Fecha de revalidación calculada por R2. NULL si el workspace no adoptó periodicidad. */
   vigente_hasta: string | null;
 };
+
+/**
+ * La consulta a listas MÁS RECIENTE de un sujeto, de cualquier severidad.
+ *
+ * Responde "¿cuándo fue la última evaluación de este tercero?", que el oficial
+ * necesita ver en la base. Desde P1 (2026-10-20) también entra a
+ * `situacionSujeto`, pero solo para una cosa: si trajo hallazgo y es posterior a
+ * la última decisión del oficial, el sujeto queda `en_revision`.
+ */
+export type UltimaConsulta = {
+  created_at: string;
+  /** Tal cual la guarda `consultas_listas_dual`: 'sin_hallazgo', 'alto', etc. */
+  severidad: string | null;
+};
+
+/**
+ * Indexa por `claveContraparte` la consulta más reciente de cada contraparte.
+ *
+ * Usa la MISMA clave que el estado (tipo + número normalizado, NIT sin DV), así
+ * que la fecha que se muestra y el estado que se muestra hablan del mismo
+ * tercero. Un CC y un NIT con el mismo número son dos claves distintas y no se
+ * cruzan.
+ *
+ * No supone orden en la entrada: compara fechas, porque las filas llegan
+ * paginadas por id.
+ */
+export function indexarUltimasConsultas(
+  consultas: readonly {
+    documento_tipo: string | null;
+    documento_numero: string | null;
+    created_at: string;
+    severidad: string | null;
+  }[],
+): Map<string, UltimaConsulta> {
+  const ultimas = new Map<string, UltimaConsulta>();
+  for (const c of consultas) {
+    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
+    if (!clave) continue;
+    const previa = ultimas.get(clave);
+    if (previa && previa.created_at >= c.created_at) continue;
+    ultimas.set(clave, { created_at: c.created_at, severidad: c.severidad });
+  }
+  return ultimas;
+}
+
+/**
+ * Indexa por `claveContraparte` la consulta LIMPIA más reciente de cada
+ * contraparte: el segundo insumo de `situacionSujeto`.
+ *
+ * Igual que `indexarUltimasConsultas`, no supone orden en la entrada y compara
+ * fechas: las filas llegan paginadas por id, no por fecha. Antes se confiaba en
+ * un `order(created_at desc)` con `limit(5000)`, pero PostgREST corta en 1.000
+ * sin avisar, y la limpia de un sujeto que cayera después de la fila 1.000
+ * desaparecía: el sujeto salía "sin consultar" habiéndose consultado.
+ *
+ * Quien llama filtra la severidad; aquí no se vuelve a mirar.
+ */
+export function indexarConsultasLimpias(
+  consultas: readonly {
+    documento_tipo: string | null;
+    documento_numero: string | null;
+    created_at: string;
+    vigente_hasta: string | null;
+  }[],
+): Map<string, ConsultaLimpia> {
+  const limpias = new Map<string, ConsultaLimpia>();
+  for (const c of consultas) {
+    const clave = claveContraparte(c.documento_tipo, c.documento_numero);
+    if (!clave) continue;
+    const previa = limpias.get(clave);
+    if (previa && previa.created_at >= c.created_at) continue;
+    limpias.set(clave, { created_at: c.created_at, vigente_hasta: c.vigente_hasta });
+  }
+  return limpias;
+}
+
+/** "sin hallazgo" o "con hallazgo (alto)", para la columna de la base. */
+export function etiquetaResultadoConsulta(severidad: string | null): string {
+  if (severidad === 'sin_hallazgo') return 'sin hallazgo';
+  if (!severidad) return 'sin resultado';
+  return `con hallazgo (${severidad.replace(/_/g, ' ')})`;
+}
 
 /** El resultado completo: el estado y de dónde salió. */
 export type SituacionSujeto = {
@@ -221,6 +315,7 @@ export function situacionSujeto(
   liberaciones: readonly ComplianceLiberacion[],
   consultaLimpia: ConsultaLimpia | null,
   hoyISO: string,
+  ultimaConsulta: UltimaConsulta | null = null,
 ): SituacionSujeto {
   const relacionCerrada = relacionCerradaAl(sujeto.relacion_hasta, hoyISO);
 
@@ -228,6 +323,18 @@ export function situacionSujeto(
 
   if (cobertura.motivo === 'rechazada') {
     return { estado: 'inhabilitado', venceEl: null, fuente: 'liberacion', relacionCerrada };
+  }
+
+  // Un hallazgo posterior a la última decisión del oficial (o sin decisión
+  // alguna) gana sobre la limpia anterior y sobre la liberación vigente: el
+  // hecho sobre el que se habilitó cambió y nadie lo ha mirado (P1, 2026-10-20).
+  // Va después del rechazo porque un rechazo ya dice "no contratar".
+  const decididaEn = cobertura.liberacion?.created_at ?? null;
+  if (
+    ultimaConsulta?.severidad === 'alto' &&
+    (decididaEn === null || ultimaConsulta.created_at > decididaEn)
+  ) {
+    return { estado: 'en_revision', venceEl: null, fuente: 'consulta', relacionCerrada };
   }
 
   if (cobertura.cubierta && cobertura.liberacion) {
@@ -411,6 +518,7 @@ export function resumirSujetos(
     sin_consultar: 0,
     habilitado: 0,
     en_seguimiento: 0,
+    en_revision: 0,
     vencido: 0,
     inhabilitado: 0,
     total: 0,

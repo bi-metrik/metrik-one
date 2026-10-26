@@ -57,10 +57,11 @@ describe('los textos que ya firmó 4D SOFT no cambian', () => {
   }
   const datos = { nombre: 'Juan Guillermo Pérez', cedula: '79123456', calidad: 'apoderado' as const }
 
-  // Copiados de la salida de `origin/main` (2026-09-23) antes del cambio.
+  // Copiados de la salida de `origin/main` (2026-09-23) antes del cambio. La versión de la Política
+  // pasó de v1.5 a v1.6 el 2026-10-11 y de v1.6 a v1.7 el 2026-10-19 (PR #1191); el resto del texto es el mismo.
   it('el aviso de la Política', () => {
     expect(textoAvisoPolitica()).toBe(
-      'Al continuar, autoriza a METRIK IA S.A.S. a tratar su correo, dirección IP y navegador para darle acceso al módulo Valida API y proteger la cuenta, conforme a la Política de Tratamiento de Datos Personales v1.5.',
+      'Al continuar, autoriza a METRIK IA S.A.S. a tratar su correo, dirección IP y navegador para darle acceso al módulo Valida API y proteger la cuenta, conforme a la Política de Tratamiento de Datos Personales v1.7.',
     )
   })
 
@@ -72,7 +73,7 @@ describe('los textos que ya firmó 4D SOFT no cambian', () => {
 
   it('la casilla', () => {
     expect(textoCasillaEntrada({ documentos: [doc4d, { titulo: 'Otro', version: 'v2' }], firmaPor: ['A', 'B'] })).toBe(
-      'Leí hasta el final «Términos de Uso, Confidencialidad y Encargo de Tratamiento de Datos — VALIDA» (v1.0) y «Otro» (v2) y los acepto para mi uso de Valida API. Autorizo a METRIK IA S.A.S. a tratar mis datos conforme a la Política de Tratamiento de Datos Personales v1.5. Declaro bajo la gravedad de juramento que tengo facultades para obligar a A y B y firmo en su nombre la declaración de arriba.',
+      'Leí hasta el final «Términos de Uso, Confidencialidad y Encargo de Tratamiento de Datos — VALIDA» (v1.0) y «Otro» (v2) y los acepto para mi uso de Valida API. Autorizo a METRIK IA S.A.S. a tratar mis datos conforme a la Política de Tratamiento de Datos Personales v1.7. Declaro bajo la gravedad de juramento que tengo facultades para obligar a A y B y firmo en su nombre la declaración de arriba.',
     )
   })
 

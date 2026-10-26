@@ -10,17 +10,35 @@ import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
 import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
 import ValidaClient from './valida-client';
-import { AvisoMora, AvisoPlazoTerminos, FranjaSuscripcion, PausaPorMora } from './avisos-cda';
+import { leerSaldoValida } from '@/lib/valida/credencial-servidor';
+import { registrarVistaAvisoModificacion } from '@/lib/valida-cda/aviso-modificacion-servidor';
+import {
+  AvisoModificacionTerminos,
+  AvisoMora,
+  AvisoPlazoTerminos,
+  AvisoRestriccion,
+  ConsultasRestringidas,
+  FranjaSuscripcion,
+  PausaPorMora,
+} from './avisos-cda';
 import { TerminosCda } from './terminos-cda';
+import { esEspacioAutogestion } from '@/lib/valida-registro/plan';
+import { estadoCobroDelEspacio } from '@/lib/valida-registro/cobro-prueba-servidor';
+import { pruebaEnPantalla } from '@/lib/valida-registro/prueba-en-pantalla';
+import { pruebaDeConfig } from '@/lib/valida/corte-bolsa';
+import { ModificacionTerminosCda } from './modificacion-terminos-cda';
 
 export const dynamic = 'force-dynamic';
+// El cargue masivo despierta su trabajador con `after()` desde las acciones de esta página
+// (`despertarTrabajador`): corre en esta misma función hasta 240 s. Ver `@/lib/valida/lote-servidor`.
+export const maxDuration = 300;
 
 interface Props {
-  searchParams: Promise<{ negocio_id?: string; terminos?: string }>;
+  searchParams: Promise<{ negocio_id?: string; terminos?: string; modificacion?: string; lote?: string }>;
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
-  const { workspaceId } = await getWorkspace();
+  const { workspaceId, realRole, impersonating } = await getWorkspace();
   if (!workspaceId) redirect('/');
 
   // Validar flag activo
@@ -54,7 +72,8 @@ export default async function ValidaPage({ searchParams }: Props) {
       />
     );
   }
-  const { negocio_id: negocioId, terminos: verTerminos } = await searchParams;
+  const { negocio_id: negocioId, terminos: verTerminos, modificacion: verModificacion, lote: loteParam } = await searchParams;
+  const loteInicialId = loteParam && /^[0-9a-f-]{36}$/i.test(loteParam) ? loteParam : null;
 
   // Términos pendientes: sin plazo (o vencido) se muestran los términos y Valida no opera; dentro
   // del plazo Valida opera con un aviso, y la persona designada abre los términos desde ese aviso
@@ -90,10 +109,52 @@ export default async function ValidaPage({ searchParams }: Props) {
     ) : null;
   }
 
-  // La mora (cláusula 11.1) y quién ve la plata. Una sola lectura de cuotas y pagos por request.
+  // Una modificación de los Términos por aviso (cláusula 13.1, la v1.4): el aviso lo ven TODOS hasta que
+  // la persona designada la acepte, y cada primera vista queda como constancia del preaviso. NO cierra
+  // nada: Valida opera igual con o sin la aceptación. `?modificacion=1` abre el documento completo (y, a la
+  // persona designada, la aceptación con la misma entrada de los términos).
+  let avisoModificacion: React.ReactNode = null;
+  if (entrada.tipo === 'ok' && entrada.modificaciones.length > 0) {
+    const firmaModificacion =
+      entrada.modificacion?.estado === 'pendiente' && entrada.modificacion.aceptante?.puede === true;
+    const designadoNombre =
+      entrada.modificacion?.estado === 'pendiente' ? entrada.modificacion.designadoNombre : null;
+    await registrarVistaAvisoModificacion(entrada);
+    if (verModificacion === '1') {
+      const pagina =
+        firmaModificacion && entrada.modificacion
+          ? await armarEstadoEntradaPagina({ workspaceId: entrada.workspaceId }, entrada.modificacion)
+          : null;
+      return (
+        <ModificacionTerminosCda
+          documentos={entrada.modificaciones}
+          entrada={pagina?.estado === 'pendiente' ? pagina : null}
+          hoy={entrada.hoy}
+          designadoNombre={designadoNombre}
+          aviso={textoAvisoPolitica('valida_cda')}
+          politicaUrl={POLITICA_DATOS_VALIDA.url}
+          politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+        />
+      );
+    }
+    avisoModificacion = entrada.modificaciones.map((doc) => (
+      <AvisoModificacionTerminos
+        key={doc.documentoId}
+        doc={doc}
+        hoy={entrada.hoy}
+        puedeAceptar={firmaModificacion}
+        designadoNombre={designadoNombre}
+      />
+    ));
+  }
+
+  // La mora (cláusula 11) y quién ve la plata. Una sola lectura de cuotas y pagos por request, sin
+  // caché entre requests: el pago aprobado levanta la restricción en la navegación siguiente.
   const [mora, vePagos] = await Promise.all([moraValidaCda(), puedeVerPagosCda(entrada)]);
   const estadoMora = mora.tipo === 'ok' ? mora.mora : null;
   const enPausa = estadoMora?.estado === 'suspendido' ? estadoMora : null;
+  // Restringido (11.1): sin consultas nuevas, con el historial y las descargas abiertos.
+  const restringido = estadoMora?.estado === 'restringido' ? estadoMora : null;
 
   // Modo vitrina (workspaces Valida-only): oculta la asociación a negocio en
   // consulta puntual / carga masiva / historial y quita la columna negocio_codigo
@@ -114,7 +175,7 @@ export default async function ValidaPage({ searchParams }: Props) {
     if (neg) negocioInicial = neg;
   }
 
-  const [historial, tutorialProgress, suscripcion] = await Promise.all([
+  const [historial, tutorialProgress, suscripcion, saldo] = await Promise.all([
     // En pausa las consultas no se muestran, y su lectura la negaría la misma puerta.
     enPausa
       ? Promise.resolve(null)
@@ -126,10 +187,30 @@ export default async function ValidaPage({ searchParams }: Props) {
     // La suscripción (pago, usuarios, términos) vive en /suscripcion. Aquí, a la persona designada,
     // solo una línea cuando hay algo que hacer; los demás ven únicamente la pausa por mora.
     vePagos ? contextoSuscripcion() : Promise.resolve(null),
+    // El contador de la bolsa (la prueba gratis o una bolsa prepagada). null en un espacio con plan
+    // mensual o con la licencia de los CDA: Valida responde otra modalidad y no se pinta nada.
+    enPausa ? Promise.resolve(null) : leerSaldoValida(workspaceId),
   ]);
 
+  // La prueba (registro autogestionado): contador, fecha, «Activar plan» y, con tarjeta, la fecha y la
+  // hora del cobro (Condiciones 7.1) y «Cancelar prueba» (7.3), en UNA franja (`FranjaPrueba`). Cancela
+  // solo la persona dueña, nunca «Ver como».
+  const configExtra = (wsRow?.config_extra ?? null) as Record<string, unknown> | null;
+  const autogestion = esEspacioAutogestion(configExtra);
+  const cobro = autogestion ? await estadoCobroDelEspacio(svc, workspaceId) : null;
+  const prueba = autogestion
+    ? pruebaEnPantalla({
+        saldo,
+        cobro,
+        venceConfig: pruebaDeConfig(configExtra)?.vence_en ?? null,
+        puedeCancelar: realRole === 'owner' && !impersonating,
+      })
+    : null;
+
+  // Mientras dura la prueba, su franja es la única: la de la suscripción («Tu cuota vence… · Pagar») no
+  // se le suma (una confirmación rechazada deja un contrato con la cuota 1 y la prueba sigue).
   const franja =
-    suscripcion?.tipo === 'ok'
+    !prueba && suscripcion?.tipo === 'ok'
       ? franjaValida(
           suscripcion.resumen,
           suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
@@ -137,15 +218,18 @@ export default async function ValidaPage({ searchParams }: Props) {
       : null;
   // El aviso del plazo de los Términos lo ven TODOS los usuarios del espacio: quien no es la persona
   // designada ve su nombre y no el botón, y así puede pedirle que acepte antes de la suspensión.
-  // Cuota y plata son solo de la persona designada del contrato (la misma regla que `/suscripcion`,
-  // `puedeVerPagosCda`): a los demás solo les llega el aviso obligatorio de servicio pausado por mora,
-  // sin montos ni botones (`PausaPorMora`).
-  const moraVisible = vePagos && estadoMora?.estado === 'en_mora' ? estadoMora : null;
+  // También TODOS ven el aviso de mora con la fecha de la restricción (cláusula 11.2), la restricción
+  // (11.1) y la pausa (11.3), sin montos. Cuota y plata son solo de la persona designada del contrato
+  // (la misma regla que `/suscripcion`, `puedeVerPagosCda`): la franja y el enlace a Suscripción.
+  const enMora = estadoMora?.estado === 'en_mora' ? estadoMora : null;
+
   const encabezado =
-    avisoPlazo || franja || moraVisible ? (
+    avisoPlazo || avisoModificacion || franja || enMora || restringido ? (
       <div className="space-y-3">
         {avisoPlazo}
-        {moraVisible && <AvisoMora mora={moraVisible} />}
+        {avisoModificacion}
+        {enMora && <AvisoMora mora={enMora} pagar={autogestion && vePagos} />}
+        {restringido && <AvisoRestriccion mora={restringido} vePagos={vePagos} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
     ) : null;
@@ -154,11 +238,15 @@ export default async function ValidaPage({ searchParams }: Props) {
     <ValidaClient
       historialInicial={historial?.ok ? historial.consultas : []}
       errorHistorial={historial && !historial.ok ? historial.error : null}
-      tutorialNuncaVisto={!enPausa && tutorialProgress === null}
+      tutorialNuncaVisto={!enPausa && !restringido && tutorialProgress === null}
       negocioInicial={modoVitrina ? null : negocioInicial}
       modoVitrina={modoVitrina}
       encabezado={encabezado}
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
+      consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
+      saldo={saldo}
+      prueba={prueba}
+      loteInicialId={loteInicialId}
     />
   );
 }

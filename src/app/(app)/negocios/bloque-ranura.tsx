@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { BedDouble, Car, Check, Info, MoreHorizontal, Package, Plane, Plus, Ticket, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -83,7 +84,7 @@ export default function BloqueRanura({
   children: ReactNode
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const inst = resolverRanura(bloque.grupo)
   const nombreGuardado = inst?.nombre ?? ''
   const [nombre, setNombre] = useState(nombreGuardado)

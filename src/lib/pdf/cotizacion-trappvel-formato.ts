@@ -10,6 +10,7 @@
  */
 
 import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
+import { aerolineaDeSigla, siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
 
 // ── Tokens (§2) ───────────────────────────────────────────────────────────────
 
@@ -59,63 +60,12 @@ export function colorDeTarifa(titulo: string): string {
 
 // ── Aerolínea ─────────────────────────────────────────────────────────────────
 
-/** Sigla IATA de las aerolíneas que Trappvel vende. Clave: nombre sin tildes, minúscula. */
-const SIGLAS: [string, string][] = [
-  ['avianca', 'AV'],
-  ['latam', 'LA'],
-  ['satena', '9R'],
-  ['wingo', 'P5'],
-  ['easyfly', 'VE'],
-  ['clic', 'VE'],
-  ['jetsmart', 'JA'],
-  ['copa', 'CM'],
-  ['iberia', 'IB'],
-  ['air europa', 'UX'],
-  ['american', 'AA'],
-  ['delta', 'DL'],
-  ['united', 'UA'],
-  ['aeromexico', 'AM'],
-  ['volaris', 'Y4'],
-  ['viva aerobus', 'VB'],
-  ['vivaaerobus', 'VB'],
-  ['air france', 'AF'],
-  ['klm', 'KL'],
-  ['lufthansa', 'LH'],
-  ['turkish', 'TK'],
-  ['spirit', 'NK'],
-  ['arajet', 'DM'],
-  ['jetblue', 'B6'],
-  ['british airways', 'BA'],
-  ['ita airways', 'AZ'],
-  ['tap', 'TP'],
-  ['emirates', 'EK'],
-  ['qatar', 'QR'],
-]
-
 /**
- * La sigla de la pastilla. Primero la que trae el número de vuelo (`AV8520` → `AV`),
- * que es un dato leído; si no, la del nombre. Sin ninguna de las dos devuelve `null` y la
- * pastilla no se pinta: dos letras inventadas se leerían como un código real.
+ * La sigla y el color de la pastilla salen del catálogo único de aerolíneas (brief del
+ * 2026-10-08): `@/lib/cotizaciones/aerolineas`. Se reexporta la sigla porque la usan esta
+ * misma hoja (`partirLineaDeVuelo`) y las pruebas de la plantilla.
  */
-export function siglaAerolinea(aerolinea: string | null, numeroVuelo?: string | null): string | null {
-  const delNumero = /^([A-Z0-9]{2})\s?\d{1,4}\b/.exec((numeroVuelo ?? '').trim().toUpperCase())
-  if (delNumero && /[A-Z]/.test(delNumero[1])) return delNumero[1]
-  if (!aerolinea) return null
-  const n = sinTildes(aerolinea)
-  // La clave tiene que ser palabra entera: «tap» no puede atrapar «Tapachula».
-  for (const [clave, sigla] of SIGLAS) {
-    if (new RegExp(`(^|[^a-z])${clave}([^a-z]|$)`).test(n)) return sigla
-  }
-  return null
-}
-
-/** Rotación magenta → verde → púrpura por sigla, como en la referencia (§4.4). */
-export function colorDeSigla(sigla: string): string {
-  const colores = [TOKENS.magenta, TOKENS.verde, TOKENS.purpura]
-  let h = 0
-  for (const c of sigla) h = (h * 31 + c.charCodeAt(0)) % 997
-  return colores[h % colores.length]
-}
+export { siglaAerolinea } from '@/lib/cotizaciones/aerolineas'
 
 /** Un número de vuelo suelto: `8832`, `AV8520`, `9R8832`, con una letra de sufijo a lo sumo. */
 const NUMERO_DE_VUELO = /^(?:[A-Z0-9]{2})?\d{1,4}[A-Z]?$/i
@@ -400,7 +350,10 @@ export interface Capitulo {
   ciudad: string | null
   /** El hotel grande: el de la tarifa principal en esa ciudad. */
   hotel: HotelPDF | null
-  /** Los hoteles de las otras tarifas en esa ciudad: una línea cada uno. */
+  /**
+   * Los demás hoteles de esa ciudad (otras tarifas, o un segundo hotel de la principal): una
+   * línea cada uno, o su tarjeta con la miniatura si el asesor le puso foto (2026-10-08).
+   */
   alternativas: HotelPDF[]
 }
 
@@ -415,18 +368,76 @@ export function capitulosDelViaje(hoteles: HotelPDF[], principal: number | null,
   const otros = hoteles.filter(h => !esDeLaPrincipal(h, principal))
   const capitulos: Capitulo[] = []
   for (const h of deLaPrincipal) {
-    const clave = sinTildes(h.ciudad ?? '')
-    const ya = capitulos.find(c => sinTildes(c.ciudad ?? '') === clave)
+    const clave = claveDeCiudad(h.ciudad)
+    const ya = capitulos.find(c => claveDeCiudad(c.ciudad) === clave)
     if (ya) ya.alternativas.push(h)
-    else capitulos.push({ ciudad: h.ciudad, hotel: h, alternativas: [] })
+    else capitulos.push({ ciudad: ciudadDeCapitulo(h.ciudad), hotel: h, alternativas: [] })
   }
   if (capitulos.length === 0) capitulos.push({ ciudad: destino, hotel: null, alternativas: [] })
+  // Hallazgo del PDF de la prueba Europa (2026-10-14): el Waldorf Astoria Amsterdam salía como
+  // opción Premium de MADRID, porque un hotel cuya ciudad no se igualaba caía al PRIMER capítulo.
+  // La ciudad sale del dato del hotel: su ciudad (también escrita dentro de un texto más largo),
+  // y si no la dice, sus fechas. Solo sin ninguno de los dos queda en el primero, como antes.
   for (const h of otros) {
-    const clave = sinTildes(h.ciudad ?? '')
-    const destinoCap = capitulos.find(c => sinTildes(c.ciudad ?? '') === clave) ?? capitulos[0]
+    const destinoCap = capituloDeCiudad(capitulos, h.ciudad)
+      ?? capitulos.find(c => mismaEstadia(c.hotel, h))
+      ?? (ciudadDeCapitulo(h.ciudad) ? nuevoCapitulo(capitulos, h.ciudad) : capitulos[0])
     destinoCap.alternativas.push(h)
   }
   return capitulos
+}
+
+/** El capítulo de esa ciudad: la misma llave, o su nombre como palabras dentro del texto leído. */
+function capituloDeCiudad(capitulos: Capitulo[], ciudad: string | null | undefined): Capitulo | undefined {
+  const clave = claveDeCiudad(ciudad)
+  if (!clave) return undefined
+  const exacto = capitulos.find(c => c.ciudad && claveDeCiudad(c.ciudad) === clave)
+  if (exacto) return exacto
+  const largo = ` ${comparable(ciudad ?? '')} `
+  return capitulos.find(c => {
+    const suya = c.ciudad ? comparable(claveDeCiudad(c.ciudad)) : ''
+    return suya.length >= 3 && largo.includes(` ${suya} `)
+  })
+}
+
+/** Un capítulo nuevo, al final, para un hotel de una ciudad que la principal no tiene. */
+function nuevoCapitulo(capitulos: Capitulo[], ciudad: string | null | undefined): Capitulo {
+  const c: Capitulo = { ciudad: ciudadDeCapitulo(ciudad), hotel: null, alternativas: [] }
+  capitulos.push(c)
+  return c
+}
+
+/** ¿Entran el mismo día al mismo lugar? Mismo check-in (mes y día; el año si los dos lo dicen). */
+function mismaEstadia(a: HotelPDF | null, b: HotelPDF): boolean {
+  if (!a) return false
+  const x = leerFecha(a.checkIn)
+  const y = leerFecha(b.checkIn)
+  if (!x || !y) return false
+  if (x.anio !== null && y.anio !== null && x.anio !== y.anio) return false
+  return x.mes === y.mes && x.dia === y.dia
+}
+
+/**
+ * La ciudad de un hotel tal como nombra su capítulo: lo que va antes de la primera coma.
+ *
+ * Brief del 2026-10-05, punto 9: el hotel a mano decía «Providencia» y el de pantallazo
+ * «Providencia, San Andrés y Providencia, Colombia» (Bedsonline escribe la ciudad, el
+ * departamento y el país). Comparando el texto entero eran dos ciudades, y el PDF abría
+ * «Destino 2 de 2» para la misma isla.
+ *
+ * Tampoco la zona: la lectura escribe «Madrid - Sol» o «Ámsterdam · Herengracht» (el barrio del
+ * hotel), y la propuesta real de la prueba Europa (2026-10-14) decía «Llegada a Madrid - Sol».
+ * Solo con el separador entre espacios: «Saint-Tropez» o «Madrid-Barajas» siguen enteros.
+ */
+export function ciudadDeCapitulo(ciudad: string | null | undefined): string | null {
+  const t = (ciudad ?? '').split(',')[0].split(/\s+[-–—·|/]\s+/)[0].trim()
+  return t === '' ? null : t
+}
+
+/** La llave con que se juntan los hoteles de una misma ciudad: sin tildes, sin código ni país. */
+export function claveDeCiudad(ciudad: string | null | undefined): string {
+  const corta = ciudadDeCapitulo(ciudad) ?? ''
+  return sinTildes(lugarConCodigo(corta)?.nombre ?? corta).replace(/\s+/g, ' ').trim()
 }
 
 /** ¿Esta fecha cae dentro de la estadía del hotel del capítulo? El día de salida no. */
@@ -607,8 +618,11 @@ export type ListaDelCierre = 'incluye' | 'noIncluye' | 'antes'
  */
 export type FilaDeListas = ListaDelCierre[][]
 
-/** Lo que mide un título de sección con su aire (`Titulo`: 24 arriba, 26 de alto, 10 abajo). */
-const ALTO_TITULO = 60
+/**
+ * Lo que mide un título de sección con su aire en espaciado normal (§4.11: 32 arriba entre
+ * secciones, 26 de alto, 16 abajo hasta el contenido).
+ */
+const ALTO_TITULO = 74
 /** Un renglón de 9 pt con su interlineado. */
 const ALTO_RENGLON = 11.5
 /** El aire entre dos ítems de una lista. */
@@ -618,7 +632,7 @@ const ANCHO_CARACTER = 4.5
 /** Lo que se come el marcador del ítem (chulo, equis o viñeta) y la franja ámbar. */
 const SANGRIA_ITEM = 16
 /** El aire entre las dos columnas. */
-export const CANAL_COLUMNAS = 20
+export const CANAL_COLUMNAS = 24
 
 /**
  * Hasta cuánto puede medir una columna para ir lado a lado con otra.
@@ -738,15 +752,15 @@ export interface GrupoDeVuelosAMedir {
 }
 
 // Medidas del JSX de `TablaVuelos`, a 1,1 veces el tamaño de la letra por renglón: un
-// vuelo de un tramo con escala y línea gris mide 43 pt; uno de ida y regreso, 67. La fila
+// vuelo de un tramo con escala y línea gris mide 38 pt; uno de ida y regreso, 60. La fila
 // nunca mide menos que la píldora de la sigla (14 pt), que va en la columna de aerolínea.
-const RELLENO_GRUPO = 12
+const RELLENO_GRUPO = 8
 const ALTO_SIGLA = 14
 const RENGLON_RUTA = 9.4
 const RENGLON_CHICO = 8.3
-const AIRE_ESCALA = 1
+const AIRE_ESCALA = 0
 const ALTO_MARCA_TARIFA = 13
-const AIRE_ENTRE_FILAS = 5
+const AIRE_ENTRE_FILAS = 4
 const AIRE_META = 4
 const CARACTER_META = 3.75
 
@@ -778,6 +792,183 @@ export function altoEstimadoDeGrupoDeVuelos(g: GrupoDeVuelosAMedir, anchoMeta: n
 export function tablaDeVuelosVaEntera(altosDeGrupos: number[]): boolean {
   const alto = ALTO_TITULO + ALTO_ENCABEZADO_VUELOS + altosDeGrupos.reduce((a, h) => a + h, 0)
   return alto <= ALTO_MAXIMO_COLUMNA
+}
+
+// ── Espacio y paginación (§4.11, Ren, 2026-10-08) ─────────────────────────────
+
+/**
+ * Los ÚNICOS espacios permitidos en el documento (§4.11, punto 2). Ningún margen suelto
+ * fuera de esta escala: si hace falta otro, se escoge el vecino de la escala.
+ *
+ * ⚠️ Lo que NO es espacio entre elementos sino geometría de una pieza dibujada (el relleno
+ * de una pastilla, la veladura del rótulo, el alto del encabezado de una tabla, el ajuste
+ * óptico que alinea un ícono con su renglón) no entra en la escala: es el dibujo de esa
+ * pieza, como su radio o su tamaño.
+ */
+export const ESCALA_DE_ESPACIOS = [4, 8, 12, 16, 24, 32, 48] as const
+export type EspacioDeEscala = (typeof ESCALA_DE_ESPACIOS)[number]
+
+/** Los espacios del documento por su función (la tabla del punto 2). */
+export interface Espaciado {
+  /** Entre renglones de una misma tarjeta. Igual en compacto. */
+  fino: EspacioDeEscala
+  /** El relleno de una tarjeta. Igual en compacto. */
+  dentro: EspacioDeEscala
+  /** Entre tarjetas o filas de un mismo bloque. */
+  tarjetas: EspacioDeEscala
+  /** Del título de una sección a su contenido, y entre bloques de una misma sección. */
+  bloque: EspacioDeEscala
+  /** Entre secciones (Vuelos, Inversión, Incluido…). */
+  seccion: EspacioDeEscala
+  /** Entre capítulos de destino. */
+  capitulo: EspacioDeEscala
+}
+
+export const ESPACIADO_NORMAL: Espaciado = { fino: 4, dentro: 8, tarjetas: 12, bloque: 16, seccion: 32, capitulo: 48 }
+
+/** El paso 1 de «la última hoja trabaja»: la columna derecha de la tabla del punto 2. */
+export const ESPACIADO_COMPACTO: Espaciado = { fino: 4, dentro: 8, tarjetas: 8, bloque: 12, seccion: 24, capitulo: 32 }
+
+/**
+ * La hoja (§4.11, punto 1): A4 vertical, 40 pt de margen lateral, la barra de 4 pt y el logo
+ * arriba (el contenido empieza en 58), el pie de 26 pt abajo y una franja de 16 pt sobre el
+ * pie que el contenido nunca invade.
+ */
+export const HOJA = {
+  ancho: 595.28,
+  alto: 841.89,
+  margen: 40,
+  arriba: 58,
+  altoPie: 26,
+  franjaSobrePie: 16,
+} as const
+
+/** Lo que el contenido puede ocupar de una hoja, de arriba abajo. */
+export const ALTO_UTIL = HOJA.alto - HOJA.arriba - HOJA.altoPie - HOJA.franjaSobrePie
+
+/** Por debajo de esto la última hoja «no trabaja» y el documento se recompone (punto 6). */
+export const UMBRAL_ULTIMA_HOJA = 0.35
+
+/** Un salto que deja en blanco más que esto al pie de una hoja se intenta cerrar (punto 8). */
+export const UMBRAL_HUECO_AL_PIE = 0.25
+
+/** El costo acotado de recomponer: nunca más de cuatro renders por documento. */
+export const MAXIMO_DE_RENDERS = 4
+
+/**
+ * Los pasos del punto 6, en orden. Cada nivel incluye los anteriores:
+ * 0 · normal; 1 · espaciado compacto; 2 · + fotos de las alternativas a 1/4 del ancho;
+ * 3 · + foto de ciudad del capítulo a 110 pt de alto.
+ */
+export type NivelDeCompactacion = 0 | 1 | 2 | 3
+
+/**
+ * Cómo se compone el documento. `compactas` es el punto 8: secciones sueltas que van en
+ * espaciado compacto aunque el nivel sea 0.
+ */
+export interface Composicion {
+  nivel: NivelDeCompactacion
+  compactas?: string[]
+}
+
+export const COMPOSICION_NORMAL: Composicion = { nivel: 0 }
+
+/** El espaciado de una sección según la composición. */
+export function espaciadoDe(composicion: Composicion | undefined, seccion: string): Espaciado {
+  if (!composicion) return ESPACIADO_NORMAL
+  return composicion.nivel >= 1 || (composicion.compactas ?? []).includes(seccion) ? ESPACIADO_COMPACTO : ESPACIADO_NORMAL
+}
+
+/**
+ * Las secciones del documento, en su orden, con el número de su marca (el que la plantilla
+ * pinta en el azul de un punto invisible al inicio de cada una, ver `medir-pdf.ts`). El
+ * orden de los números ES el orden del documento.
+ */
+const NUMERO_DE_SECCION: Record<string, number> = {
+  portada: 1,
+  dias: 120,
+  vuelos: 130,
+  inversion: 140,
+  porPasajero: 150,
+  listas: 160,
+  opcionales: 170,
+  cargos: 180,
+  notas: 190,
+  terminos: 200,
+  cierre: 210,
+}
+
+/** El número de la marca de una sección. Los capítulos van del 10 en adelante. */
+export function numeroDeSeccion(seccion: string): number {
+  const cap = /^capitulo-(\d+)$/.exec(seccion)
+  if (cap) return 10 + Math.min(Number(cap[1]), 100)
+  return NUMERO_DE_SECCION[seccion] ?? 0
+}
+
+export function seccionDeNumero(n: number): string | null {
+  if (n >= 10 && n <= 110) return `capitulo-${n - 10}`
+  return Object.entries(NUMERO_DE_SECCION).find(([, v]) => v === n)?.[0] ?? null
+}
+
+/** Lo que el paso de composición necesita saber de un PDF ya renderizado. */
+export interface MedidaDeHojas {
+  /** Borde inferior del contenido de cada hoja, en pt desde arriba (`null` si está vacía). */
+  fondos: (number | null)[]
+  /** En qué hoja (desde 1) empieza cada sección que tiene marca. */
+  inicios: Map<string, number>
+}
+
+/** Qué fracción del alto útil ocupa el contenido de una hoja. */
+export function ocupacionDeHoja(fondo: number | null): number {
+  if (fondo === null) return 0
+  return Math.max(0, Math.min(1, (fondo - HOJA.arriba) / ALTO_UTIL))
+}
+
+/**
+ * ¿La última hoja trabaja? Con una sola hoja no hay hoja que desaparecer: trabaja siempre.
+ */
+export function ultimaHojaTrabaja(m: MedidaDeHojas): boolean {
+  if (m.fondos.length <= 1) return true
+  return ocupacionDeHoja(m.fondos[m.fondos.length - 1]) >= UMBRAL_ULTIMA_HOJA
+}
+
+/**
+ * ¿La recomposición con el nivel siguiente ya cumplió? Para en cuanto la última hoja
+ * desaparezca o pase del umbral (punto 6).
+ */
+export function recomposicionCumple(antes: MedidaDeHojas, despues: MedidaDeHojas): boolean {
+  return despues.fondos.length < antes.fondos.length || ultimaHojaTrabaja(despues)
+}
+
+/**
+ * Las hojas (desde 1, sin la última) que terminan con un blanco al pie mayor que el umbral
+ * del punto 8: ahí una unidad no cupo y pasó a la siguiente.
+ */
+export function hojasConHueco(m: MedidaDeHojas): number[] {
+  const fondoUtil = HOJA.arriba + ALTO_UTIL
+  const out: number[] = []
+  m.fondos.forEach((f, i) => {
+    if (i === m.fondos.length - 1 || f === null) return
+    if ((fondoUtil - f) / ALTO_UTIL > UMBRAL_HUECO_AL_PIE) out.push(i + 1)
+  })
+  return out
+}
+
+/**
+ * Qué secciones se componen en compacto para intentar cerrar el hueco al pie de la hoja `p`
+ * (punto 8): las que tienen contenido en esa hoja —la unidad anterior al salto es de alguna
+ * de ellas— y la que empieza en la siguiente, que es la de la unidad que saltó.
+ */
+export function seccionesParaCerrarHueco(m: MedidaDeHojas, p: number): string[] {
+  const orden = [...m.inicios.entries()].sort((a, b) => numeroDeSeccion(a[0]) - numeroDeSeccion(b[0]))
+  const out: string[] = []
+  orden.forEach(([seccion, inicio], i) => {
+    const siguiente = orden[i + 1]?.[1] ?? Number.POSITIVE_INFINITY
+    // Toca la hoja p si empieza en ella o antes y sigue hasta ella; o si empieza en p + 1.
+    const tocaP = inicio <= p && siguiente >= p
+    if (tocaP || inicio === p + 1) out.push(seccion)
+  })
+  return out
 }
 
 // ── Utilidades ────────────────────────────────────────────────────────────────
@@ -838,3 +1029,92 @@ export function yaLoDiceLaPortada(
 export function tieneRegreso(v: VueloPDF): boolean {
   return v.fechaRegreso !== null || v.horaSalidaRegreso !== null || v.horaLlegadaRegreso !== null
 }
+
+// ── Las filas de la tabla «Vuelos» ────────────────────────────────────────────
+//
+// Viven aquí (y no en la plantilla) desde el brief del 2026-10-05, punto 18: «Así lo ve el
+// cliente» del vuelo pinta las mismas filas que la tabla del documento.
+
+export interface FilaVuelo {
+  vuelo: VueloPDF
+  desde: string | null
+  hasta: string | null
+  escala: string | null
+  fecha: string | null
+  salida: string | null
+  llegada: string | null
+  numero: string | null
+}
+
+/**
+ * Los números de vuelo que no se sabe a qué tramo pertenecen. Van bajo el vuelo entero, en
+ * la línea gris: pegados a la ida afirmarían que el regreso no tiene vuelo.
+ */
+export function numerosSinTramo(v: VueloPDF): string | null {
+  const { sinAsignar } = numerosDelVuelo(v)
+  if (!sinAsignar) return null
+  return `${sinAsignar.includes('·') ? 'Vuelos' : 'Vuelo'} ${sinAsignar}`
+}
+
+/**
+ * Los números de cada fila: los de los tramos del vuelo (B3) cuando vienen repartidos, y si
+ * no, el reparto del número leído. ⚠️ Un número de regreso sin fila de regreso (la captura
+ * leyó una hora que no se entiende) se perdería: ahí manda el reparto de siempre.
+ */
+export function numerosDelVuelo(v: VueloPDF): { ida: string | null; regreso: string | null; sinAsignar: string | null } {
+  const regreso = tieneRegreso(v)
+  if (v.numeros && (regreso || !v.numeros.regreso)) return v.numeros
+  return numerosDeVuelo(v.numeroVuelo, regreso)
+}
+
+/**
+ * UNA PASTILLA POR VUELO (regla del 2026-10-12, pedido de Mauricio; N9 de Vera). La aerolínea va
+ * una vez, en la primera fila del vuelo; los trayectos que siguen van sin pastilla ni nombre, para
+ * que la columna se lea como una sola celda alta. Solo un trayecto de OTRA aerolínea (código
+ * compartido, regreso con otra) lleva la suya: se reconoce por el prefijo de su número de vuelo.
+ *
+ * `null` = esa fila no lleva aerolínea. Vale igual en el PDF y en la hoja del cliente.
+ */
+export function aerolineaDeFila(filas: readonly FilaVuelo[], i: number): { sigla: string | null; nombre: string } | null {
+  const f = filas[i]
+  if (!f) return null
+  const v = f.vuelo
+  const delVuelo = siglaAerolinea(v.aerolinea, v.numeroVuelo)
+  if (i === 0) return { sigla: delVuelo, nombre: v.aerolinea ?? v.linea }
+  const deLaFila = /^([A-Z][A-Z0-9]|[0-9][A-Z])\s?\d{1,4}\b/.exec((f.numero ?? '').trim().toUpperCase())?.[1] ?? null
+  if (!deLaFila || deLaFila === delVuelo) return null
+  return { sigla: deLaFila, nombre: aerolineaDeSigla(deLaFila)?.nombre ?? deLaFila }
+}
+
+export function filasDelVuelo(v: VueloPDF): FilaVuelo[] {
+  const regreso = tieneRegreso(v)
+  const numeros = numerosDelVuelo(v)
+  // `escalas === 0` es la ÚNICA forma de afirmar «directo»: un `escalaIda` vacío puede ser
+  // un vuelo directo o una pantalla que no mostró el recorrido, y son cosas distintas.
+  const escala = (e: string | null) => (e ? `Escala en ${lugarLegible(e)}` : v.escalas === 0 ? 'Vuelo directo' : null)
+  const filas: FilaVuelo[] = [{
+    vuelo: v,
+    desde: lugarLegible(v.origen),
+    hasta: lugarLegible(v.destino),
+    escala: escala(v.escalaIda),
+    fecha: v.fechaSalida,
+    salida: v.horaSalida,
+    llegada: v.horaLlegada,
+    numero: numeros.ida,
+  }]
+  // El regreso existe cuando la captura leyó ALGO suyo, y su ruta es la de la ida al revés.
+  if (regreso) {
+    filas.push({
+      vuelo: v,
+      desde: lugarLegible(v.destino),
+      hasta: lugarLegible(v.origen),
+      escala: escala(v.escalaRegreso),
+      fecha: v.fechaRegreso,
+      salida: v.horaSalidaRegreso,
+      llegada: v.horaLlegadaRegreso,
+      numero: numeros.regreso,
+    })
+  }
+  return filas
+}
+

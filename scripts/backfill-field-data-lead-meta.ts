@@ -66,7 +66,7 @@ const esFieldData = (v: unknown): v is FieldDatum[] => Array.isArray(v) && v.len
 async function main() {
   const { data: ws, error: wsErr } = await supabase
     .from('workspaces')
-    .select('id, nombre')
+    .select('id, name')
     .eq('slug', SLUG)
     .maybeSingle()
   if (wsErr || !ws) {

@@ -90,9 +90,59 @@ describe('la bandeja habla por rutas, no por server actions', () => {
     await Promise.all(leyendo)
   })
 
-  it('sin respuesta del servidor, «Aceptar» devuelve null (la bandeja lo muestra como error)', async () => {
-    const roto = (async () => { throw new Error('red') }) as unknown as typeof fetch
-    expect(await aceptarPorRuta(COT, borrador(SEIS[0]), roto)).toBeNull()
+  it('sin respuesta del servidor, «Aceptar» reintenta y devuelve ok:false con su código y qué hacer (caso Alejandra)', async () => {
+    let llamadas = 0
+    const roto = (async () => { llamadas++; throw new TypeError('Failed to fetch') }) as unknown as typeof fetch
+    const r = await aceptarPorRuta(COT, borrador(SEIS[0]), roto, { dormir: async () => {}, reportar: () => {} })
+    expect(llamadas).toBe(3)
+    expect(r).toEqual({ ok: false, codigo: 'RED', mensaje: expect.stringMatching(/^No llegó a ONE: la conexión se cortó/) })
+  })
+
+  it('qué se reintenta: sin respuesta o sin JSON sí; un ok:false del servidor no; un 413 no', async () => {
+    const sinEspera = { dormir: async () => {}, reportar: () => {} }
+    const secuencia = (respuestas: (Response | 'red')[]) => {
+      const llamadas: string[] = []
+      const f = (async (url: string) => {
+        llamadas.push(url)
+        const r = respuestas.shift()
+        if (!r || r === 'red') throw new TypeError('Failed to fetch')
+        return r
+      }) as unknown as typeof fetch
+      return { f, llamadas }
+    }
+    const json = (x: unknown, status = 200) => new Response(JSON.stringify(x), { status, headers: { 'content-type': 'application/json' } })
+    const html = (status: number) => new Response('<html>An error occurred</html>', { status })
+
+    // La página de error del borde (504) y luego la respuesta: entra al segundo intento.
+    const a = secuencia([html(504), json({ ok: true, lectura: {}, lecturaJson: '{}', firma: 'f', alertas: [] })])
+    expect(await leerPorRuta(COT, 'hotel', 'data:x', null, a.f, sinEspera)).toMatchObject({ ok: true })
+    expect(a.llamadas).toHaveLength(2)
+
+    // Un ok:false es la decisión del servidor: no se repite.
+    const b = secuencia([json({ ok: false, codigo: 'RX6', mensaje: 'No se pudo leer' })])
+    expect(await leerPorRuta(COT, 'hotel', 'data:x', null, b.f, sinEspera)).toMatchObject({ ok: false, codigo: 'RX6' })
+    expect(b.llamadas).toHaveLength(1)
+
+    // 413: el borde no la deja entrar por tamaño. Reintentar no cambia nada: se dice por qué.
+    const c = secuencia([html(413)])
+    await expect(leerPorRuta(COT, 'hotel', 'data:x', null, c.f, sinEspera)).rejects.toMatchObject({ name: 'ErrorDeEnvio', codigo: 'PESADA' })
+    expect(c.llamadas).toHaveLength(1)
+
+    // Sin red las tres veces: lanza con su código, y la detección también.
+    const d = secuencia(['red', 'red', 'red'])
+    await expect(detectarPorRuta(COT, 'data:x', d.f, sinEspera)).rejects.toMatchObject({ codigo: 'RED', intentos: 3 })
+    expect(d.llamadas).toHaveLength(3)
+  })
+
+  it('un cuerpo de más de 4,4 MB no sale: el borde lo devolvería 413 sin decir nada', async () => {
+    const reportes: unknown[] = []
+    let llamadas = 0
+    const f = (async () => { llamadas++; return new Response('{}') }) as unknown as typeof fetch
+    const enorme = `data:image/png;base64,${'A'.repeat(4_500_000)}`
+    await expect(leerPorRuta(COT, 'hotel', enorme, null, f, { dormir: async () => {}, reportar: r => void reportes.push(r) }))
+      .rejects.toMatchObject({ codigo: 'PESADA' })
+    expect(llamadas).toBe(0)
+    expect(reportes).toEqual([expect.objectContaining({ ruta: 'leer-captura', codigo: 'PESADA', cotizacionId: COT, bytesImagen: 3_375_000 })])
   })
 
   it('la bandeja no importa las lecturas como server action: esas bloquean el refresco de Componentes', () => {

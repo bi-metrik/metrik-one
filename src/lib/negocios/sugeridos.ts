@@ -13,12 +13,33 @@
 
 export const CLAVE_SUGERIDOS = '_sugeridos'
 
+/**
+ * `entrega_id` de lo que entró al pegar una conversación en el viaje (`pegar-conversacion.ts`): `chat:<huella>`. El
+ * texto del chat no se guarda; la huella permite reconocerlo si alguien lo vuelve a presentar.
+ */
+export const PREFIJO_ENTREGA_CHAT = 'chat:'
+
 export interface MarcaSugerido {
   fuente: 'whatsapp'
   entrega_id?: string
   /** Las palabras del mensaje que sostienen el valor. */
   frase?: string
   en?: string
+  /** Sin frase: el valor salió de una deducción («Edades 9, 4: ninguno de los 2 niños es menor de 2 años»). */
+  deduccion?: string
+  /** Lo que había antes, si este sugerido reemplazó a otro que nadie confirmó. */
+  anterior?: string | number | null
+}
+
+/** El texto que se ve al pasar el cursor sobre «Sugerido»: la frase o la deducción, y lo que había antes. */
+export function textoSugerido(marca: MarcaSugerido | undefined): string {
+  const partes = [marca?.entrega_id?.startsWith(PREFIJO_ENTREGA_CHAT) ? 'Sugerido de la conversación pegada' : 'Sugerido desde WhatsApp']
+  if (marca?.frase) partes[0] += `: «${marca.frase}»`
+  else if (marca?.deduccion) partes[0] += ` (deducido): ${marca.deduccion}`
+  if (marca?.anterior !== undefined && marca.anterior !== null && marca.anterior !== '') {
+    partes.push(`Antes decía ${marca.anterior}; nadie lo había confirmado.`)
+  }
+  return partes.join('. ')
 }
 
 export function sugeridosDe(data: Record<string, unknown> | null | undefined): Record<string, MarcaSugerido> {

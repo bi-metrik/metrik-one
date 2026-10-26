@@ -1,0 +1,352 @@
+// ============================================================
+// Núcleo conversacional — los puertos en memoria (pruebas y arnés de medición)
+// ------------------------------------------------------------
+// Una base de juguete con la misma forma que la de verdad: la conversación (`wa_conversacion`, incluida la regla de la
+// RPC de salientes), los candados (`tomar_candado`), el directorio, los viajes y lo que se escribió. Su estado final
+// es la verdad contra la que el arnés califica (§3.8: «el estado final de la base»). Sin datos reales.
+// ============================================================
+
+import type { FichaCliente, Llave } from '../wa-cliente-reglas.ts';
+import { calcularNiveles } from '../niveles-solicitud.ts';
+import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
+import { cargarEnExistente } from '../wa-carga-reglas.ts';
+import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe, traeArchivo } from './bandeja/carga.ts';
+import { instruccionesCarga } from './bandeja/extraccion.ts';
+import type { AdjuntoCarga, PlanCarga } from './bandeja/carga.ts';
+import type { PuertoAdjuntos } from './adjuntos.ts';
+import type { ArchivoAdjunto } from './one/lectura-adjunto.ts';
+import type { HechoConOrigen, MiembroEquipo, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
+import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
+import { planGuardado } from '../perfil-contacto.ts';
+import type { DimensionPerfil, EstadoPerfil, HechoExistente, OrigenPerfil } from '../perfil-contacto.ts';
+import type { Almacen, FilaConversacion, MediaFila, Mensajero, Salida, Traza } from './tipos.ts';
+
+export interface ContactoMem { id: string; nombre: string; celular?: string | null; correo?: string | null; usuario?: string | null }
+export interface ViajeMem { id: string; codigo: string; contactoId: string; nombre: string; destino: string | null; abierto: boolean; datos: Record<string, unknown> }
+/** Un hecho del perfil (`contacto_perfil_hechos`), en memoria. */
+export interface HechoMem { id: string; contactoId: string; dimension: DimensionPerfil; texto: string; estado: EstadoPerfil; origenTipo: OrigenPerfil; origenRef: string }
+
+/**
+ * El equipo comercial por defecto de las pruebas (inventado): quien escribe y otra persona. Un viaje nuevo exige que el
+ * modelo nombre a una de las dos (`responsable`).
+ */
+export const EQUIPO_PRUEBA: MiembroEquipo[] = [
+  { id: 'staff-carla', nombre: 'Carla Comercial', esQuienEscribe: true },
+  { id: 'staff-beto', nombre: 'Beto Ventas', esQuienEscribe: false },
+];
+
+export class Reloj {
+  constructor(public ms = Date.parse('2026-10-06T18:45:00Z')) {}
+  ahora = () => this.ms;
+  avanzar(ms: number) { this.ms += ms; }
+}
+
+let secuencia = 0;
+export const nuevoId = () => `00000000-0000-4000-8000-${String(++secuencia).padStart(12, '0')}`;
+
+export class AlmacenMemoria implements Almacen {
+  filas: FilaConversacion[] = [];
+  candados = new Map<string, number>();
+  constructor(public reloj: Reloj) {}
+
+  entrante(p: { workspaceId: string; phone: string; clase: FilaConversacion['clase']; texto: string | null; toqueId?: string; wamid?: string; media?: FilaConversacion['media'] }): FilaConversacion {
+    const f: FilaConversacion = {
+      id: nuevoId(), workspace_id: p.workspaceId, phone: p.phone, direccion: 'entrante', clase: p.clase, texto: p.texto,
+      toque_id: p.toqueId ?? null, wa_message_id: p.wamid ?? `wamid.in.${secuencia}`, turno_id: null, traza: null,
+      ...(p.media ? { media: p.media } : {}),
+      created_at: new Date(this.reloj.ahora()).toISOString(),
+    };
+    this.filas.push(f);
+    return f;
+  }
+
+  /** La regla de `wa_conversacion_registrar_saliente`: solo con un entrante en las últimas 24 h. */
+  saliente(phone: string, wamid: string, s: Salida): void {
+    const desde = this.reloj.ahora() - 24 * 3600 * 1000;
+    const ent = [...this.filas].reverse().find((f) => f.phone === phone && f.direccion === 'entrante' && Date.parse(f.created_at) > desde);
+    if (!ent) return;
+    this.filas.push({
+      id: nuevoId(), workspace_id: ent.workspace_id, phone, direccion: 'saliente', clase: 'bot',
+      formato: s.tipo, texto: s.texto, opciones: 'opciones' in s ? s.opciones : null, wa_message_id: wamid, turno_id: null, traza: null,
+      created_at: new Date(this.reloj.ahora()).toISOString(),
+    });
+  }
+
+  async leer(workspaceId: string, phone: string, desdeIso: string): Promise<FilaConversacion[]> {
+    return structuredClone(this.filas.filter((f) => f.workspace_id === workspaceId && f.phone === phone && f.created_at >= desdeIso));
+  }
+
+  async cerrarTurno(p: { turnoId: string; filas: string[]; filaTraza: string; traza: Traza; salientes: string[] }): Promise<void> {
+    for (const f of this.filas) {
+      if (p.filas.includes(f.id) || (f.wa_message_id && p.salientes.includes(f.wa_message_id))) f.turno_id = p.turnoId;
+      if (f.id === p.filaTraza) f.traza = structuredClone(p.traza);
+    }
+  }
+
+  async tomarCandado(clave: string, segundos: number): Promise<boolean> {
+    const vence = this.candados.get(clave);
+    if (vence !== undefined && vence > this.reloj.ahora()) return false;
+    this.candados.set(clave, this.reloj.ahora() + segundos * 1000);
+    return true;
+  }
+
+  async soltarCandado(clave: string): Promise<void> {
+    this.candados.delete(clave);
+  }
+
+  trazas(): Traza[] {
+    return this.filas.map((f) => f.traza).filter((t): t is Traza => !!t);
+  }
+}
+
+export class MensajeroMemoria implements Mensajero {
+  enviados: Array<{ phone: string; salida: Salida; intent: string; wamid: string; at: number }> = [];
+  escribiendos: string[] = [];
+  /** Reemplazable: simula un rechazo de Meta. */
+  rechazar = false;
+  constructor(public almacen: AlmacenMemoria) {}
+  async escribiendo(waMessageId: string): Promise<void> { this.escribiendos.push(waMessageId); }
+  async enviar(phone: string, salida: Salida, ctx: { workspaceId: string; intent: string }): Promise<string | null> {
+    if (this.rechazar) return null;
+    const wamid = `wamid.out.${this.enviados.length + 1}`;
+    this.enviados.push({ phone, salida, intent: ctx.intent, wamid, at: performance.now() });
+    this.almacen.saliente(phone, wamid, salida);
+    return wamid;
+  }
+}
+
+function normal(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9@. ]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Lo que la extracción le pide al modelo y lo que él devuelve (la salida cruda, como la de Gemini). En las pruebas es un
+ * guion: así se prueba lo que el código hace con la salida, sin llamar a ningún modelo.
+ */
+/**
+ * `perfil`: las instrucciones se armaron con el párrafo del perfil, así que el esquema tiene que traer `perfil` (como en
+ * producción, `prepararCarga` de `produccion.ts`). Sin él, el esquema de respuesta no deja al modelo devolver lo de la
+ * persona aunque el prompt se lo pida (cp-mixto, 2026-10-14).
+ */
+export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string; perfil?: boolean }) => Promise<unknown>;
+
+/**
+ * El directorio, los viajes y lo escrito. Sin `campos`, la extracción es determinista (sin modelo): guarda los textos
+ * tal cual. Con `campos` y `extraer`, corre la MISMA cadena que producción (`instruccionesCarga` para el guion,
+ * `planDeCarga`: invariantes y unión con la pendiente) sobre la salida guionada, y escribe con `cargarEnExistente`.
+ */
+export class PuertoMemoria implements PuertoBandeja {
+  contactos: ContactoMem[] = [];
+  viajes: ViajeMem[] = [];
+  /** Lo que se escribió, en orden: la verdad del arnés. */
+  escrituras: Array<Record<string, unknown>> = [];
+  fallarBusqueda = false;
+  campos: CampoEntendible[] | null;
+  extraer: ExtractorMemoria | null;
+  /** Lo que recibió la extracción en cada llamado (para las pruebas). */
+  extracciones: string[][] = [];
+  private consecutivo = new Map<string, number>();
+  /** El equipo comercial (`equipoComercial`). Reemplazable; `'error'` simula la lectura caída. */
+  equipo: MiembroEquipo[] | 'error';
+  /**
+   * Los adjuntos (foto o PDF, 2026-10-21), solo si el escenario los pide (`conAdjuntos`): los archivos que «están en
+   * Meta» por media id, lo subido al llegar, lo anotado en cada fila y los soportes que quedaron en la actividad.
+   */
+  archivos = new Map<string, ArchivoAdjunto>();
+  mediaRota = new Set<string>();
+  subidos = new Map<string, string>();
+  anotados = new Map<string, MediaFila>();
+  soportes: Array<{ viajeId: string; ref: string; tipo: string; nombre: string | null }> = [];
+  /** Para simular que la actividad no deja escribir el soporte. */
+  fallarSoporte = false;
+  /** Lo que hace `anotarMedia` con la conversación (el escenario lo conecta a su almacén, como la base en producción). */
+  alAnotar: ((filaId: string, media: MediaFila) => void) | null = null;
+  adjuntos?: PuertoAdjuntos;
+  soportesEnViaje?: (viajeId: string, adjuntos: AdjuntoCarga[]) => Promise<void>;
+
+  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[]; campos?: CampoEntendible[]; extraer?: ExtractorMemoria; ahora?: () => number; equipo?: MiembroEquipo[]; conAdjuntos?: boolean } = {}) {
+    if (p.conAdjuntos) {
+      this.adjuntos = {
+        bajarAdjunto: async (mediaId) => (this.mediaRota.has(mediaId) ? null : this.archivos.get(mediaId) ?? { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), mime: 'image/jpeg', nombre: null }),
+        guardarAdjunto: async (filaId, archivo) => {
+          const ref = `one://gastos-soportes/ws/whatsapp/${filaId}.${archivo.mime === 'application/pdf' ? 'pdf' : 'jpg'}`;
+          this.subidos.set(ref, filaId);
+          return ref;
+        },
+        anotarMedia: async (filaId, media) => {
+          this.anotados.set(filaId, media);
+          this.alAnotar?.(filaId, media);
+        },
+      };
+      this.soportesEnViaje = async (viajeId, adjuntos) => {
+        if (this.fallarSoporte) throw new Error('la actividad no deja escribir');
+        if (!this.viajes.some((v) => v.id === viajeId)) throw new Error('viaje inexistente');
+        for (const a of adjuntos) this.soportes.push({ viajeId, ref: a.ref, tipo: a.tipo, nombre: a.nombre });
+        this.escrituras.push({ tipo: 'soporte', viajeId, refs: adjuntos.map((a) => a.ref) });
+      };
+    }
+    this.equipo = structuredClone(p.equipo ?? EQUIPO_PRUEBA);
+    this.contactos = structuredClone(p.contactos ?? []);
+    this.viajes = structuredClone(p.viajes ?? []);
+    this.campos = p.campos ?? null;
+    this.extraer = p.extraer ?? null;
+    if (p.ahora) this.ahora = p.ahora;
+  }
+  private ahora: () => number = () => Date.parse('2026-10-06T18:45:00Z');
+  private hoyISO() { return new Date(this.ahora() - 5 * 3600 * 1000).toISOString().slice(0, 10); }
+
+  async linea() { return 'Viaje a medida'; }
+
+  async equipoComercial(): Promise<MiembroEquipo[] | 'error'> {
+    return this.equipo === 'error' ? 'error' : structuredClone(this.equipo);
+  }
+
+  private ficha(c: ContactoMem): FichaCliente {
+    const ns = this.viajes.filter((v) => v.contactoId === c.id);
+    const cerrado = ns.filter((v) => !v.abierto).at(-1);
+    return {
+      id: c.id, nombre: c.nombre.toUpperCase(), cel4: c.celular ? c.celular.replace(/\D/g, '').slice(-4) : null, correo: !!c.correo, usuario: !!c.usuario,
+      abiertos: ns.filter((v) => v.abierto).map((v) => ({ codigo: v.codigo, nombre: v.nombre })),
+      cerrado: cerrado ? { codigo: cerrado.codigo, nombre: cerrado.nombre } : null,
+    };
+  }
+
+  async porNombre(texto: string): Promise<FichaCliente[] | null> {
+    if (this.fallarBusqueda) return null;
+    const ws = normal(texto).split(' ').filter((w) => w.length >= 2 && !['de', 'la', 'el', 'cliente', 'para', 'un', 'una', 'viaje', 'nuevo'].includes(w));
+    if (!ws.length) return [];
+    return this.contactos.filter((c) => { const n = normal(c.nombre).split(' '); return ws.every((w) => n.some((x) => x.startsWith(w.slice(0, Math.max(3, w.length - 1))))); }).map((c) => this.ficha(c));
+  }
+
+  async porLlave(l: Llave): Promise<FichaCliente[] | null> {
+    if (this.fallarBusqueda) return null;
+    return this.contactos.filter((c) =>
+      (l.celular && c.celular && c.celular.replace(/\D/g, '').slice(-10) === l.celular.slice(-10))
+      || (l.correo && c.correo && c.correo.toLowerCase() === l.correo)
+      || (l.usuario && c.usuario && c.usuario.toLowerCase() === l.usuario)).map((c) => this.ficha(c));
+  }
+
+  private faltas(v: ViajeMem) {
+    if (this.campos) {
+      const n = calcularNiveles(this.campos, { destino: v.destino, ...v.datos });
+      return { cotizar: n.minimo.faltan.map((f) => f.label ?? f.slug), completo: [...n.minimo.faltan, ...n.deseable.faltan].map((f) => f.label ?? f.slug) };
+    }
+    const cotizar = ['fecha de salida', 'fecha de regreso', 'adultos', 'niños'].filter((k) => !(k in v.datos));
+    if (!v.destino) cotizar.unshift('destino');
+    return { cotizar, completo: [...cotizar, 'presupuesto', 'categoría de hotel', 'plan de alimentación'].filter((k) => !(k in v.datos)) };
+  }
+
+  async codigosExistentes(candidatos: string[]): Promise<string[] | 'error'> {
+    if (this.fallarBusqueda) return 'error';
+    return this.viajes.map((v) => v.codigo).filter((c) => candidatos.includes(c));
+  }
+
+  async viaje(codigo: string): Promise<ViajeAgente | null | 'error'> {
+    if (this.fallarBusqueda) return 'error';
+    const v = this.viajes.find((x) => x.codigo === codigo);
+    if (!v) return null;
+    const c = this.contactos.find((x) => x.id === v.contactoId);
+    const f = this.faltas(v);
+    const registrado = this.campos ? registradoDe(this.campos, { destino: v.destino, ...v.datos }) : undefined;
+    return { id: v.id, codigo: v.codigo, nombre: v.nombre, cliente: c?.nombre ?? null, contactoId: v.contactoId, destino: v.destino, abierto: v.abierto, faltaCotizar: f.cotizar, faltaCompleto: f.completo, ...(registrado ? { registrado } : {}) };
+  }
+
+  async crearViaje(p: { contactoId: string; destino: string | null; responsableId: string }) {
+    const c = this.contactos.find((x) => x.id === p.contactoId);
+    if (!c) throw new Error('contacto inexistente');
+    // Como producción: se vuelve a validar al escribir.
+    if (this.equipo === 'error' || !this.equipo.some((m) => m.id === p.responsableId)) throw new Error('el responsable no es del equipo comercial');
+    const letra = normal(c.nombre)[0].toUpperCase();
+    const prefijo = this.viajes.find((v) => v.contactoId === c.id)?.codigo.split(' ')[0] ?? `${letra}${[...new Set(this.contactos.filter((x) => normal(x.nombre)[0] === normal(c.nombre)[0]).map((x) => x.id))].indexOf(c.id) + 1}`;
+    const n = (this.consecutivo.get(prefijo) ?? this.viajes.filter((v) => v.codigo.startsWith(`${prefijo} 26 `)).length) + 1;
+    this.consecutivo.set(prefijo, n);
+    const v: ViajeMem = { id: nuevoId(), codigo: `${prefijo} 26 ${n}`, contactoId: c.id, nombre: p.destino ? p.destino.toUpperCase() : `Viaje de ${c.nombre}`, destino: p.destino, abierto: true, datos: {} };
+    this.viajes.push(v);
+    this.escrituras.push({ tipo: 'viaje', codigo: v.codigo, contactoId: c.id, destino: p.destino, responsableId: p.responsableId });
+    return { id: v.id, codigo: v.codigo, nombre: v.nombre };
+  }
+
+  async prepararCarga(viajeId: string, textos: string[], previo?: unknown) {
+    const v = this.viajes.find((x) => x.id === viajeId)!;
+    if (this.campos && this.extraer) {
+      this.extracciones.push([...textos]);
+      const data = { destino: v.destino, ...v.datos };
+      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true, documentos: textos.some(traeArchivo) }), perfil: true });
+      return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
+    }
+    const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];
+    const todos = [...antes, ...textos.filter((t) => !antes.includes(t))];
+    return { entendido: todos.map((t) => t.slice(0, 70)), falta: this.faltas(v).cotizar, plan: { textos: todos } };
+  }
+
+  async cargar(viajeId: string, plan: unknown) {
+    const v = this.viajes.find((x) => x.id === viajeId)!;
+    if (this.campos && (plan as PlanCarga).sugeridos) {
+      const meta = { entrega_id: 'agente', en: new Date(this.ahora()).toISOString(), origenDe: () => 'mensaje' as const };
+      const quitar = (plan as PlanCarga).quitar;
+      const r = cargarEnExistente({ destino: v.destino, ...v.datos }, this.campos, (plan as PlanCarga).sugeridos, meta, new Set(), { delModelo: true, ...(quitar ? { quitar } : {}) });
+      const escritos = [...r.escritos, ...r.actualizados.map((a) => a.slug)];
+      if (escritos.length || r.conflictos.length || r.quitados.length) {
+        const { destino, ...resto } = r.data;
+        if (typeof destino === 'string' && destino) v.destino = destino;
+        v.datos = resto;
+      }
+      this.escrituras.push({ tipo: 'carga', codigo: v.codigo, escritos, ...(r.quitados.length ? { quitados: r.quitados } : {}) });
+      const valores = Object.fromEntries(Object.entries((plan as PlanCarga).sugeridos).map(([k, x]) => [k, x.valor]));
+      return { lineas: [lineaCargada(v.codigo, escritos, this.campos, r.quitados)], escritos: registradoDe(this.campos, valores, escritos) };
+    }
+    const textos = (plan as { textos: string[] }).textos;
+    v.datos.textos = [...((v.datos.textos as string[] | undefined) ?? []), ...textos];
+    this.escrituras.push({ tipo: 'carga', codigo: v.codigo, textos });
+    return { lineas: [`Cargué en ${v.codigo} ${textos.length === 1 ? 'el mensaje' : `los ${textos.length} mensajes`}.`] };
+  }
+
+  /** La autorización de datos por contacto (sin entrada: pendiente con un link de prueba). */
+  autorizaciones = new Map<string, AutorizacionAgente | 'error'>();
+  async autorizacion(contactoId: string): Promise<AutorizacionAgente | 'error'> {
+    const a = this.autorizaciones.get(contactoId);
+    if (a) return a;
+    this.escrituras.push({ tipo: 'enlace_autorizacion', contactoId });
+    return { estado: 'pendiente', url: `https://agencia.metrikone.co/autorizacion/${'T'.repeat(43)}?m=w`, agencia: 'la agencia', whatsapp: null, instruccion: null };
+  }
+
+  /** ¿Autorizó? Lo dice `autorizaciones` (sin entrada: no ha autorizado, como un contacto recién creado). */
+  async autorizado(contactoId: string): Promise<boolean | 'error'> {
+    const a = this.autorizaciones.get(contactoId);
+    if (a === 'error') return 'error';
+    return a?.estado === 'autorizado';
+  }
+
+  /** El perfil de cada contacto (`contacto_perfil_hechos`). */
+  perfil: HechoMem[] = [];
+  async perfilDe(contactoId: string): Promise<HechoExistente[] | 'error'> {
+    if (this.fallarBusqueda) return 'error';
+    return this.perfil.filter((h) => h.contactoId === contactoId).map((h) => ({ id: h.id, texto: h.texto, estado: h.estado }));
+  }
+
+  async guardarPerfil(p: { contactoId: string; hechos: HechoConOrigen[]; estado: 'sugerido' | 'confirmado'; origenTipo: OrigenPerfil }) {
+    // Las guardas de la base: el contacto existe aquí y tiene la autorización vigente.
+    if (!this.contactos.some((c) => c.id === p.contactoId)) throw new Error('perfil_contacto_fuera_del_workspace');
+    if ((await this.autorizado(p.contactoId)) !== true) throw new Error('perfil_sin_autorizacion');
+    const existentes = this.perfil.filter((h) => h.contactoId === p.contactoId).map((h) => ({ id: h.id, texto: h.texto, estado: h.estado }));
+    const plan = planGuardado(p.hechos, existentes, p.estado);
+    for (const h of plan.insertar) {
+      this.perfil.push({ id: nuevoId(), contactoId: p.contactoId, dimension: h.dimension, texto: h.texto, estado: p.estado, origenTipo: p.origenTipo, origenRef: h.origenRef });
+    }
+    for (const x of plan.confirmar) {
+      const h = this.perfil.find((y) => y.id === x.id);
+      if (h) h.estado = 'confirmado';
+    }
+    const guardados = [...plan.insertar, ...plan.confirmar.map((x) => x.hecho)];
+    for (const h of guardados) this.escrituras.push({ tipo: 'perfil', contactoId: p.contactoId, estado: p.estado, dimension: h.dimension, texto: h.texto, origenTipo: p.origenTipo });
+    return { guardados, yaEstaban: plan.yaEstaban };
+  }
+
+  async crearCliente(nombre: string, llave: Llave) {
+    if ((await this.porLlave(llave))?.length) return { ok: false as const, motivo: 'la llave ya es de alguien' };
+    const c: ContactoMem = { id: nuevoId(), nombre: nombre.toUpperCase(), celular: llave.celular ?? null, correo: llave.correo ?? null, usuario: llave.usuario ?? null };
+    this.contactos.push(c);
+    this.escrituras.push({ tipo: 'cliente', id: c.id, nombre: c.nombre, llave });
+    return { ok: true as const, id: c.id, nombre: c.nombre };
+  }
+}

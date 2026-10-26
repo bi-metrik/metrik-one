@@ -89,11 +89,29 @@ function cliente() {
   }
 }
 
+/**
+ * La lectura en segundo plano escribe condicional al token de su marca
+ * (`.eq('data->_lectura->>token', t)`) y relee la fila antes de lo destructivo: el doble
+ * resuelve esa ruta JSON y aplica los updates, para que la marca exista de verdad.
+ */
+function valorEnRuta(f: Fila, columna: string): unknown {
+  if (!columna.includes('->')) return f[columna]
+  const partes = columna.split(/->>?/)
+  let v: unknown = f[partes[0]]
+  for (const k of partes.slice(1)) v = v && typeof v === 'object' ? (v as Fila)[k] : undefined
+  return v
+}
+
+function aplicarUpdate(filas: Fila[], payload: Fila) {
+  for (const f of filas) Object.assign(f, payload)
+  return { data: filas.map(f => ({ id: f.id })), error: null }
+}
+
 function constructor(tabla: string) {
   const eqs: Fila = {}
   let payload: Fila | null = null
   const filtradas = () =>
-    (escenario.tablas[tabla] ?? []).filter(f => Object.entries(eqs).every(([c, v]) => f[c] === v))
+    (escenario.tablas[tabla] ?? []).filter(f => Object.entries(eqs).every(([c, v]) => valorEnRuta(f, c) === v))
   const q = {
     select: () => q,
     eq: (c: string, v: unknown) => { eqs[c] = v; return q },
@@ -103,7 +121,7 @@ function constructor(tabla: string) {
     then: (ok: (v: unknown) => unknown, ko?: (e: unknown) => unknown) => {
       if (payload) {
         efectos.updates.push({ tabla, payload })
-        return Promise.resolve({ error: null }).then(ok, ko)
+        return Promise.resolve(aplicarUpdate(filtradas(), payload)).then(ok, ko)
       }
       return Promise.resolve({ data: filtradas(), error: null }).then(ok, ko)
     },
@@ -241,8 +259,15 @@ describe('procesarDocumento — el bloque declara qué documento espera', () => 
     // quedaría sin el documento anterior y sin el nuevo.
     expect(efectos.borradosDrive).toHaveLength(0)
     expect(efectos.subidasDrive).toHaveLength(0)
-    expect(efectos.updates).toHaveLength(0)
     expect(efectos.seccionalSembrada).toHaveLength(0)
+    // Las únicas escrituras son la marca de lectura y su cierre: el documento que el
+    // bloque tenía sigue ahí, sin campos inventados, y el rechazo queda a la vista.
+    expect(efectos.updates).toHaveLength(2)
+    const fila = escenario.tablas.negocio_bloques[0]
+    const data = fila.data as Record<string, unknown>
+    expect(data.drive_file_id).toBe('drv-viejo')
+    expect(data.campos).toBeUndefined()
+    expect((data._lectura as Record<string, unknown>).estado).toBe('rechazado')
     // Y ni siquiera se gastó la extracción: no hay campos que inventar.
     expect(efectos.extracciones).toHaveLength(0)
   })
@@ -361,7 +386,11 @@ describe('reprocesarDocumento — la otra puerta que siembra datos', () => {
 
     expect(r.success).toBe(false)
     expect(r.documento_rechazado?.visto_tipo).toBe('camara_comercio')
-    expect(efectos.updates).toHaveLength(0)
+    // Marca y cierre de la marca; los campos no se tocan.
+    expect(efectos.updates).toHaveLength(2)
+    const data = escenario.tablas.negocio_bloques[0].data as Record<string, unknown>
+    expect(data.campos).toBeUndefined()
+    expect((data._lectura as Record<string, unknown>).estado).toBe('rechazado')
     expect(efectos.seccionalSembrada).toHaveLength(0)
     expect(efectos.extracciones).toHaveLength(0)
   })

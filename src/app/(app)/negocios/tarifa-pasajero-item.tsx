@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, Pencil, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -27,9 +28,12 @@ import {
   composicionDeLinea,
   confirmacionDesactualizada,
   confirmadaVigente,
+  costosAManoComoMapa,
   describirOcupacion,
   faltanPorAcomodar,
+  textoFaltanPorAcomodar,
   formatoMonto,
+  fuenteDeLectura,
   leerTarifaPax,
   lineaPorPasajero,
   MENSAJE_MONEDA_ASUMIDA,
@@ -37,20 +41,25 @@ import {
   MONEDAS_FRECUENTES,
   monedaDeTarifa,
   ocupacionObservada,
+  origenDeLaOcupacion,
+  origenDeLecturas,
   resolverTarifa,
   tarifaMasReciente,
   traeDesgloseCompleto,
   type CasillaDef,
   type ClaveCasilla,
   type Composicion,
+  type FuenteDeLectura,
   type LecturaCasilla,
   type MonedaDeTarifa,
   type TarifaPax,
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { Correcciones } from '@/lib/cotizaciones/correcciones'
+import { casillasConEstadia } from '@/lib/cotizaciones/estadia'
 import { cifrasPorRevisar } from '@/lib/cotizaciones/ficha-linea'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
+import { archivoComoDataUrl, leerSinSilencio, MENSAJE_ARCHIVO_ILEGIBLE } from '@/lib/cotizaciones/lectura-sin-silencio'
 
 /**
  * Pantallazos de una línea con precio por tipo de pasajero (diseño §6.1).
@@ -132,7 +141,7 @@ export default function TarifaPasajeroItem({
   const [detalleAbierto, setDetalleAbierto] = useState<Partial<Record<ClaveCasilla | 'resultado', boolean>>>({})
   const [editandoComposicion, setEditandoComposicion] = useState(false)
   const [tasa, setTasa] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // R8 · una opción de hotel con varias habitaciones se cotiza por sus habitaciones, contra
   // el grupo del negocio. Su bloque es otro: cupos, papel de cada captura y costo por
@@ -167,8 +176,14 @@ export default function TarifaPasajeroItem({
   const confirmacionVieja = confirmacionDesactualizada(tarifa, composicion)
 
   const defs = composicion ? casillasDe(composicion, ranura.slug) : []
-  const estado = composicion ? resolverTarifa(composicion, casillas, ranura.slug, { moneda: monedaTarifa.moneda }) : null
+  const estado = composicion ? resolverTarifa(composicion, casillasConEstadia(casillas, tarifa.correcciones), ranura.slug, {
+    moneda: monedaTarifa.moneda,
+    // Lo escrito a mano en la forma por pasos (P12), igual que el servidor al confirmar: sin
+    // esto la tarjeta seguía pidiendo «busca con 6 adultos y 1 niño» después de «Completa».
+    aMano: costosAManoComoMapa(tarifa),
+  }) : null
   const primera = casillas.grupo_completo
+  const fuentePrimera = fuenteDeLectura(primera)
   const primeraResuelve = !!(composicion && primera && traeDesgloseCompleto(primera, composicion))
 
   // §2.1 · la secuencia de tres casillas solo existe cuando la primera lectura NO resolvió.
@@ -182,8 +197,12 @@ export default function TarifaPasajeroItem({
 
   // De dónde salió la ocupación de la línea, y a quién del viaje le falta sitio (§2.4).
   const ocupacionLeida = primera ? composicionDeLectura(primera) : null
-  const laPusoElPantallazo = !!(tarifa.composicion && ocupacionLeida && mismaComposicion(ocupacionLeida, tarifa.composicion))
-  const faltan = composicion ? faltanPorAcomodar(composicion, composicionViaje) : null
+  // La lectura que puso la ocupación dice la verdad de su origen (brief del 2026-10-21, punto 2):
+  // escrita a mano no es «leído del pantallazo».
+  const ocupacionLaPuso: FuenteDeLectura | null = tarifa.composicion && ocupacionLeida && mismaComposicion(ocupacionLeida, tarifa.composicion)
+    ? fuenteDeLectura(primera)
+    : null
+  const faltan = composicion ? faltanPorAcomodar(composicion, composicionViaje, ranura.slug) : null
   // La pregunta que la lectura no resolvió: sale DESPUÉS de pegar y diciendo por qué.
   const pedirComposicion = !composicion && !!primera
   const mostrarComposicion = !!composicion && (!!primera || !!tarifa.composicion)
@@ -197,7 +216,9 @@ export default function TarifaPasajeroItem({
       try {
         // Sin moneda visible ya no hay rechazo que resolver aquí: la lectura se guarda con
         // COP supuesta y la pregunta sale DESPUÉS, persistente (`MonedaDeLaTarifa`).
-        const r = await leerCasillaDeItem(itemId, clave, dataUrl, null, enfoque)
+        // Si la llamada lanza, la casilla lo dice (`leerSinSilencio`, punto 7 del brief del
+        // 2026-10-01): antes se apagaba el «Leyendo…» y no quedaba nada, ni en pantalla ni en la base.
+        const r = await leerSinSilencio(() => leerCasillaDeItem(itemId, clave, dataUrl, null, enfoque))
         if (r.ok) {
           setGuardada(r.tarifa)
           setUltimoMensaje(r.mensaje)
@@ -206,7 +227,10 @@ export default function TarifaPasajeroItem({
         } else {
           // P8 · con opciones legibles se guarda la imagen para volver a leerla sobre la que
           // toque la persona, sin pedirle que la pegue otra vez.
-          setRechazos(x => ({ ...x, [clave]: { mensaje: r.mensaje, detalle: r.detalle, opciones: r.opciones, dataUrl } }))
+          setRechazos(x => ({
+            ...x,
+            [clave]: { mensaje: r.mensaje, detalle: 'detalle' in r ? r.detalle : undefined, opciones: 'opciones' in r ? r.opciones : undefined, dataUrl },
+          }))
         }
       } finally {
         setLeyendo(null)
@@ -214,15 +238,29 @@ export default function TarifaPasajeroItem({
     })()
   }
 
+  // Pegado o subido, el pantallazo va a SU casilla (punto 7): sin selector propio, la única
+  // forma de subir el «solo adultos» de un hotel era «Cambiar pantallazo», que reemplaza el 1.
+  function usarArchivo(clave: ClaveCasilla, archivo: File) {
+    if (!archivo.type.startsWith('image/')) {
+      setRechazos(r => ({ ...r, [clave]: { mensaje: 'Eso no es una imagen. Pega o sube el pantallazo del proveedor.' } }))
+      return
+    }
+    archivoComoDataUrl(archivo).then(
+      dataUrl => leer(clave, dataUrl),
+      (e: Error) => setRechazos(r => ({ ...r, [clave]: { mensaje: e.message } })),
+    )
+  }
+
   function pegar(clave: ClaveCasilla, e: React.ClipboardEvent) {
     const entrada = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'))
     if (!entrada) return
     e.preventDefault()
     const archivo = entrada.getAsFile()
-    if (!archivo) return
-    const lector = new FileReader()
-    lector.onload = ev => leer(clave, ev.target?.result as string)
-    lector.readAsDataURL(archivo)
+    if (!archivo) {
+      setRechazos(r => ({ ...r, [clave]: { mensaje: MENSAJE_ARCHIVO_ILEGIBLE } }))
+      return
+    }
+    usarArchivo(clave, archivo)
   }
 
   function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax }>, exito: string) {
@@ -269,12 +307,20 @@ export default function TarifaPasajeroItem({
   return (
     <div className="mt-3 rounded-lg border border-dashed p-3">
       {/* ── Qué se pide, ANTES de pegar ── */}
-      <div className="mb-2">
-        <p className="text-[11px] font-medium">Pantallazo de {ranura.label.toLowerCase()} · precio por pasajero</p>
-        <p className="text-[10px] text-muted-foreground">{ranura.queSePide}</p>
-        <p className="text-[10px] text-muted-foreground">No sirve: {ranura.queNoSirve}</p>
-        <p className="text-[10px] text-muted-foreground">La imagen no se guarda: queda lo que se leyó de ella.</p>
-      </div>
+      {fuentePrimera === 'pantallazo' ? (
+        <div className="mb-2">
+          <p className="text-[11px] font-medium">Pantallazo de {ranura.label.toLowerCase()} · precio por pasajero</p>
+          <p className="text-[10px] text-muted-foreground">{ranura.queSePide}</p>
+          <p className="text-[10px] text-muted-foreground">No sirve: {ranura.queNoSirve}</p>
+          <p className="text-[10px] text-muted-foreground">La imagen no se guarda: queda lo que se leyó de ella.</p>
+        </div>
+      ) : (
+        // Sin pantallazo detrás (escrita a mano o con tarifa del proveedor): el bloque no se
+        // presenta como uno (brief del 2026-10-21, punto 2). Pegar uno sigue a mano, abajo.
+        <div className="mb-2">
+          <p className="text-[11px] font-medium">{ranura.label} · precio por pasajero</p>
+        </div>
+      )}
 
       {(sugeridosGuardados?.length ?? 0) > 0 && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 p-2">
@@ -307,8 +353,9 @@ export default function TarifaPasajeroItem({
         detalleAbierto={!!detalleAbierto.grupo_completo}
         deshabilitado={isPending || leyendo !== null}
         onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, grupo_completo: !x.grupo_completo }))}
-        onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), 'Pantallazo quitado.')}
+        onQuitar={() => accion(() => quitarCasillaDeItem(itemId, 'grupo_completo'), TEXTO_QUITADA[fuentePrimera])}
         onPegar={e => pegar('grupo_completo', e)}
+        onArchivo={f => usarArchivo('grupo_completo', f)}
         onElegir={o => {
           const url = rechazos.grupo_completo?.dataUrl
           if (url) leer('grupo_completo', url, o)
@@ -346,7 +393,9 @@ export default function TarifaPasajeroItem({
           itemId={itemId}
           composicion={composicion}
           esPropia={!!tarifa.composicion}
-          laPusoElPantallazo={laPusoElPantallazo}
+          laPusoLaLectura={ocupacionLaPuso}
+          fuente={primera ? fuentePrimera : null}
+          composicionViaje={composicionViaje ?? null}
           faltan={faltan}
           hayViaje={!!composicionViaje}
           editando={editandoComposicion || pedirComposicion}
@@ -378,6 +427,7 @@ export default function TarifaPasajeroItem({
               onToggleDetalle={() => setDetalleAbierto(x => ({ ...x, [d.clave]: !x[d.clave] }))}
               onQuitar={() => accion(() => quitarCasillaDeItem(itemId, d.clave), `Pantallazo ${d.numero} quitado.`)}
               onPegar={e => pegar(d.clave, e)}
+              onArchivo={f => usarArchivo(d.clave, f)}
               onElegir={o => {
                 const url = rechazos[d.clave]?.dataUrl
                 if (url) leer(d.clave, url, o)
@@ -403,6 +453,9 @@ export default function TarifaPasajeroItem({
           )}
           {estado?.estado === 'inconsistente' && (
             <p className="rounded-md bg-red-50 p-2 text-[11px] font-medium text-red-900">{estado.mensaje}</p>
+          )}
+          {estado?.estado === 'sin_costo' && (
+            <p className="rounded-md bg-amber-50 p-2 text-[11px] font-medium text-amber-900" data-sin-costo-tarifario>{estado.mensaje}</p>
           )}
           {estado?.estado === 'confirmar_menor_no_paga' && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-2">
@@ -494,7 +547,10 @@ export default function TarifaPasajeroItem({
                 onClick={() => accion(() => confirmarTarifaPorPasajero(itemId, enCOP ? null : tasaNum), 'Costo por pasajero cargado. Revisa el margen de la línea.')}
                 className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
               >
-                <Check className="h-3 w-3" /> Confirmar y cargar el costo
+                {/* Punto 14 del brief del 2026-10-05: mientras el servidor guarda, el botón lo dice. Si
+                    el servidor tarda (la acción espera en fila detrás del refresco), el primer clic parecía
+                    no hacer nada: el botón solo se ponía gris. La causa en producción no se reprodujo. */}
+                <Check className="h-3 w-3" /> {isPending ? 'Cargando el costo…' : 'Confirmar y cargar el costo'}
               </button>
               <p className="text-[10px] text-muted-foreground">
                 Al confirmar, esto REEMPLAZA los rubros de la línea. El precio lo calcula el margen.
@@ -549,6 +605,25 @@ const DEF_SIN_COMPOSICION: CasillaDef = {
   busqueda: '',
   condicional: false,
   razonCondicional: null,
+}
+
+/**
+ * Lo que dice la casilla 1 cuando su lectura NO salió de un pantallazo (brief del 2026-10-21,
+ * punto 2): el bloque no simula un pantallazo leído; queda la zona de pegado como opción.
+ */
+const TITULO_SIN_PANTALLAZO: Record<Exclude<FuenteDeLectura, 'pantallazo'>, string> = {
+  manual: 'Escrita a mano',
+  tarifario: 'Del tarifario del proveedor',
+}
+const ETIQUETA_LECTURA: Record<FuenteDeLectura, string> = {
+  pantallazo: 'Leído:',
+  manual: 'Escrito a mano:',
+  tarifario: 'Tarifa del proveedor:',
+}
+const TEXTO_QUITADA: Record<FuenteDeLectura, string> = {
+  pantallazo: 'Pantallazo quitado.',
+  manual: 'Datos escritos a mano quitados.',
+  tarifario: 'Tarifa del proveedor quitada.',
 }
 
 /** Una opción leída de una captura con varias (P8). */
@@ -615,6 +690,7 @@ function Casilla({
   onToggleDetalle,
   onQuitar,
   onPegar,
+  onArchivo,
   ficha,
   onElegir,
 }: {
@@ -647,8 +723,12 @@ function Casilla({
   onToggleDetalle: () => void
   onQuitar: () => void
   onPegar: (e: React.ClipboardEvent) => void
+  /** «Subir foto»: el archivo elegido va a ESTA casilla, igual que uno pegado. */
+  onArchivo: (archivo: File) => void
 }) {
   const comoSeLlama = numerada ? `el pantallazo ${def.numero}: ${def.titulo}` : 'el pantallazo del proveedor'
+  const fuente = fuenteDeLectura(lectura)
+  const sinImagen = !!lectura && fuente !== 'pantallazo'
   return (
     <div className="rounded-md border bg-background p-2.5">
       <div className="flex items-start gap-2">
@@ -658,7 +738,7 @@ function Casilla({
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold">{def.titulo}</p>
+          <p className="text-xs font-semibold">{fuente !== 'pantallazo' ? TITULO_SIN_PANTALLAZO[fuente] : def.titulo}</p>
           {/* La búsqueda literal. Es EL requisito de la pantalla (P3). */}
           {def.busqueda && <p className="text-[11px] text-foreground">{def.busqueda}</p>}
 
@@ -671,6 +751,7 @@ function Casilla({
               onQuitar={onQuitar}
               deshabilitado={deshabilitado}
               ficha={ficha}
+              fuente={fuente}
             />
           )}
 
@@ -698,7 +779,9 @@ function Casilla({
             ) : (
               <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <ImageIcon className="h-4 w-4" />
-                {lectura
+                {sinImagen
+                  ? '¿Tienes un pantallazo del proveedor? Pégalo aquí para reemplazar esto (Ctrl+V / Cmd+V)'
+                  : lectura
                   ? 'Pega otro pantallazo aquí para reemplazar este (Ctrl+V / Cmd+V)'
                   : numerada
                     ? 'Pega aquí el pantallazo con Ctrl+V / Cmd+V'
@@ -706,6 +789,22 @@ function Casilla({
               </span>
             )}
           </div>
+          <label className="mt-1 inline-flex cursor-pointer items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground" data-subir-casilla={def.clave}>
+            <ImageIcon className="h-3 w-3" aria-hidden />
+            Subir foto
+            <input
+              type="file"
+              accept="image/*"
+              hidden
+              disabled={deshabilitado || leyendo}
+              aria-label={`Subir ${comoSeLlama}`}
+              onChange={e => {
+                const f = e.target.files?.[0]
+                e.target.value = ''
+                if (f) onArchivo(f)
+              }}
+            />
+          </label>
 
           {rechazo && (
             <div className="mt-1.5 rounded-md border border-red-300 bg-red-50 p-2">
@@ -759,7 +858,7 @@ function MonedaDeLaTarifa({
 }) {
   const [cambiando, setCambiando] = useState(false)
   const [otra, setOtra] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const apagado = deshabilitado || isPending
 
   function elegir(moneda: string | null) {
@@ -832,7 +931,7 @@ function MonedaDeLaTarifa({
 
   const origen = info.origen === 'persona' && info.decision
     ? `la eligió ${info.decision.por ?? 'una persona'}${info.decision.en ? ` · ${formatBogotaFechaCorta(info.decision.en)}` : ''}`
-    : info.manual ? 'ingresada a mano' : 'leída del pantallazo'
+    : origenDeLecturas(info)
   // Lo que dijo la IA, cuando la persona eligió otra: se enseña al lado, nunca en su lugar.
   const leidaDistinta = info.origen === 'persona' && info.leida && info.leida !== info.moneda ? info.leida : null
 
@@ -842,7 +941,7 @@ function MonedaDeLaTarifa({
         <p className="text-[11px]">
           <span className="font-medium">Moneda de la tarifa:</span> {info.moneda}
           <span className="ml-1 text-muted-foreground">· {origen}</span>
-          {leidaDistinta && <span className="ml-1 text-amber-800">· el pantallazo dice {leidaDistinta}</span>}
+          {leidaDistinta && <span className="ml-1 text-amber-800">· {info.tarifario ? 'la tarifa del proveedor dice' : info.manual ? 'lo escrito a mano dice' : 'el pantallazo dice'} {leidaDistinta}</span>}
         </p>
         <div className="flex items-center gap-2">
           {leidaDistinta && (
@@ -897,8 +996,11 @@ function LecturaResumen({
   onQuitar,
   deshabilitado,
   ficha,
+  fuente = 'pantallazo',
 }: {
   lectura: LecturaCasilla
+  /** De dónde salió la lectura: cambia cómo se nombra, nunca los números. */
+  fuente?: FuenteDeLectura
   /** La moneda con que se costea la línea: los montos se dicen en ella, no en la leída. */
   moneda: MonedaDeTarifa
   abierta: boolean
@@ -916,7 +1018,9 @@ function LecturaResumen({
   // porque «revisa esta cifra» no puede depender de que alguien abra el detalle para verlo.
   const porRevisar = ficha ? cifrasPorRevisar(ficha.ranura, lectura.campos, ficha.correcciones, lectura.moneda).size : 0
   const obs = ocupacionObservada(lectura)
-  const ocupacion = lectura.ocupacionDelItem
+  const ocupacion = lectura.ocupacionDelItem && fuente === 'tarifario' && lectura.paraComposicion
+    ? describirOcupacion(lectura.paraComposicion)
+    : lectura.ocupacionDelItem
     ? 'ocupación no visible en la imagen'
     : obs.adultos !== null || obs.ninos !== null || obs.infantes !== null
       ? describirOcupacion({ adultos: obs.adultos ?? 0, ninos: obs.ninos ?? 0, infantes: obs.infantes ?? 0 })
@@ -926,7 +1030,7 @@ function LecturaResumen({
     <div className="mt-1.5 rounded border bg-muted/20 px-2 py-1.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px]">
-          <span className="font-medium">Leído:</span> {formatoMonto(lectura.total, mon)}
+          <span className="font-medium">{ETIQUETA_LECTURA[fuente]}</span> {lectura.costoPendiente ? 'sin costo todavía' : formatoMonto(lectura.total, mon)}
           {moneda.asumida && <span className="font-medium text-amber-800"> (moneda sin confirmar)</span>} · {ocupacion}
           {lectura.porTipo.length > 0 && ' · con precio por tipo de pasajero'}
           {lectura.aPagarAgencia !== null && ` · a pagar agencia ${formatoMonto(lectura.aPagarAgencia, mon)}`}
@@ -934,7 +1038,7 @@ function LecturaResumen({
         <div className="flex items-center gap-2">
           <button type="button" onClick={onToggle} className="flex items-center gap-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground">
             {abierta ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-            {ficha ? 'Ver y corregir lo leído' : 'Ver lo leído'}
+            {fuente === 'pantallazo' ? (ficha ? 'Ver y corregir lo leído' : 'Ver lo leído') : (ficha ? 'Ver y corregir los datos' : 'Ver los datos')}
             {corregidos > 0 && (
               <span className="ml-0.5 rounded bg-amber-100 px-1 text-[9px] font-medium text-amber-900">
                 {corregidos} {corregidos === 1 ? 'corregido' : 'corregidos'}
@@ -971,6 +1075,7 @@ function LecturaResumen({
             correcciones={ficha.correcciones}
             deshabilitado={deshabilitado}
             onGuardar={ficha.onGuardar}
+            fuente={fuente}
           />
         </>
       )}
@@ -1006,7 +1111,9 @@ function ComposicionDeLinea({
   itemId,
   composicion,
   esPropia,
-  laPusoElPantallazo,
+  laPusoLaLectura,
+  fuente,
+  composicionViaje,
   faltan,
   hayViaje,
   editando,
@@ -1019,8 +1126,15 @@ function ComposicionDeLinea({
   itemId: string
   composicion: Composicion | null
   esPropia: boolean
-  /** La ocupación de la línea es la que leyó la captura, no una que alguien escribió. */
-  laPusoElPantallazo: boolean
+  /**
+   * La ocupación de la línea es la de la lectura de la casilla 1 (y de dónde salió esa lectura),
+   * no una que alguien ajustó en la línea. `null` = no la puso la lectura.
+   */
+  laPusoLaLectura: FuenteDeLectura | null
+  /** De dónde salió la casilla 1 (`null` sin lectura): una línea escrita a mano lo dice. */
+  fuente: FuenteDeLectura | null
+  /** Los pasajeros del viaje: si la línea cubre los mismos, son «la del viaje». */
+  composicionViaje: Composicion | null
   /** Pasajeros del viaje que esta línea deja sin acomodar, o `null` si no falta nadie. */
   faltan: Composicion | null
   hayViaje: boolean
@@ -1035,7 +1149,7 @@ function ComposicionDeLinea({
   const [adultos, setAdultos] = useState(String(composicion?.adultos ?? ''))
   const [ninos, setNinos] = useState(String(composicion?.ninos ?? 0))
   const [infantes, setInfantes] = useState(String(composicion?.infantes ?? 0))
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function guardar(propia: { adultos: string; ninos: string; infantes: string } | null) {
     startTransition(async () => {
@@ -1057,8 +1171,8 @@ function ComposicionDeLinea({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[11px]">
             <span className="font-medium">Esta línea cubre:</span> {describirOcupacion(composicion, 'y')}
-            <span className="ml-1 text-muted-foreground">
-              · {laPusoElPantallazo ? 'leído del pantallazo' : esPropia ? 'ajustado en esta línea' : 'la del viaje'}
+            <span className="ml-1 text-muted-foreground" data-origen-ocupacion>
+              · {origenDeLaOcupacion({ composicion, composicionViaje, esPropia, laPusoLaLectura, fuente })}
             </span>
           </p>
           <button
@@ -1073,7 +1187,7 @@ function ComposicionDeLinea({
             queda sin sitio. Que la línea cubra de más es una decisión de quien cotiza. */}
         {faltan && (
           <p className="mt-0.5 text-[11px] font-medium text-amber-800">
-            Faltan {describirOcupacion(faltan, 'y')} por acomodar.
+            {textoFaltanPorAcomodar(faltan)}
           </p>
         )}
       </div>

@@ -197,6 +197,56 @@ describe('la pestaña Pagos', () => {
     expect(t).not.toMatch(PROVEEDOR)
   })
 
+  describe('la columna Pago de cada cuota', () => {
+    const COBRO = '9fb20878-0e43-49de-8f58-892d136fa809'
+    const pagada = {
+      ...cuota,
+      estado: 'pagada' as const,
+      abonado: 150000,
+      saldo: 0,
+      enlacePago: null,
+      ultimoPago: { cobroId: COBRO, fecha: '2026-10-05', fuente: 'bold', reciboDescargable: true },
+    }
+    const pintar = (c: Record<string, unknown>) =>
+      renderToStaticMarkup(React.createElement(PestanaPagos, { carga: { estado: 'ok', cuotas: [c as typeof cuota], pagos: [] } }))
+    /** La celda Pago de la tabla (la quinta) y la tarjeta del teléfono. */
+    const celda = (html: string) => texto(/<tr[^>]*data-cuota="1"[^>]*>(?:<td[^>]*>[\s\S]*?<\/td>){4}(<td[^>]*>[\s\S]*?<\/td>)/.exec(html)?.[1] ?? '')
+    const tarjeta = (html: string) => texto(/<li[^>]*data-cuota-movil="1"[^>]*>([\s\S]*?)<\/li>/.exec(html)?.[1] ?? '')
+
+    it('pagada: fecha · medio, con la fecha bajando el recibo, en tabla y en teléfono; sin botón', () => {
+      const h = pintar(pagada)
+      expect(celda(h)).toBe('05/10/2026 · Pago en línea')
+      expect(tarjeta(h)).toContain('Pago: 05/10/2026 · Pago en línea')
+      expect(h.match(new RegExp(`href="/api/valida/archivo/recibo/${COBRO}"`, 'g'))).toHaveLength(2)
+      expect(texto(h)).not.toContain('Pagar en línea')
+      expect(texto(h)).not.toMatch(PROVEEDOR)
+    })
+
+    it('pagada sin recibo: la fecha sin enlace; un medio manual sale tal cual', () => {
+      const h = pintar({ ...pagada, ultimoPago: { ...pagada.ultimoPago, reciboDescargable: false, fuente: 'Transferencia' } })
+      expect(celda(h)).toBe('05/10/2026 · Transferencia')
+      expect(h).not.toContain('/api/valida/archivo/recibo/')
+    })
+
+    it('abonada con enlace: el abono y el botón por el saldo', () => {
+      const h = pintar({ ...pagada, estado: 'abonada', abonado: 50000, saldo: 100000, enlacePago: 'https://checkout.bold.co/payment/LNK_2' })
+      expect(celda(h)).toBe('05/10/2026 · Pago en línea Pagar en línea')
+      expect(h).toContain('href="https://checkout.bold.co/payment/LNK_2"')
+    })
+
+    it('pendiente con enlace: el botón, como siempre', () => {
+      const h = pintar({ ...cuota, estado: 'pendiente', ultimoPago: null })
+      expect(celda(h)).toBe('Pagar en línea')
+      expect(tarjeta(h)).not.toContain('Pago:')
+    })
+
+    it('sin enlace ni pago: «—»', () => {
+      const h = pintar({ ...cuota, estado: 'pendiente', enlacePago: null })
+      expect(celda(h)).toBe('—')
+      expect(tarjeta(h)).not.toContain('Pagar en línea')
+    })
+  })
+
   it('sin cuotas, el estado vacío del diseño', () => {
     const vacio = texto(renderToStaticMarkup(React.createElement(PestanaPagos, { carga: { estado: 'ok', cuotas: [], pagos: [] } })))
     expect(vacio).toContain('Aquí vas a ver cada cuota con su factura electrónica.')

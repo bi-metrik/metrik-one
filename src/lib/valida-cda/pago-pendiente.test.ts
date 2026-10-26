@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cuotasConEstado, enlaceDePagoValido, fechaCorta, proximoPago, type CobroRecibido, type CuotaDeServicio } from './pago-pendiente'
+import { cuotasConEstado, enlaceDePagoValido, fechaCorta, proximoPago, ultimoPagoDeCadaCuota, type CobroRecibido, type CuotaDeServicio, type PagoParaReparto } from './pago-pendiente'
 
 /**
  * El próximo pago de un CDA. Las cuotas son las reales de C1 26 1 (CDA del Caquetá), medidas en
@@ -178,5 +178,54 @@ describe('las cuotas de la pestaña Pagos', () => {
     const r = cuotasConEstado({ cuotas, cobros: [pagado(150000)], hoy: '2026-10-05', ahoraISO: ahora })
     expect(r[0]).toMatchObject({ estado: 'pagada', enlacePago: null, cuotaId: 'c1', factura: { numero: 'FE-1', pdf: true, xml: true } })
     expect(r[1]).toMatchObject({ estado: 'pendiente', enlacePago: LINK, factura: null })
+  })
+})
+
+describe('qué pago le abonó a cada cuota', () => {
+  const p = (cobroId: string, fecha: string | null, monto: number, extra: Partial<PagoParaReparto> = {}): PagoParaReparto => ({
+    cobroId,
+    fecha,
+    monto,
+    fuente: 'bold',
+    estado: 'pagado',
+    reciboDescargable: false,
+    ...extra,
+  })
+  const ids = (pagos: PagoParaReparto[], montos = [150000, 150000, 150000]) =>
+    ultimoPagoDeCadaCuota(
+      montos.map((monto) => ({ monto })),
+      pagos,
+    ).map((x) => x?.cobroId ?? null)
+
+  it('un pago por cuota: a cada una el suyo, aunque la RPC los dé del más nuevo al más viejo', () => {
+    expect(ids([p('b', '2026-11-01', 150000), p('a', '2026-10-05', 150000)])).toEqual(['a', 'b', null])
+  })
+
+  it('una cuota pagada en dos abonos lleva el último', () => {
+    expect(ids([p('b', '2026-10-06', 100000), p('a', '2026-10-01', 50000)])).toEqual(['b', null, null])
+  })
+
+  it('un pago grande cubre varias cuotas; el excedente abona la siguiente', () => {
+    expect(ids([p('a', '2026-10-05', 350000)])).toEqual(['a', 'a', 'a'])
+  })
+
+  it('la retención de IVA también cubre: el pago neto + su retención llena la cuota', () => {
+    expect(ids([p('b', '2026-11-01', 140000, { retencionIva: 10000 }), p('a', '2026-10-05', 140000, { retencionIva: 10000 })])).toEqual([
+      'a',
+      'b',
+      null,
+    ])
+  })
+
+  it('anulados y programados no son plata', () => {
+    expect(ids([p('x', '2026-10-06', 150000, { estado: 'anulado' }), p('y', null, 150000, { estado: 'programado' })])).toEqual([
+      null,
+      null,
+      null,
+    ])
+  })
+
+  it('unos pesos de redondeo no desplazan al pago que de verdad cubrió la cuota', () => {
+    expect(ids([p('b', '2026-11-01', 150500), p('a', '2026-10-05', 149500)])).toEqual(['a', 'b', null])
   })
 })

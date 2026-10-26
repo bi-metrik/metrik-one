@@ -5,14 +5,20 @@ import { PestanaTerminos } from '@/components/terminos/pestana-terminos'
 import { formatBogotaFechaCortaAno } from '@/lib/dates/bogota'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
-import { PLAN_CDA } from '@/lib/valida-cda/redaccion-fiscal'
+import { suscripcionEnPrueba } from '@/lib/seccion-suscripcion/prueba-servidor'
+import { ofrecePagarAhora, rechazoDeLaTarjeta } from '@/lib/seccion-suscripcion/pagar-ahora'
+import { createServiceClient } from '@/lib/supabase/server'
+import { PLAN_CDA, PLAN_ONE } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaConAnio } from '@/lib/seccion-suscripcion/estado'
 import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
 import { accionesSobreUsuario, esAdministradorSinCosto } from '@/lib/usuarios-espacio/reglas'
 import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor'
+import { leerOpcionesPago } from '@/lib/valida-cda/plan-anual-servidor'
+import { OpcionesPago } from './opciones-pago'
 import { PestanaPagos } from './pestana-pagos'
 import SuscripcionClient, { type PestanaSuscripcion } from './suscripcion-client'
 import { TarjetaPago } from './tarjeta-pago'
+import { SuscripcionEnPruebaVista } from './suscripcion-en-prueba'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,8 +37,8 @@ interface Props {
 }
 
 /**
- * `/suscripcion`: la suscripción del espacio a un servicio de MeTRIK, hoy la suscripción a Valida de
- * los CDA. Solo la ve la persona designada del contrato del espacio que lo PAGA; a cualquier otro
+ * `/suscripcion`: la suscripción del espacio a un servicio de MeTRIK: Valida de los CDA, o la licencia
+ * de ONE de un cliente de Clarity (`ctx.producto`). Solo la ve la persona designada del contrato del espacio que lo PAGA; a cualquier otro
  * (dueño o administrador que no sea la persona designada, operador, espacio sin contrato, AFI,
  * metrik) la ruta no existe (404), igual que el ítem del menú. Un platform admin en «Ver como» la ve
  * si mira como la persona designada, en solo lectura. Todo se resuelve en el servidor en cada
@@ -41,7 +47,12 @@ interface Props {
  */
 export default async function SuscripcionPage({ searchParams }: Props) {
   const ctx = await contextoSuscripcion()
-  if (ctx.tipo === 'no_aplica') notFound()
+  if (ctx.tipo === 'no_aplica') {
+    // Sin contrato todavía: la prueba gratis de Valida (la persona que se registró la ve desde el día 1).
+    const prueba = await suscripcionEnPrueba()
+    if (prueba) return <SuscripcionEnPruebaVista s={prueba} />
+    notFound()
+  }
   if (ctx.tipo === 'no_disponible') {
     return (
       <EmptyState
@@ -54,20 +65,30 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   const { tab } = await searchParams
   const tabInicial = PESTANAS.find((p) => p === tab) ?? 'resumen'
   const aprobada = ctx.entrada.estado.estado === 'aprobada'
+  const esOne = ctx.producto === 'one'
 
-  const [pagos, terminos, equipo, sugerencia] = await Promise.all([
+  // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
+  // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
+  const rechazoTarjeta = ctx.contrato.suscripcionId ? await rechazoDeLaTarjeta(ctx, createServiceClient()) : null
+  const [pagos, terminos, equipo, sugerencia, opcionesPago] = await Promise.all([
     leerPagosCda(ctx.entrada),
-    leerTerminosEmpresaCda(ctx.entrada),
+    esOne ? null : leerTerminosEmpresaCda(ctx.entrada),
     leerEquipo(ctx),
-    estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
+    esOne ? null : estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
+    // El Plan Anual: solo Valida de los CDA, con términos aceptados y el contrato encendido.
+    esOne || !aprobada ? null : leerOpcionesPago(ctx),
   ])
 
   const { contrato, resumen } = ctx
   // El nombre fiscal del plan (Felipe, 2026-09-24), no el del catálogo, que todavía dice «Licencia».
-  const plan = PLAN_CDA
-  const vigencia = contrato.vigenteHasta
-    ? `Vigente hasta el ${fechaConAnio(contrato.vigenteHasta)} · renovación mensual`
-    : `Vigente desde el ${fechaConAnio(contrato.vigenteDesde)} · renovación mensual`
+  const plan = esOne ? PLAN_ONE : PLAN_CDA
+  // Con el Plan Anual pagado, su plazo absorbe y extiende el de la cláusula 12.1 (anexo 3.3).
+  const planAnual = opcionesPago?.tipo === 'ok' && opcionesPago.anual.estado === 'activo' ? opcionesPago.anual : null
+  const vigencia = planAnual
+    ? `Plan anual del ${fechaConAnio(planAnual.desde)} al ${fechaConAnio(planAnual.hasta)}`
+    : contrato.vigenteHasta
+      ? `Vigente hasta el ${fechaConAnio(contrato.vigenteHasta)} · renovación mensual`
+      : `Vigente desde el ${fechaConAnio(contrato.vigenteDesde)} · renovación mensual`
 
   // Términos pendientes: la tarjeta de pago cede su lugar a la aceptación (el estado lo manda).
   const soloLectura = ctx.soloLectura
@@ -88,12 +109,12 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         )}
       </section>
     ) : ctx.pago ? (
-      <TarjetaPago lectura={ctx.pago} />
+      <TarjetaPago lectura={ctx.pago} pagarAhora={!soloLectura && ofrecePagarAhora(ctx)} rechazoTarjeta={rechazoTarjeta} />
     ) : null
 
   // «Aceptados el {fecha} por {nombre}», de la constancia verificada.
   let terminosResumen: string | null = null
-  if (terminos.estado === 'ok') {
+  if (terminos?.estado === 'ok') {
     const t = terminos.datos.find((d) => d.estado === 'verificado' && d.contrato)
     if (t && t.estado === 'verificado' && t.contrato) {
       const fecha = formatBogotaFechaCortaAno(t.contrato.aceptadoAt)
@@ -159,10 +180,23 @@ export default async function SuscripcionPage({ searchParams }: Props) {
               }
         }
         terminosResumen={terminosResumen}
-        sustenta={soloLectura ? null : sugerencia.yaSolicitado ? 'solicitada' : sugerencia.mostrar ? 'oferta' : null}
-        pagos={<PestanaPagos carga={pagos} />}
+        sustenta={soloLectura || !sugerencia ? null : sugerencia.yaSolicitado ? 'solicitada' : sugerencia.mostrar ? 'oferta' : null}
+        pagos={
+          <PestanaPagos
+            carga={pagos}
+            opciones={
+              opcionesPago?.tipo === 'ok' ? (
+                <OpcionesPago opciones={opcionesPago} soloLectura={soloLectura} nombreSugerido={ctx.designadoNombre} />
+              ) : null
+            }
+          />
+        }
         terminos={
-          aprobada ? (
+          !terminos ? (
+            <p data-sin-terminos className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">
+              Tu suscripción a MeTRIK ONE no tiene términos para aceptar en la plataforma.
+            </p>
+          ) : aprobada ? (
             <PestanaTerminos carga={terminos} alcance="empresa" />
           ) : (
             <p className="rounded-lg border border-border bg-papel p-4 text-sm text-tinta-suave">

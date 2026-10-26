@@ -45,6 +45,8 @@ export type NegocioExportable = {
   empresa_nombre: string | null
   contacto_nombre: string | null
   contacto_telefono: string | null
+  /** Correo del contacto (`contactos.email`). `null` = celda vacía. */
+  contacto_email: string | null
   cedula: string | null
   stage_actual: 'venta' | 'ejecucion' | 'cobro' | null
   etapa_stage: string | null
@@ -164,6 +166,7 @@ export const ENCABEZADOS = [
   'Cliente',
   'Cedula / NIT',
   'Telefono',
+  'Correo',
   'Fase',
   'Etapa',
   'Estado',
@@ -465,6 +468,7 @@ export function armarFilasExcel(entrada: EntradaExcel): FilaExcel[] {
       'Cliente': texto(n.empresa_nombre) ?? texto(n.contacto_nombre),
       'Cedula / NIT': texto(n.cedula),
       'Telefono': texto(n.contacto_telefono),
+      'Correo': texto(n.contacto_email),
       'Fase': faseDeNegocio(n),
       'Etapa': texto(n.etapa_nombre),
       'Estado': texto(n.estado),

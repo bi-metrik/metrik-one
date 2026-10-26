@@ -3,8 +3,9 @@
  *
  * Aprobados por Mauricio el 2026-09-15 y publicados en la Política de Datos
  * de Valida v1.4. Quien los EJECUTA es `public.purgar_registros_bot()`
- * (migración `20260915060000_purga_registros_bot.sql`), que corre cada día
- * por pg_cron; esta constante no borra nada.
+ * (migración `20260915060000_purga_registros_bot.sql`; el cuerpo vigente es el
+ * de `20261002140000_purga_interprete_propuesta.sql`), que corre cada día por
+ * pg_cron; esta constante no borra nada.
  *
  * Por qué existe si el SQL ya los tiene escritos: porque la Política no se
  * publica sin la purga en producción, y la prueba `purga-sql.test.ts` usa
@@ -25,7 +26,11 @@ export const PLAZOS_BOT = {
   aceptacionRespondidaAniosTrasContrato: RETENCION_ANIOS,
   /** `aceptaciones_terminos` pendientes o vencidas: días después de `expira_at`. */
   aceptacionSinRespuestaDiasTrasVencer: 90,
-  /** `wa_message_log`: días; al vencer se anulan teléfono y texto. */
+  /**
+   * `wa_message_log`: días; al vencer se anulan teléfono, texto y, del intérprete,
+   * `interprete_propuesta` (evidencia literal) e `interprete_rechazo` (puede citar el
+   * texto en un error de JSON.parse). Quedan `interprete_accion` e `interprete_resultado`.
+   */
   conversacionesDias: 90,
   /** `wa_envios`: meses; al vencer se anulan teléfono, texto y wamid. */
   acusesMeses: 12,

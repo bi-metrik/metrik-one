@@ -34,6 +34,11 @@ export interface SalidaVista {
   perdida: { autorizadaPor: string; autorizadaAt: string; causa: string } | null
   /** ¿Quien mira puede autorizar? Solo el dueño del workspace. */
   puedeAutorizar: boolean
+  /**
+   * ¿Quien mira es el dueño? Con la excepción vigente ya no se «puede autorizar» (no bloquea),
+   * pero el dueño la puede RETIRAR (P6, H6 de la verificación D). Ausente = no aplica la regla.
+   */
+  esDueno?: boolean
   /** A quién pedírselo, dicho con su nombre. */
   dueno: string | null
   excepcionesDisponibles: boolean
@@ -51,6 +56,11 @@ export interface SalidaVista {
    * («Falta el costo de Vuelo a Providencia · Opción 1: …»). `null`/ausente = no aplica.
    */
   faltaCosto?: string | null
+  /**
+   * Las líneas detrás de `faltaCosto`, con su id: el editor las cruza con las que esperan la
+   * tasa de cambio para decirlo en «Revisar y enviar» (brief del 2026-10-05).
+   */
+  faltaCostoLineas?: { id: string; nombre: string | null; grupo: string | null }[]
 }
 
 const SIN_REGLA: SalidaVista = {
@@ -108,12 +118,14 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
         }
       : null,
     puedeAutorizar: esDueno && salida.bloquea && salida.excepcionesDisponibles,
+    esDueno,
     dueno: salida.dueno,
     excepcionesDisponibles: salida.excepcionesDisponibles,
     lineas: salida.medicion?.conteo.lineas,
     lineasSinCosto: salida.medicion?.conteo.sinCosto,
     bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({ nombre: s.nombre, margenPct: s.margenRealPct })),
     faltaCosto: salida.faltaCosto,
+    faltaCostoLineas: salida.faltaCosto ? (salida.medicion?.conteo.faltantes ?? []) : [],
   }
 }
 

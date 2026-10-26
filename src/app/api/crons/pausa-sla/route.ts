@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
@@ -19,6 +20,10 @@ export async function GET(req: NextRequest) {
   if (!cronHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  // Una sola corrida aunque Vercel entregue el cron dos veces (ver `candadoDeCron`).
+  const otraCorrida = await candadoDeCron('pausa-sla', req)
+  if (otraCorrida) return otraCorrida
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -58,7 +63,11 @@ export async function GET(req: NextRequest) {
 
   for (const n of negocios) {
     // Reactivar: preserva veces_pausado (pausa YA se consumió al hacerla)
-    const { error: updErr } = await supabase
+    //
+    // La reactivación RECLAMA el negocio: solo la corrida que lo pasa de pausado a activo
+    // deja la línea de actividad y avisa. Si Vercel entrega el cron dos veces, la segunda
+    // ya no lo encuentra pausado y no vuelve a avisar (2026-10-06, brief del doble guardado).
+    const { data: reclamado, error: updErr } = await supabase
       .from('negocios')
       .update({
         pausado: false,
@@ -68,11 +77,14 @@ export async function GET(req: NextRequest) {
         updated_at: now,
       })
       .eq('id', n.id)
+      .eq('pausado', true)
+      .select('id')
 
     if (updErr) {
       console.error('[pausa-sla] Error reactivando', n.id, updErr)
       continue
     }
+    if (!reclamado || reclamado.length === 0) continue
 
     reactivados++
 

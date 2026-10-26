@@ -12,6 +12,12 @@
  * ⚠️ Si NINGUNA de las fuentes tiene número, el campo NO se toca. Un bloque viejo con el
  * total escrito a mano y sin el desglose conservaría su total en vez de quedar vacío: vaciar
  * un dato que alguien escribió porque ahora se pregunta de otra forma es perderlo.
+ *
+ * ⚠️ La suma solo sale cuando TODAS las fuentes tienen número; con alguna vacía, el campo queda
+ * VACÍO (prueba en vivo de la bandeja de WhatsApp, 2026-10-01: «2 adultos y 2 menores y en la
+ * otra 3 adultos» dejó 5 pasajeros porque se sumó solo lo conocido, y eran 7). Un cero escrito
+ * es un número. Misma regla que `aplicarSumas` de `supabase/functions/_shared/wa-entendimiento-reglas.ts`
+ * (paridad probada en `supabase/functions/_shared/wa-suma-paridad.test.ts`).
  */
 
 import { parsearNumeroColombiano } from './numero-colombiano'
@@ -30,6 +36,11 @@ export function aplicarSumas(
     if (!Array.isArray(f.suma_de) || f.suma_de.length === 0) continue
     const numeros = f.suma_de.map(slug => parsearNumeroColombiano(valores[slug]))
     if (numeros.every(n => n === null)) continue
+    if (numeros.some(n => n === null)) {
+      const actual = resultado[f.slug]
+      if (actual !== '' && actual !== null && actual !== undefined) resultado = { ...resultado, [f.slug]: '' }
+      continue
+    }
     const suma = numeros.reduce<number>((a, n) => a + (n ?? 0), 0)
     if (resultado[f.slug] !== suma) {
       resultado = { ...resultado, [f.slug]: suma }

@@ -53,6 +53,10 @@ interface FilaDocumento {
   aceptado_por: string | null
   aceptado_calidad: string | null
   aceptado_canal: string | null
+  /** Nacen en 20261007150000; ausentes antes de esa migración, que es lo mismo que «de entrada». */
+  rige_por_aviso?: boolean | null
+  reemplaza_version_id?: string | null
+  publicada_at?: string | null
 }
 
 export function mapearDocumentos(filas: readonly FilaDocumento[]): DocumentoContractual[] {
@@ -74,6 +78,9 @@ export function mapearDocumentos(filas: readonly FilaDocumento[]): DocumentoCont
         ? 'whatsapp'
         : 'modulo'
       : null,
+    rigePorAviso: f.rige_por_aviso === true,
+    reemplazaId: f.reemplaza_version_id ?? null,
+    publicadaAt: f.publicada_at ?? null,
   }))
 }
 

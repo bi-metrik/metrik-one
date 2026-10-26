@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Download, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -17,6 +18,8 @@ import {
   diasEntre,
   type EstadoPaso,
 } from '@/lib/cronograma/gantt'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 const COLOR_ESTADO: Record<EstadoPaso, string> = {
   completado: 'text-green-700',
@@ -43,14 +46,16 @@ export default function GanttCronogramaModal({
 }) {
   const [gantt, setGantt] = useState<GanttCronograma | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [descargando, startDescarga] = useTransition()
+  const [descargando, startDescarga] = useTransitionTolerante()
 
   useEffect(() => {
     let vigente = true
-    void leerGanttCronograma(negocioBloqueId).then(res => {
+    void conReintentoDeRed(() => leerGanttCronograma(negocioBloqueId)).then(res => {
       if (!vigente) return
       if (res.gantt) setGantt(res.gantt)
       else setError(res.error ?? 'No se pudo leer el cronograma')
+    }).catch(e => {
+      if (vigente) setError(mensajeDeFallaDeCarga(e, 'No se pudo leer el cronograma'))
     })
     return () => { vigente = false }
   }, [negocioBloqueId])

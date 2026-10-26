@@ -13,8 +13,12 @@
 // marginal. Familia 2.5 → se controla con `thinkingBudget` numérico (la
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
+import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
 import { normalizarMontoExtraido } from './monto-extraido'
+import { revisarLetrasLeidas } from '@/lib/texto/texto-latino'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
+import { textoDelPdf } from './texto-pdf'
+import { verificarContraTexto, type VerificacionTexto } from './verificar-contra-texto'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -75,6 +79,18 @@ export interface CampoResultado {
    * perdía al recalcular. Ver `normalizarNitYDv` y `votos.ts`.
    */
   leido?: string
+  /**
+   * De dónde salió el valor cuando no es lo que leyó la IA. `texto_pdf`: la IA leyó otra
+   * cosa (queda en `leido`) y se tomó el valor impreso en la capa de texto del PDF, que
+   * estaba a una o dos confusiones de lectura. Ver `verificar-contra-texto.ts`.
+   */
+  origen?: 'texto_pdf'
+  /**
+   * Letras de otro alfabeto que quedaron en lo leído y no se pudieron convertir con seguridad
+   * (la IA escribió «МЕЛА» por «MEJIA», V0167). El campo va a revisión (`manual`) con el valor
+   * a la vista para que la persona lo corrija. Ver `src/lib/texto/texto-latino.ts`.
+   */
+  letras_no_validas?: string[]
 }
 
 // ── Supported MIME types ─────────────────────────────────────────────────────
@@ -134,8 +150,10 @@ REGLAS:
 - Responde SOLO con JSON válido, sin texto adicional
 - Para cada campo devuelve { "value": <valor>, "confidence": <0.0 a 1.0> }
 - Si un campo no está en el documento, usa { "value": null, "confidence": 0.0 }
+- NO dejes en null un campo que SÍ aparece en el documento. Búscalo en todo el documento (encabezado, pie, tablas, sellos, otra página) y aunque la etiqueta no sea exactamente la del campo (ej. "Fecha de expedición" puede venir como "Expedido el", "Fecha de emisión" o junto al lugar de expedición). Si se lee con dificultad, devuélvelo con confidence baja; null es solo para lo que de verdad no está
 - confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
 - Limpia valores: sin espacios al inicio/final
+- NIT: devuélvelo SIN el dígito de verificación (DV), salvo que el campo diga explícitamente "completo" o "con DV". El DV es el dígito que va después del guion ("860.047.657-1" → "860047657") o el que la DIAN pone aparte en su propia casilla; si el documento lo muestra pegado al final sin guion, igual quítalo. La cédula de una persona natural no tiene DV: va completa
 - Números de identificación de personas o empresas (NIT, cédula): solo dígitos, sin puntos, guiones ni espacios. NO apliques esta regla a números de factura, radicados u otros códigos que legítimamente incluyen un prefijo o serie con letras: esos se devuelven COMPLETOS, con su prefijo y tal como aparecen (ej. si el documento muestra "FVM 3903", devuelve "FVM 3903", NUNCA solo "3903")
 - MONEDA COLOMBIANA (campos tipo currency): los valores monetarios están en pesos colombianos (COP). El separador de miles es el punto (.) y el separador decimal es la coma (,). Ejemplo: $1.500.000 = un millón quinientos mil. Devuelve SOLO el valor numérico entero sin puntos, comas ni símbolo $. Ejemplo: si ves "$1.500.000" o "1.500.000,00", devuelve "1500000"
 - Campos tipo numero (no currency): devuelve el número tal cual, sin formato de moneda
@@ -147,6 +165,28 @@ ${campos.map(c => c.tipo === 'personas'
     ? `  "${c.slug}": { "value": [{ "nombre": "...", "documento": "..." }], "confidence": 0.95 }`
     : `  "${c.slug}": { "value": "...", "confidence": 0.95 }`).join(',\n')}
 }`
+}
+
+// ── Verificación contra la capa de texto ─────────────────────────────────────
+
+/**
+ * Pasa lo leído por `verificarContraTexto` si el PDF trae capa de texto. Exportada para
+ * probarla sin Gemini; nunca lanza (sin texto legible no hace nada).
+ */
+export async function verificarConCapaDeTexto(
+  buffer: Buffer,
+  campos: CampoExtraccion[],
+  result: Record<string, CampoResultado>,
+): Promise<VerificacionTexto[]> {
+  const texto = await textoDelPdf(buffer)
+  if (!texto) return []
+  const verificaciones = verificarContraTexto(campos, result, texto)
+  for (const v of verificaciones) {
+    if (v.estado === 'corregido') {
+      console.warn(`[extract-fields] ${v.slug}: la IA leyó "${v.leido}", el texto del PDF dice "${v.valor}"`)
+    }
+  }
+  return verificaciones
 }
 
 // ── Main extractor ───────────────────────────────────────────────────────────
@@ -207,7 +247,7 @@ export async function extractFieldsFromDocument(
 
   let debugRaw = ''
   try {
-    const res = await fetch(url, {
+    const res = await fetchModeloDocumentos(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -306,12 +346,26 @@ export async function extractFieldsFromDocument(
         value = normalizarMontoExtraido(value)
       }
 
+      // Letras de otro alfabeto (la IA leyó «В» cirílica por «B», V0121): los dobles exactos se
+      // convierten; si queda alguna que no se puede convertir, el campo va a revisión con el
+      // valor a la vista. Así el error aparece en el cargue y no al generar el formulario.
+      const letras = value ? revisarLetrasLeidas(value) : null
+      if (letras) value = letras.valor
+
       // Confidence < 0.70 → manual required, value forced to null
       if (confidence < 0.70) {
         result[campo.slug] = { value: null, confidence, manual: true }
+      } else if (letras && letras.noValidas.length > 0) {
+        result[campo.slug] = { value, confidence, manual: true, letras_no_validas: letras.noValidas }
       } else {
         result[campo.slug] = { value, confidence, manual: false }
       }
+    }
+
+    // Lo leído contra la capa de texto del PDF (si la trae): la IA confunde «rn» con
+    // «m» mirando la imagen, el texto no. Un escaneo no trae capa y no cambia nada.
+    if (normalizedMime === 'application/pdf') {
+      await verificarConCapaDeTexto(buffer, campos, result)
     }
 
     return { data: result }

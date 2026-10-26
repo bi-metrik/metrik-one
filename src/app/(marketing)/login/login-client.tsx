@@ -3,6 +3,11 @@
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
+import AnimacionMarca, { type VarianteMarca } from '@/components/marca/animacion-marca'
+import { marcarIntroVista, varianteDeIntro } from '@/components/marca/intro-de-sesion'
+import { TEXTOS_LOGIN } from '@/lib/acceso-espacio/textos'
+import { slugDeEntrada } from '@/lib/acceso-espacio/direcciones'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 
 const FONT = 'var(--font-schibsted), sans-serif'
 const BASE_DOMAIN = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'localhost:3000'
@@ -28,6 +33,9 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
 
   // Selector de espacio (modo bare)
   const [slug, setSlug] = useState('')
+  // La vía «te enviamos la dirección a tu correo» (modo bare)
+  const [recuperar, setRecuperar] = useState<'no' | 'pedir' | 'enviado'>('no')
+  const [correoRecuperar, setCorreoRecuperar] = useState('')
 
   // Magic link (modo tenant)
   const [email, setEmail] = useState('')
@@ -38,6 +46,10 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
   // Codigo de ingreso (modo tenant). Ver el comentario de `handleCodigo`.
   const [codigo, setCodigo] = useState('')
   const [verificando, setVerificando] = useState(false)
+  // Que variante de la marca acompaña la entrada mientras se valida el codigo y carga
+  // la primera pantalla. Se decide al enviar: la intro completa solo la primera vez
+  // de la sesion (ver `intro-de-sesion.ts`).
+  const [varianteEntrada, setVarianteEntrada] = useState<VarianteMarca>('liviana')
 
   useEffect(() => {
     const baseHost = BASE_DOMAIN.split(':')[0]
@@ -50,12 +62,33 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
   const handleGoToWorkspace = (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    const clean = slug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '')
+    const clean = slugDeEntrada(slug, BASE_DOMAIN)
     if (!clean) {
-      setError('Escribe el nombre de tu espacio')
+      setError(TEXTOS_LOGIN.faltaEspacio)
       return
     }
     window.location.href = `https://${clean}.${BASE_DOMAIN}/login`
+  }
+
+  // «¿No sabes la dirección de tu espacio?»: la respuesta es la misma exista o no la cuenta. Solo un
+  // correo mal escrito (422) o una falla de red se dicen en pantalla.
+  const handleRecuperar = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetchPropio('/api/acceso/recuperar-espacio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ correo: correoRecuperar }),
+      })
+      if (res.status === 422) setError(TEXTOS_LOGIN.correoInvalido)
+      else if (!res.ok) setError(TEXTOS_LOGIN.errorRed)
+      else setRecuperar('enviado')
+    } catch {
+      setError(TEXTOS_LOGIN.errorRed)
+    }
+    setLoading(false)
   }
 
   // Pass redirectTo through to auth callback
@@ -109,6 +142,7 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
    */
   const handleCodigo = async (e: React.FormEvent) => {
     e.preventDefault()
+    setVarianteEntrada(varianteDeIntro())
     setVerificando(true)
     setError('')
 
@@ -124,6 +158,8 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
       return
     }
 
+    // Se marca solo al validar: un codigo mal escrito no gasta la intro.
+    marcarIntroVista()
     window.location.href = redirectTo || '/'
   }
 
@@ -161,6 +197,12 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
 
   // --- Modo dominio pelado: selector de espacio (siempre marca MéTRIK) ---
   if (mode === 'bare') {
+    const T = TEXTOS_LOGIN
+    const campo =
+      'h-11 w-full min-w-0 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none'
+    const boton =
+      'inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+    const enRecuperar = recuperar !== 'no'
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
         <div className="w-full max-w-sm space-y-8">
@@ -168,47 +210,99 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
             <MetrikLockup size="md" linkTo="/" />
             <div className="space-y-1 text-center">
               <h1 className="text-xl font-bold text-foreground" style={{ fontFamily: FONT }}>
-                Iniciar sesion
+                {enRecuperar ? T.recuperarTitulo : T.titulo}
               </h1>
               <p className="text-sm text-muted-foreground">
-                Ingresa el nombre de tu espacio de trabajo
+                {enRecuperar ? T.recuperarSubtitulo : T.subtitulo}
               </p>
             </div>
           </div>
 
-          <form onSubmit={handleGoToWorkspace} className="space-y-4">
-            <div className="space-y-2">
-              <label htmlFor="slug" className="text-sm font-medium text-foreground">
-                Tu espacio
-              </label>
-              <div className="flex items-center rounded-lg border border-border bg-background focus-within:ring-2 focus-within:ring-primary/30">
+          {!enRecuperar && (
+            <form onSubmit={handleGoToWorkspace} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="slug" className="text-sm font-medium text-foreground">
+                  {T.etiquetaEspacio}
+                </label>
+                <div className="flex items-center rounded-lg border border-border bg-background focus-within:ring-2 focus-within:ring-primary/30">
+                  <input
+                    id="slug"
+                    type="text"
+                    placeholder="tuempresa"
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    autoFocus
+                    required
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-describedby="slug-ayuda"
+                    className={`${campo} rounded-l-lg`}
+                  />
+                  <span className="shrink-0 px-3 text-sm text-muted-foreground">.{BASE_DOMAIN}</span>
+                </div>
+                <p id="slug-ayuda" className="text-xs text-muted-foreground">
+                  {T.ayudaEspacio}
+                </p>
+              </div>
+
+              {error && <p className="text-sm text-red-500">{error}</p>}
+
+              <button type="submit" className={boton}>
+                {T.botonContinuar}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setRecuperar('pedir'); setError('') }}
+                className="w-full text-center text-sm text-muted-foreground underline"
+              >
+                {T.enlaceRecuperar}
+              </button>
+            </form>
+          )}
+
+          {recuperar === 'pedir' && (
+            <form onSubmit={handleRecuperar} className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="correo-recuperar" className="text-sm font-medium text-foreground">
+                  {T.etiquetaCorreo}
+                </label>
                 <input
-                  id="slug"
-                  type="text"
-                  placeholder="tuempresa"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
+                  id="correo-recuperar"
+                  type="email"
+                  placeholder="ana@ejemplo.com"
+                  value={correoRecuperar}
+                  onChange={(e) => setCorreoRecuperar(e.target.value)}
                   autoFocus
                   required
-                  className="h-11 w-full min-w-0 rounded-l-lg bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none"
+                  className={`${campo} rounded-lg border border-border focus-visible:ring-2 focus-visible:ring-primary/30`}
                 />
-                <span className="shrink-0 px-3 text-sm text-muted-foreground">.{BASE_DOMAIN}</span>
               </div>
-            </div>
 
-            {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm text-red-500">{error}</p>}
 
+              <button type="submit" disabled={loading} className={boton}>
+                {loading ? T.enviando : T.botonEnviar}
+              </button>
+            </form>
+          )}
+
+          {recuperar === 'enviado' && (
+            <p role="status" className="rounded-lg border border-border px-4 py-3 text-sm text-foreground">
+              {T.respuestaNeutra}
+            </p>
+          )}
+
+          {enRecuperar && (
             <button
-              type="submit"
-              className="inline-flex h-11 w-full items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              type="button"
+              onClick={() => { setRecuperar('no'); setError('') }}
+              className="w-full text-center text-sm text-muted-foreground underline"
             >
-              Continuar
+              {T.volver}
             </button>
-          </form>
-
-          <p className="text-center text-xs text-muted-foreground">
-            Ingresa siempre desde la direccion de tu espacio. Si no la conoces, escribe a quien administra tu cuenta.
-          </p>
+          )}
         </div>
       </div>
     )
@@ -269,6 +363,17 @@ export default function LoginClient({ tenantBranding }: LoginClientProps) {
 
           {metrikSignature}
         </div>
+
+        {/* La espera real de entrar: validar el codigo y cargar la primera pantalla. La
+            marca aparece pasados 300 ms (un codigo errado vuelve antes y no la muestra)
+            y se queda hasta que el navegador pinta la pantalla de destino. */}
+        {verificando && (
+          <AnimacionMarca
+            variante={varianteEntrada}
+            etiqueta="Entrando"
+            className="fixed inset-0 z-50 bg-background"
+          />
+        )}
       </div>
     )
   }

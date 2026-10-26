@@ -107,3 +107,22 @@ en CI; local no se vio porque solo corrí las suites tocadas.
 **How to apply:** al escribir copy con «N años» (edades de Trappvel, antigüedades), agregar
 el archivo a `CLASIFICACION` como `no-es-plazo` con su razón en el mismo PR, y correr
 `retencion.test.ts` antes de pushear.
+
+## ⚠️ El barrido alcanza TODO el repo, migraciones incluidas, y un archivo nuevo sin clasificar lo tumba
+
+`retencion.test.ts` barre `src/`, `supabase/` y `scripts/` (`.ts`, `.tsx`, `.sql`, `.mjs`,
+menos los `*.test.*`) buscando cualquier cifra de años, y **exige una entrada en
+`CLASIFICACION` por ruta de archivo**. «Clasificarlo es la decisión; el silencio no.»
+
+Mordió el 2026-10-05: una migración de Cardumen sembró como opciones de una pregunta los
+rangos `'1 a 3 años'` y `'3 a 7 años'`, y la prueba cayó pidiendo clasificarla. Se resolvió
+con una entrada `no-es-plazo` (hay precedente idéntico: los rangos de antigüedad del
+onboarding).
+
+**How to apply:**
+- Un archivo nuevo con una cifra de años —aunque sea el enunciado de una encuesta— necesita su
+  entrada. **La llave es la RUTA**: renumerar una migración ya clasificada vuelve a tumbar la
+  prueba, lo cual es el comportamiento correcto.
+- ⚠️ **Correr solo las pruebas de la carpeta que se tocó NO ve esto.** Es una prueba de `src/`
+  que falla por un archivo de `supabase/migrations/`. El gate de CI es `npm test` completo:
+  antes de dar por verde una rama con migración nueva, correr la suite entera.

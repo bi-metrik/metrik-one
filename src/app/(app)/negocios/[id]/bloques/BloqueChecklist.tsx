@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CheckSquare, Square, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueItem, marcarBloqueCompleto, inicializarBloqueItems } from '../../negocio-v2-actions'
@@ -44,7 +45,7 @@ export default function BloqueChecklist({
   withSupport = false,
 }: BloqueChecklistProps) {
   const [items, setItems] = useState<BloqueItem[]>(initialItems)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [initializing, setInitializing] = useState(false)
   // Si la plantilla no se pudo materializar, la pantalla no puede decir "sin ítems
   // configurados": la config SÍ los declara.

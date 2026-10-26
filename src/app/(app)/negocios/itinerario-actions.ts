@@ -3,10 +3,22 @@
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
-import { diaDeItem, puedeLlevarDia, puedeSerSugerido } from '@/lib/cotizaciones/dia-relativo'
+import { diaDeItem, esHotelDeLaCotizacion, esVueloDeLaCotizacion, puedeLlevarDia, puedeQuedarFueraDelPrecio, soloVaONoVa } from '@/lib/cotizaciones/dia-relativo'
+import {
+  cambiosDeActividad,
+  esActividad,
+  estadoDeActividad,
+  estadoDeVuelo,
+  motivoDiaInvalido,
+  type EstadoActividad,
+  type PedidoActividad,
+} from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { UMBRALES_MARGEN_POR_DEFECTO, type UmbralesMargen } from '@/lib/cotizaciones/convencion-margen'
 import {
+  itemsDelItinerario,
   normalizarGrupo,
   ranurasCombinables,
   ranurasNoCombinables,
@@ -99,7 +111,17 @@ export interface EstadoItinerarios {
    * Entran en todos los itinerarios y aportan UNA vez. `aporta` es el nombre del que
    * suma; `fuera`, los que quedan afuera del total.
    */
-  fijosConAlternativas: { grupo: string; aporta: string | null; fuera: string[] }[]
+  fijosConAlternativas: {
+    grupo: string
+    aporta: string | null
+    fuera: string[]
+    /**
+     * Cuando alguna tarifa NOMBRA una opción de este servicio (lo escribe la cotización por
+     * pasos, C2), ya no hay un supuesto: cada tarifa cobra la suya, y la lectura lo respeta
+     * (`itemsDelItinerario`). Aquí va cuál cobra cada una. Ausente = el supuesto de siempre.
+     */
+    porTarifa?: { tarifa: string; opcion: string }[]
+  }[]
   itinerarios: ItinerarioCalculado[]
   umbrales: UmbralesMargen
   /**
@@ -194,6 +216,16 @@ export async function getEstadoItinerarios(cotizacionId: string): Promise<Estado
   const filas = await leerItinerarios(supabase, cotizacionId)
   if (filas === null) {
     return { ...vacio, ranuras, fijosConAlternativas, umbrales: ctx.umbrales, tablasAusentes: true }
+  }
+  // Si alguna tarifa nombra una opción de un servicio que no se cruza, el aviso dice cuál cobra
+  // cada tarifa en vez del supuesto (la lectura ya la cobra así: nota técnica de Max §2).
+  for (const f of fijosConAlternativas) {
+    const candidatos = ranurasNoCombinables(ctx.items).find(r => r.grupo === f.grupo)?.candidatos ?? []
+    if (!filas.some(t => t.seleccion.some(id => candidatos.includes(id)))) continue
+    ;(f as { porTarifa?: { tarifa: string; opcion: string }[] }).porTarifa = filas.map((t, i) => {
+      const cobra = itemsDelItinerario(ctx.items, t.seleccion).find(id => candidatos.includes(id)) ?? null
+      return { tarifa: (t.nombre ?? '').trim() || `Tarifa ${i + 1}`, opcion: (cobra && nombreDe(cobra)) || 'Sin nombre' }
+    })
   }
 
   return {
@@ -780,10 +812,17 @@ export async function actualizarRanuraDeItem(
       .eq('id', itemId)
       .maybeSingle()
     actual = data
-    if (
-      actual?.entra_al_precio === false &&
-      !puedeSerSugerido({ id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual.es_ajuste ?? false })
-    ) {
+    const destino = { id: itemId, grupo: patch.grupo as string | null, es_ajuste: actual?.es_ajuste ?? false }
+    const origen = { id: itemId, grupo: (actual?.grupo ?? null) as string | null, es_ajuste: actual?.es_ajuste ?? false }
+    // Un vuelo que no va solo cambia a otra ranura de vuelo: una sugerencia que pasara a vuelo
+    // dejaría de salir en «Opcionales» sin que nadie lo pidiera (brief del 2026-10-08).
+    // Lo mismo para un hotel que no va (cotización por pasos): solo a otro hotel.
+    const destinoValido = esVueloDeLaCotizacion(destino)
+      ? esVueloDeLaCotizacion(origen)
+      : esHotelDeLaCotizacion(destino)
+        ? esHotelDeLaCotizacion(origen)
+        : puedeQuedarFueraDelPrecio(destino)
+    if (actual?.entra_al_precio === false && !destinoValido) {
       return {
         success: false,
         error: 'Esta línea está fuera del precio. Márcala para que entre al precio antes de cambiarle el grupo.',
@@ -883,6 +922,10 @@ export async function actualizarDiaDeItem(
   if (!item) return { success: false, error: 'La línea no existe o no es de este workspace.' }
 
   if (patch.dia_relativo !== undefined && patch.dia_relativo !== null) {
+    // Brief del 2026-10-05, punto 3 · un día fuera del viaje (1 a N) no se guarda. Sin las dos
+    // fechas en el negocio no hay tope: se escribe el número (punto 1).
+    const fueraDelViaje = await motivoDiaFueraDelViaje(supabase, item.cotizacion_id as string | null, patch.dia_relativo as number)
+    if (fueraDelViaje) return { success: false, error: fueraDelViaje }
     if (!puedeLlevarDia({ id: itemId, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false })) {
       // Un vuelo o un hotel se cruzan en la tabla de combinaciones: su sitio en el
       // documento lo decide el itinerario elegido, no un día. El ítem de cuadre es
@@ -910,7 +953,9 @@ export async function actualizarDiaDeItem(
 
   const tocaElInterruptor = patch.entra_al_precio !== undefined || patch.dia_relativo !== undefined
   if (tocaElInterruptor && quedaria.entra_al_precio === false) {
-    if (!puedeSerSugerido(quedaria)) {
+    // El vuelo NO sale del precio por aquí: tiene su check (`marcarActividadEnCotizacion`), que
+    // lo saca también de «Opcionales». Por este camino quedaría como una sugerencia a la vista.
+    if (!puedeQuedarFueraDelPrecio(quedaria) || soloVaONoVa(quedaria)) {
       return {
         success: false,
         error:
@@ -943,7 +988,101 @@ export async function actualizarDiaDeItem(
   return { success: true }
 }
 
+/**
+ * El check «Va en la cotización» de una actividad y si va Incluida u Opcional (brief del
+ * 2026-10-05, punto 0, `actividad-en-cotizacion.ts`).
+ *
+ *  · Quitar el check: deja de sumar y de salir en el documento, y conserva su día. Se anota cómo
+ *    era (`tarifa_pax.noVa`) para que al marcarla vuelva igual.
+ *  · Opcional: no suma y conserva su día (no sale en «Día a día»); sale en «Opcionales» con su
+ *    precio. Al volver a Incluida recupera el día (brief del 2026-10-05, «actividades tras la
+ *    limpieza», punto 2).
+ *  · Incluida: suma; el día se elige en la tarjeta.
+ *
+ * Mueve plata, así que recalcula el total aquí mismo, como el interruptor de siempre.
+ *
+ * Desde el brief del 2026-10-08 («vuelos de punta a punta», punto 2) un VUELO también lleva el
+ * check, sin «Opcional»: quitado no suma, no entra a ninguna tarifa (`ranurasConAlternativas` lo
+ * deja fuera de su ranura) y no sale en el documento; puesto, vuelve como estaba.
+ *
+ * ⚠️ El grupo se lee de la BASE: solo una actividad o un vuelo tienen este control. Un hotel o
+ * una línea sin grupo no pueden salir del precio por aquí.
+ */
+export async function marcarActividadEnCotizacion(
+  itemId: string,
+  pedido: PedidoActividad,
+): Promise<{ success: boolean; error?: string; estado?: EstadoActividad }> {
+  const { supabase, error, userId } = await getWorkspace()
+  if (error) return { success: false, error: 'No autenticado' }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  const { data: item, error: errLee } = await sb
+    .from('items')
+    .select('*, cotizaciones(estado)')
+    .eq('id', itemId)
+    .maybeSingle()
+  if (errLee) return { success: false, error: errLee.message }
+  if (!item) return { success: false, error: 'La actividad no existe o no es de este workspace.' }
+  const estadoCot = ((item.cotizaciones ?? {}) as { estado?: string }).estado ?? 'borrador'
+  if (!isEditable(estadoCot as EstadoCotizacion)) {
+    return { success: false, error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
+  }
+  const vuelo = esVueloDeLaCotizacion({ id: itemId, grupo: item.grupo ?? null, es_ajuste: item.es_ajuste ?? false })
+  if ((!esActividad(item.grupo ?? null) && !vuelo) || item.es_ajuste === true) {
+    return { success: false, error: 'Solo una actividad o un vuelo se marcan como que van o no van.' }
+  }
+  if (vuelo && 'modo' in pedido) {
+    return { success: false, error: 'Un vuelo va o no va en la cotización: no puede ser opcional.' }
+  }
+
+  const estado = vuelo ? estadoDeVuelo(item) : estadoDeActividad(item)
+  const dia = diaDeItem({ id: itemId, dia_relativo: item.dia_relativo ?? null })
+  const tarifaCruda = (item.tarifa_pax && typeof item.tarifa_pax === 'object' ? item.tarifa_pax : {}) as Record<string, unknown>
+  // Un vuelo solo pudo haber estado incluido: al volver, vuelve incluido.
+  const era = vuelo ? 'incluida' : leerTarifaPax(item.tarifa_pax).noVa?.era ?? null
+  const cambios = cambiosDeActividad({ estado, dia, era }, pedido)
+  if (!cambios) return { success: true, estado }
+
+  // La marca se escribe sobre la tarifa CRUDA: es un dato más de la línea, no una relectura.
+  const tarifa: Record<string, unknown> = { ...tarifaCruda }
+  if (cambios.noVa) {
+    const { data: perfil } = await sb.from('profiles').select('full_name').eq('id', userId).maybeSingle()
+    tarifa.noVa = {
+      era: cambios.noVa.era,
+      por: (perfil?.full_name as string | null | undefined)?.trim() || null,
+      porId: userId ?? null,
+      en: new Date().toISOString(),
+    }
+  } else {
+    delete tarifa.noVa
+  }
+  const patch: Record<string, unknown> = {
+    entra_al_precio: cambios.entra_al_precio,
+    mostrar_en_sugeridos: cambios.mostrar_en_sugeridos,
+    // Sin tarifa guardada y sin marca que poner, la columna se queda como estaba.
+    ...(item.tarifa_pax || cambios.noVa ? { tarifa_pax: tarifa } : {}),
+  }
+  const { error: errUpd } = await sb.from('items').update(patch).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+
+  if (cambios.entra_al_precio !== (item.entra_al_precio !== false) && item.cotizacion_id) {
+    await recalcularTotales(item.cotizacion_id as string)
+  }
+  return { success: true, estado: vuelo ? estadoDeVuelo(cambios) : estadoDeActividad(cambios) }
+}
+
 // ── Interno ──────────────────────────────────────────────────────────────────
+
+/** Por qué un día no se guarda: fuera de los días del viaje del negocio. `null` = sí se guarda. */
+async function motivoDiaFueraDelViaje(supabase: unknown, cotizacionId: string | null, dia: number): Promise<string | null> {
+  if (!cotizacionId) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: cot } = await (supabase as any).from('cotizaciones').select('negocio_id').eq('id', cotizacionId).maybeSingle()
+  const negocioId = (cot?.negocio_id ?? null) as string | null
+  if (!negocioId) return null
+  const { viaje } = await leerViajeDelNegocio(supabase, negocioId)
+  return motivoDiaInvalido(dia, viaje.fechas)
+}
 
 const ERROR_TABLAS_AUSENTES =
   'Los itinerarios todavía no están disponibles en esta base: falta aplicar la migración 20260914200000_cotizacion_itinerarios.sql'

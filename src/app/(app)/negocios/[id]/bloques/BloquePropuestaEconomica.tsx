@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useRouter } from 'next/navigation'
 import { Download, FileText, CheckCircle2, AlertCircle, Loader2, RefreshCw, Lock, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -9,9 +11,20 @@ import {
   aprobarVersionPropuesta,
   corregirAprobacion,
   revertirAprobacionPropuesta,
+  getTarifaPropuesta,
+  type TarifaPropuestaVista,
 } from '@/lib/actions/propuesta-economica-actions'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
+import { useIntencion } from '@/hooks/use-intencion'
+import {
+  describirFueraDeTarifa,
+  fueraDeTarifa,
+  MOTIVO_MAX,
+  ROLES_DESCUENTO_ALTO,
+} from '@/lib/propuesta/gate-descuento'
 
 interface PropuestaVersion {
   n: number
@@ -25,6 +38,13 @@ interface PropuestaVersion {
   pdf_url: string | null
   generated_at: string
   generated_by: string | null
+  /** Presentes solo si la versión se armó con tarifas por plan y ruta. */
+  tarifa_version_id?: string
+  tarifa_version?: number
+  base_plan1?: number | null
+  base_plan2?: number | null
+  planes_ofrecidos?: Array<1 | 2>
+  cap_descuento_pct?: number
 }
 
 interface PropuestaData {
@@ -46,6 +66,10 @@ interface PropuestaData {
   aprobado_honorario?: number | null
   /** Servicio congelado al aprobar, al lado de `aprobado_plan`. */
   aprobado_servicio?: string | null
+  /** Aprobada fuera de la tarifa (solo con tarifas): motivo y cuánto se apartó. */
+  aprobado_fuera_de_tarifa?: { motivo: string; descuento_pct: number; base: number; cap: number } | null
+  /** Versión de tarifas con la que se armó (ausente = esquema anterior). */
+  tarifa?: { version_id: string; version: number } | null
 }
 
 interface ConfigExtra {
@@ -114,16 +138,79 @@ function nombreServicio(servicio: string | null | undefined): string {
   return servicio || 'sin declarar'
 }
 
-export default function BloquePropuestaEconomica({
+type TarifaVigente = Extract<TarifaPropuestaVista, { esquema: 'tarifas' }>
+
+/** Planes de una versión que se pueden aprobar. Versiones del esquema anterior: los dos. */
+function planesDe(v: PropuestaVersion | undefined): Array<1 | 2> {
+  return v?.planes_ofrecidos ?? [1, 2]
+}
+
+/**
+ * La tarifa que rige la propuesta la decide el servidor (versión vigente el día en que
+ * se creó el negocio, ruta declarada hoy). Se pide antes de pintar el cuerpo porque los
+ * valores iniciales de los planes dependen de ella. Una propuesta ya emitida con el
+ * esquema anterior no la necesita: ese esquema no cambia, así que no se pregunta.
+ */
+export default function BloquePropuestaEconomica(props: Props) {
+  const data = (props.instancia?.data ?? {}) as PropuestaData
+  const nVersiones = (data.versiones ?? []).length
+  const esquemaAnteriorSeguro = nVersiones > 0 && !data.tarifa
+  const servicioVigente = props.configExtra._servicioVigente ?? null
+  const [tarifa, setTarifa] = useState<TarifaVigente | null | 'cargando'>(
+    esquemaAnteriorSeguro ? null : 'cargando',
+  )
+
+  useEffect(() => {
+    if (esquemaAnteriorSeguro) return
+    let vivo = true
+    conReintentoDeRed(() => getTarifaPropuesta(props.negocioBloqueId)).then(res => {
+      if (!vivo) return
+      if (!res.ok) {
+        toast.error(res.error)
+        setTarifa(null)
+        return
+      }
+      setTarifa(res.tarifa.esquema === 'tarifas' ? res.tarifa : null)
+    }).catch(e => {
+      if (!vivo) return
+      toast.error(mensajeDeFallaDeCarga(e, 'No se pudieron cargar las tarifas'))
+      setTarifa(null)
+    })
+    return () => { vivo = false }
+    // La ruta (`servicioVigente`) y las versiones cambian lo que rige: se vuelve a pedir.
+  }, [props.negocioBloqueId, esquemaAnteriorSeguro, servicioVigente, nVersiones])
+
+  if (tarifa === 'cargando') {
+    return (
+      <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Cargando tarifas…
+      </div>
+    )
+  }
+  // La llave reinicia el cuerpo cuando cambia la ruta o la versión: los valores de los
+  // planes se recalculan desde la tarifa nueva en vez de arrastrar los de antes.
+  return (
+    <CuerpoPropuesta
+      key={tarifa ? `${tarifa.version.id}:${tarifa.ruta ?? ''}` : 'anterior'}
+      {...props}
+      tarifa={tarifa}
+    />
+  )
+}
+
+function CuerpoPropuesta({
   negocioBloqueId,
   negocioId,
   instancia,
   modo,
   configExtra,
   userRole,
-}: Props) {
+  tarifa,
+}: Props & { tarifa: TarifaVigente | null }) {
   // Corrección del valor aprobado (no genera versión ni PDF: ver la action).
   const [corrigiendoValor, setCorrigiendoValor] = useState(false)
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [valorCorregido, setValorCorregido] = useState('')
   // El % de la correccion vive aparte del precio, igual que en `PlanEditor`: los dos
   // se editan y cada uno reescribe al otro, y el que se teclea conserva su texto.
@@ -134,23 +221,40 @@ export default function BloquePropuestaEconomica({
   // Reversión de la aprobación (sí reabre el bloque: ver la action).
   const [revirtiendo, setRevirtiendo] = useState(false)
   const [motivoReversion, setMotivoReversion] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const router = useRouter()
+  // Generar una versión tarda (PDF + Drive) y cada intento crea una versión nueva: si la
+  // respuesta se pierde, se relee la ficha en vez de ofrecer generarla otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
   const data = (instancia?.data ?? {}) as PropuestaData
   const precioBase = data.precio_base_con_iva ?? 0
   const versiones = (data.versiones ?? []).slice().sort((a, b) => b.n - a.n)
   const aprobada = !!data.aprobado_at
-  const cap = configExtra.cap_descuento_pct ?? 50
   // Gate de descuento alto: sobre el umbral, aprobar requiere rol gerencial.
   const umbralAprobacion = configExtra.umbral_aprobacion_pct ?? null
-  const puedeAprobarAlto = ['owner', 'admin', 'supervisor'].includes(userRole ?? '')
+  const puedeAprobarAlto = ROLES_DESCUENTO_ALTO.includes(userRole ?? '')
+  // Motivo de aprobar un valor fuera de la tarifa (esquema de tarifas, SOE-004).
+  const [motivoFuera, setMotivoFuera] = useState('')
+
+  // ── Base de cada plan ─────────────────────────────────────────────────────
+  // Esquema anterior: los dos planes parten del mismo precio base y el tope es el del
+  // bloque. Con tarifas: cada plan parte de SU casilla (plan × ruta) y el tope es el de
+  // la versión de tarifas. Un plan que no se ofrece para la ruta no se edita ni se aprueba.
+  const conTarifas = tarifa !== null
+  const cap = conTarifas ? tarifa.cap_descuento_pct : configExtra.cap_descuento_pct ?? 50
+  const baseDe = (p: 1 | 2): number =>
+    conTarifas ? tarifa.planes.find(x => x.n === p)?.valor ?? 0 : precioBase
+  const ofrece = (p: 1 | 2): boolean =>
+    conTarifas ? tarifa.planes.find(x => x.n === p)?.ofrece === true : true
+  const nombrePlanTarifa = (p: 1 | 2, porDefecto: string): string =>
+    conTarifas ? tarifa.planes.find(x => x.n === p)?.nombre ?? porDefecto : porDefecto
 
   // Rango de precio válido según el cap de descuento (con IVA).
-  const precioMin = Math.round(precioBase * (1 - cap / 100)) // descuento = cap
-  const precioMax = Math.round(precioBase)                    // descuento = 0
+  const precioMinDe = (p: 1 | 2) => Math.round(baseDe(p) * (1 - cap / 100)) // descuento = cap
+  const precioMaxDe = (p: 1 | 2) => Math.round(baseDe(p))                    // descuento = 0
   // Conversores base ↔ % ↔ precio. El % conserva precisión (precio exacto manda).
-  const valorDeDesc = (d: number) => Math.round(precioBase * (1 - d / 100))
-  const descDeValor = (v: number) =>
-    precioBase > 0 ? Math.round((1 - v / precioBase) * 100 * 1e6) / 1e6 : 0
+  const valorDeDesc = (p: 1 | 2, d: number) => Math.round(baseDe(p) * (1 - d / 100))
+  const descDeValor = (p: 1 | 2, v: number) =>
+    baseDe(p) > 0 ? Math.round((1 - v / baseDe(p)) * 100 * 1e6) / 1e6 : 0
 
   // Inputs — defaults desde ultima version o desde data inicial
   const ultimaVersion = versiones[0]
@@ -164,9 +268,12 @@ export default function BloquePropuestaEconomica({
   // Strings visibles de los 4 inputs (permiten teclear libremente).
   const [desc1Str, setDesc1Str] = useState<string>(pctStr(desc1))
   const [desc2Str, setDesc2Str] = useState<string>(pctStr(desc2))
-  const [valor1Str, setValor1Str] = useState<string>(String(valorDeDesc(desc1)))
-  const [valor2Str, setValor2Str] = useState<string>(String(valorDeDesc(desc2)))
-  const [planSeleccionado, setPlanSeleccionado] = useState<1 | 2>(2)
+  const [valor1Str, setValor1Str] = useState<string>(String(valorDeDesc(1, desc1)))
+  const [valor2Str, setValor2Str] = useState<string>(String(valorDeDesc(2, desc2)))
+  const planesAprobables = planesDe(ultimaVersion)
+  const [planSeleccionado, setPlanSeleccionado] = useState<1 | 2>(
+    planesAprobables.includes(2) ? 2 : planesAprobables[0] ?? 2,
+  )
 
   // ── Handlers de edición bidireccional (%↔precio) ─────────────────────────
   // Editar el % recalcula el precio; editar el precio recalcula el %.
@@ -176,16 +283,16 @@ export default function BloquePropuestaEconomica({
     if (plan === 1) {
       setDesc1Str(raw)
       setDesc1(d)
-      setValor1Str(String(valorDeDesc(d)))
+      setValor1Str(String(valorDeDesc(1, d)))
     } else {
       setDesc2Str(raw)
       setDesc2(d)
-      setValor2Str(String(valorDeDesc(d)))
+      setValor2Str(String(valorDeDesc(2, d)))
     }
   }
   const onValor = (plan: 1 | 2, raw: string) => {
     const v = Number(raw) || 0
-    const d = descDeValor(v)
+    const d = descDeValor(plan, v)
     if (plan === 1) {
       setValor1Str(raw)
       setDesc1(d)
@@ -201,45 +308,69 @@ export default function BloquePropuestaEconomica({
   const descPlanSeleccionado = (planSeleccionado === 1
     ? ultimaVersion?.descuento_pct_plan1
     : ultimaVersion?.descuento_pct_plan2) ?? 0
-  const requiereAprobacionAlta = umbralAprobacion != null && descPlanSeleccionado > umbralAprobacion
+  // Con tarifas, un plan FUERA de la tarifa (recargo o más descuento que el tope de la
+  // versión) se puede emitir, pero solo lo aprueba un rol gerencial y con motivo. Es el
+  // aviso: la regla la aplica el servidor (`motivoAprobacionTarifaRechazada`).
+  const capUltima = Number(ultimaVersion?.cap_descuento_pct ?? NaN)
+  const seleccionFueraDeTarifa = !!ultimaVersion?.tarifa_version_id
+    && fueraDeTarifa(descPlanSeleccionado, capUltima)
+  const requiereAprobacionAlta = seleccionFueraDeTarifa
+    || (umbralAprobacion != null && descPlanSeleccionado > umbralAprobacion)
   const aprobacionBloqueada = requiereAprobacionAlta && !puedeAprobarAlto
+  const faltaMotivoFuera = seleccionFueraDeTarifa && puedeAprobarAlto && !motivoFuera.trim()
 
   // Recalculo en vivo (desde el descuento canónico). El React Compiler lo
   // auto-memoiza; no usamos useMemo manual (rompe con los helpers de conversión).
-  const plan1Valor = Math.round(precioBase * (1 - desc1 / 100))
-  const plan2Valor = Math.round(precioBase * (1 - desc2 / 100))
+  const plan1Valor = valorDeDesc(1, desc1)
+  const plan2Valor = valorDeDesc(2, desc2)
   const calc = {
-    base: precioBase,
     plan1: plan1Valor,
     plan2: plan2Valor,
     plan1_anticipo: Math.round(plan1Valor / 2),
     plan1_exito_iva: Math.round(plan1Valor / 2),
-    ahorro_plan1: precioBase - plan1Valor,
-    ahorro_plan2: precioBase - plan2Valor,
+    ahorro_plan1: baseDe(1) - plan1Valor,
+    ahorro_plan2: baseDe(2) - plan2Valor,
     desc1,
     desc2,
-    // Fuera de rango: descuento negativo (precio > base) o sobre el cap.
-    invalid1: desc1 < 0 || desc1 > cap,
-    invalid2: desc2 < 0 || desc2 > cap,
+    // Esquema anterior: fuera de rango (descuento negativo o sobre el cap) no se emite.
+    // Con tarifas se emite cualquier valor mayor que cero: lo que quede fuera de la
+    // tarifa lo frena la aprobación (rol gerencial + motivo), no la generación. Un plan
+    // que no se ofrece no se valida: no viaja.
+    invalid1: ofrece(1) && (conTarifas ? !(plan1Valor > 0) : desc1 < 0 || desc1 > cap),
+    invalid2: ofrece(2) && (conTarifas ? !(plan2Valor > 0) : desc2 < 0 || desc2 > cap),
+    fuera1: conTarifas && ofrece(1) && fueraDeTarifa(desc1, cap),
+    fuera2: conTarifas && ofrece(2) && fueraDeTarifa(desc2, cap),
   }
 
   const invalido = calc.invalid1 || calc.invalid2
 
+  // Con tarifas, una versión generada con OTRA ruta ya no vale: el valor de cada plan
+  // depende de la ruta. Se pide una versión nueva (que recalcula) antes de aprobar.
+  const rutaCambio = conTarifas && !!ultimaVersion?.tarifa_version_id
+    && (ultimaVersion.servicio ?? null) !== (tarifa.ruta ?? null)
+  const sinRuta = conTarifas && !tarifa.ruta
+  const ningunPlan = conTarifas && !ofrece(1) && !ofrece(2)
+
   // Detectar cambio vs ultima version
   const hayCambios = !ultimaVersion
-    || Math.abs(ultimaVersion.descuento_pct_plan1 - desc1) > 0.0001
-    || Math.abs(ultimaVersion.descuento_pct_plan2 - desc2) > 0.0001
+    || Math.abs(ultimaVersion.descuento_pct_plan1 - (ofrece(1) ? desc1 : 0)) > 0.0001
+    || Math.abs(ultimaVersion.descuento_pct_plan2 - (ofrece(2) ? desc2 : 0)) > 0.0001
+    || (conTarifas && ultimaVersion.tarifa_version_id !== tarifa.version.id)
+    || rutaCambio
 
   const handleGenerar = () => {
     if (invalido) {
-      toast.error(`El precio de cada plan debe estar entre ${formatCOP(precioMin)} y ${formatCOP(precioMax)} (descuento 0%–${cap}%)`)
+      toast.error(conTarifas
+        ? 'El valor de cada plan tiene que ser mayor que cero'
+        : `El descuento de cada plan debe estar entre 0% y ${cap}%`)
       return
     }
     startTransition(async () => {
       const res = await generarVersionPropuesta(negocioBloqueId, {
-        descuento_pct_plan1: calc.desc1,
-        descuento_pct_plan2: calc.desc2,
-      })
+        descuento_pct_plan1: ofrece(1) ? calc.desc1 : 0,
+        descuento_pct_plan2: ofrece(2) ? calc.desc2 : 0,
+      }, intencion.clave())
+      intencion.cerrar()
       if (res.ok) {
         if (res.warning) {
           toast.warning(`Versión v${res.version?.n} guardada (sin PDF)`, {
@@ -271,8 +402,14 @@ export default function BloquePropuestaEconomica({
       return
     }
     startTransition(async () => {
-      const res = await aprobarVersionPropuesta(negocioBloqueId, versionActiva, planSeleccionado)
+      const res = await aprobarVersionPropuesta(
+        negocioBloqueId,
+        versionActiva,
+        planSeleccionado,
+        seleccionFueraDeTarifa ? motivoFuera : null,
+      )
       if (res.ok) {
+        setMotivoFuera('')
         toast.success(`Propuesta aprobada — Plan ${planSeleccionado}`)
       } else {
         toast.error(res.error ?? 'Error aprobando propuesta')
@@ -308,6 +445,19 @@ export default function BloquePropuestaEconomica({
     const servicioVigente = configExtra._servicioVigente ?? null
     const servicioDivergente =
       !!servicioAprobado && !!servicioVigente && servicioAprobado !== servicioVigente
+    // Corrección: el descuento se mide contra la casilla del plan en la versión APROBADA
+    // (con tarifas) o contra el precio base (esquema anterior), con el tope de cada uno.
+    const versionConTarifas = !!versionMostrar?.tarifa_version_id
+    const capCorr = versionConTarifas ? Number(versionMostrar!.cap_descuento_pct ?? cap) : cap
+    const baseCorr = (p: 1 | 2): number =>
+      versionConTarifas
+        ? Number((p === 1 ? versionMostrar!.base_plan1 : versionMostrar!.base_plan2) ?? 0)
+        : precioBase
+    const planCorr: 1 | 2 = planCorregido ?? planAprobado ?? 2
+    const valorDeDescCorr = (d: number) => Math.round(baseCorr(planCorr) * (1 - d / 100))
+    // El plan va explícito porque al cambiarlo el estado todavía no se actualizó.
+    const descDeValorCorr = (v: number, p: 1 | 2 = planCorr) =>
+      baseCorr(p) > 0 ? Math.round((1 - v / baseCorr(p)) * 100 * 1e6) / 1e6 : 0
     return (
       <div className="space-y-3">
         {aprobada && versionMostrar && (
@@ -332,6 +482,13 @@ export default function BloquePropuestaEconomica({
                 {formatCOP(valorVersion!)}.
               </p>
             )}
+            {data.aprobado_fuera_de_tarifa && (
+              <p className="pl-6 text-xs text-green-800">
+                Aprobada fuera de la tarifa ({formatCOP(data.aprobado_fuera_de_tarifa.base)},{' '}
+                {describirFueraDeTarifa(data.aprobado_fuera_de_tarifa.descuento_pct, data.aprobado_fuera_de_tarifa.cap)}).
+                Motivo: {data.aprobado_fuera_de_tarifa.motivo}
+              </p>
+            )}
           </div>
         )}
         {servicioDivergente && (
@@ -340,7 +497,8 @@ export default function BloquePropuestaEconomica({
             <span>
               La propuesta se aprobó con <strong>{nombreServicio(servicioAprobado)}</strong> y
               hoy el negocio declara <strong>{nombreServicio(servicioVigente)}</strong>. El
-              alcance y la tarifa que promete el PDF salieron del primero.
+              alcance y la tarifa que promete el PDF salieron del primero, y el valor aprobado
+              no se recalcula solo.
             </span>
           </div>
         )}
@@ -385,7 +543,7 @@ export default function BloquePropuestaEconomica({
               onClick={() => {
                 const v = data.aprobado_honorario ?? valorAprobado ?? null
                 setValorCorregido(v !== null ? String(v) : '')
-                setDescCorregidoStr(v !== null ? pctStr(descDeValor(v)) : '')
+                setDescCorregidoStr(v !== null ? pctStr(descDeValorCorr(v)) : '')
                 setPlanCorregido(planAprobado ?? null)
                 setReCongelarServicio(false)
                 setCorrigiendoValor(true)
@@ -451,25 +609,31 @@ export default function BloquePropuestaEconomica({
           // ⚠️ El MISMO gate que exige la aprobacion, evaluado aqui para no ofrecer un
           // boton que el servidor va a rechazar. La regla vive en el servidor
           // (`gate-descuento`): esto es el aviso, no el control.
-          const descCorregido = valorValido && precioBase > 0 ? descDeValor(valorNum) : null
-          const fueraDeRango = descCorregido !== null && (descCorregido < 0 || descCorregido > cap)
-          const sobreUmbral =
-            descCorregido !== null && umbralAprobacion != null && descCorregido > umbralAprobacion
+          const descCorregido = valorValido && baseCorr(planCorr) > 0 ? descDeValorCorr(valorNum) : null
+          // Con tarifas, fuera de la tarifa se puede corregir con rol gerencial (el motivo
+          // ya es obligatorio aquí); en el esquema anterior sigue siendo un tope duro.
+          const fueraDeLaTarifaCorr = versionConTarifas && descCorregido !== null
+            && fueraDeTarifa(descCorregido, capCorr)
+          const fueraDeRango = !versionConTarifas && descCorregido !== null
+            && (descCorregido < 0 || descCorregido > capCorr)
+          const sobreUmbral = fueraDeLaTarifaCorr
+            || (descCorregido !== null && umbralAprobacion != null && descCorregido > umbralAprobacion)
           const bloqueadoPorUmbral = sobreUmbral && !puedeAprobarAlto
+          // Con tarifas, solo los planes que se ofrecían para la ruta aprobada.
           const PLANES: Array<{ n: 1 | 2; label: string }> = [
-            { n: 1, label: 'Plan 1 · 50/50' },
-            { n: 2, label: 'Plan 2 · pago anticipado' },
-          ]
+            { n: 1 as const, label: 'Plan 1 · 50/50' },
+            { n: 2 as const, label: 'Plan 2 · pago anticipado' },
+          ].filter(p => planesDe(versionMostrar).includes(p.n))
           // Editar el % reescribe el precio y viceversa, como en la creacion.
-          const onValorCorr = (raw: string) => {
+          const onValorCorr = (raw: string, p: 1 | 2 = planCorr) => {
             setValorCorregido(raw)
             const v = Number(raw)
-            setDescCorregidoStr(Number.isFinite(v) && precioBase > 0 ? pctStr(descDeValor(v)) : '')
+            setDescCorregidoStr(Number.isFinite(v) && baseCorr(p) > 0 ? pctStr(descDeValorCorr(v, p)) : '')
           }
           const onDescCorr = (raw: string) => {
             setDescCorregidoStr(raw)
             const d = Number(raw)
-            if (Number.isFinite(d) && precioBase > 0) setValorCorregido(String(valorDeDesc(d)))
+            if (Number.isFinite(d) && baseCorr(planCorr) > 0) setValorCorregido(String(valorDeDescCorr(d)))
           }
           const puedeGuardar =
             !!motivoCorreccion.trim()
@@ -492,7 +656,7 @@ export default function BloquePropuestaEconomica({
                     onClick={() => {
                       setPlanCorregido(p.n)
                       const v = valorDePlan(p.n)
-                      if (v !== null && v > 0) onValorCorr(String(v))
+                      if (v !== null && v > 0) onValorCorr(String(v), p.n)
                     }}
                     className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${
                       planCorregido === p.n
@@ -547,9 +711,9 @@ export default function BloquePropuestaEconomica({
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-sm text-amber-900/60">%</span>
                 </div>
               </div>
-              {precioBase > 0 && (
+              {baseCorr(planCorr) > 0 && (
                 <span className="text-[11px] text-amber-800">
-                  Rango {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+                  Rango {formatCOP(Math.round(baseCorr(planCorr) * (1 - capCorr / 100)))}–{formatCOP(baseCorr(planCorr))} · desc. máx {capCorr}%.
                 </span>
               )}
               {fueraDeRango && (
@@ -560,11 +724,19 @@ export default function BloquePropuestaEconomica({
               {bloqueadoPorUmbral && (
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-red-700">
                   <Lock className="h-3 w-3 shrink-0" />
-                  {pct2(descCorregido!)}% supera {umbralAprobacion}% — requiere un supervisor,
+                  {fueraDeLaTarifaCorr
+                    ? `Fuera de la tarifa (${describirFueraDeTarifa(descCorregido!, capCorr)})`
+                    : `${pct2(descCorregido!)}% supera ${umbralAprobacion}%`} — requiere un supervisor,
                   administrador o dueño, igual que al aprobar.
                 </span>
               )}
-              {sobreUmbral && puedeAprobarAlto && (
+              {fueraDeLaTarifaCorr && puedeAprobarAlto && (
+                <span className="text-[11px] text-amber-800">
+                  Fuera de la tarifa ({describirFueraDeTarifa(descCorregido!, capCorr)}); tu rol lo
+                  autoriza y el motivo queda en la historia del negocio.
+                </span>
+              )}
+              {!fueraDeLaTarifaCorr && sobreUmbral && puedeAprobarAlto && (
                 <span className="text-[11px] text-amber-800">
                   {pct2(descCorregido!)}% supera el umbral de {umbralAprobacion}%; tu rol lo
                   autoriza.
@@ -644,7 +816,7 @@ export default function BloquePropuestaEconomica({
   // ── Render editable ───────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      {precioBase === 0 ? (
+      {!conTarifas && precioBase === 0 ? (
         <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <span>
@@ -652,46 +824,107 @@ export default function BloquePropuestaEconomica({
             asociado con <code>precio_estandar</code> configurado.
           </span>
         </div>
+      ) : sinRuta || ningunPlan ? (
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            {sinRuta
+              ? 'Declara qué contrató el cliente: el valor de cada plan depende de la ruta del negocio.'
+              : `La ruta «${tarifa?.rutaNombre ?? tarifa?.ruta ?? ''}» no tiene ningún plan en las tarifas v${tarifa?.version.version}. Revísalas en Mi negocio → Mis servicios.`}
+          </span>
+        </div>
       ) : (
         <>
-          {/* Tarifa base de referencia */}
-          <div className="flex items-baseline justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">Tarifa base con IVA</span>
-            <span className="font-medium">{formatCOP(precioBase)}</span>
-          </div>
+          {/* Tarifa de referencia: la base única (esquema anterior) o la versión de
+              tarifas que rige este negocio con su ruta. */}
+          {conTarifas ? (
+            <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-muted-foreground">Ruta del negocio</span>
+                <span className="font-medium">{tarifa.rutaNombre ?? nombreServicio(tarifa.ruta)}</span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Tarifas v{tarifa.version.version}, vigentes para negocios creados desde el{' '}
+                {tarifa.version.vigente_desde.split('-').reverse().join('/')} · descuento máx {cap}%.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-baseline justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">Tarifa base con IVA</span>
+              <span className="font-medium">{formatCOP(precioBase)}</span>
+            </div>
+          )}
 
-          {/* Editor por plan: descuento % ↔ precio final (con IVA), sincronizados */}
+          {rutaCambio && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                La v{ultimaVersion?.n} se generó con <strong>{nombreServicio(ultimaVersion?.servicio)}</strong> y
+                hoy el negocio declara <strong>{tarifa?.rutaNombre ?? nombreServicio(tarifa?.ruta)}</strong>. Los
+                valores de abajo ya están recalculados: genera una versión nueva para poder aprobar.
+              </span>
+            </div>
+          )}
+
+          {/* Editor por plan: descuento % ↔ precio final (con IVA), sincronizados.
+              Un plan que no se ofrece para la ruta no aparece. */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <PlanEditor
-              titulo="Plan 1 (tarifa plena)"
-              descStr={desc1Str}
-              valorStr={valor1Str}
-              onDesc={raw => onDesc(1, raw)}
-              onValor={raw => onValor(1, raw)}
-              cap={cap}
-              precioMin={precioMin}
-              precioMax={precioMax}
-              invalid={calc.invalid1}
-            />
-            <PlanEditor
-              titulo="Plan 2 (pago anticipado)"
-              descStr={desc2Str}
-              valorStr={valor2Str}
-              onDesc={raw => onDesc(2, raw)}
-              onValor={raw => onValor(2, raw)}
-              cap={cap}
-              precioMin={precioMin}
-              precioMax={precioMax}
-              invalid={calc.invalid2}
-            />
+            {ofrece(1) && (
+              <PlanEditor
+                titulo={nombrePlanTarifa(1, 'Plan 1 (tarifa plena)')}
+                tarifa={conTarifas ? baseDe(1) : null}
+                descStr={desc1Str}
+                valorStr={valor1Str}
+                onDesc={raw => onDesc(1, raw)}
+                onValor={raw => onValor(1, raw)}
+                cap={cap}
+                precioMin={precioMinDe(1)}
+                precioMax={precioMaxDe(1)}
+                invalid={calc.invalid1}
+                fuera={calc.fuera1}
+              />
+            )}
+            {ofrece(2) && (
+              <PlanEditor
+                titulo={nombrePlanTarifa(2, 'Plan 2 (pago anticipado)')}
+                tarifa={conTarifas ? baseDe(2) : null}
+                descStr={desc2Str}
+                valorStr={valor2Str}
+                onDesc={raw => onDesc(2, raw)}
+                onValor={raw => onValor(2, raw)}
+                cap={cap}
+                precioMin={precioMinDe(2)}
+                precioMax={precioMaxDe(2)}
+                invalid={calc.invalid2}
+                fuera={calc.fuera2}
+              />
+            )}
           </div>
+          {conTarifas && (!ofrece(1) || !ofrece(2)) && (
+            <p className="text-xs text-muted-foreground">
+              {!ofrece(1) ? nombrePlanTarifa(1, 'El Plan 1') : nombrePlanTarifa(2, 'El Plan 2')} no se
+              ofrece para esta ruta.
+            </p>
+          )}
 
           {invalido && (
             <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>
-                El precio de cada plan debe estar entre {formatCOP(precioMin)} y {formatCOP(precioMax)}{' '}
-                (descuento entre 0% y {cap}%).
+                {conTarifas
+                  ? 'El valor de cada plan tiene que ser mayor que cero.'
+                  : `El descuento de cada plan debe estar entre 0% y ${cap}% de su tarifa.`}
+              </span>
+            </div>
+          )}
+          {!invalido && (calc.fuera1 || calc.fuera2) && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {[calc.fuera1 && `Plan 1: ${describirFueraDeTarifa(desc1, cap)}`, calc.fuera2 && `Plan 2: ${describirFueraDeTarifa(desc2, cap)}`]
+                  .filter(Boolean).join(' · ')}
+                . La propuesta se puede generar, pero ese plan solo lo aprueba un supervisor,
+                administrador o dueño, con un motivo que queda en la historia del negocio.
               </span>
             </div>
           )}
@@ -699,6 +932,7 @@ export default function BloquePropuestaEconomica({
           {/* Resumen calculado */}
           <div className="rounded-lg border bg-muted/30 p-3">
             <div className="grid grid-cols-2 gap-3 text-sm">
+              {ofrece(1) && (
               <div>
                 <p className="text-xs text-muted-foreground">
                   Plan 1 — Tarifa plena{calc.desc1 > 0 ? ` · ${pct2(calc.desc1)}% desc.` : ''}
@@ -716,15 +950,20 @@ export default function BloquePropuestaEconomica({
                   )}
                 </p>
               </div>
+              )}
+              {ofrece(2) && (
               <div>
                 <p className="text-xs text-muted-foreground">
                   Plan 2 — Pago anticipado{calc.desc2 > 0 ? ` · ${pct2(calc.desc2)}% desc.` : ''}
                 </p>
                 <p className="text-base font-medium text-green-700">{formatCOP(calc.plan2)}</p>
                 <p className="mt-1 text-xs text-green-700">
-                  Ahorro: {formatCOP(calc.ahorro_plan2)}
+                  {calc.ahorro_plan2 >= 0
+                    ? `Ahorro: ${formatCOP(calc.ahorro_plan2)}`
+                    : <span className="text-amber-700">{formatCOP(-calc.ahorro_plan2)} sobre la tarifa</span>}
                 </p>
               </div>
+              )}
             </div>
           </div>
 
@@ -754,6 +993,7 @@ export default function BloquePropuestaEconomica({
                   <legend className="px-1 text-[10px] uppercase tracking-wide text-muted-foreground">
                     Plan a aprobar
                   </legend>
+                  {planesAprobables.includes(1) && (
                   <label className="inline-flex items-center gap-1">
                     <input
                       type="radio"
@@ -764,6 +1004,8 @@ export default function BloquePropuestaEconomica({
                     />
                     <span>Plan 1 · {formatCOP(ultimaVersion!.valor_final_plan1)}</span>
                   </label>
+                  )}
+                  {planesAprobables.includes(2) && (
                   <label className="inline-flex items-center gap-1">
                     <input
                       type="radio"
@@ -774,11 +1016,16 @@ export default function BloquePropuestaEconomica({
                     />
                     <span>Plan 2 · {formatCOP(ultimaVersion!.valor_final_plan2)}</span>
                   </label>
+                  )}
                 </fieldset>
                 <button
                   onClick={handleAprobar}
-                  disabled={isPending || aprobacionBloqueada}
-                  title={aprobacionBloqueada ? `Descuentos sobre ${umbralAprobacion}% requieren aprobación gerencial` : undefined}
+                  disabled={isPending || aprobacionBloqueada || faltaMotivoFuera || rutaCambio || !planesAprobables.includes(planSeleccionado)}
+                  title={aprobacionBloqueada
+                    ? seleccionFueraDeTarifa
+                      ? 'Un valor fuera de la tarifa requiere aprobación gerencial'
+                      : `Descuentos sobre ${umbralAprobacion}% requieren aprobación gerencial`
+                    : faltaMotivoFuera ? 'Escribe el motivo de aprobar fuera de la tarifa' : undefined}
                   className="inline-flex items-center gap-1.5 rounded-md border border-green-600 bg-green-50 px-3 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-50"
                 >
                   <CheckCircle2 className="h-4 w-4" />
@@ -789,8 +1036,27 @@ export default function BloquePropuestaEconomica({
             {aprobacionBloqueada && (
               <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
                 <Lock className="h-3.5 w-3.5 shrink-0" />
-                El Plan {planSeleccionado} tiene {pct2(descPlanSeleccionado)}% de descuento — supera {umbralAprobacion}% y requiere aprobación de un supervisor, administrador o dueño.
+                {seleccionFueraDeTarifa
+                  ? `El Plan ${planSeleccionado} queda fuera de la tarifa (${describirFueraDeTarifa(descPlanSeleccionado, capUltima)}) y solo lo aprueba un supervisor, administrador o dueño.`
+                  : `El Plan ${planSeleccionado} tiene ${pct2(descPlanSeleccionado)}% de descuento — supera ${umbralAprobacion}% y requiere aprobación de un supervisor, administrador o dueño.`}
               </p>
+            )}
+            {seleccionFueraDeTarifa && puedeAprobarAlto && versiones.length > 0 && (
+              <div className="flex w-full flex-col gap-1">
+                <span className="text-xs text-amber-800">
+                  El Plan {planSeleccionado} queda fuera de la tarifa
+                  ({describirFueraDeTarifa(descPlanSeleccionado, capUltima)}). Tu rol lo puede
+                  aprobar; el motivo queda en la historia del negocio.
+                </span>
+                <input
+                  type="text"
+                  value={motivoFuera}
+                  maxLength={MOTIVO_MAX}
+                  onChange={e => setMotivoFuera(e.target.value)}
+                  placeholder="¿Por qué se aprueba fuera de la tarifa?"
+                  className="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-sm"
+                />
+              </div>
             )}
           </div>
         </>
@@ -817,6 +1083,7 @@ export default function BloquePropuestaEconomica({
 // ── Editor de un plan: descuento % ↔ precio final, enlazados ────────────────
 function PlanEditor({
   titulo,
+  tarifa = null,
   descStr,
   valorStr,
   onDesc,
@@ -825,8 +1092,11 @@ function PlanEditor({
   precioMin,
   precioMax,
   invalid,
+  fuera = false,
 }: {
   titulo: string
+  /** Valor de la casilla plan × ruta (con tarifas). `null` en el esquema anterior. */
+  tarifa?: number | null
   descStr: string
   valorStr: string
   onDesc: (raw: string) => void
@@ -835,11 +1105,16 @@ function PlanEditor({
   precioMin: number
   precioMax: number
   invalid: boolean
+  /** Con tarifas: el valor se emite, pero queda fuera de la tarifa (aprobación gerencial). */
+  fuera?: boolean
 }) {
-  const borde = invalid ? 'border-red-500' : ''
+  const borde = invalid ? 'border-red-500' : fuera ? 'border-amber-500' : ''
   return (
     <div className="rounded-md border bg-background/50 p-3">
-      <p className="mb-2 text-xs font-medium text-muted-foreground">{titulo}</p>
+      <p className="mb-2 flex items-baseline justify-between gap-2 text-xs font-medium text-muted-foreground">
+        <span>{titulo}</span>
+        {tarifa != null && <span>Tarifa {formatCOP(tarifa)}</span>}
+      </p>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="mb-1 block text-[11px] text-muted-foreground">Descuento</label>
@@ -875,7 +1150,8 @@ function PlanEditor({
         </div>
       </div>
       <p className="mt-1.5 text-[11px] text-muted-foreground">
-        Edita el % o el precio: se sincronizan. Rango {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+        Edita el % o el precio: se sincronizan. {tarifa != null ? 'Tarifa' : 'Rango'} {formatCOP(precioMin)}–{formatCOP(precioMax)} · desc. máx {cap}%.
+        {tarifa != null && ' Fuera de ese rango lo aprueba un supervisor, administrador o dueño.'}
       </p>
     </div>
   )
@@ -929,11 +1205,15 @@ function VersionList({
                 </p>
               ) : (
                 <p className="font-medium">
-                  Plan 1: {formatCOP(v.valor_final_plan1)} · Plan 2: {formatCOP(v.valor_final_plan2)}
+                  {planesDe(v).map(n => `Plan ${n}: ${formatCOP(n === 1 ? v.valor_final_plan1 : v.valor_final_plan2)}`).join(' · ')}
                 </p>
               )}
               <p className="text-xs text-muted-foreground">
-                P1 {pct2(v.descuento_pct_plan1)}% · P2 {pct2(v.descuento_pct_plan2)}% ·{' '}
+                {planesDe(v).map(n => {
+                  const d = n === 1 ? v.descuento_pct_plan1 : v.descuento_pct_plan2
+                  return d < 0 ? `P${n} +${pct2(-d)}% sobre tarifa` : `P${n} ${pct2(d)}%`
+                }).join(' · ')}
+                {v.tarifa_version != null && ` · tarifas v${v.tarifa_version}`} ·{' '}
                 {formatFechaCorta(v.generated_at)}
                 {isAprobada && <span className="ml-2 text-green-700">· Aprobada</span>}
               </p>

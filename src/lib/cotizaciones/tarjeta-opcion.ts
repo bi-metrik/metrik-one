@@ -11,8 +11,9 @@
  */
 
 import { aAdicional, etiquetaDeAdicional, type FilaAdicional } from './adicionales'
-import { menoresDeDosAnios, precioPorHabitacion, type RepartoHabitaciones } from './habitaciones'
+import { habitacionesDeTarifa, menoresDeDosAnios, precioPorHabitacion, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
 import { precioConMargen, type ConvencionMargen } from './precio-item'
+import { composicionDeTexto, registroDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
 import {
   aPesos,
   cantidadDeTipo,
@@ -25,6 +26,7 @@ import {
   type CostoPorTipo,
   type PreciosAMano,
   type TarifaConfirmada,
+  type TarifaPax,
   type TipoPasajero,
 } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
@@ -165,7 +167,7 @@ export function filasDeCosto(a: {
       const precioUnitario = p?.precio ?? 0
       filas.push({
         clave: claveDeHabitacion(h.numero),
-        nombre: `Habitación ${h.numero}`,
+        nombre: h.nombre ?? `Habitación ${h.numero}`,
         det: ocupacionCorta(h.ocupacion),
         extra: false,
         adicionalId: null,
@@ -240,10 +242,21 @@ export interface ResumenAlojamiento {
   cupos: { texto: string; falta: boolean }[]
   /** «Falta» / «Faltan» y a quién: la caja ámbar que pide la habitación que falta. */
   falta: { verbo: 'Falta' | 'Faltan'; quien: string } | null
+  /**
+   * «Sobra» / «Sobran» y quiénes: las habitaciones que VAN cubren a más de los que viajan
+   * (la operadora eligió de más). Avisa, no frena.
+   */
+  sobra: { verbo: 'Sobra' | 'Sobran'; quien: string } | null
+  /** Las que van: suman al costo y salen al cliente. */
   habitaciones: number
+  /** Las que están en la opción y no van (de referencia): no suman ni salen al cliente. */
+  referencias: number
 }
 
 const habitacionesTexto = (n: number) => (n === 1 ? '1 habitación' : `${n} habitaciones`)
+
+/** «1 de referencia, no suma» / «2 de referencia, no suman». */
+export const referenciasTexto = (n: number) => `${n} de referencia, no ${n === 1 ? 'suma' : 'suman'}`
 
 /** Lo que falta, dicho como en el prototipo: «1 infante», «2 adultos y 1 niño». */
 function quienes(c: Composicion): string {
@@ -252,22 +265,70 @@ function quienes(c: Composicion): string {
 }
 
 export function resumenDeAlojamiento(r: RepartoHabitaciones): ResumenAlojamiento {
-  const n = r.habitaciones.filter(h => h.rol === 'habitacion').length
+  const van = r.habitaciones.filter(h => h.rol === 'habitacion')
+  // Un pantallazo con el registro de VARIAS habitaciones (`reserva-habitaciones.ts`) cuenta las
+  // suyas: «3 habitaciones», no «1 habitación». Sin registro, una captura es una habitación.
+  const n = van.reduce((a, h) => a + Math.max(1, registroDeReserva(h.lectura).length), 0)
   const g = r.grupo
   const falta = r.faltan && totalPasajeros(r.faltan) > 0
     ? { verbo: (totalPasajeros(r.faltan) === 1 ? 'Falta' : 'Faltan') as 'Falta' | 'Faltan', quien: quienes(r.faltan) }
     : null
-  const titulo = falta
-    ? `${habitacionesTexto(n)} · ${falta.verbo.toLowerCase()} ${falta.quien}`
-    : g ? `${habitacionesTexto(n)} · cubre a los ${totalPasajeros(g)} viajeros` : habitacionesTexto(n)
+  const sobra = r.sobran && totalPasajeros(r.sobran) > 0
+    ? { verbo: (totalPasajeros(r.sobran) === 1 ? 'Sobra' : 'Sobran') as 'Sobra' | 'Sobran', quien: quienes(r.sobran) }
+    : null
+  const referencias = r.habitaciones.length - van.length
+  const cuadre = [
+    falta ? `${falta.verbo.toLowerCase()} ${falta.quien}` : null,
+    sobra ? `${sobra.verbo.toLowerCase()} ${sobra.quien}` : null,
+  ].filter(Boolean).join(' · ')
+  const titulo = [
+    habitacionesTexto(n),
+    cuadre || (g ? `cubre a los ${totalPasajeros(g)} viajeros` : null),
+    referencias > 0 ? referenciasTexto(referencias) : null,
+  ].filter(Boolean).join(' · ')
   const cupos = g
     ? TIPOS_PASAJERO.filter(t => cantidadDeTipo(g, t) > 0).map(t => {
       const cubre = cantidadDeTipo(r.cubiertos, t)
       const total = cantidadDeTipo(g, t)
-      return { texto: `${cubre}/${total} ${PALABRAS[t][total === 1 ? 0 : 1]}`, falta: cubre < total }
+      return { texto: `${cubre}/${total} ${PALABRAS[t][total === 1 ? 0 : 1]}`, falta: cubre !== total }
     })
     : []
-  return { titulo, cupos, falta, habitaciones: n }
+  return { titulo, cupos, falta, sobra, habitaciones: n, referencias }
+}
+
+/**
+ * El aviso de pasajeros de una opción de hotel, con las MISMAS palabras en la tarjeta y en el
+ * resumen de Componentes (brief del 2026-10-01, punto 1: el resumen decía «1 completo» con la
+ * tarjeta pidiendo una habitación). `null` si las habitaciones que van cubren justo al grupo.
+ *
+ *  · `corto`: «Faltan 1 adulto y 1 infante», «Sobra 1 adulto».
+ *  · `frase`: lo que dice la caja de la tarjeta, con qué hacer.
+ */
+export function avisoDePasajeros(r: Pick<ResumenAlojamiento, 'falta' | 'sobra'>): { corto: string; frase: string } | null {
+  if (r.falta) {
+    const corto = `${r.falta.verbo} ${r.falta.quien}`
+    return { corto, frase: `${corto}: pega su habitación.` }
+  }
+  if (r.sobra) {
+    const corto = `${r.sobra.verbo} ${r.sobra.quien}`
+    // Brief del 2026-10-05: el check reemplaza los botones «Va / No va».
+    return { corto, frase: `${corto}: quítale el check a la habitación que no va.` }
+  }
+  return null
+}
+
+/**
+ * El aviso de pasajeros de una opción, desde su tarifa y el grupo del negocio: la misma cuenta
+ * que hace la tarjeta (`repartirHabitaciones` contra `composicionViaje ?? tarifa.composicion`).
+ * `null` si la opción no tiene habitaciones o si cuadra.
+ */
+export function avisoDePasajerosDeOpcion(
+  tarifa: TarifaPax,
+  grupo: Composicion | null,
+): { corto: string; frase: string } | null {
+  const habs = habitacionesDeTarifa(tarifa)
+  if (habs.length === 0) return null
+  return avisoDePasajeros(resumenDeAlojamiento(repartirHabitaciones(habs, grupo ?? tarifa.composicion ?? null, tarifa.correcciones)))
 }
 
 /** Las edades que dice el texto de ocupación de la captura, por tipo de menor. */
@@ -341,8 +402,49 @@ export function acomodacionDeHabitaciones(r: RepartoHabitaciones): string | null
 }
 
 /**
- * La nota de la habitación de solo adultos que ONE usa para restar: «ONE también la usa para
- * sacar el precio del niño (151.400) y del infante (22.000).» `null` si no sirve para restar.
+ * La línea de la lista de Revisar cuando una reserva de varias habitaciones en un solo pantallazo
+ * no cuadra con los viajeros: «Posada Enilda: las 3 habitaciones del pantallazo dejan por fuera a
+ * 2 adultos.» `null` si la opción no es una reserva así, o si cuadra. Avisa, no impide enviar.
+ */
+export function avisoDeReservaQueNoCuadra(
+  nombre: string,
+  tarifa: TarifaPax,
+  grupo: Composicion | null,
+): string | null {
+  const habs = habitacionesDeTarifa(tarifa)
+  const registro = habs.length === 1 ? registroDeReserva(habs[0].lectura) : []
+  if (registro.length === 0) return null
+  const r = resumenDeAlojamiento(repartirHabitaciones(habs, grupo ?? tarifa.composicion ?? null, tarifa.correcciones))
+  const n = registro.length
+  const hotel = (habs[0].lectura.identidad.hotel ?? '').trim() || nombre
+  if (r.falta) return `${hotel}: las ${n} habitaciones del pantallazo dejan por fuera a ${r.falta.quien}. Revisa la reserva con el proveedor.`
+  if (r.sobra) return `${hotel}: las ${n} habitaciones del pantallazo son para más gente de la que viaja (${r.sobra.verbo.toLowerCase()} ${r.sobra.quien}). Revisa la reserva con el proveedor.`
+  return null
+}
+
+/**
+ * Cada habitación de una reserva de varias en un solo pantallazo, con su ocupación en las palabras
+ * de ONE: «Doble 1: 2 adultos; Doble 2: 2 adultos; Doble 3: 2 adultos + 1 niño + 1 infante». Es el
+ * registro: el costo sigue siendo el total del pantallazo. Una habitación sin ocupación legible va
+ * con su texto tal cual, o solo con su nombre.
+ */
+export function textoDeHabitacionDeReserva(h: HabitacionDeReserva): string {
+  const c = composicionDeTexto(h.ocupacion)
+  const ocupacion = c ? ocupacionCorta(c) : h.ocupacion
+  return ocupacion ? `${h.nombre}: ${ocupacion}` : h.nombre
+}
+
+/** La acomodación de una reserva de varias habitaciones (`textoDeHabitacionDeReserva`). `null` sin registro. */
+export function acomodacionDeReserva(registro: readonly HabitacionDeReserva[]): string | null {
+  return registro.length >= 2 ? registro.map(textoDeHabitacionDeReserva).join('; ') : null
+}
+
+/**
+ * La nota de la habitación de solo adultos que ONE usa para restar: «También sirve para calcular
+ * cuánto pagan el niño ($151.400) y el infante ($22.000).» `null` si no sirve para restar.
+ *
+ * Brief del 2026-10-05, punto 16: «ONE la usa para sacar el precio del infante (0)» no se entendía.
+ * Texto propuesto a Noor: dice para qué sirve, en pesos, y sin el sujeto «ONE».
  */
 export function notaDeReferencia(
   sirveParaRestar: boolean,
@@ -353,9 +455,10 @@ export function notaDeReferencia(
   if (!sirveParaRestar || !porTipo) return null
   const partes = porTipo
     .filter(c => c.tipo !== 'adulto')
-    .map(c => `del ${PALABRAS[c.tipo][0]} (${mil(c.unitario)})`)
+    .map(c => `el ${PALABRAS[c.tipo][0]} (${pesos(c.unitario)})`)
   if (partes.length === 0) return null
-  return `ONE ${esHabitacion ? 'también ' : ''}la usa para sacar el precio ${partes.join(' y ')}.`
+  const verbo = partes.length === 1 ? 'paga' : 'pagan'
+  return `${esHabitacion ? 'También sirve' : 'Sirve'} para calcular cuánto ${verbo} ${partes.join(' y ')}.`
 }
 
 // ── La ficha ─────────────────────────────────────────────────────────────────
@@ -379,3 +482,23 @@ export function fechasDeEstadia(entrada: string | null | undefined, salida: stri
 
 /** «2 noches». */
 export const nochesTexto = (n: number | null | undefined) => (n && n > 0 ? `${n} ${n === 1 ? 'noche' : 'noches'}` : null)
+
+/**
+ * La pregunta antes de eliminar una opción desde su tarjeta. Lo que vuelve a la bandeja depende
+ * de qué es: un hotel devuelve sus habitaciones; las demás opciones, su pantallazo o los datos
+ * escritos a mano; sin nada leído, no vuelve nada (brief del 2026-10-05, «actividades tras la
+ * limpieza», punto 4: eliminar un traslado decía «Sus habitaciones vuelven a la bandeja»).
+ */
+export function preguntaEliminarOpcion(
+  nombre: string,
+  o: { esHotel: boolean; tieneLectura: boolean; manual: boolean },
+): string {
+  const vuelve = o.esHotel
+    ? ' Sus habitaciones vuelven a la bandeja.'
+    : !o.tieneLectura
+      ? ''
+      : o.manual
+        ? ' Sus datos vuelven a la bandeja.'
+        : ' Su pantallazo vuelve a la bandeja.'
+  return `¿Eliminas ${nombre} de este bloque?${vuelve}`
+}

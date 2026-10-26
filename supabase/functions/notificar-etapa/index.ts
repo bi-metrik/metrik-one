@@ -33,7 +33,18 @@ import {
   textoDeRecibos,
 } from '../_shared/recibos-del-aviso.ts';
 import { todayBogotaISO } from '../_shared/bogota.ts';
+import { htmlCorreoInterno } from '../_shared/correo-interno.ts';
+import { marcaDelWorkspace } from '../_shared/marca-workspace.ts';
 import { esDiaHabil, paisDelWorkspace, siguienteDiaHabil } from '../_shared/dias-habiles.ts';
+import {
+  type AvisoPrevio,
+  type BloquesDelHecho,
+  type Decision,
+  datosQueCitaElAviso,
+  decidirAvisoAlCliente,
+  ESTADOS_QUE_SALIERON,
+} from '../_shared/aviso-mismo-hecho.ts';
+import { lineaCasoHtml, valorDelCampo } from '../_shared/datos-opcionales-copy.ts';
 
 const FROM = 'MéTRIK ONE <noreply@metrikone.co>';
 
@@ -453,17 +464,8 @@ Deno.serve(async (req: Request) => {
     .replaceAll('{codigo}', negocio.codigo ?? '')
     .replaceAll('{etapa}', etapa?.nombre ?? '');
 
-  const html = `<!DOCTYPE html>
-<html lang="es"><body style="margin:0;padding:24px;background:#F5F4F2;font-family:Helvetica,Arial,sans-serif;color:#1A1A1A">
-  <div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:28px">
-    <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(etapa?.nombre ?? '')}</p>
-    <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
-    <p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:#374151">${escapar(mensaje)}</p>
-    <p style="margin:0 0 22px;font-size:13px;color:#6B7280">Negocio: <strong style="color:#1A1A1A">${escapar(etiqueta ?? '')}</strong></p>
-    <a href="${link}" style="display:inline-block;background:#10B981;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-size:14px;font-weight:600">Abrir el negocio</a>
-    <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">Enviado por MéTRIK ONE</p>
-  </div>
-</body></html>`;
+  // La plantilla es la misma del aviso de asignación (`avisar-asignacion`): vive en `_shared/correo-interno.ts`.
+  const html = htmlCorreoInterno({ antetitulo: etapa?.nombre ?? '', titulo, mensaje, etiqueta: etiqueta ?? '', link });
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -532,6 +534,38 @@ async function avisarAlCliente(
 ): Promise<ResultadoAlCliente> {
   const out: ResultadoAlCliente = { ...SIN_AVISO_AL_CLIENTE };
 
+  // ── Un aviso sale UNA vez por el mismo hecho (SOE-008 / SOE-009) ───────────
+  // Antes de mandar, por canal: si la cita que cita el aviso ya pasó, o si a este
+  // cliente ya le salió este mismo aviso con el mismo dato (misma cita, mismo
+  // documento), no se manda y queda la omisión en la traza y en el historial del
+  // negocio. Una cita REPROGRAMADA es otra huella y sí sale. Regla y casos medidos en
+  // `_shared/aviso-mismo-hecho.ts`.
+  const decision = await decidirMismoHecho(supabase, negocio.id, etapa, bloqueId, avisoCliente);
+  const omitidos: Array<{ canal: 'email' | 'whatsapp'; d: Decision }> = [];
+  for (const canal of ['email', 'whatsapp'] as const) {
+    if (!canales[canal]) continue;
+    const d = decision(canal);
+    if (!d.omitir) continue;
+    omitidos.push({ canal, d });
+    canales = { ...canales, [canal]: false };
+    if (canal === 'email') out.clienteOmitido = d.motivo;
+    else out.waOmitido = d.motivo;
+    await registrarAviso(supabase, negocio, etapa, bloqueId, {
+      canal,
+      estado: 'omitido',
+      destino: null,
+      copia_a: null,
+      motivo: d.motivo,
+      titulo: null,
+      proveedor_id: null,
+      huella: d.huella,
+    });
+  }
+  if (omitidos.length > 0) {
+    await anotarOmisionEnElHistorial(supabase, negocio, etapa, avisoCliente, omitidos);
+  }
+  const huella = decision('email').huella;
+
   if (canales.email) {
     const r = await enviarAlCliente(supabase, resendKey, negocio, etapa?.nombre ?? '', avisoCliente);
     out.clienteEnviado = r.enviadoA;
@@ -546,6 +580,7 @@ async function avisarAlCliente(
       motivo: r.omitidoPor,
       titulo: r.titulo,
       proveedor_id: r.proveedorId,
+      huella,
     });
   }
 
@@ -568,6 +603,7 @@ async function avisarAlCliente(
       motivo: r.omitidoPor,
       titulo: null,
       proveedor_id: null,
+      huella,
     });
   }
 
@@ -693,6 +729,117 @@ async function liberarDiferidos(supabase: Supabase, resendKey: string): Promise<
 }
 
 
+// ── El mismo hecho ───────────────────────────────────────────────────────────
+
+/**
+ * Lee lo que la guarda del mismo hecho necesita (los bloques del dato citado, con su
+ * historial de reprocesos, y los avisos previos del mismo origen) y devuelve la
+ * decision por canal. Es una sola lectura por envio: los dos canales comparten el hecho.
+ *
+ * Mismo origen = la misma etapa (aviso de entrada) o el mismo bloque (aviso de
+ * documento). Un aviso de bloque no silencia uno de etapa ni al reves.
+ */
+async function decidirMismoHecho(
+  supabase: Supabase,
+  negocioId: string,
+  etapa: { id?: string } | null,
+  bloqueId: string | null,
+  cfg: AvisoCliente,
+): Promise<(canal: 'email' | 'whatsapp') => Decision> {
+  const citados = datosQueCitaElAviso(cfg);
+  const linkSlug = cfg.link_bloque_slug ?? null;
+  const slugs = [
+    ...(citados.includes('fecha_cita') ? [SLUG_CITA] : []),
+    ...(linkSlug && (citados.includes('link') || citados.includes('recibos')) ? [linkSlug] : []),
+  ];
+
+  const bloques: BloquesDelHecho = {};
+  if (slugs.length > 0) {
+    const { data: filas } = await supabase
+      .from('negocio_bloques')
+      .select('data, bloque_configs!inner(slug)')
+      .eq('negocio_id', negocioId)
+      .in('bloque_configs.slug', slugs);
+    for (const f of filas ?? []) {
+      const slug = (f?.bloque_configs as { slug?: string } | null)?.slug;
+      if (slug === SLUG_CITA) bloques.cita = f.data;
+      if (linkSlug && slug === linkSlug) bloques.documento = f.data;
+    }
+  }
+
+  let q = supabase
+    .from('avisos_cliente')
+    .select('canal, estado, huella, created_at')
+    .eq('negocio_id', negocioId)
+    .in('estado', [...ESTADOS_QUE_SALIERON])
+    .order('created_at', { ascending: false })
+    .limit(50);
+  q = bloqueId
+    ? q.eq('bloque_config_id', bloqueId)
+    : q.eq('etapa_id', etapa?.id ?? '00000000-0000-0000-0000-000000000000').is('bloque_config_id', null);
+  const { data: previosRaw, error } = await q;
+  if (error) {
+    // Sin poder leer la historia no se puede afirmar que el cliente ya lo sabe: se manda,
+    // que es el comportamiento de siempre. Queda en el log.
+    console.error('[notificar-etapa] no se pudieron leer los avisos previos:', error.message);
+  }
+  const previos = (previosRaw ?? []) as AvisoPrevio[];
+
+  return (canal) => decidirAvisoAlCliente({ canal, citados, bloques, previos });
+}
+
+const CANAL_EN_LETRAS: Record<'email' | 'whatsapp', string> = { email: 'correo', whatsapp: 'WhatsApp' };
+
+/** "2026-09-24T09:30" -> "24-sep-2026 9:30". Solo para el historial del equipo. */
+function fechaCorta(iso: string): string {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', day: 'numeric', month: 'short', year: 'numeric',
+  }).format(d);
+}
+
+/**
+ * Deja en el historial del negocio que un aviso al cliente NO salio y por que. Sin esto
+ * la omision solo vive en `avisos_cliente`, que el equipo no mira, y quien esperaba que
+ * el cliente recibiera el correo no tiene como saber que no le llego.
+ *
+ * Nunca propaga su error: es traza, no envio.
+ */
+async function anotarOmisionEnElHistorial(
+  supabase: Supabase,
+  negocio: Negocio,
+  etapa: { nombre?: string } | null,
+  cfg: AvisoCliente,
+  omitidos: Array<{ canal: 'email' | 'whatsapp'; d: Decision }>,
+): Promise<void> {
+  const canales = omitidos.map((o) => CANAL_EN_LETRAS[o.canal]).join(' y ');
+  const nombre = cfg.titulo ? `«${cfg.titulo}»` : `de ${etapa?.nombre ?? 'la etapa'}`;
+  const d0 = omitidos[0].d;
+  const cita = d0.valores.fecha_cita ? formatearCita(d0.valores.fecha_cita) ?? d0.valores.fecha_cita : null;
+
+  let porque: string;
+  if (d0.omitir && d0.motivo === 'cita_pasada') {
+    porque = `la cita registrada${cita ? ` (${cita})` : ''} ya pasó.`;
+  } else {
+    const previo = omitidos.find((o) => o.d.omitir && o.d.motivo === 'duplicado');
+    const cuando = previo && previo.d.omitir && previo.d.motivo === 'duplicado'
+      ? ` el ${fechaCorta(previo.d.previo.created_at)}`
+      : '';
+    porque = `ya se le había enviado${cuando} con el mismo dato${cita ? ` (cita: ${cita})` : ''}.` +
+      ' Si algo cambió, avísale por fuera de ONE.';
+  }
+
+  const { error } = await supabase.from('activity_log').insert({
+    workspace_id: negocio.workspace_id,
+    entidad_tipo: 'negocio',
+    entidad_id: negocio.id,
+    tipo: 'sistema',
+    contenido: `Aviso al cliente ${nombre} no enviado por ${canales}: ${porque}`,
+  });
+  if (error) console.error('[notificar-etapa] no se pudo anotar la omision:', negocio.codigo, error.message);
+}
+
+
 // ── La traza ─────────────────────────────────────────────────────────────────
 
 /**
@@ -727,6 +874,13 @@ async function registrarAviso(
     proveedor_id: string | null;
     /** Solo en `diferido`: el dia habil en que el cron lo va a mandar. */
     programado_para?: string | null;
+    /**
+     * Los datos del hecho que el aviso le contó al cliente (`_shared/aviso-mismo-hecho.ts`).
+     * Con ella la siguiente entrada sabe si el cliente ya lo sabe. ⚠️ Necesita la
+     * columna `avisos_cliente.huella` (migración 20261009220000): sin ella el insert
+     * falla y se pierde la traza.
+     */
+    huella?: string | null;
   },
 ): Promise<void> {
   const { error } = await supabase.from('avisos_cliente').insert({
@@ -1050,21 +1204,20 @@ async function datosOpcionales(
       .in('bloque_configs.slug', slugs)
     : { data: [] };
 
-  const camposPorSlug = new Map<string, Record<string, unknown>>();
+  // Se guarda el `data` entero: un bloque de formulario trae `campos[campo].value`,
+  // pero otros (el radicado de certificación de SOENA) guardan el dato plano. La regla
+  // vive en `_shared/datos-opcionales-copy.ts`.
+  const dataPorSlug = new Map<string, unknown>();
   for (const fila of filas ?? []) {
     const slug = (fila?.bloque_configs as { slug?: string } | null)?.slug;
     if (!slug) continue;
-    const data = (fila?.data ?? {}) as { campos?: Record<string, unknown> };
-    camposPorSlug.set(slug, data.campos ?? {});
+    dataPorSlug.set(slug, fila?.data ?? {});
   }
 
   for (const clave of declaradas) {
     const decl = camposCopy[clave];
-    const bag = camposPorSlug.get(decl.bloque_slug);
-    const valores = (decl.campos ?? []).map((c) => {
-      const v = (bag?.[c] as { value?: unknown } | undefined)?.value;
-      return typeof v === 'string' ? v.trim() : '';
-    });
+    const data = dataPorSlug.get(decl.bloque_slug);
+    const valores = (decl.campos ?? []).map((c) => valorDelCampo(data, c));
     // El PRIMER campo declarado es el ancla: sin el no hay nada que nombrar. Los demas
     // se suman si estan. Con ["marca","linea","modelo"] eso da "TOYOTA RAV4" cuando
     // falta el modelo, y nada cuando falta la marca.
@@ -1183,13 +1336,9 @@ async function enviarAlCliente(
     return { ...CORREO_VACIO, estado: 'omitido', omitidoPor: 'sin_correo' };
   }
 
-  const { data: ws } = await supabase
-    .from('workspaces')
-    .select('nombre, config_extra')
-    .eq('id', negocio.workspace_id)
-    .maybeSingle();
-
-  const marca = (ws?.nombre as string | undefined)?.trim() || 'tu proveedor';
+  // La columna es `name` (SOE-010: pedir `nombre` hacia fallar la consulta en silencio
+  // y todo correo salia como «tu proveedor»). El helper registra el error si lo hay.
+  const { marca, configExtra } = await marcaDelWorkspace(supabase, negocio.workspace_id);
 
   // ── A dónde contesta el cliente ────────────────────────────────────────────
   // Primero el COMERCIAL del negocio: es quien lo conoce y quien va a responderle.
@@ -1199,7 +1348,7 @@ async function enviarAlCliente(
   // tienen comercial con cuenta.)
   const comercial = await comercialDelNegocio(supabase, negocio.id);
   const replyTo = comercial?.email
-    ?? (ws?.config_extra as { email_respuesta?: string } | null)?.email_respuesta
+    ?? (configExtra as { email_respuesta?: string } | null)?.email_respuesta
     ?? null;
 
   // ── La copia al comercial ──────────────────────────────────────────────────
@@ -1271,7 +1420,7 @@ async function enviarAlCliente(
     <p style="margin:0 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280">${escapar(marca)}</p>
     <h1 style="margin:0 0 14px;font-size:19px;line-height:1.35">${escapar(titulo)}</h1>
     ${cuerpoHtml}
-    ${negocio.codigo ? `<p style="margin:0 0 22px;font-size:13px;color:#6B7280">Radicado: <strong style="color:#1A1A1A">${escapar(negocio.codigo)}</strong></p>` : ''}
+    ${lineaCasoHtml(negocio.codigo, escapar)}
     <p style="margin:24px 0 0;font-size:11px;color:#9CA3AF;border-top:1px solid #E5E7EB;padding-top:14px">
       Recibes este aviso porque ${escapar(marca)} gestiona un tramite a tu nombre.${
         replyTo ? ' Si tienes dudas o no quieres recibir mas avisos, responde a este correo.' : ''

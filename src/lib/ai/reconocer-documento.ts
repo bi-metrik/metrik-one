@@ -13,6 +13,7 @@
 // Cuesta una llamada más, y solo en los bloques que declaran `documento_esperado`. Los
 // demás no pasan por aquí: ni una llamada, ni un token, ni un cambio de comportamiento.
 
+import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
 import {
   TIPOS_DOCUMENTO,
   TIPO_ILEGIBLE,
@@ -92,7 +93,7 @@ export async function reconocerDocumento(
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
   try {
-    const res = await fetch(url, {
+    const res = await fetchModeloDocumentos(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

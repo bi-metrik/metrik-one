@@ -11,6 +11,7 @@ import {
   type CobroProgramadoDeCuota,
 } from './enlace-pago-cuota'
 import { referenciaEnlaceCobro } from './referencia-enlace'
+import { anclaDeFila, columnasDeAncla, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
 import { pctRetencionIvaDelEspacio, retencionIvaDeCuota } from './retencion-iva'
 
 /** Cuánto vive un enlace desde que se genera. El ciclo manual de los CDA: se manda el 20, vence el 27. */
@@ -47,7 +48,9 @@ export type ResultadoEnlaceCuota =
       monto: number | null
       /** La retención de IVA descontada del enlace. 0 si no aplica o si el enlace ya estaba vigente. */
       retencionIva: number
-      negocioId: string
+      /** El ancla del contrato: su negocio, o (desde 20261016) su suscripción. */
+      negocioId: string | null
+      suscripcionId: string | null
       numero: number
       pasarela: string | null
     }
@@ -74,17 +77,18 @@ export async function generarEnlacePagoCuota(
 
   const plan = await db
     .from('planes_cobro')
-    .select('id, negocio_id, total_cuotas, pasarela')
+    .select('id, negocio_id, suscripcion_id, total_cuotas, pasarela')
     .eq('id', cuota.data.plan_cobro_id)
     .eq('workspace_id', p.workspaceId)
     .maybeSingle()
   if (plan.error || !plan.data) return { ok: false, error: 'Cuota no encontrada.' }
-  const negocioId = plan.data.negocio_id as string
+  // El ancla del plan: su negocio o su suscripción. Contrato, planes y cobros se leen por ella.
+  const ancla = anclaDeFila(plan.data)
+  if (!ancla) return { ok: false, error: 'Cuota no encontrada.' }
+  const negocioId = ancla.tipo === 'negocio' ? ancla.id : null
+  const suscripcionId = ancla.tipo === 'suscripcion' ? ancla.id : null
 
-  const contrato = await db
-    .from('servicios_contratados')
-    .select('id')
-    .eq('negocio_id', negocioId)
+  const contrato = await filtrarPorAncla(db.from('servicios_contratados').select('id'), ancla)
     .eq('workspace_id', p.workspaceId)
     .limit(1)
   if (contrato.error) return { ok: false, error: `No se pudo leer el contrato: ${contrato.error.message}` }
@@ -92,8 +96,9 @@ export async function generarEnlacePagoCuota(
     return { ok: false, error: 'Esta cuota no es de un contrato de servicio: el cliente no tiene dónde ver el enlace.' }
   }
 
-  // Las cuotas de TODOS los planes del negocio y todos sus cobros: el reparto FIFO los necesita.
-  const planes = await db.from('planes_cobro').select('id').eq('negocio_id', negocioId).eq('workspace_id', p.workspaceId)
+  // Las cuotas de TODOS los planes del negocio (o de la suscripción) y todos sus cobros: el reparto
+  // FIFO los necesita.
+  const planes = await filtrarPorAncla(db.from('planes_cobro').select('id'), ancla).eq('workspace_id', p.workspaceId)
   if (planes.error) return { ok: false, error: `No se pudieron leer los planes: ${planes.error.message}` }
   const idsPlan = ((planes.data ?? []) as { id: string }[]).map((x) => x.id)
 
@@ -107,7 +112,7 @@ export async function generarEnlacePagoCuota(
   const cobros = await db
     .from('cobros')
     .select('id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, plan_cobro_id, numero_cuota, enlace_pago_url, enlace_pago_expira')
-    .eq('negocio_id', negocioId)
+    .eq(ancla.tipo === 'negocio' ? 'negocio_id' : 'suscripcion_id', ancla.id)
     .eq('workspace_id', p.workspaceId)
   if (cobros.error) return { ok: false, error: `No se pudieron leer los cobros: ${cobros.error.message}` }
 
@@ -165,7 +170,13 @@ export async function generarEnlacePagoCuota(
 
   // El pagador solo se lee si la retención puede aplicar: sin configuración o sin IVA no cambia nada.
   let pagadorResponsableIva: boolean | null = null
-  if (pctRetencion > 0 && ivaCuota > 0) {
+  if (pctRetencion > 0 && ivaCuota > 0 && suscripcionId) {
+    // La suscripción no tiene empresa en el directorio: lo que diga su RUT leído (`datos_fiscales`).
+    const sus = await db.from('suscripciones_producto').select('datos_fiscales').eq('id', suscripcionId).eq('workspace_id', p.workspaceId).maybeSingle()
+    if (sus.error) return { ok: false, error: `No se pudo leer el cliente de la suscripción: ${sus.error.message}` }
+    const df = (sus.data?.datos_fiscales ?? null) as { responsable_iva?: unknown } | null
+    pagadorResponsableIva = typeof df?.responsable_iva === 'boolean' ? df.responsable_iva : null
+  } else if (pctRetencion > 0 && ivaCuota > 0) {
     const neg = await db.from('negocios').select('empresa_id').eq('id', negocioId).eq('workspace_id', p.workspaceId).maybeSingle()
     if (neg.error) return { ok: false, error: `No se pudo leer el cliente del negocio: ${neg.error.message}` }
     const empresaId = (neg.data?.empresa_id as string | null | undefined) ?? null
@@ -196,7 +207,7 @@ export async function generarEnlacePagoCuota(
   })
   if (decision.accion === 'rechazar') return { ok: false, error: decision.motivo }
   if (decision.accion === 'vigente') {
-    return { ok: true, estado: 'vigente', cobroId: cobro?.id ?? null, url: decision.url, expira: decision.expira, monto: null, retencionIva: 0, negocioId, numero: cuota.data.numero, pasarela: null }
+    return { ok: true, estado: 'vigente', cobroId: cobro?.id ?? null, url: decision.url, expira: decision.expira, monto: null, retencionIva: 0, negocioId, suscripcionId, numero: cuota.data.numero, pasarela: null }
   }
 
   // La pasarela, por dato: el plan de la cuota o la configuración de cobros del espacio.
@@ -230,7 +241,7 @@ export async function generarEnlacePagoCuota(
       .from('cobros')
       .insert({
         workspace_id: p.workspaceId,
-        negocio_id: negocioId,
+        ...columnasDeAncla(ancla),
         plan_cobro_id: plan.data.id,
         numero_cuota: cuota.data.numero,
         monto: decision.monto,
@@ -294,5 +305,5 @@ export async function generarEnlacePagoCuota(
     }
   }
 
-  return { ok: true, estado: 'generado', cobroId, url: enlace.url, expira: enlace.expira, monto: decision.monto, retencionIva: decision.retencionIva, negocioId, numero: cuota.data.numero, pasarela }
+  return { ok: true, estado: 'generado', cobroId, url: enlace.url, expira: enlace.expira, monto: decision.monto, retencionIva: decision.retencionIva, negocioId, suscripcionId, numero: cuota.data.numero, pasarela }
 }

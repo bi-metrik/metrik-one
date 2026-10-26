@@ -182,4 +182,42 @@ describe('AFI desde el 2026-09-23: $50.000 fijos por CDA + 20 % de lo adicional'
     expect(problemasDeComision({ ...AFI_CDA, monto_fijo: undefined }).map((p) => p.campo)).toContain('monto_fijo')
     expect(problemasDeComision({ ...AFI_CDA, pct: 120 }).map((p) => p.campo)).toContain('pct')
   })
+
+  describe('Plan Anual: 20 % de lo pagado, sin fijo (Mauricio, 2026-10-09)', () => {
+    const ANUAL = { valor: 1_650_000, esPrimerCobro: false, prepago: true }
+
+    it('el anual de $1.650.000 genera $330.000: el 20 % de lo pagado, sin fijo', () => {
+      const r = calcularComision(AFI_CDA, ANUAL)
+      expect(r).toMatchObject({ valor: 330_000, motivo: 'fijo_mas_porcentaje' })
+      // CONTROL: ni la regla derogada del 2026-10-07 (el tercio: 550.000), ni 12 x 50.000, ni un fijo de mes.
+      expect(r.valor).not.toBe(550_000)
+      expect(r.valor).not.toBe(600_000)
+      expect(calcularComision(AFI_CDA, { valor: 1_650_000, esPrimerCobro: false }).valor).toBe(50_000)
+    })
+
+    it('si el anual trae usuarios adicionales dentro, el 20 % es sobre todo lo pagado, sin fijo', () => {
+      const r = calcularComision(AFI_CDA, { ...ANUAL, valor: 1_650_000 + 600_000, valorAdicional: 600_000 })
+      expect(r.valor).toBe(450_000)
+    })
+
+    it('el mensual no cambia: $50.000 fijos + 20 % de lo adicional', () => {
+      expect(calcularComision(AFI_CDA, { valor: 200_000, esPrimerCobro: false, valorAdicional: 50_000 }).valor).toBe(60_000)
+    })
+
+    it('con modo porcentaje no cambia (ya es sobre lo cobrado)', () => {
+      expect(calcularComision(PROMOTORA_4DSOFT, ANUAL).valor).toBe(330_000)
+    })
+
+    it('con modo monto_fijo (sin pct) un prepago lanza: no se inventa la comisión', () => {
+      expect(() => calcularComision(AFI, ANUAL)).toThrow(/prepago/)
+    })
+
+    it('durante el plan, las cuotas de usuarios adicionales llevan solo el 20 % de lo adicional, sin el fijo', () => {
+      const uno = calcularComision(AFI_CDA, { valor: 50_000, valorAdicional: 50_000, esPrimerCobro: false, soloAdicional: true })
+      expect(uno.valor).toBe(10_000)
+      const dos = calcularComision(AFI_CDA, { valor: 100_000, valorAdicional: 100_000, esPrimerCobro: false, soloAdicional: true })
+      expect(dos.valor).toBe(20_000)
+      expect(calcularComision(AFI, { valor: 50_000, esPrimerCobro: false, soloAdicional: true }).valor).toBe(0)
+    })
+  })
 })

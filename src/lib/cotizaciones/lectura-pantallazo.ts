@@ -34,10 +34,21 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
 import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
+import { ciudadEsLugarDelNombre } from './ciudad-actividad'
 import { estrellasDesdeTexto } from './estrellas'
 import { tramosDeCampos, textoDeTramo } from './tramos-vuelo'
 import { deducirAnio, esFechaSinAnio, fechaSinDiaDeLaSemana } from './anio-fecha'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import {
+  ocupacionDeReserva,
+  reservaDeVariasHabitaciones,
+  resumenDeReserva,
+  textoDeComposicion,
+  type HabitacionDeReserva,
+  type HabitacionDeReservaCruda,
+} from './reserva-habitaciones'
+
+export type { HabitacionDeReservaCruda } from './reserva-habitaciones'
 
 // ── Lo que devuelve el modelo, antes de juzgarlo ─────────────────────────────
 
@@ -143,6 +154,12 @@ export interface LecturaCruda {
    * Solo la ranura de hotel.
    */
   estrellasDeteccion?: { valor: number | null; corridas: (number | null)[]; error: string | null }
+  /**
+   * Las habitaciones de UNA reserva de varias con un total (`reserva-habitaciones.ts`). Solo la
+   * lee la cotización por pasos (`OpcionesDeLectura.reservaVariasHabitaciones`); ausente en
+   * toda otra lectura.
+   */
+  habitacionesReserva?: HabitacionDeReservaCruda[]
 }
 
 /**
@@ -183,6 +200,12 @@ export interface ContextoLectura {
    * vacío una persona, a propósito.
    */
   manual?: boolean
+  /**
+   * Escrita a mano SIN COSTO: el precio saldrá del tarifario del proveedor (brief del 2026-10-20,
+   * punto 1). El precio no es mínimo: la lectura trae solo los datos del servicio y queda marcada
+   * (`LecturaCasilla.costoPendiente`) para que nadie la costee en cero. Solo con `manual`.
+   */
+  sinCosto?: boolean
 }
 
 /**
@@ -252,6 +275,8 @@ export interface Aceptacion {
   avisos: string[]
   porTipoPax: FilaTipoPaxCruda[]
   totalGeneral: number | null
+  /** El registro de una reserva de varias habitaciones con un total. Ausente en las demás. */
+  habitacionesReserva?: HabitacionDeReserva[]
 }
 
 export type VeredictoLectura = Aceptacion | Rechazo
@@ -290,7 +315,12 @@ export function evaluarLectura(
   // precio, se contradice a sí mismo, y la duda se resuelve rechazando.
   // P8 · una lectura hecha sobre una opción YA ELEGIDA (la marcada por la pantalla o la que
   // tocó la persona) ve las demás a propósito: contarlas no la contradice.
-  const contradice = cruda.veredicto === 'detalle_unico' && !cruda.elegida
+  // Decisión del 2026-10-14 · una reserva de varias habitaciones cuyos precios SUMAN el total
+  // leído no es una lista para elegir: contar sus habitaciones tampoco la contradice.
+  const reserva = ranura.slug === 'hotel_detalle' && cruda.veredicto === 'detalle_unico' && cruda.habitacionesReserva
+    ? reservaDeVariasHabitaciones(cruda.habitacionesReserva, parseMontoCop(limpio(cruda.campos.precio_total)))
+    : null
+  const contradice = cruda.veredicto === 'detalle_unico' && !cruda.elegida && !reserva
     && typeof cruda.opcionesVisibles === 'number' && cruda.opcionesVisibles >= 2
   if (cruda.veredicto === 'varias_opciones' || contradice) {
     return {
@@ -332,6 +362,41 @@ export function evaluarLectura(
   })
   const porSlug = new Map(campos.map(c => [c.slug, c]))
   const avisosDelItem: string[] = []
+
+  // La reserva de varias habitaciones: la habitación se nombra con el registro («3 habitaciones
+  // dobles») y la ocupación es la suma de lo que dice cada una, cuando todas lo dicen.
+  if (reserva) {
+    const tipo = porSlug.get('tipo_habitacion')
+    if (tipo) {
+      tipo.valor = resumenDeReserva(reserva, tipo.valor)
+      tipo.confidence = Math.max(tipo.confidence, CONFIANZA_MINIMA)
+    }
+    const suma = ocupacionDeReserva(reserva)
+    if (suma) {
+      const fijar = (slug: string, valor: string) => {
+        const c = porSlug.get(slug)
+        if (!c) return
+        c.valor = valor
+        c.confidence = Math.max(c.confidence, CONFIANZA_MINIMA)
+      }
+      fijar('ocupacion', textoDeComposicion(suma))
+      fijar('ocupacion_adultos', String(suma.adultos))
+      fijar('ocupacion_ninos', String(suma.ninos))
+      fijar('ocupacion_infantes', String(suma.infantes))
+      fijar('ocupacion_total', String(suma.adultos + suma.ninos + suma.infantes))
+    }
+  }
+
+  // Brief del 2026-10-05 · la ciudad de una actividad no sale del nombre del tour. Si el
+  // lector devolvió como ciudad un lugar del nombre («bahía de Manzanillo» → Manzanillo), se
+  // descarta: queda como no leída y el bloque usa la ciudad del viaje.
+  if (ranura.slug === 'actividad_detalle') {
+    const ciudad = porSlug.get('ciudad')
+    if (ciudad && ciudadEsLugarDelNombre(ciudad.valor, porSlug.get('nombre')?.valor)) {
+      ciudad.valor = null
+      ciudad.confidence = 0
+    }
+  }
 
   // RX3 · la moneda que la persona indicó porque la captura solo muestra «$».
   const moneda = porSlug.get('moneda')
@@ -426,7 +491,9 @@ export function evaluarLectura(
         MINIMOS_DE_COSTO.includes(def.slug)
         // Con tabla por tipo de pasajero el total ya es el de la tabla: `base_precio` no
         // multiplica nada y exigirlo rechazaría una captura que ya se puede costear.
-        && !(tieneTablaPorTipo && def.slug === 'base_precio'))
+        && !(tieneTablaPorTipo && def.slug === 'base_precio')
+        // Sin costo (a mano, del tarifario): el precio no se pide; la moneda sí.
+        && !(contexto.sinCosto && contexto.manual && (def.slug === 'precio_total' || def.slug === 'base_precio')))
     : todosFaltantes
   if (contexto.soloMinimosDeCosto && !contexto.manual) {
     const descriptivos = todosFaltantes.filter(def => !faltantes.includes(def))
@@ -454,6 +521,7 @@ export function evaluarLectura(
     avisos: [...avisosDelItem, ...avisosDeLectura(ranura, porSlug, cruda.desglose, contexto.manual === true)],
     porTipoPax: cruda.porTipoPax ?? [],
     totalGeneral: cruda.totalGeneral ?? null,
+    ...(reserva ? { habitacionesReserva: reserva } : {}),
   }
 }
 
@@ -824,6 +892,14 @@ export function resumenDeLinea(
       etiqueta('Idioma', v('idioma')),
       etiqueta('Proveedor', v('proveedor')),
     )
+    return { nombre, descripcion: unir(partes) }
+  }
+
+  // «Otro servicio» (asistencia médica, seguro): el servicio es el nombre; el proveedor o el
+  // plan, la descripción. Sin él, caía en la rama del traslado y se llamaba «Otro servicio».
+  if (ranura.slug === 'otro_detalle') {
+    const nombre = v('nombre') || ranura.label
+    partes.push(etiqueta('Proveedor', v('proveedor')))
     return { nombre, descripcion: unir(partes) }
   }
 

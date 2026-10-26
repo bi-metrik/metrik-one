@@ -29,6 +29,17 @@ export const C = {
 export const BTN =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#CFCAC0] bg-white px-3 py-1.5 text-[13px] font-semibold leading-[1.3] text-[#191713] hover:bg-[#EEEBE4] disabled:cursor-not-allowed disabled:opacity-45'
 
+/**
+ * `.btn` ELEGIDO (Hotel / Traslado, Va / No va): acento y tinte (D6 de Noor, 2026-09-28).
+ *
+ * ⚠️ No se arma como `${BTN} border-[#0E5C43] …`: con dos clases del mismo color en la misma
+ * etiqueta gana la que Tailwind escribe DESPUÉS en el CSS, no la que va después en el texto, y
+ * ahí ganaban el borde gris y la tinta de `BTN` (brief del 2026-10-01, punto 6: el elegido
+ * «apenas se distingue»). Por eso es una cadena propia, sin los colores de `BTN`.
+ */
+export const BTN_ELEGIDO =
+  'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#0E5C43] bg-[#EAF1EE] px-3 py-1.5 text-[13px] font-semibold leading-[1.3] text-[#0E5C43] shadow-[inset_0_0_0_1px_#0E5C43] disabled:cursor-not-allowed disabled:opacity-45'
+
 /** `.btn.prim` */
 export const BTN_PRIM =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#191713] bg-[#191713] px-3 py-1.5 text-[13px] font-semibold leading-[1.3] text-[#F3F1EC] hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-45'

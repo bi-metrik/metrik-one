@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -80,7 +81,7 @@ export default function AdicionalesItem({
   margen?: MargenDeCotizacion
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [abierto, setAbierto] = useState(false)
   const [codigo, setCodigo] = useState('')
   const [nombre, setNombre] = useState('')

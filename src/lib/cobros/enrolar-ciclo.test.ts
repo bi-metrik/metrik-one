@@ -119,13 +119,25 @@ describe('no se cobra dos veces el mismo ciclo', () => {
   })
 })
 
-describe('el alcance: un solo módulo', () => {
+describe('el alcance: una lista corta de módulos', () => {
   it('un contrato de otro módulo por ciclo NO se enrola, aunque cumpla todo lo demás', () => {
-    // Las licencias de Clarity, Sustenta y de los CDA tienen sus planes cargados a mano: enrolarlas
-    // aquí emitiría cobros que nadie autorizó.
-    for (const modulo of ['business', 'valida_consulta', 'compliance']) {
+    // Las licencias de Clarity y Sustenta tienen sus planes cargados a mano: enrolarlas aquí
+    // emitiría cobros que nadie autorizó.
+    for (const modulo of ['business', 'compliance', 'valida_api']) {
       expect(enrolar({ modulo }), modulo).toEqual({ tipo: 'no', motivo: 'modulo_no_automatico' })
     }
+  })
+
+  it('Valida por CDA SÍ se enrola (decisión del 2026-10-09): mismo trial, mismo calendario', () => {
+    const r = enrolar({ modulo: 'valida_consulta', parametros: { precio_mensual: 150_000, dias_trial: 7 } })
+    expect(r.tipo).toBe('enrolar')
+    if (r.tipo !== 'enrolar') return
+    expect(r.finTrial).toBe('2026-10-06')
+    expect(r.cuotas[0]).toMatchObject({ numero: 1, monto: 150_000, fecha_vencimiento: '2026-10-06' })
+  })
+
+  it('los CDA que ya tienen plan cargado a mano NO se enrolan: el plan existente frena', () => {
+    expect(enrolar({ modulo: 'valida_consulta', tienePlan: true })).toEqual({ tipo: 'no', motivo: 'plan_existente' })
   })
 
   it('un servicio por consumo no entra ni siendo del módulo', () => {

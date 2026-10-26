@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 import { X } from 'lucide-react'
 
@@ -21,6 +22,7 @@ import {
   type FilaCosto,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * «Costo y precio» de la tarjeta (prototipo del 2026-09-24): UNA tabla (Pasajero / Cant. /
@@ -51,6 +53,10 @@ export default function TarjetaCosto({
   margenCotizacion,
   moneda,
   onCambio,
+  autorizador = null,
+  apilable = false,
+  tipoTarifa = 'neta',
+  tipoPropuesto = false,
 }: {
   itemId: string
   editable: boolean
@@ -69,12 +75,30 @@ export default function TarjetaCosto({
   margenCotizacion: { margenPct: number | null; convencion: ConvencionMargen | null }
   moneda: MonedaDeTarifa
   onCambio: () => void
+  /**
+   * Quién autoriza bajo el mínimo, con su nombre de pila: sale de la configuración del workspace
+   * (su dueño), nunca del código (P7). Sin un dueño único, «quien autoriza».
+   */
+  autorizador?: string | null
+  /**
+   * Solo la cotización por pasos (brief del 2026-10-16): la tabla mide su PROPIO ancho y, si las
+   * columnas no caben, se apila en una tarjeta por fila. Apagado, la tabla es byte a byte la de
+   * siempre (`tarjeta-costo-apilada.test.ts`).
+   */
+  apilable?: boolean
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Pública: el margen
+   * arranca en 0 y la opción no pide autorización por margen. Ausente = Neta.
+   */
+  tipoTarifa?: TipoTarifa
+  /** El tipo lo propuso ONE con lo que dice el tarifario del proveedor (la persona lo cambia). */
+  tipoPropuesto?: boolean
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
   const [info, setInfo] = useState(false)
   const [editandoMoneda, setEditandoMoneda] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // Lo que la persona está escribiendo en «Ajustar», antes de guardar.
   const [margenEscrito, setMargenEscrito] = useState<string | null>(null)
@@ -124,7 +148,9 @@ export default function TarjetaCosto({
   const margenReal = costoTotal > 0 && precioTotal > 0
     ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
     : null
-  const bajo = margenReal !== null && margenReal < pisoPct
+  // Una Pública no pide autorización por margen: su ganancia es la comisión (`tarifa-publica.ts`).
+  const publica = tipoTarifa === 'publica'
+  const bajo = !publica && margenReal !== null && margenReal < pisoPct
 
   function guardar(fn: () => Promise<{ success: boolean; error?: string }>, limpiar: () => void) {
     startTransition(async () => {
@@ -133,6 +159,11 @@ export default function TarjetaCosto({
       limpiar()
       onCambio()
     })
+  }
+
+  function elegirTipo(t: TipoTarifa) {
+    if (t === tipoTarifa && !tipoPropuesto) return
+    guardar(() => ajustarOpcion(itemId, { tipoTarifa: t }), () => setMargenEscrito(null))
   }
 
   function guardarMargen() {
@@ -198,9 +229,43 @@ export default function TarjetaCosto({
     }, () => {})
   }
 
+  // La celda del nombre, con sus marcas y su ⚠: la misma en la tabla de siempre y en la apilada.
+  const nombreDeFila = (f: FilaCosto) => (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="truncate">{f.nombre}</span>
+      {f.det && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">{f.det}</span>}
+      {f.extra && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">Adicional</span>}
+      {f.aMano && <span className="shrink-0 rounded bg-[#FBF1E2] px-[5px] py-px text-[11px] font-semibold text-[#9A5F0C]">a mano</span>}
+      {f.bajoCosto && (
+        <AlertaDecision tip="Este precio queda por debajo del costo" izquierda>
+          <p className="m-0">Con {pesos(f.precioUnitario)} por {f.nombre.toLowerCase()}, esta fila vende por debajo de lo que cuesta. Súbelo o confirma que es a propósito.</p>
+          {editable && f.aMano && (
+            <span className="mt-1 flex flex-wrap gap-2">
+              <button type="button" className={BTN} onClick={() => quitarPrecioAMano(f)}>Volver al precio de ONE</button>
+            </span>
+          )}
+        </AlertaDecision>
+      )}
+      {f.extra && editable && f.adicionalId && (
+        <button
+          type="button"
+          aria-label="Quitar adicional"
+          className={BTN_X}
+          onClick={() => guardar(() => eliminarAdicional(f.adicionalId!), () => {})}
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      )}
+    </span>
+  )
+
   // En el celular el encabezado se esconde: la primera fila de datos no lleva borde arriba.
   const fila = 'grid grid-cols-[minmax(0,1.6fr)_60px_repeat(3,minmax(0,1fr))] items-center gap-2 border-t border-[#E2DED5] px-3 py-[9px] max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2.5 max-sm:gap-y-0.5 max-sm:[&:nth-child(2)]:border-t-0'
   const num = 'text-right tabular-nums max-sm:hidden'
+  // La tabla apilable (por pasos): bloque con la tarjeta por debajo de 30rem de TABLA, subgrid encima.
+  const filaA = 'border-t border-[#E2DED5] px-3 py-[9px] @min-[30rem]:col-span-full @min-[30rem]:grid @min-[30rem]:grid-cols-subgrid @min-[30rem]:items-center'
+  const numA = 'hidden whitespace-nowrap text-right tabular-nums @min-[30rem]:block'
+  const pares = 'm-0 mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1.5 @min-[30rem]:hidden'
 
   return (
     <section aria-label="Costo y precio" className="flex flex-col gap-2.5" data-costo-precio>
@@ -208,59 +273,79 @@ export default function TarjetaCosto({
         Costo y precio<span className="h-px flex-1 bg-[#E2DED5]" />
       </p>
       {/* Sin `overflow-hidden`: el ⚠ de una fila abre su detalle por encima de la tabla. */}
-      <div role="table" className="rounded-lg border border-[#E2DED5]">
-        <div role="row" className={`${fila} rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] max-sm:hidden`}>
-          <span>Pasajero</span><span className="text-right">Cant.</span><span className="text-right">Costo c/u</span><span className="text-right">Precio c/u</span><span className="text-right">Precio total</span>
+      {apilable ? (
+        // Por pasos (brief del 2026-10-16): la tabla es un contenedor y decide por SU ancho, no
+        // por el de la ventana. Desde 30rem van las columnas, y las de números toman el ancho de
+        // su cifra (subgrid: todas las filas comparten las mismas pistas), así que ninguna cifra
+        // se encoge por debajo de sí misma; el nombre es el que se corta. Por debajo, una tarjeta
+        // por fila con «Cant. · Costo c/u · Precio c/u · Precio total» como pares.
+        <div role="table" className="@container rounded-lg border border-[#E2DED5]" data-tabla-apilable>
+          <div className="@min-[30rem]:grid @min-[30rem]:grid-cols-[minmax(0,1fr)_repeat(4,auto)] @min-[30rem]:gap-x-4">
+            <div role="row" className={`${filaA} hidden rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] @min-[30rem]:grid`}>
+              <span>Pasajero</span>
+              <span className="whitespace-nowrap text-right">Cant.</span>
+              <span className="whitespace-nowrap text-right">Costo c/u</span>
+              <span className="whitespace-nowrap text-right">Precio c/u</span>
+              <span className="whitespace-nowrap text-right">Precio total</span>
+            </div>
+            {filas.map(f => (
+              <div role="row" key={f.clave} className={`${filaA} @max-[30rem]:[&:nth-child(2)]:border-t-0`} data-fila-costo={f.clave}>
+                {nombreDeFila(f)}
+                <span className={numA} data-celda="cantidad">{f.cantidad}</span>
+                <span className={numA} data-celda="costo">{mil(f.costoUnitario)}</span>
+                <span className={numA} data-celda="precio">{mil(f.precioUnitario)}</span>
+                <span className={numA} data-celda="total"><b>{mil(f.precioTotal)}</b></span>
+                <dl className={pares}>
+                  <Par k="cantidad" etiqueta="Cant." valor={String(f.cantidad)} />
+                  <Par k="costo" etiqueta="Costo c/u" valor={mil(f.costoUnitario)} />
+                  <Par k="precio" etiqueta="Precio c/u" valor={mil(f.precioUnitario)} />
+                  <Par k="total" etiqueta="Precio total" valor={mil(f.precioTotal)} fuerte />
+                </dl>
+              </div>
+            ))}
+            <div role="row" className={`${filaA} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
+              <span>Total</span>
+              <span className="hidden @min-[30rem]:block" />
+              <span className={numA}>{mil(costoTotal)}</span>
+              <span className="hidden @min-[30rem]:block" />
+              <span className={numA}>{pesos(precioTotal)}</span>
+              <dl className={pares}>
+                <Par k="costo" etiqueta="Costo" valor={mil(costoTotal)} />
+                <Par k="total" etiqueta="Precio total" valor={pesos(precioTotal)} fuerte />
+              </dl>
+            </div>
+          </div>
         </div>
-        {filas.map(f => (
-          <div role="row" key={f.clave} className={fila} data-fila-costo={f.clave}>
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate">{f.nombre}</span>
-              {f.det && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">{f.det}</span>}
-              {f.extra && <span className="shrink-0 rounded bg-[#EEEBE4] px-[5px] py-px text-[11px] font-semibold text-[#6E6A62]">Adicional</span>}
-              {f.aMano && <span className="shrink-0 rounded bg-[#FBF1E2] px-[5px] py-px text-[11px] font-semibold text-[#9A5F0C]">a mano</span>}
-              {f.bajoCosto && (
-                <AlertaDecision tip="Este precio queda por debajo del costo" izquierda>
-                  <p className="m-0">Con {pesos(f.precioUnitario)} por {f.nombre.toLowerCase()}, esta fila vende por debajo de lo que cuesta. Súbelo o confirma que es a propósito.</p>
-                  {editable && f.aMano && (
-                    <span className="mt-1 flex flex-wrap gap-2">
-                      <button type="button" className={BTN} onClick={() => quitarPrecioAMano(f)}>Volver al precio de ONE</button>
-                    </span>
-                  )}
-                </AlertaDecision>
-              )}
-              {f.extra && editable && f.adicionalId && (
-                <button
-                  type="button"
-                  aria-label="Quitar adicional"
-                  className={BTN_X}
-                  onClick={() => guardar(() => eliminarAdicional(f.adicionalId!), () => {})}
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              )}
-            </span>
-            <span className={num}>{f.cantidad}</span>
-            <span className={num}>{mil(f.costoUnitario)}</span>
-            <span className={num}>{mil(f.precioUnitario)}</span>
-            <span className="text-right tabular-nums"><b>{mil(f.precioTotal)}</b></span>
-            <span className="col-span-2 hidden text-[12.5px] tabular-nums text-[#6E6A62] max-sm:block">
-              ×{f.cantidad} · {mil(f.costoUnitario)} → {mil(f.precioUnitario)} c/u
+      ) : (
+        <div role="table" className="rounded-lg border border-[#E2DED5]">
+          <div role="row" className={`${fila} rounded-t-lg border-t-0 bg-[#F8F7F3] text-xs font-semibold text-[#6E6A62] max-sm:hidden`}>
+            <span>Pasajero</span><span className="text-right">Cant.</span><span className="text-right">Costo c/u</span><span className="text-right">Precio c/u</span><span className="text-right">Precio total</span>
+          </div>
+          {filas.map(f => (
+            <div role="row" key={f.clave} className={fila} data-fila-costo={f.clave}>
+              {nombreDeFila(f)}
+              <span className={num}>{f.cantidad}</span>
+              <span className={num}>{mil(f.costoUnitario)}</span>
+              <span className={num}>{mil(f.precioUnitario)}</span>
+              <span className="text-right tabular-nums"><b>{mil(f.precioTotal)}</b></span>
+              <span className="col-span-2 hidden text-[12.5px] tabular-nums text-[#6E6A62] max-sm:block">
+                ×{f.cantidad} · {mil(f.costoUnitario)} → {mil(f.precioUnitario)} c/u
+              </span>
+            </div>
+          ))}
+          <div role="row" className={`${fila} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
+            <span>Total</span>
+            <span className="max-sm:hidden" />
+            <span className={num}>{mil(costoTotal)}</span>
+            <span className="max-sm:hidden" />
+            <span className="text-right tabular-nums">{pesos(precioTotal)}</span>
+            <span className="col-span-2 hidden text-[12.5px] font-normal tabular-nums text-[#6E6A62] max-sm:block">
+              Costo {mil(costoTotal)} → precio {mil(precioTotal)}
             </span>
           </div>
-        ))}
-        <div role="row" className={`${fila} rounded-b-lg bg-[#F8F7F3] font-bold`} data-fila-total>
-          <span>Total</span>
-          <span className="max-sm:hidden" />
-          <span className={num}>{mil(costoTotal)}</span>
-          <span className="max-sm:hidden" />
-          <span className="text-right tabular-nums">{pesos(precioTotal)}</span>
-          <span className="col-span-2 hidden text-[12.5px] font-normal tabular-nums text-[#6E6A62] max-sm:block">
-            Costo {mil(costoTotal)} → precio {mil(precioTotal)}
-          </span>
         </div>
-      </div>
 
+      )}
       {conAdicional && editable && (
         <FormAdicional
           itemId={itemId}
@@ -297,11 +382,37 @@ export default function TarjetaCosto({
             )}
           </span>
         </span>
-        <span className="flex items-center gap-1.5 text-[13px] text-[#6E6A62]">
+        <span className={`flex ${apilable ? 'flex-wrap ' : ''}items-center gap-1.5 text-[13px] text-[#6E6A62]`}>
+          {/* Tarifa pública o neta: un clic, junto al margen (reunión del 2026-10-22). Solo en la
+              cotización por pasos: apagada, la tarjeta es byte a byte la de siempre. */}
+          {apilable && <span className="inline-flex items-center gap-1" data-tipo-tarifa={tipoTarifa}>
+            <span className="text-xs">Tarifa</span>
+            <span role="radiogroup" aria-label="Tipo de tarifa" className="inline-flex overflow-hidden rounded-md border border-[#CFCAC0]">
+              {(['neta', 'publica'] as const).map(t => {
+                const on = t === tipoTarifa
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    title={AYUDA_TIPO_TARIFA[t]}
+                    disabled={!editable || isPending}
+                    onClick={() => elegirTipo(t)}
+                    data-elegir-tipo={t}
+                    className={`border-0 px-2 py-0.5 text-xs font-semibold ${on ? 'bg-[#191713] text-[#F3F1EC]' : 'bg-white text-[#191713] hover:bg-[#F8F7F3]'} ${t === 'publica' ? 'border-l border-[#CFCAC0]' : ''}`}
+                  >
+                    {ETIQUETA_TIPO_TARIFA[t]}
+                  </button>
+                )
+              })}
+            </span>
+            {tipoPropuesto && <span className="text-[11px] text-[#9A5F0C]" data-tipo-propuesto>según el tarifario</span>}
+          </span>}
           Margen <b className="tabular-nums text-[#191713]">{margenReal === null ? '—' : porcentaje(margenReal)}</b>
           {bajo && (
             <AlertaDecision tip="Con este margen necesitas autorización para enviar">
-              <p className="m-0">Con un margen menor al {porcentaje(pisoPct)} la cotización no se puede enviar sin la autorización de Edgar. Súbelo o pídele la autorización.</p>
+              <p className="m-0">Con un margen menor al {porcentaje(pisoPct)} la cotización no se puede enviar sin la autorización de {autorizador ?? 'quien autoriza'}. Súbelo o pídele la autorización.</p>
             </AlertaDecision>
           )}
           {editable && (
@@ -311,6 +422,11 @@ export default function TarjetaCosto({
           )}
         </span>
       </div>
+      {publica && (
+        <p className="m-0 text-xs text-[#6E6A62]" data-aviso-publica>
+          Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. No entra en el margen mínimo ni pide autorización.
+        </p>
+      )}
 
       {ajustando && editable && (
         <div className="flex flex-col gap-2.5 rounded-lg border border-[#CFCAC0] bg-[#F8F7F3] p-3" data-panel-ajustar>
@@ -405,6 +521,16 @@ export default function TarjetaCosto({
 }
 
 /** «+ Adicional»: qué es, cuántos y cuánto cuesta. El precio sale del margen de la cotización. */
+/** Un par etiqueta-valor de la tabla apilada: la cifra nunca se parte en dos líneas. */
+function Par({ k, etiqueta, valor, fuerte = false }: { k: string; etiqueta: string; valor: string; fuerte?: boolean }) {
+  return (
+    <div className="flex min-w-0 flex-col" data-par={k}>
+      <dt className="text-[11.5px] font-normal text-[#6E6A62]">{etiqueta}</dt>
+      <dd className={`m-0 whitespace-nowrap tabular-nums text-[#191713] ${fuerte ? 'font-bold' : 'font-normal'}`}>{valor}</dd>
+    </div>
+  )
+}
+
 function FormAdicional({
   itemId,
   margenCotizacion,
@@ -419,7 +545,7 @@ function FormAdicional({
   const [nombre, setNombre] = useState('')
   const [cantidad, setCantidad] = useState('1')
   const [costo, setCosto] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const costoNum = parseMontoCop(costo) ?? 0
   const precio = precioDerivadoDeAdicional(costoNum, 'COP', margenCotizacion)
 

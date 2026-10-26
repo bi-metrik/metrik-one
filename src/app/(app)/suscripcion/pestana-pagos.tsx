@@ -36,12 +36,14 @@ const CLASE_CUOTA: Record<EstadoCuota, string> = {
 
 const ETIQUETA_PAGO = { pagado: 'Recibido', programado: 'Programado', anulado: 'Anulado' } as const
 
-export function PestanaPagos({ carga }: { carga: ResultadoPagosCda }) {
+export function PestanaPagos({ carga, opciones = null }: { carga: ResultadoPagosCda; opciones?: React.ReactNode }) {
   if (carga.estado === 'sin_acceso') return <AvisoCarga carga={carga} />
   if (carga.estado === 'no_disponible') return <AvisoCarga carga={{ estado: 'no_disponible', motivo: carga.motivo }} />
 
   return (
     <div className="space-y-5">
+      {/* «Pagar el mes» y «Pagar 12 meses» (Plan Anual), cuando el contrato los tiene encendidos. */}
+      {opciones}
       <section data-cuotas-cda className="rounded-lg border border-border bg-white p-4">
         <p className="text-sm font-semibold text-tinta">Cuotas de tu suscripción</p>
         <p className="mt-1 text-xs text-tinta-suave">{NOTA_IVA_CDA}</p>
@@ -121,6 +123,40 @@ function BotonPagar({ href, className = '' }: { href: string; className?: string
   )
 }
 
+/** La fecha y el medio del pago que cubrió la cuota; la fecha baja el recibo si lo hay. */
+function PagoDeLaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
+  const p = c.ultimoPago
+  if (!p) return null
+  const fecha = fechaCorta(p.fecha)
+  const medio = etiquetaFuentePago(p.fuente)
+  return (
+    <span data-pago-cuota={p.cobroId}>
+      {p.reciboDescargable ? (
+        <a href={`/api/valida/archivo/recibo/${p.cobroId}`} className="font-semibold text-acento">
+          {fecha}
+        </a>
+      ) : (
+        fecha
+      )}
+      {medio && ` · ${medio}`}
+    </span>
+  )
+}
+
+/**
+ * La columna Pago: en una cuota pagada, el pago que la cubrió; con saldo, el pago abonado (si lo hay)
+ * y el botón si hay enlace vigente; sin nada, «—».
+ */
+function Pago({ cuota: c }: { cuota: CuotaConEstado }) {
+  if (!c.ultimoPago && !c.enlacePago) return <>—</>
+  return (
+    <span className="flex flex-col items-start gap-1">
+      {c.ultimoPago && <PagoDeLaCuota cuota={c} />}
+      {c.enlacePago && <BotonPagar href={c.enlacePago} />}
+    </span>
+  )
+}
+
 function Factura({ cuota: c }: { cuota: CuotaConEstado }) {
   if (!c.factura || !c.cuotaId) return <span className="text-tinta-suave">Pendiente</span>
   return (
@@ -154,6 +190,11 @@ function TarjetaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
         <span>
           Factura: <Factura cuota={c} />
         </span>
+        {c.ultimoPago && (
+          <span>
+            Pago: <PagoDeLaCuota cuota={c} />
+          </span>
+        )}
         {c.enlacePago && <BotonPagar href={c.enlacePago} className="w-full text-sm" />}
       </div>
     </li>
@@ -170,7 +211,9 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
       </td>
       <td className="py-1.5 pr-3">{fechaCorta(c.fechaVencimiento)}</td>
       <td className={`py-1.5 pr-3 ${CLASE_CUOTA[c.estado]}`}>{ETIQUETA_CUOTA[c.estado]}</td>
-      <td className="py-1.5 pr-3">{c.enlacePago ? <BotonPagar href={c.enlacePago} /> : '—'}</td>
+      <td className="py-1.5 pr-3">
+        <Pago cuota={c} />
+      </td>
       <td className="py-1.5">
         <Factura cuota={c} />
       </td>

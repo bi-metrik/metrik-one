@@ -25,6 +25,8 @@
  * funcion es la fuente unica: la misma que consume la pantalla para dibujar los botones.
  */
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { revalidatePath } from 'next/cache'
 import { randomUUID } from 'crypto'
 import { ctxPagosExternos } from '@/lib/permissions/ctx-pagos-externos'
@@ -567,7 +569,7 @@ export type ResultadoRegistroPago =
  * eso, el resto del sistema (panel de duplicados, congelamiento por duplicado) leeria
  * un pago repartido a proposito como un duplicado accidental y frenaria los negocios.
  */
-export async function registrarPagoExterno(
+async function registrarPagoExternoSinClave(
   input: RegistrarPagoExternoInput,
 ): Promise<ResultadoRegistroPago> {
   const ctx = await ctxPagosExternos()
@@ -1021,4 +1023,16 @@ function cop(n: number): string {
     currency: 'COP',
     maximumFractionDigits: 0,
   }).format(Number.isFinite(n) ? n : 0)
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function registrarPagoExterno(input: RegistrarPagoExternoInput, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof registrarPagoExternoSinClave>>>(
+    { accion: 'registrarPagoExterno', clave: intencion, args: [input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => registrarPagoExternoSinClave(input),
+  )
 }

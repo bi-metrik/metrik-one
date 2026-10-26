@@ -6,7 +6,8 @@
 //   Mauricio del 2026-09-08: el lector no es Haiku, se queda en Gemini.
 
 import type { ModelAdapter, ModelCallOpts, ModelResult, ModelMessage } from "./types.ts";
-import { generate } from "../venezuela/gemini.ts";
+import { generate } from "../modelo-texto.ts";
+import { modeloQueRespondio } from "../llm-anthropic.ts";
 
 async function withRetry<T>(fn: () => Promise<T>, tries = 5, baseMs = 800): Promise<T> {
   let lastErr: unknown;
@@ -86,7 +87,7 @@ const PRECIOS_GEMINI: Record<string, { in: number; out: number }> = {
 
 /**
  * Adaptador Gemini con el mismo contrato que `claudeHaiku()`. Reusa `generate()` de
- * `../venezuela/gemini.ts` (el mismo fetch, retry y usage que ya usan los bots de VE y de
+ * `../modelo-texto.ts` (el mismo fetch, retry y usage que ya usan los bots de VE y de
  * customer en produccion con esta llave), asi que aqui no hay una segunda copia del cliente.
  *
  * Salida JSON siempre (`responseMimeType: application/json`), salvo que quien llama pida
@@ -117,7 +118,12 @@ export function geminiFlashLite(modelId: string = GEMINI_LECTOR_MODELO): ModelAd
         jsonMime: !opts.plainText,
       });
       // Los tokens de pensamiento se cobran como salida (asi lo dice el pricing): van en `out`.
-      return { text: r.text, usage: { in: r.usage.in, out: r.usage.out + r.usage.thoughts } };
+      return {
+        text: r.text,
+        usage: { in: r.usage.in, out: r.usage.out + r.usage.thoughts },
+        // `generate` pasa por `fetchModelo`: puede haber contestado Haiku 5.5 aunque se pidiera Gemini.
+        modelo: modeloQueRespondio(r.raw, modelId),
+      };
     },
   };
 }

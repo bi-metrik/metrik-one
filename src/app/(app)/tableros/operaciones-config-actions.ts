@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { invalidarTablerosWorkspace } from '@/lib/tableros/cache-rpc'
 import { createServiceClient } from '@/lib/supabase/server'
 
 /**
@@ -181,6 +182,9 @@ export async function guardarConfigBonoMes(
     )
   if (error) return { ok: false, error: error.message }
 
+  // El bono vive en caché 5 minutos (`@/lib/tableros/cache-rpc`): se borra para que la
+  // política nueva se vea en la siguiente lectura.
+  invalidarTablerosWorkspace(workspaceId)
   revalidatePath('/tableros')
   revalidatePath('/equipo')
   return { ok: true }

@@ -57,12 +57,20 @@ export function EntradaTerminos({
   politicaUrl,
   politicaTitulo,
   producto = 'valida_api',
+  titulo = 'Antes de entrar: los términos de tu contrato y tus datos',
+  descripcion = 'Lee los términos hasta el final. Con una sola aprobación aceptas los términos y la Política de Datos, y se abre el módulo.',
 }: {
   entrada: EntradaPendiente
   aviso: string
   politicaUrl: string
   politicaTitulo: string
   producto?: ProductoEntrada
+  /**
+   * El encabezado. Por defecto, el de la entrada al módulo. Una modificación por aviso (cláusula 13.1)
+   * lo cambia: ahí aceptar no abre nada, porque el módulo ya está abierto y sigue abierto.
+   */
+  titulo?: string
+  descripcion?: string
 }) {
   const router = useRouter()
   const contenedorRef = useRef<HTMLDivElement>(null)
@@ -151,11 +159,8 @@ export function EntradaTerminos({
         <ShieldCheck className="mt-0.5 hidden h-5 w-5 shrink-0 text-acento sm:block" />
         <div className="min-w-0 flex-1 space-y-5">
           <div className="space-y-1">
-            <h2 className="text-base font-semibold text-tinta">Antes de entrar: los términos de tu contrato y tus datos</h2>
-            <p className="text-sm text-tinta-suave">
-              Lee los términos hasta el final. Con una sola aprobación aceptas los términos y la Política de Datos, y
-              se abre el módulo.
-            </p>
+            <h2 className="text-base font-semibold text-tinta">{titulo}</h2>
+            <p className="text-sm text-tinta-suave">{descripcion}</p>
           </div>
 
           <div className="space-y-2">

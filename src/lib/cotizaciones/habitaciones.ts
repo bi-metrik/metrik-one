@@ -19,11 +19,13 @@
  */
 
 import type { Correcciones } from './correcciones'
+import { avisoDeEstadia, casillasConEstadia, estadiaDeHabitacion, lecturaConEstadia } from './estadia'
 import {
   claveTexto,
   describirOcupacion,
   composicionDeLectura,
   formatoMonto,
+  MENSAJE_COSTO_PENDIENTE,
   montoDeCosto,
   mismoTexto,
   normalizarComposicion,
@@ -178,6 +180,11 @@ export interface HabitacionRepartida {
   total: number
   moneda: string
   lectura: LecturaCasilla
+  /**
+   * Lo que hay que decir de su estadía (`avisoDeEstadia`): un pantallazo con las fechas
+   * corregidas a otras noches, o una habitación con fechas distintas de las de la opción.
+   */
+  avisoEstadia: string | null
 }
 
 export interface RepartoHabitaciones {
@@ -227,7 +234,15 @@ function esPar(a: HabitacionRepartida, r: HabitacionRepartida): boolean {
 export function repartirHabitaciones(
   habitaciones: readonly Habitacion[],
   grupo: Composicion | null,
+  /**
+   * Las correcciones de la ficha de la opción (`tarifa.correcciones`). Con fechas corregidas,
+   * una habitación de ingreso manual cuesta las noches corregidas (`estadia.ts`); un
+   * pantallazo conserva su precio y lleva el aviso.
+   */
+  correcciones?: Correcciones | null,
 ): RepartoHabitaciones {
+  const primera = habitaciones[0]?.lectura
+  const opcion = primera ? estadiaDeHabitacion(primera, correcciones) : null
   const filas: HabitacionRepartida[] = habitaciones.map(h => ({
     id: h.id,
     numero: null,
@@ -237,9 +252,10 @@ export function repartirHabitaciones(
     // Lo que corrigió una persona manda sobre lo leído (`Habitacion.correccion`).
     ocupacion: h.correccion?.ocupacion ?? ocupacionDeHabitacion(h.lectura),
     tipoHabitacion: (h.lectura.identidad.tipo_habitacion ?? '').trim() || null,
-    total: h.correccion?.total ?? montoDeCosto(h.lectura),
+    total: h.correccion?.total ?? montoDeCosto(lecturaConEstadia(h.lectura, correcciones)),
     moneda: (h.lectura.moneda || 'COP').toUpperCase(),
     lectura: h.lectura,
+    avisoEstadia: avisoDeEstadia(h.lectura, correcciones, opcion),
   }))
 
   const cubren = () => filas
@@ -257,6 +273,27 @@ export function repartirHabitaciones(
       const conPar = candidatas.filter(a => filas.some(r => esPar(a, r)))
       const elegida = (conPar.length > 0 ? conPar : candidatas)[(conPar.length > 0 ? conPar : candidatas).length - 1]
       elegida.rol = 'referencia'
+    }
+    // H14 (prueba Europa, 2026-10-14) · las capturas de la RESTA. Con el grupo 2A+1N+1I ya
+    // cubierto por una habitación, «2 adultos + 1 niño» entraba como habitación 2 y sumaba: el
+    // hotel se cobraba dos veces. Mientras lo cubierto pase del grupo, la captura cuya ocupación
+    // CABE en la de otra habitación (misma o menos gente de cada tipo, y no la misma) es de
+    // referencia: no suma. La última que llegó primero. Un toque de una persona manda.
+    const contenida = (a: Composicion, b: Composicion) =>
+      a.adultos <= b.adultos && a.ninos <= b.ninos && a.infantes <= b.infantes
+      && totalPasajeros(a) < totalPasajeros(b)
+    // Solo cuenta si quitarla baja lo que SOBRA: con un niño de más (un infante leído como niño),
+    // una habitación de solo adultos no es la sobrante.
+    const sobranEn = (): (keyof Composicion)[] => {
+      const s = cubren()
+      return (['adultos', 'ninos', 'infantes'] as const).filter(t => s[t] > grupo[t])
+    }
+    for (let tipos = sobranEn(); tipos.length > 0; tipos = sobranEn()) {
+      const candidatas = filas.filter(f => !f.manual && f.rol === 'habitacion' && f.ocupacion
+        && tipos.some(t => f.ocupacion![t] > 0)
+        && filas.some(b => b !== f && b.rol === 'habitacion' && b.ocupacion && contenida(f.ocupacion!, b.ocupacion)))
+      if (candidatas.length === 0) break
+      candidatas[candidatas.length - 1].rol = 'referencia'
     }
   }
 
@@ -378,10 +415,15 @@ export function resolverHabitaciones(
   grupo: Composicion | null,
   opciones: { moneda?: string | null } = {},
 ): EstadoTarifa {
-  const r = repartirHabitaciones(habitacionesDeTarifa(tarifa), grupo)
+  const r = repartirHabitaciones(habitacionesDeTarifa(tarifa), grupo, tarifa.correcciones)
   const cuentan = r.habitaciones.filter(h => h.rol === 'habitacion')
   if (cuentan.length === 0) {
     return { estado: 'inconsistente', mensaje: 'Ninguna captura quedó como habitación: toca «Usar como habitación» en la que va.' }
+  }
+  // Una habitación escrita a mano sin costo (2026-10-20) no cuesta 0: falta su costo.
+  const correccionDe = new Map(habitacionesDeTarifa(tarifa).map(h => [h.id, h.correccion?.total ?? null]))
+  if (cuentan.some(h => h.lectura.costoPendiente && correccionDe.get(h.id) == null)) {
+    return { estado: 'sin_costo', mensaje: MENSAJE_COSTO_PENDIENTE }
   }
   const sinOcupacion = cuentan.find(h => !h.ocupacion)
   if (sinOcupacion) {
@@ -537,7 +579,7 @@ export function resolverTarifaDeOpcion(
 ): EstadoTarifa | null {
   if (conHabitaciones(tarifa)) return resolverHabitaciones(tarifa, grupo ?? composicionLinea, opciones)
   if (!composicionLinea) return null
-  return resolverTarifa(composicionLinea, tarifa.casillas ?? {}, ranuraSlug, opciones)
+  return resolverTarifa(composicionLinea, casillasConEstadia(tarifa.casillas ?? {}, tarifa.correcciones), ranuraSlug, opciones)
 }
 
 // ── El precio por habitación (regla 8) ───────────────────────────────────────

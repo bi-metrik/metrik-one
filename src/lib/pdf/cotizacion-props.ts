@@ -16,6 +16,7 @@ import type {
   NivelDetalle,
   VueloPDF,
 } from '@/lib/cotizaciones/detalle-viaje'
+import type { EntradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 
 /**
  * El precio de UN pasajero de cada tipo en una línea (tarifa por pasajero, diseño §4).
@@ -283,6 +284,8 @@ export interface CotizacionPDFProps {
     /** El ordinal del viaje. Se imprime «Día 3», nunca una fecha. */
     dia: number
     items: {
+      /** La línea (`items.id`). El día a día de la propuesta nueva no la repite si ya es un servicio. */
+      id?: string
       nombre: string
       descripcion: string | null
       precio_venta: number
@@ -337,6 +340,11 @@ export interface CotizacionPDFProps {
     precio_venta: number
     cantidad: number
     unidad?: string | null
+    /**
+     * La foto del perfil del plan en la biblioteca del espacio (2026-10-16), si tiene. Solo la
+     * llena la plantilla de Trappvel de @react-pdf; ausente, la tarjeta sale como siempre.
+     */
+    foto?: FotoPDF
   }[] | null
 
   /**
@@ -422,4 +430,12 @@ export interface CotizacionPDFProps {
    * viaje, y la plantilla por defecto ni lo mira.
    */
   viaje?: ViajePDF | null
+
+  /**
+   * «Así puedes pagar» (F2, PR 7): la fecha de salida, hoy y la regla 80/15 de la línea. La
+   * plantilla arma las filas sobre el TOTAL que imprime, así que suman ese total por
+   * construcción. Ausente o `null` (línea sin `plan_pagos.activo`, o cualquier cotización que no
+   * sea de viaje): la plantilla no pinta nada y el documento sale como hoy.
+   */
+  asiPuedesPagar?: EntradaAsiPuedesPagar | null
 }

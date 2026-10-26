@@ -55,7 +55,7 @@
  */
 
 import { createServiceClient } from '@/lib/supabase/server'
-import { siigoRequest, getSiigoConfig, claveIdempotencia, SiigoError, type SiigoConfig } from './client'
+import { bloqueoPorEntornoDelNegocio, siigoRequest, getSiigoConfig, claveIdempotencia, SiigoError, type SiigoConfig } from './client'
 import {
   borradorAbono,
   borradorRecibo,
@@ -96,6 +96,7 @@ import {
   type Vencimiento,
   type VoucherSiigoLeido,
 } from './abono'
+import { valorRc3DelCobro } from './rc3-negocio-servidor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 
 /** Emitir ya viene de dos confirmaciones: aquí sí vale la pena esperar el 429. */
@@ -199,6 +200,12 @@ export type ResultadoRecibo =
   | { ok: false; motivo: 'espera_factura' }
   /** No había nada que ONE pudiera emitir: el abono quedó para Tesorería, con su razón. */
   | { ok: false; motivo: 'abono_a_mano'; a_mano: AbonoAMano[] }
+  /**
+   * El RC-3 es uno por negocio y sale del comprobante UPME (SOE-029, `./rc3-negocio`): este
+   * pago no lo lleva, o el negocio no tiene con qué emitirlo. `bloqueo` = falta un dato
+   * (el comprobante); sin él es la regla haciendo su trabajo, no un fallo.
+   */
+  | { ok: false; motivo: 'rc3_del_negocio'; mensaje: string; bloqueo: boolean }
   | { ok: false; motivo: 'error'; mensaje: string }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -431,6 +438,8 @@ export async function emitirReciboDeCobro(
      * recibo automático (`['pasante']`). Lo que no se pide ni se planea.
      */
     soloComponentes?: readonly ComponenteRecibo[]
+    /** Forma de pago de Siigo de la cuenta que recibió la plata (viaje, F2-6). Ausente = la del workspace. */
+    formaDePagoId?: number | null
   } = {},
 ): Promise<ResultadoRecibo> {
   const svc = createServiceClient()
@@ -457,6 +466,13 @@ export async function emitirReciboDeCobro(
 
   if (!cobro.negocio_id) return { ok: false, motivo: 'error', mensaje: 'El cobro no está atado a un negocio' }
   const negocioId = cobro.negocio_id
+
+  // Un negocio de prueba nunca emite en los libros reales (adenda Siigo, F8-5).
+  {
+    const { data: negPrueba } = await db(svc).from('negocios').select('metadata').eq('id', negocioId).maybeSingle()
+    const entorno = await bloqueoPorEntornoDelNegocio(workspaceId, (negPrueba as { metadata?: Record<string, unknown> | null } | null)?.metadata)
+    if (entorno) return { ok: false, motivo: 'error', mensaje: entorno }
+  }
 
   // ── 1. ¿Este COBRO ya tiene recibo? ──
   // La marca por cobro es lo que reemplazó a `negocios.metadata.siigo_recibo`: con la
@@ -680,6 +696,7 @@ export async function emitirReciboDeCobro(
         )
         : borradorRecibo(
           cfg, identificacion, comp.valor, fecha, comp.concepto, sucursalDelCliente, comp.documentId,
+          opciones.formaDePagoId ?? undefined,
         )
 
       const { payload, faltantes } = armar(fechaRecibo)
@@ -1138,7 +1155,7 @@ async function planParaEsteCobro(
   svc: any,
   workspaceId: string,
   cobroId: string,
-  cobro: { monto: number | null; tipo_cobro: string | null; siigo_recibo: unknown },
+  cobro: { negocio_id?: string | null; monto: number | null; tipo_cobro: string | null; siigo_recibo: unknown },
   valorPagado: number,
   opciones: {
     concepto?: string
@@ -1225,7 +1242,32 @@ async function planParaEsteCobro(
     }
   }
 
-  const plan = planDeEmision(reparto, porConcepto, opciones.bloqueReciboSlug)
+  // ── SOE-029: el RC-3 sale del comprobante UPME, uno por negocio ──
+  //
+  // La franja `a_tarifa` de este pago solo dice SI trae plata de la tarifa; cuánto acusa
+  // el recibo y en qué pago queda colgado lo decide `planRc3DelNegocio`. Un pago sin
+  // porción UPME no puede ser el titular, así que ni se consulta.
+  let repartoFinal = reparto
+  if (reparto.pasante > 0) {
+    const negocioId = (cobro as { negocio_id?: string | null }).negocio_id
+    if (!negocioId) {
+      return { ok: false, error: { ok: false, motivo: 'error', mensaje: 'El cobro no está atado a un negocio' } }
+    }
+    const rc3 = await valorRc3DelCobro(svc, workspaceId, negocioId, cobroId)
+    if (!rc3.ok) {
+      // Pedido SOLO el RC-3: se dice por qué no sale. Con otros componentes pedidos, la
+      // tarifa simplemente no va en este pago y lo demás sigue.
+      const soloPasante = solo != null && [...solo].every(c => c === 'pasante')
+      if (soloPasante) {
+        return { ok: false, error: { ok: false, motivo: 'rc3_del_negocio', mensaje: rc3.mensaje, bloqueo: rc3.bloqueo } }
+      }
+      repartoFinal = { ...reparto, pasante: 0 }
+    } else {
+      repartoFinal = { ...reparto, pasante: rc3.valor }
+    }
+  }
+
+  const plan = planDeEmision(repartoFinal, porConcepto, opciones.bloqueReciboSlug)
   if (!plan.ok) return { ok: false, error: { ok: false, motivo: 'faltan_datos', faltantes: plan.faltantes } }
 
   // Lo que ya tiene recibo no se vuelve a emitir: es lo que hace que un reintento tras

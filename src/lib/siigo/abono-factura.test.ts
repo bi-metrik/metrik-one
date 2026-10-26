@@ -116,6 +116,16 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => servicioFalso(),
 }))
 
+// SOE-029: cuánto acusa el RC-3 lo decide el plan del negocio (`rc3-negocio`, con sus
+// propias pruebas). Aquí cada pago se toma como titular de su porción UPME, que es lo
+// que estas pruebas del abono necesitan.
+vi.mock('./rc3-negocio-servidor', () => ({
+  valorRc3DelCobro: async (_svc: unknown, _ws: string, _neg: string, cobroId: string) => {
+    const fila = (tablas.v_cobro_valor ?? []).find(f => f.cobro_id === cobroId)
+    return { ok: true, valor: Number(fila?.a_tarifa ?? 0) }
+  },
+}))
+
 // ─── Siigo: un simulador con saldo e idempotencia ────────────────────────────
 
 interface FacturaSim {
@@ -466,7 +476,7 @@ describe('2 · los pagos llegan antes que la factura', () => {
       ['cob1abhon', TRAMO],
       ['cob2abhon', TRAMO],
     ])
-    expect(r.ok && r.abonos.emitidos.map(a => a.cobro_id)).toEqual(['cob-1', 'cob-2'])
+    expect(r.ok && r.abonos!.emitidos.map(a => a.cobro_id)).toEqual(['cob-1', 'cob-2'])
     const factura = Object.values(facturas)[0]
     expect(factura.balance).toBe(0)
   })
@@ -480,8 +490,8 @@ describe('2 · los pagos llegan antes que la factura', () => {
 
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
 
-    expect(r.ok && r.abonos.fallidos).toEqual([])
-    expect(r.ok && r.abonos.emitidos).toHaveLength(2)
+    expect(r.ok && r.abonos!.fallidos).toEqual([])
+    expect(r.ok && r.abonos!.emitidos).toHaveLength(2)
   })
 
   it('al facturar NO se le avisa al cliente por los pagos viejos', async () => {
@@ -512,7 +522,7 @@ describe('3 · un cobro con RC-1 de anticipo ya emitido', () => {
 
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
 
-    expect(r.ok && r.abonos.emitidos).toEqual([])
+    expect(r.ok && r.abonos!.emitidos).toEqual([])
     expect(creados()).toHaveLength(0)
     const factura = Object.values(facturas)[0]
     expect(factura.balance).toBe(HONORARIO)
@@ -578,7 +588,7 @@ describe('4 · el honorario del pago es mayor que el saldo de la factura', () =>
 
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
 
-    expect(r.ok && r.abonos.emitidos.map(a => a.valor)).toEqual([TRAMO, TRAMO])
+    expect(r.ok && r.abonos!.emitidos.map(a => a.valor)).toEqual([TRAMO, TRAMO])
     expect(marcas('cob-2')[0]).toMatchObject({ valor: TRAMO, sin_abonar: 400_000 - TRAMO })
     expect(Object.values(facturas)[0].balance).toBe(0)
   })
@@ -619,8 +629,8 @@ describe('5 · pago con retención', () => {
 
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
 
-    expect(r.ok && r.abonos.emitidos).toEqual([])
-    expect(r.ok && r.abonos.a_mano).toMatchObject([{ cobro_id: 'cob-ret', motivo: 'retencion' }])
+    expect(r.ok && r.abonos!.emitidos).toEqual([])
+    expect(r.ok && r.abonos!.a_mano).toMatchObject([{ cobro_id: 'cob-ret', motivo: 'retencion' }])
     expect(creados()).toHaveLength(0)
   })
 })
@@ -666,8 +676,8 @@ describe('6 · reintento después de un fallo parcial', () => {
     rechazar = body => (body.date === '2026-09-05' ? new SiigoError('Siigo no responde', 503) : null)
 
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
-    expect(r.ok && r.abonos.emitidos.map(a => a.cobro_id)).toEqual(['cob-1'])
-    expect(r.ok && r.abonos.fallidos.map(a => a.cobro_id)).toEqual(['cob-2'])
+    expect(r.ok && r.abonos!.emitidos.map(a => a.cobro_id)).toEqual(['cob-1'])
+    expect(r.ok && r.abonos!.fallidos.map(a => a.cobro_id)).toEqual(['cob-2'])
 
     rechazar = null
     const again = await abonarPagosDelNegocio(WS, NEG, 'Diana')
@@ -1262,7 +1272,7 @@ describe('9 · el control de duplicados del abono', () => {
 
     const r = await emitirFacturaNegocio(WS, NEG, 'Diana', { emitir: true })
 
-    expect(r.ok && r.abonos.emitidos.map(a => a.cobro_id)).toEqual(['cob-1', 'cob-2'])
-    expect(r.ok && r.abonos.a_mano).toEqual([])
+    expect(r.ok && r.abonos!.emitidos.map(a => a.cobro_id)).toEqual(['cob-1', 'cob-2'])
+    expect(r.ok && r.abonos!.a_mano).toEqual([])
   })
 })

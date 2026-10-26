@@ -1,15 +1,19 @@
 'use client'
 
-import { useState, useEffect, useTransition, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import {
   MessageSquare, Send, Trash2, Link as LinkIcon, AtSign,
   ArrowRight, X, CheckCircle2, XCircle, Shield, Banknote,
-  CheckSquare, FolderOpen, Filter, Users,
+  CheckSquare, FolderOpen, Filter, Users, AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { getActivityLog, addComment, deleteActivity, type AreaMencionable } from '@/app/(app)/activity-actions'
+import { etiquetasDeMencion } from '@/lib/activity/etiquetas-mencion'
+import { esReferenciaArchivo, hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { resolverStatusContacto } from '@/lib/catalogos/constants'
+import { useIntencion } from '@/hooks/use-intencion'
 
 /**
  * Equipos etiquetables. Son las áreas que ya gobiernan permisos y routing en el
@@ -23,7 +27,7 @@ interface StaffOption {
   full_name: string
 }
 
-interface ActivityEntry {
+export interface ActivityEntry {
   id: string
   tipo: string
   contenido: string | null
@@ -34,6 +38,8 @@ interface ActivityEntry {
   created_at: string | null
   autor: { id: string; full_name: string } | null
   mencion: { id: string; full_name: string } | null
+  /** Personas (por nombre) y equipos (`@area`) mencionados. Vacío en comentarios viejos. */
+  menciones?: string[]
   /** Lo calcula el servidor con la misma regla que aplica al borrar. */
   puede_borrar?: boolean
 }
@@ -43,6 +49,12 @@ interface ActivityLogProps {
   entidadId: string
   staffList: StaffOption[]
   oportunidadId?: string | null
+  /**
+   * La actividad ya leída en el servidor (`getActivityLog`). Con ella la tarjeta no la
+   * vuelve a pedir al montar: esa server action se ponía en fila delante de la primera
+   * acción real de la persona. Sin ella (p. ej. el 360 del contacto), la pide como antes.
+   */
+  entradasIniciales?: ActivityEntry[]
 }
 
 const CAMPO_LABELS: Record<string, string> = {
@@ -117,10 +129,13 @@ const claveShowSystem = (tipo: string) =>
   tipo === 'contacto' ? 'activity-log:show-system:contacto' : SHOW_SYSTEM_KEY
 const showSystemPorDefecto = () => true
 
-export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId }: ActivityLogProps) {
-  const [entries, setEntries] = useState<ActivityEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [isPending, startTransition] = useTransition()
+export default function ActivityLog({ entidadTipo, entidadId, staffList, oportunidadId, entradasIniciales }: ActivityLogProps) {
+  const [entries, setEntries] = useState<ActivityEntry[]>(entradasIniciales ?? [])
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
+  const [loading, setLoading] = useState(entradasIniciales === undefined)
+  const conIniciales = entradasIniciales !== undefined
+  const [isPending, startTransition] = useTransitionTolerante()
 
   // Form state
   const [content, setContent] = useState('')
@@ -152,14 +167,27 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
     })
   }
 
+  // Llegó del servidor: si la página se vuelve a pintar (revalidación, otro negocio), manda
+  // lo nuevo. Se ajusta en el render (no en un efecto), como recomienda React para estado
+  // que deriva de una prop.
+  const [inicialesVistas, setInicialesVistas] = useState(entradasIniciales)
+  if (entradasIniciales !== inicialesVistas) {
+    setInicialesVistas(entradasIniciales)
+    if (entradasIniciales) {
+      setEntries(entradasIniciales)
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
+    if (conIniciales) return
     async function load() {
       const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
       setEntries(data as ActivityEntry[])
       setLoading(false)
     }
     load()
-  }, [entidadTipo, entidadId, oportunidadId])
+  }, [entidadTipo, entidadId, oportunidadId, conIniciales])
 
   const visibleEntries = showSystem
     ? entries
@@ -176,7 +204,9 @@ export default function ActivityLog({ entidadTipo, entidadId, staffList, oportun
         null,
         linkUrl || null,
         { staffIds: mencionIds, areas: areasSel },
+        intencion.clave(),
       )
+      intencion.cerrar()
       if (res.success) {
         // Reload to get full entry with joins
         const data = await getActivityLog(entidadTipo, entidadId, oportunidadId)
@@ -462,24 +492,24 @@ function CommentEntry({ entry, onDelete }: { entry: ActivityEntry; onDelete: (id
 
       <p className="mt-1.5 text-sm whitespace-pre-wrap">{entry.contenido}</p>
 
-      {/* Mention badge */}
-      {entry.mencion && (
-        <span className="mt-1.5 inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+      {/* Mention badges: las de `activity_menciones`; en comentarios viejos, la única de `mencion_id`. */}
+      {etiquetasDeMencion(entry).map(etiqueta => (
+        <span key={etiqueta} className="mt-1.5 mr-1 inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
           <AtSign className="h-2.5 w-2.5" />
-          {entry.mencion.full_name}
+          {etiqueta.replace(/^@/, '')}
         </span>
-      )}
+      ))}
 
-      {/* Link */}
+      {/* Link (o un archivo guardado por referencia: el soporte que llegó por WhatsApp, que abre el endpoint que firma) */}
       {entry.link_url && (
         <a
-          href={entry.link_url}
+          href={hrefArchivo(entry.link_url) ?? entry.link_url}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-1.5 inline-flex items-center gap-1 text-[10px] text-blue-600 hover:underline"
         >
           <LinkIcon className="h-2.5 w-2.5" />
-          {(() => {
+          {esReferenciaArchivo(entry.link_url) ? 'Ver archivo' : (() => {
             try { return new URL(entry.link_url).hostname } catch { return 'Enlace' }
           })()}
         </a>
@@ -511,7 +541,7 @@ function Autor({ nombre }: { nombre: string | null | undefined }) {
   )
 }
 
-function ChangeEntry({ entry }: { entry: ActivityEntry }) {
+export function ChangeEntry({ entry }: { entry: ActivityEntry }) {
   const autorName = entry.autor?.full_name
   const timestamp = entry.created_at ? timeAgo(entry.created_at) : ''
 
@@ -659,6 +689,45 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
     )
   }
 
+  // Cruce avanzado con motivo: la diferencia NO se corrigio, alguien autorizado siguio.
+  if (campo === 'cruce_avanzado') {
+    return (
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <Autor nombre={autorName} />
+            <span>avanzo sin corregir el cruce</span>
+            <span className="text-[10px]">{timestamp}</span>
+          </div>
+          {entry.valor_anterior && <p className="text-foreground/80">{entry.valor_anterior}</p>}
+          {entry.contenido && <p className="italic">Motivo: {entry.contenido}</p>}
+        </div>
+      </div>
+    )
+  }
+
+  // Devolucion de dinero (SOE-007): salida propia, no anulacion del cobro. El detalle (fecha,
+  // motivo, si cerro el caso) viene armado por la base en `contenido`.
+  if (campo === 'devolucion_dinero') {
+    return (
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <Banknote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <Autor nombre={autorName} />
+            <span>registro devolucion de dinero</span>
+            {entry.valor_nuevo && (
+              <span className="font-medium text-red-600">{formatCOP(entry.valor_nuevo)}</span>
+            )}
+            <span className="text-[10px]">{timestamp}</span>
+          </div>
+          {entry.contenido && <p className="text-foreground/80">{entry.contenido}</p>}
+        </div>
+      </div>
+    )
+  }
+
   // Carpeta URL — solo indicar que se actualizo
   if (campo === 'carpeta_url') {
     return (
@@ -682,6 +751,23 @@ function ChangeEntry({ entry }: { entry: ActivityEntry }) {
           <Autor nombre={autorName} />
           <span>actualizo datos de bloque</span>
           {entry.contenido && <span className="font-medium text-foreground">{entry.contenido}</span>}
+          <span className="text-[10px]">{timestamp}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Una fila sin campo pero con texto (confirmación del viaje, etapas por fecha, cierre del
+  // viaje, servicios, entrega, facturación): el texto ES el cambio. Antes caía al genérico y se
+  // pintaba «cambio — → —» sin decir qué pasó (barrido ámbar, 2026-10-22). Solo se toca el
+  // render: las filas viejas se arreglan solas al pintarse.
+  if (!campo && entry.contenido) {
+    return (
+      <div className="flex items-start gap-2 rounded-lg px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/30 shrink-0" />
+        <div className="flex items-center gap-1 flex-wrap min-w-0" data-cambio-contenido>
+          <Autor nombre={autorName} />
+          <span className="text-foreground/80">{entry.contenido}</span>
           <span className="text-[10px]">{timestamp}</span>
         </div>
       </div>

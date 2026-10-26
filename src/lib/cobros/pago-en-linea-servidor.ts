@@ -1,12 +1,16 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { anclaDeFila } from '@/lib/suscripciones-producto/ancla'
+import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import type { EventoPasarela, PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { createServiceClient } from '@/lib/supabase/server'
+import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activacion-servidor'
+import { abrirCicloSiCorresponde, detalleCiclo } from '@/lib/valida-registro/ciclo-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
+import { anularCobroPorReverso } from './reverso-pasarela-servidor'
 
 /**
  * El lado de Supabase del pago en línea, y `atenderWebhookPasarela`: todo lo que una ruta de webhook
@@ -23,12 +27,13 @@ import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
 
-const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
+const COLUMNAS_COBRO = 'id, workspace_id, negocio_id, suscripcion_id, monto, retencion_iva, fecha, anulado_at, tipo_cobro, external_ref, notas, enlace_pago_url'
 
 type FilaCobro = {
   id: string
   workspace_id: string
   negocio_id: string | null
+  suscripcion_id?: string | null
   monto: number | string | null
   retencion_iva: number | string | null
   fecha: string | null
@@ -44,6 +49,7 @@ function aCobro(f: FilaCobro): CobroParaPago {
     id: f.id,
     workspaceId: f.workspace_id,
     negocioId: f.negocio_id,
+    suscripcionId: f.suscripcion_id ?? null,
     monto: Number(f.monto ?? 0),
     retencionIva: Number(f.retencion_iva ?? 0),
     fecha: f.fecha,
@@ -129,22 +135,68 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
       return exactos.map(aCobro)
     },
 
+    async cobrosPorReferenciaPago(referenciaPago) {
+      const r = await db
+        .from('cobros')
+        .select(COLUMNAS_COBRO)
+        .eq('tipo_cobro', 'programado')
+        .eq('external_ref', referenciaPago)
+        .limit(5)
+      if (r.error) throw new Error(`buscar cobro por referencia de pago: ${r.error.message}`)
+      return ((r.data ?? []) as FilaCobro[]).map(aCobro)
+    },
+
+    // El reverso se anula solo en ePayco (estado 6, que ePayco puede no avisar y la conciliación
+    // pregunta). Bold (VOID_APPROVED) sigue quedando en revisión para anularlo a mano.
+    ...(pasarela === 'epayco'
+      ? {
+          anularPorReverso(cobro: CobroParaPago, e: EventoPasarela) {
+            return anularCobroPorReverso(dbCliente, pasarela, cobro, e)
+          },
+        }
+      : {}),
+
     confirmarPago(c) {
       return confirmarPagoCobroProgramado(dbCliente, c)
     },
 
+    async trasPagoRegistrado(cobro) {
+      const partes: { revisar: boolean; detalle: string }[] = []
+      const r = await activarPlanAnualSiCorresponde(dbCliente, cobro.id)
+      if (r.tipo === 'requiere_revision') {
+        partes.push({ revisar: true, detalle: `Plan anual NO activado: ${r.detalle} Revisar y devolver el pago si corresponde.` })
+      } else if (r.tipo !== 'no_aplica') {
+        partes.push({ revisar: false, detalle: r.tipo === 'activado' ? 'Plan anual activado.' : 'El plan anual ya estaba activo.' })
+      }
+      // Valida autogestionada: el pago abre el ciclo del mes en Valida (y el primero le quita el
+      // vencimiento a la llave de la prueba). No aplica a ningún espacio que no venga del registro.
+      const ciclo = detalleCiclo(await abrirCicloSiCorresponde(cobro.id, { db: dbCliente }))
+      if (ciclo) partes.push(ciclo)
+      // Un cargo con la tarjeta guardada que ePayco dejó pendiente y aprobó después: cierra el intento,
+      // el registro de Valida y manda el C3. Sin un cargo pendiente, no hace nada. Import dinámico: el
+      // módulo del cargo importa este (ciclo de módulos).
+      const { cerrarCargoAprobadoTardio } = await import('@/lib/valida-registro/cargo-tardio-servidor')
+      const tardio = await cerrarCargoAprobadoTardio({ db: dbCliente }, cobro)
+      if (tardio) partes.push(tardio)
+      if (partes.length === 0) return null
+      return { revisar: partes.some((p) => p.revisar), detalle: partes.map((p) => p.detalle).join(' ') }
+    },
+
+    async trasRechazo(cobro, e) {
+      const { aplicarRechazoTardio } = await import('@/lib/valida-registro/cargo-tardio-servidor')
+      return aplicarRechazoTardio({ db: dbCliente }, cobro, e)
+    },
+
     async anotarEnNegocio(cobro, texto) {
-      if (!cobro.negocioId) return
-      await registrarActividad(
+      // El negocio (su timeline) o la suscripción (su bitácora): `anotarEnAncla` decide y nunca lanza.
+      await anotarEnAncla(
         dbCliente,
         {
-          workspace_id: cobro.workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: cobro.negocioId,
-          tipo: 'sistema',
-          autor_id: null,
-          // `activity_log.contenido` tiene CHECK de 280 caracteres.
-          contenido: texto.slice(0, 280),
+          ancla: anclaDeFila({ negocio_id: cobro.negocioId, suscripcion_id: cobro.suscripcionId ?? null }),
+          workspaceId: cobro.workspaceId,
+          tipo: 'pago_en_linea',
+          texto,
+          datos: { cobro_id: cobro.id },
         },
         `webhook-${pasarela}`,
       )

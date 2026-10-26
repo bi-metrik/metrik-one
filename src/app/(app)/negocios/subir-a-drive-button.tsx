@@ -7,8 +7,8 @@ import { subirExportNegociosADrive } from './exportar-drive-actions'
 /**
  * «Enviar a Drive» de la lista de negocios.
  *
- * Manda los mismos ids que la descarga a Excel (los que la lista tiene a la vista, ya
- * filtrados) y la server action publica la tabla como hoja NATIVA de Google Sheets en la
+ * Manda los mismos ids que la descarga a Excel (los de la lista visible, ya filtrados,
+ * que resuelve el servidor) y la server action publica la tabla como hoja NATIVA de Google Sheets en la
  * carpeta del espacio.
  *
  * Un solo archivo: el primer clic lo crea, los siguientes le reemplazan el contenido. El
@@ -30,15 +30,25 @@ type Estado =
   | { fase: 'listo'; url: string; creado: boolean; filas: number; compartidoCon: string[]; aviso?: string }
   | { fase: 'error'; mensaje: string }
 
-export default function SubirADriveButton({ ids }: { ids: string[] }) {
+export default function SubirADriveButton({
+  total,
+  obtenerIds,
+}: {
+  /** Largo de la lista visible: sin negocios no se ofrece. */
+  total: number
+  /** Ids de la lista visible COMPLETA, en su orden (los resuelve el servidor). */
+  obtenerIds: () => Promise<string[]>
+}) {
   const [estado, setEstado] = useState<Estado>({ fase: 'quieto' })
 
   const subiendo = estado.fase === 'subiendo'
 
   const subir = async () => {
-    if (subiendo || ids.length === 0) return
+    if (subiendo || total === 0) return
     setEstado({ fase: 'subiendo' })
     try {
+      const ids = await obtenerIds()
+      if (ids.length === 0) throw new Error('La vista quedó sin negocios. Recarga la lista.')
       const r = await subirExportNegociosADrive(ids)
       if (!r.ok) {
         setEstado({ fase: 'error', mensaje: r.error })
@@ -63,7 +73,7 @@ export default function SubirADriveButton({ ids }: { ids: string[] }) {
     }
   }
 
-  const n = ids.length
+  const n = total
   return (
     <div className="flex flex-col items-end gap-1">
       <button

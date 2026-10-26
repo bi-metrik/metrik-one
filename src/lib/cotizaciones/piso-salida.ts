@@ -45,8 +45,10 @@
  * `piso-salida-datos.ts`, que solo corre en el servidor.
  */
 
-import { cascadaDeItinerario, margenMedible, motivoDeRechazo, nombreDeItinerario, ranurasSinResolver } from './itinerarios'
+import { cascadaDeItinerario, exentaDelMinimo, margenMedible, motivoDeRechazo, nombreDeItinerario, ranurasSinResolver } from './itinerarios'
 import { etiquetaDeRanura } from './ranuras-pantallazo'
+import { nombreVisibleDeLinea } from './nombre-visible'
+import { esTarifaPublica } from './tarifa-publica'
 import { cascadaVigente, type ContextoCotizacion, type FilaItinerario } from './itinerarios-datos'
 
 /** Lo que se mide: una tarifa marcada para la propuesta, o la cotización entera. */
@@ -138,7 +140,7 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
               total: Math.round(cascada.precioVenta),
               margenRealPct: margen,
               ranurasFaltantes: faltantes,
-              bajoPiso: motivoDeRechazo({ ranurasFaltantes: faltantes, margenRealPct: margen, pisoPct }) !== null,
+              bajoPiso: motivoDeRechazo({ ranurasFaltantes: faltantes, margenRealPct: margen, pisoPct, exenta: exentaDelMinimo(cascada) }) !== null,
             }
           })
       : [(() => {
@@ -151,7 +153,7 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
             total: Math.round(cascada.precioVenta),
             margenRealPct: margen,
             ranurasFaltantes: [],
-            bajoPiso: motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margen, pisoPct }) !== null,
+            bajoPiso: motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margen, pisoPct, exenta: exentaDelMinimo(cascada) }) !== null,
           }
         })()]
 
@@ -207,7 +209,8 @@ function conteoDeLineas(
     .filter(([, sinCosto]) => sinCosto)
     .map(([id]) => {
       const item = porId.get(id)
-      return { id, nombre: item?.nombre ?? null, grupo: (item?.grupo ?? null) as string | null }
+      // Como se lee, no en MAYÚSCULAS (brief del 2026-10-05, punto 10).
+      return { id, nombre: item ? nombreVisibleDeLinea(item) || null : null, grupo: (item?.grupo ?? null) as string | null }
     })
   return { lineas: vistas.size, sinCosto: faltantes.length, faltantes }
 }
@@ -235,6 +238,9 @@ function cifrasDeLinea(item: ContextoCotizacion['items'][number]): (number | boo
     item.entra_al_precio ?? null,
     item.es_ajuste === true,
     adicionales.join('|'),
+    // Tarifa pública (2026-10-22): cambia lo que se mide. Solo se agrega cuando lo es, para que
+    // la huella de toda autorización anterior siga siendo la misma.
+    ...(esTarifaPublica((item as { tarifa_pax?: unknown }).tarifa_pax) ? ['publica'] : []),
   ]
 }
 

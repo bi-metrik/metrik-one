@@ -17,6 +17,7 @@
  */
 
 import type { TipoRanura } from './ranuras-cotizacion'
+import { leerTarifaPax } from './tarifa-pasajero'
 
 /** Lo que el detector dijo de una captura (`detectarTipoDeCaptura`). */
 export interface CapturaDetectada {
@@ -73,7 +74,27 @@ export function mismoLugar(a: string | null | undefined, b: string | null | unde
   if (!x || !y) return null
   if (x.codigo && y.codigo) return x.codigo === y.codigo
   if (x.nombre && y.nombre) return x.nombre === y.nombre
+  // H9 (prueba Europa, 2026-10-14) · «MAD» contra «Madrid»: el detector escribe la ciudad y la
+  // lectura el código, o al revés. Solo con un código que se conoce; si no, no se sabe.
+  const conCodigo = x.codigo ? x : y
+  const conNombre = x.codigo ? y : x
+  const ciudad = conCodigo.codigo ? CIUDAD_DE_AEROPUERTO[conCodigo.codigo] : undefined
+  if (ciudad && conNombre.nombre) return ` ${conNombre.nombre} `.includes(` ${ciudad} `)
   return null
+}
+
+/**
+ * La ciudad de los aeropuertos que una agencia colombiana vende de verdad, sin tildes y en
+ * minúscula, para comparar un código con un nombre. Un código que no está aquí no se adivina.
+ */
+const CIUDAD_DE_AEROPUERTO: Record<string, string> = {
+  BOG: 'bogota', MDE: 'medellin', CLO: 'cali', CTG: 'cartagena', BAQ: 'barranquilla', SMR: 'santa marta',
+  ADZ: 'san andres', PVA: 'providencia', PEI: 'pereira', AXM: 'armenia', CUC: 'cucuta', BGA: 'bucaramanga',
+  LET: 'leticia', MAD: 'madrid', BCN: 'barcelona', CDG: 'paris', ORY: 'paris', AMS: 'amsterdam', LIS: 'lisboa',
+  FCO: 'roma', MXP: 'milan', FRA: 'frankfurt', MUC: 'munich', LHR: 'londres', LGW: 'londres', ZRH: 'zurich',
+  MIA: 'miami', MCO: 'orlando', FLL: 'fort lauderdale', JFK: 'nueva york', CUN: 'cancun', PTY: 'panama',
+  PUJ: 'punta cana', LIM: 'lima', SCL: 'santiago', EZE: 'buenos aires', GRU: 'sao paulo', MEX: 'ciudad de mexico',
+  SJO: 'san jose', UIO: 'quito', CUR: 'curazao', AUA: 'aruba', IST: 'estambul',
 }
 
 /**
@@ -148,27 +169,48 @@ export interface EstadoDeBloque {
 
 export function estadoDeBloque(
   bloque: { grupo: string; etiqueta: string },
-  opciones: readonly { id?: string; nombre: string; conCosto: boolean; sinConfirmar: boolean; alerta: string | null }[],
+  opciones: readonly {
+    id?: string
+    nombre: string
+    conCosto: boolean
+    sinConfirmar: boolean
+    alerta: string | null
+    /**
+     * Lo que dice la tarjeta del hotel de sus pasajeros (`avisoDePasajerosDeOpcion`): un bloque
+     * al que le faltan o le sobran pasajeros no está completo (brief del 2026-10-01, punto 1).
+     */
+    pasajeros?: { corto: string; frase: string } | null
+    /**
+     * Por qué el costo leído no entró, cuando se sabe decir en una frase («El precio está en
+     * EUR: escribe la tasa de cambio para cargar el costo.», brief del 2026-10-01).
+     */
+    pendiente?: string | null
+  }[],
 ): EstadoDeBloque {
   const sinCosto = opciones.filter(o => !o.conCosto)
   const sinConfirmar = opciones.filter(o => o.sinConfirmar)
+  const conPasajeros = opciones.find(o => o.pasajeros)
   const conAlerta = opciones.find(o => o.alerta)
   const motivo = sinConfirmar.length > 0
     ? sinConfirmar.length === 1
-      ? `${sinConfirmar[0].nombre}: falta confirmar lo leído`
+      ? `${sinConfirmar[0].nombre}: ${sinConfirmar[0].pendiente ?? 'falta confirmar lo leído'}`
       : `${sinConfirmar.length} opciones sin confirmar`
     : sinCosto.length > 0
       ? sinCosto.length === 1 ? `${sinCosto[0].nombre}: sin costo` : `${sinCosto.length} opciones sin costo`
-      : conAlerta
-        ? `${conAlerta.nombre}: ${conAlerta.alerta}`
-        : null
+      : conPasajeros
+        ? `${conPasajeros.nombre}: ${conPasajeros.pasajeros!.corto.toLowerCase()}`
+        : conAlerta
+          ? `${conAlerta.nombre}: ${conAlerta.alerta}`
+          : null
   let aviso: string | null = null
   let explicacion: string | null = null
   let opcionId: string | null = null
   if (sinConfirmar.length > 0) {
     aviso = 'Falta confirmar el costo'
     explicacion = sinConfirmar.length === 1
-      ? `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. Ábrela y termina lo que le falta.`
+      ? sinConfirmar[0].pendiente
+        ? `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. ${sinConfirmar[0].pendiente}`
+        : `ONE leyó el pantallazo de ${sinConfirmar[0].nombre}, pero su costo todavía no entró a la cotización. Ábrela y termina lo que le falta.`
       : `${sinConfirmar.length} opciones tienen el pantallazo leído y el costo sin confirmar. Ábrelas y termina lo que les falta.`
     opcionId = sinConfirmar.length === 1 ? sinConfirmar[0].id ?? null : null
   } else if (sinCosto.length > 0) {
@@ -177,6 +219,11 @@ export function estadoDeBloque(
       ? `${sinCosto[0].nombre} no tiene costo: pega su pantallazo o escríbelo a mano.`
       : `${sinCosto.length} opciones no tienen costo: pega su pantallazo o escríbelo a mano.`
     opcionId = sinCosto.length === 1 ? sinCosto[0].id ?? null : null
+  } else if (conPasajeros) {
+    // Las mismas palabras de la caja de la tarjeta, para que el resumen no diga otra cosa.
+    aviso = conPasajeros.pasajeros!.corto.startsWith('Falta') ? 'Faltan pasajeros' : 'Sobran pasajeros'
+    explicacion = `${conPasajeros.nombre} · ${conPasajeros.pasajeros!.frase}`
+    opcionId = conPasajeros.id ?? null
   } else if (conAlerta) {
     aviso = 'Hay algo por revisar'
     explicacion = `${conAlerta.nombre}: ${conAlerta.alerta}`
@@ -251,9 +298,31 @@ export function pantallazosEnCotizacion(items: readonly { id: string; tarifa_pax
     const lecturas: unknown[] = habs.length > 0 ? habs.map(h => h?.lectura) : Object.values(t.casillas ?? {})
     lecturas.forEach((l, i) => {
       if (!l || typeof l !== 'object') return
+      // Una línea escrita a mano o costeada con la tarifa del proveedor no es un pantallazo
+      // (prueba del #1229, punto b: «Otro pantallazo ya está en la cotización» sin ninguno).
+      const origen = (l as { origen?: unknown }).origen
+      if (origen === 'manual' || origen === 'tarifario') return
       const huella = (l as { huellaImagen?: unknown }).huellaImagen
       llaves.push(typeof huella === 'string' && huella ? huella : `${it.id}:${i}`)
     })
   }
   return [...new Set(llaves)]
+}
+
+// ── El aviso flotante del pendiente ──────────────────────────────────────────
+
+/** El id del aviso «Quedó un pendiente en …» de una opción: uno por opción, nunca apilados. */
+export const idAvisoPendiente = (itemId: string) => `pendiente-${itemId}`
+
+/**
+ * ¿Lo que quedó pendiente al aceptar ya se resolvió? (brief del 2026-10-05, punto 15: «Falta el
+ * 2» seguía flotando después de que el pantallazo 2 entró). Al aceptar desde la bandeja la opción
+ * tiene UNA captura y sin costo confirmado; el pendiente es otra captura o la tasa. Se resolvió
+ * cuando la opción ya tiene el costo confirmado, otra casilla leída o otra habitación.
+ */
+export function pendienteResuelto(tarifaPax: unknown): boolean {
+  const t = leerTarifaPax(tarifaPax)
+  if (t.confirmada) return true
+  if ((t.habitaciones?.length ?? 0) > 1) return true
+  return Object.keys(t.casillas ?? {}).some(k => k !== 'grupo_completo')
 }

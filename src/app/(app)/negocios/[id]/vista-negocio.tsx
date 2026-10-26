@@ -10,13 +10,27 @@ import { leerMarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio-datos'
 import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
+import { AvisoAutorizacionPendiente } from './aviso-autorizacion-pendiente'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAsignarResponsable } from '@/lib/permissions/asignar-responsable'
+import { puedeAvanzarCruces as puedeAvanzarCrucesConMotivo } from '@/lib/negocios/cruces-avance'
 import { exigeCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
 import { leerFacturasDeCuotas } from '@/lib/valida-cda/facturas-negocio-servidor'
 import { FacturasCuotas } from './facturas-cuotas'
+import { getActivityLog } from '@/app/(app)/activity-actions'
+import type { ActivityEntry } from '@/components/activity-log'
+import { leerDevolucionesDelNegocio } from '@/lib/cobros/devoluciones-servidor'
+import { cobradoDelNegocio } from '@/lib/cobros/devolucion-dinero'
+import { DevolucionesNegocio } from './devoluciones-negocio'
+import { leerConfirmacionViaje } from './confirmacion-viaje'
+import { leerRielCobro } from './riel-cobro'
+import { leerEntregaViaje } from './entrega-viaje'
+import { leerViajeFinal } from './viaje-final'
+import { leerFacturaViaje } from './factura-viaje'
+import { leerSeguimientoViaje } from './seguimiento-viaje'
 
 /**
  * Todo lo que la página del negocio le pasa a `NegocioDetailClient`, armado en UN sitio.
@@ -34,6 +48,20 @@ export type VistaNegocio = Omit<ComponentProps<typeof NegocioDetailClient>, 'err
 export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | null> {
   const data = await getNegocioDetalleCompleto(id)
   if (!data) return null
+
+  // La actividad del negocio, para que la tarjeta «Actividad» llegue pintada. Antes la
+  // pedía el navegador al montar con una server action (`getActivityLog`, 876 llamadas en
+  // 7 días, medido 2026-10-05) que se ponía en fila delante de la primera acción real.
+  // Arranca aquí y corre en paralelo con el resto del armado; la misma función, el mismo
+  // alcance por workspace y la misma regla de `puede_borrar`.
+  const actividadLogP = getActivityLog('negocio', id).then(
+    (filas) => filas as unknown as ActivityEntry[],
+    (e) => {
+      // Sin la actividad la ficha se pinta igual: la tarjeta la pide como antes.
+      console.warn('[negocio] no se pudo leer la actividad:', e instanceof Error ? e.message : e)
+      return undefined
+    },
+  )
 
   // Cargar consultas Valida solo si el workspace tiene el flag activo
   const { supabase, workspaceId, staffId, role, areas } = await getWorkspace()
@@ -101,6 +129,13 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // `config_extra.omitir_gate.staff_ids`. MISMA función que el guard de
   // `cambiarEtapaNegocioConGate`: el botón no se ofrece a quien el servidor rechaza.
   let puedeOmitirGates = false
+  // «Avanzar de todas formas» sobre un cruce: solo la lista `avanzar_cruces.staff_ids`.
+  // MISMA función que el guard de `avanzarCrucesConMotivo`.
+  let puedeAvanzarCruces = false
+  // Asignar/quitar responsables: owner/admin/supervisor, o la persona en
+  // `config_extra.asignar_responsable.staff_ids`. MISMA función que el guard de
+  // `agregarResponsable`/`quitarResponsable`. Sin config legible, solo el rol.
+  let puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, null)
   // Carpeta del cerebro: el campo solo existe donde el workspace exige la carpeta, y se
   // edita con el MISMO resolvedor que usa `actualizarCarpetaLocalNegocio`.
   const carpetaLocal = { visible: false, puedeEditar: false }
@@ -116,6 +151,8 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
       .single()
     const modules = (ws?.modules ?? {}) as Record<string, boolean>
     puedeOmitirGates = puedeOmitirGatesConMotivo({ role, staffId }, ws?.config_extra ?? null)
+    puedeAvanzarCruces = puedeAvanzarCrucesConMotivo(staffId, ws?.config_extra ?? null)
+    puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, ws?.config_extra ?? null)
     almacenamientoExterno = esAlmacenamientoExterno(ws?.config_extra ?? null)
     if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
       carpetaLocal.visible = true
@@ -146,7 +183,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // propio `mx-auto max-w-2xl`: al ensancharse el contenedor del detalle
   // quedaban desalineados. JSX del servidor se puede pasar como prop a un
   // componente cliente; convertir esta página en cliente no es opción.
-  const banner = tieneBannerDeCierre && data.negocio.cierre_motivo
+  const bannerCierre = tieneBannerDeCierre && data.negocio.cierre_motivo
     ? (
       <div className="mb-3">
         <CerradoHeaderBanner
@@ -158,6 +195,35 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
           hasAreaComercial={hasAreaComercial}
         />
       </div>
+    )
+    : null
+
+  // Confirmación del viaje (F2): solo en líneas con `plan_pagos.activo`; en las demás no lee nada.
+  // Riel de cobro (F2): solo con plan acordado. Va arriba, debajo de la cabecera.
+  const argsViaje = { workspaceId: workspaceId ?? '', negocioId: id, staffId: staffId ?? null, role: role ?? null, areas: (areas ?? []) as string[] }
+  // Riel de facturación (F5): solo en líneas que facturan por evento (`facturacion.por_titular`).
+  // Documentos y entrega (F4): solo con `entrega_viaje.activo` y en la etapa que declara sus gates.
+  // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
+  // Seguimiento (F1): la línea «Cotización enviada el …» solo en la etapa con `cotizacion_enviada`.
+  const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinalLeido, seguimientoViaje] = workspaceId
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, { ...argsViaje, motivoAutorizacion: data.autorizacionPendiente === true ? (data.motivoAutorizacion ?? null) : null }), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
+    : [null, null, null, null, null, null]
+  const viajeFinal = viajeFinalLeido?.panel ?? null
+  // La autorización de datos pendiente: se cotiza, no se envía (reunión del 2026-10-22). Solo con
+  // el negocio abierto.
+  const avisoAutorizacion = data.autorizacionPendiente === true && !data.negocio.cierre_motivo ? <AvisoAutorizacionPendiente /> : null
+  const banner = bannerCierre || avisoAutorizacion || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
+    ? (
+      <>
+        {bannerCierre}
+        {avisoAutorizacion}
+        {seguimientoViaje}
+        {rielCobro}
+        {facturaViaje}
+        {confirmacionViaje}
+        {entregaViaje}
+        {viajeFinal}
+      </>
     )
     : null
 
@@ -187,9 +253,24 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     )
     : null
 
-  const extras = extrasValida || facturasCuotas?.estado === 'ok' || facturasCuotas?.estado === 'no_disponible'
+  // Devoluciones de dinero (SOE-007): visibles en la ficha aunque el bloque de pagos no se
+  // pinte en la etapa actual (el caso típico es un negocio perdido en venta).
+  const devoluciones = workspaceId ? await leerDevolucionesDelNegocio(supabase, workspaceId, id) : []
+  const tarjetaDevoluciones = devoluciones.length > 0
+    ? (
+      <DevolucionesNegocio
+        devoluciones={devoluciones}
+        cobrado={cobradoDelNegocio(
+          (data.cobros ?? []) as Array<{ monto: number | null; tipo_cobro: string | null; fecha: string | null }>,
+        )}
+      />
+    )
+    : null
+
+  const extras = extrasValida || tarjetaDevoluciones || facturasCuotas?.estado === 'ok' || facturasCuotas?.estado === 'no_disponible'
     ? (
       <div className="space-y-3">
+        {tarjetaDevoluciones}
         {facturasCuotas?.estado === 'ok' && <FacturasCuotas cuotas={facturasCuotas.cuotas} />}
         {facturasCuotas?.estado === 'no_disponible' && (
           <p className="text-xs text-tinta-suave">No se pudieron cargar las facturas de las cuotas en este momento.</p>
@@ -226,20 +307,28 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     ejecucionData: data.ejecucionData,
     historialData: data.historialData,
     actividad: data.actividad,
+    actividadLog: await actividadLogP,
     staffList: data.staffList,
     datosOtrasEtapas: data.datosOtrasEtapas,
     datosPorSlug: data.datosPorSlug,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     bloquesEtapasPrevias: data.bloquesEtapasPrevias as any,
     pausaEnabled: data.pausaEnabled,
+    seguimiento: data.seguimiento,
     registrarPagoEnabled: conciliacionActiva,
     registrarPagoSimple: pagoSimpleActivo,
     puedeCierreNoFacturable: puedeCierreNoFacturable,
+    cierreViaje: viajeFinalLeido?.paraCerrar ?? null,
     puedeOmitirGates: puedeOmitirGates,
+    puedeAvanzarCruces: puedeAvanzarCruces,
+    puedeAsignarResponsables: puedeAsignarResponsables,
     puedeResolverAvisoRecaudo: puedeResolverAvisoRecaudo,
     carpetaLocal: carpetaLocal,
     almacenamientoExterno: almacenamientoExterno,
     banner: banner,
+    /** La autorización de datos del cliente falta (la línea la pide): se cotiza, no se envía. */
+    autorizacionPendiente: data.autorizacionPendiente === true,
+    motivoAutorizacion: data.motivoAutorizacion ?? null,
     extras: extras,
     viaje,
   }

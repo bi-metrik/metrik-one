@@ -10,6 +10,8 @@ import {
   FORMA_DE_FOTO_EN_TERCIO,
   TOKENS,
   absorberRedondeo,
+  aerolineaDeFila,
+  filasDelVuelo,
   textoTarifaNino,
   altoEstimadoDeGrupoDeVuelos,
   altoEstimadoDeLista,
@@ -35,7 +37,7 @@ import {
   textosDeTarjetaHotel,
   type FilaPorPasajeroDoc,
 } from './cotizacion-trappvel-formato'
-import type { HotelPDF } from '@/lib/cotizaciones/detalle-viaje'
+import type { HotelPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 
 const hotel = (over: Partial<HotelPDF>): HotelPDF => ({
   linea: 'HOTEL',
@@ -484,14 +486,14 @@ describe('la tabla de vuelos, entera o partida con su encabezado', () => {
   const conEscala = { conEscala: true, conTarifa: false }
   const nota = 'Tarifa Basic · 1 artículo personal'
 
-  it('calibrado contra el render: un tramo con escala y nota, 43 pt; ida y regreso, 67', () => {
-    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(43, 0)
-    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(67, 0)
+  it('calibrado contra el render: un tramo con escala y nota, 38 pt; ida y regreso, 60', () => {
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(38, 0)
+    expect(altoEstimadoDeGrupoDeVuelos({ filas: [conEscala, conEscala], meta: nota }, ANCHO_META)).toBeCloseTo(60, 0)
   })
 
   it('una fila nunca mide menos que la píldora de la sigla', () => {
     const sola = altoEstimadoDeGrupoDeVuelos({ filas: [ida], meta: '' }, ANCHO_META)
-    expect(sola).toBe(12 + 14)
+    expect(sola).toBe(8 + 14)
   })
 
   it('la marca de la tarifa, la escala y una nota larga lo hacen crecer', () => {
@@ -512,7 +514,7 @@ describe('la tabla de vuelos, entera o partida con su encabezado', () => {
   })
 
   it('el borde es el de las listas del cierre, con título y encabezado incluidos', () => {
-    const resto = ALTO_MAXIMO_COLUMNA - 60 - ALTO_ENCABEZADO_VUELOS
+    const resto = ALTO_MAXIMO_COLUMNA - 74 - ALTO_ENCABEZADO_VUELOS
     expect(tablaDeVuelosVaEntera([resto])).toBe(true)
     expect(tablaDeVuelosVaEntera([resto + 0.5])).toBe(false)
   })
@@ -542,5 +544,32 @@ describe('textoTarifaNino', () => {
     expect(textoTarifaNino({ desde: 2, hasta: 11 })).toBe('Tarifa niño de 2 a 11 años cumplidos a la fecha del viaje')
     expect(textoTarifaNino({ desde: 5, hasta: 5 })).toBe('Tarifa niño de 5 años cumplidos a la fecha del viaje')
     expect(textoTarifaNino(null)).toBeNull()
+  })
+})
+
+describe('N9 · una pastilla por vuelo (regla del 2026-10-12)', () => {
+  const vuelo = (over: Partial<VueloPDF>): VueloPDF => ({
+    linea: 'AVIANCA BOG-ADZ', aerolinea: 'Avianca', origen: 'Bogotá BOG', destino: 'San Andrés ADZ',
+    fechaSalida: '23 nov 2026', fechaRegreso: '28 nov 2026', horaSalida: '06:50', horaLlegada: '09:00',
+    horaSalidaRegreso: '18:45', horaLlegadaRegreso: '20:55', escalaIda: null, escalaRegreso: null, escalas: 0,
+    tarifa: 'Classic', equipaje: null, adicionales: [], numeroVuelo: 'AV9782 / AV9779', ...over,
+  } as VueloPDF)
+
+  it('la aerolínea va una vez, en la primera fila; el regreso de la misma aerolínea va sin pastilla', () => {
+    const filas = filasDelVuelo(vuelo({}))
+    expect(filas).toHaveLength(2)
+    expect(aerolineaDeFila(filas, 0)).toEqual({ sigla: 'AV', nombre: 'Avianca' })
+    expect(aerolineaDeFila(filas, 1)).toBeNull()
+  })
+
+  it('un trayecto de OTRA aerolínea (código compartido, regreso con otra) lleva la suya', () => {
+    const filas = filasDelVuelo(vuelo({ numeroVuelo: 'AV9782 / LA4521' }))
+    expect(aerolineaDeFila(filas, 1)).toMatchObject({ sigla: 'LA' })
+    expect(aerolineaDeFila(filas, 1)?.nombre).not.toBe('LA')
+  })
+
+  it('sin número en el regreso, o con solo dígitos, no se inventa una aerolínea', () => {
+    expect(aerolineaDeFila(filasDelVuelo(vuelo({ numeroVuelo: '9782, 9779' })), 1)).toBeNull()
+    expect(aerolineaDeFila(filasDelVuelo(vuelo({ numeroVuelo: null })), 1)).toBeNull()
   })
 })

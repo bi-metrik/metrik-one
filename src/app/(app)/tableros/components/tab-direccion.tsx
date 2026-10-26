@@ -3,6 +3,10 @@
 import { useState, useTransition } from 'react'
 import { getDirectivo, type DirectivoData } from '../directivo-actions'
 import { COLUMNAS_DIRECTIVO } from '@/lib/dian/agrupacion-directivo'
+import { notaSegundoPago, type CifraSegundoPago } from '@/lib/tableros/segundo-pago'
+import { SegundoPagoDrawer } from './segundo-pago-drawer'
+import { NOTA_REEMBOLSOS } from '@/lib/tableros/reembolsos'
+import { ReembolsosDrawer } from './reembolsos-drawer'
 
 const MESES_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -29,8 +33,13 @@ const fmtCOP = (n: number) =>
 export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
   const [datos, setDatos] = useState(inicial)
   const [cargando, startTransition] = useTransition()
+  // Qué cifra de segundo pago se abrió. `null` = panel cerrado.
+  const [abierta, setAbierta] = useState<CifraSegundoPago | null>(null)
+  const [verReembolsos, setVerReembolsos] = useState(false)
 
   function irAMes(delta: number) {
+    setAbierta(null)
+    setVerReembolsos(false)
     const d = new Date(datos.anio, datos.mes - 1 + delta, 1)
     const anio = d.getFullYear()
     const mes = d.getMonth() + 1
@@ -41,6 +50,21 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
   }
 
   const { comercial: c, metas: m } = datos
+
+  // SOE-002. "Segundo pago" eran dos preguntas con un solo nombre: aquí se mostraba lo
+  // que ENTRÓ en el mes y en Comercial lo que pagaron las ventas DEL mes. Ahora las dos
+  // tienen nombre, salen de la misma RPC que lee Comercial, y Ventas totales suma la de
+  // caja (como siempre). Si esa RPC falla, la fila de caja cae a la cifra de la RPC del
+  // directivo, que es la misma sin el umbral de migajas.
+  const sp = datos.segundoPago
+  const recibido = sp ? sp.recibido.total : c.segundo_pago
+  const ventasTotales = sp ? c.primer_pago + sp.recibido.total : c.ventas_totales
+  // SOE-007. Las devoluciones de dinero del mes, por fecha de la devolución. Se muestran, no se
+  // restan aquí: «Ingresos primer pago» ya es neto de lo devuelto en el mes (lee
+  // v_recaudo_neto_valor) y una venta devuelta en su totalidad ya no cuenta en «Negocios
+  // cerrados» (sale de v_venta_mes_comercial).
+  const re = datos.reembolsos
+  const abrirReembolsos = re && re.reembolsos > 0 ? () => setVerReembolsos(true) : undefined
 
   return (
     <div className={cargando ? 'opacity-60 transition-opacity' : ''}>
@@ -70,15 +94,37 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
             <FilaKpi nombre="Leads generados" valor={c.leads_generados} meta={m.meta_leads_mensual} />
             <FilaKpi nombre="Leads calificados" valor={c.leads_calificados} meta={m.meta_leads_calificados_mensual}
               nota="Negocios que superaron Validación" />
-            <FilaKpi nombre="Negocios cerrados" valor={c.negocios_cerrados} meta={m.meta_negocios_mensual} />
+            <FilaKpi nombre="Negocios cerrados" valor={c.negocios_cerrados} meta={m.meta_negocios_mensual}
+              detalle="Sin las ventas a las que se les devolvió todo lo que pagaron" />
             <FilaKpi nombre="Ingresos primer pago" valor={c.primer_pago} meta={null} moneda />
-            <FilaKpi nombre="Ingresos segundo pago" valor={c.segundo_pago} meta={null} moneda />
-            <FilaKpi nombre="Ventas totales" valor={c.ventas_totales} meta={m.meta_ventas_mensual} moneda destacada />
+            <FilaKpi nombre="2º pago recibido este mes" valor={recibido} meta={null} moneda
+              detalle={sp
+                ? `${notaSegundoPago('recibido', sp.umbral_migaja)}. ${fmtCOP(sp.recibido.de_ventas_del_mes)} de ventas de este mes · ${fmtCOP(sp.recibido.de_ventas_anteriores)} de ventas de meses anteriores.`
+                : 'Por fecha de pago, de ventas de cualquier mes.'}
+              onAbrir={sp && sp.recibido.negocios > 0 ? () => setAbierta('recibido') : undefined} />
+            <FilaKpi nombre="Ventas totales" valor={ventasTotales} meta={m.meta_ventas_mensual} moneda destacada
+              nota="1er pago + 2º pago recibido este mes" />
+            {/* La cifra de cohorte va DEBAJO del total y fuera de la suma: mezclarla
+                contaría dos veces la segunda mitad de una venta del mes que ya pagó. */}
+            <FilaKpi nombre="2º pago de las ventas de este mes" valor={sp ? sp.de_ventas_del_mes.total : null}
+              meta={null} moneda
+              detalle={sp
+                ? `${notaSegundoPago('de_ventas_del_mes', sp.umbral_migaja)}. No suma en Ventas totales.`
+                : 'No se pudo calcular.'}
+              onAbrir={sp && sp.de_ventas_del_mes.negocios > 0 ? () => setAbierta('de_ventas_del_mes') : undefined} />
+            <FilaKpi nombre="Reembolsos" valor={re ? re.reembolsos : null} meta={null}
+              detalle={re
+                ? `${NOTA_REEMBOLSOS}.${re.ventas_anuladas > 0 ? ` ${re.ventas_anuladas} con todo devuelto: ya no cuentan como venta.` : ''}`
+                : 'No se pudo calcular.'}
+              onAbrir={abrirReembolsos} />
+            <FilaKpi nombre="Dinero devuelto" valor={re ? re.valor : null} meta={null} moneda
+              detalle={re && re.monto > 0 ? `${fmtCOP(re.monto)} con IVA salieron de la cuenta.` : undefined}
+              onAbrir={abrirReembolsos} />
           </tbody>
         </table>
       </div>
       <p className="mt-2 text-xs text-gray-500">
-        Las tres cifras de dinero van <strong>sin IVA</strong>: es lo que queda como ingreso, no
+        Las cifras de dinero van <strong>sin IVA</strong>: es lo que queda como ingreso, no
         lo que entró a la cuenta. El IVA se recauda para la DIAN y se previsiona aparte. La meta
         de ventas también está declarada sin IVA, así que el cumplimiento compara lo mismo contra
         lo mismo.
@@ -175,22 +221,52 @@ export default function TabDireccion({ inicial }: { inicial: DirectivoData }) {
           <li><strong>Bonos y comisiones</strong>: la mecánica comercial sigue pendiente de cerrar.</li>
         </ul>
       </div>
+
+      {abierta && sp && (
+        <SegundoPagoDrawer
+          key={`${sp.anio}-${sp.mes}-${abierta}`}
+          datos={sp}
+          cifra={abierta}
+          onClose={() => setAbierta(null)}
+        />
+      )}
+
+      {verReembolsos && re && (
+        <ReembolsosDrawer
+          key={`${re.anio}-${re.mes}-reembolsos`}
+          datos={re}
+          onClose={() => setVerReembolsos(false)}
+        />
+      )}
     </div>
   )
 }
 
-function FilaKpi({ nombre, valor, meta, moneda, nota, destacada }: {
-  nombre: string; valor: number; meta?: number | null
+function FilaKpi({ nombre, valor, meta, moneda, nota, detalle, destacada, onAbrir }: {
+  nombre: string; valor: number | null; meta?: number | null
   moneda?: boolean; nota?: string; destacada?: boolean
+  /** De dónde sale la cifra, en una línea debajo del nombre. */
+  detalle?: string
+  /** Abre los casos detrás de la cifra. Sin él la celda no se pinta como clicable. */
+  onAbrir?: () => void
 }) {
-  const cumple = meta ? valor / meta : null
+  const cumple = meta && valor !== null ? valor / meta : null
+  const cifra = valor === null ? <span className="text-gray-300">sin dato</span> : moneda ? fmtCOP(valor) : valor
   return (
     <tr className={destacada ? 'bg-gray-50 font-semibold' : ''}>
       <td className="px-4 py-2.5">
         {nombre}
         {nota && <span className="ml-2 text-xs font-normal text-gray-400">{nota}</span>}
+        {detalle && <p className="mt-0.5 text-xs font-normal text-gray-400">{detalle}</p>}
       </td>
-      <td className="px-4 py-2.5 text-right tabular-nums">{moneda ? fmtCOP(valor) : valor}</td>
+      <td className="px-4 py-2.5 text-right tabular-nums">
+        {onAbrir ? (
+          <button type="button" onClick={onAbrir} title="Ver los negocios detrás de esta cifra"
+            className="tabular-nums underline decoration-dotted underline-offset-4 hover:text-acento">
+            {cifra}
+          </button>
+        ) : cifra}
+      </td>
       <td className="px-4 py-2.5 text-right tabular-nums text-gray-500">
         {meta ? (moneda ? fmtCOP(meta) : meta) : <span className="text-gray-300">sin meta</span>}
       </td>

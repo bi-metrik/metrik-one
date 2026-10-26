@@ -81,10 +81,15 @@ describe('wa-webhook aplica la puerta', () => {
   })
 
   it('identifyUser lee `modules` y lo entrega en las dos ramas (staff y colaborador)', () => {
-    const iu = cuerpo('identifyUser')
-    const lecturas = iu.split(".from('workspaces')").length - 1
-    expect(lecturas).toBe(2)
-    expect(iu.split(".select('subscription_status, modules')").length - 1).toBe(lecturas)
-    expect(iu.split('modulos: workspace ?? null').length - 1).toBe(lecturas)
+    // Desde 2026-10-01 la identificacion vive en `wa-identificar.ts` (comportamiento probado en
+    // `wa-identificar.test.ts`); aqui se mira el cableado: una sola lectura de `workspaces` con
+    // `modules`, entregada en las dos ramas.
+    const fuente = readFileSync('supabase/functions/_shared/wa-identificar.ts', 'utf8')
+    expect(fuente.split(".from('workspaces')").length - 1).toBe(1)
+    // 2026-10-02 (bot conversacional): la misma lectura trae `config_extra.bot_conversacional`, el
+    // interruptor del intérprete, para que apagado no cueste una consulta más. Aprobado por la sesión
+    // principal: solo cambia el texto fijado del select, no el comportamiento.
+    expect(fuente).toContain(".select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot')")
+    expect(fuente.split('modulos: modulos ?? null').length - 1).toBe(2)
   })
 })

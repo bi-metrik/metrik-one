@@ -23,8 +23,9 @@ vi.mock('@/app/(app)/negocios/ranura-actions', () => ({}))
 const { default: BandejaCapturas, FilaCaptura } = await import('./bandeja-capturas')
 const {
   default: IngresoManualForm, AYUDA_NETO, AYUDA_FUENTE, AYUDA_EDAD_NINO,
-  PREGUNTA_PRECIO_TRASLADO, OPCION_POR_TRAYECTO, OPCION_IN_OUT,
+  PREGUNTA_PRECIO_TRASLADO, OPCION_POR_TRAYECTO, OPCION_IN_OUT, valorEscrito,
 } = await import('./ingreso-manual-form')
+const { BTN, BTN_ELEGIDO } = await import('@/components/viaje/estilo')
 const { default: TarjetaOpcion } = await import('./tarjeta-opcion')
 
 const HOTEL = ranuraPorSlug('hotel_detalle')!
@@ -123,6 +124,27 @@ describe('el formulario', () => {
     expect(html).toMatch(/aria-pressed="true"[^>]*bg-\[#EAF1EE\]|bg-\[#EAF1EE\][^>]*aria-pressed="true"/)
   })
 
+  // Brief del 2026-10-01, punto 6: el elegido «apenas se distingue». Era `${BTN} border-[#0E5C43]
+  // bg-[#EAF1EE] text-[#0E5C43]`, y en el CSS ganaban el borde gris y la tinta negra de `BTN`.
+  it('el tipo elegido se distingue: acento y tinte, sin los colores de `BTN` compitiendo', () => {
+    for (const tipo of ['hotel', 'traslado'] as const) {
+      const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+        composicion: GRUPO, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial: tipo,
+      }))
+      const elegido = html.match(/<button[^>]*aria-pressed="true"[^>]*>/)?.[0] ?? ''
+      expect(elegido).toContain(`class="${BTN_ELEGIDO}"`)
+      for (const gris of ['bg-white', 'border-[#CFCAC0]', 'text-[#191713]']) expect(elegido, gris).not.toContain(gris)
+      const otro = html.match(/<button[^>]*aria-pressed="false"[^>]*>/)?.[0] ?? ''
+      expect(otro).toContain(`class="${BTN}"`)
+    }
+  })
+
+  // Brief del 2026-10-01, punto 7.
+  it('los montos se ven con punto de miles al escribir; las cantidades y el texto no', () => {
+    for (const k of ['netoAdulto', 'netoNino', 'netoInfante', 'neto']) expect(valorEscrito(k, '280000'), k).toBe('280.000')
+    for (const k of ['adultos', 'edadDesde', 'hotel', 'fuente']) expect(valorEscrito(k, '1000'), k).toBe('1000')
+  })
+
   it('⚠️ el rótulo del costo dice que es lo que cobra el proveedor: el margen lo pone ONE', () => {
     expect(AYUDA_NETO).toBe('Lo que te cobra el proveedor, sin sumarle nada. El margen lo pone ONE.')
     expect(texto(pintar())).toContain(AYUDA_NETO)
@@ -153,6 +175,30 @@ describe('el formulario', () => {
     const bloque = html.match(/data-campo-manual="precio"[\s\S]*?<\/div>/)?.[0] ?? ''
     expect(bloque).toContain('type="radio"')
     expect(bloque).not.toContain('checked')
+  })
+
+  it('H20 · traslado: pregunta la moneda del proveedor (COP, EUR, USD), con COP marcado, en las dos formas', () => {
+    for (const porPasos of [false, true]) {
+      const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+        composicion: { adultos: 2, ninos: 0, infantes: 0 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial: 'traslado', porPasos,
+      }))
+      const bloque = html.match(/data-campo-manual="moneda"[\s\S]*?<\/div>/)?.[0] ?? ''
+      expect(texto(bloque), String(porPasos)).toContain('Moneda del proveedor')
+      for (const m of ['COP', 'EUR', 'USD']) expect(texto(bloque)).toContain(m)
+      expect(bloque.match(/checked/g)?.length).toBe(1)
+    }
+  })
+
+  it('«Escríbelo a mano» siempre lleva costo: ya no hay «Todavía no tengo el costo» (brief del 2026-10-21, punto 2)', () => {
+    for (const tipoInicial of ['vuelo', 'hotel', 'traslado', 'actividad', 'otro'] as const) {
+      const html = renderToStaticMarkup(React.createElement(IngresoManualForm, {
+        composicion: { adultos: 2, ninos: 0, infantes: 0 }, onEnviar: async () => ({ ok: true as const }), onCerrar: () => {}, tipoInicial, porPasos: true,
+      }))
+      expect(html, tipoInicial).not.toContain('data-sin-costo')
+      expect(texto(html), tipoInicial).not.toContain('Todavía no tengo el costo')
+      expect(html, tipoInicial).toMatch(/data-campo-manual="(netoAdulto|neto)"/)
+    }
+    expect(pintar()).not.toContain('data-sin-costo')
   })
 
   it('no pide cancelación: esa es la condición del proveedor y el cliente no la ve', () => {
@@ -224,9 +270,9 @@ describe('la opción aceptada, en su tarjeta', () => {
     expect(texto(ficha)).toContain('Ingresado a mano Portafolio Verdemar 2026')
   })
 
-  it('la moneda del hotel a mano dice «ingresada a mano» (las lecturas viven en las habitaciones)', () => {
+  it('la moneda del hotel a mano dice «escrita a mano» (las lecturas viven en las habitaciones)', () => {
     const t = texto(pintar(tarifa()))
-    expect(t).toContain('COP · ingresada a mano')
+    expect(t).toContain('COP · escrita a mano')
     expect(t).not.toContain('leída del pantallazo')
   })
 
@@ -276,9 +322,9 @@ describe('el traslado a mano, en su tarjeta', () => {
     expect(texto(html.slice(html.indexOf('data-hoja-cliente')))).toContain('Incluye: Silla de bebé')
   })
 
-  it('bajo «Costo y precio» la moneda dice que se ingresó a mano, no que se leyó del pantallazo', () => {
+  it('bajo «Costo y precio» la moneda dice que se escribió a mano, no que se leyó del pantallazo', () => {
     const t = texto(pintar(trasladoManual()))
-    expect(t).toContain('COP · ingresada a mano')
+    expect(t).toContain('COP · escrita a mano')
     expect(t).not.toContain('leída del pantallazo')
   })
 })

@@ -22,6 +22,7 @@
  *    desactualizado. La huella se calcula sobre la MISMA entrada que ve el modelo.
  */
 
+import type { AnticipoPropuesta } from './propuesta/anticipo'
 import type { ViajePDF } from '@/lib/pdf/cotizacion-props'
 import type { Composicion } from './tarifa-pasajero'
 import {
@@ -34,6 +35,8 @@ import {
   type ItemConLectura,
 } from './detalle-viaje'
 import { normalizarTerminos } from './terminos-cotizacion'
+import { incluyeConPropias } from './incluye-por-one'
+import type { ParrafoViejo } from './parrafo-viejo'
 
 export const MODELO_REDACTOR = 'gemini-2.5-flash'
 
@@ -64,6 +67,19 @@ export interface DocumentoCliente extends TextoCliente {
    * guardados antes del 2026-09-23.
    */
   estilo_por_revisar?: AlertaDeEstilo[]
+  /**
+   * `'one'`: «Incluye» lo arma ONE al imprimir con lo que se cobra (`incluye-por-one.ts`, C6), y
+   * `incluye` guarda solo las líneas propias de la asesora. Ausente = «Incluye» es el texto
+   * guardado, como siempre. La escribe la forma por pasos; el PDF la lee sin mirar el interruptor.
+   */
+  incluye_origen?: 'one'
+  /**
+   * H4 (verificación D, D5) · los nombres de los servicios con que se escribió o se revisó
+   * (`nombresDelViaje`), para decir QUÉ párrafo quedó viejo cuando uno sale (`parrafo-viejo.ts`).
+   * Lo escribe solo la forma por pasos; ausente = solo se sabe que el texto entero es de otras
+   * líneas (`fuente_hash`), como siempre.
+   */
+  fuente_nombres?: string[]
 }
 
 export const LIMITES_TEXTO = {
@@ -137,6 +153,8 @@ export function leerDocumentoCliente(raw: unknown): DocumentoCliente | null {
     revisado_por_nombre: cadena(r.revisado_por_nombre),
     revisado_en: cadena(r.revisado_en),
     ...conAlertas(leerAlertasDeEstilo(r.estilo_por_revisar)),
+    ...(r.incluye_origen === 'one' ? { incluye_origen: 'one' as const } : {}),
+    ...(Array.isArray(r.fuente_nombres) ? { fuente_nombres: r.fuente_nombres.filter((x): x is string => typeof x === 'string').slice(0, 60) } : {}),
   }
 }
 
@@ -171,10 +189,16 @@ export function estadoDelTexto(doc: DocumentoCliente | null): EstadoTexto {
  */
 export function textoParaElViaje(
   doc: DocumentoCliente | null,
+  /**
+   * C6 · los renglones que arma ONE con lo que se cobra (`incluyeDeOne`). Solo se usan si el
+   * documento lleva la marca `incluye_origen = 'one'`; sin la marca, «Incluye» es el guardado.
+   */
+  incluyeDeOne?: readonly string[] | null,
 ): Partial<Pick<ViajePDF, 'titular' | 'intro' | 'incluye' | 'antesDeViajar'>> {
   const t = textoImprimible(doc)
   if (!t) return {}
-  return { titular: t.titular, intro: t.intro, incluye: t.incluye, antesDeViajar: t.antes_de_viajar }
+  const incluye = doc?.incluye_origen === 'one' && incluyeDeOne ? incluyeConPropias(incluyeDeOne, t.incluye) : t.incluye
+  return { titular: t.titular, intro: t.intro, incluye, antesDeViajar: t.antes_de_viajar }
 }
 
 /** ¿El texto se escribió (o se revisó) con otras líneas? Sin huella de ninguno de los dos lados, no se afirma. */
@@ -187,6 +211,17 @@ export function textoDesactualizado(doc: DocumentoCliente | null, huellaActual: 
 export function avisoDelTextoEnPdf(doc: DocumentoCliente | null): string | null {
   if (estadoDelTexto(doc) !== 'borrador') return null
   return 'El texto para el cliente es un borrador de ONE sin revisar: el PDF salió sin él. Revísalo y guárdalo para que se imprima.'
+}
+
+/**
+ * El aviso del PDF cuando el texto REVISADO se escribió con otras líneas (brief del 2026-10-08):
+ * un vuelo que se quitó, una aerolínea o un equipaje corregidos. El PDF lo imprime igual —no se
+ * bloquea por un cambio que puede ser menor— pero quien lo genera lo sabe antes de mandarlo:
+ * «Incluido en el plan» puede nombrar un servicio que ya no se cobra. `null` = nada que avisar.
+ */
+export function avisoDelTextoViejoEnPdf(doc: DocumentoCliente | null, huellaActual: string | null): string | null {
+  if (estadoDelTexto(doc) !== 'revisado' || !textoDesactualizado(doc, huellaActual)) return null
+  return 'El texto para el cliente se revisó con otros servicios (algo cambió después: un vuelo, un hotel, un equipaje). El PDF lo imprimió como estaba: revísalo en «Texto para el cliente» antes de enviarlo.'
 }
 
 /**
@@ -210,6 +245,18 @@ export interface PanelTextoCliente {
    * propone en un borrador sin términos (`terminosAlAbrir`); el PDF nunca las lee.
    */
   terminosBase: string | null
+  /**
+   * El anticipo para apartar que la asesora asignó (decisión del 2026-10-14, `anticipo.ts`).
+   * Vive en la misma columna que el texto, con su propio ciclo de vida.
+   */
+  anticipo?: AnticipoPropuesta | null
+  /** ¿El documento lo imprime? Solo con el motor `html` encendido en el workspace. */
+  imprimeAnticipo?: boolean
+  /**
+   * H4 · D5 · los párrafos que nombran un servicio que ya no va (`parrafo-viejo.ts`). Solo con un
+   * texto escrito por la forma por pasos (que guarda los nombres); ausente en los demás.
+   */
+  parrafosViejos?: ParrafoViejo[]
 }
 
 // ── La entrada del modelo ─────────────────────────────────────────────────────

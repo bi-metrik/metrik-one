@@ -1,10 +1,12 @@
 'use server'
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { armarSelectorDeWorkspaces, type WorkspaceConMarca } from '@/lib/workspace/archivado'
 import type { GrupoDeWorkspace } from '@/lib/workspace/grupo'
+import { entradaDeWorkspaceEnPreview, esDeploymentDePreview } from '@/lib/tenant/tenant-preview'
 
 // ============================================================
 // Tipos compartidos (cliente + servidor)
@@ -40,19 +42,18 @@ type CurrentUserCtx = {
 }
 
 async function getCurrentUserCtx(): Promise<CurrentUserCtx | null> {
-  const supabase = await createClient()
   const { user } = await getCachedUser()
   if (!user || !user.email) return null
 
-  const { data } = await supabase
-    .from('profiles')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .select('id, workspace_id, home_workspace_id, platform_admin' as any)
-    .eq('id', user.id)
-    .single()
-
-  const profile = (data as unknown as ProfileExt | null) ?? null
-  if (!profile) return null
+  // Compartida con el layout y `getWorkspace` en el mismo render (ver `perfil-sesion.ts`).
+  const fila = await leerPerfilDeSesion(user.id)
+  if (!fila) return null
+  const profile: ProfileExt = {
+    id: fila.id,
+    workspace_id: fila.workspace_id,
+    home_workspace_id: fila.home_workspace_id,
+    platform_admin: fila.platform_admin === true,
+  }
   return { profile, email: user.email }
 }
 
@@ -70,6 +71,12 @@ async function generateCrossSubdomainSessionLink(
   targetSlug: string,
   pathAfter: string = '/numeros',
 ): Promise<string | null> {
+  // En un preview de Vercel el subdominio del workspace destino es PRODUCCIÓN: el enlace
+  // sacaba al revisor de la versión del PR justo al cambiar de workspace. Ahí no hace falta
+  // sembrar sesión en otro host (la cookie de sesión ya es de este), así que el destino es
+  // la entrada al workspace en el mismo host, y no se genera ningún enlace mágico.
+  if (esDeploymentDePreview()) return entradaDeWorkspaceEnPreview(targetSlug)
+
   const svc = createServiceClient()
   const baseDomain = process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co'
   const targetOrigin =

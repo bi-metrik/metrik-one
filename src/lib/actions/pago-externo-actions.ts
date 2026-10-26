@@ -1,10 +1,12 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { guardEditarBloque } from '@/lib/permissions/guard-negocio'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO } from '@/lib/dates/bogota'
-import { alRegistrarCobro } from '@/lib/siigo/recibo-automatico'
+import { alRegistrarCobroEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 
 // Cast a untyped para columnas/tipos nuevos no en database.ts (tipo_cobro 'externo')
@@ -47,7 +49,7 @@ export interface RegistrarPagoExternoInput {
  * Idempotencia: por `external_ref` (referencia) dentro del negocio — un doble
  * click no duplica el cobro.
  */
-export async function registrarPagoExterno(
+async function registrarPagoExternoSinClave(
   negocioBloqueId: string,
   negocioId: string,
   input: RegistrarPagoExternoInput,
@@ -170,7 +172,7 @@ export async function registrarPagoExterno(
     // El abono del honorario a la factura (siempre, si hay factura) y el RC-3 de la
     // tarifa (solo con `recibo_automatico`). No devuelve error: el pago ya quedó
     // registrado y eso es lo que la persona pidió.
-    await alRegistrarCobro(workspaceId, cobroId)
+    await alRegistrarCobroEnSegundoPlano(workspaceId, cobroId)
 
     // Si este pago dejó el negocio con plata de más, se le avisa a la financiera
     // (opt-in `aviso_sobrepago`). Nunca devuelve error.
@@ -184,4 +186,16 @@ export async function registrarPagoExterno(
     console.error('[pago externo]', message)
     return { success: false, error: message }
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function registrarPagoExterno(negocioBloqueId: string, negocioId: string, input: RegistrarPagoExternoInput, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof registrarPagoExternoSinClave>>>(
+    { accion: 'registrarPagoExterno', clave: intencion, args: [negocioBloqueId, negocioId, input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => registrarPagoExternoSinClave(negocioBloqueId, negocioId, input),
+  )
 }

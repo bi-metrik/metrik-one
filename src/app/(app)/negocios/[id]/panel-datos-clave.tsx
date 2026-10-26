@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, CheckCircle2, FileText, History, KeyRound } from 'lucide-react'
 import { toast } from 'sonner'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
@@ -19,7 +20,8 @@ export type CorregirLectura = (votoSlug: string, clave: string) => Promise<{ suc
  *  - «Sin definir» en ámbar: el dato le aplica al caso y falta. Es justo lo que hay que ver;
  *  - «No aplica» en gris: ninguna de sus fuentes le aplica al caso.
  * Las contradicciones entre datos (los cruces de la línea) van arriba y en rojo, con el
- * texto del cruce. Si una frena el avance en esta etapa, lo dice.
+ * texto del cruce. Si una frena el avance en esta etapa, lo dice; si alguien autorizado
+ * la avanzó con motivo, sigue a la vista con «Avanzado por X: motivo».
  *
  * La decisión de qué mostrar ya viene tomada del servidor (`datos-clave.ts`); aquí solo se
  * pinta, así que la tarjeta y el gate de avance no pueden decir cosas distintas.
@@ -59,7 +61,14 @@ export default function PanelDatosClave({
               <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden />
               <span>
                 {c.mensaje}
-                {c.bloquea && <span className="font-semibold"> Frena el avance en esta etapa.</span>}
+                {c.avanzado ? (
+                  // La diferencia sigue ahí: se avanzó con motivo, no se corrigió.
+                  <span className="font-semibold">
+                    {' '}Avanzado por {c.avanzado.autor ?? 'alguien sin nombre registrado'}: {c.avanzado.motivo}
+                  </span>
+                ) : (
+                  c.bloquea && <span className="font-semibold"> Frena el avance en esta etapa.</span>
+                )}
               </span>
             </li>
           ))}
@@ -163,7 +172,7 @@ function concordancia(v: ResultadoVoto): string {
 }
 
 function LecturaEnDisputa({ voto, corregirLectura }: { voto: ResultadoVoto; corregirLectura?: CorregirLectura }) {
-  const [pendiente, startTransition] = useTransition()
+  const [pendiente, startTransition] = useTransitionTolerante()
   const [hecho, setHecho] = useState<string | null>(null)
 
   const corregir = (f: LecturaFuente) => {

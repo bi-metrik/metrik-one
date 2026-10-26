@@ -118,7 +118,7 @@ describe('regla 1 · sin un solo día, la cotización no se agrupa', () => {
 })
 
 describe('el día parte el documento en tres', () => {
-  it('dos tours con día, uno sin día: itinerario con dos, el tercero a sugeridos', () => {
+  it('dos tours con día y el traslado sin día: itinerario con dos, el traslado sigue incluido', () => {
     const items = viaje().map(i =>
       i.id === 'saona' ? { ...i, dia_relativo: 2 } : i.id === 'catalina' ? { ...i, dia_relativo: 3 } : i,
     )
@@ -127,10 +127,25 @@ describe('el día parte el documento en tres', () => {
       { dia: 2, itemIds: ['saona'] },
       { dia: 3, itemIds: ['catalina'] },
     ])
-    // El traslado (grupo no combinable, sin día) cae a sugeridos.
-    expect(itemsSugeridos(items)).toEqual(['traslado'])
-    // El vuelo y el hotel NO: imprimen donde imprimen hoy.
-    expect(itemsSinSeccionPropia(items)).toEqual(['avianca', 'hotel'])
+    // Brief del 2026-10-05 (D1): sin día NO es «no incluida». Lo que suma, se imprime incluido.
+    expect(itemsSugeridos(items)).toEqual([])
+    expect(itemsSinSeccionPropia(items)).toEqual(['avianca', 'hotel', 'traslado'])
+  })
+
+  it('«no incluida» es solo lo que se sacó del precio a propósito (Opcional o No va)', () => {
+    const items = viaje().map(i =>
+      i.id === 'saona' ? { ...i, dia_relativo: 2 } : i.id === 'catalina' ? { ...i, entra_al_precio: false } : i,
+    )
+    expect(itemsSugeridos(items)).toEqual(['catalina'])
+    expect(itemsSinSeccionPropia(items)).toEqual(['avianca', 'hotel', 'traslado'])
+  })
+
+  it('una «No va» con día guarda su día pero no arma itinerario', () => {
+    const noVa = { id: 'saona', grupo: 'tour', orden: 1, dia_relativo: 2, entra_al_precio: false, mostrar_en_sugeridos: false }
+    expect(diasDelItinerario([noVa])).toEqual([])
+    expect(hayDiasAsignados([noVa])).toBe(false)
+    expect(sugeridosVisibles([noVa])).toEqual([])
+    expect(diaDeItem(noVa)).toBe(2)
   })
 
   it('⚠️ un vuelo sin día no cae NUNCA a sugeridos, ni con el resto del viaje en días', () => {
@@ -163,7 +178,8 @@ describe('el día parte el documento en tres', () => {
       { id: 'tour', grupo: 'tour', orden: 2 },
     ]
     expect(diasDelItinerario(items)).toEqual([{ dia: 1, itemIds: ['seguro'] }])
-    expect(itemsSugeridos(items)).toEqual(['tour'])
+    // El tour sin día sigue incluido (D1 del brief del 2026-10-05).
+    expect(itemsSugeridos(items)).toEqual([])
   })
 
   it('⚠️⚠️ el seguro sin grupo y sin día NO cae a «no incluidas» aunque el viaje use días', () => {
@@ -184,10 +200,11 @@ describe('el día parte el documento en tres', () => {
 })
 
 describe('el check de mostrar u ocultar una sugerencia', () => {
+  // Opcional = fuera del precio y a la vista; No va = fuera del precio y oculta.
   const conDias = (): ItemConPrecio[] => [
     { id: 'tour1', grupo: 'tour', orden: 1, dia_relativo: 1 },
-    { id: 'saona', grupo: 'tour', orden: 2 },
-    { id: 'catalina', grupo: 'tour', orden: 3, mostrar_en_sugeridos: false },
+    { id: 'saona', grupo: 'tour', orden: 2, entra_al_precio: false },
+    { id: 'catalina', grupo: 'tour', orden: 3, entra_al_precio: false, mostrar_en_sugeridos: false },
   ]
 
   it('ausente cuenta como SÍ se muestra', () => {
@@ -205,70 +222,37 @@ describe('el check de mostrar u ocultar una sugerencia', () => {
   })
 })
 
-describe('⚠️⚠️ el aviso obligatorio: una sugerencia que está sumando al total', () => {
-  it('nombra la línea con su plata', () => {
+describe('⚠️⚠️ el aviso de dinero: solo lo dispara un llamador que olvidó el interruptor', () => {
+  // Desde el brief del 2026-10-05 una sugerencia es SOLO lo que salió del precio, así que con el
+  // juego de ids bien armado (`itemsQueAportanAlTotal`) el aviso queda vacío. Sigue existiendo para
+  // el llamador que arma `aportanAlTotal` sin pasar `entra_al_precio`: ahí sí la línea suma.
+  it('una opcional que un llamador cuenta en el total se nombra con su plata', () => {
+    const items: ItemConPrecio[] = [
+      { id: 'saona', grupo: 'tour', orden: 1, precio_venta: 180_000, cantidad: 3, entra_al_precio: false },
+    ]
+    expect(avisoSugeridosQueCobran(items, ['saona'])).toEqual([{ id: 'saona', precioLinea: 540_000, oculta: false }])
+  })
+
+  it('una oculta que se cuenta en el total se marca como oculta', () => {
+    const items: ItemConPrecio[] = [
+      { id: 'saona', grupo: 'tour', orden: 1, precio_venta: 540_000, cantidad: 1, entra_al_precio: false, mostrar_en_sugeridos: false },
+    ]
+    expect(avisoSugeridosQueCobran(items, ['saona'])).toEqual([{ id: 'saona', precioLinea: 540_000, oculta: true }])
+  })
+
+  it('una actividad sin día que suma no avisa: se imprime incluida (D1)', () => {
     const items = viaje().map(i => (i.id === 'saona' ? { ...i, dia_relativo: 1 } : i))
-    // `traslado` y `catalina` quedan sin día, con grupo no combinable y con precio.
-    const aviso = avisoSugeridosQueCobran(items, items.map(i => i.id))
-    expect(aviso).toEqual([
-      { id: 'traslado', precioLinea: 200_000, oculta: false },
-      { id: 'catalina', precioLinea: 480_000, oculta: false },
-    ])
+    expect(avisoSugeridosQueCobran(items, items.map(i => i.id))).toEqual([])
   })
 
-  it('multiplica por la cantidad: el aviso dice lo que la línea cobra, no el unitario', () => {
-    const items: ItemConPrecio[] = [
-      { id: 'dia', grupo: 'tour', orden: 1, dia_relativo: 1 },
-      { id: 'saona', grupo: 'tour', orden: 2, precio_venta: 180_000, cantidad: 3 },
-    ]
-    expect(avisoSugeridosQueCobran(items, ['dia', 'saona'])).toEqual([
-      { id: 'saona', precioLinea: 540_000, oculta: false },
-    ])
-  })
-
-  it('una sugerencia SIN precio no es contradicción: es una oferta, y no avisa', () => {
-    const items: ItemConPrecio[] = [
-      { id: 'dia', grupo: 'tour', orden: 1, dia_relativo: 1 },
-      { id: 'saona', grupo: 'tour', orden: 2, precio_venta: 0, cantidad: 1 },
-    ]
-    expect(avisoSugeridosQueCobran(items, ['dia', 'saona'])).toEqual([])
-  })
-
-  it('una línea que NO aporta al total (alternativa descartada) no avisa', () => {
-    // El aviso depende de `itemsQueAportanAlTotal`, no de tener precio: una alternativa
-    // de tour que la ranura descartó ya no la está pagando nadie.
-    const items: ItemConPrecio[] = [
-      { id: 'dia', grupo: 'tour', orden: 1, dia_relativo: 1 },
-      { id: 'saona', grupo: 'excursion', orden: 2, precio_venta: 540_000, cantidad: 1 },
-      { id: 'alterna', grupo: 'excursion', orden: 3, precio_venta: 600_000, cantidad: 1 },
-    ]
-    // Solo `saona` aporta (la ranura toma una sola).
-    expect(avisoSugeridosQueCobran(items, ['dia', 'saona'])).toEqual([
-      { id: 'saona', precioLinea: 540_000, oculta: false },
-    ])
-  })
-
-  it('⚠️ una sugerencia OCULTA que cobra también avisa, y se marca como oculta', () => {
-    // El cliente ni la ve y la paga: es el caso peor, no el mejor.
-    const items: ItemConPrecio[] = [
-      { id: 'dia', grupo: 'tour', orden: 1, dia_relativo: 1 },
-      { id: 'saona', grupo: 'tour', orden: 2, precio_venta: 540_000, cantidad: 1, mostrar_en_sugeridos: false },
-    ]
-    expect(avisoSugeridosQueCobran(items, ['dia', 'saona'])).toEqual([
-      { id: 'saona', precioLinea: 540_000, oculta: true },
-    ])
+  it('una sugerencia SIN precio no avisa', () => {
+    const items: ItemConPrecio[] = [{ id: 'saona', grupo: 'tour', orden: 1, precio_venta: 0, entra_al_precio: false }]
+    expect(avisoSugeridosQueCobran(items, ['saona'])).toEqual([])
   })
 
   it('sin días asignados no hay sugerencias, así que no hay aviso', () => {
     const items = viaje()
     expect(avisoSugeridosQueCobran(items, items.map(i => i.id))).toEqual([])
-  })
-
-  it('un vuelo sin día que cobra NO dispara el aviso: nunca fue sugerencia', () => {
-    const items = viaje().map(i => (i.id === 'saona' ? { ...i, dia_relativo: 1 } : i))
-    const aviso = avisoSugeridosQueCobran(items, items.map(i => i.id))
-    expect(aviso.map(a => a.id)).not.toContain('avianca')
-    expect(aviso.map(a => a.id)).not.toContain('hotel')
   })
 })
 

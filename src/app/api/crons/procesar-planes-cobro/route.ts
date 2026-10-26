@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
@@ -17,6 +18,12 @@ import { POLITICA_FASE_1 } from '@/lib/suscripciones/estado'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { generarEnlacesAutomaticos, type ResumenEnlacesAutomaticos } from '@/lib/cobros/enlace-automatico-servidor'
 import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros/enrolar-ciclo-servidor'
+import { renovarPlanesPorCiclo, type ResumenRenovacion } from '@/lib/cobros/renovar-ciclo-servidor'
+import { reconciliarCiclosValida, type ResumenReconciliacion } from '@/lib/valida-registro/ciclo-servidor'
+import { cobrarCuotasConTarjeta, type ResumenCobroToken } from '@/lib/valida-registro/cobro-token-servidor'
+import { detectarReversosEpayco, type ResumenReversos } from '@/lib/cobros/reversos-epayco-servidor'
+import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } from '@/lib/valida-registro/cobro-prueba-servidor'
+import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -32,11 +39,30 @@ import { enrolarContratosPorCiclo, type ResumenEnrolamiento } from '@/lib/cobros
 //      su plan de cobro y sus cuotas SOLO, con la primera cuota el dia en que termina su trial
 //      (`dias_trial` contado desde la aceptacion). Hoy ese paso lo hacia una persona a mano. Corre
 //      ANTES del paso 6 para que el contrato enrolado hoy reciba su enlace en esta misma corrida.
-//      Alcance: solo el modulo `radar_secop` (ver `enrolar-ciclo.ts`).
+//      Alcance: los modulos `radar_secop` y `valida_consulta` (ver `enrolar-ciclo.ts`).
+//   6b. Renovacion continua: el plan con `auto_renovar` de un contrato activo de Valida o de la
+//      licencia de Clarity (modulo `business`) recibe su
+//      cuota SIGUIENTE (una sola) cuando la ultima vence dentro de 30 dias. Sin permanencia: dar de
+//      baja es apagar `auto_renovar` y terminar el contrato (ver `renovar-ciclo.ts`).
 //   6. Enlaces de pago en linea de los contratos de servicio (CDA): la cuota que vence en 7 dias
 //      o menos (o ya vencio sin pagarse) recibe su enlace solo, con la misma funcion del boton,
 //      y la persona designada un correo. No emite cuentas de cobro (ver el bloque del paso 6).
 //   7. Plan se marca inactivo automaticamente cuando todas las cuotas se cobran (trigger DB)
+//   7a. Valida autogestionada con tarjeta: el aviso de 48 h y el cobro del primer mes al cumplirse los
+//      7 dias de la prueba (nunca antes del instante exacto), y el borrado de la tarjeta de quien
+//      cancelo (ver `src/lib/valida-registro/cobro-prueba-servidor.ts`). Sin registros con tarjeta no hace nada.
+//   7b. Cobro con la tarjeta guardada en ePayco de las cuotas que vencen (planes `epayco`). Apagado
+//      sin EPAYCO_HABILITADO (ver `src/lib/valida-registro/cobro-token-servidor.ts`). Sigue el
+//      calendario de mora de Carmen: intentos los dias 0, 3 y 7 desde el vencimiento; nada desde el 10.
+//   7c. Si la tarjeta rechazo algo hoy, otra pasada del paso 6: el enlace de pago sale el mismo dia.
+//   7d. Reversos de ePayco: se le pregunta a ePayco por los cobros pagados con ePayco en los ultimos 60
+//      dias; el que salga reversado (estado 6) se anula y se avisa a MeTRIK por correo interno. No toca
+//      la suscripcion, el ciclo ni la factura (ver `src/lib/cobros/reversos-epayco-servidor.ts`).
+//   8. Valida autogestionada: el pago mas nuevo del plan de cada espacio del registro autogestionado
+//      tiene su ciclo abierto en Valida (bolsa del mes y llave sin vencimiento). Lo abre el webhook
+//      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
+//   8b. Valida autogestionada: el aviso por correo antes de suspender por una cuota sin pagar
+//      (ver `src/lib/valida-registro/suspension-servidor.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -49,6 +75,9 @@ const DIAS_ANTICIPACION = 3
 // sistema declaraba vencido dos dias antes de lo pactado. El documento manda; el codigo se alinea.
 // OJO: esto es la gracia de la MORA, no el trial. El trial del Radar (`lib/radar/acceso.ts`) no
 // tiene gracia: la primera cuota es condicion de entrega y vence el dia en que el trial termina.
+// NO es la gracia de Valida en autoservicio (`DIAS_GRACIA_CICLO` = 10, `valida-registro/plan.ts`):
+// este numero solo marca el cobro como vencido y avisa al equipo de MeTRIK; no corta ningun servicio.
+// Se queda en 5 a proposito (2026-10-14): lo prometen los terminos del Radar y es comun a todos.
 const DIAS_GRACIA = 5
 // Dia del mes en que se ABRE la ventana de emision de cuentas. La ventana no se
 // cierra: ver el comentario del paso 4.
@@ -62,7 +91,9 @@ export const runtime = 'nodejs'
 interface PlanCobro {
   id: string
   workspace_id: string
-  negocio_id: string
+  /** El ancla: un negocio o (desde 20261016) una suscripción. Exactamente uno. */
+  negocio_id: string | null
+  suscripcion_id?: string | null
   monto: number
   frecuencia: 'mensual' | 'trimestral' | 'anual'
   fecha_inicio: string
@@ -94,6 +125,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // Una sola corrida aunque Vercel entregue el cron dos veces (ver `candadoDeCron`).
+  const otraCorrida = await candadoDeCron('procesar-planes-cobro', req)
+  if (otraCorrida) return otraCorrida
+
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -109,7 +144,7 @@ export async function GET(req: NextRequest) {
   // ── 1. Generar cobros programados (T+3 dias) ─────────────
   const { data: planes } = await supabase
     .from('planes_cobro')
-    .select('id, workspace_id, negocio_id, monto, frecuencia, fecha_inicio, fecha_fin, total_cuotas, pasarela')
+    .select('id, workspace_id, negocio_id, suscripcion_id, monto, frecuencia, fecha_inicio, fecha_fin, total_cuotas, pasarela')
     .eq('activo', true)
 
   // Un plan CON cronograma explicito no se toca aqui: sus cuotas tienen monto y
@@ -142,6 +177,7 @@ export async function GET(req: NextRequest) {
         .insert({
           workspace_id: plan.workspace_id,
           negocio_id: plan.negocio_id,
+          suscripcion_id: plan.suscripcion_id ?? null,
           plan_cobro_id: plan.id,
           numero_cuota: n,
           monto: plan.monto,
@@ -166,27 +202,45 @@ export async function GET(req: NextRequest) {
 
   const { data: cobrosPorVencer } = await supabase
     .from('cobros')
-    .select('id, workspace_id, negocio_id, plan_cobro_id, numero_cuota, monto, fecha_esperada')
+    .select('id, workspace_id, negocio_id, suscripcion_id, plan_cobro_id, numero_cuota, monto, fecha_esperada')
     .eq('tipo_cobro', 'programado')
     .eq('vencido', false)
     .is('fecha', null)
     .lte('fecha_esperada', fechaLimiteStr)
 
   for (const cobro of cobrosPorVencer ?? []) {
-    await supabase
+    // RECLAMAR el cobro: solo la corrida que lo pasa de no vencido a vencido avisa. Antes el
+    // update no tenía condición y dos corridas cruzadas (Vercel puede entregar el cron dos
+    // veces) avisaban las dos: 2 pares `cobro_vencido` en advise (medido el 2026-10-06).
+    const { data: reclamado, error: errVencer } = await supabase
       .from('cobros')
       .update({ vencido: true, vencido_at: new Date().toISOString() })
       .eq('id', cobro.id)
+      .eq('vencido', false)
+      .select('id')
+    if (errVencer) {
+      console.error('[procesar-planes-cobro] no se pudo marcar vencido', cobro.id, errVencer.message)
+      continue
+    }
+    if (!reclamado || reclamado.length === 0) continue
 
     cobrosVencidos++
 
     // ── 3. Notificaciones a 3 destinatarios ─────────────────
     // Buscar responsable + dueno (owner) + staff del area financiera (staff_areas)
-    const { data: negocio } = await supabase
-      .from('negocios')
-      .select('responsable_id, nombre, codigo, staff:responsable_id(profile_id)')
-      .eq('id', cobro.negocio_id!)
-      .single()
+    // El cobro de una suscripción (suscripciones_producto) no tiene negocio ni responsable: se avisa al
+    // dueño y a financiera con el nombre de la suscripción.
+    const susId = (cobro as { suscripcion_id?: string | null }).suscripcion_id ?? null
+    const { data: negocio } = cobro.negocio_id
+      ? await supabase
+          .from('negocios')
+          .select('responsable_id, nombre, codigo, staff:responsable_id(profile_id)')
+          .eq('id', cobro.negocio_id)
+          .single()
+      : { data: null }
+    const { data: suscripcion } = susId
+      ? await supabase.from('suscripciones_producto').select('nombre').eq('id', susId).maybeSingle()
+      : { data: null }
 
     const staffJoined = negocio?.staff as unknown as { profile_id: string | null } | { profile_id: string | null }[] | null
     const responsableProfile = Array.isArray(staffJoined)
@@ -236,7 +290,8 @@ export async function GET(req: NextRequest) {
       ? diasEntreBogota(new Date(`${fechaEsp}T05:00:00Z`), hoy) - DIAS_GRACIA
       : 0
     const negocioCodigo = (negocio as { codigo: string | null } | null)?.codigo ?? ''
-    const negocioNombre = (negocio as { nombre: string | null } | null)?.nombre ?? 'Negocio'
+    const negocioNombre =
+      (negocio as { nombre: string | null } | null)?.nombre ?? (suscripcion as { nombre: string | null } | null)?.nombre ?? 'Negocio'
 
     for (const profileId of destinatarios) {
       const { error: notifErr } = await supabase
@@ -249,7 +304,7 @@ export async function GET(req: NextRequest) {
           contenido: `Cuota ${cobro.numero_cuota ?? ''} de ${negocioCodigo} ${negocioNombre} vencida hace ${diasVencido} dia${diasVencido !== 1 ? 's' : ''} ($${Number(cobro.monto).toLocaleString('es-CO')})`,
           entidad_tipo: 'cobro',
           entidad_id: cobro.id,
-          deep_link: `/negocios/${cobro.negocio_id}`,
+          deep_link: cobro.negocio_id ? `/negocios/${cobro.negocio_id}` : null,
           metadata: {
             plan_cobro_id: cobro.plan_cobro_id,
             numero_cuota: cobro.numero_cuota,
@@ -439,6 +494,17 @@ export async function GET(req: NextRequest) {
     enrolamientoError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 6b. Renovar la cuota siguiente de los planes que se renuevan solos ──
+  // Despues del 6a (un plan recien enrolado ya trae sus cuotas) y antes del 6, para que la cuota
+  // que nace hoy entre a la seleccion de enlaces si ya esta en su ventana.
+  let renovacion: ResumenRenovacion | null = null
+  let renovacionError: string | null = null
+  try {
+    renovacion = await renovarPlanesPorCiclo({ db: supabase, hoy: hoyStr })
+  } catch (err) {
+    renovacionError = err instanceof Error ? err.message : String(err)
+  }
+
   // ── 6. Enlaces de pago en linea de los contratos de servicio ──
   // Va de ultimo a proposito: no cambia nada de lo que hacen los pasos 1 a 5, y si falla no los
   // tumba. Mira el CONTRATO (`servicios_contratados` activo o pausado) y la pasarela en linea del
@@ -451,6 +517,72 @@ export async function GET(req: NextRequest) {
     enlacesAutomaticos = await generarEnlacesAutomaticos({ hoy: hoyStr, ahoraMs: hoy.getTime() }, { db: supabase })
   } catch (err) {
     enlacesAutomaticosError = err instanceof Error ? err.message : String(err)
+  }
+
+  // ── 7a. Valida: aviso y cobro del primer mes al cumplirse los 7 días de la prueba ──
+  // Antes del 7b: el plan que nace aquí con su cuota 1 ya cobrada no se vuelve a cobrar allá.
+  let cobroPrueba: ResumenCobroPrueba | null = null
+  let cobroPruebaError: string | null = null
+  try {
+    cobroPrueba = await procesarCobrosTrasPrueba({ db: supabase, ahoraMs: hoy.getTime() })
+  } catch (err) {
+    cobroPruebaError = err instanceof Error ? err.message : String(err)
+  }
+
+  // ── 7b. Cobro con tarjeta guardada (ePayco) de las cuotas que vencen ──
+  // Solo planes con pasarela `epayco` (cuentas autogestionadas que registraron tarjeta). Con ePayco
+  // apagado no hace nada. Va ANTES del 8 para que un cobro aprobado abra su mes en esta corrida, y
+  // después del 6: una cuota rechazada aquí pasa a enlace y lo recibe en la corrida siguiente.
+  let cobroTarjeta: ResumenCobroToken | null = null
+  let cobroTarjetaError: string | null = null
+  try {
+    cobroTarjeta = await cobrarCuotasConTarjeta({ db: supabase, hoy: hoyStr })
+  } catch (err) {
+    cobroTarjetaError = err instanceof Error ? err.message : String(err)
+  }
+
+  // ── 7c. El enlace de pago de lo que la tarjeta rechazó HOY (Carmen §2.3, día 0) ──
+  // El paso 6 corrió antes del cobro: sin esta segunda pasada, el correo con el enlace saldría mañana.
+  // Es la misma función, idempotente (un enlace vigente no se repite ni se vuelve a avisar).
+  let enlacesTrasRechazo: ResumenEnlacesAutomaticos | null = null
+  if ((cobroTarjeta?.rechazadas ?? 0) + (cobroPrueba?.rechazados ?? 0) > 0) {
+    try {
+      enlacesTrasRechazo = await generarEnlacesAutomaticos({ hoy: hoyStr, ahoraMs: hoy.getTime() }, { db: supabase })
+    } catch (err) {
+      enlacesAutomaticosError = `${enlacesAutomaticosError ?? ''} tras rechazo: ${err instanceof Error ? err.message : String(err)}`.trim()
+    }
+  }
+
+  // ── 7d. Reversos de ePayco que la confirmación no avisó ──
+  // Antes del 8: un cobro anulado aquí ya no cuenta como el pago que abre el ciclo de esta corrida (el
+  // ciclo que ya estaba abierto no se cierra: eso lo decide una persona).
+  let reversosEpayco: ResumenReversos | null = null
+  let reversosEpaycoError: string | null = null
+  try {
+    reversosEpayco = await detectarReversosEpayco({ db: supabase, hoy: hoyStr, ahoraMs: hoy.getTime() })
+  } catch (err) {
+    reversosEpaycoError = err instanceof Error ? err.message : String(err)
+  }
+
+  // ── 8. Valida autogestionada: el pago más nuevo de cada plan tiene su ciclo abierto en Valida ──
+  // El webhook lo abre en el momento del pago; esto recoge lo que no alcanzó (Valida caída, o un pago
+  // registrado a mano). Solo mira espacios del registro autogestionado; idempotente en Valida.
+  let ciclosValida: ResumenReconciliacion | null = null
+  let ciclosValidaError: string | null = null
+  try {
+    ciclosValida = await reconciliarCiclosValida({ db: supabase })
+  } catch (err) {
+    ciclosValidaError = err instanceof Error ? err.message : String(err)
+  }
+
+  // ── 8b. Valida: aviso antes de suspender por una cuota sin pagar ──
+  // Después del 8: quien pagó y abre su ciclo en esta corrida ya no recibe el aviso.
+  let avisoSuspension: ResumenSuspension | null = null
+  let avisoSuspensionError: string | null = null
+  try {
+    avisoSuspension = await avisarSuspensionesProximas({ db: supabase, ahoraMs: hoy.getTime(), enviarCorreo: enviarPorResend })
+  } catch (err) {
+    avisoSuspensionError = err instanceof Error ? err.message : String(err)
   }
 
   return NextResponse.json({
@@ -475,7 +607,20 @@ export async function GET(req: NextRequest) {
     suscripciones_errores: suscripcionesErrores,
     enrolamiento_por_ciclo: enrolamiento,
     enrolamiento_por_ciclo_error: enrolamientoError,
+    renovacion_por_ciclo: renovacion,
+    renovacion_por_ciclo_error: renovacionError,
     enlaces_automaticos: enlacesAutomaticos,
     enlaces_automaticos_error: enlacesAutomaticosError,
+    cobro_prueba: cobroPrueba,
+    cobro_prueba_error: cobroPruebaError,
+    cobro_tarjeta: cobroTarjeta,
+    enlaces_tras_rechazo: enlacesTrasRechazo,
+    cobro_tarjeta_error: cobroTarjetaError,
+    reversos_epayco: reversosEpayco,
+    reversos_epayco_error: reversosEpaycoError,
+    ciclos_valida: ciclosValida,
+    ciclos_valida_error: ciclosValidaError,
+    aviso_suspension: avisoSuspension,
+    aviso_suspension_error: avisoSuspensionError,
   })
 }

@@ -62,6 +62,14 @@ export const MODULOS = {
       '/negocios', '/numeros', '/equipo', '/movimientos', '/directorio', '/contactos',
       '/tableros', '/flujo', '/gastos', '/facturacion', '/cobros-recurrentes',
       '/conciliacion', '/revision', '/promotores', '/nuevo',
+      // La licencia de ONE que el cliente paga por cuotas (próxima cuota, enlace de pago, pagos).
+      // La ruta exige además ser la persona designada del contrato que el espacio paga.
+      '/suscripcion',
+      // La biblioteca de fotos de la propuesta de viaje (2026-10-16), que desde el 2026-10-18 es
+      // «Proveedores» (`/fotos` redirige). Las páginas exigen además la plantilla con propuesta
+      // html (`tienePropuestaHtml`).
+      '/fotos',
+      '/proveedores',
     ],
     funciones: [
       'comercial_negocios', 'conciliacion', 'cobros_recurrentes', 'aliados', 'causacion',
@@ -78,7 +86,7 @@ export const MODULOS = {
     clave: 'valida_consulta',
     inicio: '/valida',
     // /suscripcion: la licencia que el CDA paga (pagos, usuarios, términos). La ruta misma exige
-    // además ser dueño, administrador o persona designada del espacio que paga el contrato.
+    // además ser la persona designada del contrato que el espacio paga. También es de Clarity.
     rutas: ['/valida', '/suscripcion'],
     funciones: [],
   },

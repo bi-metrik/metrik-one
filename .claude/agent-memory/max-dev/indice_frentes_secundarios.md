@@ -113,3 +113,122 @@ Entradas que vivían en la sección «Referencias» de MEMORY.md (proyectos viej
 - ⚠️⚠️ [Trabajar sobre otro repo desde el worktree aislado](reference_publicar_otro_repo_desde_worktree.md) — `gh repo clone` DENTRO del worktree da git completo; «git» en cualquier palabra tumba el guard
 - ⚠️⚠️ [Árbol limpio por tarball](reference_arbol_limpio_por_tarball.md) — el checkout compartido puede ir BEHIND main y mentir en silencio
 - ⚠️ [Docs de Wompi verificadas](reference_wompi_docs_verificado.md) — ya responden (no 403); referencia duplicada = 422; sin reembolso por API; `/merchants/:llave` muere 31-oct
+
+## Movidas desde MEMORY.md el 2026-10-05 (por tamaño del índice)
+
+- ⚠️ [Cotizar por rubros](project_cotizacion_margen_rubros.md) — #514 sin mergear; el backfill decide $7,17M
+- ⚠️⚠️ [/negocios como hoja de Google](project_export_negocios_a_drive.md) — #625 sin mergear: migración SIN aplicar
+- ⚠️ [El cierre se deriva de `estado`](project_cierre_desde_estado.md) — #609 sin mergear: el mapa es lista CERRADA
+- ⚠️⚠️ [Un cerrado sale de circulación](project_negocio_cerrado_solo_lectura.md) — #610 sin mergear: el recibo NO se corta
+- ⚠️ [El buscador avisa de otras pestañas](project_aviso_otras_pestanas.md) — #611 sin mergear
+- ⚠️ [Sucursal de Siigo y adopción de factura](project_siigo_sucursal_adopcion.md) — los 6 candidatos NO son lista para aplicar
+- ⚠️⚠️ [Factura: herencia sin copias y soporte](project_factura_soporte_tesoreria.md) — limpieza 1B SIN aplicar
+- ⚠️⚠️ [PQR rechazado](project_pqr_rechazado_desenlace.md) — config SOENA SIN aplicar
+- ⚠️⚠️ [Ruta de IVA por servicio](project_ruta_iva_por_servicio.md) — SQL pendiente DESPUÉS del deploy
+- ⚠️⚠️ [Aviso de sobrepago a financiera](project_aviso_sobrepago_financiera.md) — config SOENA sin aplicar
+- ⚠️⚠️ [Conciliación por referencia](project_conciliacion_por_referencia.md) — backfill de 9 filas NO aplicado
+- ⚠️⚠️ [Panel de recibos: destinatario y autor](project_panel_destinatario_y_autor.md) — #814 sin mergear: migración ANTES
+- ⚠️⚠️ [Un recibo por concepto](project_recibo_por_concepto.md) — la marca tiene DOS formas y un consumidor SQL lee una
+- ⚠️⚠️ [Recibo solo UPME y abono automático](project_factura_libre_abono.md) — #828 SIN mergear: duplicado = misma factura
+- ⚠️⚠️ [Titular corregido de la factura](project_titular_corregido_factura.md) — #833 SIN mergear: el PUT va DESPUÉS de resolver el tercero
+- ⚠️⚠️ [El correo del recibo](project_correo_recibo_dos_documentos.md) — #804 sin mergear; SQL de copy DESPUÉS de `notificar-etapa`
+- ⚠️⚠️ [Tarifa UPME mal digitada](project_tarifa_upme_mal_digitada.md) — config SOENA sin aplicar; caso V0497
+- ⚠️⚠️ [Seguimiento de citas DIAN](project_seguimiento_citas_dian.md) — config SOENA sin aplicar
+- ⚠️ [Firma de webhooks de Meta (#925, #927)](project_firma_wa_webhook.md) — wa-firma.ts compartido; meta-leads SIN redesplegar
+- ⚠️ [Lector de Navigate = Gemini 3.1 Flash-Lite](project_navigate_lector_gemini.md) — wa-webhook sin redesplegar
+- ⚠️ [Duplicados: solo facturas libres](project_duplicado_hermanos_siigo.md) — #561 sin mergear; el vínculo es la marca
+- ⚠️ [Icono de app Pino](project_icono_app_pino.md) — #602 sin mergear: el `.ico` gana sobre el `.svg`
+- ⚠️ [QA de tildes de compliance](project_qa_tildes_compliance.md) — quedan 7 erratas
+- ⚠️⚠️ [Landing de Sustenta](project_landing_sustenta.md) — franja de normas = ejemplos, NUNCA cobertura
+- ⚠️ ["Plata" vetada en copy público](project_lexico_plata_vetada.md) — quedan ~19 visibles
+- ⚠️⚠️ [Dedup de contactos por WhatsApp](project_dedup_contactos_webhook.md) — #565 sin mergear: migración ANTES del deploy
+- ⚠️⚠️ [Reproceso de documentos migrados](project_reproceso_documentos_migrados.md) — puede BORRAR datos, no es idempotente
+- ⚠️ [Routing respeta el `condition`](project_routing_condition_bloque.md) — cambia UN routing en todo el sistema
+- ⚠️ [Aviso de recaudo sin salida](project_aviso_recaudo_sin_salida.md) — el listón es `valorARecaudar`
+- ⚠️⚠️ [Avanzar tras registrar el pago](project_avance_tras_pago_fab.md) — #707 sin mergear: falso «retenido»
+- ⚠️⚠️ [Acuses de Resend](project_acuses_resend_avisos_cliente.md) — #596 sin mergear: el orden de despliegue manda
+- ⚠️⚠️ [El plazo de retención en CI](project_retencion_control_en_ci.md) — el KYC sigue en CINCO años
+- ⚠️⚠️ [Cierre del frente KYC](project_valida_privacidad_v13.md) — diez (10) años; 5 superficies
+- ⚠️⚠️ [Valida Diligencia v2](project_valida_diligencia_v2.md) — patch SIN commit ni PR
+- ⚠️ [Guards de items y aprobación](project_guard_bloque_items.md) — quién aprueba lo decide `puedeSerAprobador`
+
+- ⚠️⚠️ [Huecos de tenant del riesgo 11](project_huecos_tenant_riesgo11.md) — #761; wa-webhook SIN redesplegar
+- ⚠️ [Rediseño cotización Trappvel](project_rediseno_cotizacion_trappvel.md) — #853 (P4) SIN mergear: migración ANTES
+- ⚠️⚠️ [Cardumen independiente y Meta del 1-oct](project_cardumen_infra_independiente.md) — servicio se cobra pasadas 1.000/numero; sin pago en WABA el bot calla
+- ⚠️ [Medicion de Cardumen en el numero de ONE](project_cardumen_medicion_wa.md) — intent `cardumen:<estudio>`; origen='cardumen' pide migracion; inerte sin deploy
+- ⚠️⚠️ [Objetos sueltos por WhatsApp](project_cardumen_objetos_sueltos.md) — un `wa.me` relanza la app; el POST continúa y eso vuelve la ingesta un posible relay
+- ⚠️⚠️ [Miniweb por catálogo + ingesta (#980)](project_cardumen_miniweb_catalogo.md) — migración ANTES del merge; `cardumen` NO se toca; la ñ no se normaliza
+- ⚠️ [Guarda de sustento en triada G03 (#931)](project_cardumen_guarda_triada_g03.md) — SIN mergear; probar guardas re-leyendo salidas crudas
+- ⚠️ [Polaridad G22 y matiz G13 (#928)](project_cardumen_polaridad_matiz.md) — SIN mergear: benchmark primero
+- ⚠️⚠️ [Filtro de riesgo y blindaje de Navigate (#924)](project_cardumen_filtro_blindaje.md) — mergeado; filtro caido NO es SEN; CO no es INJ
+- ⚠️ [Navigate no es canal de ayuda (#933)](project_cardumen_sin_canal_de_ayuda.md) — SIN mergear; SEN se aparta sin prometer ayuda; caida_filtro.ts roto
+- ⚠️ [«N años» en un archivo nuevo](project_retencion_cifra_anios.md) — retencion.test.ts exige clasificarlo; CI cae aunque pase lo local
+- ⚠️⚠️ [Drive: soporte y recibo nacen cerrados](project_drive_archivos_cobro.md) — los 22 VIEJOS siguen abiertos
+- ⚠️ [Bucket público cert-documentos](project_cerrar_bucket_cert_documentos.md) — migración SIN aplicar
+
+## Movidas del índice caliente el 2026-10-14 (para que quepa)
+
+- [Propuesta de viaje: Chromium (#1161) y modelo (#1162)](project_propuesta_chromium_modelo.md) — mergeados; vercel curl crea bypass (no); Montserrat OTF
+- [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
+- [SOE-004: aprobación fuera de tarifa](project_aprobacion_fuera_de_tarifa.md) — tope frena al APROBAR, no al generar; gerencial + motivo; recargos incluidos
+- [Reporte Supertransporte (ALMA)](project_reporte_supertransporte.md) — contrapartes = todos los segmentos; MéTRIK por platform_admin/correo; KYC sin created_by
+- [Colores de aerolíneas (#1082)](project_colores_aerolineas.md) — catálogo único en src/lib/cotizaciones/aerolineas.ts; colores de tarifa vetados
+- [Fecha del pago en el bloque Pagos ePayco (SOE-013)](project_fecha_pagos_epayco_bloque.md) — pagos[].fecha viejo = registro; leer cobros.fecha; multi-pago fecha por ePayco (12-oct)
+- [Columna Pago de cuotas CDA](project_columna_pago_cuota_cda.md) — pago↔cuota por FIFO (RPC sin plan/cuota); la UI no nombra a Bold
+- [Cargue masivo de Valida concurrente](project_valida_cargue_concurrente.md) — 3 filas; reintento de red no recobra; PDF de lote ya no sigue el orden del XLSX
+- ⚠️ [Publicar los términos del Radar](project_publicacion_terminos_radar.md) — APLICADO (PDF, fila, alcance plantilla); un genérico se ve por el módulo contratado; falta ejercitar la aceptación
+- ⚠️⚠️ [ONE SECOP autoservicio: registro (#961)](project_secop_autogestion_registro.md) — ENCENDIDO en producción sin ficha de catálogo; el magic link YA verifica el correo
+- ⚠️ [Radar SECOP como módulo (#952)](project_radar_secop_modulo.md) — MERGEADO y migrado; el cron NO lee disparador_cobro: enrolar el contrato no cobra
+- [Términos de un módulo nuevo](project_terminos_modulo_radar.md) — el gate de Valida ya es genérico; el ternario mandaba todo producto nuevo a Valida API
+- ⚠️ [Vencido por cuota en la cartera (#934)](project_cartera_vencido_por_cuota.md) — migración ANTES del merge; luego redesplegar wa-alerts y wa-webhook
+- [Buscador del reparto sin Valida (#877)](project_buscador_reparto_sin_valida.md) — escape de `.or()` sin probar contra PostgREST vivo
+- ⚠️⚠️ [Entrada única de /valida-api](project_entrada_unica_valida_api.md) — Términos exige texto_sha256 = sha256(texto_md) tal cual
+- ⚠️⚠️ [Plazo, mora y facturas de los CDA en Valida](project_valida_cda_gracia_facturas.md) — #849: migración SIN aplicar; cargar un CDA tras el 30-sep lo cierra
+- ⚠️⚠️ [Factura por cobro en /valida-api (#876)](project_factura_cobro_servicio.md) — migración SIN aplicar; CUFE de la FE-1 mal copiado (90/96)
+- ⚠️⚠️ [Retención de IVA: enlace por el neto](project_retencion_iva_cobro_neto.md) — migración SIN aplicar; inerte sin 3 datos; `null` en el RUT no retiene
+- ⚠️⚠️ [Carga de los 4 CDA sobre la carga revertida](project_carga_cdas_estado_revertido.md) — plazo 27-sep; cierra la activación del contrato cancelado
+- ⚠️⚠️ [«Licencia» → «suscripción» en los CDA (#885)](project_licencia_a_suscripcion.md) — Términos v1.2; SQL de cuotas SIN aplicar; periodo sin año
+- ⚠️⚠️ [Sección Suscripción de los CDA](project_seccion_suscripcion_cda.md) — #851: migración 20260924060000 ANTES del merge; sin valor_usuario_adicional no vende
+- [Administrador designado sin costo (#906)](project_admin_designado_sin_cupo.md) — el cupo cuenta solo operativos en /suscripcion, /config y /mi-negocio
+- ⚠️ [Suscripción solo para la designada (#857)](project_suscripcion_solo_designado.md) — «Ver como» compara la persona EFECTIVA; CDA sin vitrinas
+- ⚠️⚠️ [Pago en línea de cuotas (Bold temporal)](project_pago_en_linea_bold.md) — #850: migración SIN aplicar; la pasarela sale de un dato
+- ⚠️⚠️ [Licencia ONE en /suscripcion con Bold (Termotech)](project_licencia_one_suscripcion_bold.md) — SQL SIN correr; cuota pagada sin fila rompe el FIFO
+- ⚠️⚠️ [Enlace de pago automático de cuotas CDA](project_enlace_pago_automatico.md) — cron paso 6; ignora `planes_cobro.activo` a propósito
+- ⚠️ [Tarjeta de Sustenta en /suscripcion](project_sustenta_tarjeta_marca.md) — migración de eventos SIN aplicar; sin ella se pierden en silencio
+- ⚠️⚠️ [Razón social METRIK IA S.A.S.](project_razon_social_metrik_ia.md) — sin «IA» es otra sociedad
+- [Agrupación de hotel y traslado in-out (COT-2026-0018)](project_agrupacion_hotel_traslado_inout.md) — comparar opciones por `lecturaDeOpcion`; no fusiona las duplicadas
+- [Ciudad de actividad y tasa en Revisar (Trappvel)](project_ciudad_actividad_nombre_tour.md) — regla ANGOSTA (Punta Cana es destino); tasa solo en el editor
+
+## Movidas del índice caliente (2026-10-21)
+
+- ⚠️ [Letras no latinas: bloqueo en todo ONE](project_pdf_cirilico_winansi.md) — `texto-latino.ts` + copia exacta en `_shared/`; guarda de CI sobre drawText
+- ⚠️ [Carta de autorización: copias y generar desde Cita](project_copia_carta_autorizacion.md) — `genera_en_origen`; UPDATE de f25d432f tras el merge
+- ⚠️ [Copia de la factura escribe en su origen](project_factura_copia_escribe_origen.md) — criterio único `copiaDeSoloLectura`; origen ambiguo rechaza
+- ⚠️ [ONE aguanta red lenta (7-oct)](project_red_lenta_aguanta.md) — aviso por falta de avance; copia de chunk con `src` relativo; páginas de 30
+- ⚠️ [Aviso «No pudimos conectar con ONE»](project_aviso_conexion_fallida.md) — script módulo async en el head; quita hojas colgadas; tope CSS de 25 s
+- ⚠️ [Chunks que aguantan pérdida + SW de estáticos para todos](project_resiliencia_chunks_sw.md) — runtime se cuelga del `<script>` del HTML; llave sin ?dpl
+- ⚠️ [Piloto de red en soena (#1042 y siguientes)](project_piloto_red_soena.md) — falla carga/RSC, no descargas; SW con interruptor; tabla SIN aplicar
+- ⚠️ [Cargue en segundo plano y acciones largas (#1035, #1036)](project_cargue_segundo_plano.md) — marca `data._lectura`; #1036 mergeado; /conciliacion tiene 300 s
+- ⚠️ [Acciones lentas SOENA (#1010-#1012)](project_acciones_lentas_soena.md) — `cache()` no memoiza en server actions; `after()` lanza fuera de request
+- ⚠️ [/negocios paginada en el servidor](project_lista_negocios_paginada.md) — viajan 30 tarjetas; `.in()` de 400+ uuid rompe por `Content-Location`
+- ⚠️ [loading.tsx de (app) no cubre la ficha](project_loading_app_no_cubre_ficha.md) — /negocios → /negocios/[id] no lo remonta, ni con precarga
+- ⚠️ [RUM y lecturas sin server actions (C y D)](project_rum_y_lecturas_sin_actions.md) — `[error-cliente]` se cuenta por `id`; `--query` sin corchetes
+- ⚠️ [Respuesta al tocar sin red (#1006)](project_respuesta_al_tocar.md) — CardLink en useTransition + capa en el shell; Link nuevo del shell lleva SenalDeEnlace
+- ⚠️ [Recuperación de errores de red](project_recuperacion_red_iphone.md) — escalera suave→backoff→tope; refresh fallido = recarga MPA; no reintenta escrituras
+- ⚠️ [«13» pegado a la casilla 26 del RUT (#908, #909)](project_rut_prefijo_tipo_documento.md) — tolerar ≠ proponer; #909 migración SIN aplicar
+- ⚠️ [Falsos avisos del certificado](project_falsos_avisos_certificado.md) — una regla para 2 motores; relectura solo absuelve; V0071/V0019 son config
+- ⚠️ [Animación de marca y RPC de Tableros (caída 2026-10-03)](project_animacion_marca_y_rpc_tableros.md) — loading de (app) por segmento; 12 RPC en paralelo por apertura; cacheables por ws+params
+- ⚠️ [Limpieza tras merge (hook)](project_limpieza_tras_merge.md) — settings.json vivo NO es symlink; registro del hook pendiente
+- ⚠️ [Hook de presupuesto al editar CLAUDE.md](project_hook_presupuesto_claude_md.md) — salta siempre; cifras de `.claude/rules/`
+- ⚠️ [El trigger de rol no espeja 'contador' (#988)](project_trigger_staff_rol_sin_contador.md) — staff 'contador' deja profiles.role NULL; no se autocrea
+- ⚠️ [Montos de SOENA por parseMontoCop (#842)](project_soena_parse_monto_cop.md) — el regex viejo daba NaN con 2+ puntos; extractor cerrado en #843
+- ⚠️ [SOE-012: banco en la factura exige leasing](project_cruce_banco_leasing.md) — tipo `entidad_financiera`; config SOENA SIN aplicar
+- [Post-cotización ola 1: servicios del viaje F0](project_post_cotizacion_servicios_f0.md) — migración APLICADA; datos en `_servicios`; Q1-Q8 sin medir
+- [«Activar plan»: WhatsApp solo de respaldo](project_activar_plan_whatsapp_temporal.md) — desde la pila #1107: botón a /valida/activar; WA solo con la activación cerrada
+- ⚠️ [R1: el servidor sí toma la Recomendada](project_r1_total_recomendada_adicionales.md) — la diferencia eran adicionales; precio_venta no los suma
+- ⚠️ [SOE-015: leads por ciudad de residencia](project_leads_por_ciudad_soe015.md) — copia JS de la CTE leads; cuadre sin medir en prod; DIVIPOLA solo servidor
+- ⚠️ [Lo leído contra el texto del PDF](project_verificar_contra_texto_pdf.md) — #987 SIN mergear (clasificador); 3 radicados 0↔9 quedan para el script
+- ⚠️ [Certificado UPME por correo, sin VIN](project_certificado_correo_contacto.md) — migración SIN aplicar; solo avisa; @contacto como fuente; sin celular
+- ⚠️ [NIT con DV pegado y retorno del reproceso](project_nit_dv_y_retorno_reproceso.md) — #705 SIN mergear: SQL de V0388 ANTES del merge
+- ⚠️ [«No aplica» por línea](project_no_aplica_por_linea.md) — SIN aplicar; avisa, no cierra
+- ⚠️ [Tableros operativos por fase (#939)](project_tableros_operativos.md) — inerte hasta encender config_extra.tableros_operativos en metrik

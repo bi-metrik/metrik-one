@@ -11,8 +11,8 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle } from 'lucide-
  * la información junta.»*
  *
  *  · Arriba, los cinco pasos con su estado: hecho ✓, pendiente, o con error (y cuántos).
- *  · Uno abierto a la vez. Al terminar el que está abierto se abre el siguiente; cualquiera se
- *    vuelve a abrir con un clic.
+ *  · Uno abierto a la vez; cualquiera se abre con un clic. Terminar uno NO abre el siguiente
+ *    solo (brief del 2026-10-05, punto 16): nada se mueve sin que la persona lo pida.
  *  · En celular es el mismo acordeón, con «Siguiente» fijo abajo.
  *
  * Solo del flujo de viaje (Trappvel, `lineasPorTipo`): fuera de él el editor no monta esto.
@@ -34,22 +34,12 @@ export interface PasoCotizacion {
 
 export default function PasosCotizacion({ pasos }: { pasos: PasoCotizacion[] }) {
   const primeroPendiente = pasos.find(p => p.estado !== 'hecho')?.id ?? pasos[pasos.length - 1]?.id ?? null
+  // El paso abierto lo cambia solo quien cotiza (un clic, o «Siguiente» en el celular).
+  //
+  // ⚠️ Hasta el 2026-10-05 un paso que pasaba a hecho abría solo el siguiente. Marcar que una
+  // habitación no va dejaba Componentes completo y la pantalla saltaba a Tarifas mientras la
+  // operadora seguía trabajando ahí (brief del 2026-10-05, punto 16: «Nada se mueve solo»).
   const [abierto, setAbierto] = useState<string | null>(primeroPendiente)
-  // «Al terminar un paso se abre el siguiente»: si el que está abierto pasa a hecho entre un
-  // render y el siguiente (lo guardado volvió del servidor), se abre el siguiente. Se ajusta al
-  // pintar y no en un efecto: un efecto pintaría primero el paso viejo.
-  const estados = pasos.map(p => `${p.id}:${p.estado}`).join('|')
-  const [estadosVistos, setEstadosVistos] = useState(estados)
-  if (estadosVistos !== estados) {
-    const antes = new Map(estadosVistos.split('|').map(x => x.split(':') as [string, string]))
-    const actual = pasos.find(p => p.id === abierto)
-    if (actual && actual.estado === 'hecho' && antes.get(actual.id) !== 'hecho') {
-      const i = pasos.findIndex(p => p.id === actual.id)
-      const siguiente = pasos.slice(i + 1).find(p => p.estado !== 'hecho') ?? pasos[i + 1]
-      if (siguiente) setAbierto(siguiente.id)
-    }
-    setEstadosVistos(estados)
-  }
 
   const indiceAbierto = pasos.findIndex(p => p.id === abierto)
   const siguiente = indiceAbierto >= 0 ? pasos[indiceAbierto + 1] ?? null : null

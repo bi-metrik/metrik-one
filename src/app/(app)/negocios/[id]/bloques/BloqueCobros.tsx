@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, Clock, AlertTriangle, Wallet, Receipt, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
@@ -208,8 +209,7 @@ function CobroConfirmadoRow({
 }
 
 function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 'visible' }) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const vencido = cobro.vencido === true
 
   const handleConfirmar = () => {
@@ -217,7 +217,7 @@ function CobroProgramadoRow({ cobro, modo }: { cobro: Cobro; modo: 'editable' | 
       const res = await confirmarCobroProgramado(cobro.id)
       if (res.success) {
         toast.success('Cobro confirmado')
-        router.refresh()
+        // Sin router.refresh(): la acción ya revalida la ficha (2026-10-04).
       } else {
         toast.error(res.error ?? 'Error confirmando cobro')
       }

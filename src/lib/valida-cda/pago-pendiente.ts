@@ -26,11 +26,12 @@
  * enlace que no pasa, o que ya venció, no se pinta: la tarjeta dice que el enlace llega, en vez de
  * ofrecer uno dudoso o muerto.
  *
- * El pago NO bloquea el módulo antes de 30 días de mora (cláusula 11.1): esa regla vive en
+ * La mora (restricción de consultas nuevas a los 5 días desde el 5-nov-2026, pausa a los 30) vive en
  * `plazos.ts` (`estadoMora`), y se mide sobre la cuota que devuelve `proximoPago`.
  */
 
-import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
+import { saldoCuadrado, TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { repartirFifo } from '@/lib/cobros/cuotas-fifo'
 import { TODOS_LOS_DOMINIOS_DE_PAGO } from '@/lib/suscripciones/pasarela/dominios'
 
 export interface CuotaDeServicio {
@@ -119,6 +120,79 @@ export interface CuotaConEstado {
   /** El enlace de pago, solo si la cuota tiene saldo y el enlace es de una pasarela conocida, https y vigente. */
   enlacePago: string | null
   factura: FacturaDeCuota | null
+  /**
+   * El último pago que le abonó a la cuota (ver `ultimoPagoDeCadaCuota`). Solo se llena para la
+   * pestaña Pagos; `null` o ausente = la cuota no ha recibido nada.
+   */
+  ultimoPago?: PagoDeCuota | null
+}
+
+/** Lo que la pestaña Pagos muestra del pago que cubrió una cuota: fecha, medio y su recibo. */
+export interface PagoDeCuota {
+  cobroId: string
+  /** 'YYYY-MM-DD' */
+  fecha: string
+  fuente: string | null
+  reciboDescargable: boolean
+}
+
+/** Un pago recibido con lo que el reparto necesita para decir a qué cuota fue. */
+export interface PagoParaReparto extends Omit<PagoDeCuota, 'fecha'> {
+  fecha: string | null
+  monto: number
+  estado: 'pagado' | 'programado' | 'anulado'
+  retencionIva?: number
+}
+
+/**
+ * Qué pago le abonó a cada cuota, con el MISMO reparto FIFO de `cuotasConEstado`: los pagos, del
+ * más viejo al más nuevo, van llenando las cuotas en su orden. A cada cuota le toca el ÚLTIMO pago
+ * que le aportó.
+ *
+ * No se empareja por `plan_cobro_id` + `numero_cuota`: `mis_cobros_de_servicio()` no los devuelve,
+ * y un pago suelto del negocio (sin plan ni cuota, como el de 4D SOFT) también cubre cuotas. Lo que
+ * la tabla dice «Pagada» y el pago que muestra al lado salen de la misma cuenta.
+ *
+ * Un pago que solo le toca a la cuota unos pesos de redondeo (el piso de `saldoCuadrado`) no
+ * desplaza al que de verdad la pagó, salvo que sea el único que le aportó.
+ *
+ * `cuotas` es la salida de `cuotasConEstado` (ya en orden de reparto); devuelve un arreglo paralelo.
+ * Los pagos llegan como los da la RPC: del más reciente al más viejo.
+ */
+export function ultimoPagoDeCadaCuota(
+  cuotas: readonly Pick<CuotaConEstado, 'monto'>[],
+  pagos: readonly PagoParaReparto[],
+): (PagoDeCuota | null)[] {
+  const num = (n: number | undefined) => (typeof n === 'number' && Number.isFinite(n) ? n : 0)
+  // La RPC ordena por fecha desc y, dentro del día, por creación desc: al revés queda cronológico;
+  // el sort estable por fecha solo corrige lo que viniera desordenado.
+  const enOrden = pagos
+    .filter((p): p is PagoParaReparto & { fecha: string } => p.estado === 'pagado' && !!p.fecha)
+    .reverse()
+    .sort((a, b) => a.fecha.localeCompare(b.fecha))
+
+  let acumulado = 0
+  const tramos = enOrden.map((p) => {
+    const desde = acumulado
+    acumulado += num(p.monto) + num(p.retencionIva)
+    return { pago: p, desde, hasta: acumulado }
+  })
+
+  let inicio = 0
+  return cuotas.map((cuota) => {
+    const fin = inicio + cuota.monto
+    let ultimo: PagoDeCuota | null = null
+    let ultimoDeRedondeo: PagoDeCuota | null = null
+    for (const t of tramos) {
+      const aporte = Math.min(t.hasta, fin) - Math.max(t.desde, inicio)
+      if (aporte <= 0) continue
+      const pago = { cobroId: t.pago.cobroId, fecha: t.pago.fecha, fuente: t.pago.fuente, reciboDescargable: t.pago.reciboDescargable }
+      if (aporte > TOLERANCIA_SALDO_COP) ultimo = pago
+      else ultimoDeRedondeo = pago
+    }
+    inicio = fin
+    return ultimo ?? ultimoDeRedondeo
+  })
 }
 
 /** Las cuotas con monto, de la más vieja a la más nueva: el orden del reparto. */
@@ -154,12 +228,10 @@ export function cuotasConEstado(p: {
   hoy: string
   ahoraISO: string
 }): CuotaConEstado[] {
-  let disponible = totalRecibido(p.cobros)
-  return cuotasEnOrden(p.cuotas).map((cuota) => {
-    const abonado = Math.max(0, Math.min(disponible, cuota.monto))
-    disponible -= cuota.monto
-    const saldo = cuota.monto - abonado
-    const pagada = saldo <= 0 || saldoCuadrado(saldo)
+  const ordenadas = cuotasEnOrden(p.cuotas)
+  const { tramos } = repartirFifo(ordenadas.map((c) => c.monto), totalRecibido(p.cobros))
+  return ordenadas.map((cuota, i) => {
+    const { abonado, saldo, pagada } = tramos[i]
     const estado: EstadoCuota = pagada
       ? 'pagada'
       : cuota.fechaVencimiento < p.hoy
@@ -173,8 +245,8 @@ export function cuotasConEstado(p: {
       concepto: cuota.concepto,
       fechaVencimiento: cuota.fechaVencimiento,
       monto: cuota.monto,
-      abonado: pagada ? cuota.monto : abonado,
-      saldo: pagada ? 0 : saldo,
+      abonado,
+      saldo,
       estado,
       enlacePago: pagada ? null : enlaceDeCuota(cuota, p.ahoraISO).enlace,
       factura: cuota.factura ?? null,
@@ -189,6 +261,12 @@ export function proximoPago(p: {
   hoy: string
   /** El instante de ahora, ISO-8601, para comparar contra el vencimiento del enlace. */
   ahoraISO: string
+  /**
+   * Tipos de cuota que nunca son «la pendiente»: reciben su parte del reparto como cualquiera, pero si
+   * quedan sin cubrir se saltan. La mora del servicio ignora así las cuotas de usuarios adicionales
+   * (`TIPOS_CUOTA_SIN_MORA`, Plan Anual 5.2).
+   */
+  ignorarTipos?: readonly string[]
 }): ProximoPago {
   const cuotas = cuotasEnOrden(p.cuotas)
   if (cuotas.length === 0) return { estado: 'sin_cuotas' }
@@ -200,8 +278,8 @@ export function proximoPago(p: {
     const abonado = Math.max(0, Math.min(disponible, cuota.monto))
     const saldo = cuota.monto - abonado
     // El piso de materialidad del sistema: unos pesos de redondeo no dejan una cuota «pendiente».
-    if (saldo <= 0 || saldoCuadrado(saldo)) {
-      disponible -= cuota.monto
+    if (saldo <= 0 || saldoCuadrado(saldo) || p.ignorarTipos?.includes(cuota.tipo)) {
+      disponible = Math.max(0, disponible - cuota.monto)
       continue
     }
     const { enlace, vencido: enlaceVencido } = enlaceDeCuota(cuota, p.ahoraISO)

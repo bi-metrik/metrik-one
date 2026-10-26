@@ -16,6 +16,9 @@ import {
   cuerpoDelMensaje,
   decidirRuta,
   esPalabraCierre,
+  esPedidoDeGuia,
+  TEXTO_GUIA_BANDEJA,
+  textoGuiaBandeja,
   fechaDeMeta,
   leerConfigBandeja,
   respuestaTrasRegistro,
@@ -79,6 +82,61 @@ describe('decidirRuta', () => {
   })
 })
 
+describe('pedido de guía', () => {
+  it.each(['ayuda', 'Ayuda!', 'AYUDA', '¿cómo funciona?', 'Cómo funciona esto', 'como se usa', 'Guía', 'instrucciones', 'Menú', '?', ' ¿? ', 'ayuda 🙏', '  ayuda  '])('«%s» sí', t => {
+    expect(esPedidoDeGuia(t)).toBe(true)
+  })
+
+  it.each(['necesito ayuda', 'necesito ayuda con el hotel', 'el menú del hotel', 'menú del hotel', 'ayuda con Carolina', 'cómo funciona el seguro', '', '¿', 'listo', 'bot ayuda'])('«%s» no', t => {
+    expect(esPedidoDeGuia(t)).toBe(false)
+  })
+
+  it('ruta: con la bandeja encendida, escrito → `guia`; reenviado → bandeja; apagada → bot', () => {
+    expect(decidirRuta(entrada({ texto: 'Ayuda!' }))).toBe('guia')
+    expect(decidirRuta(entrada({ texto: '¿cómo funciona?', sesionBotEsperando: true }))).toBe('guia')
+    expect(decidirRuta(entrada({ texto: 'ayuda', reenviado: true }))).toBe('bandeja')
+    expect(decidirRuta(entrada({ texto: 'ayuda', modules: APAGADA }))).toBe('bot')
+    expect(decidirRuta(entrada({ texto: 'necesito ayuda con el hotel' }))).toBe('bandeja')
+    expect(decidirRuta(entrada({ texto: 'bot ayuda' }))).toBe('bot')
+    expect(decidirRuta(entrada({ tipo: 'image', texto: 'ayuda' }))).toBe('bandeja')
+  })
+
+  it('el texto, con la config por defecto, es el acordado', () => {
+    expect(TEXTO_GUIA_BANDEJA).toBe([
+      '*Cómo pasarle una solicitud de viaje al bot* ✈️',
+      '',
+      '*1. Di de quién es*',
+      'Escríbeme el cliente o el viaje:',
+      '• Viaje nuevo: `nuevo viaje` o `nuevo Carolina Ruiz` (si ya es cliente, lo busco yo)',
+      '• Viaje que ya existe: `Carolina Ruiz`, `Europa 2 días` o el código',
+      'Espera el 📌 con el viaje.',
+      '',
+      '*2. Pásame lo del cliente*',
+      'Reenvía los mensajes y audios del cliente, o escribe lo que te dijo. Para cambiar de cliente, escribe primero el nombre del otro.',
+      '',
+      '*3. Cierra con* `listo`',
+      'Te muestro un resumen. Si está bien, responde `sí`. Sin el `sí` no cargo nada.',
+      '',
+      '*4. Lee lo que entendí*',
+      'Te digo qué cargué, cuánto lleva («Mínimo 7/9») y qué falta preguntarle al cliente.',
+      '',
+      '*Bueno saber*',
+      '• Los gastos siguen igual: empieza con `gasto`.',
+      '• Para preguntarme algo, empieza con `bot`.',
+      '• No leo lo que hay dentro de las fotos ni los pantallazos, solo el texto que escribas.',
+      '• Escribe `ayuda` cuando quieras volver a ver esto.',
+    ].join('\n'))
+  })
+
+  it('los prefijos y la palabra de cierre salen de la config', () => {
+    const c = leerConfigBandeja({ bandeja_solicitudes: { prefijos_consulta: ['one'], palabras_cierre: ['ya'] } })
+    const g = textoGuiaBandeja(c)
+    expect(g).toContain('*3. Cierra con* `ya`')
+    expect(g).toContain('empieza con `one`.')
+    expect(g).toContain('empieza con `gasto`.')
+  })
+})
+
 describe('palabra de cierre', () => {
   it('«listo» solo, con mayúsculas, tildes o puntuación, cierra', () => {
     for (const t of ['listo', 'Listo', 'LISTO!', ' listo. ', '¡Listo!']) {
@@ -120,12 +178,12 @@ describe('lo que contesta el bot', () => {
     expect(respuestaTrasRegistro('agregar')).toBeNull()
     expect(respuestaTrasRegistro('duplicado')).toBeNull()
     expect(respuestaTrasRegistro('cierre_sin_abierta')).toBe('nada_pendiente')
-    expect(respuestaTrasRegistro('respuesta_cliente')).toBe('anotado')
+    expect(respuestaTrasRegistro('respuesta_cliente')).toBeNull() // sin «Anotado.» (prueba en vivo)
   })
 
   it('la pregunta cuenta los mensajes, en singular y plural', () => {
-    expect(textoPreguntaCliente(6)).toBe('Recibí 6 mensajes. ¿De qué cliente es?')
-    expect(textoPreguntaCliente(1)).toBe('Recibí 1 mensaje. ¿De qué cliente es?')
+    expect(textoPreguntaCliente(6)).toBe('¿De qué cliente son los 6 mensajes?')
+    expect(textoPreguntaCliente(1)).toBe('¿De qué cliente es el mensaje?')
   })
 })
 
@@ -137,6 +195,9 @@ describe('cuerpo del mensaje', () => {
 
   it('foto: el pie si lo hay; sin pie, cuerpo vacío (el archivo queda por su id)', () => {
     expect(cuerpoDelMensaje({ type: 'image', text: 'hotel que le gustó' })).toEqual({ cuerpo: 'hotel que le gustó', origen: 'pie_de_foto' })
+    // Un PDF reenviado (2026-10-21) se guarda como la foto: su pie es el cuerpo y no se pierde.
+    expect(cuerpoDelMensaje({ type: 'document', text: 'itinerario del cliente' })).toEqual({ cuerpo: 'itinerario del cliente', origen: 'pie_de_foto' })
+    expect(cuerpoDelMensaje({ type: 'document', text: '' })).toEqual({ cuerpo: null, origen: null })
     expect(cuerpoDelMensaje({ type: 'image', text: '' })).toEqual({ cuerpo: null, origen: null })
   })
 

@@ -362,7 +362,11 @@ export default function FormularioClient({
         texto === undefined ? { slug, confirmado: true } : { slug, value: texto, confirmado: true },
       ]);
       if (!r.ok) {
-        setError('No se pudo guardar. Vuelve a intentar.');
+        setError(
+          r.error === 'valor_requerido'
+            ? 'Ese dato no aparece en tus documentos: escríbelo antes de confirmar.'
+            : 'No se pudo guardar. Vuelve a intentar.',
+        );
         return;
       }
       await recargar();
@@ -463,6 +467,18 @@ export default function FormularioClient({
             </div>
           ))}
         </div>
+
+        {v.devolucion && v.estado === 'devuelto' && (
+          <div className="mb-5 rounded-lg border border-advertencia/30 bg-advertencia/5 p-4 text-sm">
+            <p className="font-semibold text-[#B45309]">
+              {v.marca.nombre} te pide corregir algo antes de aprobar tu vinculación
+            </p>
+            <p className="text-[#4B5563] mt-1.5 whitespace-pre-wrap">{v.devolucion.motivo}</p>
+            <p className="text-xs text-tinta-suave mt-2">
+              Lo que ya entregaste sigue aquí. Corrige lo que se te pide y vuelve a firmar al final.
+            </p>
+          </div>
+        )}
 
         {error && (
           <div className="mb-5 rounded-lg border border-alerta/30 bg-alerta/5 p-3 text-sm text-[#B91C1C]">
@@ -1025,22 +1041,32 @@ export default function FormularioClient({
                 <>
                   <p className="text-xs text-tinta-suave mb-3">
                     Esto es lo que leímos de tus documentos. Corrige lo que esté mal y confirma.
+                    Lo que tus documentos no traen, escríbelo tú.
                   </p>
                   <div className="space-y-2">
-                    {porConfirmar.map((c) => (
+                    {porConfirmar.map((c) => {
+                      const texto =
+                        borradores[c.slug] ??
+                        (typeof c.value === 'string' ? c.value : String(c.value ?? ''));
+                      // Un dato que el documento no trae no se confirma en blanco:
+                      // Valida lo rechaza y el gate de firma lo seguiría pidiendo.
+                      const enBlanco = Boolean(c.manual) && texto.trim() === '';
+                      return (
                       <div
                         key={c.slug}
                         className="px-4 py-3 rounded-lg border border-[#E5E7EB] bg-white"
                       >
                         <label className="block text-xs text-tinta-suave mb-1">
-                          {c.slug.replace(/_/g, ' ')}
+                          {c.etiqueta ?? c.slug.replace(/_/g, ' ')}
                         </label>
+                        {c.manual && (
+                          <p className="text-xs text-tinta-suave mb-1">
+                            No aparece en tus documentos. Escríbelo; si no aplica, escribe «No aplica».
+                          </p>
+                        )}
                         <div className="flex gap-2">
                           <input
-                            value={
-                              borradores[c.slug] ??
-                              (typeof c.value === 'string' ? c.value : String(c.value ?? ''))
-                            }
+                            value={texto}
                             onChange={(ev) =>
                               setBorradores((b) => ({ ...b, [c.slug]: ev.target.value }))
                             }
@@ -1048,7 +1074,7 @@ export default function FormularioClient({
                           />
                           <button
                             type="button"
-                            disabled={pending}
+                            disabled={pending || enBlanco}
                             onClick={() => confirmarUno(c.slug)}
                             className="px-3 py-2 rounded-lg text-white text-xs font-semibold shrink-0 disabled:opacity-50"
                             style={{ background: acento }}
@@ -1057,7 +1083,8 @@ export default function FormularioClient({
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </>
               )}

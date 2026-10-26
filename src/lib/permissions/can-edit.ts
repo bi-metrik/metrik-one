@@ -231,6 +231,40 @@ export function canEditBloque(
   return false
 }
 
+// ── puedeEditarConAreaResuelta ───────────────────────────────────────
+
+/**
+ * La parte de ROL + RESPONSABLE de `canEditBloque`, para la pantalla, cuando el área
+ * ya la resolvió el servidor.
+ *
+ * El cliente no tiene el `staff.id`, las áreas ni la lista de responsables: tiene el
+ * rol, `_esResponsable` y el modo del bloque. El chequeo de área ya viaja hecho
+ * (`_areaReadonly`, calculado en `getNegocioDetalleCompleto` con las áreas efectivas y
+ * `areas_editoras`) y pone el bloque en `visible`. Lo que queda por decidir en pantalla
+ * es exactamente esto, y se decide llamando a `canEditBloque` con el área ya cubierta
+ * (sin áreas = sin segmentación) para no escribir una segunda lista de roles:
+ *   - owner / admin / supervisor: sí;
+ *   - operator: solo si es responsable del negocio;
+ *   - contador / read_only (o un rol desconocido): no.
+ *
+ * Caso que lo motivó (SOENA, SOE-018, 2026-10-15): `BloqueCompletionStamp` tenía su
+ * propia lista (operator, owner, admin o responsable) para los bloques con
+ * `restrict_to_operator_or_responsable`, y la supervisora de operaciones no podía marcar
+ * «Radicación revisada» aunque el servidor (`guardEditarBloque`) sí la dejaba.
+ */
+export function puedeEditarConAreaResuelta(role: string, esResponsable: boolean): boolean {
+  const yo = 'usuario-actual'
+  return canEditBloque(
+    // Áreas vacías: el área ya la cortó el servidor; aquí no se vuelve a mirar.
+    { id: yo, role: role as Role, areas: [] },
+    // Cualquier stage con área dueña sirve: sin áreas del usuario, el stage no corta.
+    // `cerrado` no, porque reservaría el paso a owner/admin (el negocio cerrado ya
+    // llega en modo `visible`).
+    { stage: 'ejecucion' },
+    esResponsable ? [yo] : [],
+  )
+}
+
 // ── canAdvanceStage ──────────────────────────────────────────────────
 
 /**
@@ -319,6 +353,23 @@ export function puedeGestionarPagosExternos(user: UserContext): boolean {
   if (user.role === 'owner' || user.role === 'admin') return true
   if (user.role === 'read_only' || user.role === 'contador') return false
   return getAreasEfectivas(user).has('financiera')
+}
+
+// ── puedeVerCuentasDeProveedor ───────────────────────────────────────
+
+/**
+ * Ver, cargar, cambiar y verificar las CUENTAS BANCARIAS de un proveedor (Mauricio,
+ * 2026-10-18). Es a donde sale la plata de la agencia: un «cambio de cuenta principal»
+ * en un PDF de tarifas es el camino típico de fraude. Mismo criterio que
+ * `puedeGestionarPagosExternos`: owner/admin siempre; read_only/contador nunca; el resto
+ * solo con 'financiera' en sus áreas efectivas ('direccion' la expande).
+ *
+ * Verificar además exige ser OTRA persona que quien la cargó (lo hace cumplir la base).
+ * Fuente única: la consumen las acciones de `/proveedores` y la ficha, que decide con
+ * ella si dibuja la sección.
+ */
+export function puedeVerCuentasDeProveedor(user: UserContext): boolean {
+  return puedeGestionarPagosExternos(user)
 }
 
 // ── puedeDevolverCasoPorRuta ─────────────────────────────────────────

@@ -13,6 +13,8 @@
  * `emitirFacturaDeNegocio`, y siempre por decisión de una persona.
  */
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { nombreDeQuienActua } from '@/lib/activity/nombre-de-quien-actua'
 import { todayBogotaISO } from '@/lib/dates/bogota'
@@ -24,13 +26,22 @@ import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-c
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { borradorCliente, borradorFactura, type RutExtraido } from '@/lib/siigo/mapeo'
 import { emitirReciboDeCobro } from '@/lib/siigo/recibos'
+import { motivoSinRc3 } from '@/lib/siigo/rc3-negocio'
+import { cargarPlanRc3 } from '@/lib/siigo/rc3-negocio-servidor'
 import {
   leerReciboPorConcepto,
   primerRecibo,
   recibosDelCobro,
   type ConfigReciboPorConcepto,
 } from '@/lib/siigo/recibo-componentes'
-import { leerTitularCorregido, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
+import { leerTitularCorregido, rutDeConfirmacion, titularDeConfirmacion, validarTitular, type TitularEditado } from '@/lib/siigo/titular'
+import { desdePorLinea, hayReglaDeCola } from '@/lib/facturacion/regla-viaje'
+import { entradasViaje, lineasPorTitular, reglaDelNegocio } from '@/lib/facturacion/cola-viaje'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
+import { repartoFacturaViaje } from '@/lib/facturacion/reparto-viaje'
+import { adaptadorSiigo, proveedorDeFacturacion, type ProveedorFacturacion } from '@/lib/facturacion/proveedor'
+import type { OpcionesEmision } from '@/lib/siigo/facturas'
+import { borradorFacturaViaje, type RepartoFacturaViaje } from '@/lib/siigo/config-viaje'
 import { siigoRequest, type SiigoConfig } from '@/lib/siigo/client'
 import {
   conceptoFactura,
@@ -41,6 +52,7 @@ import {
   adoptarFacturaDeSiigo,
   emitirFacturaNegocio,
   facturasAdoptablesDelNegocio,
+  textoDeAbonos,
   type FacturaAdoptable,
   type FacturaEnSiigo,
   type FacturaHermana,
@@ -260,7 +272,7 @@ export interface ColaFacturacion {
  * stage de cobro. Facturar es del área financiera, no de quien lleva el caso.
  */
 async function ctxFinanciero(): Promise<
-  { ok: true; workspaceId: string } | { ok: false; error: string }
+  { ok: true; workspaceId: string; staffId: string | null } | { ok: false; error: string }
 > {
   const { workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: error ?? 'No autenticado' }
@@ -272,7 +284,7 @@ async function ctxFinanciero(): Promise<
   if (!canEditBloque(user, { stage: 'cobro' }, [])) {
     return { ok: false, error: 'Solo el área financiera puede facturar' }
   }
-  return { ok: true, workspaceId }
+  return { ok: true, workspaceId, staffId: staffId ?? null }
 }
 
 /**
@@ -284,15 +296,11 @@ const TOTALES_VACIOS: ColaFacturacion['totales'] = {
   listos: 0, incompletos: 0, ya_facturados: 0, descartados: 0, valor_listo: 0,
 }
 
-/** Pesos sin decimales para los mensajes de este archivo. No se exporta (`'use server'`). */
-const fmtCOP = (v: number): string =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
-
 export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
   try {
-    return await armarColaFacturacion(ctx.workspaceId)
+    return await armarColaFacturacion(ctx.workspaceId, ctx.staffId)
   } catch (e) {
     // Una lectura por lote que no se pudo completar NO se degrada a una bandeja
     // corta. Ese es exactamente el fallo que este frente vino a cerrar: una lista
@@ -305,6 +313,7 @@ export async function getColaFacturacion(): Promise<{ data: ColaFacturacion | nu
 /** Cuerpo de la cola. Separado solo para que el `catch` de arriba lo envuelva entero. */
 async function armarColaFacturacion(
   workspaceId: string,
+  staffId: string | null,
 ): Promise<{ data: ColaFacturacion | null; error?: string }> {
   const svc = createServiceClient()
 
@@ -329,7 +338,12 @@ async function armarColaFacturacion(
       .eq('workspace_id', workspaceId).order('id').range(d, h),
     { etiqueta: 'facturacion/lineas_negocio' },
   )
-  let desde: number | null = null
+  // Desde qué etapa entra CADA línea (F5): antes la primera línea mandaba para todas. Una
+  // línea sin valor propio hereda el primero, como antes, así que ninguna cola cambia (Q5).
+  // Las líneas de viaje (`facturacion.por_titular`) entran por evento, no por etapa (Vera C4).
+  const desdeDeLinea = desdePorLinea(lineas)
+  const lineasViaje = lineasPorTitular(lineas)
+  const desde: number | null = [...desdeDeLinea.values()][0] ?? null
   // Los conceptos se resuelven POR LÍNEA: cada una vende cosas distintas y su
   // catálogo de Siigo no tiene por qué coincidir.
   const conceptosPorLinea = new Map<string, ConceptosConfig>()
@@ -337,15 +351,13 @@ async function armarColaFacturacion(
   // ya tiene una factura CARGADA, que es distinto de emitida desde aquí.
   const facturaSlugPorLinea = new Map<string, string>()
   for (const l of lineas) {
-    const f = (l.config_extra?.facturacion ?? {}) as { desde_etapa_numero?: number }
-    if (typeof f.desde_etapa_numero === 'number' && desde === null) desde = f.desde_etapa_numero
     const s = (l.config_extra?.siigo ?? {}) as {
       conceptos?: ConceptosConfig; bloque_factura_slug?: string
     }
     if (s.conceptos) conceptosPorLinea.set(l.id, s.conceptos)
     facturaSlugPorLinea.set(l.id, slugFacturaDeLinea(l.config_extra))
   }
-  if (desde == null) {
+  if (!hayReglaDeCola(lineas)) {
     return { data: { casos: [], workspace_nombre, desde_etapa_numero: null, siigo_configurado, descarte_abierto: ventanaDescarteAbierta(), descarte_hasta: DESCARTE_FACTURACION_HASTA, productos: [], totales: TOTALES_VACIOS } }
   }
 
@@ -360,7 +372,7 @@ async function armarColaFacturacion(
   // 391 abiertos hoy en SOENA: todavía por debajo del techo, pero la cola crece
   // con el negocio del cliente y el día que lo pase no habría error, solo casos
   // que dejan de aparecer.
-  const negocios = await traerTodo<Neg>(
+  const negociosTodos = await traerTodo<Neg>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('negocios')
@@ -370,7 +382,19 @@ async function armarColaFacturacion(
       .range(d, h),
     { etiqueta: 'facturacion/negocios' },
   )
-  const abiertos = negocios.filter(n => n.estado === 'abierto' && (n.etapas_negocio?.numero ?? 0) > desde!)
+  // El viaje de prueba (metadata.es_prueba, F8-1) no entra a la cola, ni a sus totales, ni a la
+  // emisión de quien no lo lleva ni lo aprueba: la financiera real no lo ve.
+  const ocultosPrueba = await negociosDePruebaOcultos(svc, workspaceId, staffId)
+  const negocios = sinOcultos(negociosTodos, ocultosPrueba, n => n.id)
+  const porEtapa = negocios.filter(n => {
+    if (n.estado !== 'abierto') return false
+    const d = desdeDeLinea.get(n.linea_id ?? '')
+    return d !== undefined && (n.etapas_negocio?.numero ?? 0) > d
+  })
+  // Viajes: empresa al confirmar; persona con el paquete enviado y el saldo en cero; o forzada.
+  const viajesAbiertos = negocios.filter(n => n.estado === 'abierto' && lineasViaje.has(n.linea_id ?? ''))
+  const entradaViaje = await entradasViaje(svc, workspaceId, viajesAbiertos)
+  const abiertos = [...porEtapa, ...viajesAbiertos.filter(n => entradaViaje.has(n.id))]
   const cerrados = negocios.filter(n => n.estado !== 'abierto')
 
   // ── La factura de cada caso: bloque ORIGINAL + marca, nunca una copia ──────
@@ -546,13 +570,28 @@ async function armarColaFacturacion(
   // el de UTC: emitir a las 8 p.m. del 31 fechaba la factura el 1 del mes siguiente.
   const hoy = todayBogotaISO()
 
+  // La factura de cada viaje de la cola, con el MISMO armado que la emisión (dos conceptos).
+  const facViaje = new Map<string, ReturnType<typeof borradorFacturaViaje>>()
+  for (const n of candidatos) {
+    if (!lineasViaje.has(n.linea_id ?? '')) continue
+    const rep = await repartoFacturaViaje(svc, { workspaceId, negocio: n }).catch(() => ({ ok: false as const, falta: 'el reparto del valor (no se pudo leer la cotización)' }))
+    const borr = borradorFacturaViaje(cfgEval, 'x', rep.ok ? rep.reparto : null, hoy, 19)
+    facViaje.set(n.id, rep.ok ? borr : { ...borr, faltantes: [...borr.faltantes.filter(f => !f.startsWith('el reparto')), rep.falta] })
+  }
+
   const casos: CasoPorFacturar[] = candidatos.map(n => {
     const rut = rutPorNegocio.get(n.id) ?? {}
     const contacto = contactos.get(n.contacto_id ?? '') ?? { email: null, telefono: null }
     // El titular corregido manda sobre el RUT, igual que en la emisión: la revisión
     // tiene que mostrar a nombre de quién va a salir de verdad.
     const titularCorregido = leerTitularCorregido(n.metadata)
-    const cli = borradorCliente(rut, contacto, titularCorregido)
+    // Sin RUT, el titular de «El cliente confirmó» (viaje) con su dirección y ciudad: la MISMA
+    // regla que la emisión (`borradorDelNegocio`), para que la revisión diga a nombre de quién sale.
+    const titularViaje = rutPorNegocio.has(n.id) ? null : titularDeConfirmacion(n.metadata)
+    const cli = titularViaje
+      ? borradorCliente(rutDeConfirmacion(n.metadata) ?? {}, contacto, titularCorregido ?? titularViaje)
+      : borradorCliente(rut, contacto, titularCorregido)
+    const esViaje = lineasViaje.has(n.linea_id ?? '')
     const honorario = n.precio_aprobado == null ? null : Number(n.precio_aprobado)
     // El concepto sale del MISMO helper que usa la emisión: si la pantalla y el
     // documento lo resolvieran por su cuenta, se verían distintos el día que
@@ -610,7 +649,9 @@ async function armarColaFacturacion(
       },
       honorario,
       valor_upme: upme,
-      faltan_factura: fac.faltantes,
+      // Un viaje sale con sus dos conceptos (ingreso propio y terceros), nunca con el producto de
+      // SOENA: lo que le falte a esa factura (productos, reparto) es lo que la cola dice.
+      faltan_factura: esViaje ? (facViaje.get(n.id)?.faltantes ?? fac.faltantes) : fac.faltantes,
       faltan_cliente: cli.faltantes,
       // El mapa solo guarda RUT con identificación utilizable, así que su
       // ausencia cubre las dos formas de no tenerlo: sin documento cargado y
@@ -629,7 +670,7 @@ async function armarColaFacturacion(
           : { permitida: false, reemplaza: false, razon: permisoCarga.razon },
       cerrado,
       recibo_numero: ultimoReciboPorNegocio.get(n.id) ?? null,
-      base_gravable: fac.payload.items[0]?.price ?? null,
+      base_gravable: (esViaje ? facViaje.get(n.id)?.payload.items[0]?.price : fac.payload.items[0]?.price) ?? null,
       descartado,
     }
   })
@@ -804,6 +845,11 @@ export interface ResultadoEmitir {
    * expediente queda incompleto y en silencio nadie lo notaría.
    */
   archivada?: boolean
+  /**
+   * La factura salió y quedó marcada; el PDF, los abonos y el cierre corren después de
+   * responder y lo que pase con ellos queda en la actividad del negocio.
+   */
+  completando?: boolean
   error?: string
   /**
    * Facturas del cliente que **ningún negocio reclama**. La pantalla debe
@@ -856,7 +902,7 @@ async function slugDelBloqueDeFactura(
  * del negocio y, si aplica, la justificación. Nunca el valor ni la identificación.
  * Una pantalla vieja no puede facturar por un monto que ya cambió.
  */
-export async function emitirFacturaDeNegocio(
+async function emitirFacturaDeNegocioSinClave(
   negocioId: string,
   opciones?: {
     emitir?: boolean
@@ -887,6 +933,26 @@ export async function emitirFacturaDeNegocio(
   // server action exportada es una puerta publica aunque ninguna pantalla la ofrezca.
   const cerrado = await bloqueoPorNegocioCerrado(svc, workspaceId, negocioId)
   if (cerrado) return { ok: false, error: cerrado }
+
+  // Viajes (F5): solo lo que entró a la cola por su evento (o forzado por la dirección), y nunca con
+  // el producto de SOENA. Las líneas de siempre siguen exactamente su camino.
+  const regla = await reglaDelNegocio(svc, workspaceId, negocioId)
+  if (regla?.regla === 'apagada') return { ok: false, error: 'La facturación está apagada en esta línea.' }
+  let reparto: RepartoFacturaViaje | undefined
+  let proveedor: ProveedorFacturacion = adaptadorSiigo
+  if (regla?.regla === 'viaje') {
+    if (!regla.entra) return { ok: false, error: 'Esta factura todavía no entra a la cola: falta el evento de su titular (confirmación de la empresa, o paquete enviado con el saldo en cero).' }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: negViaje } = await (svc as any).from('negocios').select('precio_aprobado, metadata').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle()
+    const r = await repartoFacturaViaje(svc, { workspaceId, negocio: (negViaje ?? { precio_aprobado: null, metadata: null }) as { precio_aprobado: number | null; metadata: Record<string, unknown> | null } })
+    if (!r.ok) return { ok: false, error: `Falta ${r.falta}.` }
+    reparto = r.reparto
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: wsProv } = await (svc as any).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
+    const p = proveedorDeFacturacion((wsProv as { config_extra?: unknown } | null)?.config_extra)
+    if ('error' in p) return { ok: false, error: p.error }
+    proveedor = p
+  }
 
   let nombre: string | null = null
   if (staffId) {
@@ -928,27 +994,27 @@ export async function emitirFacturaDeNegocio(
     if (!titular.ok) return { ok: false, error: titular.mensaje }
   }
 
-  const r = await emitirFacturaNegocio(
-    workspaceId,
-    negocioId,
-    nombre,
-    {
-      bloqueFacturaSlug,
-      datos: {
-        email: opciones?.datos?.email,
-        telefono: opciones?.datos?.telefono,
-        productoCode: opciones?.datos?.productoCode,
-        ...(titular?.ok ? { titular: titular.titular } : {}),
-      },
-      // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
-      // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
-      // sin radicar existe para la primera prueba controlada con Diana.
-      emitir: opciones?.emitir !== false,
-      enviarCorreo: opciones?.enviarCorreo === true,
-      justificacionDuplicado: opciones?.justificacionDuplicado,
+  const opcionesEmision: OpcionesEmision = {
+    bloqueFacturaSlug,
+    ...(reparto ? { viaje: reparto } : {}),
+    datos: {
+      email: opciones?.datos?.email,
+      telefono: opciones?.datos?.telefono,
+      productoCode: opciones?.datos?.productoCode,
+      ...(titular?.ok ? { titular: titular.titular } : {}),
     },
-    { staffId },
-  )
+    // Por defecto se RADICA: el botón dice "facturar electrónicamente" y una
+    // pantalla que promete eso no puede dejar un borrador sin avisar. El modo
+    // sin radicar existe para la primera prueba controlada con Diana.
+    emitir: opciones?.emitir !== false,
+    enviarCorreo: opciones?.enviarCorreo === true,
+    justificacionDuplicado: opciones?.justificacionDuplicado,
+  }
+  // Un viaje sale por la capa de proveedor (Siigo hoy, Aliaddo mañana). El camino de SOENA sigue
+  // llamando directo, como siempre (Vera F5-5).
+  const r = reparto
+    ? await proveedor.emitirFactura({ workspaceId, negocioId, staffNombre: nombre, staffId, opciones: opcionesEmision })
+    : await emitirFacturaNegocio(workspaceId, negocioId, nombre, opcionesEmision, { staffId })
 
   if (!r.ok) {
     switch (r.motivo) {
@@ -985,39 +1051,37 @@ export async function emitirFacturaDeNegocio(
       entidad_id: negocioId,
       tipo: 'sistema',
       autor_id: staffId,
-      // Los abonos van en la MISMA entrada que la emisión: salieron en el mismo acto.
+      // Los abonos van en la MISMA entrada que la emisión cuando salieron en el mismo acto.
+      // Con `completando` salen después y los anota su propia entrada.
       // `activity_log.contenido` tiene CHECK de 280 caracteres: se recorta.
       contenido: ((r.emitida
         ? `Factura ${r.numero} emitida en Siigo`
         : `Factura ${r.numero} creada en Siigo SIN radicar ante la DIAN`)
-        + textoDeAbonos(r.abonos)).slice(0, 280),
+        + (r.abonos ? textoDeAbonosConPunto(r.abonos) : '')).slice(0, 280),
     }, 'emitirFacturaDeNegocio')
   }
 
   revalidatePath('/conciliacion')
   return {
-    ok: true, numero: r.numero, borrador: !r.emitida, archivada: r.archivada,
-    abonos: {
-      emitidos: r.abonos.emitidos.map(a => a.numero),
-      a_mano: r.abonos.a_mano.length,
-      fallidos: r.abonos.fallidos.length,
-    },
+    ok: true, numero: r.numero, borrador: !r.emitida,
+    ...(r.completando ? { completando: true } : {}),
+    ...(r.archivada != null ? { archivada: r.archivada } : {}),
+    ...(r.abonos
+      ? {
+          abonos: {
+            emitidos: r.abonos.emitidos.map(a => a.numero),
+            a_mano: r.abonos.a_mano.length,
+            fallidos: r.abonos.fallidos.length,
+          },
+        }
+      : {}),
   }
 }
 
-/**
- * Lo que el timeline dice de los abonos que salieron con la factura. Vacío si no hubo.
- * No se exporta: este archivo es `'use server'`.
- */
-function textoDeAbonos(a: { emitidos: Array<{ numero: string; valor: number }>; a_mano: unknown[]; fallidos: unknown[] }): string {
-  const partes: string[] = []
-  if (a.emitidos.length > 0) {
-    const total = a.emitidos.reduce((s, x) => s + x.valor, 0)
-    partes.push(`abonos de pagos anteriores: ${a.emitidos.map(x => x.numero).join(', ')} (${fmtCOP(total)})`)
-  }
-  if (a.a_mano.length > 0) partes.push(`${a.a_mano.length} abono(s) quedan para Tesorería`)
-  if (a.fallidos.length > 0) partes.push(`${a.fallidos.length} abono(s) sin emitir: ver control de recibos`)
-  return partes.length > 0 ? ` · ${partes.join(' · ')}` : ''
+/** Los abonos, en la misma entrada que la emisión. Vacío si no hubo. */
+function textoDeAbonosConPunto(a: Parameters<typeof textoDeAbonos>[0]): string {
+  const t = textoDeAbonos(a)
+  return t ? ` · ${t}` : ''
 }
 
 // ── Adoptar una factura que YA existe en Siigo ───────────────────────────────
@@ -1397,15 +1461,6 @@ export type ResultadoRecibo =
   | { ok: false; error: string; duplicados?: Array<{ numero: string; fecha: string; valor: number }> }
 
 /**
- * Por qué Tesorería no emite nada por un pago sin tarifa UPME.
- *
- * ⚠️ No se exporta: este archivo es `'use server'`, y exportar una constante anula TODOS
- * sus exports en el build (gotcha del 2026-08-06).
- */
-const MENSAJE_SIN_TARIFA_UPME =
-  'Este pago no trae tarifa UPME: no lleva recibo de caja. Su honorario se abona solo a la factura del negocio.'
-
-/**
  * Emite el recibo de caja del recaudo de la tarifa UPME (RC-3). Es lo ÚNICO que emite.
  *
  * Brief del 2026-09-22 (Mauricio): «no nos debería permitir generar recibos de caja
@@ -1415,20 +1470,20 @@ const MENSAJE_SIN_TARIFA_UPME =
  *   - una línea que no declara `recibo_por_concepto.pasante`: sin él la emisión caería al
  *     recibo por el TOTAL con el comprobante del workspace, que en SOENA es el RC-1 (4594)
  *     del honorario. Sería un RC-1 a mano por la puerta de atrás;
- *   - un pago sin porción UPME (`a_tarifa = 0` en `v_cobro_valor`): no tiene nada que
- *     emitir, y su honorario se abona solo a la factura (`abonos-factura.ts`);
- *   - un pago cuyo reparto no se conoce: no se sabe cuánto es tarifa, y adivinarlo es
- *     emitir un documento contable con un valor inventado.
+ *   - un pago que no es el titular del RC-3 del negocio (SOE-029, `@/lib/siigo/rc3-negocio`):
+ *     el RC-3 es UNO por negocio, sale por `valor_pagado` del comprobante UPME menos lo ya
+ *     emitido, y queda colgado del pago que completa la tarifa. Los demás pagos con
+ *     porción UPME van en ese;
+ *   - un negocio sin `valor_pagado` en el comprobante: NO se cae a la tarifa confirmada.
  *
- * No acepta un valor escrito a mano: el recibo acusa la porción UPME que sale del reparto
- * del pago. Si el soporte dice otra cosa, lo que está mal es el monto del pago y se
- * corrige ahí (la emisión por concepto ya rechazaba cualquier otra cifra).
+ * No acepta un valor escrito a mano: el recibo acusa lo que dice el comprobante. Si el
+ * comprobante está mal leído, se corrige en su bloque del negocio.
  *
  * ⚠️ No hay otra vía de servidor que emita un RC-1 de honorario a pedido de una persona:
  * el abono sale solo, sin botón (`abonarAlRegistrarPago`, al facturar y en el lote del
  * rezago, que es un script y no una server action).
  */
-export async function emitirReciboDeNegocio(
+async function emitirReciboDeNegocioSinClave(
   negocioId: string,
   opciones?: { justificacionDuplicado?: string; cobroId?: string },
 ): Promise<ResultadoRecibo> {
@@ -1445,36 +1500,6 @@ export async function emitirReciboDeNegocio(
   // decir quién oprimió el botón no arrastra autoría de otro inquilino. Sin este respaldo
   // quedaron 7 marcas de 18 sin autor en SOENA (medido el 2026-09-22).
   const nombre = await nombreDeQuienActua(svc, { staffId, userId })
-
-  // ── De qué COBRO es este recibo ──
-  // Desde el 2026-09-03 el recibo cuelga del cobro. Tesorería sigue entrando por el
-  // negocio, así que cuando no llega `cobroId` se resuelve el cobro pendiente más
-  // reciente: es el que acaba de entrar y el que la persona está mirando. Si el negocio
-  // no tiene ningún cobro sin recibo, no hay plata nueva que acusar.
-  //
-  // ⚠️ Este camino solo ve los cobros **sin ninguna marca**. El panel de recibos siempre
-  // pasa `cobroId`.
-  let cobroId = opciones?.cobroId
-  if (!cobroId) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: pendientes } = await (svc as any)
-      .from('cobros')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .eq('negocio_id', negocioId)
-      .is('siigo_recibo', null)
-      .is('anulado_at', null)
-      .order('fecha', { ascending: false })
-      .limit(1)
-    cobroId = ((pendientes ?? [])[0] as { id: string } | undefined)?.id
-  }
-
-  if (!cobroId) {
-    return {
-      ok: false,
-      error: 'Este caso no tiene ningún pago registrado sin recibo. Registra el pago primero.',
-    }
-  }
 
   // ── Config de la línea: dónde archivar y con qué concepto ──
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1500,19 +1525,28 @@ export async function emitirReciboDeNegocio(
     }
   }
 
-  // ── ¿Este pago trae tarifa UPME? ──
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: fila } = await (svc as any)
-    .from('v_cobro_valor').select('a_tarifa').eq('cobro_id', cobroId).maybeSingle()
-  if (!fila) {
+  // ── SOE-029: el RC-3 es UNO por negocio y sale del comprobante UPME ──
+  // `planRc3DelNegocio` decide cuánto y en qué pago (ver `@/lib/siigo/rc3-negocio`). Es
+  // la misma cuenta que pinta la fila de Tesorería. Sin `cobroId`, el recibo va en el pago
+  // titular.
+  let rc3
+  try {
+    rc3 = await cargarPlanRc3(svc, workspaceId, negocioId)
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  const cobroId = opciones?.cobroId ?? rc3.titularId ?? undefined
+  if (!cobroId) {
+    const motivo = motivoSinRc3(rc3, '')
     return {
       ok: false,
-      error: 'No se sabe cuánto de este pago es tarifa UPME: el pago no tiene reparto. Revisa su monto y su negocio.',
+      error: rc3.estado === 'sin_tarifa' || !motivo
+        ? 'Este caso no tiene ningún pago con tarifa UPME sin recibo. Registra el pago primero.'
+        : motivo.mensaje,
     }
   }
-  if (!(Number((fila as { a_tarifa?: unknown }).a_tarifa ?? 0) > 0)) {
-    return { ok: false, error: MENSAJE_SIN_TARIFA_UPME }
-  }
+  const motivo = motivoSinRc3(rc3, cobroId)
+  if (motivo) return { ok: false, error: motivo.mensaje }
 
   const r = await emitirReciboDeCobro(workspaceId, cobroId, nombre, {
     bloqueReciboSlug,
@@ -1541,6 +1575,7 @@ export async function emitirReciboDeNegocio(
       sin_valor: 'El valor tiene que ser mayor que cero.',
       anulado: 'Ese pago está anulado: no se le puede emitir recibo.',
       faltan_datos: r.motivo === 'faltan_datos' ? `Faltan datos: ${r.faltantes.join(', ')}.` : '',
+      rc3_del_negocio: r.motivo === 'rc3_del_negocio' ? r.mensaje : '',
       error: r.motivo === 'error' ? r.mensaje : '',
     }
     return { ok: false, error: mensajes[r.motivo] || 'No se pudo emitir el recibo.' }
@@ -1555,4 +1590,23 @@ export async function emitirReciboDeNegocio(
     archivada: r.archivada,
     recibos: r.recibos.map(x => ({ numero: x.numero, valor: x.valor })),
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function emitirFacturaDeNegocio(negocioId: string, opciones?: Parameters<typeof emitirFacturaDeNegocioSinClave>[1], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof emitirFacturaDeNegocioSinClave>>>(
+    { accion: 'emitirFacturaDeNegocio', clave: intencion, args: [negocioId, opciones], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => emitirFacturaDeNegocioSinClave(negocioId, opciones),
+  )
+}
+
+export async function emitirReciboDeNegocio(negocioId: string, opciones?: Parameters<typeof emitirReciboDeNegocioSinClave>[1], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof emitirReciboDeNegocioSinClave>>>(
+    { accion: 'emitirReciboDeNegocio', clave: intencion, args: [negocioId, opciones], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => emitirReciboDeNegocioSinClave(negocioId, opciones),
+  )
 }

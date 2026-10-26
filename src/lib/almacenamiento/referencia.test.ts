@@ -6,6 +6,8 @@ import {
   esRutaDeNegocio,
   esRutaPendienteDe,
   hrefArchivo,
+  idDeArchivoDrive,
+  urlDescargaDrive,
   negocioDeRuta,
   nombreArchivoSeguro,
   parsearReferencia,
@@ -56,12 +58,60 @@ describe('hrefArchivo', () => {
     expect(hrefArchivo(ref, { descargar: true })).toBe(`/api/archivos/abrir?ref=${encodeURIComponent(ref)}&descargar=1`)
   })
 
-  it('cualquier otra URL queda idéntica: un workspace en Drive no cambia un enlace', () => {
-    const drive = 'https://drive.google.com/file/d/abc/view?usp=drivesdk'
+  it('cualquier otra URL queda idéntica para VER: un workspace en Drive no cambia un enlace', () => {
+    const drive = 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOp/view?usp=drivesdk'
     expect(hrefArchivo(drive)).toBe(drive)
-    expect(hrefArchivo(drive, { descargar: true })).toBe(drive)
     expect(hrefArchivo(null)).toBeNull()
     expect(hrefArchivo('')).toBeNull()
+    expect(hrefArchivo(null, { descargar: true })).toBeNull()
+  })
+
+  // SOE-026: «Descargar» abría el visor de Drive igual que «Ver», porque `<a download>`
+  // sobre otro dominio el navegador lo ignora.
+  describe('descargar un archivo de Drive va a la descarga directa (SOE-026)', () => {
+    const ID = '1AbCdEfGhIjKlMnOp_q-RsT'
+    const DESCARGA = `https://drive.google.com/uc?export=download&id=${ID}`
+
+    it.each([
+      [`https://drive.google.com/file/d/${ID}/view?usp=drivesdk`],
+      [`https://drive.google.com/file/d/${ID}/view`],
+      [`https://drive.google.com/file/d/${ID}`],
+      [`https://drive.google.com/open?id=${ID}`],
+      [`https://drive.google.com/uc?id=${ID}`],
+      [`https://drive.google.com/uc?export=download&id=${ID}`],
+    ])('%s', (url) => {
+      expect(hrefArchivo(url, { descargar: true })).toBe(DESCARGA)
+      // «Ver» sigue abriendo el visor, sin tocar.
+      expect(hrefArchivo(url)).toBe(url)
+    })
+
+    it('una URL que no es de Drive queda igual también al descargar', () => {
+      for (const url of [
+        'https://ejemplo.supabase.co/storage/v1/object/public/soportes/a.pdf',
+        'https://ejemplo.com/file/d/1AbCdEfGhIjKlMnOp/view',
+      ]) {
+        expect(hrefArchivo(url, { descargar: true })).toBe(url)
+      }
+    })
+
+    it('lo que no es inequívocamente un archivo de Drive no se reescribe', () => {
+      for (const url of [
+        // carpeta, no archivo
+        'https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOp',
+        // Doc nativo: `uc?export=download` no lo baja
+        `https://docs.google.com/document/d/${ID}/edit`,
+        // id con forma sospechosa
+        'https://drive.google.com/file/d/abc/view',
+      ]) {
+        expect(urlDescargaDrive(url)).toBeNull()
+        expect(hrefArchivo(url, { descargar: true })).toBe(url)
+      }
+    })
+
+    it('el parser del id sigue leyendo docs.google.com (lo usan los cobros)', () => {
+      expect(idDeArchivoDrive(`https://docs.google.com/document/d/${ID}/edit`)).toBe(ID)
+      expect(idDeArchivoDrive('one://ve-documentos/x/y.pdf')).toBeNull()
+    })
   })
 })
 

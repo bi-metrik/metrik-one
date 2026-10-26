@@ -54,14 +54,17 @@
  * retiró es el documento del cliente.
  */
 
-import { leerTarifaPax, type LecturaCasilla } from './tarifa-pasajero'
+import { esElOrigen, origenDelViaje } from '@/lib/pdf/fotos-del-viaje'
+import { composicionDeLectura, describirOcupacion, leerTarifaPax, mismaComposicion, type LecturaCasilla } from './tarifa-pasajero'
 import { ranuraDeGrupo, ranuraPorSlug, slugsDeRanura, type DefinicionRanura } from './ranuras-pantallazo'
-import { aplicarCorrecciones, leidosPorSlug } from './correcciones'
+import { aplicarCorrecciones, leidosPorSlug, type Correcciones } from './correcciones'
+import { fechasCorregidas } from './estadia'
 import { estrellasDesdeTexto } from './estrellas'
 import { notaDeLaLinea } from './nota-linea'
 import { datosManuales } from './ingreso-manual'
-import { habitacionesDeTarifa, repartirHabitaciones } from './habitaciones'
-import { acomodacionDeHabitaciones } from './tarjeta-opcion'
+import { habitacionesDeTarifa, repartirHabitaciones, type RepartoHabitaciones } from './habitaciones'
+import { acomodacionDeHabitaciones, acomodacionDeReserva, ocupacionConEdades, ocupacionCorta } from './tarjeta-opcion'
+import { registroDeReserva } from './reserva-habitaciones'
 import { vueloDesdeNombre } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { equipajeDeCampos, leerTramos, tramosDeCampos, type EquipajeTramo, type TramoVuelo } from './tramos-vuelo'
@@ -186,7 +189,8 @@ export interface HotelPDF {
    * del PDF la descarga del almacenamiento a partir de `fotoRef`. La plantilla la pone en el
    * lugar de la foto provisional de la ciudad; sin foto, el documento sale como antes.
    */
-  foto?: { url: string; proporcion?: number | null } | null
+  /** `credito`: la foto de la biblioteca que es de Commons lleva su autor y licencia («Autora, CC BY-SA 4.0»). */
+  foto?: { url: string; proporcion?: number | null; credito?: string | null } | null
   /** Dónde está guardada la foto del hotel (`sbext://…`). Ausente = sin foto. */
   fotoRef?: string
   /** Ancho entre alto de la foto guardada. */
@@ -579,10 +583,17 @@ export function tramosLeidosDelItem(item: ItemConLectura): TramoVuelo[] | null {
   return conAlgo ? tramos : null
 }
 
-/** Las noches: las que dijo la captura, y si no las dijo, las que dan las dos fechas. */
-function nochesDe(d: Record<string, string>): number | null {
+/**
+ * Las noches: las que dijo la captura, y si no las dijo, las que dan las dos fechas.
+ *
+ * Con la entrada o la salida corregidas en la ficha (y las noches no), mandan las fechas: las
+ * noches leídas son las de las fechas viejas (COT-2026-0019: «35 noches» después de corregir
+ * la entrada a una estadía de 4).
+ */
+function nochesDe(d: Record<string, string>, correcciones?: Correcciones | null): number | null {
   const leidas = numero(d, 'noches')
-  if (leidas !== null && leidas > 0) return leidas
+  const mandanLasFechas = fechasCorregidas(correcciones) && !correcciones?.noches
+  if (!mandanLasFechas && leidas !== null && leidas > 0) return leidas
   const entrada = (d['check_in'] ?? '').trim()
   const salida = (d['check_out'] ?? '').trim()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(entrada) || !/^\d{4}-\d{2}-\d{2}$/.test(salida)) return null
@@ -590,6 +601,18 @@ function nochesDe(d: Record<string, string>): number | null {
     (new Date(`${salida}T00:00:00Z`).getTime() - new Date(`${entrada}T00:00:00Z`).getTime()) / 86_400_000,
   )
   return n > 0 ? n : null
+}
+
+/**
+ * La acomodación de una opción con varias capturas de las que solo UNA va (las demás quedaron
+ * de referencia, brief del 2026-10-01, punto 2). Si la que va es la primera, `null`: el
+ * documento sigue diciendo lo de su pantallazo, como siempre. Si es otra, su ocupación: la
+ * ficha de la opción se lee de la primera captura y diría la ocupación de una que no va.
+ */
+function ocupacionDeLaUnicaQueVa(r: RepartoHabitaciones): string | null {
+  const van = r.habitaciones.filter(h => h.rol === 'habitacion')
+  if (van.length !== 1 || van[0].id === r.habitaciones[0]?.id || !van[0].ocupacion) return null
+  return describirOcupacion(van[0].ocupacion)
 }
 
 /** Los hoteles del documento, uno por línea de alojamiento. */
@@ -602,9 +625,30 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
     // entero); la ocupación del primer pantallazo solo describe su habitación.
     const tarifa = leerTarifaPax(item.tarifa_pax)
     const habs = habitacionesDeTarifa(tarifa)
-    const acomodacion = habs.length > 1 ? acomodacionDeHabitaciones(repartirHabitaciones(habs, tarifa.composicion ?? null)) : null
+    const reparto = habs.length > 1 ? repartirHabitaciones(habs, tarifa.composicion ?? null, tarifa.correcciones) : null
+    // Decisión del 2026-10-14 · un pantallazo con varias habitaciones y un total dice cada una
+    // («Doble 1: 2 adultos; …»). El precio no se parte: es el del pantallazo.
+    const reserva = !reparto && habs.length === 1 ? acomodacionDeReserva(registroDeReserva(habs[0].lectura)) : null
+    const acomodacion = reparto ? acomodacionDeHabitaciones(reparto) ?? ocupacionDeLaUnicaQueVa(reparto) : reserva
     // Ingreso manual: lo que incluye y la edad del niño viven fuera de los campos de la ranura.
-    const manual = datosManuales(casillaDelItem(item) ?? habs[0]?.lectura ?? null)
+    const primera = casillaDelItem(item) ?? habs[0]?.lectura ?? null
+    const manual = datosManuales(primera)
+    // «Tarifa niño de X a Y años…» solo cuando la opción lleva al menos un niño (brief del
+    // 2026-10-01, punto 5): en un viaje de adultos e infantes la condición no le dice nada al
+    // cliente y parece que se le cobra algo que no lleva.
+    const pax = reparto?.cubiertos ?? tarifa.composicion ?? (primera ? composicionDeLectura(primera) : null)
+    const conNinos = !!pax && pax.ninos > 0
+    // Brief del 2026-10-05, punto 9 · una opción de UNA captura dice a quiénes cubre su costo
+    // confirmado. «Hotel Sirius QA 976» se costeó para 2 adultos + 1 infante (con el pantallazo
+    // 2 de solo adultos) y el PDF decía «Acomodación: 2 adultos», que es lo que leyó la captura.
+    const cubre = reparto ? null : tarifa.confirmada?.composicion ?? primera?.paraComposicion ?? null
+    const leida = primera ? composicionDeLectura(primera) : null
+    const acomodacionConfirmada = cubre && (!leida || !mismaComposicion(leida, cubre)) ? ocupacionCorta(cubre) : null
+    // Brief del 2026-10-05, «actividades tras la limpieza», punto 4: la ocupación leída sale con
+    // las palabras de ONE («2 adultos + 1 infante»), no como la escribió la captura («2 Adultos 1
+    // Infante»). Lo que una persona corrigió en la ficha se respeta tal cual.
+    const ocupacionLeida = texto(d, 'ocupacion')
+    const acomodacionLeida = leida && !tarifa.correcciones?.ocupacion ? ocupacionConEdades(leida, ocupacionLeida) || null : null
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: texto(d, 'hotel'),
@@ -613,15 +657,15 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       regimen: texto(d, 'regimen'),
       checkIn: fechaCorta(texto(d, 'check_in')),
       checkOut: fechaCorta(texto(d, 'check_out')),
-      noches: nochesDe(d),
-      ocupacion: acomodacion ?? texto(d, 'ocupacion'),
+      noches: nochesDe(d, tarifa.correcciones),
+      ocupacion: acomodacion ?? acomodacionConfirmada ?? acomodacionLeida ?? ocupacionLeida,
       cancelacion: texto(d, 'politica_cancelacion'),
       estrellas: estrellasDesdeTexto(texto(d, 'estrellas')),
       localizador: null,
       adicionales: item.adicionales ?? [],
       // Sin ingreso manual las llaves no aparecen: la ficha de siempre se arma igual que antes.
       ...(manual?.incluye ? { incluye: manual.incluye } : {}),
-      ...(manual?.edadNino ? { edadNino: manual.edadNino } : {}),
+      ...(manual?.edadNino && conNinos ? { edadNino: manual.edadNino } : {}),
       nota: notaDeLaLinea(item),
       // Sin foto del hotel la llave no aparece: la ficha de siempre se arma igual que antes.
       ...(tarifa.fotoHotel ? { fotoRef: tarifa.fotoHotel.ref, fotoProporcion: tarifa.fotoHotel.proporcion } : {}),
@@ -668,6 +712,53 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
     })
   }
   return out
+}
+
+/**
+ * La lectura CRUDA de un traslado (con lo corregido encima): el trayecto, el vehículo y la fecha
+ * tal como los escribió la captura («2026-12-11 y 2026-12-14», «2026-12-21/lun 10:25»). La usa
+ * la propuesta nueva para partir un traslado de ida y vuelta en sus trayectos
+ * (`propuesta/trayectos.ts`). `serviciosDeItems` no cambia: lo que lee el redactor del texto
+ * (y su huella) sigue igual. `null` si la línea no es un traslado.
+ */
+export function lecturaDeTraslado(item: ItemConLectura): { trayecto: string | null; vehiculo: string | null; fecha: string | null } | null {
+  if (ranuraDelItem(item)?.slug !== 'traslado_detalle') return null
+  const d = detalleDelItem(item)
+  return {
+    trayecto: texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null),
+    vehiculo: texto(d, 'tipo_vehiculo'),
+    fecha: texto(d, 'fecha_hora'),
+  }
+}
+
+/**
+ * Dónde y cuándo es una actividad o un traslado, según su lectura (con lo corregido encima):
+ * la ciudad (solo la actividad la lee) y la fecha corta («14 dic»). Lo usa la propuesta para
+ * poner cada plan opcional en los días libres de su ciudad.
+ */
+export function lugarDelServicio(item: ItemConLectura): { ciudad: string | null; fecha: string | null } {
+  const slug = ranuraDelItem(item)?.slug
+  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') return { ciudad: null, fecha: null }
+  const d = detalleDelItem(item)
+  return {
+    ciudad: slug === 'actividad_detalle' ? texto(d, 'ciudad') : null,
+    fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+  }
+}
+
+/**
+ * «Otro servicio» (asistencia médica, seguro, tarjeta de turismo): lo que es y quién lo presta,
+ * con lo corregido encima. `null` si la línea no es un otro servicio.
+ */
+export interface OtroServicioPDF {
+  nombre: string | null
+  proveedor: string | null
+}
+
+export function otroServicioDeItem(item: ItemConLectura): OtroServicioPDF | null {
+  if (ranuraDelItem(item)?.slug !== 'otro_detalle') return null
+  const d = detalleDelItem(item)
+  return { nombre: texto(d, 'nombre'), proveedor: texto(d, 'proveedor') }
 }
 
 /** Un cargo en destino: el valor y su moneda local (ISO de tres letras, o `null`). */
@@ -738,7 +829,10 @@ export function destinoDeItinerario(vuelos: VueloPDF[], hoteles: HotelPDF[]): st
   const ciudades: string[] = []
   for (const h of hoteles) if (h.ciudad) ciudades.push(h.ciudad)
   for (const v of vuelos) if (v.destino) ciudades.push(v.destino)
-  const unicas = [...new Set(ciudades.map(c => c.trim()).filter(Boolean))]
+  // La ciudad de salida del cliente no es destino: la llegada del vuelo de regreso lo es en el
+  // papel, y la portada decía «Bogotá» en un viaje a Europa (prueba Europa, 2026-10-14).
+  const origen = origenDelViaje(vuelos)
+  const unicas = [...new Set(ciudades.map(c => c.trim()).filter(c => c && !esElOrigen(c, origen)))]
   return unicas.length === 0 ? null : unicas.join(' · ')
 }
 
@@ -808,4 +902,14 @@ export function leerConfigDocumentoViaje(raw: unknown): ConfigDocumentoViaje {
         }
       : null,
   }
+}
+
+/**
+ * La ciudad de una actividad según su lectura (con lo corregido encima). Lo usa el catálogo de
+ * fotos de la propuesta para nombrar la foto de cada actividad. `null` si la línea no es una
+ * actividad o la lectura no trae ciudad.
+ */
+export function ciudadDeActividad(item: ItemConLectura): string | null {
+  if (ranuraDelItem(item)?.slug !== 'actividad_detalle') return null
+  return texto(detalleDelItem(item), 'ciudad')
 }

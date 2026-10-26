@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
 
@@ -22,6 +22,7 @@ import ReglasValidacionSection from './reglas-validacion-section'
 import PilaSection from './pila-section'
 import TerminosSection from './terminos-section'
 import MargenSection from './margen-section'
+import TemporadasSection from './temporadas-section'
 import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 // ── Types ──────────────────────────────────────────
@@ -58,6 +59,8 @@ interface MiNegocioClientProps {
   lineaActivaId: string | null
   /** Alguna línea del workspace usa margen mínimo o recargo. Sin eso no hay sección. */
   usaPoliticaDePrecio?: boolean
+  /** El espacio tiene propuesta de viaje (`tienePropuestaHtml`): ve «Temporadas». */
+  tienePropuestaViaje?: boolean
   sectionScores: {
     fiscal: number
     marca: number
@@ -80,6 +83,7 @@ interface SectionDef {
   modules?: string[] // Si definido, solo visible cuando alguno de estos módulos está activo. Vacío = siempre visible.
   wsTipo?: 'nativo' | 'clarity' // Si definido, solo visible para ese tipo de workspace
   soloConPoliticaDePrecio?: boolean // Si true, solo visible cuando alguna linea usa margen minimo o recargo
+  soloConPropuestaViaje?: boolean // Si true, solo en espacios con propuesta de viaje (Trappvel)
 }
 
 const SECTIONS: SectionDef[] = [
@@ -98,6 +102,8 @@ const SECTIONS: SectionDef[] = [
   // (Trappvel) es `clarity`, y copiar el filtro de 'mi-flujo' la escondería justo
   // donde hace falta. Solo aparece donde alguna línea usa estos valores (R6).
   { key: 'margen', label: 'Margen y recargo', icon: Percent, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPoliticaDePrecio: true },
+  // Calendario de temporadas de la agencia (2026-10-19). Sin `wsTipo` por lo mismo que los términos.
+  { key: 'temporadas', label: 'Temporadas', icon: CalendarRange, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPropuestaViaje: true },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
@@ -125,6 +131,7 @@ export default function MiNegocioClient({
   lineasDisponibles = [],
   lineaActivaId = null,
   usaPoliticaDePrecio = false,
+  tienePropuestaViaje = false,
   sectionScores,
   workspaceTipo,
 }: MiNegocioClientProps) {
@@ -174,6 +181,8 @@ export default function MiNegocioClient({
         return monthlyTargets.length > 0 ? `${monthlyTargets.length} meses` : 'Pendiente'
       case 'terminos-propuesta':
         return 'Texto del PDF'
+      case 'temporadas':
+        return 'Alta, media y baja'
       case 'reglas-validacion':
         return 'Listas cautelares'
       default:
@@ -193,6 +202,7 @@ export default function MiNegocioClient({
     // Filtro por tipo de workspace (nativo vs clarity)
     if (s.wsTipo && s.wsTipo !== workspaceTipo) return false
     if (s.soloConPoliticaDePrecio && !usaPoliticaDePrecio) return false
+    if (s.soloConPropuestaViaje && !tienePropuestaViaje) return false
     // Si la sección define módulos requeridos, al menos uno debe estar activo
     if (s.modules && s.modules.length > 0) {
       return s.modules.some(m => mod[m])
@@ -413,6 +423,8 @@ function renderSection(
 
     case 'terminos-propuesta':
       return <TerminosSection />
+    case 'temporadas':
+      return <TemporadasSection />
 
     case 'margen':
       return <MargenSection />

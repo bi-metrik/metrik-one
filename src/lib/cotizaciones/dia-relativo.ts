@@ -73,7 +73,7 @@
  * peligroso: una línea que SÍ entra al precio y se imprime como «no incluida».
  */
 
-import { grupoCombinable } from './ranuras-pantallazo'
+import { grupoCombinable, ranuraDeGrupo } from './ranuras-pantallazo'
 
 /** Lo mínimo que hace falta de una línea para saber en qué sección del PDF sale. */
 export interface ItemConDia {
@@ -169,6 +169,45 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
 }
 
 /**
+ * ¿Es un VUELO? Desde el brief del 2026-10-08 («vuelos de punta a punta», punto 2) un vuelo
+ * lleva el mismo check «Va en la cotización» de las actividades: quitado, no suma, no entra a
+ * ninguna tarifa y no sale en el documento. Puesto otra vez, vuelve como estaba.
+ *
+ * ⚠️ Un vuelo fuera del precio NO es una sugerencia: nunca cae a «Opcionales» (regla 2 del
+ * encabezado: un vuelo no se imprime como «no incluido»). Solo tiene dos estados, va o no va.
+ */
+export function esVueloDeLaCotizacion(item: ItemConDia): boolean {
+  if (item.es_ajuste === true) return false
+  return ranuraDeGrupo(item.grupo ?? null)?.slug === 'vuelo_detalle'
+}
+
+/**
+ * ¿Es un HOTEL? Desde la cotización por pasos (etapa C, 2026-10-12) un hotel también puede «No
+ * va», como el vuelo: no suma, no entra a ninguna tarifa y no sale en el documento. Tampoco es
+ * una sugerencia: nunca cae a «Opcionales». Solo lo escribe la forma nueva
+ * (`estadoDeServicioPorPasos`); hasta ese día ninguna acción dejaba un hotel fuera del precio.
+ */
+export function esHotelDeLaCotizacion(item: ItemConDia): boolean {
+  if (item.es_ajuste === true) return false
+  return ranuraDeGrupo(item.grupo ?? null)?.slug === 'hotel_detalle'
+}
+
+/** Vuelo u hotel: van o no van, nunca «Opcional». */
+export function soloVaONoVa(item: ItemConDia): boolean {
+  return esVueloDeLaCotizacion(item) || esHotelDeLaCotizacion(item)
+}
+
+/**
+ * ¿La línea PUEDE quedar fuera del precio? Una sugerencia (actividad, traslado, tour: sale en
+ * «Opcionales» o no sale), o un vuelo u hotel que no va. Es la regla que leen `fueraDelPrecio` y
+ * los guards de las acciones que escriben `entra_al_precio`: la base nunca guarda una marca que
+ * la lectura ignore.
+ */
+export function puedeQuedarFueraDelPrecio(item: ItemConDia): boolean {
+  return puedeSerSugerido(item) || soloVaONoVa(item)
+}
+
+/**
  * ¿Esta línea está FUERA DEL PRECIO? Es la única regla del segundo interruptor.
  *
  * Tres condiciones, y las tres son de la LÍNEA (ninguna mira el resto de la cotización):
@@ -176,9 +215,11 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
  *  1. `entra_al_precio` es `false` explícito. Ausente entra, como hoy.
  *  2. No lleva día. Con día la línea está en el itinerario, o sea incluida: dejarla
  *     fuera del precio imprimiría una línea del viaje con precio que no suma.
- *  3. Puede ser sugerida (grupo declarado y no combinable, no es cuadre). Un vuelo, un
- *     hotel o una línea sin grupo nunca se imprimen como «no incluidas», así que
- *     sacarlas del precio las haría desaparecer del documento sin que sumen.
+ *  3. Puede ser sugerida (grupo declarado y no combinable, no es cuadre), o es un VUELO
+ *     (`puedeQuedarFueraDelPrecio`). Un hotel o una línea sin grupo nunca se imprimen como
+ *     «no incluidas», así que sacarlas del precio las haría desaparecer del documento sin
+ *     que sumen. El vuelo sí puede, a propósito: su check «Va en la cotización» (brief del
+ *     2026-10-08) es justo «que no sume ni salga en el documento».
  *
  * ⚠️ Por qué ninguna condición mira la COTIZACIÓN (si usa días o no). Si la regla
  * dependiera de que haya un día asignado en alguna parte, quitarle el último día a un
@@ -200,8 +241,12 @@ export function puedeSerSugerido(item: ItemConDia): boolean {
  */
 export function fueraDelPrecio(item: ItemConDia): boolean {
   if (item.entra_al_precio !== false) return false
-  if (diaDeItem(item) !== null) return false
-  return puedeSerSugerido(item)
+  // ⚠️ Desde el brief del 2026-10-05 el día YA NO es condición. Una actividad con día que se
+  // desmarca («No va») sale del precio y conserva su día para cuando la vuelvan a marcar. Ya no
+  // hay riesgo de «una línea del itinerario con precio que no suma»: una línea fuera del precio
+  // no entra al itinerario (`diasDelItinerario` la salta) ni a lo incluido del documento.
+  // Desde el 2026-10-08 un vuelo que no va también sale del precio (`esVueloDeLaCotizacion`).
+  return puedeQuedarFueraDelPrecio(item)
 }
 
 /**
@@ -211,7 +256,9 @@ export function fueraDelPrecio(item: ItemConDia): boolean {
  * `false`, ni el itinerario ni los sugeridos existen y el documento es el de hoy.
  */
 export function hayDiasAsignados(items: ItemConDia[]): boolean {
-  return items.some(i => diaDeItem(i) !== null)
+  // Solo cuentan las líneas que van en el precio: el día guardado de una «No va» no arma
+  // itinerario (brief del 2026-10-05).
+  return items.some(i => diaDeItem(i) !== null && !fueraDelPrecio(i))
 }
 
 /**
@@ -227,6 +274,8 @@ export function diasDelItinerario(items: ItemConDia[]): DiaDelItinerario[] {
   for (const item of ordenados(items)) {
     const dia = diaDeItem(item)
     if (dia === null) continue
+    // Una línea fuera del precio no está en el itinerario aunque guarde su día («No va»).
+    if (fueraDelPrecio(item)) continue
     const lista = porDia.get(dia) ?? []
     lista.push(item.id)
     porDia.set(dia, lista)
@@ -253,12 +302,11 @@ export function diasDelItinerario(items: ItemConDia[]): DiaDelItinerario[] {
  * las ocultas — una línea que el cliente no ve y sí paga es peor, no mejor.
  */
 export function itemsSugeridos(items: ItemConDia[]): string[] {
-  if (!hayDiasAsignados(items)) {
-    return ordenados(items).filter(fueraDelPrecio).map(i => i.id)
-  }
-  return ordenados(items)
-    .filter(i => diaDeItem(i) === null && puedeSerSugerido(i))
-    .map(i => i.id)
+  // Brief del 2026-10-05 (D1): «no incluida» es SOLO lo que alguien sacó del precio a propósito
+  // (Opcional, o No va). Una actividad que suma y no tiene día se imprime en lo incluido: hasta
+  // ese día caía aquí con los días en uso, y el documento decía «no incluida» mientras la cobraba.
+  // Un vuelo que no va está fuera del precio y NO es una sugerencia: no sale en «Opcionales».
+  return ordenados(items).filter(i => fueraDelPrecio(i) && puedeSerSugerido(i)).map(i => i.id)
 }
 
 /** De los sugeridos, los que el PDF sí imprime (el check encendido, o ausente). */

@@ -645,7 +645,7 @@ const ACTIVIDAD: DefinicionRanura = {
   campos: [
     { slug: 'proveedor', label: 'Proveedor', tipo: 'texto', min: true, descripcion_ai: 'Quién vende la actividad: Civitatis, GetYourGuide, Viator, o el operador directo.' },
     { slug: 'nombre', label: 'Actividad', tipo: 'texto', min: true, descripcion_ai: 'Nombre de la actividad tal como aparece.' },
-    { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad donde se presta. Si no aparece, null: no la deduzcas del viaje.' },
+    { slug: 'ciudad', label: 'Ciudad', tipo: 'texto', min: true, descripcion_ai: 'Ciudad o destino donde se presta, SOLO si la pantalla lo muestra escrito como ciudad o destino (un rótulo «Ciudad» o «Destino», la ruta del sitio «Colombia > Providencia», «Actividades en Providencia»). Un lugar que hace parte del nombre de la actividad (una bahía, playa, cayo, isla, parque, laguna) NO es la ciudad: «Tour en lancha por la bahía de Manzanillo» no dice que la ciudad sea Manzanillo. Si no la ves escrita como ciudad o destino, null: no la deduzcas del nombre de la actividad ni del viaje.' },
     { slug: 'fecha', label: 'Fecha', tipo: 'fecha', min: false, descripcion_ai: 'Fecha de la actividad en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año. Si también muestra el día de la semana, agrégalo tras una barra: --10-23/vie.' },
     { slug: 'duracion', label: 'Duración', tipo: 'texto', min: false, descripcion_ai: 'Duración tal como aparece (3 horas, día completo...).' },
     { slug: 'idioma', label: 'Idioma', tipo: 'texto', min: false, descripcion_ai: 'Idioma en que se presta el servicio.' },
@@ -679,11 +679,53 @@ const TRASLADO: DefinicionRanura = {
   ],
 }
 
+/**
+ * «Otro servicio» (cotización por pasos, 2026-10-13): lo que no es vuelo, hotel, traslado ni
+ * actividad —asistencia médica, seguro de viaje, tarjeta de turismo, equipaje adicional—. Diseño
+ * de Noor, Paso 1, «Escribirlo a mano». Cada uno es su propio servicio y SUMA aparte.
+ *
+ * ⚠️ Solo lo escribe la cotización por pasos (con su interruptor encendido): no está en
+ * `gruposCanonicos()` (los botones de la pantalla de siempre) ni en la detección del pantallazo
+ * (`PROMPT_DETECCION`), y el servidor rechaza crear una ranura «otro» con el interruptor
+ * apagado. Sus grupos sí resuelven siempre: una cotización que ya tiene un otro servicio se lee
+ * igual con el interruptor encendido o apagado.
+ *
+ * ⚠️ Los sinónimos son pocos a propósito: «seguro», «asistencia» o «propina» escritos como grupo
+ * libre en cotizaciones viejas siguen sin ser ranura (no cambian de nombre ni de bloque).
+ */
+const OTRO: DefinicionRanura = {
+  slug: 'otro_detalle',
+  label: 'Otro servicio',
+  grupos: ['otro', 'otro servicio', 'otros servicios'],
+  queSePide: 'La cotización del servicio (asistencia médica, seguro, tarjeta de turismo) con su precio.',
+  queNoSirve: 'La lista de planes: se sube el plan que ya se eligió.',
+  unidadPorDefecto: 'servicio',
+  campos: [
+    { slug: 'nombre', label: 'Servicio', tipo: 'texto', min: true, descripcion_ai: 'Qué servicio es, tal como aparece: «Asistencia médica», «Seguro de viaje», «Tarjeta de turismo», «Equipaje adicional», o el nombre del plan.' },
+    { slug: 'proveedor', label: 'Proveedor', tipo: 'texto', min: false, descripcion_ai: 'Quién lo presta (Assist Card, Universal Assistance…) y el plan, si se ve. null si no aparece.' },
+    { slug: 'pax', label: 'Personas', tipo: 'numero', min: false, descripcion_ai: 'Número de personas que cubre. Si no se ve, null: no supongas 1.' },
+    ...OCUPACION,
+    MONEDA,
+    PRECIO_TOTAL,
+    basePrecio(['total', 'por_pax'], 'total = es el precio de todas las personas; por_pax = es el precio de una sola.'),
+    ...COSTO_AGENCIA,
+  ],
+}
+
 const RANURAS: Record<string, DefinicionRanura> = {
   [VUELO.slug]: VUELO,
   [HOTEL.slug]: HOTEL,
   [ACTIVIDAD.slug]: ACTIVIDAD,
   [TRASLADO.slug]: TRASLADO,
+  [OTRO.slug]: OTRO,
+}
+
+/** Las ranuras que solo escribe la cotización por pasos: fuera de los botones de siempre. */
+const SOLO_POR_PASOS: ReadonlySet<string> = new Set([OTRO.slug])
+
+/** ¿Esta ranura solo la escribe la cotización por pasos («Otro servicio»)? */
+export function ranuraSoloPorPasos(ranura: Pick<DefinicionRanura, 'slug'> | null | undefined): boolean {
+  return !!ranura && SOLO_POR_PASOS.has(ranura.slug)
 }
 
 // ── Qué ranuras entran al producto cartesiano ────────────────────────────────
@@ -849,6 +891,9 @@ export function etiquetaDeRanura(grupo: string | null | undefined): string {
   const { definicion, numero, nombre } = instancia
   const cabeza = numero === null ? definicion.label : `${definicion.label} ${numero}`
   if (nombre === null) return cabeza
+  // «Otro servicio» se llama como lo que es («Asistencia médica»): el tipo ya lo dice su pastilla
+  // («Otro»), y el nombre nace distinto de los demás (`nombreAutomaticoDeRanura`).
+  if (definicion.slug === OTRO.slug) return nombre
   // Un nombre que YA dice el tipo («Hotel en Cancún», el que pone la ranura al nacer) no se
   // repite detrás de él: «Hotel · Hotel en Cancún» no dice nada más. Solo si también lleva
   // su ordinal («Hotel 2 en Cancún»): sin él, dos ranuras del mismo tipo se leerían iguales.
@@ -930,7 +975,9 @@ export function ranuraPorSlug(slug: string | null | undefined): DefinicionRanura
  * de combinaciones lo respeta, y el pantallazo no encuentra contrato.
  */
 export function gruposCanonicos(): { grupo: string; label: string; ranura: string }[] {
-  return Object.values(RANURAS).map(r => ({ grupo: r.grupos[0], label: r.label, ranura: r.slug }))
+  return Object.values(RANURAS)
+    .filter(r => !SOLO_POR_PASOS.has(r.slug))
+    .map(r => ({ grupo: r.grupos[0], label: r.label, ranura: r.slug }))
 }
 
 /** Los campos mínimos de una ranura. Lo que, si falta, dispara RX2. */

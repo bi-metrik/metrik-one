@@ -19,7 +19,9 @@
  * corre en memoria y lo que queda es el informe.
  */
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import * as XLSX from 'xlsx';
+import { fechasExcelAISO } from '@/lib/xlsx/fechas-excel';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import { resolverNombresUsuarios } from './_usuarios';
@@ -259,7 +261,7 @@ export async function auditarBaseDeCompras(
 
   let workbook: XLSX.WorkBook;
   try {
-    workbook = XLSX.read(buffer, { type: 'buffer' });
+    workbook = XLSX.read(buffer, { type: 'buffer', cellNF: true });
   } catch {
     return { ok: false, error: 'xlsx_invalido' };
   }
@@ -269,10 +271,11 @@ export async function auditarBaseDeCompras(
     : workbook.SheetNames[0];
   if (!sheetName) return { ok: false, error: 'xlsx_sin_hojas' };
 
-  const todasLasFilas = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+  fechasExcelAISO(workbook.Sheets[sheetName]);
+  const todasLasFilas = textoLatinoProfundo(XLSX.utils.sheet_to_json<Record<string, unknown>>(
     workbook.Sheets[sheetName],
     { defval: null, raw: false },
-  );
+  ));
   if (todasLasFilas.length === 0) return { ok: false, error: 'xlsx_vacio' };
 
   const truncado = todasLasFilas.length > LIMITE_FILAS;

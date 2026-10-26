@@ -55,6 +55,18 @@
     {
       "path": "/api/crons/radar-secop-sync",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/crons/recordatorios",
+      "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/crons/etapas-por-fecha",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/crons/valida-lotes",
+      "schedule": "* * * * *"
     }
   ]
 }

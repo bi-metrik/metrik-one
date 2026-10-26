@@ -1,6 +1,6 @@
 ---
 name: wa-gasto-descripcion
-description: PR #861 (2026-09-23) gasto por WhatsApp guarda descripcion completa y mensaje_original; mergeado pero wa-webhook SIN redesplegar; handleSessionResponse arma parsed.fields vacio
+description: #861 descripcion completa del gasto WA; fix del flujo guiado (collecting W01 + texto libre en confirming) 2026-09-30; wa-webhook se despliega aparte; handleSessionResponse arma parsed.fields vacio
 metadata:
   type: project
 ---
@@ -22,6 +22,12 @@ escribian `parsed_fields` desde `ctx.parsed.fields`, que `handleSessionResponse`
   extraccion literal cuando el modelo solo recorto. Medido contra Gemini con mensajes reales.
 - Las reglas del parser viven en `wa-parse-reglas.ts` (puro) y los handlers de registro ya se
   pueden importar en vitest (`gasto-guardado.test.ts` recorre handleGasto -> resume -> insert).
-- Pendiente abierto: detalle en un mensaje SIN monto y monto despues se pierde (no hay borrador en sesion).
+- CERRADO 2026-09-30 (rama `fix/wa-gasto-descripcion-flujo-guiado`): sin monto, `handleGasto` deja
+  sesion `collecting` W01 con los campos; `monto-pendiente.ts` (puro) decide la respuesta y en
+  `confirming` W01 el texto libre es la descripcion (reemplaza). Deploy de `wa-webhook` lo hace la sesion principal.
+- `completeSession` escribe en la base, NO en la sesion en memoria del harness: para probar un cierre
+  mira `db.actualizados.bot_sessions` (el doble ya lo registra), no `e.session.state`.
+- `clasificarRespuesta` es para respuestas CORTAS: en texto largo "ya", "va", "no", "tengo" son
+  marcas de si/no; por eso confirmar/cancelar por marca solo aplica con <=2 palabras.
 
 Relacionado: [[probar-handler-wa-bot]], [[wa-soporte-reencauza]].

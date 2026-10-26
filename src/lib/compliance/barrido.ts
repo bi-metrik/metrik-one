@@ -29,6 +29,7 @@
  * donde vive el historial.
  */
 
+import { traerTodo } from '@/lib/supabase/paginar';
 import { createServiceClient } from '@/lib/supabase/server';
 import { todayBogotaISO } from '@/lib/dates/bogota';
 import {
@@ -55,13 +56,14 @@ import {
 import { clasificarParaGuardar, calcularVigenciaParaGuardar } from './persistencia-consulta';
 import type { TierResuelto } from './tier-fuentes';
 import type { InformaMatch } from '@/lib/actions/compliance-dual';
+import { correoDeltaMonitoreo } from './correo-delta';
+import { enlaceContraparte, grupoClaveHallazgo } from './alarma-hallazgo';
 
 const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metrikone.co';
+const FROM_CORREO = 'MéTRIK ONE <noreply@metrikone.co>';
 
-/** Techo del universo que se examina. Si se topa, el barrido lo dice. */
-const LIMITE_CONSULTAS = 5000;
-const LIMITE_LIBERACIONES = 5000;
-const LIMITE_SUJETOS = 20000;
+/** Lo que se espera a Valida por una contraparte antes de darla por fallida. */
+const TIMEOUT_VALIDA_MS = 45_000;
 
 export type ResumenBarrido = {
   barrido_id: string | null;
@@ -132,12 +134,76 @@ type Contraparte = {
  * alcanzó a hacer: una evidencia parcial es evidencia, una corrida sin rastro no
  * se distingue de una corrida que nunca pasó.
  */
+/** Otro barrido del mismo workspace y día está corriendo. */
+export class BarridoEnCurso extends Error {
+  constructor(workspaceId: string, dia: string) {
+    super(`barrido_en_curso: ${workspaceId} ${dia}`);
+    this.name = 'BarridoEnCurso';
+  }
+}
+
+/**
+ * Lo que dura el candado si nadie lo suelta: un poco más que los 300 s que
+ * Vercel le da a la función. Si la corrida muere a mitad, el candado vence solo
+ * y el día no queda bloqueado.
+ */
+const CANDADO_BARRIDO_S = 330;
+
+export function claveCandadoBarrido(workspaceId: string, dia: string): string {
+  return `barrido-compliance:${workspaceId}:${dia}`;
+}
+
+/**
+ * Un solo barrido a la vez por workspace y día, venga del botón o del cron.
+ *
+ * El cron ya tenía su candado (`candadoDeCron`), pero ese solo evita dos
+ * entregas del cron: el botón "Correr ahora" no lo tomaba. Botón y cron a la
+ * vez leían el mismo cupo, elegían los mismos candidatos y los consultaban y
+ * cobraban dos veces (QA ALMA 2026-10-12, M1). El candado vive acá, en el
+ * motor que llaman los dos, y no en cada llamador.
+ *
+ * Falla cerrado: si no se puede tomar el candado, no se barre. Un barrido gasta
+ * consultas pagadas; perder un día de monitoreo se ve en la bitácora, cobrar
+ * dos veces no.
+ *
+ * Se suelta al terminar: una segunda corrida el mismo día, ya en serie, es
+ * legítima (subieron el tope y quedaron diferidos) y no repite consultas,
+ * porque las que se hicieron ya renovaron su vigencia.
+ */
 export async function ejecutarBarrido(
   workspaceId: string,
   hoyISO: string = todayBogotaISO(),
 ): Promise<ResumenBarrido> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
+  const clave = claveCandadoBarrido(workspaceId, hoyISO);
+
+  const { data: tomado, error } = await svc.rpc('tomar_candado', {
+    p_clave: clave,
+    p_segundos: CANDADO_BARRIDO_S,
+  });
+  if (error) throw new Error(`barrido_sin_candado: ${error.message}`);
+  if (tomado !== true) throw new BarridoEnCurso(workspaceId, hoyISO);
+
+  try {
+    return await barrerWorkspace(svc, workspaceId, hoyISO);
+  } finally {
+    const { error: errSoltar } = await svc
+      .from('claves_idempotencia')
+      .update({ vence_at: new Date().toISOString(), estado: 'hecha', terminada_at: new Date().toISOString() })
+      .eq('clave', clave)
+      .eq('ambito', 'candado');
+    // Si no se suelta, vence solo en CANDADO_BARRIDO_S.
+    if (errSoltar) console.warn('[barrido] candado_no_soltado', clave, errSoltar.message);
+  }
+}
+
+async function barrerWorkspace(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  hoyISO: string,
+): Promise<ResumenBarrido> {
 
   const config = await cargarConfigMonitoreo(svc, workspaceId);
   const modo = modoDelBarrido(config);
@@ -194,7 +260,7 @@ export async function ejecutarBarrido(
     universo_truncado: truncado,
   };
 
-  const { data: cab } = await svc
+  const { data: cab, error: errCab } = await svc
     .from('compliance_barridos')
     .insert({
       workspace_id: workspaceId,
@@ -211,11 +277,33 @@ export async function ejecutarBarrido(
 
   const barridoId: string | null = cab?.id ?? null;
   resumen.barrido_id = barridoId;
-  if (!barridoId) return resumen;
+  if (!barridoId) {
+    throw new Error(`barrido_sin_encabezado: ${errCab?.message ?? 'insert sin id'}`);
+  }
+
+  // Los contadores se guardan después de CADA contraparte y no solo al final:
+  // el tope del mes se calcula sumando `ejecutadas`, y una función que Vercel
+  // corta a los 300 s dejaba consultas pagadas con el encabezado en cero, así
+  // que el día siguiente creía tener el cupo entero.
+  const guardarContadores = async () => {
+    const { error } = await svc
+      .from('compliance_barridos')
+      .update({
+        ejecutadas: resumen.ejecutadas,
+        con_delta: resumen.con_delta,
+        notificadas: resumen.notificadas,
+        fallidas: resumen.fallidas,
+      })
+      .eq('id', barridoId);
+    if (error) console.error('[barrido] contadores_no_guardados', barridoId, error.message);
+  };
 
   const porClave = new Map(contrapartes.map((c) => [c.clave, c] as const));
   const slug = await slugDeWorkspace(svc, workspaceId);
   const oficiales = await oficialesDelWorkspace(svc, workspaceId);
+  // Lo que sonó en la campanita durante esta corrida. Va por correo a la dueña del
+  // workspace al final, en un solo mensaje.
+  const avisos: string[] = [];
 
   for (const s of corte.diferidos) {
     const c = porClave.get(s.clave);
@@ -243,22 +331,18 @@ export async function ejecutarBarrido(
       contraparte: c,
       motivo: s.motivo,
       oficiales,
+      avisos,
     });
     if (r.fallo) resumen.fallidas += 1;
     else resumen.ejecutadas += 1;
     if (r.delta) resumen.con_delta += 1;
     if (r.notificada) resumen.notificadas += 1;
+    await guardarContadores();
   }
 
-  await svc
-    .from('compliance_barridos')
-    .update({
-      ejecutadas: resumen.ejecutadas,
-      con_delta: resumen.con_delta,
-      notificadas: resumen.notificadas,
-      fallidas: resumen.fallidas,
-    })
-    .eq('id', barridoId);
+  if (avisos.length > 0) {
+    await enviarCorreoDelta(svc, workspaceId, oficiales, avisos);
+  }
 
   return resumen;
 }
@@ -285,43 +369,55 @@ async function cargarUniverso(
   excluidasRelacionCerrada: number;
   truncado: boolean;
 }> {
-  const { data: consultasRaw } = await svc
-    .from('consultas_listas_dual')
-    .select(
-      'id, documento_tipo, documento_numero, nombre_consultado, tipo_persona, severidad, '
-      + 'total_matches, matches, created_at, vigente_hasta, tier_maximo, segmento_id',
-    )
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
-    .limit(LIMITE_CONSULTAS);
+  // Las tres lecturas van completas y por páginas: PostgREST corta en 1.000
+  // filas sin avisar, y aquí una lista recortada no es un dato menos sino
+  // contrapartes que se dejan de vigilar, liberadas que se vuelven a cobrar o
+  // desvinculados que se vuelven a consultar. Si una lectura falla, `traerTodo`
+  // lanza y el barrido del workspace se reporta como fallido en vez de quedar
+  // registrado como "sin candidatos".
+  const consultasRaw = await traerTodo<FilaConsulta>(
+    (desde, hasta) => svc
+      .from('consultas_listas_dual')
+      .select(
+        'id, documento_tipo, documento_numero, nombre_consultado, tipo_persona, severidad, '
+        + 'total_matches, matches, created_at, vigente_hasta, tier_maximo, segmento_id',
+      )
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(desde, hasta),
+    { etiqueta: 'barrido:consultas' },
+  );
 
-  const { data: liberacionesRaw } = await svc
-    .from('compliance_liberaciones')
-    .select('*')
-    .eq('workspace_id', workspaceId)
-    .order('created_at', { ascending: false })
-    .limit(LIMITE_LIBERACIONES);
+  const liberacionesRaw = await traerTodo<ComplianceLiberacion>(
+    (desde, hasta) => svc
+      .from('compliance_liberaciones')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(desde, hasta),
+    { etiqueta: 'barrido:liberaciones' },
+  );
 
   // Tercera lectura: quién sigue adentro. Va por separado y no por join porque
   // la ausencia de ficha NO excluye a nadie (ver `clavesConRelacionCerrada`), y
   // un join dejaría esa decisión escondida en el tipo de unión.
-  const { data: sujetosRaw } = await svc
-    .from('compliance_sujetos')
-    .select('documento_tipo, documento_numero, relacion_hasta')
-    .eq('workspace_id', workspaceId)
-    .not('relacion_hasta', 'is', null)
-    .limit(LIMITE_SUJETOS);
-
-  const consultas = (consultasRaw ?? []) as FilaConsulta[];
-  const coberturas = indexarCoberturas(
-    (liberacionesRaw ?? []) as ComplianceLiberacion[],
-    hoyISO,
+  const sujetosRaw = await traerTodo<FilaSujetoBarrido>(
+    (desde, hasta) => svc
+      .from('compliance_sujetos')
+      .select('id, documento_tipo, documento_numero, relacion_hasta')
+      .eq('workspace_id', workspaceId)
+      .not('relacion_hasta', 'is', null)
+      .order('id', { ascending: true })
+      .range(desde, hasta),
+    { etiqueta: 'barrido:sujetos_cerrados' },
   );
 
-  const relacionesCerradas = clavesConRelacionCerrada(
-    (sujetosRaw ?? []) as FilaSujetoBarrido[],
-    hoyISO,
-  );
+  const consultas = consultasRaw;
+  const coberturas = indexarCoberturas(liberacionesRaw, hoyISO);
+
+  const relacionesCerradas = clavesConRelacionCerrada(sujetosRaw, hoyISO);
 
   const porClave = new Map<string, Contraparte>();
   const excluidas = new Set<string>();
@@ -372,7 +468,8 @@ async function cargarUniverso(
     contrapartes: [...porClave.values()],
     sinDocumento,
     excluidasRelacionCerrada: excluidas.size,
-    truncado: consultas.length >= LIMITE_CONSULTAS,
+    // `traerTodo` lanza antes de recortar: lo que llega está completo.
+    truncado: false,
   };
 }
 
@@ -389,7 +486,9 @@ async function barrerContraparte(
     slug: string | null;
     contraparte: Contraparte;
     motivo: 'vigencia_vencida' | 'sin_vigencia';
-    oficiales: { id: string }[];
+    oficiales: Oficial[];
+    /** Se le agrega el texto de cada campanita que efectivamente sonó. */
+    avisos: string[];
   },
 ): Promise<ResultadoItem> {
   const { contraparte: c } = ctx;
@@ -436,7 +535,7 @@ async function barrerContraparte(
   const clasificacion = await clasificarParaGuardar(matches);
   const vigencia = await calcularVigenciaParaGuardar(ctx.workspaceId, clasificacion);
 
-  const { data: filaNueva } = await svc
+  const { data: filaNueva, error: errFila } = await svc
     .from('consultas_listas_dual')
     .insert({
       workspace_id: ctx.workspaceId,
@@ -474,9 +573,11 @@ async function barrerContraparte(
   // registrado como aviso entregado, que es la mentira mas cara de todo el modulo.
   let notificada = false;
   if (efecto.notifica && ctx.oficiales.length > 0) {
-    notificada = await notificarOficiales(
+    const contenido = await notificarOficiales(
       svc, ctx.workspaceId, ctx.oficiales, c, delta, efecto.premisa_cambiada,
     );
+    notificada = contenido !== null;
+    if (contenido) ctx.avisos.push(contenido);
   }
 
   await svc.from('compliance_barrido_items').insert({
@@ -489,9 +590,13 @@ async function barrerContraparte(
     habilita_reevaluacion: efecto.habilita_reevaluacion,
     // Hubo delta que exigia avisar y no habia a quien: el workspace no tiene
     // oficial con rol. Se dice, no se calla.
-    error_mensaje: efecto.notifica && ctx.oficiales.length === 0
-      ? 'sin_oficial_a_quien_notificar'
-      : null,
+    // La consulta se pagó aunque no se haya podido guardar: cuenta como
+    // ejecutada, y el item lo dice para que no parezca una revalidación limpia.
+    error_mensaje: errFila
+      ? `consulta_no_guardada: ${errFila.message}`.slice(0, 500)
+      : efecto.notifica && ctx.oficiales.length === 0
+        ? 'sin_oficial_a_quien_notificar'
+        : null,
   });
 
   return { fallo: false, delta: delta.hay, notificada };
@@ -512,11 +617,11 @@ async function notificarOficiales(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   svc: any,
   workspaceId: string,
-  oficiales: { id: string }[],
+  oficiales: Oficial[],
   c: Contraparte,
   delta: ReturnType<typeof compararConsultas>,
   premisaCambiada: boolean,
-): Promise<boolean> {
+): Promise<string | null> {
   const quien = c.nombre?.trim() || `${c.documento_tipo} ${c.documento_numero}`;
   const contenido = premisaCambiada
     ? `${quien} cambió después de que la liberaras: pasó de ${delta.matches_antes} a ${delta.matches_ahora} reporte(s). La decisión que tomaste cubría los ${delta.matches_antes} anteriores.`
@@ -530,7 +635,10 @@ async function notificarOficiales(
     contenido,
     entidad_tipo: null,
     entidad_id: null,
-    deep_link: '/compliance/liberaciones',
+    // A la ficha de esa contraparte, y con la clave de su alarma: el aviso del
+    // barrido también se cierra decidiendo, no abriendo la campana (P1, 2026-10-20).
+    deep_link: enlaceContraparte(c.clave),
+    grupo_clave: grupoClaveHallazgo(c.documento_tipo, c.documento_numero),
     metadata: {
       documento_tipo: c.documento_tipo,
       documento_numero: c.documento_numero,
@@ -543,7 +651,67 @@ async function notificarOficiales(
   }));
 
   const { error } = await svc.from('notificaciones').insert(filas);
-  return !error;
+  return error ? null : contenido;
+}
+
+/**
+ * El correo de la campanita a la dueña del workspace (`role = 'owner'`), que es la oficial
+ * de cumplimiento. Solo se llama cuando al menos una campanita sonó en la corrida.
+ *
+ * NUNCA lanza: la campanita ya quedó escrita y el item del barrido dice `notificada`. Un
+ * correo que no sale se registra en el log y no deshace nada.
+ *
+ * ⚠️ Como los demás avisos internos, este correo no deja traza en `avisos_cliente`: un
+ * rebote o una dirección en la lista de supresión de Resend no se ven en ONE.
+ */
+async function enviarCorreoDelta(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  svc: any,
+  workspaceId: string,
+  oficiales: Oficial[],
+  avisos: string[],
+): Promise<number> {
+  try {
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) {
+      console.error('[compliance-barrido] RESEND_API_KEY no configurada: la campanita salió, el correo no');
+      return 0;
+    }
+    const duenas = oficiales.filter((o) => o.role === 'owner' && !o.platform_admin);
+    if (duenas.length === 0) return 0;
+
+    const { data: ws } = await svc.from('workspaces').select('name, slug').eq('id', workspaceId).maybeSingle();
+    if (!ws?.slug) return 0;
+
+    const destinatarios: string[] = [];
+    for (const o of duenas) {
+      const { data: u } = await svc.auth.admin.getUserById(o.id);
+      const email = u?.user?.email as string | undefined;
+      if (email) destinatarios.push(email);
+    }
+    if (destinatarios.length === 0) return 0;
+
+    const { asunto, html } = correoDeltaMonitoreo({
+      avisos,
+      workspaceNombre: (ws.name as string | null) ?? (ws.slug as string),
+      workspaceSlug: ws.slug as string,
+      baseDomain: (process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co').trim(),
+    });
+
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: FROM_CORREO, to: destinatarios, subject: asunto, html }),
+    });
+    if (!res.ok) {
+      console.error('[compliance-barrido] Resend falló:', res.status, await res.text().catch(() => ''));
+      return 0;
+    }
+    return destinatarios.length;
+  } catch (e) {
+    console.error('[compliance-barrido] correo de delta:', (e as Error).message);
+    return 0;
+  }
 }
 
 // ─── Acceso a datos ────────────────────────────────────────────────────────
@@ -582,12 +750,14 @@ async function consumidasEnPeriodo(
   workspaceId: string,
   hoyISO: string,
 ): Promise<number> {
-  const { data } = await svc
+  const { data, error } = await svc
     .from('compliance_barridos')
     .select('ejecutadas')
     .eq('workspace_id', workspaceId)
     .gte('dia', inicioDePeriodo(hoyISO))
     .lte('dia', hoyISO);
+  // Leer cero por un error sería gastar el cupo del mes otra vez.
+  if (error) throw new Error(`consumo_no_leido: ${error.message}`);
 
   return ((data ?? []) as { ejecutadas: number | null }[])
     .reduce((acc, f) => acc + (f.ejecutadas ?? 0), 0);
@@ -600,14 +770,17 @@ async function slugDeWorkspace(svc: any, workspaceId: string): Promise<string | 
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function oficialesDelWorkspace(svc: any, workspaceId: string): Promise<{ id: string }[]> {
+async function oficialesDelWorkspace(svc: any, workspaceId: string): Promise<Oficial[]> {
   const { data } = await svc
     .from('profiles')
-    .select('id')
+    .select('id, role, platform_admin')
     .eq('workspace_id', workspaceId)
     .in('role', ['owner', 'admin']);
-  return (data ?? []) as { id: string }[];
+  return (data ?? []) as Oficial[];
 }
+
+/** Quien recibe la campanita (owner y admin); el correo va solo a la dueña. */
+type Oficial = { id: string; role: string; platform_admin: boolean | null };
 
 // ─── La fuente ─────────────────────────────────────────────────────────────
 
@@ -638,6 +811,8 @@ async function consultarValida(
         identificacion: input.identificacion,
       }),
       cache: 'no-store',
+      // Una llamada colgada se comía los 300 s de la función entera.
+      signal: AbortSignal.timeout(TIMEOUT_VALIDA_MS),
     });
     if (!res.ok) {
       const texto = await res.text().catch(() => '');

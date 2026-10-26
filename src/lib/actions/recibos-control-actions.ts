@@ -70,6 +70,13 @@ import {
   type MarcaRecibo,
 } from '@/lib/siigo/recibo-componentes'
 import { ETIQUETA_ABONO_A_MANO, esMotivoAbonoAMano } from '@/lib/siigo/abono'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
+import {
+  leerComprobanteUpme,
+  planRc3DelNegocio,
+  SLUG_COMPROBANTE_UPME,
+  type PlanRc3,
+} from '@/lib/siigo/rc3-negocio'
 
 export type EstadoRecibo = 'con_recibo' | 'no_aplica' | 'pendiente'
 
@@ -108,11 +115,17 @@ export interface PagoConRecibo {
     componente: ComponenteRecibo | null
   }>
   /**
-   * La porción de tarifa UPME del pago (`a_tarifa`): es lo que acusa el recibo que se
-   * emite desde aquí, y el valor que muestra el formulario. `null` cuando la línea no
-   * parte sus recibos por concepto o el pago no tiene reparto.
+   * Lo que acusa el RC-3 que se emite desde aquí: `valor_pagado` del comprobante UPME del
+   * negocio menos lo ya acusado (SOE-029, `planRc3DelNegocio`, la MISMA cuenta que hace el
+   * servidor al emitir). Solo en el pago titular del RC-3; `null` en los demás, cuando la
+   * línea no parte sus recibos o cuando falta el comprobante.
    */
   valor_upme: number | null
+  /**
+   * De dónde sale `valor_upme`, para el diálogo de confirmación. Solo en el pago titular
+   * del RC-3 de un negocio con comprobante.
+   */
+  rc3: { comprobante: number; ya_acusado: number } | null
   /**
    * Qué le falta por acusar a un cobro que YA tiene algún recibo.
    *
@@ -197,7 +210,7 @@ export interface AbonoParaTesoreria {
 
 /** Mismo criterio de área que facturación: el recaudo es del área financiera. */
 async function ctxFinanciero(): Promise<
-  { ok: true; workspaceId: string } | { ok: false; error: string }
+  { ok: true; workspaceId: string; staffId: string | null } | { ok: false; error: string }
 > {
   const { workspaceId, staffId, role, areas, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: error ?? 'No autenticado' }
@@ -209,14 +222,14 @@ async function ctxFinanciero(): Promise<
   if (!canEditBloque(user, { stage: 'cobro' }, [])) {
     return { ok: false, error: 'Solo el área financiera puede ver el control de recibos' }
   }
-  return { ok: true, workspaceId }
+  return { ok: true, workspaceId, staffId: staffId ?? null }
 }
 
 export async function getControlRecibos(): Promise<{ data: ControlRecibos | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
   try {
-    return { data: await armarControl(ctx.workspaceId) }
+    return { data: await armarControl(ctx.workspaceId, ctx.staffId) }
   } catch (e) {
     // Igual que la cola de facturación: una lista recortada tiene el mismo aspecto que
     // una lista entera, y aquí decide si se emite un documento contable. Se prefiere
@@ -225,7 +238,7 @@ export async function getControlRecibos(): Promise<{ data: ControlRecibos | null
   }
 }
 
-async function armarControl(workspaceId: string): Promise<ControlRecibos> {
+async function armarControl(workspaceId: string, staffId: string | null): Promise<ControlRecibos> {
   const svc = createServiceClient()
 
   type FilaCobro = {
@@ -240,7 +253,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     recibo_no_aplica: { motivo?: string } | null
   }
 
-  const cobros = await traerTodo<FilaCobro>(
+  const cobrosTodos = await traerTodo<FilaCobro>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (d, h) => (svc as any)
       .from('cobros')
@@ -252,6 +265,9 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       .range(d, h),
     { etiqueta: 'recibos/cobros' },
   )
+  // Los pagos del viaje de prueba (F8-1) no entran al control ni a sus totales para quien no lo
+  // lleva ni lo aprueba.
+  const cobros = sinOcultos(cobrosTodos, await negociosDePruebaOcultos(svc, workspaceId, staffId), c => c.negocio_id)
 
   const negocioIds = [...new Set(cobros.map(c => c.negocio_id).filter((v): v is string => !!v))]
   if (negocioIds.length === 0) {
@@ -317,6 +333,71 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     for (const f of filas) repartoPorCobro.set(f.cobro_id, f)
   }
 
+  // ── SOE-029: el RC-3 es UNO por negocio y sale del comprobante UPME ──
+  //
+  // Para cada negocio de una línea que declara el recibo de la tarifa se arma el mismo plan
+  // que usa la emisión (`planRc3DelNegocio`): cuánto acusa el RC-3 y en qué pago queda.
+  const negociosConRc3 = negocios
+    .filter(n => n.linea_id && porConceptoPorLinea.get(n.linea_id)?.pasante)
+    .map(n => n.id)
+  const planRc3PorNegocio = new Map<string, PlanRc3>()
+  if (negociosConRc3.length > 0) {
+    const [comprobantes, techos] = await Promise.all([
+      traerTodo<{ negocio_id: string; data: unknown }>(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (d, h) => (svc as any)
+          .from('negocio_bloques')
+          .select('id, negocio_id, data, bloque_configs!inner(slug)')
+          .in('negocio_id', negociosConRc3)
+          .eq('bloque_configs.slug', SLUG_COMPROBANTE_UPME)
+          .order('id')
+          .range(d, h),
+        { etiqueta: 'recibos/comprobante_upme' },
+      ),
+      traerTodo<{ negocio_id: string; techo_tarifa: number | string | null }>(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (d, h) => (svc as any)
+          .from('v_negocio_valor')
+          .select('negocio_id, techo_tarifa')
+          .in('negocio_id', negociosConRc3)
+          .order('negocio_id')
+          .range(d, h),
+        { etiqueta: 'recibos/techo_tarifa' },
+      ),
+    ])
+    const comprobantesPorNegocio = new Map<string, unknown[]>()
+    for (const b of comprobantes) {
+      const lista = comprobantesPorNegocio.get(b.negocio_id) ?? []
+      lista.push(b.data)
+      comprobantesPorNegocio.set(b.negocio_id, lista)
+    }
+    const techoPorNegocio = new Map(techos.map(t => [t.negocio_id, t.techo_tarifa == null ? null : Number(t.techo_tarifa)]))
+    const cobrosPorNegocio = new Map<string, FilaCobro[]>()
+    for (const c of cobros) {
+      if (!c.negocio_id) continue
+      const lista = cobrosPorNegocio.get(c.negocio_id) ?? []
+      lista.push(c)
+      cobrosPorNegocio.set(c.negocio_id, lista)
+    }
+    for (const negocioId of negociosConRc3) {
+      planRc3PorNegocio.set(negocioId, planRc3DelNegocio({
+        comprobante: leerComprobanteUpme(comprobantesPorNegocio.get(negocioId) ?? []),
+        techoTarifa: techoPorNegocio.get(negocioId) ?? null,
+        pagos: (cobrosPorNegocio.get(negocioId) ?? []).map(c => ({
+          id: c.id,
+          fecha: c.fecha,
+          aTarifa: repartoDeCobro(repartoPorCobro.get(c.id) ?? null, {
+            monto: Number(c.monto ?? 0),
+            tipo_cobro: c.tipo_cobro,
+          })?.pasante ?? 0,
+          marca: c.siigo_recibo,
+          noAplica: c.recibo_no_aplica != null,
+        })),
+      }))
+    }
+  }
+  const fechaDe = new Map(cobros.map(c => [c.id, c.fecha]))
+
   const cfgDe = (c: { negocio_id: string | null }): ConfigReciboPorConcepto | null => {
     const lineaId = c.negocio_id ? porId.get(c.negocio_id)?.linea_id : null
     return (lineaId ? porConceptoPorLinea.get(lineaId) : null) ?? null
@@ -337,9 +418,14 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
     esperados: ComponenteRecibo[]
     /** Los recibos de CAJA del cobro: todo menos los abonos a la factura. */
     marcasCaja: MarcaRecibo[]
-    /** `null` = no se sabe (línea sin concepto, o sin reparto). */
+    /** `null` = no se sabe (línea sin concepto, o sin reparto), o no es el titular del RC-3. */
     valorUpme: number | null
     estado: EstadoRecibo
+    /** Por qué no lleva recibo propio (SOE-029), cuando su RC-3 va en el del negocio. */
+    motivoNoAplica?: string
+    /** Lo que frena el RC-3 del negocio (sin comprobante), en el pago donde se muestra. */
+    faltaRc3?: string
+    rc3?: { comprobante: number; ya_acusado: number } | null
   }
   const clasificar = (c: FilaCobro): Clasificado | null => {
     const cfg = cfgDe(c)
@@ -359,6 +445,35 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
         // Regla 2: un pago de puro honorario no tiene recibo que emitir.
         if (!(valorUpme > 0) && marcasCaja.length === 0) return null
       }
+      // SOE-029: cuánto acusa el RC-3 y en qué pago lo dice el plan del negocio, no la
+      // franja de este pago.
+      const plan = c.negocio_id ? planRc3PorNegocio.get(c.negocio_id) : undefined
+      const rol = plan?.roles.get(c.id)
+      if (plan && rol === 'titular' && !c.recibo_no_aplica) {
+        if (plan.estado === 'emitir') {
+          return {
+            c, cfg, esperados: ['pasante'], marcasCaja, valorUpme: plan.valor, estado: 'pendiente',
+            rc3: { comprobante: plan.comprobante!, ya_acusado: plan.resuelto },
+          }
+        }
+        return {
+          c, cfg, esperados: ['pasante'], marcasCaja, valorUpme: null, estado: 'pendiente',
+          faltaRc3: plan.estado === 'comprobante_ambiguo'
+            ? 'un solo valor en el comprobante de pago UPME (hay varios distintos: revisa el bloque del comprobante en el negocio)'
+            : 'el valor del comprobante de pago UPME (revisa el bloque del comprobante en el negocio)',
+        }
+      }
+      if (plan && rol === 'en_el_del_negocio' && !c.recibo_no_aplica) {
+        const titularFecha = plan.titularId ? fechaDe.get(plan.titularId) ?? null : null
+        const motivo = plan.estado === 'emitir'
+          ? `Sin recibo propio: va en el RC-3 del negocio${titularFecha ? `, en el pago del ${titularFecha}` : ''}`
+          : plan.estado === 'cubierto'
+            ? 'Sin recibo propio: la tarifa UPME del negocio ya tiene su RC-3'
+            : plan.estado === 'esperando_pagos'
+              ? `Sin recibo propio: el RC-3 del negocio sale cuando los pagos completen la tarifa (van ${fmtCOP(plan.tarifaRecibida)} de ${fmtCOP(plan.meta ?? 0)})`
+              : 'Sin recibo propio: va en el RC-3 del negocio, que espera el valor del comprobante UPME'
+        return { c, cfg, esperados: [], marcasCaja, valorUpme: null, estado: 'no_aplica', motivoNoAplica: motivo }
+      }
     }
     // ⚠️ Un cobro con UN recibo de DOS no es `con_recibo`. Ver el encabezado.
     const estado: EstadoRecibo = reciboCompleto(marcasCaja, esperados)
@@ -366,7 +481,10 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       : c.recibo_no_aplica
         ? 'no_aplica'
         : 'pendiente'
-    return { c, cfg, esperados, marcasCaja, valorUpme, estado }
+    // Un pago con porción UPME que el plan no deja como titular ni lo manda al del negocio
+    // ya tiene recibo propio o está fuera: su cifra no es la del RC-3.
+    const enPlan = c.negocio_id ? planRc3PorNegocio.has(c.negocio_id) : false
+    return { c, cfg, esperados, marcasCaja, valorUpme: enPlan ? null : valorUpme, estado }
   }
   const clasificados = cobros.map(clasificar).filter((x): x is Clasificado => x != null)
 
@@ -454,7 +572,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       .map(b => b.negocio_id),
   )
 
-  const pagos: PagoConRecibo[] = clasificados.map(({ c, cfg, esperados, marcasCaja, valorUpme, estado }) => {
+  const pagos: PagoConRecibo[] = clasificados.map(({ c, cfg, esperados, marcasCaja, valorUpme, estado, motivoNoAplica, faltaRc3, rc3 }) => {
     const neg = c.negocio_id ? porId.get(c.negocio_id) : undefined
     const meta = (neg?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
     const contacto = neg?.contacto_id ? contactoPorId.get(neg.contacto_id) : undefined
@@ -483,6 +601,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       // El botón emite SOLO el recibo de la tarifa UPME (`emitirReciboDeNegocio`). Lo que
       // lo haría volver sin emitir se dice aquí, antes de oprimirlo.
       if (!cfg?.pasante) faltantes.push('el recibo de la tarifa UPME en la configuración de la línea')
+      else if (faltaRc3) faltantes.push(faltaRc3)
       else if (valorUpme == null) faltantes.push('el reparto del pago (cuánto es tarifa UPME)')
 
       const delAbono = avisoDelAbono(c)
@@ -513,8 +632,9 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
         componente: m.componente ?? null,
       })),
       valor_upme: valorUpme,
+      rc3: rc3 ?? null,
       componentes_pendientes: componentesPendientes,
-      no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? null,
+      no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? motivoNoAplica ?? null,
       facturado: !!meta.siigo_factura?.numero,
       faltantes,
       avisos,
@@ -527,6 +647,7 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
   const abonosAMano = abonosParaTesoreria(cobros, porId, contactoPorId, cfgDe)
 
   const pendientes = pagos.filter(p => p.estado === 'pendiente')
+  const cfgPasante = (p: PagoConRecibo) => !!cfgDe({ negocio_id: p.negocio_id || null })?.pasante
   return {
     pagos,
     abonos_a_mano: abonosAMano,
@@ -534,7 +655,8 @@ async function armarControl(workspaceId: string): Promise<ControlRecibos> {
       pendientes: pendientes.length,
       con_recibo: pagos.filter(p => p.estado === 'con_recibo').length,
       no_aplica: pagos.filter(p => p.estado === 'no_aplica').length,
-      valor_pendiente: pendientes.reduce((s, p) => s + (p.valor_upme ?? p.monto), 0),
+      // Un RC-3 frenado por falta de comprobante no tiene cifra: no se inventa con el pago.
+      valor_pendiente: pendientes.reduce((s, p) => s + (p.valor_upme ?? (cfgPasante(p) ? 0 : p.monto)), 0),
       emitibles: pendientes.filter(p => p.faltantes.length === 0).length,
       abonos_a_mano: abonosAMano.length,
     },

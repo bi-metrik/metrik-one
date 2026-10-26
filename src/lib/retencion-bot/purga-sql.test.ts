@@ -30,6 +30,10 @@ import { BUCKET_ACEPTACIONES, PLAZOS_BOT, ZONA_PLAZOS } from './plazos'
 const MIGRACIONES = join(process.cwd(), 'supabase/migrations')
 const leer = (archivo: string) => readFileSync(join(MIGRACIONES, archivo), 'utf8')
 const MIGRACION_PURGA = '20260915060000_purga_registros_bot.sql'
+// Reemplaza `purgar_registros_bot()` para anular lo que guarda el interprete (propuesta y rechazo).
+const MIGRACION_PURGA_INTERPRETE = '20261002140000_purga_interprete_propuesta.sql'
+// md5 de pg_get_functiondef que la verificacion de esa migracion espera en produccion.
+const MD5_PURGA_VIGENTE = '2968113b01ecf36334f05987f20efdc9'
 
 const WS = '00000000-0000-4000-8000-0000000000a1'
 const NEG = '00000000-0000-4000-8000-0000000000b1'
@@ -93,7 +97,12 @@ const ESQUEMA_BASE = `
     gemini_input_tokens int,
     gemini_output_tokens int,
     gemini_latency_ms int,
-    confidence numeric
+    confidence numeric,
+    -- 20261002120000_bot_conversacional_interprete
+    interprete_accion text,
+    interprete_propuesta jsonb,
+    interprete_rechazo text,
+    interprete_resultado text
   );
   create table public.bot_sessions (
     id uuid primary key default gen_random_uuid(),
@@ -198,6 +207,10 @@ let bordesDeRetencionExactos = false
 // ── Fixtures de la purga ────────────────────────────────────────────────────────────────
 const LOG_VIEJO = '10000000-0000-4000-8000-000000000001'
 const LOG_JOVEN = '10000000-0000-4000-8000-000000000002'
+const LOG_SOLO_INTERPRETE = '10000000-0000-4000-8000-000000000003'
+// Lo que deja el interprete: evidencia literal y un rechazo de JSON.parse con texto del mensaje.
+const PROPUESTA = `'{"acciones":[{"accion":"abrir_viaje","evidencia":"viaje de Persona Ficticia"}]}'::jsonb`
+const RECHAZO_CON_TEXTO = `'SyntaxError: Unexpected token ''v'', "viaje de P"... is not valid JSON'`
 const ENV_VIEJO = '20000000-0000-4000-8000-000000000001'
 const ENV_JOVEN = '20000000-0000-4000-8000-000000000002'
 const ENV_VIGENTE = '20000000-0000-4000-8000-000000000003'
@@ -250,6 +263,7 @@ beforeAll(async () => {
   `)
 
   await db.exec(leer(MIGRACION_PURGA))
+  await db.exec(leer(MIGRACION_PURGA_INTERPRETE))
 
   trasMigracion = {
     acciones: await filas(
@@ -263,11 +277,18 @@ beforeAll(async () => {
   // ── Un registro a cada lado de cada plazo ──
   await db.exec(`
     insert into public.wa_message_log (id, workspace_id, phone, direction, intent, message_preview, created_at,
-                                       gemini_model, gemini_input_tokens, gemini_output_tokens, gemini_latency_ms, confidence) values
+                                       gemini_model, gemini_input_tokens, gemini_output_tokens, gemini_latency_ms, confidence,
+                                       interprete_accion, interprete_propuesta, interprete_rechazo, interprete_resultado) values
       ('${LOG_VIEJO}', '${WS}', '+573000000010', 'inbound', 'registrar_gasto', 'almuerzo 25 mil',
-         now() - interval '${P.conversacionesDias + 1} days', 'gemini-x', 120, 30, 340, 0.9),
+         now() - interval '${P.conversacionesDias + 1} days', 'gemini-x', 120, 30, 340, 0.9,
+         'bandeja.abrir_viaje', ${PROPUESTA}, 'V8_nombre_no_escrito', 'atendido'),
       ('${LOG_JOVEN}', '${WS}', '+573000000011', 'inbound', 'registrar_gasto', 'taxi 12 mil',
-         now() - interval '${P.conversacionesDias - 1} days', 'gemini-x', 100, 20, 300, 0.8);
+         now() - interval '${P.conversacionesDias - 1} days', 'gemini-x', 100, 20, 300, 0.8,
+         'bandeja.fallback', ${PROPUESTA}, ${RECHAZO_CON_TEXTO}, 'fallback_esquema'),
+      -- Ya sin telefono ni texto (anonimizada antes de existir el interprete), pero con propuesta.
+      ('${LOG_SOLO_INTERPRETE}', '${WS}', null, 'inbound', 'bandeja.fallback', null,
+         now() - interval '${P.conversacionesDias + 1} days', 'gemini-x', 90, 10, 250, null,
+         'bandeja.fallback', ${PROPUESTA}, ${RECHAZO_CON_TEXTO}, 'fallback_esquema');
 
     insert into public.wa_envios (id, wa_message_id, phone, origen, intent, preview, status, status_at, error_code, error_title, created_at) values
       ('${ENV_VIEJO}', 'wamid.ficticio.viejo', '573000000020', 'alerta', 'w25', 'Tienes un saldo', 'failed', now() - interval '13 months', 131047, 'Re-engagement message',
@@ -373,6 +394,35 @@ describe('plazos fijados contra la Politica de Datos de Valida v1.4', () => {
   })
 })
 
+describe('la purga vigente es la de 20261002140000', () => {
+  it('cambia frente a 20260915060000 solo en el paso de wa_message_log y conserva los mismos intervalos', () => {
+    const sinComentarios = (archivo: string) =>
+      leer(archivo)
+        .split('\n')
+        .filter((l) => !/^\s*--/.test(l))
+        .join('\n')
+    const intervalos = [...sinComentarios(MIGRACION_PURGA_INTERPRETE).matchAll(/interval '(\d+ \w+)'/g)]
+      .map((m) => m[1])
+      .sort()
+    expect(intervalos).toEqual(
+      [
+        `${P.acusesMeses} months`,
+        `${P.conversacionesDias} days`,
+        `${P.aceptacionSinRespuestaDiasTrasVencer} days`,
+        `${P.sesionesDiasTrasVencer} days`,
+      ].sort(),
+    )
+  })
+
+  it('la funcion aplicada es la que la verificacion espera en produccion (md5, dueño, definer, ACL)', async () => {
+    expect(
+      await uno(`
+        select md5(pg_get_functiondef(p.oid)) as md5, p.prosecdef, p.proconfig, p.proacl::text as acl
+          from pg_proc p where p.oid = 'public.purgar_registros_bot()'::regprocedure`),
+    ).toEqual({ md5: MD5_PURGA_VIGENTE, prosecdef: true, proconfig: ['search_path=""'], acl: '{postgres=X/postgres}' })
+  })
+})
+
 describe('relleno de produccion al aplicar la migracion', () => {
   it('la prueba de entrega de 4D SOFT queda copiada en su accion: delivered 13:49:24Z', () => {
     expect(trasMigracion.acciones.find((a) => a.id === ACC_4DSOFT)).toMatchObject({
@@ -402,7 +452,7 @@ describe('purgar_registros_bot: cada plazo en su borde', () => {
     expect(conteos).toEqual({
       acuses_copiados: 1, // ACC_VIGENTE (las de produccion ya venian copiadas)
       wa_envios_anonimizados: 2, // ENV_VIEJO + ENV_VIGENTE
-      wa_message_log_anonimizados: 1,
+      wa_message_log_anonimizados: 2, // LOG_VIEJO + LOG_SOLO_INTERPRETE
       bot_sessions_borradas: 1,
       aceptaciones_sin_respuesta_borradas: 1,
       aceptaciones_con_respuesta_borradas: 2, // retencion ayer + rechazada vieja
@@ -429,6 +479,30 @@ describe('purgar_registros_bot: cada plazo en su borde', () => {
     })
     const joven = await uno(`select phone, message_preview from public.wa_message_log where id = '${LOG_JOVEN}'`)
     expect(joven).toEqual({ phone: '+573000000011', message_preview: 'taxi 12 mil' })
+  })
+
+  it('wa_message_log: a los 90 dias anula la propuesta y el rechazo del interprete y conserva accion y resultado', async () => {
+    const cols = `id, interprete_accion, interprete_propuesta, interprete_rechazo, interprete_resultado`
+    expect(await uno(`select ${cols} from public.wa_message_log where id = '${LOG_VIEJO}'`)).toEqual({
+      id: LOG_VIEJO,
+      interprete_accion: 'bandeja.abrir_viaje',
+      interprete_propuesta: null,
+      interprete_rechazo: null,
+      interprete_resultado: 'atendido',
+    })
+    // Una fila a la que solo le quedaba lo del interprete tambien entra en el `where`.
+    expect(await uno(`select ${cols} from public.wa_message_log where id = '${LOG_SOLO_INTERPRETE}'`)).toEqual({
+      id: LOG_SOLO_INTERPRETE,
+      interprete_accion: 'bandeja.fallback',
+      interprete_propuesta: null,
+      interprete_rechazo: null,
+      interprete_resultado: 'fallback_esquema',
+    })
+    const joven = await uno<{ interprete_propuesta: unknown; interprete_rechazo: string }>(
+      `select interprete_propuesta, interprete_rechazo from public.wa_message_log where id = '${LOG_JOVEN}'`,
+    )
+    expect(joven?.interprete_propuesta).toEqual({ acciones: [{ accion: 'abrir_viaje', evidencia: 'viaje de Persona Ficticia' }] })
+    expect(joven?.interprete_rechazo).toContain('"viaje de P"')
   })
 
   it('wa_envios: a los 12 meses anula telefono, texto y wamid y conserva estado y error', async () => {

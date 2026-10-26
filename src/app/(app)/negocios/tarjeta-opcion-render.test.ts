@@ -150,6 +150,22 @@ describe('costo y precio: las alertas del prototipo', () => {
     expect(t).toMatch(/Margen -4,6 %/)
   })
 
+  it('el panel de tarifas del proveedor se ofrece con y sin costo, una sola vez (brief del 2026-10-21, punto 6)', () => {
+    const cambiar = React.createElement('div', { 'data-prueba-cambiar': '' }, 'Cambiar el costo por una tarifa del proveedor')
+    const respaldo = React.createElement('div', { 'data-prueba-respaldo': '' })
+    const conf = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, cambiarCosto: cambiar, respaldo })
+    expect(conf).toContain('data-prueba-cambiar')
+    expect(conf).not.toContain('data-prueba-respaldo')
+    // Va después de «Costo y precio», donde se ve sin adivinar.
+    expect(conf.indexOf('data-prueba-cambiar')).toBeGreaterThan(conf.indexOf('aria-label="Costo y precio"'))
+    // Sin confirmar: el MISMO panel (un solo montaje, brief del 2026-10-21, punto 6) y el respaldo.
+    const sin = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: null, cambiarCosto: cambiar, respaldo })
+    expect(sin).toContain('data-prueba-respaldo')
+    expect(sin.match(/data-prueba-cambiar/g)).toHaveLength(1)
+    // Sin poder editar, no se ofrece.
+    expect(pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, cambiarCosto: cambiar, editable: false })).not.toContain('data-prueba-cambiar')
+  })
+
   it('con el margen sobre el piso no hay ⚠', () => {
     const html = pintar(tarifaConHabitaciones({}, habs(POSADA), GRUPO), { confirmada: CONFIRMADA, precioLinea: 4679294, costoLinea: 3977400 })
     expect(texto(html)).not.toContain('Con este margen necesitas autorización para enviar')
@@ -206,9 +222,9 @@ describe('así lo ve el cliente', () => {
     expect(texto(html)).toContain('INCLUYE TRASLADO')
   })
 
-  it('un vuelo no tiene hoja: su nota sigue donde estaba', () => {
+  it('el vuelo también tiene hoja (D3 del brief del 2026-10-05), y su nota sigue donde estaba', () => {
     const html = pintar(tarifa(), { item: { nombre: 'AVIANCA', grupo: 'vuelo', tarifa_pax: tarifa() }, nota: 'NOTA-DE-VUELO' })
-    expect(html).not.toContain('data-hoja-cliente')
+    expect(html).toContain('data-hoja-cliente')
     expect(html).toContain('NOTA-DE-VUELO')
   })
 })

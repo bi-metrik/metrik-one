@@ -1,7 +1,12 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { generarEnlacePagoCuota } from '@/lib/cobros/enlace-pago-cuota-servidor'
+import { enlaceDeCuotaPendiente } from '@/lib/seccion-suscripcion/pagar-ahora'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { comprarLicencia, cotizarLicencia, liberarLicencia } from '@/lib/seccion-suscripcion/licencias-servidor'
@@ -19,6 +24,12 @@ import {
   validarInvitacion,
 } from '@/lib/usuarios-espacio/reglas'
 import { cambiarRolUsuario, invitarUsuario, reenviarInvitacion, retirarUsuario } from '@/lib/usuarios-espacio/servidor'
+import {
+  cambiarMencion,
+  elegirPlanAnual as elegirPlanAnualServidor,
+  enlaceDelMes,
+  type EntradaEleccion,
+} from '@/lib/valida-cda/plan-anual-servidor'
 
 /**
  * Las acciones de `/suscripcion`. Cada una vuelve a resolver el contexto en el servidor: una acción
@@ -116,7 +127,7 @@ export async function comprarUsuarioAdicional(p: { solicitudExpresa: boolean }):
 
 // ── Usuarios del espacio ──────────────────────────────────────────────────────────────────
 
-export async function invitarAlEspacio(p: {
+async function invitarAlEspacioSinClave(p: {
   correo: string
   nombre: string
   rol: string
@@ -203,7 +214,7 @@ export async function cambiarRolEnEspacio(p: { usuarioId: string; rol: string })
   return res
 }
 
-export async function reenviarInvitacionEspacio(p: { usuarioId: string }): Promise<Resultado> {
+async function reenviarInvitacionEspacioSinClave(p: { usuarioId: string }): Promise<Resultado> {
   const r = await ctxEscritura()
   if (!r.ok) return r
   return reenviarInvitacion({
@@ -231,7 +242,7 @@ export async function descartarSustenta(): Promise<Resultado> {
  * segundo clic (o el de otra persona del mismo CDA) no crea otro lead y responde `yaExistia`. El clic
  * se mide siempre; el lead, una vez.
  */
-export async function pedirContactoDeSustenta(
+async function pedirContactoDeSustentaSinClave(
   p: { origen?: string } = {},
 ): Promise<Resultado<{ yaExistia: boolean; nombre: string | null }>> {
   const r = await ctxEscritura()
@@ -264,4 +275,92 @@ export async function registrarEventoSustenta(evento: string): Promise<void> {
   const r = await ctxEscritura()
   if (!r.ok) return
   await registrarEventoSugerencia({ workspaceId: r.ctx.workspaceId, usuarioId: r.ctx.usuarioId, evento: e })
+}
+
+// ── Pagar: el mes o el plan anual (decisión de Mauricio del 2026-10-06) ──────────────────
+
+/**
+ * «Pagar ahora» de una SUSCRIPCIÓN (Valida autogestionada): el enlace de la cuota pendiente, ya, sin
+ * esperar al cron. La misma generación del botón y del paso 6 (`generarEnlacePagoCuota`).
+ */
+export async function pagarCuotaPendiente(): Promise<Resultado<{ url: string }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const db = createServiceClient() as unknown as SupabaseClient
+  const res = await enlaceDeCuotaPendiente(r.ctx, {
+    db,
+    generar: async (p) => {
+      const g = await generarEnlacePagoCuota(p, { db })
+      return g.ok ? { ok: true, url: g.url } : { ok: false, error: g.error }
+    },
+  })
+  if (res.ok) refrescar()
+  return res
+}
+
+/** «Pagar el mes»: el enlace de la cuota pendiente (el vigente o uno nuevo). */
+export async function pagarElMes(): Promise<Resultado<{ url: string }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = await enlaceDelMes(r.ctx)
+  if (res.ok) refrescar()
+  return res
+}
+
+/**
+ * «Acepto y voy a pagar»: la persona designada acepta el Anexo del Plan Anual y recibe el enlace de
+ * $1.650.000. Todo se vuelve a comprobar en el servidor (`plan-anual-servidor.ts`).
+ */
+async function elegirPlanAnualSinClave(p: EntradaEleccion): Promise<Resultado<{ url: string }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = await elegirPlanAnualServidor(r.ctx, p)
+  if (res.ok) refrescar()
+  return res
+}
+
+/**
+ * La autorización de mención del numeral 11 del anexo, después de elegir: revocarla o volver a darla.
+ * Solo la persona designada y con el plan anual activo; cada cambio es una fila nueva con su fecha.
+ * Idempotente por naturaleza: pedir el estado que ya hay no escribe nada.
+ */
+export async function cambiarMencionPlanAnual(p: { autoriza: boolean; textoMostrado: string }): Promise<Resultado> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = await cambiarMencion(r.ctx, p)
+  if (res.ok) refrescar()
+  return res
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function invitarAlEspacio(p: Parameters<typeof invitarAlEspacioSinClave>[0], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof invitarAlEspacioSinClave>>>(
+    { accion: 'invitarAlEspacio', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => invitarAlEspacioSinClave(p),
+  )
+}
+
+export async function reenviarInvitacionEspacio(p: { usuarioId: string }, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof reenviarInvitacionEspacioSinClave>>>(
+    { accion: 'reenviarInvitacionEspacio', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => reenviarInvitacionEspacioSinClave(p),
+  )
+}
+
+export async function pedirContactoDeSustenta(p: { origen?: string } = {}, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof pedirContactoDeSustentaSinClave>>>(
+    { accion: 'pedirContactoDeSustenta', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => pedirContactoDeSustentaSinClave(p),
+  )
+}
+
+export async function elegirPlanAnual(p: EntradaEleccion, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof elegirPlanAnualSinClave>>>(
+    { accion: 'elegirPlanAnual', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => elegirPlanAnualSinClave(p),
+  )
 }

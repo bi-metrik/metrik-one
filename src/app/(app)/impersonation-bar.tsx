@@ -1,12 +1,8 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { Eye, X, ChevronDown } from 'lucide-react'
-import {
-  getImpersonationOptions,
-  setImpersonation,
-  type ImpersonationOption,
-} from '@/lib/actions/impersonation'
+import { setImpersonation, type OpcionesImpersonacion } from '@/lib/actions/impersonation'
 
 const ROLE_LABEL: Record<string, string> = {
   owner: 'Dueño',
@@ -19,23 +15,21 @@ const ROLE_LABEL: Record<string, string> = {
 
 /**
  * Barra "Ver como" — solo visible para platform_admin. Permite hacer QA desde
- * la posición de cualquier usuario del workspace (rol + área). Self-resolving:
- * si el usuario no es platform_admin, el server devuelve ok=false y no renderiza.
+ * la posición de cualquier usuario del workspace (rol + área).
+ *
+ * Las opciones llegan resueltas del layout, y solo para un platform_admin
+ * (`getImpersonationOptions`). Antes la barra se las pedía al montar con una server
+ * action, en cada carga completa y para TODO usuario: 696 llamadas en 7 días (medido
+ * 2026-10-05) que casi siempre respondían «no eres admin», en fila delante de la
+ * primera acción real de la persona.
  */
-export default function ImpersonationBar() {
-  const [users, setUsers] = useState<ImpersonationOption[] | null>(null)
-  const [current, setCurrent] = useState<string | null>(null)
+export default function ImpersonationBar({ opciones = null }: { opciones?: OpcionesImpersonacion | null }) {
   const [open, setOpen] = useState(false)
   const [isPending, start] = useTransition()
+  const users = opciones?.ok ? opciones.users : []
+  const current = opciones?.current ?? null
 
-  useEffect(() => {
-    getImpersonationOptions().then((r) => {
-      setUsers(r.ok ? r.users : [])
-      setCurrent(r.current)
-    })
-  }, [])
-
-  if (!users || users.length === 0) return null // no platform_admin
+  if (users.length === 0) return null // no platform_admin
 
   const activo = users.find((u) => u.id === current)
 

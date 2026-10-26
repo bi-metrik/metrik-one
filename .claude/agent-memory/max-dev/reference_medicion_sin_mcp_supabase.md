@@ -110,3 +110,10 @@ Consecuencia práctica: con solo `.env.local` hay **lectura por PostgREST y escr
 tablas de `public` con la service role key, pero CERO DDL y CERO acceso al ledger**
 (`supabase_migrations` no está expuesto). O sea: se puede reprocesar y corregir datos,
 **no se puede aplicar una migración ni comprobar si su versión está tomada**.
+
+**2026-10-08 (SOE-006) — cerrada la Management API aun en `/database/query/read-only`.** Un
+`q.py` con guard de solo SELECT contra `pg_proc` lo bloqueó el clasificador como
+[Production Reads]. No se rodeó: se comparó la función del repo contra el md5 del brief
+cargándola en PGlite (`pg_get_functiondef` de PG18) y la migración se escribió como
+reemplazo de texto sobre la viva. Un dry-run `DO $dry$ … RAISE` se ensaya en PGlite con
+fixtures y luego lo corre la sesión principal.

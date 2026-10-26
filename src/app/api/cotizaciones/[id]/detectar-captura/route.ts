@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server'
 
 import { detectarCaptura } from '@/app/(app)/negocios/ranura-actions'
+import { bytesDeImagen, registrarEnBandeja, responderBandeja } from '@/lib/cotizaciones/bandeja-registro'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -19,7 +20,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     cuerpo = null
   }
   if (!id || !cuerpo || typeof cuerpo.dataUrl !== 'string') {
+    registrarEnBandeja('warn', { ruta: 'detectar-captura', codigo: 'IMAGEN', cotizacionId: id ?? '', bytesImagen: bytesDeImagen(cuerpo?.dataUrl) })
     return NextResponse.json({ ok: false, codigo: 'IMAGEN', mensaje: 'La imagen no llegó en un formato legible. Vuelve a pegarla.' }, { status: 400 })
   }
-  return NextResponse.json(await detectarCaptura(id, cuerpo.dataUrl))
+  const dataUrl = cuerpo.dataUrl
+  // Caso Alejandra (2026-10-05): todo `ok:false` con mensaje y con su línea en el log.
+  return NextResponse.json(await responderBandeja('detectar-captura', id, bytesDeImagen(dataUrl), () => detectarCaptura(id, dataUrl)))
 }

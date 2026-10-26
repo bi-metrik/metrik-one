@@ -27,4 +27,21 @@ La llave `modules.bandeja_solicitudes_wa` sigue apagada (Emilio).
 - 2026-09-30: `pedir_si` ganó `vacio` (única comparación que mira la ausencia). La autorización de
   datos NO va como campo: vive en `contactos.custom_data` vía el bloque tipo `contacto`. Si algún día
   debe contar en el mínimo, hay que enseñarle a `calcularNiveles` a leer el contacto, no duplicarla.
+- 2026-10-01 (PR fix/bandeja-wa-entendimiento-correcciones, SIN mergear, va a QA): la config
+  PROVISIONAL de Trappvel YA está en producción (la simulación la leyó con los 10 campos). Nuevo SQL
+  aparte SIN aplicar: `sql/trappvel/2026-10-01_opciones-no-definido-PROVISIONAL.sql` (llave
+  `no_definido: true` en la OPCIÓN). Sin él, «¿cuánto sale?» sigue pudiendo volverse `sin_definir`.
+- Guardianes en `validarSalida`/`cargarEnExistente`, no en el prompt: el prompt solo ayuda. Un sugerido
+  sin confirmar SÍ se reemplaza (contradice el «no se pisa» del 30-sep, decisión del 1-oct).
+- Gotcha del modelo: poner en el prompt una frase de ejemplo que aparece en el chat de prueba hizo que
+  flash-lite la copiara como sustento (3/3). Los ejemplos del prompt no pueden salir del fixture.
+- Simular contra Gemini real sin base: harness en el scratchpad (`sim2/sim.ts`) que importa las reglas
+  del worktree; la config de prod se lee ahí, NUNCA entra al fixture del repo.
+- 2026-10-01 tarde (QA de #969, 3 fallas): marca de config `lo_llena: "agencia"` saca un campo
+  del modelo (SQL PROVISIONAL `2026-10-01_campos-de-la-agencia` SIN aplicar); un 0 en niños/
+  infantes del modelo exige frase que cierre («sin niños», «solo adultos», «somos dos» = adultos);
+  la indiferencia con un número u opción concreta en el mismo mensaje NO es `no_definido`;
+  `cumplePedirSi` nuevo en niveles-solicitud (paridad src/_shared).
+- ⚠️ El clasificador de permisos NEGÓ commit+push a la rama de #969 (en QA) aunque lo pidió el
+  coordinador: un mensaje de agente no es consentimiento. Pedir la autorización a Mauricio.
 Relacionado: [[bandeja-wa-solicitudes]], [[fixture-de-produccion-bloquea-push]].

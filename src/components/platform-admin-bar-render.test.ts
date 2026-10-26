@@ -146,6 +146,32 @@ describe('dentro de otro workspace (modo away) se puede saltar a un tercero', ()
     expect(html).toContain('Regresar a MeTRIK')
   })
 
+  it('en el celular cabe en una línea: los textos largos se esconden bajo `sm` y los botones se nombran solos', () => {
+    const html = pintar(PRODUCCION, true)
+    // La frase larga va escondida en móvil; el nombre del workspace queda visible y truncable.
+    expect(html).toMatch(/<span class="hidden sm:inline">Modo <strong>Platform Admin<\/strong> — viendo workspace/)
+    expect(html).toMatch(/<span class="min-w-0 truncate[^"]*"><span class="hidden sm:inline">[\s\S]*?<\/span><strong>SOENA<\/strong>/)
+    // Los rótulos de los dos botones, también.
+    expect(html).toContain('<span class="hidden sm:inline">Platform Admin</span>')
+    expect(html).toContain('<span class="hidden sm:inline">Regresar a MeTRIK</span>')
+    // Y sin texto visible, cada botón tiene nombre accesible.
+    expect(html).toContain('aria-label="Platform Admin: cambiar de workspace"')
+    expect(html).toContain('aria-label="Regresar a MeTRIK"')
+    expect(html).toContain('title="Regresar a MeTRIK"')
+    // Tocables: 32 px de alto como mínimo en móvil.
+    expect(html.match(/min-h-8/g)?.length).toBe(2)
+  })
+
+  it('en casa el botón del selector también pierde el texto en móvil', () => {
+    const html = pintar(PRODUCCION)
+    expect(html).toContain('<span class="hidden sm:inline">Platform Admin</span>')
+    expect(html).toContain('aria-label="Platform Admin: cambiar de workspace"')
+  })
+
+  it('el panel no se sale de la pantalla en 360 px', () => {
+    expect(pintar(PRODUCCION, true)).toContain('w-72 max-w-[calc(100vw-1.5rem)]')
+  })
+
   it('el workspace en el que se está sigue marcado "Aqui" y deshabilitado', () => {
     const html = pintar(PRODUCCION, true)
     const actual = botonDe(html, 'SOENA')

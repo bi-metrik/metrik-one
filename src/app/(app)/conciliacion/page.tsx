@@ -6,6 +6,8 @@ import { getControlRecibos } from '@/lib/actions/recibos-control-actions'
 import ConciliacionClient from './conciliacion-client'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { destinoInicialConciliacion } from './destino-inicial'
+import { contarPendientesSiigoViaje } from '../negocios/facturacion-viaje-actions'
+import PendientesSiigoViaje from './pendientes-siigo-viaje'
 
 export const runtime = 'nodejs'
 
@@ -61,7 +63,14 @@ export default async function ConciliacionPage({
   // hidratación la descarta.
   const destino = destinoInicialConciliacion(await searchParams)
 
+  // Recibos de viajes que quedaron pendientes sin Siigo (adenda): se emiten en lote con confirmación.
+  const pendientesViaje = await contarPendientesSiigoViaje()
+
   return (
+    <>
+    {pendientesViaje.ok && pendientesViaje.recibos > 0 && (
+      <PendientesSiigoViaje recibos={pendientesViaje.recibos} entorno={pendientesViaje.entorno} />
+    )}
     <ConciliacionClient
       data={data}
       cola={cola}
@@ -70,5 +79,6 @@ export default async function ConciliacionPage({
       pestanaInicial={destino.pestana}
       saldoInicial={destino.saldo}
     />
+    </>
   )
 }

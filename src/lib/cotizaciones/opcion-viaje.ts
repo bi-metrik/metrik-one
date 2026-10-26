@@ -28,7 +28,8 @@ import {
 } from './detalle-viaje'
 import { describirOcupacion, type Composicion } from './tarifa-pasajero'
 import type { EquipajeTramo, TramoVuelo } from './tramos-vuelo'
-import type { TipoRanura } from './ranuras-cotizacion'
+import { esNombreDeOpcion, type TipoRanura } from './ranuras-cotizacion'
+import { nombreVisibleDeLinea } from './nombre-visible'
 import { diaDeLaSemana, leerFecha, lugarConCodigo } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 // ── La nota para el cliente ──────────────────────────────────────────────────
@@ -121,7 +122,9 @@ export function fichaDeOpcion(item: ItemConLectura, composicion: Composicion | n
     // ida es directa y el regreso no dice escala (la captura muestra los dos tramos iguales).
     const idaDirecta = ida?.directo === true
     const numeros = [v.numeros?.ida, v.numeros?.regreso].filter(Boolean).join(' / ') || v.numeroVuelo || null
-    const cabecera = [v.aerolinea, numeros, v.tarifa ? `Tarifa ${v.tarifa}` : null].filter(Boolean).join(' · ')
+    // «Tarifa Tarifa Económica» (brief del 2026-10-05, punto 10): la captura ya escribe la palabra.
+    const tarifa = v.tarifa ? (/^tarifa\b/i.test(v.tarifa.trim()) ? v.tarifa.trim() : `Tarifa ${v.tarifa}`) : null
+    const cabecera = [v.aerolinea, numeros, tarifa].filter(Boolean).join(' · ')
     const equipaje = ida ? equipajeCorto(ida.equipaje) : null
     const leido = [
       cabecera || null,
@@ -213,7 +216,8 @@ function comoLectura(l: unknown): ItemConLectura {
   return { ...x, grupo: x.grupo ?? null }
 }
 
-const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3 }
+// «Otro servicio» (asistencia médica, seguro) va al final del viaje, antes de las líneas sueltas.
+const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
 
 /** «2026-11-09 06:05» del primer tramo de ida, para ordenar. `--MM-DD` va después de lo fechado. */
 function claveDeSalida(item: ItemConLectura): string | null {
@@ -252,6 +256,17 @@ export function tituloDeBloque(
   numeroDeVuelo: number | null,
 ): { titulo: string; subtitulo: string | null } {
   const etiqueta = bloque.etiqueta ?? ''
+  // D4 del brief del 2026-10-05: una actividad se nombra con la actividad y su día («Día 3 ·
+  // Snorkel en Crab Cay»), no «Actividad 4 · Actividad en Providencia». El nombre de la ranura
+  // (con la ciudad de #1017, que arma el capítulo del PDF) queda de subtítulo.
+  if (bloque.tipo === 'actividad') {
+    const primera = bloque.lineas[0] as (ItemConLectura & { dia_relativo?: number | null }) | undefined
+    const nombre = primera ? nombreVisibleDeLinea(comoLectura(primera)).trim() : ''
+    if (!nombre || esNombreDeOpcion(nombre)) return { titulo: etiqueta, subtitulo: null }
+    const dia = primera?.dia_relativo
+    const conDia = typeof dia === 'number' && Number.isInteger(dia) && dia >= 1 ? `Día ${dia} · ${nombre}` : nombre
+    return { titulo: conDia, subtitulo: etiqueta || null }
+  }
   if (bloque.tipo !== 'vuelo' || numeroDeVuelo === null) return { titulo: etiqueta, subtitulo: null }
   const ruta = bloque.lineas.map(l => rutaDeOpcion(comoLectura(l))).find((r): r is string => r !== null) ?? null
   return {
@@ -273,14 +288,24 @@ export const NOMBRE_TIPO_BLOQUE: Record<TipoRanura | 'otro', string> = {
 export { equipajeDeTramo }
 
 /**
+ * La ruta de la IDA de un vuelo: de dónde sale, a dónde llega AL FINAL y qué día sale (H9, prueba
+ * Europa del 2026-10-14). El `destino` de la lectura es la llegada final de la ida (así lo pide la
+ * ranura), así que una escala no lo cambia: BOG→CDG→MAD llega a Madrid.
+ */
+export function rutaDeVueloDeOpcion(item: ItemConLectura): { origen: string | null; destino: string | null; fecha: string | null } {
+  const ida = tramosDelItem(item).tramos.find(t => t.sentido === 'ida')
+  return { origen: ida?.origen ?? null, destino: ida?.destino ?? null, fecha: ida?.fecha ?? null }
+}
+
+/**
  * Dónde queda una opción, para agrupar capturas en la bandeja (P7): la ruta de la ida en un
  * vuelo, la ciudad en un hotel. `null` en lo que la lectura no dejó.
  */
 export function lugarDeOpcion(item: ItemConLectura): { lugar: string | null; origen: string | null; destino: string | null } {
   const ranura = ranuraDelItem(item)
   if (ranura?.slug === 'vuelo_detalle') {
-    const ida = tramosDelItem(item).tramos.find(t => t.sentido === 'ida')
-    return { lugar: null, origen: ida?.origen ?? null, destino: ida?.destino ?? null }
+    const { origen, destino } = rutaDeVueloDeOpcion(item)
+    return { lugar: null, origen, destino }
   }
   if (ranura?.slug === 'hotel_detalle') {
     const [h] = hotelesDeItems([item])

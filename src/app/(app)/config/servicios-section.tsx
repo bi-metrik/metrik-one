@@ -1,15 +1,17 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
+import { useEffect, useState, useTransition, useRef } from 'react'
 import {
   Plus, X, Trash2, Check, ChevronDown, ChevronRight,
-  Pencil, Loader2,
+  Pencil, Loader2, Table2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   createServicio, updateServicio, deleteServicio, toggleServicio,
 } from './servicios-actions'
 import type { RubroTemplate } from './servicios-actions'
+import { getServiciosConTarifas } from './tarifas-actions'
+import TarifasServicio from './tarifas-servicio'
 import { TIPOS_RUBRO } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/contacts/constants'
 import type { Servicio, Staff } from '@/types/database'
@@ -31,6 +33,12 @@ export default function ServiciosSection({ initialData, staffMembers = [], linea
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  // Tarifas por plan y ruta: solo para los servicios que usa una propuesta económica.
+  const [conTarifas, setConTarifas] = useState<Set<string>>(new Set())
+  const [tarifasId, setTarifasId] = useState<string | null>(null)
+  useEffect(() => {
+    getServiciosConTarifas().then(ids => setConTarifas(new Set(ids)))
+  }, [])
 
   // New servicio form
   const [nombre, setNombre] = useState('')
@@ -607,6 +615,18 @@ export default function ServiciosSection({ initialData, staffMembers = [], linea
 
                   {/* Actions */}
                   <div className="flex shrink-0 items-center gap-1">
+                    {conTarifas.has(s.id) && (
+                      <button
+                        onClick={() => setTarifasId(tarifasId === s.id ? null : s.id)}
+                        title="Tarifas por plan y ruta"
+                        className={`inline-flex items-center gap-1 rounded px-1.5 py-1 text-[11px] hover:bg-accent ${
+                          tarifasId === s.id ? 'text-foreground' : 'text-muted-foreground'
+                        }`}
+                      >
+                        <Table2 className="h-3.5 w-3.5" />
+                        Tarifas
+                      </button>
+                    )}
                     <button
                       onClick={() => startEdit(s)}
                       className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -621,6 +641,8 @@ export default function ServiciosSection({ initialData, staffMembers = [], linea
                     </button>
                   </div>
                 </div>
+
+                {tarifasId === s.id && <TarifasServicio servicioId={s.id} />}
 
                 {/* Expanded rubros */}
                 {isExpanded && tpl && tpl.length > 0 && (

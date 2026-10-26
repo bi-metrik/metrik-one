@@ -19,13 +19,22 @@
  *   contradice nada. El cruce calla hasta que los dos lados existen.
  * - Un lado cuyo bloque no le aplica al caso tampoco cuenta (el motor solo lee bloques
  *   que le aplican; un dato de una rama abandonada no decide nada).
+ * - Excepción a la regla anterior: el tipo `requeridos` existe justo para el dato que
+ *   FALTA. Ahí la ausencia es la contradicción (una copropiedad sin el RUT del segundo
+ *   titular no puede radicarse ante la UPME), pero solo cuando la `condition` del cruce
+ *   se cumple y el bloque del dato le aplica al caso.
  * - `bloquea_en_etapas` dice en qué etapas (por `orden`) el cruce FRENA el avance. En
  *   las demás solo avisa. Frenar siempre se puede omitir con el permiso de omitir gates
  *   y el motivo escrito: un control nuevo sin salida deja casos varados.
+ * - Un cruce que frena también se puede AVANZAR, solo él, con motivo: quien el workspace
+ *   declare en `config_extra.avanzar_cruces.staff_ids` deja una excepción para ESE cruce
+ *   en ESE negocio con ESE valor de los datos (`huella`). Si los datos cambian y el cruce
+ *   vuelve a fallar, vuelve a frenar. Ver `cruces-avance.ts`.
  *
  * Configuración: `lineas_negocio.config_extra.cruces` (lista). Sin la clave, nada cambia.
  */
 
+import { entidadFinancieraEn } from '@/lib/documentos/entidad-financiera'
 import { esPersonaJuridica, parsearPersonas } from '@/lib/documentos/personas'
 import { coinciden, MODOS_COMPARACION, type ModoComparacion } from './comparar-valores'
 import {
@@ -75,6 +84,11 @@ interface CruceBase {
   condition?: Record<string, unknown>
   /** Etapas (por `orden`) en las que el cruce frena el avance. Vacío = solo avisa. */
   bloquea_en_etapas?: number[]
+  /**
+   * Lo que cuesta avanzar sin corregir el dato. Se muestra en la confirmación de
+   * «Avanzar de todas formas» («la UPME puede emitir el certificado incompleto…»).
+   */
+  advertencia?: string
 }
 
 export interface CruceCantidad extends CruceBase {
@@ -113,13 +127,64 @@ export interface CruceCoincide extends CruceBase {
   equivalencias?: string[][]
 }
 
-export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide
+/** Un dato que tiene que estar, con el nombre con que se le dice al equipo que falta. */
+export interface CampoRequerido extends FuenteValor {
+  /** «el nombre del segundo titular (RUT del solicitante 2)». */
+  label: string
+}
+
+/**
+ * Datos que TIENEN que estar cuando se cumple la `condition` (la titularidad dice
+ * copropiedad: el RUT del segundo titular, su nombre y su documento). Es el único tipo en
+ * el que un lado ausente sí es una contradicción.
+ *
+ * Un campo cuenta como presente si alguno de sus bloques (el principal o una
+ * alternativa) le aplica al caso y trae el dato. Si NINGUNO le aplica, el campo calla: un
+ * bloque que no le aplica al caso no se le puede exigir. Que el negocio no tenga todavía
+ * fila del bloque (nunca se cargó) sí cuenta como faltante: es justo el caso que se busca.
+ *
+ * Marcador del mensaje: `{faltantes}` («el nombre … y el documento …»).
+ */
+export interface CruceRequeridos extends CruceBase {
+  tipo: 'requeridos'
+  campos: CampoRequerido[]
+}
+
+/**
+ * Si en una lista de personas (los compradores de la factura) hay una ENTIDAD FINANCIERA,
+ * un dato tiene que valer uno de `valores` (la titularidad tiene que ser «leasing»).
+ *
+ * Calla si falta la lista, si nadie en ella es entidad financiera, o si falta el dato: un
+ * lado ausente no es una contradicción. La entidad se reconoce por el nombre
+ * (`@/lib/documentos/entidad-financiera`).
+ *
+ * Marcadores del mensaje: `{entidad}` (nombre de la entidad), `{valor}` (el dato, con la
+ * etiqueta de su opción), `{lista}`.
+ */
+export interface CruceEntidadFinanciera extends CruceBase {
+  tipo: 'entidad_financiera'
+  lista: FuenteValor
+  dato: FuenteValor
+  valores: string[]
+}
+
+export type Cruce = CruceCantidad | CruceDocumentoEnLista | CruceCoincide | CruceRequeridos | CruceEntidadFinanciera
 
 export interface Contradiccion {
   slug: string
   mensaje: string
   /** ¿Frena el avance en la etapa en la que está el negocio? */
   bloquea: boolean
+  /**
+   * Los valores que se contradicen, en una forma estable. Es la llave de la excepción
+   * (`cruces-avance.ts`): un avance vale mientras la huella sea la misma. Solo la traen
+   * los cruces de línea; un voto en disputa no se avanza por aquí.
+   */
+  huella?: string
+  /** El texto de costo del cruce, para la confirmación (ver `CruceBase.advertencia`). */
+  advertencia?: string
+  /** Alguien autorizado avanzó con este cruce, con estos mismos datos. */
+  avanzado?: { autor: string | null; motivo: string; fecha: string }
 }
 
 function esLado(v: unknown): v is LadoCantidad {
@@ -139,6 +204,11 @@ function esFuenteValor(v: unknown): v is FuenteValor {
   return esFuente(v)
 }
 
+function esCampoRequerido(v: unknown): v is CampoRequerido {
+  return esFuenteValor(v) && typeof (v as unknown as Record<string, unknown>).label === 'string' &&
+    !!String((v as unknown as Record<string, unknown>).label).trim()
+}
+
 function esCruce(v: unknown): v is Cruce {
   if (typeof v !== 'object' || v === null) return false
   const c = v as Record<string, unknown>
@@ -146,6 +216,16 @@ function esCruce(v: unknown): v is Cruce {
   if (typeof c.mensaje !== 'string' || !c.mensaje.trim()) return false
   if (c.tipo === 'cantidad') return esLado(c.a) && esLado(c.b)
   if (c.tipo === 'documento_en_lista') return esFuente(c.documento) && esFuente(c.lista)
+  if (c.tipo === 'requeridos') {
+    // Sin `condition` exigiría el dato a TODO caso de la línea: eso es trabajo de un gate de
+    // bloque, no de un cruce. Se descarta para que un descuido no frene la línea entera.
+    return typeof c.condition === 'object' && c.condition !== null &&
+      Array.isArray(c.campos) && c.campos.length > 0 && c.campos.every(esCampoRequerido)
+  }
+  if (c.tipo === 'entidad_financiera') {
+    return esFuenteValor(c.lista) && esFuenteValor(c.dato) && Array.isArray(c.valores) &&
+      c.valores.length > 0 && c.valores.every(v => typeof v === 'string' && !!v.trim())
+  }
   if (c.tipo === 'coincide') {
     return esFuenteValor(c.a) && Array.isArray(c.b) && c.b.some(esFuenteValor) &&
       (MODOS_COMPARACION as unknown[]).includes(c.modo)
@@ -177,6 +257,16 @@ export function slugsDeCruces(cruces: Cruce[]): string[] {
     } else if (c.tipo === 'documento_en_lista') {
       s.add(c.documento.source_bloque_slug)
       s.add(c.lista.source_bloque_slug)
+    } else if (c.tipo === 'entidad_financiera') {
+      for (const f of [c.lista, c.dato]) {
+        s.add(f.source_bloque_slug)
+        for (const alt of f.alternativas ?? []) s.add(alt)
+      }
+    } else if (c.tipo === 'requeridos') {
+      for (const f of c.campos) {
+        s.add(f.source_bloque_slug)
+        for (const alt of f.alternativas ?? []) s.add(alt)
+      }
     } else {
       for (const f of [c.a, ...c.b.filter(esFuenteValor)]) {
         s.add(f.source_bloque_slug)
@@ -205,7 +295,13 @@ async function resolverLado(lado: LadoCantidad, ctx: ContextoFuentes): Promise<L
       // Un documento sin ninguna fila todavía no dice cuántas personas trae.
       if (filas.length === 0) continue
       const soloNaturales = lado.solo_naturales_si ? await ctx.evaluar(lado.solo_naturales_si) : false
-      const n = soloNaturales ? filas.filter(p => !esPersonaJuridica(p)).length : filas.length
+      const naturales = filas.filter(p => !esPersonaJuridica(p)).length
+      // «Solo naturales» descuenta a la sociedad que ACOMPAÑA a una persona en el
+      // certificado (la del proyecto, el banco). Si no queda ninguna persona natural, la
+      // sociedad no acompaña a nadie: ES el titular, y descontarla dejaba «0 solicitantes»
+      // contra «un solo solicitante» (V0522, una SAS con el tipo de persona en «natural»).
+      // Ahí se cuentan todas.
+      const n = soloNaturales && naturales > 0 ? naturales : filas.length
       return { n, valor: String(n) }
     }
     if (lado.contar_campos && lado.contar_campos.length > 0) {
@@ -234,13 +330,41 @@ async function resolverLado(lado: LadoCantidad, ctx: ContextoFuentes): Promise<L
 
 /** El valor de una fuente: el primer bloque que le aplique al caso y traiga el campo. */
 async function resolverValor(f: FuenteValor, ctx: ContextoFuentes): Promise<unknown> {
+  return (await resolverValorConSlug(f, ctx))?.valor
+}
+
+/** Igual que `resolverValor`, con el bloque del que salió (para la etiqueta de la opción). */
+async function resolverValorConSlug(
+  f: FuenteValor,
+  ctx: ContextoFuentes,
+): Promise<{ slug: string; valor: unknown } | undefined> {
   for (const slug of [f.source_bloque_slug, ...(f.alternativas ?? [])]) {
     if (!ctx.porSlug[slug]) continue
     if (!(await ctx.aplica(slug))) continue
     const v = valorDe(ctx, slug, f.field)
-    if (v !== undefined) return v
+    if (v !== undefined) return { slug, valor: v }
   }
   return undefined
+}
+
+/**
+ * ¿Falta el dato? `null` si ninguno de sus bloques le aplica al caso (no se le exige),
+ * `true` si alguno le aplica y ninguno de los que aplican lo trae.
+ */
+async function faltaRequerido(f: CampoRequerido, ctx: ContextoFuentes): Promise<boolean | null> {
+  let algunoAplica = false
+  for (const slug of [f.source_bloque_slug, ...(f.alternativas ?? [])]) {
+    if (!(await ctx.aplica(slug))) continue
+    algunoAplica = true
+    if (valorDe(ctx, slug, f.field) !== undefined) return false
+  }
+  return algunoAplica ? true : null
+}
+
+/** «a», «a y b», «a, b y c». */
+function enumerar(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`
 }
 
 function conUnidad(n: number, unidad?: [string, string]): string {
@@ -250,6 +374,16 @@ function conUnidad(n: number, unidad?: [string, string]): string {
 
 function redactar(plantilla: string, valores: Record<string, string>): string {
   return plantilla.replace(/\{(\w+)\}/g, (m, k: string) => (k in valores ? valores[k] : m))
+}
+
+/**
+ * La huella de los valores que se contradicen y el texto de costo del cruce. La huella es
+ * texto plano con los datos del caso: no sale del servidor sin pasar por un hash
+ * (`cruces-avance.ts` → `hashHuella`).
+ */
+function extra(c: Cruce, valores: Array<string | number>): Pick<Contradiccion, 'huella' | 'advertencia'> {
+  const adv = typeof c.advertencia === 'string' && c.advertencia.trim() ? c.advertencia.trim() : undefined
+  return { huella: JSON.stringify(valores), ...(adv ? { advertencia: adv } : {}) }
 }
 
 /**
@@ -272,12 +406,46 @@ export async function evaluarCruces(
       out.push({
         slug: c.slug,
         bloquea,
+        ...extra(c, ['cantidad', a.n, a.valor, b.n, b.valor]),
         mensaje: redactar(c.mensaje, {
           a: conUnidad(a.n, c.a.unidad),
           b: conUnidad(b.n, c.b.unidad),
           a_valor: a.valor,
           b_valor: b.valor,
         }),
+      })
+      continue
+    }
+
+    if (c.tipo === 'requeridos') {
+      const faltantes: string[] = []
+      for (const f of c.campos) {
+        if ((await faltaRequerido(f, ctx)) === true) faltantes.push(f.label)
+      }
+      if (faltantes.length === 0) continue
+      out.push({
+        slug: c.slug,
+        bloquea,
+        ...extra(c, ['requeridos', ...faltantes]),
+        mensaje: redactar(c.mensaje, { faltantes: enumerar(faltantes) }),
+      })
+      continue
+    }
+
+    if (c.tipo === 'entidad_financiera') {
+      const lista = await resolverValor(c.lista, ctx)
+      const entidad = entidadFinancieraEn(parsearPersonas(lista))
+      if (!entidad) continue
+      const dato = await resolverValorConSlug(c.dato, ctx)
+      if (!dato) continue
+      const clave = normalizarClave(dato.valor)
+      if (c.valores.some(v => normalizarClave(v) === clave)) continue
+      const valor = ctx.etiqueta(dato.slug, c.dato.field, dato.valor) ?? String(dato.valor)
+      out.push({
+        slug: c.slug,
+        bloquea,
+        ...extra(c, ['entidad_financiera', `${entidad.nombre}|${entidad.documento}`, clave]),
+        mensaje: redactar(c.mensaje, { entidad: entidad.nombre, valor, lista: String(lista) }),
       })
       continue
     }
@@ -296,6 +464,7 @@ export async function evaluarCruces(
       out.push({
         slug: c.slug,
         bloquea,
+        ...extra(c, ['coincide', String(a), ...[...new Set(bs.map(String))].sort()]),
         mensaje: redactar(c.mensaje, { a_valor: String(a), b_valor: [...new Set(bs.map(String))].join(' / ') }),
       })
       continue
@@ -313,6 +482,11 @@ export async function evaluarCruces(
     out.push({
       slug: c.slug,
       bloquea,
+      ...extra(c, [
+        'documento_en_lista',
+        String(doc).replace(/\D/g, ''),
+        ...personas.map(p => `${p.nombre ?? ''}|${p.documento ?? ''}`).sort(),
+      ]),
       mensaje: redactar(c.mensaje, {
         documento: String(doc).replace(/\D/g, ''),
         lista: personas.map(p => (p.documento ? `${p.nombre} (${p.documento})` : p.nombre)).join('; '),

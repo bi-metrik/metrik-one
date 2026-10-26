@@ -18,8 +18,25 @@ import {
 import { leerContextoTextoCliente, type ContextoTextoCliente } from '@/lib/cotizaciones/documento-cliente-datos'
 import { normalizarTerminos } from '@/lib/cotizaciones/terminos-cotizacion'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
-import { PLANTILLA_POR_DEFECTO, plantillaUsaTextoDelCliente } from '@/lib/pdf/plantillas-cotizacion'
+import { PLANTILLA_POR_DEFECTO, plantillaUsaTextoDelCliente, usaMotorHtml } from '@/lib/pdf/plantillas-cotizacion'
+import { conAnticipo, normalizarAnticipo } from '@/lib/cotizaciones/propuesta/anticipo'
 import { getServerKey } from '@/lib/server-keys'
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
+import { INCLUYE_POR_ONE } from '@/lib/cotizaciones/incluye-por-one'
+import { nombresDelViaje, parrafosViejos, type ZonaDeParrafo } from '@/lib/cotizaciones/parrafo-viejo'
+
+/**
+ * C6 · «Incluye» armado por ONE: la forma por pasos pide guardar (o redactar) con la marca
+ * `incluye_origen = 'one'`. Se comprueba la pieza contra la base; con ella apagada no se marca.
+ */
+type OpcionesPorPasos = { porPasos?: boolean }
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function marcaIncluyePorOne(supabase: any, cotizacionId: string, opciones?: OpcionesPorPasos): Promise<{ marca: boolean } | { fallo: Fallo }> {
+  if (opciones?.porPasos !== true) return { marca: false }
+  const guard = await exigirPorPasos(supabase, cotizacionId, 'incluye_por_one')
+  return guard.ok ? { marca: true } : { fallo: { success: false, error: guard.error } }
+}
 
 /**
  * El texto para el cliente del documento de Trappvel: leerlo, redactarlo con ONE y
@@ -53,11 +70,19 @@ function panelDe(
   ctx: ContextoTextoCliente,
   documento: DocumentoCliente | null,
   terminos: string | null = ctx.terminos,
+  motorHtml = false,
+  anticipo = ctx.anticipo,
 ): PanelTextoCliente {
+  const desactualizado = textoDesactualizado(documento, ctx.huella)
+  // D5 · qué párrafo quedó viejo: solo un texto de la forma por pasos guarda los nombres.
+  const viejos = desactualizado && documento?.fuente_nombres ? parrafosViejos(documento, nombresDelViaje(ctx.viaje)) : null
   return {
+    anticipo,
+    imprimeAnticipo: motorHtml,
     columnaPresente: ctx.columnaPresente,
     documento,
-    desactualizado: textoDesactualizado(documento, ctx.huella),
+    desactualizado,
+    ...(viejos ? { parrafosViejos: viejos } : {}),
     hayViaje: hayViajeQueRedactar(ctx.viaje),
     editable: isEditable((ctx.estado ?? '') as EstadoCotizacion),
     terminos,
@@ -65,15 +90,17 @@ function panelDe(
   }
 }
 
+/** ¿La plantilla del workspace imprime texto del cliente? ¿Tiene el motor `html` encendido? */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function usaTextoDelCliente(supabase: any, workspaceId: string): Promise<boolean> {
+async function plantillaDelWorkspace(supabase: any, workspaceId: string): Promise<{ texto: boolean; motorHtml: boolean }> {
   const { data } = await supabase
     .from('workspaces')
-    .select('cotizacion_template_slug')
+    .select('cotizacion_template_slug, config_extra')
     .eq('id', workspaceId)
     .maybeSingle()
-  const slug = (data as { cotizacion_template_slug?: string | null } | null)?.cotizacion_template_slug
-  return plantillaUsaTextoDelCliente(slug ?? PLANTILLA_POR_DEFECTO)
+  const fila = data as { cotizacion_template_slug?: string | null; config_extra?: unknown } | null
+  const slug = fila?.cotizacion_template_slug ?? PLANTILLA_POR_DEFECTO
+  return { texto: plantillaUsaTextoDelCliente(slug), motorHtml: usaMotorHtml(slug, fila?.config_extra) }
 }
 
 /**
@@ -88,7 +115,8 @@ async function contextoParaEscribir(cotizacionId: string) {
   if (role && ROLES_SIN_ESCRITURA.has(role)) {
     return { fallo: { success: false, error: 'Tu rol puede ver la cotización pero no editar su texto.' } as Fallo }
   }
-  if (!(await usaTextoDelCliente(supabase, workspaceId))) {
+  const plantilla = await plantillaDelWorkspace(supabase, workspaceId)
+  if (!plantilla.texto) {
     return { fallo: { success: false, error: 'La plantilla de este workspace no imprime texto para el cliente.' } as Fallo }
   }
   const ctx = await leerContextoTextoCliente(supabase, cotizacionId)
@@ -104,7 +132,7 @@ async function contextoParaEscribir(cotizacionId: string) {
   }
   // `documento_cliente` no está en los tipos generados hasta regenerar `database.ts`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { supabase: supabase as any, workspaceId, staffId, ctx }
+  return { supabase: supabase as any, workspaceId, staffId, ctx, motorHtml: plantilla.motorHtml }
 }
 
 function revalidar(ctx: ContextoTextoCliente) {
@@ -118,10 +146,11 @@ function revalidar(ctx: ContextoTextoCliente) {
 export async function getTextoCliente(cotizacionId: string): Promise<PanelTextoCliente | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
-  if (!(await usaTextoDelCliente(supabase, workspaceId))) return null
+  const plantilla = await plantillaDelWorkspace(supabase, workspaceId)
+  if (!plantilla.texto) return null
   const ctx = await leerContextoTextoCliente(supabase, cotizacionId)
   if (!ctx) return null
-  return panelDe(ctx, ctx.documento)
+  return panelDe(ctx, ctx.documento, ctx.terminos, plantilla.motorHtml)
 }
 
 /**
@@ -134,12 +163,14 @@ export async function getTextoCliente(cotizacionId: string): Promise<PanelTextoC
  */
 export async function redactarDocumentoCliente(
   cotizacionId: string,
-  opciones?: { reemplazarRevisado?: boolean },
+  opciones?: { reemplazarRevisado?: boolean } & OpcionesPorPasos,
 ): Promise<Exito | Fallo> {
   const r = await contextoParaEscribir(cotizacionId)
   if ('fallo' in r) return r.fallo as Fallo
-  const { supabase, workspaceId, ctx } = r
+  const { supabase, workspaceId, ctx, motorHtml } = r
   const reemplazar = opciones?.reemplazarRevisado === true
+  const m = await marcaIncluyePorOne(supabase, cotizacionId, opciones)
+  if ('fallo' in m) return m.fallo
 
   if (ctx.documento?.revisado_en && !reemplazar) {
     return {
@@ -167,8 +198,13 @@ export async function redactarDocumentoCliente(
   }
 
   // El validador de estilo MARCA el borrador; no lo corrige. Quien revisa ve qué mirar.
+  // Con «Incluye» armado por ONE, la lista del modelo no se guarda: la arma ONE al imprimir, y
+  // un borrador nuevo no trae líneas propias.
   const documento: DocumentoCliente = {
     ...redactado.texto,
+    ...(m.marca || ctx.documento?.incluye_origen === INCLUYE_POR_ONE ? { incluye: [], incluye_origen: INCLUYE_POR_ONE } : {}),
+    // D5 · la forma por pasos guarda con qué servicios se escribió, para marcar el párrafo viejo.
+    ...(m.marca ? { fuente_nombres: nombresDelViaje(ctx.viaje) } : {}),
     origen: 'ia',
     modelo: redactado.modelo,
     redactado_en: new Date().toISOString(),
@@ -181,7 +217,8 @@ export async function redactarDocumentoCliente(
 
   let q = supabase
     .from('cotizaciones')
-    .update({ documento_cliente: documento })
+    // El anticipo comparte la columna: el borrador nuevo lo conserva (`anticipo.ts`).
+    .update({ documento_cliente: conAnticipo(documento, ctx.anticipo) })
     .eq('id', cotizacionId)
     .eq('workspace_id', workspaceId)
   if (!reemplazar) q = q.is('documento_cliente->>revisado_en', null)
@@ -198,7 +235,7 @@ export async function redactarDocumentoCliente(
   }
 
   revalidar(ctx)
-  return { success: true, panel: panelDe(ctx, documento) }
+  return { success: true, panel: panelDe(ctx, documento, ctx.terminos, motorHtml) }
 }
 
 /**
@@ -217,10 +254,17 @@ export async function guardarDocumentoCliente(
   cotizacionId: string,
   texto: TextoCliente,
   terminos?: string | null,
+  /**
+   * C6 · la forma por pasos: `texto.incluye` son solo las líneas PROPIAS de la asesora, y el
+   * documento queda con la marca `incluye_origen = 'one'` (el PDF arma lo demás).
+   */
+  opciones?: OpcionesPorPasos,
 ): Promise<Exito | Fallo> {
   const r = await contextoParaEscribir(cotizacionId)
   if ('fallo' in r) return r.fallo as Fallo
-  const { supabase, workspaceId, staffId, ctx } = r
+  const { supabase, workspaceId, staffId, ctx, motorHtml } = r
+  const m = await marcaIncluyePorOne(supabase, cotizacionId, opciones)
+  if ('fallo' in m) return m.fallo
 
   const limpio = normalizarTexto(texto)
   let documento: DocumentoCliente | null = null
@@ -244,10 +288,14 @@ export async function guardarDocumentoCliente(
       revisado_en: new Date().toISOString(),
       // Lo que la persona decidió dejar, para que quede dicho; nunca se corrige solo.
       ...conAlertas(revisarEstilo(limpio)),
+      ...(m.marca || ctx.documento?.incluye_origen === INCLUYE_POR_ONE ? { incluye_origen: INCLUYE_POR_ONE } : {}),
+      // D5 · los servicios con que se revisó (la forma por pasos).
+      ...(m.marca ? { fuente_nombres: nombresDelViaje(ctx.viaje) } : {}),
     }
   }
 
-  const cambios: Record<string, unknown> = { documento_cliente: documento }
+  // Un texto vaciado no se lleva el anticipo: la columna queda con él solo (`anticipo.ts`).
+  const cambios: Record<string, unknown> = { documento_cliente: conAnticipo(documento, ctx.anticipo) }
   const conTerminos = terminos !== undefined
   const terminosLimpios = conTerminos ? normalizarTerminos(terminos) : ctx.terminos
   if (conTerminos) cambios.terminos_condiciones = terminosLimpios
@@ -265,5 +313,77 @@ export async function guardarDocumentoCliente(
   if (!data || data.length === 0) return { success: false, error: 'No se pudo guardar el texto.' }
 
   revalidar(ctx)
-  return { success: true, panel: panelDe(ctx, documento, terminosLimpios) }
+  return { success: true, panel: panelDe(ctx, documento, terminosLimpios, motorHtml) }
+}
+
+/**
+ * El anticipo para apartar (decisión de Mauricio del 2026-10-14, punto 3): un monto y una línea
+ * que la asesora asigna a mano en esta cotización. `null` o monto vacío lo quita.
+ *
+ * Solo escribe `documento_cliente.anticipo`: el texto y su revisión quedan como estaban. No
+ * registra ningún pago ni toca la etapa del negocio (riesgo N4 de Hana): es lo que el PDF dice.
+ */
+export async function guardarAnticipoPropuesta(cotizacionId: string, raw: unknown): Promise<Exito | Fallo> {
+  const r = await contextoParaEscribir(cotizacionId)
+  if ('fallo' in r) return r.fallo as Fallo
+  const { supabase, workspaceId, ctx, motorHtml } = r
+  if (!motorHtml) return { success: false, error: 'La propuesta de este workspace no imprime anticipo.' }
+  const n = normalizarAnticipo(raw)
+  if (!n.ok) return { success: false, error: n.error }
+
+  // Se relee la columna entera: el anticipo se pone sobre lo que haya, sin tocar el texto.
+  const { data: fila } = await supabase
+    .from('cotizaciones')
+    .select('documento_cliente')
+    .eq('id', cotizacionId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const actual = (fila as { documento_cliente?: unknown } | null)?.documento_cliente
+  const base = actual && typeof actual === 'object' && !Array.isArray(actual) ? (actual as Record<string, unknown>) : null
+  const nuevo = conAnticipo(base, n.anticipo)
+  const { data, error } = await supabase
+    .from('cotizaciones')
+    .update({ documento_cliente: nuevo && Object.keys(nuevo).length > 0 ? nuevo : null })
+    .eq('id', cotizacionId)
+    .eq('workspace_id', workspaceId)
+    .select('id')
+  if (error) {
+    console.error('[guardarAnticipoPropuesta] update', error)
+    return { success: false, error: 'No se pudo guardar el anticipo.' }
+  }
+  if (!data || data.length === 0) return { success: false, error: 'No se pudo guardar el anticipo.' }
+
+  revalidar(ctx)
+  return { success: true, panel: panelDe(ctx, ctx.documento, ctx.terminos, motorHtml, n.anticipo) }
+}
+
+/**
+ * H4 (verificación D, D5) · «Actualizar con ONE» de UN párrafo: ONE redacta con el viaje de ahora y
+ * devuelve SOLO ese párrafo (el titular, la presentación o «Antes de viajar»). No guarda nada: el
+ * panel lo pone en el formulario y la asesora lo lee y guarda, como todo (guardar es revisar).
+ *
+ * Solo la forma por pasos (`exigirPorPasos`).
+ */
+export async function actualizarParrafoConOne(
+  cotizacionId: string,
+  zona: ZonaDeParrafo,
+): Promise<{ success: true; zona: ZonaDeParrafo; texto: string | string[] } | Fallo> {
+  if (zona !== 'titular' && zona !== 'intro' && zona !== 'antes') return { success: false, error: 'Ese párrafo no se redacta con ONE.' }
+  const r = await contextoParaEscribir(cotizacionId)
+  if ('fallo' in r) return r.fallo as Fallo
+  const guard = await exigirPorPasos(r.supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  if (!hayViajeQueRedactar(r.ctx.viaje)) {
+    return { success: false, error: 'Todavía no hay viaje que describir: faltan el destino o las líneas (vuelos, hoteles, traslados).' }
+  }
+  const apiKey = getServerKey('gemini')
+  if (!apiKey) return { success: false, error: 'La redacción con ONE no está configurada en el servidor.' }
+  try {
+    const { texto } = await redactarTextoCliente(r.ctx.viaje, apiKey, { ejemplos: r.ctx.configLinea.ejemplos })
+    const nuevo = zona === 'titular' ? (texto.titular ?? '') : zona === 'intro' ? (texto.intro ?? '') : texto.antes_de_viajar
+    return { success: true, zona, texto: nuevo }
+  } catch (e) {
+    console.error('[actualizarParrafoConOne]', e)
+    return { success: false, error: 'ONE no pudo redactar ese párrafo esta vez. Inténtalo de nuevo.' }
+  }
 }

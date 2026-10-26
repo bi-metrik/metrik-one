@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 import { CheckCircle2, Circle, Download, Copy, Check } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -16,6 +16,7 @@ import {
   type CamposExtraidos,
 } from '@/lib/actions/ve-documentos-negocio'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
+import { anotarFallaRed, relojRed } from '@/lib/red/bandeja-red'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import DocUploadSlot from './DocUploadSlot'
 import type { SlotState } from './DocUploadSlot'
@@ -93,7 +94,7 @@ function CamposForm({
   campos: CamposExtraidos
   onChange: (updated: CamposExtraidos) => void
 }) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const handleBlur = (key: keyof CamposExtraidos, value: string) => {
     const updated = { ...campos, [key]: value || undefined }
@@ -143,7 +144,6 @@ export default function BloqueDocumentos({
   modo,
   documentos,
 }: BloqueDocumentosProps) {
-  const router = useRouter()
   const saved = (instancia?.data ?? {}) as Record<string, unknown>
   const savedDocs = (saved.docs as Record<string, string>) ?? {}
 
@@ -210,6 +210,7 @@ export default function BloqueDocumentos({
     }
 
     setSlotStates(prev => ({ ...prev, [slug]: 'uploading' }))
+    const inicioSubida = relojRed()
 
     try {
       // 1. Obtener URL firmada
@@ -226,6 +227,7 @@ export default function BloqueDocumentos({
       if (uploadInfo.signedUrl) {
         const subida = await subirAUrlFirmada(uploadInfo.signedUrl, file, file.type || 'application/octet-stream')
         if (!subida.ok) {
+          anotarFallaRed({ superficie: 'subida', error: subida.error, desde: inicioSubida })
           setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
           toast.error(subida.error)
           return
@@ -238,6 +240,7 @@ export default function BloqueDocumentos({
             contentType: file.type || 'application/octet-stream',
           })
         if (uploadError) {
+          anotarFallaRed({ superficie: 'subida', error: uploadError, desde: inicioSubida })
           setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
           toast.error(`Error al subir: ${uploadError.message}`)
           return
@@ -267,8 +270,8 @@ export default function BloqueDocumentos({
       if (shouldComplete && instancia?.estado !== 'completo') {
         // No pasar docs del cliente — el servidor ya tiene todos via confirmarUploadDocumentoNegocio
         const res = await marcarBloqueCompleto(negocioBloqueId, {})
+        // Sin router.refresh(): `marcarBloqueCompleto` ya revalida la ficha (2026-10-04).
         if (res.error) toast.error(res.error)
-        else router.refresh()
       }
 
       // 5. AI processing para slugs conocidos
@@ -283,6 +286,8 @@ export default function BloqueDocumentos({
         }
       }
     } catch (err) {
+      // Piloto de red: la subida o una de sus acciones no llegó.
+      anotarFallaRed({ superficie: 'subida', error: err, desde: inicioSubida })
       setSlotStates(prev => ({ ...prev, [slug]: 'error' }))
       toast.error(`Error: ${err instanceof Error ? err.message : String(err)}`)
     }

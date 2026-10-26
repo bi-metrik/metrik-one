@@ -19,11 +19,8 @@ import {
   consultarValida,
   descargarPDFConsultaValida,
   descargarPlantillaValida,
-  generarPDFLoteValida,
   listarConsultasValida,
-  prepararLoteValida,
   type ConsultaHistorialItem,
-  type FilaLotePreparada,
   type FiltrosHistorial,
   type NegocioBusqueda,
   type Severidad,
@@ -34,9 +31,23 @@ import {
 } from '@/lib/actions/valida-consultas';
 import TutorialTour from '@/components/tutorial/TutorialTour';
 import TutorialButton from '@/components/tutorial/TutorialButton';
-import TutorialEmptyState from '@/components/tutorial/TutorialEmptyState';
 import { useFileDrop } from '@/hooks/use-file-drop';
+import {
+  cancelarLoteValida,
+  crearLoteValida,
+  loteVigenteValida,
+  pdfLoteValida,
+  progresoLoteValida,
+  reanudarLoteValida,
+  resultadosLoteValida,
+  type LoteVista,
+} from '@/lib/actions/valida-lotes';
+import { TOPE_FILAS_LOTE, errorTamanoArchivoLote, type AvisoTiposDocumento } from '@/lib/valida/lote';
+import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
+import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
+import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
 import { formatFecha } from '@/lib/dates/bogota'
+import { mensajeErrorValida } from '@/lib/valida/mensajes-error'
 import { PALETA } from '@/lib/marca/paleta'
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
@@ -112,6 +123,24 @@ type Props = {
    * Lo que se muestra EN LUGAR de las consultas cuando Valida está pausada (mora de más de 30 días).
    */
   consultasEnPausa?: React.ReactNode;
+  /**
+   * Lo que se muestra EN LUGAR de los formularios de consulta puntual y masiva cuando las consultas
+   * nuevas están restringidas por mora (cláusula 11.1): el historial y sus descargas siguen abiertos.
+   */
+  consultasRestringidas?: React.ReactNode;
+  /**
+   * Saldo de la bolsa (la prueba gratis del registro autogestionado, o una bolsa prepagada). null =
+   * el espacio no consulta con bolsa y no se muestra contador. Agotada o vencida, «Activa tu plan»
+   * reemplaza los formularios de consulta.
+   */
+  saldo?: SaldoBolsa | null;
+  /**
+   * La prueba gratis del registro autogestionado: con ella, el contador, la fecha y el cobro van en UNA
+   * franja (`FranjaPrueba`) en vez de la línea del saldo. null = no es una prueba.
+   */
+  prueba?: PruebaEnPantalla | null;
+  /** El lote del enlace del correo (`/valida?lote=<id>`): abre la carga masiva en ese lote. */
+  loteInicialId?: string | null;
 };
 
 export default function ValidaClient({
@@ -122,13 +151,27 @@ export default function ValidaClient({
   modoVitrina = false,
   encabezado = null,
   consultasEnPausa = null,
+  consultasRestringidas: restringidasPorMora = null,
+  saldo = null,
+  prueba = null,
+  loteInicialId = null,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>(negocioInicial ? 'historial' : 'puntual');
+  const [saldoLocal, setSaldoLocal] = useState<SaldoBolsa | null>(saldo);
+  const [corte, setCorte] = useState<MotivoCorte | null>(saldo?.bloqueada ? (saldo.motivo ?? 'bolsa_agotada') : null);
+  // La mora manda (es un contrato con cuotas vencidas); si no, el corte de la bolsa.
+  const consultasRestringidas =
+    restringidasPorMora ?? (corte ? <ActivaTuPlan motivo={corte} esPrueba={saldoLocal?.esPrueba ?? false} /> : null);
+  const [tab, setTab] = useState<TabKey>(
+    negocioInicial || consultasRestringidas ? 'historial' : loteInicialId ? 'masiva' : 'puntual',
+  );
   const [historial, setHistorial] = useState<ConsultaHistorialItem[]>(historialInicial);
   const [historialError, setHistorialError] = useState<string | null>(errorHistorial);
   const [tourTrigger, setTourTrigger] = useState(0);
+  // Sin filtros, un historial vacío invita a la primera consulta; con filtros, dice que no hay resultados.
+  const [conFiltros, setConFiltros] = useState(Boolean(negocioInicial));
 
   async function refrescarHistorial(filtros?: FiltrosHistorial) {
+    setConFiltros(Boolean(filtros && Object.entries(filtros).some(([k, v]) => k !== 'limite' && v !== undefined && v !== '')));
     const r = await listarConsultasValida(filtros);
     if (r.ok) {
       setHistorial(r.consultas);
@@ -142,8 +185,6 @@ export default function ValidaClient({
     setTourTrigger(t => t + 1);
     setTab('puntual');
   }
-
-  const mostrarEmpty = historial.length === 0 && !historialError;
 
   return (
     <div className="space-y-6">
@@ -159,16 +200,14 @@ export default function ValidaClient({
       </div>
 
       {encabezado}
+      {prueba && !consultasEnPausa && !restringidasPorMora ? (
+        <FranjaPrueba saldo={saldoLocal} prueba={prueba} />
+      ) : (
+        saldoLocal && !corte && !consultasEnPausa && !restringidasPorMora && <SaldoConsultas saldo={saldoLocal} />
+      )}
 
       <div className="space-y-6">
       {consultasEnPausa ? consultasEnPausa : (<>
-      {mostrarEmpty && (
-        <TutorialEmptyState
-          onStartDemo={dispararTutorial}
-          onTryConsulta={() => setTab('puntual')}
-        />
-      )}
-
       <div className="flex gap-1 border-b border-[#E5E7EB]">
         <TabButton
           active={tab === 'puntual'}
@@ -195,8 +234,26 @@ export default function ValidaClient({
         </TabButton>
       </div>
 
-      {tab === 'puntual' && <ConsultaPuntualForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
-      {tab === 'masiva' && <ConsultaMasivaForm onPersisted={() => refrescarHistorial()} modoVitrina={modoVitrina} />}
+      {tab !== 'historial' && consultasRestringidas}
+      {tab === 'puntual' && !consultasRestringidas && (
+        <ConsultaPuntualForm
+          onPersisted={() => refrescarHistorial()}
+          modoVitrina={modoVitrina}
+          onCorte={setCorte}
+          onConsumidas={n => setSaldoLocal(s => (s ? { ...s, saldo: Math.max(0, s.saldo - n) } : s))}
+        />
+      )}
+      {tab === 'masiva' && !consultasRestringidas && (
+        <ConsultaMasivaForm
+          onPersisted={() => refrescarHistorial()}
+          modoVitrina={modoVitrina}
+          onCorte={setCorte}
+          onConsumidas={n => setSaldoLocal(s => (s ? { ...s, saldo: Math.max(0, s.saldo - n) } : s))}
+          esPrueba={saldoLocal?.esPrueba ?? false}
+         
+          loteInicialId={loteInicialId}
+        />
+      )}
       {tab === 'historial' && (
         <Historial
           consultas={historial}
@@ -204,12 +261,13 @@ export default function ValidaClient({
           onFiltrar={refrescarHistorial}
           negocioInicial={negocioInicial}
           modoVitrina={modoVitrina}
+          textoVacio={conFiltros ? undefined : 'Haz tu primera consulta arriba.'}
         />
       )}
       </>)}
       </div>
 
-      {!consultasEnPausa && (tutorialNuncaVisto || tourTrigger > 0) && (
+      {!consultasEnPausa && !consultasRestringidas && (tutorialNuncaVisto || tourTrigger > 0) && (
         <TutorialTour slug="valida_standalone" forceStart={tourTrigger} />
       )}
     </div>
@@ -248,7 +306,18 @@ function TabButton({
 
 // ─── Consulta puntual ─────────────────────────────────────────────────────
 
-function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted: () => void; modoVitrina?: boolean }) {
+type PropsForm = {
+  onPersisted: () => void;
+  modoVitrina?: boolean;
+  /** La bolsa se cortó: el padre cambia los formularios por «Activa tu plan». */
+  onCorte?: (motivo: MotivoCorte) => void;
+  /** Consultas con resultado, para bajar el contador sin volver a leer el saldo. */
+  onConsumidas?: (n: number) => void;
+  /** La bolsa es la prueba gratis (cambia el texto del corte). */
+  esPrueba?: boolean;
+};
+
+function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onConsumidas }: PropsForm) {
   const [tipo, setTipo] = useState<TipoPersona>('natural');
   const [nombre, setNombre] = useState('');
   const [docTipo, setDocTipo] = useState<TipoDocumento>('CC');
@@ -270,7 +339,10 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
       const r = await consultarValida(input, { negocio_id: negocio?.id ?? null });
       if (r.ok) {
         setResultado({ data: r.data, valida_id: r.data.consulta_id });
+        onConsumidas?.(1);
         onPersisted();
+      } else if (esMotivoCorte(r.error)) {
+        onCorte?.(r.error);
       } else {
         setError(r.error);
       }
@@ -331,6 +403,9 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false }: { onPersisted
                   <option value="CC">CC</option>
                   <option value="CE">CE</option>
                   <option value="PAS">Pasaporte</option>
+                  <option value="TI">TI</option>
+                  <option value="PPT">PPT</option>
+                  <option value="RC">Registro civil</option>
                 </>
               ) : (
                 <option value="NIT">NIT</option>
@@ -654,35 +729,125 @@ function BotonPDFConsulta({
   );
 }
 
-// ─── Carga masiva (con barra de progreso) ─────────────────────────────────
+// ─── Carga masiva (procesada en el servidor) ──────────────────────────────
+//
+// Desde el 2026-10-15 el lote lo procesa el servidor (`@/lib/valida/lote-servidor`): el archivo se
+// sube una vez, y esta pantalla solo pregunta el progreso. Se puede cerrar la pestaña y volver: al
+// abrir la carga masiva se retoma el último lote sin terminar (o el del enlace del correo).
 
 type EstadoCargue =
   | { fase: 'inicial' }
   | { fase: 'preparando' }
-  | { fase: 'procesando'; loteId: string; total: number; procesadas: number; severidades: Record<Severidad, number>; tituloLote: string | null }
-  | { fase: 'completado'; loteId: string; total: number; severidades: Record<Severidad, number>; tituloLote: string | null }
+  | { fase: 'confirmar_saldo'; alcanzan: number; consultables: number; total: number }
+  | { fase: 'confirmar_tipos'; aviso: AvisoTiposDocumento; total: number }
+  | { fase: 'lote'; lote: LoteVista }
   | { fase: 'error'; mensaje: string };
 
-function severidadesIniciales(): Record<Severidad, number> {
-  return { alto: 0, medio: 0, bajo: 0, informativo: 0, sin_hallazgo: 0, error: 0 };
+/** Cada cuánto se pregunta el progreso mientras el lote corre. */
+const INTERVALO_PROGRESO_MS = 2_500;
+
+function sinCorte(motivo: string | null): MotivoCorte | null {
+  return esMotivoCorte(motivo) ? motivo : null;
 }
 
-function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted: () => void; modoVitrina?: boolean }) {
+function conResultado(sev: Record<string, number>): number {
+  return Object.entries(sev).reduce((a, [s, n]) => (s === 'error' ? a : a + n), 0);
+}
+
+type PropsMasiva = PropsForm & { loteInicialId?: string | null };
+
+function ConsultaMasivaForm({
+  onPersisted,
+  modoVitrina = false,
+  onCorte,
+  onConsumidas,
+  esPrueba = false,
+  loteInicialId = null,
+}: PropsMasiva) {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [titulo, setTitulo] = useState('');
   const [negocioLote, setNegocioLote] = useState<NegocioBusqueda | null>(null);
   const [estado, setEstado] = useState<EstadoCargue>({ fase: 'inicial' });
   const [pendingTpl, startTplTransition] = useTransition();
-  const [pendingPDF, setPendingPDF] = useState(false);
-  const [errorPDF, setErrorPDF] = useState<string | null>(null);
+  const [descargando, setDescargando] = useState<string | null>(null);
+  const [errorDescarga, setErrorDescarga] = useState<string | null>(null);
+  const [accion, setAccion] = useState(false);
+  // Lo ya descontado del contador de la bolsa por este lote, para no descontarlo dos veces.
+  const descontadas = useRef<Record<string, number>>({});
+  // La persona ya aceptó que las filas con un tipo de documento no reconocido no se consulten: el
+  // paso de la bolsa, si viene después, no vuelve a preguntarlo.
+  const tiposAceptados = useRef(false);
 
-  // Drag-and-drop sobre la zona de carga (mismo callback que el file picker).
-  // Se deshabilita mientras el cargue corre para no reemplazar el archivo en vuelo.
-  // La validación de extensión/tamaño/filas la sigue haciendo el server
-  // (prepararLoteValida) igual que con el picker — no se filtra aquí.
+  const loteId = estado.fase === 'lote' ? estado.lote.id : null;
+  const activo = estado.fase === 'lote' && (estado.lote.estado === 'en_cola' || estado.lote.estado === 'procesando' || estado.lote.estado === 'preparando');
+
+  // Al abrir: el lote del enlace del correo, o el último sin terminar del espacio.
+  useEffect(() => {
+    let vivo = true;
+    loteVigenteValida(loteInicialId).then(r => {
+      if (vivo && r.ok && r.lote) {
+        descontadas.current[r.lote.id] = conResultado(r.lote.severidades);
+        setEstado(e => (e.fase === 'inicial' ? { fase: 'lote', lote: r.lote! } : e));
+      }
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [loteInicialId]);
+
+  function recibir(lote: LoteVista) {
+    const antes = descontadas.current[lote.id] ?? 0;
+    const ahora = conResultado(lote.severidades);
+    if (ahora > antes) {
+      descontadas.current[lote.id] = ahora;
+      onConsumidas?.(ahora - antes);
+    }
+    setEstado({ fase: 'lote', lote });
+  }
+
+  // Mientras el lote corre, el progreso. Una pregunta a la vez (los server actions van en fila).
+  useEffect(() => {
+    if (!loteId || !activo) return;
+    let vivo = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const preguntar = async () => {
+      const r = await progresoLoteValida(loteId).catch(() => null);
+      if (!vivo) return;
+      if (r?.ok) {
+        recibir(r.lote);
+        if (r.lote.estado !== 'en_cola' && r.lote.estado !== 'procesando' && r.lote.estado !== 'preparando') {
+          onPersisted();
+          return;
+        }
+      } else if (r && !r.ok) {
+        setEstado({ fase: 'error', mensaje: r.error });
+        return;
+      }
+      timer = setTimeout(preguntar, INTERVALO_PROGRESO_MS);
+    };
+    timer = setTimeout(preguntar, INTERVALO_PROGRESO_MS);
+    return () => {
+      vivo = false;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loteId, activo]);
+
+  // El peso se mira en el navegador, ANTES de subir: Vercel corta en 4,5 MB y la persona veía un error
+  // sin explicación. El servidor lo vuelve a mirar (`crearLoteValida`).
+  function elegirArchivo(f: File | null) {
+    const error = f ? errorTamanoArchivoLote(f.size) : null;
+    if (error) {
+      setArchivo(null);
+      setEstado({ fase: 'error', mensaje: error });
+      return;
+    }
+    setArchivo(f);
+  }
+
   const drop = useFileDrop({
-    onFiles: f => setArchivo(f[0] ?? null),
-    disabled: estado.fase === 'preparando' || estado.fase === 'procesando',
+    onFiles: f => elegirArchivo(f[0] ?? null),
+    disabled: estado.fase === 'preparando' || activo,
   });
 
   async function descargarPlantilla() {
@@ -700,76 +865,117 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
     });
   }
 
-  async function iniciarCargue(e: React.FormEvent) {
-    e.preventDefault();
+  async function crear(limite: number | null) {
     if (!archivo) {
       setEstado({ fase: 'error', mensaje: 'Selecciona un archivo XLSX' });
       return;
     }
+    const errorTamano = errorTamanoArchivoLote(archivo.size);
+    if (errorTamano) {
+      setEstado({ fase: 'error', mensaje: errorTamano });
+      return;
+    }
     setEstado({ fase: 'preparando' });
-
     const fd = new FormData();
     fd.append('archivo', archivo);
-    const prep = await prepararLoteValida(fd, { negocio_id_lote: negocioLote?.id ?? null });
-
-    if (!prep.ok) {
-      setEstado({ fase: 'error', mensaje: prep.error });
+    const r = await crearLoteValida(fd, {
+      negocio_id_lote: negocioLote?.id ?? null,
+      titulo: titulo.trim() || null,
+      limite,
+      aceptarTiposDocumento: tiposAceptados.current,
+    });
+    if (r.ok) {
+      descontadas.current[r.lote.id] = 0;
+      setEstado({ fase: 'lote', lote: r.lote });
       return;
     }
-
-    const { lote_id, total, filas } = prep.data;
-    const tituloLote = titulo.trim().length > 0 ? titulo.trim() : null;
-    const severidades = severidadesIniciales();
-
-    setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas: 0, severidades, tituloLote });
-
-    let procesadas = 0;
-    for (const fila of filas) {
-      const sev = await procesarFila(fila, lote_id);
-      procesadas += 1;
-      severidades[sev] = (severidades[sev] ?? 0) + 1;
-      setEstado({ fase: 'procesando', loteId: lote_id, total, procesadas, severidades: { ...severidades }, tituloLote });
+    if ('corte' in r && esMotivoCorte(r.error)) {
+      onCorte?.(r.error);
+      setEstado({ fase: 'inicial' });
+      return;
     }
-
-    setEstado({ fase: 'completado', loteId: lote_id, total, severidades, tituloLote });
-    onPersisted();
+    if ('aviso' in r) {
+      setEstado({ fase: 'confirmar_tipos', aviso: r.aviso, total: r.total });
+      return;
+    }
+    if ('alcanzan' in r) {
+      setEstado({ fase: 'confirmar_saldo', alcanzan: r.alcanzan, consultables: r.consultables, total: r.total });
+      return;
+    }
+    setEstado({ fase: 'error', mensaje: r.error });
   }
 
-  async function procesarFila(fila: FilaLotePreparada, loteId: string): Promise<Severidad> {
-    if (fila.error) {
-      // Persistimos un error sin llamar a Valida
-      await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId });
-      return 'error';
-    }
-    const r = await consultarValida(fila.input, { negocio_id: fila.negocio_id, lote_id: loteId });
-    return r.ok ? r.data.severidad : 'error';
+  function iniciarCargue(e: React.FormEvent) {
+    e.preventDefault();
+    tiposAceptados.current = false;
+    void crear(null);
   }
 
-  async function descargarReporteCargue() {
-    if (estado.fase !== 'completado') return;
-    setPendingPDF(true);
-    setErrorPDF(null);
-    const r = await generarPDFLoteValida(estado.loteId, estado.tituloLote);
-    setPendingPDF(false);
+  async function reanudar() {
+    if (!loteId) return;
+    setAccion(true);
+    const r = await reanudarLoteValida(loteId);
+    setAccion(false);
+    if (r.ok) recibir(r.lote);
+    else if (r.corte && esMotivoCorte(r.error)) onCorte?.(r.error);
+    else setEstado({ fase: 'error', mensaje: r.error });
+  }
+
+  async function cancelar() {
+    if (!loteId) return;
+    setAccion(true);
+    const r = await cancelarLoteValida(loteId);
+    setAccion(false);
+    if (r.ok) {
+      recibir(r.lote);
+      onPersisted();
+    } else setEstado({ fase: 'error', mensaje: r.error });
+  }
+
+  async function descargarPdf(parte: number) {
+    if (!loteId) return;
+    setDescargando(`pdf-${parte}`);
+    setErrorDescarga(null);
+    const r = await pdfLoteValida(loteId, parte);
+    setDescargando(null);
     if (!r.ok) {
-      setErrorPDF(r.error);
+      setErrorDescarga(r.error);
       return;
     }
-    const blob = base64ToBlob(r.data.base64, 'application/pdf');
-    triggerDownload(blob, r.data.filename);
+    triggerDownload(base64ToBlob(r.data.base64, 'application/pdf'), r.data.filename);
+  }
+
+  async function descargarResultados() {
+    if (!loteId) return;
+    setDescargando('xlsx');
+    setErrorDescarga(null);
+    const r = await resultadosLoteValida(loteId);
+    setDescargando(null);
+    if (!r.ok) {
+      setErrorDescarga(r.error);
+      return;
+    }
+    triggerDownload(
+      base64ToBlob(r.data.base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      r.data.filename,
+    );
   }
 
   function reiniciar() {
+    // Tras un cargue cortado por la bolsa, «Nuevo cargue» lleva a «Activa tu plan»: otro no pasaría.
+    const corte = estado.fase === 'lote' ? sinCorte(estado.lote.motivoPausa) : null;
+    if (corte) {
+      onCorte?.(corte);
+      return;
+    }
     setArchivo(null);
     setTitulo('');
     setNegocioLote(null);
     setEstado({ fase: 'inicial' });
-    setErrorPDF(null);
+    setErrorDescarga(null);
     const input = document.getElementById('archivo-batch') as HTMLInputElement | null;
     if (input) input.value = '';
   }
-
-  const procesando = estado.fase === 'preparando' || estado.fase === 'procesando';
 
   return (
     <div className="bg-white rounded-lg border border-[#E5E7EB] p-6 space-y-5">
@@ -777,7 +983,8 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
         <div>
           <h3 className="text-base font-bold text-tinta">Carga masiva (XLSX)</h3>
           <p className="text-sm text-tinta-suave mt-1">
-            Sube un XLSX con la plantilla. Hasta 500 filas. Al finalizar generas un reporte PDF del cargue con marca verificable.
+            Sube un XLSX con la plantilla. Hasta {TOPE_FILAS_LOTE.toLocaleString('es-CO')} filas. El cargue corre en el servidor: puedes cerrar
+            esta pestaña y volver. Al finalizar generas un reporte PDF del cargue con marca verificable.
           </p>
         </div>
         <button
@@ -791,16 +998,65 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
         </button>
       </div>
 
-      {estado.fase === 'completado' ? (
-        <ResumenCargueCompletado
-          estado={estado}
-          pendingPDF={pendingPDF}
-          errorPDF={errorPDF}
-          onDescargar={descargarReporteCargue}
+      {estado.fase === 'lote' && !activo ? (
+        <ResumenLote
+          lote={estado.lote}
+          esPrueba={esPrueba}
+         
+          descargando={descargando}
+          errorDescarga={errorDescarga}
+          accion={accion}
+          onDescargarPdf={descargarPdf}
+          onDescargarResultados={descargarResultados}
+          onReanudar={reanudar}
+          onCancelar={cancelar}
           onReiniciar={reiniciar}
         />
-      ) : procesando ? (
-        <ProgresoCargue estado={estado} />
+      ) : estado.fase === 'lote' ? (
+        <ProgresoCargue lote={estado.lote} accion={accion} onCancelar={cancelar} />
+      ) : estado.fase === 'preparando' ? (
+        <div className="py-10 text-center space-y-3">
+          <Dona total={1} procesadas={0} pulsante />
+          <p className="text-sm font-semibold text-tinta">Preparando cargue…</p>
+          <p className="text-xs text-tinta-suave">Leyendo el archivo, validando filas y revisando tu saldo.</p>
+        </div>
+      ) : estado.fase === 'confirmar_tipos' ? (
+        <AvisoTipos
+          aviso={estado.aviso}
+          total={estado.total}
+          onProcesar={() => {
+            tiposAceptados.current = true;
+            void crear(null);
+          }}
+          onCancelar={() => setEstado({ fase: 'inicial' })}
+        />
+      ) : estado.fase === 'confirmar_saldo' ? (
+        <div data-cargue-saldo className="rounded-lg border border-[#E5E7EB] p-5 space-y-3">
+          <p className="text-sm font-semibold text-tinta">
+            Tu bolsa alcanza para {estado.alcanzan} de las {estado.consultables} consultas del archivo.
+          </p>
+          <p className="text-sm text-tinta-suave">
+            Puedes procesar las primeras {estado.alcanzan} filas que se consultan; el resto no se procesa ni se cobra.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            {estado.alcanzan > 0 && (
+              <button
+                type="button"
+                onClick={() => void crear(estado.alcanzan)}
+                className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] transition-colors"
+              >
+                Procesar las primeras {estado.alcanzan}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setEstado({ fase: 'inicial' })}
+              className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
       ) : (
         <form onSubmit={iniciarCargue} className="space-y-4">
           <div>
@@ -847,13 +1103,13 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
                   ? archivo.name
                   : 'Arrastra o selecciona un archivo XLSX'}
               </p>
-              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 5 MB / 500 filas</p>
+              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 4 MB / {TOPE_FILAS_LOTE.toLocaleString('es-CO')} filas</p>
             </div>
             <input
               id="archivo-batch"
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              onChange={e => elegirArchivo(e.target.files?.[0] ?? null)}
               className="hidden"
             />
           </label>
@@ -874,41 +1130,90 @@ function ConsultaMasivaForm({ onPersisted, modoVitrina = false }: { onPersisted:
   );
 }
 
-function ProgresoCargue({ estado }: { estado: EstadoCargue }) {
-  if (estado.fase === 'preparando') {
-    return (
-      <div className="py-10 text-center space-y-3">
-        <Dona total={1} procesadas={0} pulsante />
-        <p className="text-sm font-semibold text-tinta">Preparando cargue…</p>
-        <p className="text-xs text-tinta-suave">Leyendo el archivo y validando filas.</p>
+function AvisoTipos({
+  aviso,
+  total,
+  onProcesar,
+  onCancelar,
+}: {
+  aviso: AvisoTiposDocumento;
+  total: number;
+  onProcesar: () => void;
+  onCancelar: () => void;
+}) {
+  const una = aviso.filas === 1;
+  return (
+    <div data-cargue-tipos className="rounded-lg border border-[#E5E7EB] p-5 space-y-3">
+      <p className="text-sm font-semibold text-tinta">
+        {una ? '1 fila' : `${aviso.filas} filas`} de {total} {una ? 'tiene' : 'tienen'} un tipo de documento que Valida no
+        consulta.
+      </p>
+      <p className="text-sm text-tinta-suave">
+        En la columna <code className="bg-papel px-1 rounded">tipo_documento</code> usa CC, CE, NIT, PAS, TI, PPT o RC.
+        También se entienden «Cédula», «Pasaporte», «PP», «PA», «Tarjeta de identidad» o «Registro civil». Si procesas así, esas filas no se consultan ni se cobran.
+      </p>
+      <ul className="text-xs text-tinta-suave space-y-1">
+        {aviso.ejemplos.map((e) => (
+          <li key={e.fila}>
+            <span className="font-semibold text-tinta">Fila {e.fila}</span> ({e.valor || 'vacío'}): {e.mensaje}
+          </li>
+        ))}
+        {aviso.filas > aviso.ejemplos.length && <li>Y {aviso.filas - aviso.ejemplos.length} más.</li>}
+      </ul>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] transition-colors"
+        >
+          Corregir el archivo
+        </button>
+        <button
+          type="button"
+          onClick={onProcesar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
+        >
+          Procesar de todas formas
+        </button>
       </div>
-    );
-  }
-  if (estado.fase !== 'procesando') return null;
+    </div>
+  );
+}
 
-  const pct = estado.total === 0 ? 0 : Math.round((estado.procesadas / estado.total) * 100);
-
+function ProgresoCargue({ lote, accion, onCancelar }: { lote: LoteVista; accion: boolean; onCancelar: () => void }) {
+  const pct = lote.total === 0 ? 0 : Math.round((lote.procesadas / lote.total) * 100);
   return (
     <div className="py-6 space-y-5">
       <div className="flex items-center justify-center">
-        <Dona total={estado.total} procesadas={estado.procesadas} />
+        <Dona total={lote.total} procesadas={lote.procesadas} pulsante={lote.estado !== 'procesando'} />
       </div>
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-tinta-suave">
-          <span className="font-semibold">{estado.procesadas} / {estado.total} consultas</span>
+          <span className="font-semibold">
+            {lote.procesadas} / {lote.total} consultas{lote.titulo ? ` · ${lote.titulo}` : ''}
+          </span>
           <span className="font-mono">{pct}%</span>
         </div>
         <div className="h-2 rounded-full bg-[#E5E7EB] overflow-hidden">
-          <div
-            className="h-full bg-acento transition-[width] duration-200 ease-out"
-            style={{ width: `${pct}%` }}
-          />
+          <div className="h-full bg-acento transition-[width] duration-200 ease-out" style={{ width: `${pct}%` }} />
         </div>
       </div>
-      <DistribucionSeveridad sev={estado.severidades} />
+      <DistribucionSeveridad sev={lote.severidades as Record<Severidad, number>} />
       <p className="text-[11px] text-center text-tinta-suave">
-        No cierres esta pestaña hasta que el cargue termine. Las consultas se guardan en el historial conforme avanzan.
+        {lote.estado === 'procesando' ? 'Procesando en el servidor.' : 'En cola: empieza en unos segundos.'} Puedes cerrar esta pestaña:
+        el cargue sigue y lo retomas al volver a Carga masiva.
+        {lote.avisaPorCorreo ? ' Te avisamos por correo al terminar.' : ''}
       </p>
+      <div className="flex justify-center">
+        <button
+          type="button"
+          onClick={onCancelar}
+          disabled={accion}
+          className="text-xs font-semibold text-tinta-suave hover:text-tinta underline disabled:opacity-50"
+        >
+          Cancelar cargue
+        </button>
+      </div>
     </div>
   );
 }
@@ -975,54 +1280,121 @@ function DistribucionSeveridad({ sev }: { sev: Record<Severidad, number> }) {
   );
 }
 
-function ResumenCargueCompletado({
-  estado,
-  pendingPDF,
-  errorPDF,
-  onDescargar,
+function ResumenLote({
+  lote,
+  esPrueba,
+  descargando,
+  errorDescarga,
+  accion,
+  onDescargarPdf,
+  onDescargarResultados,
+  onReanudar,
+  onCancelar,
   onReiniciar,
 }: {
-  estado: Extract<EstadoCargue, { fase: 'completado' }>;
-  pendingPDF: boolean;
-  errorPDF: string | null;
-  onDescargar: () => void;
+  lote: LoteVista;
+  esPrueba: boolean;
+  descargando: string | null;
+  errorDescarga: string | null;
+  accion: boolean;
+  onDescargarPdf: (parte: number) => void;
+  onDescargarResultados: () => void;
+  onReanudar: () => void;
+  onCancelar: () => void;
   onReiniciar: () => void;
 }) {
+  const pausado = lote.estado === 'pausado';
+  const cancelado = lote.estado === 'cancelado';
+  const sinConsultar = Math.max(0, lote.total - lote.procesadas);
+  const corte = sinCorte(lote.motivoPausa);
+  const titulo = pausado ? 'Cargue detenido' : cancelado ? 'Cargue cancelado' : 'Cargue completado';
+
   return (
     <div className="space-y-5">
-      <div className="rounded-lg bg-acento-tinte border border-acento/30 p-5">
-        <div className="flex items-center gap-2 text-acento font-semibold">
+      <div className={`rounded-lg border p-5 ${pausado || cancelado ? 'bg-papel border-[#E5E7EB]' : 'bg-acento-tinte border-acento/30'}`}>
+        <div className={`flex items-center gap-2 font-semibold ${pausado || cancelado ? 'text-tinta' : 'text-acento'}`}>
           <Check className="h-5 w-5" />
-          Cargue completado
+          {titulo}
         </div>
         <p className="text-sm text-tinta mt-1">
-          {estado.total} consultas procesadas{estado.tituloLote ? ` · ${estado.tituloLote}` : ''}.
+          {lote.procesadas} consultas procesadas{lote.titulo ? ` · ${lote.titulo}` : ''}.
+          {lote.omitidas > 0 ? ` ${lote.omitidas} filas del archivo no entraron porque la bolsa no alcanzaba.` : ''}
         </p>
         <div className="mt-3">
-          <DistribucionSeveridad sev={estado.severidades} />
+          <DistribucionSeveridad sev={lote.severidades as Record<Severidad, number>} />
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-2">
+      {(pausado || cancelado) && sinConsultar > 0 && (
+        <div data-cargue-cortado className="space-y-2">
+          <p className="text-sm text-tinta">
+            {sinConsultar === 1
+              ? '1 fila quedó sin consultar y no se cobró.'
+              : `${sinConsultar} filas quedaron sin consultar y no se cobraron.`}
+          </p>
+          {pausado && lote.textoPausa && !corte && <p className="text-sm text-tinta-suave">{lote.textoPausa}</p>}
+          {corte && <ActivaTuPlan motivo={corte} esPrueba={esPrueba} />}
+          {pausado && (
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                onClick={onReanudar}
+                disabled={accion}
+                className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] disabled:opacity-50 transition-colors"
+              >
+                Reanudar cargue
+              </button>
+              <button
+                type="button"
+                onClick={onCancelar}
+                disabled={accion}
+                className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
+              >
+                Cancelar lo que falta
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+        {Array.from({ length: lote.partesPdf }, (_, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onDescargarPdf(i)}
+            disabled={descargando !== null}
+            className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-acento text-white font-semibold hover:bg-acento-hover disabled:opacity-50 transition-colors"
+          >
+            <FileText className="h-4 w-4" />
+            {descargando === `pdf-${i}`
+              ? 'Generando reporte…'
+              : lote.partesPdf > 1
+              ? `Reporte PDF · parte ${i + 1} de ${lote.partesPdf}`
+              : 'Descargar reporte del cargue (PDF)'}
+          </button>
+        ))}
         <button
           type="button"
-          onClick={onDescargar}
-          disabled={pendingPDF}
-          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-acento text-white font-semibold hover:bg-acento-hover disabled:opacity-50 transition-colors"
+          onClick={onDescargarResultados}
+          disabled={descargando !== null}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
         >
-          <FileText className="h-4 w-4" />
-          {pendingPDF ? 'Generando reporte…' : 'Descargar reporte del cargue (PDF)'}
+          <FileSpreadsheet className="h-4 w-4" />
+          {descargando === 'xlsx' ? 'Preparando…' : 'Resultados (XLSX)'}
         </button>
-        <button
-          type="button"
-          onClick={onReiniciar}
-          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
-        >
-          Nuevo cargue
-        </button>
+        {!pausado && (
+          <button
+            type="button"
+            onClick={onReiniciar}
+            className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
+          >
+            Nuevo cargue
+          </button>
+        )}
       </div>
 
-      {errorPDF && <ErrorBox msg={errorPDF} />}
+      {errorDescarga && <ErrorBox msg={errorDescarga} />}
     </div>
   );
 }
@@ -1035,12 +1407,15 @@ function Historial({
   onFiltrar,
   negocioInicial = null,
   modoVitrina = false,
+  textoVacio,
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   onFiltrar: (filtros: FiltrosHistorial) => Promise<void>;
   negocioInicial?: NegocioBusqueda | null;
   modoVitrina?: boolean;
+  /** Lo que dice la tabla vacía. Por defecto, «Sin consultas con los filtros aplicados.». */
+  textoVacio?: string;
 }) {
   const [negocio, setNegocio] = useState<NegocioBusqueda | null>(negocioInicial);
   const [severidad, setSeveridad] = useState<Severidad | ''>('');
@@ -1161,7 +1536,7 @@ function Historial({
         </div>
       </div>
 
-      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} />
+      <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} textoVacio={textoVacio} />
     </div>
   );
 }
@@ -1170,10 +1545,12 @@ export function HistorialTable({
   consultas,
   error,
   mostrarNegocio,
+  textoVacio = 'Sin consultas con los filtros aplicados.',
 }: {
   consultas: ConsultaHistorialItem[];
   error: string | null;
   mostrarNegocio?: boolean;
+  textoVacio?: string;
 }) {
   if (error) {
     return (
@@ -1185,7 +1562,7 @@ export function HistorialTable({
   if (consultas.length === 0) {
     return (
       <div className="bg-white rounded-lg border border-[#E5E7EB] p-8 text-center text-sm text-tinta-suave">
-        Sin consultas con los filtros aplicados.
+        {textoVacio}
       </div>
     );
   }
@@ -1281,10 +1658,23 @@ export function HistorialTable({
   );
 }
 
-function ErrorBox({ msg }: { msg: string }) {
+/**
+ * El error de una consulta, un cargue o una descarga, en llano: nunca el código crudo del motor o de
+ * ONE (`mensajeErrorValida`). El código, si lo hay, va pequeño como detalle técnico para soporte.
+ */
+export function ErrorBox({ msg }: { msg: string }) {
+  const { mensaje, codigo } = mensajeErrorValida(msg);
   return (
-    <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
-      <ShieldAlert className="h-4 w-4" /> {msg}
+    <div
+      role="alert"
+      data-error-valida={codigo ?? ''}
+      className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2"
+    >
+      <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p>{mensaje}</p>
+        {codigo && <p className="mt-1 text-[11px] text-[#B91C1C]/70 break-all">Detalle técnico: {codigo}</p>}
+      </div>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { RotateCcw, PlusCircle } from 'lucide-react'
@@ -29,7 +30,7 @@ export default function ReabrirNegocioModal({
 }: ReabrirNegocioModalProps) {
   const router = useRouter()
   const [choice, setChoice] = useState<'mismas' | 'cambiaron' | null>(null)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function handleConfirm() {
     if (!choice) return

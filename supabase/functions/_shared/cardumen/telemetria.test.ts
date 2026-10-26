@@ -53,6 +53,12 @@ describe('conTelemetria', () => {
     expect(usos).toEqual([{ modelo: 'gemini-3.1-flash-lite', tokensEntrada: 812, tokensSalida: 40, latenciaMs: 250 }]);
   });
 
+  it('si el adaptador sabe qué modelo contestó (Haiku detrás de Gemini), reporta ese', async () => {
+    const usos: UsoModelo[] = [];
+    await conTelemetria(adaptador(async () => ({ text: '{}', modelo: 'claude-haiku-5-5' })), (u) => usos.push(u)).call({ system: '', messages: [] });
+    expect(usos[0].modelo).toBe('claude-haiku-5-5');
+  });
+
   it('conserva id y precio del adaptador', () => {
     const m = conTelemetria(adaptador(async () => ({ text: '' })), () => {});
     expect(m.id).toBe('gemini-3.1-flash-lite');

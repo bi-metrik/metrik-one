@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CheckCircle2, ExternalLink, FileText, Loader2, Sparkles, AlertTriangle, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { generarVersionGuia, aprobarVersionGuia } from '@/lib/actions/guia-devolucion-actions'
@@ -42,7 +42,6 @@ export default function BloqueGuiaDevolucion({
   modo,
   preview,
 }: Props) {
-  const router = useRouter()
   const savedRaw = (instancia?.data ?? {}) as GuiaData
   // Optimistic state: cuando aprobamos localmente, no esperamos al refetch del
   // server para reflejarlo en UI.
@@ -64,7 +63,7 @@ export default function BloqueGuiaDevolucion({
   )
   const [generating, setGenerating] = useState(false)
   const [approving, setApproving] = useState(false)
-  const [, startTransition] = useTransition()
+  const [, startTransition] = useTransitionTolerante()
 
   const seccionalActual: SeccionalDIAN | undefined = SECCIONALES_DIAN.find(
     s => s.slug === (seccionalOverride || preview?.seccional_sugerida_slug),
@@ -83,7 +82,7 @@ export default function BloqueGuiaDevolucion({
         toast.warning(res.warning)
       } else {
         toast.success(`Guía v${(versiones.at(-1)?.n ?? 0) + 1} generada`)
-        router.refresh()
+        // Sin router.refresh(): la acción ya revalida la ficha (2026-10-04).
       }
       setGenerating(false)
     })
@@ -98,7 +97,7 @@ export default function BloqueGuiaDevolucion({
       } else {
         setOptimisticAprobado({ n, at: new Date().toISOString() })
         toast.success(`Guía v${n} aprobada`)
-        router.refresh()
+        // Sin router.refresh(): la acción ya revalida la ficha (2026-10-04).
       }
       setApproving(false)
     })

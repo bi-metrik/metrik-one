@@ -1,10 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, type ReactNode } from 'react'
+import Link from 'next/link'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, CheckCircle2, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { guardarDocumentoCliente, redactarDocumentoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
+import { actualizarParrafoConOne, guardarDocumentoCliente, redactarDocumentoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
+import { textoDeParrafoViejo, type ZonaDeParrafo } from '@/lib/cotizaciones/parrafo-viejo'
 import {
   describirAlertaDeEstilo,
   estadoDelTexto,
@@ -14,7 +17,9 @@ import {
   type TextoCliente,
 } from '@/lib/cotizaciones/documento-cliente'
 import { LIMITE_TERMINOS, normalizarTerminos, terminosAlAbrir } from '@/lib/cotizaciones/terminos-cotizacion'
+import { lineasPropias } from '@/lib/cotizaciones/incluye-por-one'
 import { formatBogotaFechaHora } from '@/lib/dates/bogota'
+import AnticipoPropuestaPanel from './anticipo-propuesta-panel'
 
 /**
  * «Texto para el cliente» (Trappvel): lo que el documento dice del viaje con palabras, no
@@ -71,6 +76,18 @@ function textoDe(t: TextoCliente | null): Omit<Borrador, 'terminos'> {
   }
 }
 
+/**
+ * C6 · con «Incluye» armado por ONE, el formulario solo edita las líneas PROPIAS de la asesora:
+ * las del documento marcado, o las que escribió una persona y no repiten un renglón de ONE. Lo que
+ * redactó el modelo no es propio de nadie: lo reemplaza lo de ONE.
+ */
+function textoPorPasos(doc: PanelTextoCliente['documento'], deOne: readonly string[]): Omit<Borrador, 'terminos'> {
+  const base = textoDe(doc)
+  if (!doc) return base
+  const propias = doc.incluye_origen === 'one' ? doc.incluye : doc.origen === 'persona' ? lineasPropias(doc.incluye, deOne) : []
+  return { ...base, incluye: [...propias] }
+}
+
 const mismoTexto = (a: Borrador, b: Borrador) =>
   JSON.stringify([a.titular, a.intro, a.incluye, a.antes]) === JSON.stringify([b.titular, b.intro, b.incluye, b.antes])
 
@@ -121,8 +138,8 @@ function MapaDelDocumento({ foco }: { foco: Zona | null }) {
   )
 }
 
-function Rotulo({ zona, htmlFor }: { zona: Zona; htmlFor?: string }) {
-  return (
+function Rotulo({ zona, htmlFor, extra }: { zona: Zona; htmlFor?: string; extra?: ReactNode }) {
+  const rotulo = (
     <div>
       {htmlFor ? (
         <label className="text-xs font-semibold" htmlFor={htmlFor}>{DONDE_SALE[zona].nombre}</label>
@@ -131,6 +148,34 @@ function Rotulo({ zona, htmlFor }: { zona: Zona; htmlFor?: string }) {
       )}
       <p className="text-[11px] text-muted-foreground">{DONDE_SALE[zona].ayuda}</p>
     </div>
+  )
+  if (!extra) return rotulo
+  return <div className="flex flex-wrap items-start justify-between gap-2">{rotulo}{extra}</div>
+}
+
+/** D5 · la marca del párrafo viejo: qué servicio nombra que ya no va. */
+function NotaDeParrafoViejo({ texto }: { texto: string }) {
+  return (
+    <p className="flex items-start gap-1 text-[11px] text-amber-900" data-parrafo-viejo>
+      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+      {texto}
+    </p>
+  )
+}
+
+/** D5 · «Actualizar con ONE» de un párrafo: propone el texto nuevo en el formulario, sin guardar. */
+function BotonActualizarParrafo({ onClick, cargando, disabled }: { onClick: () => void; cargando: boolean; disabled: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
+      data-actualizar-parrafo
+    >
+      {cargando ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+      {cargando ? 'Actualizando…' : 'Actualizar con ONE'}
+    </button>
   )
 }
 
@@ -141,6 +186,8 @@ function ListaEditable({
   onFocus,
   editable,
   placeholder,
+  extra,
+  marcas,
 }: {
   zona: Zona
   filas: string[]
@@ -148,39 +195,53 @@ function ListaEditable({
   onFocus: () => void
   editable: boolean
   placeholder: string
+  /** Lo que va a la derecha del rótulo (D5: «Actualizar con ONE»). */
+  extra?: ReactNode
+  /** D5 · los renglones viejos, con lo que nombran que ya no va. */
+  marcas?: ReadonlyMap<number, string>
 }) {
   const titulo = DONDE_SALE[zona].nombre
   return (
     <div className="space-y-1.5" onFocus={onFocus}>
-      <Rotulo zona={zona} />
+      <Rotulo zona={zona} extra={extra} />
       {filas.length === 0 && !editable && <p className="text-xs text-muted-foreground">Sin renglones.</p>}
-      {filas.map((fila, i) => (
-        <div key={i} className="flex items-start gap-1.5">
-          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
-          {editable ? (
-            <input
-              type="text"
-              value={fila}
-              maxLength={LIMITES_TEXTO.renglon}
-              aria-label={`${titulo}, renglón ${i + 1}`}
-              onChange={e => onChange(filas.map((f, j) => (j === i ? e.target.value : f)))}
-              className="flex-1 rounded-md border px-2 py-1 text-xs"
-            />
-          ) : (
-            <p className="flex-1 py-1 text-xs">{fila}</p>
-          )}
-          {editable && (
-            <button
-              type="button"
-              onClick={() => onChange(filas.filter((_, j) => j !== i))}
-              aria-label={`Quitar renglón ${i + 1}`}
-              className="mt-0.5 rounded p-1 text-muted-foreground hover:bg-accent hover:text-red-600"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      ))}
+      {filas.map((fila, i) => {
+        const renglon = (
+          <div key={i} className="flex items-start gap-1.5">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+            {editable ? (
+              <input
+                type="text"
+                value={fila}
+                maxLength={LIMITES_TEXTO.renglon}
+                aria-label={`${titulo}, renglón ${i + 1}`}
+                onChange={e => onChange(filas.map((f, j) => (j === i ? e.target.value : f)))}
+                className="flex-1 rounded-md border px-2 py-1 text-xs"
+              />
+            ) : (
+              <p className="flex-1 py-1 text-xs">{fila}</p>
+            )}
+            {editable && (
+              <button
+                type="button"
+                onClick={() => onChange(filas.filter((_, j) => j !== i))}
+                aria-label={`Quitar renglón ${i + 1}`}
+                className="mt-0.5 rounded p-1 text-muted-foreground hover:bg-accent hover:text-red-600"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )
+        // D5 · el renglón viejo, marcado y con lo que nombra que ya no va. Sin marcas, el de siempre.
+        const marca = marcas?.get(i)
+        return marca ? (
+          <div key={i} className="flex flex-col gap-0.5 rounded-md bg-amber-50 p-1 ring-1 ring-amber-300" data-parrafo-viejo-renglon={i}>
+            <NotaDeParrafoViejo texto={marca} />
+            {renglon}
+          </div>
+        ) : renglon
+      })}
       {editable && filas.length < LIMITES_TEXTO.renglones && (
         <button
           type="button"
@@ -198,24 +259,37 @@ function ListaEditable({
 export default function DocumentoClientePanel({
   cotizacionId,
   inicial,
+  incluyeDeOne = null,
 }: {
   cotizacionId: string
   inicial: PanelTextoCliente
+  /**
+   * C6 · la forma por pasos con la pieza `incluye_por_one`: los renglones que arma ONE con lo que
+   * se cobra. Con ellos «Incluido en el plan» se muestra armado y solo se editan las líneas
+   * propias; guardar y redactar dejan la marca. `null` = el panel de siempre.
+   */
+  incluyeDeOne?: string[] | null
 }) {
+  const porPasos = incluyeDeOne !== null
+  const textoInicial = (doc: PanelTextoCliente['documento']) => (porPasos ? textoPorPasos(doc, incluyeDeOne ?? []) : textoDe(doc))
   const [panel, setPanel] = useState(inicial)
   // Los términos al abrir: los guardados, o la propuesta de la línea en un borrador sin términos.
   const [apertura] = useState(() =>
     terminosAlAbrir({ terminos: inicial.terminos, terminosBase: inicial.terminosBase, editable: inicial.editable && inicial.columnaPresente }),
   )
-  const [guardado, setGuardado] = useState<Borrador>(() => ({ ...textoDe(inicial.documento), terminos: inicial.terminos ?? '' }))
-  const [form, setForm] = useState<Borrador>(() => ({ ...textoDe(inicial.documento), terminos: apertura.valor }))
+  const [guardado, setGuardado] = useState<Borrador>(() => ({ ...textoInicial(inicial.documento), terminos: inicial.terminos ?? '' }))
+  const [form, setForm] = useState<Borrador>(() => ({ ...textoInicial(inicial.documento), terminos: apertura.valor }))
   const [foco, setFoco] = useState<Zona | null>(null)
-  const [redactando, startRedactar] = useTransition()
-  const [guardando, startGuardar] = useTransition()
+  const [redactando, startRedactar] = useTransitionTolerante()
+  const [guardando, startGuardar] = useTransitionTolerante()
+  // D5 · el párrafo que ONE está actualizando (uno a la vez).
+  const [actualizando, setActualizando] = useState<ZonaDeParrafo | null>(null)
 
   const doc = panel.documento
   const estado = estadoDelTexto(doc)
-  const cambiosTexto = !mismoTexto(form, guardado)
+  // C6 · un texto guardado sin la marca todavía imprime el «Incluye» viejo: hay que guardarlo.
+  const sinMarca = porPasos && !!doc && doc.incluye_origen !== 'one'
+  const cambiosTexto = !mismoTexto(form, guardado) || sinMarca
   const cambios = cambiosTexto || !mismosTerminos(form, guardado)
   const editable = panel.editable && panel.columnaPresente
   const ocupado = redactando || guardando
@@ -224,6 +298,17 @@ export default function DocumentoClientePanel({
   const alertas = editable
     ? revisarEstilo({ titular: form.titular, intro: form.intro, incluye: form.incluye, antes_de_viajar: form.antes })
     : []
+  // D5 (solo la forma por pasos) · qué párrafo quedó viejo, y «Actualizar con ONE» por párrafo
+  // cuando el texto es de otras líneas.
+  const viejos = porPasos ? (panel.parrafosViejos ?? []) : []
+  const notaDe = (zona: ZonaDeParrafo) => {
+    const p = viejos.find(v => v.zona === zona && v.indice === null)
+    return p ? textoDeParrafoViejo(p) : null
+  }
+  const marcasAntes = new Map(viejos.filter(v => v.zona === 'antes' && v.indice !== null).map(v => [v.indice as number, textoDeParrafoViejo(v)]))
+  const botonDe = (zona: ZonaDeParrafo) => (porPasos && editable && panel.desactualizado && panel.hayViaje ? (
+    <BotonActualizarParrafo onClick={() => void actualizarParrafo(zona)} cargando={actualizando === zona} disabled={ocupado || actualizando !== null} />
+  ) : null)
 
   if (!panel.columnaPresente) {
     return (
@@ -241,13 +326,19 @@ export default function DocumentoClientePanel({
    */
   const aplicar = (nuevo: PanelTextoCliente, opciones?: { conservarTerminos?: boolean }) => {
     setPanel(nuevo)
-    const texto = textoDe(nuevo.documento)
+    const texto = textoInicial(nuevo.documento)
     const terminosGuardados = nuevo.terminos ?? ''
     setGuardado({ ...texto, terminos: terminosGuardados })
     setForm(f => ({ ...texto, terminos: opciones?.conservarTerminos ? f.terminos : terminosGuardados }))
   }
 
   const redactar = () => {
+    // D3 · en la forma por pasos lo único que confirma es «Enviar al cliente»: Redactar no pregunta,
+    // y lo que había se recupera con «Deshacer» en el aviso.
+    if (porPasos) {
+      redactarSinPreguntar()
+      return
+    }
     let reemplazarRevisado = false
     if (estado === 'revisado') {
       if (!confirm('Ya hay un texto revisado. ONE lo reemplaza por un borrador nuevo que habrá que volver a revisar. ¿Seguir?')) return
@@ -256,7 +347,7 @@ export default function DocumentoClientePanel({
       return
     }
     startRedactar(async () => {
-      const res = await redactarDocumentoCliente(cotizacionId, { reemplazarRevisado })
+      const res = await redactarDocumentoCliente(cotizacionId, porPasos ? { reemplazarRevisado, porPasos: true } : { reemplazarRevisado })
       if (res.success) {
         aplicar(res.panel, { conservarTerminos: true })
         toast.success('Borrador listo. Revísalo y guárdalo para que salga en el PDF.')
@@ -264,6 +355,66 @@ export default function DocumentoClientePanel({
         toast.error(res.error)
       }
     })
+  }
+
+  /**
+   * D3 · Redactar en la forma por pasos: sin `confirm()`. Lo de antes queda a un clic: un texto ya
+   * revisado se vuelve a guardar tal cual; los cambios sin guardar vuelven al formulario.
+   */
+  const redactarSinPreguntar = () => {
+    const formAntes = form
+    const revisadoAntes = estado === 'revisado' ? { ...guardado } : null
+    const conCambios = cambiosTexto
+    startRedactar(async () => {
+      const res = await redactarDocumentoCliente(cotizacionId, { reemplazarRevisado: estado === 'revisado', porPasos: true })
+      if (!res.success) {
+        toast.error(res.error)
+        return
+      }
+      aplicar(res.panel, { conservarTerminos: true })
+      const puedeDeshacer = revisadoAntes !== null || conCambios
+      toast.success('Borrador listo. Revísalo y guárdalo para que salga en el PDF.', puedeDeshacer ? {
+        action: {
+          label: 'Deshacer',
+          onClick: () => {
+            if (revisadoAntes) {
+              startGuardar(async () => {
+                const texto: TextoCliente = { titular: revisadoAntes.titular, intro: revisadoAntes.intro, incluye: revisadoAntes.incluye, antes_de_viajar: revisadoAntes.antes }
+                const r = await guardarDocumentoCliente(cotizacionId, texto, formAntes.terminos, { porPasos: true })
+                if (r.success) {
+                  aplicar(r.panel)
+                  toast.success('Volvió el texto revisado de antes.')
+                } else {
+                  toast.error(r.error)
+                }
+              })
+            } else {
+              setForm(f => ({ ...formAntes, terminos: f.terminos }))
+            }
+          },
+        },
+      } : undefined)
+    })
+  }
+
+  /** D5 · «Actualizar con ONE» de un párrafo: el texto nuevo va al formulario, sin guardar. */
+  const actualizarParrafo = async (zona: ZonaDeParrafo) => {
+    setActualizando(zona)
+    try {
+      const r = await actualizarParrafoConOne(cotizacionId, zona)
+      if (!r.success) {
+        toast.error(r.error)
+        return
+      }
+      setForm(f => (zona === 'titular' ? { ...f, titular: String(r.texto) }
+        : zona === 'intro' ? { ...f, intro: String(r.texto) }
+        : { ...f, antes: Array.isArray(r.texto) ? [...r.texto] : f.antes }))
+      toast.success('ONE propuso el párrafo. Léelo y guarda el texto para que salga en el PDF.')
+    } catch {
+      toast.error('No se pudo actualizar: revisa la conexión y vuelve a intentarlo.')
+    } finally {
+      setActualizando(null)
+    }
   }
 
   const guardar = () => {
@@ -274,7 +425,9 @@ export default function DocumentoClientePanel({
       antes_de_viajar: form.antes,
     }
     startGuardar(async () => {
-      const res = await guardarDocumentoCliente(cotizacionId, texto, form.terminos)
+      const res = porPasos
+        ? await guardarDocumentoCliente(cotizacionId, texto, form.terminos, { porPasos: true })
+        : await guardarDocumentoCliente(cotizacionId, texto, form.terminos)
       if (res.success) {
         aplicar(res.panel)
         toast.success(
@@ -360,8 +513,9 @@ export default function DocumentoClientePanel({
         </div>
       )}
 
-      <div className="space-y-1" onFocus={() => setFoco('titular')}>
-        <Rotulo zona="titular" htmlFor={`titular-${cotizacionId}`} />
+      <div className={notaDe('titular') ? 'space-y-1 rounded-md bg-amber-50 p-1.5 ring-1 ring-amber-300' : 'space-y-1'} onFocus={() => setFoco('titular')} data-parrafo="titular">
+        <Rotulo zona="titular" htmlFor={`titular-${cotizacionId}`} extra={botonDe('titular')} />
+        {notaDe('titular') && <NotaDeParrafoViejo texto={notaDe('titular')!} />}
         {editable ? (
           <input
             id={`titular-${cotizacionId}`}
@@ -377,8 +531,9 @@ export default function DocumentoClientePanel({
         )}
       </div>
 
-      <div className="space-y-1" onFocus={() => setFoco('intro')}>
-        <Rotulo zona="intro" htmlFor={`intro-${cotizacionId}`} />
+      <div className={notaDe('intro') ? 'space-y-1 rounded-md bg-amber-50 p-1.5 ring-1 ring-amber-300' : 'space-y-1'} onFocus={() => setFoco('intro')} data-parrafo="intro">
+        <Rotulo zona="intro" htmlFor={`intro-${cotizacionId}`} extra={botonDe('intro')} />
+        {notaDe('intro') && <NotaDeParrafoViejo texto={notaDe('intro')!} />}
         {editable ? (
           <textarea
             id={`intro-${cotizacionId}`}
@@ -394,14 +549,46 @@ export default function DocumentoClientePanel({
         )}
       </div>
 
-      <ListaEditable
-        zona="incluye"
-        filas={form.incluye}
-        onChange={incluye => setForm({ ...form, incluye })}
-        onFocus={() => setFoco('incluye')}
-        editable={editable}
-        placeholder="Agregar renglón"
-      />
+      {porPasos ? (
+        // C6 · «Incluye · Lo arma ONE con lo que se cobra»: lo de ONE no se edita (nunca queda
+        // viejo); debajo, las líneas propias, que se conservan.
+        <div className="space-y-1.5" onFocus={() => setFoco('incluye')} data-incluye-por-one>
+          <div>
+            <p className="text-xs font-semibold">Incluye · Lo arma ONE con lo que se cobra</p>
+            <p className="text-[11px] text-muted-foreground">Sale al final. ONE lo rehace solo cuando cambia un servicio: no se edita aquí.</p>
+          </div>
+          {incluyeDeOne!.length === 0
+            ? <p className="text-xs text-muted-foreground">Todavía no hay servicios que se cobren en la Recomendada.</p>
+            : incluyeDeOne!.map(r => (
+              <div key={r} className="flex items-start gap-1.5">
+                <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/60" />
+                <p className="flex-1 py-1 text-xs">{r}</p>
+              </div>
+            ))}
+          <ListaEditable
+            zona="incluye"
+            filas={form.incluye}
+            onChange={incluye => setForm({ ...form, incluye })}
+            onFocus={() => setFoco('incluye')}
+            editable={editable}
+            placeholder="Agregar una línea tuya"
+          />
+          {sinMarca && editable && (
+            <p className="text-[11px] text-amber-800" data-incluye-sin-guardar>
+              Guarda el texto para que el PDF use la lista que arma ONE.
+            </p>
+          )}
+        </div>
+      ) : (
+        <ListaEditable
+          zona="incluye"
+          filas={form.incluye}
+          onChange={incluye => setForm({ ...form, incluye })}
+          onFocus={() => setFoco('incluye')}
+          editable={editable}
+          placeholder="Agregar renglón"
+        />
+      )}
       <ListaEditable
         zona="antes"
         filas={form.antes}
@@ -409,6 +596,8 @@ export default function DocumentoClientePanel({
         onFocus={() => setFoco('antes')}
         editable={editable}
         placeholder="Agregar consejo"
+        extra={botonDe('antes')}
+        marcas={marcasAntes.size > 0 ? marcasAntes : undefined}
       />
 
       {/* Términos: la última sección, con el mismo guardar. ONE no los redacta. */}
@@ -446,6 +635,20 @@ export default function DocumentoClientePanel({
             Guardar texto revisado
           </button>
         </div>
+      )}
+
+      {/* Decisión del 2026-10-14 (3): el anticipo lo asigna la asesora; solo con la propuesta nueva. */}
+      {panel.imprimeAnticipo && (
+        <AnticipoPropuestaPanel cotizacionId={cotizacionId} inicial={panel.anticipo ?? null} editable={editable} />
+      )}
+
+      {/* Las fotos de la propuesta salen solas del perfil de cada hotel y tour (2026-10-16): se
+          ponen en su tarjeta o en la ficha del proveedor. */}
+      {panel.imprimeAnticipo && (
+        <p className="border-t pt-3 text-[11px] text-muted-foreground" data-fotos-propuesta>
+          Las fotos de cada hotel y tour salen solas de su perfil: pégalas en su tarjeta o en{' '}
+          <Link href="/proveedores" className="underline underline-offset-2">Proveedores</Link>.
+        </p>
       )}
     </section>
   )

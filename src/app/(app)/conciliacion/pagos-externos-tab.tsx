@@ -41,6 +41,7 @@ import {
 import { formatFecha } from '@/lib/dates/bogota'
 import { BUCKET_DOCUMENTOS_ONE } from '@/lib/almacenamiento/referencia'
 import { hrefArchivoDeCobro } from '@/lib/almacenamiento/archivo-de-cobro'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const VERDE = 'var(--acento)'
 const BUCKET = BUCKET_DOCUMENTOS_ONE
@@ -107,6 +108,8 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
   const hoyBogota = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Bogota' })
 
   const [negocios, setNegocios] = useState<NegocioParaPagoExterno[]>([])
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [cargandoNegocios, setCargandoNegocios] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -216,7 +219,8 @@ function FormularioPago({ panel, onRegistrado }: { panel: PanelPagosExternos; on
         soporte: soporte ?? undefined,
         confirmar_sobreasignacion: sobreasignada,
         justificacion: justificacion.trim() || undefined,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (res.success) {
         toast.success('Pago registrado')
         limpiar()

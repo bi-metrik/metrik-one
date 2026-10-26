@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { fetchModelo } from '@/lib/ai/modelo-llm'
 import { getServerKey } from '@/lib/server-keys'
 import { CATEGORIAS_GASTO } from '@/lib/catalogos/constants'
 import {
@@ -48,7 +49,7 @@ export async function clasificarGastoConIA(descripcion: string): Promise<Propues
   }
 
   try {
-    const res = await fetch(
+    const res = await fetchModelo(
       `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
       {
         method: 'POST',

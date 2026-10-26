@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarBloqueData, marcarBloqueCompleto } from '../../negocio-v2-actions'
@@ -48,7 +49,7 @@ export default function BloqueEquipo({
     ejecucion_id: (data.ejecucion_id as string) ?? '',
     financiero_id: (data.financiero_id as string) ?? '',
   })
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function getProfileName(id: string | null | undefined) {
     if (!id) return null

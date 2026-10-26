@@ -10,6 +10,7 @@
 
 import type { ParseResult } from './types.ts';
 import { conDescripcion } from './wa-gasto-descripcion.ts';
+import { extraerCodigoNegocio } from './wa-codigo-negocio.ts';
 
 // Unified confidence threshold (Vera mantuvo 0.7 — NO bajar)
 export const CONFIDENCE_THRESHOLD = 0.7;
@@ -70,6 +71,13 @@ function injectProjectCode(result: ParseResult, rawMessage: string): ParseResult
   if (result.fields.project_code) return result;
   const msg = rawMessage;
 
+  // Negocio: "R1 26 1", "r1-26-1", "R1261" → "R1 26 1" (`wa-codigo-negocio.ts`). Va primero: es la forma más
+  // estricta (letra, año y consecutivo) y la única que siguen generando los negocios de hoy.
+  const negocio = extraerCodigoNegocio(msg);
+  if (negocio) {
+    return { ...result, fields: { ...result.fields, project_code: negocio } };
+  }
+
   // Legacy alphanumeric: KAE-2, FAB-1, INT-3
   let m = msg.match(/\b([A-Za-z]{2,4}-\d{1,3})\b/);
   if (m) {
@@ -80,18 +88,6 @@ function injectProjectCode(result: ParseResult, rawMessage: string): ParseResult
   m = msg.match(/(?:\bP-?|#)(\d{1,4})\b/i) || msg.match(/\b(?:proyecto|proy)\s+(\d{1,4})\b/i);
   if (m) {
     return { ...result, fields: { ...result.fields, project_code: `P-${m[1].padStart(3, '0')}` } };
-  }
-
-  // Negocio spaced: "R1 26 1"
-  m = msg.match(/\b([A-Za-z]\d+)\s+(\d{2})\s+(\d+)\b/);
-  if (m) {
-    return { ...result, fields: { ...result.fields, project_code: `${m[1].toUpperCase()} ${m[2]} ${m[3]}` } };
-  }
-
-  // Negocio compact: "R1261" → "R1 26 1"
-  m = msg.match(/\b([A-Za-z]\d)(\d{2})(\d+)\b/);
-  if (m) {
-    return { ...result, fields: { ...result.fields, project_code: `${m[1].toUpperCase()} ${m[2]} ${m[3]}` } };
   }
 
   return result;
@@ -162,6 +158,9 @@ export function parseAmount(text: string): number | null {
 
 /** Extract project code or entity hint from text */
 function extractProjectRef(text: string): { entity_hint?: string; project_code?: string | number } {
+  // Negocio: "R1 26 1", "r1-26-1", "R1261" (`wa-codigo-negocio.ts`).
+  const negocio = extraerCodigoNegocio(text);
+  if (negocio) return { project_code: negocio };
   // Alphanumeric code — "KAE-2", "FAB-1"
   let m = text.match(/\b([A-Z]{2,4}-\d{1,3})\b/);
   if (m) return { project_code: m[1] };
@@ -171,14 +170,6 @@ function extractProjectRef(text: string): { entity_hint?: string; project_code?:
   if (m) return { project_code: `P-${m[1].padStart(3, '0')}` };
   m = text.match(/(?:al|del|en\s+el)\s+(\d{1,4})\b/);
   if (m) return { project_code: `P-${m[1].padStart(3, '0')}` };
-
-  // Negocio spaced: "R1 26 1"
-  m = text.match(/\b([A-Z]\d+)\s+(\d{2})\s+(\d+)\b/);
-  if (m) return { project_code: `${m[1]} ${m[2]} ${m[3]}` };
-
-  // Negocio compact: "R1261" → "R1 26 1"
-  m = text.match(/\b([A-Z]\d)(\d{2})(\d+)\b/);
-  if (m) return { project_code: `${m[1]} ${m[2]} ${m[3]}` };
 
   // Entity hint
   m = text.match(/(?:para\s+(?:lo\s+de|el\s+proyecto\s+)?|de\s+(?:lo\s+de\s+)?)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/);

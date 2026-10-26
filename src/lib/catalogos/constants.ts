@@ -220,6 +220,17 @@ export const CATEGORIAS_GASTO = [
 
 export type CategoriaGasto = typeof CATEGORIAS_GASTO[number]['value']
 
+/**
+ * Las dos categorías de gasto de VIAJE (F0 post-cotización, migración
+ * `20261012150000_servicios_viaje_esquema`). NO van en `CATEGORIAS_GASTO` a propósito: ese es
+ * el formulario de gasto de CUALQUIER workspace. Las escribe el pago a un proveedor desde la
+ * fila de un servicio del viaje (y la cortesía con valor); aquí solo viven sus rótulos.
+ */
+export const CATEGORIAS_GASTO_VIAJE = [
+  { value: 'proveedor_viaje', label: 'Proveedores del viaje' },
+  { value: 'cortesia_viaje', label: 'Cortesías del viaje' },
+] as const
+
 // ── Razones de perdida ──────────────────────────────────────
 
 export const RAZONES_PERDIDA = [

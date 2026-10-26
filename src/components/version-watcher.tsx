@@ -2,23 +2,41 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
-import { decidirAccion, estaObsoleta } from '@/lib/version/decidir'
+import {
+  decidirAccion,
+  esNavegacionInterna,
+  leerEpoca,
+  type Momento,
+} from '@/lib/version/decidir'
+import {
+  anotarEpocaViva,
+  motivoActual,
+  olvidarPestana,
+  registrarPestana,
+  tocaCargaCompleta,
+} from '@/lib/version/recarga-pendiente'
 
 /**
- * Vigilante de la pestaña. Detecta que el bundle cargado quedo atras y la
- * recarga — sola si no hay nada que perder, con aviso si la persona esta a
- * mitad de algo.
+ * Vigilante de la pestaña. Un deploy normal NO la recarga (desde 2026-10-03):
+ * Skew Protection le sirve su propia version. Solo se recarga por:
+ *
+ *  - **Epoca nueva** (`@/lib/version/epoca`): un PR rompio compatibilidad con las
+ *    pestañas viejas. Recarga sola si no hay nada que perder, con aviso si la
+ *    persona esta a mitad de algo.
+ *  - **Techo de 8 horas**: queda pendiente y se resuelve en la siguiente navegacion
+ *    interna (carga completa del destino) o al volver a la pestaña sin trabajo en
+ *    curso. Nunca a alguien que esta leyendo una pantalla visible.
  *
  * La logica de "que hacer" NO vive aqui: vive en `@/lib/version/decidir`, que
  * si tiene pruebas (este componente no se puede probar, la suite corre en
- * `node` sin DOM). Aqui solo se miden los hechos — version viva, edad, trabajo
+ * `node` sin DOM). Aqui solo se miden los hechos — epoca viva, edad, trabajo
  * en curso, conexion — y se ejecuta el veredicto.
  *
  * Contexto: incidentes Jessica (pestaña de un dia, pantalla en blanco al subir
  * un documento) y Daniela (sesion del 3 de agosto, "no abre nada"), 2026-08-19.
  */
 
-/** Cada cuanto se le pregunta al servidor por la version viva. */
+/** Cada cuanto se le pregunta al servidor por la epoca viva. */
 const INTERVALO_MS = 5 * 60 * 1000
 
 /**
@@ -62,9 +80,8 @@ function hayTrabajoEnCurso(): boolean {
   return false
 }
 
-export default function VersionWatcher({ version }: { version: string }) {
+export default function VersionWatcher({ epoca }: { epoca: number }) {
   const [avisar, setAvisar] = useState(false)
-  const nacidaEnRef = useRef<number | null>(null)
   const recargandoRef = useRef(false)
 
   const recargar = useCallback(() => {
@@ -72,69 +89,98 @@ export default function VersionWatcher({ version }: { version: string }) {
     window.location.reload()
   }, [])
 
+  // Decide con lo que ya se sabe, sin pedir red. Devuelve true si recargo.
+  const actuar = useCallback(
+    (momento: Momento): boolean => {
+      if (recargandoRef.current) return true
+      const accion = decidirAccion({
+        motivo: motivoActual(Date.now()),
+        momento,
+        trabajoEnCurso: hayTrabajoEnCurso(),
+        enLinea: navigator.onLine,
+      })
+      if (accion === 'recargar') {
+        recargar()
+        return true
+      }
+      // El aviso no se retira: una vez hay epoca nueva, la hay. Si mas adelante
+      // la persona termina lo que estaba haciendo, la siguiente revision devuelve
+      // 'recargar' y la pestaña se pone al dia sola.
+      if (accion === 'avisar') setAvisar(true)
+      return false
+    },
+    [recargar],
+  )
+
   const revisar = useCallback(async () => {
     // Una recarga ya en curso: no volver a entrar ni a pedir nada.
     if (recargandoRef.current) return
-    const nacidaEn = nacidaEnRef.current
-    if (nacidaEn === null) return
 
-    let versionViva: string | null = null
+    // Sin `x-deployment-id` a proposito: esta consulta DEBE llegar al deployment vivo.
     try {
       const res = await fetch('/api/version', { cache: 'no-store' })
-      if (res.ok) {
-        const cuerpo = (await res.json()) as { version?: unknown }
-        versionViva = typeof cuerpo.version === 'string' ? cuerpo.version : null
-      }
+      if (res.ok) anotarEpocaViva(leerEpoca(await res.json()))
     } catch {
-      // Sin respuesta no se asume nada. `versionViva` se queda en null y solo
-      // el techo de edad puede disparar la recarga — que es justo el caso que
-      // hay que cubrir: si el endpoint esta caido, la pestaña de dieciseis dias
-      // igual tiene que reciclarse.
+      // Sin respuesta no se asume nada: la epoca viva queda en la ultima conocida y
+      // solo el techo puede pedir la recarga.
     }
 
-    const accion = decidirAccion({
-      obsoleta: estaObsoleta({
-        versionCargada: version,
-        versionViva,
-        edadMs: Date.now() - nacidaEn,
-      }),
-      trabajoEnCurso: hayTrabajoEnCurso(),
-      enLinea: navigator.onLine,
-    })
-
-    if (accion === 'recargar') {
-      recargar()
-      return
-    }
-    // El aviso no se retira: una vez hay version nueva, la hay. Si mas adelante
-    // la persona termina lo que estaba haciendo, la siguiente revision devuelve
-    // 'recargar' y la pestaña se pone al dia sola.
-    if (accion === 'avisar') setAvisar(true)
-  }, [version, recargar])
+    // Despues de la red SIEMPRE como 'intervalo': la respuesta puede tardar segundos
+    // por Claro, y para entonces la persona ya esta leyendo. El techo no recarga aqui.
+    actuar('intervalo')
+  }, [actuar])
 
   useEffect(() => {
     // `Date.now()` vive aqui y no en el render: en el render el servidor y el
     // cliente calculan valores distintos y eso rompe la hidratacion (React
     // #418), gotcha ya documentado en este repo.
-    nacidaEnRef.current = Date.now()
+    registrarPestana(epoca, Date.now())
 
     const timer = setInterval(() => {
       void revisar()
     }, INTERVALO_MS)
 
-    // Volver a la pestaña es el momento con mas informacion: es cuando la
-    // persona esta a punto de usarla y cuando el intervalo pudo haber quedado
-    // congelado por el navegador en segundo plano.
+    // Volver a la pestaña es el momento con mas informacion: la persona esta a
+    // punto de usarla y todavia no esta leyendo nada. Primero se decide con lo que
+    // ya se sabe (sin red, para recargar EN el instante de volver y no segundos
+    // despues), y luego se pregunta por la epoca.
     const alVolver = () => {
-      if (document.visibilityState === 'visible') void revisar()
+      if (document.visibilityState !== 'visible') return
+      if (actuar('volver')) return
+      void revisar()
     }
     document.addEventListener('visibilitychange', alVolver)
+
+    // Navegacion interna por `<a>`/`<Link>` con la recarga pendiente: se convierte
+    // en carga completa del destino. Va en captura sobre `window` para correr ANTES
+    // que el `onClick` de `<Link>`, que ya habria arrancado la navegacion suave.
+    const alClic = (e: MouseEvent) => {
+      const ancla = (e.target as Element | null)?.closest?.('a[href]')
+      if (!(ancla instanceof HTMLAnchorElement)) return
+      const destino = esNavegacionInterna({
+        href: ancla.getAttribute('href'),
+        ubicacion: window.location.href,
+        target: ancla.getAttribute('target'),
+        descarga: ancla.hasAttribute('download'),
+        boton: e.button,
+        modificadora: e.metaKey || e.ctrlKey || e.shiftKey || e.altKey,
+        yaPrevenido: e.defaultPrevented,
+      })
+      if (!destino) return
+      if (!tocaCargaCompleta(Date.now(), navigator.onLine)) return
+      e.preventDefault()
+      e.stopPropagation()
+      window.location.assign(destino.href)
+    }
+    window.addEventListener('click', alClic, true)
 
     return () => {
       clearInterval(timer)
       document.removeEventListener('visibilitychange', alVolver)
+      window.removeEventListener('click', alClic, true)
+      olvidarPestana()
     }
-  }, [revisar])
+  }, [epoca, revisar, actuar])
 
   if (!avisar) return null
 

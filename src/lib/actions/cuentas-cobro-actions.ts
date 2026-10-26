@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { generarCuentasCobroPeriodo } from '@/lib/cobros/generar-cuentas-cobro'
@@ -146,7 +148,7 @@ export async function ejecutarGenerarCuentasCobroPeriodo(
  *   - Envía email al cliente con PDF adjunto (helper)
  *   - Marca email_resend_id + email_enviado_at + estado='enviada'
  */
-export async function aprobarYEnviarCuentaCobro(
+async function aprobarYEnviarCuentaCobroSinClave(
   cuentaId: string,
 ): Promise<ActionResult<{ resend_id: string }>> {
   const { supabase, workspaceId, userId, role, error } = await getWorkspace()
@@ -218,7 +220,7 @@ export async function aprobarYEnviarCuentaCobro(
  *   - Si estado era 'aprobada_lista_envio', pasa a 'enviada'
  *   - No toca aprobado_at, aprobado_por, pagado_at
  */
-export async function reenviarCuentaCobro(
+async function reenviarCuentaCobroSinClave(
   cuentaId: string,
 ): Promise<ActionResult<{ resend_id: string }>> {
   const { supabase, workspaceId, userId, role, error } = await getWorkspace()
@@ -471,4 +473,23 @@ export async function registrarPagoCuentaCobro(
       mensaje: `Abono parcial registrado. Saldo pendiente ${formatCOP(saldoPendiente)}.`,
     },
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function aprobarYEnviarCuentaCobro(cuentaId: string, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof aprobarYEnviarCuentaCobroSinClave>>>(
+    { accion: 'aprobarYEnviarCuentaCobro', clave: intencion, args: [cuentaId], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => aprobarYEnviarCuentaCobroSinClave(cuentaId),
+  )
+}
+
+export async function reenviarCuentaCobro(cuentaId: string, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof reenviarCuentaCobroSinClave>>>(
+    { accion: 'reenviarCuentaCobro', clave: intencion, args: [cuentaId], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => reenviarCuentaCobroSinClave(cuentaId),
+  )
 }

@@ -1,5 +1,6 @@
 'use server'
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { operadorVeControl, COLUMNA_VISIBILIDAD_OPERADOR } from '@/lib/compliance/responsables'
@@ -1254,7 +1255,7 @@ export async function importarRiesgosExcel(base64: string): Promise<{
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 })
+  const rows: any[][] = textoLatinoProfundo(XLSX.utils.sheet_to_json(ws, { header: 1 }))
 
   // Skip header row
   const dataRows = rows.slice(1)

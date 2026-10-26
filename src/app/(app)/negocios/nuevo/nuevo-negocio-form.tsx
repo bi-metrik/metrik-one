@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft, ArrowRight, User, Building2, FileText, Check, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,6 +10,7 @@ import { searchContactos, searchEmpresas } from '@/app/(app)/directorio/actions'
 import { SECTORES_EMPRESA, ORIGENES_NEGOCIO, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { PhoneInput } from '@/components/phone-input'
 import { DialogoNegocioDuplicado } from '@/components/negocios/dialogo-negocio-duplicado'
+import { useIntencion } from '@/hooks/use-intencion'
 
 type ContactoResult = { id: string; nombre: string; telefono: string | null; email: string | null }
 type EmpresaResult = { id: string; nombre: string; sector: string | null }
@@ -24,19 +26,24 @@ const STEPS = [
 export default function NuevoNegocioForm({
   lineas = [],
   lineasAutoNombre = [],
+  lineasNombrePlantilla = {},
   aliados = [],
   aliadosHabilitado = false,
 }: {
   lineas?: Linea[]
   /** Líneas cuyo negocio toma el nombre del contacto: se oculta el campo nombre. */
   lineasAutoNombre?: string[]
+  /** Líneas con nombre por plantilla (`config_extra.nombre_automatico`): id → plantilla. Se oculta el campo nombre. */
+  lineasNombrePlantilla?: Record<string, string>
   /** Aliados activos del workspace (solo si el módulo está activo). */
   aliados?: AliadoOpcion[]
   /** ¿El workspace tiene el módulo aliados? Sin él no se ofrece origen 'alianza'. */
   aliadosHabilitado?: boolean
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [step, setStep] = useState(0)
   /** Negocios que ya existen para el contacto elegido. null = no hay que preguntar. */
   const [duplicados, setDuplicados] = useState<NegocioDelMismoContacto[] | null>(null)
@@ -91,7 +98,8 @@ export default function NuevoNegocioForm({
   const negocioStep = esPersonaNatural ? 1 : 2
 
   // Línea con nombre automático = contacto → se oculta el campo "nombre del negocio".
-  const autoNombre = lineaId != null && lineasAutoNombre.includes(lineaId)
+  const plantillaNombre = lineaId != null ? lineasNombrePlantilla[lineaId] ?? null : null
+  const autoNombre = lineaId != null && (lineasAutoNombre.includes(lineaId) || plantillaNombre !== null)
 
   // ── Busqueda contactos ─────────────────────────────────────────────────────
 
@@ -186,7 +194,8 @@ export default function NuevoNegocioForm({
   const enviar = (confirmarDuplicado: boolean) => {
     startTransition(async () => {
       const result = await crearNegocio({
-        nombre: autoNombre ? contactoNombre.trim() : nombre.trim(),
+        // Con plantilla el servidor arma el nombre (y lo sigue rehaciendo con el destino y las fechas).
+        nombre: plantillaNombre !== null ? '' : autoNombre ? contactoNombre.trim() : nombre.trim(),
         linea_id: lineaId ?? undefined,
         contacto_id: contactoId ?? undefined,
         contacto_nombre: contactoId ? undefined : contactoNombre.trim(),
@@ -198,7 +207,8 @@ export default function NuevoNegocioForm({
         origen,
         aliado_id: esAlianza ? aliadoId : undefined,
         confirmar_duplicado: confirmarDuplicado,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
 
       // El teléfono tecleado ya era de otro contacto: no se creó una segunda
       // ficha, se usó la que existe. Se dice siempre, incluso cuando no hay
@@ -567,7 +577,15 @@ export default function NuevoNegocioForm({
           )}
 
           {/* Nombre — oculto cuando la línea usa nombre automático = contacto */}
-          {autoNombre ? (
+          {plantillaNombre !== null ? (
+            <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2.5">
+              <p className="text-xs font-medium text-muted-foreground">Nombre del negocio</p>
+              <p className="mt-0.5 text-sm font-medium">Automático, con la regla de la línea: {plantillaNombre}</p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+                Se arma solo con el destino y las fechas, y cambia si cambian. Si lo renombras a mano, ya no cambia.
+              </p>
+            </div>
+          ) : autoNombre ? (
             <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2.5">
               <p className="text-xs font-medium text-muted-foreground">Nombre del negocio</p>
               <p className="mt-0.5 text-sm font-medium">{contactoNombre || 'El nombre del cliente'}</p>

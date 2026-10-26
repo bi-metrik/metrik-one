@@ -4,6 +4,9 @@ import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronDown,
   ChevronRight,
   FileSpreadsheet,
@@ -30,10 +33,12 @@ import {
   ESTADO_SUJETO_LABEL,
   TIPOS_SUJETO,
   TIPO_SUJETO_LABEL,
+  etiquetaResultadoConsulta,
   porVencer,
   puedeGestionarSujetos,
   type EstadoSujeto,
 } from '@/lib/compliance/sujetos';
+import { formatFecha } from '@/lib/dates/bogota';
 
 /**
  * El color dice lo mismo que la frase: verde se puede contratar, ámbar hay que
@@ -42,12 +47,21 @@ import {
 const CHIP: Record<EstadoSujeto, string> = {
   habilitado: 'bg-[var(--acento-tinte)] text-acento border-acento/30',
   en_seguimiento: 'bg-[var(--acento-tinte)] text-[var(--acento)] border-acento/50',
+  en_revision: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
   vencido: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
   sin_consultar: 'bg-advertencia/10 text-[#B45309] border-advertencia/30',
   inhabilitado: 'bg-alerta/10 text-[#B91C1C] border-alerta/30',
 };
 
 type Segmento = { id: string; nombre: string };
+
+/** Orden de la tabla. Por defecto, el del servidor (nombre). */
+type Orden = 'nombre' | 'ultima_desc' | 'ultima_asc';
+
+/** dd/mm/aaaa en hora de Bogotá. */
+function fechaConsulta(createdAt: string): string {
+  return formatFecha(createdAt, { day: '2-digit', month: '2-digit', year: 'numeric' }) ?? '—';
+}
 type StaffLibre = { id: string; full_name: string; position: string | null };
 
 export default function SujetosClient({
@@ -68,6 +82,7 @@ export default function SujetosClient({
   const [busqueda, setBusqueda] = useState('');
   const [filtro, setFiltro] = useState<EstadoSujeto | null>(null);
   const [verCerradas, setVerCerradas] = useState(false);
+  const [orden, setOrden] = useState<Orden>('nombre');
 
   const puedeGestionar = puedeGestionarSujetos(rol);
 
@@ -91,7 +106,7 @@ export default function SujetosClient({
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
-    return base.sujetos.filter((s) => {
+    const filtrados = base.sujetos.filter((s) => {
       if (!verCerradas && s.situacion.relacionCerrada) return false;
       if (filtro && s.situacion.estado !== filtro) return false;
       if (!q) return true;
@@ -100,7 +115,20 @@ export default function SujetosClient({
         s.documento_numero.toLowerCase().includes(q)
       );
     });
-  }, [base.sujetos, busqueda, filtro, verCerradas]);
+    if (orden === 'nombre') return filtrados;
+    // Los que nunca se consultaron van al final en los dos sentidos: ordenar
+    // por fecha es para ver a quién se evaluó hace más tiempo, no para mezclar
+    // a los que no tienen fecha.
+    const signo = orden === 'ultima_desc' ? -1 : 1;
+    return [...filtrados].sort((a, b) => {
+      const fa = a.ultimaConsulta?.created_at ?? null;
+      const fb = b.ultimaConsulta?.created_at ?? null;
+      if (fa === fb) return 0;
+      if (fa === null) return 1;
+      if (fb === null) return -1;
+      return fa < fb ? -signo : signo;
+    });
+  }, [base.sujetos, busqueda, filtro, verCerradas, orden]);
 
   return (
     <div className="space-y-6">
@@ -131,6 +159,16 @@ export default function SujetosClient({
           </div>
         )}
       </div>
+
+      {base.ultimaConsultaNoDisponible && (
+        <div className="flex items-start gap-2 rounded-lg border border-advertencia/30 bg-advertencia/10 p-3 text-sm text-[#B45309]">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            No se pudo leer el historial de consultas: la columna &quot;Última consulta&quot; no
+            está disponible ahora. El estado de cada sujeto no depende de ella.
+          </span>
+        </div>
+      )}
 
       {base.sinPeriodicidad && base.esOficial && (
         <div className="p-3 rounded-lg bg-advertencia/10 border border-advertencia/30 text-sm text-[#B45309]">
@@ -220,6 +258,27 @@ export default function SujetosClient({
                 <th className="text-left px-3 py-2 font-semibold">Documento</th>
                 <th className="text-left px-3 py-2 font-semibold">Estado</th>
                 <th className="text-left px-3 py-2 font-semibold">Vigencia</th>
+                <th className="text-left px-3 py-2 font-semibold">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 hover:text-tinta"
+                    title="Ordenar por la fecha de la última consulta a listas"
+                    onClick={() =>
+                      setOrden((o) =>
+                        o === 'nombre' ? 'ultima_desc' : o === 'ultima_desc' ? 'ultima_asc' : 'nombre',
+                      )
+                    }
+                  >
+                    Última consulta
+                    {orden === 'ultima_desc' ? (
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    ) : orden === 'ultima_asc' ? (
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowUpDown className="h-3.5 w-3.5 opacity-50" />
+                    )}
+                  </button>
+                </th>
                 <th className="text-left px-3 py-2 font-semibold">Vinculación</th>
               </tr>
             </thead>
@@ -327,6 +386,26 @@ function FilaSujetoUI({
           )}
         </td>
         <td className="px-3 py-2 text-tinta-suave">
+          {sujeto.ultimaConsulta ? (
+            <span>
+              {fechaConsulta(sujeto.ultimaConsulta.created_at)}
+              {esOficial && (
+              <span
+                className={`block text-xs ${
+                  sujeto.ultimaConsulta.severidad === 'sin_hallazgo'
+                    ? 'text-[#9CA3AF]'
+                    : 'text-[#B45309]'
+                }`}
+              >
+                {etiquetaResultadoConsulta(sujeto.ultimaConsulta.severidad)}
+              </span>
+              )}
+            </span>
+          ) : (
+            <span className="text-[#9CA3AF]">—</span>
+          )}
+        </td>
+        <td className="px-3 py-2 text-tinta-suave">
           {sujeto.vinculacion ? (
             <span>
               {sujeto.vinculacion.etiqueta}
@@ -342,7 +421,7 @@ function FilaSujetoUI({
 
       {abierto && (
         <tr className="border-t border-[#E5E7EB] bg-[#FAFAF9]">
-          <td colSpan={6} className="px-4 py-4">
+          <td colSpan={7} className="px-4 py-4">
             <Detalle
               sujeto={sujeto}
               esOficial={esOficial}
@@ -424,17 +503,22 @@ function Detalle({
             <div className="text-xs text-[#9CA3AF] mt-1">
               Según el último aviso recibido, del {sujeto.vinculacion.actualizado_en.slice(0, 10)}.
             </div>
-            <Link
-              href="/compliance/vinculacion"
-              className="inline-block mt-2 text-xs text-tinta underline"
-            >
-              Abrir el expediente en la bandeja
-            </Link>
+            {/* La bandeja es solo de la oficial (owner/admin): a otro rol el
+                enlace lo mandaba de vuelta al inicio sin explicación. */}
+            {esOficial && (
+              <Link
+                href="/compliance/vinculacion"
+                className="inline-block mt-2 text-xs text-tinta underline"
+              >
+                Abrir el expediente en la bandeja
+              </Link>
+            )}
           </>
         ) : (
           <div className="text-xs text-tinta-suave mt-1">
-            No hay expediente de vinculación para este documento. Invítalo desde la bandeja de
-            vinculación para que llene el formulario y firme.
+            {esOficial
+              ? 'No hay expediente de vinculación para este documento. Invítalo desde la bandeja de vinculación para que llene el formulario y firme.'
+              : 'No hay expediente de vinculación para este documento. La oficial de cumplimiento lo invita desde la bandeja de vinculación.'}
           </div>
         )}
       </div>

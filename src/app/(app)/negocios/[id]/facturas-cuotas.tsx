@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Copy, FileCheck2, Link2, Upload } from 'lucide-react'
@@ -50,7 +51,7 @@ export function FacturasCuotas({ cuotas }: { cuotas: CuotaConFactura[] }) {
 function FilaCuota({ cuota: c }: { cuota: CuotaConFactura }) {
   const router = useRouter()
   const [abierta, setAbierta] = useState(false)
-  const [pendiente, iniciar] = useTransition()
+  const [pendiente, iniciar] = useTransitionTolerante()
 
   function enviar(formData: FormData) {
     formData.set('cuota_id', c.cuotaId)
@@ -136,7 +137,7 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConFactura }) {
  */
 function EnlacePagoCuota({ cuota: c }: { cuota: CuotaConFactura }) {
   const router = useRouter()
-  const [pendiente, iniciar] = useTransition()
+  const [pendiente, iniciar] = useTransitionTolerante()
   // Se fija al montar, no en cada render: el render tiene que ser puro.
   const [ahora] = useState(() => Date.now())
 

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback, useTransition } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { X, Loader2, Wallet, CheckCircle, XCircle, FileUp, Paperclip } from 'lucide-react'
 import { toast } from 'sonner'
 import { agregarPagoFab, getNegociosParaPagoFab, negocioPuedeRecibirCobro, estadoAvanceTrasPago, type NegocioParaPagoFab, type AvanceTrasPago } from '@/lib/actions/fab-pago-actions'
@@ -19,6 +20,7 @@ import {
   motivoRechazoComprobante,
   nombreDeComprobantePegado,
 } from '@/lib/cobros/comprobante-pegado'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const VERDE = 'var(--acento)'
 
@@ -51,6 +53,8 @@ export default function RegistrarPagoModal({
   negocioFijado?: NegocioFijadoPago
 }) {
   const [negocios, setNegocios] = useState<NegocioParaPagoFab[]>([])
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [loadingNegocios, setLoadingNegocios] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -68,7 +72,7 @@ export default function RegistrarPagoModal({
   const [fecha, setFecha] = useState('')
   const [justificacion, setJustificacion] = useState('')
   const [needJust, setNeedJust] = useState(false)
-  const [pending, startTransition] = useTransition()
+  const [pending, startTransition] = useTransitionTolerante()
 
   // Comprobante: OPCIONAL. Un pantallazo de la transferencia ahorra la discusión
   // después, pero exigirlo para poder anotar la plata deja el ingreso sin registrar.
@@ -220,7 +224,8 @@ export default function RegistrarPagoModal({
         fecha: fecha || undefined,
         justificacion: needJust ? justificacion.trim() : undefined,
         soporte_subido: soporte ?? undefined,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (res.success) {
         toast.success('Pago registrado')
         // El pago YA quedó. Lo que sigue solo puede AGREGAR una oferta, nunca deshacerlo:
@@ -249,7 +254,8 @@ export default function RegistrarPagoModal({
     const etapaDestinoId = resultado?.etapaDestinoId
     if (!etapaDestinoId) return
     startTransition(async () => {
-      const res = await cambiarEtapaNegocioConGate(negocioId, etapaDestinoId, undefined, confirmado)
+      const res = await cambiarEtapaNegocioConGate(negocioId, etapaDestinoId, undefined, confirmado, intencion.clave())
+      intencion.cerrar()
 
       if (res.error === 'gate_bloqueado') {
         // Los gates que este panel no puede ver (saldo, handoff, campo, conciliación,

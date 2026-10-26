@@ -18,9 +18,20 @@ import {
   variablesAvisoSinTelefono,
 } from '../_shared/wa-sin-telefono.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
-import { resolverEstudioChat, chatCardumenAbierto, startCardumenChat, continueCardumenChat } from '../_shared/cardumen/index.ts';
+import {
+  resolverEstudioChat,
+  chatCardumenAbierto,
+  startCardumenChat,
+  continueCardumenChat,
+  resolverEstudioMiniwebPorTrigger,
+  urlMiniwebParaParticipante,
+  esEstadoObjetos,
+  resolverEstudioObjetosPorTrigger,
+  startObjetos,
+  continueObjetos,
+} from '../_shared/cardumen/index.ts';
 import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
-import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat } from '../_shared/venezuela/index.ts';
+import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat, VE_APAGADO, cerrarVeChatPorApagado } from '../_shared/venezuela/index.ts';
 import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
@@ -31,10 +42,18 @@ import { handleConsulta } from '../_shared/handlers/consulta.ts';
 import { handleActividad } from '../_shared/handlers/actividad.ts';
 import { handleAyuda, handleUnclear, handleUnclearResume } from '../_shared/handlers/ayuda.ts';
 import { atenderBotonTerminos, atenderPendienteTerminos } from '../_shared/aceptacion-terminos-flujo.ts';
+import { atenderAvisoDatos, cerrarAviso } from '../_shared/aviso-datos-bot-flujo.ts';
 import { botEquipoPermitido, MENSAJE_BOT_SIN_CLARITY } from '../_shared/wa-modulos.ts';
+import { contestarNoSoportado, textoNoSoportado } from '../_shared/wa-no-soportado.ts';
 import { atenderEnBandeja, rutaDelMensaje } from '../_shared/wa-bandeja.ts';
 import { confirmarRecordatorio } from '../_shared/wa-recordatorios.ts';
 import { esConfirmacionDeRecordatorio } from '../_shared/wa-recordatorios-reglas.ts';
+import { identificarRemitente } from '../_shared/wa-identificar.ts';
+import { atenderEscrito } from '../_shared/wa-interprete.ts';
+import { aLetraLatina } from '../_shared/texto-latino.ts';
+import { primeraVezDelMensaje } from '../_shared/wa-mensaje-unico.ts';
+import { completarTexto, registrarEntrante } from '../_shared/wa-conversacion.ts';
+import { atenderConAgente, atenderConAgenteOne } from '../_shared/wa-agente.ts';
 import type { BotSession, HandlerContext, IncomingMessage, Intent, WaUser } from '../_shared/types.ts';
 import { OPERATOR_ALLOWED_INTENTS, CONTADOR_ALLOWED_INTENTS, READ_ONLY_ALLOWED_INTENTS } from '../_shared/types.ts';
 
@@ -122,10 +141,19 @@ Deno.serve(async (req) => {
         return new Response('OK', { status: 200 });
       }
 
-      // Un toque de boton puede ser la aceptacion de un documento: se guarda el cuerpo tal cual
-      // llego y su firma, que es lo unico que permite demostrar despues que lo mando Meta.
-      if (message.type === 'interactive') {
+      // Un toque de boton puede ser la aceptacion de un documento, y un texto puede ser el «acepto»
+      // escrito del aviso de datos del bot: se guarda el cuerpo tal cual llego y su firma, que es lo
+      // unico que permite demostrar despues que lo mando Meta. Solo en memoria: no se guarda salvo
+      // que sea esa respuesta.
+      if (message.type === 'interactive' || message.type === 'text') {
         message.webhook_crudo = { cuerpo: body, firma: signature };
+      }
+
+      // Meta reenvía el MISMO mensaje si no recibió el 200 a tiempo: se procesa una sola vez
+      // por `wa_message_id` (ver `_shared/wa-mensaje-unico.ts`).
+      if (!(await primeraVezDelMensaje(getServiceClient(), message.wa_message_id))) {
+        console.log(`[wa-webhook] ${message.wa_message_id} ya se proceso: reenvio de Meta, se ignora`);
+        return new Response('OK', { status: 200 });
       }
 
       // Process async — respond 200 immediately (Meta expects < 20s).
@@ -293,7 +321,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   // 0. Aceptacion de terminos — toque de "Acepto" / "No acepto". Va PRIMERO, antes que cualquier
   //    aislamiento: el id del boton es inequivoco (`terminos:...`) y ese toque no puede terminar
   //    como texto dentro de una entrevista de Cardumen o en el flujo de gastos.
-  if (await atenderBotonTerminos(supabase, message)) return;
+  //    Si el toque es el del aviso de datos del bot, `cerrarAviso` confirma y procesa (aqui mismo,
+  //    en orden) lo que la persona escribio antes de aceptar.
+  if (await atenderBotonTerminos(supabase, message, {
+    alResponderAviso: (fila, decision, respondidoAt) => cerrarAviso(supabase, fila, decision, respondidoAt, processMessage),
+  })) return;
 
   // 0a. Cardumen — Flow completado: guardar la respuesta y agradecer. Va PRIMERO (participantes ≠ usuarios ONE).
   if (message.type === 'flow_response') {
@@ -307,6 +339,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     de escucha ABIERTA para este telefono, TODO mensaje (texto o audio) va al motor Gemini de escucha
   //     y retorna ANTES de cualquier logica de ONE. Estudio aparte: estado en ve_chat_sessions.
   if (await hasOpenVeChat(supabase, message.phone)) {
+    // Bot apagado (2026-10-20): la conversación abierta se cierra con despedida y no cae a la lógica de ONE.
+    if (VE_APAGADO) {
+      await cerrarVeChatPorApagado(supabase, message.phone, message.text || '');
+      return;
+    }
     let texto = message.text || '';
     if (message.type === 'audio' && message.audio_id) {
       const result = await transcribeAudio(message.audio_id);
@@ -331,7 +368,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
   // 0a-ve trigger. Palabra clave publica "venezuela" abre la conversacion de escucha (solo si no hay una abierta).
-  if (message.type === 'text' && isVeTrigger(message.text)) {
+  if (!VE_APAGADO && message.type === 'text' && isVeTrigger(message.text)) {
     await startVeChat(supabase, message.phone, message.wa_message_id, message.bot_phone);
     return;
   }
@@ -341,6 +378,26 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   //     Un audio (u otro mensaje) en medio de Cardumen NUNCA debe caer en el flujo de gastos/intents.
   const chatCardumen = await chatCardumenAbierto(supabase, message.phone);
   if (chatCardumen) {
+    // 0b-obj. Cardumen modo `objetos` — se desvia ANTES de todo lo demas de este bloque.
+    //     La secuencia de objetos sueltos guarda su estado en la MISMA tabla
+    //     `cardumen_chat_sessions` que Navigate (la demo viva de Grupo Progreso), asi que
+    //     esta consulta tambien la ve. Sin esta rama, el texto de vuelta de la pagina
+    //     ("Listo preocupaciones 50-30-20") entraria al entrevistador de chat como si fuera
+    //     una narrativa — y la palabra de consentimiento por defecto del encuadre de chat es
+    //     justamente "LISTO". Lo que distingue la sesion es `state.modo = 'objetos'`.
+    //     Va antes de la transcripcion de este bloque: quien decide si vale la pena
+    //     transcribir es `continueObjetos`, que sabe en que paso va la persona.
+    if (esEstadoObjetos(chatCardumen.state)) {
+      // El audio NO se transcribe aqui: `continueObjetos` lo hace solo si el paso pendiente
+      // es un relato (en un paso de reparto la respuesta llega por el enlace de vuelta, y
+      // transcribir seria gastar una llamada para nada).
+      await continueObjetos(supabase, message.phone, chatCardumen.state, {
+        texto: message.text || '',
+        audioId: message.type === 'audio' ? (message.audio_id ?? null) : null,
+        botonId: message.interactive_reply ?? null,
+      });
+      return;
+    }
     // Lo que el webhook contesta aqui tambien es Cardumen: va marcado con el estudio.
     const avisarCardumen = (t: string) => sendTextMessage(message.phone, t, ctxCardumen(chatCardumen.estudio, t));
     let texto = message.text || '';
@@ -370,6 +427,35 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     const estudioChat = await resolverEstudioChat(supabase, message.text);
     if (estudioChat) {
       await startCardumenChat(supabase, message.phone, estudioChat, message.wa_message_id);
+      return;
+    }
+  }
+  // 0c-bis. Cardumen modo `miniweb` — el instrumento es una página, no una conversación.
+  //     MISMA tabla de triggers que el chat: el bloque de arriba ya se quedó con las palabras
+  //     de los estudios de chat (`cardumen` → `navigate`), así que ninguna palabra viva cambia
+  //     de dueño. El destino sale de `cardumen_estudios.url`: publicar un instrumento nuevo es
+  //     sembrar dos filas, no redesplegar esta función.
+  //     Va ANTES de los disparadores viejos (`cardumenflow`, `cardumen`, `turismo`), que se
+  //     quedan en pie por retrocompatibilidad.
+  if (message.type === 'text') {
+    const miniweb = await resolverEstudioMiniwebPorTrigger(supabase, message.text);
+    if (miniweb) {
+      const url = urlMiniwebParaParticipante(miniweb.url, message.phone);
+      const cuerpo = '🐟 *Cardumen*\n\nGracias por participar. Toca el botón para responder — toma pocos minutos y es confidencial.';
+      // CTA → abre el navegador interno de WhatsApp (un link de texto plano saca de la app).
+      await sendCtaUrl(message.phone, cuerpo, 'Abrir', url, ctxCardumen(miniweb.estudio, cuerpo));
+      console.log(`[wa-webhook] Cardumen miniweb '${miniweb.estudio}' enviado a ${message.phone}`);
+      return;
+    }
+  }
+  // 0c-ter. Cardumen modo `objetos` — la entrevista vive en el chat y la pagina sirve UN
+  //     paso de reparto por vez (`?obj=<id>`). MISMA tabla de triggers que el chat y el
+  //     miniweb: los bloques de arriba ya se quedaron con las palabras de los estudios
+  //     vivos, y la PK de `cardumen_estudio_triggers` impide que una palabra abra dos.
+  if (message.type === 'text') {
+    const objetos = await resolverEstudioObjetosPorTrigger(supabase, message.text);
+    if (objetos) {
+      await startObjetos(supabase, message.phone, objetos, message.wa_message_id);
       return;
     }
   }
@@ -433,17 +519,60 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
 
+  // Bloqueo de todo ONE (`_shared/texto-latino.ts`): lo que el equipo escribe al bot (gastos,
+  // contactos, datos de negocios) entra con los dobles cirílicos/griegos ya latinos.
+  if (message.text) message.text = aLetraLatina(message.text);
+
+  // 1a-aviso. Aviso de datos del bot (opt-in por workspace: `config_extra.aviso_datos_bot`, que llega en
+  //     la misma lectura que identifica al remitente). Dueño, miembro o colaborador que no haya aceptado
+  //     la versión vigente: el mensaje se RETIENE sin procesar y se le muestra el aviso. Va antes del
+  //     intérprete, la bandeja, el módulo, la transcripción y el parser: nada retenido llega a Gemini.
+  //     Apagado, no hace ni una consulta. Ver `_shared/aviso-datos-bot.ts`.
+  if (await atenderAvisoDatos(supabase, user, message, processMessage)) return;
+
+  // 1a-nosop. Lo que el bot no lee (video, sticker, tarjeta de contacto): antes se perdía en silencio. Se dice que no se
+  //     puede leer y qué sí recibe (foto o PDF del soporte). En un workspace con la bandeja sigue callado, como antes.
+  //     Ver `_shared/wa-no-soportado.ts`.
+  if (message.type === 'no_soportado') {
+    await logMessage(supabase, message.phone, 'inbound', user.workspace_id, 'no_soportado', `[${message.tipo_meta ?? 'desconocido'}]`).catch(() => {});
+    if (contestarNoSoportado(user, message) && botEquipoPermitido(user.modulos)) {
+      await sendTextMessage(message.phone, textoNoSoportado(message.tipo_meta));
+    }
+    return;
+  }
+
+  // 1a-conv. La conversación completa (`wa_conversacion`, ver `_shared/wa-conversacion.ts`): solo en los workspaces con
+  //     la bandeja o el bot conversacional configurado, y solo DESPUÉS del aviso de datos (lo retenido no se guarda).
+  //     Fuera de esos workspaces no hace ni una consulta. Se escribe aunque el agente esté apagado.
+  await registrarEntrante(supabase, user, message);
+
+  // 1a-agente. El núcleo conversacional (opt-in por workspace: `config_extra.bot_conversacional.agente`, que llega en la
+  //     misma lectura que identifica al remitente). Prendido, atiende lo del equipo con el modelo y sus herramientas; las
+  //     escrituras solo con un toque. Apagado, no hace ni una consulta y todo sigue como hoy. Ver `_shared/wa-agente.ts`.
+  if (await atenderConAgente(supabase, user, message)) return;
+
+  // 1a-int. Intérprete conversacional (opt-in por workspace: `config_extra.bot_conversacional`, que
+  //     llega en la misma lectura que identifica al remitente). Un escrito libre del equipo pasa por UN
+  //     llamado al modelo que entiende y un validador que decide; si atiende, termina aquí. Apagado, o
+  //     ante cualquier falla, devuelve `atendido: false` sin tocar la base y todo sigue exactamente
+  //     como hoy. Reenvíos, botones, audio y fotos nunca pasan. Ver `_shared/wa-interprete.ts`.
+  if ((await atenderEscrito(supabase, user, message)).atendido) return;
+
   // 1a-bandeja. Bandeja de solicitudes (opt-in por workspace: `modules.bandeja_solicitudes_wa`).
   //     Lo que un comercial reenvia o dicta queda guardado COMPLETO y agrupado por entrega, y NO
   //     pasa por Gemini ni por el flujo de gastos. Va antes de la puerta de Clarity porque es su
   //     propia llave, y antes del tope de 30 mensajes por hora porque una sola conversacion
   //     reenviada puede pasar de 30 y la bandeja no gasta parser. Con la llave apagada no hace
   //     ni una consulta: todo sigue exactamente como antes. Reglas en `_shared/wa-bandeja-reglas.ts`.
+  //     Con la llave encendida manda la bandeja: solo van al bot «gasto …», «bot …» (sin la palabra
+  //     «bot») y lo que contesta una conversación del bot a medias.
   const bandeja = await rutaDelMensaje(supabase, user, message);
+  if (bandeja.atendido) return;
   if (bandeja.ruta === 'bandeja' && bandeja.config) {
     await atenderEnBandeja(supabase, user, message, bandeja.config);
     return;
   }
+  if (bandeja.textoParaElBot) message.text = bandeja.textoParaElBot;
 
   // 1b. Modulo. Todo lo que sigue (gastos, contactos, actividad de negocios, numeros, cartera, y
   //     la transcripcion y el parseo con Gemini) es de Clarity. Va despues de la aceptacion de
@@ -469,6 +598,13 @@ async function processMessage(message: IncomingMessage): Promise<void> {
     return;
   }
 
+  // 3.2 Modo agente de ONE (2026-10-21, por defecto en todo workspace sin la bandeja; ver `_shared/wa-agente.ts`): el
+  //     núcleo conversacional con el dominio ONE (gastos con soporte, actividades, contactos, consultas). Nada se escribe
+  //     sin el toque sobre un resumen con código · empresa — nombre. Va después de las puertas del módulo, la suscripción
+  //     y el tope. Si no puede correr, devuelve false y sigue el bot de siempre (transcripción, parser, máquina de
+  //     estados). Apagado: `bot_conversacional.agente = false` en el workspace, o el secreto `AGENTE_ONE=off`.
+  if (await atenderConAgenteOne(supabase, user, message)) return;
+
   // 3.5 Transcribe audio before any processing
   if (message.type === 'audio' && message.audio_id) {
     const result = await transcribeAudio(message.audio_id);
@@ -478,6 +614,7 @@ async function processMessage(message: IncomingMessage): Promise<void> {
       return;
     }
     message.text = result.text;
+    await completarTexto(supabase, message.wa_message_id, result.text);
     // Echo so user can verify what was understood
     await sendTextMessage(message.phone, `_${result.text}_`);
     console.log(`[wa-webhook] Audio transcribed: "${result.text.slice(0, 100)}"`);
@@ -765,76 +902,8 @@ async function identifyUser(
   supabase: ReturnType<typeof getServiceClient>,
   phone: string,
 ): Promise<WaUser | null> {
-  // Normalize phone (remove +, spaces, etc.)
-  const normalized = phone.replace(/[\s+\-()]/g, '');
-
-  // 1. Check if phone belongs to a workspace owner (via RPC — strips non-digits for matching)
-  const { data: staffRows } = await supabase.rpc('wa_identify_user', { p_phone: normalized });
-  const staffMatch = staffRows?.[0];
-
-  if (staffMatch) {
-    // Get workspace subscription info
-    const { data: workspace } = await supabase
-      .from('workspaces')
-      .select('subscription_status, modules')
-      .eq('id', staffMatch.workspace_id)
-      .single();
-
-    // Map the profile role from the DB: owner, admin, operator, supervisor, contador, read_only
-    // wa_identify_user RPC returns es_principal (bool) and optionally role
-    let role: import('../_shared/types.ts').UserRole = 'operator';
-    if (staffMatch.es_principal) {
-      role = 'owner';
-    } else if (staffMatch.role) {
-      // Trust the role from the profiles table if RPC returns it
-      const validRoles = ['owner', 'admin', 'operator', 'supervisor', 'contador', 'read_only'];
-      role = validRoles.includes(staffMatch.role) ? staffMatch.role : 'operator';
-    }
-
-    return {
-      workspace_id: staffMatch.workspace_id,
-      phone: normalized,
-      name: staffMatch.full_name,
-      role,
-      user_id: staffMatch.user_id || undefined,
-      subscription_status: workspace?.subscription_status || 'trial',
-      modulos: workspace ?? null,
-    };
-  }
-
-  // 2. Check if phone belongs to a WA collaborator (also flexible matching)
-  const { data: collabMatch } = await supabase
-    .from('wa_collaborators')
-    .select('id, workspace_id, name, phone, role')
-    .or(`phone.eq.${normalized},phone.eq.+${normalized}`)
-    .eq('is_active', true)
-    .limit(1)
-    .single();
-
-  if (collabMatch) {
-    const { data: workspace } = await supabase
-      .from('workspaces')
-      .select('subscription_status, modules')
-      .eq('id', collabMatch.workspace_id)
-      .single();
-
-    // Map collaborator role — wa_collaborators may have a 'role' column
-    const validRoles = ['owner', 'admin', 'operator', 'supervisor', 'contador', 'read_only'];
-    const collabRole: import('../_shared/types.ts').UserRole =
-      collabMatch.role && validRoles.includes(collabMatch.role) ? collabMatch.role : 'operator';
-
-    return {
-      workspace_id: collabMatch.workspace_id,
-      phone: normalized,
-      name: collabMatch.name,
-      role: collabRole,
-      collaborator_id: collabMatch.id,
-      subscription_status: workspace?.subscription_status || 'trial',
-      modulos: workspace ?? null,
-    };
-  }
-
-  return null;
+  // La logica vive en `_shared/wa-identificar.ts` (probada en `wa-identificar.test.ts`).
+  return identificarRemitente(supabase, phone);
 }
 
 // ============================================================

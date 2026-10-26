@@ -68,8 +68,15 @@ import {
 
 let contadorInserts = 0;
 
+/** RPC que pidió la acción (hoy: cerrar la alarma de la contraparte). */
+const rpcs: Array<{ fn: string; args: Record<string, unknown> }> = [];
+
 function servicioFalso() {
   return {
+    async rpc(fn: string, args: Record<string, unknown>) {
+      rpcs.push({ fn, args });
+      return { data: 1, error: null };
+    },
     from(tabla: string) {
       const filtros: Array<(f: Fila) => boolean> = [];
       let orden: { campo: string; asc: boolean } | null = null;
@@ -305,6 +312,24 @@ describe('registrarDecisionContraparte — la identidad sale de la evidencia', (
     if (r.ok) throw new Error('inalcanzable');
     expect(r.error).toBe('justificacion_requerida');
     expect(fixtures.compliance_liberaciones).toHaveLength(0);
+  });
+});
+
+describe('registrarDecisionContraparte — la alarma se cierra decidiendo (P1)', () => {
+  it('al decidir, resuelve la alarma de ESA contraparte y estampa quién decidió', async () => {
+    rpcs.length = 0;
+    const r = await registrarDecisionContraparte(INPUT_OK);
+    expect(r.ok).toBe(true);
+    const cierre = rpcs.find((x) => x.fn === 'resolver_grupo_notificaciones');
+    expect(cierre).toBeDefined();
+    expect(String(cierre!.args.p_grupo_clave)).toMatch(/^compliance_hallazgo:NIT:/);
+    expect(cierre!.args.p_resuelta_por).not.toBeNull();
+  });
+
+  it('si la validación falla, no toca la alarma', async () => {
+    rpcs.length = 0;
+    await registrarDecisionContraparte({ ...INPUT_OK, justificacion: '   ' });
+    expect(rpcs).toHaveLength(0);
   });
 });
 

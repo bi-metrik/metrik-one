@@ -1,9 +1,11 @@
 'use client'
 
-import { useState, useTransition, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { resolverPlantillaCampo } from '@/lib/negocios/plantilla-campo'
 import { ImageIcon, Search, FileText, ExternalLink, Download, Copy, Check, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 import { actualizarBloqueData, marcarBloqueCompleto, consultarRetornoDeCorreccion, confirmarSugerido, descartarConflicto } from '../../negocio-v2-actions'
 import SelectorCausa from '@/components/negocios/selector-causa'
 import { LABEL_CAUSA, nuevaSesionId, type CausaCorreccion } from '@/lib/correcciones/causas'
@@ -23,7 +25,7 @@ import { InfoTooltip } from '@/components/ui/info-tooltip'
 import { formatFecha } from '@/lib/dates/bogota'
 import {
   sinHoraRegistrada,
-  rechazoPorFechaPasada,
+  notaPorFechaPasada,
   fechaHoraEnLetras,
   partesFechaHora,
   componerFechaHora,
@@ -33,6 +35,8 @@ import { parsearNumeroColombiano, formatearNumeroColombiano } from '@/lib/negoci
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
 import { revisarTarifaConfirmada, type ReglasTarifaConfirmada } from '@/lib/upme/tarifa-confirmada'
 import IndicadoresSolicitud from './indicadores-solicitud'
+import PegarConversacion from './pegar-conversacion'
+import { declaraNiveles } from '@/lib/negocios/niveles-solicitud'
 import MarcaSugerido from './marca-sugerido'
 import { sugeridosDe, conflictosDe } from '@/lib/negocios/sugeridos'
 import MarcaConflicto, { valorLegibleCampo } from './marca-conflicto'
@@ -309,7 +313,7 @@ export default function BloqueDatos({
     }
     return aplicarSumas(fields, init)
   })
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [pasteImgs, setPasteImgs] = useState<Record<string, string>>({})
   // Extracción IA desde pantallazo (imagen_clipboard con `extrae`).
   // `extrayendo`: por slug del campo imagen, true mientras corre Gemini.
@@ -321,6 +325,8 @@ export default function BloqueDatos({
   const [aiFilled, setAiFilled] = useState<Record<string, boolean>>({})
   // Rechazo de validación por campo (`fecha_hora` y la tarifa UPME). Cadena vacía = sin error.
   const [errorCampo, setErrorCampo] = useState<Record<string, string>>({})
+  // Nota (no error) de una cita registrada con fecha ya pasada: se guarda igual (SOE-009).
+  const [notaCita, setNotaCita] = useState<Record<string, string>>({})
   // Espejo en ref: el guardado diferido corre dentro de un `setTimeout` y ahí el estado
   // todavía es el viejo. Sin este espejo, un valor rechazado se guardaría igual 2,5 s
   // después de escribirlo, que es justo lo que el rechazo viene a impedir.
@@ -480,7 +486,7 @@ export default function BloqueDatos({
       if (result.trigger_afi_generation && result.negocio_id) {
         const tid = toast.loading('Generando paquete documental… esto puede tardar 30-60s')
         try {
-          const res = await fetch(`/api/afi/generar/${result.negocio_id}`, { method: 'POST' })
+          const res = await fetchPropio(`/api/afi/generar/${result.negocio_id}`, { method: 'POST' })
           const json = await res.json()
           toast.dismiss(tid)
           if (json.ok) {
@@ -496,7 +502,7 @@ export default function BloqueDatos({
       if (result.trigger_afi_contrato && result.negocio_id) {
         const tid = toast.loading('Armando contrato… esto puede tardar 15-30s')
         try {
-          const res = await fetch(`/api/afi/contrato/${result.negocio_id}`, { method: 'POST' })
+          const res = await fetchPropio(`/api/afi/contrato/${result.negocio_id}`, { method: 'POST' })
           const json = await res.json()
           toast.dismiss(tid)
           if (json.ok) {
@@ -641,11 +647,9 @@ export default function BloqueDatos({
     valuesRef.current = next
     setValues(next)
     dirtyRef.current = true
-    // La regla muerde al ESCRIBIR, no al avanzar: el aviso llega donde está el error y
-    // no sobre un botón que no explica nada. Y muerde solo sobre lo que se escribe
-    // ahora — decenas de casos cerrados guardan citas ya cumplidas, y validar el valor
-    // heredado los dejaría trabados sin poder avanzar por algo que ya ocurrió.
-    setErrorCampo(prev => ({ ...prev, [slug]: rechazoPorFechaPasada(compuesto) ?? '' }))
+    // Una cita pasada SE GUARDA (SOE-009): es la fecha real cuando la cita ya ocurrió.
+    // La nota avisa que al cliente no le va a salir el aviso de esa cita.
+    setNotaCita(prev => ({ ...prev, [slug]: notaPorFechaPasada(compuesto) ?? '' }))
   }
 
   // Salir del campo → guardar. Con la cita a medio escribir (día sí, hora no) NO se
@@ -655,7 +659,6 @@ export default function BloqueDatos({
     if (!dirtyRef.current) return
     const b = borradorCitaRef.current[slug]
     if (b && faltaHoraDeCita(b.dia, b.hora)) return
-    if (rechazoPorFechaPasada(valuesRef.current[slug])) return
     void persist(valuesRef.current, true)
   }
 
@@ -806,7 +809,7 @@ export default function BloqueDatos({
                     ePayco verificado
                   </span>
                 )}
-                {sugeridoVigente(f.slug, saved[f.slug]) && <MarcaSugerido frase={marcasSugerido[f.slug].frase} />}
+                {sugeridoVigente(f.slug, saved[f.slug]) && <MarcaSugerido marca={marcasSugerido[f.slug]} />}
                 {conflictoVigente(f.slug, saved[f.slug]) && (
                   <MarcaConflicto marca={marcasConflicto[f.slug]} legible={valorLegibleCampo(f, marcasConflicto[f.slug].valor)} />
                 )}
@@ -936,6 +939,26 @@ export default function BloqueDatos({
         )}
       </div>
       <IndicadoresSolicitud fields={fields} valores={values} />
+      {/* Pegar la conversación con el cliente: llena el bloque con sugeridos (solo en un bloque de solicitud). */}
+      {!corrigiendo && declaraNiveles(fields) && (
+        <div className="flex justify-end">
+          <PegarConversacion
+            negocioBloqueId={negocioBloqueId}
+            antes={async () => {
+              if (dirtyRef.current && !hayRechazoPendiente()) await persist(valuesRef.current, false)
+            }}
+            alCargar={(nuevos) => {
+              const slugs = Object.keys(nuevos)
+              if (!slugs.length) return
+              const next = aplicarSumas(fields, { ...valuesRef.current, ...nuevos })
+              valuesRef.current = next
+              setValues(next)
+              setConfirmados(prev => new Set([...prev].filter(s => !slugs.includes(s))))
+              setDescartados(prev => new Set([...prev].filter(s => !slugs.includes(s))))
+            }}
+          />
+        </div>
+      )}
       {fields.filter(f => visible(f, values)).map(f => (
         <div key={f.slug}>
           {f.tipo !== 'documentos_preview' && f.tipo !== 'plantilla' && (
@@ -948,7 +971,7 @@ export default function BloqueDatos({
                 <span className="rounded bg-papel px-1 py-px text-[8px] font-medium uppercase tracking-wide text-[#9CA3AF]">auto</span>
               )}
               {sugeridoVigente(f.slug, values[f.slug]) && (
-                <MarcaSugerido frase={marcasSugerido[f.slug].frase} onConfirmar={() => { void confirmarMarca(f.slug) }} />
+                <MarcaSugerido marca={marcasSugerido[f.slug]} onConfirmar={() => { void confirmarMarca(f.slug) }} />
               )}
               {conflictoVigente(f.slug, values[f.slug]) && (
                 <MarcaConflicto
@@ -1122,6 +1145,9 @@ export default function BloqueDatos({
                 </div>
                 {errorCampo[f.slug] && (
                   <span className="text-[11px] text-red-600 font-medium">{errorCampo[f.slug]}</span>
+                )}
+                {notaCita[f.slug] && !errorCampo[f.slug] && (
+                  <span className="text-[11px] text-[#B45309]">{notaCita[f.slug]}</span>
                 )}
                 {falta && !errorCampo[f.slug] && (
                   <span className="text-[11px] text-[#B45309]">

@@ -1,5 +1,6 @@
 'use server';
 
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { createServiceClient } from '@/lib/supabase/server';
 import { getWorkspace } from './get-workspace';
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
@@ -14,6 +15,10 @@ import type { UniversoSegmentacion } from '@/lib/valida/segmentacion-presets';
 import * as XLSX from 'xlsx';
 import { randomUUID } from 'crypto';
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { abrirAlarmaHallazgo, enviarCorreoHallazgos } from '@/lib/compliance/alarma-hallazgo-servidor'
+import { TIPO_ALARMA_HALLAZGO } from '@/lib/compliance/alarma-hallazgo'
+import type { AvisoHallazgo } from '@/lib/compliance/correo-hallazgo'
+import type { TierResuelto } from '@/lib/compliance/tier-fuentes'
 import {
   mapListItem,
   mapMetrics,
@@ -826,6 +831,26 @@ export async function consultaDualPersistente(
     return { ok: false, error: errIns?.message ?? 'persistencia_fallo' };
   }
 
+  // Toda consulta con hallazgo le abre el caso a la oficial (P1, 2026-10-20).
+  // Antes solo avisaba el barrido, y en ALMA los 15 hallazgos sin decidir los
+  // trajeron consultas manuales que no le llegaron a nadie. En la puntual el
+  // correo sale de una vez; en el masivo sale uno solo al cerrar el lote
+  // (`avisarLoteConHallazgos`), no uno por fila.
+  if (severidad === 'alto') {
+    const alarma = await abrirAlarmaHallazgo(svc, workspaceId, {
+      consulta_id: row.id,
+      nombre: nombreTrim,
+      documento_tipo: filaBase.documento_tipo,
+      documento_numero: idTrim,
+      total_matches: r.data.total_matches,
+      tier_maximo: (clasificacion.tier_maximo as TierResuelto | null) ?? null,
+      lote_id: meta.lote_id ?? null,
+    });
+    if (alarma?.abierta && tipoRow === 'puntual') {
+      await enviarCorreoHallazgos(svc, workspaceId, [alarma.aviso], { excluirProfileId: userId });
+    }
+  }
+
   return {
     ok: true,
     data: {
@@ -836,6 +861,65 @@ export async function consultaDualPersistente(
       segmento_nombre: segmento.data.nombre,
     },
   };
+}
+
+/**
+ * Un solo correo con los hallazgos de un masivo, al terminar el lote.
+ *
+ * Lo llama la pantalla cuando el lote termina. Lista las alarmas que ESTE lote
+ * abrió (las contrapartes que ya tenían una abierta son el mismo caso y no se
+ * repiten). Un candado por lote evita el segundo correo si la pantalla lo llama
+ * dos veces.
+ */
+export async function avisarLoteConHallazgos(loteId: string): Promise<Result<{ correos: number; hallazgos: number }>> {
+  const acceso = await accesoConsultaDual();
+  if (!acceso.ok) return acceso;
+  const { workspaceId } = await getWorkspace();
+  if (!workspaceId) return { ok: false, error: 'workspace_no_encontrado' };
+  if (!loteId?.trim()) return { ok: false, error: 'lote_requerido' };
+
+  const { user } = await getCachedUser();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+
+  const { data: filas, error } = await svc
+    .from('notificaciones')
+    .select('contenido, deep_link, metadata')
+    .eq('workspace_id', workspaceId)
+    .eq('tipo', TIPO_ALARMA_HALLAZGO)
+    .eq('metadata->>lote_id', loteId)
+    .limit(5000);
+  if (error) return { ok: false, error: error.message };
+
+  // Hay una fila por oficial: se deja una por consulta.
+  const porConsulta = new Map<string, AvisoHallazgo>();
+  for (const f of (filas ?? []) as Array<{ contenido: string; deep_link: string | null; metadata: Record<string, unknown> | null }>) {
+    const id = String(f.metadata?.consulta_id ?? f.contenido);
+    if (!porConsulta.has(id)) porConsulta.set(id, { texto: f.contenido, enlace: f.deep_link ?? '/compliance/liberaciones' });
+  }
+  const avisos = [...porConsulta.values()];
+  if (avisos.length === 0) return { ok: true, data: { correos: 0, hallazgos: 0 } };
+
+  const { data: tomado, error: errCandado } = await svc.rpc('tomar_candado', {
+    p_clave: `correo-lote-hallazgos:${workspaceId}:${loteId}`,
+    p_segundos: 60 * 60 * 24 * 30,
+  });
+  if (errCandado) return { ok: false, error: errCandado.message };
+  if (tomado !== true) return { ok: true, data: { correos: 0, hallazgos: avisos.length } };
+
+  const { data: lote } = await svc
+    .from('consultas_listas_dual')
+    .select('titulo_lote')
+    .eq('workspace_id', workspaceId)
+    .eq('lote_id', loteId)
+    .limit(1)
+    .maybeSingle();
+
+  const correos = await enviarCorreoHallazgos(svc, workspaceId, avisos, {
+    excluirProfileId: user?.id ?? null,
+    tituloLote: (lote?.titulo_lote as string | null) ?? null,
+  });
+  return { ok: true, data: { correos, hallazgos: avisos.length } };
 }
 
 /**
@@ -1024,10 +1108,10 @@ export async function prepararLoteDual(
   if (!sheetName) return { ok: false, error: 'xlsx_sin_hojas' };
 
   const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+  const rows = textoLatinoProfundo(XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: null,
     raw: false,
-  });
+  }));
 
   if (rows.length === 0) return { ok: false, error: 'xlsx_vacio' };
   if (rows.length > LOTE_LIMITE) {

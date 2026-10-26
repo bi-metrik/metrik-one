@@ -1,0 +1,83 @@
+---
+name: nucleo-conversacional
+description: Núcleo conversacional de ONE (#1060 → #1062, fallas en vivo 2026-10-07 y 10-09) — cómo se enciende, verificador solo estructural, propuesta que vence por `sobre`, extracción en 2.5-flash-lite
+metadata:
+  type: project
+---
+
+Pila: #1060 (`wa_conversacion`, migración `20261006213100`) ← #1061 (núcleo `_shared/agente/` + bandeja, migración
+`20261006213200`: `bot_parametros`, `bot_reglamentos`, `bot_modelo_precios`, `bot_uso_mes`) ← #1062 (arnés). Apilados
+porque #1060 no estaba mergeado; retargetear a `main` antes de mergear cada base.
+
+**Why:** Mauricio aprobó el diseño de Yuto (2026-10-06, `2026-10-06_investigacion-agentes-conversacionales.md`) en
+lugar del agente simple v2; criterio fijado ANTES de medir: 0 dañinas, más éxito que hoy en las reales, p90 ≤ 5 s
+(webhook → envío).
+
+**How to apply:**
+- Orden: `213100` antes del deploy de `wa-webhook` y `wa-alerts` (los dos envían por `wa-respond`); `213200` antes de
+  encender. Encender = publicar un reglamento (la semilla del Anexo A es SOLO para un workspace de prueba; se niega en
+  Trappvel) + `config_extra.bot_conversacional.agente = true`. `bot_modelo_precios` nace vacía: el costo sale `null`
+  hasta que alguien cargue precios con fuente oficial.
+- Medición 2026-10-06 (llave de pruebas, c1 completo + c2 ×1): 0 dañinas, 4/4 reales, 7/8 escenarios, 0,12 USD; p90
+  turnos con modelo 7,4 s (1 llamado 3,4 s; 2 llamados 6,7 s). 3.8 LOW pasó de 2,5 s en 37 % de los llamados con ~3,4k
+  tokens. `consultar_reglas` como llamado aparte está en 8 de 30 turnos: es la palanca más barata de latencia.
+- Arnés real: `scratchpad/nucleo-arnes.sh` (grep a «Gemini API Key (pruebas)»), `--humo` primero. Mauricio no da más
+  presupuesto de pruebas sin pedirlo: c1 + c2 ×1 por corrida.
+- Un toque por título en el arnés se busca EXACTO primero (bug «No» → [Anotar]).
+- Falla en vivo 2026-10-07 (PR fix/agente-proponer-con-respuesta): `proponer` cerraba el turno con SOLO el resumen, así
+  que una pregunta junto a un pedido nunca se contestaba, y el respaldo flash-lite repetía la misma propuesta. Ahora
+  `proponer.texto` va arriba del resumen y el candado `propuesta_repetida` (acción + datos con llaves ordenadas) no
+  reenvía la pendiente. El corte/respaldo ya era config: `bot_conversacional.agente_config.corte_ms` / `.respaldo`.
+- Segunda falla 2026-10-07 (PR fix/bandeja-acumula-propuestas, sin migración): una propuesta de anotar REEMPLAZABA la
+  pendiente y la extracción veía solo `datos.texto`. Ahora `bandeja/carga.ts`: lee los escritos del viaje (tramos por
+  `nombramientos`, el viaje_nuevo pendiente cuenta como `nuevo:<huella>`) y une con la pendiente del mismo viaje. El
+  toque de [Sí, ábrelo] ya llama a la extracción (Gemini) vía `trasEjecutar`: ese toque tarda más que antes.
+- ⚠️ Mauricio, 2026-10-07, sobre «4 o 5 estrellas»: «el modelo tiene que tener la capacidad de entender… No puede ser
+  tan paramétrico». En el núcleo el modelo interpreta y clasifica; el código SOLO protege invariantes. Por eso el núcleo
+  tiene su propia extracción (`bandeja/extraccion.ts`) y NO usa `entenderEntrega`/`validarSalida`/`guardianPasajeros`
+  (regex sobre el texto, siguen en el flujo viejo). `cargarEnExistente(..., { delModelo: true })` en el núcleo. No
+  agregar reglas de código que lean el texto del comercial: si el modelo falla, se arregla el prompt.
+- Verificador desde 2026-10-09 (rama fix/bot-verificador-estructural): SOLO datos estructurales (código, celular,
+  correo, fecha, cifra, %) contra el respaldo. Se quitaron mayúscula=nombre y las listas de verbos/participios (y el
+  cruce con «hechos» de #1073): en prod 5 de 5 rechazos eran falsos. No volver a agregar listas de palabras. El arnés
+  sigue contando como dañina un «cargué/abrí…» del modelo (`calificar.ts`).
+- Propuesta vigente con `sobre` (código del viaje en Propuesta y en el resultado de `ver_viaje`): la última propuesta
+  queda atrás si una lectura posterior tiene otro `sobre` (viaje_nuevo no tiene: cualquier `ver_viaje` la deja atrás).
+- La extracción de prod corre en `gemini-2.5-flash-lite` (defecto de `wa-entendimiento.ts`, sin secreto que lo cambie);
+  la llave de pruebas recibe 404 «no longer available to new users». El arnés extrae con 3.5-flash-lite: lo que se
+  mide es el prompt en un modelo vecino. Casos: `arnes/extraccion-casos.ts`; `c1-1009` corre la extracción real.
+- Códigos pegados («m1261»): arreglado en #1121 (`bandeja/codigo.ts`, resuelve contra la base). Ver [[tanda-bot-1012]].
+- El reglamento de la conversación (`bot_reglamentos`, Anexo A) aún dice «solo infante se deduce» en `g.pasajeros`: es
+  dato de la base, no código; no se tocó. `PuertoMemoria` con `campos` + `extraer` corre la cadena real; el guion recibe
+  `instrucciones` (el prompt) para probarlo.
+- Tercera falla 2026-10-07 (PR fix/bandeja-preferencia-no-es-valor, sin migración): «económico» → «menos de $3 M» y
+  no había cómo QUITAR. Ahora el esquema trae `quitar` (valor), `como` (calculado/deducido → marca en el resumen) y
+  `dudas` (Mauricio: «no se invente esas cifras, puede preguntar»; la duda va DENTRO del resumen, primera línea, para que
+  `salidaPropuesta` no la corte). Quitar solo borra un sugerido sin confirmar; con `_ediciones` dice «no lo quito». Las
+  edades re-propuestas con otra redacción las resuelve el MODELO (devuelve el valor exacto), no una normalización.
+- ⚠️ Mauricio, 2026-10-08, sobre #1074: «no tiene / no dieron número / está abierto» NO es vacío ni `quitar`: es la
+  opción `no_definido` del campo (presupuesto → `sin_definir`), también como corrección de un rango. `quitar` queda para
+  el campo sin esa opción o «eso no lo dijeron». «Económico» solo sigue siendo duda. Solo prompt; prueba con tope de
+  1.200 tokens en la parte fija del prompt de la extracción (estaba en ~1.169). La extracción solo la empaqueta wa-webhook.
+- La extracción NO recibe el reglamento (`g.presupuesto` y demás solo los ve el modelo de la conversación).
+- Latencia (2026-10-09, perf/agente-latencia): en vivo el turno se va en modelo útil 3,2 s + cortes 0,95 s + la
+  EXTRACCIÓN dentro de `proponer` 1,8 s (p50 4,1 s cuando corre; ~1.200 tokens de salida porque el esquema exige los 25
+  campos) + base 1,6 s. Quitar el `required` del esquema la baja a 1,4 s pero llenó 2 campos en vez de 14: no se toca
+  sin evaluación propia (el arnés NO corre la extracción: no tiene `campos`).
+- ⚠️ Caché de Gemini: 3.8 Flash pide 4.096 tokens mínimos (doc oficial); el prefijo fijo pesa ~3,5k. Probado: 5
+  pedidos idénticos de 6,3k → caché 0 en 3.8 (lite sí cachea). La explícita cachea pero no bajó la latencia y su
+  `toolConfig` es inmutable. Es palanca de costo, no de latencia.
+- Desde 2026-10-09: respaldo en paralelo pasado `corte_ms` (el principal sigue) y sin `consultar_reglas` (índice completo
+  en el sistema). Prod tenía `agente_config.corte_ms = 4000`; con el paralelo conviene 2500.
+- ⚠️ El calificador del arnés cuenta «escritura sin toque» solo en trazas `toque_propuesta`/`si_escrito`: tras #1080 el
+  toque que sigue con el modelo deja traza `modelo` con `tras_toque`, y c2-cliente-nuevo salía como dañina falsa.
+  Corregido en #1062 (ded4f494); las corridas del 2026-10-09 de #1092 se hicieron antes del arreglo.
+- 2026-10-14 (#1166): `responder.opciones` son botones de CONVERSACIÓN (`ag|c|`): su toque vuelve al modelo como
+  texto, no ejecuta. Con una pendiente el modelo pintaba [Cargar] [No] propios porque el prompt decía «no la repitas:
+  contesta con responder». Arreglo SOLO de prompt: re-llamar `proponer` (propuesta_repetida reenvía la pendiente con sus
+  botones reales). ⚠️ Revisión del coordinador: NO ejecutar la pendiente cuando el modelo «resuelve» un toque de
+  conversación en ella (lo propuse y se quitó): solo escribe el toque del botón real o el «sí» solo. Tampoco comparar
+  títulos de opciones con los de la pendiente (es comparar texto). La red ya es propuesta_repetida; no agregar más.
+- `mismaPropuesta` compara datos RESUELTOS: `anotar_en_viaje` acumula los escritos del tramo, así que re-proponer tras
+  otro escrito NO es la misma (otra huella). La repetición exacta solo se da en `cargar_tanda` (mensajes fijos) o sin escrito nuevo.
+Relacionado: [[bandeja-hibrida]], [[entendimiento-bandeja-wa]], [[perfil-contacto-bot]].

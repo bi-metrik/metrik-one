@@ -16,6 +16,7 @@ import CartaAutorizacionPDF from '@/lib/pdf/carta-autorizacion-pdf'
 import RelacionFacturasPDF from '@/lib/pdf/relacion-facturas-pdf'
 import { getCasillasMeta, metaDeCasilla } from '@/lib/pdf/formulario-casillas'
 import { calcularDvNit } from '@/lib/dian/nit'
+import { CaracterNoImprimibleError, datosParaPdf } from '@/lib/texto/texto-latino'
 import { nitConDvPegadoEnFormulario, separarSondas, sondasDeIdentificacion } from '@/lib/dian/guarda-nit-formulario'
 import {
   identificacionConPrefijoEnFormulario,
@@ -43,6 +44,7 @@ import { telefonoCasilla25 } from '@/lib/dian/telefono-casilla-25'
 import { resolverSeccionalOficial, presetKeySeccional, presetKeySeccionalExacta } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { generacionNegadaPorDisputa } from '@/lib/negocios/disputa-generacion'
+import { filaDelFormulario } from '@/lib/negocios/fila-formulario'
 import { createElement } from 'react'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -439,14 +441,20 @@ export async function generarFormulario(
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
+  // El permiso se mide sobre la fila que el usuario tiene enfrente (una copia generable
+  // vive en la etapa donde trabaja); la escritura va a la del formulario, que puede ser la
+  // del origen. Ver `@/lib/negocios/fila-formulario`.
   const guard = await guardEditarBloque(negocioBloqueId)
   if (!guard.ok) return { success: false, error: guard.error ?? 'Sin permiso' }
+
+  const fila = await filaDelFormulario(supabase, negocioBloqueId, { crear: true })
+  if (!fila.ok) return { success: false, error: fila.error }
 
   return generarFormularioCore(
     supabase as unknown as SupabaseClient,
     workspaceId,
     userId ?? null,
-    negocioBloqueId,
+    fila.id,
     negocioId,
   )
 }
@@ -658,6 +666,15 @@ export async function generarFormularioCore(
       }
     }
 
+    // Letras que la IA mete al leer (В cirílica por B, V0121 2026-10-06): los dobles exactos
+    // se convierten; lo que no se puede imprimir corta aquí con el campo a corregir, nunca con
+    // el «WinAnsi cannot encode» de pdf-lib. Ver `src/lib/texto/texto-latino.ts`.
+    const imprimibles = datosParaPdf(datosFinal, etiquetaCampoFormulario)
+    if (!imprimibles.ok) {
+      return { success: false, campos_usados: datosFinal, error: imprimibles.mensaje }
+    }
+    Object.assign(datosFinal, imprimibles.datos)
+
     const codigoNegocio = (negocio?.codigo as string) ?? negocioId.slice(0, 8)
     const fechaGeneracion = new Date().toISOString()
 
@@ -789,9 +806,33 @@ export async function generarFormularioCore(
       version_n: versionN,
     }
   } catch (err) {
+    // Última barrera: un carácter que llegó al estampado por otro lado (una constante del
+    // formato, la seccional). La persona ve qué corregir, no el error de la fuente.
+    if (err instanceof CaracterNoImprimibleError) return { success: false, error: err.message }
     console.error('[formulario-actions] Error:', err)
     return { success: false, error: `Error: ${String(err).slice(0, 200)}` }
   }
+}
+
+/** Nombre del campo en el mensaje de «carácter no válido»: el que la persona reconoce. */
+const ETIQUETAS_CAMPO: Record<string, string> = {
+  direccion: 'Dirección',
+  primer_apellido: 'Primer apellido',
+  segundo_apellido: 'Segundo apellido',
+  primer_nombre: 'Primer nombre',
+  otros_nombres: 'Otros nombres',
+  razon_social: 'Razón social',
+  nombre_suscriptor: 'Nombre del suscriptor',
+  nombre_certificado: 'Nombre',
+  municipio: 'Municipio',
+  departamento: 'Departamento',
+  correo_electronico: 'Correo electrónico',
+  entidad_financiera: 'Entidad financiera',
+  direccion_seccional: 'Dirección seccional',
+}
+
+function etiquetaCampoFormulario(campo: string): string {
+  return ETIQUETAS_CAMPO[campo] ?? campo.replace(/_/g, ' ')
 }
 
 // ── Capa editable de casillas ────────────────────────────────────────────────
@@ -851,7 +892,7 @@ export interface FormularioVersionItem {
  * editables ANTES de generar el PDF. Devuelve también el historial de versiones.
  */
 export async function resolverFormularioParaEdicion(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   negocioId: string,
 ): Promise<{
   casillas: CasillaEditable[]
@@ -868,6 +909,14 @@ export async function resolverFormularioParaEdicion(
 }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { casillas: [], versiones: [], error: 'No autenticado' }
+
+  // Desde una copia generable se lee el formulario del ORIGEN (casillas, overrides y
+  // versiones). Sin fila de origen todavía no hay nada que mostrar: generar la crea.
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: false })
+  if (!fila.ok) {
+    return fila.sinOrigen ? { casillas: [], versiones: [] } : { casillas: [], versiones: [], error: fila.error }
+  }
+  const negocioBloqueId = fila.id
 
   const { data: bloqueData } = await db(supabase)
     .from('negocio_bloques')
@@ -1060,13 +1109,16 @@ async function leerDocumentoFuente(
 
 /** Persiste la seccional seleccionada por el operador en data.seccional (010). */
 export async function guardarSeccional(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   seccional: string,
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
-  const guard = await guardEditarBloque(negocioBloqueId)
+  const guard = await guardEditarBloque(bloqueIdPedido)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: true })
+  if (!fila.ok) return { error: fila.error }
+  const negocioBloqueId = fila.id
   const { data: row } = await db(supabase).from('negocio_bloques').select('data, negocio_id').eq('id', negocioBloqueId).single()
   const current = (row?.data as Record<string, unknown>) ?? {}
   const { error: upErr } = await db(supabase)
@@ -1095,14 +1147,19 @@ export async function guardarSeccional(
 
 /** Guarda los valores editados de las casillas (solo lo sobreescrito). */
 export async function guardarFormularioOverrides(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   overrides: Record<string, string | null>,
 ): Promise<{ error: string | null }> {
   const { supabase, error } = await getWorkspace()
   if (error) return { error: 'No autenticado' }
 
-  const guard = await guardEditarBloque(negocioBloqueId)
+  const guard = await guardEditarBloque(bloqueIdPedido)
   if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+
+  // Las casillas editadas desde una copia generable son las del origen: el PDF sale de ahí.
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: true })
+  if (!fila.ok) return { error: fila.error }
+  const negocioBloqueId = fila.id
 
   const { data: row } = await db(supabase)
     .from('negocio_bloques')
@@ -1143,7 +1200,7 @@ export async function guardarFormularioOverrides(
  * vieja pisaría lo que otro proceso escribió en el medio, sin error y sin aviso.
  */
 export async function confirmarNitFormulario(
-  negocioBloqueId: string,
+  bloqueIdPedido: string,
   nitTecleado: string,
 ): Promise<{
   ok: boolean
@@ -1155,8 +1212,12 @@ export async function confirmarNitFormulario(
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
 
-  const guard = await guardEditarBloque(negocioBloqueId)
+  const guard = await guardEditarBloque(bloqueIdPedido)
   if (!guard.ok) return { ok: false, error: guard.error ?? 'Sin permiso' }
+
+  const fila = await filaDelFormulario(supabase, bloqueIdPedido, { crear: true })
+  if (!fila.ok) return { ok: false, error: fila.error }
+  const negocioBloqueId = fila.id
 
   const tecleado = digitosDeNit(nitTecleado)
   if (tecleado === '') return { ok: false, error: 'Escribe el número de la casilla 5 del RUT' }

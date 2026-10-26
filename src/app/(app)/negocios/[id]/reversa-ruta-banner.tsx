@@ -22,7 +22,8 @@
  *    línea, y sin el motivo eso no se ve nunca.
  */
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { GitBranch, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { aplicarReversaDeRuta, descartarReversaDeRuta } from '../negocio-v2-actions'
@@ -47,7 +48,7 @@ export function ReversaRutaBanner({
   propuesta: ReversaPendienteVista | null
   userRole: string
 }) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [modo, setModo] = useState<'aplicar' | 'descartar' | null>(null)
   const [motivo, setMotivo] = useState('')
 

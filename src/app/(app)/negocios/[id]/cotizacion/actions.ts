@@ -21,6 +21,10 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
+import { EMBED_NEGOCIO_ENVIO, motivoAutorizacionDeCotizacion, motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
+import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
+import { esOrigenVersion } from '@/lib/negocios/seguimiento'
+import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -94,6 +98,11 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
+  // La autorización de datos del cliente frena ENVIAR (y aprobar), no armar la cotización
+  // (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea declara el gate.
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId })
+  if (motivoDatos) return { success: false as const, error: motivoDatos }
+
   // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
   // 2026-09-22). Antes del margen: con el precio de otros pasajeros, el margen no dice nada.
   const motivoCapturas = await motivoPorCapturasDesactualizadas(supabase, { cotizacionId, destino: 'enviada' })
@@ -135,6 +144,10 @@ export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: s
     .eq('id', cotizacionId)
 
   if (updErr) return { success: false as const, error: updErr.message }
+
+  // Seguimiento (F1-1): con la línea encendida, el envío deja fecha, versión y canal, y de ahí
+  // cuelgan los toques. Apagada no escribe nada (este camino nunca llenó `fecha_envio`).
+  await registrarEnvioCotizacion(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null, canal: 'enviar' })
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
@@ -210,6 +223,8 @@ export async function aceptarCotizacionNegocio(
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
+  // La autorización de datos del cliente frena ENVIAR (y aprobar), no armar la cotización
+  // (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea declara el gate.
   // Desde borrador, «Aprobar» se salta el envío (`skip_enviar`): la misma regla que
   // «Enviar». Una que ya salió (`enviada`) se aprueba igual: registra lo que el cliente
   // aceptó.
@@ -223,14 +238,25 @@ export async function aceptarCotizacionNegocio(
   })
   if (motivo) return { success: false as const, error: motivo }
 
-  // Obtener valor_total y estado de la cotización
-  const { data: cot, error: cotErr } = await supabase
+  // Obtener valor_total y estado de la cotización, con el negocio y las etapas de su línea en la
+  // MISMA ida: la autorización de datos del cliente frena aprobar, como enviar (reunión del
+  // 2026-10-22, `autorizacion-datos/envio.ts`). Si el embebido falla, la lectura de siempre y la
+  // autorización por separado.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const conNegocio = await (supabase as any)
     .from('cotizaciones')
-    .select('valor_total, estado, consecutivo')
+    .select(`valor_total, estado, consecutivo, ${EMBED_NEGOCIO_ENVIO}`)
     .eq('id', cotizacionId)
     .single()
+  const { data: cot, error: cotErr } = conNegocio.error
+    ? await supabase.from('cotizaciones').select('valor_total, estado, consecutivo').eq('id', cotizacionId).single()
+    : conNegocio
 
   if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
+  const motivoDatos = conNegocio.error
+    ? await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId })
+    : await motivoAutorizacionDeCotizacion(supabase, { workspaceId, negocioId, negocio: (cot as { negocio_envio?: unknown }).negocio_envio })
+  if (motivoDatos) return { success: false as const, error: motivoDatos }
   const estadoCot = (cot as { estado: string }).estado
   if (estadoCot !== 'enviada' && estadoCot !== 'borrador') {
     return { success: false as const, error: 'Solo se pueden aprobar cotizaciones en borrador o enviadas' }
@@ -352,6 +378,23 @@ export async function aceptarCotizacionNegocio(
       })),
     }, 'aceptarCotizacionNegocio')
   }
+
+  // Aprobar desde borrador se salta el envío: con el seguimiento encendido, cuenta como envío
+  // para el embudo (F1-1). Si ya había fecha de envío, no la toca.
+  if (estadoCot === 'borrador') {
+    await registrarEnvioCotizacion(supabase, { workspaceId, negocioId, cotizacionId, staffId: staffId ?? null, canal: 'aprobada' })
+  }
+  // Servicios del viaje (F0): una fila por ítem de la tarifa aceptada, solo con
+  // `servicios_viaje.activo` en la línea. Va AL FINAL y no deshace nada si falla (F0-4): la
+  // aceptación ya quedó, y las filas se traen después desde el bloque con el mismo cálculo.
+  // Con el interruptor apagado no lee la cotización ni escribe nada (F0-7).
+  const servicios = await generarServiciosDesdeTarifa(supabase, {
+    workspaceId,
+    negocioId,
+    cotizacionId,
+    staffId: staffId ?? null,
+  })
+  if (!servicios.ok) console.error('[aceptarCotizacionNegocio] no se crearon los servicios del viaje:', servicios.error)
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
@@ -495,6 +538,12 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
   })
   if (!validacion.valid) return { success: false as const, error: validacion.error ?? 'No se puede corregir' }
 
+  // Servicios del viaje (F0-5): los que salieron de esta aceptación y no tienen pagos se
+  // borran; si alguno ya tiene un pago a proveedor, no se corrige nada y se duplica. Va ANTES
+  // de tocar la cotización para que el rechazo no deje la corrección a medias.
+  const soltados = await soltarServiciosDeAceptacion(supabase, { workspaceId, negocioId })
+  if (!soltados.ok) return { success: false as const, error: soltados.error }
+
   const ahora = new Date().toISOString()
 
   // 1. La cotización vuelve a borrador → el editor la reabre.
@@ -570,6 +619,16 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     valor_nuevo: null,
     contenido: `${cot.consecutivo ? `Cotización ${cot.consecutivo}` : 'La cotización'} volvió a borrador para corregirla${venia}.`.slice(0, 280),
   }, 'corregirCotizacionAceptada')
+  if (soltados.rastro) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: null,
+      contenido: soltados.rastro,
+    }, 'corregirCotizacionAceptada')
+  }
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }
@@ -640,11 +699,17 @@ export async function eliminarCotizacionBorrador(cotizacionId: string, negocioId
  * La copia nace en `borrador` y vuelve a medir: se recalcula aquí mismo, así que su total
  * y su margen salen de lo que se copió, no de lo que la original tenía guardado.
  */
-export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string) {
+export async function duplicarCotizacionNegocio(cotizacionId: string, negocioId: string, origen?: string | null) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
-  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId })
+  // Origen de la versión nueva (F1-3). La prerreserva vencida la escribe el sistema (C9), no
+  // este botón.
+  if (origen != null && (!esOrigenVersion(origen) || origen === 'prerreserva_vencida')) {
+    return { success: false as const, error: 'Escoge de dónde sale la versión nueva.' }
+  }
+
+  const res = await duplicarCotizacionCompleta(supabase, { workspaceId, cotizacionId, negocioId, origenVersion: origen ?? null })
   if (!res.ok) return { success: false as const, error: res.error }
 
   // Una cotización rápida no tiene líneas: su total es el que traía, y recalcular lo

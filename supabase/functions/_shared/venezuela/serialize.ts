@@ -2,7 +2,7 @@
 // en un registro estructurado (una llamada a Gemini al cierre). Equivalente al R2 de Cardumen.
 // No inventa: si un dato no aparece en lo que dijo la persona, lo deja null / lista vacia.
 
-import { generate } from "./gemini.ts";
+import { generate } from "../modelo-texto.ts";
 
 export interface VeRecord {
   atribucion: "con_nombre" | "anonima";

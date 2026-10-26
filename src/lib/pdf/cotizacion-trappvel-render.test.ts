@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { createElement } from 'react'
 import { renderToBuffer } from '@react-pdf/renderer'
-import { inflateSync } from 'node:zlib'
+import { crc32, deflateSync, inflateSync } from 'node:zlib'
 
 import CotizacionPDF from './cotizacion-pdf'
 import CotizacionTermotechPDF from './cotizacion-termotech-pdf'
@@ -24,6 +24,8 @@ import { textoParaElViaje, type DocumentoCliente } from '@/lib/cotizaciones/docu
 import { fotosDelViaje } from './fotos-del-viaje'
 import { fotosDeCiudad } from './fotos-ciudad'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
+import { asiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { REGLA_POR_DEFECTO } from '@/lib/viaje/plan-pagos'
 
 const VUELO = {
   linea: 'AVIANCA CUCUTA-ARMENIA',
@@ -293,6 +295,14 @@ describe('el documento del cliente', () => {
     expect(t).toContain('LLEGADA VUELO')
     expect(t).toContain('AV9459')
     expect(t).toContain('AV9460')
+  })
+
+  it('N9 · una pastilla por vuelo: el regreso de la misma aerolínea va sin nombre; uno de código compartido lleva el suyo', async () => {
+    const mismo = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 AV9460' }] }) }))
+    expect(mismo.match(/Avianca/g)).toHaveLength(1)
+    const compartido = await texto(props({ viaje: viaje({ vuelos: [{ ...VUELO, numeroVuelo: 'AV9459 LA4521' }] }) }))
+    expect(compartido.match(/Avianca/g)).toHaveLength(1)
+    expect(compartido).toMatch(/LA\s*LATAM/)
   })
 
   it('un viaje de solo ida no imprime una fila de regreso vacía', async () => {
@@ -615,6 +625,16 @@ describe('la foto del hotel ocupa el lugar de la foto de la ciudad (2026-09-24)'
     expect(t).not.toContain('Fotografías')
     expect(t).toContain('Crown Paradise')
   })
+
+  it('la foto del hotel que salió de Commons (biblioteca) imprime su crédito: autor y licencia (Emilio, 2026-10-16)', async () => {
+    const credito = 'Crown Paradise, foto de Ana Pérez (Wikimedia Commons, CC BY-SA 4.0)'
+    const t = await texto(props({
+      viaje: viaje({ fotosCiudades: [DE_LA_CIUDAD], hoteles: [{ ...HOTEL, foto: { url: PNG, proporcion: 1.5, credito } }] }),
+    }))
+    expect(t).toContain(`Fotografías: ${credito}`)
+    // La de la ciudad que reemplazó no se acredita.
+    expect(t).not.toContain('Autor de la ciudad')
+  })
 })
 
 describe('los tres niveles de detalle', () => {
@@ -855,8 +875,11 @@ describe('COT-2026-0006: San Andrés - Providencia', () => {
     expect(t).not.toMatch(/23 NOV Bogotá San Andrés Isla Avianca/)
     // ⚠️ El renderizador parte la corrida después del dígito del día («28  nov»): se busca
     // con `\s+`. Tabla de vuelos: las dos filas de Avianca, cada una con su fecha y su número.
+    // Una pastilla por vuelo (regla del 2026-10-12): la aerolínea va en la primera fila y el
+    // regreso, de la misma aerolínea, va sin pastilla ni nombre.
     expect(t).toMatch(/Avianca Bogotá San Andrés Isla Vuelo directo 23\s+nov 2026 9782/)
-    expect(t).toMatch(/Avianca San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+    expect(t).toMatch(/9782 San Andrés Isla Bogotá Vuelo directo 28\s+nov 2026 9779/)
+    expect(t.match(/Avianca/g)).toHaveLength(1)
   })
 
   it('1b · con un día que no es vuelo, el «Día a día» vuelve y cada vuelo va en su día', async () => {
@@ -1061,10 +1084,16 @@ describe('el texto para el cliente', () => {
   it('⚠️ «Antes de viajar» va con «Incluido», no suelto al final del documento', async () => {
     // El orden del texto solo significa algo dentro de UNA página: se mira la suya.
     const t = await texto(props({ dias: null, viaje: viaje({ ...textoParaElViaje(doc(true)), vuelos: [], hoteles: [], presentacion: null }) }))
-    const pagina = [...porPagina(t, 'COT-2026-0006').values()].find(p => p.includes('Antes de viajar'))!
+    const paginas = porPagina(t, 'COT-2026-0006')
+    const pagina = [...paginas.values()].find(p => p.includes('Antes de viajar'))!
     expect(pagina).toContain('Incluido en el plan')
     expect(pagina.indexOf('Incluido en el plan')).toBeLessThan(pagina.indexOf('Antes de viajar'))
-    expect(pagina.indexOf('Antes de viajar')).toBeLessThan(pagina.indexOf('Opcionales'))
+    // «Opcionales» va después: en la misma hoja, más abajo, o en una hoja posterior.
+    const hojaDe = (frase: string) => [...paginas.entries()].find(([, p]) => p.includes(frase))![0]
+    expect(hojaDe('Antes de viajar')).toBeLessThanOrEqual(hojaDe('Opcionales'))
+    if (hojaDe('Antes de viajar') === hojaDe('Opcionales')) {
+      expect(pagina.indexOf('Antes de viajar')).toBeLessThan(pagina.indexOf('Opcionales'))
+    }
   })
 
   it('⚠️⚠️ un borrador de ONE sin revisar no imprime NADA: el documento sale como sin texto', async () => {
@@ -1227,5 +1256,228 @@ describe('la nota para el cliente de una opción', () => {
   it('sin nota no aparece nada', async () => {
     const t = await texto(props())
     expect(t).not.toContain('INCLUYE ASISTENCIA EN EL AEROPUERTO')
+  })
+})
+
+// ── Toda foto de hotel que cargó el asesor sale en el PDF (brief del 2026-10-08) ─────
+
+/**
+ * Una imagen sintética de un solo color, en PNG: cada hotel lleva la SUYA para que el PDF no
+ * pueda reutilizar un mismo objeto para dos fotos y la cuenta de dibujos sea la de fotos.
+ */
+function pngDeColor(r: number, g: number, b: number, ancho = 30, alto = 20): string {
+  const trozo = (tipo: string, datos: Buffer) => {
+    const largo = Buffer.alloc(4)
+    largo.writeUInt32BE(datos.length)
+    const cuerpo = Buffer.concat([Buffer.from(tipo, 'latin1'), datos])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(cuerpo))
+    return Buffer.concat([largo, cuerpo, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(ancho, 0)
+  ihdr.writeUInt32BE(alto, 4)
+  ihdr[8] = 8 // bits por canal
+  ihdr[9] = 2 // RGB
+  const fila = Buffer.concat([Buffer.from([0]), Buffer.from(Array.from({ length: ancho }, () => [r, g, b]).flat())])
+  const datos = deflateSync(Buffer.concat(Array.from({ length: alto }, () => fila)))
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    trozo('IHDR', ihdr),
+    trozo('IDAT', datos),
+    trozo('IEND', Buffer.alloc(0)),
+  ])
+  return `data:image/png;base64,${png.toString('base64')}`
+}
+
+interface Dibujo { x: number; y: number; ancho: number; alto: number }
+
+/**
+ * Qué imágenes dibuja cada hoja y dónde, junto con el texto de esa hoja y dónde empieza.
+ * Una hoja es un flujo de contenido; su número sale del pie («<consecutivo> N de M»).
+ * Una imagen es un `Do` de un XObject: se mide con la matriz vigente en ese momento.
+ */
+function hojasDibujadas(buf: Buffer, consecutivo: string): Map<number, { imagenes: Dibujo[]; textos: { texto: string; x: number; y: number }[] }> {
+  const hojas = new Map<number, { imagenes: Dibujo[]; textos: { texto: string; x: number; y: number }[] }>()
+  const num = '(-?[\\d.]+)'
+  const seis = `${num} ${num} ${num} ${num} ${num} ${num}`
+  let desde = 0
+  for (;;) {
+    const ini = buf.indexOf('stream', desde)
+    if (ini === -1) break
+    let inicio = ini + 'stream'.length
+    if (buf[inicio] === 0x0d) inicio++
+    if (buf[inicio] === 0x0a) inicio++
+    const fin = buf.indexOf('endstream', inicio)
+    if (fin === -1) break
+    desde = fin + 'endstream'.length
+    let c: string
+    try { c = inflateSync(buf.subarray(inicio, fin)).toString('latin1') } catch { continue }
+    let ctm: Matriz = [1, 0, 0, 1, 0, 0]
+    const pila: Matriz[] = []
+    const imagenes: Dibujo[] = []
+    const textos: { texto: string; x: number; y: number }[] = []
+    const re = new RegExp(`(?:^|\\n)(q|Q)(?=\\n)|${seis} cm|BT([\\s\\S]*?)ET|/(\\S+) Do`, 'g')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(c)) !== null) {
+      if (m[1] === 'q') pila.push(ctm)
+      else if (m[1] === 'Q') ctm = pila.pop() ?? [1, 0, 0, 1, 0, 0]
+      else if (m[2] !== undefined) ctm = por(m.slice(2, 8).map(Number) as Matriz, ctm)
+      else if (m[9] !== undefined) {
+        const alto = Math.abs(ctm[3])
+        imagenes.push({ x: ctm[4], y: ctm[3] < 0 ? ctm[5] - alto : ctm[5], ancho: Math.abs(ctm[0]), alto })
+      } else {
+        const tm = new RegExp(`${seis} Tm`).exec(m[8])
+        const [e, f] = tm ? [Number(tm[5]), Number(tm[6])] : [0, 0]
+        const texto = (m[8].match(/<([0-9A-Fa-f\\s]*)>/g) ?? [])
+          .map(h => h.slice(1, -1).replace(/\\s+/g, '').match(/../g)?.map(b => String.fromCharCode(parseInt(b, 16))).join('') ?? '')
+          .join('')
+        textos.push({ texto, x: e * ctm[0] + f * ctm[2] + ctm[4], y: e * ctm[1] + f * ctm[3] + ctm[5] })
+      }
+    }
+    const pie = new RegExp(`${consecutivo}\\s*(\\d+)\\s*de`).exec(textos.map(t => t.texto).join(' '))
+    if (pie) hojas.set(Number(pie[1]), { imagenes, textos })
+  }
+  return hojas
+}
+
+describe('toda foto de hotel que cargó el asesor sale en el PDF (2026-10-08)', () => {
+  const ROJO = pngDeColor(220, 60, 60)
+  const VERDE = pngDeColor(40, 170, 120)
+  const MORADO = pngDeColor(130, 50, 220)
+  const AZUL = pngDeColor(60, 120, 220)
+
+  const TRES: CotizacionPDFProps['itinerarios'] = [
+    { nombre: 'Recomendada', esPrincipal: true, precio: 5_000_000, items: [{ nombre: 'HOTEL RECOMENDADO', descripcion: null, precio_venta: 5_000_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }] },
+    { nombre: 'Económica', esPrincipal: false, precio: 3_900_000, items: [{ nombre: 'HOTEL ECONOMICO', descripcion: null, precio_venta: 3_900_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }] },
+    { nombre: 'Premium', esPrincipal: false, precio: 8_400_000, items: [{ nombre: 'HOTEL PREMIUM', descripcion: null, precio_venta: 8_400_000, descuento_porcentaje: 0, cantidad: 1, unidad: null }] },
+  ]
+  const hotel = (nombre: string, tarifa: number | null, foto: string | null) => ({
+    ...HOTEL,
+    linea: nombre.toUpperCase(),
+    hotel: nombre,
+    ...(tarifa === null ? {} : { tarifas: [tarifa] }),
+    ...(foto ? { foto: { url: foto, proporcion: 1.5 } } : {}),
+  })
+  const DE_LA_CIUDAD = { url: AZUL, rotulo: 'Cancun · punta nizuc', credito: 'Autor de la ciudad (Wikimedia Commons, CC BY 4.0)', lugares: ['Cancun'] }
+  const tresTarifas = (fotos: [string | null, string | null, string | null], over: Partial<ViajePDF> = {}) => props({
+    itinerarios: TRES,
+    viaje: viaje({
+      vuelos: [],
+      cargosEnDestino: [],
+      hoteles: [hotel('Hotel Playa Recomendada', 0, fotos[0]), hotel('Hotel Centro Economico', 1, fotos[1]), hotel('Hotel Isla Premium', 2, fotos[2])],
+      ...over,
+    }),
+  })
+
+  /** Las fotos de todo el documento, cada una con el nombre del hotel que tiene AL LADO. */
+  async function fotosYSuHotel(p: CotizacionPDFProps, nombres: string[]) {
+    const hojas = hojasDibujadas(await pdfDe(p), 'COT-2026-0006')
+    const out: { hoja: number; hotel: string | null; foto: Dibujo }[] = []
+    for (const [hoja, { imagenes, textos }] of hojas) {
+      for (const foto of imagenes) {
+        // Al lado: el nombre empieza a la izquierda de la foto y a una altura que la foto cubre.
+        const vecino = textos.find(t => nombres.includes(t.texto) && t.x < foto.x && t.y >= foto.y && t.y <= foto.y + foto.alto)
+        out.push({ hoja, hotel: vecino?.texto ?? null, foto })
+      }
+    }
+    return out
+  }
+  const NOMBRES = ['Hotel Playa Recomendada', 'Hotel Centro Economico', 'Hotel Isla Premium']
+
+  it('(a) tres tarifas con foto: tres fotos, cada una al lado de su hotel y del mismo tamaño', async () => {
+    const fotos = await fotosYSuHotel(tresTarifas([ROJO, VERDE, MORADO]), NOMBRES)
+    expect(fotos).toHaveLength(3)
+    expect(fotos.map(f => f.hotel).sort()).toEqual([...NOMBRES].sort())
+    // La miniatura de las alternativas mide lo mismo que la del hotel grande.
+    for (const f of fotos) {
+      expect(f.foto.ancho).toBeCloseTo(fotos[0].foto.ancho, 1)
+      expect(f.foto.alto).toBeCloseTo(fotos[0].foto.alto, 1)
+      expect(f.foto.ancho / f.foto.alto).toBeCloseTo(1.5, 2)
+    }
+  })
+
+  it('(a bis) ⚠️ la fila de un hotel con su foto no se parte entre dos hojas, caiga donde caiga', async () => {
+    // Se corre el bloque de hoteles hacia el pie de la hoja una línea a la vez: en alguna de esas
+    // posiciones una fila partida dejaría la foto en una hoja y su hotel en la otra.
+    const linea = 'Una línea más de introducción, para correr los hoteles hacia el pie de la hoja. '
+    const base = tresTarifas([ROJO, VERDE, MORADO])
+    for (let k = 0; k <= 30; k += 3) {
+      const p = { ...base, viaje: { ...base.viaje!, intro: linea.repeat(k) } }
+      const fotos = await fotosYSuHotel(p, NOMBRES)
+      expect(fotos.map(f => f.hotel).sort(), `introducción de ${k} líneas`).toEqual([...NOMBRES].sort())
+    }
+  }, 60_000)
+
+  it('(b) solo la Premium con foto: una foto de hotel, al lado de la Premium; la principal conserva la de la ciudad', async () => {
+    const p = tresTarifas([null, null, MORADO], { fotosCiudades: [DE_LA_CIUDAD] })
+    const fotos = await fotosYSuHotel(p, NOMBRES)
+    expect(fotos).toHaveLength(2)
+    expect(fotos.map(f => f.hotel).sort()).toEqual(['Hotel Isla Premium', 'Hotel Playa Recomendada'])
+    const t = await texto(p)
+    // La de la ciudad sigue siendo la del capítulo, con su rótulo y su crédito.
+    expect(t).toContain('PUNTA NIZUC')
+    expect(t).toContain('Fotografías: Autor de la ciudad')
+    // La Económica, sin foto, sigue en su línea.
+    expect(t).toContain('Hotel Centro Economico')
+  })
+
+  it('(c) dos hoteles con foto en la misma ciudad: dos fotos, cada una al lado del suyo', async () => {
+    const p = props({
+      viaje: viaje({
+        vuelos: [],
+        cargosEnDestino: [],
+        hoteles: [hotel('Hotel Playa Recomendada', null, ROJO), hotel('Hotel Isla Premium', null, MORADO)],
+      }),
+    })
+    const fotos = await fotosYSuHotel(p, NOMBRES)
+    expect(fotos).toHaveLength(2)
+    expect(fotos.map(f => f.hotel).sort()).toEqual(['Hotel Isla Premium', 'Hotel Playa Recomendada'])
+  })
+
+  it('(d) sin ninguna foto: ni una imagen, y las alternativas siguen en una línea', async () => {
+    const p = tresTarifas([null, null, null])
+    const fotos = await fotosYSuHotel(p, NOMBRES)
+    expect(fotos).toHaveLength(0)
+    const t = await texto(p)
+    for (const n of NOMBRES) expect(t).toContain(n)
+    // En «normal» la línea de una alternativa junta nombre, régimen y habitación.
+    expect(t).toContain('Hotel Centro Economico · Todo incluido · Standard Double')
+  })
+})
+
+describe('«Así puedes pagar» (F2-1, PR 7)', () => {
+  const pesosPdf = (v: number) =>
+    new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(v)
+  const plano = (t: string) => t.replace(/\s+/g, ' ')
+  const entrada = { fechaSalida: '2026-12-19', hoy: '2026-10-12', regla: REGLA_POR_DEFECTO }
+
+  it('sin la entrada (línea sin plan_pagos.activo) el documento no cambia', async () => {
+    const sin = await texto(props())
+    expect(sin).not.toContain('Así puedes pagar')
+    expect(await texto(props({ asiPuedesPagar: null }))).toBe(sin)
+  })
+
+  it('con fecha: las filas que imprime suman el TOTAL que imprime', async () => {
+    const p = props({ asiPuedesPagar: entrada })
+    const total = 1_294_351 + 3_780_884
+    const t = plano(await texto(p))
+    expect(t).toContain('Así puedes pagar')
+    expect(t).toContain(plano(pesosPdf(total)))
+    const plan = asiPuedesPagar(total, entrada)
+    expect(plan.filas).toHaveLength(3)
+    for (const f of plan.filas!) {
+      expect(t).toContain(plano(pesosPdf(f.monto)))
+      expect(t).toContain(f.cuando)
+    }
+    expect(plan.filas!.reduce((a, f) => a + f.monto, 0)).toBe(total)
+    expect(t).toContain('con esto llevas el 80 %')
+    expect(t).toContain('Puedes repartirlo en más cuotas: lo acordamos contigo.')
+  })
+
+  it('sin fecha de salida: la regla en palabras y ningún monto', async () => {
+    const t = plano(await texto(props({ asiPuedesPagar: { ...entrada, fechaSalida: null } })))
+    expect(t).toContain('El 80 % quince días antes de salir y el resto el día del viaje.')
+    expect(t).not.toContain('al confirmar (anticipo)')
   })
 })

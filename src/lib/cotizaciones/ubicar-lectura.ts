@@ -15,12 +15,16 @@
  *     «Hotel 2 en Providencia» (H1).
  *  3. Sin fechas que comparar, el lugar, como siempre (`ubicarCaptura`).
  *
+ * ## Actividad (brief del 2026-10-05, «actividades tras la limpieza»)
+ *
+ * Siempre un bloque nuevo: dos actividades suman, no compiten.
+ *
  * Los demás tipos siguen con `ubicarCaptura`.
  *
  * Puro: las líneas de la cotización entran por parámetro.
  */
 
-import { lugarComparable, ubicarCaptura, type CapturaDetectada, type RanuraCandidata } from './bandeja-capturas'
+import { lugarComparable, mismoLugar, ubicarCaptura, type CapturaDetectada, type RanuraCandidata } from './bandeja-capturas'
 import {
   claveOpcionHotel,
   habitacionesDeTarifa,
@@ -31,7 +35,7 @@ import {
   sobraLaCaptura,
 } from './habitaciones'
 import { normalizarGrupo } from './itinerarios'
-import { lugarDeOpcion } from './opcion-viaje'
+import { lugarDeOpcion, rutaDeVueloDeOpcion } from './opcion-viaje'
 import { ranurasDelTipo, type TipoRanura } from './ranuras-cotizacion'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax, type Composicion, type LecturaCasilla } from './tarifa-pasajero'
@@ -140,6 +144,19 @@ export function ubicarLectura(args: {
     return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
   }
 
+  // Una actividad es un componente que SUMA: nace en su propio bloque aunque otra actividad sea
+  // de la misma ciudad (brief del 2026-10-05, «actividades tras la limpieza», punto 1). Solo es
+  // opción de otra si quien cotiza lo elige («+ Opción», «Mover a otro bloque», o «Agregar como
+  // otra opción» de la misma actividad con otro precio, que resuelve el servidor por su id).
+  //
+  // ⚠️ Antes caía en `ubicarCaptura`: sin lugar leído y con UNA sola ranura de actividad iba como
+  // hermana de esa ranura (la regla de «otra opción del mismo hotel»). En COT-2026-0021 el kayak
+  // abrió la primera ranura y el buceo, sin ciudad, entró como su «Opción 2» y dejó de sumar.
+  // «Otro servicio» igual: cada uno (asistencia médica, seguro, tarjeta de turismo) suma aparte.
+  if (tipo === 'actividad' || tipo === 'otro') return { como: 'nueva' }
+
+  if (tipo === 'vuelo') return ubicarVuelo(lectura, pistas, vivas)
+
   const captura: CapturaDetectada = { tipo, lugar: lugarLeido, origen: pistas.origen, destino: pistas.destino }
   const candidatas: RanuraCandidata[] = ranurasConLugar(vivas, tipo).map(r => ({
     grupo: r.grupo,
@@ -150,4 +167,77 @@ export function ubicarLectura(args: {
   }))
   const u = ubicarCaptura(captura, candidatas)
   return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
+}
+
+/** La fecha comparable de un vuelo: «AAAA-MM-DD» o «--MM-DD», sin el día de la semana. */
+function fechaComparable(f: string | null | undefined): { anio: string | null; mesDia: string } | null {
+  const t = (f ?? '').trim()
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(t)
+  if (iso) return { anio: iso[1], mesDia: `${iso[2]}-${iso[3]}` }
+  const corta = /^--(\d{2})-(\d{2})/.exec(t)
+  return corta ? { anio: null, mesDia: `${corta[1]}-${corta[2]}` } : null
+}
+
+/** `false` solo si las dos fechas se leen y son otro día. Sin una de las dos, no se sabe (`null`). */
+function mismaFecha(a: string | null | undefined, b: string | null | undefined): boolean | null {
+  const x = fechaComparable(a)
+  const y = fechaComparable(b)
+  if (!x || !y) return null
+  if (x.anio && y.anio && x.anio !== y.anio) return false
+  return x.mesDia === y.mesDia
+}
+
+/**
+ * H9 (prueba Europa, 2026-10-14) · un vuelo es OPCIÓN de otro cuando sale de la misma ciudad,
+ * llega al mismo destino FINAL y sale el mismo día. Las escalas no cuentan: Air France
+ * BOG→CDG→MAD compite con Avianca BOG→MAD, no suma aparte.
+ *
+ * La ruta sale primero de la LECTURA (`destino` es la llegada final de la ida, por su
+ * descripción en la ranura) y solo si no la dejó, de lo que dijo el detector, que a veces nombra
+ * la llegada del primer tramo. Sin ruta en ninguno de los dos, como siempre (`ubicarCaptura`).
+ */
+function ubicarVuelo(
+  lectura: LecturaCasilla,
+  pistas: { lugar: string | null; origen: string | null; destino: string | null },
+  vivas: readonly LineaParaUbicar[],
+): DestinoDeLectura {
+  const propia = rutaDeVueloDeOpcion({ nombre: lectura.nombre ?? null, grupo: 'vuelo', tarifa_pax: { casillas: { grupo_completo: lectura } } })
+  const origen = propia.origen ?? pistas.origen
+  const destino = propia.destino ?? pistas.destino
+  const ranuras = ranurasDelTipo(vivas as { id: string; grupo?: string | null; es_ajuste?: boolean | null }[], 'vuelo')
+  if (origen === null && destino === null) {
+    const u = ubicarCaptura({ tipo: 'vuelo', lugar: null, origen: null, destino: null }, ranuras.map(r => ({ grupo: r.grupo, tipo: 'vuelo' as const, lugar: null, origen: null, destino: null })))
+    return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
+  }
+  for (const r of ranuras) {
+    const clave = normalizarGrupo(r.grupo)
+    const rutas = vivas
+      .filter(l => normalizarGrupo(l.grupo ?? null) === clave)
+      .map(l => rutaDeVueloDeOpcion({ nombre: l.nombre ?? null, grupo: l.grupo ?? null, tarifa_pax: l.tarifa_pax, tramos: l.tramos }))
+    const coincide = rutas.some(ruta =>
+      mismoLugar(origen, ruta.origen) === true
+      && mismoLugar(destino, ruta.destino) === true
+      && mismaFecha(propia.fecha, ruta.fecha) !== false)
+    if (coincide) return { como: 'hermana', grupo: r.grupo }
+  }
+  return { como: 'nueva' }
+}
+
+/**
+ * «Agregar como otra opción» de una actividad (la bandeja la vio igual a `destinoId`, con otro
+ * precio): quien cotiza ELIGIÓ que sea opción de esa, así que va como hermana en su bloque. Es la
+ * única entrada de la bandeja que vuelve opción a una actividad (`ubicarLectura` siempre abre
+ * bloque). `null` si no es una actividad o el destino ya no es una actividad de la cotización:
+ * entonces decide `ubicarLectura`.
+ */
+export function opcionElegidaDeActividad(
+  tipo: TipoRanura,
+  destinoId: string | null | undefined,
+  lineas: readonly LineaParaUbicar[],
+): DestinoDeLectura | null {
+  if (tipo !== 'actividad' || !destinoId) return null
+  const linea = lineas.find(l => l.id === destinoId && l.es_ajuste !== true)
+  if (!linea || ranuraDeGrupo(linea.grupo ?? null)?.slug !== 'actividad_detalle') return null
+  const grupo = normalizarGrupo(linea.grupo ?? null)
+  return grupo ? { como: 'hermana', grupo } : null
 }

@@ -59,17 +59,22 @@ export function esFechaHoraPasada(value: unknown, ahora?: Date): boolean {
 }
 
 /**
- * Mensaje de rechazo para una cita que se intenta registrar en el pasado, o `null`
- * si el valor es aceptable.
+ * Nota para una cita registrada con fecha ya pasada, o `null` si no pasó.
  *
- * ⚠️ SOLO PARA VALORES NUEVOS. La operación tiene decenas de casos cerrados con
- * citas ya cumplidas: si esta regla se aplicara sobre lo YA guardado, esos casos
- * quedarían trabados sin poder avanzar. Se valida lo que alguien escribe ahora,
- * no lo que la historia dejó escrito.
+ * ⚠️ YA NO RECHAZA (SOE-009, 2026-10-09). Hasta hoy una cita pasada no se podía
+ * guardar, y eso obligaba a la operación a inventar una fecha futura cuando la cita
+ * real ya había ocurrido (pasa tras un reproceso: la cita se hizo antes de que el caso
+ * volviera a Cita). Con V0171 quedó «9-oct 10:00», registrada a las 9:38 del mismo día,
+ * y al cliente le llegó «tu cita quedó agendada» para una cita que no era la suya.
+ *
+ * Ahora se guarda la fecha REAL, y lo que protege al cliente es la otra mitad de la
+ * regla: un aviso que cita una fecha ya pasada no sale (`notificar-etapa`, ver
+ * `supabase/functions/_shared/aviso-mismo-hecho.ts`). La nota lo dice en pantalla para
+ * que nadie espere un correo que no va a salir.
  */
-export function rechazoPorFechaPasada(value: unknown): string | null {
+export function notaPorFechaPasada(value: unknown): string | null {
   if (!esFechaHoraPasada(value)) return null
-  return 'La cita no puede quedar en el pasado. Registra la fecha y hora que asignó la DIAN.'
+  return 'Esta cita ya pasó. Queda registrada, pero al cliente no se le enviará el aviso de la cita.'
 }
 
 const MESES_ES = [

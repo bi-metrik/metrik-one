@@ -1,19 +1,19 @@
 'use server';
 
 import { createServiceClient } from '@/lib/supabase/server';
-import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace';
+import { credencialValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
+import { motivoCorteDeError } from '@/lib/valida/corte-bolsa';
 import { resolverNombresUsuarios } from './_usuarios';
-import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo';
-import { validaCdaPermiteOperar } from '@/lib/valida-cda/puerta';
+import { accesoValida as accesoValidaBase } from '@/lib/valida/acceso-servidor';
+import { llamarValida, persistirConsulta, recalcularScoreNegocio } from '@/lib/valida/consulta-servidor';
+import { CODIGO_BUSQUEDA_INCOMPLETA } from '@/lib/valida/mensajes-error';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
-
-const VALIDA_API_BASE = process.env.VALIDA_API_BASE ?? 'https://api.valida.metrikone.co';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export type TipoPersona = 'natural' | 'juridica';
-export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS';
+export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS' | 'TI' | 'PPT' | 'RC';
 export type Severidad = 'alto' | 'medio' | 'bajo' | 'informativo' | 'sin_hallazgo' | 'error';
 export type TierLista = '1_vinculante' | '2_obligatoria' | '3_referencia' | '4_kyc_nacional';
 
@@ -103,111 +103,68 @@ export type FilaLotePreparada = {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 /**
- * Todo lo de este archivo es del módulo Valida (`/valida`, y su sección en el detalle del
- * negocio de un workspace que lo tenga). La sesión no basta: un workspace sin el módulo
- * (4D SOFT, con solo `valida_api`) no consulta, no lista ni descarga reportes aquí.
+ * La puerta de todo el módulo (ver `@/lib/valida/acceso-servidor`). Aquí el «no» viaja al navegador
+ * tal cual, sin el `workspaceId` que la puerta trae para el cargue masivo.
  */
-async function accesoValida(): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
-  const r = await exigirModulo(REQUISITO.validaConsulta);
-  if (!r.ok) return { ok: false, error: r.error === 'no_autenticado' ? 'workspace_no_encontrado' : r.error };
-  // Los CDA con contrato directo con METRIK IA S.A.S. no operan hasta que la persona designada
-  // acepte sus términos (cláusula 16.3), salvo dentro del plazo para aceptar, ni con más de 30 días
-  // de mora (cláusula 11.1). Un espacio sin contrato de Valida (AFI, metrik) pasa igual que antes:
-  // la puerta no le aplica. Ver `src/lib/valida-cda/puerta.ts`.
-  const puerta = await validaCdaPermiteOperar();
-  if (!puerta.ok) return puerta;
-  return r;
+async function accesoValida(
+  opts: { consultaNueva?: boolean } = {},
+): Promise<{ ok: true; workspaceId: string } | { ok: false; error: string }> {
+  const r = await accesoValidaBase(opts);
+  return r.ok ? r : { ok: false, error: r.error };
 }
 
 async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
-  const svc = createServiceClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (svc.from('workspaces') as any)
-    .select('config_extra')
-    .eq('id', workspaceId)
-    .single();
-  // Vault primero; config_extra solo mientras dure el traslado (frente 2026-09-14).
-  const key = secretoConRespaldo(
-    await leerSecretosWorkspace(workspaceId),
-    data?.config_extra as Record<string, unknown> | null,
-    'valida_api_key',
-  );
-  // SIN respaldo a la llave global de MeTRIK. Hasta el 2026-09-16 caía a `VALIDA_API_KEY`:
-  // un workspace sin llave propia consultaba a cargo de MeTRIK, y sus reportes quedaban
-  // bajo la llave de MeTRIK, donde `descargarPDFConsultaValida` los devolvía a cualquiera
-  // que tuviera un id. Medido ese día: `config_extra` ya no guarda ninguna llave (el
-  // traslado a Vault corrió y aborta si Vault no tiene exactamente las que había), y las
-  // 7 llaves de Valida medidas el 2026-09-14 son de afi, alma-afi, cda-caqueta,
-  // cda-elcarmen, cda-puertotest, maxitec y metrik: todos los workspaces con
-  // `valida_consulta` tienen la suya. Sin llave, la consulta falla a la vista.
-  return key ?? null;
+  return (await credencialValida(workspaceId)).llave;
 }
 
-async function llamarValida(
-  apiKey: string,
-  input: ValidaConsultaInput
-): Promise<{ ok: true; data: ValidaResultado } | { ok: false; error: string }> {
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/validate`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(input),
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const data = (await res.json()) as ValidaResultado;
-    return { ok: true, data };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_desconocido' };
-  }
-}
-
-async function persistirConsulta(opts: {
-  workspaceId: string;
-  userId: string | null;
-  negocioId: string | null;
-  loteId: string | null;
-  tipo: 'puntual' | 'masiva_item';
-  input: ValidaConsultaInput;
-  resultado:
-    | { ok: true; data: ValidaResultado }
-    | { ok: false; error: string };
-}): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+/**
+ * En el REINTENTO de una fila del cargue masivo: ¿el primer intento ya alcanzo a guardar esta
+ * misma consulta con resultado? Un `Load failed` en el navegador no dice si el server action
+ * corrio; si corrio, la consulta ya se cobro y se guardo, y volver a llamar a Valida la
+ * cobraria dos veces y la duplicaria en el reporte del lote.
+ *
+ * Se compara por lote + persona consultada. Limite conocido: si el XLSX trae a la MISMA
+ * persona dos veces y la segunda fila cae en reintento, devuelve el resultado de la primera
+ * (mismo resultado, una fila menos en el reporte). Solo ocurre en reintentos.
+ */
+async function consultaYaGuardadaEnLote(
+  workspaceId: string,
+  loteId: string,
+  input: ValidaConsultaInput,
+): Promise<{ id: string; data: ValidaResultado } | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
-  const isError = !opts.resultado.ok;
-  const data = opts.resultado.ok ? opts.resultado.data : null;
+  const { data, error } = await svc
+    .from('valida_consultas')
+    .select('id, valida_consulta_id, severidad, total_matches, matches, hash_reporte, created_at, nombre_consultado, documento_tipo, documento_numero')
+    .eq('workspace_id', workspaceId)
+    .eq('lote_id', loteId)
+    .eq('tipo_persona', input.tipo)
+    .not('valida_consulta_id', 'is', null);
+  if (error || !Array.isArray(data)) return null;
 
-  const row = {
-    workspace_id: opts.workspaceId,
-    negocio_id: opts.negocioId,
-    lote_id: opts.loteId,
-    tipo: opts.tipo,
-    tipo_persona: opts.input.tipo,
-    nombre_consultado: opts.input.nombre || null,
-    documento_tipo: opts.input.documento?.tipo ?? null,
-    documento_numero: opts.input.documento?.numero ?? null,
-    valida_consulta_id: data?.consulta_id ?? null,
-    severidad: (isError ? 'error' : data!.severidad) as Severidad,
-    total_matches: data?.total_matches ?? 0,
-    matches: data?.matches ?? null,
-    hash_reporte: data?.hash_reporte ?? null,
-    created_by: opts.userId,
+  const nombre = input.nombre || null;
+  const docTipo = input.documento?.tipo ?? null;
+  const docNumero = input.documento?.numero ?? null;
+  const fila = (data as Array<Record<string, unknown>>).find(
+    r =>
+      typeof r.valida_consulta_id === 'string' &&
+      (r.nombre_consultado ?? null) === nombre &&
+      (r.documento_tipo ?? null) === docTipo &&
+      (r.documento_numero ?? null) === docNumero,
+  );
+  if (!fila) return null;
+  return {
+    id: fila.id as string,
+    data: {
+      consulta_id: fila.valida_consulta_id as string,
+      severidad: fila.severidad as Severidad,
+      total_matches: (fila.total_matches as number) ?? 0,
+      matches: (fila.matches as ValidaMatch[]) ?? [],
+      hash_reporte: (fila.hash_reporte as string) ?? '',
+      fecha_reporte: (fila.created_at as string) ?? '',
+    },
   };
-
-  const { data: ins, error } = await svc.from('valida_consultas')
-    .insert(row)
-    .select('id')
-    .single();
-
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, id: ins.id };
 }
 
 /**
@@ -239,12 +196,14 @@ async function negocioEsDelWorkspace(
 
 export async function consultarValida(
   input: ValidaConsultaInput,
-  opts: { negocio_id?: string | null; lote_id?: string | null } = {}
+  // `reintento`: lo manda el cargue masivo cuando repite una fila que fallo por red (ver
+  // `consultaYaGuardadaEnLote`). Solo tiene efecto con `lote_id`.
+  opts: { negocio_id?: string | null; lote_id?: string | null; reintento?: boolean } = {}
 ): Promise<
   | { ok: true; data: ValidaResultado; consulta_local_id: string }
   | { ok: false; error: string }
 > {
-  const acceso = await accesoValida();
+  const acceso = await accesoValida({ consultaNueva: true });
   if (!acceso.ok) return acceso;
   const workspaceId = acceso.workspaceId;
 
@@ -256,10 +215,28 @@ export async function consultarValida(
     return { ok: false, error: 'negocio_no_encontrado' };
   }
 
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
+  const { llave: apiKey, prueba } = await credencialValida(workspaceId);
   if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
 
+  if (opts.reintento && opts.lote_id) {
+    const previa = await consultaYaGuardadaEnLote(workspaceId, opts.lote_id, input);
+    if (previa) return { ok: true, data: previa.data, consulta_local_id: previa.id };
+  }
+
   const resultado = await llamarValida(apiKey, input);
+
+  // Corte de la bolsa (agotada, vencida, o la llave de prueba que venció con ella): Valida no
+  // registró ni cobró la consulta, así que tampoco se guarda aquí. Guardarla como error llenaba el
+  // historial con una fila por cada intento después del corte. La pantalla lo convierte en
+  // «Activa tu plan» (ver `@/lib/valida/corte-bolsa`).
+  if (!resultado.ok) {
+    const corte = motivoCorteDeError(resultado.error, prueba);
+    if (corte) return { ok: false, error: corte };
+    // La búsqueda en alguna lista no se completó (503 de metrik-valida#66): Valida no la registró
+    // ni la cobró. Por la misma razón del corte no se guarda: una fila `error` en el historial se
+    // leía como un resultado. La pantalla dice «no pudimos revisar todas las listas; intenta de nuevo».
+    if (resultado.error === CODIGO_BUSQUEDA_INCOMPLETA) return { ok: false, error: CODIGO_BUSQUEDA_INCOMPLETA };
+  }
 
   const persisted = await persistirConsulta({
     workspaceId,
@@ -275,36 +252,37 @@ export async function consultarValida(
   if (!persisted.ok) return { ok: false, error: persisted.error };
 
   // Recalcular score SARLAFT del negocio si tiene datos configurados
-  if (opts.negocio_id) {
-    try {
-      const { calcularScoreNegocio, persistirScore } = await import('@/lib/valida/calculo-score');
-      const calc = await calcularScoreNegocio({ workspaceId, negocioId: opts.negocio_id });
-      if (calc.ok) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const svc = createServiceClient() as any;
-        const { data: datos } = await svc
-          .from('valida_sarlaft_datos_negocio')
-          .select('universo')
-          .eq('negocio_id', opts.negocio_id)
-          .maybeSingle();
-        if (datos) {
-          await persistirScore({
-            workspaceId,
-            negocioId: opts.negocio_id,
-            universo: datos.universo,
-            resultado: calc.resultado,
-          });
-        }
-      }
-    } catch {
-      // Re-cálculo silencioso — no afecta el flujo principal de la consulta
-    }
-  }
+  if (opts.negocio_id) await recalcularScoreNegocio(workspaceId, opts.negocio_id);
 
   return { ok: true, data: resultado.data, consulta_local_id: persisted.id };
 }
 
 // ─── Plantilla XLSX ───────────────────────────────────────────────────────
+
+/**
+ * La hoja que dice qué va en cada columna. Hasta el 2026-10-23 la plantilla solo traía ejemplos, y
+ * la columna `tipo_documento` llegaba con «CEDULA», «PP» o «TI», que Valida rechazaba.
+ */
+function hojaValoresPlantilla(sinNegocio: boolean): XLSX.WorkSheet {
+  const filas: string[][] = [
+    ['columna', 'valores aceptados', 'notas'],
+    ['tipo_persona', 'natural · juridica', 'Obligatoria.'],
+    ['nombre_completo', 'Nombre completo o razón social', 'Obligatorio si no hay documento.'],
+    [
+      'tipo_documento',
+      'CC · CE · NIT · PAS · TI · PPT · RC',
+      'CC: cédula de ciudadanía. CE: cédula de extranjería. NIT: personas jurídicas. PAS: pasaporte. ' +
+        'TI: tarjeta de identidad. PPT: Permiso por Protección Temporal. RC: registro civil. ' +
+        'También se entienden «Cédula», «Cédula de extranjería», «Pasaporte», «PP», «PA», «Tarjeta de identidad» y «Registro civil». ' +
+        'Vacío con número: natural se consulta como CC (PAS si el número trae letras) y jurídica como NIT.',
+    ],
+    ['numero_documento', 'Solo el número', 'Sin puntos ni espacios. Para NIT, sin dígito de verificación.'],
+  ];
+  if (!sinNegocio) filas.push(['negocio_codigo', 'Código del negocio (ej. C1 26 1)', 'Opcional.']);
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  ws['!cols'] = [{ wch: 18 }, { wch: 32 }, { wch: 100 }];
+  return ws;
+}
 
 export async function descargarPlantillaValida(
   opts: { sinNegocio?: boolean } = {},
@@ -334,6 +312,7 @@ export async function descargarPlantillaValida(
       ? [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }]
       : [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Consultas');
+    XLSX.utils.book_append_sheet(wb, hojaValoresPlantilla(sinNegocio), 'Valores aceptados');
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
     return {
@@ -346,126 +325,6 @@ export async function descargarPlantillaValida(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'error_plantilla' };
   }
-}
-
-// ─── Preparar lote ────────────────────────────────────────────────────────
-//
-// Parsea el XLSX server-side y devuelve la lista de filas listas para que el
-// cliente las procese una a una (loop con barra de progreso visible).
-// No llama a Valida ni persiste resultados — eso ocurre por fila via
-// `consultarValida(..., { lote_id })`.
-
-type FilaXLSX = {
-  tipo_persona: string;
-  nombre_completo: string;
-  tipo_documento?: string;
-  numero_documento?: string;
-  negocio_codigo?: string;
-};
-
-export async function prepararLoteValida(
-  fd: FormData,
-  opts: { negocio_id_lote?: string | null } = {}
-): Promise<
-  | { ok: true; data: { lote_id: string; total: number; filas: FilaLotePreparada[] } }
-  | { ok: false; error: string }
-> {
-  const acceso = await accesoValida();
-  if (!acceso.ok) return acceso;
-  const workspaceId = acceso.workspaceId;
-
-  const file = fd.get('archivo');
-  if (!(file instanceof File)) return { ok: false, error: 'archivo_no_provisto' };
-  if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_excede_5mb' };
-
-  let rows: FilaXLSX[];
-  try {
-    const buf = Buffer.from(await file.arrayBuffer());
-    const wb = XLSX.read(buf, { type: 'buffer' });
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    if (!sheet) return { ok: false, error: 'archivo_sin_hojas' };
-    rows = XLSX.utils.sheet_to_json<FilaXLSX>(sheet, { defval: '' });
-  } catch {
-    return { ok: false, error: 'archivo_no_legible' };
-  }
-
-  if (rows.length === 0) return { ok: false, error: 'archivo_vacio' };
-  if (rows.length > 500) return { ok: false, error: 'maximo_500_filas_por_lote' };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const svc = createServiceClient() as any;
-
-  // El negocio del lote entero llega del navegador: ajeno o inexistente, el lote no se
-  // prepara (cada fila sin codigo propio heredaria ese id).
-  if (opts.negocio_id_lote && !(await negocioEsDelWorkspace(svc, opts.negocio_id_lote, workspaceId))) {
-    return { ok: false, error: 'negocio_no_encontrado' };
-  }
-
-  // Resolver mapping codigo → negocio_id (para columna negocio_codigo)
-  const codigos = Array.from(
-    new Set(
-      rows
-        .map(r => String(r.negocio_codigo ?? '').trim())
-        .filter(c => c.length > 0)
-    )
-  );
-  const codigoToId = new Map<string, string>();
-  if (codigos.length > 0) {
-    const { data: negs } = await svc.from('negocios')
-      .select('id, codigo')
-      .eq('workspace_id', workspaceId)
-      .in('codigo', codigos);
-    for (const n of (negs ?? []) as Array<{ id: string; codigo: string }>) {
-      codigoToId.set(n.codigo, n.id);
-    }
-  }
-
-  const loteId = crypto.randomUUID();
-  const filas: FilaLotePreparada[] = rows.map((fila, idx) => {
-    const tipoPersona = String(fila.tipo_persona ?? '').trim().toLowerCase() as TipoPersona;
-    const nombre = String(fila.nombre_completo ?? '').trim();
-    const tipoDoc = String(fila.tipo_documento ?? '').trim().toUpperCase() as TipoDocumento;
-    const numDoc = String(fila.numero_documento ?? '').trim();
-    const negocioCodigo = String(fila.negocio_codigo ?? '').trim();
-
-    const negocioId = negocioCodigo
-      ? codigoToId.get(negocioCodigo) ?? null
-      : opts.negocio_id_lote ?? null;
-
-    const tipoValido = tipoPersona === 'natural' || tipoPersona === 'juridica';
-    const tieneDoc = !!(numDoc && tipoDoc);
-
-    // Al menos un dato identificador: nombre o documento (consistente con el motor).
-    if (!tipoValido || (!nombre && !tieneDoc)) {
-      return {
-        posicion: idx + 1,
-        input: {
-          tipo: tipoPersona === 'juridica' ? 'juridica' : 'natural',
-          ...(nombre ? { nombre } : {}),
-        },
-        negocio_id: negocioId,
-        error: 'tipo_persona invalido o fila sin nombre ni documento',
-      };
-    }
-
-    const input: ValidaConsultaInput = {
-      tipo: tipoPersona,
-      ...(nombre ? { nombre } : {}),
-      ...(tieneDoc ? { documento: { tipo: tipoDoc, numero: numDoc } } : {}),
-    };
-
-    return {
-      posicion: idx + 1,
-      input,
-      negocio_id: negocioId,
-      error: null,
-    };
-  });
-
-  return {
-    ok: true,
-    data: { lote_id: loteId, total: filas.length, filas },
-  };
 }
 
 // ─── Descargar PDF reporte individual ─────────────────────────────────────

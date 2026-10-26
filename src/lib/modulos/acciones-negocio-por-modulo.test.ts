@@ -119,7 +119,7 @@ import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const MENSAJE = 'Este espacio no tiene activo el módulo que usa esta acción.'
 const PNG = 'data:image/png;base64,iVBORw0KGgo='
-const REPROCESO = { tipo: 'certificacion_upme', causa: 'error_propio', detalle: 'el radicado salió mal' } as const
+const REPROCESO = { tipo: 'certificacion_upme', causa: 'error_propio', motivo: 'dato_mal_en_certificado', detalle: 'el radicado salió mal' } as const
 
 function planilla(): FormData {
   const fd = new FormData()

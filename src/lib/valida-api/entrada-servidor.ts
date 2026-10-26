@@ -3,7 +3,12 @@ import { cache } from 'react'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
 import { contextoValidaApi, type ContextoValidaApi } from './contexto'
-import { evaluarEntrada, type AceptacionUsuarioRegistrada, type EstadoEntrada } from './entrada'
+import {
+  evaluarEntrada,
+  evaluarModificacionPorAviso,
+  type AceptacionUsuarioRegistrada,
+  type EstadoEntrada,
+} from './entrada'
 import { designacionDelEspacio, documentosDelCliente, perfilReal } from './terminos-servidor'
 
 /**
@@ -74,6 +79,21 @@ export async function evaluarConDesignacion(
   const designacion = await designacionDelEspacio(p.workspaceId)
   if (designacion === 'error') return { estado: 'no_disponible' }
   return evaluarEntrada({ ...p, designacion })
+}
+
+/**
+ * La modificación por aviso que se ofrece aceptar (ver `evaluarModificacionPorAviso`), con quién la
+ * firma. Lee la designación solo si hay una modificación que ofrecer; si esa lectura falla, el estado es
+ * `no_disponible`: el aviso se sigue mostrando, pero nadie firma a ciegas.
+ */
+export async function evaluarModificacionConDesignacion(
+  p: Parameters<typeof evaluarEntrada>[0] & { designacion?: never },
+): Promise<EstadoEntrada | null> {
+  const estado = evaluarModificacionPorAviso(p)
+  if (estado === null || estado.estado !== 'pendiente') return estado
+  const designacion = await designacionDelEspacio(p.workspaceId)
+  if (designacion === 'error') return { estado: 'no_disponible' }
+  return evaluarModificacionPorAviso({ ...p, designacion })
 }
 
 /** Una sola evaluación por request aunque la pidan la página y varias acciones. */

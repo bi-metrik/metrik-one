@@ -18,6 +18,7 @@
 // Server-only.
 // ============================================================
 
+import { fetchModeloActas } from '@/lib/ai/modelo-llm'
 import type { CandidataActa } from './seleccion'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
@@ -120,7 +121,7 @@ export async function generarActa(
   const systemPrompt = buildPrompt(candidata.transcripcion.asistentes)
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
 
-  const res = await fetch(url, {
+  const res = await fetchModeloActas(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

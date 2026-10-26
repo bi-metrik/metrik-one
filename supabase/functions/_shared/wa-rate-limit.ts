@@ -16,6 +16,9 @@ export async function checkInboundLimit(supabase: SupabaseClient, phone: string)
     .select('*', { count: 'exact', head: true })
     .eq('phone', phone)
     .eq('direction', 'inbound')
+    // Lo que el intérprete atendió en la bandeja (`interprete_accion` `bandeja.…`) no cuenta: un
+    // comercial que dicta su tanda no se puede quedar sin bot de consultas. Nulo = una fila de siempre.
+    .or('interprete_accion.is.null,interprete_accion.not.like.bandeja.*')
     .gte('created_at', oneHourAgo);
 
   return (count ?? 0) < INBOUND_LIMIT;
@@ -30,7 +33,7 @@ export async function checkInboundLimit(supabase: SupabaseClient, phone: string)
 // direccion 'outbound', asi que un tope construido sobre ella no frena nada nunca.
 
 export interface LogTelemetry {
-  parser_source?: 'fast_path' | 'gemini' | 'regex';
+  parser_source?: 'fast_path' | 'gemini' | 'regex' | 'interprete';
   gemini_model?: string;
   gemini_input_tokens?: number;
   gemini_output_tokens?: number;

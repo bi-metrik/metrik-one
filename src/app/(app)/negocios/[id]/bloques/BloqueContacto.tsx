@@ -1,23 +1,25 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import Link from 'next/link'
-import { ShieldCheck, ShieldAlert, ExternalLink, User } from 'lucide-react'
+import { ExternalLink, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
-import { formatFecha } from '@/lib/dates/bogota'
 import {
   cargarFichaContacto,
   guardarFichaContacto,
-  registrarAutorizacionContacto,
   type FichaContacto,
 } from './contacto-actions'
 import {
   leerCampo,
   esCampoNativo,
-  estadoAutorizacion,
   type CampoContacto,
 } from '@/lib/contactos/campos-contacto'
+import AutorizacionDelContacto from './AutorizacionDelContacto'
+import PerfilConfirmado from '@/components/perfil-contacto/perfil-confirmado'
+import { conReintentoDeRed } from '@/lib/red/con-reintento'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 /**
  * Bloque `contacto`: la ficha de la PERSONA, editada desde dentro del negocio.
@@ -28,8 +30,9 @@ import {
  *
  * Dos modos, uno solo por bloque:
  *  · `campos` — formulario sobre la ficha del contacto.
- *  · `autorizacion` — estado de la autorizacion de tratamiento de datos. Se registra una
- *    vez por persona; en los negocios siguientes el bloque solo la muestra.
+ *  · `autorizacion` — estado de la autorizacion de tratamiento de datos que da el TITULAR en
+ *    su link (`AutorizacionDelContacto`). Vive en el contacto: un cliente recurrente que ya
+ *    autorizo la ve aprobada en sus viajes siguientes.
  */
 
 interface BloqueContactoProps {
@@ -54,11 +57,11 @@ export default function BloqueContacto({
   const [ficha, setFicha] = useState<FichaContacto | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [cargando, setCargando] = useState(true)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   useEffect(() => {
     let vivo = true
-    cargarFichaContacto(negocioBloqueId).then(res => {
+    conReintentoDeRed(() => cargarFichaContacto(negocioBloqueId)).then(res => {
       if (!vivo) return
       setCargando(false)
       if (res.error) {
@@ -71,6 +74,10 @@ export default function BloqueContacto({
         for (const c of campos) iniciales[c.slug] = leerCampo(res.ficha.valores, c.slug) ?? ''
         setValues(iniciales)
       }
+    }).catch(e => {
+      if (!vivo) return
+      setCargando(false)
+      toast.error(mensajeDeFallaDeCarga(e, 'No se pudo cargar la ficha del contacto'))
     })
     return () => {
       vivo = false
@@ -108,80 +115,9 @@ export default function BloqueContacto({
   )
 
   // ── Variante: autorizacion de tratamiento de datos ───────────────────────────
+  // La da el TITULAR en su link; aquí solo se ve el estado y se manda el link.
   if (variante === 'autorizacion') {
-    const estado = estadoAutorizacion(ficha.valores.custom_data)
-
-    function handleRegistrar() {
-      startTransition(async () => {
-        const res = await registrarAutorizacionContacto(negocioBloqueId)
-        if (res.error) {
-          toast.error(res.error)
-          return
-        }
-        setFicha(prev =>
-          prev
-            ? {
-                ...prev,
-                valores: {
-                  ...prev.valores,
-                  custom_data: {
-                    ...prev.valores.custom_data,
-                    autorizacion_datos: true,
-                    autorizacion_datos_fecha: res.fecha,
-                  },
-                },
-              }
-            : prev,
-        )
-        toast.success('Autorizacion registrada en el contacto')
-      })
-    }
-
-    if (estado.autorizado) {
-      const fechaFmt = estado.fecha
-        ? formatFecha(estado.fecha, { day: 'numeric', month: 'short', year: 'numeric' })
-        : null
-      return (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 rounded-lg border border-[#BBF7D0] bg-[var(--acento-tinte)] px-3 py-2">
-            <ShieldCheck className="h-4 w-4 shrink-0 text-acento" />
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-medium text-acento">Autorizacion de datos vigente</p>
-              <p className="text-[10px] text-acento/80">
-                {fechaFmt ? `Registrada el ${fechaFmt}` : 'Registrada sin fecha (dato migrado)'}
-              </p>
-            </div>
-          </div>
-          {enlaceFicha}
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2">
-          <ShieldAlert className="h-4 w-4 shrink-0 text-[#B45309]" />
-          <p className="text-xs text-[#92400E]">
-            {contactoNombre} no tiene autorizacion de tratamiento de datos.
-          </p>
-        </div>
-        {modo === 'editable' ? (
-          <button
-            type="button"
-            onClick={handleRegistrar}
-            disabled={isPending}
-            className="rounded-lg bg-acento px-4 py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isPending ? 'Registrando…' : 'Registrar autorizacion'}
-          </button>
-        ) : (
-          <p className="text-[11px] text-tinta-suave">
-            Se registra desde la ficha del contacto o desde la etapa donde se recoge.
-          </p>
-        )}
-        {enlaceFicha}
-      </div>
-    )
+    return <AutorizacionDelContacto negocioBloqueId={negocioBloqueId} modo={modo} enlaceFicha={enlaceFicha} />
   }
 
   // ── Variante: campos de la ficha ─────────────────────────────────────────────
@@ -278,6 +214,8 @@ export default function BloqueContacto({
           )}
         </div>
       ))}
+
+      <PerfilConfirmado hechos={fichaActual.perfil} />
 
       {enlaceFicha}
     </div>

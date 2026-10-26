@@ -1,10 +1,12 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { consultarTransaccionEpayco, type EpaycoDesglose } from '@/lib/epayco'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { revalidatePath } from 'next/cache'
-import { alRegistrarCobro } from '@/lib/siigo/recibo-automatico'
+import { alRegistrarCobroEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { fechaTransaccionBogota } from '@/lib/epayco/fecha-transaccion'
@@ -116,7 +118,7 @@ export async function consultarEpayco(
         return {
           success: false,
           negocio_existente: dup,
-          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar dos veces. Si el pago cubre los dos negocios, pídele al área financiera que lo redistribuya desde Conciliación (si es un reparto tuyo todavía sin aprobar, ábrelo en ${dup.codigo ?? 'ese negocio'} y usa «Editar reparto»).`,
         }
       }
     }
@@ -216,7 +218,7 @@ export interface RegistrarPagoEpaycoOpts {
   justificacion?: string
 }
 
-export async function registrarPagoEpayco(
+async function registrarPagoEpaycoSinClave(
   negocioBloqueId: string,
   negocioId: string,
   desglose: EpaycoDesglose,
@@ -263,7 +265,7 @@ export async function registrarPagoEpayco(
         return {
           success: false,
           negocio_existente: dup,
-          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar duplicada — pide al área financiera que distribuya ese pago entre los negocios.`,
+          error: `Esta referencia ePayco ya está registrada en ${dup.codigo ?? dup.negocio_id}. No se puede cargar dos veces. Si el pago cubre los dos negocios, pídele al área financiera que lo redistribuya desde Conciliación (si es un reparto tuyo todavía sin aprobar, ábrelo en ${dup.codigo ?? 'ese negocio'} y usa «Editar reparto»).`,
         }
       }
     }
@@ -291,13 +293,20 @@ export async function registrarPagoEpayco(
     // ── 3. Crear cobro (idempotente via external_ref) ──────────────────────
     const { data: existingCobro } = await db(supabase)
       .from('cobros')
-      .select('id')
+      .select('id, fecha')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', negocioId)
       .eq('external_ref', String(desgloseFinal.ref_payco))
       .limit(1)
 
-    let cobroId: string | null = ((existingCobro ?? [])[0] as { id: string } | undefined)?.id ?? null
+    const cobroPrevio = (existingCobro ?? [])[0] as { id: string; fecha: string | null } | undefined
+    let cobroId: string | null = cobroPrevio?.id ?? null
+    // La fecha del pago en ePayco (dia civil de Bogota), o null si el crudo no se lee.
+    const fechaPago = fechaTransaccionBogota(desgloseFinal.fecha)
+    // La que queda en `pagos[].fecha` es la MISMA del cobro (SOE-013): si el cobro ya
+    // existia, la suya; si no, la que se le pone abajo. Antes era el dia del registro y
+    // el bloque «Pagos» quedaba un dia corrido contra el cobro (V0136, ref 386159602).
+    const fechaDelCobro = cobroPrevio?.fecha ?? fechaPago ?? todayBogotaISO()
     if (!cobroId) {
       // La fecha del cobro es la del PAGO en ePayco, no la del registro en ONE
       // (decision de Mauricio, 2026-08-18). `v_venta_mes_comercial.fecha_venta`
@@ -308,7 +317,6 @@ export async function registrarPagoEpayco(
       // Si el crudo de ePayco no se puede leer NO se inventa la fecha: se cae en
       // el dia de registro, que es lo unico cierto, y queda dicho en la nota. Un
       // fallback mudo repondria el defecto sin que nadie lo vea.
-      const fechaPago = fechaTransaccionBogota(desgloseFinal.fecha)
       const notaBase = tipoCobro === 'anticipo' ? 'Anticipo' : 'Pago'
       const cobro = {
         workspace_id: workspaceId,
@@ -318,7 +326,7 @@ export async function registrarPagoEpayco(
           : `${notaBase} — fecha de registro: ePayco no devolvio una fecha legible para la ref ${desgloseFinal.ref_payco}`,
         monto: desgloseFinal.monto_bruto,
         tipo_cobro: tipoCobro,
-        fecha: fechaPago ?? todayBogotaISO(),
+        fecha: fechaDelCobro,
         external_ref: String(desgloseFinal.ref_payco),
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -414,7 +422,8 @@ export async function registrarPagoEpayco(
       total_descuentos: desgloseFinal.total_descuentos,
       monto_neto: desgloseFinal.monto_neto,
       tipo_cobro: tipoCobro,
-      fecha: todayBogotaISO(),
+      // Fecha del PAGO (la del cobro), no la del registro en ONE. Ver SOE-013 arriba.
+      fecha: fechaDelCobro,
     }
     const updatedPagos = [...currentPagos, newPago]
     const updatedData = { ...currentData, pagos: updatedPagos }
@@ -433,7 +442,7 @@ export async function registrarPagoEpayco(
     // Lo que va a Siigo por esta plata: el abono del honorario a la factura (siempre, si
     // hay factura) y el RC-3 de la tarifa (solo con `recibo_automatico`). Nunca devuelve
     // error: el pago ya quedó registrado y eso es lo que la persona pidió.
-    if (cobroId) await alRegistrarCobro(workspaceId, cobroId)
+    if (cobroId) await alRegistrarCobroEnSegundoPlano(workspaceId, cobroId)
 
     // Si este pago dejó el negocio con plata de más, se le avisa a la financiera
     // (opt-in `aviso_sobrepago`). Nunca devuelve error.
@@ -446,4 +455,16 @@ export async function registrarPagoEpayco(
     console.error('[ePayco registrar]', message)
     return { success: false, error: message }
   }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function registrarPagoEpayco(negocioBloqueId: string, negocioId: string, desglose: EpaycoDesglose, tipoCobro: string, opts: RegistrarPagoEpaycoOpts = {}, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof registrarPagoEpaycoSinClave>>>(
+    { accion: 'registrarPagoEpayco', clave: intencion, args: [negocioBloqueId, negocioId, desglose, tipoCobro, opts], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => registrarPagoEpaycoSinClave(negocioBloqueId, negocioId, desglose, tipoCobro, opts),
+  )
 }

@@ -100,10 +100,12 @@ describe('niveles con la config provisional', () => {
     expect(con.deseable.total).toBe(sin.deseable.total - 1)
   })
 
-  it('para CALCULAR, un vacío sigue valiendo 0: la composición y el total no se rompen', () => {
+  it('para CALCULAR la composición, un vacío sigue valiendo 0; el TOTAL no se inventa con lo que falta', () => {
     const vals = aplicarSumas(fields, { adultos: 2, ninos: '', infantes: undefined })
-    expect(vals.numero_pasajeros).toBe(2)
+    // Prueba en vivo de la bandeja (2026-10-01, error 5): el total sale solo con las tres fuentes.
+    expect(vals.numero_pasajeros).toBeUndefined()
     expect(normalizarComposicion(vals)).toEqual({ adultos: 2, ninos: 0, infantes: 0 })
+    expect(aplicarSumas(fields, { adultos: 2, ninos: 0, infantes: 0 }).numero_pasajeros).toBe(2)
   })
 
   it('con menores: la edad entra al mínimo', () => {

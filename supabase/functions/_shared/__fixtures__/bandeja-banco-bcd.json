@@ -1,0 +1,1697 @@
+{
+ "_que_es": "Grupos A4, B, C y D del plan de QA (qa/bandeja-wa/plan-qa.md) con la salida del modelo GRABADA a mano en el esquema nuevo, reproduciendo lo que el QA del 2026-10-01 vio hacer al modelo. Clientes ficticios; nada sale de producción. Varias salidas por escenario = varias corridas: TODAS tienen que cumplir la verdad.",
+ "hoy": "2026-10-01",
+ "escenarios": [
+  {
+   "id": "A4",
+   "titulo": "Pareja, viaje complejo (QA de #969 v2)",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Mi esposo y yo queremos Europa 20 días en mayo: Madrid, París y Roma",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [
+      "Mi esposo y yo queremos Europa 20 días en mayo: Madrid, París y Roma"
+     ],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Europa",
+       "frase": "queremos Europa"
+      },
+      "destino_tipo": {
+       "valor": "internacional",
+       "frase": "Europa"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Mi esposo y yo"
+      },
+      "ninos": {
+       "valor": "por_definir",
+       "frase": ""
+      },
+      "infantes": {
+       "valor": "por_definir",
+       "frase": ""
+      },
+      "fecha_salida": {
+       "valor": "2027-05-01",
+       "frase": "20 días en mayo"
+      },
+      "fecha_regreso": {
+       "valor": "2027-05-20",
+       "frase": "20 días en mayo"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "contiene": [
+       "MADRID",
+       "PARÍS",
+       "ROMA"
+      ]
+     },
+     "adultos": {
+      "eq": 2
+     },
+     "ninos": {
+      "eq": 0
+     },
+     "infantes": {
+      "eq": 0
+     },
+     "fecha_salida": {
+      "vacio": true
+     },
+     "fecha_regreso": {
+      "vacio": true
+     }
+    },
+    "haySolicitud": true
+   }
+  },
+  {
+   "id": "B3",
+   "titulo": "Tanda sin contenido de viaje",
+   "cliente_texto": "NUEVO Pedro Gómez",
+   "mensajes": [
+    {
+     "texto": "jajaja",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "😂😂",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "buenas noches",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "ruido"
+      },
+      {
+       "n": 2,
+       "clase": "ruido"
+      },
+      {
+       "n": 3,
+       "clase": "ruido"
+      },
+      {
+       "n": 4,
+       "clase": "ruido"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {}
+    },
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "ruido"
+      },
+      {
+       "n": 3,
+       "clase": "ruido"
+      },
+      {
+       "n": 4,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Bogotá",
+       "frase": ""
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "haySolicitud": false,
+    "sinCampos": true
+   }
+  },
+  {
+   "id": "B4",
+   "titulo": "Charla personal en medio",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Feliz cumple a tu mamá 🎂",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "el perro se enfermó, por eso no te había escrito",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "Bueno, queremos ir a San Andrés del 8 al 12 de noviembre, somos 2 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "ruido"
+      },
+      {
+       "n": 2,
+       "clase": "ruido"
+      },
+      {
+       "n": 3,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [
+      "el perro se enfermó, por eso no te había escrito",
+      "queremos ir a San Andrés del 8 al 12 de noviembre"
+     ],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "San Andrés",
+       "frase": "queremos ir a San Andrés"
+      },
+      "fecha_salida": {
+       "valor": "2026-11-08",
+       "frase": "del 8 al 12 de noviembre"
+      },
+      "fecha_regreso": {
+       "valor": "2026-11-12",
+       "frase": "del 8 al 12 de noviembre"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "somos 2 adultos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "eq": "SAN ANDRÉS"
+     },
+     "fecha_salida": {
+      "eq": "2026-11-08"
+     },
+     "fecha_regreso": {
+      "eq": "2026-11-12"
+     },
+     "adultos": {
+      "eq": 2
+     }
+    },
+    "prohibido": [
+     "perro",
+     "cumple"
+    ]
+   }
+  },
+  {
+   "id": "B5",
+   "titulo": "Juicio del comercial en la tanda",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Hola, queremos ir a Santa Marta del 20 al 23 de octubre, somos 3 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "ojo, esta señora es muy tacaña y se queja de todo",
+     "reenviado": false,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "comercial"
+      }
+     ],
+     "citas": [
+      "queremos ir a Santa Marta del 20 al 23 de octubre",
+      "tiende a ser crítica con los servicios"
+     ],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Santa Marta",
+       "frase": "queremos ir a Santa Marta"
+      },
+      "adultos": {
+       "valor": "3",
+       "frase": "somos 3 adultos"
+      }
+     }
+    },
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [
+      "ojo, esta señora es muy tacaña y se queja de todo",
+      "queremos ir a Santa Marta"
+     ],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Santa Marta",
+       "frase": "queremos ir a Santa Marta"
+      },
+      "adultos": {
+       "valor": "3",
+       "frase": "somos 3 adultos"
+      },
+      "presupuesto": {
+       "valor": "menos_3m",
+       "frase": "es muy tacaña"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "eq": "SANTA MARTA"
+     },
+     "presupuesto": {
+      "vacio": true
+     }
+    },
+    "prohibido": [
+     "tacañ",
+     "queja",
+     "crítica",
+     "critica"
+    ]
+   }
+  },
+  {
+   "id": "B6",
+   "titulo": "Promoción reenviada de otra agencia",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "PUNTA CANA desde $2.5M, salidas 5 y 12 de diciembre, todo incluido ✈️",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "esto vi, ¿ustedes lo tienen?",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Punta Cana",
+       "frase": "PUNTA CANA"
+      },
+      "fecha_salida": {
+       "valor": "2026-12-05",
+       "frase": "salidas 5 y 12 de diciembre"
+      },
+      "plan_alimentacion": {
+       "valor": "todo_incluido",
+       "frase": "todo incluido"
+      },
+      "presupuesto": {
+       "valor": "menos_3m",
+       "frase": "desde $2.5M"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "fecha_salida": {
+      "vacio": true
+     },
+     "fecha_regreso": {
+      "vacio": true
+     },
+     "plan_alimentacion": {
+      "vacio": true
+     },
+     "presupuesto": {
+      "vacio": true
+     }
+    },
+    "clases": {
+     "1": "tercero"
+    }
+   }
+  },
+  {
+   "id": "B7",
+   "titulo": "Pie de foto de un pago",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "abono reserva Cartagena",
+     "reenviado": true,
+     "origen": "pie_de_foto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cartagena",
+       "frase": "Cartagena"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "vacio": true
+     }
+    },
+    "sinCampos": true,
+    "haySolicitud": false,
+    "clases": {
+     "1": "tercero"
+    }
+   }
+  },
+  {
+   "id": "B8",
+   "titulo": "Otro servicio (visa y seguro)",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "¿Ustedes tramitan visa y seguro de viaje?",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {}
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "vacio": true
+     },
+     "fecha_salida": {
+      "vacio": true
+     },
+     "fecha_regreso": {
+      "vacio": true
+     }
+    }
+   }
+  },
+  {
+   "id": "C4",
+   "titulo": "Cliente que se corrige en la misma tanda",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Queremos ir a Cancún del 10 al 15… no perdón, del 12 al 17 de diciembre, somos 2 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cancún",
+       "frase": "Queremos ir a Cancún"
+      },
+      "fecha_salida": {
+       "valor": "2026-12-12",
+       "frase": "del 12 al 17 de diciembre"
+      },
+      "fecha_regreso": {
+       "valor": "2026-12-17",
+       "frase": "del 12 al 17 de diciembre"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "somos 2 adultos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "fecha_salida": {
+      "eq": "2026-12-12"
+     },
+     "fecha_regreso": {
+      "eq": "2026-12-17"
+     }
+    }
+   }
+  },
+  {
+   "id": "C5",
+   "titulo": "Typos y abreviaturas",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "pta cana",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "2 adlts y 1 niño d 5",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "saliendo de bgta",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      },
+      {
+       "n": 3,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Punta Cana",
+       "frase": "pta cana"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "2 adlts"
+      },
+      "ninos": {
+       "valor": "1",
+       "frase": "1 niño"
+      },
+      "edades_menores": {
+       "valor": "5",
+       "frase": "1 niño d 5"
+      },
+      "ciudad_origen": {
+       "valor": "Bogotá",
+       "frase": "saliendo de bgta"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "eq": "PUNTA CANA"
+     },
+     "adultos": {
+      "eq": 2
+     },
+     "ninos": {
+      "eq": 1
+     },
+     "edades_menores": {
+      "contiene": [
+       "5"
+      ]
+     },
+     "ciudad_origen": {
+      "eq": "BOGOTÁ"
+     }
+    }
+   }
+  },
+  {
+   "id": "C6a",
+   "titulo": "Fecha ambigua: puente de Reyes",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Queremos ir a Cartagena en el puente de Reyes, somos 2 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cartagena",
+       "frase": "ir a Cartagena"
+      },
+      "fecha_salida": {
+       "valor": "2027-01-08",
+       "frase": "el puente de Reyes"
+      },
+      "fecha_regreso": {
+       "valor": "2027-01-11",
+       "frase": "el puente de Reyes"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "somos 2 adultos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "fecha_salida": {
+      "vacio": true
+     },
+     "fecha_regreso": {
+      "vacio": true
+     }
+    }
+   }
+  },
+  {
+   "id": "C6e",
+   "titulo": "Fecha ambigua: en 15 días",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Queremos ir a Cartagena en 15 días, somos 2 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cartagena",
+       "frase": "ir a Cartagena"
+      },
+      "fecha_salida": {
+       "valor": "2026-10-16",
+       "frase": "en 15 días"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "somos 2 adultos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "fecha_salida": {
+      "vacio": true
+     }
+    }
+   }
+  },
+  {
+   "id": "C7",
+   "titulo": "Cambio de año",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Queremos ir a Punta Cana del 28 de diciembre al 3 de enero, somos 2 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "fecha_salida": {
+       "valor": "2026-12-28",
+       "frase": "del 28 de diciembre al 3 de enero"
+      },
+      "fecha_regreso": {
+       "valor": "2027-01-03",
+       "frase": "del 28 de diciembre al 3 de enero"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "fecha_salida": {
+      "eq": "2026-12-28"
+     },
+     "fecha_regreso": {
+      "eq": "2027-01-03"
+     }
+    }
+   }
+  },
+  {
+   "id": "C8",
+   "titulo": "Fecha que ya pasó",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Salimos el 5 de septiembre para Cancún, somos 2 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "fecha_salida": {
+       "valor": "2026-09-05",
+       "frase": "Salimos el 5 de septiembre"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "fecha_salida": {
+      "unoDe": [
+       null,
+       "2027-09-05"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "C9",
+   "titulo": "«Mi bebé» adulto",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Viajo con mi esposo y mi bebé, que ya tiene 18 añitos. Queremos ir a Medellín",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [
+      "Viajo con mi esposo y mi bebé, que ya tiene 18 añitos",
+      "busca un plan que incluya alojamiento y desayuno"
+     ],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Medellín",
+       "frase": "Queremos ir a Medellín"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Viajo con mi esposo"
+      },
+      "infantes": {
+       "valor": "1",
+       "frase": "mi bebé"
+      },
+      "edades_menores": {
+       "valor": "18",
+       "frase": "que ya tiene 18 añitos"
+      }
+     }
+    },
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Medellín",
+       "frase": "Queremos ir a Medellín"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Viajo con mi esposo"
+      },
+      "ninos": {
+       "valor": "1",
+       "frase": "mi bebé"
+      },
+      "edades_menores": {
+       "valor": "18",
+       "frase": "que ya tiene 18 añitos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "eq": 2
+     },
+     "edades_menores": {
+      "contiene": [
+       "18"
+      ]
+     }
+    },
+    "prohibido": [
+     "desayuno"
+    ]
+   },
+   "nota_v5": "Decisión de Mauricio (QA de #971 v5): la edad no mueve a nadie de categoría; «mi bebé de 18» se queda como lo dijo el cliente y la edad queda anotada."
+  },
+  {
+   "id": "C9b",
+   "titulo": "«Mi bebé» adulto, con el modelo sin contar al bebé",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Viajo con mi esposo y mi bebé, que ya tiene 18 añitos. Queremos ir a Medellín",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Medellín",
+       "frase": "Queremos ir a Medellín"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Viajo con mi esposo"
+      },
+      "edades_menores": {
+       "valor": "18",
+       "frase": "que ya tiene 18 añitos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "vacio": true
+     },
+     "ninos": {
+      "vacio": true
+     },
+     "infantes": {
+      "vacio": true
+     }
+    },
+    "pregunta": [
+     "adultos"
+    ]
+   }
+  },
+  {
+   "id": "C10",
+   "titulo": "Edades en el borde (2 y 12)",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Vamos 2 adultos a San Andrés y los niños tienen 2 y 12",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "San Andrés",
+       "frase": "a San Andrés"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Vamos 2 adultos"
+      },
+      "ninos": {
+       "valor": "2",
+       "frase": "los niños"
+      },
+      "infantes": {
+       "valor": "1",
+       "frase": "tienen 2"
+      },
+      "edades_menores": {
+       "valor": "2, 12",
+       "frase": "los niños tienen 2 y 12"
+      }
+     }
+    },
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "San Andrés",
+       "frase": "a San Andrés"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Vamos 2 adultos"
+      },
+      "ninos": {
+       "valor": "2",
+       "frase": "los niños"
+      },
+      "edades_menores": {
+       "valor": "2, 12",
+       "frase": "los niños tienen 2 y 12"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "eq": 2
+     },
+     "ninos": {
+      "eq": 2
+     },
+     "infantes": {
+      "eq": 0
+     },
+     "edades_menores": {
+      "contiene": [
+       "2",
+       "12"
+      ]
+     }
+    }
+   },
+   "nota_v5": "Decisión de Mauricio (QA de #971 v5): cada persona queda en la categoría que usó el cliente; «2 y 12» son 2 niños, sin preguntar. Infantes solo con un bebé o una edad menor de 2 (corrida 1: el modelo vio un infante en «tienen 2»). Corrida 2: la forma de la salida del QA v5."
+  },
+  {
+   "id": "C11",
+   "titulo": "Pasajeros sin desglose",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Somos 4 con los niños, queremos ir a Cartagena",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cartagena",
+       "frase": "ir a Cartagena"
+      },
+      "ninos": {
+       "valor": "2",
+       "frase": "Somos 4 con los niños"
+      }
+     }
+    },
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cartagena",
+       "frase": "ir a Cartagena"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Somos 4 con los niños"
+      },
+      "ninos": {
+       "valor": "2",
+       "frase": "Somos 4 con los niños"
+      },
+      "infantes": {
+       "valor": "0",
+       "frase": "Somos 4 con los niños"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "vacio": true
+     },
+     "ninos": {
+      "vacio": true
+     },
+     "infantes": {
+      "vacio": true
+     }
+    },
+    "pregunta": [
+     "adultos",
+     "ninos"
+    ]
+   }
+  },
+  {
+   "id": "C12",
+   "titulo": "Números en palabras",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Un par de adultos y tres peladitos, para Santa Marta",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "adultos": {
+       "valor": "2",
+       "frase": "Un par de adultos"
+      },
+      "ninos": {
+       "valor": "3",
+       "frase": "tres peladitos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "eq": 2
+     },
+     "ninos": {
+      "eq": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "D1",
+   "titulo": "Dos clientes en una tanda",
+   "cliente_texto": "NUEVO Carolina Ruiz",
+   "mensajes": [
+    {
+     "texto": "Hola Tati, soy Carolina, queremos Punta Cana del 5 al 10 de diciembre, somos 2 adultos y 2 niños",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "Buenas, soy Luisa Mejía, para San Andrés somos 2 adultos, del 20 al 24 de noviembre",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [
+      {
+       "cliente": "Carolina",
+       "destino": "Punta Cana",
+       "frase": "soy Carolina, queremos Punta Cana"
+      },
+      {
+       "cliente": "Luisa Mejía",
+       "destino": "San Andrés",
+       "frase": "soy Luisa Mejía, para San Andrés"
+      }
+     ],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "fecha_salida": {
+       "valor": "2026-12-05",
+       "frase": "del 5 al 10 de diciembre"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "somos 2 adultos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "solicitudes": 2,
+    "mensaje": "Veo dos solicitudes distintas"
+   }
+  },
+  {
+   "id": "D2",
+   "titulo": "Un cliente, dos viajes",
+   "cliente_texto": "NUEVO Carolina Ruiz",
+   "mensajes": [
+    {
+     "texto": "Queremos Punta Cana en diciembre, del 20 al 27, mi esposo y yo",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "Y aparte, en marzo quiero llevar a mi mamá a Cartagena, del 10 al 14",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [
+      {
+       "cliente": "",
+       "destino": "Punta Cana",
+       "frase": "Queremos Punta Cana en diciembre, del 20 al 27"
+      },
+      {
+       "cliente": "",
+       "destino": "Cartagena",
+       "frase": "en marzo quiero llevar a mi mamá a Cartagena"
+      }
+     ],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Punta Cana",
+       "frase": "Queremos Punta Cana"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "solicitudes": 2,
+    "mensaje": "Veo dos solicitudes distintas"
+   }
+  },
+  {
+   "id": "D3",
+   "titulo": "Dos voces de la misma familia",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Hola, para Cartagena del 3 al 7 de noviembre, somos 4 adultos",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "Tati, te habla el papá: somos 5, va mi hermano también",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cartagena",
+       "frase": "para Cartagena"
+      },
+      "adultos": {
+       "valor": "5",
+       "frase": "somos 5, va mi hermano también"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "vacio": true
+     }
+    },
+    "pregunta": [
+     "adultos"
+    ]
+   }
+  },
+  {
+   "id": "D4",
+   "titulo": "Terceros dentro del mismo viaje",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Vamos 2 adultos a Cancún del 1 al 6 de diciembre",
+     "reenviado": true,
+     "origen": "texto"
+    },
+    {
+     "texto": "Mi hermana también va con sus 2 hijos, pero quiere otro hotel",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      },
+      {
+       "n": 2,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Cancún",
+       "frase": "a Cancún"
+      },
+      "adultos": {
+       "valor": "2",
+       "frase": "Vamos 2 adultos"
+      },
+      "ninos": {
+       "valor": "2",
+       "frase": "sus 2 hijos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "adultos": {
+      "vacio": true
+     }
+    },
+    "pregunta": [
+     "adultos"
+    ]
+   }
+  },
+  {
+   "id": "D5",
+   "titulo": "Referencia a un viaje anterior",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Queremos algo como lo de Cancún el año pasado, pero esta vez Punta Cana",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [
+      {
+       "destino": "Punta Cana",
+       "frase": "esta vez Punta Cana"
+      }
+     ],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Punta Cana",
+       "frase": "esta vez Punta Cana"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "eq": "PUNTA CANA"
+     }
+    },
+    "solicitudes": 0
+   }
+  },
+  {
+   "id": "D6",
+   "titulo": "Varios destinos candidatos (un solo viaje)",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Punta Cana o Curazao, lo que salga más barato",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [
+      {
+       "destino": "Punta Cana",
+       "frase": "Punta Cana o Curazao"
+      },
+      {
+       "destino": "Curazao",
+       "frase": "Punta Cana o Curazao"
+      }
+     ],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "Punta Cana o Curazao",
+       "frase": "Punta Cana o Curazao"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "contiene": [
+       "PUNTA CANA",
+       "CURAZAO"
+      ]
+     }
+    },
+    "solicitudes": 0
+   }
+  },
+  {
+   "id": "D7",
+   "titulo": "Moneda y base distintas",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Para Cancún somos 2 adultos, tenemos unos 1.500 dólares por persona",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "adultos": {
+       "valor": "2",
+       "frase": "somos 2 adultos"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "presupuesto": {
+      "vacio": true
+     }
+    }
+   }
+  },
+  {
+   "id": "D8",
+   "titulo": "Hotel dentro del destino",
+   "cliente_texto": null,
+   "mensajes": [
+    {
+     "texto": "Quiero ir al Decameron de San Andrés",
+     "reenviado": true,
+     "origen": "texto"
+    }
+   ],
+   "salidas": [
+    {
+     "mensajes": [
+      {
+       "n": 1,
+       "clase": "cliente"
+      }
+     ],
+     "citas": [],
+     "solicitudes": [],
+     "cliente": {
+      "nombre": "",
+      "telefono": ""
+     },
+     "valores": {
+      "destino": {
+       "valor": "San Andrés",
+       "frase": "Decameron de San Andrés"
+      },
+      "requisitos_especiales": {
+       "valor": "Decameron",
+       "frase": "Decameron"
+      }
+     }
+    }
+   ],
+   "verdad": {
+    "campos": {
+     "destino": {
+      "eq": "SAN ANDRÉS"
+     },
+     "categoria_hotel": {
+      "vacio": true
+     }
+    }
+   }
+  }
+ ]
+}

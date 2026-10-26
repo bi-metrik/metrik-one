@@ -75,7 +75,7 @@ export async function construirExportNegocios(
 ): Promise<ExportNegocios> {
   // ── 1. Los negocios, tal como los ve la lista (mismo origen que la pantalla) ──
   //
-  // ⚠️ Los dos argumentos tienen que ser EXACTAMENTE los de `negocios/page.tsx`. Lo que
+  // ⚠️ Los dos argumentos tienen que ser EXACTAMENTE los de `lib/negocios/cargar-vista-lista.ts`. Lo que
   // esta funcion no encuentre en su mapa se cae del archivo sin ruido (`porId.get(id)` +
   // `filter(Boolean)`): el usuario ve N filas en pantalla y baja menos, sin error.
   const [abiertos, cerrados, wsRes] = await Promise.all([

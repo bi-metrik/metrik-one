@@ -4,6 +4,7 @@ import { PestanaDesincronizada } from '@/components/pestana-desincronizada'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
 import { ERROR_DESINCRONIZADO, urlDeWorkspace } from '@/lib/tenant/desincronizacion'
+import { entradaDeWorkspaceEnPreview, esDeploymentDePreview } from '@/lib/tenant/tenant-preview'
 
 export const metadata: Metadata = { title: 'Esta pestaña quedó en otro espacio de trabajo' }
 
@@ -47,11 +48,16 @@ export default async function PestanaDesincronizadaPage() {
       slugPestana={slugPestana}
       slugSesion={slugSesion}
       nombreSesion={nombreSesion || slugSesion}
-      urlSesion={urlDeWorkspace(
-        slugSesion,
-        process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co',
-        process.env.NODE_ENV === 'development',
-      )}
+      urlSesion={
+        // En un preview, «Continuar» se queda en el preview (el subdominio es producción).
+        esDeploymentDePreview()
+          ? entradaDeWorkspaceEnPreview(slugSesion)
+          : urlDeWorkspace(
+              slugSesion,
+              process.env.NEXT_PUBLIC_BASE_DOMAIN || 'metrikone.co',
+              process.env.NODE_ENV === 'development',
+            )
+      }
       workspaceDePestana={
         dePestana ? { id: dePestana.id, slug: dePestana.slug, name: dePestana.name } : null
       }

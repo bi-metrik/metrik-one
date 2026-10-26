@@ -1,5 +1,7 @@
 import 'server-only'
+import { sincronizarResponsablePrincipal } from '../../../supabase/functions/_shared/asignar-responsable.ts'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
+import { primerCampoOficialNoValido, textoLatinoProfundo } from '@/lib/texto/texto-latino'
 import { esOrigenNegocioValido, ORIGEN_ALIANZA } from '@/lib/catalogos/constants'
 import { buscarContactoDuplicado } from '@/lib/contactos/dedup'
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
@@ -7,6 +9,7 @@ import { bogotaYear } from '@/lib/dates/bogota'
 import { visiblePuedeNacerCompleto } from '@/lib/negocios/bloque-visible-completo'
 import { ensureNegocioDriveFolder } from '@/lib/negocios/ensure-drive-folder'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import { leerPlantillaNombre, nombreSegunPlantilla } from '@/lib/negocios/nombre-automatico'
 
 /**
  * Crear un negocio, sin leer la sesión. Es el cuerpo de la acción `crearNegocio`
@@ -144,24 +147,8 @@ export function computeFieldDefaults(configExtra: Record<string, unknown> | null
 
 // Mantiene negocios.responsable_id (legacy/display) = responsable más antiguo
 // restante, o null si no quedan. La fuente de verdad de permisos es la tabla N:M.
-export async function sincronizarResponsablePrincipal(
-  supabase: unknown,
-  negocioId: string,
-  workspaceId: string,
-): Promise<void> {
-  const { data } = await db(supabase)
-    .from('negocio_responsables')
-    .select('staff_id')
-    .eq('negocio_id', negocioId)
-    .order('assigned_at', { ascending: true })
-    .limit(1)
-  const principal = ((data ?? []) as { staff_id: string }[])[0]?.staff_id ?? null
-  await db(supabase)
-    .from('negocios')
-    .update({ responsable_id: principal })
-    .eq('id', negocioId)
-    .eq('workspace_id', workspaceId)
-}
+// Vive en `_shared/asignar-responsable.ts`: el bot de WhatsApp sincroniza con la misma.
+export { sincronizarResponsablePrincipal }
 
 // ── Auto-crear cotización al crear negocio ──────────────────────────────────
 // Se llama internamente desde crearNegocio() si el bloque cotización tiene
@@ -268,9 +255,17 @@ async function crearCotizacionAutomatica(
 
 export async function crearNegocioEnWorkspace(
   ctx: ContextoCrearNegocio,
-  input: EntradaCrearNegocio,
+  inputCrudo: EntradaCrearNegocio,
 ): Promise<ResultadoCrearNegocio> {
   const { supabase, workspaceId, userId, role, staffId } = ctx
+  // Bloqueo de todo ONE (`texto-latino.ts`): dobles cirílicos/griegos a latín en todo lo que
+  // llega (nombre del negocio, del contacto, documento…); un campo oficial con una letra
+  // imposible no crea nada.
+  const input = textoLatinoProfundo(inputCrudo)
+  {
+    const malo = primerCampoOficialNoValido(input as unknown as Record<string, unknown>)
+    if (malo) return { negocio_id: null, error: malo.mensaje }
+  }
   // ── Origen: validación server-side (la del formulario es solo UX) ──
   // Se exige AL CREAR y no después: un origen que se pide "más tarde" no se
   // registra nunca. El catálogo vive en src/lib/catalogos/constants.ts.
@@ -454,11 +449,34 @@ export async function crearNegocioEnWorkspace(
     }
   }
 
+  // Nombre automático por plantilla de la LÍNEA (`lineas_negocio.config_extra.nombre_automatico`, ver
+  // `supabase/functions/_shared/nombre-viaje.ts`): si el formulario no trae nombre, nace con el provisional de la regla
+  // («Viaje de Martin Mora») y queda marcado como automático, así sigue al destino y a las fechas cuando se llenen. Un
+  // nombre escrito a mano manda y no se marca.
+  let metadataNombre: Record<string, unknown> | null = null
+  if (!nombreNegocio?.trim()) {
+    const { data: lineaCfg } = await db(supabase).from('lineas_negocio').select('config_extra').eq('id', lineaId).maybeSingle()
+    const plantilla = leerPlantillaNombre((lineaCfg as { config_extra?: unknown } | null)?.config_extra)
+    if (plantilla) {
+      let cliente = input.contacto_nombre?.trim() || null
+      if (!cliente && contactoId) {
+        const { data: c } = await supabase.from('contactos').select('nombre').eq('id', contactoId).maybeSingle()
+        cliente = (c as { nombre?: string | null } | null)?.nombre ?? null
+      }
+      const auto = nombreSegunPlantilla(plantilla, {}, cliente)
+      if (auto) {
+        nombreNegocio = auto.nombre
+        metadataNombre = { nombre_auto: auto.nombre, nombre_provisional: auto.provisional }
+      }
+    }
+  }
+
   const { data: negocio, error: insertError } = await db(supabase)
     .from('negocios')
     .insert({
       workspace_id: workspaceId,
       nombre: nombreNegocio,
+      ...(metadataNombre ? { metadata: metadataNombre } : {}),
       linea_id: lineaId,
       empresa_id: empresaId ?? null,
       contacto_id: contactoId ?? null,
@@ -522,7 +540,19 @@ export async function crearNegocioEnWorkspace(
   // Resuelve drive_folder_id (linea → fallback workspace), crea carpeta +
   // subcarpetas canónicas y setea carpeta_url. No bloquea la creación del negocio
   // si Drive falla (el error queda registrado en activity_log).
-  await ensureNegocioDriveFolder(supabase, workspaceId, negocioData.id)
+  //
+  // Arranca AQUÍ y se espera al FINAL (2026-10-04): Drive no depende de los bloques ni
+  // de la cotización, ni ellos de la carpeta, así que sus idas y vueltas corren
+  // mientras se crean los bloques en vez de antes. Se espera antes de responder a
+  // propósito y NO va a `after()`: la ficha que abre a continuación muestra
+  // `carpeta_url`, y una carpeta a medio crear se cruzaría con el modo puntual del cron
+  // `ensure-negocio-folders` (los dos buscarían la raíz y los dos la crearían).
+  const carpetaDrive = ensureNegocioDriveFolder(supabase, workspaceId, negocioData.id)
+    .catch((err: unknown) => {
+      // El helper no lanza; esto es solo para que un fallo imprevisto no quede como
+      // rechazo sin dueño mientras corre lo de abajo.
+      console.error('[crearNegocio] carpeta de Drive:', err instanceof Error ? err.message : err)
+    })
 
   // Derivar tipo_persona del solicitante desde la empresa del negocio (natural vs
   // jurídica). Se determina en la creación → ningún bloque manual lo pregunta; los
@@ -628,6 +658,8 @@ export async function crearNegocioEnWorkspace(
       }
     }
   }
+
+  await carpetaDrive
 
   return { negocio_id: negocioData.id, error: null }
 }

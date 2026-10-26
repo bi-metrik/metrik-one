@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, useRef, useState, useTransition } from 'react'
+import { Fragment, useRef, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { Loader2, Sparkles, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -90,7 +91,7 @@ export default function TablaCombinaciones({
   explicarVacio?: boolean
 }) {
   const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [nombres, setNombres] = useState<Record<string, string>>({})
   const [nombresRanura, setNombresRanura] = useState<Record<string, string>>({})
   const [motivos, setMotivos] = useState<Record<string, string>>({})
@@ -250,7 +251,9 @@ export default function TablaCombinaciones({
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             Cada columna es una ranura y <strong>todas suman</strong>: dos vuelos van los dos en
             {' '}el viaje. Dentro de una columna las opciones <strong>compiten</strong> y solo una
-            {' '}entra. Tours, traslados y planes no abren columna: suman igual en las tres.
+            {' '}entra. Tours, traslados y planes no abren columna: {fijosConAlternativas.some(f => f.porTarifa)
+              ? 'cada tarifa cobra el que tiene escogido (abajo).'
+              : 'suman igual en las tres.'}
           </p>
         </div>
         {editable && ranuras.length > 0 && !tablasAusentes && faltanTarifas.length > 0 && (
@@ -323,11 +326,19 @@ export default function TablaCombinaciones({
       {!tablasAusentes && fijosConAlternativas.length > 0 && (
         <div className="border-b bg-muted/30 px-4 py-2 text-[11px] text-muted-foreground">
           {fijosConAlternativas.map(f => (
-            <p key={f.grupo}>
-              <span className="font-medium capitalize">{f.grupo}</span> no se cruza: suma
-              {' '}<span className="font-medium">«{f.aporta ?? 'Sin nombre'}»</span> en todos los
-              {' '}tarifas{f.fuera.length > 0 && <> y deja fuera del total a {f.fuera.map(n => `«${n}»`).join(', ')}</>}.
-            </p>
+            f.porTarifa ? (
+              // La cotización por pasos escogió una opción por tarifa: ya no es un supuesto.
+              <p key={f.grupo}>
+                <span className="font-medium capitalize">{f.grupo}</span>: cada tarifa cobra la suya
+                {' '}({f.porTarifa.map(t => `${t.tarifa} «${t.opcion}»`).join(', ')}).
+              </p>
+            ) : (
+              <p key={f.grupo}>
+                <span className="font-medium capitalize">{f.grupo}</span> no se cruza: suma
+                {' '}<span className="font-medium">«{f.aporta ?? 'Sin nombre'}»</span> en todos los
+                {' '}tarifas{f.fuera.length > 0 && <> y deja fuera del total a {f.fuera.map(n => `«${n}»`).join(', ')}</>}.
+              </p>
+            )
           ))}
         </div>
       )}

@@ -1,11 +1,12 @@
 'use client'
 
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { TZ, formatBogotaFechaLarga } from '@/lib/dates/bogota'
 import Link from 'next/link'
 import {
   FileSpreadsheet,
   FolderOpen,
+  Handshake,
   Timer,
   Radar,
   BarChart3,
@@ -37,14 +38,30 @@ import {
   CreditCard,
   Wrench,
   Brain,
+  Sparkles,
 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
 import FAB from './fab'
 import { PlatformAdminBar } from '@/components/platform-admin-bar'
 import ImpersonationBar from './impersonation-bar'
+import {
+  CapaNavegacionPendiente,
+  NavegacionPendienteProvider,
+  SenalDeEnlace,
+} from '@/components/navegacion-pendiente'
 import type { PlatformAdminState } from '@/lib/actions/platform-admin'
+import type { OpcionesImpersonacion } from '@/lib/actions/impersonation'
+import type { ActiveTimer } from './timer-actions'
 import { rutaPermitida, vitrinasDelEspacio } from '@/lib/modulos/gate'
+import { NOVEDADES } from '@/lib/novedades/novedades'
+import { llaveVistas, marcarVistas, novedadesDelEspacio } from '@/lib/novedades/vistas'
+import {
+  BotonNovedades,
+  NumeritoNovedades,
+  PanelNovedades,
+  etiquetaNovedades,
+  useNovedadesNoVistas,
+} from '@/components/novedades'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -118,6 +135,16 @@ interface AppShellProps {
    * El tono pinta el punto de estado; `null` = sin punto.
    */
   suscripcion?: { tono: 'verde' | 'ambar' | 'rojo' | null } | null
+  /**
+   * Lecturas que antes pedía el navegador al montar con una server action, ahora resueltas
+   * en el layout: las opciones de «Ver como» (solo platform_admin) y el timer corriendo.
+   */
+  impersonacion?: OpcionesImpersonacion | null
+  timerActivo?: ActiveTimer | null
+  /** La biblioteca de fotos de la propuesta de viaje (`/fotos`): solo con plantilla html. */
+  bibliotecaFotos?: boolean
+  /** Id del usuario de la sesión: separa el «visto» de Novedades por persona en el navegador. */
+  usuarioId?: string | null
 }
 
 const COLOR_PUNTO = { verde: '#10B981', ambar: '#D97706', rojo: '#DC2626' } as const
@@ -145,6 +172,11 @@ const BUSINESS_NAV_ITEMS = [
   { href: '/negocios', label: 'Negocios', icon: Store, roles: ['owner', 'admin', 'supervisor', 'operator'] },
   { href: '/equipo', label: 'Equipo', icon: UserCheck, roles: ['owner', 'admin', 'supervisor'] },
 ]
+
+// Proveedores (antes «Hoteles y tours», 2026-10-18): la ficha de cada hotel, operador o mayorista,
+// con sus tarifarios y sus fotos. Detrás de Negocios, solo en espacios cuya plantilla tiene
+// propuesta html (`bibliotecaFotos`). `/fotos` redirige aquí.
+const FOTOS_NAV_ITEM = { href: '/proveedores', label: 'Proveedores', icon: Handshake, roles: ['owner', 'admin', 'supervisor', 'operator'] }
 
 // Caja — agrupa flujos de ingreso y salida.
 // Movimientos siempre visible si business activo.
@@ -412,8 +444,18 @@ export default function AppShell({
   notificationBell,
   platformAdminState,
   suscripcion = null,
+  impersonacion = null,
+  timerActivo = null,
+  bibliotecaFotos = false,
+  usuarioId = null,
 }: AppShellProps) {
   const pathname = usePathname()
+  // Los Link del menu NO precargan al entrar en pantalla (prefetch={false}):
+  // cada pagina disparaba ~13 descargas RSC de las rutas del menu apenas abria
+  // y en el celular competian con la carga de lo que el usuario mira
+  // (reporte de soena, 2026-10-03). En escritorio se precarga al pasar el
+  // cursor sobre el item del sidebar, como en `CardLink`.
+  const router = useRouter()
 
   // Aplica el override de roles por workspace a una lista de items del nav.
   // Si el href está en el override, sus roles efectivos son los del override.
@@ -429,6 +471,8 @@ export default function AppShell({
   const [menuPerfilAbierto, setMenuPerfilAbierto] = useState(false)
 
   const handleSignOut = async () => {
+    // Bajo demanda: el cliente de Supabase no viaja en la primera carga (2026-10-07).
+    const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
     await supabase.auth.signOut()
     window.location.href = '/'
@@ -468,6 +512,17 @@ export default function AppShell({
   const moduloGate = <T extends { href: string }>(items: T[]): T[] =>
     items.filter((i) => rutaPermitida(i.href, ctxGate))
 
+  // ── Novedades ── (`lib/novedades/novedades.ts`). Solo las del producto del espacio; sin
+  // ninguna, no hay entrada. «Visto» vive en el navegador de cada persona.
+  const novedades = novedadesDelEspacio(NOVEDADES, ctxGate)
+  const llaveNovedades = llaveVistas(usuarioId)
+  const novedadesSinVer = useNovedadesNoVistas(llaveNovedades, novedades)
+  const [novedadesAbierto, setNovedadesAbierto] = useState(false)
+  const abrirNovedades = () => {
+    setNovedadesAbierto(true)
+    marcarVistas(llaveNovedades, novedades.map((n) => n.id))
+  }
+
   // En modo vitrina, Números y Tableros se FUERZAN aunque sus módulos (business)
   // estén off — son vitrinas de upsell. Sin esto no aparecen en un workspace
   // Valida-only porque sus grupos no se construyen. Se muestran para cualquier rol
@@ -484,9 +539,12 @@ export default function AppShell({
           : i,
       )
     : BUSINESS_NAV_ITEMS
+  const conFotos = bibliotecaFotos
+    ? businessNavItems.flatMap((i) => (i.href === '/negocios' ? [i, FOTOS_NAV_ITEM] : [i]))
+    : businessNavItems
   const businessItems = moduloGate(modoVitrina
     ? [VITRINA_NUMEROS_ITEM]
-    : (mod.business ? filterByRole(applyOverride(businessNavItems), role) : []))
+    : (mod.business ? filterByRole(applyOverride(conFotos), role) : []))
   const contabilidadItems = moduloGate(vitrinaGate(mod.causacion ? filterByRole(applyOverride(CONTABILIDAD_NAV_ITEMS), role) : []))
   // Cumplimiento incluye items "compliance" estandar + comparativa interna metrik (compliance_audit)
   const complianceItems = moduloGate(vitrinaGate((mod.compliance || mod.compliance_audit)
@@ -605,9 +663,10 @@ export default function AppShell({
   const logoFont = 'var(--font-schibsted), sans-serif'
 
   return (
+    <NavegacionPendienteProvider>
     <div className="flex h-dvh flex-col bg-background" style={brandingStyle}>
       <PlatformAdminBar state={platformAdminState ?? null} />
-      <ImpersonationBar />
+      <ImpersonationBar opciones={impersonacion} />
       <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Desktop Sidebar ── */}
       <aside
@@ -622,7 +681,7 @@ export default function AppShell({
         {/* Sidebar header: MéTRIK branding + collapse */}
         <div className="flex h-14 items-center justify-between px-3">
           {sidebarExpanded ? (
-            <Link href={homeHref} className="flex-1 overflow-hidden">
+            <Link href={homeHref} prefetch={false} className="flex-1 overflow-hidden">
               <div className="inline-flex flex-col">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont }}>
                   <span style={{ fontWeight: 700, fontSize: '0.9375rem', letterSpacing: '-0.01em', color: 'var(--sidebar-foreground)' }}>MéTRIK</span>
@@ -630,9 +689,10 @@ export default function AppShell({
                 </div>
                 <div style={{ height: '2px', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '3px' }} />
               </div>
+              <SenalDeEnlace />
             </Link>
           ) : (
-            <Link href={homeHref} className="flex h-8 w-10 shrink-0 items-center justify-center">
+            <Link href={homeHref} prefetch={false} className="flex h-8 w-10 shrink-0 items-center justify-center">
               <div className="inline-flex flex-col items-center">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
@@ -640,6 +700,7 @@ export default function AppShell({
                 </div>
                 <div style={{ height: '1.5px', width: '100%', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '1px' }} />
               </div>
+              <SenalDeEnlace />
             </Link>
           )}
           <button
@@ -664,6 +725,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -678,6 +741,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -700,6 +764,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -714,6 +780,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span className="flex-1">{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -736,6 +803,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -750,6 +819,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -772,6 +842,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -786,6 +858,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -808,6 +881,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -822,6 +897,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -859,6 +935,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -873,6 +951,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -895,6 +974,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -909,6 +990,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -926,6 +1008,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -940,6 +1024,7 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -962,6 +1047,8 @@ export default function AppShell({
                     key={item.href}
                     href={item.href}
                     title={!sidebarExpanded ? item.label : undefined}
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch(item.href)}
                     className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
                     } ${
@@ -976,9 +1063,33 @@ export default function AppShell({
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>{item.label}</span>}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
+            </div>
+          )}
+
+          {/* Novedades — botón (abre un panel, no es una ruta), con el numerito de lo no visto. */}
+          {novedades.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }} data-nav-novedades>
+              <button
+                type="button"
+                onClick={abrirNovedades}
+                title={!sidebarExpanded ? 'Novedades' : undefined}
+                aria-label={etiquetaNovedades(novedadesSinVer)}
+                className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all hover:opacity-90 ${
+                  sidebarExpanded ? '' : 'justify-center'
+                }`}
+                style={{ backgroundColor: 'transparent', color: 'var(--sidebar-muted)' }}
+              >
+                <Sparkles className="h-4 w-4 shrink-0" />
+                {sidebarExpanded && <span className="flex-1 text-left">Novedades</span>}
+                <NumeritoNovedades
+                  cuenta={novedadesSinVer}
+                  className={sidebarExpanded ? '' : 'absolute right-1 top-1'}
+                />
+              </button>
             </div>
           )}
 
@@ -990,6 +1101,8 @@ export default function AppShell({
                 return (
                   <Link
                     href="/suscripcion"
+                    prefetch={false}
+                    onMouseEnter={() => router.prefetch('/suscripcion')}
                     title={!sidebarExpanded ? 'Suscripción' : undefined}
                     className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                       sidebarExpanded ? '' : 'justify-center'
@@ -1002,6 +1115,7 @@ export default function AppShell({
                     <CreditCard className="h-4 w-4 shrink-0" />
                     {sidebarExpanded && <span>Suscripción</span>}
                     <PuntoEstado tono={suscripcion.tono} />
+                    <SenalDeEnlace />
                   </Link>
                 )
               })()}
@@ -1025,6 +1139,8 @@ export default function AppShell({
                   key={item.href}
                   href={item.href}
                   title={!sidebarExpanded ? item.label : undefined}
+                  prefetch={false}
+                  onMouseEnter={() => router.prefetch(item.href)}
                   className={`flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all ${
                     sidebarExpanded ? '' : 'justify-center'
                   } ${
@@ -1039,6 +1155,7 @@ export default function AppShell({
                 >
                   <Icon className="h-4 w-4 shrink-0" />
                   {sidebarExpanded && <span>{item.label}</span>}
+                  <SenalDeEnlace />
                 </Link>
               )
             })}
@@ -1119,7 +1236,7 @@ export default function AppShell({
         {/* Mobile header — MéTRIK isotipo + company logo + avatar/logout */}
         <header className="flex h-14 items-center justify-between border-b border-border px-4 md:hidden" style={{ backgroundColor: 'var(--sidebar)', color: 'var(--sidebar-foreground)' }}>
           <div className="flex items-center gap-3">
-            <Link href={homeHref} className="flex items-center shrink-0">
+            <Link href={homeHref} prefetch={false} className="flex items-center shrink-0">
               <div className="inline-flex flex-col items-center">
                 <div className="flex items-baseline" style={{ fontFamily: logoFont, color: 'var(--sidebar-foreground)' }}>
                   <span style={{ fontWeight: 700, fontSize: '1.125rem', letterSpacing: '-0.02em' }}>M</span>
@@ -1127,6 +1244,7 @@ export default function AppShell({
                 </div>
                 <div style={{ height: '1.5px', width: '100%', backgroundColor: 'var(--sidebar-linea)', borderRadius: '1px', marginTop: '1px' }} />
               </div>
+              <SenalDeEnlace />
             </Link>
             {hasLogo && (
               // eslint-disable-next-line @next/next/no-img-element -- dinámico desde Supabase storage, tamaño variable
@@ -1137,6 +1255,7 @@ export default function AppShell({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {novedades.length > 0 && <BotonNovedades cuenta={novedadesSinVer} onAbrir={abrirNovedades} />}
             {notificationBell}
             {suscripcion ? (
               // Con Suscripción, el avatar abre el menú de perfil: Suscripción primero, luego salir.
@@ -1166,12 +1285,14 @@ export default function AppShell({
                     >
                       <Link
                         href="/suscripcion"
+                        prefetch={false}
                         onClick={() => setMenuPerfilAbierto(false)}
                         className="flex items-center gap-2 px-3 py-2 hover:bg-muted"
                       >
                         <CreditCard className="h-4 w-4" />
                         <span>Suscripción</span>
                         <PuntoEstado tono={suscripcion.tono} />
+                        <SenalDeEnlace />
                       </Link>
                       <button
                         type="button"
@@ -1207,9 +1328,14 @@ export default function AppShell({
         </header>
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto min-h-0 bg-background">
-          <div className="p-6 pb-24 md:pb-6">{children}</div>
-        </main>
+        {/* La capa de navegación pendiente es hermana del <main> (no hija): así cubre el área
+            de contenido aunque la lista esté scrolleada, sin tapar menú ni barra superior. */}
+        <div className="relative flex flex-1 min-h-0 flex-col">
+          <main className="flex-1 overflow-auto min-h-0 bg-background">
+            <div className="p-6 pb-24 md:pb-6">{children}</div>
+          </main>
+          <CapaNavegacionPendiente />
+        </div>
 
         {/* ── Mobile "Más" panel + backdrop ── */}
         {mobileMoreOpen && (
@@ -1228,6 +1354,7 @@ export default function AppShell({
                   <Link
                     key={item.href}
                     href={item.href}
+                    prefetch={false}
                     onClick={() => setMobileMoreOpen(false)}
                     className={`flex items-center gap-3 px-5 py-3 text-sm font-medium transition-colors ${
                       i < mobileSecondary.length - 1 ? 'border-b' : ''
@@ -1235,6 +1362,7 @@ export default function AppShell({
                   >
                     <Icon className={`h-5 w-5 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground'}`} />
                     {item.label}
+                    <SenalDeEnlace />
                   </Link>
                 )
               })}
@@ -1254,6 +1382,7 @@ export default function AppShell({
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
                 onClick={() => setMobileMoreOpen(false)}
                 className={`flex flex-col items-center gap-0.5 px-1 py-1 text-[10px] font-medium transition-colors ${
                   isActive ? 'text-primary' : 'text-muted-foreground'
@@ -1261,6 +1390,7 @@ export default function AppShell({
               >
                 <Icon className="h-5 w-5" />
                 <span className="truncate max-w-[60px]">{item.label}</span>
+                <SenalDeEnlace />
               </Link>
             )
           })}
@@ -1280,8 +1410,12 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
           En modo vitrina se oculta: el shell es comercial, no operativo. */}
-      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} />}
+      {novedades.length > 0 && (
+        <PanelNovedades abierto={novedadesAbierto} onAbiertoChange={setNovedadesAbierto} lista={novedades} />
+      )}
+      {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} timerActivo={timerActivo} />}
       </div>
     </div>
+    </NavegacionPendienteProvider>
   )
 }

@@ -48,6 +48,15 @@ export interface DocumentoContractual {
   aceptadoPor: string | null
   aceptadoCalidad: string | null
   aceptadoCanal: 'whatsapp' | 'modulo' | null
+  /**
+   * Modificación de la cláusula 13.1 (migración 20261007150000): rige desde `vigenteDesde` la acepte
+   * o no el cliente, y no aceptarla nunca pausa ni restringe. Ausente = `false` (términos de entrada).
+   */
+  rigePorAviso?: boolean
+  /** Solo por aviso: la versión que esta modifica. */
+  reemplazaId?: string | null
+  /** Solo por aviso: cuándo se publicó el aviso en la plataforma (ISO). */
+  publicadaAt?: string | null
 }
 
 export interface CobroDeServicio {

@@ -378,6 +378,13 @@ backend = "postgres"
 # y el bot queda caido (paso el 2026-05-26).
 verify_jwt = false
 
+[functions.chatwoot-agente]
+# Webhook del Agent Bot de Chatwoot (asistente publico, Sabor): NO usa el JWT de
+# Supabase. Chatwoot no lo envia; la autenticidad se valida dentro de la funcion
+# con la firma HMAC-SHA256 (X-Chatwoot-Signature + X-Chatwoot-Timestamp, 5 min)
+# y el secreto CHATWOOT_WEBHOOK_SECRET_<SLUG>. Con true, el gateway responde 401.
+verify_jwt = false
+
 [functions.wa-parse-test]
 # Endpoint de pruebas del parser, sin auth de Supabase.
 verify_jwt = false
@@ -450,6 +457,11 @@ verify_jwt = false
 # de Supabase. Se autentica con secret compartido (NOTIFICAR_ETAPA_SECRET).
 verify_jwt = false
 
+[functions.avisar-asignacion]
+# Disparada por el trigger `trg_avisar_asignacion_responsable` via pg_net: NO lleva JWT
+# de Supabase. Mismo secreto compartido de `notificar-etapa` (NOTIFICAR_ETAPA_SECRET).
+verify_jwt = false
+
 [functions.alertas-plazo]
 # Cron diario que avisa por correo cuando un negocio cumple un plazo en dias
 # habiles (SOENA: los 15 y los 50 dias de la devolucion de IVA). Lo llama pg_cron
@@ -476,4 +488,12 @@ verify_jwt = false
 # WA_CANAL_PROPIO_APP_SECRET) + el handshake GET con
 # WA_CANAL_PROPIO_VERIFY_TOKEN. Sin este flag, un redeploy aplica el default
 # true y Meta recibe 401 antes de que corra el codigo.
+verify_jwt = false
+
+[functions.cardumen-ingesta]
+# Ingesta de los instrumentos de Cardumen (modo miniweb). Quien responde NO es
+# usuario de ONE: es una pagina estatica en otro dominio y no tiene JWT de
+# Supabase que mandar. Lo que la protege esta DENTRO de la funcion: el `estudio`
+# se valida contra el catalogo (404 si no existe o esta apagado), el cuerpo tiene
+# tope de 1 MB y es solo de escritura (nunca devuelve respuestas guardadas).
 verify_jwt = false

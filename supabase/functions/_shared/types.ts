@@ -75,6 +75,13 @@ export interface SessionContext {
    * en vez de repetirse. Ver `handlers/registro/soporte-foto.ts`.
    */
   soporte_reintentos?: number;
+  /**
+   * Mensajes seguidos sin monto mientras el flujo guiado del gasto espera el monto
+   * (`collecting` de W01). Guarda de bucle. Ver `handlers/registro/monto-pendiente.ts`.
+   */
+  monto_reintentos?: number;
+  /** Confianza del parser en el primer mensaje del gasto, para retomarlo igual al llegar el monto. */
+  confianza_gasto?: number;
   unclear_count?: number;
   // Session memory
   last_project_id?: string;
@@ -90,6 +97,35 @@ export interface SessionContext {
   origen_asignacion?: 'auto' | 'sugerido' | 'manual' | 'split';
   // Para awaiting_selection de centro de costos (top-3 negocios abiertos)
   cc_negocios_options?: Array<{ id: string; label: string }>;
+  /**
+   * Gastos que el intérprete conversacional entendió en un mismo mensaje y esperan su turno: se
+   * confirman UNO A LA VEZ, cada uno con sus botones (`handlers/registro/cola-gastos.ts`). Nunca
+   * existe con el interruptor apagado.
+   */
+  gastos_en_cola?: GastoEnCola[];
+  /** Cuántos gastos traía el mensaje (para «Gasto 2 de 3»). */
+  gastos_total?: number;
+  /**
+   * Pago a un proveedor del viaje (F3, `handlers/registro/servicio-viaje.ts`): solo en negocios de
+   * una línea con `servicios_viaje.activo`. `paso_viaje` dice qué se está preguntando.
+   */
+  paso_viaje?: 'servicio' | 'medio';
+  servicio_id?: string;
+  servicio_nombre?: string;
+  medio_pago?: string;
+  medio_label?: string;
+  titular_medio?: 'empresa' | 'personal';
+  /** La persona dijo que el gasto no es de ningún servicio: no se vuelve a preguntar. */
+  servicio_viaje_resuelto?: boolean;
+}
+
+/** Un gasto en la cola del intérprete: lo validado, todavía sin registrar. */
+export interface GastoEnCola {
+  monto: number | null;
+  descripcion: string | null;
+  negocio: { id: string; codigo: string | null; nombre: string | null } | 'empresa' | null;
+  /** El mensaje completo, que se guarda como `mensaje_original`. */
+  mensaje: string;
 }
 
 // --- Conversational Last Context (follow-up memory) ---
@@ -140,7 +176,13 @@ export interface WaUser {
   collaborator_id?: string;
   subscription_status: string;
   /** Fila de `workspaces` con sus `modules`, o `null` si no se pudo leer. Ver `wa-modulos.ts`. */
-  modulos: { modules?: Record<string, unknown> | null } | null;
+  modulos: {
+    modules?: Record<string, unknown> | null;
+    /** `config_extra.bot_conversacional` (el interruptor del intérprete). Ausente o nulo = apagado. */
+    bot_conversacional?: unknown;
+    /** `config_extra.aviso_datos_bot` (la puerta del aviso de datos, `aviso-datos-bot.ts`). Ausente = apagada. */
+    aviso_datos_bot?: unknown;
+  } | null;
 }
 
 // --- WhatsApp Message ---
@@ -157,8 +199,19 @@ export interface IncomingMessage {
   /** Nombre de usuario de WhatsApp, sin arroba. Solo si la persona lo activo. */
   username?: string;
   text: string;
-  type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response' | 'location';
+  /**
+   * `document`: un archivo (el PDF del recibo); su pie va en `text` (2026-10-21: antes se perdía sin rastro).
+   * `no_soportado`: un video, un sticker o una tarjeta de contacto: el bot dice que no lo puede leer en vez de callar
+   * (el tipo de Meta va en `tipo_meta`). Las reacciones y los eventos del sistema siguen sin construirse.
+   */
+  type: 'text' | 'image' | 'audio' | 'interactive' | 'button' | 'flow_response' | 'location' | 'document' | 'no_soportado';
   image_id?: string;
+  /** Solo `document`: el id del archivo en Meta, su tipo y su nombre tal como lo mandó la persona. */
+  document_id?: string;
+  document_mime?: string;
+  document_filename?: string;
+  /** Solo `no_soportado`: el `type` que mandó Meta (video, sticker, contacts). */
+  tipo_meta?: string;
   audio_id?: string;
   interactive_reply?: string;
   flow_response?: string; // JSON string del Flow completado (nfm_reply.response_json)
@@ -182,6 +235,14 @@ export interface IncomingMessage {
    * es lo que permite comprobar despues que el toque vino de Meta.
    */
   webhook_crudo?: { cuerpo: string; firma: string | null };
+  /**
+   * Bot híbrido de la bandeja (2026-10-06), solo en memoria: lo que ya se leyó de este escrito en un punto de decisión.
+   * `contenido` / `pregunta`: no contesta la pregunta (sigue su camino, nunca como respuesta). `respuesta`: es el
+   * canónico de una opción elegida para la caja abierta (no se vuelve a leer como decisión).
+   */
+  decisionLeida?: 'contenido' | 'pregunta' | 'respuesta';
+  /** Con `decisionLeida: respuesta`: la interpretación que se guarda con el mensaje en la tanda (la relee el reparto). */
+  interpretacionDecision?: Record<string, unknown>;
 }
 
 // --- Handler Context ---

@@ -28,6 +28,7 @@ vi.mock('./descargar-excel-button', () => ({
 }))
 
 const { default: NegociosClient } = await import('./negocios-client')
+const { propsLista } = await import('../../../../test/props-lista-negocios')
 
 const etapaPorNumero = new Map(LINEA_SOENA.map((e) => [e.numero, e]))
 const numeroDe = (nombre: string) => LINEA_SOENA.find((e) => e.nombre === nombre)!.numero
@@ -102,14 +103,17 @@ const CERRADOS = [caso('Z1', 13, 'completado')]
 
 const pintar = (searchParams: Record<string, string>, etapas = LINEA_SOENA) =>
   renderToStaticMarkup(
-    React.createElement(NegociosClient, {
-      negocios: ABIERTOS,
-      cerrados: CERRADOS,
-      stagesActivos: ['venta', 'ejecucion', 'cobro'],
-      etapas,
-      searchParams,
-      hoyISO: '2026-09-14',
-    }),
+    React.createElement(
+      NegociosClient,
+      propsLista({
+        negocios: ABIERTOS,
+        cerrados: CERRADOS,
+        stagesActivos: ['venta', 'ejecucion', 'cobro'],
+        etapas,
+        searchParams,
+        hoyISO: '2026-09-14',
+      }),
+    ),
   )
 
 /** El bloque de un nivel del segmentador, o null si no se pintó. */

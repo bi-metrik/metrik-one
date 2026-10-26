@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import MetrikLockup from '@/components/metrik-lockup'
 import { createClient } from '@/lib/supabase/client'
+import { fetchPropio } from '@/lib/version/fetch-propio'
 import { derivarSlug, problemaDelSlug, textoProblemaSlug } from '@/lib/secop-registro/slug'
 
 const FONT = 'var(--font-schibsted), sans-serif'
@@ -106,7 +107,7 @@ export default function RegistroSecopClient() {
     e.preventDefault()
     setOcupado(true)
     setError('')
-    const r = await fetch('/api/secop/registro', {
+    const r = await fetchPropio('/api/secop/registro', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nombre, slug: slugPropuesto, identificacion }),

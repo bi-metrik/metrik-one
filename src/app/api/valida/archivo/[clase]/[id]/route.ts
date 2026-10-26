@@ -5,11 +5,12 @@ export const dynamic = 'force-dynamic'
 
 /**
  * Descargas de la pestaña Pagos de `/valida` de un CDA: la factura electrónica de una cuota (PDF y
- * XML) y el recibo de un pago.
+ * XML) y el recibo de un pago; y el PDF de los Términos que enlaza el aviso de una modificación.
  *
  *   GET /api/valida/archivo/factura_pdf/<cuota_id>
  *   GET /api/valida/archivo/factura_xml/<cuota_id>
  *   GET /api/valida/archivo/recibo/<cobro_id>
+ *   GET /api/valida/archivo/terminos/<documento_version_id>   (el PDF de una versión de los Términos)
  *
  * Quién puede y qué archivo es lo decide `resolverArchivoCda` (`src/lib/valida-cda/archivo-servidor.ts`),
  * con la MISMA RPC que alimenta la pestaña. Aquí solo se traduce a HTTP: redirect a una URL firmada de

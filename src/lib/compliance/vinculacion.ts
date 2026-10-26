@@ -211,6 +211,26 @@ export type ExpedienteDetalle = {
    *  viejos y en los de persona natural. */
   socios?: Socio[];
   cadena?: CadenaPublica;
+  /** Valida guarda ahí la última devolución (motivo, cuándo, quién). */
+  metadata?: { devolucion?: Devolucion } | null;
+  /** Las firmas que el oficial devolvió, de la más vieja a la más nueva. */
+  firmas_anteriores?: FirmaAnterior[];
+};
+
+export type Devolucion = {
+  motivo: string;
+  devuelto_en: string | null;
+  devuelto_por?: string | null;
+};
+
+export type FirmaAnterior = {
+  firmante_nombre: string | null;
+  firmante_documento: string | null;
+  firmado_en: string | null;
+  hash_expediente: string | null;
+  motivo: string;
+  devuelta_en: string;
+  devuelta_por: string | null;
 };
 
 // ─── Permisos ─────────────────────────────────────────────────────────────
@@ -262,6 +282,9 @@ export function razonNoDecidible(estado: EstadoExpediente): string | null {
   if (estado === 'aprobado' || estado === 'rechazado') {
     return 'Este expediente ya se decidió. La decisión no se reescribe: si cambió algo, se abre una vinculación nueva.';
   }
+  if (estado === 'devuelto') {
+    return 'Se le devolvió a la contraparte para que corrija. Vuelve a quedar por revisar cuando firme de nuevo.';
+  }
   return 'Todavía no se puede decidir: la contraparte no ha terminado de llenar y firmar.';
 }
 
@@ -275,6 +298,21 @@ export const MOTIVO_RECHAZO_MIN = 10;
 export function validarMotivoRechazo(motivo: string): string | null {
   const limpio = motivo.trim();
   if (limpio.length === 0) return 'Escribe por qué se rechaza.';
+  if (limpio.length < MOTIVO_RECHAZO_MIN) {
+    return `El motivo es muy corto: mínimo ${MOTIVO_RECHAZO_MIN} caracteres.`;
+  }
+  return null;
+}
+
+/**
+ * Devolver no es decidir: el expediente sigue abierto, la firma pasa al
+ * historial y la contraparte corrige y firma otra vez. Por eso el motivo es
+ * obligatorio: es lo único que le dice qué cambiar, y sin él lo más probable
+ * es que vuelva a firmar lo mismo.
+ */
+export function validarMotivoDevolucion(motivo: string): string | null {
+  const limpio = motivo.trim();
+  if (limpio.length === 0) return 'Escribe qué tiene que corregir la contraparte.';
   if (limpio.length < MOTIVO_RECHAZO_MIN) {
     return `El motivo es muy corto: mínimo ${MOTIVO_RECHAZO_MIN} caracteres.`;
   }

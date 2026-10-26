@@ -22,6 +22,8 @@ import { guardarMarcaEnMetadata } from '@/lib/negocios/marca-metadata'
 import {
   CLAVE_TITULAR_CORREGIDO,
   leerTitularCorregido,
+  titularDeConfirmacion,
+  rutDeConfirmacion,
   mismoTitular,
   textoActividadTitular,
   type TitularCorregido,
@@ -158,9 +160,24 @@ async function borradorDelNegocio(
   negocioId: string,
   contactoId: string | null,
   titular: TitularParaBorrador | null,
+  /** El titular de «El cliente confirmó» (viaje): solo cuenta si el negocio no tiene RUT. */
+  titularConfirmacion: TitularParaBorrador | null = null,
+  /**
+   * Dirección, ciudad, correo y teléfono del mismo titular (F5): sin RUT, son los que viajan al
+   * tercero de Siigo. Sin ellos, el tercero sale incompleto y la cola lo dice.
+   */
+  rutConfirmacion: RutExtraido | null = null,
 ): Promise<{ borrador: ReturnType<typeof borradorCliente> }> {
   const { rut, contacto } = await leerRutYContacto(negocioId, contactoId)
-  return { borrador: borradorCliente(rut, contacto, titular) }
+  const sinRut = Object.keys(rut).length === 0
+  const usarConfirmacion = sinRut && !!titularConfirmacion
+  return {
+    borrador: borradorCliente(
+      usarConfirmacion && rutConfirmacion ? rutConfirmacion : rut,
+      contacto,
+      titular ?? (usarConfirmacion ? titularConfirmacion : null),
+    ),
+  }
 }
 
 /**
@@ -276,7 +293,7 @@ export async function asegurarClienteSiigo(
   // no tiene por qué envolverla en su propio try.
   let borrador: Awaited<ReturnType<typeof borradorDelNegocio>>
   try {
-    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id, titular)
+    borrador = await borradorDelNegocio(negocioId, negocio.contacto_id, titular, titularDeConfirmacion(negocio.metadata), rutDeConfirmacion(negocio.metadata))
   } catch (e) {
     // Un caso YA marcado no se convierte en error porque hoy no se pueda releer
     // su RUT: eso ya estaba resuelto y la marca sigue siendo la respuesta.

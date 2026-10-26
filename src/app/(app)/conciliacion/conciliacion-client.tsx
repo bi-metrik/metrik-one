@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition, type Dispatch, type SetStateAction } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import {
@@ -21,6 +22,7 @@ import { anularCobro } from '@/lib/actions/pagos-externos'
 import { MOTIVO_ANULACION_MIN } from '@/lib/cobros/anulacion'
 import { referenciaEsperaConfirmacion } from '@/lib/cobros/confirmacion-por-referencia'
 import PagosExternosTab from './pagos-externos-tab'
+import DevolucionesTab from './devoluciones-tab'
 import BusquedaInput from '@/components/busqueda-input'
 import { telefonoCoincide } from '@/lib/busqueda/telefono'
 import { RedistribuirModal } from './redistribuir-modal'
@@ -52,6 +54,7 @@ import {
   type TitularEnPantalla,
 } from '@/lib/facturacion/titular-revision'
 import type { FiltroSaldo, PestanaConciliacion } from './destino-inicial'
+import { useIntencion } from '@/hooks/use-intencion'
 
 const fmtCOP = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n)
@@ -72,6 +75,8 @@ type TabKey = PestanaConciliacion
  *   - Pago fuera de ePayco: captura excepcional de un ingreso que cayó a una cuenta
  *     bancaria. NO es conciliación — por eso vive en su propia pestaña, aislada de
  *     la bandeja de aceptar/rechazar.
+ *   - Devoluciones: dinero que se le devolvió al cliente (SOE-007). Una salida propia en
+ *     su fecha, con la opción de cerrar el caso en la misma acción.
  *   - Recibos de caja: de la plata que entró, cuál está acusada. Separado de
  *     facturación por decisión de Mauricio (2026-09-07): son dos controles distintos y
  *     tenerlo dentro obligaba a buscar pagos sin acusar en la pestaña "Ya facturados".
@@ -129,6 +134,7 @@ export default function ConciliacionClient(
     { key: 'saldos', label: 'Saldos', count: data.metricas.en_saldo },
     { key: 'general', label: 'Vista general' },
     { key: 'fuera_epayco', label: 'Pago fuera de ePayco' },
+    { key: 'devoluciones', label: 'Devoluciones' },
     ...(cola ? [{ key: 'facturacion' as TabKey, label: 'Por facturar', count: cola.totales.listos + cola.totales.incompletos }] : []),
     { key: 'recibos' as TabKey, label: 'Recibos de caja', count: recibos?.totales.pendientes },
   ]
@@ -179,6 +185,7 @@ export default function ConciliacionClient(
       {tab === 'saldos' && <TabSaldos data={data} filtros={filtrosSaldo} setFiltros={setFiltrosSaldo} />}
       {tab === 'general' && <VistaGeneral data={data} onTab={setTab} />}
       {tab === 'fuera_epayco' && <PagosExternosTab onDone={() => router.refresh()} />}
+      {tab === 'devoluciones' && <DevolucionesTab onDone={() => router.refresh()} />}
       {tab === 'facturacion' && cola && <TabFacturacion cola={cola} />}
       {tab === 'recibos' && (
         recibos
@@ -217,6 +224,8 @@ function TabBandeja({ pendientes, onDone }: { pendientes: ReferenciaPago[]; onDo
 
 function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => void }) {
   const [pending, startTransition] = useTransition()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [rechazando, setRechazando] = useState(false)
   const [nota, setNota] = useState('')
 
@@ -229,7 +238,8 @@ function RepartoCard({ ref_: r, onDone }: { ref_: ReferenciaPago; onDone: () => 
 
   function aceptar() {
     startTransition(async () => {
-      const res = await aceptarRepartoComercial(r.external_ref)
+      const res = await aceptarRepartoComercial(r.external_ref, intencion.clave())
+      intencion.cerrar()
       if (res.success) { toast.success('Pago conciliado'); onDone() }
       else toast.error(res.error)
     })
@@ -1199,7 +1209,11 @@ export function FilaPorFacturar({
   workspaceNombre?: string | null
   onCambio: () => void
 }) {
-  const [isPending, startTransition] = useTransition()
+  // Emitir puede tardar decenas de segundos (Siigo). Si la respuesta se pierde, la factura
+  // pudo salir igual: se relee la cola en vez de invitar a emitir otra vez.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: onCambio })
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [pidiendoMotivo, setPidiendoMotivo] = useState(false)
   const [motivo, setMotivo] = useState('')
   // Tres pasos a propósito: revisar la prefactura, confirmar, emitir. Una factura
@@ -1242,14 +1256,19 @@ export function FilaPorFacturar({
       const r = await emitirFacturaDeNegocio(caso.negocio_id, {
         justificacionDuplicado,
         datos: datosEditados(),
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (r.duplicados) {
         setDuplicados(r.duplicados); setHermanos(r.hermanos ?? []); setConfirmando(false); return
       }
       if (!r.ok) { toast.error(r.error ?? 'No se pudo emitir'); return }
       // Si el PDF no quedó en el negocio hay que decirlo: la factura salió igual,
       // pero el expediente queda incompleto y en silencio nadie lo notaría.
-      if (r.archivada === false) {
+      if (r.completando) {
+        // La factura salió y quedó marcada. El PDF y los abonos se hacen después de
+        // responder: lo que no salga queda escrito en la actividad del negocio.
+        toast.success(`Factura ${r.numero} emitida. El PDF y los abonos se completan en segundo plano`)
+      } else if (r.archivada === false) {
         toast.warning(`Factura ${r.numero} emitida, pero el PDF no quedó cargado en el negocio`)
       } else {
         toast.success(`Factura ${r.numero} emitida y archivada en el negocio`)

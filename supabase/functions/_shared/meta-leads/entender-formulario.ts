@@ -35,6 +35,8 @@
 // para que no se pueda romper por descuido.
 // ============================================================
 
+import { fetchModelo } from '../llm-anthropic.ts';
+
 /** Los papeles que ONE necesita reconocer en cualquier formulario de Meta. */
 export interface MapaFormulario {
   nombre: string | null;
@@ -142,7 +144,7 @@ export async function entenderFormulario(
     const control = new AbortController();
     const reloj = setTimeout(() => control.abort(), TIMEOUT_MS);
     try {
-      const res = await fetch(
+      const res = await fetchModelo(
         `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent?key=${key}`,
         {
           method: 'POST',

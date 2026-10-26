@@ -29,6 +29,10 @@
 import { esAvisoDeAnioViejo } from './anio-fecha'
 import type { MargenProveedor } from './margen-proveedor'
 import { leerCorrecciones, type Correcciones } from './correcciones'
+import { firmaDeEstadia } from './estadia'
+import { registroDeReserva, resumenDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
+import { leerOrigenTarifaExtraida, type OrigenTarifaExtraida } from './origen-tarifa'
+import { leerTipoTarifa, type DecisionTipoTarifa } from './tarifa-publica'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -147,6 +151,7 @@ function mismoProducto(ranuraSlug: string): string {
   if (ranuraSlug === 'vuelo_detalle') return 'el mismo vuelo y tarifa'
   if (ranuraSlug === 'actividad_detalle') return 'la misma actividad y fecha'
   if (ranuraSlug === 'traslado_detalle') return 'el mismo trayecto y vehículo'
+  if (ranuraSlug === 'otro_detalle') return 'el mismo servicio y plan'
   return 'el mismo hotel, habitación y fechas'
 }
 
@@ -162,7 +167,9 @@ function mismoProducto(ranuraSlug: string): string {
  */
 export function casillasDe(c: Composicion, ranuraSlug: string): CasillaDef[] {
   const repetir = mismoProducto(ranuraSlug)
-  const hayMenores = c.ninos + c.infantes > 0
+  // Una actividad con infantes y sin niños se costea con UN pantallazo: el infante no paga
+  // (`infanteGratisEnActividad`). No hay «solo adultos» que buscar.
+  const hayMenores = c.ninos + c.infantes > 0 && !infanteGratisEnActividad(c, ranuraSlug) && !trasladoPorGrupo(ranuraSlug)
   const separa = c.ninos > 0 && c.infantes > 0
     ? 'adultos, niños e infantes'
     : c.ninos > 0 ? 'adultos y niños' : 'adultos e infantes'
@@ -203,6 +210,45 @@ export function casillasDe(c: Composicion, ranuraSlug: string): CasillaDef[] {
     razonCondicional: razon,
   })
   return casillas
+}
+
+/**
+ * ¿La línea es una actividad cuyo pantallazo cubre a TODO el grupo, infantes incluidos, sin
+ * cobrarles? Decisión de Mauricio del 2026-10-01 (brief «actividad por pantallazo»): **en una
+ * actividad, el infante va gratis.** El total del pantallazo es el costo del grupo y se reparte
+ * entre los que pagan; el infante queda en $0 y no se pide el pantallazo «solo adultos», que es
+ * del diseño de hotel con tarifa diferencial.
+ *
+ * ⚠️ Solo con infantes y SIN niños. Cómo se reparte el total cuando viaja un niño no está
+ * decidido: con niños la actividad sigue el camino de siempre (pide las búsquedas que faltan).
+ */
+export function infanteGratisEnActividad(c: Composicion, ranuraSlug: string): boolean {
+  return ranuraSlug === 'actividad_detalle' && c.infantes > 0 && c.ninos === 0
+}
+
+/**
+ * H23 de la prueba Europa (2026-10-14) · un traslado se cotiza por vehículo o por grupo: el total
+ * del pantallazo del grupo completo ES su costo. Pedir la resta de 3 pantallazos («sin el
+ * infante», «solo adultos») a un privado que cuesta lo mismo para 3 que para 4 dejaba la línea en
+ * $0 con «Falta el costo», y el aviso «Falta el 2» seguía aunque se escribiera a mano.
+ *
+ * Si el proveedor sí separa por tipo de pasajero, el pantallazo trae el desglose y se usa (paso 1
+ * de `resolverTarifa`). Si no, el total se reparte por igual entre los que viajan: es un asiento
+ * cada uno, y el reparto solo sirve para la tabla por pasajero; el costo de la línea no cambia.
+ */
+export function trasladoPorGrupo(ranuraSlug: string): boolean {
+  return ranuraSlug === 'traslado_detalle'
+}
+
+/**
+ * Suma avisos sin repetir ninguno (brief del 2026-10-01, punto 6): la bandeja ya juzgó la
+ * captura al leerla y la vuelve a juzgar al aceptarla; sin esto, el mismo aviso quedaba dos
+ * veces en `alertas`.
+ */
+export function sumarAlertas(...listas: readonly (readonly string[] | null | undefined)[]): string[] {
+  const out: string[] = []
+  for (const l of listas) for (const a of l ?? []) if (!out.includes(a)) out.push(a)
+  return out
 }
 
 // ── Lo que se guarda de cada pantallazo ──────────────────────────────────────
@@ -290,6 +336,23 @@ export interface LecturaCasilla {
    */
   huellaImagen?: string
   /**
+   * Los tipos de pasajero que VIAJAN en esta lectura y cuyo precio no vino: un vuelo o una
+   * actividad escritos a mano con el costo del niño o del infante vacío («vacío = falta», C5). Sin
+   * fila por tipo, pero cuentan en la ocupación (`ocupacionObservada`): así la opción cubre a todos
+   * y lo que falta es el PRECIO, que impide enviar hasta tenerlo. Ausente en toda lectura de
+   * pantallazo y en las manuales de antes.
+   */
+  sinPrecio?: TipoPasajero[]
+  /**
+   * Escrita a mano SIN COSTO porque el precio va a salir del tarifario del proveedor («✎ Escríbelo a
+   * mano», brief del 2026-10-20, punto 1). La lectura trae los datos del servicio y ningún precio:
+   * `total` en 0 y sin filas por tipo. Mientras esté, el costo NO se resuelve (`resolverTarifa` dice
+   * `sin_costo`): ni un 0 confirmado ni un costo inventado. Se va sola cuando la persona elige una
+   * tarifa del proveedor (la casilla 1 pasa a ser la del tarifario) o pega un pantallazo. Ausente en
+   * toda otra lectura.
+   */
+  costoPendiente?: true
+  /**
    * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
    * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
    * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
@@ -297,12 +360,32 @@ export interface LecturaCasilla {
    */
   imagenRef?: string | null
   /**
-   * `manual` = la escribió una persona en el formulario de ingreso manual
-   * (`ingreso-manual.ts`): no hay imagen detrás. Ausente = salió de un pantallazo.
+   * La llave del «Aceptar» de la bandeja que trajo esta lectura (`aceptacion-idempotente.ts`):
+   * un reintento del mismo «Aceptar» la encuentra y no escribe otra vez. Ausente en las lecturas
+   * aceptadas antes del 2026-10-05 y en las que se pegaron en su casilla.
    */
-  origen?: 'manual'
+  aceptacion?: string
+  /**
+   * `manual` = la escribió una persona en el formulario de ingreso manual
+   * (`ingreso-manual.ts`): no hay imagen detrás. `tarifario` = la persona eligió tarifas de la
+   * extracción del tarifario del proveedor (`oferta-tarifas.ts`); el origen exacto (extracción y
+   * filas) va en `TarifaPax.tarifaExtraida`. Ausente = salió de un pantallazo.
+   */
+  origen?: 'manual' | 'tarifario'
+  /**
+   * «Otro servicio» que es una ASISTENCIA MÉDICA, escrita a mano o leída de un pantallazo en la
+   * cotización por pasos (Noor §Paso 1 y §11): el negocio la muestra en «Documentos del viajero».
+   * La pone `marcarAsistenciaMedica` al leer. Ausente en todo lo demás.
+   */
+  asistenciaMedica?: true
   /** Lo que el formulario manual deja además de la lectura (`DatosManuales`). */
-  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null }
+  manual?: { fuente: string; incluye: string | null; edadNino: { desde: number; hasta: number } | null; opcional?: boolean }
+  /**
+   * El registro de las habitaciones de UNA reserva de varias con un precio total
+   * (`reserva-habitaciones.ts`, decisión de Mauricio del 2026-10-14): cuántas, de qué tipo y con
+   * qué ocupación. Solo registro: el costo es el `total` de la lectura. Ausente en toda otra.
+   */
+  habitacionesReserva?: HabitacionDeReserva[]
 }
 
 /**
@@ -366,20 +449,34 @@ export function composicionDeLectura(l: LecturaCasilla): Composicion | null {
  * ⚠️ Solo cuenta lo que FALTA. Una línea que cubre de más no se reporta: el sistema compara
  * para avisar de un hueco, no para discutir una decisión de quien cotiza.
  */
-export function faltanPorAcomodar(linea: Composicion, viaje: Composicion | null): Composicion | null {
+export function faltanPorAcomodar(linea: Composicion, viaje: Composicion | null, ranuraSlug?: string | null): Composicion | null {
   if (!viaje) return null
   const falta: Composicion = {
     adultos: Math.max(0, viaje.adultos - linea.adultos),
     ninos: Math.max(0, viaje.ninos - linea.ninos),
-    infantes: Math.max(0, viaje.infantes - linea.infantes),
+    // Brief del 2026-10-05, «actividades tras la limpieza», punto 3: en una actividad el infante
+    // no se acomoda (va gratis, `infanteGratisEnActividad`). «2 adultos» en un viaje 2A+1I
+    // decía «Faltan 1 infante por acomodar». Hotel y vuelo siguen contándolo.
+    infantes: ranuraSlug === 'actividad_detalle' ? 0 : Math.max(0, viaje.infantes - linea.infantes),
   }
   return totalPasajeros(falta) > 0 ? falta : null
+}
+
+/** «Falta 1 infante por acomodar.» / «Faltan 2 adultos y 1 infante por acomodar.» */
+export function textoFaltanPorAcomodar(falta: Composicion): string {
+  return `${totalPasajeros(falta) === 1 ? 'Falta' : 'Faltan'} ${describirOcupacion(falta, 'y')} por acomodar.`
 }
 
 /** La ocupación que ACREDITA la captura: la de las filas si hay desglose, la leída si no. */
 export function ocupacionObservada(l: LecturaCasilla): OcupacionLeida {
   if (l.porTipo.length > 0) {
-    const suma = (t: TipoPasajero) => l.porTipo.filter(f => f.tipo === t).reduce((a, f) => a + f.cantidad, 0)
+    // Los que viajan sin precio (`sinPrecio`) no tienen fila, pero viajan: cuentan con lo leído.
+    const sinFila = (t: TipoPasajero) => {
+      if (!l.sinPrecio?.includes(t) || l.porTipo.some(f => f.tipo === t)) return 0
+      const n = t === 'nino' ? l.ocupacion?.ninos : t === 'infante' ? l.ocupacion?.infantes : l.ocupacion?.adultos
+      return typeof n === 'number' && n > 0 ? n : 0
+    }
+    const suma = (t: TipoPasajero) => l.porTipo.filter(f => f.tipo === t).reduce((a, f) => a + f.cantidad, 0) + sinFila(t)
     const adultos = suma('adulto')
     const ninos = suma('nino')
     const infantes = suma('infante')
@@ -447,6 +544,20 @@ function ocupacionNoCoincide(observada: OcupacionLeida, esperada: Composicion): 
   }
   if (observada.total !== null) return observada.total !== totalPasajeros(esperada)
   return false
+}
+
+function soloAdultosDe(c: Composicion): Composicion {
+  return { adultos: c.adultos, ninos: 0, infantes: 0 }
+}
+
+/**
+ * ¿La captura de una actividad con infante gratis muestra SOLO a los que pagan? (brief del
+ * 2026-10-05, punto 7). Vale en la casilla 1 de una actividad con infantes y sin niños
+ * (`infanteGratisEnActividad`): «2 personas» o «2 adultos» en un viaje de 2 adultos y 1 infante.
+ */
+function soloLosQuePagan(observada: OcupacionLeida, esperada: Composicion, clave: ClaveCasilla, ranuraSlug: string): boolean {
+  if (clave !== 'grupo_completo' || !infanteGratisEnActividad(esperada, ranuraSlug)) return false
+  return !ocupacionNoCoincide(observada, soloAdultosDe(esperada))
 }
 
 function sinOcupacionVisible(o: OcupacionLeida): boolean {
@@ -614,6 +725,13 @@ export function validarLecturaEnCasilla(args: {
     alertas.push(
       `El pantallazo no muestra la ocupación: se toma la de la casilla (${describirOcupacion(def.ocupacion, 'y')}). ` +
       'Confirma que esa fue la búsqueda.',
+    )
+  } else if (soloLosQuePagan(observada, def.ocupacion, clave, ranuraSlug)) {
+    // Brief del 2026-10-05, punto 7 · «2 personas» en un viaje 2A+1I: son los que pagan. El
+    // infante va gratis en la actividad (2026-10-01) y el reparto lo hace `resolverTarifa`.
+    alertas.push(
+      `El pantallazo dice ${describirObservada(observada)}: son ${describirOcupacion(soloAdultosDe(def.ocupacion), 'y')}. ` +
+      `${def.ocupacion.infantes === 1 ? 'El infante no paga' : 'Los infantes no pagan'} en la actividad.`,
     )
   } else if (ocupacionNoCoincide(observada, def.ocupacion)) {
     return {
@@ -783,6 +901,10 @@ function desactualizadasTodas(
     if (!l) continue
     const buscada = ocupacionBuscada(l, def.clave, ranuraSlug)
     if (!buscada || mismaComposicion(buscada, def.ocupacion)) continue
+    // La actividad con infante gratis acepta la captura de los que pagan (punto 7 del brief del
+    // 2026-10-05): no está vieja por no contar al infante.
+    if (def.clave === 'grupo_completo' && infanteGratisEnActividad(actual, ranuraSlug)
+      && mismaComposicion(buscada, soloAdultosDe(actual))) continue
     out.push({
       clave: def.clave,
       numero: def.numero,
@@ -855,9 +977,14 @@ export interface MonedaDeTarifa {
   decision: DecisionMoneda | null
   /**
    * La lectura la escribió una persona en el ingreso manual, no salió de un pantallazo. Solo
-   * cambia lo que se dice del origen («ingresada a mano»); la moneda y `asumida` no cambian.
+   * cambia lo que se dice del origen («escrita a mano»); la moneda y `asumida` no cambian.
    */
   manual?: boolean
+  /**
+   * La lectura salió de las tarifas del tarifario del proveedor (`origen: 'tarifario'`). Como
+   * `manual`, solo cambia lo que se dice del origen («del tarifario del proveedor»).
+   */
+  tarifario?: boolean
 }
 
 /**
@@ -875,8 +1002,10 @@ export function monedaDeTarifa(tarifa: TarifaPax): MonedaDeTarifa {
   const decision = tarifa.moneda ?? null
   if (decision) return { moneda: decision.valor, asumida: false, origen: 'persona', leida, decision }
   // Solo para decir el origen. Con habitaciones (R8) la lectura vive en la habitación.
-  const manual = [...lecturas, ...(tarifa.habitaciones ?? []).map(h => h.lectura)].some(l => l?.origen === 'manual')
-  const deMano = manual ? { manual } : {}
+  const todas = [...lecturas, ...(tarifa.habitaciones ?? []).map(h => h.lectura)]
+  const manual = todas.some(l => l?.origen === 'manual')
+  const tarifario = todas.some(l => l?.origen === 'tarifario')
+  const deMano = { ...(manual ? { manual } : {}), ...(tarifario ? { tarifario } : {}) }
   if (leida) return { moneda: leida, asumida: false, origen: 'captura', leida, decision: null, ...deMano }
   if (lecturas.length > 0) return { moneda: 'COP', asumida: true, origen: 'supuesta', leida: null, decision: null, ...deMano }
   return { moneda: 'COP', asumida: false, origen: 'sin_lectura', leida: null, decision: null, ...deMano }
@@ -889,7 +1018,46 @@ export function monedaDeTarifa(tarifa: TarifaPax): MonedaDeTarifa {
 export function origenDeMoneda(m: MonedaDeTarifa): string | null {
   if (m.asumida) return null
   if (m.origen === 'persona') return 'la elegiste tú'
-  return m.manual ? 'ingresada a mano' : 'leída del pantallazo'
+  return origenDeLecturas(m)
+}
+
+/**
+ * De dónde salió lo leído de la línea, dicho en llano (brief del 2026-10-21, punto 2): una línea
+ * escrita a mano o costeada con el tarifario del proveedor NUNCA dice «del pantallazo». Gana el
+ * tarifario: elegir una tarifa reemplaza la casilla 1 entera.
+ */
+export function origenDeLecturas(m: Pick<MonedaDeTarifa, 'manual' | 'tarifario'>): string {
+  return m.tarifario ? 'del tarifario del proveedor' : m.manual ? 'escrita a mano' : 'leída del pantallazo'
+}
+
+/** De dónde salió una lectura: `pantallazo` cuando no dice otra cosa (las de siempre). */
+export type FuenteDeLectura = 'pantallazo' | 'manual' | 'tarifario'
+export function fuenteDeLectura(l: Pick<LecturaCasilla, 'origen'> | null | undefined): FuenteDeLectura {
+  return l?.origen === 'manual' ? 'manual' : l?.origen === 'tarifario' ? 'tarifario' : 'pantallazo'
+}
+
+/**
+ * De dónde dice la línea que salieron sus pasajeros («Esta línea cubre: 2 adultos · …», brief del
+ * 2026-10-21, punto 6). Los del viaje se dicen «la del viaje» aunque la línea los tenga escritos
+ * (un tarifario o una línea guardada con los mismos): «ajustado en esta línea» solo cuando DIFIEREN
+ * y nadie más los puso. Un pantallazo que los leyó lo dice; escritos a mano, «escrito a mano».
+ */
+export function origenDeLaOcupacion(a: {
+  composicion: Composicion
+  composicionViaje: Composicion | null
+  /** La línea guarda sus pasajeros (`tarifa.composicion`). */
+  esPropia: boolean
+  /** La lectura de la casilla 1 los puso (sus pasajeros son los de la línea). `null` = no. */
+  laPusoLaLectura: FuenteDeLectura | null
+  /** De dónde salió la casilla 1 (aunque no haya puesto los pasajeros). `null` = sin lectura. */
+  fuente: FuenteDeLectura | null
+}): string {
+  const delViaje = !!a.composicionViaje && mismaComposicion(a.composicion, a.composicionViaje)
+  if (a.laPusoLaLectura === 'pantallazo') return 'leído del pantallazo'
+  if (a.laPusoLaLectura === 'manual' || (a.esPropia && a.fuente === 'manual')) return 'escrito a mano'
+  if (delViaje) return 'la del viaje'
+  if (a.laPusoLaLectura === 'tarifario') return 'el de la tarifa del proveedor'
+  return a.esPropia ? 'ajustado en esta línea' : 'la del viaje'
 }
 
 /**
@@ -964,6 +1132,17 @@ export function confirmacionDesactualizada(
       mensaje: 'Cambiaron las habitaciones después de confirmar el costo: vuelve a confirmarlo.',
     }
   }
+  // Las fechas corregidas cambiaron las noches de una habitación a mano después de confirmar
+  // (o antes de que existiera el recálculo, COT-2026-0019): el costo confirmado es de otras noches.
+  const habs = tarifa.habitaciones && tarifa.habitaciones.length > 0
+    ? tarifa.habitaciones
+    : tarifa.casillas?.grupo_completo ? [{ id: 'grupo_completo', lectura: tarifa.casillas.grupo_completo }] : []
+  if ((c.firmaEstadia ?? '') !== firmaDeEstadia(habs, tarifa.correcciones)) {
+    return {
+      motivo: 'composicion',
+      mensaje: 'Cambiaron las fechas después de confirmar el costo: vuelve a confirmarlo para cobrar las noches nuevas.',
+    }
+  }
   // Normalizada: un jsonb escrito a mano sin `ninos` o `infantes` no puede leerse como otra
   // composición solo por la forma.
   const cargada = normalizarComposicion(c.composicion)
@@ -1004,6 +1183,8 @@ export interface CostoPorTipo {
 
 export type EstadoTarifa =
   | { estado: 'vacia'; siguiente: CasillaDef; mensaje: string }
+  /** La casilla 1 se escribió a mano sin costo (`LecturaCasilla.costoPendiente`): falta elegirlo. */
+  | { estado: 'sin_costo'; mensaje: string }
   | { estado: 'falta'; siguiente: CasillaDef; faltan: CasillaDef[]; mensaje: string }
   | { estado: 'confirmar_menor_no_paga'; casilla: CasillaDef; tipo: TipoPasajero; mensaje: string }
   | { estado: 'inconsistente'; mensaje: string }
@@ -1014,7 +1195,7 @@ export type EstadoTarifa =
       costos: CostoPorTipo[]
       moneda: string
       costoTotal: number
-      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones'
+      origen: 'desglose' | 'resta' | 'solo_adultos' | 'habitaciones' | 'infante_gratis' | 'por_grupo' | 'a_mano'
       mensaje: string
       /**
        * Con habitaciones (R8) y sin un par del mismo tipo de habitación para cada menor, el
@@ -1028,6 +1209,11 @@ export interface CostoDeHabitacion {
   numero: number
   ocupacion: Composicion
   total: number
+  /**
+   * Cómo se nombra cuando no es «Habitación N»: una reserva de varias habitaciones en un solo
+   * pantallazo («3 habitaciones dobles», `reserva-habitaciones.ts`). Ausente = «Habitación N».
+   */
+  nombre?: string
 }
 
 const dosDecimales = (v: number) => Math.round(v * 100) / 100
@@ -1084,11 +1270,60 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * `opciones.moneda` es la moneda con la que se costea la línea (`monedaDeTarifa`): la que
  * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
+/** Lo que dice la opción escrita a mano sin costo mientras nadie lo elige. */
+export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo con «Usar tarifa de proveedor», pega un pantallazo o escríbelo a mano.'
+
+/**
+ * ¿La opción se escribió a mano sin costo, para sacarlo del tarifario del proveedor? Casilla 1, o
+ * alguna de sus habitaciones (`LecturaCasilla.costoPendiente`).
+ */
+export function costoPendienteDelTarifario(tarifa: Pick<TarifaPax, 'casillas' | 'habitaciones'>): boolean {
+  if (tarifa.casillas?.grupo_completo?.costoPendiente) return true
+  return (tarifa.habitaciones ?? []).some(h => h.lectura?.costoPendiente && h.correccion?.total == null)
+}
+
+/**
+ * Cómo se nombra la casilla 1 cuando NO salió de un pantallazo (brief del 2026-10-21, punto 2):
+ * los textos de `resolverTarifa` («Este pantallazo ya trae…», «Pantallazo 1: $X por…») se dicen
+ * con su fuente verdadera. Las casillas 2 y 3 siempre son pantallazos y no se tocan.
+ */
+const NOMBRE_DE_FUENTE: Record<'manual' | 'tarifario', { este: string; el: string; uno: string }> = {
+  manual: { este: 'Lo escrito a mano', el: 'lo escrito a mano', uno: 'Escrito a mano' },
+  tarifario: { este: 'La tarifa del proveedor', el: 'la tarifa del proveedor', uno: 'Tarifa del proveedor' },
+}
+function conFuenteDeLaCasilla1(e: EstadoTarifa, l1: LecturaCasilla | undefined): EstadoTarifa {
+  const f = l1?.origen === 'manual' || l1?.origen === 'tarifario' ? NOMBRE_DE_FUENTE[l1.origen] : null
+  if (!f) return e
+  const mensaje = e.mensaje
+    .replace(/^Este pantallazo/, f.este)
+    .replace(/el pantallazo trae/, `${f.el} trae`)
+    .replace(/total del pantallazo/, `total de ${f.el}`)
+  if (e.estado !== 'resuelta') return { ...e, mensaje }
+  return { ...e, mensaje, costos: e.costos.map(x => ({ ...x, deDonde: x.deDonde.replace(/^Pantallazo 1\b/, f.uno) })) }
+}
+
 export function resolverTarifa(
   c: Composicion,
   casillas: CasillasLeidas,
   ranuraSlug: string,
-  opciones: { moneda?: string | null } = {},
+  opciones: Parameters<typeof resolverTarifaPorFuente>[3] = {},
+): EstadoTarifa {
+  return conFuenteDeLaCasilla1(resolverTarifaPorFuente(c, casillas, ranuraSlug, opciones), casillas.grupo_completo)
+}
+
+function resolverTarifaPorFuente(
+  c: Composicion,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+  opciones: {
+    moneda?: string | null
+    /**
+     * El costo c/u de un tipo de pasajero escrito A MANO porque el pantallazo no lo trae (la
+     * forma por pasos, regla del «precio por pasajero que falta», 2026-10-12). `0` = «No paga
+     * en este proveedor». En la moneda de la tarifa. Ausente = como siempre.
+     */
+    aMano?: Partial<Record<TipoPasajero, number>> | null
+  } = {},
 ): EstadoTarifa {
   const defs = casillasDe(c, ranuraSlug)
   const def1 = defs[0]
@@ -1096,6 +1331,8 @@ export function resolverTarifa(
   if (!l1) {
     return { estado: 'vacia', siguiente: def1, mensaje: `Pega el pantallazo 1: ${def1.busqueda.charAt(0).toLowerCase()}${def1.busqueda.slice(1)}.` }
   }
+  // Escrita a mano sin costo (2026-10-20): con esta lectura no hay precio que resolver.
+  if (l1.costoPendiente) return { estado: 'sin_costo', mensaje: MENSAJE_COSTO_PENDIENTE }
   const viejas = capturasDesactualizadas(c, casillas, ranuraSlug)
   if (viejas.length > 0) {
     return { estado: 'desactualizada', capturas: viejas, mensaje: viejas[0].mensaje }
@@ -1160,11 +1397,103 @@ export function resolverTarifa(
     }
   }
 
+  // 2b · actividad con infantes (y sin niños): el total es del grupo y el infante va gratis.
+  // Aunque el pantallazo diga «3 personas» contando al infante, no se divide entre 3: se
+  // reparte entre los que pagan (decisión de Mauricio, 2026-10-01).
+  if (infanteGratisEnActividad(c, ranuraSlug)) {
+    const costo = montoDeCosto(l1)
+    const costos: CostoPorTipo[] = [{
+      tipo: 'adulto',
+      cantidad: c.adultos,
+      total: costo,
+      unitario: dosDecimales(costo / c.adultos),
+      deDonde: `Pantallazo 1: ${formatoMonto(costo, moneda)} por el grupo` +
+        (c.adultos > 1 ? `, dividido entre los ${c.adultos} adultos` : ''),
+    }, {
+      tipo: 'infante',
+      cantidad: c.infantes,
+      total: 0,
+      unitario: 0,
+      deDonde: 'En una actividad el infante no paga',
+    }]
+    return {
+      estado: 'resuelta',
+      costos,
+      moneda,
+      costoTotal: costo,
+      origen: 'infante_gratis',
+      mensaje: `${MENSAJE_INFANTE_GRATIS} No hace falta nada más.`,
+    }
+  }
+
+  // 2c · traslado: el total del grupo es el costo, sin resta (`trasladoPorGrupo`).
+  if (trasladoPorGrupo(ranuraSlug)) {
+    const costo = montoDeCosto(l1)
+    const personas = totalPasajeros(c)
+    const totales = repartirProporcional(costo, presentes.map(t => cantidadDeTipo(c, t)))
+    const costos: CostoPorTipo[] = presentes.map((t, i) => ({
+      tipo: t,
+      cantidad: cantidadDeTipo(c, t),
+      total: totales[i],
+      unitario: dosDecimales(totales[i] / cantidadDeTipo(c, t)),
+      deDonde: `Pantallazo 1: ${formatoMonto(costo, moneda)} por el vehículo, repartido entre los ${personas} pasajeros`,
+    }))
+    return {
+      estado: 'resuelta',
+      costos,
+      moneda,
+      costoTotal: costo,
+      origen: 'por_grupo',
+      mensaje: 'El traslado se cobra por vehículo: el pantallazo trae el costo de todo el grupo. No hace falta nada más.',
+    }
+  }
+
+  // 2d · hotel: UNA reserva de varias habitaciones en un solo pantallazo, con un total
+  // (decisión de Mauricio, 2026-10-14). El costo es el total, sin partirlo por pasajero ni por
+  // habitación: no hay de dónde sacar cuánto paga cada uno, y TP4 pediría dos búsquedas más de
+  // una reserva que ya está completa. Va como UNA fila «por habitación» con el nombre del
+  // registro («3 habitaciones dobles»). Con otra captura pegada para restar, manda la resta.
+  const registro = ranuraSlug === 'hotel_detalle' ? registroDeReserva(l1) : []
+  if (registro.length > 0 && !defs.slice(1).some(d => casillas[d.clave])) {
+    const costo = montoDeCosto(l1)
+    const nombre = (l1.identidad.tipo_habitacion ?? '').trim() || resumenDeReserva(registro, null)
+    return {
+      estado: 'resuelta',
+      costos: [],
+      moneda,
+      costoTotal: costo,
+      origen: 'habitaciones',
+      mensaje: `Una reserva de ${registro.length} habitaciones en un pantallazo: el costo es su total, ${formatoMonto(costo, moneda)}. No hace falta nada más.`,
+      porHabitacion: [{ numero: 1, ocupacion: c, total: costo, nombre }],
+    }
+  }
+
   // 3 · un solo total con menores: TP4, falta desglose.
   const necesarias = defs.slice(1)
   const faltan = necesarias.filter(d => !casillas[d.clave])
+  // 3a · lo que falta se escribió a mano («Escribir a mano» o «No paga en este proveedor»):
+  // solo si no hay otra captura pegada para restar, que manda sobre lo escrito.
+  const aMano = faltan.length === necesarias.length ? conPrecioAMano(c, l1, opciones.aMano ?? null, moneda, ranuraSlug) : null
+  if (aMano) return aMano
   if (faltan.length > 0) {
     const siguiente = faltan[0]
+    // Re-verificación D · con parte del precio ya escrito («Completa» con el pantallazo del niño),
+    // lo que falta es el precio de los que quedan, no volver a buscar el grupo con el niño. Sin
+    // nada escrito (siempre, con el interruptor apagado), el mensaje de siempre.
+    const escritos = opciones.aMano ?? null
+    if (escritos && faltan.length === necesarias.length && Object.values(escritos).some(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) {
+      const quedan = tiposPresentes(c).filter(t => t !== 'adulto'
+        && !l1.porTipo.some(f => f.tipo === t && f.cantidad > 0)
+        && !(typeof escritos[t] === 'number'))
+      if (quedan.length > 0) {
+        return {
+          estado: 'falta',
+          siguiente,
+          faltan,
+          mensaje: `Falta el precio ${quedan.map(t => `${cantidadDeTipo(c, t) === 1 ? 'del' : 'de los'} ${PALABRA[t][cantidadDeTipo(c, t) === 1 ? 0 : 1]}`).join(' y ')}: escríbelo o pega su pantallazo.`,
+        }
+      }
+    }
     const prefijo = faltan.length === necesarias.length
       ? 'Este pantallazo tiene un solo total para el grupo. '
       : ''
@@ -1262,6 +1591,106 @@ export function resolverTarifa(
   }
 }
 
+/**
+ * 3a · el precio que falta, escrito a mano (regla del 2026-10-12, P12 de Vera). El pantallazo 1
+ * trae el precio de unos tipos (el adulto, casi siempre) y la persona escribe el costo c/u de los
+ * que faltan, o confirma que no pagan (`0`).
+ *
+ * Cada tipo sale de su fila leída si la trae; si no, de lo escrito a mano. Un solo tipo sin
+ * ninguna de las dos, solo si es el adulto (el pantallazo trae un solo total), sale de la resta:
+ * el total menos lo escrito. Si queda un menor sin precio, o la resta da negativa, no se resuelve.
+ * `null` = no aplica (no hay nada escrito a mano, o no alcanza).
+ */
+function conPrecioAMano(
+  c: Composicion,
+  l1: LecturaCasilla,
+  aMano: Partial<Record<TipoPasajero, number>> | null,
+  moneda: string,
+  ranuraSlug?: string,
+): EstadoTarifa | null {
+  if (!aMano || !Object.values(aMano).some(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) return null
+  const presentes = tiposPresentes(c)
+  const filas: { tipo: TipoPasajero; total: number | null; deDonde: string }[] = presentes.map(t => {
+    const n = cantidadDeTipo(c, t)
+    const leidas = l1.porTipo.filter(f => f.tipo === t && f.cantidad > 0)
+    if (leidas.length > 0) {
+      const sub = leidas.reduce((a, f) => a + f.subtotal, 0)
+      return { tipo: t, total: sub, deDonde: `Pantallazo 1: ${formatoMonto(sub, moneda)} por ${describirOcupacion(soloTipo(t, n))}` }
+    }
+    const escrito = aMano[t]
+    // H3 (verificación D) · en una actividad el infante no paga (decisión de Mauricio, 2026-10-01):
+    // con el precio del niño ya escrito, el infante sin precio es 0, no «falta».
+    if (t === 'infante' && ranuraSlug === 'actividad_detalle' && !(typeof escrito === 'number' && Number.isFinite(escrito) && escrito >= 0)) {
+      return { tipo: t, total: 0, deDonde: 'En una actividad el infante no paga' }
+    }
+    if (typeof escrito === 'number' && Number.isFinite(escrito) && escrito >= 0) {
+      return {
+        tipo: t,
+        total: dosDecimales(escrito * n),
+        deDonde: escrito === 0 ? 'No paga en este proveedor (lo confirmó una persona)' : `Escrito a mano: ${formatoMonto(escrito, moneda)} c/u`,
+      }
+    }
+    return { tipo: t, total: null, deDonde: '' }
+  })
+  const sinPrecio = filas.filter(f => f.total === null)
+  // Solo el ADULTO puede salir de la resta (el pantallazo trae un solo total). Un menor sin
+  // fila ni precio escrito sigue faltando.
+  if (sinPrecio.length > 1 || sinPrecio.some(f => f.tipo !== 'adulto')) return null
+  const costo = montoDeCosto(l1)
+  if (sinPrecio.length === 1) {
+    const resto = dosDecimales(costo - filas.reduce((a, f) => a + (f.total ?? 0), 0))
+    if (resto < 0) {
+      return { estado: 'inconsistente', mensaje: 'Lo escrito a mano suma más que el total del pantallazo: revisa el costo de cada pasajero.' }
+    }
+    sinPrecio[0].total = resto
+    sinPrecio[0].deDonde = `Pantallazo 1 (${formatoMonto(costo, moneda)}) menos lo escrito a mano`
+  }
+  const costos: CostoPorTipo[] = filas.map(f => {
+    const n = cantidadDeTipo(c, f.tipo)
+    return { tipo: f.tipo, cantidad: n, total: f.total as number, unitario: dosDecimales((f.total as number) / n), deDonde: f.deDonde }
+  })
+  return {
+    estado: 'resuelta',
+    costos,
+    moneda,
+    costoTotal: dosDecimales(costos.reduce((a, x) => a + x.total, 0)),
+    origen: 'a_mano',
+    mensaje: 'Ya está el precio de cada tipo de pasajero (una parte escrita a mano).',
+  }
+}
+
+/**
+ * Los tipos de pasajero sin precio en una tarifa: lo que la forma por pasos dice «Falta precio:
+ * niño, infante» (regla del 2026-10-12). Vacío = no falta nada, o no aplica (sin pantallazo, sin
+ * menores, por habitaciones). Mira lo leído, no la confirmación: si falta, no hay confirmación.
+ */
+export function preciosQueFaltan(
+  c: Composicion,
+  casillas: CasillasLeidas,
+  ranuraSlug: string,
+  opciones: { moneda?: string | null; aMano?: Partial<Record<TipoPasajero, number>> | null } = {},
+): TipoPasajero[] {
+  const estado = resolverTarifa(c, casillas, ranuraSlug, opciones)
+  if (estado.estado === 'confirmar_menor_no_paga') return [estado.tipo]
+  if (estado.estado !== 'falta') return []
+  const l1 = casillas.grupo_completo
+  if (!l1) return []
+  const faltan = tiposPresentes(c).filter(t => t !== 'adulto'
+    && !l1.porTipo.some(f => f.tipo === t && f.cantidad > 0)
+    && !(typeof opciones.aMano?.[t] === 'number'))
+  // H3 (verificación D) · en una actividad el infante no paga (decisión del 2026-10-01): mientras
+  // falte el niño, el infante no se pide aparte, porque al escribir el niño queda en 0 solo
+  // (`conPrecioAMano`). Si es lo único que falta, se deja: se cierra con «No paga».
+  if (ranuraSlug === 'actividad_detalle' && faltan.includes('infante') && faltan.some(t => t !== 'infante')) {
+    return faltan.filter(t => t !== 'infante')
+  }
+  return faltan
+}
+
+/** Lo que la tarjeta dice del reparto de una actividad con infante (punto 1 del brief). */
+export const MENSAJE_INFANTE_GRATIS =
+  'Este pantallazo trae el precio del grupo. En una actividad el infante no paga: el total se reparte entre los adultos.'
+
 function soloTipo(tipo: TipoPasajero, cantidad: number): Composicion {
   return {
     adultos: tipo === 'adulto' ? cantidad : 0,
@@ -1298,9 +1727,14 @@ export interface TarifaConfirmada {
    * R8 · el costo por habitación, cuando no hay cómo partirlo por pasajero (`costos` vacío).
    * El PDF imprime entonces el precio de cada habitación en vez del de cada pasajero.
    */
-  porHabitacion?: { numero: number; ocupacion: Composicion; totalCOP: number }[]
+  porHabitacion?: { numero: number; ocupacion: Composicion; totalCOP: number; nombre?: string }[]
   /** R8 · qué habitaciones y con qué papel se confirmaron (`firmaDeHabitaciones`). */
   firmaHabitaciones?: string
+  /**
+   * Las habitaciones a mano que se costearon con fechas corregidas, y a cuántas noches
+   * (`firmaDeEstadia`, `estadia.ts`). Ausente = ninguna.
+   */
+  firmaEstadia?: string
 }
 
 /** R8 · qué hace una captura dentro de una opción de hotel. */
@@ -1408,6 +1842,102 @@ export interface TarifaPax {
    * Ausente = sin foto: el documento sale como antes.
    */
   fotoHotel?: FotoDelHotel
+  /**
+   * Una actividad a la que le quitaron el check «Va en la cotización»: cómo era antes, para que al
+   * marcarla otra vez vuelva igual (brief del 2026-10-05, `actividad-en-cotizacion.ts`). Ausente =
+   * la actividad va, o se quitó antes de esta marca (vuelve Incluida).
+   */
+  noVa?: MarcaNoVa
+  /**
+   * El costo c/u de un tipo de pasajero que el pantallazo no trae, escrito a mano en la forma
+   * por pasos (regla del 2026-10-12): «Escribir a mano» o «No paga en este proveedor» (`0`).
+   * Ausente = como siempre: lo que falta se busca con otra captura.
+   */
+  costosAMano?: CostosAMano
+  /**
+   * La persona eligió tarifas del tarifario extraído del proveedor (`oferta-tarifas.ts`): de qué
+   * extracción, qué filas, con cuántos y cuántas noches, y el canal y el IVA con que se costeó. Vale
+   * mientras la casilla 1 sea la que escribió (`origenVigente`). Ausente = como siempre.
+   */
+  tarifaExtraida?: OrigenTarifaExtraida
+  /**
+   * La llave del perfil (ficha) que la persona dijo que NO es el de esta línea («No es este» en la
+   * tarjeta, brief del 2026-10-21, punto 5). Mientras esté, esa ficha no vuelve sola por el nombre:
+   * ni fotos ni proveedor. Ausente = como siempre.
+   */
+  fichaDescartada?: string
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Ausente = Neta, como toda
+   * línea anterior a esto.
+   */
+  tipoTarifa?: DecisionTipoTarifa
+  /**
+   * El traslado (o servicio) que va con UNA opción de hotel: el id de esa opción (reunión del
+   * 2026-10-22, punto 5, `va-con-hotel.ts`). Solo cuenta en las tarifas que llevan ese hotel.
+   * Ausente = general: sirve para cualquier hotel, como siempre.
+   */
+  vaConHotel?: string
+}
+
+/** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
+export interface CostoAMano {
+  unitario: number
+  por: string | null
+  porId: string | null
+  en: string
+  /**
+   * `pantallazo`: no lo tecleó nadie, lo sacó ONE de un pantallazo pegado en la bandeja que
+   * completaba la opción («Completa SATENA: precio del niño», por pasos C5). Ausente = escrito a mano.
+   */
+  desde?: 'pantallazo'
+  /** El pantallazo de donde salió (`desde: 'pantallazo'`), guardado como los de las opciones. */
+  imagenRef?: string
+}
+export type CostosAMano = Partial<Record<'nino' | 'infante' | 'adulto', CostoAMano>>
+
+/** Lo escrito a mano, como lo pide `resolverTarifa`. */
+export function costosAManoComoMapa(t: TarifaPax): Partial<Record<TipoPasajero, number>> | null {
+  const c = t.costosAMano
+  if (!c) return null
+  const salida: Partial<Record<TipoPasajero, number>> = {}
+  for (const tipo of TIPOS_PASAJERO) {
+    const v = c[tipo]?.unitario
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) salida[tipo] = v
+  }
+  return Object.keys(salida).length > 0 ? salida : null
+}
+
+function leerCostosAMano(raw: unknown): CostosAMano | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const salida: CostosAMano = {}
+  for (const tipo of TIPOS_PASAJERO) {
+    const v = r[tipo] as Record<string, unknown> | undefined
+    if (!v || typeof v !== 'object') continue
+    const u = v.unitario
+    if (typeof u !== 'number' || !Number.isFinite(u) || u < 0 || typeof v.en !== 'string') continue
+    salida[tipo] = {
+      unitario: u, por: typeof v.por === 'string' ? v.por : null, porId: typeof v.porId === 'string' ? v.porId : null, en: v.en,
+      ...(v.desde === 'pantallazo' ? { desde: 'pantallazo' as const } : {}),
+      ...(typeof v.imagenRef === 'string' ? { imagenRef: v.imagenRef } : {}),
+    }
+  }
+  return Object.keys(salida).length > 0 ? salida : null
+}
+
+/** Cómo era una actividad antes de quitarle el check, con quién y cuándo. */
+export interface MarcaNoVa {
+  era: 'incluida' | 'opcional'
+  por: string | null
+  porId: string | null
+  en: string
+}
+
+function leerMarcaNoVa(raw: unknown): MarcaNoVa | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  if ((r.era !== 'incluida' && r.era !== 'opcional') || typeof r.en !== 'string') return null
+  return { era: r.era, por: typeof r.por === 'string' ? r.por : null, porId: typeof r.porId === 'string' ? r.porId : null, en: r.en }
 }
 
 /** Una foto de hotel guardada en el almacenamiento propio del workspace. */
@@ -1479,7 +2009,9 @@ function leerLectura(raw: unknown): LecturaCasilla | null {
     porTipo: Array.isArray(l.porTipo) ? l.porTipo : [],
     // El aviso de «año completado con el del viaje» de las lecturas anteriores al 2026-09-23
     // ya no se muestra: hoy el año se deduce sin preguntar (`anio-fecha.ts`).
-    alertas: Array.isArray(l.alertas) ? l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a)) : [],
+    // Sin repetir (punto 6 del brief del 2026-10-01): las lecturas aceptadas antes de ese día
+    // pueden traer el mismo aviso dos veces.
+    alertas: Array.isArray(l.alertas) ? sumarAlertas(l.alertas.filter(a => typeof a !== 'string' || !esAvisoDeAnioViejo(a))) : [],
     notasCliente: Array.isArray(l.notasCliente) ? l.notasCliente : [],
     campos: Array.isArray(l.campos) ? l.campos : [],
     identidad: l.identidad && typeof l.identidad === 'object' ? l.identidad : {},
@@ -1578,6 +2110,12 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const habitaciones = leerHabitaciones(r.habitaciones)
   const preciosAMano = leerPreciosAMano(r.preciosAMano)
   const fotoHotel = leerFotoDelHotel(r.fotoHotel)
+  const noVa = leerMarcaNoVa(r.noVa)
+  const costosAMano = leerCostosAMano(r.costosAMano)
+  const tarifaExtraida = leerOrigenTarifaExtraida(r.tarifaExtraida)
+  const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
+  const tipoTarifa = leerTipoTarifa(r.tipoTarifa)
+  const vaConHotel = typeof r.vaConHotel === 'string' && r.vaConHotel.trim() ? r.vaConHotel.slice(0, 100) : null
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -1596,6 +2134,18 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(Object.keys(preciosAMano).length > 0 ? { preciosAMano } : {}),
     // Igual: sin foto del hotel la llave no aparece.
     ...(fotoHotel ? { fotoHotel } : {}),
+    // Igual: sin la marca de «No va» la llave no aparece.
+    ...(noVa ? { noVa } : {}),
+    // Igual: sin precios de pasajero escritos a mano la llave no aparece.
+    ...(costosAMano ? { costosAMano } : {}),
+    // Igual: sin tarifa elegida del tarifario la llave no aparece.
+    ...(tarifaExtraida ? { tarifaExtraida } : {}),
+    // Igual: sin «No es este» en la tarjeta la llave no aparece.
+    ...(fichaDescartada ? { fichaDescartada } : {}),
+    // Igual: sin decisión de tarifa pública o neta la llave no aparece (es Neta).
+    ...(tipoTarifa ? { tipoTarifa } : {}),
+    // Igual: un servicio general (sin hotel) no lleva la llave.
+    ...(vaConHotel ? { vaConHotel } : {}),
   }
 }
 

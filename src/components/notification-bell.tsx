@@ -2,16 +2,19 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert, CalendarCheck, AlarmClock, FileText } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { createClient } from '@/lib/supabase/client'
 import {
-  getNotificaciones,
   marcarCompletada,
   descartarNotificacion,
   marcarTodasCompletadas,
   type NotificacionItem,
 } from '@/lib/actions/notificaciones'
+import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
+import { mensajeSecundario } from '@/lib/notificaciones/mensaje-secundario'
+import { toast } from 'sonner'
+import { seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
+import { BotonWhatsApp } from '@/components/boton-whatsapp'
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -43,6 +46,12 @@ const TIPO_ICON: Record<string, React.ElementType> = {
   responsable_faltante_area: UserPlus,
   cobro_vencido: CircleDollarSign,
   cuenta_cobro_pendiente_aprobacion: CircleDollarSign,
+  compliance_hallazgo: ShieldAlert,
+  compliance_delta_contraparte: ShieldAlert,
+  factura_cargada: FileText,
+  // Hitos de gestión del viaje (2026-10-22): el resumen del día abre la Agenda; el vencido, el viaje.
+  agenda_del_dia: CalendarCheck,
+  hito_vencido: AlarmClock,
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -58,6 +67,11 @@ const TIPO_COLOR: Record<string, string> = {
   responsable_faltante_area: 'var(--advertencia)',
   cobro_vencido: 'var(--alerta)',
   cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
+  compliance_hallazgo: 'var(--alerta)',
+  compliance_delta_contraparte: 'var(--alerta)',
+  factura_cargada: 'var(--acento)',
+  agenda_del_dia: 'var(--acento)',
+  hito_vencido: 'var(--alerta)',
 }
 
 // ── Componente principal ──────────────────────────────
@@ -83,26 +97,41 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
   const panelRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
-  // Cargar notificaciones
+  // Cuándo se leyó por última vez (la primera lectura llegó con la página).
+  const ultimaLectura = useRef(Date.now())
+
+  // Cargar notificaciones. Una lectura que falla deja lo que había: la campana no se vacía
+  // por un corte de red.
   const cargar = useCallback(async () => {
     setLoading(true)
-    const { items: data, total: t } = await getNotificaciones()
-    setItems(data)
-    setTotal(t)
-    setLoading(false)
+    ultimaLectura.current = Date.now()
+    try {
+      const { items: data, total: t } = await leerNotificaciones()
+      setItems(data)
+      setTotal(t)
+    } catch {
+      // Se reintenta al abrir el panel o al volver a la pestaña.
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   // Traer la siguiente página. Con backlog alto (hay usuarios con 68 pendientes)
   // las más viejas quedaban fuera del corte y eran invisibles.
   const cargarMas = useCallback(async () => {
     setCargandoMas(true)
-    const { items: data, total: t } = await getNotificaciones(items.length)
-    setItems(prev => {
-      const vistos = new Set(prev.map(n => n.id))
-      return [...prev, ...data.filter(n => !vistos.has(n.id))]
-    })
-    setTotal(t)
-    setCargandoMas(false)
+    try {
+      const { items: data, total: t } = await leerNotificaciones(items.length)
+      setItems(prev => {
+        const vistos = new Set(prev.map(n => n.id))
+        return [...prev, ...data.filter(n => !vistos.has(n.id))]
+      })
+      setTotal(t)
+    } catch {
+      toast.error('No se pudieron cargar más notificaciones')
+    } finally {
+      setCargandoMas(false)
+    }
   }, [items.length])
 
   // Abrir panel carga datos
@@ -114,10 +143,13 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
 
   // Refresco al volver a la pestaña. Respaldo del realtime: si el canal se cayó
   // (o la tabla no está en la publicación), el conteo igual se pone al día
-  // cuando el usuario regresa, sin polling permanente.
+  // cuando el usuario regresa, sin polling permanente. Con la pestaña oculta no se pide
+  // nada, y al volver solo si pasó un minuto desde la última lectura.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible') cargar()
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - ultimaLectura.current < REFRESCO_MINIMO_AL_VOLVER_MS) return
+      cargar()
     }
     document.addEventListener('visibilitychange', onVisible)
     return () => document.removeEventListener('visibilitychange', onVisible)
@@ -136,17 +168,16 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
   // de arriba recarga el conteo cada vez que el usuario vuelve a la pestaña, y el
   // contador inicial llega resuelto desde el servidor. Se pierde el aviso
   // instantáneo mientras la pestaña está al frente, nada más.
+  //
+  // El cliente de Supabase (~165 KB sin comprimir: auth, realtime, storage) se pide
+  // DESPUÉS de montar (2026-10-07, red lenta): la campana va en todas las páginas y con el
+  // import estático ese peso viajaba en la primera carga, antes de poder usar nada.
   useEffect(() => {
-    const supabase = createClient()
     const MAX_FALLOS = 3
     let fallos = 0
     let rendido = false
     let suscrito = false
-
-    // La referencia se declara antes del `subscribe` porque su callback puede
-    // dispararse de forma síncrona: leer `channel` desde `rendirse` antes de que
-    // exista rompería con "used before its declaration".
-    let canal: ReturnType<typeof supabase.channel> | null = null
+    let quitarCanal: (() => void) | null = null
 
     const rendirse = (motivo: string) => {
       if (rendido) return
@@ -155,36 +186,51 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
       // Al quitar el último canal, la librería cierra el socket (RealtimeClient
       // .removeChannel llama a disconnect cuando no quedan canales) → se acaba el
       // bucle de reconexión, no solo la suscripción.
-      if (canal) supabase.removeChannel(canal)
+      quitarCanal?.()
     }
 
-    canal = supabase
-      .channel('notificaciones-realtime')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notificaciones',
-          filter: `destinatario_id=eq.${userId}`,
-        },
-        (payload) => {
-          const nueva = payload.new as NotificacionItem
-          // Dedup por id: la misma notificación puede llegar por realtime y por
-          // un `cargar()` concurrente (apertura del panel o vuelta a la pestaña).
-          setItems(prev => (prev.some(n => n.id === nueva.id) ? prev : [nueva, ...prev]))
+    import('@/lib/supabase/client')
+      .then(({ createClient }) => {
+        if (rendido) return
+        const supabase = createClient()
+        // La referencia se declara antes del `subscribe` porque su callback puede
+        // dispararse de forma síncrona: leer `canal` desde `rendirse` antes de que
+        // exista rompería con "used before its declaration".
+        let canal: ReturnType<typeof supabase.channel> | null = null
+        quitarCanal = () => {
+          if (canal) supabase.removeChannel(canal)
         }
-      )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          suscrito = true
-          fallos = 0
-          return
-        }
-        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          fallos += 1
-          if (fallos >= MAX_FALLOS) rendirse(`${fallos} intentos fallidos (${status})`)
-        }
+        canal = supabase
+          .channel('notificaciones-realtime')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'notificaciones',
+              filter: `destinatario_id=eq.${userId}`,
+            },
+            (payload) => {
+              const nueva = payload.new as NotificacionItem
+              // Dedup por id: la misma notificación puede llegar por realtime y por
+              // un `cargar()` concurrente (apertura del panel o vuelta a la pestaña).
+              setItems(prev => (prev.some(n => n.id === nueva.id) ? prev : [nueva, ...prev]))
+            }
+          )
+          .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              suscrito = true
+              fallos = 0
+              return
+            }
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              fallos += 1
+              if (fallos >= MAX_FALLOS) rendirse(`${fallos} intentos fallidos (${status})`)
+            }
+          })
+      })
+      .catch(() => {
+        // Sin el chunk no hay aviso instantáneo; el conteo sigue llegando al volver a la pestaña.
       })
 
     // Red de seguridad: si el socket ni siquiera llega a abrirse, el callback de
@@ -196,7 +242,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
     return () => {
       clearTimeout(plazo)
       rendido = true
-      if (canal) supabase.removeChannel(canal)
+      quitarCanal?.()
     }
   }, [userId])
 
@@ -235,8 +281,10 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
   }
 
   async function handleMarcarTodas() {
-    setItems([])
-    setTotal(0)
+    // Las alarmas de hallazgo se quedan: se cierran decidiendo (P1, 2026-10-20).
+    const quedan = items.filter(n => n.estado === 'pendiente' && seCierraDecidiendo(n.grupo_clave))
+    setItems(quedan)
+    setTotal(t => Math.max(quedan.length, t - (pendientes.length - quedan.length)))
     await marcarTodasCompletadas()
   }
 
@@ -245,6 +293,8 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
       setOpen(false)
       router.push(item.deep_link)
     }
+    // La alarma de hallazgo NO se apaga al abrirla: abrir no es decidir.
+    if (seCierraDecidiendo(item.grupo_clave)) return
     // Marcar como completada al hacer click en la notificación
     marcarCompletada(item.id)
     setItems(prev => prev.filter(n => n.id !== item.id))
@@ -336,6 +386,8 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
             {!loading && pendientes.map((item) => {
               const Icon = TIPO_ICON[item.tipo] ?? Bell
               const color = TIPO_COLOR[item.tipo] ?? 'var(--tinta-suave)'
+              // Quién asignó / por qué llegó: vive en metadata.mensaje, no en el título.
+              const detalle = mensajeSecundario(item.metadata, item.contenido)
 
               return (
                 <div
@@ -358,12 +410,26 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                     <p className="text-[13px] font-medium text-foreground leading-snug">
                       {item.contenido}
                     </p>
+                    {detalle && (
+                      <p className="mt-0.5 text-[12px] text-muted-foreground leading-snug">
+                        {detalle}
+                      </p>
+                    )}
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {tiempoRelativo(item.created_at)}
                     </p>
+                    <BotonWhatsApp metadata={item.metadata} />
                   </div>
 
                   {/* Acciones */}
+                  {seCierraDecidiendo(item.grupo_clave) ? (
+                    <span
+                      className="shrink-0 ml-1 mt-0.5 text-[10px] font-medium text-muted-foreground"
+                      title="Este aviso se cierra cuando registras la decisión sobre la contraparte"
+                    >
+                      Se cierra al decidir
+                    </span>
+                  ) : (
                   <div className="flex shrink-0 items-center gap-1 ml-1">
                     <button
                       onClick={(e) => handleCompletar(item.id, e)}
@@ -380,6 +446,7 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                       <X className="h-3 w-3" />
                     </button>
                   </div>
+                  )}
                 </div>
               )
             })}

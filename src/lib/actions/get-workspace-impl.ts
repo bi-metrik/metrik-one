@@ -4,6 +4,9 @@ import { cache } from 'react'
 import { cookies, headers } from 'next/headers'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
+import { memoDeRuta } from './memo-de-ruta'
+import { rolPlataformaParaAutocrear } from './rol-plataforma-autocreado'
 import {
   ERROR_DESINCRONIZADO,
   hayDesincronizacionDeTenant,
@@ -26,6 +29,18 @@ function avisarStaffEnOtroWorkspace(profileId: string, workspaceId: string) {
       `staffId queda null en ${workspaceId}. No se crea uno nuevo (el unique ` +
       `staff_profile_id_key es GLOBAL por profile_id) ni se devuelve el ajeno ` +
       `(staff.id es FK de activity_log y negocio_responsables de otro tenant).`,
+  )
+}
+
+/** Aviso de "rol sin autocreacion de staff": una vez por profile por instancia. */
+const rolSinStaffAvisado = new Set<string>()
+function avisarRolSinAutocreacion(profileId: string, role: string | null) {
+  if (rolSinStaffAvisado.has(profileId)) return
+  rolSinStaffAvisado.add(profileId)
+  console.warn(
+    `[getWorkspace] el profile ${profileId} (rol ${role}) no tiene staff y no se ` +
+      `autocrea: trg_sync_staff_role no espeja ese rol y crearlo cambiaria profiles.role. ` +
+      `staffId queda null.`,
   )
 }
 
@@ -106,20 +121,12 @@ async function getWorkspaceImpl() {
   }
   // ─────────────────────────────────────────────────────────────────────
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    // El slug del workspace viaja en el MISMO viaje que el perfil. El guard de
-    // desincronizacion no puede costar una consulta nueva: este helper corre en cada
-    // request y lo llaman 111 archivos (cada ida y vuelta cuesta entre 60 y 180 ms).
-    // El embed se desambigua con el nombre de la FK a proposito: `profiles` tiene DOS
-    // hacia `workspaces` (`workspace_id` y `home_workspace_id`), y sin nombrarla
-    // PostgREST responde PGRST201 "Could not embed because more than one relationship
-    // was found" (medido contra produccion el 2026-09-18).
-    .select(
-      'workspace_id, role, full_name, platform_admin, workspaces!profiles_workspace_id_fkey(slug, name)',
-    )
-    .eq('id', user.id)
-    .single()
+  // El slug del workspace viaja en el MISMO viaje que el perfil. El guard de
+  // desincronizacion no puede costar una consulta nueva: este helper corre en cada
+  // request y lo llaman 111 archivos (cada ida y vuelta cuesta entre 60 y 180 ms).
+  // La lectura la comparten el layout y la barra de plataforma en el mismo render
+  // (`leerPerfilDeSesion`, con `cache()`): antes cada uno pedia la misma fila aparte.
+  const profile = await leerPerfilDeSesion(user.id)
 
   if (!profile?.workspace_id) {
     return { supabase, workspaceId: null, userId: user.id, role: null, staffId: null, areas: [] as string[], impersonating: false, realRole: null, error: 'Sin perfil' as const }
@@ -205,15 +212,12 @@ async function getWorkspaceImpl() {
       // 23505 garantizado. staffId queda null, que era el resultado efectivo de
       // antes, ahora sin error repetido en el log.
       avisarStaffEnOtroWorkspace(user.id, profile.workspace_id as string)
+    } else if (rolPlataformaParaAutocrear(profile.role) === null) {
+      // Rol sin valor de `rol_plataforma` que el trigger `trg_sync_staff_role` devuelva
+      // al mismo `profiles.role` (hoy: contador). Crear el staff le cambiaria el rol a
+      // la persona; se deja sin staff, como ya quedaba, y sin error repetido.
+      avisarRolSinAutocreacion(user.id, profile.role)
     } else {
-      const rolMap: Record<string, string> = {
-        owner: 'dueno',
-        admin: 'administrador',
-        operator: 'operativo',
-        supervisor: 'supervisor',
-        read_only: 'operativo',
-        contador: 'operativo',
-      }
       // Upsert con ignoreDuplicates (ON CONFLICT (profile_id) DO NOTHING): dos
       // requests concurrentes del mismo usuario ya no producen 23505 — el que
       // pierde la carrera recibe 0 filas y relee abajo con el service client.
@@ -224,7 +228,7 @@ async function getWorkspaceImpl() {
             workspace_id: profile.workspace_id,
             full_name: (profile as { full_name?: string }).full_name ?? 'Usuario',
             profile_id: user.id,
-            rol_plataforma: rolMap[profile.role ?? 'owner'] ?? 'dueno',
+            rol_plataforma: rolPlataformaParaAutocrear(profile.role),
             is_active: true,
           },
           { onConflict: 'profile_id', ignoreDuplicates: true },
@@ -314,7 +318,9 @@ async function getWorkspaceImpl() {
  * El `cache()` vive aqui y no en `get-workspace.ts` porque ese archivo es `'use server'`
  * y solo puede exportar funciones async (gotcha ya documentado en CLAUDE.md).
  */
-export const getWorkspaceCached = cache(getWorkspaceImpl)
+// En una RUTA el `cache()` de React no memoiza (no hay render): ahí lo hace `memoDeRuta`, solo
+// dentro de `enPeticionDeRuta` (hoy, «Aceptar» y la relectura de la bandeja de Trappvel).
+export const getWorkspaceCached = cache(memoDeRuta(getWorkspaceImpl))
 
 // Exportado SOLO para pruebas: el `cache()` de React memoiza por request y
 // volveria no determinista un test que necesita invocar el flujo varias veces.

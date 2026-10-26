@@ -179,7 +179,7 @@ describe('la casilla única', () => {
     const t = textoCasillaEntrada({ documentos: [V10_ACEPTADA], firmaPor: null })
     expect(t).toBe(
       'Leí hasta el final «Términos de Uso de VALIDA» (v1.0) y los acepto para mi uso de Valida API. ' +
-        'Autorizo a METRIK IA S.A.S. a tratar mis datos conforme a la Política de Tratamiento de Datos Personales v1.5.',
+        'Autorizo a METRIK IA S.A.S. a tratar mis datos conforme a la Política de Tratamiento de Datos Personales v1.7.',
     )
     expect(t).not.toMatch(/[—–]/)
   })
@@ -212,7 +212,7 @@ describe('las constancias del usuario', () => {
         workspace_id: WS,
         usuario_id: '123fc989-2520-4128-9e52-3283a524a75d',
         documento_slug: 'politica-datos-valida',
-        documento_version: '1.5',
+        documento_version: '1.7',
         documento_sha256: null,
         documento_url: 'https://valida.metrik.com.co/recursos/privacidad',
         aviso_texto_sha256: 'a'.repeat(64),

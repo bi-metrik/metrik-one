@@ -107,9 +107,16 @@ ya existe, `ls -la` y mirar los mtime: si son de antes de mi primer comando, es 
 
 ## Herramientas dentro del worktree
 
-- ⚠️ **2026-09-24: el `node_modules` del repo principal puede estar ATRASADO** frente al `package.json`
-  de `origin/main` (faltaba `@electric-sql/pglite`: `tsc` y las pruebas PGlite fallaban por módulo
-  ausente). `npm ci` dentro del worktree tarda ~13 s y lo resuelve; borrar ese `node_modules` al cerrar.
+- ⚠️ **El `node_modules` del repo principal puede estar ATRASADO** frente al `package.json` de
+  `origin/main`. Pasó dos veces: **2026-09-24** faltaba `@electric-sql/pglite` (`tsc` y las pruebas
+  PGlite caían por módulo ausente) y **2026-10-07** faltaba `happy-dom` — ahí el síntoma fue
+  **`npm test` con 27 archivos en rojo por fallo de COLECCIÓN** (`Failed to load url happy-dom`),
+  ninguno relacionado con lo que estaba tocando. ⚠️ **Eso se confunde con «rompí algo»**: la firma
+  de que es el entorno es que los archivos rojos no los menciona el encargo y el error es de
+  carga, no de aserción. Se comprueba desde el repo principal con
+  `node -e "require.resolve('<paquete>')"`. `npm ci` dentro del worktree lo resuelve (~1 min, 750 MB);
+  borrar ese `node_modules` al cerrar. **Correr la carpeta tocada en verde no basta para dar por
+  verde la suite**: con el entorno incompleto, `npm test` se cae antes de ejecutar nada.
 
 - **⚠️ El symlink de `node_modules` NO siempre hace falta, y suele sobrar.** El worktree
   cuelga de `metrik-one/.claude/worktrees/<x>`, o sea que está DENTRO del repo principal:

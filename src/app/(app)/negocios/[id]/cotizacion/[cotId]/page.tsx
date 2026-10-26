@@ -3,6 +3,7 @@ import { getEstadoItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import { getAdicionalesDeCotizacion } from '@/app/(app)/negocios/adicional-actions'
 import { getPoliticaRecargo } from '@/app/(app)/negocios/recargo-actions'
 import { getSalidaDeCotizacion } from '@/app/(app)/negocios/margen-salida-actions'
+import { getPedidoDeAutorizacion } from '@/app/(app)/negocios/por-pasos-actions'
 import { getTextoCliente } from '@/app/(app)/negocios/documento-cliente-actions'
 import { getFiscalProfile } from '@/app/(app)/config/fiscal-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -11,10 +12,16 @@ import { notFound } from 'next/navigation'
 import CotizacionEditor from '@/app/(app)/negocios/cotizacion-editor'
 import NegocioDetailClient from '@/app/(app)/negocios/[id]/negocio-detail-client'
 import { cargarVistaNegocio } from '@/app/(app)/negocios/[id]/vista-negocio'
+import { ProveedorTotalVivo } from '@/app/(app)/negocios/total-vivo'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
-import { lineaCotizaPorTipo } from '@/lib/cotizaciones/lineas-por-tipo'
+import { leerLineasPorTipo } from '@/lib/cotizaciones/por-pasos-datos'
+import { estadoPorPasos } from '@/lib/cotizaciones/por-pasos'
+import { configSeguimiento } from '@/lib/negocios/seguimiento'
+import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { MENSAJE_ENVIO_PENDIENTE } from '@/lib/autorizacion-datos/mensajes'
 import {
   CONFIG_IVA_POR_DEFECTO,
   leerConfigIvaCotizacion,
@@ -27,12 +34,26 @@ import {
   type UmbralesMargen,
 } from '@/lib/cotizaciones/convencion-margen'
 
+// Las casillas de la tarifa por pasajero leen el pantallazo con el modelo (8 a 25 s) por server
+// action, y una server action corre con la duración de ESTA página. Sin tope declarado quedaba
+// el de la cuenta; la bandeja, que lee por ruta, ya tenía 60 s (`leer-captura`). Una lectura
+// cortada por tiempo era un pantallazo que «no hacía nada» (brief del 2026-10-01, punto 7).
+export const maxDuration = 60
+
 export default async function CotizacionNegocioPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; cotId: string }>
+  /** `?paso=tarifas|revisar`: la cotización por pasos abre en ese paso (decisión J). */
+  searchParams?: Promise<{ paso?: string }>
 }) {
   const { id, cotId } = await params
+  const { paso } = (await searchParams) ?? {}
+
+  // La hora del servidor ANTES de leer: el editor del viaje la compara con su propia lectura
+  // para pintar la más nueva sin recargar (`lib/cotizaciones/vista-fresca.ts`).
+  const leidaEn = new Date().toISOString()
 
   // getFiscalProfile tiene getWorkspace() interno que THROWS — catch para no crashear
   const [cotizacion, items, fiscalResult, itinerarios, adicionales, salida, textoCliente] = await Promise.all([
@@ -161,6 +182,10 @@ export default async function CotizacionNegocioPage({
   // como `undefined` (el `select('*')` de `getCotizacion` no falla por columnas que no
   // existen) y todo cae a la línea, que es el comportamiento de hoy.
   let politicaLinea: UmbralesMargen = UMBRALES_MARGEN_POR_DEFECTO
+  // Seguimiento de la línea (F1): sin poder leer la línea, apagado (como hoy).
+  let seguimientoActivo = false
+  // «Así puedes pagar» (F2, PR 7): la config de la línea; con las fechas del viaje se arma abajo.
+  let configLineaPlan: unknown = null
   if (negocioLineaId) {
     try {
       const { supabase: sbLinea } = await getWorkspace()
@@ -173,6 +198,8 @@ export default async function CotizacionNegocioPage({
         (linea as { config_extra?: unknown } | null)?.config_extra,
       )
       politicaLinea = { pisoPct, avisoPct }
+      seguimientoActivo = configSeguimiento((linea as { config_extra?: unknown } | null)?.config_extra).activo
+      configLineaPlan = (linea as { config_extra?: unknown } | null)?.config_extra ?? null
     } catch {
       // Sin la línea rigen los umbrales por defecto: el color de una cifra no puede
       // depender de que una consulta secundaria responda.
@@ -232,13 +259,7 @@ export default async function CotizacionNegocioPage({
   if (negocioLineaId) {
     try {
       const { supabase: sbTipos } = await getWorkspace()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: bloquesLinea, error: errTipos } = await (sbTipos as any)
-        .from('bloque_configs')
-        .select('fields:config_extra->fields, etapas_negocio!inner(linea_id)')
-        .eq('etapas_negocio.linea_id', negocioLineaId)
-      if (errTipos) console.warn('[cotizacion] no se pudo leer si la línea cotiza por tipo:', errTipos.message)
-      else lineasPorTipo = lineaCotizaPorTipo(((bloquesLinea ?? []) as { fields: unknown }[]).map(b => b.fields))
+      lineasPorTipo = await leerLineasPorTipo(sbTipos, negocioLineaId)
     } catch {
       // Sin respuesta, lo de siempre: nombre libre.
     }
@@ -253,6 +274,10 @@ export default async function CotizacionNegocioPage({
   // final (hallazgo 33: Trappvel no). Si no se puede leer, se pinta, como siempre.
   let configIva: ConfigIvaCotizacion = CONFIG_IVA_POR_DEFECTO
   let mostrarResumenFiscal = true
+  // El interruptor de la cotización por pasos (C1): sale de la MISMA fila, sin consultas de
+  // más. Si no se puede leer, apagado: la pantalla de siempre.
+  let configWorkspace: unknown = null
+  let plantillaWorkspace: string | null = null
   try {
     const { supabase: sbIva, workspaceId: wsIva } = await getWorkspace()
     if (wsIva) {
@@ -265,6 +290,8 @@ export default async function CotizacionNegocioPage({
       const fila = wsRow as { config_extra?: unknown; cotizacion_template_slug?: string | null } | null
       configIva = leerConfigIvaCotizacion(fila?.config_extra)
       mostrarResumenFiscal = plantillaMuestraResumenFiscal(fila?.cotizacion_template_slug)
+      configWorkspace = fila?.config_extra ?? null
+      plantillaWorkspace = fila?.cotizacion_template_slug ?? null
     }
   } catch {
     // Sin respuesta, el IVA de siempre.
@@ -276,8 +303,33 @@ export default async function CotizacionNegocioPage({
     politicaLinea,
   )
 
+  // ¿Se trabaja por pasos? Las cuatro condiciones (`por-pasos.ts`), calculadas en el servidor.
+  // Gobierna solo la pantalla: la lectura del total, el IVA y el PDF no lo miran.
+  const estadoPasos = estadoPorPasos({
+    lineasPorTipo,
+    plantilla: plantillaWorkspace,
+    configWorkspace,
+    estado: (cotizacion as { estado?: string | null }).estado ?? null,
+  })
+
+  // Solo con la forma por pasos: el pedido de autorización que espera al dueño. Apagada, ninguna
+  // consulta de más (la carga de la página es la de siempre).
+  const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
+  // La carga del negocio que pinta el marco (cotización de viaje): se lee UNA vez, aquí, y de ella
+  // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
+  // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.
+  const vistaDelNegocio = lineasPorTipo ? await cargarVistaNegocio(id) : null
+  // El mismo texto que respondería «Enviar» (con menores en el viaje, el de menores).
+  const motivoAutorizacionDatos = estadoPasos.encendido && vistaDelNegocio?.autorizacionPendiente === true
+    ? (vistaDelNegocio.motivoAutorizacion ?? MENSAJE_ENVIO_PENDIENTE)
+    : null
+
   const editor = (
     <CotizacionEditor
+      porPasos={estadoPasos}
+      pedidoAutorizacion={pedidoAutorizacion}
+      motivoAutorizacionDatos={motivoAutorizacionDatos}
+      pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
       // editor la declara como la unión de sus dos valores (el CHECK de la columna). El cast
@@ -304,6 +356,9 @@ export default async function CotizacionNegocioPage({
       mostrarResumenFiscal={mostrarResumenFiscal}
       destinoViaje={destinoViaje}
       fechasViaje={fechasViaje}
+      leidaEn={leidaEn}
+      seguimiento={seguimientoActivo}
+      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: fechasViaje?.inicio ?? null, hoy: todayBogotaISO() })}
     />
   )
 
@@ -312,9 +367,15 @@ export default async function CotizacionNegocioPage({
   // es el editor; lo demás sale de la MISMA carga que usa la página del negocio. Fuera del
   // flujo de viaje, o si la carga no trae viaje, la pantalla de siempre (R6).
   if (lineasPorTipo) {
-    const vista = await cargarVistaNegocio(id)
+    const vista = vistaDelNegocio
     if (vista?.viaje) {
-      return <NegocioDetailClient {...vista} extras={null} centro={editor} cotActualId={cotId} />
+      // El proveedor deja que la columna de la derecha pinte el total que el editor acaba de
+      // leer, sin esperar el refresco (`total-vivo.tsx`).
+      return (
+        <ProveedorTotalVivo>
+          <NegocioDetailClient {...vista} extras={null} centro={editor} cotActualId={cotId} />
+        </ProveedorTotalVivo>
+      )
     }
   }
   return editor

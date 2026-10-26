@@ -23,6 +23,7 @@ import {
   cohorteInmadura,
   conversion,
   cpl,
+  leadsPorCiudad,
   lenteCohorte,
   lenteMes,
   mesesConDatos,
@@ -90,6 +91,12 @@ export default function TabMarketing({ datos }: { datos: MarketingData }) {
     [filas, datos.ventas, lente, mes],
   )
   const tc = useMemo(() => totalesPorCiudad(ciudades), [ciudades])
+
+  // Los leads de la MISMA lente, por la ciudad que la persona declaró en el formulario.
+  const lc = useMemo(
+    () => (datos.leadsCiudad ? leadsPorCiudad(filas, datos.leadsCiudad, lente === 'mes' ? mes : null) : null),
+    [filas, datos.leadsCiudad, lente, mes],
+  )
 
   function abrir(c: CampanaAgregada) {
     setSeleccion({
@@ -322,6 +329,86 @@ export default function TabMarketing({ datos }: { datos: MarketingData }) {
         </>
       )}
 
+      {/* ── Leads por ciudad (SOE-015) ───────────────────────────────────
+          La ciudad de RESIDENCIA que la persona declara en el formulario de Meta,
+          normalizada en el servidor. Las columnas son las ciudades con más leads en
+          la lente que se ve; el porqué está en `leadsPorCiudad`. */}
+      <h3 className="mt-8 mb-2 text-sm font-bold" style={{ color: CARBON }}>Leads por ciudad de residencia</h3>
+
+      {lc === null ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          No se pudo leer la ciudad de los leads en este momento. Las demás cifras de la
+          pestaña están completas.
+        </p>
+      ) : lc.total === 0 ? (
+        <p className="rounded-lg border px-4 py-6 text-center text-sm" style={{ borderColor: BORDE, color: GRIS }}>
+          {lente === 'mes'
+            ? `No entraron leads de Meta en ${etiquetaMes(mes)}.`
+            : 'Ninguna campaña ha traído leads todavía.'}
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: BORDE }}>
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-xs uppercase" style={{ color: GRIS }}>
+              <tr>
+                <th className="px-4 py-3 text-left">Campaña</th>
+                {lc.columnas.map(col => (
+                  <th key={col} className="px-3 py-3 text-right">{col}</th>
+                ))}
+                <th className="px-4 py-3 text-right font-bold">Total</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {lc.filas.map(f => (
+                <tr key={f.campaignId}>
+                  <td className="max-w-[16rem] truncate px-4 py-2.5" title={f.campana}>{f.campana}</td>
+                  {lc.columnas.map(col => (
+                    <td key={col} className="px-3 py-2.5 text-right tabular-nums">
+                      {f.celdas[col] === 0 ? <span className="text-gray-300">{RAYA}</span> : fmtNum(f.celdas[col])}
+                    </td>
+                  ))}
+                  <td className="px-4 py-2.5 text-right font-semibold tabular-nums">{fmtNum(f.total)}</td>
+                </tr>
+              ))}
+              <tr className="border-t-2 bg-gray-50 font-bold" style={{ borderColor: BORDE }}>
+                <td className="px-4 py-2.5">Total de leads</td>
+                {lc.columnas.map(col => (
+                  <td key={col} className="px-3 py-2.5 text-right tabular-nums">
+                    {lc.totales[col] === 0 ? <span className="text-gray-300">{RAYA}</span> : fmtNum(lc.totales[col])}
+                  </td>
+                ))}
+                <td className="px-4 py-2.5 text-right tabular-nums">{fmtNum(lc.total)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {lc !== null && lc.total !== t.leads && (
+        // No debería pasar: las dos cifras cuentan el mismo contacto por campaña. Si
+        // pasa, se dice en vez de dejar dos números que no cuadran sin explicación.
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Esta tabla suma {fmtNum(lc.total)} leads y la cifra de arriba dice {fmtNum(t.leads)}.
+          Probablemente entraron leads entre una lectura y otra; recarga la página.
+        </p>
+      )}
+      {lc !== null && lc.total > 0 && (
+        <p className="mt-2 mb-2 text-xs" style={{ color: GRIS }}>
+          La ciudad es la que la persona <strong>declara en el formulario de Meta</strong> como
+          su ciudad de residencia. Se agrupan las formas de escribir la misma ciudad (con o
+          sin tilde, en mayúsculas, con el departamento pegado), pero no los municipios
+          vecinos: Envigado no se suma a Medellín.{' '}
+          {lc.otras.length > 0 && (
+            <>
+              En «Otras ciudades»:{' '}
+              {lc.otras.slice(0, 12).map(o => `${o.ciudad} (${fmtNum(o.leads)})`).join(', ')}
+              {lc.otras.length > 12 ? ` y ${fmtNum(lc.otras.length - 12)} más` : ''}.{' '}
+            </>
+          )}
+          «Sin ciudad» son los leads cuyo formulario no la trae o la dejó en blanco.
+        </p>
+      )}
+
       {/* ── Ventas por ciudad ────────────────────────────────────────────
           Mismo corte que la matriz de Operaciones del tablero directivo, que es
           donde Mauricio ya lee sus ciudades. La agrupación sale de
@@ -407,11 +494,12 @@ export default function TabMarketing({ datos }: { datos: MarketingData }) {
         «Sin seccional» para las que todavía no la tienen.
       </p>
       <p className="mb-2 text-xs" style={{ color: GRIS }}>
-        <strong>Solo las ventas se parten por ciudad.</strong> Leads, inversión, CPL, CAC y
-        conversión se quedan por campaña: la ciudad es la seccional de la DIAN y llega con el
-        RUT, en Documentación, así que un lead recién entrado no tiene ninguna. El gasto de
-        Meta tampoco tiene ciudad: se reporta por campaña. Repartirlos sería inventar una
-        distribución que nadie midió.
+        <strong>Esta ciudad no es la de los leads.</strong> Aquí la ciudad es la seccional de
+        la DIAN, que llega con el RUT en Documentación, y por eso solo la tienen las ventas.
+        La de la tabla de leads es la ciudad de residencia que la persona declara en el
+        formulario de Meta. Son dos ciudades distintas y pueden no coincidir. Inversión, CPL,
+        CAC y conversión se quedan por campaña: el gasto de Meta se reporta por campaña y
+        repartirlo por ciudad sería inventar una distribución que nadie midió.
       </p>
 
       <p className="mt-3 text-xs" style={{ color: GRIS }}>

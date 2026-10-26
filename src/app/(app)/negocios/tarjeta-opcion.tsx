@@ -1,10 +1,14 @@
 'use client'
 
-import { useEffect, useId, useRef, useState, useTransition, type DragEvent, type ReactNode } from 'react'
+import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
+import { useEffect, useId, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import Link from 'next/link'
 import { toast } from 'sonner'
 
 import {
   cambiarPantallazoDeHabitacion,
+  marcarHabitacionQueVa,
   corregirCampoDeFicha,
   corregirHabitacion,
   ponerFotoDelHotel,
@@ -14,14 +18,26 @@ import {
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { comprimirFotoHotel } from '@/lib/cotizaciones/foto-hotel-navegador'
 import HojaCliente from '@/app/(app)/negocios/hoja-cliente'
+import { avisarCambioDeFotos, useFotoDeBiblioteca } from '@/app/(app)/negocios/fotos-tarjeta'
+import { AvisoTarifarioTarjeta } from '@/app/(app)/proveedores/aviso-tarifario'
+import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
+import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
+import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
+import { noEsEsteProveedor } from '@/app/(app)/negocios/tarifas-proveedor-actions'
+import { asociarConHotel } from '@/app/(app)/negocios/por-pasos-actions'
+import { origenVigente } from '@/lib/cotizaciones/origen-tarifa'
+import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
+import type { CategoriaFoto } from '@/lib/fotos/categoria'
+import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
+import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -33,7 +49,10 @@ import { fichaDeOpcion, resumenDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import type { ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { esNombreDeOpcion } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { avisoFechaDeActividad, avisoTasaPendiente } from '@/lib/cotizaciones/actividad-pantallazo'
 import {
+  composicionDeLinea,
+  costoPendienteDelTarifario,
   formatoMonto,
   leerTarifaPax,
   monedaDeTarifa,
@@ -48,10 +67,27 @@ import {
   notaDeReferencia,
   ocupacionConEdades,
   pesos,
+  avisoDePasajeros,
+  preguntaEliminarOpcion,
+  referenciasTexto,
   resumenDeAlojamiento,
+  textoDeHabitacionDeReserva,
 } from '@/lib/cotizaciones/tarjeta-opcion'
+import { registroDeReserva } from '@/lib/cotizaciones/reserva-habitaciones'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
-import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
+import {
+  agregarEspera,
+  quitarEspera,
+  segundosParaElTotal,
+  SIN_ESPERAS,
+  textoAvisoDeshacer,
+  type EsperasDeshacer,
+} from '@/lib/cotizaciones/espera-deshacer'
+import { datosManuales, esManual, montoConMiles } from '@/lib/cotizaciones/ingreso-manual'
+import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
+import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
+import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -66,6 +102,14 @@ import { datosManuales } from '@/lib/cotizaciones/ingreso-manual'
  */
 
 const ESPERA_DESHACER_MS = 6000
+
+/**
+ * La línea de una habitación que no va (de referencia). La misma frase que la actividad sin el
+ * check (brief del 2026-10-05: un solo gesto, y un solo texto, para lo mismo en toda la cotización).
+ */
+export const TEXTO_NO_VA = TEXTO_ACTIVIDAD_NO_VA
+/** Solo desde manejadores y efectos (el clic de «Quitar habitación» y el tic del aviso). */
+const horaActual = () => Date.now()
 
 /** Lo que una persona escribe en la ficha, con el rótulo del prototipo. */
 const CAMPOS_FICHA_HOTEL: readonly { slug: string; label: string }[] = [
@@ -123,8 +167,8 @@ export interface PendienteEnBandeja {
 export default function TarjetaOpcion({
   itemId,
   numero,
-  item,
-  tarifa,
+  item: itemDeLaPagina,
+  tarifa: tarifaDeLaPagina,
   composicionViaje,
   editable,
   abierta,
@@ -146,11 +190,17 @@ export default function TarjetaOpcion({
   onMover,
   mover,
   respaldo,
+  cambiarCosto = null,
   nota,
   bloqueTitulo,
   general = false,
+  fechasViaje = null,
   onGuardarNota,
   onCambio,
+  actividad = null,
+  porPasos = null,
+  autorizador = null,
+  hotelesDelViaje = [],
 }: {
   itemId: string
   numero: number
@@ -185,30 +235,85 @@ export default function TarjetaOpcion({
   mover: ReactNode
   /** Lo que la opción todavía necesita a mano (sin costo confirmado). */
   respaldo: ReactNode
+  /**
+   * El panel de las tarifas del proveedor, con o sin costo confirmado (brief del 2026-10-21, punto
+   * 6: un solo montaje). Antes vivía en `respaldo` y una línea confirmada no lo veía nunca.
+   */
+  cambiarCosto?: ReactNode
+  /**
+   * Las opciones de hotel de la cotización, para «Va con el hotel» de un traslado (reunión del
+   * 2026-10-22, punto 5, `va-con-hotel.ts`). Solo por pasos; vacío, no se ofrece.
+   */
+  hotelesDelViaje?: { id: string; nombre: string }[]
   /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
   nota: ReactNode
   /** «Hotel en Providencia»: el bloque, como lo nombra la hoja del cliente. */
   bloqueTitulo: string
   /** El nivel de detalle del documento: «general» no nombra habitación ni régimen. */
   general?: boolean
+  /** Las fechas del viaje: una actividad fuera de ellas lo avisa (brief del 2026-10-01, punto 5). */
+  fechasViaje?: { inicio: string | null; fin: string | null } | null
   onGuardarNota: (texto: string) => void
   onCambio: () => void
+  /**
+   * Actividades (brief del 2026-10-05, punto 0): si va en la cotización, Incluida u Opcional,
+   * y su día. Vuelos (brief del 2026-10-08): solo el check (`soloVa`). `null` en hotel y
+   * traslado, que se ven como siempre.
+   */
+  actividad?: ActividadDeTarjeta | null
+  /**
+   * La cotización por pasos (interruptor encendido, C4). El estado Incluido · Opcional · No va es
+   * del SERVICIO (lo pinta su tarjeta), así que aquí no va el check; eliminar no pregunta (deja
+   * «Deshacer»); el «⋯» trae «Separar» y «Mover esta opción a…»; y la opción dice en qué tarifas
+   * va. `null` = la tarjeta de siempre.
+   */
+  porPasos?: { enTarifas: string[] | null; menuExtra: (cerrar: () => void) => ReactNode } | null
+  /** Quién autoriza bajo el mínimo (el dueño del workspace, de la configuración): P7. */
+  autorizador?: string | null
 }) {
+  // Lo que el servidor acaba de guardar desde «Corregir datos» se pinta sin esperar el
+  // refresco (COT-2026-0019: la ficha siguió diciendo las fechas viejas después de guardar).
+  // Vale solo mientras la página siga trayendo la tarifa de antes.
+  const [recienGuardada, setRecienGuardada] = useState<{ antes: unknown; ahora: TarifaPax } | null>(null)
+  const vigenteLocal = !!recienGuardada && recienGuardada.antes === itemDeLaPagina.tarifa_pax
+  const item: ItemConLectura = vigenteLocal ? { ...itemDeLaPagina, tarifa_pax: recienGuardada!.ahora } : itemDeLaPagina
+  const tarifa: TarifaPax = vigenteLocal ? recienGuardada!.ahora : tarifaDeLaPagina
   const ranura = ranuraDeGrupo(item.grupo)
   const esHotel = ranura?.slug === 'hotel_detalle'
   const esTraslado = ranura?.slug === 'traslado_detalle'
+  const esActividad = ranura?.slug === 'actividad_detalle'
+  const esVuelo = ranura?.slug === 'vuelo_detalle'
+  // «Otro servicio» (asistencia médica, seguro) sale en el documento como su línea de «Inversión»,
+  // igual que un traslado: también tiene su hoja.
+  const esOtroServicio = ranura?.slug === 'otro_detalle'
   const [hotel] = esHotel ? hotelesDeItems([item]) : [null]
-  const nombre = (esHotel ? hotel?.hotel : null) || item.nombre || `Opción ${numero}`
+  // La pastilla de la aerolínea en la cabecera, la misma del PDF (brief del 2026-10-08).
+  const [vuelo] = esVuelo ? vuelosDeItems([item]) : [null]
+  const nombre = (esHotel ? hotel?.hotel : null) || nombreVisibleDeLinea(item) || `Opción ${numero}`
   const estrellas = esHotel ? hotel?.estrellas ?? null : null
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
   const habitaciones = esHotel ? habitacionesDeTarifa(tarifa) : []
-  const reparto = esHotel && habitaciones.length > 0 ? repartirHabitaciones(habitaciones, grupo) : null
+  const reparto = esHotel && habitaciones.length > 0 ? repartirHabitaciones(habitaciones, grupo, tarifa.correcciones) : null
   const resumenAloj = reparto ? resumenDeAlojamiento(reparto) : null
+  const avisoPax = resumenAloj ? avisoDePasajeros(resumenAloj) : null
+  // Lo que se lee con la tarjeta CERRADA (brief del 2026-10-01, puntos 3 y 5): la actividad
+  // fuera de las fechas del viaje, y el costo que no entró porque falta la tasa de cambio. Un
+  // precio en $0 nunca pasa callado.
+  const avisosCerrada = [
+    avisoFechaDeActividad(ranura?.slug, tarifa, fechasViaje),
+    avisoTasaPendiente(tarifa, composicionDeLinea(tarifa, composicionViaje), ranura?.slug),
+    // Escrita a mano sin costo (2026-10-20): con la tarjeta cerrada también se lee que falta.
+    !confirmada && costoPendienteDelTarifario(tarifa) ? 'Sin costo todavía: elígelo en «Usar tarifa de proveedor».' : null,
+  ].filter((a): a is string => !!a)
+
+  // Qué va y qué no (punto 0). El hook va siempre: en las demás opciones no pinta nada.
+  const act = useActividad(itemId, actividad ?? { estado: 'incluida', dia: null, precioPorPersona: null, era: null }, onCambio)
+  const noVa = !!actividad && act.estado === 'no_va'
 
   const [confirmaBorrar, setConfirmaBorrar] = useState(false)
   const [editandoFicha, setEditandoFicha] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const { ampliar, vista } = useVistaAmpliada()
   const entradaPantallazo = useRef<HTMLInputElement>(null)
 
@@ -218,9 +323,10 @@ export default function TarjetaOpcion({
       <>
         {[hotel?.habitacion, `${resumenAloj.habitaciones} ${resumenAloj.habitaciones === 1 ? 'habitación' : 'habitaciones'}`].filter(Boolean).join(' · ')}
         {' · '}
-        {resumenAloj.falta
-          ? <span className="font-semibold text-[#9A5F0C]">{resumenAloj.falta.verbo.toLowerCase()} {resumenAloj.falta.quien}</span>
+        {avisoPax
+          ? <span className="font-semibold text-[#9A5F0C]">{avisoPax.corto.toLowerCase()}</span>
           : grupo ? `cubre a los ${grupo.adultos + grupo.ninos + grupo.infantes}` : null}
+        {resumenAloj.referencias > 0 && ` · ${referenciasTexto(resumenAloj.referencias)}`}
       </>
     )
     : resumenDeOpcion(item)
@@ -235,7 +341,105 @@ export default function TarjetaOpcion({
   const fotoRef = fotoConfirmada && fotoConfirmada.antes === fotoDeLaPagina ? fotoConfirmada.ahora : fotoDeLaPagina
   const [subiendoFoto, setSubiendoFoto] = useState(false)
 
+  // El perfil del hotel o del tour (2026-10-16): sus fotos son del espacio y entran solas en la
+  // propuesta; la tarjeta las muestra, deja pegar o subir otra y pregunta «¿Es el mismo …?».
+  // El mismo pedido que usa el servidor para la casilla del IVA (`pedidoDeLinea`).
+  // Con la ficha fijada en la línea (`items.proveedor_id`), el aviso de vigencia sale de ella.
+  const proveedorFijado = (item as { proveedor_id?: string | null }).proveedor_id ?? null
+  const pedidoLinea = pedidoDeLinea(item)
+  const pedidoFoto: PedidoFoto | null = pedidoLinea ? { ...pedidoLinea, ...(proveedorFijado ? { proveedorId: proveedorFijado } : {}) } : null
+  const bib = useFotoDeBiblioteca(pedidoFoto)
+  // El espacio tiene biblioteca: toda foto nueva va al perfil (con la casilla de autorización).
+  const conBiblioteca = bib?.disponible === true
+  // Mientras el perfil se lee, la tarjeta muestra lo de antes (sin parpadear a «vacía»).
+  const enTarjeta = conBiblioteca && bib.elemento !== undefined ? fotoDeLaTarjeta(bib.elemento) : null
+  const [perfilAbierto, setPerfilAbierto] = useState(false)
+  const [contestando, setContestando] = useState(false)
+
+  /** Lo que quedó en el perfil: se pinta ya, las demás tarjetas lo releen y la foto vieja de la opción se suelta. */
+  function quedoEnBiblioteca(elemento: ElementoVista | null) {
+    bib?.poner(elemento)
+    avisarCambioDeFotos()
+    if (esHotel && elemento && elemento.fotos.length > 0) soltarFotoVieja()
+  }
+
+  function soltarFotoVieja() {
+    if (!fotoRef) return
+    void quitarFotoDelHotel(itemId).then(r => {
+      if (r.success) { setFotoConfirmada({ antes: fotoDeLaPagina, ahora: null }); onCambio() }
+    }).catch(() => {})
+  }
+
+  // «No es este»: la ficha que se asoció sola por el nombre no es la de esta línea. No se ofrece
+  // si el costo salió de la tarifa de esa ficha (eso se cambia con «Cambiar el costo»).
+  const costoDeEsaFicha = !!proveedorFijado && origenVigente(tarifa.tarifaExtraida, tarifa.casillas?.grupo_completo) && tarifa.tarifaExtraida?.proveedor_id === proveedorFijado
+  const [deshaciendo, setDeshaciendo] = useState(false)
+  function noEsEste() {
+    if (deshaciendo) return
+    setDeshaciendo(true)
+    void noEsEsteProveedor(itemId)
+      .then(r => {
+        if (!r.ok) { toast.error(r.error); return }
+        toast.success('Listo: esa ficha ya no es la de esta línea.')
+        avisarCambioDeFotos()
+        onCambio()
+      })
+      .catch(() => toast.error('No se pudo guardar. Vuelve a intentarlo.'))
+      .finally(() => setDeshaciendo(false))
+  }
+
+  function contestar(mismo: boolean) {
+    if (!pedidoFoto || !bib?.duda || contestando) return
+    setContestando(true)
+    void contestarMismoPerfil(pedidoFoto, bib.duda.clave, mismo)
+      .then(r => {
+        if (!r.ok) { toast.error(r.error); return }
+        quedoEnBiblioteca(r.elemento)
+      })
+      .catch(() => toast.error('No se pudo guardar. Vuelve a intentarlo.'))
+      .finally(() => setContestando(false))
+  }
+
+  // Con perfil, la foto subida pide antes «Tengo autorización para usar esta foto» (Emilio, 2026-10-16).
+  const [fotoPorAutorizar, setFotoPorAutorizar] = useState<File | null>(null)
+
   function ponerFoto(archivo: File) {
+    if (subiendoFoto) return
+    if (conBiblioteca) { setFotoPorAutorizar(archivo); return }
+    if (esHotel) enviarFotoDeLaOpcion(archivo)
+  }
+
+  /** Con perfil: la foto va al perfil del hotel o del tour (se agrega si cabe). */
+  function enviarAlPerfil(archivo: File, permiso: PedidoAutorizacion, categoria: CategoriaFoto | null) {
+    if (subiendoFoto || !pedidoFoto) return
+    setSubiendoFoto(true)
+    let aLaOpcion = false
+    void (async () => {
+      try {
+        const foto = await comprimirFotoHotel(archivo)
+        if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
+        const r = await subirFotoABiblioteca(pedidoFoto, foto.dataUrl, null, categoria, permiso)
+        // Una línea escrita a mano sin ficha no crea una (brief del 2026-10-21, punto 5): la foto
+        // del hotel queda en la opción.
+        if (!r.ok && r.codigo === 'A_MANO' && esHotel) {
+          setFotoPorAutorizar(null)
+          aLaOpcion = true
+          return
+        }
+        if (!r.ok) { toast.error(r.error); return }
+        setFotoPorAutorizar(null)
+        quedoEnBiblioteca(r.elemento)
+      } catch {
+        toast.error('No se pudo guardar la foto. Vuelve a intentarlo.')
+      } finally {
+        setSubiendoFoto(false)
+        if (aLaOpcion) enviarFotoDeLaOpcion(archivo)
+      }
+    })()
+  }
+
+  /** Sin perfil (otra plantilla): la foto del hotel queda en la opción, como antes. */
+  function enviarFotoDeLaOpcion(archivo: File) {
     if (subiendoFoto) return
     setSubiendoFoto(true)
     void (async () => {
@@ -244,6 +448,7 @@ export default function TarjetaOpcion({
         if (!foto) { toast.error('Ese archivo no es una foto. Usa un JPG o un PNG.'); return }
         const r = await ponerFotoDelHotel(itemId, foto.dataUrl, foto.proporcion)
         if (!r.success) { toast.error(r.error ?? 'No se pudo guardar la foto. Vuelve a intentarlo.'); return }
+        if (r.fotoBiblioteca !== undefined) quedoEnBiblioteca(r.fotoBiblioteca)
         setFotoConfirmada({ antes: fotoDeLaPagina, ahora: r.tarifa?.fotoHotel?.ref ?? null })
         onCambio()
       } catch {
@@ -281,9 +486,19 @@ export default function TarjetaOpcion({
     })
   }
 
-  const menuOpcion = (cerrar: () => void) => confirmaBorrar ? (
+  const menuOpcion = (cerrar: () => void) => porPasos ? (
+    <>
+      <ItemMenu onClick={() => { cerrar(); setEditandoFicha(true); if (!abierta) onAlternar() }}>Corregir datos</ItemMenu>
+      {habitaciones.length <= 1 && (
+        <ItemMenu onClick={() => { cerrar(); entradaPantallazo.current?.click() }}>Cambiar pantallazo</ItemMenu>
+      )}
+      {porPasos.menuExtra(cerrar)}
+      <SeparadorMenu />
+      <ItemMenu peligro onClick={() => { cerrar(); onEliminar(nombre) }}>Eliminar opción</ItemMenu>
+    </>
+  ) : confirmaBorrar ? (
     <span className="flex flex-col gap-2 px-2.5 py-2 text-[13px]" data-confirma-borrar>
-      <span>¿Eliminas {nombre} de este bloque? Sus habitaciones vuelven a la bandeja.</span>
+      <span>{preguntaEliminarOpcion(nombre, { esHotel, tieneLectura: !!tarifa.casillas?.grupo_completo, manual: esManual(tarifa.casillas?.grupo_completo) })}</span>
       <span className="flex gap-2">
         <button
           type="button"
@@ -309,11 +524,15 @@ export default function TarjetaOpcion({
 
   return (
     <div
-      className={`rounded-[10px] border bg-white text-sm text-[#191713] ${abierta ? 'border-[#CFCAC0]' : 'border-[#E2DED5]'}`}
+      className={`rounded-[10px] border text-sm ${noVa ? 'bg-[#F8F7F3] text-[#6E6A62]' : 'bg-white text-[#191713]'} ${abierta ? 'border-[#CFCAC0]' : 'border-[#E2DED5]'}`}
       data-tarjeta-opcion={itemId}
       data-linea-id={itemId}
+      {...(actividad ? { 'data-actividad-estado': act.estado } : {})}
     >
       <div className="flex items-center gap-1.5 py-2.5 pl-3 pr-2">
+        {actividad && !porPasos && (
+          <CheckVa va={!noVa} editable={editable} ocupado={act.ocupado} onCambio={va => act.marcar({ va })} />
+        )}
         <button
           type="button"
           onClick={onAlternar}
@@ -324,8 +543,13 @@ export default function TarjetaOpcion({
           <span className="min-w-0">
             <span className="block text-xs font-semibold text-[#6E6A62]">Opción {numero}</span>
             <span className="flex flex-wrap items-center gap-1.5 text-base font-bold">
+              {vuelo && <PastillaAerolinea aerolinea={vuelo.aerolinea} numeroVuelo={vuelo.numeroVuelo} />}
               {nombre}
               {estrellas ? <span className="text-xs tracking-[1px] text-[#C98A00]" aria-label={`${estrellas} estrellas`}>{'★'.repeat(estrellas)}</span> : null}
+              {/* C5 · lo escrito a mano lleva su marca en la forma por pasos (Noor: «✎ a mano»). */}
+              {porPasos && esManual(tarifa.casillas?.grupo_completo ?? tarifa.habitaciones?.[0]?.lectura ?? null) && (
+                <span className="rounded-full bg-[#F1EEE7] px-2 py-0.5 text-[11px] font-semibold text-[#6E6A62]" title="Lo escribiste a mano" data-marca-a-mano>✎ a mano</span>
+              )}
             </span>
             {sinPantallazo ? (
               <span className="block text-[13px] text-[#6E6A62] max-sm:text-xs">pega el pantallazo</span>
@@ -333,6 +557,15 @@ export default function TarjetaOpcion({
               <span className="block text-[13px] text-[#6E6A62] max-sm:text-xs">{abierta ? subAbierta : subCerrada}</span>
             )}
             <span className="mt-0.5 hidden text-sm font-bold tabular-nums max-sm:block">{pesos(precioOpcion)}</span>
+            {porPasos?.enTarifas && (
+              <span className="mt-1 flex flex-wrap gap-1" data-en-tarifas>
+                {porPasos.enTarifas.length > 0
+                  ? porPasos.enTarifas.map(t => (
+                    <span key={t} className={`rounded-full border px-1.5 text-[10.5px] font-bold ${t === 'Recomendada' ? 'border-[#0E5C43] bg-[#EAF1EE] text-[#0E5C43]' : 'border-[#CFCAC0] text-[#6E6A62]'}`}>{t}</span>
+                  ))
+                  : <span className="rounded-full border border-[#CFCAC0] px-1.5 text-[10.5px] font-bold text-[#6E6A62]">En ninguna tarifa</span>}
+              </span>
+            )}
           </span>
         </button>
         {pendiente && (
@@ -344,8 +577,10 @@ export default function TarjetaOpcion({
           </AlertaDecision>
         )}
         <span className="shrink-0 pr-0.5 text-right max-sm:hidden">
-          <small className="block text-[11px] text-[#6E6A62]">Precio</small>
-          <b className="text-[15px] tabular-nums">{pesos(precioOpcion)}</b>
+          <small className="block text-[11px] text-[#6E6A62]">
+            {actividad && act.estado === 'opcional' ? 'Opcional · no suma' : 'Precio'}
+          </small>
+          <b className={`text-[15px] tabular-nums ${noVa ? 'font-semibold text-[#6E6A62] line-through' : ''}`}>{pesos(precioOpcion)}</b>
         </span>
         {editable && <MenuAcciones contenido={menuOpcion} />}
         <input
@@ -361,6 +596,43 @@ export default function TarjetaOpcion({
         />
       </div>
 
+      {actividad?.soloVa && noVa && !porPasos && (
+        <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-vuelo-control>
+          <p className="m-0 text-xs font-semibold text-[#6E6A62]" data-vuelo-no-va>{TEXTO_VUELO_NO_VA}</p>
+        </div>
+      )}
+      {actividad && !actividad.soloVa && !(porPasos && act.estado !== 'incluida') && (
+        <div className="-mt-1 pb-2.5 pl-[50px] pr-3" data-actividad-control>
+          <ModoYDia
+            sinModo={!!porPasos}
+            estado={act.estado}
+            dia={act.dia}
+            precioPorPersona={actividad.precioPorPersona}
+            fechasViaje={fechasViaje}
+            editable={editable}
+            ocupado={act.ocupado}
+            onModo={modo => act.marcar({ modo })}
+            onDia={act.ponerDia}
+          />
+        </div>
+      )}
+
+      {avisosCerrada.length > 0 && (
+        <div className="-mt-1 flex flex-col gap-1 pb-2.5 pl-[42px] pr-3" data-avisos-opcion>
+          {avisosCerrada.map(a => (
+            <div key={a} className="flex items-start gap-[5px] text-xs font-semibold text-[#9A5F0C]" data-aviso-opcion>
+              <svg className="mt-0.5 shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M12 3 2 21h20L12 3Z" /><path d="M12 10v4M12 17h.01" /></svg>
+              <span>{a}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* La vigencia del tarifario del proveedor (2026-10-18): informativa, no frena cotizar. */}
+      {conBiblioteca && bib.proveedor && !noVa && (
+        <AvisoTarifarioTarjeta proveedor={bib.proveedor} fechasViaje={fechasViaje} />
+      )}
+
       {mover}
 
       {abierta && (
@@ -371,7 +643,11 @@ export default function TarjetaOpcion({
               tarifa={tarifa}
               esHotel={esHotel}
               grupoItem={item.grupo}
-              onListo={() => { setEditandoFicha(false); onCambio() }}
+              onListo={guardada => {
+                if (guardada) setRecienGuardada({ antes: itemDeLaPagina.tarifa_pax, ahora: guardada })
+                setEditandoFicha(false)
+                onCambio()
+              }}
               onCancelar={() => setEditandoFicha(false)}
             />
           ) : (
@@ -385,6 +661,7 @@ export default function TarjetaOpcion({
               resumen={resumenAloj}
               editable={editable}
               ampliar={ampliar}
+              onGuardada={guardada => setRecienGuardada({ antes: itemDeLaPagina.tarifa_pax, ahora: guardada })}
               onCambio={onCambio}
             />
           )}
@@ -405,15 +682,34 @@ export default function TarjetaOpcion({
             margenCotizacion={margenCotizacion}
             moneda={monedaDeTarifa(tarifa)}
             onCambio={onCambio}
+            autorizador={autorizador}
+            apilable={porPasos !== null}
+            tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
+            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
           />
 
+          {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
+              «Usar tarifa de proveedor»; con él, «Cambiar el costo». */}
+          {editable && cambiarCosto}
           {!confirmada && respaldo}
 
-          {/* El traslado también tiene su hoja: la línea de «Inversión» del documento. Su nota se
-              sigue escribiendo aparte, encima. El vuelo NO: al cliente le llega sobre todo como
-              su fila de la tabla «Vuelos», que esta hoja no pinta. */}
+          {/* Un traslado va con UNA opción de hotel o sirve para todas (reunión del 2026-10-22). */}
+          {esTraslado && porPasos !== null && hotelesDelViaje.length > 1 && (
+            <VaConHotel
+              itemId={itemId}
+              editable={editable}
+              hoteles={hotelesDelViaje}
+              actual={tarifa.vaConHotel ?? null}
+              onCambio={onCambio}
+            />
+          )}
+
+          {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
+              hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
+              «Vuelos». Su nota se sigue escribiendo aparte, encima. */}
           {!esHotel && nota}
-          {(esHotel || esTraslado) && <HojaCliente
+          {/* Lo que no va no se le muestra al cliente: tampoco aquí (brief del 2026-10-08). */}
+          {(esHotel || esTraslado || esActividad || esVuelo || esOtroServicio) && !noVa && <HojaCliente
             item={item}
             numero={numero}
             bloqueTitulo={bloqueTitulo}
@@ -426,7 +722,56 @@ export default function TarjetaOpcion({
             editable={editable}
             onGuardarNota={onGuardarNota}
             {...(esHotel ? { fotoRef, subiendoFoto, onPonerFoto: ponerFoto, onQuitarFoto: quitarFoto } : {})}
+            {...(esActividad && conBiblioteca ? { subiendoFoto, onPonerFoto: ponerFoto } : {})}
+            biblioteca={enTarjeta && bib && pedidoFoto && (esHotel || esActividad) ? {
+              tipo: esHotel ? 'hotel' : 'actividad',
+              foto: enTarjeta.foto ? { url: enTarjeta.foto.url } : null,
+              mas: enTarjeta.mas,
+              admiteOtra: enTarjeta.admiteOtra,
+              duda: bib.duda,
+              contestando,
+              onContestar: contestar,
+              onVerFotos: () => setPerfilAbierto(true),
+            } : null}
           />}
+          {/* De qué ficha son las fotos (brief del 2026-10-21, punto 5): se asoció sola por el nombre,
+              y «No es este» lo deshace. Si el nombre se parece a varias, no se asocia: «Por clasificar». */}
+          {conBiblioteca && bib?.fotosDe && (
+            <p className="m-0 flex flex-wrap items-center gap-x-2 px-3 pb-1 text-[11px] text-[#6E6A62]" data-fotos-de>
+              <span>Fotos de: <b className="font-medium text-[#191713]">{bib.fotosDe.nombre}</b>{bib.fotosDe.ciudad ? ` · ${bib.fotosDe.ciudad}` : ''}</span>
+              {editable && bib.fotosDe.deshacer && !costoDeEsaFicha && (
+                <button type="button" onClick={noEsEste} disabled={deshaciendo} className="underline hover:text-[#191713] disabled:opacity-50" data-no-es-este>
+                  No es este
+                </button>
+              )}
+            </p>
+          )}
+          {conBiblioteca && !bib?.fotosDe && (bib?.porClasificar ?? 0) > 0 && (
+            <p className="m-0 px-3 pb-1 text-[11px] text-[#9A5F0C]" data-por-clasificar-tarjeta>
+              Sin fotos: el nombre se parece a {bib!.porClasificar} proveedores. Elige cuál es en{' '}
+              <Link href="/proveedores?por=clasificar" className="underline">Proveedores, «Por clasificar»</Link>.
+            </p>
+          )}
+          {conBiblioteca && pedidoFoto && (
+            <DialogoAutorizacionFoto
+              archivo={fotoPorAutorizar}
+              guardando={subiendoFoto}
+              conCategoria={esHotel}
+              nombre={bib.elemento?.nombre ?? pedidoFoto.nombre}
+              onCancelar={() => setFotoPorAutorizar(null)}
+              onConfirmar={(permiso, categoria) => fotoPorAutorizar && enviarAlPerfil(fotoPorAutorizar, permiso, categoria)}
+            />
+          )}
+          {conBiblioteca && pedidoFoto && perfilAbierto && (
+            <PerfilFotos
+              elemento={bib.elemento ?? null}
+              pedido={pedidoFoto}
+              abierto
+              editable={editable && bib.editable}
+              onCerrar={() => setPerfilAbierto(false)}
+              onCambio={quedoEnBiblioteca}
+            />
+          )}
         </div>
       )}
       {isPending && <span className="sr-only" role="status">Guardando…</span>}
@@ -495,7 +840,8 @@ function FormFicha({
   tarifa: TarifaPax
   esHotel: boolean
   grupoItem: string | null
-  onListo: () => void
+  /** Con la tarifa que quedó guardada, para pintarla sin esperar el refresco. */
+  onListo: (guardada: TarifaPax | null) => void
   onCancelar: () => void
 }) {
   const ranura = ranuraDeGrupo(grupoItem)
@@ -507,20 +853,25 @@ function FormFicha({
     .filter(c => ranura && esCorregible(ranura, c.slug))
   const [valores, setValores] = useState<Record<string, string>>(() =>
     Object.fromEntries(campos.map(c => [c.slug, vigentes[c.slug] ?? ''])))
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function guardar(e: React.FormEvent) {
     e.preventDefault()
     const cambios = campos.filter(c => (valores[c.slug] ?? '').trim() !== (vigentes[c.slug] ?? '').trim())
     if (cambios.length === 0) { onCancelar(); return }
     startTransition(async () => {
+      let guardada: TarifaPax | null = null
+      let pendiente: string | null = null
       for (const c of cambios) {
         const v = (valores[c.slug] ?? '').trim()
         const r = await corregirCampoDeFicha(itemId, c.slug, v === '' ? null : v)
         if (!r.success) { toast.error(`${c.label}: ${r.error ?? 'no se pudo guardar'}`); return }
+        guardada = r.tarifa ?? guardada
+        pendiente = r.pendiente ?? pendiente
       }
       toast('Guardado. La vista del cliente ya muestra el cambio.')
-      onListo()
+      if (pendiente) toast.warning(pendiente)
+      onListo(guardada)
     })
   }
 
@@ -548,6 +899,7 @@ function Alojamiento({
   resumen,
   editable,
   ampliar,
+  onGuardada,
   onCambio,
 }: {
   itemId: string
@@ -555,8 +907,27 @@ function Alojamiento({
   resumen: NonNullable<ReturnType<typeof resumenDeAlojamiento>>
   editable: boolean
   ampliar: (src: string, caption: string) => void
+  /** Lo que el servidor acaba de guardar, para pintarlo sin esperar el refresco. */
+  onGuardada: (t: TarifaPax) => void
   onCambio: () => void
 }) {
+  // «Va» / «No va» (ajuste de Mauricio, 2026-10-01): la operadora elige qué habitaciones van.
+  // Mientras se guarda, ninguna fila se puede tocar otra vez.
+  const [eligiendo, startEleccion] = useTransitionTolerante()
+  function elegir(h: HabitacionRepartida, va: boolean) {
+    if (eligiendo || (h.rol === 'habitacion') === va) return
+    startEleccion(async () => {
+      const r = await marcarHabitacionQueVa(itemId, h.id, va)
+      if (!r.success) { toast.error(r.error ?? 'No se pudo guardar.'); return }
+      if (r.tarifa) onGuardada(r.tarifa)
+      if (r.pendiente) toast.warning(r.pendiente)
+      onCambio()
+    })
+  }
+  const avisoPax = avisoDePasajeros(resumen)
+  // Elegir tiene sentido con más de una captura: la única siempre va.
+  const puedeElegir = editable && reparto.habitaciones.length > 1
+
   // «Quitar habitación» se ve en el acto y se hace al vencer el «Deshacer».
   const [quitadas, setQuitadas] = useState<ReadonlySet<string>>(() => new Set())
   const enEspera = useRef(new Map<string, { reloj: ReturnType<typeof setTimeout>; ejecutar: () => void }>())
@@ -567,6 +938,16 @@ function Alojamiento({
       pendientes.clear()
     }
   }, [])
+  // Mientras corre el «Deshacer» el total todavía no cambió: el aviso lo dice, con la cuenta
+  // (`espera-deshacer.ts`). Se va al deshacer, o cuando la quita ya se escribió.
+  const [esperas, setEsperas] = useState<EsperasDeshacer>(SIN_ESPERAS)
+  const [ahora, setAhora] = useState(0)
+  useEffect(() => {
+    if (esperas.size === 0) return
+    const tic = setInterval(() => setAhora(horaActual()), 500)
+    return () => clearInterval(tic)
+  }, [esperas])
+  const segundosTotal = segundosParaElTotal(esperas, ahora)
 
   const porTipo = costoPorTipoDeHabitaciones(reparto)
   const visibles = reparto.habitaciones.filter(h => !quitadas.has(h.id))
@@ -574,10 +955,15 @@ function Alojamiento({
   function quitar(h: HabitacionRepartida, indice: number) {
     if (enEspera.current.has(h.id)) return
     const mostrar = () => setQuitadas(prev => { const n = new Set(prev); n.delete(h.id); return n })
+    const sinAviso = () => setEsperas(prev => quitarEspera(prev, h.id))
     setQuitadas(prev => new Set([...prev, h.id]))
+    const empieza = horaActual()
+    setAhora(empieza)
+    setEsperas(prev => agregarEspera(prev, h.id, empieza + ESPERA_DESHACER_MS))
     const ejecutar = () => {
       enEspera.current.delete(h.id)
       void quitarHabitacionDeOpcion(itemId, h.id).then(r => {
+        sinAviso()
         if (!r.success) { toast.error(r.error ?? 'No se pudo quitar la habitación.'); mostrar(); return }
         if (r.pendiente) toast.warning(r.pendiente)
         onCambio()
@@ -587,7 +973,7 @@ function Alojamiento({
     enEspera.current.set(h.id, { reloj, ejecutar })
     toast(`Quitaste la habitación ${h.numero ?? indice + 1}.`, {
       duration: ESPERA_DESHACER_MS,
-      action: { label: 'Deshacer', onClick: () => { clearTimeout(reloj); enEspera.current.delete(h.id); mostrar() } },
+      action: { label: 'Deshacer', onClick: () => { clearTimeout(reloj); enEspera.current.delete(h.id); mostrar(); sinAviso() } },
     })
   }
 
@@ -614,48 +1000,88 @@ function Alojamiento({
               key={h.id}
               itemId={itemId}
               h={h}
+              posicion={reparto.habitaciones.indexOf(h) + 1}
               notaReferencia={notaDeReferencia(h.sirveParaRestar, porTipo, h.rol === 'habitacion')}
               editable={editable}
               ampliar={ampliar}
+              eleccion={puedeElegir ? { ocupado: eligiendo, onElegir: va => elegir(h, va) } : null}
               onQuitar={() => quitar(h, ix)}
               onCambio={onCambio}
             />
           ))}
         </div>
       )}
-      {resumen.falta && editable && (
-        <PideHabitacion itemId={itemId} texto={`${resumen.falta.verbo} ${resumen.falta.quien}: pega su habitación.`} onCambio={onCambio} />
+      {eligiendo && <p className="m-0 text-xs text-[#6E6A62]" role="status">Guardando la elección…</p>}
+      <AvisoDeshacerTotal segundos={segundosTotal} />
+      {resumen.falta && editable && avisoPax && (
+        <PideHabitacion itemId={itemId} texto={avisoPax.frase} onCambio={onCambio} />
+      )}
+      {!resumen.falta && avisoPax && (
+        <p className="m-0 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] px-3 py-2 text-[13px] font-semibold text-[#9A5F0C]" data-sobran>
+          {avisoPax.frase}
+        </p>
       )}
     </section>
+  )
+}
+
+/**
+ * El aviso de la ventana del «Deshacer» de «Quitar habitación»: el total cambia al vencer.
+ * `segundos: null` = nada espera y no se pinta nada.
+ */
+export function AvisoDeshacerTotal({ segundos }: { segundos: number | null }) {
+  if (segundos === null) return null
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="m-0 flex items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] px-3 py-2 text-xs font-semibold text-[#9A5F0C]"
+      data-aviso-deshacer
+    >
+      {textoAvisoDeshacer(segundos)}
+    </p>
   )
 }
 
 function FilaHabitacionTarjeta({
   itemId,
   h,
+  posicion,
   notaReferencia,
   editable,
   ampliar,
+  eleccion,
   onQuitar,
   onCambio,
 }: {
   itemId: string
   h: HabitacionRepartida
+  /**
+   * Su lugar en la opción, el de siempre (brief del 2026-10-05, punto 16): marcar que una no va no
+   * renumera las demás ni la mueve. El número del documento (`h.numero`) cuenta solo las que van.
+   */
+  posicion: number
   notaReferencia: string | null
   editable: boolean
   ampliar: (src: string, caption: string) => void
+  /** «Va» / «No va». `null` = no se elige (sin editar, o la opción tiene una sola captura). */
+  eleccion: { ocupado: boolean; onElegir: (va: boolean) => void } | null
   onQuitar: () => void
   onCambio: () => void
 }) {
   const [editando, setEditando] = useState(false)
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const entrada = useRef<HTMLInputElement>(null)
   const textoOcupacion = h.lectura.campos.find(x => /ocupaci/i.test(x.label))?.valor ?? null
   const ocupacion = h.ocupacion ? ocupacionConEdades(h.ocupacion, textoOcupacion) : null
   const notaEdad = notaDeEdad(textoOcupacion)
-  // La captura que el reparto usa solo para restar no es una habitación del grupo: no lleva
-  // título propio, la explica su nota («ONE la usa para sacar el precio…»).
-  const titulo = h.numero ? `Habitación ${h.numero}` : null
+  // La que no va (de referencia) se nombra así y dice que no suma (brief del 2026-10-01,
+  // punto 2): el resumen decía «1 habitación» y no se entendía que había otra que no contaba.
+  const va = h.rol === 'habitacion'
+  // Un pantallazo con VARIAS habitaciones y un total (decisión del 2026-10-14): se nombra con su
+  // registro («3 habitaciones dobles») y lista cada una. El precio es el total del pantallazo.
+  const registro = registroDeReserva(h.lectura)
+  const titulo = registro.length > 0 ? h.tipoHabitacion ?? `${registro.length} habitaciones` : `Habitación ${posicion}`
   const precio = h.moneda === 'COP' ? pesos(h.total) : formatoMonto(h.total, h.moneda)
   const src = urlDePantallazo(h.lectura.imagenRef)
   const manual = datosManuales(h.lectura)
@@ -681,9 +1107,19 @@ function FilaHabitacionTarjeta({
         <Miniatura src={src} caption={[titulo, ocupacion].filter(Boolean).join(' · ') || 'Pantallazo'} ancho="w-[120px] max-sm:w-[84px]" onAmpliar={ampliar} />
       )}
       <div className="min-w-0">
-        {titulo && <b className="block font-semibold">{titulo}</b>}
+        <span className="flex items-center gap-1">
+          {/* El mismo check de las actividades reemplaza «Va / No va» (brief del 2026-10-05). */}
+          {eleccion && <CheckVa va={va} editable ocupado={eleccion.ocupado} onCambio={v => eleccion.onElegir(v)} />}
+          <b className={`block font-semibold ${va ? '' : 'text-[#6E6A62]'}`}>{titulo}</b>
+        </span>
         {ocupacion && <span className="text-[13px] text-[#6E6A62]">{ocupacion}</span>}
+        {registro.length > 0 && (
+          <ul className="m-0 mt-0.5 list-none p-0 text-xs text-[#6E6A62]" data-registro-habitaciones>
+            {registro.map((r, i) => <li key={`${r.nombre}-${i}`}>{textoDeHabitacionDeReserva(r)}</li>)}
+          </ul>
+        )}
         {manual?.fuente && <span className="block text-xs text-[#6E6A62]">{manual.fuente}</span>}
+        {!va && <span className="block text-xs text-[#6E6A62]" data-no-suma>{TEXTO_NO_VA}</span>}
         {notaReferencia && (
           <div className="mt-[3px] flex items-start gap-[5px] text-xs text-[#6E6A62]">
             <svg className="mt-0.5 shrink-0 text-[#0E5C43]" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M8 12h8" /></svg>
@@ -696,8 +1132,14 @@ function FilaHabitacionTarjeta({
             <span>{notaEdad}</span>
           </div>
         )}
+        {h.avisoEstadia && (
+          <div className="mt-[3px] flex items-start gap-[5px] text-xs font-semibold text-[#9A5F0C]" data-aviso-estadia>
+            <svg className="mt-0.5 shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden><path d="M12 3 2 21h20L12 3Z" /><path d="M12 10v4M12 17h.01" /></svg>
+            <span>{h.avisoEstadia}</span>
+          </div>
+        )}
       </div>
-      <span className="font-semibold tabular-nums max-sm:col-start-2 max-sm:row-start-2 max-sm:-mt-1.5 max-sm:justify-self-start">{precio}</span>
+      <span className={`tabular-nums max-sm:col-start-2 max-sm:row-start-2 max-sm:-mt-1.5 max-sm:justify-self-start ${va ? 'font-semibold' : 'text-[#6E6A62] line-through'}`}>{precio}</span>
       {editable ? (
         <span className="max-sm:col-start-3 max-sm:row-start-1">
           <MenuAcciones
@@ -741,15 +1183,15 @@ function FormHabitacion({ itemId, h, onListo, onCancelar }: { itemId: string; h:
     adultos: String(h.ocupacion?.adultos ?? ''),
     ninos: String(h.ocupacion?.ninos ?? 0),
     infantes: String(h.ocupacion?.infantes ?? 0),
-    total: String(Math.round(h.total)),
+    total: montoConMiles(String(Math.round(h.total))),
   })
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   function guardar(e: React.FormEvent) {
     e.preventDefault()
     const entero = (s: string) => Math.max(0, Math.trunc(Number(s) || 0))
     const total = parseMontoCop(v.total)
-    if (total === null) { toast.error('Escribe el precio sin puntos ni símbolo.'); return }
+    if (total === null) { toast.error('Escribe el precio de la habitación.'); return }
     startTransition(async () => {
       const r = await corregirHabitacion(itemId, h.id, { adultos: entero(v.adultos), ninos: entero(v.ninos), infantes: entero(v.infantes), total })
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
@@ -761,7 +1203,7 @@ function FormHabitacion({ itemId, h, onListo, onCancelar }: { itemId: string; h:
   const campo = (k: keyof typeof v, label: string) => (
     <label className="flex flex-col gap-0.5 text-xs text-[#6E6A62]">
       <span>{label}</span>
-      <input className={`${INPUT} tabular-nums`} inputMode="numeric" value={v[k]} onChange={e => setV(p => ({ ...p, [k]: e.target.value }))} />
+      <input className={`${INPUT} tabular-nums`} inputMode="numeric" value={v[k]} onChange={e => setV(p => ({ ...p, [k]: k === 'total' ? montoConMiles(e.target.value) : e.target.value }))} />
     </label>
   )
   return (
@@ -797,7 +1239,7 @@ function PideHabitacion({ itemId, texto, onCambio }: { itemId: string; texto: st
         if (r.pendiente) toast.warning(r.pendiente)
         onCambio()
       } catch {
-        setRechazo('No se pudo leer el pantallazo. Vuelve a pegarlo.')
+        setRechazo(MENSAJE_LECTURA_INTERRUMPIDA)
       } finally {
         setLeyendo(false)
       }
@@ -855,5 +1297,44 @@ function PideHabitacion({ itemId, texto, onCambio }: { itemId: string; texto: st
       </label>
       {rechazo && <p className="m-0 text-xs font-medium text-[#B3382C]">{rechazo}</p>}
     </div>
+  )
+}
+
+/**
+ * «Va con el hotel»: el traslado cuenta solo en las tarifas que llevan esa opción de hotel; en
+ * «Sirve para cualquier hotel» es general (una tarifa por zona, para las tres opciones).
+ */
+function VaConHotel({ itemId, editable, hoteles, actual, onCambio }: {
+  itemId: string
+  editable: boolean
+  hoteles: { id: string; nombre: string }[]
+  actual: string | null
+  onCambio: () => void
+}) {
+  const [isPending, startTransition] = useTransitionTolerante()
+  const vigente = actual && hoteles.some(h => h.id === actual) ? actual : ''
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-[13px]" data-va-con-hotel={vigente || 'general'}>
+      <span className="font-semibold">Va con</span>
+      <select
+        aria-label="Con qué hotel va este traslado"
+        value={vigente}
+        disabled={!editable || isPending}
+        onChange={e => {
+          const v = e.target.value || null
+          startTransition(async () => {
+            const r = await asociarConHotel(itemId, v)
+            if (!r.success) { toast.error(r.error); return }
+            toast.success(v ? 'El traslado va con ese hotel en las tarifas que lo llevan.' : 'El traslado sirve para cualquier hotel.')
+            onCambio()
+          })
+        }}
+        className="max-w-full rounded-lg border border-[#CFCAC0] bg-white px-2 py-1 text-[13px]"
+      >
+        <option value="">Cualquier hotel (general)</option>
+        {hoteles.map(h => <option key={h.id} value={h.id}>{h.nombre}</option>)}
+      </select>
+      <span className="text-xs text-[#6E6A62]">Cada tarifa toma el traslado de su hotel.</span>
+    </label>
   )
 }

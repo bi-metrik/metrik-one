@@ -88,6 +88,30 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     declara: 'literal',
     razon: 'la fuente única. Su docstring escribe el plazo y su fundamento legal.',
   },
+  'src/lib/valida-registro/condiciones.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'las Condiciones de la prueba gratis de Valida v1.0 (Emilio; aprobadas por Mauricio el 2026-10-11), ' +
+      'numeral 6.5: la bitácora de consultas, también la de la prueba, se conserva 10 años (Ley 962 de 2005, ' +
+      'art. 28). Es texto legal con huella SHA-256: va literal y no se interpola.',
+  },
+  'src/lib/valida-registro/terminos-plan.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'los Términos de Uso de VALIDA v2.0, variante autoservicio (Emilio; {N} = 10 por decisión de Mauricio ' +
+      'del 2026-10-14), cláusula 9.6: la bitácora de consultas se conserva diez (10) años (Ley 962 de 2005, ' +
+      'art. 28). Texto legal con huella SHA-256: va literal y no se interpola.',
+    salvo: [
+      {
+        // La 7.4 es la duración de la CONFIDENCIALIDAD después de terminar, no un plazo de conservación
+        // de datos personales.
+        frase: 'La obligación rige durante la vigencia y cinco (5) años después de su terminación',
+        razon: 'confidencialidad (cláusula 7.4), no conservación de datos',
+      },
+    ],
+  },
   'src/lib/compliance/vinculacion-publica.ts': {
     tipo: 'plazo',
     declara: 'derivado',
@@ -145,6 +169,59 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'los plazos del bot contra los que `purga-sql.test.ts` ejecuta la migración de la purga; ' +
       'los años de la aceptación salen de la constante canónica.',
   },
+  'supabase/migrations/20261005170000_cardumen_modo_objetos.sql': {
+    tipo: 'no-es-plazo',
+    razon:
+      'las cuatro cifras son los rangos de ANTIGÜEDAD en el trabajo que el instrumento de ' +
+      'Cardumen ofrece como opciones («1 a 3 años», «3 a 7 años»): es el enunciado literal ' +
+      'de una pregunta del estudio. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/wa-entendimiento-reglas.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'la EDAD de corte de un infante en la solicitud de viaje («bebés menores de 2 años»): con ' +
+      'ella el bot deduce infantes = 0. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/bandeja/reglamento-anexo-a.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el glosario del reglamento de prueba del núcleo conversacional define infante como «menor de 2 años»: ' +
+      'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/conjuntos.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el arnés re-actúa una pregunta real del bot («¿Viajan bebés (menores de 2 años)?»): una EDAD de pasajero. ' +
+      'No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/publico/reglamento-sabor.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el catálogo [EJEMPLO] del asistente de Sabor dice la edad sugerida de una experiencia («desde 8 años») y la ' +
+      'política de niños: EDADES de asistentes. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/publico/arnes/conjuntos.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'un caso adversario del arnés del asistente de Sabor es un menor que escribe («tengo 15 años»): una EDAD. ' +
+      'No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/extraccion-casos.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'los casos de la extracción del arnés describen pasajeros («el hijo de 5 años», «dos niños de 3 y 7 años»): ' +
+      'EDADES de pasajeros. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/bandeja/extraccion.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el prompt de la extracción del núcleo conversacional le dice al modelo que infante es «menor de 2 años»: ' +
+      'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
+  },
+  'src/lib/negocios/sugeridos.ts': {
+    tipo: 'no-es-plazo',
+    razon: 'ejemplo de la deducción que anota la marca de sugerido («ninguno … es menor de 2 años»): una edad.',
+  },
   'src/app/(onboarding)/onboarding/page.tsx': {
     tipo: 'no-es-plazo',
     razon:
@@ -191,6 +268,18 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     razon:
       'instrucción al lector de pantallazos: un menor de MENOS DE 2 AÑOS de edad es infante ' +
       '(R8, regla 7). No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/correr.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un viajero en la lectura falsa de la solicitud sintética del arnés («un niño de 7 años»). ' +
+      'No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/soportes/pdf-minimo.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de los viajeros inventados de la solicitud de viaje sintética del arnés («Laura Prueba, 38 años»). ' +
+      'No hay plazo de conservación en este archivo.',
   },
 };
 

@@ -21,8 +21,14 @@
  * Lo que ONE no decide solo, y deja marcado para una persona (`requiere_revision`):
  *   · un pago sobre una cuota que ya estaba pagada por otra vía (posible doble pago);
  *   · un pago por MENOS de lo esperado (el enlace es de monto cerrado: no debería pasar);
- *   · una anulación aprobada en la pasarela (deshacer un pago confirmado no lo hace un webhook);
+ *   · una anulación aprobada en la pasarela, si el repositorio no sabe anularla (`anularPorReverso`).
  *   · una moneda distinta de COP o un monto ilegible.
+ *
+ * El REVERSO de un pago ya registrado (ePayco estado 6, «Reversada»: la plata volvió al pagador) anula el
+ * cobro cuando el repositorio lo sabe hacer (`anularPorReverso`, hoy solo ePayco): monto en 0 y el valor
+ * en `monto_anulado`, igual que la anulación manual. Queda igual en revisión, porque lo que sigue (la
+ * suscripción, el ciclo de consultas, la nota crédito si ya hubo factura) lo decide una persona.
+ *
  * Un pago por MÁS de lo esperado sí se registra, con el monto real: el excedente lo descuenta de la
  * siguiente cuota el reparto FIFO al generar su enlace (regla del excedente).
  *
@@ -55,6 +61,8 @@ export interface CobroParaPago {
   id: string
   workspaceId: string
   negocioId: string | null
+  /** El ancla cuando el cobro es de una suscripción (`suscripciones_producto`) y no de un negocio. */
+  suscripcionId?: string | null
   monto: number
   fecha: string | null
   anuladoAt: string | null
@@ -78,8 +86,37 @@ export interface RepoPagoEnLinea {
   /** Cobros cuyo enlace es ese id de la pasarela. Más de uno es ambiguo y no se toca. */
   cobrosPorIdEnlace(idEnlace: string): Promise<CobroParaPago[]>
   confirmarPago(c: ConfirmacionPago): Promise<ResultadoConfirmacion>
-  /** Deja la línea en el timeline del negocio. No lanza: el pago ya quedó registrado o marcado. */
+  /**
+   * Deja la línea en la historia del cliente: el timeline del negocio, o la bitácora de la suscripción.
+   * No lanza: el pago ya quedó registrado o marcado.
+   */
   anotarEnNegocio(cobro: CobroParaPago, texto: string): Promise<void>
+  /**
+   * Lo que sigue a un pago registrado (o ya registrado, en un reintento), si el cobro lo pide: hoy,
+   * activar el Plan Anual de Valida CDA. `null` = nada que hacer. `revisar: true` deja el evento en
+   * revisión con el detalle. Si lanza, el webhook responde 500, el evento queda abierto y la pasarela
+   * reintenta: la segunda vez el pago ya está (`ya_pagado`) y esto se vuelve a correr. Tiene que ser
+   * idempotente.
+   */
+  trasPagoRegistrado?(cobro: CobroParaPago): Promise<{ revisar: boolean; detalle: string } | null>
+  /**
+   * Un RECHAZO de un cobro de ONE: hoy, el cargo con la tarjeta guardada que ePayco dejó pendiente y
+   * rechazó después (antifraude). `null` = no había un cargo pendiente que cerrar: el rechazo se ignora
+   * como siempre (un enlace sigue sirviendo). Idempotente, como `trasPagoRegistrado`.
+   */
+  trasRechazo?(cobro: CobroParaPago, e: EventoPasarela): Promise<{ revisar: boolean; detalle: string } | null>
+  /**
+   * Cobros pagados con esa transacción (`cobros.external_ref = referenciaPago`). Lo usa el reverso cuando
+   * el evento no trae la referencia de ONE. Más de uno es ambiguo y no se toca.
+   */
+  cobrosPorReferenciaPago?(referenciaPago: string): Promise<CobroParaPago[]>
+  /**
+   * Anula el cobro de un pago que la pasarela REVERSÓ (con los campos de la anulación manual) y avisa a
+   * MéTRIK. Solo si el cobro sigue sin anular y pagado con esa transacción: `anulado: false` si otro
+   * camino lo anuló entre la lectura y la escritura. No toca la suscripción, el ciclo ni la factura.
+   * Si lanza, el webhook responde 500 y la pasarela (o la conciliación siguiente) lo reintenta.
+   */
+  anularPorReverso?(cobro: CobroParaPago, e: EventoPasarela): Promise<{ anulado: boolean; detalle: string }>
 }
 
 export interface SalidaPagoEnLinea {
@@ -106,6 +143,14 @@ async function resolverCobro(
     const cobro = await repo.cobroPorId(idCobro)
     if (cobro) return { cobro }
     return { cobro: null, resultado: 'sin_cobro', detalle: `La referencia ${e.referencia} apunta a un cobro que no existe.` }
+  }
+  // 1b. Un reverso sin la referencia de ONE: el cobro que se pagó con esa transacción.
+  if (e.tipo === 'anulado' && repo.cobrosPorReferenciaPago) {
+    const cobros = await repo.cobrosPorReferenciaPago(e.referenciaPago)
+    if (cobros.length === 1) return { cobro: cobros[0] }
+    if (cobros.length > 1) {
+      return { cobro: null, resultado: 'requiere_revision', detalle: `El pago reversado ${e.referenciaPago} está en ${cobros.length} cobros: no se sabe cuál anular.` }
+    }
   }
   // 2. El id del enlace de la pasarela, contra la URL del enlace cargado en el cobro (sirve también
   //    para los enlaces que se crearon a mano en el panel de la pasarela).
@@ -208,8 +253,64 @@ export async function registrarPagoAprobado(
   throw new Error(`No se pudo registrar el pago del cobro ${cobro.id}: ${r.error}`)
 }
 
+/**
+ * El rechazo de un cargo que había quedado pendiente: solo con la referencia de ONE (dice el cobro sin
+ * buscar) y un repositorio que sepa cerrarlo. Sin eso, `null` y el rechazo se ignora como antes.
+ */
+async function rechazoDeCargoPendiente(e: EventoPasarela, repo: RepoPagoEnLinea): Promise<Salida | null> {
+  if (!repo.trasRechazo) return null
+  const idCobro = cobroDeReferencia(e.referencia)
+  if (!idCobro) return null
+  const cobro = await repo.cobroPorId(idCobro)
+  if (!cobro || cobro.fecha) return null
+  const r = await repo.trasRechazo(cobro, e)
+  if (!r) return null
+  return { resultado: r.revisar ? 'requiere_revision' : 'ignorado', detalle: r.detalle, cobroId: cobro.id, cobro }
+}
+
+/**
+ * La pasarela reversó (anuló) un pago. Se anula el cobro solo si es EL pago de esa transacción: un
+ * cobro ya anulado no se toca, uno sin pago no tiene qué anular y uno pagado con otra transacción no es
+ * de este reverso. Lo anulado queda en revisión: la suscripción y el ciclo los decide una persona.
+ */
+async function reversoDePago(e: EventoPasarela, cobro: CobroParaPago, repo: RepoPagoEnLinea): Promise<Salida> {
+  const ref = e.referenciaPago
+  if (!repo.anularPorReverso) {
+    return {
+      resultado: 'requiere_revision',
+      detalle: `La pasarela aprobó la anulación del pago ${ref}. El cobro no se deshace solo: revisarlo y anularlo a mano si corresponde.`,
+      cobroId: cobro.id,
+      cobro,
+    }
+  }
+  if (cobro.anuladoAt) {
+    return { resultado: 'ignorado', detalle: `Reverso del pago ${ref}: el cobro ya estaba anulado (${cobro.anuladoAt.slice(0, 10)}). No se tocó nada.`, cobroId: cobro.id, cobro }
+  }
+  if (!cobro.fecha) {
+    return {
+      resultado: 'requiere_revision',
+      detalle: `La pasarela reversó el pago ${ref}, pero el cobro no tiene un pago registrado: no hay nada que anular. Revisar.`,
+      cobroId: cobro.id,
+      cobro,
+    }
+  }
+  if (cobro.externalRef !== ref) {
+    return {
+      resultado: 'requiere_revision',
+      detalle: `La pasarela reversó el pago ${ref}, pero el cobro está pagado con ${cobro.externalRef ?? 'otra referencia'}: no se anuló. Revisar.`,
+      cobroId: cobro.id,
+      cobro,
+    }
+  }
+  const r = await repo.anularPorReverso(cobro, e)
+  if (!r.anulado) return { resultado: 'ignorado', detalle: r.detalle, cobroId: cobro.id, cobro }
+  return { resultado: 'requiere_revision', detalle: r.detalle, cobroId: cobro.id, cobro }
+}
+
 async function procesar(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): Promise<Salida> {
   if (e.tipo === 'rechazado') {
+    const tardio = await rechazoDeCargoPendiente(e, repo)
+    if (tardio) return tardio
     return { resultado: 'ignorado', detalle: 'Pago rechazado por la pasarela: el enlace sigue sirviendo para volver a intentar.', cobroId: null, cobro: null }
   }
   if (e.tipo === 'otro') {
@@ -220,15 +321,19 @@ async function procesar(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): 
   if (!encontrado.cobro) return { resultado: encontrado.resultado, detalle: encontrado.detalle, cobroId: null, cobro: null }
   const cobro = encontrado.cobro
 
-  if (e.tipo === 'anulado') {
-    return {
-      resultado: 'requiere_revision',
-      detalle: `La pasarela aprobó la anulación del pago ${e.referenciaPago}. El cobro no se deshace solo: revisarlo y anularlo a mano si corresponde.`,
-      cobroId: cobro.id,
-      cobro,
+  if (e.tipo === 'anulado') return reversoDePago(e, cobro, repo)
+  const salida = await registrarPagoAprobado(e, cobro, repo, hoy)
+  if ((salida.resultado === 'registrado' || salida.resultado === 'ya_pagado') && repo.trasPagoRegistrado) {
+    const despues = await repo.trasPagoRegistrado(cobro)
+    if (despues) {
+      return {
+        ...salida,
+        resultado: despues.revisar ? 'requiere_revision' : salida.resultado,
+        detalle: `${salida.detalle} ${despues.detalle}`,
+      }
     }
   }
-  return registrarPagoAprobado(e, cobro, repo, hoy)
+  return salida
 }
 
 export async function procesarEventoPasarela(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): Promise<SalidaPagoEnLinea> {

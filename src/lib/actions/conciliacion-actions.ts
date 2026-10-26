@@ -1,5 +1,7 @@
 'use server'
 
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { canEditBloque, type UserContext, type Role, type Area } from '@/lib/permissions/can-edit'
 import { revalidatePath } from 'next/cache'
@@ -51,9 +53,19 @@ import type {
 } from '@/lib/negocios/retroceso-financiero'
 import { recalcularNegocioPorCambioDeRecaudo, cambiarEtapaNegocio } from '@/app/(app)/negocios/negocio-v2-actions'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
-import { abonarAlRegistrarPago } from '@/lib/siigo/recibo-automatico'
+import { abonarEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
+import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
+import {
+  deudaParaReparto,
+  describirPorciones,
+  estadoDelReparto,
+  mensajeErrorReparto,
+  motivosParaNoEnviar,
+  type CobroParaDeuda,
+  type PorcionGuardada,
+} from '@/lib/cobros/reparto-comercial'
 
 // Cast a untyped para tablas/columnas nuevas no en database.ts
 // (negocio_conciliacion, cobros.split_json).
@@ -130,7 +142,26 @@ export interface NegocioParaSplit {
   diferencia: number
 }
 
-// ── repartirPagoCore + repartirPagoComercial (reparto del comercial) ─────────
+// ── Reparto del comercial: enviar, corregir y estado ─────────────────────────
+//
+// Rediseño del 2026-10-19 (Mauricio, con Hana y Noor). Medido en SOENA: desde el 23-sep la
+// financiera rehízo 4 repartos del comercial, porque no repartió o repartió en partes
+// iguales cuando cada negocio debía distinto. Las reglas puras viven en
+// `lib/cobros/reparto-comercial.ts`; la escritura, en la función de base
+// `guardar_reparto_comercial` (migración 20261019120000), que hace todo en UNA transacción.
+//
+// El ciclo:
+//   1. El comercial elige los negocios; cada fila se llena con lo que ese negocio debe
+//      (`prepararRepartoComercial`). Si no cuadra con el pago, no se envía.
+//   2. «Enviar a financiera» → resumen → «Confirmar envío». Antes de confirmar no se crea
+//      ningún cobro: la pantalla no llama al servidor hasta ese clic.
+//   3. Enviado y sin aprobar: el comercial lo corrige con `editarRepartoComercial`, que
+//      reemplaza TODAS las porciones vigentes de la referencia en la misma transacción.
+//   4. Aprobado (alguna porción con `confirmado_at`, o su negocio conciliado): la base
+//      rechaza la edición aunque se llame la acción directo. La financiera sigue con
+//      Redistribuir.
+//   5. Rechazado: la financiera borra las porciones y el comercial recibe la nota en una
+//      notificación (`rechazarRepartoComercial`).
 
 export interface PorcionSplit {
   negocio_id: string
@@ -140,215 +171,24 @@ export interface PorcionSplit {
 export interface RepartirPagoInput {
   /** Referencia del pago (ePayco ref_payco o referencia externa). Va a external_ref. */
   referencia: string
-  /** Monto bruto total del pago recibido (suma de las porciones debe coincidir). */
+  /** Total del pago. Con ePayco y 0, se toma del pago real. Las porciones deben sumarlo. */
   monto_total: number
-  /** Porciones por negocio. La suma NO puede exceder monto_total. */
   porciones: PorcionSplit[]
-  /** 'pago' | 'externo' | 'anticipo' | 'saldo'. Default 'pago'. */
-  tipo_cobro?: string
   fecha?: string
+  fuente?: 'epayco' | 'manual'
+  /**
+   * Con fuente manual: de dónde vino la plata (Davivienda, Nequi, efectivo…). Hasta el
+   * 2026-10-19 el modal lo exigía y no lo enviaba: la porción quedaba sin fuente.
+   */
+  fuente_nombre?: string
 }
 
-/**
- * NÚCLEO del reparto de UN pago entre VARIOS negocios sin duplicar el monto — la
- * fuente ÚNICA de la escritura del split. La usan tanto `repartirPago` (financiera,
- * `origen='financiera'`) como `repartirPagoComercial` (comercial, `origen='comercial'`).
- * NO duplicar esta lógica en otra vía. El guard de permisos lo aplica el CALLER.
- *
- * Crea un cobro por cada porción, todos con el MISMO `external_ref` (la referencia
- * del pago) pero marcados como split deliberado en `cobros.split_json` con un
- * `split_id` compartido. Así:
- *   - El monto NO se duplica: cada negocio recibe solo su porción.
- *   - `refDuplicadaNoSplit` reconoce el split_id y NO marca estos cobros como
- *     duplicado accidental de la referencia.
- *
- * Cuando `origen='comercial'` marca además `split_json.origen='comercial'` +
- * `propuesto_por=staffId` (trazabilidad: la financiera lo VALIDA y concilia; no se
- * auto-concilia el reparto del comercial). `conciliado` NO se toca acá (control de
- * dos personas).
- *
- * REGLAS DURAS del reparto del comercial (aplicadas SIEMPRE que se pase
- * `validarNegociosAbiertos`):
- *   - Todos los negocios destino existen, son del workspace y `estado='abierto'`.
- *   - No se reparte hacia negocios inexistentes ni cerrados.
- *   - Bloqueo de duplicado: si la referencia ya existe como cobro NO-split en otro
- *     negocio, se rechaza. Si ya tiene porciones split, se pide ajustar vía eliminar
- *     + re-repartir (MVP: el reparto se declara una vez, atómico).
- *
- * Parcial permitido: la suma de porciones ≤ monto_total (tolerancia 1 peso) — deja
- * saldo sin asignar. Idempotencia: por (external_ref, negocio_id).
- */
-async function repartirPagoCore(
-  supabase: unknown,
-  workspaceId: string,
-  staffId: string | null,
+type ResultadoReparto = { success: true; split_id: string } | { success: false; error: string }
+
+async function guardarRepartoComercialSinClave(
   input: RepartirPagoInput,
-  origen: 'financiera' | 'comercial',
-  opts?: { validarNegociosAbiertos?: boolean; bloquearReferenciaExistente?: boolean },
-): Promise<{ success: true; split_id: string } | { success: false; error: string }> {
-  const referencia = (input.referencia ?? '').trim()
-  if (!referencia) return { success: false, error: 'La referencia del pago es obligatoria' }
-
-  const montoTotal = Number(input.monto_total)
-  if (!Number.isFinite(montoTotal) || montoTotal <= 0) {
-    return { success: false, error: 'El monto total del pago debe ser mayor a cero' }
-  }
-
-  const porciones = (input.porciones ?? []).filter((p) => p && p.negocio_id && Number(p.monto) > 0)
-  if (porciones.length < 1) return { success: false, error: 'Agrega al menos una porción con monto' }
-
-  // Validar negocios distintos
-  const negocioIds = porciones.map((p) => p.negocio_id)
-  if (new Set(negocioIds).size !== negocioIds.length) {
-    return { success: false, error: 'No repitas el mismo negocio en el reparto' }
-  }
-
-  const sumaPorciones = porciones.reduce((s, p) => s + Number(p.monto), 0)
-  // Parcial permitido: la suma NO puede EXCEDER el total (tolerancia de 1 peso).
-  if (sumaPorciones - montoTotal > 1) {
-    return { success: false, error: 'La suma de las porciones excede el monto del pago' }
-  }
-
-  // Validar que todos los negocios son del workspace. Regla dura del comercial:
-  // además, todos deben estar 'abierto' (no se reparte hacia inexistentes/cerrados).
-  const { data: negociosRaw } = await db(supabase)
-    .from('negocios')
-    .select('id, estado, codigo')
-    .eq('workspace_id', workspaceId)
-    .in('id', negocioIds)
-  const negociosPorId = new Map(
-    ((negociosRaw ?? []) as Array<{ id: string; estado: string | null; codigo: string | null }>).map((n) => [n.id, n]),
-  )
-  for (const id of negocioIds) {
-    const neg = negociosPorId.get(id)
-    if (!neg) return { success: false, error: 'Un negocio del reparto no pertenece al workspace' }
-    if (opts?.validarNegociosAbiertos && neg.estado !== 'abierto') {
-      return { success: false, error: `El negocio ${neg.codigo ?? id} no está abierto — no se puede repartir un pago hacia él.` }
-    }
-  }
-
-  // Bloqueo de duplicado (reparto del comercial): la referencia no puede existir ya
-  // como cobro NO-split en otro negocio (sería duplicar un pago). Si ya está como
-  // split, se pide ajustar vía eliminar + re-repartir (el reparto es atómico, MVP).
-  if (opts?.bloquearReferenciaExistente) {
-    const dup = await refDuplicadaNoSplit(supabase, workspaceId, referencia)
-    if (dup && !negocioIds.includes(dup.negocio_id)) {
-      return {
-        success: false,
-        error: `La referencia ${referencia} ya está registrada como pago en ${dup.codigo ?? dup.negocio_id}. No se puede repartir una referencia que ya existe suelta — elimínala primero o pide al área financiera que la distribuya.`,
-      }
-    }
-    const { data: yaSplit } = await db(supabase)
-      .from('cobros')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .eq('external_ref', referencia)
-      .not('split_json->>split_id', 'is', null)
-      .limit(1)
-    if (yaSplit && (yaSplit as unknown[]).length > 0) {
-      return {
-        success: false,
-        error: `La referencia ${referencia} ya tiene un reparto. Para cambiarlo, elimina las porciones existentes y vuelve a repartir.`,
-      }
-    }
-  }
-
-  const splitId = randomUUID()
-  const tipoCobro = input.tipo_cobro ?? 'pago'
-  const fecha = (input.fecha ?? '').trim() || todayBogotaISO()
-  const splitBase: Record<string, unknown> = {
-    split_id: splitId,
-    split_total: montoTotal,
-    split_n: porciones.length,
-  }
-  if (origen === 'comercial') {
-    splitBase.origen = 'comercial'
-    splitBase.propuesto_por = staffId
-  }
-  const nota =
-    origen === 'comercial'
-      ? `Reparto de pago propuesto por el comercial — Ref ${referencia} entre ${porciones.length} negocios`
-      : `Reparto de pago ${referencia} entre ${porciones.length} negocios`
-
-  for (const p of porciones) {
-    // Idempotencia: ¿ya hay un cobro con esta referencia en este negocio?
-    const { data: existing } = await db(supabase)
-      .from('cobros')
-      .select('id')
-      .eq('workspace_id', workspaceId)
-      .eq('negocio_id', p.negocio_id)
-      .eq('external_ref', referencia)
-      .limit(1)
-    if (existing && (existing as unknown[]).length > 0) continue
-
-    const { error: insErr } = await db(supabase).from('cobros').insert({
-      workspace_id: workspaceId,
-      negocio_id: p.negocio_id,
-      monto: Number(p.monto),
-      tipo_cobro: tipoCobro,
-      fecha,
-      external_ref: referencia,
-      notas: nota,
-      split_json: { ...splitBase },
-    })
-    if (insErr) {
-      return { success: false, error: (insErr as { message?: string }).message ?? 'No se pudo registrar una porción' }
-    }
-  }
-
-  // Cualquier negocio tocado deja de estar conciliado (cambió su cobrado). El check
-  // de conciliación lo pone SIEMPRE la financiera (control de dos personas) — el
-  // reparto del comercial es solo una PROPUESTA hasta que ella lo valide.
-  //
-  // Acá bajar el flag SÍ es lo correcto y no pierde nada: las porciones de repartos
-  // anteriores conservan su propia marca de aceptación en `split_json.confirmado_at`, y
-  // las de este reparto nacen sin ella porque nadie las ha validado todavía.
-  await db(supabase)
-    .from('negocio_conciliacion')
-    .update({ conciliado: false, updated_at: new Date().toISOString() })
-    .eq('workspace_id', workspaceId)
-    .in('negocio_id', negocioIds)
-
-  // Trazabilidad del reparto propuesto por el comercial en cada negocio destino.
-  if (origen === 'comercial' && staffId) {
-    for (const id of negocioIds) {
-      try {
-        await registrarActividad(db(supabase), {
-          workspace_id: workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: id,
-          tipo: 'comentario',
-          autor_id: staffId,
-          contenido: `Reparto de pago propuesto por el comercial — Ref ${referencia}. Pendiente de confirmar por el área financiera.`,
-        }, 'repartirPagoCore')
-      } catch { /* no bloquear por el log */ }
-    }
-  }
-
-  // El honorario de cada porción se abona a la factura del negocio que ya la tenga. Una
-  // porción que el comercial PROPUSO espera a que la financiera la acepte (lo decide
-  // `porQueNoSeAbona`): el abono de ese reparto sale desde `aceptarRepartoComercial`.
-  // Nunca devuelve error.
-  for (const id of negocioIds) await abonarAlRegistrarPago(workspaceId, id)
-
-  for (const id of negocioIds) revalidatePath(`/negocios/${id}`)
-  revalidatePath('/conciliacion')
-  return { success: true, split_id: splitId }
-}
-
-/**
- * Reparte UN pago entre VARIOS negocios (vía del COMERCIAL). El comercial PROPONE el
- * reparto; la financiera lo VALIDA y concilia (control de dos personas). Wrapper de
- * `repartirPagoCore` con guard COMERCIAL (`ctxFabPago`) + `origen='comercial'` +
- * reglas duras (negocios abiertos, sin duplicar la referencia).
- *
- * ePayco: valida que la referencia esté 'Aceptada' y que el total ≤ monto_bruto real
- * (techo de plata) vía `consultarTransaccionEpayco`. Manual: el comercial declara el
- * total (sin re-consulta externa).
- */
-export async function repartirPagoComercial(
-  input: RepartirPagoInput & { fuente?: 'epayco' | 'manual' },
-): Promise<{ success: true; split_id: string } | { success: false; error: string }> {
+  modo: 'nuevo' | 'editar',
+): Promise<ResultadoReparto> {
   const ctx = await ctxFabPago()
   if (!ctx.ok) return { success: false, error: ctx.error }
   const { supabase, workspaceId, staffId } = ctx
@@ -358,6 +198,7 @@ export async function repartirPagoComercial(
 
   let montoTotal = Number(input.monto_total)
   const esEpayco = (input.fuente ?? 'manual') === 'epayco'
+  let fuente: string
 
   if (esEpayco) {
     // La cuenta de ePayco es GLOBAL (la de SOENA): solo la consulta un workspace que cobra
@@ -389,26 +230,304 @@ export async function repartirPagoComercial(
       }
     }
     montoTotal = Math.min(montoTotal, desglose.monto_bruto)
+    fuente = 'epayco'
+  } else {
+    const nombre = (input.fuente_nombre ?? '').trim()
+    if (!nombre) return { success: false, error: 'Indica de dónde vino el pago (banco, Nequi, efectivo…)' }
+    if (!Number.isFinite(montoTotal) || montoTotal <= 0) {
+      return { success: false, error: 'Ingresa el total del pago' }
+    }
+    fuente = nombre.slice(0, 60)
   }
 
-  const resultado = await repartirPagoCore(
-    supabase,
-    workspaceId,
-    staffId,
-    { ...input, referencia, monto_total: montoTotal },
-    'comercial',
-    { validarNegociosAbiertos: true, bloquearReferenciaExistente: true },
-  )
+  const porciones = (input.porciones ?? [])
+    .filter((p) => p && p.negocio_id)
+    .map((p) => ({ negocio_id: p.negocio_id, monto: Math.round(Number(p.monto) || 0) }))
+  // Mismas reglas que la pantalla: si no cuadra, no se envía. La base lo vuelve a exigir.
+  const motivos = motivosParaNoEnviar(montoTotal, porciones.map((p) => ({ ...p, debe: null })))
+  if (motivos.length > 0) return { success: false, error: motivos[0] }
 
-  // El reparto queda PROPUESTO: no está conciliado hasta que el área financiera
-  // lo acepte. Ese pendiente le pertenece al EQUIPO financiero (en SOENA, Diana
-  // y Leidy), no a una persona: le llega a las dos y basta con que una lo
-  // resuelva para que desaparezca de la campana de la otra.
-  if (resultado.success) {
+  const { data, error } = await db(supabase).rpc('guardar_reparto_comercial', {
+    p_referencia: referencia,
+    p_split_total: montoTotal,
+    p_porciones: porciones,
+    p_fecha: (input.fecha ?? '').trim() || null,
+    p_fuente: fuente,
+    p_modo: modo,
+  })
+  if (error) {
+    const e = error as { code?: string; message?: string }
+    return { success: false, error: mensajeErrorReparto(`${e.code ?? ''} ${e.message ?? ''}`.trim(), referencia) }
+  }
+  const guardado = (data ?? {}) as { split_id?: string; antes?: PorcionGuardada[]; despues?: PorcionGuardada[] }
+  const antes = guardado.antes ?? []
+  const despues = guardado.despues ?? []
+  const negocioIds = Array.from(new Set([...antes, ...despues].map((p) => p.negocio_id)))
+
+  // El antes y el después en el historial de cada negocio tocado: es lo único que queda de
+  // la versión reemplazada, porque sus cobros ya no existen.
+  const total = fmtCOP(montoTotal)
+  for (const id of negocioIds) {
+    await registrarActividad(db(supabase), {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: id,
+      tipo: 'cambio_sistema',
+      autor_id: staffId,
+      campo_modificado: CAMPO_REPARTO_COMERCIAL,
+      valor_anterior: modo === 'editar' ? `${referencia} · ${describirPorciones(antes)}` : null,
+      valor_nuevo: `${referencia} · ${describirPorciones(despues)}`,
+      contenido: modo === 'editar'
+        ? `Reparto corregido por el comercial (ref ${referencia}, total ${total}). Antes: ${describirPorciones(antes)}. Ahora: ${describirPorciones(despues)}. Pendiente de aprobar por el área financiera.`
+        : `Reparto enviado al área financiera (ref ${referencia}, total ${total}): ${describirPorciones(despues)}.`,
+    }, modo === 'editar' ? 'editarRepartoComercial' : 'repartirPagoComercial')
+  }
+
+  // El pendiente es del EQUIPO financiero. Una corrección cierra el aviso anterior y abre
+  // uno nuevo, para que vuelva a sonar aunque el primero siguiera sin leer.
+  if (modo === 'editar') {
+    await resolverPendienteConciliacion(supabase, workspaceId, referencia)
+    await avisarConciliacionPendiente(supabase, workspaceId, referencia, montoTotal, {
+      contenido: `Reparto corregido por el comercial para la referencia ${referencia} (${total}): ${describirPorciones(despues)} — pendiente de conciliar.`,
+    })
+  } else {
     await avisarConciliacionPendiente(supabase, workspaceId, referencia, montoTotal)
   }
 
-  return resultado
+  // Las porciones del comercial esperan a la financiera para abonarse (`porQueNoSeAbona`).
+  // Corre DESPUÉS de responder (`segundo-plano.ts`).
+  await abonarEnSegundoPlano(workspaceId, negocioIds)
+
+  for (const id of negocioIds) revalidatePath(`/negocios/${id}`)
+  revalidatePath('/conciliacion')
+  return { success: true, split_id: guardado.split_id ?? '' }
+}
+
+/** Marca del historial que deja el comercial al enviar o corregir un reparto. */
+const CAMPO_REPARTO_COMERCIAL = 'reparto_comercial'
+/** Marca del historial que deja la financiera al rechazar. La lee `estadoRepartosDelNegocio`. */
+const CAMPO_REPARTO_RECHAZADO = 'reparto_comercial_rechazado'
+
+// ── Lo que debe cada negocio, para prellenar el reparto ──────────────────────
+
+/** Un negocio que puede recibir una porción, con lo que debe hoy. */
+export interface NegocioParaReparto {
+  negocio_id: string
+  codigo: string | null
+  nombre: string | null
+  empresa: string | null
+  /** Lo que debe hoy (`deudaParaReparto`). null = negocio sin cifrar: no hay con qué medir. */
+  debe: number | null
+}
+
+async function deudasDeNegocios(
+  supabase: unknown,
+  workspaceId: string,
+  negocioIds: string[],
+  excluirRef: string | null,
+): Promise<Map<string, NegocioParaReparto>> {
+  const out = new Map<string, NegocioParaReparto>()
+  if (negocioIds.length === 0) return out
+  const [negRes, cobrosRes] = await Promise.all([
+    db(supabase)
+      .from('negocios')
+      .select('id, codigo, nombre, precio_aprobado, precio_estimado, empresas:empresa_id ( nombre )')
+      .eq('workspace_id', workspaceId)
+      .in('id', negocioIds),
+    db(supabase)
+      .from('cobros')
+      .select('negocio_id, monto, fecha, retencion_iva, anulado_at, external_ref, tipo_cobro')
+      .eq('workspace_id', workspaceId)
+      .in('negocio_id', negocioIds),
+  ])
+  const cobros = (cobrosRes.data ?? []) as Array<CobroParaDeuda & { negocio_id: string }>
+  const filas = (negRes.data ?? []) as Array<{
+    id: string; codigo: string | null; nombre: string | null
+    precio_aprobado: number | null; precio_estimado: number | null
+    empresas: { nombre: string | null } | null
+  }>
+  await Promise.all(filas.map(async (n) => {
+    const honorario = Number(n.precio_aprobado ?? n.precio_estimado ?? 0)
+    const modelo = await leerModeloDineroCompleto(supabase, n.id)
+    const cifrado = valorARecaudar(honorario, modelo) > 0
+    out.set(n.id, {
+      negocio_id: n.id,
+      codigo: n.codigo,
+      nombre: n.nombre,
+      empresa: n.empresas?.nombre ?? null,
+      debe: cifrado
+        ? deudaParaReparto({ honorario, modelo, cobros: cobros.filter((c) => c.negocio_id === n.id), excluirRef })
+        : null,
+    })
+  }))
+  return out
+}
+
+/**
+ * Lo que el modal necesita para prellenar: la deuda de los negocios pedidos y, si hay un
+ * negocio de origen, los demás negocios abiertos del mismo cliente (contacto o empresa)
+ * que tienen saldo, para ofrecerlos primero.
+ *
+ * `referencia`: al corregir un reparto, sus propias porciones no cuentan como pagadas.
+ */
+export async function prepararRepartoComercial(input: {
+  negocioIds: string[]
+  negocioOrigenId?: string | null
+  referencia?: string | null
+}): Promise<
+  | { ok: true; negocios: NegocioParaReparto[]; sugeridos: NegocioParaReparto[] }
+  | { ok: false; error: string }
+> {
+  const ctx = await ctxFabPago()
+  if (!ctx.ok) return { ok: false, error: ctx.error }
+  const { supabase, workspaceId } = ctx
+  const ref = (input.referencia ?? '').trim() || null
+
+  let delMismoCliente: string[] = []
+  const origen = input.negocioOrigenId ?? null
+  if (origen) {
+    const { data: o } = await db(supabase)
+      .from('negocios')
+      .select('contacto_id, empresa_id')
+      .eq('id', origen)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    const filtros: string[] = []
+    const fila = o as { contacto_id: string | null; empresa_id: string | null } | null
+    if (fila?.contacto_id) filtros.push(`contacto_id.eq.${fila.contacto_id}`)
+    if (fila?.empresa_id) filtros.push(`empresa_id.eq.${fila.empresa_id}`)
+    if (filtros.length > 0) {
+      const { data: hermanos } = await db(supabase)
+        .from('negocios')
+        .select('id')
+        .eq('workspace_id', workspaceId)
+        .eq('estado', 'abierto')
+        .neq('id', origen)
+        .or(filtros.join(','))
+        .limit(10)
+      delMismoCliente = ((hermanos ?? []) as Array<{ id: string }>).map((h) => h.id)
+    }
+  }
+
+  const pedidos = Array.from(new Set(input.negocioIds.filter(Boolean)))
+  const deudas = await deudasDeNegocios(supabase, workspaceId, Array.from(new Set([...pedidos, ...delMismoCliente])), ref)
+  return {
+    ok: true,
+    negocios: pedidos.map((id) => deudas.get(id)).filter((n): n is NegocioParaReparto => !!n),
+    sugeridos: delMismoCliente
+      .filter((id) => !pedidos.includes(id))
+      .map((id) => deudas.get(id))
+      .filter((n): n is NegocioParaReparto => !!n && (n.debe ?? 0) > TOLERANCIA_SALDO_COP),
+  }
+}
+
+// ── Estado del reparto en el bloque del negocio ──────────────────────────────
+
+/** Un reparto del comercial visto desde uno de sus negocios. */
+export interface RepartoDelNegocio {
+  referencia: string
+  estado: 'enviado' | 'aprobado' | 'rechazado'
+  /** Total declarado del pago. */
+  total: number
+  fuente: string | null
+  fecha: string | null
+  porciones: Array<{ negocio_id: string; codigo: string | null; monto: number }>
+  /** Nota de la financiera al rechazar. */
+  nota: string | null
+}
+
+/**
+ * Los repartos del comercial que tocan este negocio: enviados (se pueden editar),
+ * aprobados (ya no) y rechazados (con la nota de la financiera, hasta que se vuelva a
+ * repartir esa referencia). Mismo guard que repartir: quien no puede repartir no ve el
+ * botón de editar, así que tampoco necesita esto.
+ */
+export async function estadoRepartosDelNegocio(negocioId: string): Promise<RepartoDelNegocio[]> {
+  const ctx = await ctxFabPago()
+  if (!ctx.ok) return []
+  const { supabase, workspaceId } = ctx
+
+  const { data: propias } = await db(supabase)
+    .from('cobros')
+    .select('external_ref')
+    .eq('workspace_id', workspaceId)
+    .eq('negocio_id', negocioId)
+    .eq('split_json->>origen', 'comercial')
+    .is('anulado_at', null)
+  const refs = Array.from(new Set(((propias ?? []) as Array<{ external_ref: string | null }>)
+    .map((c) => c.external_ref).filter((r): r is string => !!r)))
+
+  const out: RepartoDelNegocio[] = []
+  if (refs.length > 0) {
+    const { data: porcionesRaw } = await db(supabase)
+      .from('cobros')
+      .select('negocio_id, monto, fecha, fuente, external_ref, split_json, negocios:negocio_id ( codigo )')
+      .eq('workspace_id', workspaceId)
+      .in('external_ref', refs)
+      .eq('split_json->>origen', 'comercial')
+      .is('anulado_at', null)
+    const porciones = (porcionesRaw ?? []) as Array<{
+      negocio_id: string; monto: number; fecha: string | null; fuente: string | null; external_ref: string
+      split_json: { origen?: string; confirmado_at?: string | null; split_total?: number } | null
+      negocios: { codigo: string | null } | null
+    }>
+    const ids = Array.from(new Set(porciones.map((p) => p.negocio_id)))
+    const { data: concRaw } = await db(supabase)
+      .from('negocio_conciliacion')
+      .select('negocio_id, conciliado')
+      .eq('workspace_id', workspaceId)
+      .in('negocio_id', ids.length > 0 ? ids : ['00000000-0000-0000-0000-000000000000'])
+    const conciliado = new Map(((concRaw ?? []) as Array<{ negocio_id: string; conciliado: boolean }>)
+      .map((r) => [r.negocio_id, r.conciliado === true]))
+    for (const ref of refs) {
+      const deRef = porciones.filter((p) => p.external_ref === ref)
+      if (deRef.length === 0) continue
+      out.push({
+        referencia: ref,
+        estado: estadoDelReparto(deRef as unknown as Array<CobroParaRecaudo & { negocio_id: string }>, conciliado),
+        total: Number(deRef[0].split_json?.split_total ?? deRef.reduce((s, p) => s + Number(p.monto), 0)),
+        fuente: deRef[0].fuente,
+        fecha: deRef[0].fecha,
+        porciones: deRef.map((p) => ({ negocio_id: p.negocio_id, codigo: p.negocios?.codigo ?? null, monto: Number(p.monto) })),
+        nota: null,
+      })
+    }
+  }
+
+  // Rechazos: la financiera borró las porciones, así que lo único que queda es su marca
+  // en el historial. Se muestra el último de cada referencia que no se haya vuelto a
+  // repartir después.
+  const { data: rechazosRaw } = await db(supabase)
+    .from('activity_log')
+    .select('valor_anterior, valor_nuevo, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('entidad_tipo', 'negocio')
+    .eq('entidad_id', negocioId)
+    .eq('campo_modificado', CAMPO_REPARTO_RECHAZADO)
+    .order('created_at', { ascending: false })
+    .limit(10)
+  const rechazos = ((rechazosRaw ?? []) as Array<{ valor_anterior: string | null; valor_nuevo: string | null; created_at: string }>)
+  const refsRechazadas = Array.from(new Set(rechazos.map((r) => (r.valor_anterior ?? '').trim()).filter(Boolean)))
+  // Una referencia rechazada que ya volvió a registrarse (por el comercial o la financiera)
+  // dejó de ser un rechazo pendiente.
+  const vivas = new Set<string>()
+  if (refsRechazadas.length > 0) {
+    const { data: vivasRaw } = await db(supabase)
+      .from('cobros')
+      .select('external_ref')
+      .eq('workspace_id', workspaceId)
+      .in('external_ref', refsRechazadas)
+      .is('anulado_at', null)
+    for (const c of ((vivasRaw ?? []) as Array<{ external_ref: string | null }>)) if (c.external_ref) vivas.add(c.external_ref)
+  }
+  const vistos = new Set([...out.map((r) => r.referencia), ...vivas])
+  for (const r of rechazos) {
+    const ref = (r.valor_anterior ?? '').trim()
+    if (!ref || vistos.has(ref)) continue
+    vistos.add(ref)
+    out.push({ referencia: ref, estado: 'rechazado', total: 0, fuente: null, fecha: null, porciones: [], nota: r.valor_nuevo })
+  }
+  return out
 }
 
 /** Clave del pendiente de equipo: un aviso por referencia de pago. */
@@ -422,13 +541,14 @@ async function avisarConciliacionPendiente(
   workspaceId: string,
   referencia: string,
   monto: number,
+  opts?: { contenido?: string },
 ) {
   try {
     await db(supabase).rpc('crear_notificacion_equipo', {
       p_workspace_id: workspaceId,
       p_area: 'financiera',
       p_tipo: 'conciliacion_solicitada',
-      p_contenido: `Reparto propuesto para la referencia ${referencia} (${monto.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}) — pendiente de conciliar.`,
+      p_contenido: opts?.contenido ?? `Reparto propuesto para la referencia ${referencia} (${monto.toLocaleString('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })}) — pendiente de conciliar.`,
       p_grupo_clave: claveConciliacion(referencia),
       p_entidad_tipo: null,
       p_entidad_id: null,
@@ -783,6 +903,7 @@ async function cargarPropuestasEconomicas(
 async function cargarNegociosYCobros(
   supabase: unknown,
   workspaceId: string,
+  staffId: string | null,
 ): Promise<{
   negocios: Map<string, NegocioRow>
   cobros: CobroRow[]
@@ -799,13 +920,16 @@ async function cargarNegociosYCobros(
     `)
     .eq('workspace_id', workspaceId)
 
-  const filas = (negociosRaw ?? []) as Array<{
+  // El viaje de prueba (metadata.es_prueba, F8-1) no entra al panel ni a sus totales para quien
+  // no lo lleva ni lo aprueba: ni sus negocios ni sus pagos.
+  const ocultosPrueba = await negociosDePruebaOcultos(db(supabase), workspaceId, staffId)
+  const filas = sinOcultos((negociosRaw ?? []) as Array<{
     id: string; codigo: string | null; nombre: string | null
     precio_aprobado: number | null; precio_estimado: number | null
     estado: string | null; stage_actual: string | null; created_at: string | null
     etapas_negocio: { nombre: string | null; orden: number | null } | null
     empresas: { nombre: string | null } | null
-  }>
+  }>, ocultosPrueba, (n) => n.id)
   const ids = filas.map((n) => n.id)
 
   // Una sola marca de tiempo para TODAS las filas de la respuesta: si cada negocio
@@ -820,7 +944,7 @@ async function cargarNegociosYCobros(
     .from('cobros')
     .select('id, negocio_id, monto, tipo_cobro, plan_cobro_id, external_ref, fuente, fecha, split_json, anulado_at, monto_anulado, anulacion_motivo')
     .eq('workspace_id', workspaceId)
-  const cobros = (cobrosRaw ?? []) as CobroRow[]
+  const cobros = sinOcultos((cobrosRaw ?? []) as CobroRow[], ocultosPrueba, (c) => c.negocio_id)
 
   // El check de la financiera se necesita ANTES de sumar: es lo que decide si una porción
   // propuesta por el comercial cuenta como recaudo. Se lee aquí, y no más abajo donde ya
@@ -997,9 +1121,9 @@ async function cobrosConCuentaDeCobroViva(
 export async function getConciliacionV2(): Promise<{ data: ConciliacionV2 | null; error?: string }> {
   const ctx = await ctxFinanciero()
   if (!ctx.ok) return { data: null, error: ctx.error }
-  const { supabase, workspaceId } = ctx
+  const { supabase, workspaceId, staffId } = ctx
 
-  const { negocios, cobros, cobrado, pendienteConfirmar } = await cargarNegociosYCobros(supabase, workspaceId)
+  const { negocios, cobros, cobrado, pendienteConfirmar } = await cargarNegociosYCobros(supabase, workspaceId, staffId ?? null)
 
   const negocioIds = Array.from(negocios.keys())
   const responsablePorNegocio = new Map<string, string>()
@@ -1341,7 +1465,8 @@ export interface AgregarPagoInput {
  * Núcleo de registro de UN pago contra UN negocio. Fuente ÚNICA de la vía de pago:
  * la usa `agregarPagoFab` (FAB global, guard por rol — `fab-pago-actions.ts`). El
  * reparto/registro del comercial desde el bloque de pagos entra por
- * `repartirPagoComercial`, que a su vez usa `repartirPagoCore`. NO duplicar
+ * `repartirPagoComercial` / `editarRepartoComercial` (función de base
+ * `guardar_reparto_comercial`). NO duplicar
  * esta lógica en otra vía: todas las barreras (validación ePayco real con override
  * justificado, duplicado no-split, saldo del negocio vía cobros, des-conciliar al
  * cambiar el cobrado) viven aquí.
@@ -1523,8 +1648,9 @@ export async function registrarPagoEnNegocio(
 
   // Si el negocio ya tiene factura, el honorario de este pago se le abona solo (brief del
   // 2026-09-22: el abono es 100 % automático y no depende de `recibo_automatico`). Nunca
-  // devuelve error: el pago ya quedó registrado, que es lo que la persona pidió.
-  await abonarAlRegistrarPago(workspaceId, negocioId)
+  // devuelve error: el pago ya quedó registrado, que es lo que la persona pidió. Corre
+  // DESPUÉS de responder: la persona no espera a Siigo (`segundo-plano.ts`).
+  await abonarEnSegundoPlano(workspaceId, [negocioId])
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/conciliacion')
@@ -1820,7 +1946,7 @@ export async function crearCobrosSoenaCore(
  *
  * Permisos: solo área financiera (Diana) vía ctxFinanciero.
  */
-export async function aceptarRepartoComercial(
+async function aceptarRepartoComercialSinClave(
   externalRef: string,
 ): Promise<{ success: true; conciliados: number } | { success: false; error: string }> {
   const ctx = await ctxFinanciero()
@@ -1934,7 +2060,8 @@ export async function aceptarRepartoComercial(
 
   // Y ahora sí es plata del negocio: su honorario se abona a la factura, si la hay. Es el
   // momento que `porQueNoSeAbona` le reservó a las porciones propuestas por el comercial.
-  for (const id of negociosTocados) await abonarAlRegistrarPago(workspaceId, id)
+  // Corre DESPUÉS de responder (`segundo-plano.ts`): era lo que llevaba «Conciliar» a 19,7 s.
+  await abonarEnSegundoPlano(workspaceId, negociosTocados)
 
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
   revalidatePath('/conciliacion')
@@ -1989,13 +2116,14 @@ export async function rechazarRepartoComercial(
   // Cargar los cobros de esta referencia propuestos por el comercial.
   const { data: cobrosRaw } = await db(supabase)
     .from('cobros')
-    .select('id, negocio_id, split_json')
+    .select('id, negocio_id, split_json, negocios:negocio_id ( codigo )')
     .eq('workspace_id', workspaceId)
     .eq('external_ref', ref)
   const comercial = ((cobrosRaw ?? []) as Array<{
     id: string
     negocio_id: string | null
-    split_json: { origen?: string; confirmado_at?: string | null } | null
+    split_json: { origen?: string; confirmado_at?: string | null; propuesto_por?: string | null } | null
+    negocios: { codigo: string | null } | null
   }>).filter((c) => c.split_json?.origen === 'comercial' && c.negocio_id)
 
   if (comercial.length === 0) {
@@ -2026,31 +2154,81 @@ export async function rechazarRepartoComercial(
     .eq('workspace_id', workspaceId)
     .in('negocio_id', negociosTocados)
 
-  // Constancia en el timeline de cada negocio → el comercial ve el rechazo + la nota.
-  if (staffId) {
-    const notaTxt = (nota ?? '').trim().slice(0, 300)
-    for (const id of negociosTocados) {
-      try {
-        await registrarActividad(db(supabase), {
-          workspace_id: workspaceId,
-          entidad_tipo: 'negocio',
-          entidad_id: id,
-          tipo: 'comentario',
-          autor_id: staffId,
-          contenido: `El área financiera rechazó el reparto propuesto para la referencia ${ref}.${notaTxt ? ` Nota: ${notaTxt}` : ' Vuelve a registrarlo.'}`,
-        }, 'rechazarRepartoComercial')
-      } catch { /* no bloquear por el log */ }
-    }
+  // Constancia en el timeline de cada negocio. La marca `campo_modificado` es la que lee
+  // `estadoRepartosDelNegocio` para pintar «Rechazado: <nota>» en el bloque: las porciones
+  // ya no existen, así que es lo único que queda del rechazo.
+  const notaTxt = (nota ?? '').trim().slice(0, 300)
+  for (const id of negociosTocados) {
+    await registrarActividad(db(supabase), {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: id,
+      tipo: 'cambio_sistema',
+      autor_id: staffId,
+      campo_modificado: CAMPO_REPARTO_RECHAZADO,
+      valor_anterior: ref,
+      valor_nuevo: notaTxt || null,
+      contenido: `El área financiera rechazó el reparto propuesto para la referencia ${ref}.${notaTxt ? ` Nota: ${notaTxt}` : ''} Vuelve a repartirlo.`,
+    }, 'rechazarRepartoComercial')
   }
 
+  // Y el comercial que lo propuso recibe la nota en su campana, no solo en el historial:
+  // hasta el 2026-10-19 el rechazo no le avisaba a nadie y el pago quedaba sin registrar.
+  await avisarRechazoAlComercial(supabase, workspaceId, {
+    referencia: ref,
+    nota: notaTxt,
+    propuestoPor: porRechazar.map((c) => c.split_json?.propuesto_por).filter((s): s is string => !!s),
+    negocioId: negociosTocados[0],
+    codigos: porRechazar.map((c) => c.negocios?.codigo).filter((s): s is string => !!s),
+  })
+
   // Rechazar tambien resuelve el pendiente del equipo: la decision ya se tomo.
-  // El comercial se entera por el activity_log de cada negocio.
   await resolverPendienteConciliacion(supabase, workspaceId, ref)
 
   for (const id of negociosTocados) revalidatePath(`/negocios/${id}`)
   for (const c of yaConfirmadas) if (c.negocio_id) revalidatePath(`/negocios/${c.negocio_id}`)
   revalidatePath('/conciliacion')
   return { success: true, eliminados: porRechazar.length }
+}
+
+/**
+ * Notificación al comercial que propuso el reparto rechazado. `propuesto_por` es un
+ * staff.id; la notificación va al profile de ese staff.
+ *
+ * Tipo `aprobacion_decidida`: es el del CHECK de `notificaciones` que dice «tu solicitud
+ * ya tiene decisión». Un tipo fuera del CHECK hace fallar el insert EN SILENCIO.
+ */
+async function avisarRechazoAlComercial(
+  supabase: unknown,
+  workspaceId: string,
+  p: { referencia: string; nota: string; propuestoPor: string[]; negocioId: string; codigos: string[] },
+) {
+  const staffIds = Array.from(new Set(p.propuestoPor))
+  if (staffIds.length === 0) return
+  try {
+    const { data } = await db(supabase)
+      .from('staff')
+      .select('profile_id')
+      .eq('workspace_id', workspaceId)
+      .in('id', staffIds)
+    const negocios = Array.from(new Set(p.codigos)).join(', ')
+    for (const s of ((data ?? []) as Array<{ profile_id: string | null }>)) {
+      if (!s.profile_id) continue
+      await db(supabase).rpc('crear_notificacion', {
+        p_workspace_id: workspaceId,
+        p_destinatario_id: s.profile_id,
+        p_tipo: 'aprobacion_decidida',
+        p_contenido: `El área financiera rechazó tu reparto de la referencia ${p.referencia}${negocios ? ` (${negocios})` : ''}.${p.nota ? ` Nota: ${p.nota}` : ''} Vuelve a repartirlo.`,
+        p_entidad_tipo: 'negocio',
+        p_entidad_id: p.negocioId,
+        p_deep_link: `/negocios/${p.negocioId}`,
+        p_metadata: { motivo: 'reparto_rechazado', referencia: p.referencia, nota: p.nota || null },
+        p_permitir_repetidas: true,
+      })
+    }
+  } catch {
+    // El rechazo ya se aplicó; el historial del negocio conserva la nota.
+  }
 }
 
 // El registro, listado, correccion y anulacion de pagos fuera de la pasarela vive en
@@ -2184,7 +2362,7 @@ export async function buscarNegociosParaReparto(
  * Las reglas viven en `src/lib/cobros/redistribucion.ts` (puro, 15 pruebas). Aquí solo
  * se resuelven contra la base y se ejecutan.
  */
-export async function redistribuirReferencia(input: {
+async function redistribuirReferenciaSinClave(input: {
   externalRef: string
   /** Valor real del pago que llegó. Se usa como techo. */
   pagoOriginal: number
@@ -2392,7 +2570,8 @@ export async function redistribuirReferencia(input: {
   // Las porciones nuevas o ajustadas se abonan a la factura de su negocio, si la hay. Un
   // abono YA emitido sobre una porción que esta redistribución anuló o bajó NO se deshace
   // desde aquí: queda en Siigo y lo anula Tesorería (ONE no borra documentos contables).
-  for (const negocioId of plan.negociosAfectados) await abonarAlRegistrarPago(workspaceId, negocioId)
+  // Corre DESPUÉS de responder (`segundo-plano.ts`).
+  await abonarEnSegundoPlano(workspaceId, plan.negociosAfectados)
 
   revalidatePath('/conciliacion')
   for (const negocioId of plan.negociosAfectados) revalidatePath(`/negocios/${negocioId}`)
@@ -2535,4 +2714,42 @@ export async function resolverAvisoRecaudo(input: {
 
 function fmtCop(n: number): string {
   return `$${Math.round(n).toLocaleString('es-CO')}`
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+/** Envía a la financiera un reparto NUEVO. Si la referencia ya tiene uno, se corrige con `editarRepartoComercial`. */
+export async function repartirPagoComercial(input: RepartirPagoInput, intencion?: string) {
+  return accionIdempotente<ResultadoReparto>(
+    { accion: 'repartirPagoComercial', clave: intencion, args: [input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => guardarRepartoComercialSinClave(input, 'nuevo'),
+  )
+}
+
+/**
+ * Corrige un reparto enviado y todavía sin aprobar: reemplaza todas sus porciones en una
+ * transacción y le avisa a la financiera. Aprobado, lo rechaza la base.
+ */
+export async function editarRepartoComercial(input: RepartirPagoInput, intencion?: string) {
+  return accionIdempotente<ResultadoReparto>(
+    { accion: 'editarRepartoComercial', clave: intencion, args: [input], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => guardarRepartoComercialSinClave(input, 'editar'),
+  )
+}
+
+export async function aceptarRepartoComercial(externalRef: string, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof aceptarRepartoComercialSinClave>>>(
+    { accion: 'aceptarRepartoComercial', clave: intencion, args: [externalRef], enCurso: () => ({ success: false, error: MENSAJE_EN_CURSO }) },
+    () => aceptarRepartoComercialSinClave(externalRef),
+  )
+}
+
+export async function redistribuirReferencia(input: Parameters<typeof redistribuirReferenciaSinClave>[0], intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof redistribuirReferenciaSinClave>>>(
+    { accion: 'redistribuirReferencia', clave: intencion, args: [input], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => redistribuirReferenciaSinClave(input),
+  )
 }

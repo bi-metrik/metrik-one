@@ -30,6 +30,7 @@
  */
 
 import type { MotivoCobertura } from './liberaciones';
+import type { TierResuelto } from './tier-fuentes';
 
 // ─── Vocabulario ───────────────────────────────────────────────────────────
 
@@ -253,4 +254,36 @@ export function calcularIndicadores(
     antiguedad_max_sin_decidir_dias: max,
     sin_cobertura_vigente: sinCoberturaVigente,
   };
+}
+
+// ─── Triage por tier (P1, diagnóstico Noor + Lucía 2026-10-20) ─────────────
+
+/**
+ * Toda coincidencia se guarda con `severidad = 'alto'`, sea la ONU o una nota
+ * de prensa. Con el masivo, la cola se llena de incidentes judiciales y lo
+ * vinculante queda enterrado. El triage ROTULA cada fila con el tier que ya se
+ * guarda en cada consulta, para que la oficial vea de un vistazo qué es qué.
+ *
+ * NO reordena ni cambia la severidad: por el C1 del concepto de Emilio
+ * (2026-08-31) el tier se observa y no decide hasta el bloque B, con el
+ * catálogo firmado. Lo garantiza `compliance-tier-c1-observable.test.ts`.
+ *
+ * Los rótulos de la bandeja no dicen "no vinculante" sobre ninguna lista
+ * internacional: desde 2026-10-05 la vinculancia de OFAC, UE y FTO se atribuye
+ * al supervisor del cliente (`cerebro/reglas/valida-alcance-normativo.md`).
+ */
+export type TonoTriage = 'alerta' | 'advertencia' | 'neutro';
+
+export const ROTULO_TRIAGE: Readonly<Record<TierResuelto, { texto: string; tono: TonoTriage }>> = {
+  tier_1: { texto: 'Lista vinculante', tono: 'alerta' },
+  tier_3: { texto: 'Lista restrictiva internacional', tono: 'advertencia' },
+  sin_clasificar: { texto: 'Fuente sin clasificar', tono: 'advertencia' },
+  tier_2: { texto: 'PEP', tono: 'advertencia' },
+  tier_4: { texto: 'Judicial o fuera de SARLAFT', tono: 'neutro' },
+  medios: { texto: 'Mención en medios', tono: 'neutro' },
+};
+
+/** El rótulo de una consulta por su tier máximo. null = anterior a la clasificación. */
+export function rotuloTriage(tier: TierResuelto | null | undefined): { texto: string; tono: TonoTriage } {
+  return ROTULO_TRIAGE[tier ?? 'sin_clasificar'];
 }

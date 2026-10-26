@@ -1,6 +1,8 @@
 'use client'
 
-import { useState, useTransition, type ReactNode } from 'react'
+import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
+import { useState, type ReactNode } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { AlertTriangle, BedDouble, Check, Image as ImageIcon, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -59,11 +61,11 @@ export default function HabitacionesDeOpcion({
   const [leyendo, setLeyendo] = useState(false)
   const [rechazo, setRechazo] = useState<string | null>(null)
   const [tasa, setTasa] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
   const habitaciones = habitacionesDeTarifa(tarifa)
-  const reparto = repartirHabitaciones(habitaciones, grupo)
+  const reparto = repartirHabitaciones(habitaciones, grupo, tarifa.correcciones)
   const faltantes = textoDeFaltantes(reparto)
   const monedaTarifa = monedaDeTarifa(tarifa)
   const estado = resolverHabitaciones(tarifa, grupo, { moneda: monedaTarifa.moneda })
@@ -103,7 +105,7 @@ export default function HabitacionesDeOpcion({
           setRechazo(r.mensaje)
         }
       } catch {
-        setRechazo('No se pudo leer el pantallazo. Vuelve a pegarlo.')
+        setRechazo(MENSAJE_LECTURA_INTERRUMPIDA)
       } finally {
         setLeyendo(false)
       }
@@ -170,6 +172,9 @@ export default function HabitacionesDeOpcion({
       {estado.estado === 'inconsistente' && (
         <p className="rounded-md bg-red-50 p-2 text-[11px] font-medium text-red-900">{estado.mensaje}</p>
       )}
+      {estado.estado === 'sin_costo' && (
+        <p className="rounded-md bg-amber-50 p-2 text-[11px] font-medium text-amber-900">{estado.mensaje}</p>
+      )}
 
       {estado.estado === 'resuelta' && hayPorConfirmar && (
         <div className="space-y-2 rounded-md border bg-background p-2.5">
@@ -222,7 +227,10 @@ export default function HabitacionesDeOpcion({
             onClick={() => accion(() => confirmarTarifaPorPasajero(itemId, enCOP ? null : tasaNum), 'Costo de las habitaciones cargado. Revisa el margen de la línea.')}
             className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50"
           >
-            <Check className="h-3 w-3" /> Confirmar y cargar el costo
+            {/* Punto 14 del brief del 2026-10-05: mientras el servidor guarda, el botón lo dice. Si
+                el servidor tarda (la acción espera en fila detrás del refresco), el primer clic parecía
+                no hacer nada: el botón solo se ponía gris. La causa en producción no se reprodujo. */}
+            <Check className="h-3 w-3" /> {isPending ? 'Cargando el costo…' : 'Confirmar y cargar el costo'}
           </button>
           <p className="text-[10px] text-muted-foreground">
             Al confirmar, esto REEMPLAZA los rubros de la línea. El precio lo calcula el margen.
@@ -282,6 +290,7 @@ export function FilaHabitacion({
         {h.sirveParaRestar && (
           <p className="text-[10px] text-muted-foreground">Sirve para restar el precio del menor de su mismo tipo de habitación.</p>
         )}
+        {h.avisoEstadia && <p className="text-[10px] font-semibold text-[#9A5F0C]" data-aviso-estadia>{h.avisoEstadia}</p>}
       </div>
       <button
         type="button"
@@ -338,7 +347,7 @@ export function PegarOtraHabitacion({
             setRechazo(r.mensaje)
           }
         } catch {
-          setRechazo('No se pudo leer el pantallazo. Vuelve a pegarlo.')
+          setRechazo(MENSAJE_LECTURA_INTERRUMPIDA)
         } finally {
           setLeyendo(false)
         }

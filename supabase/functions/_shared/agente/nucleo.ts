@@ -1,0 +1,689 @@
+// ============================================================
+// Núcleo conversacional — el turno (§3.1, §3.3, §3.5)
+// ------------------------------------------------------------
+// [modelo] loop de máximo 3 llamados (modo ANY): lecturas en paralelo; termina con `responder` o `proponer`.
+// [código] los candados: `proponer` no escribe (el dominio arma el resumen con datos reales); `responder` pasa por el
+// tema cerrado, los límites de Meta y el verificador. Un error de formato o del verificador vuelve al modelo UNA vez
+// (un llamado extra); la segunda, sale la respuesta fija con las opciones vigentes.
+// [código, sin modelo] el toque de una propuesta y el «sí» escrito solo: se ejecuta si la huella sigue vigente, una sola
+// vez (candado por huella).
+// [modelo, después del hecho] si el dominio lo pide (`trasEjecutar` con `seguir`), el modelo tiene un turno para seguir
+// (`seguirTrasToque`): propone lo que el hecho destrabó, pregunta lo que falta o llama `terminar`. Sale en el mismo
+// mensaje que la confirmación, debajo de ella; si el modelo falla, sale solo la confirmación.
+// Todo deja traza: llamados, tokens por modelo, herramientas, reglas, candados, verificador y tiempos.
+// ============================================================
+
+import type { ConfigAgente } from './config.ts';
+import { fechaBogota, mensajeDelTurno, recortarResultado, sistema } from './contexto.ts';
+import { CIERRAN, cierranCon, declaraciones, declaracionesRespaldo } from './herramientas.ts';
+import { fichasDeHerramienta, respuestaFija, temas, bloqueSiempre } from './reglamento.ts';
+import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar } from './render.ts';
+import { respaldoDe, verificar } from './verificador.ts';
+import { afirmaRegistroBorrado, anotarRegistrosBorrados, lineasRegistros, propuestaSobreBorrado } from './registros.ts';
+import type {
+  Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, RegistroConversacion, Reglamento, Salida, Traza, UsoLlamado,
+} from './tipos.ts';
+
+export interface DepsTurno {
+  modelo: Modelo;
+  dominio: Dominio;
+  reglamento: Reglamento;
+  config: ConfigAgente;
+  /** Hora de pared (para el estado). */
+  ahoraMs: () => number;
+  /** Reloj monotónico (para medir). */
+  reloj: () => number;
+  /**
+   * El prompt de sistema de otro bot (el asistente público arma el suyo por secciones, §7 de su diseño). Sin esto, el de
+   * siempre (`contexto.ts`): la bandeja de Trappvel no lo pasa y no cambia nada.
+   */
+  sistema?: (r: Reglamento, c: ConfigAgente) => string;
+  /**
+   * Una guarda más sobre el texto del modelo, después del verificador (el asistente público: un monto de plata solo si lo
+   * devolvió una herramienta). Devuelve los errores para el modelo; vacío = pasa. Como el verificador, vuelve al modelo
+   * UNA vez, pero sin pasarse del tope de llamados del turno; si no queda llamado o vuelve a fallar, sale la respuesta fija.
+   * `herramientas`: lo que devolvieron las herramientas de la conversación y del turno (y el resumen de la propuesta).
+   * Sin esto, no hay guarda (la bandeja de Trappvel no la pasa).
+   */
+  guardaTexto?: (texto: string, herramientas: string[]) => string[];
+}
+
+export interface EntradaTurno {
+  turnoId: string;
+  filas: FilaConversacion[];
+  nuevos: FilaConversacion[];
+  ctx: ContextoDominio;
+  /** El turno sigue a un hecho que la persona acaba de confirmar con un toque (`seguirTrasToque`). */
+  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito' };
+}
+
+export interface SalidaTurno {
+  salida: Salida | null;
+  traza: Traza;
+  /** El hecho se ejecutó y el dominio pide un turno del modelo para seguir (`seguirTrasToque`). */
+  seguir?: boolean;
+  /** Mensajes que salen después de `salida`, en orden (un cierre del dominio con varios mensajes). */
+  extras?: Salida[];
+}
+
+/** Cierra el turno que sigue a un hecho sin decir nada más (la persona ya tiene la confirmación). */
+export const TERMINAR = 'terminar';
+
+const DECLARACION_TERMINAR = {
+  name: TERMINAR,
+  description: 'Solo en el turno que sigue a un hecho confirmado: no queda nada que proponer ni que preguntar. El sistema deja la confirmación sola.',
+  parameters: { type: 'object', properties: { reglas_usadas: { type: 'array', items: { type: 'string' } } } },
+};
+
+type PropuestaGuardada = NonNullable<Traza['propuesta']>;
+
+// ── Propuestas ───────────────────────────────────────────────────────────────
+
+/** Todas las propuestas de la conversación, en orden, con lo que pasó con cada una. */
+export function propuestas(filas: FilaConversacion[]): Array<{ p: PropuestaGuardada; resultado: string | null; at: string }> {
+  const out: Array<{ p: PropuestaGuardada; resultado: string | null; at: string }> = [];
+  for (const f of filas) {
+    if (f.traza?.propuesta) out.push({ p: f.traza.propuesta, resultado: null, at: f.created_at });
+    const e = f.traza?.ejecucion;
+    if (e && (e.resultado === 'ejecutada' || e.resultado === 'rechazada')) {
+      const x = out.find((o) => o.p.huella === e.huella);
+      if (x && !x.resultado) x.resultado = e.resultado;
+    }
+  }
+  return out;
+}
+
+/**
+ * La propuesta vigente: la última, si nadie la ejecutó ni la rechazó y la conversación no la dejó atrás. Queda atrás
+ * cuando, después de proponerla, una herramienta consultó OTRA cosa concreta (`sobre`: en la bandeja, `ver_viaje` de otro
+ * viaje). Una propuesta sin `sobre` (abrir un viaje nuevo) queda atrás con cualquier consulta concreta: en vivo
+ * (2026-10-09, 12:51) «¿Abro este viaje?» siguió pendiente después de «Listo, retomamos M1 26 1», volvió pegada a una
+ * respuesta fija y un «sí» escrito la habría ejecutado. Estructural: lee la traza, no el texto. Pura.
+ */
+export function propuestaVigente(filas: FilaConversacion[], o: { venceConRespuesta?: boolean } = {}): PropuestaGuardada | null {
+  const ps = propuestas(filas);
+  const u = ps.at(-1);
+  if (!u || u.resultado) return null;
+  const i = filas.findIndex((f) => f.traza?.propuesta?.huella === u.p.huella);
+  const despues = i >= 0 ? filas.slice(i + 1) : [];
+  const atras = despues.some((f) => (f.traza?.herramientas ?? []).some((h) => h.ok && h.sobre !== undefined && h.sobre !== u.p.sobre));
+  if (atras) return null;
+  // Con `venceConRespuesta`: cualquier mensaje posterior del modelo que no reenvía ESTA propuesta (sus botones llevan su
+  // huella) la deja atrás. Estructural: mira los ids de los botones que salieron, no el texto.
+  if (o.venceConRespuesta && despues.some((f) => f.traza?.tipo === 'modelo' && f.traza.salida && !reenviaLa(f.traza.salida, u.p.huella))) return null;
+  return u.p;
+}
+
+/** ¿Esta salida lleva los botones de la propuesta con esa huella? (el reenvío de la pendiente). Pura. */
+function reenviaLa(s: Salida, huella: string): boolean {
+  return 'opciones' in s && s.opciones.some((x) => x.id.includes(`|${huella}|`));
+}
+
+/** La vigente según el dominio (si sus propuestas vencen con cualquier respuesta). */
+export function vigenteDe(filas: FilaConversacion[], d: Pick<Dominio, 'propuestaVenceConRespuesta'>): PropuestaGuardada | null {
+  return propuestaVigente(filas, { venceConRespuesta: d.propuestaVenceConRespuesta === true });
+}
+
+export async function huellaPropuesta(accion: string, datos: unknown, turnoId: string): Promise<string> {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify({ accion, datos, turnoId })));
+  return [...new Uint8Array(d)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * El mensaje de botones de una propuesta: lo de `arriba` (una respuesta del modelo o una respuesta fija) y debajo el
+ * resumen fijo del código. El cuerpo de botones de Meta va hasta 1024 caracteres: si no cabe, se corta lo de arriba
+ * (nunca el resumen, que es lo que se confirma). Pura.
+ */
+export function salidaPropuesta(p: Pick<PropuestaGuardada, 'huella' | 'resumen' | 'si' | 'no'>, arriba?: string | null): Salida {
+  const cabe = META.cuerpoBotones - [...p.resumen].length - 1;
+  const sinRepetir = arriba ? sinLineasDelResumen(arriba, p.resumen) : '';
+  const a = sinRepetir && cabe >= 20 ? cortarEnPalabra(sinRepetir, cabe) : '';
+  return { tipo: 'botones', texto: [a, p.resumen].filter(Boolean).join('\n'), opciones: botonesPropuesta(p.huella, p.si, p.no) };
+}
+
+const comparable = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
+
+/**
+ * Lo de arriba sin las líneas que ya dice el resumen: en vivo, el modelo escribió en `texto` la misma pregunta del
+ * resumen («¿Lo anoto en …?») y salió dos veces. Pura.
+ */
+export function sinLineasDelResumen(arriba: string, resumen: string): string {
+  const delResumen = new Set(resumen.split('\n').map(comparable).filter(Boolean));
+  return arriba.split('\n').filter((l) => !delResumen.has(comparable(l))).join('\n').trim();
+}
+
+/** JSON con las llaves ordenadas: `jsonb` no guarda el orden, así que dos datos iguales pueden volver distintos. Pura. */
+function estable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(estable).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${estable(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/** ¿El texto del bot dice que NO registra lo que propone («lo cancelo», «solo puedo anotar gastos»)? Pura. */
+export function anunciaQueNoRegistra(texto: string): boolean {
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\b(lo cancelo|la cancelo|cancelad[oa]|lo anulo|no (lo|la) (registro|anoto|voy a registrar)|no (puedo|se puede) (registrar|anotar)|solo (puedo )?(anotar|registrar) gastos)\b/.test(t);
+}
+
+/** ¿Es la misma propuesta (misma acción, mismos datos resueltos por el código) que la pendiente? Pura. */
+export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<Propuesta, 'accion' | 'datos'>): boolean {
+  return a.accion === b.accion && estable(a.datos) === estable(b.datos);
+}
+
+// ── El estado y el respaldo ──────────────────────────────────────────────────
+
+async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversacion[] | 'error' | null = null): Promise<string[]> {
+  const vig = vigenteDe(e.filas, deps.dominio);
+  const delDominio = [...((await deps.dominio.estado?.(e.ctx)) ?? []), ...lineasRegistros(regs)];
+  return [
+    `Ahora: ${fechaBogota(deps.ahoraMs())} (Bogotá).`,
+    `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
+    `Propuesta pendiente: ${vig ? `${vig.resumen.replace(/\n/g, ' · ')} — espera su toque` : 'ninguna'}.`,
+    ...delDominio,
+    ...(e.tras ? [
+      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')} La confirmación ya la escribe el sistema: no la repitas.`,
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si no queda nada, llama \`${TERMINAR}\`.`,
+    ] : []),
+  ];
+}
+
+/** Todo lo que respalda un dato del texto: la conversación, lo consultado, el estado y el reglamento. */
+function fuentesDeRespaldo(e: EntradaTurno, extra: string[]): string[] {
+  const f: string[] = [...extra];
+  for (const x of e.filas) {
+    if (x.texto) f.push(x.texto);
+    // Lo leído de un soporte respalda el «el recibo dice $6.880» (con la fecha también como «21/10/2026»).
+    const l = x.media?.lectura;
+    if (l) {
+      f.push(JSON.stringify(l));
+      if (l.fecha) {
+        const [a, m, d] = l.fecha.split('-');
+        f.push(`${Number(d)}/${Number(m)}/${a} ${d}/${m}/${a} ${Number(d)} de ${MESES[Number(m) - 1] ?? ''} de ${a}`);
+      }
+    }
+    for (const o of x.opciones ?? []) f.push(`${o.titulo} ${o.descripcion ?? ''}`);
+    for (const h of x.traza?.herramientas ?? []) f.push(JSON.stringify(h.datos ?? ''));
+    if (x.traza?.propuesta) f.push(x.traza.propuesta.resumen);
+    for (const l of x.traza?.ejecucion?.lineas ?? []) f.push(l);
+    if (x.traza?.ejecucion?.escrituras?.length) f.push(JSON.stringify(x.traza.ejecucion.escrituras));
+  }
+  for (const r of e.ctx.resultadosPrevios) f.push(JSON.stringify(r.datos ?? ''));
+  return f;
+}
+
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
+ * Tope de la preparación de adjuntos (bajar, guardar y leer los soportes) antes del turno del modelo. No se descuenta del
+ * tope del turno (2026-10-21: con 9 s compartidos, dos PDF juntos se quedaban sin leer y el bot pedía sus montos).
+ */
+export const TOPE_PREPARAR_MS = 15000;
+
+/** Los registros de la conversación revisados en la base (si el dominio los declara). Nunca lanza: si falla, `'error'`. */
+async function registrosDe(d: Dominio, ctx: ContextoDominio): Promise<RegistroConversacion[] | 'error' | null> {
+  if (!d.registros) return null;
+  try {
+    return await d.registros(ctx);
+  } catch (err) {
+    console.error('[agente] registros de la conversación:', err);
+    return 'error';
+  }
+}
+
+/** Corre la preparación del dominio con tope: si no alcanza, el turno sigue sin lo que faltó. Nunca lanza. */
+async function prepararAdjuntos(d: Dominio, ctx: ContextoDominio, topeMs: number): Promise<Array<Record<string, unknown>> | null> {
+  if (!d.prepararTurno) return null;
+  let soltar: () => void = () => {};
+  const corte = new Promise<'corte'>((r) => {
+    const t = setTimeout(() => r('corte'), Math.max(0, topeMs));
+    soltar = () => clearTimeout(t);
+  });
+  try {
+    const r = await Promise.race([d.prepararTurno(ctx), corte]);
+    if (r === 'corte') return [{ error: `tope de ${topeMs} ms: el turno sigue sin lo que faltó` }];
+    return r.length ? r : null;
+  } catch (err) {
+    return [{ error: String(err).slice(0, 160) }];
+  } finally {
+    soltar();
+  }
+}
+
+/** La respuesta fija de «no pude» con las opciones vigentes (la propuesta pendiente, si la hay). */
+function caido(deps: DepsTurno, e: EntradaTurno): Salida {
+  const t = respuestaFija(deps.reglamento, 'rf.modelo_caido');
+  const vig = vigenteDe(e.filas, deps.dominio);
+  return vig ? salidaPropuesta(vig, t) : { tipo: 'texto', texto: t };
+}
+
+// ── El turno del modelo ──────────────────────────────────────────────────────
+
+export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<SalidaTurno> {
+  const { reglamento: r, config: c, dominio: d } = deps;
+  const traza: Traza = {
+    tipo: 'modelo', bot: d.bot, reglamento: { id: r.id, version: r.version, huella: r.huella },
+    llamados: 0, uso: [], herramientas: [], candados: [], verificador: [], reglas_usadas: [], ms_modelo: 0, ms_herramientas: 0,
+  };
+  // Los soportes que llegaron (fotos, PDF): se bajan, se guardan y se leen antes de armar lo que ve el modelo. El tiempo
+  // de leerlos no se descuenta del turno del modelo (2026-10-21: con dos PDF juntos, la lectura se comía el turno y el
+  // bot preguntaba los montos que los PDF ya traían).
+  const adjuntos = await prepararAdjuntos(d, e.ctx, TOPE_PREPARAR_MS);
+  if (adjuntos) traza.adjuntos = adjuntos;
+  const t0Modelo = deps.reloj();
+  // La base manda (2026-10-21): lo registrado en la conversación, revisado ahora.
+  const regs = await registrosDe(d, e.ctx);
+  if (regs !== null) traza.registros = regs === 'error' ? 'error' : regs.map((x) => ({ alias: x.alias, estado: x.estado }));
+  const est = await estado(deps, e, regs);
+  const sis = deps.sistema ? { texto: deps.sistema(r, c) } : sistema(r, c);
+  const usuario = mensajeDelTurno({ estado: est, filas: anotarRegistrosBorrados(e.filas, regs), nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
+  const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
+  const todas = decl.map((x) => x.name);
+  const declRespaldo = declaracionesRespaldo(decl);
+  const cierran = e.tras ? [...cierranCon(d), TERMINAR] : cierranCon(d);
+  // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
+  // presupuesto agotado tras `buscar` y `consultar_reglas` (que ya no existe), el modelo cerró «¿qué le falta al viaje de…?» con
+  // `link_autorizacion` porque era la única salida con la ficha a mano. Ahí contesta con `responder`.
+  const forzados = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
+  // Tras un hecho, lo que no sea seguir (falla, tema fuera, `terminar`) deja la confirmación sola: el hecho ya ocurrió.
+  const soloHecho: Salida | null = e.tras ? { tipo: 'texto', texto: e.tras.lineas.join('\n') } : null;
+  const caer = (): Salida => soloHecho ?? caido(deps, e);
+  const conHecho = (s: Salida): Salida => (e.tras ? { ...s, texto: [...e.tras.lineas, s.texto].filter(Boolean).join('\n') } : s);
+  let termino = false;
+  const mensajes: Mensaje[] = [{ role: 'user', parts: [{ text: usuario }] }];
+  const resultadosTurno: string[] = [];
+  const respaldoFijo = [usuario, bloqueSiempre(r)];
+  let presupuesto = c.topes.llamados;
+  let correccionUsada = false;
+  let correccionGuarda = false;
+  const deHerramientas = (extra: string[] = []) => [...e.ctx.resultadosPrevios.map((x) => JSON.stringify(x.datos ?? '')), ...extra];
+  const fin = (salida: Salida | null, extra: Partial<Traza> = {}): SalidaTurno => {
+    const t: Traza = { ...traza, ...extra, salida };
+    if (e.tras) {
+      t.tras_toque = { origen: e.tras.origen, resultado: t.propuesta ? 'propuesta' : termino ? 'terminar' : salida === soloHecho ? 'solo_hecho' : 'respuesta' };
+      if (salida === soloHecho) t.respuesta_fija = 'rf.hecho';
+    }
+    return { salida, traza: t };
+  };
+
+  while (traza.llamados! < presupuesto) {
+    const restante = c.topes.turnoMs - (deps.reloj() - t0Modelo);
+    if (restante < 500) return fin(caer(), { error: 'tope de tiempo del turno' });
+    const ultimo = traza.llamados! >= presupuesto - 1;
+    const tm = deps.reloj();
+    const res = await deps.modelo.llamar({
+      sistema: sis.texto, mensajes, herramientas: decl, permitidas: ultimo ? forzados : todas, timeoutMs: restante,
+      ...(c.respaldoEstricto && c.respaldo ? { herramientasRespaldo: declRespaldo } : {}),
+    });
+    traza.ms_modelo! += Math.round(deps.reloj() - tm);
+    traza.llamados!++;
+    traza.uso!.push(...res.usos);
+    if (!res.ok) return fin(caer(), { error: `modelo: ${res.motivo}` });
+    mensajes.push(res.mensaje);
+
+    const llamadas = res.mensaje.parts.filter((p): p is Parte & { functionCall: NonNullable<Parte['functionCall']> } => !!p.functionCall);
+    const lecturas = llamadas.filter((p) => !cierran.includes(p.functionCall.name));
+    const cierres = llamadas.filter((p) => cierran.includes(p.functionCall.name));
+
+    if (lecturas.length) {
+      const th = deps.reloj();
+      const respuestas = await Promise.all(lecturas.map(async (p) => {
+        const nombre = p.functionCall.name;
+        const args = p.functionCall.args ?? {};
+        const ti = deps.reloj();
+        let r2: { ok: boolean; datos: unknown; error?: string; privado?: unknown; sobre?: string };
+        try {
+          if (d.lecturas.some((l) => l.name === nombre)) {
+            r2 = await d.leer(nombre, args, e.ctx);
+          } else {
+            r2 = { ok: false, datos: null, error: `No existe la herramienta «${nombre}». Usa: ${todas.join(', ')}.` };
+          }
+        } catch (err) {
+          r2 = { ok: false, datos: null, error: `No pude consultar ahora (${String(err).slice(0, 80)}). No digas que no existe: di que no pudiste revisar.` };
+        }
+        const reglas = fichasDeHerramienta(r, nombre);
+        const datos = recortarResultado(r2.datos);
+        traza.herramientas!.push({ nombre, args, ok: r2.ok, datos, ...(r2.privado !== undefined ? { privado: r2.privado } : {}), ...(r2.sobre !== undefined ? { sobre: r2.sobre } : {}), error: r2.error, ms: Math.round(deps.reloj() - ti) });
+        // Lo que se leyó en este turno también respalda la propuesta del mismo turno.
+        e.ctx.resultadosPrevios.push({ herramienta: nombre, args, datos: r2.datos, privado: r2.privado });
+        resultadosTurno.push(JSON.stringify(datos ?? ''));
+        const response = r2.ok ? { ok: true, resultado: datos, ...(reglas.length ? { reglas } : {}) } : { ok: false, error: r2.error };
+        return { functionResponse: { name: nombre, response, ...(p.functionCall.id ? { id: p.functionCall.id } : {}) } } as Parte;
+      }));
+      // Un cierre en el mismo llamado que una lectura no vio su resultado: no sale.
+      for (const p of cierres) {
+        respuestas.push({ functionResponse: { name: p.functionCall.name, response: { ok: false, error: 'No se envió: primero mira el resultado de las consultas de este mismo llamado.' }, ...(p.functionCall.id ? { id: p.functionCall.id } : {}) } });
+      }
+      traza.ms_herramientas! += Math.round(deps.reloj() - th);
+      mensajes.push({ role: 'user', parts: respuestas });
+      continue;
+    }
+
+    const cierre = cierres[0];
+    if (!cierre) return fin(caer(), { error: 'el modelo no llamó ninguna herramienta' });
+    const nombre = cierre.functionCall.name;
+    const args = (cierre.functionCall.args ?? {}) as Record<string, unknown>;
+    if (Array.isArray(args.reglas_usadas)) traza.reglas_usadas!.push(...args.reglas_usadas.map(String));
+    // Cada llamada del mensaje lleva su respuesta: Claude rechaza (HTTP 400) un `tool_use` sin su `tool_result` (medido
+    // en el arnés del 2026-10-21: el modelo cerró con dos llamadas y el segundo llamado del turno falló). Solo se atiende
+    // la primera; las demás vuelven sin ejecutar.
+    const devolver = (error: string) => {
+      mensajes.push({
+        role: 'user',
+        parts: cierres.map((c) => ({
+          functionResponse: {
+            name: c.functionCall.name,
+            response: { ok: false, error: c === cierre ? error : 'No se ejecutó: llama una sola herramienta que cierre el turno por vez.' },
+            ...(c.functionCall.id ? { id: c.functionCall.id } : {}),
+          },
+        })),
+      });
+    };
+
+    if (nombre === TERMINAR) {
+      termino = true;
+      return fin(soloHecho);
+    }
+
+    // Un cierre del dominio: la salida la escribe el código (p. ej. el link real y el mensaje para reenviar). Si el
+    // candado lo ataja, vuelve al modelo con el error, como `proponer`.
+    if (d.cerrar && (d.cierres ?? []).some((c) => c.name === nombre)) {
+      const th = deps.reloj();
+      let r: Awaited<ReturnType<NonNullable<Dominio['cerrar']>>>;
+      try {
+        r = await d.cerrar(nombre, args, e.ctx);
+      } catch (err) {
+        r = { ok: false, error: `No pude hacerlo ahora (${String(err).slice(0, 80)}). Dilo así, sin inventar el resultado.`, candado: 'cierre_fallo' };
+      }
+      const ms = Math.round(deps.reloj() - th);
+      traza.ms_herramientas! += ms;
+      traza.herramientas!.push({ nombre, args, ok: r.ok, ...(r.ok ? { datos: r.datos, ...(r.privado !== undefined ? { privado: r.privado } : {}) } : { error: r.error }), ms });
+      if (!r.ok) {
+        traza.candados!.push({ candado: r.candado, detalle: r.error });
+        devolver(r.error);
+        continue;
+      }
+      const [primera, ...resto] = r.salidas;
+      if (!primera) return fin(caer(), { error: `${nombre} sin salida` });
+      const s1 = fin(conHecho(primera), { tema: nombre, ...(resto.length ? { salidas_extra: resto } : {}) });
+      return resto.length ? { ...s1, extras: resto } : s1;
+    }
+
+    if (nombre === 'proponer') {
+      const accion = String(args.accion ?? '');
+      const datos = (args.datos && typeof args.datos === 'object' ? args.datos : {}) as Record<string, unknown>;
+      const th = deps.reloj();
+      const borrado = propuestaSobreBorrado(datos, regs);
+      const p = borrado
+        ? { ok: false as const, error: `${borrado.alias} ya no existe en la base (lo borraron): no se puede tocar. No digas que está registrado; si lo quieren otra vez, propónlo como uno nuevo.`, candado: 'registro_borrado' }
+        : d.acciones.includes(accion)
+        ? await d.proponer(accion, datos, e.ctx)
+        : { ok: false as const, error: `Acción desconocida. Usa una de: ${d.acciones.join(', ')}.`, candado: 'accion_desconocida' };
+      traza.ms_herramientas! += Math.round(deps.reloj() - th);
+      const respaldoCandado = !p.ok && 'respaldo' in p ? p.respaldo : undefined;
+      traza.herramientas!.push({ nombre, args, ok: p.ok, ...(p.ok ? { datos: p.propuesta.resumen } : { error: p.error, ...(respaldoCandado !== undefined ? { datos: respaldoCandado } : {}) }), ms: Math.round(deps.reloj() - th) });
+      if (!p.ok) {
+        // Lo que el candado leyó de la base (las cuotas de un ingreso que no cuadra) respalda las cifras que el modelo diga
+        // de ese error, en este turno y en los siguientes (queda en `traza.herramientas[].datos`).
+        if (respaldoCandado !== undefined) resultadosTurno.push(JSON.stringify(respaldoCandado));
+        traza.candados!.push({ candado: p.candado, detalle: p.error });
+        devolver(p.error);
+        continue;
+      }
+      // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
+      let arriba: string | null = null;
+      let texto = String(args.texto ?? '').trim();
+      // Un resumen con su botón de registrar no sale debajo de un texto que dice que no se registra (caso real 2026-10-21:
+      // «solo puedo anotar gastos… lo cancelo» y, en el mismo mensaje, la propuesta de gasto con «¿Lo registro?»). Es una
+      // invariante sobre lo que escribe el bot, no una lectura de lo que dijo la persona.
+      if (texto && anunciaQueNoRegistra(texto)) {
+        traza.candados!.push({ candado: 'propuesta_contradicha', detalle: texto.slice(0, 200) });
+        devolver('No se envió: el texto dice que no lo registras y abajo iba la propuesta para registrarlo. Si no se registra, contesta con `responder` sin propuesta; si es otra cosa (p. ej. un ingreso y no un gasto), propón eso.');
+        continue;
+      }
+      const contradice = texto ? deps.dominio.revisarTextoPropuesta?.(texto, p.propuesta) ?? null : null;
+      if (contradice) {
+        traza.candados!.push({ candado: 'texto_contra_propuesta', detalle: texto.slice(0, 200) });
+        devolver(contradice);
+        continue;
+      }
+      // Del respaldo no sale texto arriba de una propuesta (`respaldoEstricto`): su declaración no lo trae, y si igual lo
+      // escribe, se ignora. Lo decide quién escribió el llamado, no lo que dice.
+      if (texto && c.respaldoEstricto && c.respaldo && res.mensaje.modelo === c.respaldo.modelo && c.respaldo.modelo !== c.principal.modelo) {
+        traza.candados!.push({ candado: 'respaldo_sin_texto', detalle: texto.slice(0, 200) });
+        texto = '';
+      }
+      if (texto) {
+        const render = renderizar(texto, [], { turno: e.turnoId.slice(0, 8), topeTexto: c.topes.texto, final: correccionUsada });
+        if (!render.ok) {
+          correccionUsada = true;
+          presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+          traza.candados!.push({ candado: 'formato_meta', detalle: render.error });
+          devolver(`${render.error} (el \`texto\` de \`proponer\`)`);
+          continue;
+        }
+        const motivos = [...verificar(render.salida.texto, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno), p.propuesta.resumen])), ...afirmaRegistroBorrado(render.salida.texto, regs)];
+        if (motivos.length) {
+          traza.verificador!.push({ motivo: motivos.join('; '), texto: render.salida.texto });
+          if (!correccionUsada) {
+            correccionUsada = true;
+            presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+            devolver(`No se envió porque el \`texto\`: ${motivos.join('; ')}. Vuelve a llamar \`proponer\` con el texto sin eso (los datos tienen que salir de la conversación o de una herramienta).`);
+            continue;
+          }
+          // Segunda vez: el texto no sale; la propuesta (que arma el código con datos reales) sí.
+        } else {
+          const guarda = deps.guardaTexto?.(render.salida.texto, deHerramientas([p.propuesta.resumen])) ?? [];
+          if (guarda.length) {
+            traza.candados!.push({ candado: 'guarda_texto', detalle: guarda.join('; ').slice(0, 200) });
+            if (!correccionGuarda && traza.llamados! < presupuesto) {
+              correccionGuarda = true;
+              devolver(`No se envió el \`texto\`: ${guarda.join('; ')}. Vuelve a llamar \`proponer\` con el texto corregido.`);
+              continue;
+            }
+            // Segunda vez (o sin llamado): el texto no sale; la propuesta (armada por el código) sí.
+          } else {
+            arriba = render.salida.texto;
+          }
+        }
+      }
+      // Candado: la misma propuesta que ya está pendiente no se arma de nuevo. Se reenvía LA PENDIENTE (misma huella,
+      // con sus botones) y arriba la respuesta del modelo o una línea fija: en vivo, el texto suelto dejaba los botones
+      // muy arriba en el chat.
+      const vig = vigenteDe(e.filas, deps.dominio);
+      if (vig && mismaPropuesta(vig, p.propuesta)) {
+        traza.candados!.push({ candado: 'propuesta_repetida', detalle: `${accion}: igual a la pendiente ${vig.huella}` });
+        return fin(salidaPropuesta(vig, arriba ?? TEXTO_PROPUESTA_PENDIENTE), { tema: 'propuesta', ...(arriba ? {} : { respuesta_fija: 'propuesta_pendiente' }) });
+      }
+      const huella = await huellaPropuesta(accion, p.propuesta.datos, e.turnoId);
+      const guardada: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: { accion, datos } };
+      // Tras un hecho, la confirmación va primero y la propuesta debajo, en el mismo mensaje (si no cabe, se corta lo
+      // del modelo, no la confirmación ni el resumen).
+      const encima = e.tras ? [...e.tras.lineas, arriba].filter(Boolean).join('\n') : arriba;
+      return fin(salidaPropuesta(guardada, encima), { propuesta: guardada, tema: 'propuesta' });
+    }
+
+    // responder
+    const tema = String(args.tema ?? '');
+    traza.tema = tema;
+    if (tema === 'fuera' || !temas(r).includes(tema)) {
+      if (tema !== 'fuera') traza.candados!.push({ candado: 'tema_cerrado', detalle: `tema «${tema}» fuera de la lista` });
+      if (soloHecho) return fin(soloHecho);
+      const t = respuestaFija(r, 'rf.fuera_de_tema');
+      return fin({ tipo: 'texto', texto: t }, { respuesta_fija: 'rf.fuera_de_tema' });
+    }
+    const texto = String(args.texto ?? '').trim();
+    const opciones = opcionesDelModelo(args.opciones);
+    const render = renderizar(texto, opciones, { turno: e.turnoId.slice(0, 8), topeTexto: c.topes.texto, final: correccionUsada });
+    if (!render.ok) {
+      correccionUsada = true;
+      presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+      traza.candados!.push({ candado: 'formato_meta', detalle: render.error });
+      devolver(render.error);
+      continue;
+    }
+    // El dominio revisa lo que sale (ONE: una lista de negocios o «Gasto de empresa» armada por el modelo no sale).
+    const delDominio = d.revisarRespuesta?.(render.salida, e.ctx) ?? null;
+    if (delDominio) {
+      traza.candados!.push({ candado: 'respuesta_del_dominio', detalle: delDominio });
+      if (!correccionUsada) {
+        correccionUsada = true;
+        presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+        devolver(delDominio);
+        continue;
+      }
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'respuesta_del_dominio' });
+    }
+    const aVerificar = [render.salida.texto, ...('opciones' in render.salida ? render.salida.opciones.map((o) => `${o.titulo}. ${o.descripcion ?? ''}`) : [])].join('\n');
+    const motivos = texto ? [...verificar(aVerificar, respaldoDe([...respaldoFijo, ...fuentesDeRespaldo(e, resultadosTurno)])), ...afirmaRegistroBorrado(aVerificar, regs)] : ['texto vacío'];
+    if (motivos.length) {
+      traza.verificador!.push({ motivo: motivos.join('; '), texto: aVerificar });
+      if (!correccionUsada) {
+        correccionUsada = true;
+        presupuesto = Math.max(presupuesto, traza.llamados! + 1);
+        devolver(`No se envió porque: ${motivos.join('; ')}. Escríbelo otra vez sin eso (los datos tienen que salir de la conversación o de una herramienta).`);
+        continue;
+      }
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'verificador' });
+    }
+    const guarda = texto ? (deps.guardaTexto?.(aVerificar, deHerramientas()) ?? []) : [];
+    if (guarda.length) {
+      traza.candados!.push({ candado: 'guarda_texto', detalle: guarda.join('; ').slice(0, 200) });
+      // Un reintento, dentro del tope de llamados del turno (no lo alarga, a diferencia del verificador).
+      if (!correccionGuarda && traza.llamados! < presupuesto) {
+        correccionGuarda = true;
+        devolver(`No se envió porque: ${guarda.join('; ')}. Escríbelo otra vez.`);
+        continue;
+      }
+      return fin(caer(), { respuesta_fija: soloHecho ? 'rf.hecho' : 'rf.modelo_caido', error: 'guarda' });
+    }
+    return fin(conHecho(render.salida));
+  }
+  return fin(caer(), { error: 'tope de llamados sin respuesta' });
+}
+
+// ── El toque de una propuesta (y el «sí» escrito solo), sin modelo ────────────
+
+export const TEXTO_YA_HECHO = 'Eso ya quedó hecho.';
+export const TEXTO_SIN_VIGENTE = 'Ese botón ya no está vigente: no hice nada.';
+/** Cuando el modelo repite la propuesta pendiente sin decir nada más: va arriba de la pendiente reenviada. No afirma nada. */
+export const TEXTO_PROPUESTA_PENDIENTE = 'Esto sigue esperando tu toque:';
+export const TEXTO_NO_PUDE = 'No pude hacerlo ahora: no se escribió nada. Toca de nuevo en un rato.';
+
+/** «sí» escrito solo, sin más palabras (como en #1056). Pura. */
+export function esSiSolo(texto: string | null | undefined): boolean {
+  const t = String(texto ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/g, '');
+  return t === 'si';
+}
+
+export async function toqueDePropuesta(
+  deps: Omit<DepsTurno, 'modelo'> & { almacen: Pick<Almacen, 'tomarCandado' | 'soltarCandado'> },
+  e: EntradaTurno,
+  toque: { huella: string; si: boolean },
+  tipo: 'toque_propuesta' | 'si_escrito' = 'toque_propuesta',
+): Promise<SalidaTurno> {
+  const t0 = deps.reloj();
+  const base: Traza = { tipo, bot: deps.dominio.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella } };
+  const ps = propuestas(e.filas);
+  const esta = ps.find((x) => x.p.huella === toque.huella);
+  const vig = vigenteDe(e.filas, deps.dominio);
+  const salida = (s: Salida, ejecucion: Traza['ejecucion'], extra: Partial<Traza> = {}): SalidaTurno =>
+    ({ salida: s, traza: { ...base, ...extra, ejecucion, salida: s, ms_herramientas: Math.round(deps.reloj() - t0) } });
+
+  if (!esta) {
+    return vig
+      ? salida(salidaPropuesta(vig, respuestaFija(deps.reglamento, 'rf.toque_viejo')), { huella: toque.huella, resultado: 'vieja' })
+      : salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' });
+  }
+  if (esta.resultado) {
+    return salida({ tipo: 'texto', texto: esta.resultado === 'ejecutada' ? TEXTO_YA_HECHO : respuestaFija(deps.reglamento, 'rf.no_hice_nada') }, { huella: toque.huella, resultado: 'repetida' });
+  }
+  if (!vig || vig.huella !== toque.huella) {
+    return vig
+      ? salida(salidaPropuesta(vig, respuestaFija(deps.reglamento, 'rf.toque_viejo')), { huella: toque.huella, resultado: 'vieja' })
+      : salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' });
+  }
+  if (!toque.si) {
+    return salida({ tipo: 'texto', texto: respuestaFija(deps.reglamento, 'rf.no_hice_nada') }, { huella: toque.huella, accion: vig.accion, resultado: 'rechazada' });
+  }
+  // La tanda cambió desde que se armó: se vuelve a armar con los mismos datos del modelo y se muestra la de ahora.
+  if (deps.dominio.sigueVigente && !deps.dominio.sigueVigente(vig, e.ctx)) {
+    const a = vig.args_modelo;
+    const p = await deps.dominio.proponer(String(a.accion), (a.datos ?? {}) as Record<string, unknown>, e.ctx);
+    if (!p.ok) return salida({ tipo: 'texto', texto: TEXTO_SIN_VIGENTE }, { huella: toque.huella, resultado: 'vieja' }, { candados: [{ candado: p.candado, detalle: p.error }] });
+    const huella = await huellaPropuesta(String(a.accion), p.propuesta.datos, e.turnoId);
+    const nueva: PropuestaGuardada = { ...p.propuesta, huella, args_modelo: a };
+    return salida(salidaPropuesta(nueva, respuestaFija(deps.reglamento, 'rf.toque_viejo')), { huella: toque.huella, resultado: 'vieja' }, { propuesta: nueva });
+  }
+  // Una sola vez por huella, aunque lleguen dos toques a la vez.
+  const clave = `agente:propuesta:${toque.huella}`;
+  if (!(await deps.almacen.tomarCandado(clave, 7 * 24 * 3600))) {
+    return salida({ tipo: 'texto', texto: TEXTO_YA_HECHO }, { huella: toque.huella, resultado: 'repetida' });
+  }
+  try {
+    const h = await deps.dominio.ejecutar(vig, e.ctx);
+    const ejecucion = {
+      huella: toque.huella, accion: vig.accion, resultado: 'ejecutada' as const, lineas: h.lineas, escrituras: h.escrituras, nombrados: h.nombrados, consumidos: h.consumidos,
+    };
+    // Lo que ya se puede proponer con lo dicho (abrir un viaje → anotar lo que el comercial ya contó de él).
+    let sig: Awaited<ReturnType<NonNullable<Dominio['trasEjecutar']>>> = null;
+    try {
+      sig = deps.dominio.trasEjecutar ? await deps.dominio.trasEjecutar(vig, h, toque.huella, e.ctx) : null;
+    } catch (err) {
+      console.error('[agente] tras ejecutar:', err);
+    }
+    if (sig?.propuesta) {
+      const p = sig.propuesta;
+      const huella = await huellaPropuesta(p.accion, p.datos, e.turnoId);
+      const nueva: PropuestaGuardada = { ...p, huella, args_modelo: { accion: p.accion, datos: { viaje: p.datos.codigo }, origen: 'tras_ejecutar' } };
+      return salida(salidaPropuesta(nueva, sig.lineas.join('\n')), { ...ejecucion, lineas: sig.lineas }, { respuesta_fija: 'rf.hecho', propuesta: nueva });
+    }
+    const lineas = sig?.lineas ?? h.lineas;
+    const r = salida({ tipo: 'texto', texto: lineas.join('\n') }, { ...ejecucion, lineas }, { respuesta_fija: 'rf.hecho' });
+    return sig?.seguir ? { ...r, seguir: true } : r;
+  } catch (err) {
+    await deps.almacen.soltarCandado(clave);
+    return salida({ tipo: 'texto', texto: TEXTO_NO_PUDE }, { huella: toque.huella, accion: vig.accion, resultado: 'error' }, { error: String(err).slice(0, 200) });
+  }
+}
+
+/**
+ * El turno del modelo que sigue a un toque ejecutado (`toque.seguir`): la conversación ya con el hecho (el cliente creado
+ * es una ficha vista, la propuesta ya no está pendiente) y el estado diciendo qué acaba de pasar. El modelo decide si
+ * sigue; la salida es una sola: la confirmación arriba y lo que él siga debajo, o la confirmación sola. La traza es de
+ * tipo `modelo` (cuenta en el uso del mes) y conserva la `ejecucion` del toque, que es la que cierra la propuesta tocada.
+ */
+export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: SalidaTurno): Promise<SalidaTurno> {
+  const ej = toque.traza.ejecucion;
+  if (!toque.seguir || !ej || ej.resultado !== 'ejecutada') return toque;
+  const origen = toque.traza.tipo === 'si_escrito' ? 'si_escrito' : 'toque_propuesta';
+  // La fila que guardará la traza del toque es la última nueva: con el hecho puesto, la conversación es la de después.
+  const conHecho = e.nuevos.at(-1)?.id;
+  const filas = e.filas.map((f) => (f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
+  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen } });
+  return {
+    salida: m.salida,
+    traza: {
+      ...m.traza,
+      tipo: 'modelo',
+      ejecucion: ej,
+      ms_herramientas: (m.traza.ms_herramientas ?? 0) + (toque.traza.ms_herramientas ?? 0),
+    },
+  };
+}
+
+/** Para la traza de uso: los tokens del turno sumados por modelo. Pura. */
+export function usoPorModelo(usos: UsoLlamado[]): Record<string, { llamados: number; entrada: number; salida: number; razonamiento: number; cache: number }> {
+  const out: Record<string, { llamados: number; entrada: number; salida: number; razonamiento: number; cache: number }> = {};
+  for (const u of usos) {
+    const x = out[u.modelo] ??= { llamados: 0, entrada: 0, salida: 0, razonamiento: 0, cache: 0 };
+    x.llamados++;
+    x.entrada += u.entrada; x.salida += u.salida; x.razonamiento += u.razonamiento; x.cache += u.cache;
+  }
+  return out;
+}
+
+export type { Propuesta, Reglamento };

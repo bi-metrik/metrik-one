@@ -6,12 +6,17 @@
 import type { HandlerContext } from '../../types.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
 import { formatCOP, bold, formatProject } from '../../wa-format.ts';
-import { findActiveDestinos } from '../../wa-lookup.ts';
+import { buscarNegocios, findActiveNegocios } from '../../wa-lookup.ts';
 import { completeSession } from '../../wa-session.ts';
 import { downloadAndStoreImage } from '../../wa-media.ts';
-import { showGastoConfirmation, proceedEmpresaGasto } from './gasto.ts';
+import type { ParsedFields } from '../../types.ts';
+import { showGastoConfirmation, proceedEmpresaGasto, handleGasto, categoriaDelGasto, ofrecerNegocios } from './gasto.ts';
+import { decidirSeleccionGasto, textoRepregunta, type DecisionSeleccion, type OpcionGasto } from './seleccion-gasto.ts';
+import { decidirConfirmacionGasto, decidirMontoPendiente, unirMensajes } from './monto-pendiente.ts';
 import { executeRegistro } from './execute.ts';
-import { BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
+import { archivoDeSoporte, BOTONES_SOPORTE, decidirSoporte } from './soporte-foto.ts';
+import { seguirConLaCola } from './cola-gastos.ts';
+import { confirmarPagoServicio, seleccionDeViaje } from './servicio-viaje.ts';
 
 const AWAITING_SELECTION_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 
@@ -37,7 +42,90 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     return;
   }
 
-  // Confirmation
+  // Flujo guiado del gasto: el primer mensaje no traia monto y se pidio. La decision
+  // (monto, cancelar, otra orden, repreguntar) vive en `monto-pendiente.ts`, pura y probada.
+  if (session.state === 'collecting' && context.pending_action === 'W01') {
+    const decision = decidirMontoPendiente(
+      message.text ?? '',
+      context.parsed_fields ?? {},
+      Number(context.monto_reintentos) || 0,
+    );
+    if (decision.accion === 'cerrar') {
+      await ctx.sendMessage(decision.mensaje);
+      await completeSession(supabase, session.id);
+      return;
+    }
+    if (decision.accion === 'repreguntar') {
+      await ctx.sendMessage(decision.mensaje);
+      await ctx.updateSession('collecting', {
+        monto_reintentos: decision.reintentos,
+        parsed_fields: decision.fields,
+      });
+      return;
+    }
+    // Con el monto, el gasto sigue EXACTAMENTE el camino de un mensaje completo, con los
+    // campos de los dos mensajes y la confianza del primero (que es el que traia el
+    // codigo del negocio, si lo traia).
+    await handleGasto({
+      ...ctx,
+      parsed: {
+        intent: 'GASTO',
+        confidence: Number(context.confianza_gasto) || 0,
+        fields: decision.fields,
+      },
+    });
+    return;
+  }
+
+  // Confirmacion de un gasto: el texto libre es la descripcion, no un error.
+  if (session.state === 'confirming' && context.pending_action === 'W01') {
+    const decision = decidirConfirmacionGasto(
+      { texto: message.text ?? '', botonId: message.interactive_reply },
+      context.parsed_fields ?? {},
+      context.amount,
+    );
+    switch (decision.accion) {
+      case 'confirmar':
+        await executeRegistro(ctx);
+        return;
+      case 'cancelar':
+        await ctx.sendMessage('❌ Cancelado.');
+        await completeSession(supabase, session.id);
+        // Gastos del intérprete que esperan turno (sin cola, no hace nada).
+        await seguirConLaCola(ctx);
+        return;
+      case 'describir':
+        await reconfirmarGasto(ctx, decision.fields);
+        return;
+      case 'botones':
+        await ctx.sendButtons('Presiona un botón para confirmar o cancelar.', [
+          { id: 'btn_confirm', title: '✅ Confirmar' },
+          { id: 'btn_cancel', title: '❌ Cancelar' },
+        ]);
+        return;
+      case 'cambiar_negocio': {
+        const [negocio] = await buscarNegocios(supabase, user.workspace_id, decision.codigo, 1);
+        if (negocio && negocio.coincidencia === 'codigo') {
+          const fields = { ...(context.parsed_fields ?? {}), mensaje_original: unirMensajes(context.parsed_fields?.mensaje_original, textoDe(ctx)) };
+          await showGastoConfirmation(ctx, negocio, context.amount!, context.categoria || 'otros', fields, 'negocio');
+          return;
+        }
+        await ctx.sendButtons(
+          `⚠️ No encontré ningún negocio activo con código ${decision.codigo}. ${destinoDelGasto(context)}`,
+          [{ id: 'btn_confirm', title: '✅ Confirmar' }, { id: 'btn_cancel', title: '❌ Cancelar' }],
+        );
+        return;
+      }
+      case 'aclarar_destino':
+        await ctx.sendButtons(destinoDelGasto(context), [
+          { id: 'btn_confirm', title: '✅ Confirmar' },
+          { id: 'btn_cancel', title: '❌ Cancelar' },
+        ]);
+        return;
+    }
+  }
+
+  // Confirmation (W06)
   if (session.state === 'confirming') {
     const btnId = message.interactive_reply;
     if (btnId === 'btn_confirm' || ['sí', 'si', 'yes', '1', '✅', 'confirmo', 'dale'].includes(text)) {
@@ -75,6 +163,15 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
 
     const options = context.options || [];
     const btnId = message.interactive_reply;
+
+    // A qué negocio va un gasto: además del número, el código del negocio, su nombre o «cancelar». El texto
+    // libre nunca se descarta (ver `seleccion-gasto.ts`). El pago a un proveedor del viaje (`paso_viaje`) tiene
+    // sus propias opciones y sigue como estaba.
+    if (context.pending_action === 'W01' && !context.paso_viaje) {
+      await responderSeleccionGasto(ctx, decidirSeleccionGasto({ texto: message.text ?? '', botonId: btnId }, options));
+      return;
+    }
+
     const btnMatch = btnId ? options.find((o: any) => o.id === btnId) : null;
     const selection = parseInt(text);
 
@@ -104,7 +201,7 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     const decision = decidirSoporte(
       {
         tipo: message.type,
-        tieneImagen: Boolean(message.image_id),
+        tieneImagen: Boolean(archivoDeSoporte(message)),
         botonId: message.interactive_reply,
         texto: message.text,
       },
@@ -123,19 +220,20 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     }
 
     if (decision.accion === 'guardar_foto') {
-      if (context.gasto_id && message.image_id) {
+      const archivo = archivoDeSoporte(message);
+      if (context.gasto_id && archivo) {
         // Lo que vuelve es una REFERENCIA (`one://gastos-soportes/…`), no una URL
         // publica: el bucket deja de serlo. La pantalla la abre por `/api/archivos/abrir`.
         const referencia = await downloadAndStoreImage(
-          supabase, message.image_id, user.workspace_id, context.gasto_id,
+          supabase, archivo, user.workspace_id, context.gasto_id,
         );
         if (referencia) {
           await supabase.from('gastos')
             .update({ soporte_url: referencia, soporte_pendiente: false })
             .eq('id', context.gasto_id);
-          await ctx.sendMessage('📷 Guardé el soporte fotográfico.');
+          await ctx.sendMessage(message.type === 'document' ? '📎 Guardé el soporte.' : '📷 Guardé el soporte fotográfico.');
         } else {
-          await ctx.sendMessage('⚠️ No pude guardar la foto. Puedes subirla después desde la app.');
+          await ctx.sendMessage('⚠️ No pude guardar el soporte. Puedes subirlo después desde la app.');
         }
       }
     } else {
@@ -143,15 +241,123 @@ export async function handleResumeRegistro(ctx: HandlerContext): Promise<void> {
     }
 
     await completeSession(supabase, session.id);
+    // Gastos del intérprete que esperan turno (sin cola, no hace nada).
+    await seguirConLaCola(ctx);
     return;
   }
 }
 
+/**
+ * Vuelve a mostrar la confirmacion del gasto con la descripcion que el usuario acaba de
+ * escribir. Mismo destino, mismo monto; la categoria se recalcula porque la descripcion
+ * nueva puede decirla ("Peaje" -> transporte).
+ */
+export async function reconfirmarGasto(ctx: HandlerContext, fields: ParsedFields): Promise<void> {
+  const { session, supabase } = ctx;
+  const c = session.context;
+  // Si la descripcion nueva no dice categoria ("autopista norte"), se queda la que habia.
+  const deLaDescripcion = categoriaDelGasto(fields);
+  const categoria = deLaDescripcion !== 'otros' ? deLaDescripcion : c.categoria || 'otros';
+
+  if (c.destino_tipo === 'empresa') {
+    await proceedEmpresaGasto(ctx, c.amount!, fields, categoria);
+    return;
+  }
+
+  // Pago a un servicio del viaje: la descripción no cambia el servicio ni el medio.
+  if (c.servicio_id) {
+    await ctx.updateSession('confirming', { parsed_fields: fields });
+    await confirmarPagoServicio(ctx);
+    return;
+  }
+
+  if (c.negocio_id) {
+    const { data: negocio } = await supabase
+      .from('negocios')
+      .select('id, nombre, codigo, estado')
+      .eq('id', c.negocio_id)
+      .single();
+    const entity = negocio
+      ? { ...negocio, proyecto_id: negocio.id, codigo: negocio.codigo ?? '' }
+      : { id: c.negocio_id, nombre: c.proyecto_nombre || 'negocio' };
+    await showGastoConfirmation(ctx, entity, c.amount!, categoria, fields, 'negocio');
+    return;
+  }
+
+  const { data: project } = c.proyecto_id
+    ? await supabase.from('v_proyecto_financiero').select('*').eq('proyecto_id', c.proyecto_id).single()
+    : { data: null };
+  const entity = project ?? { proyecto_id: c.proyecto_id, nombre: c.proyecto_nombre || 'negocio' };
+  await showGastoConfirmation(ctx, entity, c.amount!, categoria, fields, 'proyecto');
+}
+
 // --- Selection sub-handlers ---
+
+/** Ejecuta la decisión sobre la respuesta a «¿Para cuál?» de un gasto. El gasto sigue en la sesión hasta el final. */
+async function responderSeleccionGasto(ctx: HandlerContext, decision: DecisionSeleccion): Promise<void> {
+  const { session, supabase, user } = ctx;
+  const c = session.context;
+  const options = (c.options || []) as OpcionGasto[];
+  const gasto = { amount: c.amount!, categoria: c.categoria || 'otros', fields: c.parsed_fields ?? {} };
+
+  switch (decision.accion) {
+    case 'opcion':
+      await handleW01Selection(ctx, decision.opcion);
+      return;
+    case 'cancelar':
+      await ctx.sendMessage('❌ Cancelado.');
+      await completeSession(supabase, session.id);
+      await seguirConLaCola(ctx);
+      return;
+    case 'repreguntar':
+      await ctx.sendOptions(textoRepregunta(), options.map((o) => o.label));
+      return;
+    case 'codigo':
+    case 'pista': {
+      const buscado = decision.accion === 'codigo' ? decision.codigo : decision.texto;
+      const encontrados = await buscarNegocios(supabase, user.workspace_id, buscado);
+      const seguros = decision.accion === 'codigo'
+        ? encontrados.filter((n) => n.coincidencia === 'codigo')
+        : encontrados;
+      if (seguros.length === 1) {
+        // El mensaje que nombró el negocio queda en el mensaje original del gasto, no en su descripción.
+        const fields = { ...gasto.fields, mensaje_original: unirMensajes(gasto.fields.mensaje_original, textoDe(ctx)) };
+        await showGastoConfirmation(ctx, seguros[0], gasto.amount, gasto.categoria, fields, 'negocio');
+        return;
+      }
+      if (seguros.length > 1) {
+        await ofrecerNegocios(ctx, `Encontré varios para «${buscado}». ¿Cuál?`, seguros, gasto, true);
+        return;
+      }
+      // Nada: se vuelve a preguntar con la misma lista. El gasto sigue esperando.
+      await ctx.sendOptions(textoRepregunta(buscado), options.map((o) => o.label));
+      return;
+    }
+  }
+}
+
+/** A dónde va el gasto que se está confirmando, dicho para repetir los botones sin perderlo. */
+function destinoDelGasto(c: HandlerContext['session']['context']): string {
+  const monto = c.amount ? ` de ${formatCOP(c.amount)}` : '';
+  if (c.destino_tipo === 'empresa') {
+    return `El gasto${monto} va como gasto de empresa. Si es de un negocio, escribe su código (p. ej. I1 26 5); si no, confirma o cancela.`;
+  }
+  return `El gasto${monto} va para ${bold(c.proyecto_nombre || 'el negocio')}. Si es otro, escribe su código (p. ej. I1 26 5); si no, confirma o cancela.`;
+}
+
+function textoDe(ctx: HandlerContext): string {
+  return String(ctx.message.text ?? '').trim();
+}
 
 async function handleW01Selection(ctx: HandlerContext, selected: { id: string; label: string; _tipo?: string }): Promise<void> {
   const { session, supabase, user } = ctx;
   const context = session.context;
+
+  // Pago a un proveedor del viaje (F3): servicio y medio de pago.
+  if (context.paso_viaje) {
+    await seleccionDeViaje(ctx, selected);
+    return;
+  }
 
   if (selected.id === 'cancelar') {
     await ctx.sendMessage('❌ Cancelado.');
@@ -173,11 +379,11 @@ async function handleW01Selection(ctx: HandlerContext, selected: { id: string; l
   }
 
   if (selected.id === 'otro_destino') {
-    const allActive = await findActiveDestinos(supabase, user.workspace_id);
-    const newOptions = allActive.all.slice(0, 5).map((d: any) => ({
+    const activos = await findActiveNegocios(supabase, user.workspace_id);
+    const newOptions = activos.slice(0, 5).map((d) => ({
       id: d.proyecto_id || d.id,
       label: formatProject(d),
-      _tipo: d._tipo,
+      _tipo: 'negocio',
     }));
     newOptions.push({ id: 'empresa', label: '🏢 Gasto de empresa', _tipo: 'empresa' as any });
     await ctx.sendOptions('Tus negocios:', newOptions.map((o) => o.label));

@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { CheckCircle2, Lock } from 'lucide-react'
 import { toast } from 'sonner'
 import { marcarBloqueCompleto } from '../../negocio-v2-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { formatFecha } from '@/lib/dates/bogota'
+import { puedeEditarConAreaResuelta } from '@/lib/permissions/can-edit'
 
 interface BloqueCompletionStampProps {
   negocioBloqueId: string
@@ -28,7 +30,7 @@ export default function BloqueCompletionStamp({
   esResponsable,
   profiles,
 }: BloqueCompletionStampProps) {
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const [optimisticDone, setOptimisticDone] = useState(false)
 
   const done = instancia?.estado === 'completo' || optimisticDone
@@ -36,12 +38,15 @@ export default function BloqueCompletionStamp({
   const completadoPor = instancia?.completado_por as string | undefined
   const completadoPorNombre = profiles.find(p => p.id === completadoPor)?.full_name ?? 'Sin asignar'
 
-  const isOperator = userRole === 'operator'
-  const isResponsable = esResponsable
-  const isGerencial = userRole === 'owner' || userRole === 'admin'
-  const canMark = !restrictToOperatorOrResponsable || isOperator || isResponsable || isGerencial
+  // `restrict_to_operator_or_responsable`: la pantalla decide con la MISMA regla que el
+  // servidor (`canEditBloque` vía `guardEditarBloque`), no con una lista propia. El área
+  // ya llega resuelta en `modo` (`_areaReadonly`); aquí solo queda rol + responsable.
+  // Antes la lista era operator/owner/admin/responsable y dejaba fuera al supervisor,
+  // que el servidor sí acepta (SOE-018).
+  const canMark = !restrictToOperatorOrResponsable
+    || puedeEditarConAreaResuelta(userRole, esResponsable)
   const reasonBlocked = restrictToOperatorOrResponsable && !canMark
-    ? 'Solo el ejecutor de operaciones o un responsable asignado puede marcar este cargue.'
+    ? 'Solo el ejecutor responsable del caso o un supervisor puede marcar este cargue.'
     : null
 
   function handleClick() {

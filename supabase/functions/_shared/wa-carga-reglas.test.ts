@@ -46,12 +46,12 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(ops.map(o => o.id)).toEqual(['2', '1']);
   });
 
-  it('sin negocios abiertos no hay opciones y la pregunta solo ofrece NUEVO', () => {
+  it('sin negocios abiertos no hay opciones y la pregunta solo ofrece un viaje nuevo (sin comandos en mayúsculas)', () => {
     const ops = armarOpcionesNegocio([], 'hola');
     expect(ops).toEqual([]);
     const t = textoPreguntaNegocio({ nMensajes: 3, opciones: ops });
-    expect(t).toContain('Recibí 3 mensajes.');
-    expect(t).toContain('NUEVO');
+    expect(t).toBe('¿De qué cliente son los 3 mensajes? No tienes viajes abiertos: escribe «nuevo» y su nombre, o «descartar».');
+    expect(t).not.toMatch(/\b(?:NUEVO|DESCARTAR|SÍ)\b/);
     expect(t).not.toMatch(/^1\./m);
   });
 
@@ -65,8 +65,8 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(ops.map(o => o.id)).toEqual(['3', '2', '1']);
     expect(ops[0].propuesto).toBe(true);
     const t = textoPreguntaNegocio({ nMensajes: 2, opciones: ops });
-    expect(t).toContain('Parece de MARTA GÓMEZ: es la 1.');
-    expect(t).toContain('1. T1 26 3 · MARTA GÓMEZ');
+    expect(t.split('\n')[0]).toBe('¿De qué viaje son los 2 mensajes? Parece de Marta Gómez (el 1).');
+    expect(t).toContain('1. Marta Gómez (T1 26 3)');
   });
 
   it('si el cliente nombrado tiene DOS negocios abiertos no se propone ninguno', () => {
@@ -84,9 +84,9 @@ describe('la lista de «¿A qué viaje van?»', () => {
     expect(nombraAlCliente('marta', 'MARTA')).toBe(false);
   });
 
-  it('cada opción: código · cliente · destino', () => {
-    const ops = armarOpcionesNegocio([neg('14', { cliente: 'MARTA GÓMEZ', destino: 'Punta Cana', del_remitente: true })], '');
-    expect(textoPreguntaNegocio({ nMensajes: 1, opciones: ops })).toContain('1. T1 26 14 · MARTA GÓMEZ · Punta Cana');
+  it('cada opción: nombre del negocio · cliente (código), como lo recuerda el comercial (prueba en vivo, parte B)', () => {
+    const ops = armarOpcionesNegocio([neg('14', { cliente: 'MARTA GÓMEZ', destino: 'Punta Cana', nombre: 'Europa 2 días', del_remitente: true })], '');
+    expect(textoPreguntaNegocio({ nMensajes: 1, opciones: ops })).toContain('1. Europa 2 días · Marta Gómez (T1 26 14)');
   });
 });
 
@@ -119,8 +119,10 @@ describe('la respuesta: número, código o NUEVO', () => {
     expect(interpretarRespuestaNegocio('Nuevo: Marta Gómez 3001234567', ops)).toEqual({ tipo: 'nuevo', cliente: 'Marta Gómez 3001234567' });
   });
 
-  it('un nombre suelto o un texto cualquiera no se adivina', () => {
-    expect(interpretarRespuestaNegocio('Marta', ops)).toEqual({ tipo: 'no_entendida' });
+  it('el nombre de un cliente o de un negocio de la lista lo elige (prueba en vivo v2, N2); un texto cualquiera no se adivina', () => {
+    expect(interpretarRespuestaNegocio('Marta', ops)).toEqual({ tipo: 'existente', negocio_id: 'a' });
+    expect(interpretarRespuestaNegocio('Pedro', ops)).toEqual({ tipo: 'no_entendida' });
+    expect(interpretarRespuestaNegocio('DESCARTAR', ops)).toEqual({ tipo: 'descartar' });
     expect(interpretarRespuestaNegocio('el de punta cana', ops)).toEqual({ tipo: 'no_entendida' });
     expect(interpretarRespuestaNegocio('novedad', ops)).toEqual({ tipo: 'no_entendida' });
   });
@@ -167,12 +169,71 @@ describe('cargar en un negocio que ya existe', () => {
     expect(r.data._sugeridos).toBeUndefined();
   });
 
-  it('un valor todavía sugerido de una entrega anterior tampoco se pisa', () => {
-    const data = { destino: 'CANCÚN', _sugeridos: { destino: { fuente: 'whatsapp', entrega_id: 'e1', frase: 'cancún', en: 'x' } } };
-    const r = cargarEnExistente(data, FIELDS, { destino: { valor: 'Punta Cana', frase: 'punta cana' } }, meta);
-    expect(r.data.destino).toBe('CANCÚN');
-    expect(r.conflictos.map(c => c.slug)).toEqual(['destino']);
-    expect(r.data._sugeridos).toEqual(data._sugeridos);
+  describe('regla 4: un sugerido que nadie confirmó se actualiza con un mensaje posterior', () => {
+    const sug = { fuente: 'whatsapp', entrega_id: 'e1', frase: 'somos mi esposo y yo', en: 'x' };
+
+    it('pasa: el valor nuevo reemplaza, la marca guarda el anterior y la suma se recalcula', () => {
+      const data = { adultos: 2, ninos: 2, numero_pasajeros: 4, _sugeridos: { adultos: sug } };
+      const r = cargarEnExistente(data, FIELDS, { adultos: { valor: 3, frase: 'o sea seríamos 3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(3);
+      expect(r.data.numero_pasajeros).toBe(5);
+      expect(r.conflictos).toEqual([]);
+      expect(r.escritos).toEqual([]);
+      expect(r.actualizados).toEqual([{ slug: 'adultos', anterior: 2, valor: 3, frase: 'o sea seríamos 3 adultos' }]);
+      expect((r.data._sugeridos as Record<string, unknown>).adultos).toEqual({
+        fuente: 'whatsapp', entrega_id: 'e2', frase: 'o sea seríamos 3 adultos', en: meta.en, anterior: 2,
+      });
+      expect(r.data._conflictos).toBeUndefined();
+    });
+
+    it('pasa: el texto del bloque de viaje entra en mayúscula también al actualizar', () => {
+      const data = { destino: 'CANCÚN', _sugeridos: { destino: sug } };
+      const r = cargarEnExistente(data, FIELDS, { destino: { valor: 'Punta Cana', frase: 'punta cana' } }, meta);
+      expect(r.data.destino).toBe('PUNTA CANA');
+      expect(r.actualizados.map(a => [a.anterior, a.slug])).toEqual([['CANCÚN', 'destino']]);
+    });
+
+    it('pasa: un conflicto viejo sobre ese sugerido se va, gana lo último que dijo el cliente', () => {
+      const viejo = { fuente: 'whatsapp', entrega_id: 'e0', valor: 4, frase: 'cuatro', en: 'x', origen: 'mensaje' };
+      const data = { adultos: 2, _sugeridos: { adultos: sug }, _conflictos: { adultos: viejo } };
+      const r = cargarEnExistente(data, FIELDS, { adultos: { valor: 3, frase: '3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(3);
+      expect(r.data._conflictos).toBeUndefined();
+    });
+
+    it('no pasa: lo confirmado por una persona (sin marca) queda en conflicto', () => {
+      const r = cargarEnExistente({ adultos: 2 }, FIELDS, { adultos: { valor: 3, frase: '3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(2);
+      expect(r.actualizados).toEqual([]);
+      expect(r.conflictos.map(c => c.slug)).toEqual(['adultos']);
+    });
+
+    it('no pasa: un sugerido con corrección registrada (_ediciones) queda en conflicto', () => {
+      const data = { adultos: 2, _sugeridos: { adultos: sug }, _ediciones: { adultos: { por: 's' } } };
+      const r = cargarEnExistente(data, FIELDS, { adultos: { valor: 3, frase: '3 adultos' } }, meta);
+      expect(r.data.adultos).toBe(2);
+      expect(r.conflictos.map(c => c.slug)).toEqual(['adultos']);
+    });
+
+    it('no pasa: una deducción nunca reemplaza, solo llena vacíos', () => {
+      const data = { ninos: 1, _sugeridos: { ninos: sug } };
+      const r = cargarEnExistente(data, FIELDS, { ninos: { valor: 0, frase: '', deduccion: 'x' } }, meta);
+      expect(r.data.ninos).toBe(1);
+      expect(r.actualizados).toEqual([]);
+    });
+
+    it('el bot lo dice y la traza lo registra', () => {
+      const m = mensajeCargaExistente({
+        codigo: 'T1 26 14', fields: FIELDS, escritos: [], conflictos: [],
+        actualizados: [{ slug: 'adultos', anterior: 2, valor: 3 }], faltanMinimo: [], enlace: 'L',
+      });
+      expect(m).toBe('Actualicé adultos: 2 → 3. Lo anterior era una sugerencia que nadie había confirmado.\nYa está el mínimo para cotizar: L');
+      const t = trazaCarga({
+        quien: 'Tatiana', fechaISO: '2026-10-01', escritos: [], conflictos: [], fields: FIELDS, historia: '',
+        actualizados: [{ slug: 'adultos', anterior: 2, valor: 3 }],
+      });
+      expect(t).toBe('Se cargó 1 dato desde WhatsApp (Tatiana, 1-oct).\nActualizado (era sugerido, nadie lo había confirmado): Adultos 2 → 3.');
+    });
   });
 
   it('en un negocio vivo el default cuenta como valor (no se sabe si alguien lo dejó a propósito)', () => {

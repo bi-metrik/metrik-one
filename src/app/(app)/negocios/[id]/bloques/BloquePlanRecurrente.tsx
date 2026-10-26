@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Calendar, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatCOP } from '@/lib/contacts/constants'
@@ -80,8 +80,7 @@ export default function BloquePlanRecurrente({
   modo,
   configExtra,
 }: Props) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
   const completado = instancia?.completado === true
   const planData = (instancia?.data ?? null) as PlanData | null
 
@@ -116,7 +115,7 @@ export default function BloquePlanRecurrente({
       })
       if (res.success) {
         toast.success('Plan recurrente creado')
-        router.refresh()
+        // Sin router.refresh(): la acción ya revalida la ficha (2026-10-04).
       } else {
         toast.error(res.error ?? 'Error creando plan')
       }
@@ -130,7 +129,7 @@ export default function BloquePlanRecurrente({
       const res = await cancelarPlan(planData.plan_id!)
       if (res.success) {
         toast.success('Plan cancelado')
-        router.refresh()
+        // Sin router.refresh(): la acción ya revalida la ficha (2026-10-04).
       } else {
         toast.error(res.error ?? 'Error cancelando plan')
       }

@@ -12,6 +12,8 @@ metadata:
 
 **#910 (merge ecffe5e2).** Foto del hotel: `tarifa_pax.fotoHotel {ref, proporcion}`, bucket privado del workspace (`fotos-hotel/<cot>/<item>-<huella>.jpg`), comprimida en el navegador (1600 px, JPEG). En el PDF ocupa el lugar de la miniatura de ciudad del capítulo y la reemplaza (sin crédito); se quitó el hueco 80×60 dentro de `TarjetaHotel`. Se borra siempre con la opción, también al devolverla a la bandeja (`imagenesAlBorrarOpcion`).
 
-**Límites no resueltos:** solo imprime la foto del hotel PRINCIPAL de cada capítulo (una alternativa de otra tarifa no la muestra); la portada sigue siendo la foto de ciudad; sin QA en pantalla ni PDF con foto real (solo pruebas de render de texto).
+**Límites no resueltos:** la portada sigue siendo la foto de ciudad; sin QA con foto real.
+
+**2026-10-08 (feat/foto-hotel-por-opcion):** las alternativas (otra tarifa o segundo hotel en la misma ciudad) con foto salen como tarjeta completa + miniatura 3:2 al lado, `wrap={false}` (`HotelAlternativoConFoto`); sin foto, la línea de siempre. Solo la foto del hotel GRANDE reemplaza la de ciudad. **Why:** Mauricio: «las fotos si el usuario las carga deben quedar puestas en la propuesta». **How to apply:** contar fotos en el PDF con `hojasDibujadas` del render test (`/X Do` + matriz), no con el texto; comparar «igual a main» por flujos inflados, NO por bytes (dos renders del mismo componente con imágenes difieren fuera de los flujos). Tres tarifas con foto suma una hoja (2→3 en el fixture de Cancún).
 
 Relacionado: [[project-tarjeta-opcion-trappvel]], [[project-documento-trappvel-fotos-ritmo]].

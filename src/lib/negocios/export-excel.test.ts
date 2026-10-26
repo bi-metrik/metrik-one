@@ -44,6 +44,7 @@ const negocio = (p: Partial<NegocioExportable> & Pick<NegocioExportable, 'id'>):
   empresa_nombre: null,
   contacto_nombre: 'Ana',
   contacto_telefono: null,
+  contacto_email: null,
   cedula: null,
   stage_actual: 'venta',
   etapa_stage: 'venta',
@@ -321,10 +322,25 @@ describe('armarFilasExcel — identidad, personas y forma', () => {
     expect(filas[0]['Operaciones']).toBeNull()
   })
 
-  it('cada fila tiene exactamente las 50 columnas del spec, en su orden', () => {
+  it('cada fila tiene exactamente las 51 columnas del spec, en su orden', () => {
     const [f] = armarFilasExcel(entrada({ negocios: [negocio({ id: 'n1' })] }))
-    expect(ENCABEZADOS).toHaveLength(50)
+    expect(ENCABEZADOS).toHaveLength(51)
     expect(Object.keys(f)).toEqual([...ENCABEZADOS])
+  })
+
+  // SOE-020: la financiera pidió el correo del cliente en la base de ventas.
+  it('«Correo» va justo después de «Telefono» y trae el email del contacto, o vacía sin él', () => {
+    expect(ENCABEZADOS.indexOf('Correo')).toBe(ENCABEZADOS.indexOf('Telefono') + 1)
+    const [con, sin, blanco] = armarFilasExcel(entrada({
+      negocios: [
+        negocio({ id: 'con', contacto_email: '  ana@correo.co ' }),
+        negocio({ id: 'sin', contacto_email: null }),
+        negocio({ id: 'blanco', contacto_email: '   ' }),
+      ],
+    }))
+    expect(con['Correo']).toBe('ana@correo.co')
+    expect(sin['Correo']).toBeNull()
+    expect(blanco['Correo']).toBeNull()
   })
 
   /**

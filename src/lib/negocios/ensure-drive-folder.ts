@@ -149,17 +149,23 @@ export async function ensureNegocioDriveFolder(
     const folderId = await createDriveFolder(folderName, driveFolderId, workspaceId)
     const folderUrl = `https://drive.google.com/drive/folders/${folderId}`
 
-    for (const carpeta of CARPETAS_INICIALES) {
-      try {
-        await createDriveFolder(carpeta, folderId, workspaceId)
-      } catch (err) {
+    // Las cinco subcarpetas cuelgan de la MISMA raíz y no dependen entre sí: van en
+    // paralelo (2026-10-04). En serie eran cinco idas y vueltas a Drive (buscar + crear
+    // cada una) y llevaban «Crear negocio» a 7,5 s de p95 en SOENA. Sigue siendo
+    // idempotente: `createDriveFolder` busca por nombre dentro del padre antes de crear,
+    // y aquí cada nombre se pide una sola vez.
+    const subcarpetas = await Promise.allSettled(
+      CARPETAS_INICIALES.map(carpeta => createDriveFolder(carpeta, folderId, workspaceId)),
+    )
+    subcarpetas.forEach((r, i) => {
+      if (r.status === 'rejected') {
         // No bloquea si una subcarpeta falla — la carpeta raíz ya existe.
         console.warn(
-          `[ensureNegocioDriveFolder] no se pudo pre-crear "${carpeta}" (negocio=${negocioId}):`,
-          err instanceof Error ? err.message : err,
+          `[ensureNegocioDriveFolder] no se pudo pre-crear "${CARPETAS_INICIALES[i]}" (negocio=${negocioId}):`,
+          r.reason instanceof Error ? r.reason.message : r.reason,
         )
       }
-    }
+    })
 
     await supabase
       .from('negocios')

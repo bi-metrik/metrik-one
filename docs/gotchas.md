@@ -175,3 +175,172 @@
   Paso con #957: conflicto en `docs/bitacora/2026-09.md`, el archivo al que todas las sesiones
   agregan arriba. Diagnostico: `gh pr view <n> --json mergeable,mergeStateStatus`; si dice DIRTY,
   el CI no esta caido, el PR esta en conflicto.
+- **El preview de un PR abre un workspace con `?__ws=<slug>` (solo con `VERCEL_ENV=preview`).** El
+  host `*.vercel.app` no tiene subdominio, asi que el middleware toma el inquilino de la cookie
+  host-only `__preview_ws` que fija `?__ws=` (`src/lib/tenant/tenant-preview.ts`); `?__ws=off` la
+  quita. Cambiar de workspace en el preview se queda en el preview (`/?__ws=<slug>`), no salta a
+  `<slug>.metrikone.co`. ⚠️ El preview usa la base de PRODUCCION (URL y service role del scope
+  Preview = las de produccion): todo lo que se cree ahi es real. ⚠️ Entrar con el CODIGO del correo,
+  no con el enlace: si `*.vercel.app` no esta en las Redirect URLs de Supabase Auth, el enlace cae
+  en el Site URL (produccion). ⚠️ El scope Preview no tiene `GEMINI_API_KEY`: sin ella no se lee
+  ningun pantallazo en el preview.
+- **El `_cross_check` guardado de un documento envejece aunque nadie toque el archivo.** Se calcula
+  una vez al cargar; si después llega el RUT, se corrige un dato o cambia una regla de comparación,
+  la fila sigue en falla. La lectura del negocio relee las filas que fallan
+  (`documentos/relectura-cross-check.ts`) y solo absuelve. Cambiar una comparación de texto exige
+  cambiarla en `documentos/comparar-check.ts` o `negocios/comparar-valores.ts`, que comparten
+  normalización y regla de nombres: no volver a copiarlas dentro de un archivo `'use server'`.
+- **El `cache()` de React NO memoiza dentro de una ruta (`route.ts`).** Sin render no hay
+  despachador y `cache(fn)` llama a `fn` cada vez. `getWorkspace` dentro de una ruta resolvía la
+  sesión una vez por acción anidada: «Aceptar» de la bandeja de Trappvel, 5 veces en serie (2026-10-01).
+  Para memoizar en una ruta, envolver el cuerpo en `enPeticionDeRuta` (`src/lib/actions/memo-de-ruta.ts`).
+- **Dos clases de Tailwind del mismo color en una etiqueta: gana la que el CSS escribe después, no la
+  que va después en el texto.** `${BTN} border-[#0E5C43] text-[#0E5C43]` dejaba el borde gris y la
+  tinta negra de `BTN` (el «Hotel / Traslado» elegido no se distinguía). Un estado elegido es una
+  cadena propia (`BTN_ELEGIDO`), sin los colores de la base.
+- **Lo que importa un `error.tsx` lo carga TODA página de la app.** `enviar.ts` importaba una constante
+  de `reporte.ts`, que importa Zod: 378 KB de JS en cada página para pintar la pantalla de error, la que
+  tiene que salir cuando la red no da para bajar chunks (2026-10-02). Las pantallas de error y lo que
+  importan van sin dependencias pesadas; las constantes compartidas, en un archivo sin imports.
+- **Con React 19, lo que lanza un `startTransition(async …)` sube al error boundary.** Un server action
+  que no llega (iPhone: `TypeError: Load failed`) reemplazaba la ficha entera por «Algo se rompió». En
+  pantallas de uso móvil, `useTransitionTolerante` (`src/hooks/`) en vez de `useTransition`. No
+  reintentar escrituras por red: el error no dice si la petición alcanzó al servidor.
+- **`unstable_cache` sirve una entrada VENCIDA una vez (stale-while-revalidate).** Con solo
+  `revalidate: 300`, la primera visita después de dos horas recibe la cifra de hace dos horas mientras se
+  refresca por detrás. Para un tope real de atraso, la ventana de tiempo va en la llave
+  (`ventanaActual()` en `src/lib/tableros/cache-rpc.ts`). Además: adentro no se puede llamar `cookies()`
+  (lanza), así que el cliente de Supabase con el JWT de la sesión se crea afuera y entra por cierre; el
+  cierre NO forma parte de la llave, solo los argumentos (`JSON.stringify(args)`) y los `keyParts`.
+  Una RPC con guarda `current_user_workspace_id()` llamada con service_role devuelve ceros, no error:
+  verificar la guarda antes de guardar (2026-10-03).
+- **`.in('col', ids)` con ~420+ uuid falla desde Node aunque PostgREST responda 200.** PostgREST
+  devuelve la query entera en la cabecera `Content-Location` (18.236 bytes con 466 uuid) y el `fetch`
+  de Node (undici) corta las cabeceras en 16 KB: `HeadersOverflowError`, que supabase-js entrega como
+  `{ error }`. Un `data ?? []` lo convierte en «no hay filas» sin ruido. Lotes de 100 ids, o acotar por
+  JOIN (`tabla!inner(col)` + filtro sobre el padre) en vez de mandar la lista (2026-10-03).
+- **Un deploy ya no recarga la pestaña: la que manda es la ÉPOCA.** (2026-10-03, fix/no-recargar-por-deploy). Una pestaña vieja puede vivir hasta 8 h con el código de antes contra la base de hoy. Si un PR borra, renombra o cambia de tipo algo que el código viejo usa, **sube `EPOCA` en `src/lib/version/epoca.ts` en el mismo PR** (la guarda `check-migracion-epoca` lo exige para migraciones). Y todo `fetch('/api/...')` nuevo del cliente va por `fetchPropio`: Skew Protection no sella los `fetch` propios, solo assets, RSC y server actions. `/api/version` es la excepción, debe llegar al deployment vivo. Si alguien baja Maximum Age de Skew Protection (hoy 7 días) por debajo de 8 h, las pestañas viejas vuelven a quedarse sin assets.
+- **Next pone las server actions en fila: una lectura al montar retrasa la acción que viene detrás.**
+  (2026-10-05, #1019). Sobre una red lenta, un `useEffect` que pide datos por server action hace esperar
+  el guardado o el cambio de etapa que la persona toca después. Lo que se lee al montar llega del
+  servidor (layout o página, en el mismo `Promise.all`) o por un `GET` de ruta con `pedirJson` (que
+  pasa por `fetchPropio`) dentro de `enPeticionDeRuta`, llamando a la misma función que la action. Las
+  escrituras siguen siendo server actions. Para medir: `vercel metrics vercel.function_invocation.count
+  --group-by server_action_name`.
+- **Un `fetch` con `cache: 'no-cache'` a una ruta con ETag recibe el 304 como el 200 guardado.** El
+  navegador revalida con `If-None-Match` y JS ve el cuerpo anterior con status 200: no hay rama de 304
+  que escribir. La ruta responde `Cache-Control: private, no-cache` (ningún CDN la comparte) y acepta
+  ETag débil `W/`, por si la compresión de Vercel lo debilita (`src/lib/http/etag.ts`, 2026-10-05).
+- **`history.replaceState(window.history.state, …)` no le avisa al router de Next.** El estado que se
+  pasa lleva la marca interna `__NA` y Next lo deja pasar sin sincronizar su URL (`canonicalUrl`).
+  Toda server action con `revalidatePath` vuelve a pintar la página con la URL de la ÚLTIMA navegación,
+  no con la que muestra la barra. En `/negocios` eso borraba los filtros al asignar responsable desde
+  la tarjeta: el servidor mandaba la vista sin filtros y la lista la adoptaba. Arreglo: la lista no
+  adopta una vista cuyos parámetros no coinciden con la URL (`vistaDeOtraUrl` en `negocios-client.tsx`)
+  y relee con los filtros puestos (2026-10-05). Un server component que dependa de `searchParams`
+  escritos así tiene el mismo problema.
+- **La lectura de un documento termina DESPUÉS de responder: no la esperes en la acción.** (2026-10-05,
+  fix/cargue-segundo-plano). `procesarDocumento`/`reprocesarDocumento` devuelven `leyendo: true` y el
+  resultado queda en `data._lectura` (`src/lib/documentos/lectura-en-curso.ts`). Quien escriba `data` de
+  un bloque documental debe conservar `_lectura` (spread de la fila, como hoy) y no borrar la marca de
+  otro. Mientras lee, el bloque está `pendiente` aunque tuviera documento: no es un dato perdido, es la
+  marca. Todo trabajo en `after()` sigue sujeto al `maxDuration` de la página que llamó (60 s en la
+  ficha) y no tiene a quién entregarle un `revalidatePath`: la pantalla refresca sola. Dentro de
+  `after()` lanzado desde una server action `cookies()` SÍ funciona (Next lo permite si el padre es
+  `action`); desde un render, no.
+- **Una página SIN `maxDuration` corre con el tope del proyecto (300 s, fluid), no con 60.** (2026-10-05).
+  `/negocios/[id]` declara 60; `/conciliacion` no declara nada. Una server action hereda el tope de la
+  página desde la que se llama: la emisión de factura de 61 s (V0549) salía de `/conciliacion` y NO tocó
+  ningún tope. Leer el valor real: `vercel api /v9/projects/<id>` → `defaultResourceConfig.functionDefaultTimeout`.
+- **Escritura larga + red mala: `useTransitionTolerante({ releer })`, no el aviso de «intenta de nuevo».**
+  (2026-10-05). En Claro/Telmex la petición llega y lo que se pierde es la respuesta: repetir puede duplicar.
+  `reintentar` solo para acciones idempotentes.
+- **Una copia heredada (`source_etapa_orden`) nunca escribe en su propia fila.** (2026-10-06). El render le
+  pinta el `data` del origen, así que lo escrito en la copia desaparece al recargar. O escribe en el origen
+  (`editable_siempre` + `source_bloque_slug`, vía `resolverDestino`) o es de solo lectura, y la pantalla y el
+  servidor lo deciden con la MISMA función (`copiaDeSoloLectura`). Abrir `editable_siempre` en un bloque sin
+  revisar si tiene copias fue lo que dejó a SOENA subir la factura y recibir el rechazo al final.
+- **Chromium repite UNA vez un POST cuyo socket reusado se cierra sin responder, con o sin service
+  worker.** Medido el 2026-10-06 (`scripts/sw-piloto.e2e.mjs`, servidor local HTTP/1.1 con keep-alive):
+  una server action cortada así llegó DOS veces al servidor desde una pestaña sin SW. **Contra Vercel
+  también** (2026-10-06, `scripts/post-cortado-vercel.e2e.mjs`, 4 de 4): con la respuesta perdida,
+  Chromium abre otra conexión y REENVÍA el POST, y la página recibe la respuesta de la segunda como si
+  nada. Conexión que se cae: 0,7 s. Señal que se pierde sin cerrar: 10 s si la conexión estaba en reposo
+  (falla el PING de HTTP/2) y 75 s si no. HTTP/3 no se probó. Una action «que no se confirmó» puede
+  haberse ejecutado dos veces aunque nadie reintentó: la idempotencia del lado del servidor no es opcional.
+- **Leer-calcular-escribir sin condición no aguanta dos peticiones iguales.** (2026-10-06, #1048).
+  `marcarBloqueCompleto` leía el bloque, calculaba el diff y escribía: dos guardados del mismo bloque a la
+  vez se creían el primero (663 pares de historial `bloque_datos` en soena; en prueba, también dos veces
+  los cobros de `auto_cobros_multi`). Ahora escribe con `.eq('updated_at', <versión leída>)` y, si no toca
+  filas, repite desde la lectura (3 intentos, el último sin condición). Patrón para cualquier «leer,
+  mezclar, escribir» sobre una fila con `updated_at`. Para lo que sale hacia afuera (pago, factura,
+  correo) la barrera es la clave de intención: `useIntencion` + `accionIdempotente` (#1049/#1050).
+- **Service worker (`public/sw.js`): estáticos en TODOS los workspaces, navegación y RSC solo en soena.** Desde el
+  2026-10-12 guarda SOLO estáticos de `/_next/static/chunks|media` con hash en el nombre, con la llave sin `?dpl=`
+  (Turbopack nombra por contenido; si algún día un archivo cambia de bytes sin cambiar de nombre, el caché serviría
+  el viejo: subir `CACHE_ESTATICOS`). Nunca HTML, RSC, `/api/` ni Supabase. Lista `PILOTO` dentro del archivo =
+  `WORKSPACES_PILOTO_RED` (lo comprueba `src/lib/red/sw.test.ts`). Lo que sigue es del piloto (soena):
+  no guarda respuestas; solo toca GET
+  de navegación (reintenta y, sin red, «Reconectando») y RSC sin prefetch (lee la respuesta ENTERA para
+  poder repetirla: se pierde el pintado parcial del stream). Una respuesta RSC redirigida va tal cual: Next
+  mira `redirected`/`url`. Nunca `/api/`, `/auth/` (el código del enlace mágico es de un solo uso), POST
+  ni otro dominio. `/sw.js` pasa el middleware sin sesión: un SW que redirige no se registra NI SE
+  ACTUALIZA, y el interruptor de apagado (`APAGADO = true` en el archivo) llega por la actualización.
+  Segunda llave: `SW_ACTIVO` en `src/lib/red/piloto.ts` (y fuera de producción se desregistra: en `next dev` los
+  chunks no llevan hash).
+
+- **Un trigger que busca filas que llegan en el VIAJE SIGUIENTE no las ve.** (2026-10-06,
+  fix/idempotencia-menciones). `addComment` escribía `activity_log` con `mencion_id` y después, en otra
+  petición, `activity_menciones`. La guarda de `fn_notif_mencion` («si ya hay filas en
+  `activity_menciones`, no avisar») corría en el primer insert, cuando esas filas aún no existían: la
+  primera persona mencionada recibía dos avisos (72 pares a 0,2 s). Dos escrituras por PostgREST son dos
+  transacciones; una guarda entre ellas solo sirve si el dato que mira ya está escrito. Arreglo: con
+  menciones nuevas `mencion_id` va null y el distintivo sale de `activity_menciones`.
+- **Para mostrar un formulario generado en otra etapa, la copia es un `documento` readonly, no otro
+  `formulario`.** (2026-10-06). Un `formulario` con la misma plantilla es un bloque independiente con su
+  propia fila: el `formulario_dian_envio` muestra vacío en 217 de 244 casos aunque el 010 ya exista. La
+  copia `documento` con `source_etapa_orden` + `source_bloque_slug` del formulario lee su `drive_url`
+  (`copia-de-formulario.ts`, solo por slug) y no genera ni sube nada.
+- **⚠️ Un `<script>` en línea del `<head>` de Next NO corre si una hoja de estilo de Next cuelga, y una hoja colgada no deja pintar NADA.** Next/React pone sus `<link rel="stylesheet">` primero en el `<head>`; un script clásico posterior espera a que bajen (son «script-blocking»). Medido en Chromium el 2026-10-06 con `page.route` colgando `/_next/static/chunks/**`: el respaldo «No pudimos conectar» nunca corría. Arreglo: `<script type="module" async>` en línea, que corre apenas se lee. Y aun corriendo, el aviso quedaba en el DOM sin pintarse (la hoja pendiente bloquea el render): hay que QUITAR las hojas con `sheet === null` antes de pintar. Esa es la pantalla en blanco de `/tableros`. Ver `src/lib/red/aviso-conexion.ts` y `scripts/aviso-conexion.e2e.mjs`.
+- **`AbortSignal.timeout(ms)` lanza `RangeError` con un número no entero.** (2026-10-06, núcleo conversacional).
+  `performance.now()` da decimales; «lo que queda del turno» calculado con él y pasado tal cual hizo que el llamado de
+  respaldo fallara siempre con `RangeError [ERR_OUT_OF_RANGE]` (y en `fetch` eso parece un error de red). Redondear
+  antes: `AbortSignal.timeout(Math.round(ms))`.
+- **Tocar un botón «por título» con `includes` toca el equivocado.** (2026-10-06, arnés del núcleo). «No» encontró
+  [Anotar] porque «anotar» contiene «no», y el arnés ejecutó una carga que el usuario simulado había rechazado. Buscar
+  primero el título exacto, después el que empieza igual, y solo al final por contenido.
+- **`alertas_plazo_log` ya no es «un aviso por caso para siempre»: es uno por hito y por ciclo de reproceso.** (2026-10-07). La UNIQUE es `(negocio_id, hito, ciclo)` y el `ciclo` lo pone un trigger desde `negocios.metadata.reproceso.ciclo` (lo que mande quien inserta se ignora). «Ya avisado» se decide por TIEMPO (`enviado_at` posterior al `abierto_at` del último reproceso), no por el número: las filas anteriores a la columna nacieron en 0 aunque su caso vaya en el ciclo 2. Compararlas por número repetiría el primer día los avisos ya enviados.
+- **Una versión nueva de términos con `vigente_desde` futuro, registrada como de ENTRADA, cierra el módulo el día que empieza a regir.** (2026-10-07, feat/valida-cda-terminos-v1-4). `estadoTerminos` exige aceptadas TODAS las versiones vigentes: la v1.4 de los CDA, cargada como las anteriores, habría pausado Valida el 6-nov a quien no la aceptara. Una modificación por la 13.1 va con `rige_por_aviso = true` y `reemplaza_version_id` (la cubre la aceptación de la anterior, `cubiertaPorAviso`). Y el alta de esa fila ES la publicación: el código que la entiende tiene que estar desplegado antes.
+- **El `load` de un `<script>`/`<link>` NO llega a `window`; el `error` sí.** (2026-10-07, fix/red-lenta-aguanta). Por especificación, un evento `load` no sube de `document` a la ventana: `window.addEventListener('load', fn, true)` nunca ve la carga de un chunk. Escuchar en `document` con captura.
+- **Turbopack registra cada chunk por el ATRIBUTO `src` de `document.currentScript`.** (2026-10-07). Una copia de reintento creada con `x.src = viejo.src` lleva la URL absoluta y el runtime la anota bajo otra llave: la página no hidrata nunca, aunque el chunk bajó. La copia va con `setAttribute('src', viejo.getAttribute('src'))` (relativo, `/_next/...?dpl=`). Además el runtime guarda un fallo para siempre (`chunkResolvers`): el reintento tiene que pasar antes de llamar su `onerror`. Ver `src/lib/red/aviso-conexion.ts`.
+- **`staff.is_active` es un estado de HOY: no se filtra con él un indicador de un periodo.** (2026-10-08, SOE-006). Retirar a alguien (`retirarUsuario`) solo pone `is_active = false`; el perfil sigue en el workspace y la autoría de bloques y eventos sigue intacta. Un `WHERE s.is_active` en un tablero borra a la persona de TODOS los meses, también de los que trabajó (pasó en `get_operaciones_bono_resumen`). Para un indicador: activo O con actividad en el periodo, y el rótulo con `src/lib/equipo/inactivos.ts`. Para asignar, avisar o contar licencias, `is_active` sí manda.
+- **react-pdf conserva el `marginTop` de una unidad que no cabe y pasa ENTERA a la hoja siguiente.** (2026-10-08, feat/paginacion-pdf-trappvel). Solo al trozo de un nodo PARTIDO le pone `marginTop: 0` (`splitNode`); el que se mueve completo (un `wrap={false}`, o un padre cuyo primer hijo no cupo) llega con su margen y la hoja empieza con ese blanco. Para el aire entre unidades del flujo, una caja vacía con alto (`<View style={{ height }} />`): esa sí se parte, así que el aire se queda al pie de la hoja anterior. `marginBottom` tampoco sirve: entra en el cálculo de `minPresenceAhead` y puede empujar sola a la caja.
+- **Una imagen en `objectFit: 'cover'` se dibuja MÁS GRANDE que su marco y la recorta un `W n`.** (2026-10-08). Medir el `Do` sin el recorte da el tamaño de la imagen escalada, no el del marco: la foto de portada de 190 pt «medía» 343. `medir-pdf.ts` sigue el recorte vigente (con su pila en `q`/`Q`).
+- **Un módulo que llega a un Server Component no puede importar `createContext` ni `useContext`, aunque sea una plantilla de @react-pdf.** (2026-10-08). `cotizacion-trappvel-pdf.tsx` entra al grafo del servidor por `plantillas-cotizacion.ts` → `terminos-al-crear.ts` → `negocios/page.tsx`; `tsc`, eslint y vitest pasan, y el que cae es `next build` («needs `createContext`… only works in a Client Component»). En las plantillas PDF, los datos de composición van por props.
+- **Un `cambio_etapa` se resuelve con `etapa_orden_registrada(linea, valor, momento)`, nunca con `etapas_negocio.nombre = valor`.** (2026-10-10, SOE-006). `activity_log` guarda el NOMBRE que la etapa tenía ese día; comparar contra el nombre de hoy deja en cero toda la historia anterior a un renombre (le pasó a Correcciones del bono con «Seguimiento» → «Entrega a la DIAN»). Desde `20261010113000` el trigger de `etapas_negocio` guarda cada nombre viejo en `etapas_nombres_anteriores`. Ojo también con `ilike '%texto%'`: una etapa nueva con nombre parecido entra sola al filtro («Validación de rechazo» en «calificados»).
+- **El total de una tarifa NO es la suma de `items.precio_venta`: le faltan los adicionales.** (2026-10-12, riesgo R1 de la cotización integrada). La cascada cobra `precioConAdicionales` (línea + `item_adicionales.precio × cantidad`), y `precio_venta` es solo la línea. El total de la tarifa principal = suma de `precio_venta` de sus líneas + los adicionales de esas líneas. Medir solo `precio_venta` deja la tarifa corta justo en sus adicionales, y eso se leyó como «el servidor no tomó la Recomendada» cuando sí la tomaba. Para medir desde SQL, sumar también los adicionales; mejor, leer `opcionesDeAprobacion` / `cascadaDeItinerario`. Fijado en `negocios/total-recomendada-adicionales.test.ts`.
+- **El runtime de Turbopack se cuelga del `<script>` del HTML: su `error` le llega aunque el reintento baje.** (2026-10-12, fix/resiliencia-chunks-red). Los chunks de los componentes de la página los pide el cliente RSC (`__turbopack_load_by_url__`, «from module N»); si el `<script>` ya está en el documento, el runtime no crea otro sino `addEventListener('error')` sobre ese, y un rechazo queda para siempre (`ChunkLoadError`). El reintento de `aviso-conexion.ts` corta ese `error` en la ventana (fase de captura) mientras quedan intentos, y al agotarse se lo re-dispara a los anteriores. No se corta en hojas de estilo (React espera su `load`/`error`). Se reprodujo con un proxy que corta sockets (`scripts/sw-estaticos.e2e.mjs`), no con `page.route` de pérdida instantánea.
+- **`page.route('**/*.js')` NO toma un chunk con `?dpl=`.** (2026-10-12). El glob de Playwright exige que la URL TERMINE en `.js`; con Skew Protection (`VERCEL_DEPLOYMENT_ID` en el build) todas llevan query. Usar `**/_next/static/chunks/**` y filtrar dentro. Y `next start` local necesita el MISMO `VERCEL_DEPLOYMENT_ID` del build: sin él la página no hidrata y no hay error en consola.
+- **Insertar un workspace dispara tres siembras: perfil fiscal, categorías de gasto y estados de sistema.** (2026-10-13, espacio de pruebas). `seed_fiscal_profile`, `seed_expense_categories` y `create_default_stages_for_workspace` corren AFTER INSERT ON workspaces, y `fiscal_profiles.workspace_id` es UNIQUE: un script que copia o provisiona un workspace e INSERTA su perfil fiscal choca; hay que completar la fila por upsert `onConflict: 'workspace_id'`. Copiar `expense_categories` o `workspace_stages` de otro workspace las duplica. Ver `src/lib/espacio-pruebas/plan.ts`.
+- **`workspaces.linea_activa_id` → `lineas_negocio` es circular con `lineas_negocio.workspace_id`: un workspace copiado no puede nacer con su línea activa.** (2026-10-14, espacio de pruebas). Ningún orden de inserts lo resuelve; la llave no es diferible y Postgres la revisa al cierre de cada sentencia. El primer `--apply` de `clonar-config-workspace.ts` cayó ahí en producción y la prueba no lo vio porque el doble en memoria solo revisaba llaves al BORRAR. Se inserta en null y se fija con un UPDATE al final (`REFERENCIAS_DIFERIDAS` en `src/lib/espacio-pruebas/plan.ts`, que cubre también `cotizaciones.tarifa_aceptada_id`/`duplicada_de`, `items.opcion_de`, `contactos.fuente_promotor_id`). Un doble que escribe filas tiene que hacer cumplir las llaves al escribir, no solo al borrar.
+- **Una columna `GENERATED ALWAYS` rechaza cualquier valor, null incluido, y PostgREST la escribe si viene en el JSON.** (2026-10-14, espacio de pruebas). `rubros.valor_total` (= cantidad × valor_unitario): copiar filas tal cual las leyó un `select *` falla con «cannot insert a non-DEFAULT value into column». PostgREST no expone `information_schema`, así que con la llave de servicio no se puede preguntar cuáles son: lista medida + reintento sin la columna que nombre el error (`src/lib/espacio-pruebas/plan.ts`, `red.ts`).
+- **Las migraciones del repo NO reconstruyen el esquema de producción.** (2026-10-14). Sobre una base vacía fallan ~190-300 de ~515: `staff`, `cobros`, `activity_log` y otras nacieron fuera de ellas, y muchas migraciones de datos abortan a propósito si no encuentran la fila. Para probar contra Postgres con el esquema real: `scripts/espacio-pruebas-esquema-produccion.sql` (lectura del catálogo) y cargar ese DDL en PGlite.
+- **Los server actions del cliente van en fila: `Promise.all` de N acciones desde el navegador corre de a una.** (2026-10-15, feat/valida-lote-servidor). El router de Next encola cada acción (`actionQueue.pending` en `app-router-instance.js`) y no arranca la siguiente hasta que vuelve la anterior. El cargue masivo de Valida pedía 3 filas a la vez y en producción corrían en serie (2.707 filas, ningún hueco < 150 ms). Para trabajo concurrente o largo: procesarlo en el servidor (cola en Postgres + cron/`after()`), no desde el navegador. Corolario: un sondeo con server action (progreso cada 2,5 s) también hace esperar a cualquier otra acción de la misma pestaña.
+- **Un `onPaste` de React en un `DialogContent` de Radix no oye el Ctrl+V si el foco quedó fuera del diálogo.** (2026-10-16, feat/fotos-web-bloqueada). Con `onOpenAutoFocus` prevenido el foco sigue en el botón que abrió el selector, que está fuera del portal: el evento nunca pasa por el árbol del diálogo. Escuchar en el documento mientras está abierto (`usar-imagen-pegada.ts`). Y hacerlo en CAPTURA con `stopPropagation` si se toma la imagen: la ficha del negocio ya tiene otro `paste` en el documento (el comprobante del riel de cobro) que, con el foco fuera de un campo, abriría «pago del viajero» con la misma foto.
+- **`patchDeRecalculo` escribe `items.subtotal` con el costo unitario de la cascada: con IVA del proveedor hay que pasarle el costo SIN IVA.** (2026-10-19, feat/trappvel-fichas-temporadas-iva). La cascada ya trae el costo con IVA (`costosDelItem`); si ese número vuelve a `subtotal`, la próxima lectura le suma el IVA otra vez y el costo crece en cada recálculo. `recalcularTotales` le pasa `costoUnitarioSinIva(fila)` (lo guardado, sin dividir). Todo armador nuevo de la cascada tiene que pasar por `costosDelItem`, no por `costoDeRubrosConfirmados` a secas.
+- **Lo que debe un negocio de SOENA para repartir un pago es honorario + tarifa confirmada, no el honorario de Cartera.** (2026-10-19, feat/reparto-pagos-comercial). El cliente paga los dos en UN pago, así que prellenar con `v_cartera_negocio` (solo honorario) deja cada fila corta justo en la tarifa. La cuenta es `deudaParaReparto` (`src/lib/cobros/reparto-comercial.ts`); al corregir un reparto excluye las porciones de su propia referencia, o el negocio parece deber menos por el reparto que se está corrigiendo.
+- **Los repartos mal hechos casi nunca son del mismo contacto.** (2026-10-19). De los 4 que rehízo la financiera, solo V0477-79 compartían contacto; V0559/60, V0587/89 y V0593/94 eran contactos y empresas distintas creados el mismo día. Un aviso de «no repartió» que exija mismo contacto se calla en 3 de 4: por eso el aviso sale con solo superar la deuda, y el mismo contacto solo decide qué negocio se sugiere por nombre.
+- **Pintar la tarjeta de un hotel o un tour ESCRIBE en `fotos_perfiles`, que es la ficha del proveedor.** (2026-10-20, feat/panel-tarifas-alcance). `fotosParaTarjetas` crea el perfil la primera vez que un nombre aparece (decisión de la biblioteca de fotos del 2026-10-16) y desde #1204 ese perfil es una ficha «por clasificar». Un nombre escrito a mano («City Tour …») no es un proveedor: el pedido lleva `aMano` (`PedidoDeLinea`) y no escribe. Todo lector que tome la ficha por el nombre (panel de tarifas, IVA, aviso) tiene que respetar `aMano`, o la tarjeta, el IVA y el panel hablan de fichas distintas.
+- **Una lectura «sin costo» tiene `total` 0: sin la marca, `resolverTarifa` la confirma en cero.** (2026-10-20). La casilla «Todavía no tengo el costo» de «Escríbelo a mano» deja la lectura sin precio y con `costoPendiente`; `resolverTarifa` y `resolverHabitaciones` devuelven `sin_costo` por esa marca. Un camino nuevo que arme lecturas sin precio tiene que ponerla.
+- **Elegir «la más barata» entre tarifas de monedas distintas compara números que no se comparan.** (2026-10-21, feat/cotizar-con-tarifa). 210 USD < 300.000 COP y la preselección marcaba la suite en dólares (sin tasa) sobre la doble en pesos; se vio en la captura, no en las pruebas. `preseleccion` (`preseleccion-tarifas.ts`) fija la moneda primero (COP si hay) y compara dentro de ella.
+- **El doble de Supabase no devuelve columnas que el insert no puso: `'col' in fila` miente.** (2026-10-21). `crearRanuraConOpcion` en el doble deja el ítem sin `proveedor_id`, así que «escribir solo si la columna existe» (`'proveedor_id' in fresca`) no escribía. Para tolerar una migración sin aplicar: escribir y, si el error es de columna (`42703`/`PGRST204`), reintentar sin ella (`crearLineaConTarifa`).
+- **`reconocer` ya no pregunta en las tarjetas; lo creado a propósito sí.** (2026-10-21). Una duda con UN candidato en la misma ciudad se asocia sola (`seguro`, `porDuda`). «Agregar proveedor», `crearPerfil` y el importador de Airtable pasan `preguntarDudas: true`: sin eso, crear «Iberostar … Suites» a mano lo volvería alias del «Iberostar …» que ya está.
+- **`wa_conversacion.clase` tiene CHECK y no incluye `documento`: un PDF entrante va como `otro` con `media.tipo = 'documento'`.** (2026-10-21, feat/wa-soporte-pdf-agente). Quien lea la conversación y quiera saber si una fila trae un soporte tiene que mirar `media.tipo` (`imagen` o `documento`), no la clase: un reenvío también trae su `media`. Lo que el dominio ONE prepara del archivo (`ref`, `lectura`) se escribe en la misma columna `media` (jsonb).
+- **`isPending` de una transición con server action + `revalidatePath` no termina hasta que la ficha nueva se pinta.** Si ese repintado se cuelga, el botón queda «Cambiando…» para siempre aunque el servidor ya contestó (prueba del #1229). Un `setState` DESPUÉS de un `await` dentro de `startTransition` ya no es transición en React 19: se pinta enseguida. El estado del botón va por la respuesta (`src/hooks/use-avance-de-etapa.ts`), y deshabilitado hasta ver la etapa nueva (con routing, avanzar desde la vieja movería dos etapas).
+- **Preseleccionar «la más barata» solo dentro del MISMO servicio** (`mismoServicio`). Entre servicios distintos (29 actividades de un operador) el precio no dice cuál pidió el cliente: se marcó sola la más barata, fuera de vista.
+- **En el motor html, una línea con día asignado llega al día a día por DOS lados** (`servicios` con el día y `props.dias`). (2026-10-22). `diaADia` deduplica por la línea (`ServicioDelDocumento.itemId` ↔ `props.dias[].items[].id`): quien arme otra entrada del modelo tiene que pasar los dos ids o la actividad vuelve a salir dos veces y la portada cuenta «2 visitas».
+- **Un cargo de ePayco «pendiente» (antifraude eControl) se decide horas después, y el pago solo no cierra el cargo** (2026-10-22, transacción 390720992). La confirmación registra el pago en `cobros`; el intento (`cobro_intentos_tarjeta`), el registro de Valida (`cobro_pendiente`) y el C3 los cierra `cargo-tardio-servidor.ts` desde `trasPagoRegistrado`/`trasRechazo`. La conciliación usa el MISMO id de evento que la confirmación (`<ref_payco>-<estado>`) para que una de las dos sea duplicado. Y una consulta a APIFY con `success: false` («Transacción no relacionada con el comercio») trae `data: { error: {} }`: leerla como estado daba «rechazado».
+- **ePayco no avisa el reverso por la confirmación** (2026-10-23, transacción 390720992, reversada desde el panel). Solo la consulta (`POST /payment/transaction`, `codTransactionState: 6`) lo dice: la conciliación 7d (`reversos-epayco-servidor.ts`) pregunta por los cobros pagados con ePayco de los últimos 60 días. Un cobro anulado por reverso CONSERVA `fecha`: el cron lo cuenta como cuota cubierta y no la vuelve a cobrar; recobrar o suspender es decisión de una persona.
+- **El margen de la cotización solo alcanza a las líneas que lo HEREDAN (`items.margen_porcentaje = null`).** (2026-10-22, reunión con Trappvel). Con margen propio 0 en cada opción, subir el de «Tarifas» no mueve nada y el margen real queda en 0. Un precio que ya trae la comisión va como «Pública» (`tarifa-publica.ts`), no con 0 a mano; las que no siguen el margen las lista `lineasConMargenPropio`.
+- **La foto de un hotel con ficha fijada vive en la llave de la FICHA, no en la del nombre leído.** (2026-10-22). La tarjeta la muestra y la guarda por `items.proveedor_id`; todo lector del documento tiene que resolver esa ficha (`FichasDeHotel`, embebida en la lectura de ítems del PDF) o el hotel sale sin foto. Y el motor html pregunta por la ciudad del CAPÍTULO: `catalogo-propuesta.ts` vuelve a buscar por la del hotel.
+- **`itemsDelItinerario` mira `tarifa_pax.vaConHotel`: quien arme un `ItemConGrupo` a mano tiene que pasar `tarifa_pax`.** (2026-10-22). Sin él, el traslado atado a un hotel vuelve a contar en todas las tarifas y la pantalla dice un total y el servidor otro.

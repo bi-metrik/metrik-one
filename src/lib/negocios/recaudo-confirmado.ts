@@ -23,7 +23,7 @@
  * El estado ya existía, repartido en dos señales que este módulo cruza:
  *
  *   1. `cobros.split_json.origen === 'comercial'` — la porción es una PROPUESTA del
- *      comercial. Lo escribe `repartirPagoCore` (conciliacion-actions.ts), que ya declara
+ *      comercial. Lo escribe `guardar_reparto_comercial` (vía conciliacion-actions.ts), que ya declara
  *      en su comentario que el check "lo pone SIEMPRE la financiera (control de dos
  *      personas)".
  *   2. `cobros.split_json.confirmado_at` — la financiera validó ESA porción. Lo escribe

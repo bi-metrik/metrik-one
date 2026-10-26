@@ -9,8 +9,11 @@
 
 import type { HandlerContext } from '../types.ts';
 import { bold } from '../wa-format.ts';
-import { findNegocios, findNegocioByCode, findActiveNegocios } from '../wa-lookup.ts';
+import { findNegocios, findNegocioByCode, findActiveNegocios, clienteDelNegocio } from '../wa-lookup.ts';
+import { extraerCodigoNegocio } from '../wa-codigo-negocio.ts';
+import { nombreDeViaje } from '../wa-entendimiento-reglas.ts';
 import { completeSession } from '../wa-session.ts';
+import { comentariosDeActividad, filasDeComentarios } from '../comentario-actividad.ts';
 
 const LAST_CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 min
 
@@ -98,14 +101,14 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
   await askChoice(
     ctx,
     text,
-    activos.slice(0, 3).map((n: any) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })),
+    activos.slice(0, 3).map(n => ({ id: n.id, nombre: n.nombre, codigo: n.codigo, cliente: clienteDelNegocio(n) })),
   );
 }
 
 async function askChoice(
   ctx: HandlerContext,
   text: string,
-  candidates: Array<{ id: string; nombre: string; codigo?: string | null }>,
+  candidates: Array<{ id: string; nombre: string; codigo?: string | null; cliente?: string | null }>,
 ): Promise<void> {
   // WhatsApp interactive buttons admiten máximo 3 botones y title <= 20 chars
   const buttons = candidates.slice(0, 3).map((c, i) => {
@@ -117,8 +120,11 @@ async function askChoice(
   // No incluimos botón "Otro" porque consumiría un slot de los 3 y los activos
   // están ya en orden de últimos tocados. Si el usuario quería otro, puede
   // responder con el código del negocio (ej. "R1 26 2").
+  // Los botones solo caben 20 caracteres (el código); la lista dice cada negocio como se recuerda:
+  // «MEDELLÍN NOV 5-8 · Sofía Prueba (S 26 2)» (prueba en vivo v2 de la bandeja, N6).
+  const lista = candidates.slice(0, 3).map(c => `• ${nombreDeViaje({ nombre: c.nombre, cliente: c.cliente ?? null, codigo: c.codigo ?? null })}`);
   await ctx.sendButtons(
-    `📝 ¿En cuál negocio registro esta actividad?\n\n"${text.slice(0, 200)}"\n\nResponde con un botón o escribe el código.`,
+    `📝 ¿En cuál negocio registro esta actividad?\n\n"${text.slice(0, 200)}"\n\n${lista.join('\n')}\n\nResponde con un botón o escribe el código.`,
     buttons,
   );
 
@@ -153,8 +159,8 @@ async function handleResume(ctx: HandlerContext): Promise<void> {
       }
     }
 
-    // Texto: posiblemente un código de negocio
-    const n = await findNegocioByCode(supabase, user.workspace_id, text);
+    // Texto: posiblemente un código de negocio, también dentro de una frase ("es el R1 26 1").
+    const n = await findNegocioByCode(supabase, user.workspace_id, extraerCodigoNegocio(text) ?? text);
     if (n) {
       await persistActividad(ctx, n.id, n.nombre, context.activity_text || text);
       return;
@@ -194,22 +200,18 @@ async function persistActividad(
   else if (/visit[eé]|visita|fu[ií]\s+a/i.test(lower)) tipoLabel = '🚗';
   else if (/whatsapp|mensaje|chat/i.test(lower)) tipoLabel = '💬';
 
-  const contenido = `${tipoLabel} ${text}`.slice(0, 280);
-
   // Si no hay autor_id (colaborador WA sin profile), antepone el nombre al texto
-  // para preservar la autoría visible en el timeline.
-  const contenidoFinal = autorId
-    ? contenido
-    : `${tipoLabel} [${user.name}] ${text}`.slice(0, 280);
+  // para preservar la autoría visible en el timeline. `contenido` admite 280 caracteres:
+  // lo largo va completo en varios comentarios seguidos, no cortado.
+  const contenidos = comentariosDeActividad(autorId ? `${tipoLabel} ` : `${tipoLabel} [${user.name}] `, text);
 
-  const { error } = await supabase.from('activity_log').insert({
+  const { error } = await supabase.from('activity_log').insert(filasDeComentarios({
     workspace_id: user.workspace_id,
     entidad_tipo: 'negocio',
     entidad_id: negocioId,
     tipo: 'comentario',
-    contenido: contenidoFinal,
     autor_id: autorId,
-  });
+  }, contenidos));
 
   if (error) {
     console.error('[actividad] insert error:', error);
@@ -222,6 +224,7 @@ async function persistActividad(
     .update({ updated_at: new Date().toISOString() })
     .eq('id', negocioId);
 
-  await ctx.sendMessage(`✅ ${tipoLabel} registrado en ${bold(negocioNombre)}`);
+  const enVarios = contenidos.length > 1 ? `, completo en ${contenidos.length} comentarios seguidos` : '';
+  await ctx.sendMessage(`✅ ${tipoLabel} registrado en ${bold(negocioNombre)}${enVarios}`);
   await completeSession(supabase, session.id);
 }

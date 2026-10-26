@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Plus, X } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -10,6 +11,7 @@ import {
 import { todayBogotaISO, formatFecha } from '@/lib/dates/bogota'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import AvisoHonorarioPendiente from './AvisoHonorarioPendiente'
+import { useIntencion } from '@/hooks/use-intencion'
 
 interface BloquePagoExternoProps {
   negocioBloqueId: string
@@ -48,6 +50,8 @@ export default function BloquePagoExterno({
   const [pagos, setPagos] = useState<PagoExternoRegistrado[]>(
     () => ((instancia?.data as { pagos_externos?: PagoExternoRegistrado[] } | null)?.pagos_externos) ?? [],
   )
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
 
   // Re-sincronizar con la prop tras revalidatePath (mismo patrón que BloquePagosEpayco).
   useEffect(() => {
@@ -62,7 +66,7 @@ export default function BloquePagoExterno({
   const [fecha, setFecha] = useState(() => todayBogotaISO())
   const [retefuente, setRetefuente] = useState('')
   const [reteica, setReteica] = useState('')
-  const [isPending, startTransition] = useTransition()
+  const [isPending, startTransition] = useTransitionTolerante()
 
   const total = pagos.reduce((s, p) => s + p.monto_bruto, 0)
 
@@ -92,7 +96,8 @@ export default function BloquePagoExterno({
         fecha,
         retefuente: retefuente ? Number(retefuente) : undefined,
         reteica: reteica ? Number(reteica) : undefined,
-      })
+      }, intencion.clave())
+      intencion.cerrar()
       if (!result.success) {
         toast.error(result.error)
       } else {

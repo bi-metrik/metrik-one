@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { invalidarTablerosWorkspace } from '@/lib/tableros/cache-rpc'
 import { createServiceClient } from '@/lib/supabase/server'
 import { FEATURES } from '@/lib/feature-flags'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
@@ -1219,6 +1220,8 @@ export async function saveMeta(mes: string, metaVentas: number, metaRecaudo?: nu
 
   if (upsertError) return { success: false, error: upsertError.message }
 
+  // `config_metas` la lee la pestaña Dirección de Tableros, que vive en caché 5 minutos.
+  invalidarTablerosWorkspace(workspaceId)
   revalidatePath('/numeros')
   revalidatePath('/config')
   return { success: true }

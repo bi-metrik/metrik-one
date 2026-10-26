@@ -1,9 +1,11 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { rpcTablero } from '@/lib/tableros/cache-rpc'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
 import { canonizarSeccional } from '@/lib/dian/seccionales'
 import { normalizarCortePlanPago } from './comercial-plan-pago'
+import { rotularFilas, rotularNombre, staffInactivos } from '@/lib/equipo/inactivos'
 import type {
   ComercialResumenRow,
   ComercialPerfil,
@@ -31,13 +33,17 @@ export async function getComercialResumen(
 ): Promise<ComercialResumenRow[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return []
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_resumen_soena', {
-    p_workspace_id: workspaceId,
-    p_anio: anio,
-    p_mes: mes,
-  })
-  return (data as ComercialResumenRow[]) ?? []
+  const [{ data }, inactivos] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_comercial_resumen_soena', {
+      p_workspace_id: workspaceId,
+      p_anio: anio,
+      p_mes: mes,
+    }),
+    staffInactivos(supabase, workspaceId),
+  ])
+  // SOE-006: quien hoy está inactivo sigue en el periodo en que vendió, rotulado.
+  return rotularFilas((data as ComercialResumenRow[]) ?? [], (r) => r.responsable_id, inactivos)
 }
 
 /**
@@ -52,14 +58,20 @@ export async function getComercialPerfil(
   const { supabase, workspaceId } = await getWorkspace()
   if (!workspaceId || !supabase) return null
   const responsableId = staffId === 'sin-responsable' ? null : staffId
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_perfil_soena', {
-    p_responsable_id: responsableId,
-    p_anio: anio,
-    p_mes: mes,
-  })
+  const [{ data }, inactivos] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_comercial_perfil_soena', {
+      p_responsable_id: responsableId,
+      p_anio: anio,
+      p_mes: mes,
+    }),
+    responsableId ? staffInactivos(supabase, workspaceId) : Promise.resolve(new Set<string>()),
+  ])
   if (!data) return null
-  return data as ComercialPerfil
+  const perfil = data as ComercialPerfil
+  return responsableId && inactivos.has(responsableId)
+    ? { ...perfil, nombre: rotularNombre(perfil.nombre, true) }
+    : perfil
 }
 
 // ── Iteracion 2: KPIs del mes, series, metas ──
@@ -74,13 +86,18 @@ import type {
 export async function getComercialMes(anio: number, mes: number): Promise<ComercialMesResponse | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_kpis_mes_soena', {
-    p_workspace_id: workspaceId,
-    p_anio: anio,
-    p_mes: mes,
-  })
-  return (data as ComercialMesResponse) ?? null
+  const [{ data }, inactivos] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    rpcTablero(supabase as any, workspaceId, 'get_comercial_kpis_mes_soena', {
+      p_workspace_id: workspaceId,
+      p_anio: anio,
+      p_mes: mes,
+    }),
+    staffInactivos(supabase, workspaceId),
+  ])
+  const mesData = (data as ComercialMesResponse) ?? null
+  if (!mesData) return null
+  return { ...mesData, porVendedor: rotularFilas(mesData.porVendedor, (v) => v.responsable_id, inactivos) }
 }
 
 /** Serie historica de los ultimos N meses. */
@@ -88,7 +105,7 @@ export async function getComercialSerie(meses = 12): Promise<ComercialSerieRespo
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data } = await (supabase as any).rpc('get_comercial_serie_mensual_soena', {
+  const { data } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_serie_mensual_soena', {
     p_workspace_id: workspaceId,
     p_meses: meses,
   })
@@ -108,7 +125,7 @@ export async function getComercialSerieSeccional(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_serie_seccional_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_serie_seccional_soena', {
     p_workspace_id: workspaceId,
     p_meses: meses,
   })
@@ -133,7 +150,7 @@ export async function getComercialSerieVendedor(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_serie_vendedor_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_serie_vendedor_soena', {
     p_workspace_id: workspaceId,
     p_meses: meses,
   })
@@ -141,7 +158,10 @@ export async function getComercialSerieVendedor(
     console.error('[comercial] no se pudo traer el historico por vendedor:', rpcError)
     return null
   }
-  return (data as ComercialSerieVendedorResponse) ?? null
+  const serie = (data as ComercialSerieVendedorResponse) ?? null
+  if (!serie) return null
+  const inactivos = await staffInactivos(supabase, workspaceId)
+  return { ...serie, serie: rotularFilas(serie.serie, (p) => p.responsable_id, inactivos) }
 }
 
 /**
@@ -309,7 +329,7 @@ export async function getComercialOrigenMes(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_origen_mes_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_origen_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -379,7 +399,7 @@ export async function getComercialSeccionalMes(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_seccional_mes_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_seccional_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -451,7 +471,7 @@ export async function getComercialPlanPagoMes(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_comercial_plan_pago_mes_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_comercial_plan_pago_mes_soena', {
     p_workspace_id: workspaceId,
     p_anio: anio,
     p_mes: mes,
@@ -485,7 +505,7 @@ export async function getCapacidadSeccional(
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId || !supabase) return null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error: rpcError } = await (supabase as any).rpc('get_capacidad_seccional_soena', {
+  const { data, error: rpcError } = await rpcTablero(supabase as any, workspaceId, 'get_capacidad_seccional_soena', {
     p_workspace_id: workspaceId,
     p_desde: desde,
     p_hasta: hasta,

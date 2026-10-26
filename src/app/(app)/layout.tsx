@@ -2,15 +2,21 @@ import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import AppShell from './app-shell'
+import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
 import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
 import NotificationBell from '@/components/notification-bell'
 import DevWorkspaceBar from '@/components/dev-workspace-bar'
 import VersionWatcher from '@/components/version-watcher'
+import RumRed from '@/components/rum/rum-red'
+import PilotoRed from '@/components/red/piloto-red'
 import { getPlatformAdminState } from '@/lib/actions/platform-admin'
+import { getImpersonationOptions } from '@/lib/actions/impersonation'
+import { getActiveTimer } from './timer-actions'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { leerPerfilDeSesion } from '@/lib/supabase/perfil-sesion'
 import { getNotificaciones } from '@/lib/actions/notificaciones'
-import { versionDelBuild } from '@/lib/version/build'
+import { EPOCA } from '@/lib/version/epoca'
 import { accesoWorkspace } from '@/lib/suscripciones/estado'
 import { menuSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 
@@ -38,16 +44,25 @@ export default async function AppLayout({
   // Son independientes: ninguna usa el resultado de otra. `getNotificaciones` llama a
   // `getWorkspace` por dentro, pero los dos pasan por el mismo `cache()` de React
   // (`getWorkspaceCached`), asi que comparten la promesa en vuelo — no duplica lecturas.
-  const [profileResult, workspaceCtx, platformAdminState, notificaciones] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('full_name, role, workspace_id')
-      .eq('id', user.id)
-      .single(),
-    getWorkspace(),
-    getPlatformAdminState(),
-    getNotificaciones(),
-  ])
+  //
+  // Las dos ultimas las pedia el navegador al montar el shell, cada una con su server action
+  // (2026-10-05): las opciones de «Ver como» y el timer del FAB. Next pone las server actions
+  // en fila, asi que esas lecturas retrasaban la primera accion real de la persona, y con la
+  // red de Claro/Telmex cada viaje cuesta segundos. Aqui van en paralelo con lo demas.
+  const [profileResult, workspaceCtx, { platformAdminState, impersonacion }, notificaciones, timerActivo] =
+    await Promise.all([
+      // La MISMA fila que leen `getWorkspace` y `getPlatformAdminState`: una sola lectura
+      // compartida por `cache()` (antes eran tres a la vez, ver `perfil-sesion.ts`).
+      leerPerfilDeSesion(user.id).then((data) => ({ data })),
+      getWorkspace(),
+      // «Ver como» es solo del platform_admin: a los demas no se les pregunta nada.
+      getPlatformAdminState().then(async (estado) => ({
+        platformAdminState: estado,
+        impersonacion: estado ? await getImpersonationOptions() : null,
+      })),
+      getNotificaciones(),
+      getActiveTimer(),
+    ])
 
   const profile = profileResult.data
   if (!profile) {
@@ -107,6 +122,7 @@ export default async function AppLayout({
     modules: Record<string, boolean> | null
     config_extra: Record<string, unknown> | null
     subscription_status: string | null
+    cotizacion_template_slug: string | null
   }
   const [staffSelfResult, workspaceResult, lineasResult] = await Promise.all([
     // El header muestra el Cargo (staff.position) del usuario; si no tiene, cae al
@@ -121,7 +137,7 @@ export default async function AppLayout({
       .maybeSingle(),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (activeClient.from('workspaces') as any)
-      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra, subscription_status')
+      .select('name, slug, color_primario, color_secundario, logo_url, modules, config_extra, subscription_status, cotizacion_template_slug')
       .eq('id', activeWorkspaceId)
       .single() as Promise<{ data: WorkspaceRow | null; error: unknown }>,
     // hasLineas: workspace tiene al menos una linea activa → habilita item /flujo
@@ -176,9 +192,10 @@ export default async function AppLayout({
   const modoVitrina = (workspace.config_extra as { modo_vitrina?: boolean } | null)
     ?.modo_vitrina === true
   const hasLineas = (lineasResult.count ?? 0) > 0
-  // Suscripción: solo en un espacio con Valida (los CDA), y solo para quien la maneja. La misma
-  // resolución (cacheada por request) la usan `/suscripcion` y la franja de `/valida`.
-  const suscripcion = workspaceModules.valida_consulta ? await menuSuscripcion() : null
+  // Suscripción: en un espacio con Valida (los CDA) o con Clarity (la licencia de ONE por cuotas), y
+  // solo para quien la maneja. La misma resolución (cacheada por request) la usan `/suscripcion` y la
+  // franja de `/valida`.
+  const suscripcion = workspaceModules.valida_consulta || workspaceModules.business ? await menuSuscripcion() : null
 
   // Notificaciones pendientes resueltas aquí (server) para que la campana pinte
   // el contador en el primer render. Antes el componente arrancaba vacío y solo
@@ -205,6 +222,10 @@ export default async function AppLayout({
         modoVitrina={modoVitrina}
         hasLineas={hasLineas}
         suscripcion={suscripcion}
+        impersonacion={impersonacion}
+        timerActivo={timerActivo}
+        bibliotecaFotos={tienePropuestaHtml(workspace.cotizacion_template_slug)}
+        usuarioId={user.id}
         notificationBell={
           <NotificationBell
             userId={user.id}
@@ -218,7 +239,13 @@ export default async function AppLayout({
       {/* Vigilante de pestaña vieja: compara el build cargado contra el vivo y
           recarga (sola si no hay nada que perder, con aviso si la persona esta
           escribiendo). Techo de 8h aunque no haya deploy nuevo. */}
-      <VersionWatcher version={versionDelBuild()} />
+      <VersionWatcher epoca={EPOCA} />
+      {/* Medicion desde el navegador (`[rum]`): web vitals y navegaciones suaves, un
+          beacon por ciclo de pagina. No pinta nada. */}
+      <RumRed />
+      {/* Piloto de red (solo los workspaces de `WORKSPACES_PILOTO_RED`): pulso de conexión
+          hacia Vercel y fuera de Vercel, y bandeja de fallas por superficie. No pinta nada. */}
+      <PilotoRed slug={workspace.slug} />
       {process.env.NODE_ENV === 'development' && allWorkspaces.length > 0 && (
         <DevWorkspaceBar workspaces={allWorkspaces} activeSlug={activeSlug ?? ''} />
       )}

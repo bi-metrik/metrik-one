@@ -1,11 +1,13 @@
 'use server'
 
+import { ciudadesEnTexto } from '@/lib/pdf/fotos-del-viaje'
 import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getServerKey } from '@/lib/server-keys'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { detectarTipoDeCaptura } from '@/lib/ai/detectar-tipo-captura'
+import { MENSAJE_SIN_DETECCION } from '@/lib/cotizaciones/proceso-captura'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import {
   bloquesPorRanura,
@@ -27,6 +29,8 @@ import { lugarDeOpcion } from '@/lib/cotizaciones/opcion-viaje'
 import { etiquetaDeRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { SIN_OPCIONES } from '@/lib/cotizaciones/ubicador-capturas'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
+import { ordenDeFila } from '@/lib/cotizaciones/memo-de-aceptacion'
 
 /**
  * La ranura desde la pantalla: crearla con su nombre, agregarle una opción hermana y
@@ -58,21 +62,25 @@ interface Contexto {
 async function contexto(cotizacionId: string): Promise<Contexto | { error: string }> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
-  const { data: cot } = await (supabase as Supabase)
-    .from('cotizaciones')
-    .select('id, estado, negocio_id, oportunidad_id')
-    .eq('id', cotizacionId)
-    .maybeSingle()
+  // H2 (verificación D) · la cotización y sus líneas, en paralelo: las mismas dos consultas, una
+  // ida menos en serie. Si la cotización no se edita, las líneas se descartan sin usarse.
+  const [{ data: cot }, { data: filas, error: errItems }] = await Promise.all([
+    (supabase as Supabase)
+      .from('cotizaciones')
+      .select('id, estado, negocio_id, oportunidad_id')
+      .eq('id', cotizacionId)
+      .maybeSingle(),
+    // `select('*')`: `ranura_id` la agrega `20260923233000` y nombrarla daría un 400 sin ella.
+    (supabase as Supabase)
+      .from('items')
+      .select('*')
+      .eq('cotizacion_id', cotizacionId)
+      .order('orden'),
+  ])
   if (!cot) return { error: 'Cotización no encontrada' }
   if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
     return { error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
   }
-  // `select('*')`: `ranura_id` la agrega `20260923233000` y nombrarla daría un 400 sin ella.
-  const { data: filas, error: errItems } = await (supabase as Supabase)
-    .from('items')
-    .select('*')
-    .eq('cotizacion_id', cotizacionId)
-    .order('orden')
   if (errItems) return { error: errItems.message as string }
   return {
     supabase,
@@ -98,7 +106,9 @@ async function insertarOpcion(
   c: Contexto,
   args: { grupo: string; nombre: string; unidad: string | null; cantidad: number },
 ): Promise<{ id: string } | { error: string }> {
-  const orden = c.items.reduce((m, i) => Math.max(m, Number(i.orden) || 0), 0) + 1
+  // En un lote por pasos el orden lo fija la posición del pantallazo (`ordenDeFila`): las cadenas
+  // de cada tipo corren en paralelo y «el último + 1» daría dos líneas con el mismo orden (H3).
+  const orden = ordenDeFila() ?? c.items.reduce((m, i) => Math.max(m, Number(i.orden) || 0), 0) + 1
   const { data, error } = await c.supabase
     .from('items')
     .insert({
@@ -125,6 +135,8 @@ export interface PistasDeLugar {
   lugar?: string | null
   origen?: string | null
   destino?: string | null
+  /** «Otro servicio»: lo que es («Asistencia médica»). Es el nombre de la ranura. */
+  servicio?: string | null
 }
 
 /**
@@ -143,6 +155,11 @@ export async function crearRanuraConOpcion(
   if (!esTipoRanura(tipo)) return { success: false, error: 'Tipo de componente desconocido' }
   const c = await contexto(cotizacionId)
   if ('error' in c) return { success: false, error: c.error }
+  // «Otro servicio» solo lo abre la cotización por pasos (N5): apagada, no se escribe nada.
+  if (tipo === 'otro') {
+    const guard = await exigirPorPasos(c.supabase, cotizacionId)
+    if (!guard.ok) return { success: false, error: guard.error }
+  }
 
   const { viaje } = await leerViajeDelNegocio(c.supabase, c.cotizacion.negocio_id)
   const grupos = c.items.map(i => (i.grupo ?? null) as string | null)
@@ -150,13 +167,18 @@ export async function crearRanuraConOpcion(
   const nombresEnUso = bloquesPorRanura(c.items as { id: string; grupo?: string | null }[])
     .map(b => b.etiqueta)
     .filter((e): e is string => e !== null)
+  // Un traslado en un viaje de varias ciudades («Madrid, Barcelona, París y Ámsterdam»): el destino
+  // no dice dónde queda ESTE traslado, y tomar la primera nombraba «Traslado en Madrid» al Eurostar
+  // (prueba Europa, 2026-10-14). Hotel y actividad siguen con el destino, como siempre.
+  const destinoUnico = tipo === 'traslado' && ciudadesEnTexto(viaje.destino).length > 1 ? null : viaje.destino
   const nombre = nombreAutomaticoDeRanura({
     tipo,
-    lugar: pistas.lugar ?? viaje.destino,
+    lugar: pistas.lugar ?? destinoUnico,
     origen: pistas.origen ?? null,
     destino: pistas.destino ?? (tipo === 'vuelo' ? viaje.destino : null),
     numero,
     nombresEnUso,
+    servicio: pistas.servicio ?? null,
   })
   // La forma que se guarda sale del grupo ya escrito: si el nombre traía «:», el grupo lo
   // cambia por un guion, y la fila tiene que decir exactamente lo mismo que el grupo.
@@ -313,7 +335,12 @@ export async function detectarCaptura(cotizacionId: string, dataUrl: string): Pr
   if (!apiKey) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la lectura de capturas. Avísale a MeTRIK.' }
 
   const r = await detectarTipoDeCaptura(Buffer.from(m[2], 'base64'), m[1], apiKey)
-  if (!r.data) return { ok: false, codigo: 'LECTURA', mensaje: 'No se pudo mirar el pantallazo. Vuelve a intentarlo.' }
+  // Brief del 2026-10-05, punto 8: no es una falla que la persona tenga que arreglar. La bandeja
+  // pide el tipo con los botones «Es hotel», «Es vuelo»… y con eso la lectura sigue.
+  if (!r.data) {
+    if (r.error) console.warn(`[detectar-tipo] sin tipo: ${r.error}`)
+    return { ok: false, codigo: 'LECTURA', mensaje: MENSAJE_SIN_DETECCION }
+  }
   if (!r.data.tipo) {
     return {
       ok: false,

@@ -101,11 +101,18 @@ vi.mock('@/lib/modulos/exigir-modulo', async () =>
 // La puerta de términos de los CDA (`valida-cda/puerta.ts`). Su lógica se prueba aparte; aquí se fija
 // que TODA acción del módulo la consulta y que su «no» corta antes de la red y de la base.
 const puertaTerminos: { resultado: { ok: true } | { ok: false; error: string } } = { resultado: { ok: true } }
+// La restricción de las consultas nuevas por mora (cláusula 11.1 v1.4): solo la pregunta
+// `validaCdaPermiteConsultar`, que además exige lo de `validaCdaPermiteOperar`.
+const puertaConsulta: { resultado: { ok: true } | { ok: false; error: string } } = { resultado: { ok: true } }
 const consultasPuerta = vi.fn()
 vi.mock('@/lib/valida-cda/puerta', () => ({
   validaCdaPermiteOperar: async () => {
     consultasPuerta()
     return puertaTerminos.resultado
+  },
+  validaCdaPermiteConsultar: async () => {
+    consultasPuerta()
+    return puertaTerminos.resultado.ok ? puertaConsulta.resultado : puertaTerminos.resultado
   },
 }))
 
@@ -170,12 +177,14 @@ function constructor(tabla: string) {
 
 import {
   consultarValida,
-  prepararLoteValida,
   listarConsultasValida,
   descargarPDFConsultaValida,
   generarPDFLoteValida,
   buscarNegociosParaValida,
 } from './valida-consultas'
+// El cargue masivo nació aparte el 2026-10-15 (`crearLoteValida` reemplaza a `prepararLoteValida`):
+// pasa por la MISMA puerta, y estas pruebas lo siguen cubriendo con ella.
+import { crearLoteValida } from './valida-lotes'
 import { MODULES, reiniciarModulo } from '../../../test/exigir-modulo-doble'
 
 const PERSONA = { tipo: 'natural' as const, nombre: 'Juan Perez' }
@@ -204,6 +213,7 @@ beforeEach(() => {
   llave.delWorkspace = 'llave-de-prueba'
   process.env.VALIDA_API_KEY = 'llave-global-de-metrik'
   puertaTerminos.resultado = { ok: true }
+  puertaConsulta.resultado = { ok: true }
   consultasPuerta.mockClear()
 })
 
@@ -220,7 +230,7 @@ describe('un CDA con los términos sin aceptar no opera Valida (2026-09-23)', ()
       await descargarPDFConsultaValida('val-1'),
       await generarPDFLoteValida('lote-1'),
       await listarConsultasValida(),
-      await prepararLoteValida(loteSinCodigo()),
+      await crearLoteValida(loteSinCodigo()),
       await buscarNegociosParaValida('P'),
     ]
     expect(resultados).toEqual(resultados.map(() => PENDIENTE))
@@ -239,6 +249,39 @@ describe('un CDA con los términos sin aceptar no opera Valida (2026-09-23)', ()
     reiniciarModulo('ws-1', { ...MODULES.cuatroDSoft })
     expect(await consultarValida(PERSONA)).toEqual({ ok: false, error: 'modulo_no_activo' })
     expect(consultasPuerta).not.toHaveBeenCalled()
+  })
+})
+
+describe('consultas restringidas por mora: el histórico sigue abierto (cláusula 11.1 v1.4)', () => {
+  const RESTRINGIDO = {
+    ok: false as const,
+    error: 'Las consultas nuevas están restringidas desde el 16-nov por un pago de la suscripción vencido desde el 10-nov.',
+  }
+  beforeEach(() => {
+    reiniciarModulo('ws-1', { ...MODULES.cda })
+    puertaConsulta.resultado = RESTRINGIDO
+  })
+
+  it('la consulta individual y la masiva se niegan antes de llegar a Valida o a la base', async () => {
+    expect(await consultarValida(PERSONA)).toEqual(RESTRINGIDO)
+    expect(await crearLoteValida(loteSinCodigo())).toEqual(RESTRINGIDO)
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('listar el historial, descargar un reporte, el PDF del lote y buscar negocios siguen abiertos', async () => {
+    expect((await listarConsultasValida()).ok).toBe(true)
+    expect(await descargarPDFConsultaValida('val-1')).not.toEqual(RESTRINGIDO)
+    expect(await generarPDFLoteValida('lote-1')).not.toEqual(RESTRINGIDO)
+    expect((await buscarNegociosParaValida('P')).ok).toBe(true)
+    // Las cuatro preguntaron a la puerta (la de operar), no se la saltaron.
+    expect(consultasPuerta).toHaveBeenCalledTimes(4)
+  })
+
+  it('CONTROL — al registrarse el pago, la siguiente consulta pasa', async () => {
+    puertaConsulta.resultado = { ok: true }
+    expect((await consultarValida(PERSONA)).ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -267,8 +310,8 @@ describe('el módulo Valida, no la sesión, abre estas acciones (tercera ronda)'
     expect((await listarConsultasValida()).ok).toBe(false)
   })
 
-  it('no prepara lotes', async () => {
-    expect((await prepararLoteValida(loteSinCodigo())).ok).toBe(false)
+  it('no crea lotes', async () => {
+    expect((await crearLoteValida(loteSinCodigo())).ok).toBe(false)
   })
 
   it('no busca negocios', async () => {
@@ -346,19 +389,45 @@ describe('consultarValida — de quien es el negocio', () => {
   })
 })
 
-describe('prepararLoteValida — el negocio del lote', () => {
-  it('un negocio propio se reparte a las filas sin codigo', async () => {
-    const r = await prepararLoteValida(loteSinCodigo(), { negocio_id_lote: 'neg-propio' })
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.data.filas.map((f) => f.negocio_id)).toEqual(['neg-propio'])
+describe('consultarValida — tope de tiempo y reintento del cargue masivo (2026-10-04)', () => {
+  it('la llamada a Valida lleva tope de tiempo y, si se agota, la fila se guarda como error', async () => {
+    fetchValida.mockImplementationOnce(async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError')
+    })
+    const r = await consultarValida(PERSONA, { lote_id: 'lote-1' })
+    expect(r).toEqual({ ok: false, error: 'valida_tiempo_agotado' })
+    const init = fetchValida.mock.calls[0][1] as { signal?: unknown }
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(inserts).toHaveLength(1)
+    expect(inserts[0].payload.severidad).toBe('error')
   })
 
-  it('un negocio de otro workspace no se reparte a las filas', async () => {
-    const r = await prepararLoteValida(loteSinCodigo(), { negocio_id_lote: 'neg-ajeno' })
-    expect(r).toEqual({ ok: false, error: 'negocio_no_encontrado' })
+  it('el reintento de una fila que el primer intento ya guardo no vuelve a cobrarla', async () => {
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Y' }, { lote_id: 'lote-1', reintento: true })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.consulta_local_id).toBe('c-lote')
+      expect(r.data.severidad).toBe('sin_hallazgo')
+    }
+    expect(fetchValida).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('el reintento de una fila que NO quedo guardada si consulta', async () => {
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Otra persona' }, { lote_id: 'lote-1', reintento: true })
+    expect(r.ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
+    expect(inserts).toHaveLength(1)
+  })
+
+  it('CONTROL — sin la marca de reintento, la misma persona del lote se consulta de nuevo', async () => {
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Y' }, { lote_id: 'lote-1' })
+    expect(r.ok).toBe(true)
+    expect(fetchValida).toHaveBeenCalledTimes(1)
   })
 })
+
+// El negocio del lote se prueba con el lote nuevo en `valida-lotes.test.ts`.
 
 describe('listarConsultasValida — codigo y nombre del negocio', () => {
   it('una consulta atada a un negocio ajeno no trae su codigo ni su nombre', async () => {

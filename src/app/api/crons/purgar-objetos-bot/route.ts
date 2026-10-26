@@ -14,6 +14,7 @@
  * en meses.
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createServiceClient } from '@/lib/supabase/server'
 import { drenarObjetosPurgados, type ClienteDrenaje } from '@/lib/retencion-bot/drenar-objetos'
 
@@ -26,6 +27,10 @@ export async function GET(req: NextRequest) {
   if (!cronHeader && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
   }
+
+  // Una sola corrida aunque Vercel entregue el cron dos veces (ver `candadoDeCron`).
+  const otraCorrida = await candadoDeCron('purgar-objetos-bot', req)
+  if (otraCorrida) return otraCorrida
 
   // La cola y su RPC no estan en los tipos generados de la base.
   const cliente = createServiceClient() as unknown as ClienteDrenaje

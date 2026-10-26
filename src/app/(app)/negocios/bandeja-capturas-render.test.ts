@@ -131,6 +131,22 @@ describe('la fila de un pantallazo leído: se revisa antes de aceptar (H4)', () 
     expect(html).toContain('role="tooltip"')
     expect(html).toContain('Revisa la moneda: la captura no la muestra.')
   })
+
+  it('el hotel fuera de las fechas del viaje se lee en la fila, sin pasar el mouse (brief del 2026-09-30)', () => {
+    const aviso = 'El hotel va del 9 oct 2026 al 13 nov 2026 y el viaje es del 9 nov 2026 al 13 nov 2026. Revisa las fechas.'
+    const solo = pintar(captura({ estado: { fase: 'lista', alertas: [aviso] } }))
+    expect(solo).toContain('data-aviso-fechas')
+    expect(solo).toContain(aviso)
+    // Sola, no deja el ícono: no hay nada más que decidir al pasar el mouse.
+    expect(solo).not.toContain('role="tooltip"')
+    // Con otra alerta, esa sigue en el ícono y el aviso de fechas sigue a la vista.
+    const con = pintar(captura({ estado: { fase: 'lista', alertas: [aviso, 'Revisa la moneda: la captura no la muestra.'] } }))
+    expect(con).toContain('data-aviso-fechas')
+    expect(con).toContain('role="tooltip"')
+    // También en la fila que pregunta si es la misma opción.
+    const parecida = pintar(captura({ estado: { fase: 'parecida', conItemId: 'item-0', donde: 'Opción 1 de Hotel', alertas: [aviso] } }))
+    expect(parecida).toContain('data-aviso-fechas')
+  })
 })
 
 describe('mientras se lee', () => {
@@ -306,5 +322,47 @@ describe('el ⚠ de la tarjeta: qué opción tiene un pantallazo esperando (R8, 
     expect(pendientesPorOpcion([sobra('c1', 'o2', false)])).toEqual({})
     expect(pendientesPorOpcion([sobra('c1', 'borrador:cap-9')])).toEqual({})
     expect(pendientesPorOpcion([{ id: 'c1', estado: { fase: 'lista' as const, alertas: [] } }])).toEqual({})
+  })
+})
+
+describe('caso Alejandra (2026-10-05): lo que no llegó a ONE dice qué pasó y se retoma sin volver a pegarlo', () => {
+  it('una lectura que no llegó ofrece «Reintentar» y no pide volver a pegarla', async () => {
+    const { MENSAJE_LECTURA_SIN_RED } = await import('@/lib/cotizaciones/proceso-captura')
+    const html = pintar(captura({ estado: { fase: 'rechazada', mensaje: MENSAJE_LECTURA_SIN_RED, reintentar: true }, borrador: null, tipo: 'hotel' }))
+    expect(html).toContain('No llegó a ONE: la conexión se cortó al mandar el pantallazo')
+    expect(html).toMatch(/data-reintentar-captura[^>]*>Reintentar</)
+    expect(html).not.toContain('Vuelve a pegarlo')
+  })
+
+  it('un rechazo de la captura (no de la red) no ofrece «Reintentar»: reintentar no lo cambiaría', () => {
+    const html = pintar(captura({ estado: { fase: 'rechazada', mensaje: 'Esta captura no trae precio.' }, borrador: null }))
+    expect(html).not.toContain('data-reintentar-captura')
+  })
+
+  it('H19 · un rechazo de la lectura ofrece decir qué es: «Es traslado», nunca un callejón', () => {
+    const html = pintar(captura({ estado: { fase: 'rechazada', mensaje: 'Esta captura no es de vuelo.' }, borrador: null, tipo: 'vuelo' }))
+    expect(html).toContain('data-reclasificar-captura')
+    expect(html).toContain('Es traslado')
+    // El tipo que ya falló no se vuelve a ofrecer.
+    expect(html).not.toContain('Es vuelo')
+    // Sin red, la salida es «Reintentar», no reclasificar.
+    const sinRed = pintar(captura({ estado: { fase: 'rechazada', mensaje: 'x', reintentar: true }, borrador: null, tipo: 'vuelo' }))
+    expect(sinRed).not.toContain('data-reclasificar-captura')
+  })
+
+  it('la detección que no llegó dice «Se cortó la conexión», no «No se reconoce qué es»', async () => {
+    const { MENSAJE_DETECCION_SIN_RED } = await import('@/lib/cotizaciones/proceso-captura')
+    const html = pintar(captura({ estado: { fase: 'eligiendo_tipo', motivo: MENSAJE_DETECCION_SIN_RED }, borrador: null, tipo: null }))
+    expect(html).toContain('Se cortó la conexión')
+    expect(html).not.toContain('No se reconoce qué es')
+    expect(html).toContain('Es hotel')
+  })
+
+  it('«Aceptar» sin respuesta, o con un ok:false sin texto, igual dice qué pasó y qué hacer', () => {
+    expect(desenlaceDeAceptacion(null)).toEqual({ tipo: 'error', mensaje: expect.stringMatching(/^No llegó a ONE: la conexión se cortó al aceptar/) })
+    expect(desenlaceDeAceptacion({ ok: false, codigo: 'CREAR', mensaje: '' })).toEqual({ tipo: 'error', mensaje: expect.stringContaining('código CREAR') })
+    for (const r of [desenlaceDeAceptacion(null), desenlaceDeAceptacion({ ok: false, codigo: 'X', mensaje: '' })]) {
+      expect(r).not.toEqual({ tipo: 'error', mensaje: 'No se pudo agregar la captura. Inténtalo otra vez.' })
+    }
   })
 })

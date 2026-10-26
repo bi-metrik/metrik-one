@@ -38,3 +38,4 @@ Si una vuelve a tener algo pendiente, sube de nuevo a `MEMORY.md`.
 - [Tokens Pino Profundo](project_tokens_pino_profundo.md) — #601: el acento es invisible sobre carbón
 - [Capturas de Sustenta para la landing de AFI](project_capturas_sustenta_landing.md) — datos FICTICIOS
 - [FTO del State Dept en Valida](project_valida_fto_state_dept.md) — lista activa; la privacidad NO enumera la FTO
+- Fotos reemplazadas por [[fotos-perfiles]] (2026-10-16, código borrado): [web bloqueada](project_fotos_web_bloqueada.md), [galería + Emilio](project_galeria_fotos_hotel.md) (migración 20261016233000 sigue viva), [por categoría](project_fotos_hotel_por_categoria.md) (migración 20261016221500 sigue viva), [biblioteca y tarjeta](project_biblioteca_fotos.md)

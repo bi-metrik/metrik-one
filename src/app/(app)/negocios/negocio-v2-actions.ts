@@ -1,8 +1,30 @@
 'use server'
 
+import { leerConfigPorPasos } from '@/lib/cotizaciones/por-pasos'
+import { accionIdempotente } from '@/lib/idempotencia/accion'
+import { MENSAJE_EN_CURSO } from '@/lib/idempotencia/clave'
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { revalidatePath } from 'next/cache'
-import { RAZONES_PERDIDA_NEGOCIO, MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, MAX_DIAS_PAUSA, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
+import { randomUUID } from 'crypto'
+import { after } from 'next/server'
+import { correoAlCrearNegocio } from '@/lib/autorizacion-datos/servidor'
+import { bloqueoAutorizacionDatos } from '@/lib/autorizacion-datos/gate-servidor'
+import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
+import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
+import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
+import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
+import { evaluarGateCotizacionRequerida } from '@/lib/negocios/gate-cotizacion-requerida'
+import { sinNegociosDePruebaAjenos } from '@/lib/negocios/negocios-de-prueba'
+import { evaluarGateServicios } from '@/lib/viaje/servicios-viaje-datos'
+import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
+import { lineasDelGate } from '@/lib/viaje/gate-servicios'
+import { evaluarGateEntrega } from '@/lib/viaje/entrega-datos'
+import { evaluarGateCierre, evaluarGatePostventa } from '@/lib/viaje/cierre-viaje-datos'
+import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
+import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
+import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import { MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
   crearNegocioEnWorkspace,
@@ -13,6 +35,7 @@ import {
   type ResultadoCrearNegocio,
 } from '@/lib/negocios/crear-negocio'
 import { esAlmacenamientoExterno } from '@/lib/almacenamiento/config'
+import { camposOficialesNoValidos, primerCampoOficialNoValido } from '@/lib/texto/texto-latino'
 import { faltaHonorarioConfirmado, type ConfigCobro } from '@/lib/negocios/honorario-confirmado'
 import { esSuperficieDeCapturaDeCobro } from '@/lib/negocios/superficie-cobro'
 import { esBloqueReactivado, reactivacionActiva } from '@/lib/negocios/bloque-reactivado'
@@ -21,6 +44,10 @@ import { routingDeEtapa } from '@/lib/negocios/retorno-reproceso'
 import type { EtapaDelSegmentador } from '@/lib/negocios/linea-de-flujo'
 import type { GuiaEtapa } from '@/lib/negocios/guia-etapa'
 import { todayBogotaISO } from '@/lib/dates/bogota'
+import { fechasDeCobrosMulti, notaCobroMulti } from '@/lib/epayco/fecha-cobro-multi-pago'
+import { filasConId, planearGuardadoMulti, type CobroExistente, type FilaMultiPago } from '@/lib/epayco/multi-pago-filas'
+import { puedeEditarMultiPago } from '@/lib/permissions/multi-pago'
+import { consultarTransaccionEpayco } from '@/lib/epayco'
 import { bloqueTipoCode } from '@/components/workflow/types'
 import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanonicoSeccional } from '@/lib/dian/seccionales'
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
@@ -90,13 +117,8 @@ import { avisoNoAplica, reglasNoAplica, type AvisoNoAplica } from '@/lib/negocio
 import { aplicarDesenlacesDeRetorno } from '@/lib/negocios/aplicar-desenlace'
 import { leerDesenlacesDeMetadata, type DesenlaceMarcado } from '@/lib/negocios/desenlace-retorno'
 import { visiblePuedeNacerCompleto, gateVisibleQuedaResuelto, documentoHeredadoNaceCompleto } from '@/lib/negocios/bloque-visible-completo'
-import {
-  fuenteDeHerencia,
-  indicesDeHerencia,
-  origenesPorSlugDe,
-  type FilaDelNegocio,
-  type FuenteHerencia,
-} from '@/lib/negocios/herencia-casilla'
+import { instanciarBloquesDeEtapa } from '@/lib/negocios/instanciar-bloques-etapa'
+import { asignarResponsableAlEntrar } from '@/lib/negocios/responsable-automatico'
 import {
   dataDeFacturaParaCopias,
   emisorImpideFactura,
@@ -110,6 +132,23 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAsignarResponsableEnWorkspace } from '@/lib/permissions/asignar-responsable-servidor'
+import { tiposReprocesoOperativo } from '@/lib/negocios/reproceso-operativo'
+import {
+  anclaDeBloques,
+  CAMPO_AVANCE_ANTICIPADO,
+  configAvanceAnticipado,
+  contenidoAvanceAnticipado,
+  evaluarAvanceAnticipado,
+  SIN_ANCLA,
+} from '@/lib/negocios/avance-anticipado'
+import type { TipoReproceso } from '@/lib/negocios/atribucion-reproceso'
+import {
+  CAMPO_CRUCE_AVANZADO,
+  esAvanzable,
+  puedeAvanzarCruces,
+  validarMotivoAvance,
+} from '@/lib/negocios/cruces-avance'
 import {
   resumenCampanasContacto,
   type InteraccionCampana,
@@ -119,6 +158,7 @@ import {
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
+import { formulariosOrigenDeCopias, historialSinOrigenesGenerables, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
 import { bloqueOcultoEnHistorial } from '@/lib/negocios/bloque-oculto-historial'
 import { datosClaveDelNegocio, contradiccionesQueBloquean } from '@/lib/negocios/datos-clave-servidor'
@@ -128,6 +168,7 @@ import { sanearDataDelNavegador } from '@/lib/negocios/data-escribible'
 import { mayusculasDeBloqueDeViaje } from '@/lib/negocios/mayusculas'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { refrescarVigenciaCrossCheck, type CrossCheckGuardado, type SpecVigencia } from '@/lib/documentos/refrescar-vigencia'
+import { absolverCrossCheck, type SpecRelectura } from '@/lib/documentos/relectura-cross-check'
 import { calcularDvNit, nitSinDv } from '@/lib/dian/nit'
 import { calcularTarifaUpmePorAnio } from '@/lib/upme/tarifa'
 import { registrarCorrecciones, contextoCorreccion, esCausaValida, type CampoCorregido, type CausaCorreccion } from '@/lib/correcciones/registrar'
@@ -156,11 +197,17 @@ import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { evaluarGateMargen } from '@/lib/cotizaciones/gate-margen-datos'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 import { crearClienteSiigoAlAvanzar } from '@/lib/siigo/clientes'
-import { abonarAlRegistrarPago } from '@/lib/siigo/recibo-automatico'
+import { abonarEnSegundoPlano } from '@/lib/siigo/segundo-plano'
 import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servidor'
 import { cerrarReprocesoSiSeRehizoElTramo } from '@/lib/negocios/cierre-reproceso-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
-import { bloqueCobrosCompleto, cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
+import { bloqueCobrosCompleto, cobradoConfirmado, resumenDeCobro } from '@/lib/cobros/saldo-negocio'
+import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
+import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
+import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
+import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
+import { autorizacionEstaPendiente, faltaAutorizacionDelNegocio, lineaExigeAutorizacion, MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
+import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -181,6 +228,9 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
 import { guardarCarpetaLocal, resolverPermisoCarpetaLocal } from '@/lib/negocios/carpeta-local-servidor'
+import { costosEjecutadosPorNegocio } from '@/lib/negocios/costos-ejecutados'
+import { documentosLeyendo, mensajeDocumentoLeyendo } from '@/lib/negocios/documentos-leyendo'
+import { camposCambiados, renombrarNegocioSiAplica } from '@/lib/negocios/nombre-automatico'
 
 // ── Tipos inline para el nuevo schema de negocios ─────────────────────────────
 // Las tablas nuevas (negocios, lineas_negocio, etapas_negocio, bloque_configs,
@@ -209,6 +259,10 @@ export type EtapaNegocio = {
   // config_extra.buzon_leads = true → buzón de entrada (Recepción). Al descartar
   // desde aquí se piden razones de triage de lead, no de pérdida de venta.
   es_buzon?: boolean
+  // config_extra.reproceso_operativo → tipos de reproceso que el operativo del caso puede
+  // abrir desde esta etapa (SOE-001). Solo decide si la pantalla dibuja el botón; el
+  // permiso lo vuelve a decidir `reprocesarNegocio`.
+  reproceso_operativo?: TipoReproceso[]
   // config_extra.guia → la ayuda de la etapa, en la etapa. Se muestra sobre los
   // bloques para responder, sin salir de la pantalla, las tres preguntas que se
   // hace quien abre un caso: dónde está, qué le toca y qué falta para avanzar.
@@ -328,8 +382,8 @@ export type NegocioDetalle = {
     rol: string | null
     segmento: string | null
   } | null
-  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
-  responsables: Array<{ id: string; full_name: string }>
+  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). `rol` = área del responsable. */
+  responsables: Array<{ id: string; full_name: string; rol: string | null }>
   /**
    * Recaudo pendiente para pasar a operaciones. Presente (no null) solo cuando la
    * etapa actual tiene el gate `saldo:handoff` (ej. Documentación). El bloque de
@@ -415,6 +469,8 @@ export type NegocioResumen = {
   contacto_nombre: string | null
   /** Celular del contacto. Solo para la búsqueda: la tarjeta no lo muestra. */
   contacto_telefono: string | null
+  /** Correo del contacto (`contactos.email`). Solo para el Excel: la tarjeta no lo muestra. */
+  contacto_email: string | null
   // Ejecucion
   costos_ejecutados: number
   // Pausa
@@ -660,6 +716,13 @@ export async function getNegociosV2(
    */
   estado: 'abierto' | 'completado' | 'cerrado' | 'todos' = 'abierto',
   incluirPausados = false,
+  /**
+   * `false` deja `costos_ejecutados` en 0 sin leer `gastos`/`horas`. Solo para quien los
+   * pide aparte para un subconjunto (la lista paginada, `cargar-vista-lista.ts`): esas
+   * dos lecturas mandan los ids por la URL, y con el universo entero son ~18 KB por
+   * consulta. Quien no lo sepa no debe tocarlo: el 0 no es un dato.
+   */
+  conCostos = true,
 ): Promise<NegocioResumen[]> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return []
@@ -667,12 +730,22 @@ export async function getNegociosV2(
   // ── Modelo roles-areas-stages Fase 2: filtrado por operator ──
   // Operator solo ve negocios donde es responsable (negocio_responsables N:M).
   // Otros roles (owner/admin/supervisor/read_only) ven todos. Contador no llega aqui.
+  //
+  // Un operator SIN staffId no ve ninguno. Hasta el 2026-10-18 la condición era
+  // `role === 'operator' && staffId`: sin fila en `staff` el filtro se saltaba y el
+  // operator veía TODOS los negocios del workspace. `getWorkspace` autocrea el staff
+  // del operator (#988), pero hay caminos donde igual queda null (su staff vive en otro
+  // workspace, el upsert falló); el default seguro es la lista vacía, igual que el
+  // detalle (`getNegocioDetalleCompleto`) y `canViewNegocio` ya hacían.
   let negocioIdsPermitidos: string[] | null = null
-  if (role === 'operator' && staffId) {
-    const { data: nrRows } = await db(supabase)
+  if (role === 'operator') {
+    if (!staffId) return []
+    const { data: nrRows, error: errorResponsables } = await db(supabase)
       .from('negocio_responsables')
       .select('negocio_id')
       .eq('staff_id', staffId)
+    // Un fallo aquí NO es "no tiene negocios": se lanza (ver abajo).
+    if (errorResponsables) throw new Error(`negocio_responsables: ${errorResponsables.message}`)
     const ids = (nrRows ?? []).map((r: { negocio_id: string }) => r.negocio_id)
     if (ids.length === 0) return []
     negocioIdsPermitidos = ids
@@ -701,13 +774,18 @@ export async function getNegociosV2(
       etapa_cambiada_at,
       origen,
       aliado_id,
+      linea_id,
       lineas_negocio(nombre, numero),
       etapas_negocio(nombre, stage, numero, config_extra),
       empresas(nombre),
-      contactos(nombre, telefono)
+      contactos(nombre, telefono, email),
+      negocio_responsables(assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name))
     `)
     .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
+    // Desempate: dos negocios con el mismo `created_at` (cargas por lote) salían en orden
+    // arbitrario, y la lista por páginas repetía uno y saltaba otro entre «Ver más».
+    .order('id', { ascending: true })
 
   if (estado === 'cerrado') {
     query = query.in('estado', ESTADOS_CERRADOS)
@@ -721,22 +799,28 @@ export async function getNegociosV2(
     query = query.in('id', negocioIdsPermitidos)
   }
 
-  const { data } = await query
+  const { data: dataCruda, error: errorLista } = await query
 
-  if (!data) return []
+  // Antes `if (!data) return []`: un fallo de Supabase (timeout, red, permisos) llegaba a la
+  // pantalla como «Sin negocios» con 200. Se lanza: la página lo entrega a `error.tsx`, la
+  // ruta de la lista responde 500 y el export ya respondía 500 ante un throw.
+  if (errorLista) throw new Error(`negocios: ${errorLista.message}`)
+  if (!dataCruda) return []
+  // El negocio del viaje de prueba (metadata.es_prueba, F8) solo lo listan sus responsables y
+  // los aprobadores de su línea: el equipo real del cliente no lo ve (Vera F8-1).
+  const data = await sinNegociosDePruebaAjenos(
+    db(supabase), workspaceId, staffId ?? null, dataCruda as Record<string, unknown>[],
+  )
 
   // Batch: gastos por negocio
   const negocioIds = (data as Record<string, unknown>[]).map(r => r.id as string)
-  const [gastosRes, horasRes, staffRes, wsRes, respRes, festivosRes] = await Promise.all([
-    db(supabase).from('gastos').select('negocio_id, monto').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
-    db(supabase).from('horas').select('negocio_id, horas, staff_id').eq('workspace_id', workspaceId).in('negocio_id', negocioIds),
-    supabase.from('staff').select('id, salary').eq('workspace_id', workspaceId),
+  // Los responsables ya vienen embebidos en la consulta de `negocios` (antes era una
+  // lectura aparte con los ~466 ids en la URL, ~18 KB por consulta en SOENA).
+  const [costosPorNeg, wsRes, festivosRes] = await Promise.all([
+    conCostos
+      ? costosEjecutadosPorNegocio(supabase, workspaceId, negocioIds)
+      : Promise.resolve({} as Record<string, number>),
     db(supabase).from('workspaces').select('config_extra').eq('id', workspaceId).single(),
-    db(supabase)
-      .from('negocio_responsables')
-      .select('negocio_id, assigned_at, staff:staff!negocio_responsables_staff_id_fkey(id, full_name)')
-      .in('negocio_id', negocioIds)
-      .order('assigned_at', { ascending: true }),
     // Calendario de festivos: misma tabla que usa la función SQL horas_habiles_entre.
     db(supabase).from('festivos_colombia').select('fecha'),
   ])
@@ -749,9 +833,17 @@ export async function getNegociosV2(
 
   // Responsables por negocio (orden estable por assigned_at = más antiguo primero).
   const responsablesPorNeg: Record<string, Array<{ id: string; full_name: string }>> = {}
-  for (const r of ((respRes.data ?? []) as Array<{ negocio_id: string; staff: { id: string; full_name: string | null } | null }>)) {
-    if (!r.staff) continue
-    ;(responsablesPorNeg[r.negocio_id] ??= []).push({ id: r.staff.id, full_name: r.staff.full_name ?? '—' })
+  for (const row of data as Record<string, unknown>[]) {
+    const asignaciones = ((row.negocio_responsables ?? []) as Array<{
+      assigned_at: string | null
+      staff: { id: string; full_name: string | null } | null
+    }>)
+      .slice()
+      .sort((a, b) => (a.assigned_at ?? '').localeCompare(b.assigned_at ?? ''))
+    for (const r of asignaciones) {
+      if (!r.staff) continue
+      ;(responsablesPorNeg[row.id as string] ??= []).push({ id: r.staff.id, full_name: r.staff.full_name ?? '—' })
+    }
   }
 
   // Nombre del aliado de los negocios de origen 'alianza'. Query aparte (no
@@ -774,26 +866,6 @@ export async function getNegociosV2(
     for (const a of ((aliadosRows ?? []) as Array<{ id: string; nombre: string }>)) {
       aliadoNombres[a.id] = a.nombre
     }
-  }
-
-  // Staff salary map for hour cost calculation
-  const staffSalaryMap: Record<string, number> = {}
-  for (const s of ((staffRes.data ?? []) as Array<{ id: string; salary: number | null }>)) {
-    staffSalaryMap[s.id] = s.salary ?? 0
-  }
-
-  // Sum gastos per negocio
-  const gastosPorNeg: Record<string, number> = {}
-  for (const g of ((gastosRes.data ?? []) as Array<{ negocio_id: string; monto: number }>)) {
-    gastosPorNeg[g.negocio_id] = (gastosPorNeg[g.negocio_id] ?? 0) + (g.monto ?? 0)
-  }
-
-  // Sum horas cost per negocio
-  const horasCostoPorNeg: Record<string, number> = {}
-  for (const h of ((horasRes.data ?? []) as Array<{ negocio_id: string; horas: number; staff_id: string | null }>)) {
-    const salary = h.staff_id ? (staffSalaryMap[h.staff_id] ?? 0) : 0
-    const tarifa = salary > 0 ? salary / 160 : 0
-    horasCostoPorNeg[h.negocio_id] = (horasCostoPorNeg[h.negocio_id] ?? 0) + ((h.horas ?? 0) * tarifa)
   }
 
   // ── Tarjeta config-driven: vehículo + seccional desde un bloque (ej. Factura) ──
@@ -955,17 +1027,27 @@ export async function getNegociosV2(
       // bloques dan 1.510 filas sobre los negocios abiertos. PostgREST corta en
       // 1.000 sin avisar, y lo que se perdería son instancias del bloque — o sea,
       // negocios que dejarían de aparecer en su grupo o marcas que no encenderían.
-      const filas = await traerTodo<{ negocio_id: string; bloque_config_id: string; estado: string | null }>(
-        (desde, hasta) =>
-          db(supabase)
+      //
+      // Se acota por JOIN con `negocios` (mismo estado que la consulta principal), no con
+      // los ids en la URL: eran los ~466 uuid de SOENA, ~18 KB por cada página de
+      // `traerTodo`, y desde Node la petición ni salía (`fetch failed`, medido el
+      // 2026-10-03). El JOIN puede traer instancias de negocios que la lista no tiene
+      // (pausados, ajenos a un operator): se descartan abajo contra `idsDeLaLista`.
+      const idsDeLaLista = new Set(negocioIds)
+      const filasCrudas = await traerTodo<{ negocio_id: string; bloque_config_id: string; estado: string | null }>(
+        (desde, hasta) => {
+          let q = db(supabase)
             .from('negocio_bloques')
-            .select('negocio_id, bloque_config_id, estado')
-            .in('negocio_id', negocioIds)
+            .select('negocio_id, bloque_config_id, estado, negocios!inner(workspace_id)')
+            .eq('negocios.workspace_id', workspaceId)
             .in('bloque_config_id', Array.from(nombrePorConfig.keys()))
-            .order('id')
-            .range(desde, hasta),
+          if (estado === 'cerrado') q = q.in('negocios.estado', ESTADOS_CERRADOS)
+          else if (estado !== 'todos') q = q.eq('negocios.estado', estado)
+          return q.order('id').range(desde, hasta)
+        },
         { etiqueta: 'seguimiento de citas · negocio_bloques' },
       )
+      const filas = filasCrudas.filter((f) => idsDeLaLista.has(f.negocio_id))
 
       const estadosPorNeg: Record<string, Record<string, EstadoBloque>> = {}
       for (const f of filas) {
@@ -1032,7 +1114,8 @@ export async function getNegociosV2(
       contacto_nombre: (row.contactos as { nombre: string } | null)?.nombre ?? null,
       contacto_telefono:
         (row.contactos as { telefono: string | null } | null)?.telefono ?? null,
-      costos_ejecutados: Math.round((gastosPorNeg[id] ?? 0) + (horasCostoPorNeg[id] ?? 0)),
+      contacto_email: (row.contactos as { email: string | null } | null)?.email ?? null,
+      costos_ejecutados: costosPorNeg[id] ?? 0,
       pausado: (row.pausado as boolean) ?? false,
       pausado_hasta: (row.pausado_hasta as string) ?? null,
       motivo_pausa: (row.motivo_pausa as string) ?? null,
@@ -1112,19 +1195,22 @@ export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return []
 
-  const { data: ws } = await db(supabase)
+  const { data: ws, error: errorWs } = await db(supabase)
     .from('workspaces')
     .select('linea_activa_id')
     .eq('id', workspaceId)
     .single()
+  // Igual que `getNegociosV2`: un fallo no es "sin etapas" (el segmentador quedaba vacío).
+  if (errorWs) throw new Error(`workspaces: ${errorWs.message}`)
   const lineaId = (ws as { linea_activa_id: string | null } | null)?.linea_activa_id
   if (!lineaId) return []
 
-  const { data } = await db(supabase)
+  const { data, error: errorEtapas } = await db(supabase)
     .from('etapas_negocio')
     .select('numero, nombre, stage, orden, config_extra')
     .eq('linea_id', lineaId)
     .order('orden', { ascending: true })
+  if (errorEtapas) throw new Error(`etapas_negocio: ${errorEtapas.message}`)
 
   type Fila = { numero: number | null; nombre: string; stage: string | null; orden: number; config_extra: Record<string, unknown> | null }
   return ((data as Fila[] | null) ?? [])
@@ -1146,6 +1232,8 @@ async function getNegocioDetalle(id: string): Promise<{
   etapasLinea: EtapaNegocio[]
   etapasNoAplican: EtapaNoAplica[]
   blockIdByConfigId: Record<string, string>
+  /** La línea declara el gate `autorizacion_datos` en alguna etapa (`autorizacion-datos/envio.ts`). */
+  exigeAutorizacionDatos: boolean
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -1198,12 +1286,14 @@ async function getNegocioDetalle(id: string): Promise<{
   // Responsables (multi) desde negocio_responsables (N:M) — fuente de verdad.
   const { data: respRows } = await db(supabase)
     .from('negocio_responsables')
-    .select('staff_id, assigned_at, staff!negocio_responsables_staff_id_fkey(id, full_name)')
+    .select('staff_id, assigned_at, rol, staff!negocio_responsables_staff_id_fkey(id, full_name)')
     .eq('negocio_id', id)
     .order('assigned_at', { ascending: true })
-  const responsables = ((respRows ?? []) as Array<{ staff: { id: string; full_name: string } | null }>)
-    .map((r) => r.staff)
-    .filter((s): s is { id: string; full_name: string } => s !== null)
+  // `rol` ('comercial' | 'operaciones' | null) viaja para que el detalle diga el área.
+  type FilaResp = { rol: string | null; staff: { id: string; full_name: string } | null }
+  const responsables = ((respRows ?? []) as FilaResp[])
+    .filter((r): r is FilaResp & { staff: { id: string; full_name: string } } => r.staff !== null)
+    .map((r) => ({ id: r.staff.id, full_name: r.staff.full_name, rol: r.rol }))
 
   // Día en que este negocio se volvió venta, para el header: el del PRIMER cobro
   // imputado. Se lee de `v_venta_mes_comercial`, que es la definición canónica —la
@@ -1262,6 +1352,7 @@ async function getNegocioDetalle(id: string): Promise<{
 
   // Cargar etapas de la línea para la barra de progreso
   let etapasLinea: EtapaNegocio[] = []
+  let exigeAutorizacionDatos = false
   let etapasNoAplican: EtapaNoAplica[] = []
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
@@ -1286,6 +1377,7 @@ async function getNegocioDetalle(id: string): Promise<{
       negocioTyped.etapa_actual_id ?? null,
     )
 
+    exigeAutorizacionDatos = lineaExigeAutorizacion((etapas ?? []) as { config_extra?: unknown }[])
     etapasLinea = ((etapas ?? []) as Record<string, unknown>[]).map(e => ({
       id: e.id as string,
       linea_id: e.linea_id as string,
@@ -1296,6 +1388,7 @@ async function getNegocioDetalle(id: string): Promise<{
       guia: ((e.config_extra as { guia?: GuiaEtapa } | null)?.guia ?? null),
       es_cierre: (e.config_extra as { etapa_cierre?: boolean } | null)?.etapa_cierre === true,
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
+      reproceso_operativo: tiposReprocesoOperativo(e.config_extra as Record<string, unknown> | null),
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
     }))
 
@@ -2069,6 +2162,7 @@ async function getNegocioDetalle(id: string): Promise<{
     etapasLinea,
     etapasNoAplican,
     blockIdByConfigId: Object.fromEntries(blockIdByConfigId),
+    exigeAutorizacionDatos,
   }
 }
 
@@ -2097,6 +2191,8 @@ export async function getDatosNuevoNegocio(): Promise<{
       .from('lineas_negocio')
       .select('id, workspace_id, nombre, tipo, numero')
       .or(`workspace_id.is.null,workspace_id.eq.${workspaceId}`)
+      // Igual que «Nuevo negocio»: una línea apagada no se ofrece para crear.
+      .eq('is_active', true)
       .order('numero', { ascending: true }),
   ])
 
@@ -2115,12 +2211,29 @@ export async function getDatosNuevoNegocio(): Promise<{
 
 // ── Crear negocio ─────────────────────────────────────────────────────────────
 
-export async function crearNegocio(input: EntradaCrearNegocio): Promise<ResultadoCrearNegocio> {
+async function crearNegocioSinClave(input: EntradaCrearNegocio): Promise<ResultadoCrearNegocio> {
   const { supabase, workspaceId, userId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { negocio_id: null, error: 'No autenticado' }
   // Crear un negocio es la puerta a todo Clarity (bloques, carpeta de Drive, cobros): un
   // workspace sin el módulo no crea negocios sobre sí mismo aunque llame a la acción.
   if (!(await exigirModulo(REQUISITO.clarity)).ok) return { negocio_id: null, error: MENSAJE_MODULO_NO_ACTIVO }
+
+  // «Nuevo negocio» solo ofrece las líneas activas del workspace (`negocios/nuevo/page.tsx`).
+  // Aquí se exige lo mismo, porque la pantalla solo esconde: una línea apagada (p. ej. el clon
+  // de prueba de una línea que se está rediseñando) o de otro workspace no recibe negocios
+  // por esta puerta aunque alguien mande su id. Sin `linea_id` explícito no se mira nada: el
+  // negocio entra por `linea_activa_id`, como siempre (conversión de leads, bandeja).
+  if (input.linea_id) {
+    const { data: linea } = await db(supabase)
+      .from('lineas_negocio')
+      .select('id, is_active')
+      .eq('id', input.linea_id)
+      .eq('workspace_id', workspaceId)
+      .maybeSingle()
+    if (!linea || (linea as { is_active: boolean | null }).is_active !== true) {
+      return { negocio_id: null, error: 'Esa línea de negocio no está disponible. Escoge otra.' }
+    }
+  }
 
   // El cuerpo vive en `src/lib/negocios/crear-negocio.ts`: el webhook de Wompi de Ferretería
   // crea negocios sin sesión por la misma vía.
@@ -2128,7 +2241,21 @@ export async function crearNegocio(input: EntradaCrearNegocio): Promise<Resultad
     { supabase, workspaceId, userId: userId ?? null, role: role ?? null, staffId: staffId ?? null },
     input,
   )
-  if (r.negocio_id) revalidatePath('/negocios')
+  if (r.negocio_id) {
+    revalidatePath('/negocios')
+    // El correo con el link de autorización de datos, si el workspace lo encendió y el contacto lo
+    // necesita (ver `lib/autorizacion-datos/servidor.ts`). Después de responder: no demora la
+    // creación, y si falla, el viaje ya quedó creado y el link se manda desde el bloque.
+    const negocioCreado = r.negocio_id
+    try {
+      after(async () => {
+        try {
+          const c = await correoAlCrearNegocio(negocioCreado)
+          if (!c.enviado && c.motivo === 'error') console.error('[crearNegocio] correo de autorización:', c.detalle)
+        } catch (e) { console.error('[crearNegocio] correo de autorización:', e) }
+      })
+    } catch (e) { console.error('[crearNegocio] no se pudo programar el correo de autorización:', e) }
+  }
   return r
 }
 
@@ -2461,6 +2588,12 @@ export async function descartarInteraccion(
   return { success: true }
 }
 
+/** La etiqueta que la persona ve para un campo del bloque (para el mensaje de letras no válidas). */
+function etiquetaDeCampoBloque(configExtra: unknown): (campo: string) => string {
+  const campos = ((configExtra as { fields?: Array<{ slug?: string; label?: string }> } | null)?.fields ?? [])
+  return (campo) => campos.find(f => f.slug === campo)?.label ?? campo.replace(/_/g, ' ')
+}
+
 // ── Cambiar etapa del negocio ─────────────────────────────────────────────────
 
 export async function cambiarEtapaNegocio(
@@ -2515,165 +2648,11 @@ export async function cambiarEtapaNegocio(
     return { error: (updateError as { message: string }).message }
   }
 
-  // Crear negocio_bloques para la nueva etapa si no existen
-  // Solo heredar estado/data para bloques VISIBLE (editable siempre empieza pendiente)
-  const { data: bloqueConfigs } = await db(supabase)
-    .from('bloque_configs')
-    .select('id, bloque_definition_id, estado, es_gate, nombre, config_extra, bloque_definitions(tipo)')
-    .eq('etapa_id', nuevaEtapaId)
-    .eq('workspace_id', workspaceId)
-
-  if (bloqueConfigs && (bloqueConfigs as Record<string, unknown>[]).length > 0) {
-    const typedConfigs = bloqueConfigs as Array<{
-      id: string
-      bloque_definition_id: string
-      estado: string
-      es_gate: boolean | null
-      nombre: string | null
-      config_extra: Record<string, unknown> | null
-      bloque_definitions: { tipo: string } | null
-    }>
-    const configIds = typedConfigs.map(b => b.id)
-
-    const instanciasExistentes = await db(supabase)
-      .from('negocio_bloques')
-      .select('bloque_config_id')
-      .eq('negocio_id', negocioId)
-      .in('bloque_config_id', configIds)
-
-    const existingIds = new Set(
-      ((instanciasExistentes.data ?? []) as Record<string, unknown>[]).map(
-        i => i.bloque_config_id as string
-      )
-    )
-
-    // Filas completas del negocio (de cualquier etapa) con la config que las gobierna.
-    // Solo las de ORIGEN alimentan la herencia: ver `herencia-casilla.ts`.
-    const { data: completadosRaw } = await db(supabase)
-      .from('negocio_bloques')
-      .select('id, estado, data, completado_at, bloque_configs(bloque_definition_id, nombre, estado, slug, config_extra, bloque_definitions(tipo))')
-      .eq('negocio_id', negocioId)
-      .eq('estado', 'completo')
-
-    const aFila = (c: Record<string, unknown>): FilaDelNegocio => {
-      const cfg = (c.bloque_configs ?? {}) as Record<string, unknown>
-      return {
-        id: c.id as string,
-        estado: c.estado as string,
-        data: (c.data ?? null) as Record<string, unknown> | null,
-        completado_at: (c.completado_at ?? null) as string | null,
-        config: {
-          bloque_definition_id: (cfg.bloque_definition_id ?? null) as string | null,
-          nombre: (cfg.nombre ?? null) as string | null,
-          estado: (cfg.estado ?? null) as string | null,
-          slug: (cfg.slug ?? null) as string | null,
-          config_extra: (cfg.config_extra ?? null) as Record<string, unknown> | null,
-          tipo: ((cfg.bloque_definitions as Record<string, unknown> | null)?.tipo ?? null) as string | null,
-        },
-      }
-    }
-    const indices = indicesDeHerencia(((completadosRaw ?? []) as Record<string, unknown>[]).map(aFila))
-
-    // Una copia de documento hereda el archivo de SU origen, que se busca por slug y en
-    // cualquier estado (la factura que archiva Siigo queda `pendiente` con archivo).
-    const slugsOrigenDocumento = [...new Set(
-      typedConfigs
-        .filter(bc => !existingIds.has(bc.id) && bc.estado === 'visible' && bc.bloque_definitions?.tipo === 'documento')
-        .map(bc => (bc.config_extra as { source_bloque_slug?: unknown } | null)?.source_bloque_slug)
-        .filter((x): x is string => typeof x === 'string' && x !== ''),
-    )]
-    let origenesPorSlug = new Map<string, FilaDelNegocio>()
-    if (slugsOrigenDocumento.length > 0) {
-      const { data: origenesRaw } = await db(supabase)
-        .from('negocio_bloques')
-        .select('id, estado, data, completado_at, bloque_configs!inner(bloque_definition_id, nombre, estado, slug, config_extra, bloque_definitions(tipo))')
-        .eq('negocio_id', negocioId)
-        .in('bloque_configs.slug', slugsOrigenDocumento)
-      origenesPorSlug = origenesPorSlugDe(((origenesRaw ?? []) as Record<string, unknown>[]).map(aFila))
-    }
-
-    // De qué fila heredó cada casilla nueva. Los `bloque_items` se copian de esa misma
-    // fila, nunca de otra con el mismo `definition_id`.
-    const fuentePorConfig = new Map<string, FuenteHerencia>()
-
-    const nuevas = typedConfigs
-      .filter(bc => !existingIds.has(bc.id))
-      .map(bc => {
-        const isVisible = bc.estado === 'visible'
-        const isDatos = bc.bloque_definitions?.tipo === 'datos'
-
-        // Los bloques `datos` y `documento` COMPARTEN `bloque_definition_id`: su identidad
-        // es el nombre (datos) o el label (documento). Heredar por definition_id copiaba
-        // respuestas y archivos ajenos (321 instancias de datos en julio, 508 casillas de
-        // documento en septiembre). Y una COPIA no puede ser fuente: una copia sucia se
-        // perpetuaba en cada avance de etapa. Toda la regla vive en `fuenteDeHerencia`.
-        const prevCompleto = fuenteDeHerencia(
-          {
-            bloque_definition_id: bc.bloque_definition_id,
-            estado: bc.estado,
-            nombre: bc.nombre,
-            config_extra: bc.config_extra,
-            tipo: bc.bloque_definitions?.tipo,
-          },
-          indices,
-          origenesPorSlug,
-        )
-        if (prevCompleto) fuentePorConfig.set(bc.id, prevCompleto)
-
-        // If no inherited data, initialize with field defaults from config
-        const data = prevCompleto?.data
-          ?? (isDatos ? computeFieldDefaults(bc.config_extra as Record<string, unknown> | null) : {})
-
-        // Heredar el estado `completo` exige además que los campos `required` del bloque
-        // DESTINO tengan valor: el origen puede declarar otros campos, y un gate no debe
-        // darse por cumplido con una respuesta que su propia casilla no tiene.
-        const heredaCompleto = !!prevCompleto
-          && (!isVisible || visiblePuedeNacerCompleto(
-                bc.config_extra as Record<string, unknown> | null,
-                data,
-                bc.es_gate === true,
-              ))
-
-        return {
-          negocio_id: negocioId,
-          bloque_config_id: bc.id,
-          estado: heredaCompleto ? 'completo' : 'pendiente',
-          data,
-          completado_at: heredaCompleto ? (prevCompleto?.completado_at ?? new Date().toISOString()) : null,
-        }
-      })
-
-    if (nuevas.length > 0) {
-      const { data: insertadas } = await db(supabase)
-        .from('negocio_bloques')
-        .insert(nuevas)
-        .select('id, bloque_config_id')
-
-      // Copiar bloque_items para bloques visibles que heredaron de un bloque previo
-      if (insertadas) {
-        for (const inst of (insertadas as Array<{ id: string; bloque_config_id: string }>)) {
-          const bc = typedConfigs.find(c => c.id === inst.bloque_config_id)
-          if (!bc || bc.estado !== 'visible') continue
-          const prev = fuentePorConfig.get(bc.id)
-          if (!prev) continue
-
-          // Copiar items del bloque fuente al nuevo bloque visible
-          const { data: sourceItems } = await db(supabase)
-            .from('bloque_items')
-            .select('orden, label, tipo, contenido, completado, completado_por, completado_at, link_url, imagen_data')
-            .eq('negocio_bloque_id', prev.id)
-
-          if (sourceItems && (sourceItems as unknown[]).length > 0) {
-            const copiedItems = (sourceItems as Record<string, unknown>[]).map(item => ({
-              ...item,
-              negocio_bloque_id: inst.id,
-            }))
-            await db(supabase).from('bloque_items').insert(copiedItems)
-          }
-        }
-      }
-    }
-  }
+  // Crear negocio_bloques para la nueva etapa si no existen (lo comparte el cron que mueve de
+  // etapa por fechas, que no tiene sesión: `instanciar-bloques-etapa.ts`).
+  await instanciarBloquesDeEtapa(supabase, { negocioId, etapaId: nuevaEtapaId, workspaceId })
+  // Quien atiende la etapa, si la etapa lo declara (SOE-016). No lanza ni frena el avance.
+  await asignarResponsableAlEntrar(supabase, { negocioId, etapaId: nuevaEtapaId, workspaceId })
 
   revalidatePath(`/negocios/${negocioId}`)
   revalidatePath('/negocios')
@@ -3067,7 +3046,23 @@ async function camposDecisionDelNegocio(
 
 // ── Cambiar etapa con gate check ──────────────────────────────────────────────
 
-export async function cambiarEtapaNegocioConGate(
+/**
+ * Un bloqueo del avance tal como lo pinta el modal. `tipo: 'cruce'` es un cruce de la
+ * línea que quien está en `avanzar_cruces.staff_ids` puede avanzar con motivo
+ * (`avanzarCrucesConMotivo`); trae su `cruce_slug` y, si lo declara, el texto de costo.
+ */
+export type BloquePendienteGate = {
+  nombre: string
+  es_gate: boolean
+  omitible?: boolean
+  tipo?: BloqueoGate['tipo'] | 'cruce' | 'autorizacion_datos'
+  cruce_slug?: string
+  advertencia?: string
+  /** `tipo: 'autorizacion_datos'`: el link para que el modal lo copie ahí mismo. */
+  enlace?: string
+}
+
+async function cambiarEtapaNegocioConGateSinClave(
   negocioId: string,
   nuevaEtapaId: string,
   motivoOverride?: string,
@@ -3088,7 +3083,7 @@ export async function cambiarEtapaNegocioConGate(
    * `tipo: 'carpeta_local'` marca el gate que el modal resuelve ahí mismo: pide la
    * carpeta del cerebro, la guarda y reintenta el avance.
    */
-  bloquesPendientes?: Array<{ nombre: string; es_gate: boolean; omitible?: boolean; tipo?: BloqueoGate['tipo'] }>
+  bloquesPendientes?: BloquePendienteGate[]
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
   /** Presente solo con `error === 'requiere_confirmacion'`. */
@@ -3144,6 +3139,21 @@ export async function cambiarEtapaNegocioConGate(
 
   const gAvance = await guardAvanzarStage(negocioId, (negocio.stage_actual ?? 'venta') as Stage, areasQueAvanzan)
   if (!gAvance.ok) return { error: gAvance.error ?? 'Sin permiso' }
+
+  // Un documento que se está leyendo (en segundo plano, ver `lectura-en-curso`) frena el
+  // avance, también con override: los cruces y gates todavía ven el documento anterior.
+  // Dura lo que tarda la lectura (segundos); una lectura vencida ya no frena.
+  const leyendo = await documentosLeyendo(supabase, negocioId)
+  if (leyendo.length > 0) {
+    return {
+      error: 'gate_bloqueado',
+      bloquesPendientes: leyendo.map(nombre => ({
+        nombre: mensajeDocumentoLeyendo(nombre),
+        es_gate: true,
+        omitible: false,
+      })),
+    }
+  }
 
   // resolvedEtapaId puede cambiar si routing auto-corrige el destino
   let resolvedEtapaId = nuevaEtapaId
@@ -3269,6 +3279,39 @@ export async function cambiarEtapaNegocioConGate(
   // ESCRITURA se difiere hasta que el avance sea seguro.
   let aplicarOmisiones: (() => Promise<string | null>) | null = null
 
+  // Bloqueo de todo ONE (`texto-latino.ts`): un campo que va a un documento oficial con una
+  // letra que no se puede escribir (la IA leyó «МЕЛА» por «MEJIA») frena el avance, también con
+  // override: el formulario de la DIAN no saldría. El mensaje dice qué campo y qué letra.
+  {
+    const { data: filasLetras } = await db(supabase)
+      .from('negocio_bloques')
+      .select('data, bloque_configs(nombre)')
+      .eq('negocio_id', negocioId)
+    const malos = camposOficialesNoValidos(
+      ((filasLetras ?? []) as Array<{ data: unknown; bloque_configs: { nombre: string | null } | null }>)
+        .map(f => ({ bloque: f.bloque_configs?.nombre ?? null, data: f.data })),
+    )
+    if (malos.length > 0) {
+      return {
+        error: 'gate_bloqueado',
+        bloquesPendientes: malos.map(m => ({
+          nombre: `Corregir «${m.campo.replace(/_/g, ' ')}»${m.bloque ? ` en ${m.bloque}` : ''}: carácter no válido ${m.caracteres.map(c => `"${c}"`).join(', ')}`,
+          es_gate: true,
+          omitible: false,
+        })),
+      }
+    }
+  }
+
+  // Lo que falta para avanzar, de TODAS las familias de gates de la etapa juntas (barrido
+  // ámbar, 2026-10-22). Antes cada familia devolvía apenas fallaba y el equipo descubría los
+  // pendientes de a uno: con saldo pendiente solo salía «Saldo pendiente» y, al saldar, recién
+  // aparecía la confirmación del cierre. Ahora cada familia AGREGA sus líneas en el orden de
+  // siempre y se devuelven todas en un solo aviso, después del margen.
+  // Una lectura que falla sigue agregando su línea (fail-closed); el override no cambia: con
+  // motivo, el bloque de abajo no corre y el margen decide solo, como hoy.
+  const pendientesGate: BloquePendienteGate[] = []
+
   // Verificar gates si no hay motivo de override
   if (!motivoOverride && negocio.etapa_actual_id) {
     // ANTES de evaluar los gates: cerrar automáticamente los bloques gate de anticipo
@@ -3319,10 +3362,7 @@ export async function cambiarEtapaNegocioConGate(
       const retienen = pendientesIds.filter(p => !omitibles.some(o => o.bloque_config_id === p.bloque_config_id))
 
       if (retienen.length > 0) {
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: retienen.map(b => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })),
-        }
+        pendientesGate.push(...retienen.map(b => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })))
       }
 
       // Todos los que faltaban vencieron: se marcan como "no aplica" —con motivo,
@@ -3331,7 +3371,8 @@ export async function cambiarEtapaNegocioConGate(
       //
       // La escritura queda diferida (ver `aplicarOmisiones` arriba): solo corre cuando
       // el avance está confirmado y a punto de ejecutarse.
-      aplicarOmisiones = async () => {
+      // Si algún bloque retiene, el avance no ocurre: no hay omisiones que escribir.
+      if (retienen.length === 0) aplicarOmisiones = async () => {
         const ahora = new Date().toISOString()
         for (const p of omitibles) {
           const cfg = cfgPorId.get(p.bloque_config_id)
@@ -3383,9 +3424,29 @@ export async function cambiarEtapaNegocioConGate(
         .eq('entidad_id', negocioId)
         .eq('tipo', 'comentario')
       if ((count ?? 0) === 0) {
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'Comentario en actividad', es_gate: true }] }
+        pendientesGate.push({ nombre: 'Comentario en actividad', es_gate: true })
       }
     }
+
+    // Gate custom: cotizacion_requerida — el negocio tiene al menos una cotización viva. Opt-in
+    // por etapa; sin el id en `config_extra.gates` no consulta nada. Complementa a
+    // `margen_sobre_piso`, que solo juzga las cotizaciones que existen.
+    const faltaCotizacion = await evaluarGateCotizacionRequerida(db(supabase), {
+      workspaceId,
+      negocioId,
+      gates: etapaGates,
+      mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+    })
+    if (faltaCotizacion) pendientesGate.push({ nombre: faltaCotizacion, es_gate: true })
+
+    // Gates de seguimiento (post-cotización, F1): `cotizacion_enviada`. Opt-in por etapa; sin
+    // esos ids en `config_extra.gates` no consulta nada.
+    const bloqueoSeguimiento = await evaluarGatesSeguimiento(db(supabase), {
+      negocioId,
+      gates: etapaGates,
+      mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+    })
+    if (bloqueoSeguimiento) pendientesGate.push({ nombre: bloqueoSeguimiento, es_gate: true })
 
     // Gate custom: saldo_cero — el HONORARIO pendiente debe estar cubierto.
     //
@@ -3398,50 +3459,46 @@ export async function cambiarEtapaNegocioConGate(
     // mayoría ya en Entrega.
     //
     // Un sobrepago (saldo negativo) NO bloquea aquí: solo se compara el faltante.
+    //
+    // Lo que cubre es lo que ENTRÓ (con fecha, sin anular, con la retención de IVA) y está
+    // confirmado por la financiera: la misma cuenta de la tarjeta y del panel de Cierre
+    // económico (`lib/cobros/saldo-cero.ts`). Si no se puede leer, retiene.
     if (etapaGates.includes('saldo_cero')) {
-      const [negPrecioRes, cobrosRes, conciliadoRes] = await Promise.all([
-        db(supabase)
-          .from('negocios')
-          .select('precio_aprobado, precio_estimado')
-          .eq('id', negocioId)
-          .single(),
-        db(supabase)
-          .from('cobros')
-          .select('monto, split_json')
-          .eq('negocio_id', negocioId)
-          .eq('workspace_id', workspaceId)
-          ,
-        db(supabase)
-          .from('negocio_conciliacion')
-          .select('conciliado')
-          .eq('negocio_id', negocioId)
-          .eq('workspace_id', workspaceId)
-          .maybeSingle(),
-      ])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const negPrecio = negPrecioRes.data as any
-      const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
-      // Solo el recaudo CONFIRMADO cubre el saldo (ver `lib/negocios/recaudo-confirmado.ts`).
-      const cobrosSaldo = (cobrosRes.data ?? []) as CobroParaRecaudo[]
-      const conciliadoSaldo = (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true
-      const totalCobrado = sumarRecaudoConfirmado(cobrosSaldo, conciliadoSaldo)
-      const saldo = precio - totalCobrado
-
-      if (saldo > TOLERANCIA_SALDO_COP) {
-        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-        // Nombrar la plata que está registrada pero sin confirmar. Decir solo "faltan $X"
-        // manda a la financiera a buscar un pago que YA está en el sistema esperando su
-        // visto bueno.
-        const sinConfirmar = recaudoPendienteDeConfirmar(cobrosSaldo, conciliadoSaldo)
-        const detalle = sinConfirmar > 0
-          ? ` (hay ${fmt.format(sinConfirmar)} de un reparto sin confirmar por el área financiera)`
-          : ''
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}${detalle}`, es_gate: true }],
-        }
+      const lectura = await leerSaldoCero(db(supabase), { workspaceId, negocioId })
+      if (!lectura.ok) {
+        pendientesGate.push({ nombre: lectura.error, es_gate: true })
+      } else {
+        const mensaje = mensajeSaldoCero(lectura.saldo)
+        if (mensaje) pendientesGate.push({ nombre: mensaje, es_gate: true })
       }
     }
+
+    // Gates de la confirmación del viaje (post-cotización, F2): confirmación registrada, plan
+    // acordado y anticipo con soporte. Opt-in por etapa; sin esos ids no consulta nada.
+    const faltaConfirmacion = await evaluarGatesConfirmacion(db(supabase), {
+      workspaceId,
+      negocioId,
+      gates: etapaGates,
+      mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+    })
+    pendientesGate.push(...faltaConfirmacion.map((nombre) => ({ nombre, es_gate: true })))
+
+    // Gate de Reservas y pagos (F3-7): todo servicio que va, pagado con soporte, medio y
+    // titular, sin aprobación abierta y confirmado. Opt-in por etapa; máximo 3 líneas y «y N más».
+    const faltaServicios = await evaluarGateServicios(db(supabase), { workspaceId, negocioId, gates: etapaGates })
+    if (faltaServicios.length > 0) {
+      pendientesGate.push(...lineasDelGate(faltaServicios).map((nombre) => ({ nombre, es_gate: true })))
+    }
+
+    // Gates de Documentos y entrega (F4): vouchers, documentos del viajero, cobro mínimo y
+    // paquete enviado. Opt-in por etapa; con `entrega_viaje.activo` apagado no frena.
+    const faltaEntrega = await evaluarGateEntrega(db(supabase), { workspaceId, negocioId, gates: etapaGates })
+    pendientesGate.push(...faltaEntrega.map((nombre) => ({ nombre, es_gate: true })))
+
+    // Gate del Cierre económico (F6-4/F6-5): margen calculado y confirmado por la dirección con
+    // la huella vigente, saldo a favor decidido. Opt-in por etapa; con `cierre_viaje` apagado no frena.
+    const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: etapaGates })
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true })))
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
     // operaciones (handoff comercial → operaciones, ej. salida de Documentación).
@@ -3475,10 +3532,7 @@ export async function cambiarEtapaNegocioConGate(
         if (esCeroDeliberado(propuestasHandoff, negHandoff?.precio_aprobado ?? null)) {
           // Nada que recaudar: el handoff no exige recaudo.
         } else {
-          return {
-            error: 'gate_bloqueado',
-            bloquesPendientes: [{ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true }],
-          }
+          pendientesGate.push({ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true })
         }
       } else {
 
@@ -3518,7 +3572,7 @@ export async function cambiarEtapaNegocioConGate(
         const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
         const nombre = gateMessages['saldo:handoff']
           ?? `Recaudo insuficiente para pasar a operaciones: falta ${fmt.format(pend.pendienteTotal)}${desglose}`
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        pendientesGate.push({ nombre, es_gate: true })
       }
       } // fin else (precioHandoff > 0)
     }
@@ -3560,7 +3614,7 @@ export async function cambiarEtapaNegocioConGate(
         const actualStr = typeof actual === 'boolean' ? String(actual) : String(actual ?? '')
         if (actualStr !== expected) {
           const nombre = gateMessages[gate] ?? `Campo "${slug}" debe ser "${expected}"`
-          return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+          pendientesGate.push({ nombre, es_gate: true })
         }
       }
     }
@@ -3626,7 +3680,7 @@ export async function cambiarEtapaNegocioConGate(
           const gateMessagesAlguno = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
           const nombre = gateMessagesAlguno['campos_alguno']
             ?? `Al menos uno de estos campos debe ser "${esperado}": ${camposExigidos.join(', ')}`
-          return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+          pendientesGate.push({ nombre, es_gate: true })
         }
       }
     }
@@ -3645,8 +3699,8 @@ export async function cambiarEtapaNegocioConGate(
         .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
       if (errSol) {
         // Sin poder leer no se puede afirmar que el mínimo está: el lado seguro es retener.
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'No se pudo revisar el mínimo de la solicitud', es_gate: true }] }
-      }
+        pendientesGate.push({ nombre: 'No se pudo revisar el mínimo de la solicitud', es_gate: true })
+      } else {
       type FilaSol = { data: unknown; bloque_configs: { orden: number | null; config_extra: { fields?: unknown } | null; bloque_definitions: { tipo?: string } | null } | null }
       const filas = ((bloquesSol ?? []) as FilaSol[])
         .filter(b => b.bloque_configs?.bloque_definitions?.tipo === 'datos')
@@ -3656,11 +3710,22 @@ export async function cambiarEtapaNegocioConGate(
       if (niveles.errores.length > 0) console.warn('[cambiarEtapa] solicitud_minimo con config dudosa:', niveles.errores)
       if (niveles.minimo.faltan.length > 0) {
         const msgs = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: mensajeMinimoIncompleto(niveles.minimo, msgs['solicitud_minimo']), es_gate: true }],
-        }
+        pendientesGate.push({ nombre: mensajeMinimoIncompleto(niveles.minimo, msgs['solicitud_minimo']), es_gate: true })
       }
+      } // fin else (errSol)
+    }
+
+    // Gate custom: autorizacion_datos — el cliente autorizó el tratamiento de sus datos en el
+    // link (decisión de Mauricio, 2026-10-08). Vive en el CONTACTO: un cliente recurrente que ya
+    // autorizó pasa sin volver a firmar, salvo una versión MAYOR nueva del texto. Si el viaje lleva
+    // menores, exige también esa casilla. Las marcas manuales viejas no cuentan. El bloqueo trae el
+    // link para copiarlo desde el modal. Cede al override como los demás gates de etapa.
+    if (etapaGates.includes(GATE_AUTORIZACION)) {
+      const bloqueo = await bloqueoAutorizacionDatos({
+        supabase, workspaceId, negocioId, staffId: staffId ?? null,
+        mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+      })
+      if (bloqueo) pendientesGate.push(bloqueo)
     }
 
     // Gate custom: sobrepago_conciliado — si el total cobrado supera el precio del
@@ -3724,10 +3789,7 @@ export async function cambiarEtapaNegocioConGate(
         const accion = camposConc['accion_extra']
         if (accion == null || String(accion) === '') {
           const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-          return {
-            error: 'gate_bloqueado',
-            bloquesPendientes: [{ nombre: `Concilia el sobrepago de ${fmt.format(extra)}`, es_gate: true }],
-          }
+          pendientesGate.push({ nombre: `Concilia el sobrepago de ${fmt.format(extra)}`, es_gate: true })
         }
       }
     }
@@ -3780,7 +3842,7 @@ export async function cambiarEtapaNegocioConGate(
             ? `Conciliación pendiente: faltan ${fmt.format(descuadre.faltante)} del honorario`
             : `Conciliación pendiente: sobran ${fmt.format(descuadre.exceso)} sobre el valor a recaudar`
         const nombre = gateMessages['conciliacion_diana'] ?? defaultMsg
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        pendientesGate.push({ nombre, es_gate: true })
       }
     }
   }
@@ -3819,13 +3881,15 @@ export async function cambiarEtapaNegocioConGate(
           const nombre = gateMessagesMargen['margen_sobre_piso'] ?? veredicto.mensaje
           // Para quien no es el dueño, el bloqueo no cede al override: la pantalla no
           // le ofrece «Omitir» sobre algo que el servidor le va a rechazar.
-          return {
-            error: 'gate_bloqueado',
-            bloquesPendientes: [{ nombre, es_gate: true, ...(esDueno ? {} : { omitible: false }) }],
-          }
+          pendientesGate.push({ nombre, es_gate: true, ...(esDueno ? {} : { omitible: false }) })
         }
       }
     }
+  }
+
+  // Todas las familias juntas, en el orden de siempre (ver `pendientesGate` arriba).
+  if (pendientesGate.length > 0) {
+    return { error: 'gate_bloqueado', bloquesPendientes: pendientesGate }
   }
 
   // ── Control de fraude: congelar negocio con referencia duplicada sin resolver ──
@@ -3880,7 +3944,15 @@ export async function cambiarEtapaNegocioConGate(
     if (bloqueantes.length > 0) {
       return {
         error: 'gate_bloqueado',
-        bloquesPendientes: bloqueantes.map(c => ({ nombre: c.mensaje, es_gate: true })),
+        bloquesPendientes: bloqueantes.map(c => (esAvanzable(c)
+          ? {
+              nombre: c.mensaje,
+              es_gate: true,
+              tipo: 'cruce' as const,
+              cruce_slug: c.slug,
+              ...(c.advertencia ? { advertencia: c.advertencia } : {}),
+            }
+          : { nombre: c.mensaje, es_gate: true })),
       }
     }
   }
@@ -4201,6 +4273,43 @@ export async function cambiarEtapaNegocioConGate(
     }, 'cambiarEtapaNegocioConGate')
   }
 
+  // ── Salida anticipada de una etapa sin gate (SOE-001) ─────────────────────────
+  // La etapa que lo declara (`registrar_avance_anticipado`) NO frena: deja una marca
+  // consultable con los días hábiles que llevaba desde su ancla. Va después de mover y
+  // no puede tumbar el avance. Ver `avance-anticipado.ts`.
+  const cfgAnticipado = configAvanceAnticipado(etapaActualConfigExtra)
+  if (cfgAnticipado && staffId && etapaActualNombre) {
+    try {
+      const { data: datasBloques } = await db(supabase)
+        .from('negocio_bloques')
+        .select('data')
+        .eq('negocio_id', negocioId)
+      const anticipado = evaluarAvanceAnticipado({
+        config: cfgAnticipado,
+        fechaAncla: anclaDeBloques(
+          ((datasBloques ?? []) as Array<{ data: Record<string, unknown> | null }>).map((b) => b.data),
+          cfgAnticipado.ancla_campo,
+        ),
+        hoy: todayBogotaISO(),
+      })
+      if (anticipado) {
+        await registrarActividad(supabase, {
+          workspace_id: workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: negocioId,
+          tipo: 'sistema',
+          autor_id: staffId,
+          campo_modificado: CAMPO_AVANCE_ANTICIPADO,
+          valor_anterior: etapaActualNombre,
+          valor_nuevo: anticipado.dias === null ? SIN_ANCLA : String(anticipado.dias),
+          contenido: contenidoAvanceAnticipado(etapaActualNombre, anticipado),
+        }, 'cambiarEtapaNegocioConGate')
+      }
+    } catch (e) {
+      console.error('[cambiarEtapa] no se pudo registrar el avance anticipado:', e)
+    }
+  }
+
   // El tercero de Siigo se crea al superar la etapa donde se captura el RUT.
   // Va DESPUÉS del avance y del log, y no puede romper ninguno de los dos: el
   // negocio ya se movió. Un tercero no es un documento contable (crearlo dos
@@ -4253,21 +4362,150 @@ export async function cambiarEtapaNegocioConGate(
 
 // ── Marcar bloque completo ─────────────────────────────────────────────────────
 
+// ── Avanzar un cruce con motivo ───────────────────────────────────────────────
+
+/**
+ * Deja la excepción para los cruces que frenan HOY el avance del negocio, con el motivo
+ * de quien los avanza. No mueve el negocio: la pantalla reintenta el avance después, y
+ * ese avance pasa por todos los demás gates como siempre.
+ *
+ * - Lo puede hacer solo quien está en `workspaces.config_extra.avanzar_cruces.staff_ids`
+ *   (`puedeAvanzarCruces`, la misma función que decide si la pantalla dibuja el botón), y
+ *   además tiene que poder avanzar la fase (`guardAvanzarStage`).
+ * - La excepción vale para ese cruce, en ese negocio, con esos datos (la huella que
+ *   devuelve `contradiccionesQueBloquean`, recalculada aquí: no se le cree al cliente).
+ *   Un slug que hoy no frena no deja nada.
+ * - Queda en `negocio_cruces_avanzados` (solo la escribe service_role) y en el historial
+ *   del negocio, con quién, qué cruce y el motivo.
+ */
+export async function avanzarCrucesConMotivo(
+  negocioId: string,
+  cruceSlugs: string[],
+  motivo: string,
+): Promise<{ error: string | null; avanzados?: number }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { error: 'No autenticado' }
+
+  const errMotivo = validarMotivoAvance(motivo)
+  if (errMotivo) return { error: errMotivo }
+  const motivoLimpio = motivo.trim()
+  const slugs = [...new Set((Array.isArray(cruceSlugs) ? cruceSlugs : []).filter(x => typeof x === 'string' && x))]
+  if (slugs.length === 0) return { error: 'No hay cruces para avanzar' }
+
+  const svc = createServiceClient()
+  const { data: ws } = await db(svc).from('workspaces').select('config_extra').eq('id', workspaceId).maybeSingle()
+  if (!puedeAvanzarCruces(staffId, (ws as { config_extra?: unknown } | null)?.config_extra ?? null)) {
+    return { error: 'No tienes permiso para avanzar cruces' }
+  }
+
+  const { data: negocioRaw } = await db(supabase)
+    .from('negocios')
+    .select('etapa_actual_id, stage_actual')
+    .eq('id', negocioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const negocio = negocioRaw as { etapa_actual_id: string | null; stage_actual: string | null } | null
+  if (!negocio?.etapa_actual_id) return { error: 'Negocio no encontrado' }
+
+  const { data: etapaRaw } = await db(supabase)
+    .from('etapas_negocio')
+    .select('orden, linea_id, nombre, config_extra')
+    .eq('id', negocio.etapa_actual_id)
+    .maybeSingle()
+  const etapa = etapaRaw as {
+    orden: number; linea_id: string; nombre: string | null; config_extra: { areas_que_avanzan?: unknown } | null
+  } | null
+  if (!etapa) return { error: 'Etapa no encontrada' }
+
+  const gAvance = await guardAvanzarStage(
+    negocioId,
+    (negocio.stage_actual ?? 'venta') as Stage,
+    (etapa.config_extra?.areas_que_avanzan ?? []) as Area[],
+  )
+  if (!gAvance.ok) return { error: gAvance.error ?? 'Sin permiso' }
+
+  const { data: lineaRaw } = await db(supabase)
+    .from('lineas_negocio').select('config_extra').eq('id', etapa.linea_id).maybeSingle()
+  const bloqueantes = await contradiccionesQueBloquean(supabase, {
+    negocioId,
+    lineaId: etapa.linea_id,
+    etapaActualId: negocio.etapa_actual_id,
+    etapaOrden: etapa.orden,
+    configLinea: (lineaRaw as { config_extra?: Record<string, unknown> | null } | null)?.config_extra ?? null,
+  })
+  const aAvanzar = bloqueantes.filter(c => esAvanzable(c) && slugs.includes(c.slug))
+  if (aAvanzar.length === 0) return { error: null, avanzados: 0 }
+
+  const { error: errIns } = await db(svc).from('negocio_cruces_avanzados').insert(aAvanzar.map(c => ({
+    workspace_id: workspaceId,
+    negocio_id: negocioId,
+    cruce_slug: c.slug,
+    huella: c.huella,
+    mensaje: c.mensaje,
+    motivo: motivoLimpio,
+    etapa_id: negocio.etapa_actual_id,
+    autor_id: staffId,
+  })))
+  if (errIns) {
+    console.error('[avanzarCrucesConMotivo] insert:', errIns)
+    return { error: 'No se pudo guardar el avance del cruce' }
+  }
+
+  for (const c of aAvanzar) {
+    await registrarActividad(db(svc), {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      campo_modificado: CAMPO_CRUCE_AVANZADO,
+      valor_anterior: c.mensaje,
+      valor_nuevo: c.slug,
+      contenido: motivoLimpio,
+    }, 'avanzarCrucesConMotivo')
+  }
+
+  return { error: null, avanzados: aAvanzar.length }
+}
+
+/**
+ * Cuántas veces se repite un guardado que chocó con otro guardado del mismo bloque antes de
+ * escribir sin condición (ver «Escritura condicionada» en `marcarBloqueCompletoSinMemo`).
+ */
+const INTENTOS_GUARDADO_BLOQUE = 3
+
+/**
+ * Guardar un bloque completo. Corre dentro de `enPeticionDeRuta`: el guard, los helpers y la
+ * propia acción piden `getWorkspace` y, en una server action, el `cache()` de React no
+ * memoiza (no hay render). Así la sesión se resuelve UNA vez por guardado.
+ */
 export async function marcarBloqueCompleto(
+  negocioBloqueId: string,
+  data: Record<string, unknown>,
+  opts?: { correccion?: { causa?: string; sesion_id?: string } }
+): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
+  return enPeticionDeRuta(() => marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts))
+}
+
+async function marcarBloqueCompletoSinMemo(
   negocioBloqueId: string,
   data: Record<string, unknown>,
   // Ver `actualizarBloqueData`. Un bloque de una etapa superada casi siempre está
   // COMPLETO, así que la corrección entra por acá y no por el guardado de borrador:
   // sin este tratamiento, el camino más común de corrección era justo el que no
   // dejaba ni marca de autoría ni traza (hueco detectado el 2026-08-02).
-  opts?: { correccion?: { causa?: string; sesion_id?: string } }
+  opts?: { correccion?: { causa?: string; sesion_id?: string } },
+  // Ver `INTENTOS_GUARDADO_BLOQUE`: un guardado que choca con otro se repite desde arriba.
+  intento = 1,
 ): Promise<{ error: string | null; trigger_afi_generation?: boolean; trigger_afi_contrato?: boolean; negocio_id?: string }> {
   const { supabase, workspaceId, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
   // Guard server-side de permisos (rol+área+responsable). La UI es solo UX.
-  const guard = await guardEditarBloque(negocioBloqueId)
-  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+  if (intento === 1) {
+    const guard = await guardEditarBloque(negocioBloqueId)
+    if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
+  }
 
   // Bloque compartido entre etapas: el DATO vive en la fila del origen, pero la
   // COMPLETITUD es de cada etapa (cada una tiene su propio gate). Por eso se separan:
@@ -4279,12 +4517,13 @@ export async function marcarBloqueCompleto(
   // Leer datos actuales + negocio_id del servidor y hacer merge (evita sobreescribir campos AI)
   const { data: currentBloque } = await db(supabase)
     .from('negocio_bloques')
-    .select('data, negocio_id')
+    .select('data, negocio_id, updated_at')
     .eq('id', destinoId)
     .single()
 
   const negocioId = (currentBloque as Record<string, unknown> | null)?.negocio_id as string | null
   const currentData = (currentBloque?.data as Record<string, unknown>) ?? {}
+  const versionDato = (currentBloque as { updated_at?: string | null } | null)?.updated_at ?? null
 
   // ── Cómo se cierra este tipo de bloque ────────────────────────────────────
   //
@@ -4295,12 +4534,19 @@ export async function marcarBloqueCompleto(
   // cuenta como ítem marcado ni como documento subido). Los manuales siguen igual.
   const { data: cfgRaw } = await db(supabase)
     .from('negocio_bloques')
-    .select('bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
+    .select('estado, updated_at, bloque_configs!inner(es_gate, config_extra, bloque_definitions!inner(tipo))')
     .eq('id', negocioBloqueId)
     .single()
+  // Estado y versión de la fila LOCAL leídos en la misma lectura: la escritura de abajo se
+  // condiciona a esa versión, así que `estadoPrevio` es cierto en el momento de escribir.
+  const estadoPrevio = (cfgRaw as { estado?: string | null } | null)?.estado ?? null
+  const versionLocal = (cfgRaw as { updated_at?: string | null } | null)?.updated_at ?? null
   const cfg = (cfgRaw as { bloque_configs?: { es_gate?: boolean; config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } } | null)?.bloque_configs
   const tipoBloque = cfg?.bloque_definitions?.tipo
   const configExtraBloque = cfg?.config_extra ?? {}
+  // El bloque multi-pago crea cobros reales: se escribe solo con «Guardar pagos»
+  // (`guardarPagosMulti`), nunca por el cierre genérico.
+  if (configExtraBloque.es_multi_pago === true) return { error: MENSAJE_MULTI_PAGO_POR_BOTON }
 
   // Lista blanca de lo que el navegador escribe (ver `lib/negocios/data-escribible.ts`):
   // antes se mezclaba `data` entero, así que por aquí entraban `docs`, `drive_url` o
@@ -4313,6 +4559,12 @@ export async function marcarBloqueCompleto(
     workspaceId,
     modo: 'mezcla',
   })
+  // Un campo que va a un documento oficial no se guarda con letras que no se pueden escribir
+  // (bloqueo de todo ONE, `texto-latino.ts`). Solo lo que la persona acaba de mandar.
+  {
+    const malo = primerCampoOficialNoValido(mergedData, etiquetaDeCampoBloque(configExtraBloque), Object.keys(data))
+    if (malo) return { error: malo.mensaje }
+  }
   // Campos `suma_de` (ej. número de pasajeros = adultos + niños + infantes): el servidor
   // los vuelve a calcular sobre lo ya saneado. Lo que manda el navegador es UX. Ver `campo-suma.ts`.
   mergedData = aplicarSumas(configExtraBloque.fields as CampoConSuma[] | undefined, mergedData)
@@ -4396,30 +4648,68 @@ export async function marcarBloqueCompleto(
     }
   }
 
-  if (destinoId !== negocioBloqueId) {
-    const { error: dataError } = await db(supabase)
-      .from('negocio_bloques')
-      .update({ data: mergedData, updated_at: new Date().toISOString() })
-      .eq('id', destinoId)
+  // ── Escritura condicionada a lo leído (dos guardados a la vez) ─────────────
+  //
+  // Todo lo de arriba (la mezcla, la corrección, el diff del historial) se calculó sobre
+  // `currentData`. Si otro guardado del MISMO bloque escribió entre esa lectura y esta
+  // escritura —la misma acción repetida por el navegador, dos pestañas, un doble toque—,
+  // los dos creían ser el primero: dos líneas idénticas de historial y dos veces lo que
+  // cuelga del guardado (medido el 2026-10-06: 663 pares de `bloque_datos` en soena, la
+  // mitad a menos de 2 s). Ahora la escritura exige que la fila siga en la versión leída
+  // (`updated_at`); si no, se repite todo desde la lectura y el segundo ve lo que dejó
+  // el primero. El último intento escribe sin condición: nunca se pierde un guardado.
+  const ultimoIntento = intento >= INTENTOS_GUARDADO_BLOQUE
+  const compartido = destinoId !== negocioBloqueId
+  const versionEscritura = compartido ? versionLocal : (versionDato === versionLocal ? versionLocal : null)
+  // Sin compartir, dato y estado son la misma fila leída dos veces: si la versión cambió
+  // entre las dos lecturas, lo leído no es una foto coherente y se vuelve a empezar.
+  if (!compartido && !ultimoIntento && versionDato !== versionLocal) {
+    return marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts, intento + 1)
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const siSigueEn = (q: any, version: string | null) =>
+    !ultimoIntento && typeof version === 'string' ? q.eq('updated_at', version) : q
+  const seAdelantoOtro = (filas: unknown, version: string | null) =>
+    !ultimoIntento && typeof version === 'string' && Array.isArray(filas) && filas.length === 0
+
+  if (compartido) {
+    const { data: filasDato, error: dataError } = await siSigueEn(
+      db(supabase)
+        .from('negocio_bloques')
+        .update({ data: mergedData, updated_at: new Date().toISOString() })
+        .eq('id', destinoId),
+      versionDato,
+    ).select('id')
     if (dataError) return { error: (dataError as { message: string }).message }
+    if (seAdelantoOtro(filasDato, versionDato)) return marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts, intento + 1)
   }
 
-  const { error: updateError } = await db(supabase)
-    .from('negocio_bloques')
-    .update({
-      estado: 'completo',
-      // Si el bloque es compartido, el dato ya quedó en el origen; escribirlo también
-      // aquí recrearía la copia divergente que este mecanismo viene a eliminar.
-      ...(destinoId === negocioBloqueId ? { data: mergedData } : {}),
-      completado_at: new Date().toISOString(),
-      // FK → profiles(id) y el display resuelve por profiles. Debe ser el
-      // profile.id (userId), NO staff.id. Antes usaba staffId → violaba la FK.
-      completado_por: userId ?? null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', negocioBloqueId)
+  const { data: filasLocal, error: updateError } = await siSigueEn(
+    db(supabase)
+      .from('negocio_bloques')
+      .update({
+        estado: 'completo',
+        // Si el bloque es compartido, el dato ya quedó en el origen; escribirlo también
+        // aquí recrearía la copia divergente que este mecanismo viene a eliminar.
+        ...(compartido ? {} : { data: mergedData }),
+        completado_at: new Date().toISOString(),
+        // FK → profiles(id) y el display resuelve por profiles. Debe ser el
+        // profile.id (userId), NO staff.id. Antes usaba staffId → violaba la FK.
+        completado_por: userId ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', negocioBloqueId),
+    versionEscritura,
+  ).select('id')
 
   if (updateError) return { error: (updateError as { message: string }).message }
+  if (seAdelantoOtro(filasLocal, versionEscritura)) return marcarBloqueCompletoSinMemo(negocioBloqueId, data, opts, intento + 1)
+
+  // ¿Este guardado cambió algo? Pasó a completo, o cambió al menos un campo respecto de lo
+  // que había. Un re-guardado idéntico de un bloque ya completo no es un hecho nuevo: no
+  // deja historial ni vuelve a disparar lo que cuelga del guardado (los cobros automáticos).
+  const camposCambiados = Object.keys(data).filter(key => JSON.stringify(currentData[key]) !== JSON.stringify(data[key]))
+  const huboCambio = estadoPrevio !== 'completo' || camposCambiados.length > 0
 
   // Igual que en `actualizarBloqueData`: la respuesta y sus campos derivados se escriben
   // juntos. Hace falta en AMBOS caminos — el cliente manda por aquí cuando el bloque queda
@@ -4492,7 +4782,7 @@ export async function marcarBloqueCompleto(
     const triggers = (configExtra.triggers ?? []) as Array<{ event: string; action: string; params?: Record<string, unknown> }>
 
     const autoCobros = triggers.find(t => t.action === 'auto_cobros')
-    if (tipo === 'datos' && autoCobros) {
+    if (tipo === 'datos' && autoCobros && huboCambio) {
       const valorAnticipo = mergedData.valor_anticipo as number | undefined
       const referenciaEpayco = mergedData.referencia_anticipo as string | undefined
       if (valorAnticipo) {
@@ -4500,13 +4790,8 @@ export async function marcarBloqueCompleto(
       }
     }
 
-    const autoCobrosMulti = triggers.find(t => t.action === 'auto_cobros_multi')
-    if (tipo === 'datos' && autoCobrosMulti) {
-      const pagos = (mergedData.pagos ?? []) as Array<{ referencia_epayco: string; valor_pago: number }>
-      if (pagos.length > 0) {
-        await autoCrearCobrosMulti(bloque.negocio_id, pagos)
-      }
-    }
+    // `auto_cobros_multi` ya no crea cobros desde aquí: el bloque multi-pago se escribe solo
+    // con `guardarPagosMulti` (ver arriba, y el rechazo al inicio de esta función).
 
     // ── Hook AFI: si es uno de los bloques accionables del workspace afi, señalar al cliente
     // que dispare el endpoint correspondiente (route handlers tienen maxDuration=60s).
@@ -4531,16 +4816,11 @@ export async function marcarBloqueCompleto(
       return { error: null, trigger_afi_contrato: true, negocio_id: bloque.negocio_id }
     }
 
-    // Registrar en activity_log con detalle de campos que cambiaron
-    if (staffId && workspaceId) {
+    // Registrar en activity_log con detalle de campos que cambiaron. Solo si cambió algo:
+    // ver `huboCambio` arriba.
+    if (staffId && workspaceId && huboCambio) {
       const bloqueNombre = bloque.bloque_configs?.nombre ?? bloque.bloque_configs?.bloque_definitions?.nombre ?? 'Bloque'
-      // Diff: detectar qué campos cambiaron respecto a los datos anteriores
-      const changedFields: string[] = []
-      for (const key of Object.keys(data)) {
-        if (JSON.stringify(currentData[key]) !== JSON.stringify(data[key])) {
-          changedFields.push(key)
-        }
-      }
+      const changedFields = camposCambiados
       const detalle = changedFields.length > 0
         ? `Bloque "${bloqueNombre}" completado (${changedFields.join(', ')})`
         : `Bloque "${bloqueNombre}" completado`
@@ -4990,7 +5270,17 @@ export async function consultarRetornoDeCorreccion(
   return { aviso: posibles[0].aviso, etapa: posibles[0].etapaNombre }
 }
 
+/** Guardar un campo de la ficha. Ver `marcarBloqueCompleto`: una sola sesión por guardado. */
 export async function actualizarBloqueData(
+  negocioBloqueId: string,
+  data: Record<string, unknown>,
+  negocioId?: string,
+  opts?: { revalidate?: boolean; correccion?: { causa?: string; sesion_id?: string } }
+): Promise<{ error: string | null }> {
+  return enPeticionDeRuta(() => actualizarBloqueDataSinMemo(negocioBloqueId, data, negocioId, opts))
+}
+
+async function actualizarBloqueDataSinMemo(
   negocioBloqueId: string,
   data: Record<string, unknown>,
   negocioId?: string,
@@ -5034,6 +5324,9 @@ export async function actualizarBloqueData(
     { config_extra?: Record<string, unknown> | null; bloque_definitions?: { tipo?: string } | null } | null
   const ce = cfgAbierto?.config_extra ?? null
   const tipoAbierto = cfgAbierto?.bloque_definitions?.tipo ?? null
+  // El bloque multi-pago no se autoguarda: cada pausa a mitad de una cifra terminaba en un
+  // cobro real. Se escribe solo con «Guardar pagos» (`guardarPagosMulti`).
+  if ((ce as { es_multi_pago?: unknown } | null)?.es_multi_pago === true) return { error: MENSAJE_MULTI_PAGO_POR_BOTON }
 
   // La copia local de un bloque compartido está vacía por diseño: el dato vive en el origen.
   let dataDestino: Record<string, unknown> | null =
@@ -5070,6 +5363,13 @@ export async function actualizarBloqueData(
       }),
     ),
   )
+
+  // Bloqueo de todo ONE (`texto-latino.ts`): un campo oficial con letras que no se pueden
+  // escribir no se guarda. Solo lo que la persona acaba de mandar.
+  {
+    const malo = primerCampoOficialNoValido(dataSaneada, etiquetaDeCampoBloque(ce), Object.keys(data))
+    if (malo) return { error: malo.mensaje }
+  }
 
   // ── Corrección post-avance ────────────────────────────────────────────────
   // Escribir en un bloque de una etapa YA SUPERADA no es trabajo de la etapa, es
@@ -5178,6 +5478,8 @@ export async function actualizarBloqueData(
   }
 
   const nid = negocioId ?? (row as Record<string, unknown>)?.negocio_id as string | undefined
+  // El nombre automático sigue al destino y a las fechas (regla de la línea), si nadie lo renombró a mano.
+  if (nid) await renombrarNegocioSiAplica(supabase, nid, camposCambiados(dataDestino, dataFinal))
   if (nid && opts?.revalidate !== false) revalidatePath(`/negocios/${nid}`)
 
   // No registrar en activity_log aquí — auto-save cada 800ms genera ruido.
@@ -5387,7 +5689,7 @@ async function autoCrearCobros(
     if (!res.success) return { error: res.error }
     await reevaluarBloquesCobros(negocioId)
     // Con factura, el honorario de este pago se abona solo. Nunca devuelve error.
-    await abonarAlRegistrarPago(workspaceId, negocioId)
+    await abonarEnSegundoPlano(workspaceId, [negocioId])
     revalidatePath(`/negocios/${negocioId}`)
     return { error: null }
   }
@@ -5413,7 +5715,7 @@ async function autoCrearCobros(
       external_ref: referenciaEpayco ?? null,
     }).eq('id', (existente as Record<string, unknown>[])[0].id)
     await reevaluarBloquesCobros(negocioId)
-    await abonarAlRegistrarPago(workspaceId, negocioId)
+    await abonarEnSegundoPlano(workspaceId, [negocioId])
     revalidatePath(`/negocios/${negocioId}`)
     return { error: null }
   }
@@ -5433,80 +5735,206 @@ async function autoCrearCobros(
   if (insertError) return { error: (insertError as { message: string }).message }
 
   await reevaluarBloquesCobros(negocioId)
-  await abonarAlRegistrarPago(workspaceId, negocioId)
+  await abonarEnSegundoPlano(workspaceId, [negocioId])
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
 }
 
-// ── Auto-crear cobros multi-pago (etapa 7, idempotente por external_ref) ─────
+// ── Bloque multi-pago: «Guardar pagos» (etapa 7) ─────────────────────────────
 
-async function autoCrearCobrosMulti(
-  negocioId: string,
-  pagos: Array<{ referencia_epayco: string; valor_pago: number }>
+/**
+ * Guarda las filas del bloque «Pagos ePayco» multi-pago (`config_extra.es_multi_pago`) y
+ * deja sus cobros como dicen las filas. Es la ÚNICA vía que escribe ese bloque: el
+ * autoguardado (`actualizarBloqueData`) y el cierre genérico (`marcarBloqueCompleto`) lo
+ * rechazan. Reemplaza a `autoCrearCobrosMulti` (2026-10-19), que creaba un cobro por cada
+ * pausa del autoguardado: ver `lib/epayco/multi-pago-filas.ts`.
+ *
+ * Permiso: el MISMO de la pantalla, `puedeEditarMultiPago` (owner/admin), además del guard
+ * del bloque. Antes la pantalla lo pedía y el servidor no.
+ *
+ * Valida antes de escribir nada: cada referencia que exista en ePayco tiene que estar
+ * Aceptada y el valor no puede pasar del pago real (la misma regla de `registrarPagoEpayco`
+ * y del reparto), y una referencia ya registrada en OTRO negocio no se carga dos veces.
+ */
+async function guardarPagosMultiSinClave(
+  negocioBloqueId: string,
+  filasEntrantes: ReadonlyArray<Partial<FilaMultiPago>>,
 ): Promise<{ error: string | null }> {
-  const { supabase, workspaceId, error } = await getWorkspace()
+  const { supabase, workspaceId, userId, staffId, role, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
+  if (!puedeEditarMultiPago(role)) return { error: MENSAJE_SIN_PERMISO_MULTI_PAGO }
+  const guard = await guardEditarBloque(negocioBloqueId)
+  if (!guard.ok) return { error: guard.error ?? 'Sin permiso' }
 
-  if (!pagos.length) return { error: null }
+  const { data: bloqueRaw } = await db(supabase)
+    .from('negocio_bloques')
+    .select('negocio_id, data, bloque_configs!inner(config_extra)')
+    .eq('id', negocioBloqueId)
+    .maybeSingle()
+  const bloque = bloqueRaw as { negocio_id: string; data: Record<string, unknown> | null; bloque_configs: { config_extra: Record<string, unknown> | null } | null } | null
+  if (!bloque?.negocio_id) return { error: 'Bloque no encontrado' }
+  if (bloque.bloque_configs?.config_extra?.es_multi_pago !== true) return { error: 'Este bloque no es de pagos múltiples' }
+  const negocioId = bloque.negocio_id
 
-  // Idempotencia por MULTIPLICIDAD de (external_ref, monto), no por external_ref
-  // como conjunto. Bug 26 (SOENA): dos abonos reales que comparten la misma
-  // referencia ePayco (o referencia vacía/repetida) colapsaban en un Set →
-  // tras insertar el primero, el segundo se descartaba como "ya existe" y el
-  // saldo no bajaba. Contando cuántos cobros ya existen por cada par (ref, monto)
-  // e insertando solo el delta faltante, distinguimos "re-guardar el mismo pago"
-  // (idempotente, delta 0) de "dos pagos reales distintos" (ambos se registran).
-  const claveDe = (ref: string, monto: number) =>
-    `${ref ?? ''} ${Math.round(Number(monto) * 100)}`
+  const previas = filasConId(((bloque.data?.pagos ?? []) as Array<Partial<FilaMultiPago>>), () => randomUUID())
+  const filas = filasConId(filasEntrantes ?? [], () => randomUUID())
 
-  const { data: existentes } = await db(supabase)
-    .from('cobros')
-    .select('external_ref, monto')
-    .eq('workspace_id', workspaceId)
-    .eq('negocio_id', negocioId)
-    .eq('tipo_cobro', 'pago')
+  const [cobrosRes, concRes] = await Promise.all([
+    db(supabase)
+      .from('cobros')
+      .select('id, external_ref, monto, siigo_recibo')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', negocioId)
+      .eq('tipo_cobro', 'pago')
+      .is('anulado_at', null),
+    db(supabase)
+      .from('negocio_conciliacion')
+      .select('conciliado')
+      .eq('workspace_id', workspaceId)
+      .eq('negocio_id', negocioId)
+      .maybeSingle(),
+  ])
+  // «Confirmado por la financiera»: el negocio conciliado, o el pago con recibo de caja ya
+  // emitido. Cualquiera de los dos y la fila queda quieta.
+  const conciliado = (concRes.data as { conciliado?: boolean } | null)?.conciliado === true
+  const existentes: CobroExistente[] = ((cobrosRes.data ?? []) as Array<{ id: string; external_ref: string | null; monto: number; siigo_recibo: unknown }>)
+    .map((c) => ({ id: c.id, external_ref: c.external_ref, monto: Number(c.monto), bloqueado: conciliado || c.siigo_recibo != null }))
 
-  // Cuántos cobros ya existen por cada par (ref, monto)
-  const restante = new Map<string, number>()
-  for (const e of (existentes ?? []) as Array<{ external_ref: string | null; monto: number }>) {
-    const k = claveDe(e.external_ref ?? '', e.monto)
-    restante.set(k, (restante.get(k) ?? 0) + 1)
+  const plan = planearGuardadoMulti(filas, previas, existentes)
+  if (plan.errores.length > 0) return { error: plan.errores[0] }
+
+  // ── Validación contra ePayco y contra otros negocios, solo de lo que cambia ──
+  const aValidar = [...plan.crear, ...plan.corregir]
+  const conEpayco = (await exigirModulo(REQUISITO.pagoEpayco)).ok
+  // Una consulta por referencia: la validación y la fecha del cobro leen la misma respuesta.
+  const consultasEpayco = new Map<number, ReturnType<typeof consultarTransaccionEpayco>>()
+  const consultar = (ref: number) => {
+    if (!consultasEpayco.has(ref)) consultasEpayco.set(ref, consultarTransaccionEpayco(ref))
+    return consultasEpayco.get(ref)!
+  }
+  for (const v of aValidar) {
+    const { data: dup } = await db(supabase)
+      .from('cobros')
+      .select('negocio_id, negocios:negocio_id ( codigo )')
+      .eq('workspace_id', workspaceId)
+      .eq('external_ref', v.referencia)
+      .neq('negocio_id', negocioId)
+      .is('anulado_at', null)
+      .limit(1)
+      .maybeSingle()
+    if (dup) {
+      const codigo = (dup as { negocios: { codigo: string | null } | null }).negocios?.codigo ?? 'otro negocio'
+      return { error: `La referencia ${v.referencia} ya está registrada en ${codigo}. No se puede cargar dos veces: si el pago cubre los dos negocios, pídele al área financiera que lo redistribuya.` }
+    }
+    const refNum = /^\d+$/.test(v.referencia) ? parseInt(v.referencia, 10) : NaN
+    if (!conEpayco || !(refNum > 0)) continue
+    let tx: Awaited<ReturnType<typeof consultarTransaccionEpayco>> | null = null
+    try { tx = await consultar(refNum) } catch { tx = null } // no existe o ePayco caído: no hay contra qué validar
+    if (!tx) continue
+    if (tx.estado !== 'Aceptada') {
+      return { error: `La referencia ${v.referencia} está "${tx.estado}" en ePayco: solo se registran pagos aprobados.` }
+    }
+    if (Number.isFinite(tx.monto_bruto) && v.monto - tx.monto_bruto > 1) {
+      return { error: `El valor de la referencia ${v.referencia} (${fmtCopMulti(v.monto)}) supera el pago real de ePayco (${fmtCopMulti(tx.monto_bruto)}).` }
+    }
   }
 
-  // Recorrer las filas pedidas; insertar solo las que exceden lo ya registrado
-  // por su par (ref, monto). El Map se decrementa por cada par "consumido" para
-  // que un pago repetido legítimamente (2 filas iguales) registre 2 cobros.
-  const nuevos = pagos
-    .filter(p => {
-      const k = claveDe(p.referencia_epayco, p.valor_pago)
-      const ya = restante.get(k) ?? 0
-      if (ya > 0) {
-        restante.set(k, ya - 1) // este par ya está cubierto por un cobro existente
-        return false
-      }
-      return true
-    })
-    .map(p => ({
+  // ── Escribir ──
+  // La fecha del cobro es la del PAGO en ePayco, no la del registro (decisión 2026-08-18).
+  const fechas = plan.crear.length > 0
+    ? await fechasDeCobrosMulti(plan.crear.map((c) => c.referencia), {
+        puedeConsultar: async () => conEpayco,
+        consultar,
+        hoy: todayBogotaISO(),
+      })
+    : []
+  const cobroDeFila = new Map<string, string>()
+  for (let i = 0; i < plan.crear.length; i++) {
+    const c = plan.crear[i]
+    const { data: ins, error: insErr } = await db(supabase).from('cobros').insert({
       workspace_id: workspaceId,
       negocio_id: negocioId,
-      notas: 'Pago',
-      monto: p.valor_pago,
+      notas: notaCobroMulti(c.referencia, fechas[i].dePago),
+      monto: c.monto,
       tipo_cobro: 'pago',
-      fecha: todayBogotaISO(),
-      external_ref: p.referencia_epayco,
-    }))
+      fecha: fechas[i].fecha,
+      external_ref: c.referencia,
+      created_by: userId,
+    }).select('id').single()
+    if (insErr) return { error: (insErr as { message: string }).message }
+    cobroDeFila.set(c.filaId, (ins as { id: string }).id)
+  }
+  for (const c of plan.corregir) {
+    const { error: upErr } = await db(supabase).from('cobros')
+      .update({ monto: c.monto, external_ref: c.referencia })
+      .eq('id', c.cobroId).eq('workspace_id', workspaceId).is('anulado_at', null)
+    if (upErr) return { error: (upErr as { message: string }).message }
+  }
+  for (const c of plan.anular) {
+    const { error: anErr } = await db(supabase).from('cobros')
+      .update({
+        monto: 0,
+        monto_anulado: c.montoAnterior,
+        anulado_at: new Date().toISOString(),
+        anulado_por: userId,
+        anulacion_motivo: `Se quitó la fila del pago ${c.referencia} en el bloque de pagos`.slice(0, 300),
+      })
+      .eq('id', c.cobroId).eq('workspace_id', workspaceId).is('anulado_at', null)
+    if (anErr) return { error: (anErr as { message: string }).message }
+  }
 
-  if (nuevos.length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error: insertError } = await (supabase as any).from('cobros').insert(nuevos)
-    if (insertError) return { error: (insertError as { message: string }).message }
-    // Con factura, el honorario de estos pagos se abona solo. Nunca devuelve error.
-    await abonarAlRegistrarPago(workspaceId, negocioId)
+  const pagos = plan.filas.map((f) => ({ ...f, cobro_id: f.cobro_id ?? cobroDeFila.get(f.id) ?? null }))
+  const completo = pagos.length > 0
+  const ahora = new Date().toISOString()
+  const { error: bErr } = await db(supabase)
+    .from('negocio_bloques')
+    .update({
+      data: { ...(bloque.data ?? {}), pagos },
+      estado: completo ? 'completo' : 'pendiente',
+      completado_at: completo ? ahora : null,
+      updated_at: ahora,
+    })
+    .eq('id', negocioBloqueId)
+  if (bErr) return { error: (bErr as { message: string }).message }
+
+  if (plan.crear.length + plan.corregir.length + plan.anular.length > 0) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'cambio',
+      autor_id: staffId,
+      contenido: [
+        plan.crear.length ? `${plan.crear.length} pago(s) nuevo(s): ${plan.crear.map((c) => `${c.referencia} ${fmtCopMulti(c.monto)}`).join(', ')}` : '',
+        plan.corregir.length ? `${plan.corregir.length} corregido(s): ${plan.corregir.map((c) => `${c.referencia} → ${fmtCopMulti(c.monto)}`).join(', ')}` : '',
+        plan.anular.length ? `${plan.anular.length} anulado(s): ${plan.anular.map((c) => `${c.referencia} ${fmtCopMulti(c.montoAnterior)}`).join(', ')}` : '',
+      ].filter(Boolean).join('. ').slice(0, 280),
+    }, 'guardarPagosMulti')
+    // Con factura, el honorario de los pagos nuevos se abona solo. Nunca devuelve error.
+    await abonarEnSegundoPlano(workspaceId, [negocioId])
   }
 
   await reevaluarBloquesCobros(negocioId)
   revalidatePath(`/negocios/${negocioId}`)
   return { error: null }
+}
+
+function fmtCopMulti(n: number): string {
+  return `$${Math.round(n).toLocaleString('es-CO')}`
+}
+
+/** Sin `export`: un archivo `'use server'` que exporta una constante pierde todos sus exports. */
+const MENSAJE_SIN_PERMISO_MULTI_PAGO = 'Solo el dueño o un administrador registran los pagos de este bloque.'
+
+/** Mensaje para quien intente escribir el bloque multi-pago por el guardado genérico. */
+const MENSAJE_MULTI_PAGO_POR_BOTON = 'Los pagos de este bloque se guardan con «Guardar pagos».'
+
+/** Filas sin `id` (guardadas antes del 2026-10-19) se aceptan: el servidor les pone uno. */
+export async function guardarPagosMulti(negocioBloqueId: string, filas: ReadonlyArray<Partial<FilaMultiPago>>, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof guardarPagosMultiSinClave>>>(
+    { accion: 'guardarPagosMulti', clave: intencion, args: [negocioBloqueId, filas], enCurso: () => ({ error: MENSAJE_EN_CURSO }) },
+    () => guardarPagosMultiSinClave(negocioBloqueId, filas),
+  )
 }
 
 // ── Responsable de un paso del cronograma ────────────────────────────────────
@@ -5851,7 +6279,7 @@ async function saldoCobrosCubierto(
       .single(),
     supabase
       .from('cobros')
-      .select('monto, fecha, retencion_iva')
+      .select('monto, fecha, retencion_iva, anulado_at')
       .eq('negocio_id', negocioId)
       ,
     leerModeloDineroCompleto(supabase, negocioId),
@@ -5862,7 +6290,7 @@ async function saldoCobrosCubierto(
   // Un workspace sin modelo de dinero (sin tarifa pasante) da tarifa 0, y entonces el
   // valor a recaudar es el precio: el comportamiento generico no cambia.
   const aRecaudar = valorARecaudar(precio, modelo)
-  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null; retencion_iva: number | null }>)
+  const totalCobrado = cobradoConfirmado((cobrosRes.data ?? []) as Array<{ monto: number; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>)
   return bloqueCobrosCompleto({ valorARecaudar: aRecaudar, cobrado: totalCobrado })
 }
 
@@ -6272,6 +6700,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   etapasNoAplican: EtapaNoAplica[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
   datosPorSlug: Record<string, Record<string, unknown>>
+  /**
+   * La línea pide la autorización de datos y el cliente todavía no la dio: se cotiza, pero no se
+   * envía (reunión del 2026-10-22). La ficha lo dice arriba.
+   */
+  autorizacionPendiente?: boolean
+  /** Con la autorización pendiente, lo mismo que responde «Enviar» (`MENSAJE_ENVIO`). */
+  motivoAutorizacion?: string | null
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -6389,6 +6824,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }>
   staffList: Array<{ id: string; full_name: string }>
   pausaEnabled: boolean
+  /** Seguimiento de la línea (F1): motivos de pérdida y plazo del aplazamiento. Apagado = como hoy. */
+  seguimiento: ConfigSeguimiento
   /** ¿El usuario actual (por staff.id) es uno de los responsables del negocio? */
   currentUserEsResponsable: boolean
   /**
@@ -6441,7 +6878,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     db(supabase).from('negocios').select('metadata').eq('id', id).maybeSingle(),
     // UNA sola lectura de `workspaces`: antes eran DOS al MISMO registro, una para
     // el gate del honorario y otra para modules/config_extra.
-    db(supabase).from('workspaces').select('modules, config_extra').eq('id', workspaceId).single(),
+    db(supabase).from('workspaces').select('modules, config_extra, cotizacion_template_slug').eq('id', workspaceId).single(),
     // Visibilidad de operator: solo se pregunta cuando el rol lo exige.
     role === 'operator'
       ? db(supabase).from('negocio_responsables').select('staff_id').eq('negocio_id', id)
@@ -6460,7 +6897,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       .eq('workspace_id', workspaceId),
     db(supabase)
       .from('cobros')
-      .select('id, notas, monto, retencion_iva, retencion_iva_estado, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo')
+      .select('id, notas, monto, retencion_iva, retencion_iva_estado, revisado, tipo_cobro, fecha, fecha_esperada, numero_cuota, vencido, external_ref, split_json, siigo_recibo, anulado_at')
       .eq('workspace_id', workspaceId)
       .eq('negocio_id', id)
       .order('created_at', { ascending: true }),
@@ -6503,6 +6940,79 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
 
   if (!base) return null
 
+  // ── Segunda ola: todo lo que solo necesita `base` (2026-10-04) ────────────
+  //
+  // Después de la primera ola quedaban ONCE lecturas más en fila india, aunque ninguna
+  // usa el resultado de otra: solo `id`, la línea y los bloques de `base`. Se lanzan
+  // todas aquí y cada una se espera donde se usaba, en el mismo orden de siempre, así
+  // que lo que cambia es CUÁNDO salen, no qué se lee ni cómo se procesa. Ninguna
+  // escribe; las dos escrituras de esta función siguen más abajo, después de todas.
+  // `Promise.resolve` es lo que las DISPARA: el builder de PostgREST no sale hasta que
+  // alguien llama a su `then`.
+  const lineaIdBase = base.negocio.linea_id
+  const bloqueConfigIds = base.bloques.map(b => b.id)
+  const negocioBloqueIds = base.bloques.map(b => b.instancia?.id).filter(Boolean) as string[]
+  const tieneGuia = base.bloques.some(b =>
+    (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
+  )
+  const olaLineaConfig = lineaIdBase
+    ? Promise.resolve(db(supabase).from('lineas_negocio').select('config_extra').eq('id', lineaIdBase).maybeSingle())
+    : null
+  const olaPropuestaCero = lineaIdBase && (base.negocio.precio_aprobado ?? 0) <= 0
+    ? Promise.resolve(db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
+        .eq('negocio_id', id)
+        .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'))
+    : null
+  const olaConfigsExtra = bloqueConfigIds.length > 0
+    ? Promise.resolve(db(supabase).from('bloque_configs').select('id, config_extra').in('id', bloqueConfigIds))
+    : null
+  const olaItemsBloques = negocioBloqueIds.length > 0
+    ? Promise.resolve(db(supabase)
+        .from('bloque_items')
+        .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, responsable_texto')
+        .in('negocio_bloque_id', negocioBloqueIds)
+        .order('orden', { ascending: true }))
+    : null
+  const olaBloquesGuia = tieneGuia
+    ? Promise.resolve(db(supabase)
+        .from('negocio_bloques')
+        .select('data, bloque_configs!inner(nombre, slug, config_extra)')
+        .eq('negocio_id', id))
+    : null
+  const olaConfigsLinea = lineaIdBase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? Promise.resolve((db(supabase) as any)
+        .from('bloque_configs')
+        .select('config_extra, etapas_negocio!inner(linea_id, orden)')
+        .eq('etapas_negocio.linea_id', lineaIdBase))
+    : null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaPropuestas = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(etapa_id, slug, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica'))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaServicio = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug)')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.slug', 'servicio_contratado'))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaDocumentos = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(nombre, slug, etapa_id, config_extra, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'documento'))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const olaDatos = Promise.resolve((db(supabase) as any)
+    .from('negocio_bloques')
+    .select('data, bloque_configs!inner(slug, bloque_definitions!inner(tipo))')
+    .eq('negocio_id', id)
+    .eq('bloque_configs.bloque_definitions.tipo', 'datos'))
+
   const negMetaRow = negMetaRes.data
   const seccional010DelNegocio = (negMetaRow?.metadata as Record<string, unknown> | null)?.seccional as string | undefined
 
@@ -6526,9 +7036,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // etapas previas la necesita para el opt-in `reactivar_bloques`, y volver a
   // consultarla ahí sería una segunda consulta por la misma fila.
   let lineaConfigExtra: Record<string, unknown> | null = null
-  if (base.negocio.linea_id) {
-    const lineaCobroRes = await db(supabase)
-      .from('lineas_negocio').select('config_extra').eq('id', base.negocio.linea_id).maybeSingle()
+  if (base.negocio.linea_id && olaLineaConfig) {
+    const lineaCobroRes = await olaLineaConfig
     lineaConfigExtra = (lineaCobroRes.data as { config_extra?: Record<string, unknown> } | null)?.config_extra ?? null
     // Un honorario en cero puede ser una DECISION (propuesta aprobada regalando
     // el servicio) y no un dato que falta. El criterio no se reimplementa acá:
@@ -6537,12 +7046,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // que es el único caso en que puede cambiar la respuesta: así el detalle no
     // paga una consulta más en los negocios que sí tienen honorario.
     let ceroDeliberado = false
-    if ((base.negocio.precio_aprobado ?? 0) <= 0) {
-      const { data: propRows } = await db(supabase)
-        .from('negocio_bloques')
-        .select('data, bloque_configs!inner(bloque_definitions!inner(tipo))')
-        .eq('negocio_id', id)
-        .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    if ((base.negocio.precio_aprobado ?? 0) <= 0 && olaPropuestaCero) {
+      const { data: propRows } = await olaPropuestaCero
       ceroDeliberado = esCeroDeliberado(
         (propRows ?? []) as Array<{ data: Record<string, unknown> | null }>,
         base.negocio.precio_aprobado,
@@ -6589,8 +7094,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // aquí no tumba la ficha: la tarjeta simplemente no se pinta. Se lanza AQUÍ y se
   // espera al final: corre en paralelo con el resto del detalle en vez de sumarle
   // sus idas y vueltas a la base.
+  //
+  // ⚠️ Hasta el 2026-10-04 aquí había un `await` que contradecía este comentario: los
+  // datos clave se esperaban EN SERIE antes de seguir. Sin él, la promesa se espera
+  // donde siempre se leyó (`datosClave: await datosClavePromesa`, al armar la ficha).
   const datosClavePromesa = base.negocio.linea_id
-    ? await datosClaveDelNegocio(supabase, {
+    ? datosClaveDelNegocio(supabase, {
         negocioId: id,
         lineaId: base.negocio.linea_id,
         etapaActualId: base.negocio.etapa_actual_id,
@@ -6614,15 +7123,16 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   const staffIdsPrecio = (((wsRow as { config_extra?: { correccion_precio?: { staff_ids?: unknown } } } | null)
     ?.config_extra?.correccion_precio?.staff_ids ?? []) as string[])
   const puedeCorregirPrecioWs = role === 'owner' || (!!staffId && staffIdsPrecio.includes(staffId))
+  // La cotización por pasos (C4, decisión J): con el interruptor encendido y la plantilla de viaje,
+  // el «Enviar» del bloque Cotización lleva a «Revisar y enviar». La página de la cotización vuelve
+  // a comprobar las cuatro condiciones; esto solo decide a dónde lleva el botón.
+  const cotizacionPorPasos = leerConfigPorPasos((wsRow as { config_extra?: unknown } | null)?.config_extra).activo
+    && (wsRow as { cotizacion_template_slug?: string | null } | null)?.cotizacion_template_slug === 'trappvel'
 
   // Cargar config_extra de los bloque_configs
-  const bloqueConfigIds = base.bloques.map(b => b.id)
   const bloqueConfigsExtra: Record<string, Record<string, unknown>> = {}
-  if (bloqueConfigIds.length > 0) {
-    const { data: extras } = await db(supabase)
-      .from('bloque_configs')
-      .select('id, config_extra')
-      .in('id', bloqueConfigIds)
+  if (olaConfigsExtra) {
+    const { data: extras } = await olaConfigsExtra
     if (extras) {
       for (const e of extras as Record<string, unknown>[]) {
         bloqueConfigsExtra[e.id as string] = (e.config_extra ?? {}) as Record<string, unknown>
@@ -6631,14 +7141,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   }
 
   // Cargar bloque_items de todos los negocio_bloques
-  const negocioBloqueIds = base.bloques.map(b => b.instancia?.id).filter(Boolean) as string[]
   const itemsByBloqueId: Record<string, unknown[]> = {}
-  if (negocioBloqueIds.length > 0) {
-    const { data: itemsData } = await db(supabase)
-      .from('bloque_items')
-      .select('id, negocio_bloque_id, label, tipo, completado, completado_por, completado_at, link_url, imagen_data, orden, fecha_inicio, fecha_fin, fecha_inicio_real, fecha_fin_real, responsable_id, responsable_texto')
-      .in('negocio_bloque_id', negocioBloqueIds)
-      .order('orden', { ascending: true })
+  if (olaItemsBloques) {
+    const { data: itemsData } = await olaItemsBloques
     if (itemsData) {
       for (const item of itemsData as Record<string, unknown>[]) {
         const bid = item.negocio_bloque_id as string
@@ -6796,6 +7301,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     }
     presupuestoPorRubro = calcularPresupuestoPorRubro(
       itemsDeLaTarifaAceptada((itemsConRubros ?? []) as (ItemPresupuesto & ItemConGrupo)[], seleccion),
+      // Solo con servicios del viaje encendidos en la línea (Vera X12): apagado, como hoy.
+      { plegarViaje: serviciosViajeActivo(lineaConfigExtra) },
     )
   }
 
@@ -6811,15 +7318,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     autor_nombre: a.autor_id ? (staffMap[a.autor_id as string] ?? null) : null,
   }))
 
-  // Calcular resumen financiero
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobrosList = ((cobrosData ?? []) as any[]) as Array<{
-    monto: number
-    revisado: boolean
-  }>
-  // 2026-04-28: cobros registrados = dinero entrado. revisado es flag para
-  // contador (bandeja /revision), no afecta cálculos operativos.
-  const totalCobrado = cobrosList.reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  // Calcular resumen financiero.
+  // «Total cobrado» = lo que de verdad entró: cobros con fecha (más la retención de IVA que
+  // practicó el cliente), sin cuotas programadas ni pagos anulados. Antes sumaba TODAS las
+  // filas de `cobros`, así que una cuota programada sin pagar ya contaba como plata recibida
+  // y «Por cobrar» bajaba sin que entrara un peso. Es la misma definición de la tarjeta de
+  // cobros y del motor de avance (`cobradoConfirmado`). `revisado` sigue sin pesar: es la
+  // marca del contador (bandeja /revision), no dice si la plata entró.
+  const cobrosParaResumen = (cobrosData ?? []) as Array<{ monto: number | null; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>
 
   // ── Cross-etapa data for conditions + auto_fill ────────────────────────────
   // Se recolectan LAS DOS formas de declarar el bloque fuente (orden de etapa y
@@ -6832,19 +7338,13 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // de RUT, Factura y Fecha cita DIAN. Se resuelven por IDENTIDAD DE BLOQUE
   // (nombre), no por orden de etapa — robusto a reordenamientos. Mapa nombre→data
   // (campos AI aplanados), ignorando heredados readonly (sin campos propios).
-  const tieneGuia = base.bloques.some(b =>
-    (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'guia_devolucion'
-  )
   const datosGuiaPorNombre: Record<string, Record<string, unknown>> = {}
   // Índice por slug ESTABLE del bloque (vía preferida; robusto a renames, a
   // diferencia de datosGuiaPorNombre que se rompió cuando "Factura de venta" pasó
   // a "Factura Venta Vehículo"). Ver docs/specs/2026-05-26_block-references-by-slug.md
   const datosGuiaPorSlug: Record<string, Record<string, unknown>> = {}
-  if (tieneGuia) {
-    const { data: bloquesGuia } = await db(supabase)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, slug, config_extra)')
-      .eq('negocio_id', id)
+  if (olaBloquesGuia) {
+    const { data: bloquesGuia } = await olaBloquesGuia
     for (const b of ((bloquesGuia ?? []) as Record<string, unknown>[])) {
       const cfg = b.bloque_configs as { nombre?: string; slug?: string | null; config_extra?: Record<string, unknown> | null }
       if ((cfg?.config_extra as { source_etapa_orden?: unknown } | null)?.source_etapa_orden !== undefined) continue
@@ -6868,12 +7368,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // bloques de etapas previas (ej. DA6/DA7 en E6 con auto_fill desde E2/E5).
   // Sin esto, datosOtrasEtapas queda vacio para los rangos que el historial
   // necesita y los bloques readonly quedan filtrados del historial.
-  if (base.negocio.linea_id) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: allConfigs } = await (db(supabase) as any)
-      .from('bloque_configs')
-      .select('config_extra, etapas_negocio!inner(linea_id, orden)')
-      .eq('etapas_negocio.linea_id', base.negocio.linea_id)
+  if (olaConfigsLinea) {
+    const { data: allConfigs } = await olaConfigsLinea
     for (const c of ((allConfigs ?? []) as Record<string, unknown>[])) {
       const ce = c.config_extra as { fields?: Array<{ auto_fill?: { source_etapa_orden?: number } }> } | null
       const fields = ce?.fields ?? []
@@ -6977,12 +7473,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Índice por slug estable del bloque origen (vía preferida de la herencia readonly).
   const propuestaDataPorSlug: Record<string, Record<string, unknown>> = {}
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: propuestaBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(etapa_id, slug, bloque_definitions!inner(tipo), etapas_negocio!inner(orden))')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.bloque_definitions.tipo', 'propuesta_economica')
+    const { data: propuestaBlocks } = await olaPropuestas
     if (propuestaBlocks) {
       for (const pb of (propuestaBlocks as Record<string, unknown>[])) {
         const cfg = pb.bloque_configs as Record<string, unknown>
@@ -7004,12 +7495,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // Se lee su bloque, no el campo derivado (misma regla que `niegaCertificacionUpme`).
   let servicioVigenteNeg: string | null = null
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: servBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(slug)')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.slug', 'servicio_contratado')
+    const { data: servBlocks } = await olaServicio
     // Un negocio trae varias filas del bloque (las copias readonly viajan con el entre
     // etapas): gana la que tenga respuesta, no la primera que llegue.
     for (const sb_ of ((servBlocks ?? []) as Array<{ data: Record<string, unknown> | null }>)) {
@@ -7031,12 +7517,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // heredar además del archivo. Ver `devolucion_habilitada` más abajo.
   const documentoConfigPorSlug = new Map<string, Record<string, unknown>>()
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: docBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(nombre, slug, etapa_id, config_extra, bloque_definitions!inner(tipo, nombre), etapas_negocio!inner(orden))')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.bloque_definitions.tipo', 'documento')
+    const { data: docBlocks } = await olaDocumentos
     if (docBlocks) {
       for (const db_ of (docBlocks as Record<string, unknown>[])) {
         const cfg = db_.bloque_configs as Record<string, unknown>
@@ -7071,12 +7552,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // `datos` heredados COPIAN el dato en su propia fila; aqui hace falta compartirlo.
   const datosCompartidosPorSlug = new Map<string, Record<string, unknown>>()
   {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: datosBlocks } = await (db(supabase) as any)
-      .from('negocio_bloques')
-      .select('data, bloque_configs!inner(slug, bloque_definitions!inner(tipo))')
-      .eq('negocio_id', id)
-      .eq('bloque_configs.bloque_definitions.tipo', 'datos')
+    const { data: datosBlocks } = await olaDatos
     for (const row of ((datosBlocks ?? []) as Record<string, unknown>[])) {
       const cfg = row.bloque_configs as Record<string, unknown>
       const slug = cfg.slug as string | null
@@ -7254,7 +7730,9 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // historial). El componente HistorialEtapasPrevias los muestra en
       // orden de aparicion (etapa_orden ASC, bloque.orden ASC).
       const etapaInfoById = new Map(etapasPrevias.map(e => [e.id, { orden: e.orden, nombre: e.nombre, stage: e.stage }]))
-      const HIDDEN_TYPES = new Set(['resumen_financiero', 'resultado', 'ejecucion', 'historial', 'historial_valida'])
+      // `servicios` también: sus datos los arma el servidor solo para la etapa actual, y en
+      // el historial saldría un tablero vacío que no dice la verdad.
+      const HIDDEN_TYPES = new Set(['resumen_financiero', 'resultado', 'ejecucion', 'historial', 'historial_valida', 'servicios'])
 
       // ── Bloques que se ACTIVARON tarde ────────────────────────────────────────
       // Un bloque condicional de una etapa ya pasada puede aplicar HOY porque
@@ -7263,6 +7741,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       // pendiente) lo escondían justo cuando hacía falta. `esBloqueReactivado` es
       // quien decide; aquí solo se aplica. Ver `src/lib/negocios/bloque-reactivado.ts`.
       const reactivables = new Set<string>()
+      // La bolsa de fuentes del historial (la de la etapa actual más las referencias de los
+      // bloques del historial, si la reactivación las cargó). La usa la relectura del
+      // veredicto de los documentos del historial.
+      let fuentesHistorial: Record<string, Record<string, unknown>> = datosPorSlug
       {
         const activa = reactivacionActiva(lineaConfigExtra)
         // ⚠️ Las bolsas de arriba se armaron SOLO con lo que declaran los bloques de
@@ -7311,6 +7793,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           }
         }
         const fuentes = { porSlug, porEtapaOrden }
+        fuentesHistorial = porSlug
         // Instancias que hay que CREAR: sin fila no hay dónde escribir el dato, y un
         // bloque configurado después de que el caso pasó por su etapa nunca la tuvo.
         const nacen: Array<{ negocio_id: string; bloque_config_id: string; estado: string; data: Record<string, unknown> }> = []
@@ -7445,6 +7928,17 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
             ? { ...ceEnrichedPropuesta, _areaReadonly: true }
             : ceEnrichedPropuesta
 
+        // El certificado de una etapa que ya pasó se sigue viendo en el historial con su
+        // veredicto: se relee igual que en la etapa actual (solo absuelve), contra la bolsa
+        // del historial, que ya trae las fuentes de sus propios cross_check.
+        let instHist = inst
+        const checksHist = (ce as { cross_check?: { checks?: SpecRelectura[] } }).cross_check?.checks
+        const ccHist = (inst.data as Record<string, unknown> | null)?._cross_check as CrossCheckGuardado | undefined
+        if (def?.tipo === 'documento' && ccHist && (checksHist?.length ?? 0) > 0) {
+          const relecto = absolverCrossCheck(ccHist, checksHist, { porSlug: fuentesHistorial, porEtapaBloque: datosPorEtapaBloque })
+          if (relecto !== ccHist) instHist = { ...inst, data: { ...(inst.data ?? {}), _cross_check: relecto } }
+        }
+
         bloquesEtapasPrevias.push({
           etapa_orden: etapaInfo.orden,
           etapa_nombre: etapaInfo.nombre,
@@ -7459,7 +7953,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           nombre: (cfg.nombre as string | null) ?? null,
           slug: (cfg.slug as string | null) ?? null,
           bloque_definitions: def,
-          instancia: inst,
+          instancia: instHist,
           config_extra: ceEnriched,
           items: itemsByInst.get(inst.id) ?? [],
         })
@@ -7520,6 +8014,44 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     dataFacturaParaCopias = dataDeFacturaParaCopias(original, resolucion, gate?.numero_campo)
   }
 
+  // ── Copias de documento cuyo origen es un FORMULARIO generado ──────────────
+  // La copia readonly de un documento puede apuntar (`source_bloque_slug`) a un bloque
+  // `formulario`: SOENA muestra el borrador de la carta de autorización, que se genera
+  // en Documentación, desde etapas posteriores donde el equipo no lo encontraba (solo
+  // vivía en el historial cerrado). La copia solo pinta el PDF: el formulario se genera
+  // en su etapa, nunca desde aquí. Se consulta solo si alguna copia de esta etapa quedó
+  // sin origen entre los documentos, y solo trae filas de tipo `formulario`.
+  const formularioDataPorSlug = await formulariosOrigenDeCopias(
+    supabase, id,
+    slugsDeCopiasSinOrigen(
+      base.bloques.map(b => ({
+        tipo: (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo,
+        configExtra: bloqueConfigsExtra[b.id],
+      })),
+      documentoDataPorSlug,
+    ),
+  )
+
+  // Servicios del viaje (F0): solo si la etapa actual tiene el bloque. Viaja en el
+  // `config_extra` del bloque, como las demás banderas del servidor (`_servicios`).
+  const hayBloqueServicios = base.bloques.some(
+    b => (b as { bloque_definitions?: { tipo?: string } | null }).bloque_definitions?.tipo === 'servicios',
+  )
+  const serviciosViaje: DatosBloqueServicios | null = hayBloqueServicios
+    ? await datosDelTablero(supabase, {
+        workspaceId,
+        negocioId: id,
+        configLinea: lineaConfigExtra,
+        hayCotizacionAceptada: !!cotizacionAceptada,
+        quien: {
+          role: role ?? null,
+          areas: (areas ?? []) as string[],
+          staffId: staffId ?? null,
+          aprobadores: aprobadoresDeLinea(lineaConfigExtra),
+        },
+      })
+    : null
+
   const bloquesConExtra = base.bloques.map(b => {
     const configExtra = bloqueConfigsExtra[b.id] ?? {}
 
@@ -7554,6 +8086,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       const srcData = srcSlug === slugFacturaLinea
         ? dataFacturaParaCopias
         : (srcSlug ? documentoDataPorSlug.get(srcSlug) : undefined)
+          // Origen formulario (la carta de autorización generada): solo por slug.
+          ?? (srcSlug ? formularioDataPorSlug.get(srcSlug) : undefined)
           ?? documentoDataPorEtapaNombre.get(`${srcOrden}::${bNombre}`)
           // Con el origen declarado por slug y sin fila de origen, la copia NO muestra
           // su propia data: la llenó la herencia, y antes del 2026-09-14 la herencia
@@ -7614,8 +8148,14 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
           const valor = campos?.[spec.slug]?.value
           return valor === null || valor === undefined || valor === '' ? null : String(valor)
         })
-        if (cc !== ccGuardado) {
-          b = { ...b, instancia: { ...b.instancia, data: { ...data, _cross_check: cc } } }
+        // Las filas de texto que fallaron al cargar se vuelven a comparar con los
+        // datos de hoy y las reglas de hoy. Solo absuelve. Ver `relectura-cross-check.ts`.
+        const ccRelecto = absolverCrossCheck(cc, specCross?.checks as SpecRelectura[] | undefined, {
+          porSlug: datosPorSlug,
+          porEtapaBloque: datosPorEtapaBloque,
+        })
+        if (ccRelecto !== ccGuardado) {
+          b = { ...b, instancia: { ...b.instancia, data: { ...data, _cross_check: ccRelecto } } }
         }
       }
     }
@@ -7759,6 +8299,12 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
         enrichedConfigExtra._puedeRevertirAprobacion = true
       }
     }
+    // Seguimiento (F1-3): con la línea encendida, «Duplicar» pregunta de dónde sale la versión.
+    if (defTipo === 'cotizacion' && configSeguimiento(lineaConfigExtra).activo) {
+      enrichedConfigExtra._seguimiento = true
+    }
+    if (defTipo === 'cotizacion' && cotizacionPorPasos) enrichedConfigExtra._porPasos = true
+    if (defTipo === 'servicios' && serviciosViaje) enrichedConfigExtra._servicios = serviciosViaje
     if (defTipo === 'propuesta_economica' && puedeCorregirPrecioWs) {
       enrichedConfigExtra._puedeCorregirPrecio = true
     }
@@ -7850,18 +8396,91 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (errCierre) console.error('[getNegocioDetalle] no se pudieron cerrar los gates heredados ya llenos:', errCierre)
   }
 
+  // ── ¿Falta la autorización de datos? ──
+  // Con la MISMA regla que frena «Enviar», «Aprobar» y el gate (`faltaAutorizacionDelNegocio`), sin
+  // depender de que el bloque se pinte: el de «Autorización de datos» vive en Solicitud y, como su
+  // trabajo no queda en `negocio_bloques.data`, el historial lo salta mientras falte la firma. Antes
+  // la bandera salía de los candidatos de abajo y en Cotización quedaba siempre en `false`
+  // (prueba con clics del 2026-10-25): el aviso desaparecía justo cuando más hacía falta.
+  // Si no se puede leer, no se afirma nada aquí; «Enviar» igual falla cerrado.
+  const faltaAutorizacion = base.exigeAutorizacionDatos
+    ? faltaAutorizacionDelNegocio(db(supabase), { workspaceId, negocioId: id, contactoId: base.negocio.contacto_id ?? null })
+      .catch((e: unknown) => {
+        console.error('[getNegocioDetalle] no se pudo revisar la autorización de datos:', e)
+        return 'error' as const
+      })
+    : null
+  // ── Autorización, ficha y servicios: el estado lo dice el gate, no la fila ──
+  // Su trabajo no se guarda en el bloque (vive en el contacto o en `negocio_servicios`), así que
+  // nadie marcaba `negocio_bloques.estado`: la autorización firmada seguía en «Pendiente»
+  // (barrido 2026-10-22). Se deriva con la MISMA regla del gate, se pinta y se persiste en los dos
+  // sentidos: una autorización revocada vuelve a pendiente. Ver `estado-bloques-derivado.ts`.
+  {
+    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown> }
+    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[] }> = []
+    const recoger = (lista: ConInstancia[]) => lista.forEach((b, i) => {
+      const tipo = tipoDerivado(b.bloque_definitions?.tipo, b.config_extra)
+      if (!tipo || !b.instancia) return
+      candidatos.push({
+        lista, i, instanciaId: b.instancia.id, actual: b.instancia.estado, tipo,
+        ...(tipo === 'ficha' ? { campos: (b.config_extra.campos ?? []) as CampoContacto[] } : {}),
+      })
+    })
+    recoger(bloquesConExtra as unknown as ConInstancia[])
+    recoger(bloquesEtapasPrevias as unknown as ConInstancia[])
+    if (candidatos.length > 0) {
+      const derivados = await derivarEstadosDeBloques(db(supabase), {
+        workspaceId,
+        negocioId: id,
+        contactoId: base.negocio.contacto_id ?? null,
+        configLinea: lineaConfigExtra,
+        bloques: candidatos,
+        ...(faltaAutorizacion ? { faltaAutorizacion } : {}),
+      }).catch((e) => {
+        console.error('[getNegocioDetalle] no se pudo derivar el estado de los bloques:', e)
+        return new Map<string, EstadoBloqueDerivado | null>()
+      })
+      const { completar, reabrir } = cambiosDeEstado(candidatos.map(c => ({ ...c, derivado: derivados.get(c.instanciaId) ?? null })))
+      for (const c of candidatos) {
+        const estado = derivados.get(c.instanciaId)
+        if (!estado || (!completar.includes(c.instanciaId) && !reabrir.includes(c.instanciaId))) continue
+        const b = c.lista[c.i]
+        c.lista[c.i] = { ...b, instancia: { ...b.instancia!, estado } }
+      }
+      const ahora = new Date().toISOString()
+      const [errCompletar, errReabrir] = await Promise.all([
+        completar.length > 0
+          ? db(supabase).from('negocio_bloques').update({ estado: 'completo', completado_at: ahora, updated_at: ahora }).in('id', completar).then((r: { error: unknown }) => r.error)
+          : null,
+        reabrir.length > 0
+          ? db(supabase).from('negocio_bloques').update({ estado: 'pendiente', completado_at: null, updated_at: ahora }).in('id', reabrir).then((r: { error: unknown }) => r.error)
+          : null,
+      ])
+      if (errCompletar || errReabrir) console.error('[getNegocioDetalle] no se pudo guardar el estado derivado de los bloques:', errCompletar ?? errReabrir)
+    }
+  }
+
+  const faltaLeida = faltaAutorizacion ? await faltaAutorizacion : null
+  const autorizacionPendiente = autorizacionEstaPendiente(faltaLeida)
+
   return {
     negocio: base.negocio,
     noAplica,
     datosClave: await datosClavePromesa,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
+    autorizacionPendiente,
+    motivoAutorizacion: autorizacionPendiente && faltaLeida ? MENSAJE_ENVIO[faltaLeida] : null,
     etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente
     // evalúe `condition.source_bloque_slug` por identidad (no por etapa_orden).
     datosPorSlug,
-    bloquesEtapasPrevias,
+    // El origen que la etapa actual ya ofrece generar desde su copia no se repite aquí.
+    bloquesEtapasPrevias: historialSinOrigenesGenerables(
+      bloquesEtapasPrevias,
+      base.bloques.map(b => bloqueConfigsExtra[b.id]),
+    ),
     profiles: perfilesConEstadoEnEquipo(
       (profilesData ?? []).map(p => ({
         id: p.id,
@@ -7901,8 +8520,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     cotizacionesNegocio,
     puedeCorregirCotizacion,
     resumenFinanciero: {
-      totalCobrado,
-      porCobrar: Math.max(0, (precioAprobado ?? 0) - totalCobrado),
+      ...resumenDeCobro(cobrosParaResumen, precioAprobado),
       precioAprobado,
       costosEjecutados: (() => {
         const gastos = ((gastosData ?? []) as Array<{ monto: number }>)
@@ -7999,6 +8617,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       full_name: s.full_name,
     })),
     pausaEnabled,
+    seguimiento: configSeguimiento(lineaConfigExtra),
   }
 }
 
@@ -8205,6 +8824,12 @@ export async function perderNegocio(
     return { error: 'El negocio ya esta cerrado' }
   }
 
+  // Seguimiento (F1-4, Vera C10): con la línea encendida, el motivo es uno de los de la línea,
+  // cada uno sobre un `value` global (los reportes no se rompen). Apagada, como siempre.
+  const cfgSeguimiento = await configSeguimientoDelNegocio(db(supabase), negocioId)
+  const motivoInvalido = motivoPerdidaInvalido(cfgSeguimiento, razon)
+  if (motivoInvalido) return { error: motivoInvalido }
+
   const { error: updErr } = await db(supabase)
     .from('negocios')
     .update({
@@ -8219,7 +8844,7 @@ export async function perderNegocio(
   if (updErr) return { error: (updErr as { message: string }).message }
 
   // Log en activity_log
-  const razonLabel = RAZONES_PERDIDA_NEGOCIO.find(r => r.value === razon)?.label ?? razon
+  const razonLabel = etiquetaMotivoPerdida(cfgSeguimiento, razon)
   if (staffId) {
     await registrarActividad(supabase, {
       workspace_id: workspaceId,
@@ -8287,17 +8912,29 @@ export async function pausarNegocio(
   // Cargar negocio
   const { data: negocio } = await db(supabase)
     .from('negocios')
-    .select('id, stage_actual, estado, pausado, veces_pausado')
+    .select('id, stage_actual, estado, pausado, veces_pausado, metadata, linea_id')
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
     .single()
   if (!negocio) return { error: 'Negocio no encontrado' }
 
-  type N = { stage_actual: string; estado: string; pausado: boolean; veces_pausado: number }
+  type N = { stage_actual: string; estado: string; pausado: boolean; veces_pausado: number; metadata: Record<string, unknown> | null; linea_id: string | null }
   const n = negocio as N
   if (n.estado !== 'abierto') return { error: 'El negocio ya esta cerrado' }
   if (n.stage_actual !== 'venta') return { error: 'Solo se puede pausar un negocio en etapa de venta' }
   if (n.pausado) return { error: 'El negocio ya esta pausado' }
+
+  // Seguimiento (F1-4, P6, Vera C10): la línea fija el plazo (`pausa.max_dias`, 14 si no lo
+  // dice) y, encendida, el cuarto aplazamiento NO pierde el negocio solo: lo dice y para.
+  let cfgPausa: ConfigSeguimiento = configSeguimiento(null)
+  if (n.linea_id) {
+    const { data: lineaPausa } = await db(supabase).from('lineas_negocio').select('config_extra').eq('id', n.linea_id).maybeSingle()
+    cfgPausa = configSeguimiento((lineaPausa as { config_extra: unknown } | null)?.config_extra ?? null)
+  }
+  const maxDiasPausa = cfgPausa.maxDiasAplazar
+  if (cfgPausa.activo && n.veces_pausado >= MAX_PAUSAS) {
+    return { error: mensajeTopeAplazamientos(MAX_PAUSAS) }
+  }
 
   // Si ya alcanzo el maximo de pausas → auto-perdido
   if (n.veces_pausado >= MAX_PAUSAS) {
@@ -8347,13 +8984,13 @@ export async function pausarNegocio(
     return { error: 'Debe registrar al menos una interaccion con el cliente antes de pausar' }
   }
 
-  // Validar fecha de reapertura <= ultima_actividad + MAX_DIAS_PAUSA
+  // Validar fecha de reapertura <= ultima_actividad + días de la línea (MAX_DIAS_PAUSA por defecto)
   const fechaLimite = new Date(ultimaActividad)
-  fechaLimite.setDate(fechaLimite.getDate() + MAX_DIAS_PAUSA)
+  fechaLimite.setDate(fechaLimite.getDate() + maxDiasPausa)
   const fechaReaperturaDate = new Date(`${fechaReapertura}T00:00:00`)
   if (isNaN(fechaReaperturaDate.getTime())) return { error: 'Fecha de reapertura invalida' }
   if (fechaReaperturaDate.getTime() > fechaLimite.getTime()) {
-    return { error: `La fecha de reapertura no puede superar ${MAX_DIAS_PAUSA} dias desde la ultima actividad (${todayBogotaISO(fechaLimite)})` }
+    return { error: `La fecha de reapertura no puede superar ${maxDiasPausa} dias desde la ultima actividad (${todayBogotaISO(fechaLimite)})` }
   }
 
   const now = new Date().toISOString()
@@ -8367,6 +9004,12 @@ export async function pausarNegocio(
       veces_pausado: n.veces_pausado + 1,
       ultimo_pausado_at: now,
       updated_at: now,
+      // Seguimiento: el toque de ese día lo agenda el motor de recordatorios (fuente
+      // `aplazado`). Vive en metadata y no en `pausado_hasta`, que el cron de pausa borra al
+      // reactivar a primera hora, antes del motor.
+      ...(cfgPausa.activo
+        ? { metadata: { ...(n.metadata ?? {}), seguimiento: { ...((n.metadata ?? {}).seguimiento as Record<string, unknown> | undefined ?? {}), aplazado_para: fechaReapertura } } }
+        : {}),
     })
     .eq('id', negocioId)
     .eq('workspace_id', workspaceId)
@@ -8629,15 +9272,18 @@ async function camposDeCierre(
 ): Promise<Record<string, unknown>> {
   const { data: cobrosData } = await db(supabase)
     .from('cobros')
-    .select('monto, revisado')
+    .select('monto, fecha, retencion_iva, anulado_at')
     .eq('negocio_id', negocioId)
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cobros = ((cobrosData ?? []) as any[]) as Array<{ monto: number }>
-  // 2026-04-28: todos los cobros registrados cuentan. revisado es para contador.
-  const totalCobrado = cobros.reduce((sum, c) => sum + (c.monto ?? 0), 0)
+  // Solo lo que entró (`cobradoConfirmado`): una cuota programada sin pagar no es cobro y
+  // el snapshot del cierre la contaba como tal, dejando `pendiente_cobro` en 0 con plata
+  // por entrar. Los snapshots de cierres ya hechos no se reescriben: esto vale desde el
+  // siguiente cierre.
   const precioAprobado = negocio.precio_aprobado ?? negocio.precio_estimado ?? 0
-  const pendiente = Math.max(0, precioAprobado - totalCobrado)
+  const { totalCobrado, porCobrar: pendiente } = resumenDeCobro(
+    (cobrosData ?? []) as Array<{ monto: number | null; fecha: string | null; retencion_iva: number | null; anulado_at: string | null }>,
+    precioAprobado,
+  )
   const nf = opts?.noFacturable
   const now = new Date().toISOString()
 
@@ -8823,6 +9469,15 @@ export async function completarNegocio(
   // la validación vigente. La excepción explícita solo existe en cobro, para un
   // gate realmente incumplido y con autorización de administración/financiera.
   const gateErr = await validarGateFacturaEmitida(supabase, negocioId, negocio.etapa_actual_id as string | null)
+
+  // Postventa del viaje (F6-7): «Cerrar el negocio» exige la calificación y la respuesta del
+  // referido. Opt-in por etapa (`postventa_completa`); con `cierre_viaje` apagado no frena.
+  if (negocio.etapa_actual_id) {
+    const { data: etapaCierre } = await db(supabase).from('etapas_negocio').select('config_extra').eq('id', negocio.etapa_actual_id).maybeSingle()
+    const gatesCierre = (((etapaCierre as { config_extra?: { gates?: unknown } } | null)?.config_extra?.gates ?? []) as unknown[]).filter((g): g is string => typeof g === 'string')
+    const faltaPv = await evaluarGatePostventa(db(supabase), { workspaceId, negocioId, gates: gatesCierre })
+    if (faltaPv) return { error: faltaPv }
+  }
   if (!esCierreNoFacturable) {
     if (gateErr) return { error: gateErr }
   } else {
@@ -8897,8 +9552,8 @@ export async function completarNegocio(
       autor_id: staffId,
       ...(esCierreNoFacturable ? { campo_modificado: 'cierre_no_facturable' } : {}),
       contenido: esCierreNoFacturable
-        ? `Proyecto completado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
-        : 'Proyecto completado',
+        ? `Negocio cerrado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
+        : 'Negocio cerrado',
       valor_nuevo: 'completado',
     }, 'completarNegocio')
   }
@@ -8950,11 +9605,12 @@ export async function agregarResponsable(
 }> {
   // userId = profile.id, que es lo que `assigned_by` exige (FK a profiles). El staff.id
   // del autor lo traduce `asignarResponsable` al anotar, acotado al workspace del negocio.
-  const { supabase, workspaceId, role, userId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const allowed = ['owner', 'admin', 'supervisor']
-  if (!role || !allowed.includes(role)) {
+  // owner/admin/supervisor, o la persona declarada en
+  // `config_extra.asignar_responsable.staff_ids`. MISMA regla que la lista y el detalle.
+  if (!(await puedeAsignarResponsableEnWorkspace(workspaceId, { role, staffId }))) {
     return { error: 'Sin permisos para asignar responsable' }
   }
 
@@ -9006,8 +9662,8 @@ export async function quitarResponsable(
   const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const allowed = ['owner', 'admin', 'supervisor']
-  if (!role || !allowed.includes(role)) {
+  // Misma regla que `agregarResponsable` (`puedeAsignarResponsable`).
+  if (!(await puedeAsignarResponsableEnWorkspace(workspaceId, { role, staffId }))) {
     return { error: 'Sin permisos para quitar responsable' }
   }
 
@@ -9108,4 +9764,23 @@ export async function descartarConflicto(negocioBloqueId: string, slug: string):
     .eq('id', destinoId)
   if (errEsc) return { error: (errEsc as { message: string }).message }
   return { error: null }
+}
+
+// ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
+// Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
+// clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
+// reenvía, doble toque, «Reintentar» tras «No se confirmó») se ejecuta una sola vez.
+
+export async function crearNegocio(input: EntradaCrearNegocio, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof crearNegocioSinClave>>>(
+    { accion: 'crearNegocio', clave: intencion, args: [input], enCurso: () => ({ negocio_id: null, error: MENSAJE_EN_CURSO }) },
+    () => crearNegocioSinClave(input),
+  )
+}
+
+export async function cambiarEtapaNegocioConGate(negocioId: string, nuevaEtapaId: string, motivoOverride?: string, confirmado?: boolean, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof cambiarEtapaNegocioConGateSinClave>>>(
+    { accion: 'cambiarEtapaNegocioConGate', clave: intencion, args: [negocioId, nuevaEtapaId, motivoOverride, confirmado], enCurso: () => ({ error: MENSAJE_EN_CURSO }) },
+    () => cambiarEtapaNegocioConGateSinClave(negocioId, nuevaEtapaId, motivoOverride, confirmado),
+  )
 }

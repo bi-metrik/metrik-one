@@ -4,6 +4,8 @@
 // Pattern: parse-rut.ts (inline_data base64, structured output)
 // ============================================================
 
+import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
+
 const GEMINI_MODEL = 'gemini-3.1-flash-lite'
 
 const SYSTEM_PROMPT = `Eres un extractor de datos de tramites de vehiculos colombianos.
@@ -167,7 +169,7 @@ export async function parseVeDocuments(
 
   let debugRaw = ''
   try {
-    const res = await fetch(url, {
+    const res = await fetchModeloDocumentos(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -218,12 +220,12 @@ export async function parseVeDocuments(
     // Fallback: repair common malformations if it still fails.
     let raw: Record<string, VeVehicleField>
     try {
-      raw = JSON.parse(debugRaw)
+      raw = textoLatinoProfundo(JSON.parse(debugRaw))
     } catch {
       console.warn('[parse-ve-docs] Direct parse failed, attempting repair...')
       const repaired = repairJson(debugRaw)
       try {
-        raw = JSON.parse(repaired)
+        raw = textoLatinoProfundo(JSON.parse(repaired))
       } catch (e2) {
         console.error('[parse-ve-docs] Repair also failed. Raw:', debugRaw.slice(0, 600))
         throw new Error(`JSON invalido de Gemini: ${String(e2).slice(0, 80)}`)
@@ -277,3 +279,4 @@ function buildResult(raw: Record<string, VeVehicleField>): VeVehicleData {
     overall_confidence,
   }
 }
+import { textoLatinoProfundo } from '@/lib/texto/texto-latino'

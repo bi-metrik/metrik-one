@@ -11,6 +11,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { bloqueoPorEntorno, esNegocioDePrueba } from './config-viaje'
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
 
 const SIIGO_BASE = 'https://api.siigo.com'
@@ -52,6 +53,24 @@ export interface SiigoConfig {
   facturaPaymentId: number
   /** Forma de pago del recibo de caja. */
   reciboPaymentId: number
+  // ── Viajes (adenda Siigo, ola 4). Opcionales: sin ellos, todo sigue como hoy (SOENA). ──
+  /**
+   * Forma de pago del recibo por cuenta donde entró la plata (`cuenta_recaudo` → id de forma de
+   * pago RC). Con el mapa, una cuenta que no esté en él NO emite («falta configurar»).
+   */
+  reciboPaymentIdPorCuenta?: Record<string, number>
+  /** Producto de la factura para el ingreso propio (fee, margen), con IVA. */
+  productoPropioCode?: string
+  /** Producto de la factura para lo recibido para terceros, sin IVA. */
+  productoTercerosCode?: string
+  /** Centro de costo de Siigo (opcional). */
+  centroCostoId?: number
+  /**
+   * Empresa de Siigo de pruebas o libros reales. Obligatorio en espacios nuevos (lo pregunta el
+   * setup); ausente = `produccion`, para no tocar SOENA. Un negocio de prueba nunca emite en
+   * producción (`config-viaje.ts`).
+   */
+  entorno?: 'pruebas' | 'produccion'
 }
 
 export class SiigoError extends Error {
@@ -112,6 +131,30 @@ async function resolveCredentials(workspaceId: string): Promise<SiigoCredentials
  * Se resuelven una vez con `scripts/inspect-siigo-catalogos.ts` y se guardan; NO
  * se adivinan en runtime ni se hardcodean, porque son distintos en cada empresa.
  */
+/**
+ * El `siigo_config` tal como esté, sin exigir que esté completo (para las guardas: entorno y
+ * formas de pago). `null` si el espacio no lo tiene.
+ */
+export async function siigoConfigParcial(workspaceId: string): Promise<Partial<SiigoConfig> | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (createServiceClient() as any)
+    .from('workspaces')
+    .select('config_extra')
+    .eq('id', workspaceId)
+    .maybeSingle()
+  const cfg = ((data?.config_extra ?? {}) as Record<string, unknown>).siigo_config
+  return cfg && typeof cfg === 'object' ? (cfg as Partial<SiigoConfig>) : null
+}
+
+/**
+ * La guarda del entorno contra la base: un negocio de prueba no emite contra el Siigo de
+ * producción (`config-viaje.ts`). Devuelve el motivo o `null`.
+ */
+export async function bloqueoPorEntornoDelNegocio(workspaceId: string, metadata: Record<string, unknown> | null | undefined): Promise<string | null> {
+  if (!esNegocioDePrueba(metadata)) return null
+  return bloqueoPorEntorno(await siigoConfigParcial(workspaceId), metadata)
+}
+
 export async function getSiigoConfig(workspaceId: string): Promise<SiigoConfig> {
   const svc = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,11 +193,12 @@ async function getAccessToken(workspaceId: string, creds: SiigoCredentials): Pro
   const cached = tokenCache.get(workspaceId)
   if (cached && cached.expiresAt > Date.now()) return cached.token
 
-  const res = await fetch(`${SIIGO_BASE}/auth`, {
+  const res = await conTimeout(TIMEOUT_LECTURA_MS, 'POST /auth', signal => fetch(`${SIIGO_BASE}/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Partner-Id': creds.partnerId },
     body: JSON.stringify({ username: creds.username, access_key: creds.accessKey }),
-  })
+    signal,
+  }))
 
   if (!res.ok) {
     // El cuerpo del error de auth puede venir con eco de lo enviado: NO lo
@@ -182,6 +226,41 @@ export function invalidarTokenSiigo(workspaceId: string): void {
   tokenCache.delete(workspaceId)
 }
 
+// ── Timeout ──────────────────────────────────────────────────────────────────
+
+/**
+ * Cuánto se espera, como máximo, CADA intento contra Siigo. Hasta el 2026-10-04 no había
+ * ninguno: un Siigo colgado dejaba la acción esperando hasta que Vercel mataba la función.
+ *
+ * Dos valores porque no cuestan lo mismo. Una lectura que se corta solo se repite. Una
+ * escritura cortada pudo quedar hecha del lado de Siigo: las de documento llevan
+ * `Idempotency-Key` (reintentarla devuelve el mismo) y el cliente se busca por
+ * identificación antes de crearlo, pero igual se le da margen de sobra a la DIAN.
+ * La espera de un 429 (`maxEspera429Ms`) NO cuenta aquí: va entre dos intentos.
+ */
+export const TIMEOUT_LECTURA_MS = 20_000
+export const TIMEOUT_ESCRITURA_MS = 45_000
+
+/** Corre `pedir` con un tope; si se pasa, lanza un `SiigoError` que dice qué y cuánto. */
+async function conTimeout(
+  ms: number,
+  que: string,
+  pedir: (signal: AbortSignal) => Promise<Response>,
+): Promise<Response> {
+  const control = new AbortController()
+  const reloj = setTimeout(() => control.abort(), ms)
+  try {
+    return await pedir(control.signal)
+  } catch (e) {
+    if (control.signal.aborted) {
+      throw new SiigoError(`Siigo no respondió en ${Math.round(ms / 1000)} s (${que})`, 0, ['timeout'])
+    }
+    throw e
+  } finally {
+    clearTimeout(reloj)
+  }
+}
+
 // ── Petición ─────────────────────────────────────────────────────────────────
 
 interface RequestOpts {
@@ -206,6 +285,11 @@ interface RequestOpts {
    * las 100 peticiones seguidas y Siigo pide ~19 s de pausa.
    */
   maxEspera429Ms?: number
+  /**
+   * Tope de CADA intento, en ms. Por defecto `TIMEOUT_LECTURA_MS` en GET y
+   * `TIMEOUT_ESCRITURA_MS` en POST/PUT/DELETE.
+   */
+  timeoutMs?: number
 }
 
 /** Segundos que Siigo pide esperar, del header o del texto del error. */
@@ -268,6 +352,7 @@ export async function siigoRequest<T>(
 ): Promise<T> {
   const creds = await resolveCredentials(workspaceId)
   const { method = 'GET', body, idempotencyKey, maxEspera429Ms = 0 } = opts
+  const timeoutMs = opts.timeoutMs ?? (method === 'GET' ? TIMEOUT_LECTURA_MS : TIMEOUT_ESCRITURA_MS)
 
   const ejecutar = async (token: string): Promise<Response> => {
     const headers: Record<string, string> = {
@@ -277,12 +362,13 @@ export async function siigoRequest<T>(
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     // Solo en POST: en GET/PUT/DELETE el header no tiene efecto.
     if (idempotencyKey && method === 'POST') headers['Idempotency-Key'] = idempotencyKey
-    return fetch(`${SIIGO_BASE}${path}`, {
+    return conTimeout(timeoutMs, `${method} ${path}`, signal => fetch(`${SIIGO_BASE}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
       cache: 'no-store',
-    })
+      signal,
+    }))
   }
 
   let token = await getAccessToken(workspaceId, creds)

@@ -190,7 +190,12 @@ function sembrar(
   }
 }
 
-const input = { tipo: 'devolucion_dian' as const, causa: 'error_propio' as const, detalle: 'No se envió la documentación antes de la cita.' }
+const input = {
+  tipo: 'devolucion_dian' as const,
+  causa: 'error_propio' as const,
+  motivo: 'envio_tardio_al_cliente',
+  detalle: 'No se envió la documentación antes de la cita.',
+}
 const tocoElCaso = () => escrituras.some((e) => e.tabla === 'negocios' || e.tabla === 'negocio_bloques')
 
 beforeEach(() => {
@@ -426,5 +431,97 @@ describe('reprocesarNegocio — retorno a la etapa que sí aplica', () => {
     const r = await reprocesarNegocio('neg-v0388', input)
     expect(r).toMatchObject({ ok: true, etapaNombre: 'Cita' })
     expect(r.aviso).toBeUndefined()
+  })
+})
+
+// ── SOE-001 (2026-10-07): motivo de lista y reproceso del operativo del caso ─────────
+describe('motivo del reproceso', () => {
+  it('sin motivo no reprocesa ni escribe nada', async () => {
+    sembrar(19, { conRouting: true })
+    const r = await reprocesarNegocio('neg-v0388', { ...input, motivo: '' })
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/motivo/)
+    expect(escrituras).toHaveLength(0)
+  })
+
+  it('un motivo de OTRO tipo tampoco pasa', async () => {
+    sembrar(19, { conRouting: true })
+    const r = await reprocesarNegocio('neg-v0388', { ...input, motivo: 'pago_upme_rechazado' })
+    expect(r.ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
+  })
+
+  it('el motivo queda en el evento de calidad, en la marca y en el timeline', async () => {
+    sembrar(19, { conRouting: true })
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r.ok).toBe(true)
+    const evento = escrituras.find((e) => e.tabla === 'reproceso_eventos' && e.op === 'insert')
+    expect(evento?.payload).toMatchObject({ motivo: 'envio_tardio_al_cliente', causa: 'error_propio' })
+    const marca = (escrituras.find((e) => e.tabla === 'negocios' && e.op === 'update')?.payload.metadata as Fila).reproceso as Fila
+    expect(marca.motivo).toBe('envio_tardio_al_cliente')
+    const traza = registrarActividad.mock.calls.map((c) => (c[1] as Fila).contenido as string).find((t) => t?.startsWith('Reproceso'))
+    expect(traza).toContain('Motivo: No le enviamos los documentos a tiempo para la cita')
+  })
+
+  it('registrar el error sin devolver también exige y guarda el motivo', async () => {
+    sembrar(14)
+    expect((await registrarErrorSinDevolver('neg-v0388', { ...input, motivo: null })).ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
+    await registrarErrorSinDevolver('neg-v0388', input)
+    expect(escrituras.find((e) => e.tabla === 'reproceso_eventos')?.payload.motivo).toBe('envio_tardio_al_cliente')
+  })
+})
+
+describe('el operativo del caso reprocesa desde las etapas que se lo abren', () => {
+  /** El caso en «Confirmación del radicado» (21), que declara `reproceso_operativo`. */
+  function sembrarEn21({ abierta = true, puesto = 'operaciones' }: { abierta?: boolean; puesto?: string } = {}) {
+    sembrar(19, { conRouting: true })
+    const seg = tablas.etapas_negocio.find((e) => e.id === 'etapa-19')!
+    seg.config_extra = { routing: { conditional: [], default_etapa_orden: 21 } }
+    tablas.etapas_negocio.push(etapa(21, 'Confirmación del radicado', {
+      routing: { conditional: [], default_etapa_orden: 15 },
+      ...(abierta ? { reproceso_operativo: ['devolucion_dian'] } : {}),
+    }))
+    tablas.negocios[0].etapa_actual_id = 'etapa-21'
+    tablas.negocio_responsables = [{ negocio_id: 'neg-v0388', staff_id: 'staff-camila', rol: puesto }]
+    sesion = { role: 'operator', staffId: 'staff-camila' }
+  }
+
+  it('lo abre, vuelve a Cita, y la causa es la del motivo aunque haya mandado otra', async () => {
+    sembrarEn21()
+    const r = await reprocesarNegocio('neg-v0388', {
+      tipo: 'devolucion_dian', causa: 'criterio_tercero', motivo: 'documento_propio_mal_diligenciado', detalle: 'La casilla 49 quedó mal.',
+    })
+    expect(r).toMatchObject({ ok: true, etapaNombre: 'Cita' })
+    const evento = escrituras.find((e) => e.tabla === 'reproceso_eventos' && e.op === 'insert')
+    expect(evento?.payload).toMatchObject({ causa: 'error_propio', motivo: 'documento_propio_mal_diligenciado', abierto_por: 'staff-camila' })
+  })
+
+  it('NO si no es el operativo del caso (otro puesto)', async () => {
+    sembrarEn21({ puesto: 'comercial' })
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r.ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
+  })
+
+  it('NO en una etapa que no se lo abre', async () => {
+    sembrarEn21({ abierta: false })
+    const r = await reprocesarNegocio('neg-v0388', input)
+    expect(r.ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
+  })
+
+  it('NO para otro tipo de reproceso', async () => {
+    sembrarEn21()
+    const r = await reprocesarNegocio('neg-v0388', { ...input, tipo: 'certificacion_upme', motivo: 'dato_mal_en_certificado' })
+    expect(r.ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
+  })
+
+  it('registrar un error sin devolver sigue siendo solo de dirección y supervisión', async () => {
+    sembrarEn21()
+    const r = await registrarErrorSinDevolver('neg-v0388', input)
+    expect(r.ok).toBe(false)
+    expect(escrituras).toHaveLength(0)
   })
 })

@@ -6,6 +6,13 @@ import { destinoTrasAutenticar, esRelativo } from '@/lib/tenant/destino-tenant'
 import { destinoSiBloqueada, rutaGateada } from '@/lib/modulos/gate'
 import { leerPerfilDeAcceso, type ClientePerfil } from '@/lib/modulos/perfil-de-acceso'
 import { RUTA_DESINCRONIZADA, hayDesincronizacionDeTenant } from '@/lib/tenant/desincronizacion'
+import { RUTA_ENSAYO_CHROMIUM } from '@/lib/pdf/chromium/acceso-ensayo'
+import {
+  COOKIE_TENANT_PREVIEW,
+  PARAM_TENANT_PREVIEW,
+  accionTenantPreview,
+  slugTenantDePreview,
+} from '@/lib/tenant/tenant-preview'
 
 const IS_DEV = process.env.NODE_ENV === 'development'
 
@@ -62,7 +69,11 @@ async function getLanding(supabase: Awaited<ReturnType<typeof updateSession>>['s
 
 export async function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') || ''
-  const slug = extractSlug(hostname)
+  // En un preview de Vercel (`*.vercel.app`) no hay subdominio: el inquilino lo declara la
+  // cookie que fija `?__ws=<slug>` (ver `lib/tenant/tenant-preview.ts`). Fuera de un preview
+  // `slugTenantDePreview` devuelve null, así que producción y local quedan como estaban.
+  const slug =
+    extractSlug(hostname) ?? slugTenantDePreview(request.cookies.get(COOKIE_TENANT_PREVIEW)?.value)
   const { pathname } = request.nextUrl
 
   // La tarjeta Open Graph por inquilino es publica y no depende de sesion: quien
@@ -79,6 +90,63 @@ export async function middleware(request: NextRequest) {
   // entiende. La ruta autentica sola (ver `lib/ferreteria/api.ts`). Lo mismo el webhook de Wompi
   // (`/api/ferreteria/wompi/eventos`), que se autentica por la firma del evento.
   if (pathname.startsWith('/api/ferreteria/')) return NextResponse.next()
+
+  // El reporte de errores del navegador (`error.tsx`, `global-error.tsx`). `global-error`
+  // puede saltar sin sesion o con la sesion vencida: sin este corte, en un subdominio el
+  // `!user` de abajo respondia 307 a /login y el reporte se perdia. No lee sesion ni
+  // workspace (ver `app/api/errores-cliente/route.ts`).
+  if (pathname === '/api/errores-cliente') return NextResponse.next()
+
+  // La medicion del navegador (`[rum]`, ver `app/api/rum/route.ts`). Mismo caso: el beacon
+  // sale al ocultar o cerrar la pestaña, a veces con la sesion vencida, y un 307 a /login lo
+  // perderia. Tampoco tiene por que gastar un viaje a Auth por beacon. No lee sesion.
+  if (pathname === '/api/rum') return NextResponse.next()
+
+  // La version del deployment (`VersionWatcher`, cada 5 min por pestaña abierta). Publica a
+  // proposito y sin datos (ver `app/api/version/route.ts`). Pasaba por `updateSession` y por
+  // la lectura del perfil del guard: dos viajes (Auth + `/profiles`) por pestaña cada 5 min
+  // para devolver un id de deployment, y con la sesion vencida el `!user` de abajo respondia
+  // 307 a /login, justo cuando el vigilante mas necesita la respuesta.
+  if (pathname === '/api/version') return NextResponse.next()
+
+  // El correo con el link de autorización de datos al crear un viaje desde el bot (edge
+  // function, sin sesión). La ruta solo actúa sobre un negocio creado hace menos de 15 minutos y
+  // solo manda el correo que el sistema habría mandado solo (ver `app/api/autorizacion-datos`).
+  if (pathname === '/api/autorizacion-datos/al-crear') return NextResponse.next()
+
+  // Ensayo de Chromium (PR 0 de la propuesta de Trappvel): SOLO en un preview, que ya está
+  // detrás del SSO de Vercel, para medir el arranque en frío con `vercel curl` sin sesión de
+  // ONE. Imprime un fixture del repo. En producción sigue el camino normal (sesión) y la ruta
+  // exige platform admin. Ver `lib/pdf/chromium/acceso-ensayo.ts`.
+  if (pathname === RUTA_ENSAYO_CHROMIUM && process.env.VERCEL_ENV === 'preview') return NextResponse.next()
+
+  // El service worker del piloto de red (`public/sw.js`). Es un archivo estatico, pero `.js` no
+  // esta excluido del matcher: sin este corte, una pestaña sin sesion recibia un 307 a /login y
+  // el navegador rechaza registrar (o ACTUALIZAR, que es por donde llega el interruptor de
+  // apagado) un service worker que redirige.
+  if (pathname === '/sw.js') return NextResponse.next()
+
+  // Preview: `?__ws=<slug>` fija el inquilino de esta pestaña y redirige a la misma URL sin
+  // el parámetro (así no se queda pegado en la barra ni en el historial). `?__ws=off` lo
+  // quita. Solo en un preview: en producción y en local `accionTenantPreview` devuelve null
+  // y el parámetro sigue de largo como antes.
+  const accionPreview = accionTenantPreview(request.nextUrl.searchParams.get(PARAM_TENANT_PREVIEW))
+  if (accionPreview) {
+    const limpia = request.nextUrl.clone()
+    limpia.searchParams.delete(PARAM_TENANT_PREVIEW)
+    const res = NextResponse.redirect(limpia)
+    if (accionPreview.tipo === 'fijar') {
+      res.cookies.set(COOKIE_TENANT_PREVIEW, accionPreview.slug, {
+        path: '/',
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: true,
+      })
+    } else {
+      res.cookies.delete(COOKIE_TENANT_PREVIEW)
+    }
+    return res
+  }
 
   // Refresh Supabase session
   const { user, supabaseResponse, supabase } = await updateSession(request)
@@ -140,6 +208,10 @@ export async function middleware(request: NextRequest) {
     // pagina valida contra Valida. La marca que se pinta sale del workspace del
     // propio expediente, no de este subdominio.
     if (pathname.startsWith('/vinculacion/')) return respuestaTenant()
+
+    // Link de autorización de datos del cliente final (sin usuario en ONE). La credencial es el
+    // token, y la página solo abre un enlace del workspace de ESTE subdominio.
+    if (pathname.startsWith('/autorizacion/')) return respuestaTenant()
 
     // No autenticado → login DEL MISMO SUBDOMAIN (no marketing). Asi el magic link
     // siembra sesion en este subdomain via /auth/callback, en lugar de pasar por
@@ -226,6 +298,10 @@ export async function middleware(request: NextRequest) {
 
   if (pathname.startsWith('/auth/callback')) return supabaseResponse
   if (pathname === '/sin-espacio') return supabaseResponse
+  // Alta autogestionada de Valida: pública en el dominio base, como `/secop`. Sin este corte, el gate
+  // por módulo de abajo trataba `/valida/empezar` como la ruta `/valida` del espacio de la sesión y
+  // mandaba a otro lado a quien ya tiene espacio; la página y su ruta de API resuelven ese caso.
+  if (pathname === '/valida/empezar') return supabaseResponse
 
   // Signup cerrado: registro / onboarding / invitaciones -> al login
   if (pathname === '/registro' || pathname === '/onboarding' || pathname === '/accept-invite') {

@@ -10,7 +10,9 @@
  * No es un archivo `'use server'`: exportar esto desde uno lo volvería un endpoint.
  */
 
+import { createHash } from 'node:crypto'
 import { contextoFuentesDelNegocio } from './fuentes-negocio-servidor'
+import { aplicarAvances, type AvanceCruce } from './cruces-avance'
 import { evaluarCruces, leerCruces, slugsDeCruces, type Contradiccion, type Cruce } from './cruces'
 import {
   leerConfigDatosClave,
@@ -79,6 +81,43 @@ async function reprocesosDelNegocio(supabase: unknown, negocioId: string): Promi
   return resumirReprocesos((data ?? []) as Array<{ ciclo: number; tipo: string; abierto_at: string; cerrado_at: string | null }>)
 }
 
+/**
+ * La huella de una contradicción trae los datos del caso en claro (nombres, documentos).
+ * Sale del evaluador convertida en hash: así viaja a la pantalla y así se guarda la
+ * excepción, sin copiar datos del cliente a otra tabla.
+ */
+export function hashHuella(huella: string): string {
+  return createHash('sha256').update(huella).digest('hex').slice(0, 32)
+}
+
+function conHuellaHash(cs: Contradiccion[]): Contradiccion[] {
+  return cs.map(c => (c.huella ? { ...c, huella: hashHuella(c.huella) } : c))
+}
+
+/**
+ * Las excepciones de cruces del negocio (`negocio_cruces_avanzados`). Un fallo de lectura
+ * devuelve vacío: sin excepciones el cruce vuelve a frenar, que es el lado seguro.
+ */
+export async function avancesDelNegocio(supabase: unknown, negocioId: string): Promise<AvanceCruce[]> {
+  const { data, error } = await db(supabase)
+    .from('negocio_cruces_avanzados')
+    .select('cruce_slug, huella, motivo, created_at, autor:staff!negocio_cruces_avanzados_autor_id_fkey(full_name)')
+    .eq('negocio_id', negocioId)
+  if (error) {
+    console.error('[datos-clave] negocio_cruces_avanzados:', error)
+    return []
+  }
+  return ((data ?? []) as Array<{
+    cruce_slug: string; huella: string; motivo: string; created_at: string; autor: { full_name: string | null } | null
+  }>).map(r => ({
+    cruce_slug: r.cruce_slug,
+    huella: r.huella,
+    motivo: r.motivo,
+    created_at: r.created_at,
+    autor: r.autor?.full_name ?? null,
+  }))
+}
+
 /** Un voto en disputa también es una contradicción: la que el gate frena y la tarjeta pinta. */
 function contradiccionesDeVotos(votos: ResultadoVoto[]): Contradiccion[] {
   return votos
@@ -96,6 +135,7 @@ export async function datosClaveDelNegocio(supabase: unknown, args: Args): Promi
   const cruces = leerCruces(args.configLinea)
   const votos = leerVotos(args.configLinea)
   const reprocesosP = reprocesosDelNegocio(supabase, args.negocioId)
+  const avancesP = cruces.length > 0 ? avancesDelNegocio(supabase, args.negocioId) : Promise.resolve([])
   let contradicciones: Contradiccion[] = []
   let lecturas: ResultadoVoto[] = []
   let vista: VistaDatosClave | null = null
@@ -105,7 +145,8 @@ export async function datosClaveDelNegocio(supabase: unknown, args: Args): Promi
       evaluarCruces(cruces, ctx, args.etapaOrden),
       evaluarVotos(votos, ctx, args.etapaOrden),
     ])
-    contradicciones = deCruces
+    // Un cruce avanzado con motivo sigue a la vista, marcado: la diferencia no se corrigió.
+    contradicciones = aplicarAvances(conHuellaHash(deCruces), await avancesP)
     lecturas = deVotos
     if (config) vista = await resolverDatosClave(config, ctx, contradicciones)
   }
@@ -147,6 +188,10 @@ export async function votoDelNegocio(supabase: unknown, args: Args, votoSlug: st
  * Las contradicciones que FRENAN el avance en la etapa actual. Vacío si ningún cruce
  * bloquea en esta etapa, sin tocar la base: la gran mayoría de los avances no paga
  * ninguna consulta por esto.
+ *
+ * Un cruce con una excepción vigente (mismo cruce, mismos datos: `cruces-avance.ts`) ya
+ * no frena. Los cruces de línea vuelven con la huella en hash: es la llave con la que
+ * `avanzarCrucesConMotivo` guarda la excepción.
  */
 export async function contradiccionesQueBloquean(supabase: unknown, args: Args): Promise<Contradiccion[]> {
   if (args.etapaOrden === null) return []
@@ -155,6 +200,12 @@ export async function contradiccionesQueBloquean(supabase: unknown, args: Args):
   const votos = leerVotos(args.configLinea).filter(v => (v.bloquea_en_etapas ?? []).includes(orden))
   if (cruces.length === 0 && votos.length === 0) return []
   const ctx = await contexto(supabase, args, null, cruces, votos)
-  const [deCruces, deVotos] = await Promise.all([evaluarCruces(cruces, ctx, orden), evaluarVotos(votos, ctx, orden)])
-  return [...deCruces.filter(c => c.bloquea), ...contradiccionesDeVotos(deVotos).filter(c => c.bloquea)]
+  const [deCruces, deVotos, avances] = await Promise.all([
+    evaluarCruces(cruces, ctx, orden),
+    evaluarVotos(votos, ctx, orden),
+    cruces.length > 0 ? avancesDelNegocio(supabase, args.negocioId) : Promise.resolve([] as AvanceCruce[]),
+  ])
+  const crucesQueFrenan = aplicarAvances(conHuellaHash(deCruces.filter(c => c.bloquea)), avances)
+    .filter(c => !c.avanzado)
+  return [...crucesQueFrenan, ...contradiccionesDeVotos(deVotos).filter(c => c.bloquea)]
 }

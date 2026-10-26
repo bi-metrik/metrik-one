@@ -8,6 +8,7 @@ import { CircleCheck, ExternalLink, FileText, FolderCheck, Grid3x3, SearchCheck,
 import MetrikLockup from '@/components/metrik-lockup'
 import { textoConfirmacion } from '@/lib/seccion-suscripcion/sugerencias'
 import { descartarSustenta, pedirContactoDeSustenta, registrarEventoSustenta } from './acciones'
+import { useIntencion } from '@/hooks/use-intencion'
 
 /**
  * Sustenta en el Resumen de `/suscripcion` (Mateo y Ren, 2026-09-23): una tarjeta con marca, dos
@@ -150,6 +151,8 @@ const BOTON_SECUNDARIO =
 
 export function SeccionSustenta({ inicial }: { inicial: EstadoSustenta }) {
   const router = useRouter()
+  // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
+  const intencion = useIntencion()
   const [estado, setEstado] = useState<Estado>(
     inicial === 'solicitada' ? { tipo: 'confirmada', recien: false, nombre: null } : { tipo: 'oferta' },
   )
@@ -159,7 +162,8 @@ export function SeccionSustenta({ inicial }: { inicial: EstadoSustenta }) {
   function pedirDemostracion(origen: 'tarjeta' | 'panel') {
     if (pendiente || estado.tipo !== 'oferta') return
     iniciar(async () => {
-      const r = await pedirContactoDeSustenta({ origen })
+      const r = await pedirContactoDeSustenta({ origen }, intencion.clave())
+      intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
         return

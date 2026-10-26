@@ -1,0 +1,96 @@
+// Generación de texto compartida (pedido con forma de Gemini; el modelo lo pone `fetchModelo`: Haiku 5.5 o Gemini).
+// La usan el lector de Navigate de cardumen (`cardumen/model.ts`) y el bot de servicio al cliente (`customer/`).
+// Nació en `venezuela/gemini.ts` (bot "Voz de Venezuela"); se movió aquí el 2026-10-20, cuando Mauricio apagó ese
+// bot y dejó cardumen en Haiku: así apagar Venezuela no toca a nadie más. Mismo patrón: fetch nativo, usageMetadata,
+// retry con backoff, thinking OFF.
+
+import { fetchModelo, haikuActivo } from './llm-anthropic.ts';
+
+export interface GenUsage {
+  in: number;        // promptTokenCount
+  out: number;       // candidatesTokenCount
+  thoughts: number;  // thoughtsTokenCount (debe ser 0 con thinkingBudget:0)
+  total: number;     // totalTokenCount
+}
+export interface GenResult { text: string; usage: GenUsage; raw?: unknown }
+
+export interface Msg { role: "user" | "model"; text: string }
+
+export interface CallOpts {
+  model: string;
+  system: string;
+  messages: Msg[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  thinkingBudget?: number;   // 0 = thinking OFF (palanca de costo del bot; obligatorio en prod)
+  jsonMime?: boolean;
+}
+
+// Reintento con backoff exponencial para 429/503/500/UNAVAILABLE.
+async function withRetry<T>(fn: () => Promise<T>, tries = 6, baseMs = 1200): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = (e as Error).message ?? "";
+      const transient = /\b(429|503|500|502|504|UNAVAILABLE|overloaded|high demand|RESOURCE_EXHAUSTED|internal)\b/i.test(msg);
+      if (!transient || i === tries - 1) throw e;
+      const delay = Math.min(baseMs * 2 ** i, 15000) + Math.floor(Math.random() * 500);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+interface RespuestaGenerar {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number };
+}
+
+export async function generate(opts: CallOpts): Promise<GenResult> {
+  const key = Deno.env.get("GEMINI_API_KEY") ?? "";
+  // Con Haiku activo, la llave de Gemini solo sirve de respaldo: sin ella se corre sin respaldo.
+  if (!key && !haikuActivo()) throw new Error("GEMINI_API_KEY no esta en el entorno");
+
+  const contents = opts.messages.map((m) => ({ role: m.role, parts: [{ text: m.text }] }));
+
+  const generationConfig: Record<string, unknown> = {
+    temperature: opts.temperature ?? 0.7,
+    maxOutputTokens: opts.maxOutputTokens ?? 256,
+  };
+  if (opts.thinkingBudget !== undefined) {
+    generationConfig.thinkingConfig = { thinkingBudget: opts.thinkingBudget };
+  }
+  if (opts.jsonMime) generationConfig.responseMimeType = "application/json";
+
+  const body: Record<string, unknown> = {
+    contents,
+    systemInstruction: { parts: [{ text: opts.system }] },
+    generationConfig,
+  };
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent${key ? `?key=${key}` : ""}`;
+
+  const data: RespuestaGenerar = await withRetry(async (): Promise<RespuestaGenerar> => {
+    const res = await fetchModelo(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+    return res.json();
+  });
+
+  const text: string =
+    data?.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+  const um = data?.usageMetadata ?? {};
+  const usage: GenUsage = {
+    in: um.promptTokenCount ?? 0,
+    out: um.candidatesTokenCount ?? 0,
+    thoughts: um.thoughtsTokenCount ?? 0,
+    total: um.totalTokenCount ?? 0,
+  };
+  return { text, usage, raw: data };
+}

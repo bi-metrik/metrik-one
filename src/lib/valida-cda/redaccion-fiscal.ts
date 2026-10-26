@@ -16,3 +16,10 @@ export const PLAN_CDA = 'Suscripción VALIDA · Plan CDA — servicio de computa
 
 /** La nota de IVA, en la tarjeta de pago y en la pestaña Pagos. */
 export const NOTA_IVA_CDA = 'Servicio excluido de IVA (art. 476 num. 21 ET, computación en la nube)'
+
+/**
+ * Nombre del plan de la licencia de ONE (Clarity) en el encabezado de /suscripcion. Misma regla que el
+ * de Valida: la ficha `licencia-clarity` es excluida de IVA como computación en la nube, así que ante
+ * el cliente no se llama «licencia».
+ */
+export const PLAN_ONE = 'Suscripción MeTRIK ONE — servicio de computación en la nube (SaaS)'

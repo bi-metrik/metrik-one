@@ -44,7 +44,16 @@ import { ERROR_DESINCRONIZADO } from '@/lib/tenant/desincronizacion'
 
 // ─── Estado de la "base" ───────────────────────────────────────────────────
 
-type StaffRow = { id: string; profile_id: string; workspace_id: string; is_active: boolean }
+type StaffRow = {
+  id: string
+  profile_id: string
+  workspace_id: string
+  is_active: boolean
+  rol_plataforma?: string
+}
+
+/** `staff_rol_plataforma_check` en produccion: el doble lo hace cumplir como la base. */
+const ROL_PLATAFORMA_VALIDOS = ['dueno', 'administrador', 'supervisor', 'ejecutor', 'contador', 'campo']
 
 let usuario: { id: string }
 let perfil: {
@@ -83,6 +92,15 @@ function clienteFalso(opts: { rls: boolean }) {
         if (opts.rls) escriturasStaff++
         const conflicto = staffRows.some((r) => r.profile_id === row.profile_id)
         const resolver = () => {
+          if (!ROL_PLATAFORMA_VALIDOS.includes(row.rol_plataforma as string)) {
+            return {
+              data: null,
+              error: {
+                code: '23514',
+                message: 'new row for relation "staff" violates check constraint "staff_rol_plataforma_check"',
+              },
+            }
+          }
           if (conflicto) {
             return viaUpsert
               ? { data: null, error: null } // ON CONFLICT DO NOTHING
@@ -99,6 +117,7 @@ function clienteFalso(opts: { rls: boolean }) {
             profile_id: row.profile_id as string,
             workspace_id: row.workspace_id as string,
             is_active: row.is_active as boolean,
+            rol_plataforma: row.rol_plataforma as string,
           }
           staffRows.push(nueva)
           return { data: { id: nueva.id }, error: null }
@@ -226,6 +245,36 @@ describe('getWorkspace — resolucion del staff', () => {
     expect(escriturasStaff).toBe(1)
     expect(staffRows).toHaveLength(1)
     expect(staffRows[0].workspace_id).toBe('ws-actual')
+  })
+
+  // VISTOS FALLAR (2026-10-02) contra el mapa viejo: operator y read_only daban
+  // 'operativo' → 23514 → staffId null y console.error (528 en alma-afi el 01-oct).
+  it.each([
+    ['operator', 'ejecutor'],
+    ['read_only', 'campo'],
+    ['supervisor', 'supervisor'],
+    ['admin', 'administrador'],
+  ])('%s sin staff: se crea con rol_plataforma %s, que pasa el CHECK', async (role, esperado) => {
+    usuario = { id: `user-${role}` }
+    perfil.role = role
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.staffId).toBe('staff-nuevo')
+    expect(staffRows[0].rol_plataforma).toBe(esperado)
+    expect(errorSpy).not.toHaveBeenCalled()
+  })
+
+  it('contador sin staff: no se autocrea (el trigger le borraria el rol), sin error', async () => {
+    usuario = { id: 'user-contador' }
+    perfil.role = 'contador'
+
+    const r = await getWorkspaceImpl()
+
+    expect(r.staffId).toBeNull()
+    expect(escriturasStaff).toBe(0)
+    expect(errorSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 
   it('carrera insert-vs-select: el que pierde relee y usa el registro del ganador, sin error', async () => {

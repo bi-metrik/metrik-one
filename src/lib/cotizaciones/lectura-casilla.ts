@@ -177,5 +177,6 @@ export function construirLecturaCasilla(
     descripcion,
     leidaEn,
     ...(monedaAsumida ? { monedaAsumida: true } : {}),
+    ...(aceptacion.habitacionesReserva ? { habitacionesReserva: aceptacion.habitacionesReserva } : {}),
   }
 }

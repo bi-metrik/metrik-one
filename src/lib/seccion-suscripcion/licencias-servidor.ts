@@ -1,6 +1,8 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
+import { anclaDeFila, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
 import { cuotasConEstado, type CuotaDeServicio } from '@/lib/valida-cda/pago-pendiente'
+import { TIPO_CUOTA_ANUAL } from '@/lib/valida-cda/plan-anual'
 import type { ContextoSuscripcion } from './contexto-servidor'
 import { parametroEntero, parametroMonto } from './contexto-servidor'
 import {
@@ -104,10 +106,10 @@ interface PlanLeido {
 async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any
-  const planes = await svc
-    .from('planes_cobro')
-    .select('id')
-    .eq('negocio_id', ctx.contrato.negocioId)
+  // El ancla del contrato: su negocio o su suscripción.
+  const ancla = anclaDeFila({ negocio_id: ctx.contrato.negocioId, suscripcion_id: ctx.contrato.suscripcionId })
+  if (!ancla) return 'error'
+  const planes = await filtrarPorAncla(svc.from('planes_cobro').select('id'), ancla)
     .eq('workspace_id', ctx.contrato.cobradorId)
   if (planes.error) {
     console.error('[suscripcion] planes:', planes.error.message)
@@ -118,13 +120,15 @@ async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
 
   const [cuotas, cobros] = await Promise.all([
     svc.from('plan_cobro_cuotas').select('id, plan_cobro_id, numero, tipo, monto, fecha_vencimiento, concepto_detalle').in('plan_cobro_id', ids),
-    svc.from('cobros').select('plan_cobro_id, numero_cuota, monto, retencion_iva, fecha, anulado_at').eq('negocio_id', ctx.contrato.negocioId),
+    filtrarPorAncla(svc.from('cobros').select('plan_cobro_id, numero_cuota, monto, retencion_iva, fecha, anulado_at'), ancla),
   ])
   if (cuotas.error || cobros.error) {
     console.error('[suscripcion] cuotas o cobros:', cuotas.error?.message ?? cobros.error?.message)
     return 'error'
   }
-  const filasCuota = (cuotas.data ?? []) as FilaCuotaPlan[]
+  // La cuota anual (Plan Anual) paga doce períodos de una vez: no lleva cargos de licencias. Los
+  // usuarios adicionales de esos períodos van en sus cuotas `usuarios_adicionales`, una por período.
+  const filasCuota = ((cuotas.data ?? []) as FilaCuotaPlan[]).filter((q) => q.tipo !== TIPO_CUOTA_ANUAL)
   const filasCobro = (cobros.data ?? []) as FilaCobro[]
 
   const cargos = filasCuota.length
@@ -173,7 +177,9 @@ async function leerPlan(ctx: Ctx, hoy: string): Promise<PlanLeido | 'error'> {
       concepto: q.concepto_detalle,
       base: conceptoBase(q.concepto_detalle),
       fechaVencimiento: q.fecha_vencimiento,
-      modificable: !conCobro.has(`${q.plan_cobro_id}#${q.numero}`) && sinPlata.has(q.id),
+      // Una cuota en cero (usuarios adicionales de un período del Plan Anual, sin ninguno) no entra al
+      // reparto, así que tampoco tiene plata: se puede tocar si no tiene cobro.
+      modificable: !conCobro.has(`${q.plan_cobro_id}#${q.numero}`) && (sinPlata.has(q.id) || Number(q.monto) === 0),
     })),
     cargosVivos: ((cargos.data ?? []) as FilaCargo[]).map((c) => ({
       id: c.id,

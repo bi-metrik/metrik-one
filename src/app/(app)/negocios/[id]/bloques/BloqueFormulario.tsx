@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -16,7 +17,6 @@ import {
 } from 'lucide-react'
 import {
   generarFormulario,
-  resolverFormularioParaEdicion,
   guardarFormularioOverrides,
   guardarSeccional,
   confirmarNitFormulario,
@@ -26,6 +26,8 @@ import {
 } from '@/lib/actions/formulario-actions'
 import type { NegocioBloque } from '../../negocio-v2-actions'
 import { hrefArchivo } from '@/lib/almacenamiento/referencia'
+import { leerFormularioParaEdicion } from '@/lib/formularios/leer-para-edicion'
+import { mensajeDeFallaDeCarga } from '@/lib/red/error-de-red'
 
 interface BloqueFormularioProps {
   negocioBloqueId: string
@@ -66,7 +68,8 @@ export default function BloqueFormulario({
   const [seccional, setSeccional] = useState<string | null>(null)
   const [seccionalSugerida, setSeccionalSugerida] = useState(false)
   const [state, setState] = useState<GenerateState>('idle')
-  const [isPending, startTransition] = useTransition()
+  // Generar el formulario crea una versión con su PDF: si la respuesta se pierde, se relee.
+  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
   const [verHistorial, setVerHistorial] = useState(false)
   // ── Transcripción a ciegas del NIT ──────────────────────────────────────
   const [confirmNit, setConfirmNit] = useState<EstadoConfirmacionNit | undefined>(undefined)
@@ -84,8 +87,17 @@ export default function BloqueFormulario({
   const driveUrl = (saved.drive_url as string) ?? null
   const versionActual = (saved.version_actual as number) ?? versiones[0]?.version_n ?? null
 
+  // Lectura por GET (`/api/negocios/<id>/formulario/<bloque>`), no por server action: una
+  // action al montar se ponía en fila delante de la primera acción real en la ficha.
   async function cargar() {
-    const res = await resolverFormularioParaEdicion(negocioBloqueId, negocioId)
+    let res: Awaited<ReturnType<typeof leerFormularioParaEdicion>>
+    try {
+      res = await leerFormularioParaEdicion(negocioId, negocioBloqueId)
+    } catch (e) {
+      toast.error(mensajeDeFallaDeCarga(e, 'No se pudo cargar el formulario'))
+      setLoading(false)
+      return
+    }
     if (res.error) { toast.error(res.error); setLoading(false); return }
     setCasillas(res.casillas)
     setVersiones(res.versiones)

@@ -5,7 +5,8 @@
  * del gate usa para resolverlo ahí mismo. Las reglas (formato, permiso, quién ve el
  * campo) viven en `@/lib/negocios/carpeta-local`; aquí solo se pintan y se envían.
  */
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
+import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { Brain, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { actualizarCarpetaLocalNegocio } from '../negocio-v2-actions'
@@ -29,7 +30,7 @@ export function CarpetaLocalEditor({
   const [valor, setValor] = useState(inicial ?? '')
   const [guardada, setGuardada] = useState(inicial)
   const [error, setError] = useState<string | null>(null)
-  const [pendiente, startTransition] = useTransition()
+  const [pendiente, startTransition] = useTransitionTolerante()
 
   function abrir() {
     setValor(guardada ?? '')

@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   avisoFechasFueraDelViaje,
+  esAvisoFechasFueraDelViaje,
   crudaDeHotelManual,
   datosManuales,
   lecturaManual,
@@ -342,5 +343,15 @@ describe('lo que se valida antes de firmar', () => {
     expect(montoManual('$ 45.000')).toBe(45_000)
     expect(montoManual('45,000.5')).toBeNull()
     expect(nochesEntre('2026-11-23', '2026-11-26')).toBe(3)
+  })
+})
+
+describe('el aviso de fechas fuera del viaje se reconoce entre las alertas', () => {
+  it('el texto que arma `avisoFechasFueraDelViaje`, y ningún otro', () => {
+    const viaje = { inicio: '2026-11-09', fin: '2026-11-13' }
+    const aviso = avisoFechasFueraDelViaje('2026-10-09', '2026-11-13', viaje)!
+    expect(esAvisoFechasFueraDelViaje(aviso)).toBe(true)
+    expect(esAvisoFechasFueraDelViaje(avisoFechasFueraDelViaje('2026-11-09', '2026-11-20', { inicio: null, fin: '2026-11-13' })!)).toBe(true)
+    expect(esAvisoFechasFueraDelViaje('Revisa la moneda: la captura no la muestra.')).toBe(false)
   })
 })

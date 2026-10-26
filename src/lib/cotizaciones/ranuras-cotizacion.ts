@@ -34,15 +34,31 @@ import { NOMBRES_TARIFA } from './tarifas'
 
 // ── Los tipos de ranura ───────────────────────────────────────────────────────
 
-/** El tipo, escrito como el primer sinónimo del catálogo: es lo que guarda la base. */
-export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado'] as const
+/**
+ * El tipo, escrito como el primer sinónimo del catálogo: es lo que guarda la base.
+ *
+ * «otro» («Otro servicio»: asistencia médica, seguro…) solo lo escribe la cotización por pasos
+ * (migración `20261013140000_cotizacion_ranuras_tipo_otro.sql`). Lo que se ofrece en la pantalla
+ * de siempre y en la detección del pantallazo son los cuatro de `TIPOS_CON_PANTALLAZO`.
+ */
+export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro'] as const
 export type TipoRanura = (typeof TIPOS_RANURA)[number]
+
+/** Los cuatro tipos de siempre: los que reconoce la detección y ofrece la pantalla de siempre. */
+export const TIPOS_CON_PANTALLAZO = ['vuelo', 'hotel', 'actividad', 'traslado'] as const satisfies readonly TipoRanura[]
+export type TipoConPantallazo = (typeof TIPOS_CON_PANTALLAZO)[number]
+
+/** ¿Es uno de los cuatro tipos de siempre (no «otro»)? */
+export function esTipoConPantallazo(v: unknown): v is TipoConPantallazo {
+  return typeof v === 'string' && (TIPOS_CON_PANTALLAZO as readonly string[]).includes(v)
+}
 
 const SLUG_POR_TIPO: Record<TipoRanura, string> = {
   vuelo: 'vuelo_detalle',
   hotel: 'hotel_detalle',
   actividad: 'actividad_detalle',
   traslado: 'traslado_detalle',
+  otro: 'otro_detalle',
 }
 
 export function esTipoRanura(v: unknown): v is TipoRanura {
@@ -182,10 +198,24 @@ export function nombreAutomaticoDeRanura(args: {
   destino?: string | null
   numero?: number | null
   nombresEnUso?: readonly string[]
+  /** «Otro servicio»: lo que es («Asistencia médica»). Es su nombre, sin tipo ni lugar. */
+  servicio?: string | null
 }): string {
   const def = definicionDeTipo(args.tipo)
   const etiqueta = def.label
   const enUso = new Set((args.nombresEnUso ?? []).map(clave))
+
+  // «Otro servicio» se llama como lo que es: «Asistencia médica», «Seguro de viaje». Si ya hay uno
+  // con ese nombre, el nuevo lleva su número («Asistencia médica 2»): suman por separado.
+  if (args.tipo === 'otro') {
+    const servicio = comoFrase((args.servicio ?? '').trim().replace(/\s+/g, ' ').slice(0, 100))
+    const nombre = servicio || etiqueta
+    if (!enUso.has(clave(nombre))) return nombre
+    // El número cuenta los servicios de ESE nombre, no la ranura: el segundo es «… 2».
+    let n = 2
+    while (enUso.has(clave(`${nombre} ${n}`))) n += 1
+    return `${nombre} ${n}`
+  }
 
   const armar = (cabeza: string): string => {
     if (args.tipo === 'vuelo') {
@@ -196,6 +226,8 @@ export function nombreAutomaticoDeRanura(args: {
       return cabeza
     }
     const lugar = ciudadCorta(args.lugar)
+    // «Traslado París–Ámsterdam»: un trayecto entre dos ciudades no queda «en» ninguna.
+    if (lugar && args.tipo === 'traslado' && lugar.includes('–')) return `${cabeza} ${lugar}`
     return lugar ? `${cabeza} en ${lugar}` : cabeza
   }
 
@@ -203,6 +235,13 @@ export function nombreAutomaticoDeRanura(args: {
   if (!enUso.has(clave(base))) return base
   const n = args.numero && args.numero >= 2 ? args.numero : 2
   return armar(`${etiqueta} ${n}`)
+}
+
+/** «ASISTENCIA MÉDICA» → «Asistencia médica»: lo escrito todo en mayúscula, en frase. */
+function comoFrase(t: string): string {
+  if (t === '' || t !== t.toLocaleUpperCase('es-CO')) return t
+  const bajo = t.toLocaleLowerCase('es-CO')
+  return bajo.charAt(0).toLocaleUpperCase('es-CO') + bajo.slice(1)
 }
 
 // ── El nombre de una opción ───────────────────────────────────────────────────

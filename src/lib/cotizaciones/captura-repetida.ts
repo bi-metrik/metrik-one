@@ -75,6 +75,9 @@ export function opcionConLaMismaImagen(huella: string | null, opciones: readonly
 
 const numeroDeVuelo = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '')
 
+/** «Aeropuerto - hotel (ida y regreso)» → «Aeropuerto - hotel»: la ruta, sin el sentido. */
+const sinSentido = (trayecto: string) => trayecto.replace(/\s*\((?:ida y regreso|solo ida)\)\s*$/i, '').trim()
+
 /**
  * ¿Es el mismo servicio? Misma ranura, el dato principal (aerolínea, hotel, actividad,
  * trayecto) presente en las dos y coincidente, ningún otro dato de identidad que se
@@ -94,8 +97,11 @@ export function mismoServicio(a: OpcionComparable, b: OpcionComparable): boolean
   const campos = camposDeIdentidad(ra.slug)
   if (campos.length === 0) return false
   const [principal] = campos
-  const pa = la.identidad[principal]
-  const pb = lb.identidad[principal]
+  // D2 del brief del 2026-10-05 · el trayecto de un traslado es la ruta: reingresarlo para pasarlo
+  // de «solo ida» a «ida y regreso» (o al revés) es el mismo traslado, y se pregunta si reemplaza.
+  const clave = (v: string | null | undefined) => (ra.slug === 'traslado_detalle' && v ? sinSentido(v) : v)
+  const pa = clave(la.identidad[principal])
+  const pb = clave(lb.identidad[principal])
   if (!pa || !pb || !mismoTexto(pa, pb)) return false
   for (const campo of campos.slice(1)) {
     const va = la.identidad[campo]

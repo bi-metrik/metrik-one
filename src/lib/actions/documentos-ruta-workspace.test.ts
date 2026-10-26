@@ -93,11 +93,29 @@ function cliente() {
   }
 }
 
+/**
+ * La lectura en segundo plano escribe condicional al token de su marca
+ * (`.eq('data->_lectura->>token', t)`) y relee la fila antes de lo destructivo: el doble
+ * resuelve esa ruta JSON y aplica los updates, para que la marca exista de verdad.
+ */
+function valorEnRuta(f: Fila, columna: string): unknown {
+  if (!columna.includes('->')) return f[columna]
+  const partes = columna.split(/->>?/)
+  let v: unknown = f[partes[0]]
+  for (const k of partes.slice(1)) v = v && typeof v === 'object' ? (v as Fila)[k] : undefined
+  return v
+}
+
+function aplicarUpdate(filas: Fila[], payload: Fila) {
+  for (const f of filas) Object.assign(f, payload)
+  return { data: filas.map(f => ({ id: f.id })), error: null }
+}
+
 function constructor(tabla: string) {
   const eqs: Fila = {}
   let payload: Fila | null = null
   const filtradas = () =>
-    (escenario.tablas[tabla] ?? []).filter((f) => Object.entries(eqs).every(([c, v]) => f[c] === v))
+    (escenario.tablas[tabla] ?? []).filter((f) => Object.entries(eqs).every(([c, v]) => valorEnRuta(f, c) === v))
   const q = {
     select: () => q,
     eq: (c: string, v: unknown) => {
@@ -113,7 +131,7 @@ function constructor(tabla: string) {
     then: (ok: (v: unknown) => unknown, ko?: (e: unknown) => unknown) => {
       if (payload) {
         efectos.updates.push({ tabla, filtros: { ...eqs }, payload })
-        return Promise.resolve({ error: null }).then(ok, ko)
+        return Promise.resolve(aplicarUpdate(filtradas(), payload)).then(ok, ko)
       }
       return Promise.resolve({ data: filtradas(), error: null }).then(ok, ko)
     },

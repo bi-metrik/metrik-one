@@ -96,7 +96,7 @@ Vite no tiene router ni server actions. Para ver qué pinta una pantalla DESPUÉ
   key falsa: sin cookies el middleware no llama a producción. `next build` + `next start` también
   corre en el worktree (compila la app entera).
 - **Clic confiable:** `Input.dispatchMouseEvent` (moved, pressed, released) en el centro del
-  `getBoundingClientRect`, tras confirmar con `elementFromPoint` que no lo tapa el splash.
+  `getBoundingClientRect`, tras confirmar con `elementFromPoint` que nada lo tapa (el splash se quitó el 2026-10-03).
 - **Pegar una imagen:** `new ClipboardEvent('paste', { clipboardData: dt })` con un `DataTransfer`
   que lleva un `File`. React lo recibe en `onPaste`.
 - **Simular un refresco que llega sin los datos nuevos:** la página pinta una foto congelada del

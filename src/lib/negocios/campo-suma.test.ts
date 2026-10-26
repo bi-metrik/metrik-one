@@ -14,8 +14,14 @@ describe('campo suma_de · número de pasajeros', () => {
     expect(aplicarSumas(CAMPOS, { adultos: 2, ninos: 1, infantes: 1 }).numero_pasajeros).toBe(4)
   })
 
-  it('lee lo que se escribe a la colombiana y cuenta como cero lo vacío', () => {
-    expect(aplicarSumas(CAMPOS, { adultos: '5', ninos: '', infantes: null }).numero_pasajeros).toBe(5)
+  it('lee lo que se escribe a la colombiana; un cero escrito cuenta', () => {
+    expect(aplicarSumas(CAMPOS, { adultos: '5', ninos: '0', infantes: 0 }).numero_pasajeros).toBe(5)
+  })
+
+  it('con una fuente vacía NO suma lo conocido: el total queda vacío (prueba en vivo de la bandeja, 2026-10-01)', () => {
+    expect(aplicarSumas(CAMPOS, { adultos: '5', ninos: '', infantes: null }).numero_pasajeros).toBeUndefined()
+    // Un total que ya estaba (de antes, o sumado con lo que había) se vacía.
+    expect(aplicarSumas(CAMPOS, { adultos: 5, ninos: '', infantes: 0, numero_pasajeros: 5 }).numero_pasajeros).toBe('')
   })
 
   it('pisa un total escrito a mano que no cuadra con el desglose', () => {

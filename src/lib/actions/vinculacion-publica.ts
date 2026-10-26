@@ -18,8 +18,8 @@
  * se podría abrir bajo la marca de cualquier otro cliente.
  */
 
-import { headers } from 'next/headers';
-import { createServiceClient } from '@/lib/supabase/server';
+import { origenDelTenant } from '@/lib/tenant/origen-tenant';
+import { marcaDelWorkspace as marcaCompartida } from '@/lib/marca/marca-workspace';
 import {
   CADENA_VACIA,
   VERSION_TEXTO,
@@ -82,13 +82,20 @@ export type CampoPublico = {
   value: unknown;
   origen: string;
   confirmado: boolean;
+  /** La misma regla del gate de firma en Valida: lo que la firma exige. */
   requiere_confirmacion: boolean;
+  /** Nombre legible del campo. Opcional mientras Valida no lo mande. */
+  etiqueta?: string;
+  /** El documento no lo trae: la contraparte lo escribe, no lo confirma en blanco. */
+  manual?: boolean;
 };
 
 export type VistaPublica = {
   expedienteId: string;
   estado: string;
   tokenExpiraEn: string | null;
+  /** Si la empresa devolvió el expediente: qué pidió corregir. */
+  devolucion: { motivo: string; devuelto_en: string | null } | null;
   sujeto: { tipo: 'natural' | 'juridica'; razon_social: string | null; nombre: string | null };
   kit: SlotPedido[];
   documentos: DocumentoPublico[];
@@ -133,57 +140,13 @@ function ruta(token: string, sufijo = ''): string {
 // ─── La marca de quien invita ─────────────────────────────────────────────
 
 /**
- * Los datos de empresa pueden estar vacíos: el perfil fiscal del workspace es
- * opcional. Lo que falta se devuelve como null y la pantalla no lo pinta. Un
- * rótulo "NIT:" sin número al lado se lee como plataforma rota, y esta página
- * la ve alguien que todavía no confía en nosotros.
+ * La lectura vive en `lib/marca/marca-workspace.ts`, compartida con la autorización de
+ * datos del cliente final. Aquí solo se recorta a la forma que ya consumía esta pantalla.
  */
 async function marcaDelWorkspace(workspaceId: string | null): Promise<MarcaInvitante> {
-  const vacia: MarcaInvitante = {
-    nombre: 'la empresa que te invitó',
-    logoUrl: null,
-    colorPrimario: null,
-    razonSocial: null,
-    nit: null,
-    direccion: null,
-    ciudad: null,
-    telefono: null,
-    correo: null,
-  };
-  if (!workspaceId) return vacia;
-
-  const svc = createServiceClient();
-  const [ws, fiscal] = await Promise.all([
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc.from('workspaces') as any)
-      .select('name, logo_url, color_primario')
-      .eq('id', workspaceId)
-      .maybeSingle(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (svc.from('fiscal_profiles') as any)
-      .select('nit, razon_social, direccion_fiscal, municipio, telefono, email_fiscal')
-      .eq('workspace_id', workspaceId)
-      .maybeSingle(),
-  ]);
-
-  const w = ws.data as Record<string, string | null> | null;
-  const f = fiscal.data as Record<string, string | null> | null;
-  const limpio = (v: string | null | undefined) => {
-    const s = (v ?? '').trim();
-    return s.length > 0 ? s : null;
-  };
-
-  return {
-    nombre: limpio(f?.razon_social) ?? limpio(w?.name) ?? vacia.nombre,
-    logoUrl: limpio(w?.logo_url),
-    colorPrimario: limpio(w?.color_primario),
-    razonSocial: limpio(f?.razon_social),
-    nit: limpio(f?.nit),
-    direccion: limpio(f?.direccion_fiscal),
-    ciudad: limpio(f?.municipio),
-    telefono: limpio(f?.telefono),
-    correo: limpio(f?.email_fiscal),
-  };
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { nombreComercial, ...marca } = await marcaCompartida(workspaceId, 'la empresa que te invitó');
+  return marca;
 }
 
 // ─── Abrir el enlace ──────────────────────────────────────────────────────
@@ -194,6 +157,7 @@ type PayloadValida = {
   estado: string;
   etapa_actual: string;
   token_expira_en: string | null;
+  devolucion?: { motivo: string; devuelto_en: string | null } | null;
   sujeto: { tipo: 'natural' | 'juridica'; razon_social: string | null; nombre: string | null };
   kit_requerido: SlotPedido[];
   documentos: DocumentoPublico[];
@@ -236,6 +200,7 @@ export async function abrirVinculacion(
       expedienteId: base.data.expediente_id,
       estado: base.data.estado,
       tokenExpiraEn: base.data.token_expira_en,
+      devolucion: base.data.devolucion ?? null,
       sujeto: base.data.sujeto,
       kit,
       documentos: base.data.documentos ?? [],
@@ -585,9 +550,7 @@ export async function enviarSolicitud(
   // El host lo pone ONE, no el navegador: si viniera del cliente, cualquiera
   // podría pedirle a Valida que mande un correo con la marca de la empresa y un
   // enlace a un sitio suyo.
-  const h = await headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
-  const proto = h.get('x-forwarded-proto') ?? (host.startsWith('localhost') ? 'http' : 'https');
+  const origen = await origenDelTenant();
 
   const r = await publico<{ ok: boolean }>(rutaSolicitud(token), {
     method: 'POST',
@@ -598,7 +561,7 @@ export async function enviarSolicitud(
       documento_tipo: datos.tipoDocumento,
       documento_numero: normalizarDocumento(datos.documento),
       email: datos.correo.trim().toLowerCase(),
-      enlace_base: `${proto}://${host}`,
+      enlace_base: origen,
     }),
   });
   if (!r.ok) return { ok: false, error: r.error };

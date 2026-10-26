@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getRolePermissions } from '@/lib/roles'
 import { bogotaYearMonth } from '@/lib/dates/bogota'
+import { rotularNombre } from '@/lib/equipo/inactivos'
 
 // ── Types ───────────────────────────────────────────────
 
@@ -99,11 +100,12 @@ export async function getEquipoFilterOptions() {
   if (error || !workspaceId) return { staff: [], proyectos: [] }
 
   const [{ data: staffData }, { data: proyData }] = await Promise.all([
+    // Sin filtrar `is_active` (SOE-006): este filtro recorta horas de CUALQUIER mes, y quien se
+    // retiró tiene que poder buscarse en los meses en que registró. Va rotulado y al final.
     supabase
       .from('staff')
-      .select('id, full_name')
+      .select('id, full_name, is_active')
       .eq('workspace_id', workspaceId)
-      .eq('is_active', true)
       .order('full_name'),
     supabase
       .from('proyectos')
@@ -114,7 +116,9 @@ export async function getEquipoFilterOptions() {
   ])
 
   return {
-    staff: (staffData ?? []).map(s => ({ id: s.id, nombre: s.full_name ?? 'Sin nombre' })),
+    staff: [...(staffData ?? [])]
+      .sort((a, b) => Number(a.is_active === false) - Number(b.is_active === false))
+      .map(s => ({ id: s.id, nombre: rotularNombre(s.full_name ?? 'Sin nombre', s.is_active === false) })),
     proyectos: (proyData ?? []).map(p => ({ id: p.id, nombre: p.nombre ?? 'Sin nombre', codigo: p.codigo ?? '' })),
   }
 }
