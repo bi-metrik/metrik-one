@@ -220,7 +220,7 @@ describe('las reglas de composición', () => {
     expect(c.declaradas).toEqual({ lecturas: LECTURAS_NEGOCIO, cierres: ['preguntar_destino'], acciones: ['gasto', 'adjuntar_soporte', 'corregir_gasto'] })
     expect(c.parametros['equipo.gastos']).toEqual({ rubros: true })
     // Los `datos` de proponer: solo los de sus acciones (sin cuota, parcial, tipo, nombre…).
-    expect(Object.keys(c.dominio.datosProponer).sort()).toEqual(['categoria', 'descripcion', 'empresa', 'empresa_dicho_en', 'gasto', 'monto', 'monto_distinto', 'negocio', 'soporte'])
+    expect(Object.keys(c.dominio.datosProponer).sort()).toEqual(['categoria', 'descripcion', 'empresa', 'empresa_dicho_en', 'fecha', 'gasto', 'monto', 'monto_distinto', 'negocio', 'soporte'])
   })
 
   it('el fuera de tema lo arma el código con lo que el rol hace', () => {
