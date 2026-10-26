@@ -24,6 +24,7 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
+import { faltanCampos } from '@/lib/documentos/completar-campos'
 import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
@@ -881,12 +882,20 @@ export default function BloqueDocumento({
     () => (saved._extraction_status as 'ok' | 'failed' | 'no_key' | undefined) ?? null,
   )
 
+  // En el modo de solo lectura la única relectura que se ofrece es la que llena huecos
+  // (`soloHuecos`): no pisa un campo ni baja el estado. El reproceso completo, que
+  // reescribe todo lo extraído, sigue siendo cosa del modo editable.
+  const releeSoloHuecos = modo === 'visible'
   const handleReprocesar = async () => {
     setReprocessing(true)
     setAvisoLectura(null)
     let enEspera = false
     try {
-      const res = await reprocesarDocumento(negocioBloqueId, negocioId)
+      const res = await reprocesarDocumento(
+        negocioBloqueId,
+        negocioId,
+        releeSoloHuecos ? { soloHuecos: true } : undefined,
+      )
       if (res.success && res.leyendo && res.lectura) {
         // La relectura corre en el servidor; el resultado llega por la espera de abajo.
         enEspera = true
@@ -904,7 +913,7 @@ export default function BloqueDocumento({
       setDocRechazado(null)
       if (res.campos) setCampos(res.campos)
       setExtractionStatus('ok')
-      toast.success('Documento reprocesado con IA')
+      toast.success(releeSoloHuecos ? 'Documento leído de nuevo' : 'Documento reprocesado con IA')
       // Sin router.refresh(): la acción ya hace revalidatePath de la ficha y Next aplica
       // ese render en la misma respuesta. Refrescar aquí la renderizaba DOS veces (2026-10-04).
     } catch (err) {
@@ -957,7 +966,7 @@ export default function BloqueDocumento({
       setUploadState('uploaded')
       setPendingStoragePath(null)
       if (!esCarga) {
-        toast.success('Documento reprocesado con IA')
+        toast.success(releeSoloHuecos ? 'Documento leído de nuevo' : 'Documento reprocesado con IA')
       } else if (camposConfig.length > 0 && b?.extraction_status === 'failed') {
         toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
       } else if (camposConfig.length > 0 && nuevosCampos) {
@@ -1443,6 +1452,36 @@ export default function BloqueDocumento({
         )}
         {uploadState === 'error' && errorMsg && !docRechazado && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{errorMsg}</p>
+        )}
+        {/* ── La lectura falló y el caso ya avanzó (SOE-029) ───────────────────────
+            El banner de «Reintentar» vivía solo en el modo editable, y el de solo lectura
+            no pinta campos que no existen: un documento cuya lectura falló en una etapa ya
+            superada se quedaba sin datos y sin salida. Esta relectura llena SOLO los campos
+            que faltan (`soloHuecos`): no cambia el archivo, no pisa lo escrito ni baja el
+            estado. La ofrece quien puede corregir el bloque en este modo; el servidor vuelve
+            a mirarlo en `guardEditarBloque`. */}
+        {camposConfig.length > 0 && driveUrl && puedeCorregirVisible && !avisoLectura
+          && (extractionStatus === 'failed' || extractionStatus === 'no_key')
+          && faltanCampos(campos, camposConfig.map(c => c.slug)) && (
+          <div data-relectura="huecos" className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50/50 p-3">
+            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-red-700">No se pudieron leer los datos de este documento</p>
+              <p className="mt-0.5 text-[11px] text-red-600">
+                El archivo está guardado. Leerlo de nuevo solo llena los campos vacíos: no cambia el
+                archivo ni lo que ya está escrito.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleReprocesar}
+              disabled={reprocessing}
+              className="shrink-0 inline-flex items-center gap-1 rounded-md bg-red-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {reprocessing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+              {reprocessing ? 'Leyendo…' : 'Leer de nuevo'}
+            </button>
+          </div>
         )}
         {camposConfig.length > 0 && Object.keys(campos).length > 0 && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
