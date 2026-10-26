@@ -10,15 +10,16 @@ import type { EntradaAuditoria, EstadoIntegracion } from '@/lib/boveda/integraci
 // campo nunca se llena con lo guardado y, después de guardar, se vacía. El servidor no devuelve llaves, solo
 // «configurada», los últimos 4 y la fecha.
 
-// Texto de las garantías: borrador de Max, lo revisa Vera antes del merge.
+// Texto de las garantías: revisado por Vera el 2026-10-26 (veredicto AJUSTAR, aplicado). Dice «en ONE» a propósito:
+// quien administra la base a nivel técnico podría cambiarlas o leerlas, y eso no se promete aquí (ver el PR).
 export const GARANTIAS_BOVEDA = [
   {
     titulo: 'Bajo tu control',
-    texto: 'Solo tú, como dueño del espacio, puedes cargar, reemplazar o borrar una llave. Si la borras, la conexión se corta de inmediato.',
+    texto: 'En ONE, solo tú, como dueño del espacio, puedes cargar, reemplazar o borrar una llave. Si la borras, ONE deja de crear links y de recibir avisos de pago de inmediato; los links que ya enviaste siguen abiertos en Bold.',
   },
   {
     titulo: 'Guardadas con cifrado',
-    texto: 'Las llaves quedan cifradas y solo el servidor de ONE las usa para conectarse. Cada carga, cambio o borrado queda en el registro de abajo, sin la llave.',
+    texto: 'Las llaves quedan cifradas y solo el servidor de ONE las usa para conectarse. Cada carga, cambio o borrado que se hace en ONE queda en el registro de abajo, sin la llave.',
   },
   {
     titulo: 'Nadie las vuelve a ver en ONE',
@@ -127,7 +128,7 @@ function Integracion({ integracion, puedeEditar, onCambio }: { integracion: Esta
 
   const borrar = () =>
     start(async () => {
-      if (!window.confirm(`¿Borrar las llaves de ${integracion.nombre}? La conexión se corta de inmediato.`)) return
+      if (!window.confirm(`¿Borrar las llaves de ${integracion.nombre}? ONE deja de crear links y de recibir avisos de pago de inmediato. Los links ya enviados siguen abiertos en ${integracion.nombre}.`)) return
       const r = await borrarIntegracionAction(integracion.id)
       if (!r.ok) {
         toast.error(r.error)
