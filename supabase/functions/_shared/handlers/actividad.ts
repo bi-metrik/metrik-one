@@ -13,7 +13,7 @@ import { findNegocios, findNegocioByCode, findActiveNegocios, clienteDelNegocio 
 import { extraerCodigoNegocio } from '../wa-codigo-negocio.ts';
 import { nombreDeViaje } from '../wa-entendimiento-reglas.ts';
 import { completeSession } from '../wa-session.ts';
-import { comentariosDeActividad, filasDeComentarios } from '../comentario-actividad.ts';
+import { comentariosDeActividad, filasDeComentarios, textoDeActividad } from '../comentario-actividad.ts';
 
 const LAST_CONTEXT_TTL_MS = 5 * 60 * 1000; // 5 min
 
@@ -32,13 +32,18 @@ export async function handleActividad(ctx: HandlerContext): Promise<void> {
 async function routeActividad(ctx: HandlerContext): Promise<void> {
   const { parsed, user, supabase, session } = ctx;
   const { entity_hint, project_code, activity_text } = parsed.fields;
-  const text = activity_text || parsed.fields.mensaje_original || ctx.message.text;
+  // De una nota de voz va la transcripción entera; lo que entendió el parser queda arriba como resumen.
+  const { texto: text, talCual } = textoDeActividad({
+    tipo: ctx.message.type,
+    mensaje: ctx.message.text,
+    interpretado: activity_text || parsed.fields.mensaje_original || null,
+  });
 
   // (a.1) Resolve by explicit code
   if (project_code) {
     const n = await findNegocioByCode(supabase, user.workspace_id, String(project_code));
     if (n) {
-      await persistActividad(ctx, n.id, n.nombre, text);
+      await persistActividad(ctx, n.id, n.nombre, text, talCual);
       return;
     }
   }
@@ -47,11 +52,11 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
   if (entity_hint) {
     const negocios = await findNegocios(supabase, user.workspace_id, entity_hint);
     if (negocios.length === 1) {
-      await persistActividad(ctx, negocios[0].id, negocios[0].nombre, text);
+      await persistActividad(ctx, negocios[0].id, negocios[0].nombre, text, talCual);
       return;
     }
     if (negocios.length > 1) {
-      await askChoice(ctx, text, negocios.slice(0, 3).map((n: any) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
+      await askChoice(ctx, text, talCual, negocios.slice(0, 3).map((n: { id: string; nombre: string; codigo?: string | null }) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
       return;
     }
 
@@ -66,11 +71,11 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
       .limit(3);
 
     if (viaEmpresa && viaEmpresa.length === 1) {
-      await persistActividad(ctx, viaEmpresa[0].id, viaEmpresa[0].nombre, text);
+      await persistActividad(ctx, viaEmpresa[0].id, viaEmpresa[0].nombre, text, talCual);
       return;
     }
     if (viaEmpresa && viaEmpresa.length > 1) {
-      await askChoice(ctx, text, viaEmpresa.map((n: any) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
+      await askChoice(ctx, text, talCual, viaEmpresa.map((n: { id: string; nombre: string; codigo?: string | null }) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
       return;
     }
   }
@@ -82,7 +87,7 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
     if (ageMs < LAST_CONTEXT_TTL_MS) {
       const item = lc.items[0];
       if (item.id) {
-        await persistActividad(ctx, item.id, item.nombre, text);
+        await persistActividad(ctx, item.id, item.nombre, text, talCual);
         return;
       }
     }
@@ -101,6 +106,7 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
   await askChoice(
     ctx,
     text,
+    talCual,
     activos.slice(0, 3).map(n => ({ id: n.id, nombre: n.nombre, codigo: n.codigo, cliente: clienteDelNegocio(n) })),
   );
 }
@@ -108,6 +114,7 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
 async function askChoice(
   ctx: HandlerContext,
   text: string,
+  talCual: boolean,
   candidates: Array<{ id: string; nombre: string; codigo?: string | null; cliente?: string | null }>,
 ): Promise<void> {
   // WhatsApp interactive buttons admiten máximo 3 botones y title <= 20 chars
@@ -132,6 +139,7 @@ async function askChoice(
     intent: 'ACTIVIDAD',
     pending_action: 'WAC',
     activity_text: text,
+    activity_tal_cual: talCual,
     options: candidates.map((c, i) => ({
       id: `pick_${i}`,
       label: c.nombre,
@@ -154,7 +162,7 @@ async function handleResume(ctx: HandlerContext): Promise<void> {
       const picked = context.options?.[idx];
       if (picked) {
         const negocioId = String((picked.extra as any)?.negocio_id || '');
-        await persistActividad(ctx, negocioId, picked.label, context.activity_text || text);
+        await persistActividad(ctx, negocioId, picked.label, context.activity_text || text, context.activity_tal_cual === true);
         return;
       }
     }
@@ -162,7 +170,7 @@ async function handleResume(ctx: HandlerContext): Promise<void> {
     // Texto: posiblemente un código de negocio, también dentro de una frase ("es el R1 26 1").
     const n = await findNegocioByCode(supabase, user.workspace_id, extraerCodigoNegocio(text) ?? text);
     if (n) {
-      await persistActividad(ctx, n.id, n.nombre, context.activity_text || text);
+      await persistActividad(ctx, n.id, n.nombre, context.activity_text || text, context.activity_tal_cual === true);
       return;
     }
 
@@ -176,6 +184,7 @@ async function persistActividad(
   negocioId: string,
   negocioNombre: string,
   text: string,
+  talCual = false,
 ): Promise<void> {
   const { supabase, user, session } = ctx;
 
@@ -224,7 +233,10 @@ async function persistActividad(
     .update({ updated_at: new Date().toISOString() })
     .eq('id', negocioId);
 
-  const enVarios = contenidos.length > 1 ? `, completo en ${contenidos.length} comentarios seguidos` : '';
+  // «Tal cual» solo de la nota de voz; de lo que interpretó el parser no se promete que esté completo.
+  const enVarios = talCual
+    ? `, con tu nota de voz tal cual${contenidos.length > 1 ? ` en ${contenidos.length} comentarios seguidos` : ''}`
+    : contenidos.length > 1 ? `, en ${contenidos.length} comentarios seguidos` : '';
   await ctx.sendMessage(`✅ ${tipoLabel} registrado en ${bold(negocioNombre)}${enVarios}`);
   await completeSession(supabase, session.id);
 }

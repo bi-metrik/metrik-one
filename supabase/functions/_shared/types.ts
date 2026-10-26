@@ -88,6 +88,7 @@ export interface SessionContext {
   last_project_name?: string;
   // ACTIVIDAD
   activity_text?: string;
+  activity_tal_cual?: boolean; // activity_text es una nota de voz tal cual
   // Timeout tracking: ISO timestamp when awaiting_selection started
   awaiting_since?: string;
   // Conversational memory (loaded from last completed session of same phone)

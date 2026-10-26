@@ -12,6 +12,7 @@ import 'server-only'
 import { randomBytes, createHash, randomUUID } from 'node:crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { marcaDelWorkspace, type MarcaWorkspace } from '@/lib/marca/marca-workspace'
+import { remitenteCliente } from '../../../supabase/functions/_shared/remitente-correo'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { formatFecha, todayBogotaISO } from '@/lib/dates/bogota'
 import { subirAOne } from '@/lib/almacenamiento/one'
@@ -72,10 +73,10 @@ export async function estadoDelContacto(workspaceId: string, contactoId: string)
   return { estado: leerEstado(data), error: null }
 }
 
-export async function configDelWorkspace(workspaceId: string): Promise<{ config: ConfigAutorizacion; slug: string | null }> {
+export async function configDelWorkspace(workspaceId: string): Promise<{ config: ConfigAutorizacion; slug: string | null; configExtra: unknown }> {
   const { data } = await svc().from('workspaces').select('slug, config_extra').eq('id', workspaceId).maybeSingle()
   const fila = data as { slug: string | null; config_extra: unknown } | null
-  return { config: leerConfigAutorizacion(fila?.config_extra ?? null), slug: fila?.slug ?? null }
+  return { config: leerConfigAutorizacion(fila?.config_extra ?? null), slug: fila?.slug ?? null, configExtra: fila?.config_extra ?? null }
 }
 
 /** La versión vigente del workspace, o el marcador si no ha publicado ninguna. */
@@ -168,10 +169,18 @@ async function enviarPorResend(m: { from: string; to: string; replyTo: string | 
   }
 }
 
-/** «Trappvel vía MéTRIK ONE <noreply@metrikone.co>»: el cliente reconoce a su agencia, no a MéTRIK. */
-function remitente(marca: MarcaWorkspace): string {
+/**
+ * «Trappvel vía MéTRIK ONE <noreply@metrikone.co>»: el cliente reconoce a su agencia, no a MéTRIK.
+ * Si el workspace declaró `config_extra.remitente_correo` (dominio permitido), sale desde ahí.
+ */
+export function remitente(marca: MarcaWorkspace, configExtra: unknown = null): string {
   const nombre = (marca.nombreComercial ?? marca.nombre).replace(/[<>"]/g, '').trim()
-  return `${nombre} vía MéTRIK ONE <noreply@metrikone.co>`
+  return remitenteCliente({
+    configExtra,
+    marca: nombre,
+    porDefecto: `${nombre} vía MéTRIK ONE <noreply@metrikone.co>`,
+    contexto: 'autorizacion-datos',
+  }).from
 }
 
 export type ResultadoCorreo =
@@ -191,7 +200,7 @@ export async function enviarCorreoAutorizacion(p: {
   staffId: string | null
   origen: OrigenCorreo
 }): Promise<ResultadoCorreo> {
-  const [{ estado, error }, { config }, texto] = await Promise.all([
+  const [{ estado, error }, { config, configExtra }, texto] = await Promise.all([
     estadoDelContacto(p.workspaceId, p.contactoId),
     configDelWorkspace(p.workspaceId),
     textoVigente(p.workspaceId),
@@ -221,7 +230,7 @@ export async function enviarCorreoAutorizacion(p: {
   const m = marcadoresDe(texto, marca, { nombreCliente: estado.contacto?.nombre ?? '', link: enlace.url })
   const correo = armarCorreoAutorizacion(texto, m, marca.colorPrimario)
   const r = await enviarPorResend({
-    from: remitente(marca),
+    from: remitente(marca, configExtra),
     to: decision.email,
     replyTo: config.responderA ?? marca.correo,
     subject: correo.asunto,
@@ -471,7 +480,7 @@ export async function responderAutorizacion(p: RespuestaTitular): Promise<{ ok: 
     return { ok: false, error: vigente.esMarcador ? 'no_autorizable' : 'texto_cambio' }
   }
 
-  const [marca, { config, slug }, contacto] = await Promise.all([
+  const [marca, { config, slug, configExtra }, contacto] = await Promise.all([
     marcaDelWorkspace(e.workspace_id, 'su agencia'),
     configDelWorkspace(e.workspace_id),
     db.from('contactos').select('nombre, email, custom_data').eq('id', e.contacto_id).eq('workspace_id', e.workspace_id).maybeSingle(),
@@ -543,7 +552,7 @@ export async function responderAutorizacion(p: RespuestaTitular): Promise<{ ok: 
       fecha: formatFecha(ahora, { day: 'numeric', month: 'long', year: 'numeric' }) ?? ahora.slice(0, 10),
     })
     const r = await enviarPorResend({
-      from: remitente(marca), to: email, replyTo: config.responderA ?? marca.correo,
+      from: remitente(marca, configExtra), to: email, replyTo: config.responderA ?? marca.correo,
       subject: copia.asunto, html: copia.html, text: copia.texto, idempotencyKey: `autorizacion-datos-copia:${e.id}`,
     })
     copiaEnviada = r.ok
