@@ -323,7 +323,59 @@ La traza de cada turno trae `rol: { clave: 'mano_derecha', version: 1, … }`.
 
 **Para Chatwoot (Sabor)** se hace lo mismo con canal `chatwoot`, motor `publico`, funciones `clientes.*` y la asignación por inbox `cw:<cuenta>:<inbox>`. El camino está probado con un catálogo de prueba en `publico/roles-chatwoot.test.ts`: con todas las funciones, el arnés en seco da lo mismo que el dominio público entero.
 
-## 7. Dónde está cada cosa
+## 7. Interruptores y avisos por workspace
+
+Lo que corre alrededor de los asistentes y no es una función del rol. Ninguna de estas piezas trae migración.
+
+### 7.1 Calificación diaria (spec §4.4, #1289)
+
+Cada mañana un juez lee cada conversación del día anterior y la marca contra la lista fija de fallas (`src/lib/asistentes/fallas.ts`). Deja una fila por conversación y día en `asistente_calificaciones`.
+
+- **El interruptor:** `config_extra.bot_conversacional.calificacion.con_texto = true`. Está apagado por defecto y solo `true` literal lo prende.
+- **Es un permiso del contrato, no una función del rol.** Autoriza que el texto de las conversaciones del cliente salga hacia el juez. Por eso no vive en `asistente_funciones_empresa`: una función prendida viaja al componedor y al modelo, y ese catálogo solo admite `equipo.*`, `recolector.*` y `clientes.*`. Para prenderlo a un cliente, primero Emilio confirma que su contrato lo cubre y después va el SQL.
+- **Sin el interruptor** no se arma el texto, no se llama al juez y no se escribe fila. El workspace aparece en el resumen solo con las métricas de sus trazas.
+- **El juez es Claude Haiku 5.5 sin respaldo de Gemini.** El pedido sale sin llave de Gemini y se corta antes de salir si Haiku no está activo (`haikuActivo()`: `LLM_PROVEEDOR` y `ANTHROPIC_API_KEY`). Así el texto de un cliente solo va al proveedor que su contrato cubre. Si Haiku falla, esa conversación queda sin calificar ese día y el resumen lo dice.
+- **El cron:** `calificar-asistentes` (`vercel.json`, `30 11 * * *`): 11:30 UTC, 6:30 de Bogotá, con el día anterior. `?fecha=AAAA-MM-DD` con `CRON_SECRET` califica otro día y `?forzar=1` salta el candado para terminar una corrida que se quedó sin tiempo. Las conversaciones ya calificadas se saltan.
+
+```sql
+update public.workspaces
+set config_extra = coalesce(config_extra, '{}'::jsonb) || jsonb_build_object(
+  'bot_conversacional',
+  coalesce(config_extra->'bot_conversacional', '{}'::jsonb)
+    || '{"calificacion": {"con_texto": true, "autorizado_por": "<contrato y cláusulas>"}}'::jsonb
+)
+where id = '<WORKSPACE>';
+```
+
+### 7.2 Resumen diario por correo (spec §4.3, #1290)
+
+- **El cron:** `resumen-asistentes` (`vercel.json`, `0 12 * * *`): 12:00 UTC, 7:00 de Bogotá, media hora después de la calificación y con el mismo día.
+- **A quién le llega:** un solo correo a Mauricio (`PARA_RESUMEN`, `mauricio.moreno@metrik.com.co`) con todos los workspaces. No se configura por workspace.
+- **Qué trae, por workspace y rol:**
+  - arriba, lo que pide acción;
+  - conversaciones y turnos;
+  - registros confirmados;
+  - bloqueos («no pude» y candados);
+  - escalamientos hechos;
+  - el costo del día (modelo, juez y notas de voz; la transcripción queda «sin medir»).
+- **Con el interruptor de §7.1** suma las calificadas y resueltas, las fallas por tipo, los escalamientos debidos (F9 sin fila de escalamiento), las fallas dañinas arriba y la lección del día con un caso propuesto para el arnés.
+- **Sin el interruptor** el workspace sale marcado «solo métricas de trazas: sin calificación con texto»: sin fallas ni lección, y los escalamientos debidos en 0 porque nadie los midió.
+- **Sale aunque no haya actividad**, con «sin actividad». Si un día no llega, se cayó el cron.
+- El correo no lee el texto de ninguna conversación. La conversación va por alias y la traza se ubica por `turno_id`.
+
+### 7.3 Correo si se caen los modelos (spec §4.1, #1286)
+
+- **No se configura.** Aplica a todos los workspaces en los tres canales: ONE y la bandeja (`_shared/wa-agente.ts`) y el asistente público de Chatwoot (`chatwoot-agente`, por `alertaCaida` de `publico/cola.ts`).
+- **Qué cuenta como caída** (`caidaDelTurno` en `agente/caida.ts`): el turno terminó por error del modelo y en el llamado que falló ningún modelo contestó. Un `refusal` o un «sin llamada» no cuentan, porque el proveedor está arriba; eso lo cuenta el resumen.
+- **Un correo por incidente.** El candado es `agente:caido:<workspace>:<ventana de 30 min>`. Si la ventana anterior también tuvo caída, el incidente sigue y solo sale un recordatorio por hora (`agente:caido:<workspace>:recordatorio`). Si Resend falla, los candados se sueltan y el próximo turno caído lo intenta otra vez.
+- **El secreto:** `RESEND_API_KEY` en los secretos de las edge functions. Sin él no sale ningún correo; el turno no se cae por eso.
+- **Los avisos de cupo (ONE) y de presupuesto del día (público) ahora van por correo** a Mauricio. Ya no dependen de `WA_ADMIN_NOTIFY_PHONE`.
+
+### 7.4 Transcripción con pistas (spec §4.6, #1291)
+
+Su interruptor (`config_extra.bot_conversacional.transcripcion.pistas`) y la corrida del arnés están en la sección 2.1.
+
+## 8. Dónde está cada cosa
 
 | Qué | Archivo |
 |---|---|
@@ -340,4 +392,7 @@ La traza de cada turno trae `rol: { clave: 'mano_derecha', version: 1, … }`.
 | Pistas para transcribir (constructor, interruptor, gancho de las funciones) | `…/agente/pistas.ts`, lector `pistas-supabase.ts`; arnés en `…/agente/arnes/audios/` |
 | Botones de plantilla (`ag\|t\|`, `payloadPlantilla`, `componenteBotonPlantilla`) | `…/agente/render.ts`; pruebas en `toque-plantilla.test.ts` |
 | Banco del arnés | `…/agente/arnes/banco.ts` |
+| Correo si se caen los modelos | `…/agente/caida.ts`; envío en `_shared/correo-interno.ts` |
+| Calificación diaria y su interruptor | `src/lib/asistentes/calificacion.ts`, `calificacion-servidor.ts`, `fallas.ts`; cron `src/app/api/crons/calificar-asistentes` |
+| Resumen diario por correo | `src/lib/asistentes/resumen.ts`, `resumen-servidor.ts`; cron `src/app/api/crons/resumen-asistentes` |
 | Tablas, RPC y publicación | `supabase/migrations/20261026183000_asistentes_roles.sql` |
