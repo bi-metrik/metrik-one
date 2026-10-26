@@ -22,6 +22,7 @@ import {
   type Reconocimiento,
 } from '@/lib/documentos/tipo-documento'
 import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
+import { completarCampos, faltanCampos } from '@/lib/documentos/completar-campos'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
 import {
@@ -1118,18 +1119,30 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
  * Re-ejecuta la extracción AI sobre el archivo ya guardado en Drive.
  * Útil cuando la AI falló la primera vez, cambió la API key o se ajustó
  * la configuración de campos_extraccion.
+ *
+ * `soloHuecos` (SOE-029, 2026-10-26): la relectura NO pisa nada de lo que el bloque ya
+ * tiene. Solo escribe los campos configurados que el bloque todavía no trae
+ * (`completarCampos`), y si el resultado no completa el bloque, el estado se queda como
+ * estaba (nunca baja de `completo` a `pendiente`). Es la puerta del modo de solo lectura:
+ * el caso que la motivó son comprobantes UPME cargados entre el 1 y el 13 de octubre,
+ * cuando Gemini respondía 403, que quedaron sin `campos` en negocios que ya avanzaron. Ahí
+ * el reproceso completo no se ofrecía (solo vive en el modo editable) y, de ofrecerse,
+ * reescribe todo lo extraído (ver el aprendizaje `reproceso-documentos-borra-datos`).
+ * Sin la opción, el comportamiento es el de siempre.
  */
 export async function reprocesarDocumento(
   negocioBloqueId: string,
   negocioId: string,
+  opciones?: { soloHuecos?: boolean },
 ): Promise<ResultadoReprocesar> {
   // Una sola sesión por guardado: en una server action el `cache()` de React no memoiza.
-  return enPeticionDeRuta(() => reprocesarDocumentoSinMemo(negocioBloqueId, negocioId))
+  return enPeticionDeRuta(() => reprocesarDocumentoSinMemo(negocioBloqueId, negocioId, opciones?.soloHuecos === true))
 }
 
 async function reprocesarDocumentoSinMemo(
   negocioBloqueId: string,
   negocioId: string,
+  soloHuecos: boolean,
 ): Promise<ResultadoReprocesar> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -1193,6 +1206,12 @@ async function reprocesarDocumentoSinMemo(
       return { success: false, error: 'Este bloque no tiene campos de extracción configurados' }
     }
 
+    // Llenar huecos sin huecos es una llamada al modelo que no puede escribir nada: se
+    // corta antes de marcar la lectura, así el bloque no pasa ni un instante a `pendiente`.
+    if (soloHuecos && !faltanCampos(currentData.campos as Record<string, CampoResultado> | undefined, camposExtraccion.map(c => c.slug))) {
+      return { success: false, error: 'El documento ya tiene todos sus campos: no hay nada que leer' }
+    }
+
     // 2. API key Gemini
     const apiKey = getServerKey('gemini')
     if (!apiKey) return { success: false, error: 'API key de Gemini no configurada' }
@@ -1221,6 +1240,7 @@ async function reprocesarDocumentoSinMemo(
       camposExtraccion,
       apiKey,
       marca: marcada.marca,
+      soloHuecos,
     }
     const agenda = despuesDeResponder(`reproceso del bloque ${bloqueId}`, () => leerReproceso(ctx))
     if (agenda.agendado) {
@@ -1258,13 +1278,15 @@ type ContextoReproceso = {
   camposExtraccion: CampoExtraccion[]
   apiKey: string
   marca: MarcaLectura
+  /** Ver `reprocesarDocumento`: solo los campos que faltan, sin tocar el resto. */
+  soloHuecos: boolean
 }
 
 /** La relectura del archivo ya guardado. Mismas reglas que `leerCarga`. */
 async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesar> {
   const {
     supabase, workspaceId, negocioId, bloqueId, negocioDelBloque, fileName, driveFileId,
-    referenciaOne, referenciaExterna, configExtra, camposExtraccion, apiKey, marca,
+    referenciaOne, referenciaExterna, configExtra, camposExtraccion, apiKey, marca, soloHuecos,
   } = ctx
 
   const fallar = async (error: string, documentoRechazado?: DocumentoRechazado): Promise<ResultadoReprocesar> => {
@@ -1340,18 +1362,34 @@ async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesa
     // el modelo leía, alguien pudo corregir un campo a mano, y esa corrección manda.
     const currentData = await dataActual(supabase, bloqueId)
     const existingCampos = (currentData.campos as Record<string, CampoResultado>) ?? {}
-    const mergedCampos: Record<string, CampoResultado> = { ...extraction.data }
-    for (const [slug, campo] of Object.entries(existingCampos)) {
-      if (campo?.manual && campo.value) {
-        mergedCampos[slug] = campo
+    let mergedCampos: Record<string, CampoResultado>
+    if (soloHuecos) {
+      // Solo entra lo que el bloque no trae; todo lo demás, tal cual estaba.
+      // Copia profunda: `completarCampos` copia el mapa pero comparte cada campo, y la
+      // normalización los muta en el sitio. Sin la copia, el NIT ya guardado salía recortado
+      // y la reposición de abajo devolvía el objeto ya mutado.
+      mergedCampos = structuredClone(
+        completarCampos(existingCampos, extraction.data, camposExtraccion.map(c => c.slug)).campos,
+      )
+      // La normalización puede reescribir campos derivados (el DV desde el NIT, el NIT sin
+      // DV): corre sobre el conjunto para que lo NUEVO salga de lo que va a quedar, y
+      // después se repone lo que ya estaba, que este modo no puede tocar.
+      aplicarNormalizaciones(camposExtraccion, mergedCampos)
+      for (const [slug, campo] of Object.entries(existingCampos)) mergedCampos[slug] = campo
+    } else {
+      mergedCampos = { ...extraction.data }
+      for (const [slug, campo] of Object.entries(existingCampos)) {
+        if (campo?.manual && campo.value) {
+          mergedCampos[slug] = campo
+        }
       }
-    }
 
-    // 5b. Normalización determinista, DESPUÉS del merge (ver `@/lib/documentos/normalizaciones`).
-    // Antes corría sobre la extracción cruda y el merge venía detrás: con un NIT corregido a
-    // mano, el DV salía del NIT recién extraído y quedaba desalineado del que sí se guarda.
-    // Sobre el merge, lo protegido no se toca y lo derivado sale de lo que va a quedar.
-    aplicarNormalizaciones(camposExtraccion, mergedCampos)
+      // 5b. Normalización determinista, DESPUÉS del merge (ver `@/lib/documentos/normalizaciones`).
+      // Antes corría sobre la extracción cruda y el merge venía detrás: con un NIT corregido a
+      // mano, el DV salía del NIT recién extraído y quedaba desalineado del que sí se guarda.
+      // Sobre el merge, lo protegido no se toca y lo derivado sale de lo que va a quedar.
+      aplicarNormalizaciones(camposExtraccion, mergedCampos)
+    }
 
     // 6. Determinar completitud
     const requiredCampos = camposExtraccion.filter(c => c.required)
@@ -1380,9 +1418,16 @@ async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesa
     }
     if (ccResult) newData._cross_check = { ...ccResult, solo_alerta: crossCheckSoloAlerta }
 
+    // Llenar huecos nunca baja el estado: incompleto, el bloque queda como estaba antes de
+    // la lectura; y si ya estaba completo, conserva su fecha de completado.
+    const estadoFinal = soloHuecos
+      ? (isComplete
+          ? (marca.estado_previo === 'completo' ? { estado: 'completo' } : { estado: 'completo', completado_at: now })
+          : { estado: marca.estado_previo ?? 'pendiente' })
+      : (isComplete ? { estado: 'completo', completado_at: now } : { estado: 'pendiente', completado_at: null })
     const escrita = await escribirSiEsMia(supabase, bloqueId, marca.token, {
       data: newData,
-      ...(isComplete ? { estado: 'completo', completado_at: now } : { estado: 'pendiente', completado_at: null }),
+      ...estadoFinal,
       updated_at: now,
     })
     if (!escrita) return { success: false, error: LECTURA_REEMPLAZADA }
