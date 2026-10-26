@@ -75,7 +75,6 @@ export function normalizarConCifras(s: string): string[] {
     if (activo) out.push(String(total + actual));
     activo = false; total = 0; actual = 0; ultimoMult = 0; empezoEnCero = false;
   };
-  const esNumero = (t: string | undefined) => !!t && (t in UNIDADES || t in MULTIPLICADORES || valorDigitos(t) !== null);
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i];
     if (t === '|') { soltar(); continue; }
