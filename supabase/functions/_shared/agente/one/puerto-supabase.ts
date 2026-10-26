@@ -18,6 +18,7 @@ import type { MediaFila } from '../tipos.ts';
 import { descripcionParaGuardar } from '../../wa-gasto-descripcion.ts';
 import { tieneServiciosPorPagar } from '../../handlers/registro/servicio-viaje.ts';
 import { EMOJI_ACTIVIDAD } from './dominio.ts';
+import { comentariosDeActividad, filasDeComentarios } from '../../comentario-actividad.ts';
 import type { CobroPendiente, GastoOne, NegocioOne, PuertoOne } from './dominio.ts';
 import { confirmarPagoCobroProgramado } from '../../confirmar-cobro-programado.ts';
 
@@ -249,11 +250,13 @@ export function puertoOneSupabase(supabase: SupabaseClient, user: WaUser): Puert
         autorId = (data?.id as string | undefined) ?? null;
       }
       const emoji = EMOJI_ACTIVIDAD[tipo] ?? '📝';
-      // `activity_log.contenido` tiene CHECK de 280 caracteres.
-      const contenido = (autorId ? `${emoji} ${texto}` : `${emoji} [${user.name}] ${texto}`).slice(0, 280);
-      const { error } = await supabase.from('activity_log').insert({ workspace_id: ws, entidad_tipo: 'negocio', entidad_id: negocioId, tipo: 'comentario', contenido, autor_id: autorId });
+      // `activity_log.contenido` tiene CHECK de 280 caracteres: lo largo va completo en varios comentarios, no cortado.
+      const contenidos = comentariosDeActividad(autorId ? `${emoji} ` : `${emoji} [${user.name}] `, texto);
+      const filas = filasDeComentarios({ workspace_id: ws, entidad_tipo: 'negocio', entidad_id: negocioId, tipo: 'comentario', autor_id: autorId }, contenidos);
+      const { error } = await supabase.from('activity_log').insert(filas);
       if (error) throw new Error(`no se pudo registrar la actividad: ${error.message}`);
       await supabase.from('negocios').update({ updated_at: new Date().toISOString() }).eq('id', negocioId).eq('workspace_id', ws);
+      return { comentarios: contenidos.length };
     },
     async crearContacto({ nombre, telefono, decisor }) {
       // El duplicado se revisó al proponer; se vuelve a revisar al escribir (entre la propuesta y el toque pudo crearse).

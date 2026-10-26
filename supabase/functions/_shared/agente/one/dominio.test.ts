@@ -189,6 +189,20 @@ describe('actividad, contacto y consultas', () => {
     expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'llamada', texto: 'llamé a Alfa para revisar el cobro' }])
   })
 
+  it('una actividad larga (una nota de voz de minutos) se guarda entera y lo dice antes y después del toque', async () => {
+    // El caso del 2026-10-26: 4.451 caracteres transcritos completos y en el timeline quedaron 279, sin aviso.
+    const largo = Array.from({ length: 40 }, (_, i) => `En el evento, punto ${i + 1}: la cocina trabaja con siete personas de planta.`).join(' ')
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: largo } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.escribe(largo)
+    expect(t[0].texto).toContain('Es largo: la guardo completa, en varios comentarios seguidos.\n¿La registro?')
+    const fin = await e.toca('Registrar')
+    expect(fin.map((s) => s.texto).join('\n')).toMatch(/✅ 🤝 Actividad registrada en A1 26 1 · Alfa Grupo — Concesión de prueba, completa en \d+ comentarios seguidos\./)
+    expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'reunion', texto: largo }])
+  })
+
   it('contacto nuevo: el teléfono tiene que estar escrito y no ser de otro', async () => {
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'contacto_nuevo', datos: { nombre: 'Juan Prueba', telefono: '3009998877' } } },
