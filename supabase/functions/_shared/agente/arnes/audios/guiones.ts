@@ -104,7 +104,7 @@ export const GUIONES: Guion[] = [
     id: 'imp-01', workspace: 'imperviun', quien: 'el residente de obra',
     texto: 'Gasto de la obra {n:Alameda}: compré dos canecas de impermeabilizante en {n:Construmax}, {c:un millón trescientos cincuenta mil} pesos, factura {k:FE 4587|efe e cuarenta y cinco ochenta y siete}.',
     condiciones: { ruido: 'obra', rapido: false, corte: null },
-    distractores: ['Bosque Verde', 'Hernán Quintero'], voz: 'Algenib', estilo: 'Hombre colombiano de unos 45 años, maestro de obra, habla claro pero informal',
+    distractores: ['Bosque Verde', 'Hernán Quintero'], voz: 'Algenib', estilo: 'Hombre colombiano adulto, maestro de obra, habla claro pero informal',
   },
   {
     id: 'imp-02', workspace: 'imperviun', quien: 'un operario',
@@ -204,7 +204,7 @@ export const GUIONES: Guion[] = [
     id: 'sab-03', workspace: 'sabor', quien: 'un cliente',
     texto: 'Buenas, la {n:cata de cacao amazónico} del viernes, ¿todavía hay cupo para {c:seis} personas?',
     condiciones: { ruido: 'salon', rapido: false, corte: null },
-    distractores: ['Cata de café de origen', 'Brunch de mercado'], voz: 'Gacrux', estilo: 'Hombre colombiano de unos 50 años, en un restaurante lleno',
+    distractores: ['Cata de café de origen', 'Brunch de mercado'], voz: 'Gacrux', estilo: 'Hombre colombiano mayor, voz grave, en un restaurante lleno',
   },
   {
     id: 'sab-04', workspace: 'sabor', quien: 'un cliente',

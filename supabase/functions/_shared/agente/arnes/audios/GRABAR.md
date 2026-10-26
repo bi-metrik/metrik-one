@@ -36,7 +36,7 @@ Las notas reales reemplazan a las sintéticas (`sinteticos/*.sintetico.ogg`). La
 
 Antes de grabar, cada persona firma este texto, con fecha. El documento firmado se guarda en el Drive de MéTRIK, carpeta del frente de asistentes, y no en el repositorio. En el repositorio solo queda el alias (`permiso-A`).
 
-> Autorizo a MéTRIK S.A.S. a guardar en su repositorio de código y a usar las notas de voz que grabo leyendo guiones inventados, solo para probar y mejorar la transcripción de sus asistentes. Sé que mi voz queda en esas grabaciones. Las notas no traen datos reales míos ni de terceros. Puedo pedir que se borren escribiendo a mauricio.moreno@metrik.com.co.
+> Autorizo a METRIK IA S.A.S. a guardar en su repositorio de código y a usar las notas de voz que grabo leyendo guiones inventados, solo para probar y mejorar la transcripción de sus asistentes. Sé que mi voz queda en esas grabaciones. Las notas no traen datos reales míos ni de terceros. Puedo pedir que se borren escribiendo a mauricio.moreno@metrik.com.co.
 >
 > Nombre, documento, firma y fecha.
 
