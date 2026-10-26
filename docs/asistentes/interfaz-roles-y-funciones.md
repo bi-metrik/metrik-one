@@ -43,7 +43,7 @@ export const CLIENTES_FICHA: Funcion = {
   fichas: ['alc.experiencias'],         // fichas del reglamento que son suyas: sin la función, no van al modelo
   temas: ['experiencia', 'funciones'],  // los de `alc.temas` que aporta
   requiere: [],                         // otras funciones sin las que esta no sirve (sin ellas, queda fuera)
-  pistas: async (ctx) => [],            // opcional: palabras de la base para la transcripción (§4.6, pieza futura)
+  pistas: async (ctx) => [],            // opcional: palabras de la base para la transcripción (§4.6, sección 2.1)
 }
 ```
 
@@ -67,6 +67,45 @@ Reglas:
 La prueba exige los tres por cada función del archivo. Los casos reales del cliente van aparte, en el arnés de su rol.
 
 **4. Si el motor es nuevo** (obras, citas): es un `Dominio` como cualquier otro. Se pasa en `componerDominio({ motores: { obras: dominioObras(...) } })`. Si su `proponer` usa propiedades distintas por acción, se pasa también `datosPorAccion`, para que el rol vea solo las de sus acciones. Así lo hace `DATOS_POR_ACCION_ONE` en `one/dominio.ts`.
+
+### 2.1 Cómo una función aporta pistas a la transcripción (spec §4.6)
+
+Una función puede declarar `pistas(ctx)`. Devuelve las palabras de la base que pueden aparecer en una nota de voz de su dominio: los servicios del portafolio, la experiencia vigente o los nombres cortos de las obras. `ctx` trae `workspaceId` y los `parametros` con que la empresa prendió la función.
+
+**Cómo llega a la transcripción.** Solo aportan las funciones que quedaron en la composición del turno: una que el componedor dejó fuera, por no tener motor o por faltarle lo que requiere, no aporta. `fuentesDeComposicion` (`agente/pistas.ts`) toma cada función compuesta con sus parámetros, y `pistasDeFunciones` junta lo que devuelven. Eso va a `pistasSiEncendidas` como `extras`.
+
+- En WhatsApp, `wa-agente.ts` pasa la composición del turno (`turno.composicion`, del rol o del cargo de quien escribe).
+- En Chatwoot, la cola compone y le pasa al transcriptor `fuentesDePistas`, y `chatwoot-agente` las junta.
+
+Los `extras` van después del equipo y los colaboradores y antes de los clientes, dentro del tope. Una función que falla no frena la transcripción: no aporta.
+
+**Qué devolver.** Nombres cortos, de 40 caracteres como máximo, sin listas de códigos. Si el rol atiende a clientes, tampoco van datos de un cliente final: en público ya no entran los otros clientes ni el formato de los códigos.
+
+**El interruptor.** Está apagado en todos los workspaces. Se prende por workspace en `workspaces.config_extra`:
+
+```json
+{ "bot_conversacional": { "transcripcion": { "pistas": true, "tope": 40 } } }
+```
+
+- Solo `pistas: true` literal lo prende.
+- El `tope` es el máximo de palabras: va de 5 a 80 y por defecto es 40. Además hay un tope de 900 caracteres.
+- Apagado, no se lee la base, no se llama a ningún gancho y el pedido a Gemini es byte a byte el de antes. Vale igual para ONE, la bandeja y público.
+
+**La corrida del 26-oct** (arnés `agente/arnes/audios/`, llave de Gemini de pruebas). Fueron 20 notas **sintéticas**, hechas con el TTS de Gemini más ruido; ninguna real. Se corrió con k = 3, con y sin pistas: 240 intentos.
+
+| Modelo | Pistas | Fallos | Nombres | Cifras | Códigos | Inserción falsa | WER |
+|---|---|---|---|---|---|---|---|
+| gemini-3.5-flash-lite | sin | 0/60 | 74,5 % | 96,0 % | 55,6 % | 0,0 % | 14,8 % |
+| gemini-3.5-flash-lite | con | 0/60 | 92,2 % | 100 % | 100 % | 0,0 % | 10,9 % |
+| gemini-2.5-flash-lite | ambas | 120/120 | — | — | — | — | — |
+
+- Por workspace (3.5-flash-lite, sin → con pistas):
+  - Imperviun: nombres de 81,0 a 97,6 % y códigos de 55,6 a 100 %;
+  - Laura: nombres de 53,8 a 84,6 %;
+  - Sabor: nombres de 100 a 95,2 %, por un fallo en 1 de 3 intentos.
+- gemini-2.5-flash-lite devolvió HTTP 404, «no longer available to new users». No es el código: la llave de pruebas es de un proyecto nuevo. Es el modelo por defecto de ONE (`wa-transcribe.ts`); la llave de producción, más vieja, lo sigue usando, pero Google lo está retirando.
+
+**Las pistas siguen apagadas hasta repetir la corrida con notas reales** (`arnes/audios/GRABAR.md`): el resultado de arriba es con voces sintéticas. Ninguna función del catálogo declara `pistas` todavía.
 
 ## 3. Cómo se arma y se publica la ficha de un rol
 
@@ -177,6 +216,27 @@ Se escribe a mejor esfuerzo: si falla, el traspaso sale igual y queda en el log.
 - si la empresa apaga una función, sale enseguida;
 - si el rol se apaga, se para.
 
+### 3.2 Botones de una plantilla (spec §4.5)
+
+Si el rol manda una plantilla con respuestas rápidas, como la apertura de la jornada o un recordatorio, el toque de cada botón llega al asistente. Para eso, cada botón lleva el payload `ag|t|<plantilla>|<accion>`.
+
+- `componenteBotonPlantilla(plantilla, accion, index)` (`agente/render.ts`) arma el componente `button`/`quick_reply` con su `payload`. Va en los `components` del envío. `index` va de 0 a 9.
+- `payloadPlantilla(plantilla, accion)` arma solo el payload. Lanza un error si una clave no es válida o si el payload pasa de 256 caracteres.
+- Plantilla y acción van en minúsculas, dígitos y `_` (`[a-z0-9_]+`), como pide Meta para el nombre de una plantilla.
+
+**La trampa: el componente es obligatorio.** Si la plantilla sale sin él, Meta devuelve como payload el texto del botón (el ejemplo oficial: `"payload": "Unsubscribe", "text": "Unsubscribe"`). Ese toque no lleva el prefijo, así que no llega al asistente y sigue por el bot de siempre.
+
+**Qué ve el turno.** `leerToque` lo devuelve como `{ clase: 'plantilla', plantilla, accion }`. En la conversación aparece como `[toque: "<texto del botón>" · botón de la plantilla <plantilla>]`; si Meta no trae el texto, va la acción. El mensaje con la plantilla no queda en la conversación, por eso se dice de cuál viene.
+
+**No hay código por acción.** El modelo decide qué sigue con las funciones del rol. Si una acción tiene que escribir algo, va por `proponer`, como cualquier otra.
+
+**Lo que no es del asistente.**
+
+- Un payload sin el prefijo, mal formado o de otra plantilla sigue por el camino de hoy.
+- Los payloads `rec_ok` y `rec_ok:<evento>` de los recordatorios (#966) los resuelve el webhook antes y nunca llegan al agente.
+
+**El tope de 256 no está verificado contra Meta.** Meta no publica un tope para el `payload` de un botón de plantilla. El de 256 es el único que publica para el id de un botón (mensajes interactivos de respuesta), el mismo de `META.idBoton`, y no se ha probado con un envío real.
+
 ## 4. Cómo se prende una función para una empresa
 
 ```sql
@@ -277,5 +337,7 @@ La traza de cada turno trae `rol: { clave: 'mano_derecha', version: 1, … }`.
 | Resolución del rol, rol fijo y traza | `…/agente/roles.ts` |
 | Turno de WhatsApp con roles | `…/agente/one/turno-con-rol.ts` (lo usa `_shared/wa-agente.ts`) |
 | Turno de Chatwoot con roles | `…/agente/publico/turno-con-rol.ts` (lo usa `chatwoot-agente/index.ts`); compone `publico/cola.ts`, `dominioYReglamento` |
+| Pistas para transcribir (constructor, interruptor, gancho de las funciones) | `…/agente/pistas.ts`, lector `pistas-supabase.ts`; arnés en `…/agente/arnes/audios/` |
+| Botones de plantilla (`ag\|t\|`, `payloadPlantilla`, `componenteBotonPlantilla`) | `…/agente/render.ts`; pruebas en `toque-plantilla.test.ts` |
 | Banco del arnés | `…/agente/arnes/banco.ts` |
 | Tablas, RPC y publicación | `supabase/migrations/20261026183000_asistentes_roles.sql` |
