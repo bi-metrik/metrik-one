@@ -92,7 +92,7 @@ export const CONFIG_PUBLICO_POR_DEFECTO: ConfigPublico = {
   corteTotalMs: 20000,
   rafagaMs: 2500,
   audio: { modelo: 'gemini-3.5-flash-lite', llaveEnv: 'GEMINI_API_KEY_PAGO', maxBytes: 20 * 1024 * 1024 },
-  transcripcion: { pistas: false, tope: TOPE_PISTAS },
+  transcripcion: { pistas: false, tope: TOPE_PISTAS, vocabulario: [] },
   terminosUrl: TERMINOS_EJEMPLO,
   enlacesPermitidos: [],
   presupuestoDiarioUsd: null,
