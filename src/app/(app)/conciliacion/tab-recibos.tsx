@@ -226,15 +226,25 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
         </div>
       </div>
 
+      {/* SOE-029: la cifra grande es la del RECIBO (la porción UPME), no lo que consignó
+          el cliente. Con el total en grande, Tesorería creyó que el recibo salía por el
+          pago entero y dejó de emitirlos. Lo consignado queda en chico, solo si difiere. */}
       <span className="shrink-0 text-right">
-        <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
-          {fmtCOP(pago.monto)}
-        </span>
-        {/* En un pago mixto el recibo acusa solo la tarifa: se dice cuánto es, para que
-            nadie espere un recibo por el pago entero. */}
-        {pago.valor_upme != null && pago.valor_upme > 0 && Math.round(pago.valor_upme) !== Math.round(pago.monto) && (
-          <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
-            tarifa UPME {fmtCOP(pago.valor_upme)}
+        {pago.valor_upme != null && pago.valor_upme > 0 ? (
+          <>
+            <span className="block text-[10px]" style={{ color: 'var(--tinta-suave)' }}>Recibo por</span>
+            <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+              {fmtCOP(pago.valor_upme)}
+            </span>
+            {Math.round(pago.valor_upme) !== Math.round(pago.monto) && (
+              <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
+                consignó {fmtCOP(pago.monto)}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+            {fmtCOP(pago.monto)}
           </span>
         )}
       </span>
