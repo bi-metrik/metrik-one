@@ -206,7 +206,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // En viaje, Cierre económico y Postventa (F6): solo con `cierre_viaje.activo` y en su etapa.
   // Seguimiento (F1): la línea «Cotización enviada el …» solo en la etapa con `cotizacion_enviada`.
   const [rielCobro, confirmacionViaje, facturaViaje, entregaViaje, viajeFinalLeido, seguimientoViaje] = workspaceId
-    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, argsViaje), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
+    ? await Promise.all([leerRielCobro(supabase, argsViaje), leerConfirmacionViaje(supabase, { ...argsViaje, motivoAutorizacion: data.autorizacionPendiente === true ? (data.motivoAutorizacion ?? null) : null }), leerFacturaViaje(supabase, argsViaje), leerEntregaViaje(supabase, argsViaje), leerViajeFinal(supabase, argsViaje), leerSeguimientoViaje(supabase, argsViaje)])
     : [null, null, null, null, null, null]
   const viajeFinal = viajeFinalLeido?.panel ?? null
   // La autorización de datos pendiente: se cotiza, no se envía (reunión del 2026-10-22). Solo con
@@ -328,6 +328,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     banner: banner,
     /** La autorización de datos del cliente falta (la línea la pide): se cotiza, no se envía. */
     autorizacionPendiente: data.autorizacionPendiente === true,
+    motivoAutorizacion: data.motivoAutorizacion ?? null,
     extras: extras,
     viaje,
   }

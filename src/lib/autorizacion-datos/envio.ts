@@ -73,14 +73,35 @@ export async function autorizacionDelNegocioLeido(
   const n = args.negocio
   if (!n?.linea_id) return { aplica: false, falta: null }
   if (!lineaExigeAutorizacion(n.lineas_negocio?.etapas_negocio ?? [])) return { aplica: false, falta: null }
-  if (!n.contacto_id) return { aplica: true, falta: 'sin_contacto' }
+  return { aplica: true, falta: await faltaAutorizacionDelNegocio(supabase, { workspaceId: args.workspaceId, negocioId: args.negocioId, contactoId: n.contacto_id }) }
+}
+
+/**
+ * Qué le falta a la autorización del negocio, con la línea ya sabida que la exige: la RPC del
+ * contacto y los menores del viaje, la regla del gate (`faltaParaAvanzar`). La comparten «Enviar»,
+ * «Aprobar», «El cliente confirmó» y la ficha (el aviso y el estado del bloque), para que el aviso
+ * y el bloqueo no puedan decir cosas distintas. `'error'` = no se pudo leer.
+ */
+export async function faltaAutorizacionDelNegocio(
+  supabase: Cliente,
+  args: { workspaceId: string; negocioId: string; contactoId: string | null },
+): Promise<FaltaGate | 'error' | null> {
+  if (!args.contactoId) return 'sin_contacto'
   const [{ estado, error: errEstado }, bloques] = await Promise.all([
-    estadoDelContacto(args.workspaceId, n.contacto_id),
+    estadoDelContacto(args.workspaceId, args.contactoId),
     supabase.from('negocio_bloques').select('data').eq('negocio_id', args.negocioId),
   ])
-  if (errEstado || bloques.error) return { aplica: true, falta: 'error' }
+  if (errEstado || bloques.error) return 'error'
   const menores = hayMenores(((bloques.data ?? []) as Array<{ data: Record<string, unknown> | null }>).map(b => b.data))
-  return { aplica: true, falta: faltaParaAvanzar(estado, { menores }) }
+  return faltaParaAvanzar(estado, { menores })
+}
+
+/**
+ * ¿Se avisa que falta la autorización? Sí cuando la regla dice qué falta; no cuando está firmada,
+ * la línea no la pide (`null`) o no se pudo leer (`'error'`: no se afirma lo que no se sabe).
+ */
+export function autorizacionEstaPendiente(falta: FaltaGate | 'error' | null): boolean {
+  return falta === 'sin_contacto' || falta === 'generales' || falta === 'menores'
 }
 
 /** El veredicto para un negocio, leído de la base. */

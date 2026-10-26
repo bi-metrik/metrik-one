@@ -9,13 +9,13 @@ import 'server-only'
  * cabecera vieja que un «Completo» o un «Pendiente» inventado.
  */
 
-import { estadoDelContacto } from '@/lib/autorizacion-datos/servidor'
-import { hayMenores } from '@/lib/autorizacion-datos/estado'
+import { faltaAutorizacionDelNegocio } from '@/lib/autorizacion-datos/envio'
+import type { FaltaGate } from '@/lib/autorizacion-datos/estado'
 import type { CampoContacto, ValoresContacto } from '@/lib/contactos/campos-contacto'
 import { serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import { configReglasPago } from '@/lib/viaje/reglas-pago'
 import { leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
-import { estadoAutorizacion, estadoFicha, estadoServicios, type EstadoBloque, type TipoDerivado } from './estado-bloques-derivado'
+import { estadoFicha, estadoServicios, type EstadoBloque, type TipoDerivado } from './estado-bloques-derivado'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -35,6 +35,8 @@ export async function derivarEstadosDeBloques(
     contactoId: string | null
     configLinea: unknown
     bloques: readonly BloqueConEstadoDerivado[]
+    /** Lo que ya se leyó de la autorización para el aviso de la ficha: así no se lee dos veces. */
+    faltaAutorizacion?: Promise<FaltaGate | 'error' | null>
   },
 ): Promise<Map<string, EstadoBloque | null>> {
   const out = new Map<string, EstadoBloque | null>()
@@ -55,19 +57,14 @@ export async function derivarEstadosDeBloques(
   return out
 }
 
-/** El veredicto del gate `autorizacion_datos`, con los menores del viaje. */
-async function veredictoAutorizacion(db: Db, args: { workspaceId: string; negocioId: string; contactoId: string | null }): Promise<EstadoBloque | null> {
-  if (!args.contactoId) return estadoAutorizacion(null, false)
-  const [{ estado, error }, bloques] = await Promise.all([
-    estadoDelContacto(args.workspaceId, args.contactoId),
-    db.from('negocio_bloques').select('data').eq('negocio_id', args.negocioId),
-  ])
-  if (error || bloques.error) {
-    console.error('[estado derivado] no se pudo leer la autorización:', error ?? bloques.error?.message)
+/** El veredicto del gate `autorizacion_datos`, con los menores del viaje (la regla de `envio.ts`). */
+async function veredictoAutorizacion(db: Db, args: { workspaceId: string; negocioId: string; contactoId: string | null; faltaAutorizacion?: Promise<FaltaGate | 'error' | null> }): Promise<EstadoBloque | null> {
+  const falta = await (args.faltaAutorizacion ?? faltaAutorizacionDelNegocio(db, args))
+  if (falta === 'error') {
+    console.error('[estado derivado] no se pudo leer la autorización')
     return null
   }
-  const menores = hayMenores(((bloques.data ?? []) as Array<{ data: Record<string, unknown> | null }>).map(b => b.data))
-  return estadoAutorizacion(estado, menores)
+  return falta === null ? 'completo' : 'pendiente'
 }
 
 /** Los valores del contacto. `null` = no hay contacto; `undefined` = no se pudo leer. */
