@@ -14,7 +14,7 @@ Spec `docs/specs/2026-10-26_asistentes-roles-y-funciones.md` (PR #1278). Decisi�
 - `asistente_resolver_rol` devuelve `{usa_roles, rol}`: `usa_roles=false` = enrutamiento de hoy; `true` con rol null = workspace con roles y remitente sin asignación (no caer al dominio ONE completo).
 - En un trigger BEFORE la columna generada (`sujeto`) todavía es NULL: el trigger arma la expresión a mano.
 
-Lo que ya existe en PR abiertos: toque de plantilla en #966; Imperviun en #1235/#1237 (se reutiliza partido en funciones); Sabor etapa 2 en #1234 (campañas, `funcion_saldo`).
+Lo que ya existe: toque de plantilla en #966 y Imperviun en #1235/#1237 (abiertos; Imperviun se reutiliza partido en funciones); Sabor etapa 2 (#1234, campañas y `funcion_saldo`) ya está en main.
 
 **Why:** la pieza 2 (componedor) y las sesiones de cada cliente construyen encima de esto.
 **How to apply:** el arnés que emite el banco usa `huellaPublicable`; para staff, asignar por persona (`staff`) y no confiar en `cargo` distinto de owner/operator mientras el rol del remitente siga roto.
