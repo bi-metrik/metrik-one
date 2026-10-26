@@ -53,7 +53,7 @@ Reglas:
 - **Cada herramienta de un motor tiene exactamente una función dueña.** La prueba `componer.test.ts` («el catálogo cubre cada herramienta de cada motor una sola vez») falla si una queda sin dueña o con dos. Una herramienta sin dueña no la ve ningún rol.
 - **Una ficha es de una función si la función toma algo del motor de ese canal.** Por eso una ficha de Sabor que se llame igual que una de ONE no es de ONE. Una ficha que no es de ninguna función va siempre. Si es de varias, va cuando está alguna de ellas.
 - **Las comunes las pone el componedor.** Se declaran con `familia: 'comun'` y `comun: true`:
-  - `comun.persona`: en Chatwoot es `pasar_a_persona`; en WhatsApp es un hueco hasta la pieza de traspaso.
+  - `comun.persona`: el paso a una persona. En Chatwoot es `pasar_a_persona` del motor `publico`; en WhatsApp es `pasar_a_persona` del motor `persona` (`agente/persona.ts`). Lo configura la ficha `rol.escalamiento` (sección 3.1).
   - `comun.fuera_de_tema`: la respuesta fija `rf.fuera_de_tema` la arma el código con las líneas `queHace` del rol. Si ninguna función del turno trae su línea `queHace`, se deja el texto del reglamento.
 
 **2. La entrada en el catálogo.** Se agrega al arreglo de `funciones/catalogo.ts`. `catalogoDe` lanza si la clave está mal formada o repetida.
@@ -76,8 +76,78 @@ El contenido del rol va en `bot_parametros` con `bot = 'rol:<clave>'`, y se publ
 |---|---|---|
 | `perfil` | `perfil` | `valores.nombre`, `audiencia`, `idioma` y el trato. |
 | `rol.funciones` | `alcance` | `valores.funciones: string[]`. Es obligatoria: `asistente_publicar_rol` la exige y la RPC la lee. |
-| `rol.escalamiento` | `alcance` | A quién se pasa la conversación (`chatwoot_equipo` o `wa_link`), si se ofrece o se pasa directo, y el horario. |
+| `rol.escalamiento` | `alcance` | A quién se pasa la conversación (`chatwoot_equipo` o `wa_link`), los umbrales de las señales del código y el horario. Ver la sección 3.1. |
 | `rol.saludo` | `estilo` | Saludo por hora, presentación en el primer contacto y la plantilla diaria, si la hay. |
+
+### 3.1 La ficha `rol.escalamiento` (el paso a una persona, spec §4.2)
+
+Es una ficha `alcance` con `carga: 'siempre'`. El modelo lee su `hacer` (una línea corta basta); el código lee sus `valores`. Sin la ficha, rige el modo por defecto del canal: en WhatsApp, el WhatsApp de MeTRIK; en Chatwoot, el equipo de `config_extra` y sin horario. Una ficha con el modo de otro canal, o con un número que no sirve, también cae al de por defecto y queda en el log.
+
+**Las cuatro señales.**
+
+| Señal | La detecta | Qué hace |
+|---|---|---|
+| Pide una persona | El modelo: `pasar_a_persona` con motivo `pide_persona` | WhatsApp: el botón sale de una (`link`). Chatwoot: pasa. |
+| Frustración, no entiende, dato que no está | El modelo: `frustracion`, `no_entiende`, `sin_dato` (en Chatwoot, sus 14 motivos) | WhatsApp: se ofrece el botón (`ofrecido`), nunca dos turnos seguidos. Chatwoot: pasa. |
+| Dos «no pude» seguidos | El código: turnos con `rf.modelo_caido` o con un error del turno en la traza (un error del envío no cuenta) | WhatsApp: el botón se ofrece debajo de la respuesta fija. Chatwoot (con rol): pasa con `no_entiende`. |
+| Tres correcciones de lo mismo | El código: 3 propuestas sobre lo mismo (acción y `sobre`) reemplazadas sin tocarse, o 3 respuestas tras la misma pregunta | Igual que la anterior. |
+
+**Modo `wa_link`** (ONE: el equipo de hoy, la gestión de Imperviun, Laura):
+
+```json
+{
+  "modo": "wa_link",
+  "numero": "573159509103",
+  "atiende": "alguien de MeTRIK",
+  "boton": "Escribir a MeTRIK",
+  "plantilla": "Hola, soy {nombre} de {empresa}. El asistente no pudo con: {resumen}",
+  "umbral_no_pude": 2,
+  "umbral_correcciones": 3
+}
+```
+
+- Todo es opcional. Sin `numero`, el de MeTRIK. Con un número propio y sin `atiende`, «alguien del equipo».
+- `atiende` es como lo lee la persona: «alguien de MeTRIK», «la oficina». **Nunca el nombre de una persona**: un rol de operarios pone el número de la oficina y `"atiende": "la oficina"`.
+- `boton`: hasta 20 caracteres (límite de Meta). Uno más largo no se corta: va «Abrir WhatsApp».
+- `plantilla`: tiene que traer `{resumen}`; si no, va la de por defecto. `{nombre}` es quien escribe y `{empresa}` el workspace. El `{resumen}` lo arma el código en una línea y sin datos sensibles: sin correos, links ni cifras de cinco dígitos o más.
+- El botón es un mensaje `cta_url` que abre `https://wa.me/<numero>?text=<mensaje>`.
+
+Ejemplo para los operarios de una obra (datos inventados):
+
+```sql
+insert into public.bot_parametros (workspace_id, bot, clave, tipo, carga, hacer, valores) values
+  ('00000000-0000-4000-8000-0000000000d1', 'rol:recolector', 'rol.escalamiento', 'alcance', 'siempre',
+   'Si pide hablar con alguien, pásalo a la oficina con pasar_a_persona.',
+   '{"modo": "wa_link", "numero": "576015550101", "atiende": "la oficina", "boton": "Escribir a oficina"}');
+```
+
+**Modo `chatwoot_equipo`** (Sabor): pasa directo, sin ofrecer. Hace la nota privada, la etiqueta, el equipo y el `open`.
+
+```json
+{
+  "modo": "chatwoot_equipo",
+  "equipos": { "pago": 3, "queja": 2, "reserva_lista": 3 },
+  "equipo_por_defecto": 1,
+  "horario": { "dias": [1, 2, 3, 4, 5, 6], "desde": "09:00", "hasta": "21:00" },
+  "umbral_no_pude": 2,
+  "umbral_correcciones": 3
+}
+```
+
+- El equipo de un motivo sale de `equipos`, luego de `equipo_por_defecto` y, al final, del `config_extra` de siempre.
+- `horario` va en hora de Bogotá, con los días de 1 (lunes) a 7 (domingo) y `hasta` exclusivo. Sin horario, siempre se pasa igual. Fuera del horario, la nota lo dice; si el reglamento trae `rf.persona.fuera_de_horario`, ese texto le sale al cliente aparte.
+- **La nota** tiene una cabecera común: motivo, qué pidió, qué consultó y el siguiente paso. El bloque del medio lo aporta cada función con su gancho `notaPersona(ctx)`. Si ninguna función del rol lo declara, va el bloque del motor público: la reserva, la mesa, la autorización y la alimentación de Sabor. La sesión de Sabor lo mueve a sus funciones cuando parta `publico/dominio.ts` (por ejemplo, la reserva a `clientes.toma_datos`).
+- Las señales del código solo corren con un rol. Sin filas de roles, Sabor sigue exactamente como hoy.
+
+**La fila.** Cada traspaso deja una fila en `asistente_escalamientos`:
+
+- `modo`: `ofrecido`, `link` o `pasado`;
+- el motivo y el `rol_clave` (sin roles: `cargo:<cargo>` en WhatsApp y `asistente-publico` en Chatwoot);
+- el canal;
+- la conversación por alias: `wa-` más 10 hex en WhatsApp, `cw:<cuenta>:<conversación>` en Chatwoot;
+- el resumen del código.
+
+Se escribe a mejor esfuerzo: si falla, el traspaso sale igual y queda en el log. La traza del turno lo trae en `escalamiento`.
 
 **Publicar exige el banco del arnés.**
 
@@ -201,6 +271,7 @@ La traza de cada turno trae `rol: { clave: 'mano_derecha', version: 1, … }`.
 | Catálogo | `…/agente/funciones/catalogo.ts` |
 | Funciones de ONE (`equipo.*`) y sus casos | `…/agente/funciones/equipo-one.ts`, `equipo-one.casos.test.ts` |
 | Comunes | `…/agente/funciones/comunes.ts` |
+| Paso a una persona (`rol.escalamiento`, señales, botón, fila) | `…/agente/persona.ts`, `persona-produccion.ts`; pruebas en `persona.test.ts` |
 | Componedor y reglamento del turno | `…/agente/componer.ts` |
 | Mapa cargo → funciones de ONE | `…/agente/one/cargos.ts` |
 | Resolución del rol, rol fijo y traza | `…/agente/roles.ts` |
