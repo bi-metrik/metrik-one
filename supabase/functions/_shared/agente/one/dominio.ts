@@ -24,7 +24,7 @@ import type { ContextoDominio, DeclaracionHerramienta, Dominio, FilaConversacion
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
 import { esAdjuntoEntrante, preparadorDeAdjuntos } from '../adjuntos.ts';
 import { BOT_ONE } from './reglamento.ts';
-import { comentariosDeActividad } from '../../comentario-actividad.ts';
+import { comentariosDeActividad, textoConNota } from '../../comentario-actividad.ts';
 
 export { BOT_ONE };
 
@@ -408,11 +408,6 @@ export function notaDe(filas: FilaConversacion[], v: unknown): { v: { n: number;
     return { error: `«${String(v)}» no es un audio ni un escrito de la persona en esta conversación. \`nota\` es el #n de una línea «[audio de …]» o «[escrito de …]».` };
   }
   return { v: { n: n!, texto, audio: f.clase === 'audio' } };
-}
-
-/** Lo que se guarda con una nota: el resumen del modelo arriba (si lo hay y no es la nota misma) y la nota entera. Pura. */
-export function textoConNota(resumen: string, nota: string): string {
-  return resumen && resumen !== nota ? `Resumen: ${resumen}\n\nNota tal cual: ${nota}` : nota;
 }
 
 /**
