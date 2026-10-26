@@ -28,8 +28,11 @@ export interface DepsCola extends DepsTurno {
   phone: string;
   remitente: { nombre: string; rol: string };
   nuevoId: () => string;
-  /** Después de cada turno del modelo (el cupo de uso justo). No bloquea la respuesta. */
-  despuesDelTurno?: (traza: Traza) => Promise<void>;
+  /**
+   * Después de cada turno del modelo (el cupo de uso justo y el correo si se cayeron los modelos, `caida.ts`). No
+   * bloquea la respuesta. `turnoId`: para encontrar la traza.
+   */
+  despuesDelTurno?: (traza: Traza, turno: { turnoId: string }) => Promise<void>;
   /** Espera (reemplazable en pruebas). */
   dormir?: (ms: number) => Promise<void>;
 }
@@ -108,7 +111,7 @@ async function toqueYSeguir(d: DepsCola, e: Parameters<typeof toqueDePropuesta>[
     const r = await toqueDePropuesta(d, e, t, tipo);
     if (!r.seguir) return r;
     const s = await seguirTrasToque(d, e, r);
-    if (d.despuesDelTurno && s.traza.tipo === 'modelo') await d.despuesDelTurno(s.traza).catch((err) => console.error('[agente] después del turno:', err));
+    if (d.despuesDelTurno && s.traza.tipo === 'modelo') await d.despuesDelTurno(s.traza, { turnoId: e.turnoId }).catch((err) => console.error('[agente] después del turno:', err));
     return s;
   });
 }
@@ -192,7 +195,7 @@ export async function unTurno(d: DepsCola, ventana: { esperado?: boolean } = {})
     if (despues.some((f) => esAdjunto(f) && Date.parse(f.created_at) - ultimo <= vAdj)) return await unTurno(d, { esperado: true });
   }
   await enviarYCerrar(d, turnoId, pend, r, 'agente.turno');
-  if (d.despuesDelTurno) await d.despuesDelTurno(r.traza).catch((err) => console.error('[agente] después del turno:', err));
+  if (d.despuesDelTurno) await d.despuesDelTurno(r.traza, { turnoId }).catch((err) => console.error('[agente] después del turno:', err));
   return true;
 }
 

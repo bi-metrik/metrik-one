@@ -8,7 +8,8 @@
 //   `crearContactoConGuardian`), los viajes con `calcularNiveles`, el negocio nuevo como lo crea la bandeja hoy
 //   (`crearNegocio`, con la empresa espejo) y la carga con la extracción del núcleo (`bandeja/extraccion.ts`: el modelo
 //   clasifica, el código solo valida) y `cargarEnExistente`, que no pisa lo que una persona editó.
-// · `cargarReglamento`, `cupoSupabase`.
+// · `cargarReglamento`, `cupoSupabase` (el aviso del cupo sale por correo desde el 2026-10-26).
+// · `caidaSupabase`, `alertarCaidaWa`: el correo inmediato si se caen los modelos (`caida.ts`).
 // ============================================================
 
 import { sendButtons, sendList, sendTextoConId, sendTypingIndicator } from '../wa-respond.ts';
@@ -28,7 +29,10 @@ import { esquemaCarga, esquemaCargaCompacta, instruccionesCarga, omitidosCompact
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
 import { renombrarSegunPlantilla } from '../nombre-viaje.ts';
-import { enviarAvisoInterno } from '../wa-alerta.ts';
+import { CORREO_MAURICIO, enviarCorreoInterno, htmlDeTexto } from '../correo-interno.ts';
+import type { CorreoInterno } from '../correo-interno.ts';
+import { aliasConversacionWa, alertarSiCaido, caidaDelTurno } from './caida.ts';
+import type { PuertosCaida } from './caida.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
 import type { MiembroEquipo, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
@@ -126,15 +130,57 @@ export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen): Puerto
     },
     tomarCandado: (k, s) => almacen.tomarCandado(k, s),
     async avisar(texto, variables) {
-      // El canal de avisos internos de siempre (el mismo del número desconocido): a MéTRIK, nunca al cliente.
-      const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
-      if (!admin) {
-        console.warn('[agente] cupo de uso justo sin avisar: falta WA_ADMIN_NOTIFY_PHONE');
-        return;
-      }
-      await enviarAvisoInterno(admin, 'agente_cupo', texto, variables);
+      // A MéTRIK por correo, nunca al cliente (spec 2026-10-26, §4.1 punto 5: por WhatsApp se perdían fuera de la
+      // ventana de 24 h). Un correo por umbral y por mes: el candado ya lo asegura y la llave de Resend también.
+      const r = await enviarCorreoInterno(correoAvisoCupo(texto, variables));
+      if (!r.ok) console.error('[agente] no salió el aviso del cupo:', r.error);
     },
   };
+}
+
+/** El correo del aviso del cupo de uso justo. Pura. */
+export function correoAvisoCupo(texto: string, v: Record<string, string>): CorreoInterno {
+  const asunto = Number(v.umbral) >= 100 ? 'pasó su cupo' : `va en el ${v.umbral} % del cupo`;
+  return {
+    to: CORREO_MAURICIO,
+    subject: `Cupo del asistente: ${v.workspace} ${asunto} de ${v.mes}`,
+    text: texto,
+    html: htmlDeTexto(texto),
+    idempotencyKey: `agente-cupo/${v.workspace}/${v.mes}/${v.umbral}`,
+  };
+}
+
+// ── Caída de los modelos (spec 2026-10-26, §4.1) ─────────────────────────────
+
+/**
+ * Los puertos del correo de caída en WhatsApp (ONE y la bandeja): los candados del almacén, la cuenta de
+ * conversaciones sin respuesta del modelo en la última hora (`wa_conversacion`, índice parcial de las trazas del
+ * modelo) y Resend.
+ */
+export function caidaSupabase(supabase: SupabaseClient, almacen: Pick<Almacen, 'tomarCandado' | 'soltarCandado'>, workspaceId: string): PuertosCaida {
+  return {
+    tomarCandado: (k, s) => almacen.tomarCandado(k, s),
+    soltarCandado: (k) => almacen.soltarCandado(k),
+    async sinRespuesta(desdeIso) {
+      const { data, error } = await supabase.from('wa_conversacion').select('phone')
+        .eq('workspace_id', workspaceId).gte('created_at', desdeIso).eq('traza->>tipo', 'modelo').like('traza->>error', 'modelo:%').limit(2000);
+      if (error) return null;
+      return new Set(((data ?? []) as Fila[]).map((x) => String(x.phone))).size;
+    },
+    enviarCorreo: (m) => enviarCorreoInterno(m),
+  };
+}
+
+/** El correo si se cayeron los modelos en un turno de WhatsApp. Nunca lanza (ver `alertarSiCaido`). */
+export async function alertarCaidaWa(
+  supabase: SupabaseClient, almacen: Pick<Almacen, 'tomarCandado' | 'soltarCandado'>, traza: Traza,
+  o: { workspaceId: string; workspaceNombre: string; canal: 'one' | 'bandeja'; phone: string; turnoId: string | null },
+): Promise<void> {
+  if (!caidaDelTurno(traza)) return;
+  await alertarSiCaido(caidaSupabase(supabase, almacen, o.workspaceId), traza, {
+    workspaceId: o.workspaceId, workspaceNombre: o.workspaceNombre, canal: o.canal,
+    conversacion: await aliasConversacionWa(o.workspaceId, o.phone), turnoId: o.turnoId, ahoraMs: Date.now(),
+  });
 }
 
 // ── La bandeja ───────────────────────────────────────────────────────────────
