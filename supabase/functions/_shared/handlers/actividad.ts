@@ -56,7 +56,7 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
       return;
     }
     if (negocios.length > 1) {
-      await askChoice(ctx, text, talCual, negocios.slice(0, 3).map((n: any) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
+      await askChoice(ctx, text, talCual, negocios.slice(0, 3).map((n: { id: string; nombre: string; codigo?: string | null }) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
       return;
     }
 
@@ -75,7 +75,7 @@ async function routeActividad(ctx: HandlerContext): Promise<void> {
       return;
     }
     if (viaEmpresa && viaEmpresa.length > 1) {
-      await askChoice(ctx, text, talCual, viaEmpresa.map((n: any) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
+      await askChoice(ctx, text, talCual, viaEmpresa.map((n: { id: string; nombre: string; codigo?: string | null }) => ({ id: n.id, nombre: n.nombre, codigo: n.codigo })));
       return;
     }
   }
