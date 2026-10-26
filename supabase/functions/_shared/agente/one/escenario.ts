@@ -19,6 +19,8 @@ import { rolDeCargo } from '../roles.ts';
 import { PuertoOneMemoria } from './puerto-memoria.ts';
 import type { GastoMem, NegocioMem } from './puerto-memoria.ts';
 import { reglamentoOne } from './reglamento.ts';
+import { ESCALAMIENTO_METRIK, dominioPersona, escalamientoDe } from '../persona.ts';
+import type { FilaEscalamiento, PuertoEscalamientos } from '../persona.ts';
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
 
 export const WS_ONE_PRUEBA = '00000000-0000-4000-8000-0000000000e1';
@@ -41,6 +43,8 @@ export interface EscenarioOne {
   deps: DepsCola;
   /** Lo que armó el componedor (las herramientas del cargo o del rol). Sin componer, null. */
   composicion: Composicion | null;
+  /** Las filas de `asistente_escalamientos` que dejó la conversación (§4.2). */
+  escalamientos: FilaEscalamiento[];
   semilla(filas: Array<Partial<FilaConversacion> & Pick<FilaConversacion, 'direccion' | 'clase'>>): void;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Una foto (el recibo), con o sin pie de foto. `archivo`: los bytes que «están en Meta» (para el lector). */
@@ -81,6 +85,10 @@ export async function escenarioOne(p: {
   rolTraza?: RolTraza;
   /** El dominio ONE entero, sin componer (para probar el motor y sus candados de permiso). */
   sinComponer?: boolean;
+  /** Sin el paso a una persona (`comun.persona`), como antes de §4.2. Por defecto va, como en producción. */
+  sinPersona?: boolean;
+  /** Dónde se escriben las filas de `asistente_escalamientos` (en pruebas, uno que falla). Por defecto, en memoria. */
+  escalamientos?: PuertoEscalamientos;
 }): Promise<EscenarioOne> {
   const reloj = new Reloj(Date.parse('2026-10-21T15:00:00Z'));
   const almacen = new AlmacenMemoria(reloj);
@@ -97,7 +105,12 @@ export async function escenarioOne(p: {
   const base = p.reglamento ?? await reglamentoOne('Empresa de Prueba');
   // Como en producción (`wa-agente.ts`): el motor ONE con los permisos de las funciones, recortado por el componedor.
   const motor = dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null, empresa: 'Empresa de Prueba', ...(p.sinComponer ? {} : { funciones: claves }) });
-  const composicion = p.sinComponer ? null : componerOne(motor, funciones, () => {});
+  // El paso a una persona (§4.2): la ficha `rol.escalamiento` del reglamento, o el WhatsApp de MeTRIK.
+  const escalamiento = escalamientoDe(base, ESCALAMIENTO_METRIK, () => {});
+  const persona = p.sinComponer || p.sinPersona ? null : dominioPersona({ config: escalamiento, empresa: 'Empresa de Prueba', base: motor });
+  const composicion = p.sinComponer ? null : componerOne(motor, funciones, () => {}, persona);
+  const escalamientos: FilaEscalamiento[] = [];
+  const puertoEsc: PuertoEscalamientos = p.escalamientos ?? { registrar: async (f) => { escalamientos.push(f); } };
   const deps: DepsCola = {
     modelo: p.modelo,
     dominio: composicion ? composicion.dominio : motor,
@@ -112,6 +125,9 @@ export async function escenarioOne(p: {
     nuevoId,
     // La ventana de los adjuntos espera en el reloj de la prueba, no en el de verdad.
     dormir: async (ms: number) => { reloj.avanzar(ms); },
+    ...(persona ? {
+      persona: { config: escalamiento, empresa: 'Empresa de Prueba', rolClave: (p.rolTraza ?? rolDeCargo(rol, claves)).clave, canal: 'wa_one' as const, escalamientos: puertoEsc },
+    } : {}),
   };
   const pasos: PasoOne[] = [];
   let fotos = 0;
@@ -131,7 +147,7 @@ export async function escenarioOne(p: {
     return ops.find((x) => x.titulo.toLowerCase() === t) ?? ops.find((x) => x.titulo.toLowerCase().startsWith(t)) ?? ops.find((x) => x.titulo.toLowerCase().includes(t));
   };
   return {
-    pasos, reloj, almacen, mensajero, puerto, deps, composicion,
+    pasos, reloj, almacen, mensajero, puerto, deps, composicion, escalamientos,
     semilla(filas) {
       for (const f of filas) {
         reloj.avanzar(10_000);

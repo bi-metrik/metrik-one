@@ -6,6 +6,8 @@
 //     escribe (`cargos.ts`) y el reglamento de siempre (el publicado con bot `one`, o el del código).
 //   · `rol`: el rol fijo de la conversación, su versión publicada (bot `rol:<clave>`) y sus funciones.
 //   · `parar`: respuesta fija, sin modelo (nunca el dominio completo).
+// En los dos primeros, el componedor pone `comun.persona` (§4.2): el motor `persona` con la ficha `rol.escalamiento` del
+// reglamento, o el WhatsApp de MeTRIK si no la trae (el «equipo de hoy» del ADN, también sin roles).
 // ============================================================
 
 import type { Composicion } from '../componer.ts';
@@ -14,6 +16,8 @@ import type { Resolucion, RolResuelto } from '../roles.ts';
 import type { FuncionPrendida } from '../funciones/tipos.ts';
 import type { Dominio, Reglamento, RolTraza } from '../tipos.ts';
 import { componerOne, funcionesDelCargo, reglamentoOneDelTurno } from './cargos.ts';
+import { ESCALAMIENTO_METRIK, dominioPersona, escalamientoDe } from '../persona.ts';
+import type { EscalamientoWaLink } from '../persona.ts';
 
 /** Lo que contesta el canal cuando el workspace usa roles y quien escribe no tiene uno activo. */
 export const RF_SIN_ROL = 'Por este chat todavía no tengo nada habilitado para ti. Pídeselo a quien administra ONE en tu empresa.';
@@ -31,11 +35,17 @@ export interface PuertosTurnoOne {
   reglamentoDeHoy(): Promise<Reglamento>;
   /** El motor ONE con los permisos de estas funciones. */
   motor(funciones: string[]): Dominio;
+  /** El nombre de la empresa (va en el mensaje ya escrito del paso a persona). */
+  empresa?: string | null;
   log?(m: string): void;
 }
 
 export type TurnoOne =
-  | { tipo: 'atender'; dominio: Dominio; reglamento: Reglamento; rol: RolTraza; composicion: Composicion; via: 'cargo' | 'rol' }
+  | {
+    tipo: 'atender'; dominio: Dominio; reglamento: Reglamento; rol: RolTraza; composicion: Composicion; via: 'cargo' | 'rol';
+    /** El paso a persona de este rol (la ficha `rol.escalamiento`, o el WhatsApp de MeTRIK). */
+    escalamiento: EscalamientoWaLink;
+  }
   | { tipo: 'parar'; texto: string; motivo: string };
 
 export async function turnoOne(cargo: string, p: PuertosTurnoOne): Promise<TurnoOne> {
@@ -57,9 +67,12 @@ export async function turnoOne(cargo: string, p: PuertosTurnoOne): Promise<Turno
     rol = rolDeCargo(cargo, funciones as string[]);
   }
   const claves = funciones.map((f) => (typeof f === 'string' ? f : f.funcion));
-  const composicion = componerOne(p.motor(claves), funciones, p.log);
+  const motor = p.motor(claves);
+  const escalamiento = escalamientoDe(base, ESCALAMIENTO_METRIK, p.log);
+  const persona = dominioPersona({ config: escalamiento, empresa: p.empresa ?? null, base: motor });
+  const composicion = componerOne(motor, funciones, p.log, persona);
   return {
     tipo: 'atender', dominio: composicion.dominio, reglamento: await reglamentoOneDelTurno(base, composicion), rol, composicion,
-    via: r.tipo === 'rol' ? 'rol' : 'cargo',
+    via: r.tipo === 'rol' ? 'rol' : 'cargo', escalamiento,
   };
 }

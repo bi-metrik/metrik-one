@@ -12,6 +12,7 @@ Piezas §4.4 y §4.3 de la spec de asistentes (26-oct), sin migración. Crons `c
 - **Juez sin respaldo:** el pedido va sin llave de Gemini y se corta antes de salir si `haikuActivo()` es falso. Si no, `fetchModelo` mandaría el texto del cliente a Google.
 - **Alias copiado:** `aliasWa` en `conversaciones.ts` copia `aliasConversacionWa` de `caida.ts`. Importar `caida.ts` desde `src/` arrastra `correo-interno.ts` (usa `Deno`) al `tsc` de Next y lo rompe. La paridad la cuida `_shared/agente/alias-paridad.test.ts`. Lo mismo pasa con cualquier módulo de `_shared` que toque `Deno`.
 - **La transcripción no deja su uso en la traza** (solo `tramos.transcripcion_ms`): el resumen cuenta notas de voz y pone el costo como «sin medir».
+- Para las otras sesiones, lo vigente vive en `docs/asistentes/interfaz-roles-y-funciones.md` §7 (interruptores y avisos: calificación, resumen, caída, pistas). Si cambia el código, actualizar esa sección.
 - La lista F1-F9 sigue el brief, que no coincide con la numeración de la spec en §1 (F2 / F8).
 
 **Why:** Sabor sale el 29-oct y su contrato es el único que autoriza calificar con texto. Imperviun, Laura y Trappvel quedan en métricas hasta que Emilio diga.

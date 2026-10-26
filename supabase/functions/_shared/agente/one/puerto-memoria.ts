@@ -153,7 +153,7 @@ export class PuertoOneMemoria implements PuertoOne {
     const id = this.id('gasto');
     const soporte = this.soporteDe(p.mediaId, p.ref);
     const neg = this.negocios.find((n) => n.id === p.negocioId) ?? null;
-    this.gastos.push({ id, fecha: '2026-10-21', monto: p.monto, categoria: p.categoria, descripcion: p.descripcion ?? '', negocio: neg?.codigo ?? null, negocioId: p.negocioId, soporte: soporte === 'guardado' });
+    this.gastos.push({ id, fecha: p.fecha, monto: p.monto, categoria: p.categoria, descripcion: p.descripcion ?? '', negocio: neg?.codigo ?? null, negocioId: p.negocioId, soporte: soporte === 'guardado' });
     this.escrituras.push({ tipo: 'gasto', id, monto: p.monto, negocio: neg?.codigo ?? null, categoria: p.categoria, descripcion: p.descripcion, soporte: soporte === 'guardado', centro: p.centro });
     return { id, soporte };
   }

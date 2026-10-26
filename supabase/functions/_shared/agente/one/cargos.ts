@@ -20,6 +20,7 @@
 import { componerDominio, reglamentoDelTurno } from '../componer.ts';
 import type { Composicion, OpcionesComponer } from '../componer.ts';
 import { MOTOR_ONE } from '../funciones/equipo-one.ts';
+import { MOTOR_PERSONA } from '../persona.ts';
 import type { Dominio, Reglamento } from '../tipos.ts';
 import { huellaDe } from '../reglamento.ts';
 import { DATOS_POR_ACCION_ONE, permisosDeFunciones } from './dominio.ts';
@@ -39,9 +40,16 @@ export const funcionesDelCargo = (cargo: string): string[] => [...(FUNCIONES_POR
 
 export { permisosDeFunciones };
 
-/** El dominio ONE compuesto con estas funciones (las de un cargo o las de un rol). `motor` ya armado con las mismas. */
-export function componerOne(motor: Dominio, funciones: OpcionesComponer['funciones'], log?: (m: string) => void): Composicion {
-  return componerDominio({ motores: { [MOTOR_ONE]: motor }, funciones, datosPorAccion: { [MOTOR_ONE]: DATOS_POR_ACCION_ONE }, ...(log ? { log } : {}) });
+/**
+ * El dominio ONE compuesto con estas funciones (las de un cargo o las de un rol). `motor` ya armado con las mismas.
+ * `persona`: el motor del paso a una persona (`../persona.ts`, `dominioPersona`), que pone `comun.persona` en todo rol
+ * (§4.2). Sin él, el rol queda sin paso a persona (pruebas del motor ONE solo).
+ */
+export function componerOne(motor: Dominio, funciones: OpcionesComponer['funciones'], log?: (m: string) => void, persona?: Dominio | null): Composicion {
+  return componerDominio({
+    motores: { [MOTOR_ONE]: motor, ...(persona ? { [MOTOR_PERSONA]: persona } : {}) }, funciones,
+    datosPorAccion: { [MOTOR_ONE]: DATOS_POR_ACCION_ONE }, ...(log ? { log } : {}),
+  });
 }
 
 /** El reglamento ONE del turno: las fichas de las funciones que quedaron (con las reescrituras de la prosa de ONE). */
