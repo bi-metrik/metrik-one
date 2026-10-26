@@ -2,7 +2,10 @@
  * Envío de cuenta de cobro al cliente vía Resend.
  *
  * Adjunta el PDF descargado desde Drive y mantiene branding MeTRIK.
- * From: facturacion@metrikone.co · Reply-To: mauricio.moreno@metrik.com.co
+ * From: facturacion@metrik.com.co · Reply-To: mauricio.moreno@metrik.com.co
+ * (la spec original, decisión 2026-05-19_resend-dominio-compartido-facturacion: salía de
+ * metrikone.co solo por el límite de 1 dominio del plan Free de Resend; con Pro, metrik.com.co
+ * está verificado).
  *
  * Marca en cuentas_cobro_emitidas:
  *   - email_resend_id (id del envío)
@@ -15,7 +18,7 @@ import { downloadDriveFile, getAccessToken } from '@/lib/google-drive'
 import { formatCOP } from '@/lib/cobros/format'
 import { PALETA } from '@/lib/marca/paleta'
 
-const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrikone.co>'
+export const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrik.com.co>'
 const REPLY_TO_MAURICIO = 'mauricio.moreno@metrik.com.co'
 const BCC_MAURICIO = 'mauricio.moreno@metrik.com.co'
 
