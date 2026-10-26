@@ -206,6 +206,13 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'un caso adversario del arnés del asistente de Sabor es un menor que escribe («tengo 15 años»): una EDAD. ' +
       'No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/publico/arnes/fichas-prueba.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'las fichas [EJEMPLO] del arnés del asistente de Sabor dicen la edad mínima de cada experiencia («solo mayores ' +
+      'de 18 años» en la cata, «desde 12 años» en la clase de sushi): EDADES de asistentes. No hay plazo de ' +
+      'conservación en este archivo.',
+  },
   'supabase/functions/_shared/agente/arnes/extraccion-casos.ts': {
     tipo: 'no-es-plazo',
     razon:
