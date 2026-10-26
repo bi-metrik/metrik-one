@@ -1471,6 +1471,19 @@ interface EtapaHistorialProps {
   historialData: HistorialData
   precioTotal: number
   userRole: string
+  /**
+   * El usuario es responsable del negocio. El historial lo necesita igual que la etapa
+   * actual: el ejecutor responsable corrige hacia atrás sus documentos (opt-in
+   * `corregir_campos_gerencial`, causa obligatoria) y `BloqueDocumento` lo lee de
+   * `bloque._esResponsable`. Sin él, una operadora responsable con el área invitada
+   * (`areas_editoras`) no veía cómo corregir un documento que el servidor sí le dejaba
+   * cambiar (SOENA, SOE-028: el RUT de Documentación visto desde Cargue).
+   *
+   * También alcanza a `editable_siempre` en el historial: para el operator responsable,
+   * `getBloqueMode` da el mismo modo que en la etapa actual, y el servidor lo deja con el
+   * mismo criterio (área del stage del bloque + responsable).
+   */
+  esResponsable: boolean
   /** Ver `BloqueRenderer`. Aqui importa por `editable_siempre`, que levanta el
    *  `_forceReadOnly` con el que el historial fuerza solo lectura a todo lo demas. */
   negocioCerrado?: boolean
@@ -1478,7 +1491,7 @@ interface EtapaHistorialProps {
 
 function HistorialEtapasPrevias({
   bloques, negocioId, workspaceId, profiles, cobros, cotizacionesNegocio,
-  resumenFinanciero, ejecucionData, historialData, precioTotal, userRole,
+  resumenFinanciero, ejecucionData, historialData, precioTotal, userRole, esResponsable,
   negocioCerrado = false,
 }: EtapaHistorialProps) {
   const [open, setOpen] = useState(false)
@@ -1539,7 +1552,7 @@ function HistorialEtapasPrevias({
                   <div className="border-t border-border/40 bg-muted/20 px-4 py-3">
                     {b.instancia ? (
                       <BloqueRenderer
-                        bloque={{ ...b, _forceReadOnly: true }}
+                        bloque={{ ...b, _forceReadOnly: true, _esResponsable: esResponsable }}
                         negocioId={negocioId}
                         workspaceId={workspaceId}
                         profiles={profiles}
@@ -1707,6 +1720,11 @@ function BloqueRenderer({
     // operator responsable. Va ANTES de la línea de `visible` por eso. El área, el
     // historial y el negocio cerrado la siguen cerrando más abajo.
     if (generaEnOrigen) return modoDeCopiaGenerable(userRole, bloque._esResponsable ?? false)
+    // Copia de un documento que no escribe en su origen: siempre de solo lectura. En modo
+    // editable ofrecía «Reemplazar» y «Reprocesar IA», y el servidor los rechaza todos
+    // (`documento-actions.destinoDeEscritura`, mismo criterio de `copia-heredada.ts`). El
+    // modo visible dice dónde está el original (`_origenEtapaNombre`).
+    if (tipo === 'documento' && copiaDeSoloLectura(configExtra)) return 'visible'
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
     // Heredado que se comporta según lo que traiga: con el dato ya puesto en la
@@ -3057,6 +3075,7 @@ export default function NegocioDetailClient({
             historialData={historialData}
             precioTotal={negocio.valor_a_recaudar ?? negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
             userRole={userRole}
+            esResponsable={currentUserEsResponsable}
             negocioCerrado={negocioCerrado}
           />
         )}
