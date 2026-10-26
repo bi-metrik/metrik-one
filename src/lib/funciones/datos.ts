@@ -164,7 +164,7 @@ export interface Experiencia extends FichaExperienciaDatos {
   created_at: string
 }
 
-/** Las experiencias, la más reciente primero (Sabor estrena película cada semana). */
+/** Las experiencias, la más reciente primero (Sabor estrena experiencia cada semana). */
 export async function leerExperiencias(db: SupabaseClient, workspaceId: string): Promise<Experiencia[]> {
   const { data, error } = await db
     .from('funcion_experiencias')

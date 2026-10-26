@@ -36,7 +36,7 @@ export function LugarCliente({ negocio, puedeEditar }: { negocio: Negocio; puede
         <label className="block">Dirección<input {...props('direccion')} className={`${campo} h-11`} placeholder="AK 9 #104A-50, Bogotá" /></label>
         <label className="block">Piso<input {...props('piso')} className={`${campo} h-11`} placeholder="Segundo piso" /></label>
         <label className="block">
-          Recepción <span className="text-xs text-[#6B7280]">(cómo los reciben al llegar; sin el tema de la película, que va en el saludo de cada experiencia)</span>
+          Recepción <span className="text-xs text-[#6B7280]">(cómo los reciben al llegar; sin el tema de la experiencia, que va en el saludo de cada experiencia)</span>
           <textarea {...props('recepcion')} rows={3} className={campo} placeholder="Al llegar, en el primer piso encontrarán personal de nuestro staff que los recibirá y les indicará por dónde ingresar." />
         </label>
         <label className="block">
