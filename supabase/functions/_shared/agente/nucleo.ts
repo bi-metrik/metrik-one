@@ -21,7 +21,7 @@ import { META, botonesPropuesta, cortarEnPalabra, opcionesDelModelo, renderizar 
 import { respaldoDe, verificar } from './verificador.ts';
 import { afirmaRegistroBorrado, anotarRegistrosBorrados, lineasRegistros, propuestaSobreBorrado } from './registros.ts';
 import type {
-  Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, RegistroConversacion, Reglamento, Salida, Traza, UsoLlamado,
+  Almacen, ContextoDominio, Dominio, FilaConversacion, Mensaje, Modelo, Parte, Propuesta, RegistroConversacion, Reglamento, RolTraza, Salida, Traza, UsoLlamado,
 } from './tipos.ts';
 
 export interface DepsTurno {
@@ -46,6 +46,8 @@ export interface DepsTurno {
    * Sin esto, no hay guarda (la bandeja de Trappvel no la pasa).
    */
   guardaTexto?: (texto: string, herramientas: string[]) => string[];
+  /** El rol que atiende (spec 2026-10-26, §2.9): va tal cual en cada traza. Sin él (la bandeja), la traza no lo trae. */
+  rol?: RolTraza | null;
 }
 
 export interface EntradaTurno {
@@ -264,7 +266,7 @@ function caido(deps: DepsTurno, e: EntradaTurno): Salida {
 export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<SalidaTurno> {
   const { reglamento: r, config: c, dominio: d } = deps;
   const traza: Traza = {
-    tipo: 'modelo', bot: d.bot, reglamento: { id: r.id, version: r.version, huella: r.huella },
+    tipo: 'modelo', bot: d.bot, reglamento: { id: r.id, version: r.version, huella: r.huella }, ...(deps.rol ? { rol: deps.rol } : {}),
     llamados: 0, uso: [], herramientas: [], candados: [], verificador: [], reglas_usadas: [], ms_modelo: 0, ms_herramientas: 0,
   };
   // Los soportes que llegaron (fotos, PDF): se bajan, se guardan y se leen antes de armar lo que ve el modelo. El tiempo
@@ -286,7 +288,8 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   // En el último llamado (forzado a cerrar) NO entran los cierres del dominio: medido en vivo (2026-10-08), con el
   // presupuesto agotado tras `buscar` y `consultar_reglas` (que ya no existe), el modelo cerró «¿qué le falta al viaje de…?» con
   // `link_autorizacion` porque era la única salida con la ficha a mano. Ahí contesta con `responder`.
-  const forzados = e.tras ? [...CIERRAN, TERMINAR] : CIERRAN;
+  // Solo los declarados: un rol sin acciones no tiene `proponer`.
+  const forzados = (e.tras ? [...CIERRAN, TERMINAR] : CIERRAN).filter((x) => todas.includes(x));
   // Tras un hecho, lo que no sea seguir (falla, tema fuera, `terminar`) deja la confirmación sola: el hecho ya ocurrió.
   const soloHecho: Salida | null = e.tras ? { tipo: 'texto', texto: e.tras.lineas.join('\n') } : null;
   const caer = (): Salida => soloHecho ?? caido(deps, e);
@@ -585,7 +588,7 @@ export async function toqueDePropuesta(
   tipo: 'toque_propuesta' | 'si_escrito' = 'toque_propuesta',
 ): Promise<SalidaTurno> {
   const t0 = deps.reloj();
-  const base: Traza = { tipo, bot: deps.dominio.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella } };
+  const base: Traza = { tipo, bot: deps.dominio.bot, reglamento: { id: deps.reglamento.id, version: deps.reglamento.version, huella: deps.reglamento.huella }, ...(deps.rol ? { rol: deps.rol } : {}) };
   const ps = propuestas(e.filas);
   const esta = ps.find((x) => x.p.huella === toque.huella);
   const vig = vigenteDe(e.filas, deps.dominio);

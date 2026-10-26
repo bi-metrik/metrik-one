@@ -20,6 +20,9 @@ import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
 import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { lectorDeDocumentosDeViaje } from './agente/bandeja/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
+import { turnoOne } from './agente/one/turno-con-rol.ts';
+import { resolverRol, rolPrevio } from './agente/roles.ts';
+import type { RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
@@ -124,9 +127,29 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
   const phone = message.phone.replace(/\D/g, '');
   try {
     const { data: ws } = await supabase.from('workspaces').select('name, slug').eq('id', user.workspace_id).maybeSingle();
-    // Un reglamento propio publicado (`bot_reglamentos`, bot 'one') reemplaza al del código.
-    const reglamento = (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId))
-      ?? await reglamentoOne(String(ws?.name ?? 'la empresa'));
+    const empresa = ws?.name ? String(ws.name) : null;
+    const puerto = puertoOneSupabase(supabase, user);
+    const lector = lectorDeSoportes({ llaveGemini: llave });
+    // Qué atiende este turno (spec 2026-10-26, asistentes-roles-y-funciones): con roles en la base, el rol de quien
+    // escribe; sin roles (o sin la migración todavía), el dominio ONE recortado a su cargo. Una ida a la base.
+    const turno = await turnoOne(user.role, {
+      resolver: () => resolverRol(supabase, {
+        workspaceId: user.workspace_id, canal: 'wa_one', staff: user.staff_id ?? null, colaborador: user.collaborator_id ?? null,
+        cargo: user.role, inbox: inboxWaOne(),
+      }),
+      rolPrevio: () => rolPrevioWa(supabase, user.workspace_id, phone, config.topes.ventanaHoras),
+      reglamentoDelRol: (clave, id) => cargarReglamento(supabase, user.workspace_id, `rol:${clave}`, id),
+      // Un reglamento propio publicado (`bot_reglamentos`, bot 'one') reemplaza al del código.
+      reglamentoDeHoy: async () => (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId)) ?? await reglamentoOne(String(ws?.name ?? 'la empresa')),
+      motor: (funciones) => dominioOne(puerto, { rol: user.role, lector, empresa, funciones }),
+    });
+    if (turno.tipo === 'parar') {
+      // El workspace usa roles y quien escribe no tiene uno activo: lo fijo, sin modelo y sin el dominio completo.
+      console.warn(`[agente-one] ${user.workspace_id}: sin rol activo (${turno.motivo}), respuesta fija`);
+      await mensajeroWa().enviar(phone, { tipo: 'texto', texto: turno.texto }, { workspaceId: user.workspace_id, intent: 'agente.sin_rol' });
+      await soltarDelAgente(supabase, message);
+      return true;
+    }
 
     // Un audio se transcribe antes del turno (lo que dice es un escrito dictado).
     if (message.type === 'audio' && message.audio_id) {
@@ -140,8 +163,9 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     await atenderPendientes({
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
       // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
-      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: lectorDeSoportes({ llaveGemini: llave }), empresa: ws?.name ? String(ws.name) : null }),
-      reglamento,
+      dominio: turno.dominio,
+      reglamento: turno.reglamento,
+      rol: turno.rol,
       config,
       ahoraMs: () => Date.now(),
       reloj: () => performance.now(),
@@ -179,4 +203,26 @@ async function soltarDelAgente(supabase: SupabaseClient, message: IncomingMessag
   } catch (err) {
     console.error('[agente-one] no se pudo soltar el mensaje:', err);
   }
+}
+
+/** El inbox de Meta del número de Agus para las asignaciones por canal: 'wa:<phone_number_id>'. */
+function inboxWaOne(): string | null {
+  const id = (Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '').replace(/\D/g, '');
+  return id ? `wa:${id}` : null;
+}
+
+/**
+ * El rol con que empezó esta conversación (el `traza.rol` más reciente dentro de su ventana): el rol se fija al empezar
+ * y no cambia a mitad (spec 2026-10-26, §2.6). Solo se lee si el workspace usa roles. Error = null (manda el de ahora).
+ */
+async function rolPrevioWa(supabase: SupabaseClient, workspaceId: string, phone: string, ventanaHoras: number): Promise<RolTraza | null> {
+  const desde = new Date(Date.now() - ventanaHoras * 3600 * 1000).toISOString();
+  const { data, error } = await supabase.from('wa_conversacion').select('traza')
+    .eq('workspace_id', workspaceId).eq('phone', phone).gte('created_at', desde).not('traza->rol', 'is', null)
+    .order('created_at', { ascending: false }).limit(1);
+  if (error) {
+    console.error('[agente-one] no se pudo leer el rol de la conversación:', error.message);
+    return null;
+  }
+  return rolPrevio((data ?? []) as Array<{ traza?: { rol?: RolTraza | null } | null }>);
 }

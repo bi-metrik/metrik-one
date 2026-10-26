@@ -349,10 +349,25 @@ export interface RegistroConversacion {
 
 // ── La traza ─────────────────────────────────────────────────────────────────
 
+/**
+ * El rol que atendió el turno (spec 2026-10-26, §2.9): la clave, la versión de su reglamento y sus funciones. En el
+ * camino de hoy de ONE (sin roles en la base) la clave es `cargo:<cargo>` y no hay versión.
+ */
+export interface RolTraza {
+  clave: string;
+  id: string | null;
+  version: number | null;
+  reglamento_id: string | null;
+  por: 'staff' | 'colaborador' | 'cargo' | 'inbox';
+  funciones: Array<{ funcion: string; parametros: Record<string, unknown> }>;
+}
+
 export interface Traza {
   tipo: 'modelo' | 'toque_propuesta' | 'si_escrito' | 'reenvio' | 'sin_turno';
   bot: string;
   reglamento?: { id: string; version: number; huella: string } | null;
+  /** El rol del turno (§2.9). Ausente en los dominios que no se componen (la bandeja). */
+  rol?: RolTraza | null;
   /** Desde que llegó el webhook del último mensaje del turno hasta que salió la respuesta. */
   ms_turno?: number;
   ms_modelo?: number;

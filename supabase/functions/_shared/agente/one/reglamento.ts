@@ -13,6 +13,7 @@
 // escrito en la conversación). Si alguien borra una ficha, el candado sigue en `dominio.ts`.
 // ============================================================
 
+import { enumerar } from '../componer.ts';
 import { huellaDe } from '../reglamento.ts';
 import type { Ficha, Reglamento } from '../tipos.ts';
 import { CATEGORIA_LABELS } from '../../types.ts';
@@ -90,6 +91,30 @@ export function fichasOne(negocio: string): Ficha[] {
     { clave: 'rf.no_hice_nada', tipo: 'respuesta_fija', carga: 'siempre', hacer: 'Listo, no registré nada.' },
   ];
 }
+
+/**
+ * La prosa de ONE que nombra todo lo que hace el bot (el perfil, los temas, la ayuda), reescrita con lo que el rol del
+ * turno sí hace (`../componer.ts`, `fichasDelTurno`). Solo se aplica si el turno quedó sin alguna función: con todas
+ * (owner y admin) el reglamento es el de siempre. Puras.
+ */
+export const REESCRITURAS_ONE: Record<string, (hace: string[], f: Ficha) => Ficha> = {
+  perfil: (hace, f) => ({
+    ...f,
+    hacer: hace.length
+      ? `Asistente de WhatsApp de ONE. Lo que la persona puede hacer por aquí, escribiendo como habla: ${enumerar(hace)}.`
+      : 'Asistente de WhatsApp de ONE. Por aquí la persona no tiene nada habilitado: dile que lo pida a su administrador.',
+  }),
+  'alc.temas': (hace, f) => ({
+    ...f,
+    hacer: `Tus temas: ${hace.length ? `${enumerar(hace)}, y ` : ''}la ayuda de qué puedes hacer. Saludar, agradecer o cerrar también es de tu tema (\`conversacion\`).`,
+  }),
+  'g.ayuda': (hace, f) => ({
+    ...f,
+    hacer: hace.length
+      ? `en 3 o 4 líneas, solo lo que se puede hacer por aquí: ${enumerar(hace)}. Nada más (lo demás no está habilitado para su rol). Sin cifras de ejemplo. Tema \`ayuda\``
+      : 'di en una línea que por aquí no tiene nada habilitado y que lo pida a su administrador. Tema `ayuda`',
+  }),
+};
 
 const cache = new Map<string, Reglamento>();
 

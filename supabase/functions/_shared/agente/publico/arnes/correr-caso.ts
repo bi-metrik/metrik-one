@@ -7,7 +7,8 @@
 // ============================================================
 
 import { modeloGuionado } from '../../modelo-guionado.ts';
-import type { Modelo } from '../../tipos.ts';
+import type { Ficha, Modelo } from '../../tipos.ts';
+import type { DepsPublico } from '../cola.ts';
 import { escenarioPublico, reglamentoSabor } from '../escenario.ts';
 import type { EscenarioPublico } from '../escenario.ts';
 import { REGLAMENTO_SABOR } from '../reglamento-sabor.ts';
@@ -27,6 +28,16 @@ export interface OpcionesCorrida {
   configBase?: Partial<ConfigPublico>;
   /** Multiplica los cortes que fija el propio caso (operación). */
   escala?: number;
+  /**
+   * Corre el caso sobre un ROL compuesto (spec 2026-10-26): las funciones del rol y el catálogo que las define. Sin
+   * esto, sobre el dominio público entero.
+   */
+  rol?: { funciones: NonNullable<DepsPublico['funciones']>; catalogo?: DepsPublico['catalogo'] };
+  /**
+   * Las fichas base del reglamento (las del rol que se va a publicar). Sin esto, `REGLAMENTO_SABOR`. Los casos que
+   * cambian fichas (`caso.fichas`) las cambian sobre estas.
+   */
+  fichasBase?: Ficha[];
 }
 
 const PRECIOS_GUION: PrecioModelo[] = [{ modelo: 'guion', entrada: 0.1, salida: 0.5, cache: null }];
@@ -42,7 +53,8 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
     try { exito = await caso.soloCodigo(); } catch (err) { exito = { ok: false, motivo: String(err).slice(0, 200) }; }
     return { id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo, exito, daninas: [], atajadas: [], internos: [], demoras: 0, turnosModelo: 0, personas: [], transcripcion: [] };
   }
-  const reglamento = await reglamentoSabor(caso.fichas ? caso.fichas(REGLAMENTO_SABOR) : REGLAMENTO_SABOR);
+  const baseFichas = o.fichasBase ?? REGLAMENTO_SABOR;
+  const reglamento = await reglamentoSabor(caso.fichas ? caso.fichas(baseFichas) : baseFichas);
   const base = o.modelo ? o.modelo() : modeloGuionado(caso.guion ?? []);
   // El envoltorio necesita el escenario, que se arma con el modelo ya envuelto: se lo pasa por referencia.
   const ref: { e?: EscenarioPublico } = {};
@@ -50,6 +62,7 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
   const e = ref.e = await escenarioPublico({
     modelo, canal: caso.canal, config: { ...o.configBase, ...escalar(caso.config, o.escala ?? 1) }, reglamento, vivo: o.vivo, fallarHerramienta: caso.fallarHerramienta ? () => true : undefined,
     precios: o.modelo ? (o.precios ?? []) : PRECIOS_GUION,
+    ...(o.rol ? { funciones: o.rol.funciones, ...(o.rol.catalogo ? { catalogo: o.rol.catalogo } : {}) } : {}),
   });
   let error: string | undefined;
   try {

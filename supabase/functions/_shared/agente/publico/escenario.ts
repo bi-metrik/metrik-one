@@ -61,6 +61,10 @@ export async function escenarioPublico(p: {
   fallarHerramienta?: () => boolean;
   precios?: DepsPublico['precios'];
   conversacionId?: number;
+  /** Con roles: las funciones del rol, el catálogo (de prueba) y el rol para la traza (ver `cola.ts`). */
+  funciones?: DepsPublico['funciones'];
+  catalogo?: DepsPublico['catalogo'];
+  rol?: DepsPublico['rol'];
 }): Promise<EscenarioPublico> {
   const reloj = new RelojPublico(undefined, p.vivo ?? false);
   const almacen = new AlmacenPublicoMemoria(reloj, WS_PUBLICO);
@@ -87,6 +91,9 @@ export async function escenarioPublico(p: {
     nuevoId: nuevoIdPublico,
     dormir: async (ms) => { reloj.avanzar(ms); },
     fallarHerramienta: p.fallarHerramienta,
+    ...(p.funciones ? { funciones: p.funciones } : {}),
+    ...(p.catalogo ? { catalogo: p.catalogo } : {}),
+    ...(p.rol ? { rol: p.rol } : {}),
   };
   const pasos: PasoPublico[] = [];
   let mensajeId = 100;

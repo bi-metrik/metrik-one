@@ -10,8 +10,12 @@ import type { ConfigAgente } from '../config.ts';
 import { atenderPendientes } from '../cola.ts';
 import type { DepsCola } from '../cola.ts';
 import { AlmacenMemoria, MensajeroMemoria, Reloj, nuevoId } from '../memoria.ts';
-import type { FilaConversacion, Modelo, Reglamento, Salida, Traza } from '../tipos.ts';
+import type { FilaConversacion, Modelo, Reglamento, RolTraza, Salida, Traza } from '../tipos.ts';
 import { dominioOne } from './dominio.ts';
+import { componerOne, funcionesDelCargo, reglamentoOneDelTurno } from './cargos.ts';
+import type { Composicion } from '../componer.ts';
+import type { FuncionPrendida } from '../funciones/tipos.ts';
+import { rolDeCargo } from '../roles.ts';
 import { PuertoOneMemoria } from './puerto-memoria.ts';
 import type { GastoMem, NegocioMem } from './puerto-memoria.ts';
 import { reglamentoOne } from './reglamento.ts';
@@ -35,6 +39,8 @@ export interface EscenarioOne {
   mensajero: MensajeroMemoria;
   puerto: PuertoOneMemoria;
   deps: DepsCola;
+  /** Lo que armó el componedor (las herramientas del cargo o del rol). Sin componer, null. */
+  composicion: Composicion | null;
   semilla(filas: Array<Partial<FilaConversacion> & Pick<FilaConversacion, 'direccion' | 'clase'>>): void;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Una foto (el recibo), con o sin pie de foto. `archivo`: los bytes que «están en Meta» (para el lector). */
@@ -66,6 +72,15 @@ export async function escenarioOne(p: {
   reloj?: () => number;
   /** El lector de soportes (en pruebas, uno guionado; en el arnés, el real). Sin él, los soportes no se leen. */
   lector?: Lector | null;
+  /**
+   * Las funciones del turno (un rol de la base, ya intersecadas con las prendidas). Sin ellas, las del cargo (`rol`,
+   * `cargos.ts`), como en producción sin roles.
+   */
+  funciones?: Array<string | FuncionPrendida>;
+  /** El rol para la traza (con `funciones`). */
+  rolTraza?: RolTraza;
+  /** El dominio ONE entero, sin componer (para probar el motor y sus candados de permiso). */
+  sinComponer?: boolean;
 }): Promise<EscenarioOne> {
   const reloj = new Reloj(Date.parse('2026-10-21T15:00:00Z'));
   const almacen = new AlmacenMemoria(reloj);
@@ -77,10 +92,17 @@ export async function escenarioOne(p: {
     if (f) f.media = structuredClone(media);
   };
   const rol = p.rol ?? 'owner';
+  const funciones = p.funciones ?? funcionesDelCargo(rol);
+  const claves = funciones.map((f) => (typeof f === 'string' ? f : f.funcion));
+  const base = p.reglamento ?? await reglamentoOne('Empresa de Prueba');
+  // Como en producción (`wa-agente.ts`): el motor ONE con los permisos de las funciones, recortado por el componedor.
+  const motor = dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null, empresa: 'Empresa de Prueba', ...(p.sinComponer ? {} : { funciones: claves }) });
+  const composicion = p.sinComponer ? null : componerOne(motor, funciones, () => {});
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null, empresa: 'Empresa de Prueba' }),
-    reglamento: p.reglamento ?? await reglamentoOne('Empresa de Prueba'),
+    dominio: composicion ? composicion.dominio : motor,
+    reglamento: composicion ? await reglamentoOneDelTurno(base, composicion) : base,
+    ...(composicion ? { rol: p.rolTraza ?? rolDeCargo(rol, claves) } : {}),
     config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
     ahoraMs: reloj.ahora,
     reloj: p.reloj ?? (() => reloj.ahora()),
@@ -109,7 +131,7 @@ export async function escenarioOne(p: {
     return ops.find((x) => x.titulo.toLowerCase() === t) ?? ops.find((x) => x.titulo.toLowerCase().startsWith(t)) ?? ops.find((x) => x.titulo.toLowerCase().includes(t));
   };
   return {
-    pasos, reloj, almacen, mensajero, puerto, deps,
+    pasos, reloj, almacen, mensajero, puerto, deps, composicion,
     semilla(filas) {
       for (const f of filas) {
         reloj.avanzar(10_000);

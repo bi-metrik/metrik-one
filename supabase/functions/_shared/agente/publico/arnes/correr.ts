@@ -6,6 +6,9 @@
 //   deno run -A --node-modules-dir=none …/correr.ts --salida <dir> --cli [--k 3] [--paralelo 4] [--modelo claude-haiku-5-5]
 //   ANTHROPIC_API_KEY_PRUEBAS=… deno run -A --node-modules-dir=none …/correr.ts --salida <dir> [--k 3]
 //   Comunes: [--conjunto escenarios|adversario|lenguaje|operacion|real|todo] [--solo id1,id2]
+//            [--fichas-rol <fichas.json>]   las fichas del ROL que se va a publicar (un arreglo de fichas en JSON); sin
+//                                            él, REGLAMENTO_SABOR. Deja `banco.json`: lo que pide asistente_publicar_rol
+//                                            (`pasa`, `k`, `fecha`, `huella_fichas` = huellaPublicable de esas fichas).
 // --seco   sin red: el guion de cada caso hace de modelo (prueba el código, no mide al modelo).
 // --cli    Haiku por el CLI de Claude Code con la SUSCRIPCIÓN (Mauricio, 2026-10-21): `modelo-cli.ts`. Los cortes se
 //          agrandan (el arranque del CLI cuesta segundos) y los tiempos medidos NO sirven para fijar `corte_1`.
@@ -21,6 +24,9 @@ import { CONJUNTOS_PUBLICO, ESCALA, TODOS_LOS_CASOS } from './conjuntos.ts';
 import { correrCaso, reporte } from './correr-caso.ts';
 import type { OpcionesCorrida, ResultadoPassK } from './correr-caso.ts';
 import { modeloCli } from './modelo-cli.ts';
+import { bancoDelArnes } from '../../arnes/banco.ts';
+import { REGLAMENTO_SABOR } from '../reglamento-sabor.ts';
+import type { Ficha } from '../../tipos.ts';
 
 const args = Deno.args;
 const arg = (k: string) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
@@ -55,8 +61,10 @@ if (import.meta.main) {
   const modelo: OpcionesCorrida['modelo'] = seco ? null
     : cli ? () => modeloCli({ modelo: nombreModelo, concurrencia: paralelo })
       : () => modeloAnthropic({ llave: LLAVE, modelo: nombreModelo, esfuerzo, pensamiento, maxSalida: 2048, estricto: true });
+  const rutaFichas = arg('--fichas-rol');
+  const fichasBase: Ficha[] = rutaFichas ? JSON.parse(await Deno.readTextFile(rutaFichas)) : REGLAMENTO_SABOR;
   const o: OpcionesCorrida = {
-    modelo, k, vivo: !seco,
+    modelo, k, vivo: !seco, ...(rutaFichas ? { fichasBase } : {}),
     ...(cli ? { configBase: { corte1Ms: 60_000, corteTotalMs: 180_000 }, escala: ESCALA_CLI } : {}),
   };
   const t0 = Date.now();
@@ -112,5 +120,11 @@ if (import.meta.main) {
     seco ? 'En seco el tiempo interno no se mide (reloj falso).' : '',
   ].join('\n');
   await Deno.writeTextFile(`${salida}/reporte.md`, md);
+  // El banco para publicar el rol (`asistente_publicar_rol`): solo pasa con el modelo real, todos los casos en pass^k.
+  const banco = await bancoDelArnes({
+    fichas: fichasBase, k, arnes: `publico/arnes/correr.ts --conjunto ${conjunto}${solo ? ` --solo ${solo.join(',')}` : ''}`,
+    modelo: seco ? 'seco' : nombreModelo, seco, resultados: rs.map((r) => ({ id: r.id, pasa: r.pasa, daninas: r.corridas.reduce((n, x) => n + x.daninas.length, 0) })),
+  });
+  await Deno.writeTextFile(`${salida}/banco.json`, JSON.stringify(banco, null, 2));
   console.log(JSON.stringify({ etiqueta, passK: rep.passK, casos: rep.casos, daninas: rep.daninas, internos: rep.internos, porConjunto: rep.porConjunto }));
 }

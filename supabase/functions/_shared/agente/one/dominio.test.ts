@@ -279,7 +279,20 @@ describe('el rol manda (los permisos del bot de siempre)', () => {
       { name: 'proponer', args: { accion: 'contacto_nuevo', datos: { nombre: 'Juan Prueba' } } },
       { name: 'responder', args: { tema: 'contacto', texto: 'Tu rol no permite crear contactos por aquí.' } },
     ])
+    // Desde el componedor (2026-10-26) el operador ni siquiera ve `contacto_nuevo`: si el modelo lo intenta igual, el
+    // núcleo lo ataja como acción desconocida, antes del motor.
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS, rol: 'operator' })
+    await e.escribe('nuevo contacto Juan Prueba')
+    expect(e.trazas().at(-1)!.candados![0].candado).toBe('accion_desconocida')
+    expect(e.composicion!.declaradas.acciones).toEqual(['gasto', 'adjuntar_soporte', 'corregir_gasto', 'actividad'])
+  })
+
+  it('el motor sin componer sigue frenando por rol (la tercera llave)', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'contacto_nuevo', datos: { nombre: 'Juan Prueba' } } },
+      { name: 'responder', args: { tema: 'contacto', texto: 'Tu rol no permite crear contactos por aquí.' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, rol: 'operator', sinComponer: true })
     await e.escribe('nuevo contacto Juan Prueba')
     expect(e.trazas().at(-1)!.candados![0].candado).toBe('rol')
   })
