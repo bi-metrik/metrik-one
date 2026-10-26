@@ -349,7 +349,7 @@ where id = '<WORKSPACE>';
 
 ### 7.2 Resumen diario por correo (spec §4.3, #1290)
 
-- **El cron:** `resumen-asistentes` (`vercel.json`, `0 12 * * *`): 12:00 UTC, 7:00 de Bogotá, media hora después de la calificación y con el mismo día.
+- **El cron:** `resumen-asistentes` (`vercel.json`, `0 12 * * *`): 12:00 UTC, 7:00 de Bogotá, media hora después de la calificación y sobre el mismo día anterior.
 - **A quién le llega:** un solo correo a Mauricio (`PARA_RESUMEN`, `mauricio.moreno@metrik.com.co`) con todos los workspaces. No se configura por workspace.
 - **Qué trae, por workspace y rol:**
   - arriba, lo que pide acción;
