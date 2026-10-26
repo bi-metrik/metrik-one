@@ -168,6 +168,7 @@ export function puertoOneSupabase(supabase: SupabaseClient, user: WaUser): Puert
       const insert: Record<string, unknown> = {
         workspace_id: ws,
         monto: p.monto,
+        fecha: p.fecha,
         categoria: p.categoria,
         // Como el bot de siempre: el detalle completo, o «Categoría — $monto» si no hubo concepto.
         descripcion: descripcionParaGuardar({ descripcion: p.descripcion ?? undefined }, p.categoria, p.monto),

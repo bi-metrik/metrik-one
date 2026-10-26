@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { escenarioOne } from './escenario'
 import { modeloGuionado } from '../modelo-guionado'
-import { fotoDe, gastosDeLaConversacion, nombreNegocio, permisosDe, telefonoEnLaConversacion } from './dominio'
+import { DIAS_ATRAS_GASTO, fechaConDia, fechaDelGasto, fotoDe, gastosDeLaConversacion, nombreNegocio, permisosDe, telefonoEnLaConversacion } from './dominio'
 import { agenteOnePorDefecto, CORTE_ONE_MS, dominioDelAgente, leerConfigOne } from '../config'
 import { declaraciones } from '../herramientas'
 import { dominioOne } from './dominio'
@@ -536,5 +536,67 @@ describe('«de empresa» dicho antes de la lista del destino', () => {
     await e.escribe('50 mil en papelería, gasto de empresa')
     expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
     expect(e.puerto.escrituras).toEqual([])
+  })
+})
+
+describe('la fecha del gasto (caso real 2026-10-26: «el miércoles de la semana pasada» quedó con la fecha de hoy)', () => {
+  // El reloj del escenario: miércoles 21-oct-2026, 10:00 en Bogotá.
+  it('«el miércoles de la semana pasada»: la fecha que deduce el modelo se ve en el resumen y va al gasto', async () => {
+    const modelo = modeloGuionado([
+      (p) => {
+        const props = (p.herramientas.find((d) => d.name === 'proponer')!.parameters as { properties: { datos: { properties: Record<string, unknown> } } }).properties.datos.properties
+        expect(props.fecha).toBeDefined()
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 21000, negocio: 'A1 26 1', categoria: 'otros', fecha: '2026-10-14' } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t1 = await e.escribe('Un gasto de 21.000 al A1 26 1, se ejecutó el miércoles de la semana pasada')
+    expect(t1[0].texto).toContain('📅 miércoles 14-oct')
+    expect(t1[0].texto).not.toContain('Hoy')
+    await e.toca('Registrar')
+    expect(e.puerto.gastos.at(-1)!.fecha).toBe('2026-10-14')
+  })
+
+  it('sin fecha dicha: hoy en Bogotá, y el resumen lo dice', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 5000, negocio: 'A1 26 1', categoria: 'otros' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t1 = await e.escribe('5000 al A1 26 1')
+    expect(t1[0].texto).toContain('📅 Hoy, miércoles 21-oct')
+    await e.toca('Registrar')
+    expect(e.puerto.gastos.at(-1)!.fecha).toBe('2026-10-21')
+  })
+
+  it('una fecha futura no se propone: vuelve al modelo con el error', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 5000, negocio: 'A1 26 1', categoria: 'otros', fecha: '2026-10-22' } } },
+      (p) => {
+        const r = p.mensajes.at(-1)!.parts[0].functionResponse!.response as { error: string }
+        expect(r.error).toContain('es futura')
+        return { name: 'responder', args: { tema: 'gasto', texto: '¿Qué día fue el gasto?' } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('5000 al A1 26 1, mañana')
+    expect(e.puerto.escrituras).toEqual([])
+    expect(e.trazas().at(-1)!.candados![0].candado).toBe('fecha')
+  })
+
+  it('fechaDelGasto: el caso real con el reloj del 26-oct, los topes y lo que no es fecha', () => {
+    const ahora = Date.parse('2026-10-26T19:42:00Z') // lunes 26-oct-2026, 14:42 en Bogotá
+    expect(fechaDelGasto('2026-10-21', ahora)).toEqual({ fecha: '2026-10-21' })
+    expect(fechaConDia('2026-10-21')).toBe('miércoles 21-oct')
+    expect(fechaDelGasto('', ahora)).toEqual({ fecha: '2026-10-26' })
+    expect(fechaDelGasto(undefined, ahora)).toEqual({ fecha: '2026-10-26' })
+    // A las 9 p. m. de Bogotá ya es mañana en UTC: hoy sigue siendo el de Bogotá.
+    expect(fechaDelGasto(null, Date.parse('2026-10-27T02:00:00Z'))).toEqual({ fecha: '2026-10-26' })
+    expect(fechaDelGasto('2026-10-27', ahora)).toHaveProperty('error')
+    expect(fechaDelGasto(`2026-07-28`, ahora)).toEqual({ fecha: '2026-07-28' }) // justo 90 días
+    expect(fechaDelGasto('2026-07-27', ahora)).toHaveProperty('error')
+    expect(fechaDelGasto('2025-10-21', ahora)).toHaveProperty('error') // el año mal deducido
+    expect(fechaDelGasto('2026-02-30', ahora)).toHaveProperty('error')
+    expect(fechaDelGasto('21/10/2026', ahora)).toHaveProperty('error')
+    expect(DIAS_ATRAS_GASTO).toBe(90)
   })
 })
