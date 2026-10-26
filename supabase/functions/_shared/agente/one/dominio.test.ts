@@ -526,6 +526,40 @@ describe('r-t-gasolina (arnés real 2026-10-22): una lista del destino ya contes
   })
 })
 
+describe('Resend (caso real 2026-10-26): la respuesta a la lista vale por lo que dice, no por ser la primera', () => {
+  it('«se realizó ayer» no es «Gasto de empresa»; «sería un gasto de empresa» después sí, sin volver a mostrar la lista', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $65.000?' } },
+      // Lo que hizo el modelo real: apuntó `empresa_dicho_en` al mensaje de la fecha.
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 65000, empresa: true, empresa_dicho_en: '#3', categoria: 'software', descripcion: 'suscripción a Resend' } } },
+      { name: 'responder', args: { tema: 'gasto', texto: 'Anoto la fecha de ayer. ¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 65000, empresa: true, empresa_dicho_en: '#5', categoria: 'software', descripcion: 'suscripción a Resend' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Registra la suscripción a Resend por 65.000')
+    let t = await e.escribe('se realizó el día de ayer')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    expect(t[0].texto).not.toContain('Gasto de empresa (sin negocio)')
+    t = await e.escribe('sería un gasto de empresa')
+    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras[0]).toMatchObject({ monto: 65000, negocio: null })
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('el número de la opción «Gasto de empresa» escrito como respuesta también vale', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, empresa_dicho_en: '#3', categoria: 'alimentacion' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const l = await e.escribe('Bebidas de 20000')
+    const k = ('opciones' in l[0] ? l[0].opciones : []).findIndex((o) => o.titulo === 'Gasto de empresa')
+    const t = await e.escribe(String(k + 1))
+    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+  })
+})
+
 describe('«de empresa» dicho antes de la lista del destino', () => {
   it('no basta: primero preguntar_destino y la persona toca la opción', async () => {
     const modelo = modeloGuionado([
