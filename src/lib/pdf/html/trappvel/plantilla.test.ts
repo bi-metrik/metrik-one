@@ -377,7 +377,9 @@ describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
     expect(tbodies[1][1]).toBeUndefined()
     expect(tbodies[2][1]).toBe(' class="nobr"')
     expect(filas(tbodies[2][2])).toBe(2)
-    // El encabezado de la sección no se separa de lo que sigue.
+    // El encabezado va en el mismo bloque que no se parte con las primeras filas: un `.sh` suelto
+    // quedaba solo al pie de la hoja 1 (muestra sin fotos del 2026-10-27).
+    expect(h).toMatch(/<div class="nobr"><div class="sh">(?:(?!<\/section>)[\s\S])*?>Traslados<[\s\S]*?<table class="tr fija">[\s\S]*?<\/table><\/div>/)
     expect(h).toMatch(/\.sh \{[^}]*break-after: avoid/)
   })
 

@@ -483,25 +483,28 @@ function traslados(m: ModeloPropuesta): string {
     const derecha = [t.hora ? esc(t.hora) : '', conVersion ? etiquetasDe(t.tarifas, porIndice) : ''].filter(Boolean).join(' ')
     return `<tr><td>${esc([dia, flecha(trayecto).replace(/^hotel\b/, 'Hotel')].filter(Boolean).join(' · '))}</td><td>${esc(mayuscula(resto.join(' · ')))}</td><td class="est">${derecha}</td></tr>`
   })
-  return `<section class="sec">\n${encabezadoDeSeccion('van', 'Traslados', sub)}
-  <table class="tr">
-${tramosDeFilas(cuerpo)}
-  </table>\n</section>`
+  // El título va en un bloque que no se parte con las primeras filas (en una tabla aparte, con las
+  // mismas columnas): un `.sh` suelto antes de la tabla quedaba solo al pie de la hoja.
+  const [juntas, medio, cola] = tramosDeFilas(cuerpo)
+  const columnas = '<colgroup><col style="width:49%"><col><col style="width:16%"></colgroup>'
+  const tabla = (tbodies: string[], clase: string) => `<table class="${clase}">${columnas}\n${tbodies.join('\n')}\n</table>`
+  return `<section class="sec">
+<div class="nobr">${encabezadoDeSeccion('van', 'Traslados', sub)}
+${tabla([`<tbody class="nobr">${juntas.join('\n')}</tbody>`], 'tr fija')}</div>
+${medio ? tabla([`<tbody>${medio.join('\n')}</tbody>`, `<tbody class="nobr">${cola!.join('\n')}</tbody>`], 'tr fija sigue') : ''}
+</section>`
 }
 
 /**
  * Las filas de una tabla larga en tramos: las primeras van juntas (el título de la sección, que no
  * se separa de lo que sigue, nunca queda al pie con una sola fila) y las últimas también (ninguna
  * fila sola arriba de la hoja siguiente). Lo del medio se parte entre cualquier par de filas.
+ * Corta (hasta el doble de `juntas`), va entera en el primer tramo.
  */
-function tramosDeFilas(filas: string[], juntas = FILAS_JUNTAS): string {
-  if (filas.length <= juntas * 2) return `<tbody class="nobr">${filas.join('\n')}</tbody>`
+function tramosDeFilas(filas: string[], juntas = FILAS_JUNTAS): [string[], string[] | null, string[] | null] {
+  if (filas.length <= juntas * 2) return [filas, null, null]
   const cola = Math.min(2, filas.length - juntas)
-  return [
-    `<tbody class="nobr">${filas.slice(0, juntas).join('\n')}</tbody>`,
-    `<tbody>${filas.slice(juntas, filas.length - cola).join('\n')}</tbody>`,
-    `<tbody class="nobr">${filas.slice(filas.length - cola).join('\n')}</tbody>`,
-  ].join('\n')
+  return [filas.slice(0, juntas), filas.slice(juntas, filas.length - cola), filas.slice(filas.length - cola)]
 }
 const FILAS_JUNTAS = 3
 
