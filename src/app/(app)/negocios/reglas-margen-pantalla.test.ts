@@ -14,7 +14,7 @@ import path from 'node:path'
 
 import { calcularCascada, type LineaCalculada } from '@/lib/cotizaciones/totales'
 import { paramsPorOpcion } from '@/lib/cotizaciones/reglas-margen'
-import { tarifasCalculadas } from '@/lib/cotizaciones/por-pasos-vista'
+import { preciosDeLasOpciones, tarifasCalculadas } from '@/lib/cotizaciones/por-pasos-vista'
 import { lineasDelCaso, NOMBRES_DEL_CASO, paramsDelCaso, TARIFAS_DEL_CASO } from '../../../../test/caso-reglas-margen'
 
 vi.mock('sonner', () => ({ toast: Object.assign(() => {}, { success: () => {}, error: () => {}, warning: () => {} }) }))
@@ -73,13 +73,14 @@ function tarifas(descuento: 3 | 7) {
   const lineas = lineasDelCaso(descuento)
   const params = paramsDelCaso()
   const calculadas = tarifasCalculadas(lineas, params, TARIFAS_DEL_CASO)
+  const precios = preciosDeLasOpciones(lineas, params)
   return renderToStaticMarkup(React.createElement(TarifasPorPasos, {
     tarifas: calculadas,
     servicios: [{ grupo: 'hotel', tipo: 'hotel', nombre: 'Hotel en San Andrés', opciones: ['h-eco', 'h-rec', 'h-pre'], estado: 'incluido', lugar: 'San Andrés', fecha: null, candidatas: ['h-eco', 'h-rec', 'h-pre'] }],
     iguales: [], opcionales: [], noVan: [],
     nombreDeOpcion: (id: string) => NOMBRES_DEL_CASO[id] ?? id,
     detalleDeOpcion: () => null,
-    precioDeOpcion: () => 0,
+    precioDeOpcion: (id: string) => precios.get(id)?.precio ?? 0,
     margenPct: 15, pisoPct: 12, avisoPct: 12,
     editable: true, ocupado: false,
     autorizacion: { bloquea: true, dueno: 'Gerente', esDueno: false, vigente: null, perdida: false, pedido: null, disponible: true },

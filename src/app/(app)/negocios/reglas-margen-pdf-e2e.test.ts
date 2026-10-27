@@ -130,6 +130,8 @@ async function generar(conTarifas: boolean) {
   captura.props = null
   const r = (await generateCotizacionPDF(COT, { vistaPrevia: true })) as { success: boolean; error?: string; pdf?: string }
   if (!r.success) throw new Error(r.error)
+  // Para las capturas del PR: con `PDF_REGLAS_SALIDA=<carpeta>`, el PDF de verdad.
+  if (process.env.PDF_REGLAS_SALIDA) (await import('node:fs')).writeFileSync(`${process.env.PDF_REGLAS_SALIDA}/pdf-${conTarifas ? 'tarifas' : 'lista'}.pdf`, Buffer.from(r.pdf!, 'base64'))
   return { props: captura.props as CotizacionPDFProps, texto: textoDelPDF(Buffer.from(r.pdf!, 'base64')) }
 }
 
@@ -166,7 +168,7 @@ describe('sin tarifas: la lista del documento', () => {
   it('los descuentos sobre el total y el descuento del hotel salen con su descripción', () => {
     expect(r.props.descuentosTotal?.map(d => d.descripcion)).toEqual(['Alianza fondo de empleados X', 'Cliente recurrente'])
     const hotel = (r.props.items as LineaDoc[]).find(l => /Arena/i.test(l.nombre))!
-    expect(hotel.nota).toMatch(/^Descuento · Reserva esta semana: −\$\d/)
+    expect(hotel.nota).toMatch(/^Descuento · Reserva esta semana: –\$\d/)
     expect(r.texto).toContain('Alianza fondo de empleados X')
     expect(r.texto).toContain('Cliente recurrente')
     expect(r.texto).toContain('Reserva esta semana')

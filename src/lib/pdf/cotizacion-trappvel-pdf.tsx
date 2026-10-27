@@ -1536,7 +1536,7 @@ export default function CotizacionTrappvelPDF({
       {descuentosDelTotal.map((d, k) => (
         <View key={`descuento-${k}`} style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, width: 230 }}>{d.descripcion}</Text>
-          <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{`−${pesos(d.valor)}`}</Text>
+          <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{`–${pesos(d.valor)}`}</Text>
         </View>
       ))}
       {!general && iva > 0 && descuentosDelTotal.length === 0 && (
@@ -1811,7 +1811,7 @@ export default function CotizacionTrappvelPDF({
                       {b.descuentos.map((d, k) => (
                         <View key={`tarifa-${i}-descuento-${k}`} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
                           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.texto, flex: 1, paddingRight: 8 }}>{d.descripcion}</Text>
-                          <Text style={{ fontSize: 7.5, color: C.tinta }}>{`−${pesos(d.valor)}`}</Text>
+                          <Text style={{ fontSize: 7.5, color: C.tinta }}>{`–${pesos(d.valor)}`}</Text>
                         </View>
                       ))}
                     </View>
@@ -1974,7 +1974,7 @@ export default function CotizacionTrappvelPDF({
               )}
               {sumaDescuentos > 0 && (
                 <Text style={{ fontSize: 7.5, color: C.gris, marginTop: epp.fino }}>
-                  {`Antes de los descuentos sobre el total (−${pesos(sumaDescuentos)}).`}
+                  {`Antes de los descuentos sobre el total (–${pesos(sumaDescuentos)}).`}
                 </Text>
               )}
             </View>

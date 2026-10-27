@@ -453,7 +453,7 @@ const pesos = (v: number) => `$${Math.round(v).toLocaleString('es-CO')}`
 
 /** «Descuento por cierre esta semana: −$120.000», la línea que ve el cliente bajo su hotel. */
 export function textoDescuentoDeLinea(motivo: string, valor: number): string {
-  return `Descuento · ${motivo}: −${pesos(valor)}`
+  return `Descuento · ${motivo}: –${pesos(valor)}`
 }
 
 /** «Colchón $60.000 por tiquete · 2 tiquetes internacionales», la nota de la tarjeta del vuelo. */
