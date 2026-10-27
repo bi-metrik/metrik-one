@@ -1,0 +1,28 @@
+{
+  "_fuente": "Respuesta SIMULADA: la misma oferta de Aliados, pero el último ícono es un dibujo que el modelo no supo leer (un escudo con una estrella). Debe quedar sin identificar y el seguro médico NO se marca.",
+  "es_oferta_de_hotel": true,
+  "hotel": "Hotel Cartagena Dubai",
+  "zona": "Bocagrande",
+  "noches": 3,
+  "habitacion": "Estandar -Standar",
+  "plan_alimentacion": "(P.A.E) Desayuno, Almuerzo y Cena",
+  "temporada": "Baja | Regular",
+  "tarifa_promo": true,
+  "compra_antes_de": "2027-03-31",
+  "moneda": "COP",
+  "precios_por_persona": [
+    { "acomodacion": "triple", "precio": 1649915 },
+    { "acomodacion": "doble", "precio": 1668902 },
+    { "acomodacion": "sencilla", "precio": 2548649 }
+  ],
+  "nino": { "precio": 1365104, "edad_min": 2, "edad_max": 11 },
+  "iconos": [
+    { "descripcion": "tiquete de avión", "categoria": "tiquete_aereo", "seguro": true },
+    { "descripcion": "tenedor y cuchillo", "categoria": "alimentacion", "seguro": true },
+    { "descripcion": "lancha", "categoria": "planes_tours", "seguro": true },
+    { "descripcion": "bus", "categoria": "traslados", "seguro": true },
+    { "descripcion": "escudo con una estrella", "categoria": "sin_identificar", "seguro": false }
+  ],
+  "texto_incluye": null,
+  "incluye_por_texto": []
+}
