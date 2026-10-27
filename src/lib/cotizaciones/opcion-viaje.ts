@@ -217,7 +217,8 @@ function comoLectura(l: unknown): ItemConLectura {
 }
 
 // «Otro servicio» (asistencia médica, seguro) va al final del viaje, antes de las líneas sueltas.
-const RANGO_TIPO: Record<TipoRanura, number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
+// El paquete de bloqueo (hotel + vuelo del operador) va primero: es el viaje entero.
+const RANGO_TIPO: Record<TipoRanura, number> = { paquete: -1, vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
 
 /** «2026-11-09 06:05» del primer tramo de ida, para ordenar. `--MM-DD` va después de lo fechado. */
 function claveDeSalida(item: ItemConLectura): string | null {
@@ -282,6 +283,7 @@ export const NOMBRE_TIPO_BLOQUE: Record<TipoRanura | 'otro', string> = {
   traslado: 'Traslado',
   actividad: 'Actividad',
   otro: 'Otro',
+  paquete: 'Paquete',
 }
 
 /** Re-export para la pantalla: el equipaje largo del documento. */
