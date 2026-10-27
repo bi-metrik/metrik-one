@@ -14,7 +14,7 @@ import NegocioDetailClient from '@/app/(app)/negocios/[id]/negocio-detail-client
 import { cargarVistaNegocio } from '@/app/(app)/negocios/[id]/vista-negocio'
 import { ProveedorTotalVivo } from '@/app/(app)/negocios/total-vivo'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
-import { leerModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
+import type { ModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import { leerLineasPorTipo } from '@/lib/cotizaciones/por-pasos-datos'
 import { estadoPorPasos } from '@/lib/cotizaciones/por-pasos'
@@ -241,14 +241,16 @@ export default async function CotizacionNegocioPage({
   let fechasViaje: { inicio: string | null; fin: string | null } | null = null
   // El nivel de detalle del documento: la hoja del cliente de cada opción lo respeta.
   let nivelDetalle: NivelDetalle | null = null
+  let modalidadViaje: ModalidadDelViaje | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
-    const { viaje, error: errViaje } = await leerViajeDelNegocio(sbViaje, id)
+    const { viaje, error: errViaje, modalidad } = await leerViajeDelNegocio(sbViaje, id)
     if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
     composicionViaje = viaje.composicion
     destinoViaje = viaje.destino
     fechasViaje = viaje.fechas
     nivelDetalle = viaje.nivelDetalle
+    modalidadViaje = modalidad ?? null
   } catch {
     // Sin composición del viaje la pantalla la pide por línea.
   }
@@ -316,19 +318,9 @@ export default async function CotizacionNegocioPage({
   // Solo con la forma por pasos: el pedido de autorización que espera al dueño. Apagada, ninguna
   // consulta de más (la carga de la página es la de siempre).
   const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
-  // Viaje en bloqueo (brief del 2026-10-27): solo con la forma por pasos, una consulta estrecha. Si no
-  // se puede leer, A medida: la pantalla de siempre (el servidor lo vuelve a exigir en cada acción).
-  let bloqueo: { operador: string | null } | null = null
-  if (estadoPasos.encendido) {
-    try {
-      const { supabase: sbModalidad } = await getWorkspace()
-      const { modalidad, error: errModalidad } = await leerModalidadDelViaje(sbModalidad, id)
-      if (errModalidad) console.warn('[cotizacion] no se pudo leer la modalidad del viaje:', errModalidad)
-      bloqueo = modalidad.bloqueo ? { operador: modalidad.operador } : null
-    } catch {
-      // Sin respuesta, A medida.
-    }
-  }
+  // Viaje en bloqueo (brief del 2026-10-27): sale de la misma lectura del viaje, sin consultas de más, y
+  // solo cuenta con la forma por pasos. Sin respuesta, A medida (el servidor lo exige en cada acción).
+  const bloqueo = estadoPasos.encendido && modalidadViaje?.bloqueo ? { operador: modalidadViaje.operador } : null
   // La carga del negocio que pinta el marco (cotización de viaje): se lee UNA vez, aquí, y de ella
   // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
   // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.

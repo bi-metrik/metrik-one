@@ -47,7 +47,7 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '- precios_por_persona: UNA entrada por cada acomodación que aparezca con su precio (sencilla, doble, triple,',
   '  cuadruple). Solo las que aparezcan: si no hay cuádruple, no la pongas. precio = el número sin puntos ni símbolo.',
   '  No confundas los botones de «+ N PAX» con precios.',
-  '- nino: el precio por niño (CHD, menor) y su rango de edad (ej. «CHD 02-11 años» → edad_min 2, edad_max 11). null si',
+  '- nino: el precio por niño (CHD, menor) y su rango de edad en años (ej. «CHD 02-11» → edad_min 2, edad_max 11). null si',
   '  no aparece.',
   '- iconos: CADA ícono de la fila de servicios incluidos (pequeños dibujos junto al hotel), en orden. Para cada uno:',
   '  descripcion (qué dibujo es, en pocas palabras) y categoria, una de: tiquete_aereo (avión, tiquete, pasabordo),',

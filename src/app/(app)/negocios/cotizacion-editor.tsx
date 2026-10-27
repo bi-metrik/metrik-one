@@ -3812,7 +3812,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               operador={bloqueo?.operador ?? null}
               pasajeros={composicionViaje ? { adultos: composicionViaje.adultos, ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null}
               vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
-              onCambio={refrescar}
+              onCambio={() => refrescar()}
               onEliminar={pp.onEliminar}
             />
           )
