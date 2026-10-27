@@ -206,6 +206,16 @@ export interface CorteReverso {
   aviso_cliente?: { estado: 'enviado' | 'fallido' | 'retenido' | 'vencido'; at: string; error?: string }
 }
 
+/**
+ * ¿El plan tiene un corte por reverso VIGENTE (hecho o por hacer en Valida)? Mientras lo tenga, nada se
+ * le cobra solo a la tarjeta (paso 7b): cobrarle a quien reversó invita a otro contracargo (Mik,
+ * 2026-10-27). El pago de reactivación abre un ciclo nuevo, que reemplaza `valida_plan` y lo levanta.
+ */
+export function corteVigente(configExtra: Record<string, unknown> | null | undefined): boolean {
+  const e = planDeConfig(configExtra)?.reversado?.corte?.estado
+  return e === 'pendiente' || e === 'anulado'
+}
+
 /** El plan suspendido por el reverso de su pago (corte hecho en Valida), o `null`. */
 export function planSuspendidoPorReverso(
   configExtra: Record<string, unknown> | null | undefined,

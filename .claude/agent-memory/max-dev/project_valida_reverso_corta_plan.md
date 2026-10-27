@@ -20,6 +20,7 @@ MéTRIK NO corta. «Otro pago válido» = FIFO sigue cubriendo la cuota, o un ev
   verificó con un cobro sin plan.
 - Correo al cliente detrás de `AVISO_REVERSO_CLIENTE_APROBADO=false` (prod lo retiene; preview lo manda). Solo el
   mismo día de Bogotá del corte; después queda `vencido`.
-- Abierto: 7b sigue cargando la tarjeta la cuota SIGUIENTE aunque el plan esté cortado (la cortada cuenta como
-  pagada porque el anulado conserva `fecha`). Decisión de Términos, no se tocó.
+- 7b NO carga la tarjeta mientras `corteVigente` (pendiente/anulado), ni la reversada ni la siguiente (Mik,
+  27-oct: invita otro contracargo). OJO: el `pagadas` de 7b sigue contando el anulado con `fecha` como pagado;
+  lo que lo frena es la guarda por plan. La mora/Pagos (FIFO, `mis_cobros_de_servicio`) ya lo cuenta no pagado.
 - Ver [[project-epayco-reversos]].

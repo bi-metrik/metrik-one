@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { crearDoble, type Tablas } from '../../../test/tablas-doble'
 import type { PeticionValida, ResultadoValida } from '@/lib/valida-api/cliente-nucleo'
-import type { CorreoSaliente } from '@/lib/cobros/enlace-automatico-servidor'
+import type { CorreoSaliente, ResultadoEnvio } from '@/lib/cobros/enlace-automatico-servidor'
 import type { PasarelaAdapter, SolicitudEnlacePago } from '@/lib/suscripciones/pasarela/adapter'
 import type { CobroParaPago } from '@/lib/cobros/pago-en-linea'
 import type { EventoPasarela } from '@/lib/suscripciones/pasarela/adapter'
@@ -134,7 +134,7 @@ function correos() {
   return {
     cliente,
     interno,
-    enviarCliente: async (m: CorreoSaliente) => (cliente.push(m), { ok: true as const, id: 'm1' }),
+    enviarCliente: async (m: CorreoSaliente): Promise<ResultadoEnvio> => (cliente.push(m), { ok: true, id: 'm1' }),
     enviarInterno: async (m: { to: string; text: string }) => (interno.push(m), { ok: true as const }),
   }
 }
@@ -397,6 +397,24 @@ describe('reactivar: pagar el período', () => {
     expect(resumen.abiertos).toBe(1)
     expect(v.llamadas).toHaveLength(1)
     expect(planSuspendidoPorReverso(config(tablas))).toBeNull()
+  })
+
+  it('para la mora y la pestaña Pagos la cuota reversada NO cuenta como pagada; el pago de reactivación la cubre', async () => {
+    const { cuotasConEstado } = await import('@/lib/valida-cda/pago-pendiente')
+    const { db, tablas } = await reversar(base(), valida(OK_ANULADO))
+    // El mismo criterio de `mis_cobros_de_servicio`: anulado > sin fecha (programado) > pagado.
+    const leer = () =>
+      cuotasConEstado({
+        cuotas: [{ cuotaId: 'q1', numero: 1, tipo: 'mensual', monto: 150000, fechaVencimiento: '2026-10-22', concepto: null, enlacePagoUrl: null, enlacePagoExpira: null }],
+        cobros: tablas.cobros.map((c) => ({ monto: Number(c.monto ?? 0), estado: c.anulado_at ? ('anulado' as const) : c.fecha === null ? ('programado' as const) : ('pagado' as const) })),
+        hoy: '2026-10-27',
+        ahoraISO: AHORA.toISOString(),
+      })[0].estado
+    expect(leer()).toBe('vencida')
+    await enlaceDeReactivacion(PAGADOR, { db, adapterPara: () => pasarela().adapter, ahoraMs: AHORA.getTime() })
+    const recobroId = (config(tablas).valida_plan as { reversado: { recobro_cobro_id: string } }).reversado.recobro_cobro_id
+    ;(tablas.cobros.find((c) => c.id === recobroId) as Record<string, unknown>).fecha = '2026-10-27'
+    expect(leer()).toBe('pagada')
   })
 
   it('sin suspensión no hay nada que pagar', async () => {
