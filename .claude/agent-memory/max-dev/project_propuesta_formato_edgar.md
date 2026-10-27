@@ -22,5 +22,10 @@ eso se reescribieron). QA en `proyectos/trappvel/clarity/qa/2026-10-27_pdf-forma
 - QA sin base ni cuota: fixture `test/propuesta-curazao.ts` (forma de la COT-2026-0004) y un `*.test.ts` temporal
   que llama `pdfDePropuestaHtml` con `CHROMIUM_EJECUTABLE=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome`.
   Este subagente no tuvo MCP de Supabase: la COT real no se pudo leer.
+- Destinatario (ajuste de Mauricio del mismo día): el CONTACTO del negocio (`contactos(nombre)` en la misma
+  consulta del negocio), con nombre propio (`destinatario.ts`: mayúsculas → «Ricardo Peñuela», partículas en
+  minúscula, mixto se respeta) y la empresa solo si `tipo_persona <> 'natural'`. Aviso «Propuesta de viaje para …»
+  y cuarta tarjeta «Cotizada para»; sin contacto vuelve a pasajeros / «Incluye». La empresa de relleno «Cliente»
+  de la acción NO cuenta. El doble `test/cotizacion-pdf-doble.ts` ya proyecta `empresas(` y `contactos(` del negocio.
 - Con 3 versiones (Europa) la hoja de precios ocupa 2 hojas; con 2 cabe en una.
 - Ver [[propuesta-motor-html-h33]] y [[fotos-catalogo]].

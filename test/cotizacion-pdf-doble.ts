@@ -62,6 +62,15 @@ function constructor(tabla: string) {
     if (tabla === 'negocios' && columnas.includes('lineas_negocio(etapas_negocio(')) {
       salida.lineas_negocio = f.linea_id ? { etapas_negocio: etapasDe(f.linea_id) } : null
     }
+    // El cliente del negocio para el PDF (`cotizacion-pdf-actions.ts`): su empresa y su contacto.
+    if (tabla === 'negocios' && columnas.includes('empresas(')) {
+      const e = (tablas.empresas ?? []).find(x => x.id === f.empresa_id)
+      salida.empresas = e ? { ...e } : null
+    }
+    if (tabla === 'negocios' && columnas.includes('contactos(')) {
+      const c = (tablas.contactos ?? []).find(x => x.id === f.contacto_id)
+      salida.contactos = c ? { nombre: c.nombre ?? null } : null
+    }
     if (tabla === 'cotizaciones' && columnas.includes('negocio_envio:negocios')) {
       const n = (tablas.negocios ?? []).find(x => x.id === f.negocio_id)
       salida.negocio_envio = n
@@ -73,7 +82,7 @@ function constructor(tabla: string) {
       const p = (tablas.fotos_perfiles ?? []).find(x => x.id === f.proveedor_id)
       salida.ficha = p ? { tipo: p.tipo, clave: p.clave } : null
     }
-    if (columnas.includes('empresas(')) salida.empresas = null
+    if (columnas.includes('empresas(') && salida.empresas === undefined) salida.empresas = null
     if (columnas.includes('oportunidades(')) salida.oportunidades = null
     return salida
   }

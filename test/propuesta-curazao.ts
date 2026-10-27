@@ -161,4 +161,7 @@ export const ENTRADA_CURAZAO: EntradaModeloPropuesta = {
   menoresAutorizados: false,
   anticipo: null,
   asesora: { nombre: 'Asesora de Ejemplo', whatsapp: null },
+  // El contacto del negocio, guardado en mayúsculas como el de la COT-2026-0004 real; la empresa
+  // es persona natural con el mismo nombre.
+  cliente: { contacto: 'ANDRÉS DE LA TORRE', empresa: 'ANDRÉS DE LA TORRE', tipoPersona: 'natural' },
 }

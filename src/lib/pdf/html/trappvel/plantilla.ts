@@ -33,6 +33,7 @@ import type {
   TrayectoDoc,
 } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import { notaDeFila } from '@/lib/viaje/asi-puedes-pagar'
+import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
 import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
 
@@ -314,11 +315,14 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const destinos = m.ruta.paradas.length > 0
     ? m.ruta.paradas.map((x) => `${x.ciudad}${x.noches ? ` (${x.noches}N)` : ''}`).join(' · ')
     : p.destino
+  // A quién va dirigida (2026-10-27): el contacto del negocio, como «Titular de la reserva» en el
+  // formato de Edgar. Sin contacto, la cuarta tarjeta vuelve a «Incluye» y el aviso, a los pasajeros.
+  const para = p.destinatario ? textoDelDestinatario(p.destinatario) : null
   const datos = [
     ['Duración', p.duracion],
     ['Destinos', destinos],
     ['Viajeros', p.viajeros],
-    ['Incluye', resumenIncluye(m)],
+    para ? ['Cotizada para', para] : ['Incluye', resumenIncluye(m)],
   ].filter((d): d is [string, string] => Boolean(d[1]))
   const fotos = fotosDePortada(m, r)
   const collage = fotos.length > 0
@@ -327,7 +331,7 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
   // El aviso blanco va donde Edgar pone la caja verde de «servicios confirmados»: aquí, el texto
   // revisado del cliente. Sin texto, no hay aviso.
   const aviso = p.intro
-    ? `<div class="aviso"><span class="ok">${icono('pin')}</span><b>${esc(quienes ? `Propuesta de viaje para ${quienes}` : 'Su propuesta de viaje')}</b><p>${esc(p.intro)}</p></div>`
+    ? `<div class="aviso"><span class="ok">${icono('pin')}</span><b>${esc(para ? `Propuesta de viaje para ${para}` : quienes ? `Propuesta de viaje para ${quienes}` : 'Su propuesta de viaje')}</b><p>${esc(p.intro)}</p></div>`
     : ''
   const largo = p.titulo.length > 46
   return [

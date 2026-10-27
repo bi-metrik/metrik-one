@@ -122,7 +122,7 @@ describe('portada como la de Edgar', () => {
 
   it('el aviso lleva el texto revisado; sin él, no hay aviso', () => {
     const h = html(ENTRADA_CURAZAO)
-    expect(texto(h)).toContain('Propuesta de viaje para Ana y Luis 5 noches en Willemstad con todo incluido.')
+    expect(texto(h)).toContain('Propuesta de viaje para Andrés de la Torre 5 noches en Willemstad con todo incluido.')
     const m = modeloDePropuesta(ENTRADA_CURAZAO)
     m.portada.intro = null
     const sinIntro = htmlDePropuesta(m, RECURSOS)
@@ -134,11 +134,41 @@ describe('portada como la de Edgar', () => {
     const h = html(ENTRADA_CURAZAO)
     expect(h).toContain('<div class="facts" style="grid-template-columns:repeat(4,1fr)">')
     expect(texto(h.slice(h.indexOf('<div class="facts"'), h.indexOf('<div class="viajeros"')))).toBe(
-      ' Duración 6 días · 5 noches Destinos Willemstad (5N) Viajeros 2 adultos y 1 niño Incluye Vuelos, 5 noches y 2 traslados ',
+      ' Duración 6 días · 5 noches Destinos Willemstad (5N) Viajeros 2 adultos y 1 niño Cotizada para Andrés de la Torre ',
     )
     expect(h).toContain('<div class="vj"><i>AN</i><b>Ana</b></div>')
     expect(h).toContain('<div class="vj"><i>LU</i><b>Luis</b></div>')
     expect(texto(h)).not.toContain('Tomás')
+  })
+})
+
+describe('a quién va dirigida (Mauricio, 2026-10-27)', () => {
+  const facts = (h: string) => texto(h.slice(h.indexOf('<div class="facts"'), h.indexOf('<div class="viajeros"')))
+  const aviso = (h: string) => texto(h.slice(h.indexOf('<div class="aviso"'), h.indexOf('<div class="facts"')))
+
+  it('con contacto: el aviso y la cuarta tarjeta lo nombran con nombre propio, no a los pasajeros', () => {
+    const h = html(ENTRADA_CURAZAO)
+    expect(aviso(h)).toContain('Propuesta de viaje para Andrés de la Torre')
+    expect(aviso(h)).not.toContain('Ana y Luis')
+    expect(facts(h)).toContain('Cotizada para Andrés de la Torre')
+    expect(facts(h)).not.toContain('Incluye')
+    // Persona natural con el mismo nombre: la empresa no se repite.
+    expect(texto(h)).not.toMatch(/ANDRÉS|Andrés de la Torre · /)
+  })
+
+  it('persona jurídica: el contacto y la empresa, tal como está guardada', () => {
+    const h = html({ ...ENTRADA_CURAZAO, cliente: { contacto: 'ana gómez', empresa: 'Viajes XYZ S.A.S.', tipoPersona: 'juridica' } })
+    expect(aviso(h)).toContain('Propuesta de viaje para Ana Gómez · Viajes XYZ S.A.S.')
+    expect(facts(h)).toContain('Cotizada para Ana Gómez · Viajes XYZ S.A.S.')
+  })
+
+  it('sin contacto: el aviso vuelve a los pasajeros y la cuarta tarjeta a «Incluye»', () => {
+    const h = html({ ...ENTRADA_CURAZAO, cliente: { contacto: null, empresa: 'Viajes XYZ S.A.S.', tipoPersona: 'juridica' } })
+    expect(aviso(h)).toContain('Propuesta de viaje para Ana y Luis')
+    expect(facts(h)).toContain('Incluye Vuelos, 5 noches y 2 traslados')
+    expect(facts(h)).not.toContain('Cotizada para')
+    const sinCliente = html({ ...ENTRADA_CURAZAO, cliente: undefined })
+    expect(facts(sinCliente)).toContain('Incluye Vuelos, 5 noches y 2 traslados')
   })
 })
 
