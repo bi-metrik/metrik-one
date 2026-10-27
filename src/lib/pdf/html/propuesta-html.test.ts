@@ -57,7 +57,7 @@ describe('prepararPropuestaHtml', () => {
     expect(html).not.toMatch(/src="(?!data:)/)
     // 12 hoteles con foto + portada + ciudades del banco (Madrid y París).
     expect((html.match(/data:image\/jpeg;base64/g) ?? []).length).toBeGreaterThanOrEqual(13)
-    expect(html).toContain("font-family:'Montserrat'")
+    expect(html).toContain("font-family:'Poppins'")
     // Meta de peso: el prototipo pesaba 8,4 MB por fotos de 1280 px.
     expect(Buffer.byteLength(html)).toBeLessThan(3_000_000)
     expect(pie).toContain('COT-2026-0026')
@@ -71,6 +71,7 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
   /** El HTML de una sección, por su título. */
   const seccion = (html: string, titulo: string) => {
     const i = html.indexOf(`>${titulo}<`)
+    if (i < 0) throw new Error(`sin la sección ${titulo}`)
     return html.slice(i, html.indexOf('</section>', i))
   }
 
@@ -84,19 +85,20 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
     const planes = seccion(html, 'Planes para los días libres')
     expect((planes.match(/<div class="img" style="background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(8)
     expect(planes).not.toContain('sinfoto')
-    // «Lo que van a vivir»: Barcelona y Ámsterdam ya no van con el degradado.
-    const vivir = seccion(html, 'Lo que van a vivir')
-    expect(vivir).not.toContain('sinfoto')
+    // Barcelona y Ámsterdam (sin banco) llevan la del catálogo el primer día en la ciudad.
+    const dias = seccion(html, 'Itinerario día a día')
+    expect((dias.match(/class="ph" style="background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(4)
     // Los créditos de Commons, como el prototipo.
     expect(html).toContain('Park Güell, Isiwal (Wikimedia Commons, CC BY-SA 3.0)')
     expect(html).toContain('Casa Batlló, Txllxt TxllxT (Wikimedia Commons, CC BY-SA 4.0)')
     expect(Buffer.byteLength(html)).toBeLessThan(3_000_000)
   })
 
-  it('sin catálogo, los planes van sin imagen y las ciudades sin banco con el degradado (como antes)', { timeout: 30_000 }, async () => {
+  it('sin catálogo, los planes van sin imagen y las ciudades sin banco van sin foto en su día', { timeout: 30_000 }, async () => {
     const { html } = await prepararPropuestaHtml(entradaComoLaAccion(), { marca: 'A', logoUrl: null, fotoDeCiudad: bancoComoFotoPDF })
     expect(seccion(html, 'Planes para los días libres')).not.toContain('class="img')
-    expect(seccion(html, 'Lo que van a vivir')).toContain('sinfoto')
+    // Solo Madrid y París tienen banco.
+    expect((seccion(html, 'Itinerario día a día').match(/class="ph"/g) ?? []).length).toBeLessThan(4)
   })
 
   it('con foto en algunos planes, los demás llevan el degradado; el hotel sin foto en la opción toma la que subió la asesora', { timeout: 30_000 }, async () => {
@@ -131,7 +133,7 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
     expect(modelo.hoteles.flatMap((c) => c.opciones).every((o) => !o.foto)).toBe(true)
     expect(html).not.toContain('Hotel, Autora (Wikimedia Commons, CC BY 4.0)')
     // Ningún hotel con foto: las tarjetas van sin imagen, como antes.
-    expect(seccion(html, 'Dónde duermen')).not.toContain('class="img')
+    expect(seccion(html, 'Hospedaje')).not.toContain('class="img')
   })
 
   it('la muestra: solo los 3 hoteles con foto subida la llevan; los demás, el degradado', { timeout: 30_000 }, async () => {
@@ -143,7 +145,7 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
     })
     const conFoto = modelo.hoteles.flatMap((c) => c.opciones).filter((o) => o.foto).map((o) => o.hotel)
     expect(conFoto).toEqual(['Catalonia Puerta del Sol', 'H10 Metropolitan', 'Pullman Paris Tour Eiffel'])
-    const hoteles = seccion(html, 'Dónde duermen')
+    const hoteles = seccion(html, 'Hospedaje')
     expect((hoteles.match(/class="img" style="background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(3)
     expect((hoteles.match(/class="img sinfoto"/g) ?? []).length).toBe(9)
     // Le Meurice tiene en el catálogo una de Commons: ni la foto ni su crédito.
@@ -176,7 +178,7 @@ describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => 
   it('un hotel no lleva una extra automática (sin elegir): ni la foto ni su crédito', { timeout: 60_000 }, async () => {
     const { html } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opciones(CATALOGO_EUROPA_BIBLIOTECA))
     expect(html).not.toContain(CREDITO_EXTRA_HOTEL_AUTOMATICA)
-    const hoteles = html.slice(html.indexOf('>Dónde duermen<'), html.indexOf('</section>', html.indexOf('>Dónde duermen<')))
+    const hoteles = html.slice(html.indexOf('>Hospedaje<'), html.indexOf('</section>', html.indexOf('>Hospedaje<')))
     expect((hoteles.match(/class="img mosaico n2"/g) ?? []).length).toBe(2)
   })
 

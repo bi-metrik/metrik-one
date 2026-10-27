@@ -1,200 +1,188 @@
 /**
- * Estilos e iconos de la propuesta de Trappvel, copiados del prototipo aprobado (v5,
- * `proyectos/trappvel/clarity/qa/2026-10-13_prueba-europa/ideal/doc.html`). No se reescriben
- * a mano: si el prototipo cambia, se vuelve a copiar. Lo único cambiado es el fondo del
- * encabezado de la primera hoja, que ahora llega por la foto de la portada.
+ * Estilos de la propuesta de Trappvel: el sistema visual del formato que mandó Edgar Alarcón el
+ * 2026-10-14 (`proyectos/trappvel/clarity/docs/entrada/formato-edgar/`, carta, Inter + Poppins),
+ * decisión de Mauricio del 2026-10-27. Colores y medidas sacados del PDF de Edgar por muestreo de
+ * píxeles (110 ppp): rosa #e6197a, morado #7b2fbe, turquesa #1ca2b8, tinta #1f2340, gris #6b7088,
+ * tarjetas #fdf2f7 con borde #f7dce9, líneas #ece7ef y la banda del pie #1b1f3b → #1e2e5c.
+ *
+ * Se prueban por contenido en `plantilla.test.ts` (saltos de hoja: `.nobr`, `.sh`, `.tf`).
  */
 
 export const CSS_PROPUESTA = `
-@page { size: A4; margin: 11mm 12mm 16mm; }
-:root { --ink:#1f1a2b; --mute:#6a6478; --line:#e6e1ec; --soft:#f4f0f7; --navy:#2b1840; --acc:#e63380; --tq:#1fa7bd; --grad:linear-gradient(90deg,#e63380,#8b4fa0 55%,#1fa7bd); --e:#1a93a8; --r:#e63380; --p:#7a4fa8; }
+@page { size: Letter; margin: 6mm 9mm 14mm; }
+:root { --ink:#1f2340; --mute:#6b7088; --line:#ece7ef; --rosa:#e6197a; --morado:#7b2fbe; --tq:#1ca2b8; --suave:#fdf2f7; --borde:#f7dce9; --navy:#1b1f3b; --grad:linear-gradient(90deg,#e6197a,#8a2cb5 50%,#1ca2b8); --e:#1a93a8; --r:#e6197a; --p:#7b2fbe; }
 * { box-sizing: border-box; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { margin:0; font-family: Inter, sans-serif; color: var(--ink); font-size: 9.6pt; line-height: 1.45; }
-h1,h2,h3,.mont { font-family: Montserrat, sans-serif; }
-h2 { font-size: 17pt; margin: 0 0 2mm; color: var(--navy); letter-spacing: -.2px; }
-h2 + .lead { color: var(--mute); margin: 0 0 5mm; font-size: 10pt; }
-h3 { font-size: 11.5pt; margin: 0 0 1.5mm; color: var(--navy); }
-.sec { margin-top: 7mm; }
+body { margin:0; font-family: Inter, sans-serif; color: var(--ink); font-size: 8.3pt; line-height: 1.5; }
+h1,h2,h3,.pop { font-family: Poppins, Inter, sans-serif; }
+h2 { font: 700 15.7pt/1.1 Poppins, sans-serif; margin: 0; color: var(--ink); letter-spacing: -.1px; }
+h3 { font: 700 10.5pt/1.25 Poppins, sans-serif; margin: 0 0 1.5mm; color: var(--ink); }
+.sec { margin-top: 5.5mm; }
 .nobr { break-inside: avoid; }
-.kicker { font: 600 7.5pt Montserrat, sans-serif; letter-spacing: 1.6px; text-transform: uppercase; color: var(--acc); }
-.muted { color: var(--mute); }
-.small { font-size: 8.2pt; }
-.money { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tag { display:inline-block; font: 700 6.8pt Montserrat, sans-serif; letter-spacing: .8px; text-transform: uppercase; padding: .6mm 2mm; border-radius: 1mm; color:#fff; }
-.tE { background: var(--e); } .tR { background: var(--r); } .tP { background: var(--p); }
-.cE { color: var(--e); } .cR { color: var(--r); } .cP { color: var(--p); }
-/* Pastilla de aerolínea (brief 2026-10-08): redonda y más chica que la etiqueta de versión. */
-.al { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width: 5.6mm; height: 3.6mm; padding: 0 1.1mm; border-radius: 1.8mm; font: 700 6pt/1 Montserrat, sans-serif; letter-spacing: .2px; margin-right: 1.2mm; overflow: hidden; }
-
-/* Portada */
-.cover { width: 210mm; height: 297mm; position: relative; overflow: hidden; color: #fff; background: var(--navy); }
-.cover .mosaic { position:absolute; inset:0 0 auto 0; height: 168mm; display:grid; grid-template-columns: 1.3fr 1fr; grid-template-rows: 1fr 1fr; gap: 1.2mm; }
-.cover .mosaic div { background-size: cover; background-position: center; position: relative; }
-.cover .mosaic div:first-child { grid-row: span 2; }
-.cover .mosaic span { position:absolute; left: 3mm; bottom: 2.5mm; font: 600 6.5pt Montserrat; letter-spacing: 1.2px; text-transform: uppercase; text-shadow: 0 0 4px rgba(0,0,0,.7); }
-.cover .shade { position:absolute; left:0; right:0; top: 120mm; height: 50mm; background: linear-gradient(transparent, var(--navy)); }
-.cover .body { position:absolute; left: 16mm; right: 16mm; top: 150mm; }
-.cover .brand { position:absolute; top: 11mm; left: 15mm; } .cover .brand img { height: 10mm; display:block; filter: drop-shadow(0 0 2.5mm rgba(0,0,0,.55)); }
-.cover::after { content:""; position:absolute; left:0; right:0; bottom:0; height: 2.5mm; background: var(--grad); }
-.gbar { height: 1.2mm; width: 28mm; background: var(--grad); border-radius: 1mm; margin-bottom: 3mm; }
-.cover .code { position:absolute; top: 13mm; right: 16mm; font: 600 8pt Montserrat; letter-spacing: 1px; text-shadow: 0 0 6px rgba(0,0,0,.6); }
-.cover h1 { font-size: 27pt; line-height: 1.08; margin: 3mm 0 3mm; letter-spacing: -.5px; }
-.cover .para { font-size: 10.5pt; opacity: .9; max-width: 160mm; margin: 0; }
-.cover .facts { display:grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin-top: 8mm; border-top: 1px solid rgba(255,255,255,.25); padding-top: 4mm; }
-.cover .facts b { display:block; font: 600 6.8pt Montserrat; letter-spacing: 1.3px; text-transform: uppercase; opacity: .7; margin-bottom: 1mm; }
-.cover .facts div { font-size: 9.5pt; }
-.cover .who { position:absolute; left:16mm; right:16mm; bottom: 12mm; display:flex; justify-content: space-between; font-size: 8.3pt; opacity: .85; }
-
-/* Ruta */
-.route { display:flex; align-items: stretch; margin: 4mm 0 6mm; }
-.stop { flex: 1; text-align: center; position: relative; }
-.stop .dot { width: 9mm; height: 9mm; border-radius: 50%; margin: 0 auto 1.5mm; background: var(--navy); color:#fff; font: 700 8pt Montserrat; display:flex; align-items:center; justify-content:center; }
-.stop.home .dot { background: #fff; color: var(--navy); border: 2px solid var(--navy); }
-.stop .city { font: 700 9.5pt Montserrat; color: var(--navy); }
-.stop .when { font-size: 7.8pt; color: var(--mute); }
-.leg { flex: .9; display:flex; flex-direction: column; align-items:center; justify-content: flex-start; padding-top: 2mm; }
-.leg .bar { width: 100%; border-top: 2px dashed #9fb0bd; margin-bottom: 1mm; }
-.leg .bar.train { border-top: 3px solid #9fb0bd; }
-.leg .ico { font-size: 11pt; line-height: 1; }
-.leg .lbl { font-size: 7.2pt; color: var(--mute); text-align:center; line-height: 1.25; }
-.photo-row { display:grid; grid-template-columns: repeat(4,1fr); gap: 2mm; margin-bottom: 6mm; }
-.photo-row div { height: 30mm; border-radius: 1.5mm; background-size: cover; background-position: center; }
-
-/* Tarifas */
-.tarifas { display:grid; grid-template-columns: repeat(3, 1fr); gap: 3mm; }
-.tf { border: 1px solid var(--line); border-radius: 2.5mm; padding: 4mm 4mm 3mm; position: relative; }
-.tf.rec { border: 2px solid var(--r); box-shadow: 0 1mm 4mm rgba(230,51,128,.18); }
-.tf .name { font: 800 12pt Montserrat; }
-.tf .badge { position:absolute; top: -3mm; right: 4mm; }
-.tf .price { font: 800 17pt Montserrat; margin: 2mm 0 0; letter-spacing: -.4px; }
-.tf .pp { font-size: 7.8pt; color: var(--mute); margin-bottom: 3mm; }
-.tf .row { border-top: 1px solid var(--line); padding: 1.6mm 0; font-size: 8.4pt; }
-.tf .row b { display:block; font: 600 6.6pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: var(--mute); }
-.stars { color: #c9962a; letter-spacing: .5px; font-size: 7.5pt; }
-.flag { font-size: 7.6pt; color: #9a3412; }
-.igual { margin-top: 5mm; background: var(--soft); border-radius: 2.5mm; padding: 4mm 5mm; }
-.igual ul { margin: 1mm 0 0; padding-left: 4.5mm; columns: 2; column-gap: 8mm; }
-.igual li { margin-bottom: 1mm; break-inside: avoid; }
-
-/* Día a día */
-.day { display:grid; grid-template-columns: 22mm 1fr; gap: 4mm; padding: 2.6mm 0; border-bottom: 1px solid var(--line); break-inside: avoid; }
-.day .d { font: 800 15pt Montserrat; color: var(--navy); line-height: 1; }
-.day .d small { display:block; font: 600 7pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: var(--mute); margin-top: 1mm; }
-.day .t { font: 700 10pt Montserrat; color: var(--navy); margin-bottom: .8mm; }
-.day .t .city { color: var(--acc); font-weight: 600; font-size: 8pt; letter-spacing: 1px; text-transform: uppercase; margin-left: 2mm; }
-.ev { display:grid; grid-template-columns: 12mm 5mm 1fr; gap: 1mm; font-size: 8.8pt; margin: .5mm 0; }
-.ev .h { color: var(--mute); font-variant-numeric: tabular-nums; }
-.ev .i { text-align:center; }
-.opt3 { display:grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 1mm; font-size: 7.9pt; }
-.opt3 div { background: var(--soft); border-radius: 1.2mm; padding: 1.2mm 2mm; }
-.free { color: var(--mute); font-style: italic; font-size: 8.6pt; }
-.warnbox { background: #fdeef5; border-left: 3px solid var(--acc); padding: 1.5mm 3mm; font-size: 8.2pt; margin-top: 1mm; }
-
-/* Hoteles */
-.cityhead { display:flex; justify-content: space-between; align-items: baseline; margin: 3.5mm 0 1.8mm; border-bottom: 2px solid var(--navy); padding-bottom: 1mm; }
-.cityhead .mont { font: 800 13pt Montserrat; color: var(--navy); }
-.hotels { display:grid; grid-template-columns: repeat(3,1fr); gap: 3mm; break-inside: avoid; }
-.hc { border: 1px solid var(--line); border-radius: 2mm; overflow: hidden; font-size: 8.2pt; }
-.hc.rec { border: 2px solid var(--r); }
-.hc .img { height: 42mm; background-size: cover; background-position: center; position: relative; }
-.hc .img .tag { position:absolute; top: 2mm; left: 2mm; }
-.hc .img .zone { position:absolute; bottom: 0; left:0; right:0; padding: 4mm 2mm 1mm; font-size: 6.6pt; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.65)); }
-.hc .b { padding: 1.8mm 2.5mm 2mm; line-height: 1.35; }
-.hc .n { font: 700 9.2pt Montserrat; color: var(--navy); line-height: 1.2; }
-.hc .p { font: 800 10pt Montserrat; margin-top: 1.2mm; }
-.hc .ok { color: #2f6b47; } .hc .no { color: #9a3412; }
-
-/* Tablas */
-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
-th { text-align:left; font: 600 6.8pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: var(--mute); border-bottom: 1.5px solid var(--navy); padding: 1.5mm 1.5mm; }
-td { border-bottom: 1px solid var(--line); padding: 1.8mm 1.5mm; vertical-align: top; }
-td.r, th.r { text-align: right; }
-tr.sub td { background: var(--soft); font: 700 8pt Montserrat; color: var(--navy); }
-.fl { font: 700 8.5pt Montserrat; }
-.two { display:grid; grid-template-columns: 1fr 1fr; gap: 6mm; }
-.pay { display:grid; grid-template-columns: repeat(3,1fr); gap: 3mm; margin: 3mm 0 4mm; }
-.pay div { background: var(--soft); border-radius: 2mm; padding: 3mm; }
-.pay .v { font: 800 13pt Montserrat; color: var(--navy); }
-.list li { margin-bottom: 1.2mm; }
-.sign { margin-top: 8mm; display:flex; justify-content: space-between; align-items: flex-end; }
-.credits { font-size: 6.6pt; color: var(--mute); margin-top: 6mm; line-height: 1.35; }
-.ic { width: 3.6mm; height: 3.6mm; vertical-align: -0.7mm; color: var(--navy); }
-.leg .ic { width: 4.5mm; height: 4.5mm; color: #7d909e; }
-.ev .i .ic { color: var(--acc); }
-td .ic { color: var(--acc); margin-right: .8mm; }
-.cover .mosaic span { left:auto; bottom:auto; right: 3mm; top: 3mm; }
-.cover .mosaic div:first-child span { top: 26mm; left: 16mm; right: auto; }
-.cover .mosaic div:nth-child(2) span { top: auto; bottom: 3mm; }
-.opcs { display:grid; grid-template-columns: repeat(4,1fr); gap: 3mm; }
-.oc { border:1px solid var(--line); border-radius:2mm; overflow:hidden; font-size:8pt; break-inside: avoid; display:flex; flex-direction:column; }
-.oc .img { height: 30mm; background-size:cover; background-position:center; position:relative; }
-.oc .where { position:absolute; left:0; right:0; bottom:0; padding: 4mm 2mm 1mm; color:#fff; font: 600 6.5pt Montserrat; letter-spacing:1px; text-transform:uppercase; background: linear-gradient(transparent, rgba(0,0,0,.65)); }
-.oc .b { padding: 2mm 2.4mm; display:flex; flex-direction:column; flex:1; line-height:1.35; }
-.oc .n { font: 700 9pt Montserrat; color: var(--navy); margin-bottom: .8mm; }
-.oc .foot { margin-top:auto; padding-top: 1.5mm; display:flex; justify-content:space-between; align-items:baseline; }
-.oc .pr { font: 800 9pt Montserrat; color: var(--acc); }
-.cta { margin-top: 5mm; background: var(--navy); color:#fff; border-radius: 3mm; padding: 5mm 6mm; display:grid; grid-template-columns: 1.15fr 1fr; gap: 5mm; align-items:center; break-inside: avoid; }
-.ctt { font: 700 12.5pt Montserrat; line-height:1.25; margin: 1.5mm 0 2mm; }
-.btns { display:flex; flex-direction:column; gap: 2mm; }
-.btn { display:flex; justify-content:space-between; align-items:center; text-decoration:none; color:#fff; border-radius: 2mm; padding: 2.6mm 4mm; font-size: 8.2pt; }
-.btn b { font: 800 9.5pt Montserrat; }
-.bE { background: var(--e); } .bR { background: var(--r); box-shadow: 0 0 0 1.2px #fff inset; } .bP { background: var(--p); }
-.hls { display:grid; grid-template-columns: 1fr 1fr; gap: 4mm; margin-top: 2mm; }
-.hl { border-radius: 3mm; overflow:hidden; background: var(--soft); break-inside: avoid; }
-.hl .img { height: 62mm; background-size: cover; position: relative; }
-.hl .ct { position:absolute; left: 3mm; top: 3mm; background: rgba(43,24,64,.82); color:#fff; font: 700 6.8pt Montserrat; letter-spacing: 1.2px; text-transform: uppercase; padding: 1mm 2.2mm; border-radius: 1mm; }
-.hl .tx { padding: 3mm 4mm 4mm; border-top: 1.2mm solid; border-image: var(--grad) 1; }
-.hl h3 { font-size: 12.5pt; margin-bottom: 1mm; }
-.hl p { margin: 0; font-size: 9pt; color: var(--ink); }
-
-/* v5 · estilo Edgar: denso, corrido */
-.list { break-inside: avoid; }
 .brk { break-before: page; margin-top: 0; }
-.top { display:flex; justify-content:space-between; align-items:center; margin-bottom: 3mm; }
-.top .k { font: 600 7.2pt Montserrat; letter-spacing: 1.8px; text-transform: uppercase; color: var(--mute); }
-.top .k i { display:inline-block; width:1.8mm; height:1.8mm; border-radius:50%; background: var(--acc); margin-right: 1.8mm; vertical-align: .2mm; }
-.top img { height: 9mm; }
-.hero { position:relative; height: 66mm; border-radius: 3mm; overflow:hidden; background: var(--navy) center 55%/cover; }
-.hero::after { content:""; position:absolute; inset:0; background: linear-gradient(90deg, rgba(43,24,64,.88) 0%, rgba(43,24,64,.55) 55%, rgba(43,24,64,.05) 100%); }
-.hero .in { position:absolute; left: 7mm; right: 40mm; bottom: 6mm; z-index:1; color:#fff; }
-.hero .dt { font: 700 7.5pt Montserrat; letter-spacing: 1.6px; text-transform: uppercase; color:#ff9cc6; }
-.hero h1 { font-size: 23pt; line-height: 1.08; margin: 1.5mm 0 2mm; letter-spacing: -.4px; }
-.hero .sub { font-size: 9.5pt; opacity: .92; }
-.hero .ph { position:absolute; right: 3mm; bottom: 2.5mm; z-index:1; font: 600 6pt Montserrat; letter-spacing: 1px; text-transform: uppercase; color: rgba(255,255,255,.85); }
-.facts5 { display:grid; grid-template-columns: repeat(4,1fr); gap: 2.5mm; margin: 3.5mm 0 0; }
-.facts5 div { background: #fdf0f6; border: 1px solid #f7d3e4; border-radius: 2mm; padding: 2.4mm 3mm; font: 600 8.8pt Montserrat; color: var(--navy); line-height: 1.3; }
-.facts5 b { display:block; font: 700 6.4pt Montserrat; letter-spacing: 1.3px; text-transform: uppercase; color: var(--acc); margin-bottom: .8mm; }
-.intro { font-size: 10pt; margin: 4mm 0 0; }
-.sh { display:flex; align-items:center; gap: 3mm; margin: 0 0 3mm; break-after: avoid; }
-.sh .sq { width: 10mm; height: 10mm; border-radius: 2.2mm; background: linear-gradient(135deg,#e63380,#8b4fa0); display:flex; align-items:center; justify-content:center; flex: none; }
-.sh .sq .ic { width: 5.2mm; height: 5.2mm; color:#fff; vertical-align: 0; }
-.sh h2 { margin: 0; font-size: 15.5pt; }
-.sh .st { font-size: 8.4pt; color: var(--mute); margin-top: .3mm; }
-.route { margin: 3mm 0 4mm; padding: 3mm 2mm; background: var(--soft); border-radius: 2.5mm; }
-.hls { grid-template-columns: 1fr 1fr; gap: 2.5mm; margin-top: 0; }
-.hl { display:grid; grid-template-columns: 36mm 1fr; background: #fff; border: 1px solid var(--line); border-radius: 2.5mm; }
-.hl .img { height: auto; min-height: 40mm; background-position: center; }
-.hl .ct { white-space: nowrap; left: 1.5mm; top: auto; bottom: 1.5mm; font-size: 5.6pt; padding: .7mm 1.5mm; letter-spacing: .8px; }
-.hl .tx { border-top: 0; border-left: 1mm solid; border-image: linear-gradient(#e63380,#8b4fa0,#1fa7bd) 1; padding: 2.4mm 3mm; }
-.hl h3 { font-size: 10.5pt; }
-.hl p { font-size: 8.8pt; line-height: 1.38; }
-/* Día a día con línea de tiempo */
-.day { grid-template-columns: 13mm 1fr; gap: 3.5mm; padding: 1.4mm 0; border-bottom: 0; position: relative; }
-.day::before { content:""; position:absolute; left: 6.25mm; top: 0; bottom: 0; width: .5mm; background: #d9c6e6; }
-.day .d { width: 13mm; height: 13mm; border-radius: 50%; background: linear-gradient(135deg,#e63380,#8b4fa0); color:#fff; font: 800 12.5pt Montserrat; display:flex; flex-direction:column; align-items:center; justify-content:center; position: relative; z-index: 1; }
-.day .d small { color: #fff; opacity: .9; font-size: 4.9pt; letter-spacing: .3px; margin-top: .4mm; }
-.day .t { font-size: 10.5pt; margin-top: .8mm; }
-.pill { text-align:center; margin: 2.5mm 0 1.5mm; position: relative; break-after: avoid; }
-.pill::before { content:""; position:absolute; left:0; right:0; top: 50%; border-top: 1px solid var(--line); }
-.pill span { position: relative; display:inline-block; background: linear-gradient(90deg,#e63380,#8b4fa0); color:#fff; font: 700 7.2pt Montserrat; letter-spacing: 2px; text-transform: uppercase; padding: 1.2mm 5mm; border-radius: 5mm; }
-/* Hoteles más compactos */
-.hc .img { height: 29mm; }
-.cityhead { margin: 2.5mm 0 1.6mm; border-bottom-width: 1.5px; }
-.cityhead .mont { font-size: 11.5pt; }
-.oc .img { height: 25mm; }
-.credits { margin-top: 4mm; }
-.sign { margin-top: 5mm; }
+.muted { color: var(--mute); }
+.small { font-size: 7.6pt; }
+.money { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.caps { font: 700 6.8pt Inter, sans-serif; letter-spacing: 1.6px; text-transform: uppercase; color: var(--rosa); }
+.tag { display:inline-block; font: 800 6.4pt/1.3 Inter, sans-serif; letter-spacing: 1px; text-transform: uppercase; padding: .7mm 2mm; border-radius: 1mm; color:#fff; }
+.tE { background: var(--e); } .tR { background: var(--r); } .tP { background: var(--p); } .tN { background: var(--ink); }
+.cE { color: var(--e); } .cR { color: var(--r); } .cP { color: var(--p); } .cN { color: var(--ink); }
+.al { display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; min-width: 5.6mm; height: 3.6mm; padding: 0 1.1mm; border-radius: 1.8mm; font: 700 6pt/1 Inter, sans-serif; letter-spacing: .2px; margin-right: 1.2mm; overflow: hidden; vertical-align: -.6mm; }
+.ic { width: 3.6mm; height: 3.6mm; vertical-align: -0.7mm; }
+.sinfoto { background: linear-gradient(135deg,#e6197a,#8a2cb5 55%,#1ca2b8); }
+
+/* Encabezado de la primera hoja */
+.top { display:flex; justify-content:space-between; align-items:center; height: 9mm; margin-bottom: 3.5mm; }
+.top .k { font: 600 7.4pt Inter, sans-serif; letter-spacing: 2.2px; text-transform: uppercase; color: var(--mute); }
+.top .k i { display:inline-block; width:1.9mm; height:1.9mm; border-radius:50%; background: var(--rosa); margin-right: 3mm; vertical-align: .25mm; }
+.top img { height: 8.8mm; display:block; }
+.top b.pop { font-size: 15pt; color: var(--ink); }
+
+/* Portada: collage de fotos con banda oscura */
+.hero { position:relative; height: 57mm; border-radius: 3.7mm; overflow:hidden; background: linear-gradient(120deg,#1b1f3b,#3b2a6b 60%,#1e2e5c); }
+.hero .fotos { position:absolute; inset:0; display:grid; gap: .5mm; }
+.hero .fotos div { background-size: cover; background-position: center; }
+.hero::after { content:""; position:absolute; inset:0; background: linear-gradient(90deg, rgba(27,31,59,.72) 0%, rgba(27,31,59,.42) 55%, rgba(27,31,59,.18) 100%), linear-gradient(rgba(27,31,59,0) 40%, rgba(27,31,59,.35)); }
+.hero .in { position:absolute; left: 7.8mm; right: 10mm; bottom: 7mm; z-index:1; color:#fff; }
+.hero.conaviso .in { bottom: 14.5mm; }
+.hero .dt { font: 700 8.6pt Inter, sans-serif; letter-spacing: 2.6px; text-transform: uppercase; color: #fff; opacity: .92; }
+.hero h1 { font: 700 30pt/1.07 Poppins, sans-serif; margin: 1.6mm 0 1.6mm; letter-spacing: -.3px; }
+.hero h1.largo { font-size: 23pt; }
+.hero .sub { font-size: 9.6pt; opacity: .95; }
+.aviso { position:relative; z-index:2; margin: -8.8mm 3.9mm 0; background:#fff; border: 1px solid var(--line); border-radius: 2.8mm; box-shadow: 0 1.2mm 3.5mm rgba(31,35,64,.12); padding: 3.2mm 5mm 3.4mm 16.5mm; }
+.aviso .ok { position:absolute; left: 4.4mm; top: 50%; transform: translateY(-50%); width: 8.2mm; height: 8.2mm; border-radius: 50%; background: linear-gradient(135deg,#e6197a,#8a2cb5); display:flex; align-items:center; justify-content:center; }
+.aviso .ok .ic { width: 4.4mm; height: 4.4mm; color:#fff; vertical-align: 0; }
+.aviso b { display:block; font: 700 10.4pt/1.35 Inter, sans-serif; color: var(--ink); }
+.aviso p { margin: .6mm 0 0; font-size: 8.5pt; color: var(--mute); line-height: 1.45; }
+.facts { display:grid; gap: 3.2mm; margin-top: 4mm; }
+.facts div { background: var(--suave); border: 1px solid var(--borde); border-radius: 3.2mm; padding: 3.8mm 4mm 4.4mm; font: 600 9.6pt/1.42 Inter, sans-serif; color: var(--ink); }
+.facts b { display:block; font: 700 6.6pt Inter, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; color: var(--rosa); margin-bottom: 1.6mm; }
+.viajeros { display:grid; grid-template-columns: 1fr 1fr; gap: 3mm 3.2mm; margin-top: 3mm; }
+.vj { display:flex; align-items:center; gap: 3mm; border: 1px solid var(--line); border-radius: 6.5mm; height: 12.7mm; padding: 0 4mm 0 1.8mm; }
+.vj i { flex:none; width: 8.3mm; height: 8.3mm; border-radius: 50%; background: linear-gradient(135deg,#e6197a,#1ca2b8); color:#fff; font: 700 8pt Inter, sans-serif; font-style: normal; display:flex; align-items:center; justify-content:center; }
+.vj b { font: 700 8.3pt Inter, sans-serif; }
+
+/* Encabezado de sección: cuadro degradado con el ícono, título y bajada */
+.sh { display:flex; align-items:center; gap: 3.3mm; margin: 0 0 3mm; break-after: avoid; }
+.sh .sq { width: 10.6mm; height: 10.6mm; border-radius: 2.3mm; background: linear-gradient(135deg,#e6197a,#8a2cb5); display:flex; align-items:center; justify-content:center; flex: none; }
+.sh .sq .ic { width: 5.4mm; height: 5.4mm; color:#fff; vertical-align: 0; }
+.sh .st { font: 600 8.3pt/1.35 Inter, sans-serif; color: var(--mute); margin-top: .4mm; }
+
+/* Vuelos y tren: una tarjeta por trayecto */
+.vc { border: 1px solid var(--line); border-radius: 2.8mm; padding: 3.2mm 5.5mm 3.2mm 6mm; margin-bottom: 2.1mm; break-inside: avoid; }
+.vc .fila { display:grid; grid-template-columns: 39mm 25mm 1fr 25mm 26mm; align-items:center; }
+.vc .quien { display:flex; align-items:center; flex-wrap: wrap; gap: 1.2mm 2.4mm; }
+.vc .bd { display:inline-block; font: 800 6.6pt/1.3 Inter, sans-serif; letter-spacing: 1px; text-transform: uppercase; padding: 1.3mm 2.4mm; border-radius: 1mm; }
+.vc .num { font: 700 9.3pt Inter, sans-serif; color: var(--ink); }
+.vc .tags { display:flex; gap: 1mm; flex-wrap: wrap; width: 100%; }
+.vc .pt { text-align:center; line-height: 1.25; }
+.vc .pt .cod { font: 700 13.5pt/1.15 Poppins, sans-serif; color: var(--ink); }
+.vc .pt .cod.largo { font-size: 9.5pt; }
+.vc .pt .h { font: 700 9.75pt Inter, sans-serif; color: var(--rosa); margin-top: .5mm; }
+.vc .pt .f { font: 500 7.5pt Inter, sans-serif; color: var(--mute); margin-top: .3mm; }
+.vc .linea { padding: 0 2mm; text-align:center; }
+.vc .linea .l { font: 600 7.5pt Inter, sans-serif; color: var(--mute); margin-bottom: .8mm; min-height: 3mm; }
+.vc .linea .b { position: relative; height: .6mm; border-radius: .3mm; background: var(--grad); margin-right: 2mm; }
+.vc .linea .b .ic { position:absolute; right: -2.4mm; top: -1.5mm; width: 3.4mm; height: 3.4mm; color: #7b2fbe; transform: rotate(90deg); }
+.vc .der { text-align:center; line-height: 1.3; }
+.vc .der .k { font: 500 7.5pt Inter, sans-serif; color: var(--mute); }
+.vc .der .v { font: 800 8.6pt Inter, sans-serif; color: var(--ink); }
+.vc .nota { font-size: 7.1pt; color: var(--mute); margin-top: 1.6mm; line-height: 1.4; }
+
+/* Hospedaje: grilla de dos columnas */
+.hg { display:grid; grid-template-columns: 1fr 1fr; gap: 3.7mm; margin-bottom: 3.7mm; break-inside: avoid; }
+.hc { border: 1px solid var(--line); border-radius: 2.8mm; overflow: hidden; display:flex; flex-direction: column; break-inside: avoid; }
+.hc .img { height: 25mm; background-size: cover; background-position: center; position: relative; }
+.hc .img .tags { position:absolute; top: 2.4mm; left: 3.2mm; display:flex; gap: 1mm; flex-wrap: wrap; }
+.hc .img .stars { position:absolute; left: 3.2mm; bottom: 3mm; background: rgba(31,35,64,.8); border-radius: 1.4mm; padding: .5mm 2.4mm; color: #ffc53d; font-size: 7.4pt; letter-spacing: 1.4px; }
+.hc .b { padding: 3.2mm 3.7mm 2.4mm; }
+.hc .b > .tags { display:flex; gap: 1mm; flex-wrap: wrap; margin-bottom: 1.6mm; }
+.hc .n { font: 700 10.5pt/1.25 Poppins, sans-serif; color: var(--ink); }
+.hc .zona { margin: .7mm 0 2.4mm; }
+.kv { display:flex; justify-content: space-between; gap: 3mm; border-top: 1px dashed var(--line); padding: 1.05mm 0; font-size: 7.7pt; }
+.kv span:first-child { color: var(--mute); white-space: nowrap; }
+.kv span:last-child { font-weight: 700; text-align: right; }
+.hc .pie { margin-top: auto; background: #fafafc; border-top: 1px solid var(--line); padding: 2.3mm 3.7mm 2.5mm; font-size: 7.5pt; color: var(--mute); line-height: 1.45; }
+
+/* Traslados: filas */
+table { width: 100%; border-collapse: collapse; font-size: 7.7pt; }
+td { border-bottom: 1px solid #f3eff5; padding: 1.3mm 1.6mm; vertical-align: top; line-height: 1.45; }
+th { text-align:left; font: 700 6.6pt Inter, sans-serif; letter-spacing: 1.4px; text-transform: uppercase; color: var(--rosa); padding: 1.3mm 1.6mm; border-bottom: 1px solid #f3eff5; }
+td.r, th.r { text-align: right; }
+.tr { border-top: 1px solid #f3eff5; }
+.tr td:first-child { font-weight: 700; width: 49%; }
+.tr td.est { text-align:right; font-weight: 700; color: var(--morado); white-space: nowrap; }
+tr { break-inside: avoid; }
+thead { display: table-header-group; }
+
+/* Itinerario día a día: línea de tiempo */
+.pill { text-align:center; margin: 3mm 0 3.2mm; position: relative; break-after: avoid; }
+.pill::before { content:""; position:absolute; left:0; right:0; top: 50%; border-top: 1px solid #f1d6e3; }
+.pill span { position: relative; display:inline-block; background: linear-gradient(90deg,#e6197a,#7b2fbe); color:#fff; font: 800 8.6pt Inter, sans-serif; letter-spacing: 2.6px; text-transform: uppercase; padding: 1.9mm 6.2mm; border-radius: 5mm; }
+.pill span .ic { width: 3.4mm; height: 3.4mm; color: #fff; margin-right: 1.8mm; vertical-align: -.6mm; }
+.day { display:grid; grid-template-columns: 15.2mm 1fr; column-gap: 5.3mm; padding-bottom: 3.4mm; position: relative; break-inside: avoid; }
+.day::before { content:""; position:absolute; left: 6.9mm; top: 17.4mm; bottom: 2mm; width: .7mm; border-radius: .35mm; background: linear-gradient(#a879d6, rgba(190,153,223,.15)); }
+.day .dn { width: 15.2mm; height: 15.2mm; border-radius: 50%; background: linear-gradient(150deg,#e6197a 0%,#8a2cb5 48%,#3f7fbd 100%); box-shadow: 0 1.3mm 3.4mm rgba(230,25,122,.3); color:#fff; font: 700 15pt/1 Poppins, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.day .dn small { font: 800 5.4pt Inter, sans-serif; letter-spacing: 1px; margin-bottom: .6mm; opacity: .95; }
+.day .df { font: 700 7.85pt Inter, sans-serif; letter-spacing: 1.6px; text-transform: uppercase; color: var(--rosa); margin-top: .4mm; }
+.day .t { font: 600 12.8pt/1.3 Poppins, sans-serif; color: var(--ink); margin: .5mm 0 2mm; }
+.day .cuerpo.foto { display:grid; grid-template-columns: 39.7mm 1fr; gap: 4.4mm; align-items: start; }
+.day .ph { height: 25.8mm; border-radius: 2.3mm; background-size: cover; background-position: center; box-shadow: 0 1.2mm 3mm rgba(31,35,64,.18); }
+.ev { display:grid; grid-template-columns: 17mm 1fr; margin-bottom: 1.2mm; font-size: 8.25pt; line-height: 1.5; }
+.ev .h { font-weight: 700; color: var(--morado); white-space: nowrap; }
+.chips { display:flex; flex-wrap: wrap; gap: 1.6mm 2mm; margin-top: 1.2mm; }
+.chip { display:inline-block; border-radius: 4mm; padding: 1mm 3mm; font: 700 7.4pt/1.4 Inter, sans-serif; background: #f4ecfb; border: 1px solid #e4d3f5; color: #5d2496; }
+
+/* Planes opcionales: tarjetas como las del hospedaje */
+.opcs { display:grid; grid-template-columns: repeat(4,1fr); gap: 3mm; }
+.oc { border:1px solid var(--line); border-radius: 2.8mm; overflow:hidden; font-size: 7.7pt; break-inside: avoid; display:flex; flex-direction:column; }
+.oc .img { height: 25mm; background-size:cover; background-position:center; position:relative; }
+.oc .where { position:absolute; left: 2.4mm; bottom: 2.4mm; background: rgba(31,35,64,.8); color:#fff; border-radius: 1.4mm; padding: .5mm 2mm; font: 700 6.2pt Inter, sans-serif; letter-spacing: 1px; text-transform: uppercase; }
+.oc .b { padding: 2.6mm 3mm; display:flex; flex-direction:column; flex:1; line-height:1.4; }
+.oc .n { font: 700 9pt/1.25 Poppins, sans-serif; color: var(--ink); margin-bottom: .8mm; }
+.oc .foot { margin-top:auto; padding-top: 1.6mm; display:flex; justify-content:space-between; align-items:baseline; border-top: 1px dashed var(--line); }
+.oc .pr { font: 800 8.6pt Inter, sans-serif; color: var(--rosa); }
+
+/* Información útil y términos: tarjetas con título rosa en versalitas */
+.cards { display:grid; gap: 3.7mm; }
+.card { border: 1px solid var(--line); border-radius: 3.2mm; padding: 4.2mm 4.4mm 3.6mm; break-inside: avoid; }
+.card > .caps { display:block; font-size: 7.9pt; letter-spacing: 1.8px; margin-bottom: 2.4mm; }
+.card ul { margin: 0; padding-left: 4mm; font-size: 7.9pt; line-height: 1.5; }
+.card li { margin-bottom: 1.1mm; }
+.card.dos ul { columns: 2; column-gap: 8mm; }
+.card.dos li { break-inside: avoid; }
+
+/* La hoja de precios */
+.tarifas { display:grid; gap: 3.7mm; }
+.tf { border: 1px solid var(--line); border-radius: 3.2mm; padding: 4.6mm 4.6mm 3.4mm; position: relative; break-inside: avoid; }
+.tf.rec { border: 2px solid var(--rosa); box-shadow: 0 1.2mm 4mm rgba(230,25,122,.16); }
+.tf .badge { position:absolute; top: -2.6mm; right: 4mm; background: linear-gradient(90deg,#e6197a,#7b2fbe); border-radius: 3mm; padding: .7mm 2.6mm; }
+.tf .name { font: 700 12pt Poppins, sans-serif; }
+.tf .price { font: 700 19pt/1.15 Poppins, sans-serif; margin: 1.6mm 0 0; color: var(--ink); letter-spacing: -.3px; }
+.tf .pp { font-size: 7.6pt; color: var(--mute); margin-bottom: 2.6mm; }
+.tf .row { border-top: 1px dashed var(--line); padding: 1.7mm 0; font-size: 7.9pt; line-height: 1.45; }
+.tf .row b { display:block; font: 700 6.4pt Inter, sans-serif; letter-spacing: 1.4px; text-transform: uppercase; color: var(--mute); margin-bottom: .3mm; }
+.stars { color: #e3a21a; letter-spacing: .5px; font-size: 7.5pt; }
+.cta { margin-top: 4mm; background: linear-gradient(90deg,#1b1f3b,#1e2e5c); color:#fff; border-radius: 3.2mm; padding: 4.6mm 6mm; display:grid; grid-template-columns: 1.15fr 1fr; gap: 5mm; align-items:center; break-inside: avoid; }
+.cta.solo { grid-template-columns: 1fr; }
+.cta .caps { color: #ff8fc0; }
+.ctt { font: 700 12.5pt/1.25 Poppins, sans-serif; margin: 1.2mm 0 1.4mm; }
+.btns { display:flex; flex-direction:column; gap: 2mm; }
+.btn { display:flex; justify-content:space-between; align-items:center; text-decoration:none; color:#fff; border-radius: 2mm; padding: 2.4mm 4mm; font-size: 8pt; }
+.btn b { font: 800 8.6pt Inter, sans-serif; }
+.bE { background: var(--e); } .bR { background: var(--r); } .bP { background: var(--p); } .bN { background: #3b4170; }
+.pagos .tot td { font: 700 9pt Poppins, sans-serif; color: var(--ink); border-bottom: 0; }
+.pagos td.r { font-weight: 700; }
+.sign { margin-top: 6mm; display:flex; justify-content: space-between; align-items: flex-end; break-inside: avoid; }
+.sign b.pop { font: 700 10.5pt Poppins, sans-serif; color: var(--ink); }
+.credits { font-size: 6.4pt; color: var(--mute); margin-top: 4mm; line-height: 1.35; }
+
+/* Fotos extra de la biblioteca: en el MISMO recuadro (mismo alto), principal 2/3 y extras 1/3. */
+.img.mosaico { display:grid; grid-template-columns: 2fr 1fr; gap: .6mm; background: #fff; }
+.img.mosaico.n1 { grid-template-rows: 1fr; }
+.img.mosaico.n2 { grid-template-rows: 1fr 1fr; }
+.img.mosaico .m0 { grid-row: 1 / -1; background-size: cover; background-position: center; }
+.img.mosaico .mx { background-size: cover; background-position: center; }
 `
 
 /** Los símbolos SVG que usa el documento (`<use href="#plane"/>`). */
@@ -210,5 +198,6 @@ export const ICONOS_PROPUESTA = `<svg width="0" height="0" style="position:absol
 <symbol id="star" viewBox="0 0 24 24"><path d="M12 2l3 6.6 7.2.7-5.4 4.8 1.6 7.1L12 17.6 5.6 21.2l1.6-7.1L1.8 9.3 9 8.6z" fill="currentColor"/></symbol>
 <symbol id="tag" viewBox="0 0 24 24"><path d="M3 3h8l10 10-8 8L3 11zm4 2.5A1.5 1.5 0 1 0 7 8.5a1.5 1.5 0 0 0 0-3z" fill="currentColor"/></symbol>
 <symbol id="doc" viewBox="0 0 24 24"><path d="M6 2h8l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm7 1.5V8h4.5zM7 12v2h10v-2zm0 4v2h7v-2z" fill="currentColor"/></symbol>
+<symbol id="info" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 5h2v2h-2zm0 4h2v6h-2z" fill="currentColor"/></symbol>
 <symbol id="pin" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z" fill="currentColor"/></symbol>
 </defs></svg>`
