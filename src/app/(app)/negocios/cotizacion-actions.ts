@@ -6,6 +6,7 @@ import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { leerReglasDeCotizacion, margenHeredado } from '@/lib/cotizaciones/reglas-margen'
 import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
@@ -1058,7 +1059,9 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [{ data: cot }, { data: items }] = await Promise.all([(supabase as any)
     .from('cotizaciones')
-    .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, margen_default_pct, descuento_porcentaje')
+    // `*` y no la lista: `reglas_margen` la agrega una migración, y nombrarla antes devolvería un
+    // 400 sobre toda la fila (el recálculo se quedaría sin parámetros). Ausente = sin reglas.
+    .select('*')
     .eq('id', cotizacionId)
     .maybeSingle(),
 
@@ -1107,6 +1110,8 @@ export async function recalcularTotales(cotizacionId: string) {
     margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
     descuentoComercialPct: cot?.descuento_porcentaje,
     convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
+    // Reglas de margen (2026-10-27, `reglas-margen.ts`): las que la cotización copió al nacer.
+    reglas: leerReglasDeCotizacion(cot?.reglas_margen),
   }
   // Tarjeta de la opción (prototipo del 2026-09-24) · una línea con precios de fila escritos
   // a mano lleva el precio que suman esas filas más las demás con su margen
@@ -1123,7 +1128,9 @@ export async function recalcularTotales(cotizacionId: string) {
     const precio = precioDeLineaConManuales({
       confirmada: tarifa.confirmada,
       preciosAMano: tarifa.preciosAMano,
-      margenPct: Number(item.margen_porcentaje ?? params.margenPct) || 0,
+      margenPct: item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
+        ? Number(item.margen_porcentaje) || 0
+        : margenHeredado(item.grupo, params.margenPct, params.reglas),
       convencion: params.convencionMargen ?? undefined,
       administrativosPct: params.administrativosPct,
     })
@@ -1147,6 +1154,11 @@ export async function recalcularTotales(cotizacionId: string) {
       precio_manual: conManuales !== undefined ? true : item.precio_manual,
       // Punto 11 del brief del 2026-10-05: el precio cuadra con lo que paga cada pasajero.
       pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
+      // Reglas de margen (2026-10-27): vuelo, hotel o lo demás, la ruta del vuelo, el descuento
+      // del hotel y si es Pública. Sin reglas solo cuenta lo de siempre.
+      grupo: (item.grupo ?? null) as string | null,
+      nombre: (item.nombre ?? null) as string | null,
+      tarifa_pax: item.tarifa_pax ?? null,
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito

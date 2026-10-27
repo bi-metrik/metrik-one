@@ -271,6 +271,8 @@ export interface LineaDeCascada {
   costoLinea: number
   precioAdicionales: number
   costoAdicionales: number
+  /** Reglas de margen (2026-10-27): los puntos extra de la línea son precio suyo. */
+  reglas?: { puntos: number }
 }
 
 /** Lo mínimo del ítem: nombre, su base declarada y si es plata de la agencia. */
@@ -297,7 +299,8 @@ export function lineasParaIva(
       return {
         id: l.id,
         nombre: meta?.nombre ?? null,
-        precio: l.precioLinea,
+        // Los puntos extra (reglas de margen) son ingreso propio de la línea en esta cascada.
+        precio: l.precioLinea + (l.reglas?.puntos ?? 0),
         costoTerceros: l.costoLinea,
         precioAdicionales: l.precioAdicionales,
         costoAdicionales: l.costoAdicionales,

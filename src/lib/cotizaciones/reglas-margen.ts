@@ -220,6 +220,21 @@ export function tipoParaMargen(grupo: string | null | undefined): TipoParaMargen
   return 'otro'
 }
 
+/**
+ * El margen que hereda una línea sin margen propio, fuera de la cascada (las filas con precio a
+ * mano de la tarjeta). Sin reglas, el de la cotización; con reglas, el hotel el de la cotización y
+ * lo demás 0. El vuelo no entra aquí: su colchón lo calcula la cascada con su costo.
+ */
+export function margenHeredado(
+  grupo: string | null | undefined,
+  margenCotizacion: number | null | undefined,
+  reglas: ReglasDeCotizacion | null | undefined,
+): number {
+  const m = Number(margenCotizacion) || 0
+  if (!reglas) return m
+  return tipoParaMargen(grupo) === 'hotel' ? m : 0
+}
+
 // ── 1 · El colchón del vuelo ─────────────────────────────────────────────────
 
 /** El colchón de UN tiquete: `min(techo, max(piso, pct × precio))`, al peso. */
@@ -363,6 +378,26 @@ export function comisionDePublica(tarifaPax: unknown): number | null {
   if (!decision || decision.tipo !== 'publica') return null
   const c = decision.comisionPct
   return c !== null && c !== undefined && Number.isFinite(c) && c >= 0 && c < 100 ? c : null
+}
+
+/**
+ * Los parámetros para calcular el precio de CADA opción por separado (la tarjeta, «Lo que suma»):
+ * sin puntos extra ni descuentos sobre el total. Los puntos se reparten entre las líneas de UNA
+ * tarifa y los descuentos son del total: sobre todas las opciones a la vez no significan nada.
+ */
+export function paramsPorOpcion<T extends { reglas?: ReglasDeCotizacion | null }>(params: T): T {
+  if (!params.reglas) return params
+  return { ...params, reglas: { ...params.reglas, puntosExtra: 0, descuentos: [] } }
+}
+
+/**
+ * El descuento sobre el total, en %, que el IVA tiene que restar: los descuentos de las reglas
+ * más el descuento comercial de siempre. Sin reglas es el comercial, como antes.
+ */
+export function pctDescuentoTotal(params: { descuentoComercialPct?: number | null; reglas?: ReglasDeCotizacion | null }): number {
+  const comercial = Math.min(100, Math.max(0, Number(params.descuentoComercialPct) || 0))
+  if (!params.reglas) return comercial
+  return Math.min(100, comercial + params.reglas.descuentos.reduce((a, d) => a + d.pct, 0))
 }
 
 // ── Cómo se dice ─────────────────────────────────────────────────────────────
