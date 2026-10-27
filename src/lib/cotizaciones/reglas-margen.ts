@@ -400,6 +400,53 @@ export function pctDescuentoTotal(params: { descuentoComercialPct?: number | nul
   return Math.min(100, comercial + params.reglas.descuentos.reduce((a, d) => a + d.pct, 0))
 }
 
+// ── Lo que imprime el documento del cliente ──────────────────────────────────
+
+/** Lo mínimo de una línea calculada que hace falta para el documento. */
+interface LineaParaDocumento {
+  id?: string
+  precioLinea: number
+  reglas?: { puntos: number; descuento: { motivo: string; valor: number } | null }
+}
+
+/**
+ * Lo que las reglas de margen le cambian al documento del cliente, sacado de UNA cascada (la de
+ * una tarifa o la vigente). `null` sin reglas: el documento de siempre.
+ *
+ *  · `precioPorItem`: el precio de cada línea en ESTE documento (con su parte de los puntos
+ *    extra). Los puntos no salen como renglón: van dentro del precio de cada línea.
+ *  · `notas`: «Descuento · motivo: −$X» bajo la opción con descuento.
+ *  · `descuentos`: los descuentos sobre el total, con su descripción y su cifra al peso.
+ *  · `subtotal`: la suma de las líneas antes de esos descuentos.
+ */
+export interface ReglasDelDocumento {
+  precioPorItem: Map<string, number>
+  notas: Map<string, string>
+  descuentos: { descripcion: string; valor: number }[]
+  subtotal: number
+}
+
+export function reglasDelDocumento(cascada: {
+  lineas: readonly LineaParaDocumento[]
+  reglas?: { descuentos: { descripcion: string; valor: number }[]; subtotal: number }
+}): ReglasDelDocumento | null {
+  if (!cascada.reglas) return null
+  const precioPorItem = new Map<string, number>()
+  const notas = new Map<string, string>()
+  for (const l of cascada.lineas) {
+    if (!l.id) continue
+    precioPorItem.set(l.id, l.precioLinea + (l.reglas?.puntos ?? 0))
+    const d = l.reglas?.descuento
+    if (d && d.valor > 0) notas.set(l.id, textoDescuentoDeLinea(d.motivo, d.valor))
+  }
+  return {
+    precioPorItem,
+    notas,
+    descuentos: cascada.reglas.descuentos.filter(d => d.valor > 0).map(d => ({ descripcion: d.descripcion, valor: d.valor })),
+    subtotal: cascada.reglas.subtotal,
+  }
+}
+
 // ── Cómo se dice ─────────────────────────────────────────────────────────────
 
 const pesos = (v: number) => `$${Math.round(v).toLocaleString('es-CO')}`

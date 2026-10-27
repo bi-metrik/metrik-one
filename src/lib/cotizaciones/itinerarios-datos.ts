@@ -37,7 +37,7 @@ import {
   type ItemConGrupo,
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
-import { leerReglasDeCotizacion, type ReglasDeCotizacion } from './reglas-margen'
+import { leerReglasDeCotizacion, reglasDelDocumento, type ReglasDeCotizacion, type ReglasDelDocumento } from './reglas-margen'
 import { idDelPrincipal } from './tarifas'
 import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre, type FilaDePasajeros } from './cuadre-pasajero'
@@ -666,7 +666,7 @@ function aFila(data: any): FilaItinerario {
 export async function bloquesParaPDF(
   supabase: Supabase,
   cotizacionId: string,
-): Promise<{ nombre: string | null; orden: number; esPrincipal: boolean; itemIds: string[]; precio: number }[] | null> {
+): Promise<{ nombre: string | null; orden: number; esPrincipal: boolean; itemIds: string[]; precio: number; reglas?: ReglasDelDocumento }[] | null> {
   const ctx = await contextoDeCotizacion(supabase, cotizacionId)
   if (!ctx) return null
   const filas = await leerItinerarios(supabase, cotizacionId)
@@ -681,11 +681,28 @@ export async function bloquesParaPDF(
     return a.orden - b.orden
   })
 
-  return ordenadas.map(fila => ({
-    nombre: fila.nombre,
-    orden: fila.orden,
-    esPrincipal: fila.esPrincipal,
-    itemIds: itemsDelItinerario(ctx.items, fila.seleccion),
-    precio: cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).precioVenta,
-  }))
+  return ordenadas.map(fila => {
+    const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+    // Reglas de margen (2026-10-27): los puntos extra van dentro del precio de cada línea de
+    // ESTA tarifa, y sus descuentos sobre el total salen con su descripción. Sin reglas, nada.
+    const reglas = reglasDelDocumento(cascada)
+    return {
+      nombre: fila.nombre,
+      orden: fila.orden,
+      esPrincipal: fila.esPrincipal,
+      itemIds: itemsDelItinerario(ctx.items, fila.seleccion),
+      precio: cascada.precioVenta,
+      ...(reglas ? { reglas } : {}),
+    }
+  })
+}
+
+/**
+ * Lo que las reglas de margen le cambian al documento SIN tarifas en la propuesta: sale de la
+ * cascada vigente, la misma que fija `valor_total`. `null` sin reglas o sin poder leer.
+ */
+export async function reglasDelDocumentoVigente(supabase: Supabase, cotizacionId: string): Promise<ReglasDelDocumento | null> {
+  const [ctx, filas] = await Promise.all([contextoDeCotizacion(supabase, cotizacionId), leerItinerarios(supabase, cotizacionId)])
+  if (!ctx?.params.reglas) return null
+  return reglasDelDocumento(cascadaVigente(ctx, filas))
 }

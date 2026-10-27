@@ -27,6 +27,14 @@ export interface ServicioConOpciones extends ServicioDelViaje {
   candidatas: string[]
 }
 
+/** Las reglas de margen de la cotización (brief del 2026-10-27, `reglas-margen.ts`). */
+export interface ReglasEnTarifas {
+  puntosExtra: number
+  puntosMax: number
+  descuentos: { id: string; descripcion: string; pct: number }[]
+  pisoHotelPct: number
+}
+
 export interface AutorizacionVista {
   /** Bajo el mínimo y sin autorización vigente: no se envía. */
   bloquea: boolean
@@ -74,6 +82,9 @@ export function TarifasPorPasos({
   onEliminarTarifa,
   onMotivo,
   onSeguir,
+  reglas = null,
+  onPuntos,
+  onDescuentos,
 }: {
   tarifas: TarifaCalculada[]
   servicios: ServicioConOpciones[]
@@ -111,6 +122,13 @@ export function TarifasPorPasos({
   onEliminarTarifa: (tarifaId: string) => void
   onMotivo: (tarifaId: string, codigo: string | null) => void
   onSeguir: (paso: 1 | 3) => void
+  /**
+   * Las reglas de margen. Con ellas la casilla es el margen de los HOTELES, se suman puntos extra y
+   * descuentos sobre el total, y se juzga el margen global. Ausente, la pantalla de siempre.
+   */
+  reglas?: ReglasEnTarifas | null
+  onPuntos?: (puntos: number) => void
+  onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number }[]) => void
 }) {
   const soloRecomendada = servicios.length > 0 && !servicios.some(s => s.tipo === 'vuelo' || s.tipo === 'hotel')
   const visibles = servicios.length === 0 || soloRecomendada ? tarifas.filter(t => t.canon === 'Recomendada' || t.esPrincipal) : tarifas
@@ -122,10 +140,22 @@ export function TarifasPorPasos({
   const [renombrando, setRenombrando] = useState<string | null>(null)
   const [verCalculo, setVerCalculo] = useState(false)
   const vanAlCliente = (t: TarifaCalculada) => t.esPrincipal || (t.vaEnPropuesta && !t.igualA)
-  const bajoMinimo = tarifas.filter(t => vanAlCliente(t) && !t.exenta && t.margenReal !== null && t.margenReal < pisoPct)
+  /** Los hoteles de una tarifa que, con su descuento, quedaron bajo el piso de hotel (reglas). */
+  const hotelesBajos = (t: TarifaCalculada) => t.cascada?.reglas?.hotelesBajoPiso ?? []
+  const bajoMinimo = tarifas.filter(t => vanAlCliente(t) && ((!t.exenta && t.margenReal !== null && t.margenReal < pisoPct) || hotelesBajos(t).length > 0))
   /** El margen real de una tarifa, dicho con las líneas de tarifa pública que no cuenta. */
   const margenDeTarifa = (t: TarifaCalculada) => (t.exenta ? 'solo tarifa pública' : pct(t.margenReal))
-  const notaPublicas = (t: TarifaCalculada) => (!t.exenta && t.publicas > 0 ? ` (sin ${t.publicas === 1 ? '1 de tarifa pública' : `${t.publicas} de tarifa pública`})` : '')
+  // Con reglas, las Públicas CON comisión sí cuentan: la nota nombra solo las que no.
+  const sinContar = (t: TarifaCalculada) => (reglas ? t.cascada?.reglas?.publicasSinComision ?? 0 : t.publicas)
+  const notaPublicas = (t: TarifaCalculada) => {
+    const n = sinContar(t)
+    if (t.exenta || n === 0) return ''
+    return reglas
+      ? ` (sin ${n === 1 ? '1 pública sin comisión' : `${n} públicas sin comisión`})`
+      : ` (sin ${n === 1 ? '1 de tarifa pública' : `${n} de tarifa pública`})`
+  }
+  const [puntosEscritos, setPuntosEscritos] = useState<string | null>(null)
+  const [nuevoDescuento, setNuevoDescuento] = useState<{ descripcion: string; pct: string } | null>(null)
 
   const pregunta = (() => {
     const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : `qué opción de ${s.nombre}`))]
@@ -149,11 +179,11 @@ export function TarifasPorPasos({
   const margenYAutorizacion = (
     <div className="flex flex-col gap-2 rounded-xl border border-[#E2DED5] bg-white p-3" data-margen-unico>
       <label className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-semibold">Margen</span>
+        <span className="font-semibold">{reglas ? 'Margen de hoteles' : 'Margen'}</span>
         <input
           type="text"
           inputMode="decimal"
-          aria-label="Margen de la cotización"
+          aria-label={reglas ? 'Margen de los hoteles' : 'Margen de la cotización'}
           disabled={!editable || ocupado}
           value={margenEscrito ?? String(margenPct).replace('.', ',')}
           onChange={e => setMargenEscrito(e.target.value)}
@@ -167,8 +197,100 @@ export function TarifasPorPasos({
           className={`${INPUT} !w-[70px] text-right tabular-nums`}
         />
         <span>%</span>
-        <span className="text-xs text-[#6E6A62]">uno para las tres tarifas · mínimo {pct(pisoPct)}</span>
+        <span className="text-xs text-[#6E6A62]">
+          {reglas
+            ? `vuelos con su colchón · lo demás arranca en 0 % · margen global mínimo ${pct(pisoPct)}`
+            : `uno para las tres tarifas · mínimo ${pct(pisoPct)}`}
+        </span>
       </label>
+      {reglas && (
+        <div className="flex flex-col gap-2 border-t border-[#E2DED5] pt-2" data-reglas-total>
+          <label className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-semibold">Puntos extra</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              aria-label="Puntos extra de margen"
+              disabled={!editable || ocupado}
+              value={puntosEscritos ?? String(reglas.puntosExtra).replace('.', ',')}
+              onChange={e => setPuntosEscritos(e.target.value)}
+              onBlur={() => {
+                if (puntosEscritos === null) return
+                const v = puntosEscritos.trim() === '' ? 0 : Number(puntosEscritos.replace(',', '.'))
+                setPuntosEscritos(null)
+                if (Number.isFinite(v) && v >= 0 && v <= reglas.puntosMax && v !== reglas.puntosExtra) onPuntos?.(v)
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+              className={`${INPUT} !w-[70px] text-right tabular-nums`}
+              data-puntos-extra
+            />
+            <span className="text-xs text-[#6E6A62]">de 0 a {String(reglas.puntosMax).replace('.', ',')} puntos sobre el total · van en el precio de hoteles y planes, nunca en los vuelos</span>
+          </label>
+          <div className="flex flex-col gap-1.5" data-descuentos-total>
+            <span className="text-sm font-semibold">Descuentos sobre el total <span className="text-xs font-normal text-[#6E6A62]">· el cliente los ve con su descripción</span></span>
+            {reglas.descuentos.map(d => (
+              <span key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] px-2.5 py-1.5 text-[13px]" data-descuento-total={d.id}>
+                <span className="min-w-0 flex-1">{d.descripcion}</span>
+                <b className="tabular-nums">{pct(d.pct)}</b>
+                {editable && (
+                  <button
+                    type="button"
+                    className={`${LINK} text-xs`}
+                    disabled={ocupado}
+                    onClick={() => onDescuentos?.(reglas.descuentos.filter(x => x.id !== d.id))}
+                  >
+                    Quitar
+                  </button>
+                )}
+              </span>
+            ))}
+            {editable && (nuevoDescuento ? (
+              <span className="flex flex-wrap items-end gap-2" data-nuevo-descuento>
+                <label className="flex min-w-[180px] flex-1 flex-col gap-0.5 text-xs text-[#6E6A62]">
+                  <span>Descripción</span>
+                  <input
+                    autoFocus
+                    type="text"
+                    maxLength={80}
+                    className={INPUT}
+                    placeholder="Ej.: Cliente recurrente"
+                    value={nuevoDescuento.descripcion}
+                    onChange={e => setNuevoDescuento({ ...nuevoDescuento, descripcion: e.target.value })}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5 text-xs text-[#6E6A62]">
+                  <span>%</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className={`${INPUT} !w-[70px] text-right tabular-nums`}
+                    value={nuevoDescuento.pct}
+                    onChange={e => setNuevoDescuento({ ...nuevoDescuento, pct: e.target.value })}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className={BTN_PRIM}
+                  disabled={ocupado}
+                  onClick={() => {
+                    const v = Number(nuevoDescuento.pct.replace(',', '.'))
+                    if (!nuevoDescuento.descripcion.trim() || !Number.isFinite(v) || v <= 0 || v >= 100) return
+                    onDescuentos?.([...reglas.descuentos, { descripcion: nuevoDescuento.descripcion.trim(), pct: v }])
+                    setNuevoDescuento(null)
+                  }}
+                >
+                  Agregar
+                </button>
+                <button type="button" className={BTN} onClick={() => setNuevoDescuento(null)}>Cancelar</button>
+              </span>
+            ) : (
+              <button type="button" className={`${LINK} self-start text-[13px]`} disabled={ocupado} onClick={() => setNuevoDescuento({ descripcion: '', pct: '' })} data-agregar-descuento-total>
+                + Descuento sobre el total
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {propios.length > 0 && (
         <div className="flex flex-col gap-1 rounded-lg border border-[#F0D9B5] bg-[#FBF1E2] p-2.5 text-[13px]" data-margen-propio>
           <span>
@@ -184,7 +306,7 @@ export function TarifasPorPasos({
         </div>
       )}
       <p className="m-0 text-[13px]" data-margenes-reales>
-        Margen real:{' '}
+        {reglas ? 'Margen global (no se edita):' : 'Margen real:'}{' '}
         {tarifas.filter(vanAlCliente).map((t, i) => (
           <span key={t.id}>
             {i > 0 && ' · '}
@@ -198,6 +320,11 @@ export function TarifasPorPasos({
       {bajoMinimo.length > 0 && autorizacion && (
         <div className="flex flex-col gap-1.5 rounded-lg border border-[#EBC1BB] bg-[#FBEDEB] p-2.5 text-[13px]" data-autorizacion>
           <span className="font-semibold text-[#B3382C]">{bajoMinimo.map(t => t.nombre).join(' y ')} · Bajo el mínimo</span>
+          {bajoMinimo.flatMap(t => hotelesBajos(t).map(h => (
+            <span key={`${t.id}-${h.id}`} className="text-xs text-[#B3382C]" data-hotel-bajo-piso>
+              {nombreDeOpcion(h.id ?? '')} con su descuento queda al {pct(h.margenPct)} (mínimo de hotel {pct(reglas?.pisoHotelPct ?? 0)}) · {t.nombre}
+            </span>
+          )))}
           {autorizacion.vigente ? (
             <>
               <span className="font-semibold text-[#0E5C43]">✓ Autorizado por {autorizacion.vigente.por} · «{autorizacion.vigente.motivo}»</span>
@@ -355,7 +482,14 @@ export function TarifasPorPasos({
       <div className="flex flex-wrap items-end gap-3 border-t-2 border-[#191713] pt-2" data-total-tarifa>
         <span className="min-w-0 flex-1">
           <small className="block text-[11px] font-bold uppercase tracking-wide text-[#6E6A62]">Total {t.nombre}</small>
-          <small className="block text-xs text-[#6E6A62] tabular-nums">costo {pesos(t.costo)} · ganas {pesos(t.precio - t.costo)} · margen real {margenDeTarifa(t)}{notaPublicas(t)}</small>
+          <small className="block text-xs text-[#6E6A62] tabular-nums">costo {pesos(t.costo)} · ganas {pesos(t.precio - t.costo)} · margen {reglas ? 'global' : 'real'} {margenDeTarifa(t)}{notaPublicas(t)}</small>
+          {reglas && t.cascada?.reglas && (t.cascada.reglas.puntosPesos > 0 || t.cascada.reglas.descuentos.length > 0) && (
+            <small className="block text-xs text-[#6E6A62] tabular-nums" data-desglose-tarifa>
+              {t.cascada.reglas.puntosPesos > 0 ? `incluye ${pesos(t.cascada.reglas.puntosPesos)} de puntos extra · ` : ''}
+              subtotal {pesos(t.cascada.reglas.subtotal)}
+              {t.cascada.reglas.descuentos.map(d => ` · ${d.descripcion} −${pesos(d.valor)}`).join('')}
+            </small>
+          )}
           {t.canon === 'Recomendada' ? (
             <span className="text-[12.5px] font-semibold text-[#0E5C43]">✓ Siempre se manda: es el total de la cotización</span>
           ) : (

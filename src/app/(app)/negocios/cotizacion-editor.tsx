@@ -1003,7 +1003,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       // De dónde a dónde va el vuelo, para cuando el recargo aplica solo a internacionales.
       tarifa_pax: i.tarifa_pax,
     })),
-    politicaRecargo,
+    // Con reglas de margen el colchón de cada tiquete reemplaza el recargo fijo: no se ofrece.
+    paramsCascada.reglas ? { ...politicaRecargo, activo: false } : politicaRecargo,
     // B4 · solo cuenta si el recargo va por pasajero: los que viajan según el negocio.
     pasajerosDelViaje(composicionViaje),
   )
@@ -2447,7 +2448,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               margenAplicado={Number(itemMargen) || 0}
               convencion={convencionMargen}
               administrativosPct={(Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0)}
-              pisoPct={umbrales.pisoPct}
+              // Con reglas de margen la tarjeta no juzga contra el mínimo global (eso es de la
+              // tarifa): un hotel contra su piso de hotel; lo demás solo avisa si vende bajo costo.
+              pisoPct={paramsCascada.reglas
+                ? (linea?.reglas?.tipo === 'hotel' ? paramsCascada.reglas.politica.pisoHotelPct : 0)
+                : umbrales.pisoPct}
+              reglasDeLinea={porPasosDeOpcion ? linea?.reglas ?? null : null}
               adicionales={adicionales.porItem[item.id] ?? []}
               adicionalesDisponible={adicionales.disponible}
               margenCotizacion={{ margenPct: margenCotizacion, convencion: convencionMargen }}

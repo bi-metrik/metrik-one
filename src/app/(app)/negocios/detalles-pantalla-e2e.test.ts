@@ -492,7 +492,7 @@ describe('punto 4 · el traslado se ve como el hotel, no en MAYÚSCULAS', () => 
 
   it('el PDF arma la línea con `nombreVisibleDeLinea`', () => {
     const pdf = readFileSync(join(__dirname, 'cotizacion-pdf-actions.ts'), 'utf8')
-    const paraPlantilla = pdf.slice(pdf.indexOf('const paraPlantilla = '), pdf.indexOf('const paraPlantilla = ') + 1500)
+    const paraPlantilla = pdf.slice(pdf.indexOf('const paraPlantillaBase = '), pdf.indexOf('const paraPlantillaBase = ') + 1500)
     expect(paraPlantilla).toContain('nombre: nombreVisibleDeLinea(i),')
   })
 })

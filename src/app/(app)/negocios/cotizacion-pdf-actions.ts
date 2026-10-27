@@ -16,7 +16,8 @@ import {
   contextoDelViaje,
   registrarSalidaAlCliente,
 } from '@/lib/cotizaciones/registro-decisiones'
-import { leerAdicionalesDeItems } from '@/lib/cotizaciones/itinerarios-datos'
+import { leerAdicionalesDeItems, reglasDelDocumentoVigente } from '@/lib/cotizaciones/itinerarios-datos'
+import { leerReglasDeCotizacion, type ReglasDelDocumento } from '@/lib/cotizaciones/reglas-margen'
 import {
   adicionalesPorItem,
   adicionalEnLaFicha,
@@ -900,6 +901,10 @@ export async function generateCotizacionPDF(
     ? (i: ItemRow) => !i.id || idsDeLaUnica.has(i.id) || i.es_ajuste === true
     : aporta
   const itemPorId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
+  // Reglas de margen (2026-10-27): sin tarifas en la propuesta, el documento sale de la cascada
+  // vigente (la de `valor_total`). Solo se lee si la cotización tiene reglas.
+  const conReglasDeMargen = leerReglasDeCotizacion((cot as unknown as { reglas_margen?: unknown }).reglas_margen) !== null
+  const reglasVigente = conReglasDeMargen && !bloques ? await reglasDelDocumentoVigente(supabase, cotizacionId) : null
 
   /**
    * Los adicionales de cada variante, para el documento del cliente (§1.2 del diseño).
@@ -965,8 +970,22 @@ export async function generateCotizacionPDF(
   //
   // Sin ranuras con alternativas devuelve todos los ítems: el PDF de Termotech, Arca
   // y WMC no cambia una línea.
-  const paraPlantilla = (original: ItemRow) => {
-    const i = conIva(original)
+  /**
+   * Reglas de margen (2026-10-27, `reglas-margen.ts`): el precio de la línea en ESTE documento
+   * (con su parte de los puntos extra, que no salen como renglón) y la nota del descuento por
+   * hotel. Sin reglas, la línea tal cual.
+   */
+  const conReglas = (reglasDoc: ReglasDelDocumento | null, i: ItemRow): ItemRow => {
+    const precio = reglasDoc && i.id ? reglasDoc.precioPorItem.get(i.id) : undefined
+    if (precio === undefined) return i
+    return { ...i, precio_venta: precio / (Number(i.cantidad) || 1) }
+  }
+  const paraPlantillaDe = (reglasDoc: ReglasDelDocumento | null) => (original: ItemRow) => ({
+    ...paraPlantillaBase(conReglas(reglasDoc, original), original),
+    ...(reglasDoc && original.id && reglasDoc.notas.has(original.id) ? { nota: reglasDoc.notas.get(original.id) } : {}),
+  })
+  const paraPlantillaBase = (ajustado: ItemRow, original: ItemRow) => {
+    const i = conIva(ajustado)
     const adicionales = adicionalesDe(original)
     const ivaAdicionales = sumaIvaAlPrecio ? ivaDe(original)?.ivaAdicionales ?? 0 : 0
     // R8 · la llave solo aparece en una opción de hotel cobrada por habitación: las demás
@@ -992,6 +1011,8 @@ export async function generateCotizacionPDF(
     }
   }
 
+  const paraPlantilla = paraPlantillaDe(reglasVigente)
+
   /**
    * El IVA de una tarifa: la suma del de sus líneas. Con el IVA encima es lo que se le suma a
    * su precio; con el IVA adentro es lo que su precio ya trae, y solo va a la nota.
@@ -1011,7 +1032,8 @@ export async function generateCotizacionPDF(
         items: b.itemIds
           .map(id => itemPorId.get(id))
           .filter((i): i is ItemRow => i !== undefined)
-          .map(paraPlantilla),
+          .map(paraPlantillaDe(b.reglas ?? null)),
+        ...(b.reglas && b.reglas.descuentos.length > 0 ? { descuentos: b.reglas.descuentos } : {}),
       }))
     : null
 
@@ -1371,6 +1393,12 @@ export async function generateCotizacionPDF(
     },
     items: itemsParaResumen,
     itinerarios: itinerariosPDF,
+    // Reglas de margen (2026-10-27): los descuentos sobre el total, con su descripción. Los del
+    // TOTAL: los de la Recomendada con tarifas, los de la cascada vigente sin ellas.
+    // Sin reglas la llave no aparece: las props son las de siempre (igualdad C0).
+    ...((bloques?.find(b => b.esPrincipal)?.reglas ?? reglasVigente)?.descuentos.length
+      ? { descuentosTotal: (bloques?.find(b => b.esPrincipal)?.reglas ?? reglasVigente)!.descuentos }
+      : {}),
     dias: diasPDF,
     itemsSinDia: itemsSinDiaPDF,
     sugeridos: sugeridosPDF && sugeridosPDF.length > 0 ? sugeridosPDF : null,

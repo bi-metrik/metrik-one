@@ -30,6 +30,7 @@ import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
 import type { CategoriaFoto } from '@/lib/fotos/categoria'
 import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
+import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
@@ -201,7 +202,13 @@ export default function TarjetaOpcion({
   porPasos = null,
   autorizador = null,
   hotelesDelViaje = [],
+  reglasDeLinea = null,
 }: {
+  /**
+   * Las reglas de margen de esta línea (brief del 2026-10-27), de la cascada por opción: colchón
+   * del vuelo, descuento del hotel, comisión de la Pública. `null` sin reglas.
+   */
+  reglasDeLinea?: ReglasDeLinea | null
   itemId: string
   numero: number
   item: ItemConLectura
@@ -686,6 +693,9 @@ export default function TarjetaOpcion({
             apilable={porPasos !== null}
             tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
             tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
+            reglas={reglasDeLinea
+              ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null, comisionPct: tarifa.tipoTarifa?.comisionPct ?? null }
+              : null}
           />
 
           {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
