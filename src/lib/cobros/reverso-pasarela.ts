@@ -1,7 +1,9 @@
 /**
  * El reverso de un pago en línea: la pasarela aprobó el pago y después devolvió la plata al pagador
  * (ePayco: estado 6, «Reversada»). Caso real: la 390720992 de ePayco, aprobada y reversada desde el
- * panel el 2026-10-22, sin que ePayco avisara por la confirmación; el cobro se anuló a mano por SQL.
+ * panel el 2026-10-22. ePayco SÍ llamó la confirmación con el 6 (`pasarela_eventos` 390720992-6,
+ * recibida 16:45:13Z), pero el código de ese día solo la dejaba en revisión; el cobro se anuló a mano.
+ * La conciliación del cron queda como red: ePayco no garantiza la llamada.
  *
  * Lo que ONE hace solo (`reverso-pasarela-servidor.ts`):
  *   - anula el cobro con los mismos campos de la anulación manual (`anulacion.ts`): `monto` 0, el valor
@@ -10,7 +12,7 @@
  *   - avisa a MéTRIK por correo interno (nunca al cliente).
  *
  * Lo que NO hace, y queda para que Mauricio lo decida (Términos, con Emilio): cancelar o suspender la
- * suscripción, cerrar el ciclo de consultas de Valida, volver a cobrar la cuota o hacer la nota crédito
+ * suscripción, cerrar el ciclo de consultas de Valida (solo lo MARCA, `valida_plan.reversado`), volver a cobrar la cuota o hacer la nota crédito
  * de una factura ya emitida (la factura no se toca: solo se avisa).
  *
  * Puro: textos y nada más.
@@ -48,6 +50,19 @@ export interface DatosAvisoReverso {
   numeroCuota: number | null
   /** La factura del cobro: `numero` si existe, `null` si no hay, `'desconocida'` si no se pudo leer. */
   factura: { numero: string; fecha: string | null } | null | 'desconocida'
+  /**
+   * El ciclo VIGENTE de Valida que abrió este pago (marcado `reversado`, sigue abierto en Valida); `null`
+   * si el pago no abrió el ciclo vigente de ningún espacio, `'error'` si no se pudo leer o marcar.
+   * Opcional: los reversos que no son de Valida no lo traen.
+   */
+  cicloValida?: { hasta: string; consultas: number; cuota: number } | null | 'error'
+}
+
+/** La frase del ciclo de Valida, para el detalle del evento y para el correo. `null` = no aplica. */
+export function fraseCicloValida(c: DatosAvisoReverso['cicloValida']): string | null {
+  if (c === 'error') return 'No se pudo revisar si este pago abrió el ciclo vigente de Valida: revisarlo en el espacio.'
+  if (!c) return null
+  return `Este pago abrió el ciclo vigente de Valida (cuota ${c.cuota}, hasta el ${c.hasta}, ${c.consultas.toLocaleString('es-CO')} consultas): SIGUE ABIERTO en Valida, ONE solo lo marcó como reversado. Cerrarlo es a mano.`
 }
 
 /** La frase de la factura, para el detalle del evento y para el correo. */
@@ -65,8 +80,11 @@ export function detalleReverso(d: DatosAvisoReverso): string {
   return [
     `${nombrePasarela(d.pasarela)} reversó el pago ${d.referenciaPago}: cobro anulado (${formatCOP(d.monto)} quedan en monto_anulado).`,
     fraseFactura(d.factura),
+    fraseCicloValida(d.cicloValida),
     PENDIENTE_DECISION,
-  ].join(' ')
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 function escapar(t: string): string {
@@ -88,6 +106,7 @@ export function correoAvisoReverso(d: DatosAvisoReverso): { subject: string; tex
     '',
     'Lo que hizo ONE: anuló el cobro (monto en 0, el valor en monto_anulado). Ya no suma y no se factura.',
     fraseFactura(d.factura),
+    ...(fraseCicloValida(d.cicloValida) ? [fraseCicloValida(d.cicloValida) as string] : []),
     '',
     `Falta decidir: ${PENDIENTE_DECISION}`,
   ]

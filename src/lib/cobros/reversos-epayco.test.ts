@@ -1,7 +1,8 @@
 /**
  * El REVERSO de un pago de ePayco (estado 6, «Reversada»). Caso real: la 390720992, aprobada el
- * 2026-10-22 (cobro f5f27bbf) y reversada desde el panel de ePayco ese mismo día. ePayco NO mandó la
- * confirmación del reverso: el cobro siguió contando como pagado hasta que se anuló a mano por SQL.
+ * 2026-10-22 (cobro f5f27bbf) y reversada desde el panel de ePayco ese mismo día. ePayco SÍ mandó la
+ * confirmación del reverso (390720992-6, 16:45Z), pero el código de ese día solo la dejaba en revisión y
+ * el cobro se anuló a mano por SQL. La conciliación es la red por si la confirmación no llega.
  *
  * Con el código real de la confirmación (`parsearConfirmacionEpayco` + `procesarEventoPasarela` +
  * `repoPagoEnLinea`), de la anulación (`anularCobroPorReverso`) y de la conciliación
@@ -319,5 +320,49 @@ describe('confirmación del reverso (webhook) y conciliación, en cualquier orde
     expect(s.resultado).toBe('requiere_revision')
     expect(cobroDe(tablas).monto).toBe(150000)
     expect(correos).toHaveLength(0)
+  })
+})
+
+describe('el ciclo de Valida que abrió el pago reversado', () => {
+  const PAGADOR = 'ws-afi-prueba'
+  const PLAN = { cliente_id: 'cli-9', limite_mes: 3000, cobro_id: COBRO, cuota_numero: 1, desde: '2026-10-22', hasta: '2026-11-21', vence_en: '2026-11-26T05:00:00Z', abierto_at: '2026-10-22T14:28:59Z' }
+  function conCiclo(plan: Record<string, unknown> = PLAN) {
+    return base({
+      servicios_contratados: [{ id: 'sc-1', workspace_id: METRIK, negocio_id: null, suscripcion_id: SUS, workspace_pagador_id: PAGADOR, estado: 'activo' }],
+      workspaces: [{ id: PAGADOR, config_extra: { origen_registro: 'valida_autogestion', valida_cliente_id: 'cli-9', valida_plan: plan } }],
+    })
+  }
+
+  it('lo marca como reversado (sin cerrarlo) y lo dice en el evento y en el aviso; la confirmación repetida no lo vuelve a tocar', async () => {
+    const { db, tablas } = crear(conCiclo())
+    const repo = repoPagoEnLinea(db, 'epayco', epaycoDoble({}).adapter)
+    const e = parsearConfirmacionEpayco(confirmacionReverso())
+    if (!e) throw new Error('confirmación ilegible')
+    const r = await procesarEventoPasarela(e, repo, HOY)
+    expect(r.resultado).toBe('requiere_revision')
+
+    const config = tablas.workspaces[0].config_extra as Record<string, unknown>
+    const plan = config.valida_plan as Record<string, unknown>
+    // El ciclo sigue igual (mismas consultas y vencimiento) y lleva la marca; el resto del espacio, intacto.
+    expect(plan).toMatchObject({ ...PLAN, reversado: { referencia_pago: 'epayco-390720992' } })
+    expect(typeof (plan.reversado as { at: string }).at).toBe('string')
+    expect(config.origen_registro).toBe('valida_autogestion')
+    expect(r.detalle).toContain('SIGUE ABIERTO en Valida')
+    expect(r.detalle).toContain('hasta el 2026-11-21')
+    expect(correos).toHaveLength(1)
+    expect(correos[0].text).toContain('3.000 consultas')
+
+    expect((await procesarEventoPasarela(e, repo, HOY)).resultado).toBe('duplicado')
+    expect(correos).toHaveLength(1)
+  })
+
+  it('un pago que no abrió el ciclo vigente (ya hay uno más nuevo) no marca nada', async () => {
+    const otro = { ...PLAN, cobro_id: 'otro-cobro', cuota_numero: 2 }
+    const { db, tablas } = crear(conCiclo(otro))
+    const { adapter } = epaycoDoble({ 'epayco-390720992': REVERSADA })
+    await detectarReversosEpayco({ db, hoy: HOY, ahoraMs: AHORA, adapterPara: () => adapter })
+    expect((tablas.workspaces[0].config_extra as Record<string, unknown>).valida_plan).toEqual(otro)
+    expect(cobroDe(tablas).anulado_at).not.toBeNull()
+    expect(correos[0].text).not.toContain('ciclo vigente de Valida')
   })
 })

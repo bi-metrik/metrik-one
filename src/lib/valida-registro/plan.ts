@@ -174,6 +174,12 @@ export interface PlanAbierto {
   hasta: string
   vence_en: string
   abierto_at: string
+  /**
+   * La pasarela REVERSÓ el pago que abrió este ciclo (`reverso-pasarela-servidor.ts`). Es una marca: el
+   * ciclo sigue abierto en Valida (cerrarlo es una decisión de Términos y no hay ruta en Valida para
+   * eso). El ciclo siguiente, pagado, reemplaza el plan entero y la marca se va con él.
+   */
+  reversado?: { at: string; referencia_pago: string }
 }
 
 export function planDeConfig(configExtra: Record<string, unknown> | null | undefined): PlanAbierto | null {
@@ -190,6 +196,15 @@ export function planDeConfig(configExtra: Record<string, unknown> | null | undef
 export function abreCiclo(p: { cuotaNumero: number; planActual: PlanAbierto | null }): boolean {
   if (!p.planActual) return true
   return p.cuotaNumero > p.planActual.cuota_numero
+}
+
+/** `config_extra` con la marca del reverso en el ciclo abierto (el resto, tal cual). */
+export function configConCicloReversado(
+  configExtra: Record<string, unknown>,
+  plan: PlanAbierto,
+  marca: { at: string; referencia_pago: string },
+): Record<string, unknown> {
+  return { ...configExtra, valida_plan: { ...plan, reversado: marca } }
 }
 
 /** `config_extra` después de abrir el ciclo: sin `valida_prueba`, con `valida_plan`. */

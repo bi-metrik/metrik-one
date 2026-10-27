@@ -1,6 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EventoPasarela } from '@/lib/suscripciones/pasarela/adapter'
 import type { CobroParaPago } from './pago-en-linea'
+import { anclaDeFila, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
+import { configConCicloReversado, planDeConfig } from '@/lib/valida-registro/plan'
 import {
   AVISO_REVERSO_PARA,
   correoAvisoReverso,
@@ -87,6 +89,38 @@ async function contextoDelCobro(db: Db, cobro: CobroParaPago): Promise<{ cliente
   return { cliente, numeroCuota }
 }
 
+/**
+ * Si el pago reversado es el que abrió el ciclo VIGENTE de Valida de un espacio autogestionado
+ * (`config_extra.valida_plan.cobro_id`), lo marca (`valida_plan.reversado`) y lo dice. NO lo cierra en
+ * Valida: no hay ruta para eso y es una decisión de Términos. Una falla aquí no deshace la anulación:
+ * queda dicha en el detalle (`'error'`).
+ */
+async function marcarCicloDeValida(db: Db, cobro: CobroParaPago, referenciaPago: string, ahora: string): Promise<DatosAvisoReverso['cicloValida']> {
+  try {
+    const ancla = anclaDeFila({ negocio_id: cobro.negocioId, suscripcion_id: cobro.suscripcionId ?? null })
+    if (!ancla) return null
+    const sc = await filtrarPorAncla(db.from('servicios_contratados').select('workspace_pagador_id').eq('workspace_id', cobro.workspaceId), ancla)
+    if (sc.error) throw new Error(sc.error.message)
+    const pagadores = [...new Set(((sc.data ?? []) as { workspace_pagador_id: string | null }[]).map((c) => c.workspace_pagador_id).filter(Boolean))] as string[]
+    for (const id of pagadores) {
+      const ws = await db.from('workspaces').select('config_extra').eq('id', id).maybeSingle()
+      if (ws.error) throw new Error(ws.error.message)
+      const config = ((ws.data as { config_extra: Record<string, unknown> | null } | null)?.config_extra ?? {}) as Record<string, unknown>
+      const plan = planDeConfig(config)
+      if (!plan || plan.cobro_id !== cobro.id) continue
+      if (!plan.reversado) {
+        const u = await db.from('workspaces').update({ config_extra: configConCicloReversado(config, plan, { at: ahora, referencia_pago: referenciaPago }) }).eq('id', id)
+        if (u.error) throw new Error(u.error.message)
+      }
+      return { hasta: plan.hasta, consultas: plan.limite_mes, cuota: plan.cuota_numero }
+    }
+    return null
+  } catch (err) {
+    console.error(`[reverso] no se pudo marcar el ciclo de Valida del cobro ${cobro.id}:`, err instanceof Error ? err.message : err)
+    return 'error'
+  }
+}
+
 export async function anularCobroPorReverso(
   dbCliente: SupabaseClient,
   pasarela: string,
@@ -120,8 +154,12 @@ export async function anularCobroPorReverso(
     return { anulado: false, detalle: `Reverso del pago ${e.referenciaPago}: el cobro ya se había anulado por otro camino. No se tocó nada.` }
   }
 
-  const [factura, ctx] = await Promise.all([facturaDelCobro(db, cobro.id), contextoDelCobro(db, cobro)])
-  const datos: DatosAvisoReverso = { pasarela, referenciaPago: e.referenciaPago, cobroId: cobro.id, monto, factura, ...ctx }
+  const [factura, ctx, cicloValida] = await Promise.all([
+    facturaDelCobro(db, cobro.id),
+    contextoDelCobro(db, cobro),
+    marcarCicloDeValida(db, cobro, e.referenciaPago, ahora),
+  ])
+  const datos: DatosAvisoReverso = { pasarela, referenciaPago: e.referenciaPago, cobroId: cobro.id, monto, factura, cicloValida, ...ctx }
   const correo = correoAvisoReverso(datos)
   let envio: { ok: true } | { ok: false; error: string }
   try {

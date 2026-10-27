@@ -16,8 +16,8 @@
 - ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
 - ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
-- ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco no avisa el reverso; conciliación 7d; anula sin tocar suscripción ni ciclo
-- ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — #1252 mergeado; (d) activar-antes-de-cobrar abierto; llaves .env.local no son de MeTRIK
+- ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco SÍ manda el 6; 7d es red; ciclo Valida solo se marca
+- ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — causa: deploy tras la aceptación; paso 7e; (d) abierto
 - [Número de vuelo por tramo en servicios](project_numero_vuelo_por_tramo.md) — items.tramos leído aparte (no en el contexto: P3); filas viejas se releen por contenido
 - ⚠️ [Bot ONE registra ingresos (#1231)](project_ingresos_wa_one.md) — cuotas programadas; candado con `respaldo`; depósito propio = ingreso; v4
 - [Recuperar dirección del espacio y bienvenida Valida (22-oct)](project_recuperar_direccion_espacio.md) — #1242; tope por instancia + idempotencia Resend; textos en acceso-espacio/textos.ts

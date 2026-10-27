@@ -130,30 +130,62 @@ async function moverRegistro(db: Db, id: string, cambios: Record<string, unknown
   return (u.data ?? []).length === 1
 }
 
+/** Los intentos con la tarjeta de ese cobro (cualquier resultado). Sin ninguno, no hubo cargo con la tarjeta. */
+async function intentosDelCobro(db: Db, cobroId: string): Promise<(FilaIntento & { resultado: string | null })[]> {
+  const r = await db.from('cobro_intentos_tarjeta').select('id, plan_cobro_id, numero_cuota, intento, referencia, resultado').eq('cobro_id', cobroId)
+  if (r.error) throw new Error(`intentos del cobro ${cobroId}: ${r.error.message}`)
+  return (r.data ?? []) as (FilaIntento & { resultado: string | null })[]
+}
+
+/** El pago del cobro TAL COMO QUEDÓ en la base: `null` si no tiene pago o está anulado. */
+async function pagoDelCobro(db: Db, cobroId: string): Promise<{ externalRef: string | null } | null> {
+  const r = await db.from('cobros').select('fecha, anulado_at, external_ref').eq('id', cobroId).maybeSingle()
+  if (r.error) throw new Error(`cobro ${cobroId}: ${r.error.message}`)
+  const f = r.data as { fecha: string | null; anulado_at: string | null; external_ref: string | null } | null
+  if (!f?.fecha || f.anulado_at) return null
+  return { externalRef: f.external_ref }
+}
+
 /**
- * (a) Un pago REGISTRADO sobre un cobro con un cargo pendiente: el intento pasa a `aprobado`; si es la
- * cuota 1, el registro pasa a `cobrado` y, si el cobro vino de «Activar y pagar», sale el C3.
- * `null` si no había nada pendiente (el caso común: el cargo se aprobó en el acto).
+ * (a) Un pago REGISTRADO sobre un cobro de un cargo con la tarjeta: el intento pendiente pasa a
+ * `aprobado`; si es la cuota 1 y el registro sigue en `cobro_pendiente`, pasa a `cobrado` y, si el cobro
+ * vino de «Activar y pagar» y lo pagó ESA tarjeta, sale el C3.
+ *
+ * Cada paso tiene su guarda y no depende del anterior: el intento puede estar ya cerrado y el registro
+ * seguir en `cobro_pendiente` (la confirmación llegó mientras el cargo aún no había escrito el
+ * `cobro_pendiente`, o el pago se registró con un código que no cerraba nada, como el del 2026-10-22);
+ * entonces se cierra solo el registro. Lee el pago de la base: sin pago registrado (o anulado) no hace
+ * nada. `null` si no hubo nada que cerrar (el caso común: el cargo se aprobó en el acto).
  */
 export async function cerrarCargoAprobadoTardio(deps: DepsCargoTardio, cobro: CobroParaPago): Promise<{ revisar: boolean; detalle: string } | null> {
   const db = deps.db as Db
-  const intento = await intentoPendiente(db, cobro.id, null)
-  if (!intento) return null
-  const referencia = cobro.externalRef ?? intento.referencia
-  if (!(await cerrarIntento(db, intento.id, 'aprobado', `Aprobado después de quedar pendiente (${referencia ?? 'sin referencia'}).`))) return null
-  const partes = ['Cobro con tarjeta aprobado después de quedar pendiente: intento cerrado.']
-  if (intento.numero_cuota !== 1) return { revisar: false, detalle: partes.join(' ') }
+  const intentos = await intentosDelCobro(db, cobro.id)
+  if (intentos.length === 0) return null
+  const pago = await pagoDelCobro(db, cobro.id)
+  if (!pago) return null
+  const pendientes = intentos.filter((i) => i.resultado === 'pendiente')
+  const pendiente = pendientes.length === 1 ? pendientes[0] : null
+  const referencia = pago.externalRef ?? cobro.externalRef ?? pendiente?.referencia ?? null
+  const partes: string[] = []
+  const resultado = (revisar = false) => (partes.length > 0 ? { revisar, detalle: partes.join(' ') } : null)
+
+  if (pendiente && (await cerrarIntento(db, pendiente.id, 'aprobado', `Aprobado después de quedar pendiente (${referencia ?? 'sin referencia'}).`))) {
+    partes.push('Cobro con tarjeta aprobado después de quedar pendiente: intento cerrado.')
+  }
+  if (!intentos.every((i) => i.numero_cuota === 1)) return resultado()
 
   const reg = await registroDelCobro(db, cobro)
-  if (!reg || reg.cobro_estado !== 'cobro_pendiente') return { revisar: false, detalle: partes.join(' ') }
+  if (!reg || reg.cobro_estado !== 'cobro_pendiente') return resultado()
   const movido = await moverRegistro(db, reg.id, {
     cobro_estado: 'cobrado',
     cobro_detalle: `Aprobado después de quedar pendiente (${referencia ?? 'sin referencia'}).`,
     ...(referencia ? { cobro_ref: referencia } : {}),
   })
-  if (!movido) return { revisar: false, detalle: partes.join(' ') }
+  if (!movido) return resultado()
   partes.push('Registro de Valida: cobrado.')
-  if (!vinoDeLaConfirmacion(reg)) return { revisar: false, detalle: partes.join(' ') }
+  // El C3 nombra la tarjeta: solo si el pago es el de un cargo con ella (no un enlace pagado aparte).
+  const conLaTarjeta = referencia !== null && intentos.some((i) => i.referencia === referencia)
+  if (!vinoDeLaConfirmacion(reg) || !conLaTarjeta) return resultado()
 
   // C3. Sin los 4 dígitos no hay correo que mandar (el texto los nombra): queda dicho en el evento.
   const ultimos4 = await (deps.ultimos4 ?? ((ref) => ultimosDigitosTarjetaEpayco(ref)))(reg.metodo_pago_ref)
@@ -213,4 +245,102 @@ export async function aplicarRechazoTardio(deps: DepsCargoTardio, cobro: CobroPa
   // La suscripción quedó activa sin el pago (se activa antes del cobro): lo revisa una persona.
   partes.push('La suscripción se activó antes del cobro y sigue activa: revisar.')
   return { revisar: true, detalle: partes.join(' ') }
+}
+
+/**
+ * (d) Un registro en `cobro_pendiente` cuyo primer cobro YA está pagado: lo cierra como lo habría cerrado
+ * la confirmación (`cerrarCargoAprobadoTardio`). Dos caminos lo usan:
+ *   - el cargo, justo después de escribir `cobro_pendiente`: si la confirmación de la aprobación llegó
+ *     ENTRE el cargo y esa escritura, la confirmación no encontró el registro en `cobro_pendiente` y nada
+ *     más lo iba a cerrar;
+ *   - el cron (`conciliarRegistrosConCobroPendiente`): la red para lo que quedó colgado igual (el caso
+ *     del 2026-10-22: el pago se registró antes de que existiera el cierre; la confirmación ya estaba
+ *     procesada y la conciliación del cargo pendiente no mira una cuota pagada).
+ * Solo la suscripción del registro (`valida_registro_id`), su cuota 1 y un pago no anulado.
+ */
+export async function cerrarRegistroConPagoRegistrado(
+  deps: DepsCargoTardio,
+  registroId: string,
+): Promise<{ tipo: 'cerrado'; revisar: boolean; detalle: string } | { tipo: 'sin_cambio'; motivo: string }> {
+  const db = deps.db as Db
+  const reg = await db.from('valida_registros').select('cobro_estado').eq('id', registroId).maybeSingle()
+  if (reg.error) throw new Error(`registro ${registroId}: ${reg.error.message}`)
+  if ((reg.data as { cobro_estado: string | null } | null)?.cobro_estado !== 'cobro_pendiente') return { tipo: 'sin_cambio', motivo: 'no_esta_en_cobro_pendiente' }
+
+  const s = await db.from('suscripciones_producto').select('id, workspace_id').eq('valida_registro_id', registroId)
+  if (s.error) throw new Error(`suscripción del registro ${registroId}: ${s.error.message}`)
+  const subs = (s.data ?? []) as { id: string; workspace_id: string }[]
+  if (subs.length !== 1) return { tipo: 'sin_cambio', motivo: subs.length === 0 ? 'sin_suscripcion' : 'varias_suscripciones' }
+
+  const c = await db
+    .from('cobros')
+    .select('id, workspace_id, negocio_id, suscripcion_id, monto, fecha, anulado_at, tipo_cobro, external_ref, notas')
+    .eq('suscripcion_id', subs[0].id)
+    .eq('workspace_id', subs[0].workspace_id)
+    .eq('numero_cuota', 1)
+    .eq('tipo_cobro', 'programado')
+  if (c.error) throw new Error(`cuota 1 del registro ${registroId}: ${c.error.message}`)
+  const filas = (c.data ?? []) as {
+    id: string
+    workspace_id: string
+    negocio_id: string | null
+    suscripcion_id: string | null
+    monto: number | string | null
+    fecha: string | null
+    anulado_at: string | null
+    tipo_cobro: string | null
+    external_ref: string | null
+    notas: string | null
+  }[]
+  const pagados = filas.filter((f) => f.fecha && !f.anulado_at)
+  if (pagados.length !== 1) return { tipo: 'sin_cambio', motivo: pagados.length === 0 ? 'cuota_1_sin_pago' : 'varios_pagos' }
+  const f = pagados[0]
+  const r = await cerrarCargoAprobadoTardio(deps, {
+    id: f.id,
+    workspaceId: f.workspace_id,
+    negocioId: f.negocio_id,
+    suscripcionId: f.suscripcion_id,
+    monto: Number(f.monto ?? 0),
+    fecha: f.fecha,
+    anuladoAt: f.anulado_at,
+    tipoCobro: f.tipo_cobro,
+    externalRef: f.external_ref,
+    notas: f.notas,
+  })
+  if (!r) return { tipo: 'sin_cambio', motivo: 'nada_que_cerrar' }
+  return { tipo: 'cerrado', revisar: r.revisar, detalle: r.detalle }
+}
+
+export interface ResumenRegistrosCobroPendiente {
+  revisados: number
+  cerrados: { registroId: string; revisar: boolean; detalle: string }[]
+  errores: { registroId: string; error: string }[]
+}
+
+/** Registros por corrida: `cobro_pendiente` es un estado de horas, nunca debería haber muchos. */
+export const TOPE_REGISTROS_COBRO_PENDIENTE = 50
+
+/**
+ * Paso 7e del cron `procesar-planes-cobro`: todo registro en `cobro_pendiente` con su primer cobro ya
+ * pagado se cierra (intento, registro y C3, una sola vez). Sin pago, no lo toca: lo cierra la
+ * confirmación o la conciliación del cargo pendiente (7b). No llama a ePayco ni cobra.
+ */
+export async function conciliarRegistrosConCobroPendiente(deps: DepsCargoTardio): Promise<ResumenRegistrosCobroPendiente> {
+  const db = deps.db as Db
+  const resumen: ResumenRegistrosCobroPendiente = { revisados: 0, cerrados: [], errores: [] }
+  const q = await db.from('valida_registros').select('id').eq('cobro_estado', 'cobro_pendiente').order('updated_at', { ascending: true }).limit(TOPE_REGISTROS_COBRO_PENDIENTE)
+  if (q.error) throw new Error(`registros en cobro_pendiente: ${q.error.message}`)
+  for (const { id } of (q.data ?? []) as { id: string }[]) {
+    resumen.revisados += 1
+    try {
+      const r = await cerrarRegistroConPagoRegistrado(deps, id)
+      if (r.tipo === 'cerrado') {
+        resumen.cerrados.push({ registroId: id, revisar: r.revisar, detalle: r.detalle })
+        console.log(`[valida-cobro] registro ${id} cerrado por la conciliación: ${r.detalle}`)
+      }
+    } catch (e) {
+      resumen.errores.push({ registroId: id, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  return resumen
 }
