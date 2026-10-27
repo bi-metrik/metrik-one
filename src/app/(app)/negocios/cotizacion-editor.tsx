@@ -173,6 +173,8 @@ import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
+import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
+import { leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
 import { listaUnica } from '@/lib/cotizaciones/lista-unica'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
@@ -408,6 +410,12 @@ interface Props {
    * (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Se arma igual; `null` = nada que decir.
    */
   motivoAutorizacionDatos?: string | null
+  /**
+   * Con la forma por pasos: el viaje es Bloqueo (brief del 2026-10-27), con su operador. `null` = A
+   * medida, la pantalla de siempre. Cada opción de la ranura «Paquete de bloqueo» se pinta con su
+   * tarjeta de paquete (hotel + vuelo).
+   */
+  bloqueo?: { operador: string | null } | null
 }
 
 /** Lo que la cotización por pasos le pide a la tarjeta de una opción (`TarjetaOpcion.porPasos`). */
@@ -416,7 +424,7 @@ type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -3786,9 +3794,30 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         />
       )}
       agregarSinPantallazo={jsxAgregar}
+      bloqueo={bloqueo ? (
+        <SeccionBloqueo cotizacionId={cotizacion.id} operador={bloqueo.operador} editable={editable} onCreado={id => { refrescar(); mostrarOpcion(id) }} />
+      ) : null}
       tarjetaDeOpcion={(id, pp) => {
         const item = itemPorIdVista.get(id)
-        return item ? pintarLinea(item, true, pp) : null
+        if (!item) return null
+        // Viaje en bloqueo: la opción de la ranura «Paquete de bloqueo» es un paquete (hotel + vuelo).
+        if (ranuraDeGrupo(item.grupo ?? null)?.slug === 'paquete_detalle') {
+          return (
+            <TarjetaPaqueteBloqueo
+              cotizacionId={cotizacion.id}
+              itemId={item.id}
+              tarifaPax={item.tarifa_pax}
+              precioVenta={item.precio_venta ?? null}
+              editable={editable}
+              operador={bloqueo?.operador ?? null}
+              pasajeros={composicionViaje ? { adultos: composicionViaje.adultos, ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null}
+              vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
+              onCambio={refrescar}
+              onEliminar={pp.onEliminar}
+            />
+          )
+        }
+        return pintarLinea(item, true, pp)
       }}
       revisarLista={(
         <>
