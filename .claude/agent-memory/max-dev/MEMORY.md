@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; SQL config SIN aplicar; puntos fuera de precio_venta; `–` no `−` en PDF
+- ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje
 - ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 APLICADA; no mergear sin DNS
 - ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 SIN aplicar; migrar antes del merge (datos.ts lee la columna)
 - ⚠️⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — DNS de Resend bajo <slug> tumba el espacio: CNAME del slug en el mismo paso; logo solo con clave
@@ -17,7 +18,8 @@
 - ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
 - ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
-- ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco SÍ manda el 6; 7d es red; ciclo Valida solo se marca
+- ⚠️⚠️ [Reverso corta el plan de Valida (27-oct)](project_valida_reverso_corta_plan.md) — Valida#82 primero; estado en reversado.corte; reactivación = cobro sin plan; correo retenido en prod
+- ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco SÍ manda el 6; 7d es red; desde 27-oct el ciclo se corta (ver arriba)
 - ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — causa: deploy tras la aceptación; paso 7e; (d) abierto
 - [Número de vuelo por tramo en servicios](project_numero_vuelo_por_tramo.md) — items.tramos leído aparte (no en el contexto: P3); filas viejas se releen por contenido
 - ⚠️ [Bot ONE registra ingresos (#1231)](project_ingresos_wa_one.md) — cuotas programadas; candado con `respaldo`; depósito propio = ingreso; v4

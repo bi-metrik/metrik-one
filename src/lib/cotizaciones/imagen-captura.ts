@@ -20,6 +20,7 @@ import 'server-only'
 import { almacenamientoExternoDe } from '@/lib/almacenamiento/supabase-externo'
 import { huellaDeImagen } from './captura-repetida'
 import type { LecturaCasilla, TarifaPax } from './tarifa-pasajero'
+import { leerPaqueteBloqueo } from './bloqueo-paquete'
 
 const EXTENSIONES: Record<string, string> = {
   'image/png': 'png',
@@ -113,11 +114,14 @@ export async function imagenComoDataUrl(workspaceId: string | null | undefined, 
   }
 }
 
-/** Todas las imágenes guardadas de una tarifa: sus casillas y sus habitaciones. */
+/** Todas las imágenes guardadas de una tarifa: sus casillas, sus habitaciones y los pantallazos de un paquete. */
 export function imagenesDeTarifa(t: TarifaPax): string[] {
   const refs = new Set<string>()
   for (const l of Object.values(t.casillas ?? {})) if (l?.imagenRef) refs.add(l.imagenRef)
   for (const h of t.habitaciones ?? []) if (h.lectura?.imagenRef) refs.add(h.lectura.imagenRef)
+  // Los dos pantallazos de un paquete de bloqueo (hotel y vuelo).
+  const paquete = leerPaqueteBloqueo(t.bloqueo)
+  for (const r of [paquete?.imagenes.hotel, paquete?.imagenes.vuelo]) if (r) refs.add(r)
   return [...refs]
 }
 

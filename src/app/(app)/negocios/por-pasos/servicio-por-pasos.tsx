@@ -16,8 +16,8 @@ import type { ServicioDelViaje } from '@/lib/cotizaciones/por-pasos-vista'
  * opciones (la tarjeta de siempre de cada opción) y «+ Otra opción» al pie.
  */
 
-const ICONO: Record<ServicioDelViaje['tipo'], typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, otro: Package }
-const NOMBRE_TIPO: Record<ServicioDelViaje['tipo'], string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', otro: 'Otro' }
+const ICONO: Record<ServicioDelViaje['tipo'], typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, otro: Package, paquete: Package }
+const NOMBRE_TIPO: Record<ServicioDelViaje['tipo'], string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', otro: 'Otro', paquete: 'Paquete' }
 
 export function ServicioPorPasos({
   servicio,

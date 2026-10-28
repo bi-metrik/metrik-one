@@ -2,7 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EventoPasarela } from '@/lib/suscripciones/pasarela/adapter'
 import type { CobroParaPago } from './pago-en-linea'
 import { anclaDeFila, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
-import { configConCicloReversado, planDeConfig } from '@/lib/valida-registro/plan'
+import { configConCicloReversado, planDeConfig, type CorteReverso } from '@/lib/valida-registro/plan'
+import { cortarCicloEnValida, otroPagoValido, type DepsCorte } from '@/lib/valida-registro/corte-reverso-servidor'
 import {
   AVISO_REVERSO_PARA,
   correoAvisoReverso,
@@ -57,6 +58,8 @@ export async function enviarCorreoInternoPorResend(m: CorreoInterno): Promise<{ 
 export interface DepsReverso {
   enviarCorreo?: EnvioCorreoInterno
   ahora?: () => Date
+  /** Valida, el correo al cliente y el entorno del corte del plan (`corte-reverso-servidor.ts`). */
+  corte?: Omit<DepsCorte, 'db'>
 }
 
 /** La factura del cobro (`facturas_cobro`, una por cobro). Una lectura fallida no se toma por «sin factura». */
@@ -91,11 +94,18 @@ async function contextoDelCobro(db: Db, cobro: CobroParaPago): Promise<{ cliente
 
 /**
  * Si el pago reversado es el que abrió el ciclo VIGENTE de Valida de un espacio autogestionado
- * (`config_extra.valida_plan.cobro_id`), lo marca (`valida_plan.reversado`) y lo dice. NO lo cierra en
- * Valida: no hay ruta para eso y es una decisión de Términos. Una falla aquí no deshace la anulación:
- * queda dicha en el detalle (`'error'`).
+ * (`config_extra.valida_plan.cobro_id`), lo marca (`valida_plan.reversado`) y, desde el 2026-10-27, CIERRA
+ * el plan en Valida en el acto (`corte-reverso-servidor.ts`), salvo que otro pago válido cubra la cuota
+ * (condición de Emilio). Si Valida no responde, el corte queda `pendiente` y lo reintenta el cron (7f).
+ * Una falla aquí no deshace la anulación del cobro: queda dicha en el detalle (`'error'`).
  */
-async function marcarCicloDeValida(db: Db, cobro: CobroParaPago, referenciaPago: string, ahora: string): Promise<DatosAvisoReverso['cicloValida']> {
+async function marcarCicloDeValida(
+  db: Db,
+  cobro: CobroParaPago,
+  e: EventoPasarela,
+  ahora: string,
+  deps: DepsReverso,
+): Promise<DatosAvisoReverso['cicloValida']> {
   try {
     const ancla = anclaDeFila({ negocio_id: cobro.negocioId, suscripcion_id: cobro.suscripcionId ?? null })
     if (!ancla) return null
@@ -108,11 +118,34 @@ async function marcarCicloDeValida(db: Db, cobro: CobroParaPago, referenciaPago:
       const config = ((ws.data as { config_extra: Record<string, unknown> | null } | null)?.config_extra ?? {}) as Record<string, unknown>
       const plan = planDeConfig(config)
       if (!plan || plan.cobro_id !== cobro.id) continue
-      if (!plan.reversado) {
-        const u = await db.from('workspaces').update({ config_extra: configConCicloReversado(config, plan, { at: ahora, referencia_pago: referenciaPago }) }).eq('id', id)
-        if (u.error) throw new Error(u.error.message)
+      const ciclo = { hasta: plan.hasta, consultas: plan.limite_mes, cuota: plan.cuota_numero }
+      if (plan.reversado) return { ...ciclo, corte: plan.reversado.corte ?? null }
+
+      const monto = Math.round(cobro.monto)
+      let corte: CorteReverso
+      try {
+        const otro = await otroPagoValido(db, cobro, e.transaccionId)
+        corte = otro
+          ? { estado: 'no_aplica', monto, intentos: 0, detalle: `No se cortó el plan: ${otro}.` }
+          : { estado: 'pendiente', monto, intentos: 0 }
+      } catch (err) {
+        // Sin poder comprobarlo no se corta: el plan de un cliente que sí pagó no se cierra a ciegas.
+        corte = { estado: 'final', monto, intentos: 0, detalle: `No se pudo comprobar si otro pago cubre la cuota (${err instanceof Error ? err.message : String(err)}): no se cortó.` }
       }
-      return { hasta: plan.hasta, consultas: plan.limite_mes, cuota: plan.cuota_numero }
+      const u = await db
+        .from('workspaces')
+        .update({ config_extra: configConCicloReversado(config, plan, { at: ahora, referencia_pago: e.referenciaPago, corte }) })
+        .eq('id', id)
+      if (u.error) throw new Error(u.error.message)
+      if (corte.estado === 'pendiente') {
+        try {
+          corte = (await cortarCicloEnValida(id, { db, ...(deps.corte ?? {}) })) ?? corte
+        } catch (err) {
+          // Queda `pendiente`: el cron lo reintenta.
+          corte = { ...corte, detalle: `No se pudo pedir el corte a Valida (${err instanceof Error ? err.message : String(err)}). Lo reintenta el cron.` }
+        }
+      }
+      return { ...ciclo, corte }
     }
     return null
   } catch (err) {
@@ -157,7 +190,7 @@ export async function anularCobroPorReverso(
   const [factura, ctx, cicloValida] = await Promise.all([
     facturaDelCobro(db, cobro.id),
     contextoDelCobro(db, cobro),
-    marcarCicloDeValida(db, cobro, e.referenciaPago, ahora),
+    marcarCicloDeValida(db, cobro, e, ahora, deps),
   ])
   const datos: DatosAvisoReverso = { pasarela, referenciaPago: e.referenciaPago, cobroId: cobro.id, monto, factura, cicloValida, ...ctx }
   const correo = correoAvisoReverso(datos)

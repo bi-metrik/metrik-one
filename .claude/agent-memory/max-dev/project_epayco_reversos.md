@@ -1,6 +1,6 @@
 ---
 name: project-epayco-reversos
-description: Reverso de pagos ePayco (estado 6) — ePayco SÍ manda la confirmación del 6 (390720992-6); webhook + conciliación 7d anulan el cobro; el ciclo de Valida solo se MARCA
+description: Reverso de pagos ePayco (estado 6) — ePayco SÍ manda la confirmación del 6 (390720992-6); webhook + conciliación 7d anulan el cobro; desde 27-oct el ciclo de Valida se corta
 metadata:
   type: project
 ---
@@ -14,6 +14,8 @@ consulta y procesa con el mismo id `<ref>-6`. Es red, no el camino principal.
 PR fix/valida-cobro-pendiente-y-reverso (26-oct): el reverso MARCA `config_extra.valida_plan.reversado` si ese
 cobro abrió el ciclo vigente, y lo dice en evento y correo. No lo cierra: metrik-valida no tiene ruta para cerrar
 un ciclo (solo `POST /autogestion/{cliente}/ciclos`).
+
+Actualización 27-oct: Mauricio decidió que el reverso corta el plan en el acto: ver [[project-valida-reverso-corta-plan]].
 
 **Why:** cancelar la suscripción, cerrar el ciclo de Valida o recobrar la cuota es tema de Términos: Mauricio lo
 decide con Emilio. Por eso el cobro anulado CONSERVA `fecha` (el cron lo trata como cuota cubierta).

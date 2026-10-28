@@ -254,4 +254,5 @@ const ICONO: Record<TipoRanura | 'otro', typeof Plane> = {
   traslado: Car,
   actividad: Ticket,
   otro: Package,
+  paquete: Package,
 }
