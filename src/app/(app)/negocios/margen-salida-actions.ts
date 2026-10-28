@@ -6,7 +6,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { createServiceClient } from '@/lib/supabase/server'
 import { pctTexto } from '@/lib/cotizaciones/piso-salida'
-import { detalleDeCausas } from '@/lib/cotizaciones/causas-margen'
+import { bajoMinimoParaNota, detalleDeCausas } from '@/lib/cotizaciones/causas-margen'
 import {
   evaluarSalida,
   faltaLaTabla,
@@ -125,11 +125,7 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
     lineas: salida.medicion?.conteo.lineas,
     lineasSinCosto: salida.medicion?.conteo.sinCosto,
     // Con reglas de margen van también los hoteles bajo su piso: la nota dice la causa real.
-    bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({
-      nombre: s.nombre,
-      margenPct: s.margenRealPct,
-      ...(s.hotelesBajoPiso?.length ? { hoteles: s.hotelesBajoPiso, pisoHotelPct: s.pisoHotelPct } : {}),
-    })),
+    bajoMinimo: bajoMinimoParaNota(salida.medicion?.bajoPiso ?? []),
     faltaCosto: salida.faltaCosto,
     faltaCostoLineas: salida.faltaCosto ? (salida.medicion?.conteo.faltantes ?? []) : [],
   }

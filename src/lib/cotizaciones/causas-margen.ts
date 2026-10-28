@@ -60,6 +60,18 @@ export interface SujetoQueFrena {
 }
 
 /**
+ * Lo que la vista de la salida (`getSalidaDeCotizacion`) le pasa a la nota: cada sujeto que frena
+ * con su margen y, si los hay, los hoteles bajo su piso.
+ */
+export function bajoMinimoParaNota(sujetos: readonly SujetoQueFrena[]): { nombre: string | null; margenPct: number | null; hoteles?: { nombre: string | null; margenPct: number }[]; pisoHotelPct?: number }[] {
+  return sujetos.map(s => ({
+    nombre: s.nombre,
+    margenPct: s.margenRealPct,
+    ...(s.hotelesBajoPiso?.length ? { hoteles: [...s.hotelesBajoPiso], pisoHotelPct: s.pisoHotelPct } : {}),
+  }))
+}
+
+/**
  * El paréntesis del pedido y del registro de la autorización. Los hoteles bajo su piso, con su
  * nombre; el margen global, como siempre («tarifa Recomendada al 11,9 %»), solo si es causa o si
  * no hay otra (no se puede medir).
