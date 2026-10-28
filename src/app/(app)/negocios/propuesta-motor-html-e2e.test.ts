@@ -159,6 +159,27 @@ describe('motor html de la propuesta en la acción del PDF', () => {
     expect(doc.getPageCount()).toBe(1)
   })
 
+  it('encendido: el contacto del negocio llega al modelo, con su empresa, y la propuesta lo nombra (2026-10-27)', async () => {
+    sembrar({ motor: true })
+    Object.assign(base.tablas.negocios[0], { contacto_id: 'c-1', empresa_id: 'e-1' })
+    base.tablas.contactos = [{ id: 'c-1', workspace_id: WS, nombre: 'ANDRÉS DE LA TORRE' }]
+    base.tablas.empresas = [{ id: 'e-1', workspace_id: WS, nombre: 'ANDRÉS DE LA TORRE', tipo_persona: 'natural', numero_documento: null, contacto_nombre: null, contacto_email: null, regimen_tributario: null, gran_contribuyente: false, agente_retenedor: false }]
+    await generar()
+    const entrada = motor.llamadas[0] as EntradaModeloPropuesta
+    expect(entrada.cliente).toEqual({ contacto: 'ANDRÉS DE LA TORRE', empresa: 'ANDRÉS DE LA TORRE', tipoPersona: 'natural' })
+    const m = modeloDePropuesta(entrada)
+    expect(m.portada.destinatario).toEqual({ nombre: 'Andrés de la Torre', empresa: null })
+    expect(htmlDePropuesta(m, { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'A' })).toContain('<b>Cotizada para</b>Andrés de la Torre')
+  })
+
+  it('encendido: sin contacto en el negocio, el modelo no tiene destinatario (la empresa de relleno no cuenta)', async () => {
+    sembrar({ motor: true })
+    await generar()
+    const entrada = motor.llamadas[0] as EntradaModeloPropuesta
+    expect(entrada.cliente).toEqual({ contacto: null, empresa: null, tipoPersona: null })
+    expect(modeloDePropuesta(entrada).portada.destinatario).toBeNull()
+  })
+
   it('encendido: cada plan opcional llega con su día, en el orden de los sugeridos', async () => {
     sembrar({ motor: true })
     ;(base.tablas.items as Fila[]).push(

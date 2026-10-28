@@ -1,20 +1,25 @@
 /**
- * La propuesta de viaje de Trappvel en HTML, para imprimirla con Chromium (motor `html`, PR 2
- * del plan del 2026-10-14). Reproduce el prototipo aprobado (v5):
+ * La propuesta de viaje de Trappvel en HTML, para imprimirla con Chromium (motor `html`).
  *
- *   portada (encabezado, foto, datos, ruta, «Lo que van a vivir») · día a día · dónde duermen ·
- *   vuelos · trenes y traslados · planes para los días libres · elijan su versión + apartar ·
- *   qué incluye y cuándo se paga · términos, firma y créditos
+ * Desde el 2026-10-27 (decisión de Mauricio) copia el formato que mandó Edgar Alarcón el
+ * 2026-10-14 (`proyectos/trappvel/clarity/docs/entrada/formato-edgar/`), con una hoja de precios
+ * al final en el mismo sistema visual:
+ *
+ *   portada (encabezado, collage, aviso, 4 tarjetas, viajeros) · vuelos y tren · hospedaje ·
+ *   traslados · itinerario día a día (línea de tiempo) · planes opcionales · información útil ·
+ *   HOJA DE PRECIOS (elijan su versión + apartar · cuánto pagan y cuándo · qué incluye y
+ *   términos, en tarjetas · firma)
+ *
+ * Lo que el formato de Edgar tiene y una cotización NO (localizadores, «confirmado», e-tickets,
+ * «Realizado», chips de reservas, clima, contactos de proveedores) no se imprime: aquí solo va lo
+ * que existe en el modelo. Una fila sin dato no sale.
  *
  * PURO: recibe el modelo (`modeloDePropuesta`) y los recursos ya resueltos (fotos reducidas y
  * logo como data URL) y devuelve el HTML. No lee disco ni red; se prueba con vitest.
  *
- * Texto: solo lo que ya existe. El texto revisado del cliente (`documento_cliente`: titular,
- * intro, incluye, antes de viajar) y frases deterministas armadas con los datos. Nada generado.
- *
- * Decisiones de Mauricio del 2026-10-14: sin políticas de cancelación de hoteles; sin anticipo
- * fijo (solo el que la asesora asignó, y el botón abre su WhatsApp); los nombres que dice el
- * documento son los que el modelo deja pasar (`portada.nombres`).
+ * Decisiones de Mauricio del 2026-10-14 que siguen: sin políticas de cancelación de hoteles; sin
+ * anticipo fijo (solo el que la asesora asignó, y el botón abre su WhatsApp); los nombres que
+ * dice el documento son los que el modelo deja pasar (`portada.nombres`).
  */
 import type {
   CiudadDoc,
@@ -25,10 +30,12 @@ import type {
   ModeloPropuesta,
   OpcionalDoc,
   TarifaDoc,
+  TrayectoDoc,
 } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import { notaDeFila } from '@/lib/viaje/asi-puedes-pagar'
+import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
-import { nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
+import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
 
 export interface FotoResuelta {
   /** data URL ya reducida. */
@@ -44,6 +51,8 @@ export interface RecursosPropuesta {
   fotoDeCiudad: (ciudad: string | null) => FotoResuelta | null
   /** Foto del catálogo (`fotos_catalogo`) para un plan opcional, por su nombre. Sin ella, degradado. */
   fotoDeOpcional?: (nombre: string) => FotoResuelta | null
+  /** Foto del catálogo para una actividad incluida, por su nombre corto. Va al lado de su día. */
+  fotoDeActividad?: (nombre: string) => FotoResuelta | null
   /**
    * Las fotos extra (biblioteca, hasta dos) de un hotel o de un plan. Van en el MISMO recuadro de
    * la principal (`imagenDeTarjeta`): la tarjeta no crece, así que no agregan hojas ni huecos.
@@ -91,20 +100,24 @@ function diaCorto(iso: string | null | undefined): string | null {
   return d ? `${DIAS[d.getUTCDay()]} ${d.getUTCDate()}` : null
 }
 
+/** «Jue 10 dic», como debajo de la hora en las tarjetas de vuelo de Edgar. */
+function diaConMes(iso: string | null | undefined): string | null {
+  const d = fecha(iso)
+  if (!d) return null
+  const dia = DIAS[d.getUTCDay()]
+  return `${dia[0].toUpperCase()}${dia.slice(1)} ${d.getUTCDate()} ${MESES[d.getUTCMonth()]}`
+}
+
+/** «10 dic» */
+function diaMes(iso: string | null | undefined): string | null {
+  const d = fecha(iso)
+  return d ? `${d.getUTCDate()} ${MESES[d.getUTCMonth()]}` : null
+}
+
 /** «jueves 10 de diciembre» */
 function diaLargo(iso: string | null | undefined): string | null {
   const d = fecha(iso)
   return d ? `${DIAS_LARGOS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES_LARGOS[d.getUTCMonth()]}` : null
-}
-
-/** «vie 11 – lun 14 dic» */
-function rango(desde: string | null, hasta: string | null): string | null {
-  const a = fecha(desde)
-  const b = fecha(hasta)
-  if (!a) return null
-  if (!b) return `${diaCorto(desde)} ${MESES[a.getUTCMonth()]}`
-  const mesA = a.getUTCMonth() === b.getUTCMonth() ? '' : ` ${MESES[a.getUTCMonth()]}`
-  return `${diaCorto(desde)}${mesA} – ${diaCorto(hasta)} ${MESES[b.getUTCMonth()]}`
 }
 
 /** «11 – 14 dic» */
@@ -130,23 +143,38 @@ function icono(id: string): string {
   return `<svg class="ic" viewBox="0 0 24 24"><use href="#${id}"/></svg>`
 }
 
-const ICONO_EVENTO: Record<EventoDoc['tipo'], string> = { vuelo: 'plane', tren: 'train', traslado: 'van', hotel: 'bed', actividad: 'tk' }
-
 function fondo(f: FotoResuelta | null, extra = ''): string {
   if (!f) return extra ? ` style="${extra}"` : ''
   const pos = f.foco ? `${Math.round(f.foco.x * 100)}% ${Math.round(f.foco.y * 100)}%` : 'center'
   return ` style="background-image:url(${f.src});background-position:${pos};${extra}"`
 }
 
+const llano = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+const minuscula = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s)
+const mayuscula = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s)
+
+/** «A», «A o B», «A, B o C». */
+function oLista(xs: string[]): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} o ${xs[xs.length - 1]}`
+}
+
+/** «A», «A y B», «A, B y C». */
+function yLista(xs: string[]): string {
+  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
+}
+
 // ── Fotos extra en el mismo recuadro ─────────────────────────────────────────
 
 /** Columnas de la cuadrícula de planes (`.opcs` en estilos.ts). */
 export const COLUMNAS_OPCIONALES = 4
-/** Ancho útil de la hoja (A4 menos 12 mm por lado, `@page` de estilos.ts) y separación de las tarjetas. */
-const ANCHO_UTIL_MM = 186
-const SEPARACION_MM = 3
-/** Alto del recuadro de foto (`.hc .img` y `.oc .img`, la versión compacta de estilos.ts). */
-const ALTO_FOTO_MM = { hotel: 29, opcional: 25 } as const
+/** Columnas del hospedaje (`.hg` en estilos.ts): dos, como el formato de Edgar. */
+export const COLUMNAS_HOTELES = 2
+/** Ancho útil de la hoja (carta: 215,9 mm menos 9 mm por lado, `@page` de estilos.ts). */
+const ANCHO_UTIL_MM = 197.9
+/** Separación de las tarjetas por cuadrícula (`gap` de `.hg` y `.opcs`). */
+const SEPARACION_MM = { hotel: 3.7, opcional: 3 } as const
+/** Alto del recuadro de foto (`.hc .img` y `.oc .img` de estilos.ts). */
+const ALTO_FOTO_MM = { hotel: 25, opcional: 25 } as const
 /** Una foto extra más chica que esto no se reconoce: mejor no ponerla. */
 const EXTRA_MINIMA_MM = { ancho: 14, alto: 12 } as const
 const ESPACIO_MOSAICO_MM = 0.6
@@ -159,7 +187,7 @@ const ESPACIO_MOSAICO_MM = 0.6
  */
 export function extrasQueCaben(seccion: 'hotel' | 'opcional', columnas: number): number {
   const cols = Math.max(1, Math.floor(columnas))
-  const tarjeta = (ANCHO_UTIL_MM - SEPARACION_MM * (cols - 1)) / cols
+  const tarjeta = (ANCHO_UTIL_MM - SEPARACION_MM[seccion] * (cols - 1)) / cols
   const ancho = (tarjeta - ESPACIO_MOSAICO_MM) / 3
   if (ancho < EXTRA_MINIMA_MM.ancho) return 0
   for (const n of [2, 1]) {
@@ -202,6 +230,20 @@ function etiquetasDe(indices: number[], porIndice: Map<number, TarifaDoc>): stri
     .join(' ')
 }
 
+/** ¿Estas tarifas son todas las del documento? Entonces la etiqueta sobra. */
+function enTodas(indices: number[], m: ModeloPropuesta): boolean {
+  return m.tarifas.every((t) => indices.includes(t.indice))
+}
+
+/** «Aeropuerto Barajas T4 - hotel» → «Aeropuerto Barajas T4 → hotel». */
+function flecha(trayecto: string): string {
+  // «Hotel» va en minúscula en medio de la frase: «Traslado hotel → estación».
+  return trayecto.replace(/\s+(?:-|–)\s+/, ' → ').replace(/^Hotel\b/, 'hotel')
+}
+
+/** «Bogotá BOG» → «Bogotá». */
+const ciudadSola = (s: string | null) => (s ?? '').replace(/\s*\(?\b[A-Z]{3}\b\)?\s*$/, '').trim() || null
+
 // ── Secciones ─────────────────────────────────────────────────────────────────
 
 function encabezadoDeSeccion(icon: string, titulo: string, sub: string | null): string {
@@ -220,251 +262,181 @@ function resumenIncluye(m: ModeloPropuesta): string | null {
   const visitas = m.dias.flatMap((d) => d.eventos).filter((e) => e.tipo === 'actividad').length
   if (visitas > 0) partes.push(`${visitas} ${visitas === 1 ? 'visita' : 'visitas'}`)
   if (partes.length === 0) return null
-  const lista = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`
-  return lista[0].toUpperCase() + lista.slice(1)
+  return mayuscula(yLista(partes))
+}
+
+/** El hotel que el documento nombra en una ciudad: el de la tarifa recomendada, o el primero. */
+function opcionDeReferencia(c: CiudadDoc, m: ModeloPropuesta) {
+  const principal = m.tarifas.find((t) => t.esPrincipal)?.indice
+  return (principal !== undefined ? c.opciones.find((x) => x.tarifas.includes(principal)) : undefined) ?? c.opciones[0]
+}
+
+/**
+ * Las fotos del collage de la portada (hasta 4, como el de Edgar): la de la portada, las de cada
+ * ciudad y, si faltan, las de los hoteles de la versión recomendada. Sin repetir; sin ninguna,
+ * la banda queda con el degradado oscuro.
+ */
+export function fotosDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoResuelta[] {
+  const fotos: FotoResuelta[] = []
+  const vistas = new Set<string>()
+  const sumar = (f: FotoResuelta | null | undefined) => {
+    if (!f || vistas.has(f.src) || fotos.length >= 4) return
+    vistas.add(f.src)
+    fotos.push(f)
+  }
+  sumar(r.foto(m.portada.foto?.url))
+  for (const p of m.ruta.paradas) sumar(r.fotoDeCiudad(p.ciudad))
+  for (const c of m.hoteles) {
+    const o = opcionDeReferencia(c, m)
+    const principal = o ? r.foto(o.foto?.url) : null
+    sumar(principal)
+    if (o && principal) for (const x of r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []) sumar(x)
+  }
+  for (const c of m.hoteles) for (const o of c.opciones) sumar(r.foto(o.foto?.url))
+  return fotos
+}
+
+function marcaDe(r: RecursosPropuesta, alto?: string): string {
+  return r.logo
+    ? `<img src="${r.logo}" alt="${esc(r.marca)}"${alto ? ` style="height:${alto}"` : ''}>`
+    : `<b class="pop">${esc(r.marca)}</b>`
+}
+
+function iniciales(nombre: string): string {
+  const partes = nombre.trim().split(/\s+/).filter(Boolean)
+  const letras = partes.length > 1 ? partes[0][0] + partes[partes.length - 1][0] : (partes[0] ?? '').slice(0, 2)
+  return letras.toUpperCase()
 }
 
 function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const p = m.portada
-  const foto = r.foto(p.foto?.url)
-  const quienes = p.nombres.length > 0 ? p.nombres.join(', ').replace(/, ([^,]*)$/, ' y $1') : p.viajeros
-  const dt = [p.fechas, quienes].filter(Boolean).join(' · ')
-  const sub = [p.duracion, m.ruta.paradas.length > 1 ? `${m.ruta.paradas.length} ciudades` : null].filter(Boolean).join(' · ')
-  const marca = r.logo ? `<img src="${r.logo}" alt="${esc(r.marca)}">` : `<b class="mont">${esc(r.marca)}</b>`
+  const quienes = p.nombres.length > 0 ? yLista(p.nombres) : null
+  const sub = [p.duracion, quienes].filter(Boolean).join(' · ')
   const destinos = m.ruta.paradas.length > 0
     ? m.ruta.paradas.map((x) => `${x.ciudad}${x.noches ? ` (${x.noches}N)` : ''}`).join(' · ')
     : p.destino
-  const incluye = resumenIncluye(m)
+  // A quién va dirigida (2026-10-27): el contacto del negocio, como «Titular de la reserva» en el
+  // formato de Edgar. Sin contacto, la cuarta tarjeta vuelve a «Incluye» y el aviso, a los pasajeros.
+  const para = p.destinatario ? textoDelDestinatario(p.destinatario) : null
   const datos = [
     ['Duración', p.duracion],
     ['Destinos', destinos],
-    ['Viajeros', quienes],
-    ['Incluye', incluye],
+    ['Viajeros', p.viajeros],
+    para ? ['Cotizada para', para] : ['Incluye', resumenIncluye(m)],
   ].filter((d): d is [string, string] => Boolean(d[1]))
+  const fotos = fotosDePortada(m, r)
+  const collage = fotos.length > 0
+    ? `<div class="fotos" style="grid-template-columns:repeat(${fotos.length},1fr)">${fotos.map((f) => `<div${fondo(f)}></div>`).join('')}</div>`
+    : ''
+  // El aviso blanco va donde Edgar pone la caja verde de «servicios confirmados»: aquí, el texto
+  // revisado del cliente. Sin texto, no hay aviso.
+  const aviso = p.intro
+    ? `<div class="aviso"><span class="ok">${icono('pin')}</span><b>${esc(para ? `Propuesta de viaje para ${para}` : quienes ? `Propuesta de viaje para ${quienes}` : 'Su propuesta de viaje')}</b><p>${esc(p.intro)}</p></div>`
+    : ''
+  const largo = p.titulo.length > 46
   return [
-    `<div class="top"><span class="k"><i></i>Propuesta de viaje · ${esc(p.consecutivo)}</span>${marca}</div>`,
-    `<div class="hero"${fondo(foto)}><div class="in">`,
-    dt ? `<div class="dt">${esc(dt)}</div>` : '',
-    `<h1>${esc(p.titulo)}</h1>`,
+    `<div class="top"><span class="k"><i></i>Propuesta de viaje · ${esc(p.consecutivo)}</span>${marcaDe(r)}</div>`,
+    `<div class="hero${aviso ? ' conaviso' : ''}">${collage}<div class="in">`,
+    p.fechas ? `<div class="dt">${esc(p.fechas)}</div>` : '',
+    `<h1${largo ? ' class="largo"' : ''}>${esc(p.titulo)}</h1>`,
     sub ? `<div class="sub">${esc(sub)}</div>` : '',
-    `</div>${p.foto?.rotulo ? `<span class="ph">${esc(p.foto.rotulo)}</span>` : ''}</div>`,
+    `</div></div>`,
+    aviso,
     datos.length > 0
-      ? `<div class="facts5" style="grid-template-columns:repeat(${datos.length},1fr)">${datos.map(([k, v]) => `<div><b>${esc(k)}</b>${esc(v)}</div>`).join('')}</div>`
+      ? `<div class="facts" style="grid-template-columns:repeat(${datos.length},1fr)">${datos.map(([k, v]) => `<div><b>${esc(k)}</b>${esc(v)}</div>`).join('')}</div>`
       : '',
-    p.intro ? `<p class="intro">${esc(p.intro)}</p>` : '',
+    p.nombres.length > 0
+      ? `<div class="viajeros">${p.nombres.map((n) => `<div class="vj"><i>${esc(iniciales(n))}</i><b>${esc(n)}</b></div>`).join('')}</div>`
+      : '',
   ].join('\n')
 }
 
-function ruta(m: ModeloPropuesta): string {
-  const { origen, paradas, regreso } = m.ruta
-  if (paradas.length === 0) return ''
-  const sigla = (s: string | null) => {
-    const iata = /\b([A-Z]{3})\b/.exec(s ?? '')?.[1]
-    return iata ?? (s ?? '').slice(0, 3).toUpperCase()
+// ── Vuelos y tren ─────────────────────────────────────────────────────────────
+
+/** «Madrid MAD» → «MAD»; sin código, la ciudad en mayúscula (como «SEVILLA» en el tren de Edgar). */
+function codigoDe(lugar: string | null): string {
+  const iata = /\b([A-Z]{3})\b\)?\s*$/.exec(lugar ?? '')?.[1]
+  return iata ?? (ciudadSola(lugar) ?? lugar ?? '').toUpperCase()
+}
+
+function punto(lugar: string | null, hora: string | null, dia: string | null): string {
+  const cod = codigoDe(lugar)
+  return `<div class="pt"><div class="cod${cod.length > 7 ? ' largo' : ''}">${esc(cod)}</div>${hora ? `<div class="h">${esc(hora)}</div>` : ''}${dia ? `<div class="f">${esc(dia)}</div>` : ''}</div>`
+}
+
+interface VueloUnico {
+  fila: FilaVueloDoc
+  tarifas: number[]
+}
+
+/** Un vuelo una vez aunque lo lleven varias versiones: la etiqueta dice cuáles. */
+function vuelosUnicos(m: ModeloPropuesta): VueloUnico[] {
+  const porClave = new Map<string, VueloUnico>()
+  for (const f of m.vuelos) {
+    const k = [f.numero, f.aerolinea, f.fecha, f.desde, f.hasta, f.salida, f.llegada].join('|')
+    const ya = porClave.get(k)
+    const tarifas = f.tarifas.length > 0 ? f.tarifas : m.tarifas.map((t) => t.indice)
+    if (ya) ya.tarifas = [...new Set([...ya.tarifas, ...tarifas])]
+    else porClave.set(k, { fila: f, tarifas })
   }
-  const ciudadSola = (s: string | null) => (s ?? '').replace(/\s*\(?\b[A-Z]{3}\b\)?\s*$/, '').trim() || s || ''
-  const partes: string[] = []
-  if (origen) {
-    partes.push(`<div class="stop home"><div class="dot">${esc(sigla(origen))}</div><div class="city">${esc(ciudadSola(origen))}</div></div>`)
-    partes.push(`<div class="leg"><div class="bar"></div><div class="ico">${icono('plane')}</div><div class="lbl">vuelo</div></div>`)
-  }
-  paradas.forEach((x, i) => {
-    const cuando = rangoCorto(x.desde, x.hasta)
-    partes.push(
-      `<div class="stop"><div class="dot">${x.noches ? `${x.noches}n` : '·'}</div><div class="city">${esc(x.ciudad)}</div>${cuando ? `<div class="when">${esc(cuando)}</div>` : ''}</div>`,
-    )
-    if (i < paradas.length - 1) {
-      const tren = x.siguiente !== null
-      const lbl = tren ? etiquetaDeTren(x.siguiente as string) : ''
-      partes.push(
-        `<div class="leg"><div class="bar${tren ? ' train' : ''}"></div><div class="ico">${icono(tren ? 'train' : 'plane')}</div><div class="lbl">${esc(lbl)}</div></div>`,
-      )
-    }
-  })
-  if (regreso) {
-    partes.push(`<div class="leg"><div class="bar"></div><div class="ico">${icono('plane')}</div><div class="lbl">regreso</div></div>`)
-    partes.push(`<div class="stop home"><div class="dot">${esc(sigla(regreso))}</div><div class="city">${esc(ciudadSola(regreso))}</div></div>`)
-  }
-  return `<div class="route">${partes.join('\n')}</div>`
+  return [...porClave.values()].sort(
+    (a, b) => (a.fila.fecha ?? '').localeCompare(b.fila.fecha ?? '') || (a.fila.salida ?? '').localeCompare(b.fila.salida ?? ''),
+  )
 }
 
-/** «Lo que van a vivir»: una tarjeta por ciudad, con su foto y lo que ya está incluido allí. */
-function loQueVanAVivir(m: ModeloPropuesta, r: RecursosPropuesta): string {
-  if (m.ruta.paradas.length === 0) return ''
-  const tarjetas = m.ruta.paradas.map((x) => {
-    const actividades = [
-      ...new Set(
-        m.dias
-          .filter((d) => d.ciudad === x.ciudad)
-          .flatMap((d) => d.eventos)
-          .filter((e) => e.tipo === 'actividad')
-          .map((e) => cabeza(e.texto)),
-      ),
-    ]
-    const ciudadDoc = m.hoteles.find((h) => h.ciudad === x.ciudad)
-    const hotel = ciudadDoc ? hotelDeReferencia(ciudadDoc, m) : null
-    const texto = actividades.length > 0
-      ? `Incluido: ${actividades.slice(0, 3).join(', ')}.`
-      : hotel
-        ? `${x.noches ?? ''} ${x.noches === 1 ? 'noche' : 'noches'} en ${hotel}.`.trim()
-        : null
-    const foto = r.fotoDeCiudad(x.ciudad)
-    const rotulo = `${x.ciudad}${x.noches ? ` · ${x.noches} ${x.noches === 1 ? 'noche' : 'noches'}` : ''}`
-    return `<div class="hl"><div class="img${foto ? '' : ' sinfoto'}"${fondo(foto)}><span class="ct">${esc(rotulo)}</span></div><div class="tx"><h3>${esc(x.ciudad)}</h3>${texto ? `<p>${esc(texto)}</p>` : ''}</div></div>`
-  })
-  return `${encabezadoDeSeccion('star', 'Lo que van a vivir', 'Una ciudad a la vez')}\n<div class="hls">${tarjetas.join('\n')}</div>`
+function tarjetaDeVuelo(v: VueloUnico, i: number, m: ModeloPropuesta, porIndice: Map<number, TarifaDoc>): string {
+  const f = v.fila
+  const casa = llano(ciudadSola(m.ruta.origen) ?? '')
+  const vuelve = casa !== '' && llano(ciudadSola(f.hasta) ?? '') === casa
+  const linea = f.escala ?? (vuelve && i > 0 ? 'Vuelo de regreso' : null)
+  // La fecha de llegada solo si es la misma de la salida: el modelo no trae la otra.
+  const mismoDia = f.salida && f.llegada && f.llegada >= f.salida
+  const tags = m.tarifas.length > 0 && !enTodas(v.tarifas, m) ? `<span class="tags">${etiquetasDe(v.tarifas, porIndice)}</span>` : ''
+  const nota = [f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
+  return `<div class="vc"><div class="fila">
+    <div class="quien">${insigniasDeVuelo(f.aerolinea, f.numero)}${f.numero ? `<span class="num">${esc(f.numero)}</span>` : ''}${tags}</div>
+    ${punto(f.desde, f.salida, diaConMes(f.fecha))}
+    <div class="linea"><div class="l">${esc(linea ?? '')}</div><div class="b">${icono('plane')}</div></div>
+    ${punto(f.hasta, f.llegada, mismoDia ? diaConMes(f.fecha) : null)}
+    <div class="der">${f.tarifaAerolinea ? `<div class="k">Tarifa</div><div class="v">${esc(f.tarifaAerolinea)}</div>` : ''}</div>
+  </div>${nota ? `<div class="nota">${esc(nota)}</div>` : ''}</div>`
 }
 
-/** El hotel que el documento nombra en una ciudad: el de la tarifa recomendada, o el primero. */
-function hotelDeReferencia(c: CiudadDoc, m: ModeloPropuesta): string | null {
-  const principal = m.tarifas.find((t) => t.esPrincipal)?.indice
-  const o = (principal !== undefined ? c.opciones.find((x) => x.tarifas.includes(principal)) : undefined) ?? c.opciones[0]
-  return o?.hotel ?? null
-}
-
-function tituloDelDia(d: DiaDoc, i: number, dias: DiaDoc[], m: ModeloPropuesta): { titulo: string; lugar: string | null } {
-  const tipos = new Set(d.eventos.map((e) => e.tipo))
-  const anterior = i > 0 ? dias[i - 1].ciudad : null
-  const ciudadSola = (s: string | null) => (s ?? '').replace(/\s*\(?\b[A-Z]{3}\b\)?\s*$/, '').trim() || null
-  // El título que escriba el texto generado (PR 6) manda; el lugar sigue saliendo de los datos.
-  const conTitulo = (t: { titulo: string; lugar: string | null }) => (d.titulo ? { ...t, titulo: d.titulo } : t)
-  const sale = d.eventos.some((e) => e.tipo === 'vuelo' && e.momento === 'salida')
-  if (i === 0 && sale) {
-    const origen = ciudadSola(m.ruta.origen)
-    return conTitulo({ titulo: origen ? `Salida desde ${origen}` : 'Salida', lugar: origen })
-  }
-  if (i === dias.length - 1 && sale) {
-    const casa = ciudadSola(m.ruta.regreso)
-    return conTitulo({ titulo: 'Regreso a casa', lugar: [anterior, casa].filter(Boolean).join(' → ') || null })
-  }
-  if (tipos.has('tren') && d.ciudad && anterior && d.ciudad !== anterior) {
-    return conTitulo({ titulo: `En tren a ${d.ciudad}`, lugar: `${anterior} → ${d.ciudad}` })
-  }
-  if (d.ciudad && d.ciudad !== anterior) return conTitulo({ titulo: `Llegada a ${d.ciudad}`, lugar: d.ciudad })
-  const actividad = d.eventos.find((e) => e.tipo === 'actividad')
-  if (actividad) return conTitulo({ titulo: cabeza(actividad.texto), lugar: d.ciudad })
-  if (d.libre) return conTitulo({ titulo: 'Día libre', lugar: d.ciudad })
-  return conTitulo({ titulo: d.ciudad ? `En ${d.ciudad}` : 'En ruta', lugar: d.ciudad })
-}
-
-/** «A», «A o B», «A, B o C». */
-function oLista(xs: string[]): string {
-  return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} o ${xs[xs.length - 1]}`
-}
-
-/** «Aeropuerto Barajas T4 - hotel» → «Aeropuerto Barajas T4 → hotel». */
-function flecha(trayecto: string): string {
-  // «Hotel» va en minúscula en medio de la frase: «Traslado hotel → estación».
-  return trayecto.replace(/\s+(?:-|–)\s+/, ' → ').replace(/^Hotel\b/, 'hotel')
-}
-
-const minuscula = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s)
-
-/** «Barcelona Sants - hotel · Compartido» con hora o sin ella: ¿es el traslado al llegar a la ciudad? */
-function esTrasladoAlLlegar(texto: string): boolean {
-  const extremos = cabeza(texto).split(/\s+(?:-|→|–)\s+/)
-  return extremos.length === 2 && /\bhotel\b/i.test(extremos[1]) && !/\bhotel\b/i.test(extremos[0])
-}
-
-/**
- * Un renglón del día: hora a la izquierda (o «al llegar»), ícono y el texto en frase. Nada que no
- * esté en los datos: sin hora, la columna queda en blanco.
- */
-function renglonDeEvento(e: EventoDoc, d: DiaDoc, porIndice: Map<number, TarifaDoc>): string {
-  let hora = e.hora ?? ''
-  let texto: string
-  switch (e.tipo) {
-    case 'vuelo':
-      texto = e.momento === 'llegada' ? esc(e.texto.replace(/^Llegada a /, 'Llegan a ')) : `Vuelo ${esc(e.texto)}`
-      break
-    case 'tren': {
-      const [trayecto, ...resto] = e.texto.split(' · ')
-      texto = resto.length > 0 ? `Tren ${esc(resto.join(' · '))} · ${esc(flecha(trayecto))}` : `Tren ${esc(flecha(trayecto))}`
-      break
-    }
-    case 'traslado': {
-      const [trayecto, ...resto] = e.texto.split(' · ')
-      texto = `Traslado ${esc(flecha(trayecto))}${resto.length > 0 ? ` · ${esc(minuscula(resto.join(' · ')))}` : ''}`
-      // Del aeropuerto o la estación al hotel, el día que llegan: «al llegar».
-      if (!hora && esTrasladoAlLlegar(e.texto) && d.eventos.some((x) => x.tipo === 'tren' || x.tipo === 'vuelo')) hora = 'al llegar'
-      break
-    }
-    case 'actividad': {
-      // La ciudad del día ya está en el título: «Museo del Prado · 2 h · Madrid» → «Museo del Prado · 2 h».
-      const partes = e.texto.split(' · ')
-      const ultima = partes[partes.length - 1]
-      const sinCiudad = partes.length > 1 && d.ciudad && llano(ultima) === llano(d.ciudad) ? partes.slice(0, -1) : partes
-      texto = `${esc(sinCiudad.join(' · '))}. <b>Incluida.</b>`
-      break
-    }
-    default:
-      texto = esc(e.texto)
-  }
-  const linea = `<div class="ev"><span class="h">${esc(hora)}</span><span class="i">${icono(ICONO_EVENTO[e.tipo])}</span><span>${texto}</span></div>`
-  // Las cajitas por versión: solo los vuelos (el modelo ya no las pone en los hoteles).
-  if (e.tipo !== 'vuelo' || e.porTarifa.length === 0) return linea
-  const celdas = e.porTarifa
-    .map((pt) => {
-      const nombres = pt.tarifas
-        .map((i) => porIndice.get(i))
-        .filter((t): t is TarifaDoc => t !== undefined)
-        .map((t) => `<span class="c${LETRA[t.clave]} fl">${esc(t.nombre)}</span>`)
-        .join(' · ')
-      return `<div>${nombres || '<span class="fl">Todas</span>'}<br>${(pt.siglas ?? []).map(pastillaAerolinea).join('')}${esc(pt.texto)}</div>`
-    })
-    .join('')
-  return `${linea}<div class="opt3" style="grid-template-columns:repeat(${Math.min(3, e.porTarifa.length)},1fr)">${celdas}</div>`
-}
-
-function llano(s: string): string {
-  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
-}
-
-/**
- * «Así se ve cada día», como el prototipo v4 (pedido de Mauricio del 2026-10-14): el número del
- * día grande con «JUE · DIC» debajo, el título y la ciudad en rosado, un renglón por hecho, las
- * versiones en cajitas solo el día de un vuelo, y los días libres con los planes de su ciudad.
- * Un día no se parte entre hojas (`.day` es `break-inside: avoid`).
- */
-function diaADia(m: ModeloPropuesta): string {
-  if (m.dias.length === 0) return ''
-  const porIndice = tarifaPorIndice(m)
-  const hayOpcionales = m.opcionales.length > 0
-  const ubicados = new Set(m.dias.flatMap((d) => d.opcionales))
-  const sueltos = m.opcionales.some((o) => !ubicados.has(o.nombre))
-  const ver = '(ver «Planes para los días libres»)'
-  const bloques = m.dias.map((d, i) => {
-    const f = fecha(d.fecha)
-    const { titulo, lugar } = tituloDelDia(d, i, m.dias, m)
-    const renglones = d.eventos.map((e) => renglonDeEvento(e, d, porIndice))
-    const sol = (h: string, contenido: string) =>
-      `<div class="ev"><span class="h">${esc(h)}</span><span class="i">${icono('sun')}</span><span class="free">${contenido}</span></div>`
-    const opcional = d.opcionales.length > 0 ? `<b>Opcional:</b> ${esc(oLista(d.opcionales))} ${ver}.` : null
-    if (d.libre) {
-      const resto = opcional ?? (hayOpcionales && sueltos ? 'Pueden sumar uno de los planes del final.' : '')
-      renglones.push(sol('', `Libre para ustedes.${resto ? ` ${resto}` : ''}`))
-    } else if (opcional) {
-      renglones.push(sol('', opcional))
-    }
-    if (d.sugerencia) renglones.push(sol('', `Sugerencia: ${esc(d.sugerencia)}`))
-    return `<div class="day"><div class="d">${f ? f.getUTCDate() : d.numero}<small>${f ? `${DIAS[f.getUTCDay()]} · ${MESES[f.getUTCMonth()]}` : `día ${d.numero}`}</small></div><div>
-    <div class="t">${esc(titulo)}${lugar ? ` <span class="city">${esc(lugar)}</span>` : ''}</div>
-    ${renglones.join('\n')}
+function tarjetaDeTren(t: TrayectoDoc, m: ModeloPropuesta, porIndice: Map<number, TarifaDoc>): string {
+  const [trayecto, ...resto] = t.descripcion.split(' · ')
+  const [desde, hasta] = trayecto.split(/\s+(?:-|–|→)\s+/)
+  const servicio = resto.join(' · ')
+  const clase = servicio.includes(',') ? servicio.slice(servicio.indexOf(',') + 1).trim() : null
+  const tags = m.tarifas.length > 0 && t.tarifas.length > 0 && !enTodas(t.tarifas, m) ? `<span class="tags">${etiquetasDe(t.tarifas, porIndice)}</span>` : ''
+  return `<div class="vc"><div class="fila">
+    <div class="quien"><span class="bd" style="background:#5a2a82;color:#fff">Tren</span><span class="num">${esc(etiquetaDeTren(t.descripcion))}</span>${tags}</div>
+    ${punto(desde ?? trayecto, t.hora, diaConMes(t.fecha))}
+    <div class="linea"><div class="l"></div><div class="b">${icono('train')}</div></div>
+    ${punto(hasta ?? null, null, null)}
+    <div class="der">${clase ? `<div class="k">Clase</div><div class="v">${esc(mayuscula(clase))}</div>` : ''}</div>
   </div></div>`
-  })
-  const sub = hayOpcionales
-    ? 'Lo que está en negrilla ya está incluido. Los días libres los pueden llenar con los planes opcionales del final, o simplemente caminar.'
-    : 'Lo que está en negrilla ya está incluido.'
-  // Sin salto de hoja forzado: con la portada larga (la COT-2026-0026 real, ruta con textos crudos)
-  // las tarjetas de «Lo que van a vivir» pasaban a la hoja 2 y el salto la dejaba con dos tarjetas
-  // y 85 % en blanco.
-  // El encabezado va pegado al primer día en un bloque que no se parte: `break-after: avoid` del
-  // `.sh` Chromium no lo respeta y el título quedaba solo al pie de la hoja 1.
-  const [primero, ...resto] = bloques
-  return `<section class="sec dias">\n<div class="nobr">${encabezadoDeSeccion('cal', 'Así se ve cada día', sub)}\n${primero}</div>\n${resto.join('\n')}\n</section>`
 }
 
-function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
+function vuelosYTren(m: ModeloPropuesta): string {
+  const trenes = m.trayectos.filas.filter((t) => t.tipo === 'tren')
+  if (m.vuelos.length === 0 && trenes.length === 0) return ''
+  const porIndice = tarifaPorIndice(m)
+  const vuelos = vuelosUnicos(m)
+  const tarjetas = [
+    ...vuelos.map((v, i) => ({ fecha: v.fila.fecha ?? '', html: tarjetaDeVuelo(v, i, m, porIndice) })),
+    ...trenes.map((t) => ({ fecha: t.fecha ?? '', html: tarjetaDeTren(t, m, porIndice) })),
+  ].sort((a, b) => a.fecha.localeCompare(b.fecha))
+  const titulo = vuelos.length > 0 ? (trenes.length > 0 ? 'Vuelos y tren' : 'Vuelos') : 'Trenes'
+  const iguales = m.tarifas.length > 1 && vuelos.every((v) => enTodas(v.tarifas, m))
+  const sub = m.tarifas.length > 1 ? (iguales ? 'Iguales en todas las versiones.' : 'La etiqueta de color dice en qué versión va cada uno.') : null
+  // El título va pegado a la primera tarjeta: nunca queda solo al pie de la hoja.
+  const [primera, ...resto] = tarjetas.map((t) => t.html)
+  return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion(titulo === 'Trenes' ? 'train' : 'plane', titulo, sub)}\n${primera}</div>\n${resto.join('\n')}\n</section>`
+}
+
+// ── Hospedaje ─────────────────────────────────────────────────────────────────
+
+function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
   if (m.hoteles.length === 0) return ''
   const porIndice = tarifaPorIndice(m)
   const regimenes = [...new Set(m.hoteles.flatMap((c) => c.opciones.map((o) => o.regimen)).filter(Boolean))]
@@ -473,112 +445,211 @@ function dondeDuermen(m: ModeloPropuesta, r: RecursosPropuesta): string {
     m.tarifas.length > 0 ? 'Un hotel por versión del viaje; la etiqueta de color dice cuál.' : null,
   ].filter(Boolean).join(' ')
   // Un hotel solo lleva la foto que subió la asesora (Mauricio, 2026-10-14); sin ella, el
-  // degradado. Repetir la de la ciudad en cada hotel diría que los tres son el mismo sitio. Si
-  // ningún hotel tiene foto, las tarjetas van sin imagen, como antes.
+  // degradado. Si ningún hotel tiene foto, las tarjetas van sin imagen.
   const conImagen = m.hoteles.some((c) => c.opciones.some((o) => r.foto(o.foto?.url)))
-  const ciudades = m.hoteles.map((c) => {
-    const caben = extrasQueCaben('hotel', Math.min(3, Math.max(1, c.opciones.length)))
-    const cuando = rango(c.desde, c.hasta)
-    const noches = c.noches ? `${c.noches} ${c.noches === 1 ? 'noche' : 'noches'}` : null
-    const tarjetas = c.opciones.map((o) => {
-      const principal = o.tarifas.some((i) => porIndice.get(i)?.esPrincipal)
+  const caben = extrasQueCaben('hotel', COLUMNAS_HOTELES)
+  const tarjetas = m.hoteles.flatMap((c) =>
+    c.opciones.map((o) => {
       const foto = r.foto(o.foto?.url)
       const tags = etiquetasDe(o.tarifas, porIndice)
       const tagsHtml = tags ? `<span class="tags">${tags}</span>` : ''
-      const detalle = [
-        estrellas(o.estrellas),
-        o.habitacion ? esc(o.habitacion) : '',
-      ].filter(Boolean).join(' · ')
+      const stars = o.estrellas && o.estrellas > 0 ? `<span class="stars">${'★'.repeat(Math.min(5, o.estrellas))}</span>` : ''
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
       const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
-      const imagen = foto || conImagen ? imagenDeTarjeta(foto, extras, tagsHtml) : ''
-      return `<div class="hc${principal && m.tarifas.length > 0 ? ' rec' : ''}">${imagen}<div class="b">${imagen ? '' : tagsHtml}<div class="n">${esc(o.hotel)}</div>${detalle}${o.regimen && regimenes.length !== 1 ? `<br>${esc(o.regimen)}` : ''}${o.cargoEnDestino ? `<br><span class="muted">${esc(o.cargoEnDestino)}, se paga en el hotel</span>` : ''}</div></div>`
-    })
-    const columnas = Math.min(3, Math.max(1, c.opciones.length))
-    return `<div class="nobr">
-  <div class="cityhead"><span class="mont">${esc(c.ciudad ?? 'Hotel')}</span><span class="muted small">${esc([cuando, noches].filter(Boolean).join(' · '))}</span></div>
-  <div class="hotels" style="grid-template-columns:repeat(${columnas},1fr)">${tarjetas.join('\n')}</div></div>`
-  })
-  return `<section class="sec">\n${encabezadoDeSeccion('bed', 'Dónde duermen', sub || null)}\n${ciudades.join('\n')}\n</section>`
+      const imagen = foto || conImagen ? imagenDeTarjeta(foto, extras, `${tagsHtml}${stars}`) : ''
+      const estancia = [rangoCorto(c.desde, c.hasta), c.noches ? `(${c.noches} ${c.noches === 1 ? 'noche' : 'noches'})` : null].filter(Boolean).join(' ')
+      const filas = [
+        ['Estancia', estancia],
+        ['Habitación', o.habitacion],
+        ['Régimen', o.regimen],
+      ].filter((x): x is [string, string] => Boolean(x[1]))
+      const enTexto = imagen ? '' : `${tagsHtml}`
+      return `<div class="hc">${imagen}<div class="b">${enTexto}<div class="n">${esc(o.hotel)}${!imagen && stars ? ` ${estrellas(o.estrellas)}` : ''}</div>${c.ciudad ? `<div class="caps zona">${esc(c.ciudad)}</div>` : ''}${filas.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>${o.cargoEnDestino ? `<div class="pie">${esc(o.cargoEnDestino)}, se paga en el hotel.</div>` : ''}</div>`
+    }),
+  )
+  const filas: string[] = []
+  for (let i = 0; i < tarjetas.length; i += COLUMNAS_HOTELES) filas.push(`<div class="hg">${tarjetas.slice(i, i + COLUMNAS_HOTELES).join('\n')}</div>`)
+  const [primera, ...resto] = filas
+  return `<section class="sec hospedaje">\n<div class="nobr">${encabezadoDeSeccion('bed', 'Hospedaje', sub || null)}\n${primera}</div>\n${resto.join('\n')}\n</section>`
 }
 
-/** Los vuelos agrupados por trayecto y fecha, en orden. */
-function gruposDeVuelos(m: ModeloPropuesta): { titulo: string; filas: FilaVueloDoc[] }[] {
-  const grupos = new Map<string, FilaVueloDoc[]>()
-  for (const f of m.vuelos) {
-    const k = `${f.fecha ?? ''}|${f.desde ?? ''}|${f.hasta ?? ''}`
-    grupos.set(k, [...(grupos.get(k) ?? []), f])
-  }
-  const casa = (m.ruta.origen ?? '').toLowerCase()
-  const lista = [...grupos.values()].sort((a, b) => (a[0].fecha ?? '').localeCompare(b[0].fecha ?? ''))
-  return lista.map((filas, i) => {
-    const f = filas[0]
-    const vuelve = casa !== '' && (f.hasta ?? '').toLowerCase() === casa
-    const nombre = vuelve && i > 0 ? 'Regreso' : i === 0 ? 'Ida' : 'Vuelo'
-    const cuando = diaLargo(f.fecha) ?? f.fecha
-    return { titulo: [nombre, [f.desde, f.hasta].filter(Boolean).join(' → '), cuando].filter(Boolean).join(' · '), filas }
-  })
-}
+// ── Traslados ─────────────────────────────────────────────────────────────────
 
-function vuelos(m: ModeloPropuesta): string {
-  if (m.vuelos.length === 0) return ''
-  const porIndice = tarifaPorIndice(m)
-  const conTarifas = m.tarifas.length > 0
-  const filas = gruposDeVuelos(m).map((g) => {
-    const cols = conTarifas ? 4 : 3
-    const sub = `<tr class="sub"><td colspan="${cols}">${esc(g.titulo)}</td></tr>`
-    const cuerpo = g.filas.map((f) => {
-      const vuelo = [nombreDeAerolinea(f.aerolinea, f.numero), f.numero].filter(Boolean).join(' ')
-      const horario = f.salida || f.llegada ? `${f.salida ?? '?'} → ${f.llegada ?? '?'}` : ''
-      const equipaje = [f.tarifaAerolinea, f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
-      return `<tr>${conTarifas ? `<td>${etiquetasDe(f.tarifas.length > 0 ? f.tarifas : m.tarifas.map((t) => t.indice), porIndice)}</td>` : ''}<td>${pastillasDeVuelo(f.aerolinea, f.numero)}<span class="fl">${esc(vuelo)}</span>${f.escala ? `<br>${esc(f.escala)}` : ''}</td><td>${esc(horario)}</td><td>${esc(equipaje)}</td></tr>`
-    })
-    // Cada tramo (ida, regreso) es un bloque que no se parte; la tabla sí puede seguir en la
-    // hoja siguiente, con la cabecera repetida. Antes la tabla entera no se partía y, detrás de
-    // los hoteles, saltaba de hoja dejando media página en blanco.
-    return `<tbody class="nobr">${[sub, ...cuerpo].join('\n')}</tbody>`
-  })
-  return `<section class="sec">\n${encabezadoDeSeccion('plane', 'Vuelos', null)}
-  <table><thead><tr>${conTarifas ? '<th style="width:24mm">Versión</th>' : ''}<th>Vuelo</th><th>Horario</th><th>Equipaje</th></tr></thead>
-${filas.join('\n')}
-  </table>\n</section>`
-}
-
-function trenesYTraslados(m: ModeloPropuesta): string {
-  const filas = m.trayectos.filas
+function traslados(m: ModeloPropuesta): string {
+  const filas = m.trayectos.filas.filter((t) => t.tipo === 'traslado')
   if (filas.length === 0) return ''
   const porIndice = tarifaPorIndice(m)
-  const conColumna = m.tarifas.length > 0 && !m.trayectos.igualEnTodas
-  const hayTren = filas.some((t) => t.tipo === 'tren')
-  const titulo = hayTren ? 'Trenes y traslados' : 'Traslados'
-  const sub = m.tarifas.length > 0 && m.trayectos.igualEnTodas ? 'Iguales en todas las versiones.' : null
-  const conHora = filas.some((t) => t.hora)
+  const conVersion = m.tarifas.length > 0 && !m.trayectos.igualEnTodas
+  const sub = m.tarifas.length > 1 && m.trayectos.igualEnTodas ? 'Iguales en todas las versiones.' : null
   const cuerpo = filas.map((t) => {
-    const dia = diaCorto(t.fecha) ?? t.fecha ?? ''
-    const desc = t.tipo === 'tren' ? `<b>${esc(t.descripcion)}</b>` : esc(t.descripcion)
-    return `<tr><td>${esc(dia)}</td><td>${icono(t.tipo === 'tren' ? 'train' : 'van')} ${desc}</td>${conHora ? `<td>${esc(t.hora ?? '')}</td>` : ''}${conColumna ? `<td>${etiquetasDe(t.tarifas, porIndice)}</td>` : ''}</tr>`
+    const [trayecto, ...resto] = t.descripcion.split(' · ')
+    const dia = diaMes(t.fecha) ?? t.fecha
+    const derecha = [t.hora ? esc(t.hora) : '', conVersion ? etiquetasDe(t.tarifas, porIndice) : ''].filter(Boolean).join(' ')
+    return `<tr><td>${esc([dia, flecha(trayecto).replace(/^hotel\b/, 'Hotel')].filter(Boolean).join(' · '))}</td><td>${esc(mayuscula(resto.join(' · ')))}</td><td class="est">${derecha}</td></tr>`
   })
-  return `<section class="sec">\n${encabezadoDeSeccion(hayTren ? 'train' : 'van', titulo, sub)}
-  <table><thead><tr><th style="width:20mm">Día</th><th>Servicio</th>${conHora ? '<th style="width:18mm">Hora</th>' : ''}${conColumna ? '<th>Versión</th>' : ''}</tr></thead>
-${tramosDeFilas(cuerpo)}
-  </table>\n</section>`
+  // El título va en un bloque que no se parte con las primeras filas (en una tabla aparte, con las
+  // mismas columnas): un `.sh` suelto antes de la tabla quedaba solo al pie de la hoja.
+  const [juntas, medio, cola] = tramosDeFilas(cuerpo)
+  const columnas = '<colgroup><col style="width:49%"><col><col style="width:16%"></colgroup>'
+  const tabla = (tbodies: string[], clase: string) => `<table class="${clase}">${columnas}\n${tbodies.join('\n')}\n</table>`
+  return `<section class="sec">
+<div class="nobr">${encabezadoDeSeccion('van', 'Traslados', sub)}
+${tabla([`<tbody class="nobr">${juntas.join('\n')}</tbody>`], 'tr fija')}</div>
+${medio ? tabla([`<tbody>${medio.join('\n')}</tbody>`, `<tbody class="nobr">${cola!.join('\n')}</tbody>`], 'tr fija sigue') : ''}
+</section>`
 }
 
 /**
  * Las filas de una tabla larga en tramos: las primeras van juntas (el título de la sección, que no
  * se separa de lo que sigue, nunca queda al pie con una sola fila) y las últimas también (ninguna
  * fila sola arriba de la hoja siguiente). Lo del medio se parte entre cualquier par de filas.
+ * Corta (hasta el doble de `juntas`), va entera en el primer tramo.
  */
-function tramosDeFilas(filas: string[], juntas = FILAS_JUNTAS): string {
-  if (filas.length <= juntas * 2) return `<tbody class="nobr">${filas.join('\n')}</tbody>`
+function tramosDeFilas(filas: string[], juntas = FILAS_JUNTAS): [string[], string[] | null, string[] | null] {
+  if (filas.length <= juntas * 2) return [filas, null, null]
   const cola = Math.min(2, filas.length - juntas)
-  return [
-    `<tbody class="nobr">${filas.slice(0, juntas).join('\n')}</tbody>`,
-    `<tbody>${filas.slice(juntas, filas.length - cola).join('\n')}</tbody>`,
-    `<tbody class="nobr">${filas.slice(filas.length - cola).join('\n')}</tbody>`,
-  ].join('\n')
+  return [filas.slice(0, juntas), filas.slice(juntas, filas.length - cola), filas.slice(filas.length - cola)]
 }
 const FILAS_JUNTAS = 3
+
+// ── Itinerario día a día ──────────────────────────────────────────────────────
+
+function tituloDelDia(d: DiaDoc, i: number, dias: DiaDoc[], m: ModeloPropuesta): string {
+  // El título que escriba el texto generado manda.
+  if (d.titulo) return d.titulo
+  const tipos = new Set(d.eventos.map((e) => e.tipo))
+  const anterior = i > 0 ? dias[i - 1].ciudad : null
+  const sale = d.eventos.some((e) => e.tipo === 'vuelo' && e.momento === 'salida')
+  if (i === 0 && sale) {
+    const origen = ciudadSola(m.ruta.origen)
+    return origen ? `Salida desde ${origen}` : 'Salida'
+  }
+  if (i === dias.length - 1 && sale) return 'Regreso a casa'
+  if (tipos.has('tren') && d.ciudad && anterior && d.ciudad !== anterior) return `${anterior} → ${d.ciudad} en tren`
+  if (d.ciudad && d.ciudad !== anterior) return `Llegada a ${d.ciudad}`
+  const actividad = d.eventos.find((e) => e.tipo === 'actividad')
+  if (actividad) return cabeza(actividad.texto)
+  if (d.libre) return d.ciudad ? `Día libre en ${d.ciudad}` : 'Día libre'
+  return d.ciudad ? `En ${d.ciudad}` : 'En ruta'
+}
+
+/** Del aeropuerto o la estación al hotel: «Barcelona Sants - hotel · Compartido». */
+function esTrasladoAlLlegar(texto: string): boolean {
+  const extremos = cabeza(texto).split(/\s+(?:-|→|–)\s+/)
+  return extremos.length === 2 && /\bhotel\b/i.test(extremos[1]) && !/\bhotel\b/i.test(extremos[0])
+}
+
+const PALABRA_EVENTO: Record<EventoDoc['tipo'], string> = { vuelo: 'Vuelo', tren: 'Tren', traslado: 'Traslado', hotel: 'Hotel', actividad: 'Incluida' }
+
+/**
+ * Un renglón del día: la hora en morado a la izquierda (o, sin hora, la palabra del hecho, como
+ * «Llegada» o «Libre» en el formato de Edgar) y el texto en frase. Nada que no esté en los datos.
+ */
+function renglonDeEvento(e: EventoDoc, d: DiaDoc): string {
+  let etiquetaIzq = e.hora ?? ''
+  let texto: string
+  switch (e.tipo) {
+    case 'vuelo':
+      if (e.momento === 'llegada') {
+        texto = esc(e.texto.replace(/^Llegada a /, 'Llegan a '))
+        etiquetaIzq ||= 'Llegada'
+      } else {
+        texto = `${etiquetaIzq ? 'Vuelo ' : ''}${esc(e.texto)}`
+      }
+      break
+    case 'tren': {
+      const [trayecto, ...resto] = e.texto.split(' · ')
+      const cuerpo = resto.length > 0 ? `${esc(resto.join(' · '))} · ${esc(flecha(trayecto))}` : esc(flecha(trayecto))
+      texto = `${etiquetaIzq ? 'Tren ' : ''}${cuerpo}`
+      break
+    }
+    case 'traslado': {
+      const [trayecto, ...resto] = e.texto.split(' · ')
+      if (!etiquetaIzq && esTrasladoAlLlegar(e.texto) && d.eventos.some((x) => x.tipo === 'tren' || x.tipo === 'vuelo')) etiquetaIzq = 'Al llegar'
+      texto = `${etiquetaIzq ? 'Traslado ' : ''}${esc(flecha(trayecto))}${resto.length > 0 ? ` · ${esc(minuscula(resto.join(' · ')))}` : ''}`
+      break
+    }
+    case 'actividad': {
+      // La ciudad del día ya está en la píldora: «Museo del Prado · 2 h · Madrid» → «Museo del Prado · 2 h».
+      const partes = e.texto.split(' · ')
+      const ultima = partes[partes.length - 1]
+      const sinCiudad = partes.length > 1 && d.ciudad && llano(ultima) === llano(d.ciudad) ? partes.slice(0, -1) : partes
+      // Sin hora, «Incluida» va a la izquierda; con hora, al final de la frase.
+      texto = `<b>${esc(sinCiudad[0])}</b>${sinCiudad.length > 1 ? ` · ${esc(sinCiudad.slice(1).join(' · '))}` : ''}.${etiquetaIzq ? ' Incluida.' : ''}`
+      break
+    }
+    default:
+      texto = esc(e.texto)
+  }
+  // Sin hora, la palabra del hecho va a la izquierda y el texto no la repite.
+  etiquetaIzq ||= PALABRA_EVENTO[e.tipo]
+  return `<div class="ev"><span class="h">${esc(etiquetaIzq)}</span><span>${texto}</span></div>`
+}
+
+/** Las versiones del día de un vuelo, en chips: «Recomendada · AV Avianca 19:20, directo». */
+function chipsDeVuelo(e: EventoDoc, porIndice: Map<number, TarifaDoc>): string[] {
+  if (e.tipo !== 'vuelo' || e.porTarifa.length === 0) return []
+  return e.porTarifa.map((pt) => {
+    const nombres = pt.tarifas
+      .map((i) => porIndice.get(i))
+      .filter((t): t is TarifaDoc => t !== undefined)
+      .map((t) => `<span class="c${LETRA[t.clave]}">${esc(t.nombre)}</span>`)
+      .join(' · ')
+    return `<span class="chip">${nombres || 'Todas'} · ${(pt.siglas ?? []).map(pastillaAerolinea).join('')}${esc(pt.texto)}</span>`
+  })
+}
+
+/**
+ * «Itinerario día a día», como el de Edgar: una píldora con la ciudad cada vez que cambia, el
+ * círculo «DÍA n» con su línea de tiempo, la fecha en rosa, el título, la foto (la de la actividad
+ * incluida o, el primer día en una ciudad, la de la ciudad) y un renglón por hecho. Las versiones
+ * de los vuelos y los planes opcionales van en chips. Un día no se parte entre hojas.
+ */
+function itinerario(m: ModeloPropuesta, r: RecursosPropuesta): string {
+  if (m.dias.length === 0) return ''
+  const porIndice = tarifaPorIndice(m)
+  const hayOpcionales = m.opcionales.length > 0
+  const ubicados = new Set(m.dias.flatMap((d) => d.opcionales))
+  const sueltos = m.opcionales.some((o) => !ubicados.has(o.nombre))
+  const ciudadesConFoto = new Set<string>()
+  let ciudadPrevia: string | null = null
+  const bloques = m.dias.map((d, i) => {
+    const f = fecha(d.fecha)
+    const titulo = tituloDelDia(d, i, m.dias, m)
+    const renglones = d.eventos.map((e) => renglonDeEvento(e, d))
+    const chips = d.eventos.flatMap((e) => chipsDeVuelo(e, porIndice))
+    if (d.libre) {
+      const resto = d.opcionales.length > 0 ? '' : hayOpcionales && sueltos ? ' Pueden sumar uno de los planes del final.' : ''
+      renglones.push(`<div class="ev"><span class="h">Libre</span><span>Día abierto para ustedes.${resto}</span></div>`)
+    }
+    if (d.opcionales.length > 0) chips.push(`<span class="chip">Opcional: ${esc(oLista(d.opcionales))} (ver «Planes para los días libres»)</span>`)
+    if (d.sugerencia) renglones.push(`<div class="ev"><span class="h">Idea</span><span>${esc(d.sugerencia)}</span></div>`)
+    // La foto: la de la actividad incluida; si no, la de la ciudad el primer día que se está en ella.
+    const actividad = d.eventos.find((e) => e.tipo === 'actividad')
+    let foto = actividad ? (r.fotoDeActividad?.(cabeza(actividad.texto)) ?? null) : null
+    if (!foto && d.ciudad && !ciudadesConFoto.has(d.ciudad)) foto = r.fotoDeCiudad(d.ciudad)
+    if (d.ciudad && foto) ciudadesConFoto.add(d.ciudad)
+    const contenido = `<div>${renglones.join('\n')}${chips.length > 0 ? `<div class="chips">${chips.join('')}</div>` : ''}</div>`
+    const pildora = d.ciudad && d.ciudad !== ciudadPrevia ? `<div class="pill"><span>${icono('pin')}${esc(d.ciudad)}</span></div>\n` : ''
+    if (d.ciudad) ciudadPrevia = d.ciudad
+    const dia = `<div class="day"><div class="dn"><small>DÍA</small>${d.numero}</div><div>
+    ${f ? `<div class="df">${esc(diaLargo(d.fecha))}</div>` : ''}
+    <div class="t">${esc(titulo)}</div>
+    <div class="cuerpo${foto ? ' foto' : ''}">${foto ? `<div class="ph"${fondo(foto)}></div>` : ''}${contenido}</div>
+  </div></div>`
+    // La píldora no queda sola al pie: va pegada a su día.
+    return pildora ? `<div class="nobr">${pildora}${dia}</div>` : dia
+  })
+  const sub = hayOpcionales
+    ? 'Lo que dice «Incluida» ya está en el precio. Los días libres los pueden llenar con los planes opcionales.'
+    : 'Lo que dice «Incluida» ya está en el precio.'
+  // El encabezado va pegado al primer día en un bloque que no se parte: `break-after: avoid` del
+  // `.sh` Chromium no lo respeta y el título quedaba solo al pie de la hoja.
+  const [primero, ...resto] = bloques
+  return `<section class="sec dias">\n<div class="nobr">${encabezadoDeSeccion('cal', 'Itinerario día a día', sub)}\n${primero}</div>\n${resto.join('\n')}\n</section>`
+}
+
+// ── Planes opcionales ─────────────────────────────────────────────────────────
 
 /** «Madrid · dom 13»: la ciudad del plan y el día en que el día a día lo propone. */
 function lugarDelOpcional(o: OpcionalDoc, m: ModeloPropuesta): string | null {
@@ -591,7 +662,7 @@ function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
   if (m.opcionales.length === 0) return ''
   const fotos = m.opcionales.map((o) => r.fotoDeOpcional?.(o.nombre) ?? null)
   // Con alguna foto, todas las tarjetas llevan imagen (la que no tiene, el degradado): una fila
-  // de tarjetas con y sin imagen se ve rota. Sin ninguna, como antes.
+  // de tarjetas con y sin imagen se ve rota. Sin ninguna, sin imagen.
   const conImagen = fotos.some(Boolean)
   const caben = extrasQueCaben('opcional', COLUMNAS_OPCIONALES)
   const tarjetas = m.opcionales.map((o, i) => {
@@ -599,11 +670,24 @@ function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
     const lugar = lugarDelOpcional(o, m)
     const extras = fotos[i] ? (r.extrasDeOpcional?.(o.nombre) ?? []).slice(0, caben) : []
     const imagen = conImagen ? imagenDeTarjeta(fotos[i], extras, lugar ? `<div class="where">${esc(lugar)}</div>` : '') : ''
-    return `<div class="oc">${imagen}<div class="b"><div class="n">${esc(o.nombre)}</div>${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
+    return `<div class="oc">${imagen}<div class="b"><div class="n">${esc(o.nombre)}</div>${!imagen && lugar ? `<div class="caps">${esc(lugar)}</div>` : ''}${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
   })
-  return `<section class="sec">\n${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
+  return `<section class="sec nobr">\n${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
   <div class="opcs">${tarjetas.join('\n')}</div>\n</section>`
 }
+
+// ── Información útil ──────────────────────────────────────────────────────────
+
+const lista = (xs: string[]) => `<ul>${xs.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
+
+function informacionUtil(m: ModeloPropuesta): string {
+  const antes = m.formal.antesDeViajar
+  if (antes.length === 0) return ''
+  return `<section class="sec nobr">\n${encabezadoDeSeccion('info', 'Información útil', 'Lo que conviene tener listo antes de salir')}
+  <div class="cards"><div class="card${antes.length > 3 ? ' dos' : ''}"><span class="caps">Antes de viajar</span>${lista(antes)}</div></div>\n</section>`
+}
+
+// ── Hoja de precios ───────────────────────────────────────────────────────────
 
 function enlaceWhatsApp(numero: string, texto: string): string {
   return `https://wa.me/${numero.replace(/\D/g, '')}?text=${encodeURIComponent(texto)}`
@@ -627,7 +711,7 @@ function apartar(m: ModeloPropuesta): string {
       : [`<a class="btn bR" href="${esc(enlaceWhatsApp(numero, `${saludo}, queremos apartar el viaje de la propuesta ${m.portada.consecutivo}.`))}"><span>${esc(asesora?.nombre ?? 'Su asesora')}</span><b>Apartar por WhatsApp</b></a>`]
   return `<div class="cta${botones.length === 0 ? ' solo' : ''}">
     <div class="ctl">
-      <div class="kicker" style="color:#ff8fbf">Aparta tu viaje</div>
+      <div class="caps">Aparta tu viaje</div>
       <div class="ctt">${esc(titulo)}</div>
       ${detalle ? `<div class="small" style="opacity:.85">${esc(detalle)}</div>` : ''}
     </div>
@@ -635,32 +719,48 @@ function apartar(m: ModeloPropuesta): string {
   </div>`
 }
 
+/** Los vuelos de una versión agrupados por trayecto y fecha, en orden. */
+function gruposDeVuelos(vuelos: FilaVueloDoc[], m: ModeloPropuesta): { titulo: string; filas: FilaVueloDoc[] }[] {
+  const grupos = new Map<string, FilaVueloDoc[]>()
+  for (const f of vuelos) {
+    const k = `${f.fecha ?? ''}|${f.desde ?? ''}|${f.hasta ?? ''}`
+    grupos.set(k, [...(grupos.get(k) ?? []), f])
+  }
+  const casa = (m.ruta.origen ?? '').toLowerCase()
+  const listaG = [...grupos.values()].sort((a, b) => (a[0].fecha ?? '').localeCompare(b[0].fecha ?? ''))
+  return listaG.map((filas, i) => {
+    const f = filas[0]
+    const vuelve = casa !== '' && (f.hasta ?? '').toLowerCase() === casa
+    return { titulo: vuelve && i > 0 ? 'Regreso' : i === 0 ? 'Ida' : 'Vuelo', filas }
+  })
+}
+
 function eligeTuVersion(m: ModeloPropuesta): string {
   if (m.tarifas.length === 0) {
     const lineas = m.precio.lineas
       .map((l) => `<tr><td>${esc(l.nombre)}${l.adicionales.length > 0 ? `<br><span class="muted small">${esc(l.adicionales.join(' · '))}</span>` : ''}</td><td class="r money">${esc(pesos(l.total))}</td></tr>`)
       .join('\n')
-    return `<section class="sec">\n${encabezadoDeSeccion('tag', 'Precio del viaje', 'Precio total para el grupo.')}
-  <table class="nobr">${lineas}
-  <tr class="sub"><td>Total</td><td class="r money">${esc(pesos(m.precio.total))}</td></tr></table>
-  ${m.precio.notaIva ? `<p class="small muted">${esc(m.precio.notaIva)}</p>` : ''}
-  ${apartar(m)}\n</section>`
+    return `<div class="nobr">${encabezadoDeSeccion('tag', 'Precio del viaje', 'Precio total para el grupo.')}
+  <table class="tr pagos">${lineas}
+  <tr class="tot"><td>Total</td><td class="r money">${esc(pesos(m.precio.total))}</td></tr></table>
+  ${m.precio.notaIva ? `<p class="small muted">${esc(m.precio.notaIva)}</p>` : ''}</div>
+  ${apartar(m)}`
   }
   const tarjetas = m.tarifas.map((t) => {
     const precio = t.esPrincipal ? m.precio.total : t.precio
     const pp = ['el grupo', t.estrellas ? `${t.estrellas}★` : null].filter(Boolean).join(' · ')
-    const filasVuelo = gruposDeVuelos({ ...m, vuelos: t.vuelos }).map((g) => {
+    const filasVuelo = gruposDeVuelos(t.vuelos, m).map((g) => {
       const f = g.filas[0]
       const vuelo = [nombreDeAerolinea(f.aerolinea, f.numero), f.numero].filter(Boolean).join(' ')
       const horas = f.salida || f.llegada ? ` · ${f.salida ?? '?'} → ${f.llegada ?? '?'}` : ''
       const extra = [f.tarifaAerolinea, f.equipaje, ...f.adicionales].filter(Boolean).join(' · ')
-      return `<div class="row"><b>${esc(g.titulo.split(' · ')[0])}${f.fecha ? ` · ${esc(diaCorto(f.fecha) ?? '')}` : ''}</b>${pastillasDeVuelo(f.aerolinea, f.numero)}${esc(vuelo)}${f.escala ? ` · ${esc(f.escala)}` : ''}${esc(horas)}${extra ? `<br><span class="muted">${esc(extra)}</span>` : ''}</div>`
+      return `<div class="row"><b>${esc(g.titulo)}${f.fecha ? ` · ${esc(diaCorto(f.fecha) ?? '')}` : ''}</b>${pastillasDeVuelo(f.aerolinea, f.numero)}${esc(vuelo)}${f.escala ? ` · ${esc(f.escala)}` : ''}${esc(horas)}${extra ? `<br><span class="muted">${esc(extra)}</span>` : ''}</div>`
     })
     const hoteles = t.hoteles.length > 0
       ? `<div class="row"><b>Hoteles</b>${t.hoteles.map((h) => `${esc(h.nombre)} ${estrellas(h.estrellas)}`).join('<br>')}</div>`
       : ''
     return `<div class="tf${t.esPrincipal ? ' rec' : ''}">
-      ${t.esPrincipal ? '<span class="tag tR badge">La que recomendamos</span>' : ''}
+      ${t.esPrincipal ? '<span class="tag badge">La que recomendamos</span>' : ''}
       <div class="name c${LETRA[t.clave]}">${esc(t.nombre)}</div>
       <div class="price money">${esc(pesos(precio))}</div>
       <div class="pp">${esc(pp)}${t.notaIva ? `<br>${esc(t.notaIva)}` : ''}</div>
@@ -671,128 +771,121 @@ function eligeTuVersion(m: ModeloPropuesta): string {
   const sub = m.igualEnTodas.length > 0
     ? 'Precio total para el grupo. Lo demás va igual en todas; cambian los vuelos y los hoteles.'
     : 'Precio total para el grupo.'
-  return `<section class="sec">\n${encabezadoDeSeccion('tag', 'Elijan su versión', sub)}
-  <div class="tarifas nobr" style="grid-template-columns:repeat(${Math.min(3, m.tarifas.length)},1fr)">${tarjetas.join('\n')}</div>
-  ${apartar(m)}\n</section>`
+  return `<div class="nobr">${encabezadoDeSeccion('tag', 'Elijan su versión', sub)}
+  <div class="tarifas nobr" style="grid-template-columns:repeat(${Math.min(3, m.tarifas.length)},1fr)">${tarjetas.join('\n')}</div></div>
+  ${apartar(m)}`
 }
 
-function incluyeYPagos(m: ModeloPropuesta): string {
-  const incluye = m.precio.incluye.length > 0
+function cuantoYCuando(m: ModeloPropuesta): string {
+  const planes = m.precio.planes
+  if (planes.length === 0) return ''
+  const conFilas = planes.filter((p) => p.plan.filas !== null)
+  let cuerpo: string
+  if (conFilas.length === 0) {
+    cuerpo = `<p class="small">${esc(planes[0].plan.regla)}</p>`
+  } else {
+    const n = Math.max(...conFilas.map((p) => p.plan.filas!.length))
+    const cabecera = planes.length > 1
+      ? `<tr><th></th>${planes.map((p) => {
+          const t = m.tarifas.find((x) => x.indice === p.tarifa)
+          return `<th class="r">${t ? `<span class="c${LETRA[t.clave]}">${esc(t.nombre)}</span>` : ''}</th>`
+        }).join('')}</tr>`
+      : ''
+    const filas: string[] = []
+    for (let i = 0; i < n; i++) {
+      const ref = conFilas.find((p) => p.plan.filas![i])!.plan
+      const f = ref.filas![i]
+      const nota = notaDeFila(f, ref.pctMinimo, pesos)
+      filas.push(
+        `<tr><td><b>${esc(mayuscula(f.cuando))}</b>${nota && planes.length === 1 ? ` <span class="muted">(${esc(nota)})</span>` : ''}</td>${planes
+          .map((p) => `<td class="r money">${p.plan.filas?.[i] ? esc(pesos(p.plan.filas[i].monto)) : ''}</td>`)
+          .join('')}</tr>`,
+      )
+    }
+    filas.push(`<tr class="tot"><td>Total</td>${planes.map((p) => `<td class="r money">${esc(pesos(p.plan.suma))}</td>`).join('')}</tr>`)
+    // El total va en el mismo bloque que las cuotas: nunca se separa de ellas.
+    cuerpo = `<table class="tr pagos">${cabecera}${filas.join('\n')}</table><p class="small muted">${esc(conFilas[0].plan.regla)} ${esc(conFilas[0].plan.pie)}</p>`
+  }
+  return `<div class="sec nobr">${encabezadoDeSeccion('cal', 'Cuánto pagan y cuándo', null)}${cuerpo}</div>`
+}
+
+/**
+ * Los términos en tarjetas: un renglón corto sin punto final («Condiciones generales», «Medios de
+ * pago») abre una tarjeta nueva con ese título; lo demás son sus puntos.
+ */
+export function bloquesDeTerminos(texto: string | null): { titulo: string | null; puntos: string[] }[] {
+  const lineas = (texto ?? '')
+    .split(/\n+/)
+    .map((x) => x.replace(/^\s*[-•·*]\s*/, '').trim())
+    .filter(Boolean)
+  const bloques: { titulo: string | null; puntos: string[] }[] = []
+  lineas.forEach((l, i) => {
+    const esTitulo = i < lineas.length - 1 && l.split(/\s+/).length <= 4 && !/[.:;,]$/.test(l) && !/\d/.test(l)
+    if (esTitulo) bloques.push({ titulo: l, puntos: [] })
+    else if (bloques.length === 0) bloques.push({ titulo: null, puntos: [l] })
+    else bloques[bloques.length - 1].puntos.push(l)
+  })
+  return bloques.filter((b) => b.puntos.length > 0)
+}
+
+/**
+ * Lo que incluye y los términos en una sola fila de tarjetas (hasta tres por fila), como las de
+ * «Información útil» del formato de Edgar: así la hoja de precios cabe en una hoja.
+ */
+function incluyeYCondiciones(m: ModeloPropuesta): string {
+  const xs = m.precio.incluye.length > 0
     ? m.precio.incluye
     : m.tarifas.length > 0
       ? m.igualEnTodas
       : m.precio.lineas.map((l) => l.nombre)
-  const lista = (xs: string[]) => `<ul class="list small">${xs.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`
-  const tituloIncluye = m.tarifas.length > 0 ? 'Incluido en todas' : 'Incluido'
-  const columnas = [
-    incluye.length > 0 ? `<div><h3>${tituloIncluye}</h3>${lista(incluye)}</div>` : '',
-    m.precio.noIncluye.length > 0 ? `<div><h3>No incluido</h3>${lista(m.precio.noIncluye)}</div>` : '',
+  const tarjetasIncluye = [
+    xs.length > 0 ? `<div class="card"><span class="caps">${m.tarifas.length > 0 ? 'Incluido en todas' : 'Incluido'}</span>${lista(xs)}</div>` : '',
+    m.precio.noIncluye.length > 0 ? `<div class="card"><span class="caps">No incluido</span>${lista(m.precio.noIncluye)}</div>` : '',
   ].filter(Boolean)
-
-  let plan = ''
-  const planes = m.precio.planes
-  if (planes.length > 0) {
-    const conFilas = planes.filter((p) => p.plan.filas !== null)
-    if (conFilas.length === 0) {
-      plan = `<p class="small">${esc(planes[0].plan.regla)}</p>`
-    } else {
-      const n = Math.max(...conFilas.map((p) => p.plan.filas!.length))
-      const cabecera = planes.length > 1
-        ? `<tr><th></th>${planes.map((p) => {
-            const t = m.tarifas.find((x) => x.indice === p.tarifa)
-            return `<th class="r">${t ? `<span class="c${LETRA[t.clave]}">${esc(t.nombre)}</span>` : ''}</th>`
-          }).join('')}</tr>`
-        : ''
-      const filas: string[] = []
-      for (let i = 0; i < n; i++) {
-        const ref = conFilas.find((p) => p.plan.filas![i])!.plan
-        const f = ref.filas![i]
-        const nota = notaDeFila(f, ref.pctMinimo, pesos)
-        filas.push(
-          `<tr><td><b>${esc(f.cuando[0].toUpperCase() + f.cuando.slice(1))}</b>${nota && planes.length === 1 ? ` <span class="muted">(${esc(nota)})</span>` : ''}</td>${planes
-            .map((p) => `<td class="r money">${p.plan.filas?.[i] ? esc(pesos(p.plan.filas[i].monto)) : ''}</td>`)
-            .join('')}</tr>`,
-        )
-      }
-      filas.push(`<tr><td><b>Total</b></td>${planes.map((p) => `<td class="r money"><b>${esc(pesos(p.plan.suma))}</b></td>`).join('')}</tr>`)
-      plan = `<table class="nobr">${cabecera}${filas.join('\n')}</table><p class="small muted">${esc(conFilas[0].plan.regla)} ${esc(conFilas[0].plan.pie)}</p>`
-    }
-  }
-  const antes = m.formal.antesDeViajar.length > 0 ? `<div class="nobr"><h3 style="margin-top:5mm">Antes de viajar</h3>${lista(m.formal.antesDeViajar)}</div>` : ''
-  if (columnas.length === 0 && !plan && !antes) return ''
-  return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('doc', plan ? 'Qué incluye y cuándo se paga' : 'Qué incluye', null)}
-  ${columnas.length > 0 ? `<div class="two">${columnas.join('\n')}</div>` : ''}</div>
-  ${plan ? `<div class="nobr"><h3 style="margin-top:6mm">Cuánto pagan y cuándo</h3>${plan}</div>` : ''}
-  ${antes}\n</section>`
+  const tarjetasTerminos = bloquesDeTerminos(m.formal.terminos).map(
+    (b) => `<div class="card"><span class="caps">${esc(b.titulo ?? 'Términos y condiciones')}</span>${lista(b.puntos)}</div>`,
+  )
+  const tarjetas = [...tarjetasIncluye, ...tarjetasTerminos]
+  if (tarjetas.length === 0) return ''
+  const titulo = tarjetasIncluye.length === 0 ? 'Términos y condiciones' : tarjetasTerminos.length === 0 ? 'Qué incluye' : 'Qué incluye y condiciones'
+  return `<div class="sec nobr">${encabezadoDeSeccion('doc', titulo, null)}<div class="cards" style="grid-template-columns:repeat(${Math.min(3, tarjetas.length)},1fr)">${tarjetas.join('\n')}</div></div>`
 }
 
-function formal(m: ModeloPropuesta, r: RecursosPropuesta): string {
-  const terminos = (m.formal.terminos ?? '')
-    .split(/\n+/)
-    .map((x) => x.replace(/^\s*[-•·*]\s*/, '').trim())
-    .filter(Boolean)
+function firmaYCreditos(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const firma = m.formal.firma
   const creditos = [...new Set([...m.formal.creditos, ...(r.creditosExtra ?? [])])]
-  return `<section class="sec">
-  ${terminos.length > 0 ? `${encabezadoDeSeccion('doc', 'Términos y condiciones', null)}<ul class="list small">${terminos.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
-  <div class="sign">
-    <div>${firma ? `<b class="mont" style="color:var(--navy)">${esc(firma.nombre)}</b><br><span class="muted small">${esc([firma.cargo, firma.contacto].filter(Boolean).join(' · '))}</span>` : ''}</div>
-    ${r.logo ? `<img src="${r.logo}" alt="${esc(r.marca)}" style="height:9mm">` : `<b class="mont">${esc(r.marca)}</b>`}
+  return `<div class="sign">
+    <div>${firma ? `<b class="pop">${esc(firma.nombre)}</b><br><span class="muted small">${esc([firma.cargo, firma.contacto].filter(Boolean).join(' · '))}</span>` : ''}</div>
+    ${marcaDe(r, '9mm')}
   </div>
-  ${creditos.length > 0 ? `<div class="credits"><b>Fotografías:</b> ${creditos.map(esc).join(' · ')}</div>` : ''}
-</section>`
+  ${creditos.length > 0 ? `<div class="credits"><b>Fotografías:</b> ${creditos.map(esc).join(' · ')}</div>` : ''}`
 }
 
-/** Lo que el prototipo no tenía: tarjetas sin foto, el llamado sin botones y tablas que se parten. */
-const CSS_EXTRA = `
-.tN { background: var(--navy); } .cN { color: var(--navy); } .bN { background: var(--navy); }
-.sinfoto { background: linear-gradient(135deg,#e63380,#8b4fa0 55%,#1fa7bd); }
-.cta.solo { grid-template-columns: 1fr; }
-.hc .img .tags { position:absolute; top: 2mm; left: 2mm; display:flex; gap: 1mm; flex-wrap: wrap; }
-.hc .img .tags .tag { position: static; }
-.hc .b > .tags { display:flex; gap: 1mm; flex-wrap: wrap; margin-bottom: 1.2mm; }
-.top b.mont { font-size: 13pt; color: var(--navy); }
-/* Día a día como el prototipo v4: número grande, «JUE · DIC» debajo y un separador fino entre
-   días (sin la línea de tiempo ni los círculos del v5). */
-.dias .day { grid-template-columns: 22mm 1fr; gap: 4mm; padding: 2.6mm 0; border-bottom: 1px solid var(--line); }
-.dias > .day:last-child { border-bottom: 0; }
-.dias .day::before { display: none; }
-.dias .day .d { width: auto; height: auto; border-radius: 0; background: none; color: var(--navy); font: 800 15pt Montserrat; line-height: 1; display: block; }
-.dias .day .d small { color: var(--mute); opacity: 1; font: 600 7pt Montserrat; letter-spacing: 1px; text-transform: uppercase; margin-top: 1mm; }
-.dias .day .t { font-size: 10pt; margin-top: 0; }
-.dias .ev { grid-template-columns: 14mm 5mm 1fr; }
-.dias .ev .h { white-space: nowrap; }
-/* Las tablas siguen en la hoja siguiente (cabecera repetida); una fila nunca se parte. */
-tr { break-inside: avoid; }
-thead { display: table-header-group; }
-/* Fotos extra de la biblioteca: en el MISMO recuadro (mismo alto), principal 2/3 y extras 1/3. */
-.img.mosaico { display:grid; grid-template-columns: 2fr 1fr; gap: .6mm; background: #fff; }
-.img.mosaico.n1 { grid-template-rows: 1fr; }
-.img.mosaico.n2 { grid-template-rows: 1fr 1fr; }
-.img.mosaico .m0 { grid-row: 1 / -1; background-size: cover; background-position: center; }
-.img.mosaico .mx { background-size: cover; background-position: center; }
-/* Una tarjeta de versión no se parte nunca; si las tres no caben, el bloque salta entero. */
-.tf { break-inside: avoid; }
-`
+/** La hoja de precios del final: arranca en hoja nueva (decisión de Mauricio del 2026-10-27). */
+function hojaDePrecios(m: ModeloPropuesta, r: RecursosPropuesta): string {
+  return `<section class="sec brk precios">
+${eligeTuVersion(m)}
+${cuantoYCuando(m)}
+${incluyeYCondiciones(m)}
+${firmaYCreditos(m, r)}
+</section>`
+}
 
 export function htmlDePropuesta(m: ModeloPropuesta, r: RecursosPropuesta): string {
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><title>${esc(m.portada.consecutivo)} · ${esc(m.portada.titulo)}</title>
-<style>${CSS_PROPUESTA}${CSS_EXTRA}</style></head><body>
+<style>${CSS_PROPUESTA}</style></head><body>
 ${ICONOS_PROPUESTA}
 <section>
 ${portada(m, r)}
-${ruta(m)}
-${loQueVanAVivir(m, r)}
 </section>
-${diaADia(m)}
-${dondeDuermen(m, r)}
-${vuelos(m)}
-${trenesYTraslados(m)}
+${vuelosYTren(m)}
+${hospedaje(m, r)}
+${traslados(m)}
+${itinerario(m, r)}
 ${opcionales(m, r)}
-${eligeTuVersion(m)}
-${incluyeYPagos(m)}
-${formal(m, r)}
+${informacionUtil(m)}
+${hojaDePrecios(m, r)}
 </body></html>`
 }
 
@@ -800,17 +893,17 @@ ${formal(m, r)}
 
 const COLOR_EXACTO = '-webkit-print-color-adjust:exact;print-color-adjust:exact;'
 
-/** La franja degradada de 1,6 mm arriba de cada hoja. */
+/** La franja degradada de arriba de cada hoja (rosa → morado → turquesa, como la de Edgar). */
 export function encabezadoDeHoja(): string {
-  return `<div style="${COLOR_EXACTO}width:100%;margin:-4mm 0 0;height:1.6mm;background:linear-gradient(90deg,#e63380,#8b4fa0 55%,#1fa7bd)"></div>`
+  return `<div style="${COLOR_EXACTO}width:100%;margin:-4mm 0 0;height:1.6mm;background:linear-gradient(90deg,#e6197a,#8a2cb5 50%,#1ca2b8)"></div>`
 }
 
 /**
- * La banda navy del pie: los datos de la agencia a la izquierda (el pie configurado del
- * documento) y «COT-xxxx · N de M» a la derecha. `cssFuente` es el `@font-face` de Inter: el
- * pie se pinta en otro contexto, sin las fuentes de la página.
+ * La banda azul oscura del pie: los datos de la agencia al centro (el pie configurado del
+ * documento), como el de Edgar, y «COT-xxxx · N de M» discreto a la derecha. `cssFuente` es el
+ * `@font-face` de Inter: el pie se pinta en otro contexto, sin las fuentes de la página.
  */
 export function pieDeHoja(opts: { texto: string; codigo: string; cssFuente?: string | null }): string {
   const ff = opts.cssFuente ? `<style>${opts.cssFuente}</style>` : ''
-  return `${ff}<div style="${COLOR_EXACTO}width:100%;margin:0 0 -4mm;background:#2b1840;color:#fff;font:6.8pt Inter,sans-serif;padding:3mm 12mm 3.4mm;display:flex;justify-content:space-between;gap:6mm"><span>${esc(opts.texto)}</span><span style="white-space:nowrap">${esc(opts.codigo)} · <span class="pageNumber"></span> de <span class="totalPages"></span></span></div>`
+  return `${ff}<div style="${COLOR_EXACTO}position:relative;width:100%;margin:0 0 -4mm;background:linear-gradient(90deg,#1b1f3b,#1e2e5c);color:#fff;font:600 7.6pt Inter,sans-serif;padding:3.9mm 9mm 4mm;text-align:center"><span>${esc(opts.texto)}</span><span style="position:absolute;right:9mm;top:4.3mm;font-size:6pt;font-weight:400;opacity:.6;white-space:nowrap">${esc(opts.codigo)} · <span class="pageNumber"></span> de <span class="totalPages"></span></span></div>`
 }

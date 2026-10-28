@@ -1,6 +1,6 @@
 ---
 name: bloqueo-trappvel
-description: Viajes en bloqueo de Trappvel (2026-10-27, feat/trappvel-bloqueo) — ranura «paquete» (migración 20261027174500 SIN aplicar) y config modalidad_viaje SIN aplicar; dos pantallazos por paquete; íconos a 5 categorías
+description: Viajes en bloqueo de Trappvel (2026-10-27, feat/trappvel-bloqueo) — ranura «paquete» (migración 20261027174500 APLICADA 27-oct) y config modalidad_viaje SIN aplicar; dos pantallazos por paquete; íconos a 5 categorías
 metadata:
   type: project
 ---
@@ -12,8 +12,7 @@ contra main SIN mergear (lo mergea la sesión principal).
 asesora no cotiza vuelo ni hotel por separado.
 
 **How to apply (lo que no se ve a primera vista):**
-- ⚠️ Orden: migración `20261027174500_cotizacion_ranuras_tipo_paquete.sql` ANTES del merge (sin ella, «+ Paquete» crea
-  la línea sin ranura: 23514 tolerado). La config `sql/trappvel/2026-10-27_modalidad-bloqueo-PENDIENTE.sql` DESPUÉS
+- Migración `20261027174500_cotizacion_ranuras_tipo_paquete.sql` APLICADA en producción (27-oct, sesión principal). La config `sql/trappvel/2026-10-27_modalidad-bloqueo-PENDIENTE.sql` DESPUÉS
   del deploy; sin ella nadie es Bloqueo y nada cambia.
 - El slug es `modalidad_viaje`, NO `tipo_viaje` (ese ya es playa/naturaleza/crucero).
 - La modalidad sale de la MISMA lectura del viaje (`leerViajeDelNegocio` devuelve `modalidad` aparte de `viaje`): una
