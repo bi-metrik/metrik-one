@@ -184,6 +184,20 @@ export function permisosDeFunciones(funciones: Iterable<string>): Permisos {
 
 // ── Cómo se nombra un negocio ────────────────────────────────────────────────
 
+/** Días alrededor de la fecha del gasto en que otro con el mismo monto y destino se avisa como posible repetido. */
+export const DIAS_GASTO_PARECIDO = 10;
+
+/**
+ * Un gasto ya registrado que el nuevo parece repetir: mismo monto (±1 peso), mismo destino (el negocio, o los dos de
+ * empresa) y a 10 días o menos de su fecha (caso real 2026-10-28: «Resend» de $65.000 quedó dos veces, el 25 y el 28 de
+ * octubre, sin aviso). Solo avisa: decidir si es otro lo dice la persona. Pura.
+ */
+export function gastoParecido(gastos: GastoOne[], g: { monto: number; negocio: string | null; fecha: string }): GastoOne | null {
+  const dia = (iso: string) => Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / 86_400_000;
+  return gastos.find((x) => Math.abs(x.monto - g.monto) <= 1 && (x.negocio ?? null) === g.negocio
+    && Math.abs(dia(x.fecha) - dia(g.fecha)) <= DIAS_GASTO_PARECIDO) ?? null;
+}
+
 const corto = (s: string, max: number) => ([...s].length <= max ? s : `${[...s].slice(0, max - 1).join('')}…`);
 
 /** «P1 26 5 · Pérez Construcciones — Remodelación cocina»: siempre código, empresa (o el contacto) y nombre. Pura. */
@@ -821,6 +835,10 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     const cc = await puerto.centroCostos({ negocioId: negocio?.id ?? null, descripcion });
     const etiquetaCentro = cc.centro === 'directa_negocio' ? 'Negocio' : cc.centro === 'distribuible_one' ? 'ONE' : cc.centro === 'distribuible_clarity' ? 'Clarity' : cc.centro ? 'Mixto' : null;
     const destino = negocio ? `📁 ${nombreNegocio(negocio)}` : '🏢 Gasto de empresa (sin negocio)';
+    // ¿Ya está registrado? La base manda: se lee en el turno. Si no responde, se propone sin el aviso.
+    const desde = new Date(Date.parse(`${fecha}T12:00:00Z`) - DIAS_GASTO_PARECIDO * 86_400_000).toISOString();
+    const recientes = await puerto.gastosRecientes({ desdeIso: desde, negocioId: negocio?.id ?? null, limite: 200 }).catch(() => 'error' as const);
+    const parecido = recientes === 'error' ? null : gastoParecido(recientes.gastos, { monto, negocio: negocio?.codigo ?? null, fecha });
     const resumen = [
       `💰 Gasto de ${formatCOP(monto)} · ${CATEGORIA_LABELS[categoria] ?? categoria}`,
       destino,
@@ -831,6 +849,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       // El soporte dice otro monto: se ve en el resumen, nunca se adjunta callado.
       ...(foto?.lectura && montoDistinto(foto.lectura, monto) ? [lineaDistinto(foto.lectura, monto)] : []),
       ...(etiquetaCentro ? [`🏷️ Centro: ${etiquetaCentro}`] : []),
+      ...(parecido ? [`⚠️ Ya hay uno parecido: ${formatCOP(parecido.monto)} el ${fechaConDia(parecido.fecha)}${parecido.descripcion ? ` («${corto(parecido.descripcion, 60)}»)` : ''}. Si es el mismo, toca No.`] : []),
       '¿Lo registro?',
     ].join('\n');
     return {
