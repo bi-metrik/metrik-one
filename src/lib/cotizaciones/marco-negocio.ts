@@ -26,6 +26,7 @@ import { lugarConCodigo, sinTildes } from '@/lib/pdf/cotizacion-trappvel-formato
 import { coberturaDeLinea, type LineaParaCobertura } from './cobertura-opciones'
 import { encabezadoDelViaje, rangoDelViaje, resumenDelViaje } from './estado-pasos'
 import { describirOcupacion, type Composicion } from './tarifa-pasajero'
+import { esValorBloqueo } from './bloqueo-modalidad'
 
 /** Los estados que cuentan como cotización abierta del negocio. */
 export const ESTADOS_ABIERTOS = ['borrador', 'enviada', 'aceptada'] as const
@@ -38,7 +39,7 @@ export const ETAPAS_CON_COTIZACIONES: readonly number[] = [2, 3]
  * desplegable). `detalle`: texto libre debajo del valor, en gris (las edades bajo los pasajeros).
  */
 export interface FilaSolicitud {
-  clave: 'destino' | 'origen' | 'fechas' | 'pasajeros' | 'grupo' | 'presupuesto' | 'hotel' | 'alimentacion'
+  clave: 'destino' | 'modalidad' | 'origen' | 'fechas' | 'pasajeros' | 'grupo' | 'presupuesto' | 'hotel' | 'alimentacion'
     | 'acomodacion' | 'equipaje' | 'menores' | 'requisitos'
   label: string
   valor: string
@@ -47,7 +48,7 @@ export interface FilaSolicitud {
 }
 
 /**
- * Los datos clave de «Condiciones del viaje» (especificación de Noor, 2026-10-26): hasta 12 filas, cada una solo si
+ * Los datos clave de «Condiciones del viaje» (especificación de Noor, 2026-10-26; más la modalidad del bloqueo, 2026-10-27): hasta 13 filas, cada una solo si
  * tiene valor. Sin filas, la tarjeta dice que el negocio aún no tiene la solicitud.
  */
 export interface SolicitudDelViaje {
@@ -123,6 +124,8 @@ export const SLUGS_SOLICITUD = [
   'flexibilidad_fecha', 'adultos', 'ninos', 'infantes', 'numero_pasajeros', 'edades_menores', 'composicion',
   'presupuesto', 'categoria_hotel', 'plan_alimentacion', 'acomodacion', 'equipaje', 'permiso_salida_menores',
   'requisitos_especiales',
+  // Viaje en bloqueo (brief del 2026-10-27): A medida | Bloqueo, y el operador.
+  'modalidad_viaje', 'operador_bloqueo',
 ] as const
 
 /** «sin_preferencia» → «Sin preferencia»: un valor de opción que no está en la config. */
@@ -188,6 +191,8 @@ export function solicitudDesdeFilas(
 
   const candidatas: Array<FilaSolicitud | null> = [
     fila('destino', 'Destino', unir([viaje.destino, etiqueta('destino_tipo'), etiqueta('tipo_viaje')])),
+    // Solo si es Bloqueo: A medida es el default y no se pinta (las tarjetas de siempre quedan iguales).
+    esValorBloqueo(primero('modalidad_viaje')) ? fila('modalidad', 'Modalidad', unir(['Bloqueo', primero('operador_bloqueo')])) : null,
     fila('origen', 'Sale de', etiqueta('ciudad_origen')),
     fila('fechas', 'Fechas', unir([rangoDelViaje(viaje.fechas.inicio, viaje.fechas.fin), etiqueta('fechas_tipo'), etiqueta('flexibilidad_fecha')])),
     pasajeros ? { clave: 'pasajeros', label: 'Pasajeros', valor: pasajeros, ...(edades ? { detalle: `Edades: ${edades}` } : {}) } : null,

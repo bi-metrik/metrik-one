@@ -104,6 +104,11 @@ export interface PropsVistaPorPasos {
   /** Cuántas cosas rojas y ámbar muestra la lista de Revisar (C6 la vuelve única). */
   conteoLista: { rojos: number; ambar: number }
   bandeja: ReactNode
+  /**
+   * Viaje en bloqueo (brief del 2026-10-27): la sección «Viaje en bloqueo · operador» con «+ Paquete»,
+   * arriba del Paso 1. Ausente (o `null`) en todo viaje A medida: la pantalla de siempre.
+   */
+  bloqueo?: ReactNode
   agregarSinPantallazo: ReactNode
   tarjetaDeOpcion: (itemId: string, porPasos: { enTarifas: string[] | null; menuExtra: (cerrar: () => void) => ReactNode; onEliminar: () => void }) => ReactNode
   revisarLista: ReactNode
@@ -432,6 +437,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     <div className="flex flex-col gap-3" data-paso-armar>
       <h2 className="m-0 text-base font-bold">1 · Armar el viaje</h2>
       <p className="m-0 text-[13px] text-[#6E6A62]">Pega los pantallazos de lo que cotizaste, en el orden que quieras. ONE lee cada uno y te dice a dónde va.</p>
+      {p.bloqueo ?? null}
       {p.editable && p.bandeja}
       {serviciosDelPaso1.length === 0 ? (
         <p className="m-0 rounded-xl border border-[#E2DED5] bg-white p-6 text-center text-[13px] text-[#6E6A62]">

@@ -155,8 +155,9 @@ export async function crearRanuraConOpcion(
   if (!esTipoRanura(tipo)) return { success: false, error: 'Tipo de componente desconocido' }
   const c = await contexto(cotizacionId)
   if ('error' in c) return { success: false, error: c.error }
-  // «Otro servicio» solo lo abre la cotización por pasos (N5): apagada, no se escribe nada.
-  if (tipo === 'otro') {
+  // «Otro servicio» y el «Paquete de bloqueo» solo los abre la cotización por pasos (N5): apagada, no
+  // se escribe nada.
+  if (tipo === 'otro' || tipo === 'paquete') {
     const guard = await exigirPorPasos(c.supabase, cotizacionId)
     if (!guard.ok) return { success: false, error: guard.error }
   }

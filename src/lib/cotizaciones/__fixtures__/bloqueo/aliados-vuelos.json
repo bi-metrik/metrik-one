@@ -1,0 +1,8 @@
+{
+  "_fuente": "Respuesta SIMULADA del modelo a proyectos/trappvel/clarity/docs/entrada/bloqueos/2026-10-27_aliados-vuelos.png (no es una grabación). Fechas y números en las dos formas que puede devolver el modelo.",
+  "es_vuelo": true,
+  "tramos": [
+    { "aerolinea": "JetSMART", "numero_vuelo": "vuelo 5150", "origen": "BOG", "destino": "CTG", "fecha": "05-Feb-2027", "hora_salida": "4:45", "hora_llegada": "6:22", "fecha_llegada": "2027-02-05", "directo": true, "escalas": null },
+    { "aerolinea": "JetSMART", "numero_vuelo": "5167", "origen": "CTG", "destino": "BOG", "fecha": "2027-02-08", "hora_salida": "21:39", "hora_llegada": "23:15", "fecha_llegada": "08-Feb-2027", "directo": true, "escalas": 0 }
+  ]
+}

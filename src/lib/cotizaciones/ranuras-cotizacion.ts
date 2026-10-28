@@ -41,7 +41,7 @@ import { NOMBRES_TARIFA } from './tarifas'
  * (migración `20261013140000_cotizacion_ranuras_tipo_otro.sql`). Lo que se ofrece en la pantalla
  * de siempre y en la detección del pantallazo son los cuatro de `TIPOS_CON_PANTALLAZO`.
  */
-export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro'] as const
+export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro', 'paquete'] as const
 export type TipoRanura = (typeof TIPOS_RANURA)[number]
 
 /** Los cuatro tipos de siempre: los que reconoce la detección y ofrece la pantalla de siempre. */
@@ -59,6 +59,7 @@ const SLUG_POR_TIPO: Record<TipoRanura, string> = {
   actividad: 'actividad_detalle',
   traslado: 'traslado_detalle',
   otro: 'otro_detalle',
+  paquete: 'paquete_detalle',
 }
 
 export function esTipoRanura(v: unknown): v is TipoRanura {

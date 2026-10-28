@@ -44,6 +44,7 @@ const CAMPOS_POR_TIPO: Record<TipoRanura, readonly string[]> = {
   traslado: ['proveedor', 'trayecto', 'tipo_vehiculo', 'fecha_hora', 'costo'],
   actividad: ['proveedor', 'nombre', 'fecha', 'duracion', 'costo'],
   otro: ['nombre', 'proveedor', 'costo'],
+  paquete: ['nombre', 'costo'],
 }
 
 /** Los que, vacíos, se marcan en ámbar: sin ellos la opción queda coja. */
