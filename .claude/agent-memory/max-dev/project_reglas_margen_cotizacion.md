@@ -17,6 +17,9 @@ Brief `proyectos/trappvel/clarity/briefs/2026-10-27_brief-max-reglas-de-margen-c
   Pública en `tipoTarifa.comisionPct`: con ella entra al margen global; sin ella sale de la base (no aprueba en falso).
 - Con reglas el recargo fijo no se ofrece y `aplicarRecargo` lo rechaza.
 - `−` (U+2212) no existe en WinAnsi: en @react-pdf usar `–` (gotcha del 2026-10-27).
+- Paquete de bloqueo (`paquete_detalle`) = 'hotel' en `tipoParaMargen` (fix 28-oct, fix/trappvel-bloqueo-margen-paquete):
+  #1311 llegó después del bloqueo y lo dejaba a 0 % (precio = costo). Toda ranura nueva que deba margen tiene que
+  entrar a `tipoParaMargen`, o con reglas nace en 0. Recibe puntos y descuento de hotel; Pública (incluida) sigue en 0.
 - Abierto: hotel con precios de fila a mano no recibe descuento ni puntos; cotizaciones viejas con `piso_margen_pct`
   null pasan a medirse contra 12 tras el SQL; QA en navegador real sin hacer.
 
