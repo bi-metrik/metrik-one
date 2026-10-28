@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 
 import { BTN, BTN_PRIM, INPUT, LINK } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
+import { causasBajoMinimo } from '@/lib/cotizaciones/causas-margen'
 import { MOTIVOS_COMBINACION } from '@/lib/cotizaciones/motivo-combinacion'
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import type { ServicioDelViaje, TarifaCalculada } from '@/lib/cotizaciones/por-pasos-vista'
@@ -85,6 +86,7 @@ export function TarifasPorPasos({
   reglas = null,
   onPuntos,
   onDescuentos,
+  delTotal = null,
 }: {
   tarifas: TarifaCalculada[]
   servicios: ServicioConOpciones[]
@@ -129,6 +131,12 @@ export function TarifasPorPasos({
   reglas?: ReglasEnTarifas | null
   onPuntos?: (puntos: number) => void
   onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number }[]) => void
+  /**
+   * El margen del total, el MISMO que pinta el encabezado (`margenDelEncabezado`). Sin tarifas que
+   * vayan al cliente (un solo hotel, nada que escoger) es lo único que hay que medir: sin él, el
+   * rótulo «Margen global (no se edita):» quedaba vacío (falla 1 del brief del 2026-10-28).
+   */
+  delTotal?: { margenPct: number | null; exenta: boolean; hotelesBajoPiso: { id: string | undefined; margenPct: number }[] } | null
 }) {
   // Un paquete de bloqueo se margina como hotel (`tipoParaMargen`): la casilla lo nombra.
   const conPaquete = servicios.some(s => s.tipo === 'paquete')
@@ -144,9 +152,27 @@ export function TarifasPorPasos({
   const vanAlCliente = (t: TarifaCalculada) => t.esPrincipal || (t.vaEnPropuesta && !t.igualA)
   /** Los hoteles de una tarifa que, con su descuento, quedaron bajo el piso de hotel (reglas). */
   const hotelesBajos = (t: TarifaCalculada) => t.cascada?.reglas?.hotelesBajoPiso ?? []
-  const bajoMinimo = tarifas.filter(t => vanAlCliente(t) && ((!t.exenta && t.margenReal !== null && t.margenReal < pisoPct) || hotelesBajos(t).length > 0))
+  /**
+   * Lo que se mide: las tarifas que van al cliente o, sin ninguna, el total (el que pinta el
+   * encabezado). Cada uno con su margen y sus hoteles bajo el piso.
+   */
+  const medidos: { id: string; nombre: string | null; margenReal: number | null; exenta: boolean; hoteles: { id: string | undefined; margenPct: number }[]; tarifa: TarifaCalculada | null }[] =
+    tarifas.some(vanAlCliente)
+      ? tarifas.filter(vanAlCliente).map(t => ({ id: t.id, nombre: t.nombre, margenReal: t.margenReal, exenta: t.exenta, hoteles: hotelesBajos(t), tarifa: t }))
+      : delTotal
+        ? [{ id: 'total', nombre: null, margenReal: delTotal.margenPct, exenta: delTotal.exenta, hoteles: delTotal.hotelesBajoPiso, tarifa: null }]
+        : []
+  const globalBajo = (t: { exenta: boolean; margenReal: number | null }) => !t.exenta && t.margenReal !== null && t.margenReal < pisoPct
+  const bajoMinimo = medidos.filter(t => globalBajo(t) || t.hoteles.length > 0)
+  /** Por qué pide la autorización, cada causa por separado (`causas-margen.ts`). */
+  const causasDe = (t: (typeof medidos)[number]) => causasBajoMinimo({
+    nombre: t.nombre,
+    margenPct: t.exenta ? null : t.margenReal,
+    hoteles: t.hoteles.map(h => ({ nombre: nombreDeOpcion(h.id ?? ''), margenPct: h.margenPct })),
+    pisoHotelPct: reglas?.pisoHotelPct ?? 0,
+  }, pisoPct)
   /** El margen real de una tarifa, dicho con las líneas de tarifa pública que no cuenta. */
-  const margenDeTarifa = (t: TarifaCalculada) => (t.exenta ? 'solo tarifa pública' : pct(t.margenReal))
+  const margenDeTarifa = (t: { exenta: boolean; margenReal: number | null }) => (t.exenta ? 'solo tarifa pública' : pct(t.margenReal))
   // Con reglas, las Públicas CON comisión sí cuentan: la nota nombra solo las que no.
   const sinContar = (t: TarifaCalculada) => (reglas ? t.cascada?.reglas?.publicasSinComision ?? 0 : t.publicas)
   const notaPublicas = (t: TarifaCalculada) => {
@@ -309,22 +335,23 @@ export function TarifasPorPasos({
       )}
       <p className="m-0 text-[13px]" data-margenes-reales>
         {reglas ? 'Margen global (no se edita):' : 'Margen real:'}{' '}
-        {tarifas.filter(vanAlCliente).map((t, i) => (
+        {medidos.map((t, i) => (
           <span key={t.id}>
             {i > 0 && ' · '}
-            <b className={t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}>
-              {t.nombre} {margenDeTarifa(t)}
+            <b className={`whitespace-nowrap ${t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}`} data-margen-medido={t.id}>
+              {t.nombre ? `${t.nombre} ` : ''}{margenDeTarifa(t)}
             </b>
-            {notaPublicas(t) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t)}</span>}
+            {t.tarifa && notaPublicas(t.tarifa) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t.tarifa)}</span>}
           </span>
         ))}
       </p>
       {bajoMinimo.length > 0 && autorizacion && (
         <div className="flex flex-col gap-1.5 rounded-lg border border-[#EBC1BB] bg-[#FBEDEB] p-2.5 text-[13px]" data-autorizacion>
-          <span className="font-semibold text-[#B3382C]">{bajoMinimo.map(t => t.nombre).join(' y ')} · Bajo el mínimo</span>
-          {bajoMinimo.flatMap(t => hotelesBajos(t).map(h => (
-            <span key={`${t.id}-${h.id}`} className="text-xs text-[#B3382C]" data-hotel-bajo-piso>
-              {nombreDeOpcion(h.id ?? '')} con su descuento queda al {pct(h.margenPct)} (mínimo de hotel {pct(reglas?.pisoHotelPct ?? 0)}) · {t.nombre}
+          <span className="font-semibold text-[#B3382C]">{[bajoMinimo.map(t => t.nombre).filter(Boolean).join(' y '), 'Bajo el mínimo'].filter(Boolean).join(' · ')}</span>
+          {/* Brief del 2026-10-28 · la causa real: el hotel con su nombre, el global solo si lo es. */}
+          {bajoMinimo.flatMap(t => causasDe(t).map((c, i) => (
+            <span key={`${t.id}-${i}`} className="text-xs text-[#B3382C]" data-causa-margen={i < t.hoteles.length ? 'hotel' : 'global'}>
+              {c}
             </span>
           )))}
           {autorizacion.vigente ? (
@@ -353,7 +380,7 @@ export function TarifasPorPasos({
                           setMotivo('')
                         }}
                       >
-                        Autorizar {pct(bajoMinimo[0]?.margenReal ?? null)}
+                        {bajoMinimo[0] && globalBajo(bajoMinimo[0]) ? `Autorizar ${pct(bajoMinimo[0].margenReal)}` : 'Autorizar'}
                       </button>
                       <button type="button" className={BTN} onClick={() => setAutorizando(false)}>Cancelar</button>
                     </span>

@@ -20,6 +20,10 @@ Brief `proyectos/trappvel/clarity/briefs/2026-10-27_brief-max-reglas-de-margen-c
 - Paquete de bloqueo (`paquete_detalle`) = 'hotel' en `tipoParaMargen` (fix 28-oct, fix/trappvel-bloqueo-margen-paquete):
   #1311 llegó después del bloqueo y lo dejaba a 0 % (precio = costo). Toda ranura nueva que deba margen tiene que
   entrar a `tipoParaMargen`, o con reglas nace en 0. Recibe puntos y descuento de hotel; Pública (incluida) sigue en 0.
+- 2026-10-28 (fix/margen-global-y-aviso-hotel): el margen que se pinta junto al total y en «Tarifas» sale de UNA
+  función, `por-pasos-vista.ts › margenDelEncabezado` (con reglas = global, no `margenRealPct`). Sin tarifas que vayan
+  al cliente, «Tarifas» mide el total (`delTotal`). Toda frase de «bajo el mínimo» se arma con `causas-margen.ts`
+  (hotel con su opción vs. 10 %, global como siempre); no escribir otra a mano.
 - Abierto: hotel con precios de fila a mano no recibe descuento ni puntos; cotizaciones viejas con `piso_margen_pct`
   null pasan a medirse contra 12 tras el SQL; QA en navegador real sin hacer.
 
