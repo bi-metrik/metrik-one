@@ -154,9 +154,11 @@ export interface FichaExperienciaDatos {
   saludo_grupo: string | null
   relato_grupo: string | null
   edad_minima: number | null
+  /** Puerta cerrada al iniciar (películas). Desmarcada por defecto. */
+  puerta_cerrada: boolean
 }
 
-const COLUMNAS_FICHA = 'nombre, titulo_oferta, frase_gancho, intro, que_incluye, emojis_tema, saludo_grupo, relato_grupo, edad_minima'
+const COLUMNAS_FICHA = 'nombre, titulo_oferta, frase_gancho, intro, que_incluye, emojis_tema, saludo_grupo, relato_grupo, edad_minima, puerta_cerrada'
 
 export interface Experiencia extends FichaExperienciaDatos {
   id: string

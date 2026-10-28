@@ -15,8 +15,12 @@
 //     en el saludo temático de cada experiencia; lo del negocio queda sin tema (23-oct).
 //   · La puerta cerrada termina en «para evitar interrupciones. 🚪», sin «durante la proyección. 🎬» (26-oct): Sabor también hace
 //     catas de vino y clases de sushi, y la parte fija no puede asumir cine.
+//   · La puerta cerrada sale solo si la experiencia la tiene marcada (26-oct, Mauricio y Paula: «aplica solo a las
+//     películas… En los talleres no aplica»). La llegada 10 minutos antes sigue fija en todas.
 //   · El mensaje directo va sin la intro (23-oct): gancho, qué incluye, precio y los horarios aparte.
 //   · «paga el saldo 1 día antes» sale del plazo del saldo de la campaña («N días antes»).
+//   · Con plazo 0 la línea del abono cambia entera (28-oct, Mauricio, P16): «El saldo lo pagas con el link hasta la hora
+//     de inicio, o el día de la experiencia en el lugar.» (un abono y varios).
 // Pura: sin red, sin reloj.
 // ============================================================
 
@@ -47,10 +51,15 @@ export const TEXTO_OFERTA = {
   preventaVarias: '🎟️ Preventa en algunos horarios: te contamos el precio con cada horario.',
   regular: (precio: string) => `🎫 Boletería regular: ${precio}`,
   regularVarios: '🎫 Boletería regular: te contamos el precio con cada horario.',
-  /** «1 día antes», «N días antes» o, con 0, «antes de que empiece la experiencia»: el plazo del saldo de la campaña. */
-  plazoSaldo: (dias: number) => (dias === 0 ? 'antes de que empiece la experiencia' : dias === 1 ? '1 día antes' : `${dias} días antes`),
+  /** «1 día antes» o «N días antes»: el plazo del saldo de la campaña (1 o más días). */
+  plazoSaldo: (dias: number) => (dias === 1 ? '1 día antes' : `${dias} días antes`),
   abono: (abono: string, plazo: string) => `✨ Reserva con ${abono} por cupo y paga el saldo ${plazo}.`,
   abonoVarios: (plazo: string) => `✨ Reserva con un abono por cupo y paga el saldo ${plazo}.`,
+  /** Con plazo 0 (P16, Mauricio 28-oct): link hasta la hora de inicio; ya en la función, en el lugar (QR de Bold). */
+  abonoHastaInicio: (abono: string) =>
+    `✨ Reserva con ${abono} por cupo. El saldo lo pagas con el link hasta la hora de inicio, o el día de la experiencia en el lugar.`,
+  abonoVariosHastaInicio:
+    '✨ Reserva con un abono por cupo. El saldo lo pagas con el link hasta la hora de inicio, o el día de la experiencia en el lugar.',
   /** El mensaje directo no lista funciones (pesa 1.000 bytes como máximo): nombra la campaña y ofrece los horarios. */
   agendaDirecto: (campana: string) => `📅 ${campana}: te compartimos por este chat los horarios disponibles.`,
   direccion: (direccion: string) => `📍 ${direccion}`,
@@ -93,6 +102,8 @@ export interface PartesBienvenida {
   parqueadero: string;
   relato: string;
   firma: string;
+  /** Si va el párrafo de la puerta cerrada (la experiencia la tiene marcada). */
+  puertaCerrada: boolean;
 }
 
 export const TEXTO_BIENVENIDA = {
@@ -128,7 +139,7 @@ export function plantillaBienvenida(p: PartesBienvenida): string {
     p.saludo,
     `${t.fecha}\n${p.dia} | ${p.hora}`,
     `${t.llegada(p.llegada)}\n${t.inicio(p.inicio)}`,
-    t.puerta,
+    p.puertaCerrada ? t.puerta : null,
     `${t.lugar}\n${p.direccion} – ${p.piso}`,
     p.recepcion,
     `${t.parqueadero}\n\n${p.parqueadero}`,
@@ -137,5 +148,7 @@ export function plantillaBienvenida(p: PartesBienvenida): string {
     t.importante,
     p.relato,
     `${t.despedida}\n${p.firma}`,
-  ].join('\n\n');
+  ]
+    .filter((x): x is string => x !== null)
+    .join('\n\n');
 }

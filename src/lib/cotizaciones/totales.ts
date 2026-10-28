@@ -45,6 +45,15 @@ import {
 import { totalesDeAdicionales, type AdicionalParaSuma } from './adicionales'
 import { precioCuadradoPorPasajero, type FilaDePasajeros } from './cuadre-pasajero'
 import { esTarifaPublica } from './tarifa-publica'
+import {
+  colchonDeLinea,
+  comisionDePublica,
+  descuentoDeLinea,
+  tipoParaMargen,
+  type ColchonDeLinea,
+  type ReglasDeCotizacion,
+  type TipoParaMargen,
+} from './reglas-margen'
 
 export interface ItemParaCascada {
   id?: string
@@ -84,6 +93,12 @@ export interface ItemParaCascada {
    * margen mínimo. Ausente = Neta, que es todo lo anterior al 2026-10-22.
    */
   tarifa_pax?: unknown
+  /**
+   * La ranura y el nombre de la línea. Solo los miran las reglas de margen (`reglas-margen.ts`):
+   * vuelo, hotel o lo demás, y de dónde a dónde va un vuelo. Sin reglas no cambian nada.
+   */
+  grupo?: string | null
+  nombre?: string | null
 }
 
 export interface ParametrosCascada {
@@ -94,6 +109,12 @@ export interface ParametrosCascada {
   /** Descuento comercial final, en % sobre la venta bruta. */
   descuentoComercialPct?: number | null
   convencionMargen?: ConvencionMargen | null
+  /**
+   * Las reglas de margen de la cotización (`reglas-margen.ts`, brief del 2026-10-27). Ausentes o
+   * `null` —toda cotización anterior y toda línea que no las declara—, la cascada es exactamente
+   * la de siempre.
+   */
+  reglas?: ReglasDeCotizacion | null
 }
 
 export interface LineaCalculada {
@@ -160,6 +181,50 @@ export interface LineaCalculada {
   margenRealPct: number | null
   /** La línea es de tarifa pública (`tarifa-publica.ts`): no entra en la medida del mínimo. */
   publica: boolean
+  /**
+   * Lo que agregan las reglas de margen. Ausente sin reglas: la línea de siempre.
+   *
+   * ⚠️ `puntos` SÍ está en `precioConAdicionales` (es lo que el cliente paga por la línea en ESTA
+   * tarifa) y NO en `precioLinea`: el reparto depende de qué líneas lleva cada tarifa, y
+   * `recalcularTotales` escribe `items.precio_venta` desde `precioLinea`.
+   */
+  reglas?: ReglasDeLinea
+}
+
+export interface ReglasDeLinea {
+  tipo: TipoParaMargen
+  /** Solo en un vuelo que hereda el margen: el colchón que lo decide. */
+  colchon: ColchonDeLinea | null
+  /** El descuento que ve el cliente en esta opción, ya en pesos (`precioLinea` ya lo descontó). */
+  descuento: { motivo: string; valor: number; precioSinDescuento: number } | null
+  /** Los pesos que le tocan de los puntos extra en ESTA cascada. */
+  puntos: number
+  /** La comisión de una línea Pública, si alguien la escribió. */
+  comisionPct: number | null
+}
+
+/** Lo que las reglas de margen dejan en la cascada. Ausente sin reglas. */
+export interface ResultadoReglas {
+  /**
+   * El margen global: `(venta − costo) / venta` después de márgenes, colchones, puntos y
+   * descuentos. Las Públicas con comisión entran con su comisión; las que no la tienen, no entran.
+   * `null` = no se puede medir (sin venta o sin costo en la base).
+   */
+  margenGlobalPct: number | null
+  /** El mismo margen ANTES de los puntos extra y de los descuentos. */
+  margenAntesPct: number | null
+  /** Los puntos que se pidieron y los pesos que de verdad se repartieron. */
+  puntosPct: number
+  puntosPesos: number
+  /** Cada descuento sobre el total, en pesos, en el orden en que se escribió. */
+  descuentos: { id: string; descripcion: string; pct: number; valor: number }[]
+  /** La suma de las líneas que ve el cliente, antes de los descuentos sobre el total. */
+  subtotal: number
+  /** Los hoteles cuyo margen (ya con su descuento) quedó bajo el piso de hotel. */
+  hotelesBajoPiso: { id: string | undefined; margenPct: number }[]
+  pisoHotelPct: number
+  /** Las Públicas sin comisión: no entran al margen global. */
+  publicasSinComision: number
 }
 
 /**
@@ -195,6 +260,8 @@ export interface Cascada {
   margenRealPct: number | null
   /** Ver `PesoDeLasPublicas`. */
   publicas: PesoDeLasPublicas
+  /** Ver `ResultadoReglas`. Ausente sin reglas de margen. */
+  reglas?: ResultadoReglas
 }
 
 /**
@@ -226,14 +293,34 @@ export function costoDeLinea(item: ItemParaCascada): number {
   return unitario * cantidad * (1 - descuento / 100)
 }
 
+/**
+ * El precio de una línea, cuadrado al peso como lo imprime el documento: por pasajero si la línea
+ * se vende por pasajero (punto 11 del brief del 2026-10-05), si no por unidad («VLR. UNIT.»).
+ */
+function cuadrarAlPeso(precio: number, cantidad: number, pasajeros: ItemParaCascada['pasajeros'] | false): number {
+  return pasajeros
+    ? precioCuadradoPorPasajero(precio / cantidad, pasajeros) * cantidad
+    : Math.round(precio / cantidad) * cantidad
+}
+
+/** Lo que hace falta para repartir los puntos extra: la línea, su cantidad y cómo se cuadra. */
+interface ParaPuntos {
+  linea: LineaCalculada
+  cantidad: number
+  pasajeros: ItemParaCascada['pasajeros'] | false
+}
+
 /** Toda la cascada, de las líneas al precio final. */
 export function calcularCascada(items: ItemParaCascada[], params: ParametrosCascada): Cascada {
   const adminPct = Math.max(0, Number(params.administrativosPct) || 0)
   const margenCotizacion = Number(params.margenPct) || 0
   const descComercial = Math.min(100, Math.max(0, Number(params.descuentoComercialPct) || 0))
   const convencion = params.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO
+  // Las reglas de margen (brief del 2026-10-27). Sin ellas, todo lo de abajo es lo de siempre.
+  const reglas = params.reglas ?? null
 
   const lineas: LineaCalculada[] = []
+  const paraPuntos: ParaPuntos[] = []
   let costoDirecto = 0
   let ventaBruta = 0
   /**
@@ -270,33 +357,68 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     costoBaseDeAdministrativos += costoLinea
     costoDirecto += costoLinea + adic.costo
 
+    const publica = item.es_ajuste !== true && esTarifaPublica(item.tarifa_pax)
     const margenPropio = item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
-    const margenAplicado = margenPropio ? Number(item.margen_porcentaje) || 0 : margenCotizacion
+    const tipo = reglas ? tipoParaMargen(item.grupo) : null
+    // La parte de los administrativos que le toca a esta línea. Proporcional al
+    // costo, que es la propiedad que permite que una línea margine distinto sin
+    // romper la suma (ver el encabezado del archivo).
+    const costoDeVentaLinea = costoLinea * (1 + adminPct / 100)
+    const cantidadLinea = Number(item.cantidad) || 1
+    const derivaDelCosto = costoLinea > 0 && item.precio_manual !== true && item.es_ajuste !== true
+
+    // El margen con que nace la línea cuando nadie le escribió uno. Sin reglas, el de la
+    // cotización (lo de siempre). Con reglas: el hotel, el de la cotización; el vuelo, su
+    // colchón; una Pública y todo lo demás, 0.
+    let colchon: ColchonDeLinea | null = null
+    let margenAplicado: number
+    if (margenPropio) margenAplicado = Number(item.margen_porcentaje) || 0
+    else if (!reglas) margenAplicado = margenCotizacion
+    else if (publica) margenAplicado = 0
+    else if (tipo === 'hotel') margenAplicado = margenCotizacion
+    else if (tipo === 'vuelo' && derivaDelCosto) {
+      colchon = colchonDeLinea(item, costoLinea, cantidadLinea, reglas.politica)
+      const conColchon = costoDeVentaLinea + colchon.colchon
+      margenAplicado = convencion === 'sobre_venta'
+        ? (conColchon > 0 ? (colchon.colchon / conColchon) * 100 : 0)
+        : (costoDeVentaLinea > 0 ? (colchon.colchon / costoDeVentaLinea) * 100 : 0)
+    } else margenAplicado = 0
 
     let precioLinea: number
     if (costoLinea <= 0 || item.precio_manual === true || item.es_ajuste === true) {
       // Línea sin costo o con precio fijado a mano: manda lo guardado.
-      const cantidad = Number(item.cantidad) || 1
       const descuento = Math.min(100, Math.max(0, Number(item.descuento_porcentaje) || 0))
-      const bruto = (Number(item.precio_venta) || 0) * cantidad
+      const bruto = (Number(item.precio_venta) || 0) * cantidadLinea
       precioLinea = item.precio_manual === true || item.es_ajuste === true
         ? bruto
         : bruto * (1 - descuento / 100)
+    } else if (colchon) {
+      // El colchón se suma en pesos: el margen de arriba es solo cómo se dice.
+      precioLinea = costoDeVentaLinea + colchon.colchon
     } else {
-      precioLinea = precioConMargen(costoLinea * (1 + adminPct / 100), margenAplicado, convencion)
+      precioLinea = precioConMargen(costoDeVentaLinea, margenAplicado, convencion)
+    }
+
+    // El descuento que el cliente ve en esta opción (el del hotel). Solo con reglas, y solo
+    // sobre un precio que sale del costo: un precio escrito a mano ya dice lo que se cobra.
+    const descuentoCliente = reglas && derivaDelCosto ? descuentoDeLinea(item.tarifa_pax) : null
+    const precioSinDescuento = precioLinea
+    if (descuentoCliente) {
+      precioLinea = descuentoCliente.tipo === 'pct'
+        // Puntos de margen que se ceden: 15 % con 3 de descuento queda en 12 %.
+        ? precioConMargen(costoDeVentaLinea, margenAplicado - descuentoCliente.valor, convencion)
+        : precioLinea - descuentoCliente.valor
+      precioLinea = Math.max(0, precioLinea)
     }
 
     // El precio de la línea se cuadra al peso POR UNIDAD, que es la cifra que se
     // imprime en la cotización del cliente ("VLR. UNIT."). Sin esto, el total salía
     // de redondear la suma exacta y la columna del PDF sumaba unos pesos distintos:
     // un documento que no cuadra consigo mismo, y el cliente sí suma la columna.
-    const cantidadLinea = Number(item.cantidad) || 1
     // Una línea que se vende por pasajero cuadra con lo que paga cada uno (punto 11 del brief
     // del 2026-10-05). Solo la que sale del margen: un precio escrito a mano manda tal cual.
-    const porPasajero = costoLinea > 0 && item.precio_manual !== true && item.es_ajuste !== true && item.pasajeros
-    precioLinea = porPasajero
-      ? precioCuadradoPorPasajero(precioLinea / cantidadLinea, item.pasajeros) * cantidadLinea
-      : Math.round(precioLinea / cantidadLinea) * cantidadLinea
+    const porPasajero = derivaDelCosto && item.pasajeros ? item.pasajeros : false
+    precioLinea = cuadrarAlPeso(precioLinea, cantidadLinea, porPasajero)
 
     // El adicional se suma DESPUÉS del cuadre por unidad, no antes: su cantidad es la
     // suya (seis maletas para seis adultos) y no tiene por qué ser múltiplo de la del
@@ -305,12 +427,6 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     const precioConAdicionales = precioLinea + adic.precio
     ventaBruta += precioConAdicionales
 
-    // La parte de los administrativos que le toca a esta línea. Proporcional al
-    // costo, que es la propiedad que permite que una línea margine distinto sin
-    // romper la suma (ver el encabezado del archivo).
-    const costoDeVentaLinea = costoLinea * (1 + adminPct / 100)
-
-    const publica = item.es_ajuste !== true && esTarifaPublica(item.tarifa_pax)
     if (publica) {
       publicasLineas++
       publicasCosto += costoDeVentaLinea + adic.costo
@@ -320,7 +436,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       else if (!(precioConAdicionales > 0)) netaSinNada = true
     }
 
-    lineas.push({
+    const linea: LineaCalculada = {
       id: item.id,
       costoUnitario,
       costoLinea: Math.round(costoLinea),
@@ -336,7 +452,25 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       // cifras impresas al lado, y el usuario no tiene cómo saber cuál falla.
       margenRealPct: margenRealDeLinea(Math.round(costoDeVentaLinea), Math.round(precioLinea)),
       publica,
-    })
+    }
+    if (reglas && tipo) {
+      const sinDescuento = descuentoCliente ? Math.round(cuadrarAlPeso(precioSinDescuento, cantidadLinea, porPasajero)) : 0
+      linea.reglas = {
+        tipo,
+        colchon,
+        descuento: descuentoCliente
+          ? { motivo: descuentoCliente.motivo, valor: Math.max(0, sinDescuento - linea.precioLinea), precioSinDescuento: sinDescuento }
+          : null,
+        puntos: 0,
+        comisionPct: publica ? comisionDePublica(item.tarifa_pax) : null,
+      }
+      // Reciben puntos extra el hotel y lo demás, nunca el vuelo (el cliente compara el tiquete en
+      // internet), ni una Pública (su precio es el público), ni un precio escrito a mano.
+      if (tipo !== 'vuelo' && !publica && derivaDelCosto && linea.precioLinea > 0) {
+        paraPuntos.push({ linea, cantidad: cantidadLinea, pasajeros: porPasajero })
+      }
+    }
+    lineas.push(linea)
   }
 
   // El AIU se calcula sobre el costo BASE, no sobre el que ya trae adicionales: ver la
@@ -344,6 +478,21 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
   // idéntico a `costoDirecto` y esto es exactamente la línea de siempre.
   const administrativos = costoBaseDeAdministrativos * (adminPct / 100)
   const costoDeVenta = costoDirecto + administrativos
+
+  if (reglas) {
+    return conReglas({
+      reglas,
+      lineas,
+      paraPuntos,
+      ventaBruta,
+      costoDirecto,
+      administrativos,
+      costoDeVenta,
+      descComercial,
+      publicas: { lineas: publicasLineas, costo: publicasCosto, venta: publicasVenta, netaConCosto, netaSinNada },
+    })
+  }
+
   const descuentoComercial = ventaBruta * (descComercial / 100)
   const precioVenta = ventaBruta - descuentoComercial
 
@@ -361,6 +510,150 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       costoDeVenta: Math.round(publicasCosto),
       ventaBruta: Math.round(publicasVenta),
       exentaDelMinimo: publicasLineas > 0 && !netaConCosto && !netaSinNada,
+    },
+  }
+}
+
+/**
+ * La base del margen global: venta y costo de cada línea. Una Pública entra solo si alguien
+ * escribió su comisión, y entonces su costo es el precio público menos la comisión (su margen es
+ * la comisión). Sin comisión no entra: su costo registrado ES el precio público, y medirla en 0 %
+ * le pediría autorización a toda cotización con Públicas.
+ */
+function baseDelMargenGlobal(lineas: readonly LineaCalculada[]): { venta: number; costo: number; sinComision: number } {
+  let venta = 0
+  let costo = 0
+  let sinComision = 0
+  for (const l of lineas) {
+    if (l.reglas === undefined) continue
+    if (l.publica) {
+      const c = l.reglas.comisionPct
+      if (c === null) { sinComision++; continue }
+      venta += l.precioConAdicionales
+      costo += l.precioConAdicionales * (1 - c / 100)
+      continue
+    }
+    venta += l.precioConAdicionales
+    costo += l.costoDeVentaLinea + l.costoAdicionales
+  }
+  return { venta, costo, sinComision }
+}
+
+function margenDe(venta: number, costo: number): number | null {
+  return venta > 0 && costo > 0 ? ((venta - costo) / venta) * 100 : null
+}
+
+/**
+ * Los puntos extra: lo que hay que sumarle a la venta para que el margen global suba exactamente
+ * esos puntos, repartido entre las líneas que pueden recibirlo en proporción a su precio y
+ * cuadrado al peso como el resto del documento. Lo que el redondeo deja suelto va a la línea más
+ * grande. Devuelve los pesos que de verdad se repartieron (ya están en cada línea).
+ */
+function repartirPuntos(paraPuntos: ParaPuntos[], extra: number): number {
+  const pesoTotal = paraPuntos.reduce((s, x) => s + x.linea.precioLinea, 0)
+  if (!(extra > 0) || !(pesoTotal > 0)) return 0
+  let repartido = 0
+  for (const x of paraPuntos) {
+    const meta = x.linea.precioLinea + (extra * x.linea.precioLinea) / pesoTotal
+    const nuevo = Math.round(cuadrarAlPeso(meta, x.cantidad, x.pasajeros))
+    x.linea.reglas!.puntos = nuevo - x.linea.precioLinea
+    repartido += x.linea.reglas!.puntos
+  }
+  const resto = extra - repartido
+  if (resto !== 0) {
+    const mayor = paraPuntos.reduce((m, x) => (x.linea.precioLinea > m.linea.precioLinea ? x : m))
+    const actual = mayor.linea.precioLinea + mayor.linea.reglas!.puntos
+    const nuevo = Math.round(cuadrarAlPeso(actual + resto, mayor.cantidad, mayor.pasajeros))
+    repartido += nuevo - actual
+    mayor.linea.reglas!.puntos = nuevo - mayor.linea.precioLinea
+  }
+  for (const x of paraPuntos) x.linea.precioConAdicionales += x.linea.reglas!.puntos
+  return repartido
+}
+
+/**
+ * El final de la cascada con reglas de margen: los puntos extra, los descuentos sobre el total y
+ * el margen global (`reglas-margen.ts`). Vive aparte para que la cascada sin reglas se lea igual
+ * que siempre.
+ */
+function conReglas(a: {
+  reglas: ReglasDeCotizacion
+  lineas: LineaCalculada[]
+  paraPuntos: ParaPuntos[]
+  ventaBruta: number
+  costoDirecto: number
+  administrativos: number
+  costoDeVenta: number
+  descComercial: number
+  publicas: { lineas: number; costo: number; venta: number; netaConCosto: boolean; netaSinNada: boolean }
+}): Cascada {
+  const { reglas, lineas } = a
+  const politica = reglas.politica
+
+  // ── 4 · Puntos extra: de 0 al tope, sobre el margen global, repartidos por precio ──
+  const antes = baseDelMargenGlobal(lineas)
+  const margenAntesPct = margenDe(antes.venta, antes.costo)
+  const puntosPct = Math.min(politica.puntosExtraMax, Math.max(0, Number(reglas.puntosExtra) || 0))
+  let ventaBruta = a.ventaBruta
+  let puntosPesos = 0
+  if (puntosPct > 0 && margenAntesPct !== null && a.paraPuntos.length > 0) {
+    const objetivo = (margenAntesPct + puntosPct) / 100
+    const extra = objetivo < 1 ? Math.round(antes.costo / (1 - objetivo) - antes.venta) : 0
+    puntosPesos = repartirPuntos(a.paraPuntos, extra)
+    ventaBruta += puntosPesos
+  }
+
+  // ── 5 · Descuentos sobre el total: después de los puntos, cada uno al peso ──
+  // El descuento comercial de siempre (`cotizaciones.descuento_porcentaje`), si alguien lo puso,
+  // es uno más: con reglas el cliente ve todo descuento con su nombre.
+  const pedidos = [
+    ...reglas.descuentos,
+    ...(a.descComercial > 0 ? [{ id: 'comercial', descripcion: 'Descuento comercial', pct: a.descComercial }] : []),
+  ]
+  const descuentos = pedidos.map(d => ({ ...d, valor: Math.round(ventaBruta * (d.pct / 100)) }))
+  const descuentoComercial = descuentos.reduce((s, d) => s + d.valor, 0)
+  const precioVenta = ventaBruta - descuentoComercial
+
+  // ── 6 · El margen global, después de todo ──
+  const despues = baseDelMargenGlobal(lineas)
+  // Los descuentos se reparten en proporción a la venta, igual que `margenMedible` reparte el
+  // descuento comercial entre las Netas.
+  const factor = ventaBruta > 0 ? precioVenta / ventaBruta : 1
+  const margenGlobalPct = margenDe(despues.venta * factor, despues.costo)
+
+  const pisoHotel = politica.pisoHotelPct
+  const hotelesBajoPiso = lineas
+    .filter(l => l.reglas?.tipo === 'hotel' && !l.publica && l.margenRealPct !== null && l.margenRealPct < pisoHotel)
+    .map(l => ({ id: l.id, margenPct: l.margenRealPct as number }))
+
+  const p = a.publicas
+  return {
+    lineas,
+    costoDirecto: Math.round(a.costoDirecto),
+    administrativos: Math.round(a.administrativos),
+    costoDeVenta: Math.round(a.costoDeVenta),
+    ventaBruta: Math.round(ventaBruta),
+    descuentoComercial: Math.round(descuentoComercial),
+    precioVenta: Math.round(precioVenta),
+    margenRealPct: precioVenta > 0 ? ((precioVenta - a.costoDeVenta) / precioVenta) * 100 : null,
+    publicas: {
+      lineas: p.lineas,
+      costoDeVenta: Math.round(p.costo),
+      ventaBruta: Math.round(p.venta),
+      // Con reglas, una Pública con comisión SÍ tiene margen que exigir: exenta solo si lo único
+      // que cobra son Públicas sin comisión.
+      exentaDelMinimo: p.lineas > 0 && !p.netaConCosto && !p.netaSinNada && despues.venta === 0,
+    },
+    reglas: {
+      margenGlobalPct,
+      margenAntesPct,
+      puntosPct,
+      puntosPesos,
+      descuentos,
+      subtotal: Math.round(ventaBruta),
+      hotelesBajoPiso,
+      pisoHotelPct: pisoHotel,
+      publicasSinComision: despues.sinComision,
     },
   }
 }

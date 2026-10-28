@@ -10,8 +10,15 @@
  * y entonces TODO correo al cliente final en su nombre sale desde ahí. `nombre` es opcional
  * (si falta, va la marca del workspace).
  *
- * Sin la clave, cada envío conserva EXACTAMENTE su remitente de siempre: quien llama pasa
- * ese remitente como respaldo y se devuelve tal cual.
+ * Sin la clave, el correo sale de `DIRECCION_AVISOS_CLIENTE` (avisos@avisos.metrikone.co) con el
+ * NOMBRE visible de siempre de cada envío: quien llama pasa ese remitente como respaldo y se
+ * devuelve tal cual.
+ *
+ * Reparto de dominios (Resend Pro, 2026-10-26), para que la reputación de uno no arrastre al otro:
+ *   · metrikone.co (raíz)      → auth de Supabase, sistema y avisos internos al equipo.
+ *   · avisos.metrikone.co      → avisos a clientes finales de workspaces SIN remitente propio.
+ *   · <ws>.metrikone.co        → remitente propio del workspace (`remitente_correo`).
+ *   · metrik.com.co            → facturación de MéTRIK.
  *
  * La dirección solo vale si su dominio está en `DOMINIOS_PERMITIDOS`: un dominio que no está
  * verificado en Resend hace rebotar el POST con 403 y el aviso al cliente no saldría. Una
@@ -26,11 +33,31 @@ export const CLAVE_REMITENTE_CORREO = 'remitente_correo';
  * Dominios verificados en Resend para remitentes de workspace.
  * `metrikone.co` admite subdominios (ej. `soena.metrikone.co`); `metrik.com.co`, solo la raíz.
  * Antes de agregar uno aquí, verificarlo en Resend.
+ *
+ * Dar remitente propio a un workspace con `<slug>.metrikone.co` crea registros de Resend
+ * bajo ese nombre (`send.<slug>`, `rsend.<slug>`, `resend._domainkey.<slug>`). Con hijos, el
+ * comodín `*.metrikone.co` deja de aplicarle a `<slug>.metrikone.co` y el espacio deja de
+ * resolver SIN error en ningún log (SOENA, 2026-10-26, ~2 h caído). En el MISMO paso hay que
+ * crear `<slug>` CNAME al destino del ALIAS `*` (leerlo de `vercel dns ls metrikone.co`) y
+ * comprobar con `dig +short <slug>.metrikone.co`. El `vercel dns add` lo corre Mauricio.
+ * Ver docs/gotchas.md.
  */
 export const DOMINIOS_PERMITIDOS: ReadonlyArray<{ dominio: string; subdominios: boolean }> = [
   { dominio: 'metrikone.co', subdominios: true },
   { dominio: 'metrik.com.co', subdominios: false },
 ];
+
+/**
+ * La dirección por defecto de los avisos al cliente final. ⚠️ Necesita el dominio
+ * `avisos.metrikone.co` verificado en Resend: sin él Resend responde 403 y el aviso no sale.
+ */
+export const DIRECCION_AVISOS_CLIENTE = 'avisos@avisos.metrikone.co';
+
+/** «<nombre> <avisos@avisos.metrikone.co>»: el remitente por defecto con el nombre visible de cada envío. */
+export function remitenteAvisosPorDefecto(nombreVisible: string): string {
+  const nombre = limpiarNombre(nombreVisible);
+  return nombre ? `${nombre} <${DIRECCION_AVISOS_CLIENTE}>` : DIRECCION_AVISOS_CLIENTE;
+}
 
 const FORMA_CORREO = /^[a-z0-9._%+-]+@([a-z0-9-]+(\.[a-z0-9-]+)+)$/;
 
@@ -109,9 +136,13 @@ export function logoParaCorreo(url: unknown): string | null {
 // ── El aviso de avance de etapa (notificar-etapa) ─────────────────────────────
 // Vive aquí y no en notificar-etapa/index.ts para poder probarlo desde vitest.
 
-/** El remitente de siempre del aviso de etapa. NO cambiar: sin la clave sale byte a byte así. */
+/**
+ * El remitente por defecto del aviso de etapa: el nombre de siempre («SOENA (via MeTRIK)») desde
+ * `avisos.metrikone.co`. Hasta el 2026-10-26 salía de `noreply@metrikone.co`, la misma dirección
+ * del auth y de los avisos internos.
+ */
 export function remitenteAvisoEtapaPorDefecto(marca: string): string {
-  return `${marca} (via MeTRIK) <noreply@metrikone.co>`;
+  return remitenteAvisosPorDefecto(`${marca} (via MeTRIK)`);
 }
 
 export function remitenteAvisoEtapa(p: {

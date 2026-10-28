@@ -1,0 +1,28 @@
+{
+  "_fuente": "Respuesta SIMULADA del modelo a proyectos/trappvel/clarity/docs/entrada/bloqueos/2026-10-27_aliados-hotel-tabla-acomodaciones.png (no es una grabación: armada a mano mirando el pantallazo).",
+  "es_oferta_de_hotel": true,
+  "hotel": "Hotel Cartagena Dubai",
+  "zona": "Zona Bocagrande",
+  "noches": 3,
+  "habitacion": "Estandar -Standar",
+  "plan_alimentacion": "(P.A.E) Desayuno, Almuerzo y",
+  "temporada": "Baja | Regular",
+  "tarifa_promo": true,
+  "compra_antes_de": "31-Mar-2027",
+  "moneda": "COP",
+  "precios_por_persona": [
+    { "acomodacion": "triple", "precio": "$ 1.649.915" },
+    { "acomodacion": "doble", "precio": 1668902 },
+    { "acomodacion": "sencilla", "precio": 2548649 }
+  ],
+  "nino": { "precio": 1365104, "edad_min": 2, "edad_max": 11 },
+  "iconos": [
+    { "descripcion": "tiquete de avión", "categoria": "tiquete_aereo", "seguro": true },
+    { "descripcion": "tenedor y cuchillo", "categoria": "alimentacion", "seguro": true },
+    { "descripcion": "lancha", "categoria": "planes_tours", "seguro": true },
+    { "descripcion": "bus", "categoria": "traslados", "seguro": true },
+    { "descripcion": "maletín con cruz", "categoria": "seguro_medico", "seguro": true }
+  ],
+  "texto_incluye": null,
+  "incluye_por_texto": []
+}

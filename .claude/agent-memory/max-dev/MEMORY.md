@@ -2,19 +2,25 @@
 
 ## Project memories
 
-- ⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — remitente_correo; logo solo con clave; SOENA: verificar dominio → deploy → clave
+- ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; SQL config SIN aplicar; puntos fuera de precio_venta; `–` no `−` en PDF
+- ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje
+- ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 APLICADA; no mergear sin DNS
+- ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 APLICADA (dicho 28-oct); datos.ts lee la columna
+- ⚠️⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — DNS de Resend bajo <slug> tumba el espacio: CNAME del slug en el mismo paso; logo solo con clave
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
-- ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — migración 20261026183000 APLICADA (26-oct); huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — 20261026183000 APLICADA; componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id
+- ⚠️⚠️ [Paso a una persona §4.2 (comun.persona)](project_paso_a_persona.md) — motor `persona` aparte; deploy de wa-webhook da el botón a TODOS; Sabor sin rol igual byte a byte
 - ⚠️ [Calificación y resumen diario de asistentes (#1289)](project_calificacion_resumen_asistentes.md) — con_texto SIN prender en Sabor; tokens en `juez`; caida.ts no se importa en src
 - ⚠️ [Toque de botón de plantilla §4.5 (ag|t|)](project_toque_plantilla.md) — sin el componente con payload Meta devuelve el texto; tope 256 no publicado
-- ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho #1285 sin conectar; arnés lo corre Mauricio
+- ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho conectado en #1285 (fuentesDeComposicion); arnés lo corre Mauricio
 - ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
-- ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; plazo 0 en 20261026210000; no solo cine; saldo P14 (modalidad al pagar); pasarela null
+- ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; plazo 0 en 20261026210000 (texto 28-oct); no solo cine; saldo P14 (modalidad al pagar); pasarela null
 - ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
-- ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco no avisa el reverso; conciliación 7d; anula sin tocar suscripción ni ciclo
-- ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — #1252 mergeado; (d) activar-antes-de-cobrar abierto; llaves .env.local no son de MeTRIK
+- ⚠️⚠️ [Reverso corta el plan de Valida (27-oct)](project_valida_reverso_corta_plan.md) — Valida#82 primero; estado en reversado.corte; reactivación = cobro sin plan; correo retenido en prod
+- ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco SÍ manda el 6; 7d es red; desde 27-oct el ciclo se corta (ver arriba)
+- ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — causa: deploy tras la aceptación; paso 7e; (d) abierto
 - [Número de vuelo por tramo en servicios](project_numero_vuelo_por_tramo.md) — items.tramos leído aparte (no en el contexto: P3); filas viejas se releen por contenido
 - ⚠️ [Bot ONE registra ingresos (#1231)](project_ingresos_wa_one.md) — cuotas programadas; candado con `respaldo`; depósito propio = ingreso; v4
 - [Recuperar dirección del espacio y bienvenida Valida (22-oct)](project_recuperar_direccion_espacio.md) — #1242; tope por instancia + idempotencia Resend; textos en acceso-espacio/textos.ts
@@ -44,6 +50,7 @@
 - ⚠️⚠️ [Valida: tabla angosta de búsqueda (metrik-valida #64)](project_valida_tabla_angosta_busqueda.md) — 0038/0039 SIN aplicar; poblar antes de 0039; seqscan off obligatorio; tokens societarios pierden matches
 - ⚠️⚠️ [Re-verificación D (#1183, #1185-#1188)](project_cotizacion_reverificacion_d.md) — sin mergear; reserva solo por pasos (hash del prompt); V8 pide --resembrar; «actividades opcionales» reportado
 - ⚠️⚠️ [Verificación D de la cotización (#1170-#1179)](project_cotizacion_verificacion_d.md) — sin mergear; #1172 apilado en #1171; imports chocan; lectura real fija 6/0/0
+- ⚠️ [Propuesta Trappvel = formato de Edgar (27-oct)](project_propuesta_formato_edgar.md) — carta + Poppins; sin saltos forzados (28-oct); holgura de 5 mm en la COT real
 - ⚠️⚠️ [Propuesta: H33 (#1165) y motor html (PR 2)](project_propuesta_motor_html_h33.md) — SQL del interruptor SIN aplicar; anticipo en documento_cliente
 - ⚠️⚠️ [Propuesta PR 4: catálogo de fotos](project_fotos_catalogo.md) — migración 20261014221500 (tabla + bucket); hoteles NUNCA de Commons
 - ⚠️⚠️ [Perfil del contacto por el bot (corte 1)](project_perfil_contacto_bot.md) — migración 20261012234500 SIN aplicar; fichas sin publicar; el esquema manda sobre el prompt

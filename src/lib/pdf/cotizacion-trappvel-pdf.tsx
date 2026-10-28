@@ -990,6 +990,8 @@ interface LineaImpresa {
   precioPorPasajero?: PrecioPorPasajeroPDF
   precioPorHabitacion?: PrecioPorHabitacionPDF
   total: number
+  /** Reglas de margen: «Descuento · motivo: −$X» bajo la opción (el precio ya lo descontó). */
+  nota?: string | null
 }
 
 /**
@@ -1000,7 +1002,7 @@ interface LineaImpresa {
  * TOTAL, que sí los incluye. Ausente vale 0.
  */
 function lineasImpresas(
-  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number; precioPorPasajero?: PrecioPorPasajeroPDF; precioPorHabitacion?: PrecioPorHabitacionPDF }[],
+  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number; precioPorPasajero?: PrecioPorPasajeroPDF; precioPorHabitacion?: PrecioPorHabitacionPDF; nota?: string | null }[],
 ): LineaImpresa[] {
   return items.map(i => {
     const cantidad = i.cantidad ?? 1
@@ -1013,6 +1015,7 @@ function lineasImpresas(
       precioPorPasajero: i.precioPorPasajero,
       ...(i.precioPorHabitacion ? { precioPorHabitacion: i.precioPorHabitacion } : {}),
       total: base + (i.valorAdicionales ?? 0),
+      ...(i.nota ? { nota: i.nota } : {}),
     }
   })
 }
@@ -1072,6 +1075,10 @@ function LineaPrecio({ l, e, detallada, tam = 9, ultima = false, presenciaExtra,
           <Text hyphenationCallback={SIN_GUION} style={{ fontSize: tam - 2, color: C.gris }}>
             {`Incluye: ${l.adicionales!.join(' · ')}`}
           </Text>
+        )}
+        {/* Reglas de margen: el descuento de esta opción, con su motivo. El precio ya lo trae. */}
+        {l.nota && (
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: tam - 2, color: C.magenta }}>{l.nota}</Text>
         )}
         {detallada && <PorPasajero precios={l.precioPorPasajero ?? null} habitaciones={l.precioPorHabitacion ?? null} color={C.gris} />}
       </View>
@@ -1216,6 +1223,7 @@ export default function CotizacionTrappvelPDF({
   viaje,
   asiPuedesPagar: entradaPlan,
   composicion,
+  descuentosTotal,
 }: CotizacionPDFProps & {
   /**
    * Cómo se compone (§4.11): normal si no viene. Lo fija `componerCotizacionTrappvel`
@@ -1270,6 +1278,8 @@ export default function CotizacionTrappvelPDF({
       /** Solo con `linea_incluida`: cuánto IVA trae el precio de esta tarifa. */
       notaIva: ivaDelBloque > 0 ? `Incluye IVA de ${pesos(ivaDelBloque)}` : null,
       lineas: lineasImpresas(it.items),
+      /** Reglas de margen: los descuentos sobre el total de esta tarifa, con su descripción. */
+      descuentos: it.descuentos ?? [],
     }
   })
   const porTarifas = bloques.length > 1
@@ -1289,7 +1299,11 @@ export default function CotizacionTrappvelPDF({
    * viajeros: una maleta la compra alguien concreto.
    */
   const cubierto = preciosPorPasajero?.cubierto ?? null
-  const diferencia = cubierto === null ? null : total - cubierto
+  // Reglas de margen: los descuentos sobre el total no se reparten entre los viajeros. La tabla por
+  // pasajero suma lo de ANTES de los descuentos, y así se dice debajo.
+  const descuentosDelTotal = descuentosTotal ?? []
+  const sumaDescuentos = descuentosDelTotal.reduce((a, d) => a + d.valor, 0)
+  const diferencia = cubierto === null ? null : total + sumaDescuentos - cubierto
 
   /**
    * ⚠️⚠️ Una diferencia de unos pocos pesos NO es un cobro por el grupo: es redondeo.
@@ -1511,7 +1525,21 @@ export default function CotizacionTrappvelPDF({
   // de la firma: en los demás casos lo lleva la caja que lo envuelve.
   const totales = (minPresenceAhead?: number) => (
     <View wrap={false} minPresenceAhead={minPresenceAhead} style={{ marginTop: espDe('inversion').tarjetas }}>
-      {!general && iva > 0 && (
+      {/* Reglas de margen: el subtotal y cada descuento sobre el total con su descripción. La
+          columna de líneas suma el subtotal; el subtotal menos los descuentos es el TOTAL. */}
+      {descuentosDelTotal.length > 0 && (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
+          <Text style={{ fontSize: 8.5, color: C.gris, width: 120 }}>Subtotal</Text>
+          <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{pesos(subtotal)}</Text>
+        </View>
+      )}
+      {descuentosDelTotal.map((d, k) => (
+        <View key={`descuento-${k}`} style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
+          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 8.5, color: C.gris, width: 230 }}>{d.descripcion}</Text>
+          <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{`–${pesos(d.valor)}`}</Text>
+        </View>
+      ))}
+      {!general && iva > 0 && descuentosDelTotal.length === 0 && (
         <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 4 }}>
           <Text style={{ fontSize: 8.5, color: C.gris, width: 120 }}>Subtotal</Text>
           <Text style={{ fontSize: 8.5, color: C.tinta, width: 110, textAlign: 'right' }}>{pesos(subtotal)}</Text>
@@ -1778,6 +1806,14 @@ export default function CotizacionTrappvelPDF({
                           ))}
                         </View>
                       )}
+                      {/* Reglas de margen: los descuentos de esta tarifa, con su descripción. Las
+                          líneas de arriba menos estos dan el precio del encabezado. */}
+                      {b.descuentos.map((d, k) => (
+                        <View key={`tarifa-${i}-descuento-${k}`} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+                          <Text hyphenationCallback={SIN_GUION} style={{ fontSize: 7.5, color: C.texto, flex: 1, paddingRight: 8 }}>{d.descripcion}</Text>
+                          <Text style={{ fontSize: 7.5, color: C.tinta }}>{`–${pesos(d.valor)}`}</Text>
+                        </View>
+                      ))}
                     </View>
                   </View>
                 ))}
@@ -1934,6 +1970,11 @@ export default function CotizacionTrappvelPDF({
               {porElGrupo === null && preciosPorPasajero.sinReparto.length === 0 && (
                 <Text style={{ fontSize: 7.5, color: C.gris, marginTop: epp.fino }}>
                   Es el precio de cada viajero; no suma el total de arriba.
+                </Text>
+              )}
+              {sumaDescuentos > 0 && (
+                <Text style={{ fontSize: 7.5, color: C.gris, marginTop: epp.fino }}>
+                  {`Antes de los descuentos sobre el total (–${pesos(sumaDescuentos)}).`}
                 </Text>
               )}
             </View>

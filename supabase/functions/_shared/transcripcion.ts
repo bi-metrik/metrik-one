@@ -12,8 +12,18 @@
 
 export const URL_GEMINI_MODELOS = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-/** El modelo de audio de ONE y la bandeja si no se fija `GEMINI_AUDIO_MODEL` (Sprint 2, Yuto: Flash-Lite). */
-export const MODELO_AUDIO_ONE = 'gemini-2.5-flash-lite';
+/**
+ * El modelo de audio de ONE y la bandeja si no se fija `GEMINI_AUDIO_MODEL`. Desde el 2026-10-26 `gemini-3.5-flash-lite`
+ * (el de público): con `gemini-2.5-flash-lite` una nota de Mauricio salió «se proyecta de rife panamá» por «el proyecto
+ * de Reframeit Panamá», y él pidió un modelo más capaz. Mismo precio de entrada de audio; la salida cuesta más (precios
+ * de https://ai.google.dev/gemini-api/docs/pricing, leídos el 2026-10-26). Razona en `minimal` por defecto y ese
+ * razonamiento cuenta dentro de `maxOutputTokens` (https://ai.google.dev/gemini-api/docs/thinking): con 8192 sobra.
+ * Para volver atrás sin desplegar: el secreto `GEMINI_AUDIO_MODEL=gemini-2.5-flash-lite`.
+ */
+export const MODELO_AUDIO_ONE = 'gemini-3.5-flash-lite';
+
+/** El modelo de audio de ONE hasta el 2026-10-26 (para comparar en el arnés de audios). */
+export const MODELO_AUDIO_ONE_ANTERIOR = 'gemini-2.5-flash-lite';
 
 /** Prompt neutro: no presupone gastos ni ningun tema. */
 export const PROMPT_TRANSCRIPCION_LITERAL =

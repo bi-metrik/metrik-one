@@ -87,6 +87,8 @@ export function tipoDeServicio(
   const porGrupo = tipoDeDefinicion(ranuraDeGrupo(item.grupo))
   const tipo = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
   if (tipo === 'otro') return lineaConAsistenciaMedica(item) ? 'asistencia' : 'otro'
+  // Un paquete de bloqueo (hotel + vuelo del operador, un valor) se opera como un servicio del operador.
+  if (tipo === 'paquete') return 'otro'
   if (tipo) return tipo
   const texto = `${normalizarGrupo(item.grupo) ?? ''} ${item.nombre ?? ''}`.toLowerCase()
   if (/\b(asistencia|seguro)\b/.test(texto)) return 'asistencia'

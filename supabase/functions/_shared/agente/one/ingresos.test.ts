@@ -137,11 +137,14 @@ describe('permisos: solo quien puede registrar cobros en la app', () => {
       rol: 'operator',
       guion: [
         { name: 'proponer', args: { accion: 'ingreso', datos: { negocio: 'D1 26 5', soporte: '#1' } } },
-        { name: 'responder', args: { tema: 'ingreso', texto: 'Tu rol no permite registrar ingresos por aquí.' } },
+        // `ingreso` tampoco es tema suyo (sus temas son los de sus funciones): contesta con `ayuda`.
+        { name: 'responder', args: { tema: 'ayuda', texto: 'Tu rol no permite registrar ingresos por aquí.' } },
       ],
     })
     await e.foto('ingreso de dimpro', { archivo: FOTO })
-    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['rol'])
+    // Desde el componedor (2026-10-26) `ingreso` no está entre sus acciones: el núcleo lo ataja antes del motor (que
+    // igual lo frenaría por rol: `dominio.test.ts`, «el motor sin componer»).
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['accion_desconocida'])
     expect(e.puerto.escrituras).toEqual([])
   })
 

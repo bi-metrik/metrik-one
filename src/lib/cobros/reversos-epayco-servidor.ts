@@ -10,16 +10,18 @@ import { referenciaEnlaceCobro } from './referencia-enlace'
 /**
  * Conciliación de REVERSOS de ePayco (paso 7d del cron `procesar-planes-cobro`).
  *
- * ePayco reversó la 390720992 desde su panel el 2026-10-22 y NO mandó la confirmación del reverso: en
- * `pasarela_eventos` solo quedaron la pendiente (3) y la aceptada (1). Sin esto, ONE seguía contando
- * ese cobro como pagado. Aquí se le PREGUNTA a ePayco (`adapter.consultar`, `POST /payment/transaction`)
+ * ePayco reversó la 390720992 desde su panel el 2026-10-22. Sí mandó la confirmación del reverso
+ * (`pasarela_eventos` 390720992-6, 16:45:13Z; antes se creyó que no), pero nada en la documentación
+ * garantiza que siempre llegue (el reverso que pide la red de procesamiento puede tardar días, y una
+ * confirmación caída no se reintenta para siempre). Esto es la red: se le PREGUNTA a ePayco (`adapter.consultar`, `POST /payment/transaction`)
  * por los cobros que ONE registró como pagados con ePayco en los últimos `DIAS_VENTANA_REVERSOS` días, y
  * el que ePayco reporte como reversado (estado 6) entra por el MISMO camino de la confirmación
  * (`procesarEventoPasarela`, evento `anulado`) con el MISMO id de evento (`<ref_payco>-6`): si la
  * confirmación del reverso llega antes o después, es un duplicado y nada se hace dos veces.
  *
- * Lo que hace un reverso: anular el cobro y avisar a MéTRIK (`reverso-pasarela-servidor.ts`). Lo que
- * NO hace: tocar la suscripción, el ciclo de consultas o la factura.
+ * Lo que hace un reverso: anular el cobro, avisar a MéTRIK y, si abrió el ciclo vigente de Valida
+ * autogestionada, cerrar el plan en Valida (`reverso-pasarela-servidor.ts`). Lo que NO hace: tocar la
+ * suscripción o la factura.
  *
  * Ventana: la documentación de ePayco no pone límite a la consulta; reversar desde el panel solo se
  * puede el mismo día hasta las 9 p. m., y después lo pide la red de procesamiento, que puede tardar.

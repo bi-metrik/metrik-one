@@ -57,6 +57,7 @@ import {
 } from '@/lib/cotizaciones/ranuras-datos'
 import { revisarExcepcionTrasCambio } from '@/lib/cotizaciones/piso-salida-datos'
 import { createServiceClient } from '@/lib/supabase/server'
+import { paramsPorOpcion } from '@/lib/cotizaciones/reglas-margen'
 
 /**
  * Itinerarios de una cotización: leer, combinar y decidir cuáles van al cliente.
@@ -298,7 +299,7 @@ export async function armarTarifas(cotizacionId: string) {
 
   // El precio de cada opción, con la MISMA cascada que pinta la línea en el editor.
   const precioPorItem = new Map(
-    calcularCascada(ctx.items, ctx.params).lineas
+    calcularCascada(ctx.items, paramsPorOpcion(ctx.params)).lineas
       .filter(l => typeof l.id === 'string')
       .map(l => [l.id as string, l.precioConAdicionales]),
   )

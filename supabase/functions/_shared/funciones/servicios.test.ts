@@ -192,6 +192,7 @@ beforeAll(async () => {
   await pg.exec(leer('src/lib/funciones/__fixtures__/esquema-base.sql'))
   await pg.exec(leer('supabase/migrations/20261021090000_asistente_chatwoot.sql'))
   await pg.exec(leer('supabase/migrations/20261022170000_modulo_funciones.sql'))
+  await pg.exec(leer('supabase/migrations/20261026220000_funciones_puerta_cerrada.sql'))
   await pg.exec(leer('supabase/migrations/20261026210000_funciones_saldo_plazo_cero.sql'))
 })
 

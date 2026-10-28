@@ -181,3 +181,54 @@ describe('qué cuotas de un plan con tarjeta reciben enlace', () => {
     expect([...(await cuotasConTarjetaRechazada(d.db, ['p1']))]).toEqual(['p1|2'])
   })
 })
+
+describe('con el plan cortado por el reverso de un pago, la tarjeta no se toca (Mik, 2026-10-27)', () => {
+  const PLAN_CORTADO = {
+    cliente_id: 'cli-1',
+    limite_mes: 3000,
+    cobro_id: 'c1',
+    cuota_numero: 1,
+    desde: '2026-10-21',
+    hasta: '2026-11-20',
+    vence_en: '2026-12-01T05:00:00.000Z',
+    abierto_at: '2026-10-21T12:00:00Z',
+  }
+  function cortado(estado: 'pendiente' | 'anulado' | 'no_aplica' | 'final') {
+    const t = base()
+    // La cuota 1 se reversó: el cobro queda anulado y conserva su fecha.
+    Object.assign(t.cobros[0], { anulado_at: '2026-10-27T15:00:00Z', monto: 0, monto_anulado: 150000 })
+    Object.assign(t.workspaces[0].config_extra as Record<string, unknown>, {
+      valida_plan: { ...PLAN_CORTADO, reversado: { at: '2026-10-27T15:00:00Z', referencia_pago: 'epayco-1', corte: { estado, monto: 150000, intentos: 1 } } },
+    })
+    return t
+  }
+  const correr = (d: ReturnType<typeof crearDoble>, e: ReturnType<typeof epayco>) =>
+    cobrarCuotasConTarjeta({ db: conLlaveUnica(d.db, d.tablas), adapterPara: e.adapterPara, hoy: '2026-11-21', ahoraMs: Date.parse('2026-11-21T12:00:00Z') })
+
+  it.each(['anulado', 'pendiente'] as const)('corte %s: ni la cuota siguiente ni la reversada se cargan', async (estado) => {
+    const d = crearDoble(cortado(estado))
+    const e = epayco([APROBADO])
+    const r = await correr(d, e)
+    expect(e.cargos).toHaveLength(0)
+    expect(r.cortadosPorReverso).toBe(1)
+    expect(r.revisadas).toBe(0)
+    expect(d.tablas.cobro_intentos_tarjeta).toHaveLength(0)
+  })
+
+  it('sin corte (otro pago válido cubrió la cuota: no_aplica) la cuota siguiente se carga como siempre', async () => {
+    const d = crearDoble(cortado('no_aplica'))
+    const e = epayco([APROBADO])
+    const r = await correr(d, e)
+    expect(r.cortadosPorReverso).toBe(0)
+    expect(e.cargos).toHaveLength(1)
+  })
+
+  it('pagada la reactivación (ciclo nuevo, sin marca), la cuota siguiente vuelve a cargarse', async () => {
+    const t = cortado('anulado')
+    ;(t.workspaces[0].config_extra as Record<string, unknown>).valida_plan = { ...PLAN_CORTADO, cobro_id: 'recobro-1' }
+    const d = crearDoble(t)
+    const e = epayco([APROBADO])
+    await correr(d, e)
+    expect(e.cargos).toHaveLength(1)
+  })
+})

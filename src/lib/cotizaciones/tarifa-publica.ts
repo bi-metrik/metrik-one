@@ -36,6 +36,12 @@ export interface DecisionTipoTarifa {
   origen: OrigenTipoTarifa
   por: string | null
   en: string
+  /**
+   * La comisión que trae la tarifa Pública, si alguien la escribió (reglas de margen del
+   * 2026-10-27, `reglas-margen.ts`). Con ella la línea entra al margen global con su comisión; sin
+   * ella, sale de la base. Ausente en toda decisión anterior y en toda Neta.
+   */
+  comisionPct?: number | null
 }
 
 type Obj = Record<string, unknown>
@@ -45,11 +51,16 @@ const esObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.i
 export function leerTipoTarifa(raw: unknown): DecisionTipoTarifa | null {
   if (!esObj(raw)) return null
   if (raw.tipo !== 'neta' && raw.tipo !== 'publica') return null
+  const comision = Number(raw.comisionPct)
+  const conComision = raw.tipo === 'publica' && raw.comisionPct !== null && raw.comisionPct !== undefined
+    && Number.isFinite(comision) && comision >= 0 && comision < 100
   return {
     tipo: raw.tipo,
     origen: raw.origen === 'tarifario' ? 'tarifario' : 'persona',
     por: typeof raw.por === 'string' ? raw.por.slice(0, 200) : null,
     en: typeof raw.en === 'string' ? raw.en : '',
+    // Sin comisión la llave no aparece: la decisión se lee igual que antes.
+    ...(conComision ? { comisionPct: comision } : {}),
   }
 }
 

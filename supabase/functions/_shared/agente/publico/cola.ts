@@ -27,12 +27,20 @@ import { esSiSolo, propuestaVigente, toqueDePropuesta, turnoDelModelo } from '..
 import type { DepsTurno, SalidaTurno } from '../nucleo.ts';
 import { leerToque, cortarEnPalabra } from '../render.ts';
 import type { PrecioModelo } from '../uso.ts';
-import type { ContextoDominio, Modelo, Reglamento, Salida } from '../tipos.ts';
+import type { ContextoDominio, Dominio, Modelo, Reglamento, RolTraza, Salida } from '../tipos.ts';
+import { componerDominio, fichasDelTurno } from '../componer.ts';
+import { ESCALAMIENTO_CHATWOOT_HOY, MOTIVO_LLANO, dentroDeHorario, equipoDe, escalamientoDe, notaComun, registrarEscalamiento, resumenTraspaso, senalDelCodigo, turnosDe } from '../persona.ts';
+import type { EscalamientoChatwoot, PuertoEscalamientos } from '../persona.ts';
+import type { Composicion } from '../componer.ts';
+import { fuentesDeComposicion } from '../pistas.ts';
+import type { FuentePistaDelTurno } from '../pistas.ts';
+import type { Catalogo } from '../funciones/catalogo.ts';
+import type { FuncionPrendida } from '../funciones/tipos.ts';
 import {
   RF_BIENVENIDA, autorizacionEnEspera, conAviso, estadoAutorizacion, salidaAutorizacion, eventoAutorizacion, huellaTexto, motivoAviso, respuestaA, textoFijo, versionDe,
 } from './autorizacion.ts';
 import type { ConfigPublico } from './config.ts';
-import { PASAR_A_PERSONA, RESPUESTA_FIJA, RF_PERSONA_POR_QUE, dominioPublico, porQueYaSalio, volvioDePersona } from './dominio.ts';
+import { BOT_PUBLICO, PASAR_A_PERSONA, RESPUESTA_FIJA, RF_PERSONA_POR_QUE, dominioPublico, porQueYaSalio, volvioDePersona } from './dominio.ts';
 import { enlacesFueraDeLista } from './enlaces.ts';
 import { preciosSinHerramienta } from './precios.ts';
 import { frasesDeSobreventa } from './sobreventa.ts';
@@ -69,9 +77,26 @@ export interface DepsPublico {
   dormir: (ms: number) => Promise<void>;
   /** Arnés de operación: una herramienta caída. */
   fallarHerramienta?: () => boolean;
+  /**
+   * Con roles (spec 2026-10-26): las funciones del rol del inbox (ya intersecadas con las prendidas). El dominio del
+   * turno es el público recortado a ellas por el componedor; `reglamento` es entonces la versión del rol. Sin esto,
+   * el dominio público entero, como siempre.
+   */
+  funciones?: Array<string | FuncionPrendida>;
+  /** El catálogo para componer (en las pruebas, uno con funciones de prueba). Sin él, el del código. */
+  catalogo?: Catalogo;
+  /** El rol del turno, para la traza (§2.9). */
+  rol?: RolTraza | null;
+  /**
+   * Dónde queda cada paso a persona (`asistente_escalamientos`, spec 2026-10-26 §4.2), a mejor esfuerzo. Sin esto (el
+   * arnés), no se escribe nada y el paso sale igual.
+   */
+  escalamientos?: PuertoEscalamientos | null;
 }
 
 const DIAS_DE_CONVERSACION = 30;
+/** El id del motor del asistente público en el componedor (`../funciones/tipos.ts`). */
+export const MOTOR_PUBLICO = 'publico';
 const REMITENTE = { nombre: 'el cliente', rol: 'cliente' };
 
 export function clavesPublico(l: LlaveConversacion) {
@@ -109,10 +134,35 @@ const esPalabraSola = (t: string | null | undefined, w: string) => String(t ?? '
 
 // ── La nota del paso a persona (§6.2.1) ──────────────────────────────────────
 
-/** La nota privada con formato fijo, armada por el código. Nunca el detalle de un dato sensible. Pura. */
+/** Lo que hace la persona del equipo después de cada motivo (la última línea de la nota). */
+export const SIGUIENTE_PASO: Record<MotivoPersona, string> = {
+  reserva_lista: 'confirmar cupo y enviar el pago', restriccion: 'revisar la restricción para el menú', celebracion: 'coordinar la celebración',
+  grupo: 'cotizar el grupo', pide_persona: 'atender lo que pide', queja: 'atender la queja', pago: 'revisar el pago (el asistente no lo vio)',
+  no_entiende: 'retomar la conversación', menor: 'pedir que escriba un adulto', crisis: 'atender ya', abuso: 'revisar la conversación',
+  duda_abierta: 'contestar la duda (la ficha y las reglas no la cubren)', datos: 'atender la solicitud de datos', falla: 'contestar: el asistente falló',
+};
+
+/**
+ * La nota privada con formato fijo, armada por el código. Nunca el detalle de un dato sensible. Pura. La cabecera
+ * (motivo, qué pidió, qué consultó, siguiente paso) es la común (`../persona.ts`, `notaComun`); el medio es el bloque
+ * de este motor (`bloqueNotaPublico`), o el que aporten las funciones del rol (`bloques`, su gancho `notaPersona`).
+ */
 export function notaPersona(p: {
   motivo: MotivoPersona; pidio: string; filas: FilaPublica[]; reserva: Record<string, unknown> | null; herramientas: string[]; ahoraIso: string;
+  bloques?: string[][]; fueraDeHorario?: EscalamientoChatwoot['horario'];
 }): string {
+  return notaComun({
+    motivo: p.motivo, pidio: p.pidio, bloques: p.bloques?.length ? p.bloques : [bloqueNotaPublico(p)], consulto: p.herramientas,
+    siguiente: SIGUIENTE_PASO[p.motivo], fueraDeHorario: p.fueraDeHorario ?? null,
+  });
+}
+
+/**
+ * El bloque del medio de la nota del motor público (Sabor): la reserva, la mesa que pidió, la autorización de datos y la
+ * de alimentación. Es de Sabor: cuando su sesión parta este dominio en `clientes.*`, cada parte va al gancho
+ * `notaPersona` de su función (p. ej. la reserva en `clientes.toma_datos`). Pura.
+ */
+export function bloqueNotaPublico(p: { filas: FilaPublica[]; reserva: Record<string, unknown> | null }): string[] {
   const g = estadoAutorizacion(p.filas, 'general');
   const s = estadoAutorizacion(p.filas, 'sensible');
   const aut = g.estado === 'si'
@@ -126,22 +176,12 @@ export function notaPersona(p: {
     : 'sin datos tomados';
   // La mesa que pidió es preferencia: la asigna el equipo (§8.4.2). Vale la de la reserva o la última anotada.
   const preferencia = (r?.preferencia_mesa as string | undefined) ?? p.filas.map((f) => (f.traza as TrazaPublica | null)?.preferencia_mesa).filter(Boolean).at(-1) ?? null;
-  const siguiente: Record<MotivoPersona, string> = {
-    reserva_lista: 'confirmar cupo y enviar el pago', restriccion: 'revisar la restricción para el menú', celebracion: 'coordinar la celebración',
-    grupo: 'cotizar el grupo', pide_persona: 'atender lo que pide', queja: 'atender la queja', pago: 'revisar el pago (el asistente no lo vio)',
-    no_entiende: 'retomar la conversación', menor: 'pedir que escriba un adulto', crisis: 'atender ya', abuso: 'revisar la conversación',
-    duda_abierta: 'contestar la duda (la ficha y las reglas no la cubren)', datos: 'atender la solicitud de datos', falla: 'contestar: el asistente falló',
-  };
   return [
-    `[Asistente] Paso a persona · motivo: ${p.motivo}`,
-    `Pidió: ${p.pidio || '(ver el chat)'}`,
     `Reserva: ${reserva}`,
     ...(preferencia ? [`Preferencia de mesa: ${preferencia} (por confirmar: la asigna el equipo)`] : []),
     `Autorización de datos: ${aut}`,
     ...(alimentacion ? [`Alimentación: ${alimentacion}`] : []),
-    ...(p.herramientas.length ? [`Consultó: ${[...new Set(p.herramientas)].join(', ')}`] : []),
-    `Siguiente paso: ${siguiente[p.motivo]}`,
-  ].join('\n');
+  ];
 }
 
 // ── Publicar ─────────────────────────────────────────────────────────────────
@@ -190,7 +230,7 @@ interface Resultado {
 
 const sinTurno = (d: DepsPublico, extra: Partial<TrazaPublica> = {}): TrazaPublica => ({
   tipo: 'sin_turno', bot: dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: {} }).bot,
-  reglamento: { id: d.reglamento.id, version: d.reglamento.version, huella: d.reglamento.huella }, canal: d.canal, ...extra,
+  reglamento: { id: d.reglamento.id, version: d.reglamento.version, huella: d.reglamento.huella }, ...(d.rol ? { rol: d.rol } : {}), canal: d.canal, ...extra,
 });
 
 function ctxDe(d: DepsPublico, filas: FilaPublica[]): ContextoDominio {
@@ -200,11 +240,60 @@ function ctxDe(d: DepsPublico, filas: FilaPublica[]): ContextoDominio {
   return { workspaceId: d.llave.workspaceId, phone: llaveTexto(d.llave), remitente: REMITENTE, conversacion: filas, resultadosPrevios };
 }
 
+/** El dominio público entero y, con un rol, su composición (motor `publico`). Pura. */
+function composicionPublica(d: DepsPublico, log?: (m: string) => void): { base: Dominio; c: Composicion | null } {
+  const base = dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta });
+  if (!d.funciones) return { base, c: null };
+  return {
+    base,
+    c: componerDominio({ motores: { [MOTOR_PUBLICO]: base }, funciones: d.funciones, ...(d.catalogo ? { catalogo: d.catalogo } : {}), ...(log ? { log } : {}) }),
+  };
+}
+
+/**
+ * Las funciones del rol que aportan pistas a la transcripción (spec 2026-10-26, §4.6): solo con
+ * `transcripcion.pistas = true` y un rol. Apagado, `undefined`: el transcriptor recibe lo mismo que antes.
+ */
+export function fuentesDePistasDelTurno(d: DepsPublico): FuentePistaDelTurno[] | undefined {
+  if (d.config.transcripcion?.pistas !== true || !d.funciones) return undefined;
+  // Sin log: lo que el componedor deja fuera ya lo anota el turno del modelo.
+  const { c } = composicionPublica(d, () => {});
+  return c ? fuentesDeComposicion(c) : undefined;
+}
+
+/**
+ * El dominio y el reglamento del turno: el público entero o, con un rol, recortado a sus funciones por el componedor
+ * (motor `publico`). El reglamento del rol pierde las fichas de las funciones que no tiene.
+ */
+export function dominioYReglamento(d: DepsPublico): { dominio: Dominio; reglamento: Reglamento } {
+  const { base, c } = composicionPublica(d);
+  if (!c) return { dominio: base, reglamento: d.reglamento };
+  // La huella se queda la de la versión publicada (la traza dice qué versión atendió; lo recortado es función de ella).
+  return { dominio: c.dominio, reglamento: { ...d.reglamento, fichas: fichasDelTurno(d.reglamento.fichas, c, d.catalogo ? { catalogo: d.catalogo } : {}) } };
+}
+
+/**
+ * Con un rol: lo que la ficha `rol.escalamiento` dice del paso a persona (equipo por motivo, horario, umbrales) y los
+ * bloques de la nota que aportan sus funciones (gancho `notaPersona`). Sin rol, lo de siempre (el equipo de
+ * `config_extra`, sin horario, el bloque de Sabor).
+ */
+function personaDelRol(d: DepsPublico): { escalamiento: EscalamientoChatwoot; bloques: (ctx: { motivo: string; pidio: string; filas: FilaPublica[]; reserva: Record<string, unknown> | null }) => string[][] } {
+  if (!d.funciones) return { escalamiento: ESCALAMIENTO_CHATWOOT_HOY, bloques: () => [] };
+  const base = dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d) });
+  const c = componerDominio({ motores: { [MOTOR_PUBLICO]: base }, funciones: d.funciones, ...(d.catalogo ? { catalogo: d.catalogo } : {}), log: () => {} });
+  return {
+    escalamiento: escalamientoDe(d.reglamento, ESCALAMIENTO_CHATWOOT_HOY),
+    bloques: (x) => c.funciones.filter((f) => f.notaPersona).map((f) => f.notaPersona!({ ...x, parametros: c.parametros[f.clave] ?? {} })),
+  };
+}
+
 function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
+  const dr = dominioYReglamento(d);
   return {
     modelo: d.modelo,
-    dominio: dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta }),
-    reglamento: d.reglamento,
+    dominio: dr.dominio,
+    reglamento: dr.reglamento,
+    ...(d.rol ? { rol: d.rol } : {}),
     config: configNucleo(d.config, turnoMs),
     ahoraMs: d.ahoraMs,
     reloj: d.reloj,
@@ -315,8 +404,9 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
     } else {
       const t0 = d.reloj();
       let fallidos = 0;
+      const fuentesDePistas = fuentesDePistasDelTurno(d);
       for (const a of audios) {
-        const t = await d.transcriptor.transcribir({ url: a.adjunto!.url!, extension: a.adjunto?.extension });
+        const t = await d.transcriptor.transcribir({ url: a.adjunto!.url!, extension: a.adjunto?.extension, ...(fuentesDePistas ? { fuentesDePistas } : {}) });
         if (t.texto) {
           await d.almacen.completarTexto(a.id, t.texto);
           a.texto = t.texto;
@@ -472,6 +562,15 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   }
   const extras = salida === r.salida ? (r.extras ?? []) : [];
 
+  // Con un rol, la señal del código (§4.2): dos «no pude» seguidos o tres correcciones de lo mismo pasan a persona
+  // (en Chatwoot se pasa directo, sin ofrecer). Sin rol, Sabor sigue como siempre.
+  const delRol = personaDelRol(d);
+  let delCodigo: 'no_pude' | 'bucle' | null = null;
+  if (d.funciones && !persona) {
+    delCodigo = senalDelCodigo(turnosDe(filas), { ...traza, salida }, delRol.escalamiento.umbrales);
+    if (delCodigo) persona = { motivo: 'no_entiende', pidio: `señal del código: ${MOTIVO_LLANO[delCodigo]}` };
+  }
+
   // El aviso de bot y términos (§5.1): pegado a la primera respuesta que sale.
   const motivo = salida ? motivoAviso(filas, new Set(pend.map((f) => f.id)), d.ahoraMs(), d.config.pausaLargaHoras) : null;
   let avisoAparte: Salida | null = null;
@@ -535,12 +634,31 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
       .filter((h) => !['responder', PASAR_A_PERSONA, RESPUESTA_FIJA].includes(h));
     const filasNota = r.autorizacion ? filas.map((f) => (f.id === ultima.id ? { ...f, traza: { ...(f.traza ?? sinTurno(d)), autorizacion: r!.autorizacion } as TrazaPublica } : f)) : filas;
     const reserva = r.reserva ?? (propuestaVigente(filas)?.datos ?? null);
+    const esc = delRol.escalamiento;
+    const fuera = !dentroDeHorario(esc.horario, d.ahoraMs()) ? esc.horario : null;
     const paso: PasoAPersona = {
-      motivo: persona.motivo, etiqueta: ETIQUETA_MOTIVO[persona.motivo], equipo: d.config.equipos[persona.motivo] ?? null,
-      nota: notaPersona({ motivo: persona.motivo, pidio: persona.pidio, filas: filasNota, reserva, herramientas, ahoraIso: new Date(d.ahoraMs()).toISOString() }),
+      motivo: persona.motivo, etiqueta: ETIQUETA_MOTIVO[persona.motivo], equipo: equipoDe(esc, persona.motivo, d.config.equipos),
+      nota: notaPersona({
+        motivo: persona.motivo, pidio: persona.pidio, filas: filasNota, reserva, herramientas, ahoraIso: new Date(d.ahoraMs()).toISOString(),
+        bloques: delRol.bloques({ motivo: persona.motivo, pidio: persona.pidio, filas: filasNota, reserva }), fueraDeHorario: fuera,
+      }),
     };
     traza.persona = paso;
     errores.push(...(await pasarAPersona(d, turnoId, paso)));
+    // Fuera del horario de la ficha: si el reglamento trae qué decirle, sale aparte (el paso ya quedó hecho).
+    const textoFuera = fuera ? textoFijo(d.reglamento, 'rf.persona.fuera_de_horario', varsDe(d)) : '';
+    if (fuera && textoFuera && d.reglamento.fichas.some((f) => f.clave === 'rf.persona.fuera_de_horario')) {
+      const e = await publicarEn(d, turnoId, 'fuera_de_horario', { tipo: 'texto', texto: textoFuera });
+      if (!e.ok) errores.push(`extra: ${e.motivo}`);
+    }
+    // La fila de `asistente_escalamientos` (a mejor esfuerzo: si falla, el paso ya salió).
+    const resumen = resumenTraspaso(persona.motivo, persona.pidio);
+    const motivoFila = delCodigo ?? persona.motivo;
+    traza.escalamiento = { modo: 'pasado', motivo: motivoFila, senal: delCodigo ? 'codigo' : 'modelo', resumen };
+    await registrarEscalamiento(d.escalamientos, {
+      workspace_id: d.llave.workspaceId, rol_clave: d.rol?.clave ?? BOT_PUBLICO, canal: 'chatwoot', conversacion: `cw:${llaveTexto(d.llave)}`,
+      motivo: motivoFila, resumen, modo: 'pasado',
+    });
   }
 
   // Prueba: aviso y autorizaciones.

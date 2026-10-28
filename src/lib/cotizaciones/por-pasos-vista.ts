@@ -37,6 +37,7 @@ import { detalleDeLectura, hotelesDeItems, tramosDelItem, type ItemConLectura } 
 import { leerTarifaPax } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { diaDeItem } from './dia-relativo'
+import { paramsPorOpcion } from './reglas-margen'
 
 // ── Las líneas, como las lee el servidor ─────────────────────────────────────
 
@@ -206,7 +207,8 @@ export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCasc
 /** El precio de cada opción (con sus adicionales): no depende de la tarifa, el margen es uno. */
 export function preciosDeLasOpciones(lineas: LineaDeCascada[], params: ParametrosCascada): Map<string, { precio: number; costo: number }> {
   return new Map(
-    calcularCascada(lineas, params).lineas
+    // Sin puntos extra ni descuentos sobre el total: son de una tarifa, no de cada opción.
+    calcularCascada(lineas, paramsPorOpcion(params)).lineas
       .filter(l => typeof l.id === 'string')
       .map(l => [l.id as string, { precio: l.precioConAdicionales, costo: l.costoLinea + l.costoAdicionales }]),
   )
@@ -229,12 +231,12 @@ export interface ServicioDelViaje {
 
 export interface TramoDelViaje {
   clave: string
-  /** «Vuelos», «Providencia», «Otros servicios». */
+  /** «Paquete de bloqueo», «Vuelos», «Providencia», «Otros servicios». */
   titulo: string
   servicios: ServicioDelViaje[]
 }
 
-const ORDEN_TIPO: Record<TipoRanura | 'otro', number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
+const ORDEN_TIPO: Record<TipoRanura | 'otro', number> = { paquete: -1, vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
 
 function sinTildes(t: string): string {
   return t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
@@ -353,7 +355,10 @@ export function viajeEnOrden(
 
   const vuelos = servicios.filter(s => s.tipo === 'vuelo').sort((a, b) => (a.fecha ?? '9999').localeCompare(b.fecha ?? '9999'))
   const otros = servicios.filter(s => s.tipo === 'otro')
-  const resto = servicios.filter(s => s.tipo !== 'vuelo' && s.tipo !== 'otro')
+  // El paquete de bloqueo (hotel + vuelo del operador) es el viaje entero: va primero y en su
+  // propia sección, no en un destino ni en «Otros servicios».
+  const paquetes = servicios.filter(s => s.tipo === 'paquete')
+  const resto = servicios.filter(s => s.tipo !== 'vuelo' && s.tipo !== 'otro' && s.tipo !== 'paquete')
   const destinoDelNegocio = ciudadCorta(viaje.destino) ?? 'El viaje'
   const tramos = new Map<string, TramoDelViaje & { fecha: string }>()
   for (const s of resto) {
@@ -372,6 +377,7 @@ export function viajeEnOrden(
       servicios: t.servicios.sort((a, b) => ORDEN_TIPO[a.tipo] - ORDEN_TIPO[b.tipo] || (a.fecha ?? '9999').localeCompare(b.fecha ?? '9999')),
     }))
   return [
+    ...(paquetes.length > 0 ? [{ clave: 'paquetes', titulo: paquetes.length > 1 ? 'Paquetes de bloqueo' : 'Paquete de bloqueo', servicios: paquetes }] : []),
     ...(vuelos.length > 0 ? [{ clave: 'vuelos', titulo: 'Vuelos', servicios: vuelos }] : []),
     ...destinos,
     ...(otros.length > 0 ? [{ clave: 'otros', titulo: 'Otros servicios', servicios: otros }] : []),

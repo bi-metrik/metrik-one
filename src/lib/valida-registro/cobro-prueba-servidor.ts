@@ -23,6 +23,7 @@ import {
   puedeCancelar,
   textoConfirmacionCobro,
 } from './cobro-prueba'
+import { FROM_FACTURACION } from '@/lib/email/remitente-facturacion'
 import { titularDelCobro } from './metodo-pago'
 import { cancelarSuscripcionEnPrueba } from './suscripcion-prueba-servidor'
 import { TERMINOS_PLAN, terminosPlanListos } from './terminos-plan'
@@ -148,7 +149,8 @@ function urlCuentaPorDefecto(slug: string): string {
   return `https://${slug}.${base}/valida`
 }
 
-const FROM_AVISO = 'Valida · METRIK <facturacion@metrikone.co>'
+// El remitente de cobro de MéTRIK (metrik.com.co), el mismo de la cuenta de cobro y del enlace.
+const FROM_AVISO = FROM_FACTURACION
 
 export async function enviarPorResend(m: CorreoSaliente): Promise<ResultadoEnvio> {
   const key = process.env.RESEND_API_KEY
@@ -397,12 +399,32 @@ async function activarYCobrarReclamado(
       { db: deps.db, ahoraMs },
       { cobradorId: contrato.workspace_id, cuotaId: cuota.data.id as string, intento, reintentoTrasConfirmacion: intento === 1 },
     )
-    return await registrarResultado(db, res, planId, cerrar, origen === 'confirmacion' ? volverAlDia7(db, r.id, ahoraMs) : null)
+    const desenlace = await registrarResultado(db, res, planId, cerrar, origen === 'confirmacion' ? volverAlDia7(db, r.id, ahoraMs) : null)
+    if (desenlace.tipo === 'pendiente') await cerrarSiYaSeAprobo(deps, r.id, ahoraMs)
+    return desenlace
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (fase === 'antes') return soltar(`error: ${msg}`)
     await cerrar('revisar', `error en el cobro: ${msg}`)
     return { tipo: 'revisar', detalle: msg }
+  }
+}
+
+/**
+ * Un cargo que quedó pendiente puede aprobarse en segundos: si la confirmación de ePayco llegó ANTES de
+ * que aquí se escribiera `cobro_pendiente`, no encontró qué cerrar y el registro se quedaba colgado. Se
+ * mira otra vez, ya escrito: con el pago registrado, se cierra igual que con la confirmación (intento,
+ * registro y C3 una vez). El desenlace sigue `pendiente`: el C3, si toca, ya salió desde ahí. Nunca lanza
+ * (el cargo ya se hizo); lo que no cierre aquí lo cierra el paso 7e del cron.
+ */
+async function cerrarSiYaSeAprobo(deps: DepsCobroPrueba, registroId: string, ahoraMs: number): Promise<void> {
+  try {
+    // Import dinámico: `cargo-tardio-servidor` importa este módulo (el C3).
+    const { cerrarRegistroConPagoRegistrado } = await import('./cargo-tardio-servidor')
+    const r = await cerrarRegistroConPagoRegistrado({ db: deps.db, ahoraMs, enviarCorreo: deps.enviarCorreo, urlCuenta: deps.urlCuenta, ultimos4: deps.ultimos4 }, registroId)
+    if (r.tipo === 'cerrado') console.log(`[valida-cobro] cargo pendiente ya aprobado al terminar el cargo (${registroId}): ${r.detalle}`)
+  } catch (e) {
+    console.error('[valida-cobro] revisar si el cargo pendiente ya se aprobó:', registroId, e instanceof Error ? e.message : e)
   }
 }
 

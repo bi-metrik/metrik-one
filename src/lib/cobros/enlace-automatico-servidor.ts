@@ -21,6 +21,7 @@ import {
   type MotivoDescarte,
   type PlanParaEnlace,
 } from './enlace-automatico'
+import { FROM_FACTURACION } from '@/lib/email/remitente-facturacion'
 import { generarEnlacePagoCuota, type ResultadoEnlaceCuota } from './enlace-pago-cuota-servidor'
 
 /**
@@ -85,7 +86,8 @@ export interface ResumenEnlacesAutomaticos {
   conTarjetaSinRechazo: number
 }
 
-const FROM_AVISO = 'MéTRIK · Facturación <facturacion@metrikone.co>'
+// El remitente de cobro de MéTRIK (metrik.com.co), compartido con la cuenta de cobro.
+const FROM_AVISO = FROM_FACTURACION
 
 export function urlSuscripcionPorDefecto(slug: string): string {
   if (process.env.NODE_ENV === 'development') return 'http://localhost:3000/suscripcion'

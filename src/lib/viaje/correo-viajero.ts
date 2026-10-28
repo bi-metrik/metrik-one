@@ -12,7 +12,7 @@ import 'server-only'
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { correoValido } from './confirmacion'
-import { remitenteCliente } from '../../../supabase/functions/_shared/remitente-correo'
+import { remitenteAvisosPorDefecto, remitenteCliente } from '../../../supabase/functions/_shared/remitente-correo'
 
 export type EstadoCorreo = { estado: 'enviado' | 'omitido' | 'fallido'; destino: string | null; motivo: string | null }
 
@@ -34,7 +34,7 @@ export function textoPlanoDelMensaje(texto: string): string {
 }
 
 /**
- * «Trappvel vía MéTRIK ONE <noreply@metrikone.co>», o el remitente propio del workspace si declaró
+ * «Trappvel vía MéTRIK ONE <avisos@avisos.metrikone.co>», o el remitente propio del workspace si declaró
  * `config_extra.remitente_correo` en un dominio permitido (ver _shared/remitente-correo.ts).
  */
 export function remitenteViajero(agencia: string, configExtra: unknown): string {
@@ -42,7 +42,7 @@ export function remitenteViajero(agencia: string, configExtra: unknown): string 
   return remitenteCliente({
     configExtra,
     marca: nombre,
-    porDefecto: `${nombre} vía MéTRIK ONE <noreply@metrikone.co>`,
+    porDefecto: remitenteAvisosPorDefecto(`${nombre} vía MéTRIK ONE`),
     contexto: 'correo-viajero',
   }).from
 }

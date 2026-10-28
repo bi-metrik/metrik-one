@@ -3,11 +3,14 @@
 // ------------------------------------------------------------
 // Gemini transcribe mejor los nombres y los códigos si sabe cuáles pueden aparecer. Las pistas salen de la base del
 // workspace en el momento (lector en `pistas-supabase.ts`) y de las funciones del rol por su gancho `pistas` (el de
-// `agente/funciones/tipos.ts` del componedor, #1285):
+// `agente/funciones/tipos.ts`; la composición del turno las entrega con `fuentesDeComposicion`):
 //   · nombres del equipo y de los colaboradores;
 //   · clientes de los negocios abiertos (la empresa, o el contacto si es persona natural) y el nombre corto del negocio;
 //   · el FORMATO de los códigos («I1 26 5») con los prefijos de empresa en uso, nunca la lista de códigos;
-//   · lo que aporten las funciones (servicios del portafolio, la experiencia vigente).
+//   · lo que aporten las funciones (servicios del portafolio, la experiencia vigente);
+//   · los proveedores de los gastos recientes, por la descripción («Supabase», «Vercel Pro», «Resend») y el
+//     `vocabulario` fijo de la configuración, para marcas que todavía no están en la base (2026-10-26, caso real:
+//     «suscripción a Resend» se transcribió «Recent Pro»).
 // Con tope por turno (cantidad y caracteres) para no inflar el prompt.
 //
 // El riesgo: que la transcripción meta un nombre de la lista que no se dijo. Por eso el bloque dice que se usen solo
@@ -31,6 +34,8 @@ export interface BasePistas {
   colaboradores: string[];
   /** Negocios abiertos, del más reciente al más viejo. */
   negocios: NegocioPista[];
+  /** Descripciones de los gastos recientes, del más reciente al más viejo (de ahí sale el proveedor). */
+  gastos?: string[];
 }
 
 export interface OpcionesPistas {
@@ -45,6 +50,8 @@ export interface OpcionesPistas {
   incluirClientes?: boolean;
   /** Lo que aportan las funciones del rol por su gancho (`pistasDeFunciones`). */
   extras?: string[];
+  /** El `vocabulario` fijo de la configuración: va primero. */
+  vocabulario?: string[];
 }
 
 export const TOPE_PISTAS = 40;
@@ -82,6 +89,20 @@ export function nombreCorto(nombre: string | null | undefined): string | null {
   return limpiarPista(base.trim().split(/\s+/).slice(0, 5).join(' '));
 }
 
+/**
+ * El proveedor de un gasto por su descripción: lo de antes de « — », «(», «,», «;», «:» o «$», desde la primera palabra
+ * con mayúscula y como mucho 4 palabras. «suscripción a Resend» → «Resend»; «Vercel Pro (infra MeTRIK…) — agosto» →
+ * «Vercel Pro». Sin mayúscula no hay nombre propio: `null` («invitacion café cierre»). Pura.
+ */
+export function proveedorDeGasto(descripcion: string | null | undefined): string | null {
+  if (!descripcion) return null;
+  const base = descripcion.split(/\s[-–—]\s|[(,;:|$]/)[0] ?? '';
+  const palabras = base.trim().split(/\s+/);
+  const i = palabras.findIndex((w) => /^\p{Lu}/u.test(w));
+  if (i < 0) return null;
+  return limpiarPista(palabras.slice(i, i + 4).join(' '));
+}
+
 const RE_CODIGO = /^([A-ZÑ]+\d*) (\d{2}) (\d+)$/;
 
 /**
@@ -101,17 +122,22 @@ export function formatoDeCodigos(codigos: Array<string | null | undefined>): str
   return `Los códigos de negocio son el código de la empresa (letra y número), el año en dos dígitos y un consecutivo, separados por espacios, como «${prefijos[0]} ${anio} 1». Si dictan uno, escríbelo en esa forma. Códigos de empresa en uso: ${prefijos.join(', ')}.`;
 }
 
-/** La lista ordenada, sin repetidos y con el tope: equipo, colaboradores, funciones, clientes, negocios. Pura. */
+/**
+ * La lista ordenada, sin repetidos y con el tope: vocabulario, equipo, colaboradores, funciones, clientes, negocios y
+ * proveedores. Pura.
+ */
 export function listaDePistas(base: BasePistas, o: OpcionesPistas = {}): string[] {
   const tope = Math.max(0, Math.floor(o.tope ?? TOPE_PISTAS));
   const maxCar = o.maxCaracteres ?? MAX_CARACTERES_PISTAS;
   const incluirClientes = o.incluirClientes !== false;
   const candidatas: unknown[] = [
+    ...(o.vocabulario ?? []),
     ...base.equipo,
     ...base.colaboradores,
     ...(o.extras ?? []),
     ...(incluirClientes ? base.negocios.map((n) => n.cliente) : []),
     ...(incluirClientes ? base.negocios.map((n) => nombreCorto(n.nombre)) : []),
+    ...(base.gastos ?? []).map(proveedorDeGasto),
   ];
   const vistas = new Set<string>();
   const out: string[] = [];
@@ -149,18 +175,25 @@ export function textoPistas(base: BasePistas, o: OpcionesPistas = {}): string | 
 export interface ConfigTranscripcion {
   pistas: boolean;
   tope: number;
+  /** Palabras fijas de la empresa (marcas, proveedores): `transcripcion.vocabulario`, hasta 40. */
+  vocabulario: string[];
 }
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Obj : null);
 
-/** Lee `bot_conversacional.transcripcion`. Solo `pistas: true` literal las prende; el tope va de 5 a 80. Pura. */
+/**
+ * Lee `bot_conversacional.transcripcion`. Solo `pistas: true` literal las prende; el tope va de 5 a 80; del
+ * `vocabulario` solo las cadenas, hasta 40. Pura.
+ */
 export function leerConfigTranscripcion(botConversacional: unknown): ConfigTranscripcion {
   const t = obj(obj(botConversacional)?.transcripcion);
   const tope = t?.tope;
+  const vocabulario = Array.isArray(t?.vocabulario) ? (t!.vocabulario as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 40) : [];
   return {
     pistas: t?.pistas === true,
     tope: typeof tope === 'number' && Number.isFinite(tope) ? Math.min(80, Math.max(5, Math.floor(tope))) : TOPE_PISTAS,
+    vocabulario,
   };
 }
 
@@ -177,26 +210,44 @@ export async function pistasSiEncendidas(
   try {
     const r = await leer();
     if (!r) return null;
-    return textoPistas(r.base, { ...o, tope: config.tope, extras: r.extras });
+    return textoPistas(r.base, { ...o, tope: config.tope, extras: r.extras, vocabulario: config.vocabulario });
   } catch (e) {
     console.error('[pistas] no se pudieron armar las pistas, se transcribe sin ellas:', e);
     return null;
   }
 }
 
-// ── El gancho de las funciones (#1285) ────────────────────────────────────────
+// ── El gancho de las funciones (componedor) ────────────────────────────────────────
 
 /**
- * La forma del gancho que declara una función del componedor (`Funcion.pistas`, `agente/funciones/tipos.ts` en #1285).
- * Estructural, para no depender de ese PR: cuando entre, una `Funcion` encaja aquí tal cual.
+ * La forma del gancho que declara una función del componedor (`Funcion.pistas`, `agente/funciones/tipos.ts`).
+ * Estructural: una `Funcion` encaja aquí tal cual (lo comprueba `pistas.test.ts`).
  */
 export interface FuenteDePistas {
   pistas?(ctx: { workspaceId: string; parametros: Record<string, unknown> }): Promise<string[]>;
 }
 
+/** Una función del turno con los parámetros con que la empresa la prendió. */
+export interface FuentePistaDelTurno {
+  funcion: FuenteDePistas;
+  parametros: Record<string, unknown>;
+}
+
+/**
+ * Las fuentes de pistas de una composición (`componerDominio`, `componer.ts`): cada función que quedó en el turno
+ * (comunes incluidas), con sus parámetros. Las que el componedor dejó fuera (sin motor, sin lo que requieren) no
+ * aportan. Estructural, para no importar el componedor. Pura.
+ */
+export function fuentesDeComposicion(c: {
+  funciones: Array<FuenteDePistas & { clave: string }>;
+  parametros: Record<string, Record<string, unknown>>;
+}): FuentePistaDelTurno[] {
+  return c.funciones.map((funcion) => ({ funcion, parametros: c.parametros[funcion.clave] ?? {} }));
+}
+
 /** Junta lo que aportan las funciones del rol. La que falla o no tiene gancho no aporta; nunca lanza. */
 export async function pistasDeFunciones(
-  funciones: Array<{ funcion: FuenteDePistas; parametros: Record<string, unknown> }>,
+  funciones: FuentePistaDelTurno[],
   workspaceId: string,
 ): Promise<string[]> {
   const partes = await Promise.all(funciones.map(async ({ funcion, parametros }) => {

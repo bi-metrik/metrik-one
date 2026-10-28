@@ -1,7 +1,8 @@
 /**
  * `20261026210000_funciones_saldo_plazo_cero.sql` y su dry-run (`scripts/funciones-saldo-plazo-cero-dry-run.mjs`),
- * corridos de verdad en PGlite encima de la migración del módulo (`20261022170000_modulo_funciones.sql`, la que está en
- * producción). El comportamiento con 0 (plazo, link, `funcion_pasada`, estado) se prueba en `funciones-sql.test.ts`.
+ * corridos de verdad en PGlite encima de la migración del módulo (`20261022170000_modulo_funciones.sql`) y de la puerta
+ * cerrada (`20261026220000_funciones_puerta_cerrada.sql`), las dos en producción. El comportamiento con 0 (plazo, link,
+ * `funcion_pasada`, estado) se prueba en `funciones-sql.test.ts`.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -20,6 +21,8 @@ beforeAll(async () => {
   await db.exec(leer('src/lib/funciones/__fixtures__/esquema-base.sql'))
   await db.exec(leer('supabase/migrations/20261021090000_asistente_chatwoot.sql'))
   await db.exec(leer('supabase/migrations/20261022170000_modulo_funciones.sql'))
+  // La puerta cerrada (#1300) ya está aplicada en producción: el dry-run corre encima de ella.
+  await db.exec(leer('supabase/migrations/20261026220000_funciones_puerta_cerrada.sql'))
 })
 
 afterAll(async () => {

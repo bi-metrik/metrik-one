@@ -25,6 +25,8 @@ const leer = (ruta: string) => readFileSync(join(RAIZ, ruta), 'utf8')
 const ESQUEMA_BASE = leer('src/lib/funciones/__fixtures__/esquema-base.sql')
 const CHATWOOT = leer('supabase/migrations/20261021090000_asistente_chatwoot.sql')
 const FUNCIONES = leer('supabase/migrations/20261022170000_modulo_funciones.sql')
+// La puerta cerrada como campo de la ficha (26-oct), encima del módulo.
+const PUERTA = leer('supabase/migrations/20261026220000_funciones_puerta_cerrada.sql')
 const SALDO_PLAZO_CERO = leer('supabase/migrations/20261026210000_funciones_saldo_plazo_cero.sql')
 
 const WS = '00000000-0000-4000-8000-00000000f001'
@@ -242,6 +244,7 @@ beforeAll(async () => {
   await db.exec(ESQUEMA_BASE)
   await db.exec(CHATWOOT)
   await db.exec(FUNCIONES)
+  await db.exec(PUERTA)
   await db.exec(SALDO_PLAZO_CERO)
   await db.exec(`
     insert into public.workspaces (id, slug) values ('${WS}', 'sabor-prueba'), ('${OTRO_WS}', 'otro');
@@ -1146,6 +1149,7 @@ describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () =>
     saludo_grupo: '🎃💀 ¡Hola!',
     relato_grupo: '💀🎁 ¡Que comience!',
     edad_minima: 6,
+    puerta_cerrada: true,
   }
   const guardarFicha = (ficha: unknown, id: string | null = null, quien: Quien = { equipo: EQUIPO }) =>
     rpc<string>(`select funcion_guardar_experiencia($1, $2, $3::jsonb) as r`, [WS, id, JSON.stringify(ficha)], quien)
@@ -1156,11 +1160,14 @@ describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () =>
     expect(e.titulo_oferta).toBe('🎃💀 EL EXTRAÑO MUNDO DE JACK llega a CENA Y PELÍCULA 🎄🖤')
     expect(e.intro).toBe('Primera línea.\n\nSegunda   línea con espacios.')
     expect(e.que_incluye).toEqual(['🍽️ 5 tiempos', '🥂 2 bebidas'])
-    expect([e.emojis_tema, e.saludo_grupo, e.relato_grupo, e.edad_minima]).toEqual(['🎃🖤', '🎃💀 ¡Hola!', '💀🎁 ¡Que comience!', 6])
+    expect([e.emojis_tema, e.saludo_grupo, e.relato_grupo, e.edad_minima, e.puerta_cerrada]).toEqual(['🎃🖤', '🎃💀 ¡Hola!', '💀🎁 ¡Que comience!', 6, true])
     // Reemplaza la ficha entera: lo que no viene queda nulo.
     await guardarFicha({ nombre: 'Otra' }, id)
-    const [d] = await q<Record<string, unknown>>(`select nombre, titulo_oferta, que_incluye, edad_minima from funcion_experiencias where id = $1`, [id])
-    expect(d).toEqual({ nombre: 'Otra', titulo_oferta: null, que_incluye: null, edad_minima: null })
+    const [d] = await q<Record<string, unknown>>(`select nombre, titulo_oferta, que_incluye, edad_minima, puerta_cerrada from funcion_experiencias where id = $1`, [id])
+    // La puerta que no viene queda desmarcada (no nula): así una cata no sale con la puerta cerrada.
+    expect(d).toEqual({ nombre: 'Otra', titulo_oferta: null, que_incluye: null, edad_minima: null, puerta_cerrada: false })
+    await guardarFicha({ nombre: 'Otra', puerta_cerrada: null }, id)
+    expect((await q<{ p: boolean }>(`select puerta_cerrada as p from funcion_experiencias where id = $1`, [id]))[0].p).toBe(false)
     expect(Object.keys(e)).not.toContain('info_general')
     expect(Object.keys(e)).not.toContain('historia')
   })
@@ -1171,6 +1178,8 @@ describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () =>
     expect(await codigo(guardarFicha({ ...FICHA, que_incluye: Array.from({ length: 21 }, (_, i) => `cosa ${i}`) }))).toBe('datos_invalidos')
     expect(await codigo(guardarFicha({ ...FICHA, nombre: '  ' }))).toBe('datos_invalidos')
     expect(await codigo(guardarFicha({ ...FICHA, edad_minima: '6' }))).toBe('datos_invalidos')
+    expect(await codigo(guardarFicha({ ...FICHA, puerta_cerrada: 'si' }))).toBe('datos_invalidos')
+    expect(await codigo(guardarFicha({ ...FICHA, puerta_cerrada: 1 }))).toBe('datos_invalidos')
     expect(await codigo(guardarFicha(FICHA, null, { equipo: LECTOR }))).toBe('sin_permiso')
     expect(await codigo(guardarFicha(FICHA, null, 'servidor'))).toMatch(/permission denied/)
   })
@@ -1257,7 +1266,7 @@ describe('la ficha en tres niveles y la preventa por función (P11 y P4)', () =>
     const d = await rpc<{ experiencia: Record<string, unknown>; funciones: Array<{ es_preventa: boolean; preventa_hasta: string | null; tarifa: { tarifa: string } }> }>(
       `select funcion_panel_campana($1) as r`, [e.campana])
     expect(Object.keys(d.experiencia).sort()).toEqual(
-      ['edad_minima', 'emojis_tema', 'experiencia_id', 'frase_gancho', 'intro', 'nombre', 'que_incluye', 'relato_grupo', 'saludo_grupo', 'titulo_oferta'])
+      ['edad_minima', 'emojis_tema', 'experiencia_id', 'frase_gancho', 'intro', 'nombre', 'puerta_cerrada', 'que_incluye', 'relato_grupo', 'saludo_grupo', 'titulo_oferta'])
     expect(d.experiencia.que_incluye).toEqual(['🍽️ 5 tiempos', '🥂 2 bebidas'])
     expect(d.funciones[0].es_preventa).toBe(true)
     expect(d.funciones[0].preventa_hasta).toMatch(/^\d{4}-\d{2}-\d{2}$/)
@@ -1695,6 +1704,8 @@ describe('una cata de vino (26-oct): la misma base para una experiencia que no e
     saludo_grupo: '🍷 ¡Hola, amantes del vino!\n\n¡Bienvenidos al grupo oficial de la cata!',
     relato_grupo: '🍇 ¡Que comience nuestra cata!',
     edad_minima: 18,
+    // Un taller: la puerta no se cierra (Paula, 26-oct).
+    puerta_cerrada: false,
   }
   const NEGOCIO = { direccion: '[PRUEBA] Calle 1, Bogotá', piso: 'Segundo piso', recepcion: 'Los recibimos en la entrada.', parqueadero: 'Bahía en frente.', firma: 'El equipo' }
   const CINE = /pel[ií]cula|\bcine\b|proyecci|🎬/i
@@ -1706,8 +1717,8 @@ describe('una cata de vino (26-oct): la misma base para una experiencia que no e
   }
 
   /** La cata: experiencia por la RPC de la ficha; campaña activa y publicada ($150.000, abono $50.000); 12 cupos. */
-  async function cata() {
-    const experiencia = await rpc<string>(`select funcion_guardar_experiencia($1, null, $2::jsonb) as r`, [WS, JSON.stringify(CATA)])
+  async function cata(ficha: Record<string, unknown> = CATA) {
+    const experiencia = await rpc<string>(`select funcion_guardar_experiencia($1, null, $2::jsonb) as r`, [WS, JSON.stringify(ficha)])
     const campana = uuid()
     const funcion = uuid()
     await q(
@@ -1763,6 +1774,18 @@ describe('una cata de vino (26-oct): la misma base para una experiencia que no e
     expect(textos[0].texto).toContain('🎫 Boletería regular: $150.000')
     expect(textos[0].texto).toContain('✨ Reserva con $50.000 por cupo y paga el saldo 1 día antes.')
     expect(textos[1].texto).toContain('📅 Cata de vinos del Valle de Uco · noviembre: te compartimos por este chat los horarios disponibles.')
-    expect(textos[2].texto).toContain('cerraremos la puerta de ingreso para evitar interrupciones. 🚪')
+    // La cata no cierra la puerta (26-oct): la base devuelve false y la bienvenida no lo avisa; la llegada sí.
+    expect(p.experiencia.puerta_cerrada).toBe(false)
+    expect(textos[2].texto).not.toContain('puerta')
+    expect(textos[2].texto).toMatch(/🕐 LLEGADA: /)
+  })
+
+  it('la puerta cerrada pasa de punta a punta: la ficha la guarda, el panel la devuelve y la bienvenida la avisa', async () => {
+    const c = await cata({ ...CATA, nombre: '[PRUEBA] Jack', puerta_cerrada: true })
+    const p = await rpc<PanelCata>(`select funcion_panel_campana($1) as r`, [c.campana])
+    expect(p.experiencia.puerta_cerrada).toBe(true)
+    const b = generarBienvenida({ ficha: p.experiencia, negocio: NEGOCIO, funcion: { inicia_at: p.funciones[0].inicia_at } })
+    expect(b.texto).toContain('cerraremos la puerta de ingreso para evitar interrupciones. 🚪')
+    expect(b.texto).toMatch(/🕐 LLEGADA: /)
   })
 })

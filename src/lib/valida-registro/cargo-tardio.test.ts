@@ -30,6 +30,7 @@ const { procesarEventoPasarela } = await import('@/lib/cobros/pago-en-linea')
 const { repoPagoEnLinea } = await import('@/lib/cobros/pago-en-linea-servidor')
 const { parsearConfirmacionEpayco } = await import('@/lib/suscripciones/pasarela/epayco')
 const { cobrarCuotaConTarjeta, cobrarCuotasConTarjeta } = await import('./cobro-token-servidor')
+const { cerrarCargoAprobadoTardio, cerrarRegistroConPagoRegistrado, conciliarRegistrosConCobroPendiente } = await import('./cargo-tardio-servidor')
 
 const METRIK = 'ws-metrik'
 const PAGADOR = 'ws-cda'
@@ -347,5 +348,93 @@ describe('(c) la conciliación consulta a ePayco el cargo pendiente', () => {
     expect(r.aprobadas).toBe(1)
     expect(d.tablas.cobros[1].fecha).toBe('2026-11-23')
     expect(d.tablas.cobro_intentos_tarjeta[1].resultado).toBe('aprobado')
+  })
+})
+
+describe('(d) el registro que quedó en cobro_pendiente con el pago ya registrado', () => {
+  /** Lo que quedó en producción el 2026-10-22: el pago registrado y el evento cerrado, nada más. */
+  function comoQuedo22Oct(registro: Record<string, unknown> = {}) {
+    const t = base(registro)
+    Object.assign(t.cobros[0], { fecha: '2026-10-22', fuente: 'epayco' })
+    t.pasarela_eventos.push({ pasarela: 'epayco', evento_id: '390720992-1', resultado: 'registrado' })
+    return dobleConEventosUnicos(t)
+  }
+  const deps = (d: ReturnType<typeof dobleConEventosUnicos>) => ({ db: d.db, ahoraMs: AHORA, ultimos4: async () => '0326' })
+
+  it('el caso real: la confirmación ya no vuelve y la conciliación del cargo no mira una cuota pagada; el cron (7e) lo cierra con el C3 una vez', async () => {
+    const d = comoQuedo22Oct()
+    // La confirmación repetida es duplicado (el evento ya está cerrado): por ahí no se cierra nada.
+    const otra = await procesarEventoPasarela(confirmacion('1', 'Aceptada'), repoPagoEnLinea(d.db, 'epayco', adapterNulo), '2026-10-22')
+    expect(otra.resultado).toBe('duplicado')
+    expect(d.tablas.valida_registros[0].cobro_estado).toBe('cobro_pendiente')
+
+    const r = await conciliarRegistrosConCobroPendiente(deps(d))
+    expect(r.revisados).toBe(1)
+    expect(r.errores).toEqual([])
+    expect(r.cerrados).toHaveLength(1)
+    expect(d.tablas.cobro_intentos_tarjeta[0].resultado).toBe('aprobado')
+    expect(d.tablas.valida_registros[0]).toMatchObject({ cobro_estado: 'cobrado', cobro_ref: 'epayco-390720992' })
+    expect(correos).toHaveLength(1)
+    expect(correos[0]).toMatchObject({ to: ['ana@cda.co'], idem: `valida-cobro-confirmado-${REG}` })
+
+    // Otra corrida: ya no hay registros en cobro_pendiente.
+    const segunda = await conciliarRegistrosConCobroPendiente(deps(d))
+    expect(segunda.revisados).toBe(0)
+    expect(correos).toHaveLength(1)
+  })
+
+  it('la confirmación llega ANTES de que el cargo escriba cobro_pendiente: el cargo lo cierra al terminar, con el C3 una vez', async () => {
+    const d = dobleConEventosUnicos(base({ cobro_estado: 'cobrando' }))
+    const r = await procesarEventoPasarela(confirmacion('1', 'Aceptada'), repoPagoEnLinea(d.db, 'epayco', adapterNulo), '2026-10-22')
+    expect(r.resultado).toBe('registrado')
+    expect(d.tablas.cobro_intentos_tarjeta[0].resultado).toBe('aprobado')
+    expect(d.tablas.valida_registros[0].cobro_estado).toBe('cobrando')
+    expect(correos).toHaveLength(0)
+
+    // El cargo escribe ahora `cobro_pendiente` (registrarResultado) y mira otra vez.
+    d.tablas.valida_registros[0].cobro_estado = 'cobro_pendiente'
+    const cierre = await cerrarRegistroConPagoRegistrado(deps(d), REG)
+    expect(cierre).toMatchObject({ tipo: 'cerrado', revisar: false })
+    expect(d.tablas.valida_registros[0].cobro_estado).toBe('cobrado')
+    expect(correos).toHaveLength(1)
+
+    expect(await cerrarRegistroConPagoRegistrado(deps(d), REG)).toEqual({ tipo: 'sin_cambio', motivo: 'no_esta_en_cobro_pendiente' })
+    expect((await procesarEventoPasarela(confirmacion('1', 'Aceptada'), repoPagoEnLinea(d.db, 'epayco', adapterNulo), '2026-10-22')).resultado).toBe('duplicado')
+    expect(correos).toHaveLength(1)
+  })
+
+  it('sin pago registrado no toca nada (lo cierra la confirmación o la conciliación del cargo)', async () => {
+    const d = dobleConEventosUnicos(base())
+    const r = await conciliarRegistrosConCobroPendiente(deps(d))
+    expect(r).toMatchObject({ revisados: 1, cerrados: [], errores: [] })
+    expect(d.tablas.cobro_intentos_tarjeta[0].resultado).toBe('pendiente')
+    expect(d.tablas.valida_registros[0].cobro_estado).toBe('cobro_pendiente')
+    expect(correos).toHaveLength(0)
+  })
+
+  it('el cierre lee el pago de la base: sin pago registrado no cierra el intento ni el registro', async () => {
+    const d = dobleConEventosUnicos(base())
+    const cobro = { id: COBRO, workspaceId: METRIK, negocioId: null, suscripcionId: SUS, monto: 150000, fecha: '2026-10-22', anuladoAt: null, tipoCobro: 'programado', externalRef: 'epayco-390720992', notas: null }
+    expect(await cerrarCargoAprobadoTardio(deps(d), cobro)).toBeNull()
+    expect(d.tablas.cobro_intentos_tarjeta[0].resultado).toBe('pendiente')
+    expect(d.tablas.valida_registros[0].cobro_estado).toBe('cobro_pendiente')
+    expect(correos).toHaveLength(0)
+  })
+
+  it('un pago anulado no cierra el registro', async () => {
+    const d = comoQuedo22Oct()
+    d.tablas.cobros[0].anulado_at = '2026-10-22T16:42:00Z'
+    expect(await cerrarRegistroConPagoRegistrado(deps(d), REG)).toEqual({ tipo: 'sin_cambio', motivo: 'cuota_1_sin_pago' })
+    expect(d.tablas.valida_registros[0].cobro_estado).toBe('cobro_pendiente')
+    expect(correos).toHaveLength(0)
+  })
+
+  it('la cuota 1 pagada por OTRO medio (un enlace): el registro pasa a cobrado, sin el C3 que nombra la tarjeta', async () => {
+    const d = comoQuedo22Oct()
+    d.tablas.cobros[0].external_ref = 'bold-LNK-77'
+    const r = await cerrarRegistroConPagoRegistrado(deps(d), REG)
+    expect(r.tipo).toBe('cerrado')
+    expect(d.tablas.valida_registros[0]).toMatchObject({ cobro_estado: 'cobrado', cobro_ref: 'bold-LNK-77' })
+    expect(correos).toHaveLength(0)
   })
 })

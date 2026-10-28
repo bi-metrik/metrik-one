@@ -144,7 +144,13 @@ export interface Opcion { id: string; titulo: string; descripcion?: string }
 export type Salida =
   | { tipo: 'texto'; texto: string }
   | { tipo: 'botones'; texto: string; opciones: Opcion[] }
-  | { tipo: 'lista'; texto: string; boton: string; opciones: Opcion[] };
+  | { tipo: 'lista'; texto: string; boton: string; opciones: Opcion[] }
+  /**
+   * Un botón que abre un link (spec 2026-10-26, §4.2: el paso a una persona en ONE abre el WhatsApp de MeTRIK con el
+   * mensaje escrito). En WhatsApp sale como `interactive.type = "cta_url"` (cuerpo ≤ 1024, botón ≤ 20); en Chatwoot,
+   * como texto con el link debajo. Lo arma siempre el código, nunca el modelo.
+   */
+  | { tipo: 'enlace'; texto: string; boton: string; url: string };
 
 export interface Mensajero {
   /** Marca leído y enciende «escribiendo…» (una sola llamada a Meta). Nunca lanza. */
@@ -349,10 +355,25 @@ export interface RegistroConversacion {
 
 // ── La traza ─────────────────────────────────────────────────────────────────
 
+/**
+ * El rol que atendió el turno (spec 2026-10-26, §2.9): la clave, la versión de su reglamento y sus funciones. En el
+ * camino de hoy de ONE (sin roles en la base) la clave es `cargo:<cargo>` y no hay versión.
+ */
+export interface RolTraza {
+  clave: string;
+  id: string | null;
+  version: number | null;
+  reglamento_id: string | null;
+  por: 'staff' | 'colaborador' | 'cargo' | 'inbox';
+  funciones: Array<{ funcion: string; parametros: Record<string, unknown> }>;
+}
+
 export interface Traza {
   tipo: 'modelo' | 'toque_propuesta' | 'si_escrito' | 'reenvio' | 'sin_turno';
   bot: string;
   reglamento?: { id: string; version: number; huella: string } | null;
+  /** El rol del turno (§2.9). Ausente en los dominios que no se componen (la bandeja). */
+  rol?: RolTraza | null;
   /** Desde que llegó el webhook del último mensaje del turno hasta que salió la respuesta. */
   ms_turno?: number;
   ms_modelo?: number;
@@ -390,5 +411,12 @@ export interface Traza {
   adjuntos?: Array<Record<string, unknown>> | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
   salidas_extra?: Salida[] | null;
+  /**
+   * El traspaso a una persona de este turno (spec 2026-10-26, §4.2), si lo hubo: `ofrecido` (sin que la persona lo
+   * pidiera; nunca dos turnos seguidos), `link` (lo pidió: el botón al WhatsApp) o `pasado` (Chatwoot). `senal`: quién lo
+   * disparó, el modelo (motivo) o el código (dos «no pude» seguidos, tres correcciones de lo mismo). `resumen`: una
+   * línea armada por el código, sin datos sensibles (la misma de `asistente_escalamientos`).
+   */
+  escalamiento?: { modo: 'ofrecido' | 'pasado' | 'link'; motivo: string; senal: 'modelo' | 'codigo'; resumen?: string } | null;
   error?: string | null;
 }

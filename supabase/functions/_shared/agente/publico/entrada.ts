@@ -50,6 +50,8 @@ export interface PuertosEntrada {
 export interface Atender {
   workspace: WorkspacePublico;
   llave: LlaveConversacion;
+  /** El inbox de Chatwoot del mensaje (para el rol asignado por inbox: 'cw:<cuenta>:<inbox>'). */
+  inboxId: number | null;
   canal: Canal;
   anuncio7Dias: boolean;
 }
@@ -82,7 +84,7 @@ export async function recibir(req: { slug: string | null; cuerpo: string; firma:
   const inbox = inboxRegistrado(ws.config, m.inboxId)!;
   const canal: Canal = inbox.canal !== 'otro' ? inbox.canal : canalDeChatwoot(m.canalChatwoot);
   const llave: LlaveConversacion = { workspaceId: ws.id, cuentaId: m.cuentaId!, conversacionId: m.conversacionId! };
-  const atender: Atender = { workspace: ws, llave, canal, anuncio7Dias: inbox.anuncio7Dias };
+  const atender: Atender = { workspace: ws, llave, inboxId: m.inboxId, canal, anuncio7Dias: inbox.anuncio7Dias };
 
   if (m.evento === 'message_updated') {
     const adjunto = adjuntoDe(m);

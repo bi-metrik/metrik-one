@@ -1,0 +1,18 @@
+{
+  "_fuente": "Respuesta SIMULADA: una oferta sin fila de íconos ni texto de lo que incluye.",
+  "es_oferta_de_hotel": true,
+  "hotel": "Hotel Caribe",
+  "zona": null,
+  "noches": 3,
+  "habitacion": null,
+  "plan_alimentacion": null,
+  "temporada": null,
+  "tarifa_promo": null,
+  "compra_antes_de": null,
+  "moneda": null,
+  "precios_por_persona": [{ "acomodacion": "Doble", "precio": 1500000 }],
+  "nino": null,
+  "iconos": [],
+  "texto_incluye": null,
+  "incluye_por_texto": []
+}

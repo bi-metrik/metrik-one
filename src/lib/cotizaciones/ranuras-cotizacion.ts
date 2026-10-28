@@ -41,7 +41,7 @@ import { NOMBRES_TARIFA } from './tarifas'
  * (migración `20261013140000_cotizacion_ranuras_tipo_otro.sql`). Lo que se ofrece en la pantalla
  * de siempre y en la detección del pantallazo son los cuatro de `TIPOS_CON_PANTALLAZO`.
  */
-export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro'] as const
+export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro', 'paquete'] as const
 export type TipoRanura = (typeof TIPOS_RANURA)[number]
 
 /** Los cuatro tipos de siempre: los que reconoce la detección y ofrece la pantalla de siempre. */
@@ -59,6 +59,7 @@ const SLUG_POR_TIPO: Record<TipoRanura, string> = {
   actividad: 'actividad_detalle',
   traslado: 'traslado_detalle',
   otro: 'otro_detalle',
+  paquete: 'paquete_detalle',
 }
 
 export function esTipoRanura(v: unknown): v is TipoRanura {
@@ -72,11 +73,21 @@ export function definicionDeTipo(tipo: TipoRanura): DefinicionRanura {
   return def
 }
 
-/** El tipo de una definición del catálogo (`vuelo_detalle` → `vuelo`). */
+const TIPO_POR_SLUG: ReadonlyMap<string, TipoRanura> = new Map(
+  (Object.entries(SLUG_POR_TIPO) as [TipoRanura, string][]).map(([tipo, slug]) => [slug, tipo] as const),
+)
+
+/**
+ * El tipo de una definición del catálogo (`vuelo_detalle` → `vuelo`).
+ *
+ * ⚠️ Se resuelve por el SLUG, no por el primer sinónimo: el paquete de bloqueo se agrupa como
+ * «paquete de bloqueo» (sinónimos estrechos a propósito) y su tipo es `paquete`. Leerlo por el
+ * sinónimo lo dejaba sin tipo, y la cotización por pasos lo pintaba como «Otro» en «Otros
+ * servicios» (prueba en producción del 2026-10-28).
+ */
 export function tipoDeDefinicion(def: DefinicionRanura | null | undefined): TipoRanura | null {
   if (!def) return null
-  const tipo = def.grupos[0]
-  return esTipoRanura(tipo) ? tipo : null
+  return TIPO_POR_SLUG.get(def.slug) ?? null
 }
 
 // ── La ranura y su grupo ──────────────────────────────────────────────────────

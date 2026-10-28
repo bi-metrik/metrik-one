@@ -15,6 +15,14 @@ Fuera a propósito: correos internos, MeTRIK propios (cuotas/enlace automático,
 **Why:** Resend Pro (10 dominios); SOENA sin DNS en gruposoena.com → `soena.metrikone.co`. Requisito: sin clave, `from`
 byte a byte igual; por eso el logo (`workspaces.logo_url`) en la cabecera de notificar-etapa solo sale CON la clave.
 
-**How to apply:** orden para SOENA: verificar soena.metrikone.co en Resend → desplegar notificar-etapa → escribir la
+**How to apply:** orden para SOENA: verificar soena.metrikone.co en Resend (registros DNS + en el MISMO paso
+`<slug>` CNAME al destino del ALIAS `*`, ver abajo) → desplegar notificar-etapa → escribir la
 clave. Un dominio nuevo se agrega a la lista solo después de verificarlo en Resend. Otros FROM de facturacion@metrikone.co
 (enlace-automatico, cobro-prueba Valida) NO se movieron a metrik.com.co.
+
+⚠️⚠️ **Incidente 2026-10-26 (~13:00-15:30):** los registros de Resend bajo `soena.metrikone.co` (send/rsend/_domainkey)
+convirtieron `soena` en nombre vacío y el comodín `*.metrikone.co` dejó de aplicarle: SOENA no resolvía ~2 h, sin un
+solo error en Vercel/Supabase/logs. Arreglo: `soena` CNAME explícito al destino del ALIAS `*` (rec_6a3afcd9838afdf0940fe4b3).
+Para todo workspace nuevo con remitente `<slug>.metrikone.co`: crear ese CNAME en el mismo paso (valor de
+`vercel dns ls metrikone.co`, nunca de memoria) y comprobar con `dig +short`. `vercel dns add` lo corre Mauricio.
+Gotcha en docs/gotchas.md.

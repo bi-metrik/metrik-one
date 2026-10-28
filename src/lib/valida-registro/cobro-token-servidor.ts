@@ -9,7 +9,7 @@ import { repoPagoEnLinea } from '@/lib/cobros/pago-en-linea-servidor'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { epaycoHabilitado, leerRefMedioPagoEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
-import { CALENDARIO_MORA, esEspacioAutogestion, intentoDelDia } from './plan'
+import { CALENDARIO_MORA, corteVigente, esEspacioAutogestion, intentoDelDia } from './plan'
 import { titularDelCobro } from './metodo-pago'
 
 /**
@@ -212,6 +212,21 @@ async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: s
   }
 }
 
+/**
+ * ¿El espacio que paga el contrato de esa ancla tiene el plan cortado por el reverso de un pago
+ * (`corteVigente`)? Entonces la tarjeta no se toca: ni la cuota reversada (que cuenta como no pagada
+ * mientras dure el corte) ni las siguientes. Se paga a mano el período desde `/valida`.
+ */
+async function planCortadoPorReverso(db: Db, cobradorId: string, ancla: Ancla): Promise<boolean> {
+  const sc = await filtrarPorAncla(db.from('servicios_contratados').select('workspace_pagador_id').eq('workspace_id', cobradorId), ancla)
+  if (sc.error) throw new Error(`contrato del plan: ${sc.error.message}`)
+  const ids = [...new Set(((sc.data ?? []) as { workspace_pagador_id: string | null }[]).map((c) => c.workspace_pagador_id).filter(Boolean))] as string[]
+  if (ids.length === 0) return false
+  const ws = await db.from('workspaces').select('config_extra').in('id', ids)
+  if (ws.error) throw new Error(`espacio que paga: ${ws.error.message}`)
+  return ((ws.data ?? []) as { config_extra: Record<string, unknown> | null }[]).some((w) => corteVigente(w.config_extra))
+}
+
 /** Al nacer el plan: si la cuenta tiene tarjeta, se cobra por token y no por enlace. */
 export async function pasarElPlanATarjeta(deps: DepsCobroToken, p: { cobradorId: string; planCobroId: string; ancla: Ancla }): Promise<boolean> {
   const db = deps.db as Db
@@ -248,6 +263,7 @@ export async function cobrarCuotaConTarjeta(
   const ancla = anclaDeFila(plan.data)
   if (!ancla) return { tipo: 'error', mensaje: `el plan ${plan.data.id} no tiene ancla` }
 
+  if (await planCortadoPorReverso(db, p.cobradorId, ancla)) return { tipo: 'no_aplica', motivo: 'plan_cortado_por_reverso' }
   const pagador = await pagadorConTarjeta(db, p.cobradorId, ancla)
   if (!pagador) return { tipo: 'no_aplica', motivo: 'sin_tarjeta' }
 
@@ -513,6 +529,8 @@ export interface ResumenCobroToken {
   yaIntentadas: number
   /** Planes con una cuota en suspensión: no se cobra nada más de ellos. */
   suspendidos: number
+  /** Planes con el corte por reverso vigente: la tarjeta no se toca (ni la cuota reversada ni las siguientes). */
+  cortadosPorReverso: number
   errores: { cuotaId: string; error: string }[]
 }
 
@@ -528,13 +546,24 @@ function diasEntre(desde: string, hasta: string): number {
  */
 export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: string; soloPlan?: string }): Promise<ResumenCobroToken> {
   const db = deps.db as Db
-  const resumen: ResumenCobroToken = { revisadas: 0, aprobadas: 0, pendientes: 0, rechazadas: 0, yaIntentadas: 0, suspendidos: 0, errores: [] }
+  const resumen: ResumenCobroToken = { revisadas: 0, aprobadas: 0, pendientes: 0, rechazadas: 0, yaIntentadas: 0, suspendidos: 0, cortadosPorReverso: 0, errores: [] }
   if (!(deps.adapterPara ?? adapterTarjeta)('epayco')) return resumen
-  let q = db.from('planes_cobro').select('id, workspace_id').eq('pasarela', 'epayco')
+  let q = db.from('planes_cobro').select('id, workspace_id, negocio_id, suscripcion_id').eq('pasarela', 'epayco')
   if (deps.soloPlan) q = q.eq('id', deps.soloPlan)
   const planes = await q
   if (planes.error) throw new Error(`planes con tarjeta: ${planes.error.message}`)
-  for (const plan of (planes.data ?? []) as { id: string; workspace_id: string }[]) {
+  for (const plan of (planes.data ?? []) as { id: string; workspace_id: string; negocio_id?: string | null; suscripcion_id?: string | null }[]) {
+    const ancla = anclaDeFila(plan)
+    try {
+      if (ancla && (await planCortadoPorReverso(db, plan.workspace_id, ancla))) {
+        resumen.cortadosPorReverso += 1
+        continue
+      }
+    } catch (e) {
+      // Sin poder leerlo no se cobra: el lado seguro.
+      resumen.errores.push({ cuotaId: `plan:${plan.id}`, error: e instanceof Error ? e.message : String(e) })
+      continue
+    }
     const [cuotas, cobros] = await Promise.all([
       db
         .from('plan_cobro_cuotas')

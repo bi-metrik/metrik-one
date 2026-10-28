@@ -148,8 +148,11 @@ export class ChatwootMemoria implements MensajeroChatwoot {
 export class TranscriptorMemoria implements Transcriptor {
   textos = new Map<string, string | null>();
   llamadas: string[] = [];
-  async transcribir(a: { url: string }): Promise<{ texto: string | null; error?: string }> {
+  /** Lo que recibió cada llamada (las fuentes de pistas, si llegaron). */
+  pedidos: Array<Parameters<Transcriptor['transcribir']>[0]> = [];
+  async transcribir(a: Parameters<Transcriptor['transcribir']>[0]): Promise<{ texto: string | null; error?: string }> {
     this.llamadas.push(a.url);
+    this.pedidos.push(a);
     const t = this.textos.get(a.url);
     return t ? { texto: t } : { texto: null, error: 'GEMINI_RESULT: (vacío, simulado)' };
   }

@@ -20,6 +20,10 @@ import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
 import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { lectorDeDocumentosDeViaje } from './agente/bandeja/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
+import { turnoOne } from './agente/one/turno-con-rol.ts';
+import { escalamientosSupabase } from './agente/persona-produccion.ts';
+import { resolverRol, rolPrevio } from './agente/roles.ts';
+import type { RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { alertarCaidaWa, almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
@@ -27,19 +31,23 @@ import { revisarCupo } from './agente/uso.ts';
 import { completarTexto } from './wa-conversacion.ts';
 import { staffIdDelRemitente } from './wa-bandeja.ts';
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
-import { leerConfigTranscripcion, pistasSiEncendidas } from './agente/pistas.ts';
+import { fuentesDeComposicion, leerConfigTranscripcion, pistasDeFunciones, pistasSiEncendidas } from './agente/pistas.ts';
+import type { Composicion } from './agente/componer.ts';
 import { leerBasePistas } from './agente/pistas-supabase.ts';
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
 
 /**
  * Las pistas para transcribir la nota de voz (spec 2026-10-26, §4.6): solo con `bot_conversacional.transcripcion.pistas
- * = true`. Apagado devuelve `null` sin una consulta y la transcripción queda como siempre. Las funciones del rol
- * aportarán las suyas por su gancho cuando entre el componedor (#1285); hoy no hay ninguna.
+ * = true`. Apagado devuelve `null` sin una consulta y la transcripción queda como siempre. Con la composición del turno
+ * (el rol o el cargo de quien escribe), las funciones que quedaron aportan las suyas por su gancho `pistas`.
  */
-function pistasDeLaNota(supabase: SupabaseClient, user: WaUser): Promise<string | null> {
+function pistasDeLaNota(supabase: SupabaseClient, user: WaUser, composicion?: Composicion): Promise<string | null> {
   return pistasSiEncendidas(
     leerConfigTranscripcion(user.modulos?.bot_conversacional),
-    async () => ({ base: await leerBasePistas(supabase, user.workspace_id) }),
+    async () => ({
+      base: await leerBasePistas(supabase, user.workspace_id),
+      extras: composicion ? await pistasDeFunciones(fuentesDeComposicion(composicion), user.workspace_id) : [],
+    }),
   );
 }
 
@@ -142,13 +150,34 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
   const phone = message.phone.replace(/\D/g, '');
   try {
     const { data: ws } = await supabase.from('workspaces').select('name, slug').eq('id', user.workspace_id).maybeSingle();
-    // Un reglamento propio publicado (`bot_reglamentos`, bot 'one') reemplaza al del código.
-    const reglamento = (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId))
-      ?? await reglamentoOne(String(ws?.name ?? 'la empresa'));
+    const empresa = ws?.name ? String(ws.name) : null;
+    const puerto = puertoOneSupabase(supabase, user);
+    const lector = lectorDeSoportes({ llaveGemini: llave });
+    // Qué atiende este turno (spec 2026-10-26, asistentes-roles-y-funciones): con roles en la base, el rol de quien
+    // escribe; sin roles (o sin la migración todavía), el dominio ONE recortado a su cargo. Una ida a la base.
+    const turno = await turnoOne(user.role, {
+      resolver: () => resolverRol(supabase, {
+        workspaceId: user.workspace_id, canal: 'wa_one', staff: user.staff_id ?? null, colaborador: user.collaborator_id ?? null,
+        cargo: user.role, inbox: inboxWaOne(),
+      }),
+      rolPrevio: () => rolPrevioWa(supabase, user.workspace_id, phone, config.topes.ventanaHoras),
+      reglamentoDelRol: (clave, id) => cargarReglamento(supabase, user.workspace_id, `rol:${clave}`, id),
+      // Un reglamento propio publicado (`bot_reglamentos`, bot 'one') reemplaza al del código.
+      reglamentoDeHoy: async () => (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, config.reglamentoId)) ?? await reglamentoOne(String(ws?.name ?? 'la empresa')),
+      motor: (funciones) => dominioOne(puerto, { rol: user.role, lector, empresa, funciones }),
+      empresa,
+    });
+    if (turno.tipo === 'parar') {
+      // El workspace usa roles y quien escribe no tiene uno activo: lo fijo, sin modelo y sin el dominio completo.
+      console.warn(`[agente-one] ${user.workspace_id}: sin rol activo (${turno.motivo}), respuesta fija`);
+      await mensajeroWa().enviar(phone, { tipo: 'texto', texto: turno.texto }, { workspaceId: user.workspace_id, intent: 'agente.sin_rol' });
+      await soltarDelAgente(supabase, message);
+      return true;
+    }
 
     // Un audio se transcribe antes del turno (lo que dice es un escrito dictado).
     if (message.type === 'audio' && message.audio_id) {
-      const pistas = await pistasDeLaNota(supabase, user);
+      const pistas = await pistasDeLaNota(supabase, user, turno.composicion);
       const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true, pistas });
       if (r.text) await completarTexto(supabase, message.wa_message_id, r.text);
     }
@@ -159,8 +188,12 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     await atenderPendientes({
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
       // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
-      dominio: dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: lectorDeSoportes({ llaveGemini: llave }), empresa: ws?.name ? String(ws.name) : null }),
-      reglamento,
+      dominio: turno.dominio,
+      reglamento: turno.reglamento,
+      rol: turno.rol,
+      // El paso a una persona (spec 2026-10-26, §4.2): el botón al WhatsApp de MeTRIK (o al de la ficha del rol), la
+      // señal del código y la fila de `asistente_escalamientos`.
+      persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one', escalamientos: escalamientosSupabase(supabase) },
       config,
       ahoraMs: () => Date.now(),
       reloj: () => performance.now(),
@@ -202,4 +235,26 @@ async function soltarDelAgente(supabase: SupabaseClient, message: IncomingMessag
   } catch (err) {
     console.error('[agente-one] no se pudo soltar el mensaje:', err);
   }
+}
+
+/** El inbox de Meta del número de Agus para las asignaciones por canal: 'wa:<phone_number_id>'. */
+function inboxWaOne(): string | null {
+  const id = (Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '').replace(/\D/g, '');
+  return id ? `wa:${id}` : null;
+}
+
+/**
+ * El rol con que empezó esta conversación (el `traza.rol` más reciente dentro de su ventana): el rol se fija al empezar
+ * y no cambia a mitad (spec 2026-10-26, §2.6). Solo se lee si el workspace usa roles. Error = null (manda el de ahora).
+ */
+async function rolPrevioWa(supabase: SupabaseClient, workspaceId: string, phone: string, ventanaHoras: number): Promise<RolTraza | null> {
+  const desde = new Date(Date.now() - ventanaHoras * 3600 * 1000).toISOString();
+  const { data, error } = await supabase.from('wa_conversacion').select('traza')
+    .eq('workspace_id', workspaceId).eq('phone', phone).gte('created_at', desde).not('traza->rol', 'is', null)
+    .order('created_at', { ascending: false }).limit(1);
+  if (error) {
+    console.error('[agente-one] no se pudo leer el rol de la conversación:', error.message);
+    return null;
+  }
+  return rolPrevio((data ?? []) as Array<{ traza?: { rol?: RolTraza | null } | null }>);
 }

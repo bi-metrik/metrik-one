@@ -93,6 +93,8 @@ export interface PuertoOne {
   registrarGasto(p: {
     monto: number; categoria: string; descripcion: string | null; mensajeOriginal: string | null; negocioId: string | null;
     centro: string | null; origen: string | null; mediaId: string | null; ref?: string | null;
+    /** El día del gasto, AAAA-MM-DD (Bogotá). */
+    fecha: string;
   }): Promise<{ id: string; soporte: SoporteGuardado }>;
   /** Deja el soporte (ya subido, `ref`; si no, lo baja de Meta) en el gasto. false = no se pudo (no se escribió nada). */
   adjuntarSoporte(gastoId: string, mediaId: string, ref?: string | null): Promise<boolean>;
@@ -161,6 +163,23 @@ export function permisosDe(rol: string): Permisos {
     default:
       return { escribir: false, ingresos: false, contactos: false, negocios: false, plata: false, gastos: false };
   }
+}
+
+/**
+ * Los permisos desde las funciones `equipo.*` del turno (spec 2026-10-26, §2.6): con las de un cargo
+ * (`cargos.ts`, `FUNCIONES_POR_CARGO`) da exactamente `permisosDe(cargo)`. El motor sigue frenando por permiso al
+ * proponer y al leer: es la tercera llave, detrás de no declarar y de la segunda llave del componedor. Pura.
+ */
+export function permisosDeFunciones(funciones: Iterable<string>): Permisos {
+  const s = new Set(funciones);
+  return {
+    escribir: s.has('equipo.gastos') && s.has('equipo.actividades'),
+    ingresos: s.has('equipo.ingresos'),
+    contactos: s.has('equipo.contactos'),
+    negocios: s.has('equipo.consulta_negocio'),
+    plata: s.has('equipo.ver_plata'),
+    gastos: s.has('equipo.consulta_gastos'),
+  };
 }
 
 // ── Cómo se nombra un negocio ────────────────────────────────────────────────
@@ -264,6 +283,38 @@ export function fechaCorta(iso: string): string {
 /** Hoy en Bogotá (UTC-5), AAAA-MM-DD. Pura. */
 export function fechaHoyBogota(ms: number): string {
   return new Date(ms - 5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+/** «miércoles 21-oct» desde «2026-10-21». Pura. */
+export function fechaConDia(iso: string): string {
+  return `${DIAS_SEMANA[new Date(`${iso}T12:00:00Z`).getUTCDay()]} ${fechaCorta(iso)}`;
+}
+
+/**
+ * Hasta cuántos días atrás se registra un gasto por el chat. Un gasto que se reporta tarde es de la semana o del mes
+ * pasado; uno de hace más de 90 días casi siempre es un año o un mes mal deducido (y, si de verdad es tan viejo, toca
+ * periodos que contabilidad ya pudo cerrar): ese se registra en la app.
+ */
+export const DIAS_ATRAS_GASTO = 90;
+
+/**
+ * La fecha del gasto: la que dedujo el modelo de lo que dijo la persona (AAAA-MM-DD) o, sin fecha, hoy en Bogotá (caso
+ * real 2026-10-26: «se ejecutó el miércoles de la semana pasada» quedó con la fecha de hoy). Ni futura ni de hace más de
+ * `DIAS_ATRAS_GASTO` días. Pura.
+ */
+export function fechaDelGasto(dicha: unknown, ahoraMs: number): { fecha: string } | { error: string } {
+  const hoy = fechaHoyBogota(ahoraMs);
+  const f = String(dicha ?? '').trim();
+  if (!f) return { fecha: hoy };
+  const ms = Date.parse(`${f}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || !Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 10) !== f) {
+    return { error: `La fecha «${f}» no es una fecha AAAA-MM-DD. Sácala de lo que dijo la persona y de «Ahora» del Estado (hoy es ${hoy}); si no dijo fecha, déjala vacía.` };
+  }
+  if (f > hoy) return { error: `La fecha ${f} es futura (hoy es ${hoy}): un gasto se registra cuando ya se hizo. Revisa el día que dijo la persona o pregúntalo.` };
+  const tope = new Date(Date.parse(`${hoy}T00:00:00Z`) - DIAS_ATRAS_GASTO * 86_400_000).toISOString().slice(0, 10);
+  if (f < tope) return { error: `La fecha ${f} es de hace más de ${DIAS_ATRAS_GASTO} días (hoy es ${hoy}). Si la dedujiste mal, corrígela; si de verdad es tan vieja, dilo: ese gasto se registra en la app.` };
+  return { fecha: f };
 }
 
 /** El nombre de una empresa sin tildes, puntuación ni sufijo societario («Empresa de Prueba S.A.S.» → «empresa de prueba»). Pura. */
@@ -427,28 +478,36 @@ const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
  * ¿El gasto de empresa tiene de dónde salir? (2026-10-21: en el arnés el modelo lo puso por su cuenta cuando no
  * encontró el negocio, y una vez apuntó `empresa_dicho_en` a «Bebidas de 20000»). `#n` tiene que ser una respuesta de la
  * persona a la pregunta del destino que armó el código (`preguntar_destino`, con su opción «Gasto de empresa»): el toque
- * de esa opción, o el escrito/audio que la CONTESTA (la última lista, el primer mensaje después; qué dice lo lee el modelo). Si la persona dijo «de
- * empresa» antes de cualquier lista, el bot pregunta el destino y ella toca la opción: un paso más, a cambio de que
- * nadie registre a empresa por suposición. Estructural: no lee el texto de la persona. Pura.
+ * de esa opción, o un escrito/audio posterior a esa lista que lo DICE («empresa», «ninguno», «sin negocio» o el número
+ * de la opción). Si la persona dijo «de empresa» antes de cualquier lista, el bot pregunta el destino y ella toca la
+ * opción: un paso más, a cambio de que nadie registre a empresa por suposición.
+ *
+ * Antes valía el primer mensaje después de la lista, dijera lo que dijera, y ningún otro (caso real 2026-10-26, gasto
+ * de Resend: la persona contestó la lista con «se realizó el día de ayer», el modelo apuntó ahí y salió «Gasto de
+ * empresa» sin que nadie lo dijera; luego dijo «sería un gasto de empresa» y el candado lo rechazó por no ser el primero,
+ * y le volvió a mostrar la lista). Lee el texto solo para eso: que la persona haya dicho empresa. Pura.
  */
 export function empresaDicha(filas: FilaConversacion[], v: unknown): boolean {
   const n = numeroDeFila(v);
   const f = n ? filas[n - 1] : undefined;
   if (!f || f.direccion !== 'entrante' || f.clase === 'reenvio') return false;
-  // La lista del destino tiene que ser la ÚLTIMA antes de `#n` y `#n` el PRIMER mensaje de la persona después de ella: la
-  // respuesta a ESA pregunta. Antes bastaba con cualquier lista anterior, ya contestada (arnés real del 2026-10-22,
-  // r-t-gasolina: la lista del gasto de 90.000 se contestó tocando E1 26 1, y dos gastos después «Gasto de 18900 sin
-  // mas…» pasó como respaldo de un gasto de empresa que nadie pidió; Mauricio tocó Registrar).
+  // La lista del destino tiene que ser la ÚLTIMA antes de `#n`: una lista ya superada por otra no respalda nada (arnés
+  // real del 2026-10-22, r-t-gasolina: «Gasto de 18900 sin mas…» dos gastos después pasó como respaldo).
   let l = -1;
   for (let i = n! - 2; i >= 0; i--) {
     const x = filas[i];
     if (x.direccion === 'saliente' && (x.opciones ?? []).some((o) => o.id.startsWith('ag|c|'))) { l = i; break; }
   }
-  if (l < 0 || !(filas[l].opciones ?? []).some((o) => o.id.startsWith('ag|c|') && o.titulo === OPCION_EMPRESA)) return false;
-  if (filas.slice(l + 1, n! - 1).some((x) => x.direccion === 'entrante')) return false;
-  if (f.clase === 'toque') return (f.texto ?? '').trim() === OPCION_EMPRESA;
-  return ['escrito', 'audio', 'imagen'].includes(f.clase);
+  const opciones = l < 0 ? [] : (filas[l].opciones ?? []).filter((o) => o.id.startsWith('ag|c|'));
+  const k = opciones.findIndex((o) => o.titulo === OPCION_EMPRESA);
+  if (k < 0) return false;
+  const texto = (f.texto ?? '').trim();
+  if (f.clase === 'toque') return texto === OPCION_EMPRESA;
+  if (!['escrito', 'audio', 'imagen'].includes(f.clase)) return false;
+  return DICE_EMPRESA.test(texto) || texto === String(k + 1);
 }
+
+const DICE_EMPRESA = /empresa|\bning[uú]n[oa]?\b|sin negocio/i;
 
 /** ¿El teléfono está escrito por el equipo en la conversación? (solo dígitos; el valor tiene que existir). Pura. */
 export function telefonoEnLaConversacion(filas: FilaConversacion[], telefono: string): boolean {
@@ -557,6 +616,7 @@ const DATOS_PROPONER_ONE: Record<string, unknown> = {
   empresa: { type: 'boolean', description: 'gasto: true si es gasto de empresa (sin negocio). Solo si la persona lo dijo o lo eligió.' },
   empresa_dicho_en: { type: 'string', description: 'gasto de empresa: el #n del mensaje de la persona donde lo dijo o donde tocó «Gasto de empresa».' },
   categoria: { type: 'string', enum: categorias, description: 'gasto: la deduces del concepto; sin concepto, otros.' },
+  fecha: { type: 'string', description: 'gasto: el día en que se hizo, AAAA-MM-DD, si la persona dijo uno («ayer», «el miércoles de la semana pasada», «el 3»): lo calculas con «Ahora» del Estado. Vacío si no dijo fecha (queda hoy).' },
   descripcion: { type: 'string', description: 'gasto: el concepto con las palabras de la persona, corto, sin el monto ni el negocio. Vacío si no dijo concepto.' },
   soporte: { type: 'string', description: 'gasto / corregir_gasto / ingreso: el #n de la foto o el PDF del recibo o del comprobante, si llegó uno. adjuntar_soporte: ese #n.' },
   gasto: { type: 'string', description: 'adjuntar_soporte / corregir_gasto: el gasto (G1, G2… del Estado, o el id que devolvió gastos_recientes para uno de otro momento).' },
@@ -570,6 +630,16 @@ const DATOS_PROPONER_ONE: Record<string, unknown> = {
   telefono: { type: 'string', description: 'contacto_nuevo: el celular, solo si la persona lo escribió.' },
   cargo: { type: 'string', description: 'contacto_nuevo: el cargo o el rol, si lo dijo.' },
   decisor: { type: 'boolean', description: 'contacto_nuevo: true si es quien decide la compra (dueño, gerente, arquitecto a cargo).' },
+};
+
+/** Qué propiedades de `datos` usa cada acción (el componedor declara solo las de las acciones del rol). */
+export const DATOS_POR_ACCION_ONE: Record<string, string[]> = {
+  gasto: ['monto', 'negocio', 'empresa', 'empresa_dicho_en', 'categoria', 'descripcion', 'fecha', 'soporte'],
+  adjuntar_soporte: ['soporte', 'gasto', 'monto_distinto'],
+  corregir_gasto: ['monto', 'soporte', 'gasto'],
+  ingreso: ['monto', 'negocio', 'soporte', 'cuota', 'parcial'],
+  actividad: ['negocio', 'tipo', 'texto', 'nota'],
+  contacto_nuevo: ['nombre', 'telefono', 'cargo', 'decisor'],
 };
 
 type Resultado<T> = { ok: true; v: T } | { ok: false; error: string; candado: string; respaldo?: unknown };
@@ -586,9 +656,13 @@ export const VENTANA_ADJUNTOS_ONE_MS = 5000;
 const PREPARAR_DESDE_MS = 60 * 60 * 1000;
 const PREPARAR_MAX = 4;
 
-/** `empresa`: el nombre del workspace (para reconocer un depósito a su propia cuenta). */
-export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null; empresa?: string | null }): Dominio {
-  const permisos = permisosDe(o.rol);
+/**
+ * `empresa`: el nombre del workspace (para reconocer un depósito a su propia cuenta). `funciones`: las funciones
+ * `equipo.*` del turno (un cargo o un rol, `cargos.ts`); con ellas los permisos salen de las funciones, sin ellas, del
+ * cargo (`permisosDe`, como siempre). Este dominio declara todo: lo que ve el modelo lo recorta el componedor.
+ */
+export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => number; lector?: Lector | null; empresa?: string | null; funciones?: Iterable<string> }): Dominio {
+  const permisos = o.funciones ? permisosDeFunciones(o.funciones) : permisosDe(o.rol);
   const ahora = o.ahora ?? (() => Date.now());
   // Baja, sube y lee los soportes recientes que todavía no se prepararon (`../adjuntos.ts`, común con la bandeja).
   const prepararTurno = preparadorDeAdjuntos(puerto, {
@@ -710,6 +784,9 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     if (!Number.isFinite(monto) || monto <= 0) return { ok: false, error: 'Falta el monto (un número mayor que cero). Pregúntalo si la persona no lo dijo.', candado: 'monto' };
     const categoria = String(d.categoria ?? '');
     if (!categorias.includes(categoria)) return { ok: false, error: `Categoría inválida. Usa una de: ${categorias.join(', ')}.`, candado: 'categoria' };
+    const f = fechaDelGasto(d.fecha, ahora());
+    if ('error' in f) return { ok: false, error: f.error, candado: 'fecha' };
+    const fecha = f.fecha;
     const codigo = String(d.negocio ?? '').trim();
     const deEmpresa = d.empresa === true;
     if (!codigo && !deEmpresa) return { ok: false, error: 'Falta el destino: llama `preguntar_destino` (el sistema manda la lista). No lo supongas ni armes tú la lista.', candado: 'sin_destino' };
@@ -747,6 +824,8 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     const resumen = [
       `💰 Gasto de ${formatCOP(monto)} · ${CATEGORIA_LABELS[categoria] ?? categoria}`,
       destino,
+      // La fecha siempre a la vista, también la de hoy: es la única forma de ver una mal deducida antes del toque.
+      `📅 ${fecha === fechaHoyBogota(ahora()) ? 'Hoy, ' : ''}${fechaConDia(fecha)}`,
       ...(descripcion ? [`📝 ${corto(descripcion, 200)}`] : []),
       foto ? lineaSoporte(foto) : '📎 Sin soporte todavía',
       // El soporte dice otro monto: se ve en el resumen, nunca se adjunta callado.
@@ -759,7 +838,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       v: {
         accion: 'gasto',
         datos: {
-          monto, categoria, descripcion, negocio_id: negocio?.id ?? null, negocio: negocio?.codigo ?? null,
+          monto, categoria, descripcion, fecha, negocio_id: negocio?.id ?? null, negocio: negocio?.codigo ?? null,
           etiqueta: negocio ? nombreNegocio(negocio) : 'Gasto de empresa', foto: foto?.fila ?? null, media_id: foto?.mediaId ?? null,
           ...(foto ? { ref: foto.ref, tipo_soporte: foto.tipo } : {}),
           // `mensaje_original` NO va aquí: cambia con cada mensaje y la misma propuesta dejaría de ser «la misma»
@@ -1006,6 +1085,8 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
         mensajeOriginal: ultimoTextoDelEquipo(ctx.conversacion), negocioId: (d.negocio_id as string | null) ?? null,
         centro: (d.centro as string | null) ?? null, origen: (d.origen as string | null) ?? null, mediaId: (d.media_id as string | null) ?? null,
         ref: (d.ref as string | null) ?? null,
+        // Una propuesta de antes de este cambio no trae fecha: hoy, como entonces.
+        fecha: typeof d.fecha === 'string' ? d.fecha : fechaHoyBogota(ahora()),
       });
       const lineas = [
         `✅ Gasto de ${formatCOP(Number(d.monto))} registrado · ${String(d.etiqueta)}`,

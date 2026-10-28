@@ -712,16 +712,42 @@ const OTRO: DefinicionRanura = {
   ],
 }
 
+/**
+ * «Paquete de bloqueo» (Trappvel, brief del 2026-10-27): en un viaje en BLOQUEO cada opción es UN
+ * paquete del operador —hotel + vuelo en fechas cerradas, un valor por persona— armado con DOS
+ * pantallazos que la asesora une en el mismo paquete (`bloqueo-paquete.ts`). Su lectura NO pasa por
+ * este contrato: tiene su propio lector (`bloqueo-extraccion.ts`), porque trae una tabla de precios por
+ * acomodación y la fila de íconos de lo que incluye. Los campos de aquí solo nombran la ranura.
+ *
+ * ⚠️ Solo lo escribe la cotización por pasos de un viaje en bloqueo: fuera de los botones de siempre y
+ * de la detección. Los sinónimos son estrechos a propósito: un grupo libre «paquete» de una cotización
+ * vieja NO se vuelve ranura.
+ */
+const PAQUETE: DefinicionRanura = {
+  slug: 'paquete_detalle',
+  label: 'Paquete de bloqueo',
+  grupos: ['paquete de bloqueo', 'paquetes de bloqueo'],
+  queSePide: 'Dos pantallazos que van juntos: el del hotel (con la tabla de precios por persona) y el del vuelo.',
+  queNoSirve: 'Pantallazos de hotel y vuelo de paquetes distintos en el mismo paquete.',
+  unidadPorDefecto: 'paquete',
+  campos: [
+    { slug: 'nombre', label: 'Hotel', tipo: 'texto', min: true, descripcion_ai: 'Nombre del hotel del paquete.' },
+    MONEDA,
+    PRECIO_TOTAL,
+  ],
+}
+
 const RANURAS: Record<string, DefinicionRanura> = {
   [VUELO.slug]: VUELO,
   [HOTEL.slug]: HOTEL,
   [ACTIVIDAD.slug]: ACTIVIDAD,
   [TRASLADO.slug]: TRASLADO,
   [OTRO.slug]: OTRO,
+  [PAQUETE.slug]: PAQUETE,
 }
 
 /** Las ranuras que solo escribe la cotización por pasos: fuera de los botones de siempre. */
-const SOLO_POR_PASOS: ReadonlySet<string> = new Set([OTRO.slug])
+const SOLO_POR_PASOS: ReadonlySet<string> = new Set([OTRO.slug, PAQUETE.slug])
 
 /** ¿Esta ranura solo la escribe la cotización por pasos («Otro servicio»)? */
 export function ranuraSoloPorPasos(ranura: Pick<DefinicionRanura, 'slug'> | null | undefined): boolean {

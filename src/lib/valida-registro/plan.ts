@@ -174,6 +174,55 @@ export interface PlanAbierto {
   hasta: string
   vence_en: string
   abierto_at: string
+  /**
+   * La pasarela REVERSÓ el pago que abrió este ciclo (`reverso-pasarela-servidor.ts`). Desde el
+   * 2026-10-27 (decisión de Mauricio, condiciones de Emilio) el reverso CIERRA el plan en Valida en el
+   * acto (`corte`, ver `corte-reverso-servidor.ts`), salvo que otro pago válido cubra la cuota. El ciclo
+   * siguiente, pagado (o el pago de reactivación, `recobro_cobro_id`), reemplaza el plan entero y la
+   * marca se va con él. Una marca sin `corte` es de antes de esa decisión: no suspende nada.
+   */
+  reversado?: { at: string; referencia_pago: string; corte?: CorteReverso; recobro_cobro_id?: string }
+}
+
+/**
+ * El cierre del ciclo en Valida por el reverso de su pago (`POST /autogestion/{cliente}/ciclos/anular`).
+ *   - `pendiente`: Valida no respondió (o falló); lo reintenta el cron (paso 7f).
+ *   - `anulado`: Valida cerró el ciclo. Es la suspensión que ve el cliente en `/valida`.
+ *   - `no_aplica`: otro pago válido cubre la cuota (un cobro duplicado o indebido que MéTRIK reversó):
+ *     el plan NO se corta (condición de Emilio).
+ *   - `final`: Valida respondió algo que no se arregla reintentando (404, 409 ciclo_reemplazado, 422) o
+ *     se agotaron los intentos. Queda para una persona.
+ */
+export interface CorteReverso {
+  estado: 'pendiente' | 'anulado' | 'no_aplica' | 'final'
+  /** Lo reversado (pesos): va en el correo y en la pantalla. */
+  monto: number
+  intentos: number
+  detalle?: string
+  ultimo_intento_at?: string
+  /** El instante del corte según Valida (`anulado_en`). */
+  anulado_en?: string
+  /** El correo al cliente (una vez, el mismo día del corte). */
+  aviso_cliente?: { estado: 'enviado' | 'fallido' | 'retenido' | 'vencido'; at: string; error?: string }
+}
+
+/**
+ * ¿El plan tiene un corte por reverso VIGENTE (hecho o por hacer en Valida)? Mientras lo tenga, nada se
+ * le cobra solo a la tarjeta (paso 7b): cobrarle a quien reversó invita a otro contracargo (Mik,
+ * 2026-10-27). El pago de reactivación abre un ciclo nuevo, que reemplaza `valida_plan` y lo levanta.
+ */
+export function corteVigente(configExtra: Record<string, unknown> | null | undefined): boolean {
+  const e = planDeConfig(configExtra)?.reversado?.corte?.estado
+  return e === 'pendiente' || e === 'anulado'
+}
+
+/** El plan suspendido por el reverso de su pago (corte hecho en Valida), o `null`. */
+export function planSuspendidoPorReverso(
+  configExtra: Record<string, unknown> | null | undefined,
+): (PlanAbierto & { reversado: NonNullable<PlanAbierto['reversado']> & { corte: CorteReverso } }) | null {
+  const plan = planDeConfig(configExtra)
+  if (!plan?.reversado?.corte || plan.reversado.corte.estado !== 'anulado') return null
+  return plan as PlanAbierto & { reversado: NonNullable<PlanAbierto['reversado']> & { corte: CorteReverso } }
 }
 
 export function planDeConfig(configExtra: Record<string, unknown> | null | undefined): PlanAbierto | null {
@@ -190,6 +239,15 @@ export function planDeConfig(configExtra: Record<string, unknown> | null | undef
 export function abreCiclo(p: { cuotaNumero: number; planActual: PlanAbierto | null }): boolean {
   if (!p.planActual) return true
   return p.cuotaNumero > p.planActual.cuota_numero
+}
+
+/** `config_extra` con la marca del reverso en el ciclo abierto (el resto, tal cual). */
+export function configConCicloReversado(
+  configExtra: Record<string, unknown>,
+  plan: PlanAbierto,
+  marca: NonNullable<PlanAbierto['reversado']>,
+): Record<string, unknown> {
+  return { ...configExtra, valida_plan: { ...plan, reversado: marca } }
 }
 
 /** `config_extra` después de abrir el ciclo: sin `valida_prueba`, con `valida_plan`. */

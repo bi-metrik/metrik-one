@@ -157,7 +157,7 @@ export async function guardarExperienciaAction(e: DatosExperiencia): Promise<Res
       p_ficha: {
         nombre: e.nombre.trim(), titulo_oferta: libre(e.titulo_oferta), frase_gancho: libre(e.frase_gancho), intro: libre(e.intro),
         que_incluye: incluye.length ? incluye : null, emojis_tema: libre(e.emojis_tema), saludo_grupo: libre(e.saludo_grupo),
-        relato_grupo: libre(e.relato_grupo), edad_minima: e.edad_minima,
+        relato_grupo: libre(e.relato_grupo), edad_minima: e.edad_minima, puerta_cerrada: e.puerta_cerrada === true,
       },
     },
     ['/funciones'],

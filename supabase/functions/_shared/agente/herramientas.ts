@@ -47,10 +47,9 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
     const reglas = fichasDeHerramienta(r, c.name);
     return reglas.length ? { ...c, description: `${c.description}\nReglas:\n${reglas.join('\n')}` } : c;
   });
-  return [
-    ...d.lecturas,
-    ...cierres,
-    {
+  // Un rol sin acciones (un contador, solo consultas) no recibe `proponer`: un enum vacío no es una herramienta
+  // (spec 2026-10-26, §2.6: lo que el rol no tiene no existe para el modelo).
+  const proponer: DeclaracionHerramienta[] = d.acciones.length ? [{
       name: 'proponer',
       description: [
         'La única puerta para escribir en ONE, y no escribe: el sistema arma un resumen con datos reales y lo manda con botones; se ejecuta solo si la persona toca «sí». Cierra el turno: no redactes después.',
@@ -70,7 +69,11 @@ export function declaraciones(d: Dominio, r: Reglamento): DeclaracionHerramienta
         },
         required: ['accion', 'datos'],
       },
-    },
+    }] : [];
+  return [
+    ...d.lecturas,
+    ...cierres,
+    ...proponer,
     {
       name: 'responder',
       description: 'Lo que le llega a la persona. Texto corto (máximo 600 caracteres). Con 2 o 3 salidas cerradas, ponlas en `opciones` (botones, título de hasta 20 caracteres); para elegir entre 4 y 10 cosas, también (lista: título de hasta 24, descripción de hasta 72). Más de 10, no. Las `opciones` son para elegir, no para confirmar: los botones que escriben en ONE (cargar, anotar, abrir, descartar) solo los pone el sistema con `proponer`; nunca los imites aquí ni mandes a tocar los de otro mensaje.',

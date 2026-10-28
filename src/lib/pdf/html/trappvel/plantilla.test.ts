@@ -1,11 +1,13 @@
 /**
  * La plantilla HTML de la propuesta de Trappvel, sin navegador: lo que el HTML dice y lo que NO
- * puede decir (decisiones de Mauricio del 2026-10-14).
+ * puede decir (decisiones de Mauricio del 2026-10-14), y el formato de Edgar del 2026-10-14
+ * adaptado a cotización (decisión del 2026-10-27).
  */
 import { describe, expect, it } from 'vitest'
 import { ENTRADA_EUROPA, PRECIO_E, PRECIO_P, PRECIO_R, PROPS_EUROPA } from '../../../../../test/propuesta-europa'
+import { ENTRADA_CURAZAO, PRECIO_CUR_P, PRECIO_CUR_R, TERMINOS_CURAZAO } from '../../../../../test/propuesta-curazao'
 import { modeloDePropuesta, type EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { esc, htmlDePropuesta, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
+import { bloquesDeTerminos, esc, fotosDePortada, htmlDePropuesta, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
 
 const RECURSOS: RecursosPropuesta = {
   foto: (url) => (url ? { src: `data:image/jpeg;base64,FOTO`, foco: null } : null),
@@ -14,9 +16,14 @@ const RECURSOS: RecursosPropuesta = {
   marca: 'Agencia de ejemplo',
 }
 
-const html = (e: EntradaModeloPropuesta = ENTRADA_EUROPA) => htmlDePropuesta(modeloDePropuesta(e), RECURSOS)
+const html = (e: EntradaModeloPropuesta = ENTRADA_EUROPA, r: RecursosPropuesta = RECURSOS) => htmlDePropuesta(modeloDePropuesta(e), r)
 /** Sin etiquetas, para buscar frases como las lee el cliente. */
 const texto = (h: string) => h.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ')
+/** El HTML de una sección, por su título. */
+const seccionDe = (doc: string, titulo: string) => {
+  const i = doc.indexOf(`>${titulo}<`)
+  return doc.slice(i, doc.indexOf('</section>', i))
+}
 
 describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
   const h = html()
@@ -31,23 +38,29 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
     expect(iR).toBeLessThan(iP)
   })
 
-  it('las secciones del prototipo v5', () => {
-    for (const s of ['Lo que van a vivir', 'Así se ve cada día', 'Dónde duermen', 'Vuelos', 'Trenes y traslados', 'Planes para los días libres', 'Elijan su versión', 'Qué incluye y cuándo se paga', 'Términos y condiciones']) {
-      expect(t).toContain(s)
-    }
+  it('las secciones del formato de Edgar, en su orden, y la hoja de precios al final', () => {
+    const orden = ['Vuelos y tren', 'Hospedaje', 'Traslados', 'Itinerario día a día', 'Planes para los días libres', 'Información útil', 'Elijan su versión', 'Cuánto pagan y cuándo', 'Qué incluye y condiciones']
+    const posiciones = orden.map((s) => h.indexOf(`>${s}<`))
+    expect(posiciones.every((p) => p > -1)).toBe(true)
+    expect([...posiciones].sort((a, b) => a - b)).toEqual(posiciones)
     // 14 días de viaje, una tarjeta por día.
     expect((h.match(/<div class="day">/g) ?? []).length).toBe(14)
+    // Las del prototipo v5 que el formato de Edgar no tiene ya no salen.
+    expect(t).not.toContain('Lo que van a vivir')
+    expect(h).not.toContain('class="route"')
   })
 
-  it('saltos: la tabla de vuelos fluye detrás de los hoteles; solo cada tramo no se parte', () => {
-    const vuelos = h.slice(h.indexOf('>Vuelos<'), h.indexOf('</section>', h.indexOf('>Vuelos<')))
-    // La tabla entera con «nobr» saltaba de hoja y dejaba 3/4 de página en blanco.
-    expect(vuelos).not.toMatch(/<table class="nobr"/)
-    expect(vuelos).toContain('<thead>')
-    // Ida y regreso: dos bloques que no se parten.
-    expect((vuelos.match(/<tbody class="nobr">/g) ?? []).length).toBe(2)
-    const trenes = h.slice(h.indexOf('>Trenes y traslados<'))
-    expect(trenes.slice(0, trenes.indexOf('</table>'))).not.toMatch(/<table class="nobr"/)
+  it('carta, Inter y Poppins, los colores de Edgar', () => {
+    expect(h).toContain('@page { size: Letter;')
+    expect(h).toMatch(/h2 \{ font: 700 15\.7pt\/1\.1 Poppins/)
+    expect(h).toContain('--rosa:#e6197a')
+    expect(h).toContain('--morado:#7b2fbe')
+    expect(h).toContain('--ink:#1f2340')
+  })
+
+  it('una cotización no dice lo de un itinerario confirmado', () => {
+    expect(t).toContain('Propuesta de viaje · COT-2026-0026')
+    expect(t).not.toMatch(/confirmad|localizador|e-ticket|realizado|conf\. hotel/i)
   })
 
   it('léxico: «Premium» se le dice «Superior» al cliente', () => {
@@ -69,9 +82,12 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
     expect(h).not.toMatch(/bold\.co|checkout|link de pago/i)
   })
 
-  it('los trenes van aparte de los traslados', () => {
-    const tabla = h.slice(h.indexOf('Trenes y traslados'))
-    expect((tabla.match(/<b>[^<]*(AVE|TGV|Eurostar)[^<]*<\/b>/g) ?? []).length).toBe(3)
+  it('los trenes van en «Vuelos y tren», como tarjetas, y no en los traslados', () => {
+    const vuelos = seccionDe(h, 'Vuelos y tren')
+    expect((vuelos.match(/<span class="bd" style="background:#5a2a82;color:#fff">Tren<\/span>/g) ?? []).length).toBe(3)
+    expect(texto(vuelos)).toContain('AVE 03071 Renfe')
+    expect(texto(vuelos)).toContain('MADRID ATOCHA')
+    expect(seccionDe(h, 'Traslados')).not.toMatch(/AVE|TGV|Eurostar/)
   })
 
   it('el texto revisado del cliente sale; los datos de la agencia son los del pie', () => {
@@ -81,13 +97,175 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
   })
 })
 
+describe('portada como la de Edgar', () => {
+  it('collage de hasta 4 fotos: la de portada, las de ciudad y, si faltan, las de los hoteles de la Recomendada', () => {
+    const m = modeloDePropuesta(ENTRADA_CURAZAO)
+    const r: RecursosPropuesta = {
+      ...RECURSOS,
+      foto: (url) => (url ? { src: `data:${url.split('/').pop()}`, foco: null } : null),
+    }
+    // Sin foto de portada ni de ciudad: primero el hotel de la Recomendada, después el de la Superior.
+    expect(fotosDePortada(m, r).map((f) => f.src)).toEqual(['data:parkplaza.jpg', 'data:pullman.jpg'])
+    const conCiudad = { ...r, fotoDeCiudad: () => ({ src: 'data:ciudad', foco: null }) }
+    expect(fotosDePortada(m, conCiudad).map((f) => f.src)).toEqual(['data:ciudad', 'data:parkplaza.jpg', 'data:pullman.jpg'])
+    const h = htmlDePropuesta(m, conCiudad)
+    expect(h).toContain('<div class="fotos" style="grid-template-columns:repeat(3,1fr)">')
+    // Nunca más de cuatro.
+    expect(fotosDePortada(modeloDePropuesta(ENTRADA_EUROPA), { ...r, fotoDeCiudad: (c) => ({ src: `data:${c}`, foco: null }) })).toHaveLength(4)
+  })
+
+  it('sin ninguna foto, la banda queda con el degradado (sin collage)', () => {
+    const h = html(ENTRADA_CURAZAO, { ...RECURSOS, foto: () => null })
+    expect(h).toContain('<div class="hero conaviso"><div class="in">')
+    expect(h).not.toContain('class="fotos"')
+  })
+
+  it('el aviso lleva el texto revisado; sin él, no hay aviso', () => {
+    const h = html(ENTRADA_CURAZAO)
+    expect(texto(h)).toContain('Propuesta de viaje para Andrés de la Torre 5 noches en Willemstad con todo incluido.')
+    const m = modeloDePropuesta(ENTRADA_CURAZAO)
+    m.portada.intro = null
+    const sinIntro = htmlDePropuesta(m, RECURSOS)
+    expect(sinIntro).not.toContain('class="aviso"')
+    expect(sinIntro).toContain('<div class="hero">')
+  })
+
+  it('las 4 tarjetas rosadas y una ficha por viajero con sus iniciales (los menores sin autorización no salen)', () => {
+    const h = html(ENTRADA_CURAZAO)
+    expect(h).toContain('<div class="facts" style="grid-template-columns:repeat(4,1fr)">')
+    expect(texto(h.slice(h.indexOf('<div class="facts"'), h.indexOf('<div class="viajeros"')))).toBe(
+      ' Duración 6 días · 5 noches Destinos Willemstad (5N) Viajeros 2 adultos y 1 niño Cotizada para Andrés de la Torre ',
+    )
+    expect(h).toContain('<div class="vj"><i>AN</i><b>Ana</b></div>')
+    expect(h).toContain('<div class="vj"><i>LU</i><b>Luis</b></div>')
+    expect(texto(h)).not.toContain('Tomás')
+  })
+})
+
+describe('a quién va dirigida (Mauricio, 2026-10-27)', () => {
+  const facts = (h: string) => texto(h.slice(h.indexOf('<div class="facts"'), h.indexOf('<div class="viajeros"')))
+  const aviso = (h: string) => texto(h.slice(h.indexOf('<div class="aviso"'), h.indexOf('<div class="facts"')))
+
+  it('con contacto: el aviso y la cuarta tarjeta lo nombran con nombre propio, no a los pasajeros', () => {
+    const h = html(ENTRADA_CURAZAO)
+    expect(aviso(h)).toContain('Propuesta de viaje para Andrés de la Torre')
+    expect(aviso(h)).not.toContain('Ana y Luis')
+    expect(facts(h)).toContain('Cotizada para Andrés de la Torre')
+    expect(facts(h)).not.toContain('Incluye')
+    // Persona natural con el mismo nombre: la empresa no se repite.
+    expect(texto(h)).not.toMatch(/ANDRÉS|Andrés de la Torre · /)
+  })
+
+  it('persona jurídica: el contacto y la empresa, tal como está guardada', () => {
+    const h = html({ ...ENTRADA_CURAZAO, cliente: { contacto: 'ana gómez', empresa: 'Viajes XYZ S.A.S.', tipoPersona: 'juridica' } })
+    expect(aviso(h)).toContain('Propuesta de viaje para Ana Gómez · Viajes XYZ S.A.S.')
+    expect(facts(h)).toContain('Cotizada para Ana Gómez · Viajes XYZ S.A.S.')
+  })
+
+  it('sin contacto: el aviso vuelve a los pasajeros y la cuarta tarjeta a «Incluye»', () => {
+    const h = html({ ...ENTRADA_CURAZAO, cliente: { contacto: null, empresa: 'Viajes XYZ S.A.S.', tipoPersona: 'juridica' } })
+    expect(aviso(h)).toContain('Propuesta de viaje para Ana y Luis')
+    expect(facts(h)).toContain('Incluye Vuelos, 5 noches y 2 traslados')
+    expect(facts(h)).not.toContain('Cotizada para')
+    const sinCliente = html({ ...ENTRADA_CURAZAO, cliente: undefined })
+    expect(facts(sinCliente)).toContain('Incluye Vuelos, 5 noches y 2 traslados')
+  })
+})
+
+describe('COT-2026-0004 de muestra (dos versiones, mismos vuelos)', () => {
+  const h = html(ENTRADA_CURAZAO)
+  const t = texto(h)
+
+  it('un vuelo una sola vez aunque lo lleven las dos versiones: sin etiqueta, «iguales en todas»', () => {
+    const v = seccionDe(h, 'Vuelos')
+    expect((v.match(/<div class="vc">/g) ?? []).length).toBe(2)
+    expect(v).not.toContain('class="tag')
+    expect(texto(v)).toContain('Iguales en todas las versiones.')
+    // Origen, hora, fecha, línea, destino y la tarifa a la derecha; el equipaje debajo.
+    expect(texto(v)).toContain('Avianca AV92 BOG 07:30 Jue 26 nov Vuelo directo CUR 10:30 Jue 26 nov Tarifa Light Standard economy Artículo personal + equipaje de mano')
+  })
+
+  it('el título de «Vuelos» va pegado a la primera tarjeta', () => {
+    expect(h).toMatch(/<div class="nobr"><div class="sh">[\s\S]*?>Vuelos<[\s\S]*?<\/div><\/div><\/div>\n<div class="vc">/)
+    expect(h).toMatch(/\.vc \{[^}]*break-inside: avoid/)
+  })
+
+  it('hospedaje: tarjeta por hotel con su versión, estrellas sobre la foto y la tabla clave/valor sin datos inventados', () => {
+    const s = seccionDe(h, 'Hospedaje')
+    expect((s.match(/<div class="hc">/g) ?? []).length).toBe(2)
+    expect(s).toContain('<span class="tags"><span class="tag tR">Recomendada</span></span><span class="stars">★★★</span>')
+    expect(s).toContain('<span class="tag tP">Superior</span>')
+    expect(texto(s)).toContain('Kunuku Resort All Inclusive Curacao Willemstad')
+    expect(texto(s)).toContain('Estancia 26 nov – 1 dic (5 noches) Habitación Doble, una cama doble, no fumadores Régimen Todo incluido')
+    expect(texto(s)).not.toMatch(/Dirección|Teléfono|Localizador/)
+    // Dos tarjetas por fila, y la primera fila va con el título.
+    expect(h).toContain('<div class="nobr"><div class="sh"><div class="sq"><svg class="ic" viewBox="0 0 24 24"><use href="#bed"/>')
+    expect((s.match(/<div class="hg">/g) ?? []).length).toBe(1)
+  })
+
+  it('traslados en filas: «fecha · trayecto» y el servicio', () => {
+    expect(texto(seccionDe(h, 'Traslados'))).toContain('26 nov · Aeropuerto Hato → hotel Compartido, shuttle estándar')
+    expect(texto(seccionDe(h, 'Traslados'))).toContain('1 dic · Hotel → aeropuerto Hato Compartido, shuttle estándar')
+  })
+
+  it('el itinerario: píldora de la ciudad pegada a su día, círculo «DÍA n», fecha larga y hora en morado', () => {
+    const d = seccionDe(h, 'Itinerario día a día')
+    expect((d.match(/class="pill"/g) ?? []).length).toBe(1)
+    expect(d).toMatch(/<div class="nobr"><div class="pill"><span>.*?Willemstad<\/span><\/div>\n<div class="day">/)
+    expect(d).toContain('<div class="dn"><small>DÍA</small>6</div>')
+    expect(texto(d)).toContain('martes 1 de diciembre Regreso a casa')
+    expect(texto(d)).toContain('07:30 Vuelo Bogotá (BOG) → Curazao (CUR)')
+    expect(texto(d)).toContain('Día libre en Willemstad Libre Día abierto para ustedes.')
+  })
+
+  it('los precios siguen a lo anterior: versiones, apartar, cuotas con su total, incluye y términos', () => {
+    const i = h.indexOf('<section class="sec precios">')
+    expect(i).toBeGreaterThan(-1)
+    const p = h.slice(i)
+    const tp = texto(p)
+    expect(tp).toContain(pesos(PRECIO_CUR_R))
+    expect(tp).toContain(pesos(PRECIO_CUR_P))
+    expect(tp).toContain('¿Les gusta? Escríbannos y se lo apartamos.')
+    // El total va en la misma tabla que las cuotas, dentro de un bloque que no se parte.
+    const pagos = p.slice(p.indexOf('>Cuánto pagan y cuándo<'))
+    const tabla = pagos.slice(pagos.indexOf('<table'), pagos.indexOf('</table>'))
+    expect(texto(tabla)).toMatch(/Al confirmar \(anticipo\).*Total \$ 9\.552\.219 \$ 15\.964\.024/)
+    expect(p).toMatch(/<div class="sec nobr"><div class="sh">[\s\S]*?>Cuánto pagan y cuándo</)
+    // Incluye y términos en tarjetas de a tres.
+    expect(tp).toMatch(/Qué incluye y condiciones Incluido en todas .* Condiciones generales .* Medios de pago/)
+    expect(p).toContain('grid-template-columns:repeat(3,1fr)')
+  })
+
+  it('nada de lo que la cotización no tiene', () => {
+    expect(t).not.toMatch(/confirmad|localizador|e-ticket|realizado/i)
+  })
+})
+
+describe('términos en tarjetas', () => {
+  it('un renglón corto sin punto abre una tarjeta; lo demás son sus puntos', () => {
+    expect(bloquesDeTerminos(TERMINOS_CURAZAO)).toEqual([
+      { titulo: 'Condiciones generales', puntos: expect.arrayContaining(['Los servicios que no se tomen no son reembolsables.']) },
+      { titulo: 'Medios de pago', puntos: expect.arrayContaining(['PSE, tarjeta de crédito o link de pago, con un recargo promedio del 3 %.']) },
+    ])
+    expect(bloquesDeTerminos(TERMINOS_CURAZAO)[0].puntos).toHaveLength(3)
+  })
+
+  it('sin títulos, un solo bloque; vacío, nada', () => {
+    expect(bloquesDeTerminos('- Uno.\n- Dos.')).toEqual([{ titulo: null, puntos: ['Uno.', 'Dos.'] }])
+    expect(bloquesDeTerminos(null)).toEqual([])
+    // Un renglón con cifras no es título («Banco 123»), ni el último renglón.
+    expect(bloquesDeTerminos('Cuenta 123\nFin')).toEqual([{ titulo: null, puntos: ['Cuenta 123', 'Fin'] }])
+  })
+})
+
 describe('decisión 3 sin anticipo', () => {
   it('no imprime ninguna cifra para apartar: solo el llamado y el WhatsApp', () => {
     const h = html({ ...ENTRADA_EUROPA, anticipo: null })
     const t = texto(h)
     expect(t).not.toContain('Apártenlo con')
     expect(t).toContain('¿Les gusta? Escríbannos y se lo apartamos.')
-    const cta = h.slice(h.indexOf('<div class="cta'), h.indexOf('</section>', h.indexOf('<div class="cta')))
+    const i = h.indexOf('<div class="cta')
+    const cta = h.slice(i, h.indexOf('<div class="sec nobr">', i))
     expect(cta).not.toMatch(/\$\s?\d/)
     expect(cta).toContain('wa.me/573000000000')
   })
@@ -136,61 +314,75 @@ describe('escape', () => {
   })
 })
 
-describe('«Así se ve cada día» como el prototipo v4', () => {
+describe('«Itinerario día a día» como el de Edgar', () => {
   const h = html()
   const inicio = h.indexOf('class="sec dias"')
   const dias = h.slice(inicio, h.indexOf('</section>', inicio))
-  /** El bloque de un día, por su número («13»). */
+  /** El bloque de un día, por su número («DÍA 4»). */
   const dia = (n: number) => {
-    const i = dias.indexOf(`<div class="d">${n}<small>`)
+    const i = dias.indexOf(`<small>DÍA</small>${n}</div>`)
     const fin = dias.indexOf('<div class="day">', i + 1)
     return dias.slice(i, fin === -1 ? undefined : fin)
   }
 
   it('sin salto de hoja forzado, y el título pegado al primer día (no queda solo al pie de la hoja)', () => {
-    // Con la portada larga de la COT-2026-0026 real, el salto dejaba la hoja 2 con dos tarjetas.
     expect(h).not.toContain('class="sec brk dias"')
     const pegado = dias.slice(dias.indexOf('<div class="nobr">'), dias.indexOf('<div class="day">') + 1)
     expect(dias.indexOf('<div class="nobr">')).toBeGreaterThan(-1)
-    expect(pegado).toContain('Así se ve cada día')
-    expect(dias.indexOf('<div class="nobr">')).toBeLessThan(dias.indexOf('Así se ve cada día'))
+    expect(pegado).toContain('Itinerario día a día')
     expect((dias.match(/<div class="day">/g) ?? []).length).toBe(14)
   })
 
-  it('el número del día grande con «jue · dic» debajo, título y ciudad; sin las píldoras del v5', () => {
-    expect(dia(10)).toContain('<div class="d">10<small>jue · dic</small></div>')
-    expect(texto(dia(10))).toContain('Salida desde Bogotá')
-    expect(texto(dia(14))).toContain('En tren a Barcelona Madrid → Barcelona')
-    expect(dias).not.toContain('class="pill"')
+  it('una píldora por ciudad, cuando cambia, pegada a su día', () => {
+    const pildoras = [...dias.matchAll(/<div class="pill"><span><svg[^>]*><use href="#pin"\/><\/svg>([^<]+)<\/span>/g)].map((x) => x[1])
+    expect(pildoras).toEqual(['Madrid', 'Barcelona', 'París', 'Ámsterdam'])
+    expect((dias.match(/<div class="nobr"><div class="pill">/g) ?? []).length).toBe(4)
   })
 
-  it('las cajitas de las tres versiones SOLO el día de un vuelo', () => {
-    const conCajas = [...dias.matchAll(/<div class="d">(\d+)<small>/g)]
-      .map((x) => Number(x[1]))
-      .filter((n) => dia(n).includes('class="opt3"'))
-    // Sale (10), llega a Madrid (11) y regresa (23). Los hoteles ya no se repiten por día.
-    expect(conCajas).toEqual([10, 11, 23])
-    expect(texto(dia(10))).toContain('Avianca 19:20, directo')
-    expect(texto(dia(10))).toContain('Air France 18:45, vía París')
-    expect(texto(dia(11))).toContain('llega 11:15')
-    expect(texto(dia(23))).toContain('Iberia 06:25, vía Madrid · llega 15:45')
+  it('círculo «DÍA n», la fecha larga en rosa y el título del día', () => {
+    expect(dia(1)).toContain('<div class="df">jueves 10 de diciembre</div>')
+    expect(texto(dia(1))).toContain('Salida desde Bogotá')
+    expect(texto(dia(5))).toContain('Madrid → Barcelona en tren')
+    expect(h).toMatch(/\.day \.dn \{[^}]*border-radius: 50%/)
+  })
+
+  it('las versiones en chips SOLO el día de un vuelo', () => {
+    const conChips = Array.from({ length: 14 }, (_, i) => i + 1).filter((n) => /class="chip"><span class="c/.test(dia(n)))
+    // Sale (1), llega a Madrid (2) y regresa (14). Los hoteles no se repiten por día.
+    expect(conChips).toEqual([1, 2, 14])
+    expect(texto(dia(1))).toContain('Avianca 19:20, directo')
+    expect(texto(dia(1))).toContain('Air France 18:45, vía París')
+    expect(texto(dia(2))).toContain('llega 11:15')
+    expect(texto(dia(14))).toContain('Iberia 06:25, vía Madrid · llega 15:45')
     expect(texto(dias)).not.toContain('Catalonia Puerta del Sol')
   })
 
-  it('un renglón por hecho, en frase: traslados, trenes e incluidas', () => {
-    expect(texto(dia(11))).toContain('al llegar Traslado Aeropuerto Barajas T4 → hotel · privado, van con silla de bebé')
-    expect(texto(dia(14))).toContain('Tren AVE 03071 Renfe, Estándar · Madrid Atocha → Barcelona Sants')
-    expect(texto(dia(12))).toContain('Museo del Prado con guía en español · 2 h. Incluida.')
+  it('un renglón por hecho: la hora o la palabra del hecho a la izquierda, el texto en frase', () => {
+    expect(texto(dia(2))).toContain('Al llegar Traslado Aeropuerto Barajas T4 → hotel · privado, van con silla de bebé')
+    expect(texto(dia(5))).toContain('Tren AVE 03071 Renfe, Estándar · Madrid Atocha → Barcelona Sants')
+    expect(texto(dia(3))).toContain('Incluida Museo del Prado con guía en español · 2 h.')
   })
 
-  it('el día libre propone los planes de su ciudad', () => {
-    expect(texto(dia(13))).toContain('Día libre')
-    expect(texto(dia(13))).toContain('Libre para ustedes. Opcional: Palacio Real de Madrid o Tour del Bernabéu (ver «Planes para los días libres»).')
-    expect(texto(dia(16))).toContain('Opcional: Park Güell con guía o Aquàrium de Barcelona')
+  it('el día libre propone los planes de su ciudad en un chip', () => {
+    expect(texto(dia(4))).toContain('Día libre en Madrid')
+    expect(texto(dia(4))).toContain('Libre Día abierto para ustedes. Opcional: Palacio Real de Madrid o Tour del Bernabéu (ver «Planes para los días libres»)')
+    expect(texto(dia(7))).toContain('Opcional: Park Güell con guía o Aquàrium de Barcelona')
   })
 
-  it('separador fino entre días y un día que no se parte', () => {
-    expect(h).toMatch(/\.dias \.day \{[^}]*border-bottom: 1px solid var\(--line\)/)
+  it('la foto del día: la de la actividad incluida; si no, la de la ciudad el primer día allí', () => {
+    const r: RecursosPropuesta = {
+      ...RECURSOS,
+      fotoDeCiudad: (c) => (c === 'Madrid' ? { src: 'data:madrid', foco: null } : null),
+      fotoDeActividad: (n) => (n.startsWith('Sagrada Familia') ? { src: 'data:sagrada', foco: null } : null),
+    }
+    const h2 = html(ENTRADA_EUROPA, r)
+    const d2 = h2.slice(h2.indexOf('class="sec dias"'))
+    expect((d2.match(/class="ph" style="background-image:url\(data:madrid\)/g) ?? []).length).toBe(1)
+    expect((d2.match(/class="ph" style="background-image:url\(data:sagrada\)/g) ?? []).length).toBe(1)
+    expect((d2.match(/class="cuerpo foto"/g) ?? []).length).toBe(2)
+  })
+
+  it('un día que no se parte', () => {
     expect(h).toMatch(/\.day \{[^}]*break-inside: avoid/)
   })
 
@@ -198,48 +390,84 @@ describe('«Así se ve cada día» como el prototipo v4', () => {
     const m = modeloDePropuesta(ENTRADA_EUROPA)
     m.dias[2] = { ...m.dias[2], titulo: 'Arte para toda la familia', sugerencia: 'Parque del Retiro y el Palacio de Cristal.' }
     const t = texto(htmlDePropuesta(m, RECURSOS))
-    expect(t).toContain('Arte para toda la familia Madrid')
-    expect(t).toContain('Sugerencia: Parque del Retiro y el Palacio de Cristal.')
+    expect(t).toContain('Arte para toda la familia')
+    expect(t).toContain('Idea Parque del Retiro y el Palacio de Cristal.')
   })
 })
 
 describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
   const h = html()
-  const seccionDe = (doc: string, titulo: string) => {
-    const i = doc.indexOf(`>${titulo}<`)
-    return doc.slice(i, doc.indexOf('</section>', i))
-  }
   const seccion = (titulo: string) => seccionDe(h, titulo)
   const filas = (tbody: string) => (tbody.match(/<tr>/g) ?? []).length
 
-  it('«Trenes y traslados»: el título nunca queda al pie con menos de 3 filas, ni una fila sola arriba', () => {
-    const tbodies = [...seccion('Trenes y traslados').matchAll(/<tbody( class="nobr")?>([\s\S]*?)<\/tbody>/g)]
+  it('«Traslados»: el título nunca queda al pie con menos de 3 filas, ni una fila sola arriba', () => {
+    const tbodies = [...seccion('Traslados').matchAll(/<tbody( class="nobr")?>([\s\S]*?)<\/tbody>/g)]
     expect(tbodies).toHaveLength(3)
     expect(tbodies[0][1]).toBe(' class="nobr"')
     expect(filas(tbodies[0][2])).toBe(3)
     expect(tbodies[1][1]).toBeUndefined()
     expect(tbodies[2][1]).toBe(' class="nobr"')
     expect(filas(tbodies[2][2])).toBe(2)
-    // El encabezado de la sección no se separa de lo que sigue.
+    // El encabezado va en el mismo bloque que no se parte con las primeras filas: un `.sh` suelto
+    // quedaba solo al pie de la hoja 1 (muestra sin fotos del 2026-10-27).
+    expect(h).toMatch(/<div class="nobr"><div class="sh">(?:(?!<\/section>)[\s\S])*?>Traslados<[\s\S]*?<table class="tr fija">[\s\S]*?<\/table><\/div>/)
     expect(h).toMatch(/\.sh \{[^}]*break-after: avoid/)
   })
 
   it('una tabla corta va en un solo tramo que no se parte', () => {
     const m = modeloDePropuesta(ENTRADA_EUROPA)
     m.trayectos = { ...m.trayectos, filas: m.trayectos.filas.slice(0, 4) }
-    const trenes = seccionDe(htmlDePropuesta(m, RECURSOS), 'Trenes y traslados')
-    expect(trenes.match(/<tbody class="nobr">/g) ?? []).toHaveLength(1)
-    expect(trenes).not.toMatch(/<tbody>/)
+    const tr = seccionDe(htmlDePropuesta(m, RECURSOS), 'Traslados')
+    expect(tr.match(/<tbody class="nobr">/g) ?? []).toHaveLength(1)
+    expect(tr).not.toMatch(/<tbody>/)
   })
 
-  it('«Elijan su versión»: ninguna tarjeta se parte y el bloque de las tres salta entero', () => {
+  it('«Elijan su versión»: ninguna tarjeta se parte y el bloque de las tres va con su título', () => {
     expect(seccion('Elijan su versión')).toContain('<div class="tarifas nobr"')
-    expect(h).toMatch(/\.tf \{ break-inside: avoid; \}/)
+    expect(h).toMatch(/\.tf \{[^}]*break-inside: avoid/)
     expect(h).toMatch(/\.nobr \{ break-inside: avoid; \}/)
   })
 
-  it('«Antes de viajar» no queda solo al pie: va con su lista', () => {
-    expect(h).toMatch(/<div class="nobr"><h3 style="margin-top:5mm">Antes de viajar<\/h3><ul/)
+  it('ningún salto de hoja forzado entre secciones (pedido de Edgar del 2026-10-28: menos blanco)', () => {
+    for (const doc of [h, html(ENTRADA_CURAZAO)]) {
+      expect(doc).not.toMatch(/break-before:\s*page|page-break-before|break-after:\s*page|page-break-after:\s*always/)
+      expect(doc).not.toMatch(/class="[^"]*\bbrk\b/)
+    }
+    expect(h).toContain('<section class="sec precios">')
+  })
+
+  it('las secciones grandes no son un bloque entero: se parten por sus tarjetas', () => {
+    // Ninguna de estas secciones va entera en `.nobr` (solo el título con su primer bloque).
+    for (const titulo of ['Hospedaje', 'Itinerario día a día', 'Planes para los días libres', 'Qué incluye y condiciones']) {
+      const antes = h.slice(0, h.indexOf(`>${titulo}<`))
+      expect(antes.slice(antes.lastIndexOf('class="sec')), titulo).toMatch(/^class="sec(?: [a-z]+)?"><?\n?<div class="nobr">/)
+      expect(antes.slice(antes.lastIndexOf('class="sec')), titulo).not.toMatch(/^class="sec nobr"/)
+    }
+    // Los 8 planes en dos filas de 4: la primera con el título, la segunda suelta.
+    const planes = seccion('Planes para los días libres')
+    expect((planes.match(/<div class="opcs">/g) ?? []).length).toBe(2)
+    expect(h).toMatch(/<div class="nobr"><div class="sh">(?:(?!<\/section>)[\s\S])*?>Planes para los días libres<[\s\S]*?<div class="opcs">[\s\S]*?<\/div>\n<div class="opcs">/)
+    expect(h).toMatch(/\.oc \{[^}]*break-inside: avoid/)
+    expect(h).toMatch(/\.card \{[^}]*break-inside: avoid/)
+  })
+
+  it('la firma va pegada a la última fila de condiciones (nunca sola arriba de una hoja)', () => {
+    // Una sola fila: el título, la fila y la firma en el mismo bloque que no se parte.
+    const desde = h.lastIndexOf('<div class="sec"><div class="nobr">', h.indexOf('>Qué incluye y condiciones<'))
+    const bloque = h.slice(desde)
+    expect(bloque).toMatch(/^<div class="sec"><div class="nobr"><div class="sh">(?:(?!<div class="nobr">)[\s\S])*?<div class="cards"(?:(?!<div class="nobr">)[\s\S])*?<div class="sign">/)
+    // Con más de tres bloques, dos filas: la primera con el título y la última con la firma.
+    const largo = TERMINOS_CURAZAO + '\nCambios\nCada cambio tiene un costo.\nEquipaje\nSegún la aerolínea.'
+    const m = modeloDePropuesta({ ...ENTRADA_CURAZAO, props: { ...ENTRADA_CURAZAO.props, cotizacion: { ...ENTRADA_CURAZAO.props.cotizacion, terminos_condiciones: largo } } })
+    const dos = htmlDePropuesta(m, RECURSOS)
+    const sec = dos.slice(dos.indexOf('>Qué incluye y condiciones<'))
+    expect((sec.match(/<div class="cards"/g) ?? []).length).toBe(2)
+    expect(sec).toMatch(/<\/div><div class="nobr"><div class="cards"[\s\S]*?<div class="sign">/)
+  })
+
+  it('«Antes de viajar» no queda solo al pie: va con su lista, en la tarjeta de «Información útil»', () => {
+    expect(seccion('Información útil')).toMatch(/<div class="card"><span class="caps">Antes de viajar<\/span><ul>/)
+    expect(h).toContain('<section class="sec nobr">\n<div class="sh"><div class="sq"><svg class="ic" viewBox="0 0 24 24"><use href="#info"/>')
   })
 
   it('la foto de cada plan lleva su ciudad y el día en que el día a día lo propone', () => {
@@ -250,7 +478,9 @@ describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
     expect((planes.match(/class="where"/g) ?? []).length).toBe(8)
   })
 
-  it('sin ninguna foto de plan, la tarjeta sigue como antes (sin imagen ni etiqueta)', () => {
-    expect(seccion('Planes para los días libres')).not.toContain('class="where"')
+  it('sin ninguna foto de plan, la tarjeta va sin imagen y el lugar en el texto', () => {
+    const planes = seccion('Planes para los días libres')
+    expect(planes).not.toContain('class="where"')
+    expect(planes).toContain('<div class="n">Palacio Real de Madrid</div><div class="caps">Madrid · dom 13</div>')
   })
 })

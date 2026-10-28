@@ -16,7 +16,8 @@ import {
   contextoDelViaje,
   registrarSalidaAlCliente,
 } from '@/lib/cotizaciones/registro-decisiones'
-import { leerAdicionalesDeItems } from '@/lib/cotizaciones/itinerarios-datos'
+import { leerAdicionalesDeItems, reglasDelDocumentoVigente } from '@/lib/cotizaciones/itinerarios-datos'
+import { leerReglasDeCotizacion, type ReglasDelDocumento } from '@/lib/cotizaciones/reglas-margen'
 import {
   adicionalesPorItem,
   adicionalEnLaFicha,
@@ -53,6 +54,7 @@ import {
 } from '@/lib/pdf/plantillas-cotizacion'
 import type { ServicioDelDocumento } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import { lugaresDeOpcionales, serviciosDelDocumento, type LugarDeOpcional } from '@/lib/cotizaciones/propuesta/servicios-del-documento'
+import type { ClienteDelNegocio } from '@/lib/cotizaciones/propuesta/destinatario'
 import { leerAnticipo } from '@/lib/cotizaciones/propuesta/anticipo'
 import { whatsappDesdeTelefono } from '@/lib/contactos/telefono'
 import { avisoDelTextoEnPdf, avisoDelTextoViejoEnPdf, leerDocumentoCliente, textoParaElViaje } from '@/lib/cotizaciones/documento-cliente'
@@ -329,13 +331,15 @@ export async function generateCotizacionPDF(
   // Para cotizaciones de negocio, intentar obtener empresa del negocio
   type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null; configLinea: unknown }
   let negocioInfo: NegocioInfo | null = null
+  let contactoDelNegocio: string | null = null
 
   if (cot.negocio_id) {
     const { data: negocio } = await supabase
       .from('negocios')
       // La línea viaja en la MISMA ida (embed): «Así puedes pagar» lee su `config_extra` y una
       // consulta aparte le sumaba una ida a todo PDF de negocio (presupuesto V5 de C0).
-      .select('id, nombre, carpeta_url, linea_id, empresa_id, lineas_negocio(config_extra), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento)')
+      // El contacto también (2026-10-27): la propuesta de viaje dice a quién va dirigida.
+      .select('id, nombre, carpeta_url, linea_id, empresa_id, lineas_negocio(config_extra), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento), contactos(nombre)')
       .eq('id', cot.negocio_id)
       .single()
     if (negocio) {
@@ -351,8 +355,15 @@ export async function generateCotizacionPDF(
       if (!empresa) {
         empresa = (negocio.empresas as EmpresaRow | null) ?? null
       }
+      const contactoEmbebido = (negocio as { contactos?: unknown }).contactos
+      const filaContacto = (Array.isArray(contactoEmbebido) ? contactoEmbebido[0] : contactoEmbebido) as { nombre?: string | null } | null | undefined
+      contactoDelNegocio = filaContacto?.nombre ?? null
     }
   }
+
+  // A quién va dirigida la propuesta de viaje: el contacto del negocio y su empresa real (la de
+  // relleno de abajo no cuenta).
+  const clienteDelNegocio = { contacto: contactoDelNegocio, empresa: empresa?.nombre ?? null, tipoPersona: empresa?.tipo_persona ?? null }
 
   // Fallback: empresa genérica para renderizar el PDF
   if (!empresa) {
@@ -900,6 +911,10 @@ export async function generateCotizacionPDF(
     ? (i: ItemRow) => !i.id || idsDeLaUnica.has(i.id) || i.es_ajuste === true
     : aporta
   const itemPorId = new Map(items.filter(i => i.id).map(i => [i.id as string, i]))
+  // Reglas de margen (2026-10-27): sin tarifas en la propuesta, el documento sale de la cascada
+  // vigente (la de `valor_total`). Solo se lee si la cotización tiene reglas.
+  const conReglasDeMargen = leerReglasDeCotizacion((cot as unknown as { reglas_margen?: unknown }).reglas_margen) !== null
+  const reglasVigente = conReglasDeMargen && !bloques ? await reglasDelDocumentoVigente(supabase, cotizacionId) : null
 
   /**
    * Los adicionales de cada variante, para el documento del cliente (§1.2 del diseño).
@@ -965,8 +980,22 @@ export async function generateCotizacionPDF(
   //
   // Sin ranuras con alternativas devuelve todos los ítems: el PDF de Termotech, Arca
   // y WMC no cambia una línea.
-  const paraPlantilla = (original: ItemRow) => {
-    const i = conIva(original)
+  /**
+   * Reglas de margen (2026-10-27, `reglas-margen.ts`): el precio de la línea en ESTE documento
+   * (con su parte de los puntos extra, que no salen como renglón) y la nota del descuento por
+   * hotel. Sin reglas, la línea tal cual.
+   */
+  const conReglas = (reglasDoc: ReglasDelDocumento | null, i: ItemRow): ItemRow => {
+    const precio = reglasDoc && i.id ? reglasDoc.precioPorItem.get(i.id) : undefined
+    if (precio === undefined) return i
+    return { ...i, precio_venta: precio / (Number(i.cantidad) || 1) }
+  }
+  const paraPlantillaDe = (reglasDoc: ReglasDelDocumento | null) => (original: ItemRow) => ({
+    ...paraPlantillaBase(conReglas(reglasDoc, original), original),
+    ...(reglasDoc && original.id && reglasDoc.notas.has(original.id) ? { nota: reglasDoc.notas.get(original.id) } : {}),
+  })
+  const paraPlantillaBase = (ajustado: ItemRow, original: ItemRow) => {
+    const i = conIva(ajustado)
     const adicionales = adicionalesDe(original)
     const ivaAdicionales = sumaIvaAlPrecio ? ivaDe(original)?.ivaAdicionales ?? 0 : 0
     // R8 · la llave solo aparece en una opción de hotel cobrada por habitación: las demás
@@ -992,6 +1021,8 @@ export async function generateCotizacionPDF(
     }
   }
 
+  const paraPlantilla = paraPlantillaDe(reglasVigente)
+
   /**
    * El IVA de una tarifa: la suma del de sus líneas. Con el IVA encima es lo que se le suma a
    * su precio; con el IVA adentro es lo que su precio ya trae, y solo va a la nota.
@@ -1011,7 +1042,8 @@ export async function generateCotizacionPDF(
         items: b.itemIds
           .map(id => itemPorId.get(id))
           .filter((i): i is ItemRow => i !== undefined)
-          .map(paraPlantilla),
+          .map(paraPlantillaDe(b.reglas ?? null)),
+        ...(b.reglas && b.reglas.descuentos.length > 0 ? { descuentos: b.reglas.descuentos } : {}),
       }))
     : null
 
@@ -1371,6 +1403,12 @@ export async function generateCotizacionPDF(
     },
     items: itemsParaResumen,
     itinerarios: itinerariosPDF,
+    // Reglas de margen (2026-10-27): los descuentos sobre el total, con su descripción. Los del
+    // TOTAL: los de la Recomendada con tarifas, los de la cascada vigente sin ellas.
+    // Sin reglas la llave no aparece: las props son las de siempre (igualdad C0).
+    ...((bloques?.find(b => b.esPrincipal)?.reglas ?? reglasVigente)?.descuentos.length
+      ? { descuentosTotal: (bloques?.find(b => b.esPrincipal)?.reglas ?? reglasVigente)!.descuentos }
+      : {}),
     dias: diasPDF,
     itemsSinDia: itemsSinDiaPDF,
     sugeridos: sugeridosPDF && sugeridosPDF.length > 0 ? sugeridosPDF : null,
@@ -1414,6 +1452,7 @@ export async function generateCotizacionPDF(
         opcionales: opcionalesDoc,
         fichasDeHotel,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
+        cliente: clienteDelNegocio,
         staffId: staffId ?? null,
         workspaceId,
         marca: ws?.name ?? 'Mi Empresa',
@@ -1520,6 +1559,8 @@ async function propuestaConMotorHtml(
     /** La ficha fijada en la línea de cada hotel (`catalogo-propuesta.ts`). */
     fichasDeHotel?: ReadonlyMap<string, string>
     documentoCliente: unknown
+    /** El contacto y la empresa del negocio: a quién va dirigida la propuesta. */
+    cliente: ClienteDelNegocio
     staffId: string | null
     workspaceId: string
     marca: string
@@ -1548,6 +1589,7 @@ async function propuestaConMotorHtml(
       lugaresDeOpcionales: e.lugaresDeOpcionales,
       anticipo: leerAnticipo(e.documentoCliente),
       asesora,
+      cliente: e.cliente,
     },
     {
       marca: e.marca,

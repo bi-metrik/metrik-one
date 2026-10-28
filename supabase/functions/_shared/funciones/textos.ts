@@ -37,6 +37,8 @@ export interface FichaTextos {
   emojis_tema: string | null;
   saludo_grupo: string | null;
   relato_grupo: string | null;
+  /** La puerta se cierra al iniciar (películas, 26-oct). Solo `true` la avisa: sin marcar o ausente, no sale. */
+  puerta_cerrada?: boolean | null;
 }
 
 /** Los datos del lugar, una vez por workspace (`funcion_negocio`). */
@@ -171,9 +173,10 @@ const regularDe = (t: TarifaPublica) => (t.tarifa === 'preventa' ? t.precio_comp
 const unicos = <T,>(xs: T[]) => [...new Set(xs)];
 
 /** El plazo del saldo de la campaña: entero de 0 a 30 (0 = hasta que empieza). Si no llega (no debería: la base lo llena con 1), se pide. */
-function plazoSaldo(campana: CampanaTextos, f: ReturnType<typeof faltas>): string {
+function plazoSaldo(campana: CampanaTextos, f: ReturnType<typeof faltas>): string | 0 {
   const d = campana.dias_saldo_antes;
-  return Number.isInteger(d) && d >= 0 ? TEXTO_OFERTA.plazoSaldo(d) : f.valor(null, 'días antes para el saldo');
+  if (d === 0) return 0;
+  return Number.isInteger(d) && d >= 1 ? TEXTO_OFERTA.plazoSaldo(d) : f.valor(null, 'días antes para el saldo');
 }
 
 /** El abono común de las funciones (o `null` si ninguna se aparta con abono), con el plazo del saldo de la campaña. */
@@ -181,6 +184,10 @@ function lineaAbono(vendibles: FuncionTextos[], campana: CampanaTextos, f: Retur
   const abonos = unicos(vendibles.map((x) => x.tarifa.abono_persona));
   if (abonos.every((a) => a === null)) return null;
   const plazo = plazoSaldo(campana, f);
+  if (plazo === 0) {
+    // Plazo 0 (28-oct): link hasta la hora de inicio; ya en la función, en el lugar.
+    return abonos.length === 1 ? TEXTO_OFERTA.abonoHastaInicio(pesosTexto(abonos[0]!)) : TEXTO_OFERTA.abonoVariosHastaInicio;
+  }
   return abonos.length === 1 ? TEXTO_OFERTA.abono(pesosTexto(abonos[0]!), plazo) : TEXTO_OFERTA.abonoVarios(plazo);
 }
 
@@ -271,7 +278,10 @@ export function generarMensajeDirecto(o: {
   ]);
 }
 
-/** c) La bienvenida al grupo de WhatsApp de una función: llegada 10 minutos antes e inicio 10 minutos después. */
+/**
+ * c) La bienvenida al grupo de WhatsApp de una función: llegada 10 minutos antes e inicio 10 minutos después (fijo en
+ * todas). El aviso de la puerta cerrada solo si la experiencia lo tiene marcado (26-oct).
+ */
 export function generarBienvenida(o: { ficha: FichaTextos; negocio: NegocioTextos; funcion: { inicia_at: string } }): TextoGenerado {
   const f = faltas();
   const inicio = Date.parse(o.funcion.inicia_at);
@@ -287,6 +297,7 @@ export function generarBienvenida(o: { ficha: FichaTextos; negocio: NegocioTexto
     recepcion: f.valor(o.negocio.recepcion, 'recepción'),
     parqueadero: f.valor(o.negocio.parqueadero, 'parqueadero'),
     relato: f.valor(o.ficha.relato_grupo, 'relato de cierre del grupo'),
+    puertaCerrada: o.ficha.puerta_cerrada === true,
     firma: f.valor(o.negocio.firma, 'firma'),
   });
   return medir(texto, f.lista, null, []);
