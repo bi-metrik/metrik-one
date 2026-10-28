@@ -37,6 +37,7 @@ import { detalleDeLectura, hotelesDeItems, tramosDelItem, type ItemConLectura } 
 import { leerTarifaPax } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { diaDeItem } from './dia-relativo'
+import { paramsPorOpcion } from './reglas-margen'
 
 // ── Las líneas, como las lee el servidor ─────────────────────────────────────
 
@@ -206,7 +207,8 @@ export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCasc
 /** El precio de cada opción (con sus adicionales): no depende de la tarifa, el margen es uno. */
 export function preciosDeLasOpciones(lineas: LineaDeCascada[], params: ParametrosCascada): Map<string, { precio: number; costo: number }> {
   return new Map(
-    calcularCascada(lineas, params).lineas
+    // Sin puntos extra ni descuentos sobre el total: son de una tarifa, no de cada opción.
+    calcularCascada(lineas, paramsPorOpcion(params)).lineas
       .filter(l => typeof l.id === 'string')
       .map(l => [l.id as string, { precio: l.precioConAdicionales, costo: l.costoLinea + l.costoAdicionales }]),
   )

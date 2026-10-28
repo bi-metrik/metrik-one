@@ -747,10 +747,16 @@ function gruposDeVuelos(vuelos: FilaVueloDoc[], m: ModeloPropuesta): { titulo: s
 function eligeTuVersion(m: ModeloPropuesta): string {
   if (m.tarifas.length === 0) {
     const lineas = m.precio.lineas
-      .map((l) => `<tr><td>${esc(l.nombre)}${l.adicionales.length > 0 ? `<br><span class="muted small">${esc(l.adicionales.join(' · '))}</span>` : ''}</td><td class="r money">${esc(pesos(l.total))}</td></tr>`)
+      .map((l) => `<tr><td>${esc(l.nombre)}${l.adicionales.length > 0 ? `<br><span class="muted small">${esc(l.adicionales.join(' · '))}</span>` : ''}${l.nota ? `<br><span class="small">${esc(l.nota)}</span>` : ''}</td><td class="r money">${esc(pesos(l.total))}</td></tr>`)
       .join('\n')
+    // Reglas de margen: el subtotal y cada descuento sobre el total, con su descripción.
+    const descuentos = m.precio.descuentos.length > 0
+      ? `<tr><td class="muted">Subtotal</td><td class="r money">${esc(pesos(m.precio.lineas.reduce((a, l) => a + l.total, 0)))}</td></tr>${m.precio.descuentos
+          .map((d) => `<tr><td>${esc(d.descripcion)}</td><td class="r money">−${esc(pesos(d.valor))}</td></tr>`)
+          .join('')}`
+      : ''
     return `<div class="nobr">${encabezadoDeSeccion('tag', 'Precio del viaje', 'Precio total para el grupo.')}
-  <table class="tr pagos">${lineas}
+  <table class="tr pagos">${lineas}${descuentos}
   <tr class="tot"><td>Total</td><td class="r money">${esc(pesos(m.precio.total))}</td></tr></table>
   ${m.precio.notaIva ? `<p class="small muted">${esc(m.precio.notaIva)}</p>` : ''}</div>
   ${apartar(m)}`
@@ -768,6 +774,12 @@ function eligeTuVersion(m: ModeloPropuesta): string {
     const hoteles = t.hoteles.length > 0
       ? `<div class="row"><b>Hoteles</b>${t.hoteles.map((h) => `${esc(h.nombre)} ${estrellas(h.estrellas)}`).join('<br>')}</div>`
       : ''
+    // Reglas de margen: el descuento de cada hotel y los descuentos sobre el total de ESTA tarifa.
+    const notas = t.lineas.filter((l) => l.nota).map((l) => esc(l.nota))
+    const descuentos = t.descuentos.map((d) => `${esc(d.descripcion)}: −${esc(pesos(d.valor))}`)
+    const conDescuento = notas.length + descuentos.length > 0
+      ? `<div class="row"><b>Descuentos</b>${[...notas, ...descuentos].join('<br>')}</div>`
+      : ''
     return `<div class="tf${t.esPrincipal ? ' rec' : ''}">
       ${t.esPrincipal ? '<span class="tag badge">La que recomendamos</span>' : ''}
       <div class="name c${LETRA[t.clave]}">${esc(t.nombre)}</div>
@@ -775,6 +787,7 @@ function eligeTuVersion(m: ModeloPropuesta): string {
       <div class="pp">${esc(pp)}${t.notaIva ? `<br>${esc(t.notaIva)}` : ''}</div>
       ${filasVuelo.join('\n')}
       ${hoteles}
+      ${conDescuento}
     </div>`
   })
   const sub = m.igualEnTodas.length > 0

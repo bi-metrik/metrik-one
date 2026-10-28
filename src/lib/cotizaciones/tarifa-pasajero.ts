@@ -1884,6 +1884,38 @@ export interface TarifaPax {
    * Ausente = general: sirve para cualquier hotel, como siempre.
    */
   vaConHotel?: string
+  /**
+   * El descuento que el cliente ve en esta opción, con su motivo (reglas de margen del 2026-10-27,
+   * `reglas-margen.ts`: el descuento por hotel). Ausente = sin descuento, como toda línea anterior.
+   */
+  descuentoCliente?: DescuentoClienteGuardado
+}
+
+/** `tarifa_pax.descuentoCliente` tal como se guarda. La regla que lo lee es `reglas-margen.ts`. */
+export interface DescuentoClienteGuardado {
+  motivo: string
+  tipo: 'pct' | 'monto'
+  valor: number
+  por?: string | null
+  en?: string
+}
+
+/**
+ * El descuento guardado, sin interpretarlo: solo se comprueba la forma para no perderlo en la
+ * próxima escritura (ver `leerTarifaPax`). La validación de negocio vive en `reglas-margen.ts`.
+ */
+function leerDescuentoCliente(raw: unknown): DescuentoClienteGuardado | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  const valor = Number(r.valor)
+  if (typeof r.motivo !== 'string' || !r.motivo.trim() || (r.tipo !== 'pct' && r.tipo !== 'monto') || !Number.isFinite(valor) || valor <= 0) return null
+  return {
+    motivo: r.motivo.slice(0, 200),
+    tipo: r.tipo,
+    valor,
+    por: typeof r.por === 'string' ? r.por.slice(0, 200) : null,
+    en: typeof r.en === 'string' ? r.en : '',
+  }
 }
 
 /** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
@@ -2123,6 +2155,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
   const tipoTarifa = leerTipoTarifa(r.tipoTarifa)
   const vaConHotel = typeof r.vaConHotel === 'string' && r.vaConHotel.trim() ? r.vaConHotel.slice(0, 100) : null
+  const descuentoCliente = leerDescuentoCliente(r.descuentoCliente)
   const bloqueo = leerPaqueteBloqueo(r.bloqueo)
   return {
     composicion: normalizarComposicion(r.composicion),
@@ -2154,6 +2187,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(tipoTarifa ? { tipoTarifa } : {}),
     // Igual: un servicio general (sin hotel) no lleva la llave.
     ...(vaConHotel ? { vaConHotel } : {}),
+    // Igual: sin descuento al cliente la llave no aparece.
+    ...(descuentoCliente ? { descuentoCliente } : {}),
     // Igual: solo un paquete de bloqueo lleva la llave.
     ...(bloqueo ? { bloqueo } : {}),
   }

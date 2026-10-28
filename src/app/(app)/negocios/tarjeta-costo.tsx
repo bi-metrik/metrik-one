@@ -23,6 +23,9 @@ import {
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
+import type { DescuentoClienteGuardado } from '@/lib/cotizaciones/tarifa-pasajero'
+import { ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
 
 /**
  * «Costo y precio» de la tarjeta (prototipo del 2026-09-24): UNA tabla (Pasajero / Cant. /
@@ -57,6 +60,7 @@ export default function TarjetaCosto({
   apilable = false,
   tipoTarifa = 'neta',
   tipoPropuesto = false,
+  reglas = null,
 }: {
   itemId: string
   editable: boolean
@@ -93,6 +97,12 @@ export default function TarjetaCosto({
   tipoTarifa?: TipoTarifa
   /** El tipo lo propuso ONE con lo que dice el tarifario del proveedor (la persona lo cambia). */
   tipoPropuesto?: boolean
+  /**
+   * Las reglas de margen de la cotización (brief del 2026-10-27): lo que la cascada dice de esta
+   * línea, el descuento guardado y la comisión. Solo en la cotización por pasos con reglas;
+   * ausente, la tarjeta es la de siempre.
+   */
+  reglas?: { linea: ReglasDeLinea; descuento: DescuentoClienteGuardado | null; comisionPct: number | null } | null
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
@@ -424,8 +434,22 @@ export default function TarjetaCosto({
       </div>
       {publica && (
         <p className="m-0 text-xs text-[#6E6A62]" data-aviso-publica>
-          Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. No entra en el margen mínimo ni pide autorización.
+          {reglas
+            ? 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión.'
+            : 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. No entra en el margen mínimo ni pide autorización.'}
         </p>
+      )}
+      {reglas && apilable && (
+        <ReglasDeOpcion
+          reglas={reglas.linea}
+          descuento={reglas.descuento}
+          comisionPct={reglas.comisionPct}
+          publica={publica}
+          editable={editable}
+          ocupado={isPending}
+          onDescuento={d => guardar(() => ajustarOpcion(itemId, { descuentoCliente: d }), () => {})}
+          onComision={c => guardar(() => ajustarOpcion(itemId, { comisionPct: c }), () => {})}
+        />
       )}
 
       {ajustando && editable && (

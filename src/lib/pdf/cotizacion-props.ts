@@ -225,7 +225,19 @@ export interface CotizacionPDFProps {
      * Ausente vale 0: es todo lo que no es un viaje con adicionales.
      */
     valorAdicionales?: number
+    /**
+     * Reglas de margen (2026-10-27): «Descuento · motivo: −$X» bajo la opción que lo lleva (el
+     * descuento por hotel). El precio de la línea ya lo trae descontado. Ausente = nada.
+     */
+    nota?: string | null
   }[]
+
+  /**
+   * Reglas de margen (2026-10-27): los descuentos sobre el total del documento (los del TOTAL), con
+   * su descripción. Van entre el subtotal y el TOTAL; la suma de `items` menos estos descuentos es
+   * el total. `null` o ausente = ninguno, el documento de siempre.
+   */
+  descuentosTotal?: { descripcion: string; valor: number }[] | null
 
   /**
    * R7 · los bloques de la propuesta, uno por itinerario marcado «va en propuesta».
@@ -260,7 +272,14 @@ export interface CotizacionPDFProps {
       adicionales?: string[]
       /** Ver `items[].valorAdicionales`: TIENE que entrar en el total impreso. */
       valorAdicionales?: number
+      /** Ver `items[].nota`. */
+      nota?: string | null
     }[]
+    /**
+     * Reglas de margen (2026-10-27): los descuentos sobre el total de ESTA tarifa, con su
+     * descripción. La suma de las líneas menos estos descuentos es `precio`. Ausente = ninguno.
+     */
+    descuentos?: { descripcion: string; valor: number }[]
   }[] | null
   /**
    * El itinerario DÍA POR DÍA: un bloque por día, con las líneas que le tocan.

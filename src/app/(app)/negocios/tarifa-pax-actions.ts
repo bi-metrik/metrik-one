@@ -93,6 +93,7 @@ import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
 import { medirEtapa } from '@/lib/actions/tiempos-de-ruta'
+import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -1387,6 +1388,16 @@ export interface CambiosDeAjuste {
    * al de la cotización (o al del proveedor). Queda como decisión de una persona.
    */
   tipoTarifa?: TipoTarifa
+  /**
+   * Reglas de margen (2026-10-27, `reglas-margen.ts`): el descuento que el cliente ve en esta
+   * opción (el del hotel), con su motivo. `null` lo quita.
+   */
+  descuentoCliente?: { motivo: string; tipo: 'pct' | 'monto'; valor: number } | null
+  /**
+   * Reglas de margen: la comisión que trae una tarifa Pública. Con ella la línea entra al margen
+   * global; `null` la quita y la línea vuelve a quedar fuera de esa base.
+   */
+  comisionPct?: number | null
 }
 
 /**
@@ -1405,6 +1416,17 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
 
   if (cambios.tipoTarifa !== undefined && cambios.tipoTarifa !== 'neta' && cambios.tipoTarifa !== 'publica') {
     return { success: false, error: 'Elige si la tarifa es neta o pública.' }
+  }
+  if (cambios.descuentoCliente) {
+    const motivo = motivoDescuentoInvalido(cambios.descuentoCliente)
+    if (motivo) return { success: false, error: motivo }
+  }
+  if (cambios.comisionPct !== undefined && cambios.comisionPct !== null) {
+    const c = cambios.comisionPct
+    if (!Number.isFinite(c) || c < 0 || c >= 100) return { success: false, error: 'La comisión va de 0 a 99,9 %.' }
+    if ((cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo ?? 'neta') !== 'publica') {
+      return { success: false, error: 'La comisión es de una tarifa Pública.' }
+    }
   }
   const margenDelProveedor = conf?.margenProveedor
     ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
@@ -1434,7 +1456,28 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
   const guardado = await guardarTarifa(supabase, itemId, leida => {
     const actual: TarifaPax = cambios.tipoTarifa !== undefined
       ? { ...leida, tipoTarifa: { tipo: cambios.tipoTarifa, origen: 'persona', por, en } }
-      : leida
+      : { ...leida }
+    // La comisión vive en la decisión de Pública: es de ella, y se va si la línea vuelve a Neta.
+    if (cambios.comisionPct !== undefined && actual.tipoTarifa?.tipo === 'publica') {
+      const { comisionPct: _antes, ...resto } = actual.tipoTarifa
+      void _antes
+      actual.tipoTarifa = cambios.comisionPct === null
+        ? resto
+        : { ...resto, comisionPct: Math.round(cambios.comisionPct * 100) / 100 }
+    }
+    if (cambios.descuentoCliente !== undefined) {
+      if (cambios.descuentoCliente === null) delete actual.descuentoCliente
+      else {
+        const d = cambios.descuentoCliente
+        actual.descuentoCliente = {
+          motivo: d.motivo.trim(),
+          tipo: d.tipo,
+          valor: d.tipo === 'pct' ? Math.round(d.valor * 100) / 100 : Math.round(d.valor),
+          por,
+          en,
+        }
+      }
+    }
     const precios = cambios.volverACalculado ? {} : { ...(actual.preciosAMano ?? {}) }
     for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
       if (v === null) delete precios[clave]
