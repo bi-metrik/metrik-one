@@ -19,8 +19,9 @@ import { referenciaEnlaceCobro } from './referencia-enlace'
  * (`procesarEventoPasarela`, evento `anulado`) con el MISMO id de evento (`<ref_payco>-6`): si la
  * confirmación del reverso llega antes o después, es un duplicado y nada se hace dos veces.
  *
- * Lo que hace un reverso: anular el cobro y avisar a MéTRIK (`reverso-pasarela-servidor.ts`). Lo que
- * NO hace: tocar la suscripción, el ciclo de consultas o la factura.
+ * Lo que hace un reverso: anular el cobro, avisar a MéTRIK y, si abrió el ciclo vigente de Valida
+ * autogestionada, cerrar el plan en Valida (`reverso-pasarela-servidor.ts`). Lo que NO hace: tocar la
+ * suscripción o la factura.
  *
  * Ventana: la documentación de ePayco no pone límite a la consulta; reversar desde el panel solo se
  * puede el mismo día hasta las 9 p. m., y después lo pide la red de procesamiento, que puede tardar.

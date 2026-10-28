@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import EmptyState from '@/components/empty-state';
 import { getWorkspace } from '@/lib/actions/get-workspace';
 import { createServiceClient } from '@/lib/supabase/server';
@@ -27,6 +28,9 @@ import { estadoCobroDelEspacio } from '@/lib/valida-registro/cobro-prueba-servid
 import { pruebaEnPantalla } from '@/lib/valida-registro/prueba-en-pantalla';
 import { pruebaDeConfig } from '@/lib/valida/corte-bolsa';
 import { ModificacionTerminosCda } from './modificacion-terminos-cda';
+import { suspensionPorReversoEnPantalla } from '@/lib/valida-registro/corte-reverso-servidor';
+import { frasesSuspension } from '@/lib/valida-registro/corte-reverso';
+import { PlanSuspendidoPorReverso } from './plan-suspendido-reverso';
 
 export const dynamic = 'force-dynamic';
 // El cargue masivo despierta su trabajador con `after()` desde las acciones de esta página
@@ -207,10 +211,18 @@ export default async function ValidaPage({ searchParams }: Props) {
       })
     : null;
 
+  // El plan cortado por la reversión del pago (decisión del 2026-10-27): Valida ya no deja consultar.
+  // Manda sobre la mora y la franja, que hablarían de la cuota del pago reversado como de una cuota
+  // vencida cualquiera y llevarían a un «Pagar» que no sirve para eso.
+  const suspension =
+    autogestion && !enPausa
+      ? await suspensionPorReversoEnPantalla(svc as unknown as SupabaseClient, workspaceId, configExtra)
+      : null;
+
   // Mientras dura la prueba, su franja es la única: la de la suscripción («Tu cuota vence… · Pagar») no
   // se le suma (una confirmación rechazada deja un contrato con la cuota 1 y la prueba sigue).
   const franja =
-    !prueba && suscripcion?.tipo === 'ok'
+    !prueba && !suspension && suscripcion?.tipo === 'ok'
       ? franjaValida(
           suscripcion.resumen,
           suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
@@ -221,15 +233,17 @@ export default async function ValidaPage({ searchParams }: Props) {
   // También TODOS ven el aviso de mora con la fecha de la restricción (cláusula 11.2), la restricción
   // (11.1) y la pausa (11.3), sin montos. Cuota y plata son solo de la persona designada del contrato
   // (la misma regla que `/suscripcion`, `puedeVerPagosCda`): la franja y el enlace a Suscripción.
-  const enMora = estadoMora?.estado === 'en_mora' ? estadoMora : null;
+  const enMora = !suspension && estadoMora?.estado === 'en_mora' ? estadoMora : null;
+  const restringidoVisible = suspension ? null : restringido;
 
   const encabezado =
-    avisoPlazo || avisoModificacion || franja || enMora || restringido ? (
+    avisoPlazo || avisoModificacion || franja || enMora || restringidoVisible || suspension ? (
       <div className="space-y-3">
+        {suspension && <PlanSuspendidoPorReverso frases={frasesSuspension(suspension)} puedePagar={vePagos} />}
         {avisoPlazo}
         {avisoModificacion}
         {enMora && <AvisoMora mora={enMora} pagar={autogestion && vePagos} />}
-        {restringido && <AvisoRestriccion mora={restringido} vePagos={vePagos} />}
+        {restringidoVisible && <AvisoRestriccion mora={restringidoVisible} vePagos={vePagos} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
     ) : null;
@@ -238,12 +252,12 @@ export default async function ValidaPage({ searchParams }: Props) {
     <ValidaClient
       historialInicial={historial?.ok ? historial.consultas : []}
       errorHistorial={historial && !historial.ok ? historial.error : null}
-      tutorialNuncaVisto={!enPausa && !restringido && tutorialProgress === null}
+      tutorialNuncaVisto={!enPausa && !restringido && !suspension && tutorialProgress === null}
       negocioInicial={modoVitrina ? null : negocioInicial}
       modoVitrina={modoVitrina}
       encabezado={encabezado}
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
-      consultasRestringidas={restringido ? <ConsultasRestringidas /> : null}
+      consultasRestringidas={restringido || suspension ? <ConsultasRestringidas /> : null}
       saldo={saldo}
       prueba={prueba}
       loteInicialId={loteInicialId}
