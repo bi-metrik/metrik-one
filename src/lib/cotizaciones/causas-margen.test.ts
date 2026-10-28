@@ -16,9 +16,10 @@ import type { ParametrosCascada } from './totales'
 import { lineasDelCaso, paramsDelCaso, TARIFAS_DEL_CASO } from '../../../test/caso-reglas-margen'
 
 function ctx(descuento: 3 | 7, params: ParametrosCascada, items?: ItemDeCotizacion[]): ContextoCotizacion {
+  const p = params as ContextoCotizacion['params']
   return {
     items: items ?? (lineasDelCaso(descuento) as unknown as ItemDeCotizacion[]),
-    params,
+    params: p,
     umbrales: { pisoPct: 12, avisoPct: 12 },
     negocioId: 'neg', oportunidadId: null, pisoEnLaSalida: true,
   }
