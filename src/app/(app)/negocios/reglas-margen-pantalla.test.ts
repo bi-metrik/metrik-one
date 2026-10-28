@@ -187,6 +187,7 @@ describe('falla 1 · el margen global en «Tarifas» lleva cifra y es la del enc
     it(`sin tarifas (un hotel, nada que escoger), con ${nombre}`, () => {
       const params = paramsDelCaso(r)
       const html = tarifas(3, { params, tarifas: [] })
+      if (nombre === '5 puntos extra') volcar('margen-global-sin-tarifas', html)
       expect(rotulo(html)).toBe(`Margen global (no se edita): ${encabezado(lineasDelCaso(3), params, [])}`)
     })
 

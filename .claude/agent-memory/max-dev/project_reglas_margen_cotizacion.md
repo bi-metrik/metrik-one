@@ -17,6 +17,10 @@ Brief `proyectos/trappvel/clarity/briefs/2026-10-27_brief-max-reglas-de-margen-c
   Pública en `tipoTarifa.comisionPct`: con ella entra al margen global; sin ella sale de la base (no aprueba en falso).
 - Con reglas el recargo fijo no se ofrece y `aplicarRecargo` lo rechaza.
 - `−` (U+2212) no existe en WinAnsi: en @react-pdf usar `–` (gotcha del 2026-10-27).
+- 2026-10-28 (fix/margen-global-y-aviso-hotel): el margen que se pinta junto al total y en «Tarifas» sale de UNA
+  función, `por-pasos-vista.ts › margenDelEncabezado` (con reglas = global, no `margenRealPct`). Sin tarifas que vayan
+  al cliente, «Tarifas» mide el total (`delTotal`). Toda frase de «bajo el mínimo» se arma con `causas-margen.ts`
+  (hotel con su opción vs. 10 %, global como siempre); no escribir otra a mano.
 - Abierto: hotel con precios de fila a mano no recibe descuento ni puntos; cotizaciones viejas con `piso_margen_pct`
   null pasan a medirse contra 12 tras el SQL; QA en navegador real sin hacer.
 

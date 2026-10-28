@@ -336,7 +336,7 @@ export function TarifasPorPasos({
         {medidos.map((t, i) => (
           <span key={t.id}>
             {i > 0 && ' · '}
-            <b className={t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''} data-margen-medido={t.id}>
+            <b className={`whitespace-nowrap ${t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}`} data-margen-medido={t.id}>
               {t.nombre ? `${t.nombre} ` : ''}{margenDeTarifa(t)}
             </b>
             {t.tarifa && notaPublicas(t.tarifa) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t.tarifa)}</span>}
