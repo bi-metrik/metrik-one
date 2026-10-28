@@ -218,9 +218,10 @@ describe('COT-2026-0004 de muestra (dos versiones, mismos vuelos)', () => {
     expect(texto(d)).toContain('Día libre en Willemstad Libre Día abierto para ustedes.')
   })
 
-  it('la hoja de precios arranca en hoja nueva y cabe junta: versiones, apartar, cuotas con su total, incluye y términos', () => {
-    const p = h.slice(h.indexOf('<section class="sec brk precios">'))
-    expect(p).not.toBe('')
+  it('los precios siguen a lo anterior: versiones, apartar, cuotas con su total, incluye y términos', () => {
+    const i = h.indexOf('<section class="sec precios">')
+    expect(i).toBeGreaterThan(-1)
+    const p = h.slice(i)
     const tp = texto(p)
     expect(tp).toContain(pesos(PRECIO_CUR_R))
     expect(tp).toContain(pesos(PRECIO_CUR_P))
@@ -427,9 +428,41 @@ describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
     expect(h).toMatch(/\.nobr \{ break-inside: avoid; \}/)
   })
 
-  it('la hoja de precios empieza en hoja nueva', () => {
-    expect(h).toContain('<section class="sec brk precios">')
-    expect(h).toMatch(/\.brk \{ break-before: page;/)
+  it('ningún salto de hoja forzado entre secciones (pedido de Edgar del 2026-10-28: menos blanco)', () => {
+    for (const doc of [h, html(ENTRADA_CURAZAO)]) {
+      expect(doc).not.toMatch(/break-before:\s*page|page-break-before|break-after:\s*page|page-break-after:\s*always/)
+      expect(doc).not.toMatch(/class="[^"]*\bbrk\b/)
+    }
+    expect(h).toContain('<section class="sec precios">')
+  })
+
+  it('las secciones grandes no son un bloque entero: se parten por sus tarjetas', () => {
+    // Ninguna de estas secciones va entera en `.nobr` (solo el título con su primer bloque).
+    for (const titulo of ['Hospedaje', 'Itinerario día a día', 'Planes para los días libres', 'Qué incluye y condiciones']) {
+      const antes = h.slice(0, h.indexOf(`>${titulo}<`))
+      expect(antes.slice(antes.lastIndexOf('class="sec')), titulo).toMatch(/^class="sec(?: [a-z]+)?"><?\n?<div class="nobr">/)
+      expect(antes.slice(antes.lastIndexOf('class="sec')), titulo).not.toMatch(/^class="sec nobr"/)
+    }
+    // Los 8 planes en dos filas de 4: la primera con el título, la segunda suelta.
+    const planes = seccion('Planes para los días libres')
+    expect((planes.match(/<div class="opcs">/g) ?? []).length).toBe(2)
+    expect(h).toMatch(/<div class="nobr"><div class="sh">(?:(?!<\/section>)[\s\S])*?>Planes para los días libres<[\s\S]*?<div class="opcs">[\s\S]*?<\/div>\n<div class="opcs">/)
+    expect(h).toMatch(/\.oc \{[^}]*break-inside: avoid/)
+    expect(h).toMatch(/\.card \{[^}]*break-inside: avoid/)
+  })
+
+  it('la firma va pegada a la última fila de condiciones (nunca sola arriba de una hoja)', () => {
+    // Una sola fila: el título, la fila y la firma en el mismo bloque que no se parte.
+    const desde = h.lastIndexOf('<div class="sec"><div class="nobr">', h.indexOf('>Qué incluye y condiciones<'))
+    const bloque = h.slice(desde)
+    expect(bloque).toMatch(/^<div class="sec"><div class="nobr"><div class="sh">(?:(?!<div class="nobr">)[\s\S])*?<div class="cards"(?:(?!<div class="nobr">)[\s\S])*?<div class="sign">/)
+    // Con más de tres bloques, dos filas: la primera con el título y la última con la firma.
+    const largo = TERMINOS_CURAZAO + '\nCambios\nCada cambio tiene un costo.\nEquipaje\nSegún la aerolínea.'
+    const m = modeloDePropuesta({ ...ENTRADA_CURAZAO, props: { ...ENTRADA_CURAZAO.props, cotizacion: { ...ENTRADA_CURAZAO.props.cotizacion, terminos_condiciones: largo } } })
+    const dos = htmlDePropuesta(m, RECURSOS)
+    const sec = dos.slice(dos.indexOf('>Qué incluye y condiciones<'))
+    expect((sec.match(/<div class="cards"/g) ?? []).length).toBe(2)
+    expect(sec).toMatch(/<\/div><div class="nobr"><div class="cards"[\s\S]*?<div class="sign">/)
   })
 
   it('«Antes de viajar» no queda solo al pie: va con su lista, en la tarjeta de «Información útil»', () => {
