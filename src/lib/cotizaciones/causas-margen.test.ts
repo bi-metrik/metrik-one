@@ -95,6 +95,18 @@ describe('el aviso por el camino del servidor (viaje ficticio, mínimo 12 %, hot
     expect(a.nota).toMatchObject({ titulo: 'Hotel Ficticio Arena queda en 8 %, mínimo 10 %.' })
   })
 
+  it('paquete de bloqueo (#1319, se margina como hotel): bajo el 10 % se nombra igual que un hotel', () => {
+    const paquete = {
+      ...lineasDelCaso(3).find(l => l.id === 'a-lancha')!,
+      id: 'pq', nombre: 'Paquete ficticio de bloqueo', grupo: 'paquete de bloqueo: Paquete de bloqueo', subtotal: 2_000_000, orden: 8,
+      tarifa_pax: { descuentoCliente: { motivo: 'Cierre de mes', tipo: 'pct', valor: 7 } },
+    }
+    const items = [...lineasDelCaso(3), paquete] as unknown as ItemDeCotizacion[]
+    const a = avisos(3, paramsDelCaso({ descuentos: [] }), null, items)
+    expect((a.nota as { titulo: string }).titulo).toContain('Paquete ficticio de bloqueo queda en 8 %, mínimo 10 %')
+    expect(a.pedido).toContain('Paquete ficticio de bloqueo queda en 8 %, mínimo 10 %')
+  })
+
   it('«Revisar y enviar» lleva la misma causa en el renglón que impide enviar', () => {
     const a = avisos(7, paramsDelCaso({ descuentos: [] }))
     const m = medirSalida(ctx(7, paramsDelCaso({ descuentos: [] })), FILAS)
