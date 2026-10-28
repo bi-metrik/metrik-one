@@ -36,9 +36,10 @@ y tres textos, §1.8 del diseño, que manda sobre lo anterior); P4 (preventa = i
   (`funcion_plazo_saldo(t,0)=t`), migración `20261026210000_funciones_saldo_plazo_cero.sql` (rama
   feat/funciones-saldo-plazo-cero; SIN aplicar al abrir el PR; dry-run `scripts/funciones-saldo-plazo-cero-dry-run.mjs`).
   Las pruebas SQL cargan módulo → puerta cerrada (20261026220000, aplicada) → plazo 0; versión menor que la de la
-  puerta, se dejó así (sin guarda de orden). Texto con 0 fijado por Mauricio 28-oct («El saldo lo pagas con el link hasta
-  la hora de inicio, o el día de la experiencia en el lugar.»), pendiente de Vera; con nombre de campaña >~175 el
-  mensaje directo pasa de 1.000 bytes.
+  puerta, se dejó así (sin guarda de orden). Textos fijados por Mauricio 28-oct (2.ª versión, pendiente de Vera): oferta
+  con 0 «…con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.» y la bienvenida
+  «…por el chat de su reserva, o durante la experiencia, con nuestro equipo.». Con 0 el mensaje directo pasa de 1.000
+  bytes desde un nombre de campaña de 162 caracteres (agenda de prueba).
   Una prueba «a N horas de la función con 1 día» cruza la medianoche de Bogotá según la hora en que corre: usar 1 minuto.
 - Saldo (P14a-c, 25-oct): la modalidad se elige AL PAGAR (`funcion_preparar_pago(ws, ids, modalidad)`), no al apartar.
   El saldo es un pago más (`funcion_pagos.concepto`/`medio`); pagado y saldo se calculan en `funcion_saldo_de`, nunca

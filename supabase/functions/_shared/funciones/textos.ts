@@ -185,7 +185,7 @@ function lineaAbono(vendibles: FuncionTextos[], campana: CampanaTextos, f: Retur
   if (abonos.every((a) => a === null)) return null;
   const plazo = plazoSaldo(campana, f);
   if (plazo === 0) {
-    // Plazo 0 (28-oct): link hasta la hora de inicio; ya en la función, en el lugar.
+    // Plazo 0 (28-oct): link hasta que empieza; ya en la experiencia, con el equipo.
     return abonos.length === 1 ? TEXTO_OFERTA.abonoHastaInicio(pesosTexto(abonos[0]!)) : TEXTO_OFERTA.abonoVariosHastaInicio;
   }
   return abonos.length === 1 ? TEXTO_OFERTA.abono(pesosTexto(abonos[0]!), plazo) : TEXTO_OFERTA.abonoVarios(plazo);
