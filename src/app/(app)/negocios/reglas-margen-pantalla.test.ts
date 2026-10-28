@@ -14,7 +14,9 @@ import path from 'node:path'
 
 import { calcularCascada, type LineaCalculada } from '@/lib/cotizaciones/totales'
 import { paramsPorOpcion } from '@/lib/cotizaciones/reglas-margen'
-import { preciosDeLasOpciones, tarifasCalculadas } from '@/lib/cotizaciones/por-pasos-vista'
+import { cascadaDelTotal, margenDelEncabezado, preciosDeLasOpciones, tarifasCalculadas, type LineaDeCascada, type TarifaDeLaPantalla } from '@/lib/cotizaciones/por-pasos-vista'
+import { exentaDelMinimo } from '@/lib/cotizaciones/itinerarios'
+import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { lineasDelCaso, NOMBRES_DEL_CASO, paramsDelCaso, TARIFAS_DEL_CASO } from '../../../../test/caso-reglas-margen'
 
 vi.mock('sonner', () => ({ toast: Object.assign(() => {}, { success: () => {}, error: () => {}, warning: () => {} }) }))
@@ -69,11 +71,15 @@ function tarjeta(id: string, descuento: 3 | 7 = 3) {
   return renderToStaticMarkup(React.createElement(TarjetaCosto, props))
 }
 
-function tarifas(descuento: 3 | 7) {
-  const lineas = lineasDelCaso(descuento)
-  const params = paramsDelCaso()
-  const calculadas = tarifasCalculadas(lineas, params, TARIFAS_DEL_CASO)
+function tarifas(descuento: 3 | 7, opciones: { params?: ParametrosCascada; tarifas?: TarifaDeLaPantalla[]; pisoPct?: number; lineas?: LineaDeCascada[] } = {}) {
+  const lineas = opciones.lineas ?? lineasDelCaso(descuento)
+  const params = opciones.params ?? paramsDelCaso()
+  const pantalla = opciones.tarifas ?? TARIFAS_DEL_CASO
+  const calculadas = tarifasCalculadas(lineas, params, pantalla)
   const precios = preciosDeLasOpciones(lineas, params)
+  // Lo que la vista le pasa: el total de la cotización, con la misma cifra que el encabezado.
+  const total = cascadaDelTotal(lineas, params, pantalla)
+  const delTotal = { margenPct: margenDelEncabezado(total, params), exenta: exentaDelMinimo(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }
   return renderToStaticMarkup(React.createElement(TarifasPorPasos, {
     tarifas: calculadas,
     servicios: [{ grupo: 'hotel', tipo: 'hotel', nombre: 'Hotel en San Andrés', opciones: ['h-eco', 'h-rec', 'h-pre'], estado: 'incluido', lugar: 'San Andrés', fecha: null, candidatas: ['h-eco', 'h-rec', 'h-pre'] }],
@@ -81,14 +87,15 @@ function tarifas(descuento: 3 | 7) {
     nombreDeOpcion: (id: string) => NOMBRES_DEL_CASO[id] ?? id,
     detalleDeOpcion: () => null,
     precioDeOpcion: (id: string) => precios.get(id)?.precio ?? 0,
-    margenPct: 15, pisoPct: 12, avisoPct: 12,
+    margenPct: 15, pisoPct: opciones.pisoPct ?? 12, avisoPct: opciones.pisoPct ?? 12,
     editable: true, ocupado: false,
     autorizacion: { bloquea: true, dueno: 'Gerente', esDueno: false, vigente: null, perdida: false, pedido: null, disponible: true },
     verElCalculo: null, rastro: null,
     onElegir: () => {}, onMandar: () => {}, onMargen: () => {}, onPedir: () => {}, onAutorizar: () => {}, onRetirar: () => {},
     onReponer: () => {}, onVerEnElViaje: () => {}, onRenombrar: () => {}, onEliminarTarifa: () => {}, onMotivo: () => {}, onSeguir: () => {},
-    reglas: { puntosExtra: 5, puntosMax: 5, descuentos: params.reglas!.descuentos, pisoHotelPct: 10 },
+    reglas: { puntosExtra: params.reglas!.puntosExtra, puntosMax: 5, descuentos: params.reglas!.descuentos, pisoHotelPct: 10 },
     onPuntos: () => {}, onDescuentos: () => {},
+    delTotal,
   }))
 }
 
@@ -149,7 +156,105 @@ describe('el paso «Tarifas» con reglas', () => {
     const t = texto(html)
     expect(html).toContain('data-autorizacion')
     expect(t).toContain('Recomendada · Bajo el mínimo')
-    expect(t).toMatch(/Hotel Ficticio Coral con su descuento queda al 8(,0)? % \(mínimo de hotel 10 %\)/)
+    expect(t).toMatch(/Hotel Ficticio Coral \(recomendada\) queda en 8 %, mínimo 10 %/)
     expect(t).toContain('Pedir autorización a Gerente')
+  })
+})
+
+// ── Brief del 2026-10-28 · dos fallas de pantalla ─────────────────────────────
+
+/** Como lo escribe el encabezado (`lo-que-suma.tsx › margenTexto`). */
+const comoEncabezado = (m: number) => `${String(Math.round(m * 10) / 10).replace('.', ',')} %`
+/** Lo que dice el rótulo «Margen global (no se edita):», sin etiquetas. */
+function rotulo(html: string) {
+  const desde = html.indexOf('data-margenes-reales')
+  return texto(html.slice(html.indexOf('>', desde) + 1, html.indexOf('</p>', desde)))
+}
+/** El encabezado del paso: el margen del total, el que pinta `LoQueSuma`. */
+function encabezado(lineas: LineaDeCascada[], params: ParametrosCascada, pantalla: TarifaDeLaPantalla[]) {
+  return comoEncabezado(margenDelEncabezado(cascadaDelTotal(lineas, params, pantalla), params) as number)
+}
+
+describe('falla 1 · el margen global en «Tarifas» lleva cifra y es la del encabezado', () => {
+  const casos: [string, Parameters<typeof paramsDelCaso>[0]][] = [
+    ['0 puntos extra', { puntosExtra: 0 }],
+    ['3 puntos extra', { puntosExtra: 3 }],
+    ['5 puntos extra', { puntosExtra: 5 }],
+    ['5 puntos y un descuento sobre el total', { puntosExtra: 5, descuentos: [{ id: 'd1', descripcion: 'Cliente recurrente', pct: 4 }] }],
+  ]
+
+  for (const [nombre, r] of casos) {
+    it(`sin tarifas (un hotel, nada que escoger), con ${nombre}`, () => {
+      const params = paramsDelCaso(r)
+      const html = tarifas(3, { params, tarifas: [] })
+      expect(rotulo(html)).toBe(`Margen global (no se edita): ${encabezado(lineasDelCaso(3), params, [])}`)
+    })
+
+    it(`con las tres tarifas, la Recomendada (el total) con ${nombre}`, () => {
+      const params = paramsDelCaso(r)
+      const html = tarifas(3, { params })
+      expect(rotulo(html)).toContain(`Recomendada ${encabezado(lineasDelCaso(3), params, TARIFAS_DEL_CASO)}`)
+    })
+  }
+
+  it('la cifra se mueve con los puntos y los descuentos', () => {
+    const cifras = [{ puntosExtra: 0 }, { puntosExtra: 5 }, { puntosExtra: 5, descuentos: [{ id: 'd1', descripcion: 'x', pct: 4 }] }]
+      .map(r => rotulo(tarifas(3, { params: paramsDelCaso(r), tarifas: [] })))
+    expect(new Set(cifras).size).toBe(3)
+  })
+
+  it('con reglas el encabezado es el margen global (el que se juzga); sin reglas, el de siempre', () => {
+    const params = paramsDelCaso()
+    const total = cascadaDelTotal(lineasDelCaso(3), params, TARIFAS_DEL_CASO)
+    expect(margenDelEncabezado(total, params)).toBe(total.reglas!.margenGlobalPct)
+    const sinReglas = { ...params, reglas: undefined }
+    const plano = cascadaDelTotal(lineasDelCaso(3), sinReglas, TARIFAS_DEL_CASO)
+    expect(margenDelEncabezado(plano, sinReglas)).toBe(plano.margenRealPct)
+  })
+})
+
+describe('falla 2 · el aviso de aprobación dice la causa real', () => {
+  const causas = (html: string) => [...html.matchAll(/data-causa-margen="(\w+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]])
+
+  it('por hotel: 8 % en el hotel con global ≥ 12 % nombra el hotel y no el global', () => {
+    const html = tarifas(7, { params: paramsDelCaso({ descuentos: [] }) })
+    volcar('aviso-hotel', html)
+    expect(rotulo(html)).toContain('Recomendada 13 %')
+    expect(causas(html)).toEqual([['hotel', 'Hotel Ficticio Coral (recomendada) queda en 8 %, mínimo 10 %']])
+    expect(texto(html)).toContain('Pedir autorización a Gerente')
+  })
+
+  it('por global: global bajo 12 % y todos los hoteles ≥ 10 % habla del global', () => {
+    const html = tarifas(3, { params: paramsDelCaso({ puntosExtra: 3 }) })
+    volcar('aviso-global', html)
+    const c = causas(html)
+    expect(c.length).toBeGreaterThan(0)
+    expect(c.every(([tipo]) => tipo === 'global')).toBe(true)
+    expect(c.map(x => x[1])).toContain('Recomendada: margen 11,7 %, mínimo 12 %')
+  })
+
+  it('combinado: hotel bajo 10 % y global bajo 12 % salen las dos causas', () => {
+    const html = tarifas(7)
+    volcar('aviso-combinado', html)
+    expect(causas(html)).toEqual([
+      ['hotel', 'Hotel Ficticio Coral (recomendada) queda en 8 %, mínimo 10 %'],
+      ['global', 'Recomendada: margen 11,2 %, mínimo 12 %'],
+    ])
+  })
+
+  it('sin aviso: hotel en 12 % y global en 13 % no pide aprobación', () => {
+    const html = tarifas(3)
+    expect(html).not.toContain('data-autorizacion')
+    expect(causas(html)).toEqual([])
+  })
+
+  it('sin tarifas, un hotel bajo su piso también abre la caja de la autorización y se nombra', () => {
+    const lineas = lineasDelCaso(3).map(l => (l.id === 'h-eco' ? { ...l, tarifa_pax: { descuentoCliente: { motivo: 'x', tipo: 'pct', valor: 7 } } } : l))
+    const params = paramsDelCaso({ descuentos: [] })
+    expect(cascadaDelTotal(lineas, params, []).reglas!.hotelesBajoPiso.map(h => h.id)).toEqual(['h-eco'])
+    const html = tarifas(3, { params, tarifas: [], lineas })
+    expect(html).toContain('data-autorizacion')
+    expect(causas(html)).toEqual([['hotel', 'Hotel Ficticio Arena queda en 8 %, mínimo 10 %']])
+    expect(texto(html)).toContain('Bajo el mínimo')
   })
 })

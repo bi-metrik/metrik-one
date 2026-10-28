@@ -204,6 +204,15 @@ export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCasc
   return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), params)
 }
 
+/**
+ * El margen que pinta el encabezado junto al total, y el mismo que dice «Tarifas» cuando no hay
+ * tarifas que vayan al cliente (brief del 2026-10-28, falla 1): UNA cifra para las dos. Con reglas
+ * de margen es el global (el que se juzga contra el mínimo); sin reglas, el de siempre.
+ */
+export function margenDelEncabezado(total: Cascada, params: ParametrosCascada): number | null {
+  return params.reglas ? margenMedible(total) ?? total.margenRealPct : total.margenRealPct
+}
+
 /** El precio de cada opción (con sus adicionales): no depende de la tarifa, el margen es uno. */
 export function preciosDeLasOpciones(lineas: LineaDeCascada[], params: ParametrosCascada): Map<string, { precio: number; costo: number }> {
   return new Map(

@@ -6,6 +6,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { createServiceClient } from '@/lib/supabase/server'
 import { pctTexto } from '@/lib/cotizaciones/piso-salida'
+import { detalleDeCausas } from '@/lib/cotizaciones/causas-margen'
 import {
   evaluarSalida,
   faltaLaTabla,
@@ -50,7 +51,7 @@ export interface SalidaVista {
   lineas?: number
   lineasSinCosto?: number
   /** Lo que frena, con su margen real (`null` = no se puede medir). */
-  bajoMinimo?: { nombre: string | null; margenPct: number | null }[]
+  bajoMinimo?: { nombre: string | null; margenPct: number | null; hoteles?: { nombre: string | null; margenPct: number }[]; pisoHotelPct?: number }[]
   /**
    * Una línea sin costo entra al total que sale: el motivo para no enviar
    * («Falta el costo de Vuelo a Providencia · Opción 1: …»). `null`/ausente = no aplica.
@@ -123,7 +124,12 @@ export async function getSalidaDeCotizacion(cotizacionId: string): Promise<Salid
     excepcionesDisponibles: salida.excepcionesDisponibles,
     lineas: salida.medicion?.conteo.lineas,
     lineasSinCosto: salida.medicion?.conteo.sinCosto,
-    bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({ nombre: s.nombre, margenPct: s.margenRealPct })),
+    // Con reglas de margen van también los hoteles bajo su piso: la nota dice la causa real.
+    bajoMinimo: (salida.medicion?.bajoPiso ?? []).map(s => ({
+      nombre: s.nombre,
+      margenPct: s.margenRealPct,
+      ...(s.hotelesBajoPiso?.length ? { hoteles: s.hotelesBajoPiso, pisoHotelPct: s.pisoHotelPct } : {}),
+    })),
     faltaCosto: salida.faltaCosto,
     faltaCostoLineas: salida.faltaCosto ? (salida.medicion?.conteo.faltantes ?? []) : [],
   }
@@ -221,13 +227,9 @@ export async function autorizarBajoElMinimo(
     || 'la cotización'
 
   if (negocioId) {
-    const detalle = salida.medicion.bajoPiso
-      .map(s => {
-        const quien = s.tipo === 'tarifa' ? `tarifa ${s.nombre}` : 'cotización'
-        const margen = s.margenRealPct === null ? 'sin margen medible' : pctTexto(s.margenRealPct, salida.medicion!.pisoPct)
-        return `${quien} al ${margen}`
-      })
-      .join(', ')
+    const detalle = detalleDeCausas(salida.medicion.bajoPiso, salida.medicion.pisoPct)
+    // Con un hotel bajo su piso, «el mínimo de 12 %» no es la causa: el paréntesis la dice.
+    const conHotel = salida.medicion.bajoPiso.some(s => (s.hotelesBajoPiso?.length ?? 0) > 0)
     const log = await registrarActividad(supabase, {
       workspace_id: workspaceId,
       entidad_tipo: 'negocio',
@@ -238,7 +240,7 @@ export async function autorizarBajoElMinimo(
       valor_anterior: null,
       valor_nuevo: 'autorizada',
       contenido: recortarParaLog(
-        `Autorizó ${codigo} bajo el margen mínimo de ${pctTexto(salida.medicion.pisoPct)} (${detalle}). ` +
+        `Autorizó ${codigo} bajo el margen mínimo${conHotel ? '' : ` de ${pctTexto(salida.medicion.pisoPct)}`} (${detalle}). ` +
         `Motivo: ${motivoLimpio}`,
       ),
     }, 'autorizarBajoElMinimo')
