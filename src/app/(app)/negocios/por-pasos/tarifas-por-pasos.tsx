@@ -130,6 +130,8 @@ export function TarifasPorPasos({
   onPuntos?: (puntos: number) => void
   onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number }[]) => void
 }) {
+  // Un paquete de bloqueo se margina como hotel (`tipoParaMargen`): la casilla lo nombra.
+  const conPaquete = servicios.some(s => s.tipo === 'paquete')
   const soloRecomendada = servicios.length > 0 && !servicios.some(s => s.tipo === 'vuelo' || s.tipo === 'hotel')
   const visibles = servicios.length === 0 || soloRecomendada ? tarifas.filter(t => t.canon === 'Recomendada' || t.esPrincipal) : tarifas
   const [ver, setVer] = useState<string>(() => (visibles.find(t => t.canon === 'Recomendada') ?? visibles[0])?.id ?? 'comparar')
@@ -179,11 +181,11 @@ export function TarifasPorPasos({
   const margenYAutorizacion = (
     <div className="flex flex-col gap-2 rounded-xl border border-[#E2DED5] bg-white p-3" data-margen-unico>
       <label className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-semibold">{reglas ? 'Margen de hoteles' : 'Margen'}</span>
+        <span className="font-semibold">{reglas ? (conPaquete ? 'Margen de hoteles y paquetes' : 'Margen de hoteles') : 'Margen'}</span>
         <input
           type="text"
           inputMode="decimal"
-          aria-label={reglas ? 'Margen de los hoteles' : 'Margen de la cotización'}
+          aria-label={reglas ? (conPaquete ? 'Margen de los hoteles y paquetes' : 'Margen de los hoteles') : 'Margen de la cotización'}
           disabled={!editable || ocupado}
           value={margenEscrito ?? String(margenPct).replace('.', ',')}
           onChange={e => setMargenEscrito(e.target.value)}
@@ -224,7 +226,7 @@ export function TarifasPorPasos({
               className={`${INPUT} !w-[70px] text-right tabular-nums`}
               data-puntos-extra
             />
-            <span className="text-xs text-[#6E6A62]">de 0 a {String(reglas.puntosMax).replace('.', ',')} puntos sobre el total · van en el precio de hoteles y planes, nunca en los vuelos</span>
+            <span className="text-xs text-[#6E6A62]">de 0 a {String(reglas.puntosMax).replace('.', ',')} puntos sobre el total · van en el precio de hoteles{conPaquete ? ', paquetes' : ''} y planes, nunca en los vuelos</span>
           </label>
           <div className="flex flex-col gap-1.5" data-descuentos-total>
             <span className="text-sm font-semibold">Descuentos sobre el total <span className="text-xs font-normal text-[#6E6A62]">· el cliente los ve con su descripción</span></span>

@@ -8,7 +8,8 @@
  *  1. **Vuelo**: un colchón por tiquete y por pasajero, `min(techo, max(piso, pct × precio))`,
  *     separado en nacional e internacional. No es ganancia pura: cubre lo que se mueve el precio
  *     entre la cotización y la reserva. Se ve como el margen de la línea y se puede editar.
- *  2. **Hotel**: el margen de la cotización (15 % de arranque), editable como siempre, y un
+ *  2. **Hotel** (y el paquete de bloqueo, que es hotel + vuelo del operador en un valor): el
+ *     margen de la cotización (15 % de arranque), editable como siempre, y un
  *     descuento por hotel con motivo que el cliente ve. Si el margen que le queda al hotel baja
  *     del piso de hotel (10 %), la cotización pide la autorización del dueño.
  *  3. **Lo demás** (planes, actividades, traslados, otros): arranca en 0 %.
@@ -212,18 +213,26 @@ export function motivoReglasInvalidas(
 
 export type TipoParaMargen = 'vuelo' | 'hotel' | 'otro'
 
-/** Vuelo, hotel o lo demás, por la RANURA del grupo (el mismo criterio del recargo). */
+/**
+ * Vuelo, hotel o lo demás, por la RANURA del grupo (el mismo criterio del recargo).
+ *
+ * El paquete de bloqueo (`paquete_detalle`: hotel + vuelo del operador, un valor por persona) se
+ * margina como HOTEL (decisión de Mauricio, brief del bloqueo del 2026-10-27, punto 6): comisión
+ * «por incluir» (Neta) hereda el margen de la cotización, igual que un hotel; «incluida» es una
+ * Pública y queda en 0 % por su propio camino. El vuelo de adentro no es una línea con costo, así
+ * que no suma colchón. Con reglas, antes caía en «lo demás» y salía a 0 % (precio = costo).
+ */
 export function tipoParaMargen(grupo: string | null | undefined): TipoParaMargen {
   const slug = ranuraDeGrupo(grupo ?? null)?.slug
   if (slug === 'vuelo_detalle') return 'vuelo'
-  if (slug === 'hotel_detalle') return 'hotel'
+  if (slug === 'hotel_detalle' || slug === 'paquete_detalle') return 'hotel'
   return 'otro'
 }
 
 /**
  * El margen que hereda una línea sin margen propio, fuera de la cascada (las filas con precio a
- * mano de la tarjeta). Sin reglas, el de la cotización; con reglas, el hotel el de la cotización y
- * lo demás 0. El vuelo no entra aquí: su colchón lo calcula la cascada con su costo.
+ * mano de la tarjeta). Sin reglas, el de la cotización; con reglas, el hotel (y el paquete de
+ * bloqueo, ver `tipoParaMargen`) el de la cotización y lo demás 0. El vuelo no entra aquí: su colchón lo calcula la cascada con su costo.
  */
 export function margenHeredado(
   grupo: string | null | undefined,
