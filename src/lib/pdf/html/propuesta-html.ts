@@ -3,12 +3,14 @@
  * 2026-10-14). Lo usa `generateCotizacionPDF` cuando el workspace lo tiene encendido
  * (`usaMotorHtml`); si algo aquí falla, la acción imprime el PDF de @react-pdf de siempre.
  *
+ * Plantilla: el formato de Edgar del 2026-10-14 (carta, Inter + Poppins), ver `trappvel/plantilla.ts`.
+ *
  * Pasos:
  *  1. el modelo (`modeloDePropuesta`), con las mismas cifras que el PDF de hoy;
  *  2. las fotos: cada una se baja a lo que el documento necesita con `sharp` (JPEG, ancho
  *     tope por uso) y viaja dentro del HTML como data URL. El prototipo pesaba 8,4 MB por
  *     fotos de 1280 px; la meta es que el PDF pase por WhatsApp;
- *  3. el HTML (`htmlDePropuesta`, puro) con Inter y Montserrat embebidas;
+ *  3. el HTML (`htmlDePropuesta`, puro) con Inter y Poppins embebidas;
  *  4. Chromium, sin red, con la franja de arriba y la banda del pie en cada hoja.
  */
 import { readFile } from 'node:fs/promises'
@@ -19,7 +21,7 @@ import { fotoImprimible, type OrigenFoto } from '@/lib/fotos/clave'
 import { fuentesDelDocumento } from '@/lib/pdf/chromium/fuentes'
 import { cssDeFuentes, inyectarEstilo } from '@/lib/pdf/chromium/recursos'
 import { imprimirHtmlAPdf, type MedidasRender } from '@/lib/pdf/chromium/render-chromium'
-import { COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta } from './trappvel/plantilla'
+import { COLUMNAS_HOTELES, COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta } from './trappvel/plantilla'
 
 /** Ancho tope por uso, en px (a ~150 ppp sobre el ancho impreso). */
 export const ANCHO_FOTO = { portada: 1400, tarjeta: 700, extra: 400, logo: 600 } as const
@@ -110,7 +112,7 @@ export interface OpcionesPropuestaHtml {
   /** Nombre del workspace: va escrito si no hay logo. */
   marca: string
   logoUrl: string | null
-  /** El banco de fotos de ciudad (`fotosDeCiudad` → FotoPDF). Sin él, «Lo que van a vivir» va sin fotos. */
+  /** El banco de fotos de ciudad (`fotosDeCiudad` → FotoPDF). Sin él, la portada y los días van sin fotos de ciudad. */
   fotoDeCiudad?: (ciudad: string) => FotoPDF[]
   /**
    * El catálogo de fotos del workspace (PR 4). Manda sobre el banco en las ciudades (alguien la
@@ -178,7 +180,7 @@ export async function prepararPropuestaHtml(
   const extrasHotel = new Map<string, { src: string; extras: FotoDeCatalogo[] }>()
   if (catalogo) {
     for (const c of modelo.hoteles) {
-      const caben = extrasQueCaben('hotel', Math.min(3, Math.max(1, c.opciones.length)))
+      const caben = extrasQueCaben('hotel', COLUMNAS_HOTELES)
       for (const o of c.opciones) {
         if (o.foto) continue
         const f = catalogo.hotel(o.hotel, c.ciudad)
@@ -200,6 +202,20 @@ export async function prepararPropuestaHtml(
     }
   }
 
+  // Las actividades incluidas, por su nombre corto: su foto va al lado de su día en el itinerario.
+  const deActividad = new Map<string, FotoDeCatalogo>()
+  if (catalogo) {
+    for (const d of modelo.dias) {
+      for (const e of d.eventos) {
+        if (e.tipo !== 'actividad') continue
+        const nombre = e.texto.split(' · ')[0].trim()
+        if (deActividad.has(nombre)) continue
+        const f = catalogo.actividad(nombre)
+        if (f) deActividad.set(nombre, f)
+      }
+    }
+  }
+
   const pedidos = new Map<string, number>()
   const pedir = (url: string | null | undefined, ancho: number) => {
     if (!url) return
@@ -209,6 +225,7 @@ export async function prepararPropuestaHtml(
   for (const f of deCiudad.values()) pedir(f.url, ANCHO_FOTO.tarjeta)
   for (const c of modelo.hoteles) for (const o of c.opciones) pedir(o.foto?.url, ANCHO_FOTO.tarjeta)
   for (const f of deOpcional.values()) pedir(f.src, ANCHO_FOTO.tarjeta)
+  for (const f of deActividad.values()) pedir(f.src, ANCHO_FOTO.tarjeta)
   for (const h of extrasHotel.values()) for (const f of h.extras) pedir(f.src, ANCHO_FOTO.extra)
   for (const f of deOpcional.values()) for (const x of f.extras ?? []) pedir(x.src, ANCHO_FOTO.extra)
 
@@ -221,6 +238,7 @@ export async function prepararPropuestaHtml(
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
   for (const f of deOpcional.values()) if (f.foco) focoDe.set(f.src, f.foco)
+  for (const f of deActividad.values()) if (f.foco) focoDe.set(f.src, f.foco)
   for (const lista of [...[...extrasHotel.values()].map((h) => h.extras), ...[...deOpcional.values()].map((f) => f.extras ?? [])]) {
     for (const f of lista) if (f.foco) focoDe.set(f.src, f.foco)
   }
@@ -238,12 +256,14 @@ export async function prepararPropuestaHtml(
     ...creditosCatalogo,
     ...[...extrasHotel.values()].flatMap(extrasDeHotelResueltas).map((f) => f.credito),
     ...[...deOpcional.values()].filter((f) => porUrl.has(f.src)).flatMap((f) => [f.credito, ...conArchivo(f.extras).map((x) => x.credito)]),
+    ...[...deActividad.values()].filter((f) => porUrl.has(f.src)).map((f) => f.credito),
   ].filter((c): c is string => !!c)
 
   const crudo = htmlDePropuesta(modelo, {
     foto: resolver,
     fotoDeCiudad: (ciudad) => (ciudad ? resolver(deCiudad.get(ciudad)?.url) : null),
     fotoDeOpcional: (nombre) => resolver(deOpcional.get(nombre)?.src),
+    fotoDeActividad: (nombre) => resolver(deActividad.get(nombre)?.src),
     extrasDeHotel: (ciudad, hotel) => extrasDeHotelResueltas(extrasHotel.get(claveHotel(ciudad, hotel))).map((f) => resolver(f.src)!),
     extrasDeOpcional: (nombre) => conArchivo(deOpcional.get(nombre)?.extras).map((f) => resolver(f.src)!),
     logo,

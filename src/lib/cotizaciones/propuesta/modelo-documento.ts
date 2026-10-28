@@ -57,6 +57,7 @@ import { siglasDeTramos } from '@/lib/cotizaciones/aerolineas'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import { asiPuedesPagar, type AsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import type { AnticipoPropuesta } from './anticipo'
+import { destinatarioDeLaPropuesta, type ClienteDelNegocio, type Destinatario } from './destinatario'
 
 // ── Entrada ───────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,8 @@ export interface EntradaModeloPropuesta {
    * (`lugaresDeOpcionales`). Sin él, la ciudad se busca en el nombre del plan.
    */
   lugaresDeOpcionales?: ({ ciudad: string | null; fecha: string | null } | null)[]
+  /** El contacto y la empresa del negocio: a quién va dirigida la propuesta (2026-10-27). */
+  cliente?: ClienteDelNegocio | null
 }
 
 // ── Salida ────────────────────────────────────────────────────────────────────
@@ -255,6 +258,8 @@ export interface ModeloPropuesta {
     fotosCiudades: FotoPDF[]
     /** Decisión 1: nombres de pila que se pueden imprimir (los de menores solo con autorización). */
     nombres: string[]
+    /** A quién va dirigida, con nombre propio; `null` sin contacto (el documento habla a los pasajeros). */
+    destinatario: Destinatario | null
   }
   ruta: { origen: string | null; paradas: ParadaDoc[]; regreso: string | null }
   dias: DiaDoc[]
@@ -465,6 +470,7 @@ export function modeloDePropuesta({
   anticipo = null,
   asesora = null,
   lugaresDeOpcionales = [],
+  cliente = null,
 }: EntradaModeloPropuesta): ModeloPropuesta {
   const v = props.viaje ?? null
   const inicio = v?.fechaInicio ?? null
@@ -681,6 +687,7 @@ export function modeloDePropuesta({
       foto: v?.foto ?? null,
       fotosCiudades: v?.fotosCiudades ?? [],
       nombres: nombresParaLaPropuesta(viajeros, menoresAutorizados),
+      destinatario: destinatarioDeLaPropuesta(cliente),
     },
     ruta,
     dias,

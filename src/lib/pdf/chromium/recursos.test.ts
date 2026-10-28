@@ -66,10 +66,10 @@ describe('fuentes y estilo', () => {
     expect(pie).toContain('class="totalPages"')
   })
 
-  it('las siete fuentes del repo son woff2 de verdad', () => {
+  it('las nueve fuentes del repo son woff2 de verdad', () => {
     const dir = path.join(__dirname, 'fuentes')
     const archivos = readdirSync(dir).filter((f) => f.endsWith('.woff2'))
-    expect(archivos).toHaveLength(7)
+    expect(archivos).toHaveLength(9)
     for (const f of archivos) expect(readFileSync(path.join(dir, f)).subarray(0, 4).toString('latin1')).toBe('wOF2')
   })
 })
