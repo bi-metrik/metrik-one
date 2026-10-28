@@ -229,7 +229,7 @@ export interface ServicioDelViaje {
 
 export interface TramoDelViaje {
   clave: string
-  /** «Vuelos», «Providencia», «Otros servicios». */
+  /** «Paquete de bloqueo», «Vuelos», «Providencia», «Otros servicios». */
   titulo: string
   servicios: ServicioDelViaje[]
 }
@@ -353,7 +353,10 @@ export function viajeEnOrden(
 
   const vuelos = servicios.filter(s => s.tipo === 'vuelo').sort((a, b) => (a.fecha ?? '9999').localeCompare(b.fecha ?? '9999'))
   const otros = servicios.filter(s => s.tipo === 'otro')
-  const resto = servicios.filter(s => s.tipo !== 'vuelo' && s.tipo !== 'otro')
+  // El paquete de bloqueo (hotel + vuelo del operador) es el viaje entero: va primero y en su
+  // propia sección, no en un destino ni en «Otros servicios».
+  const paquetes = servicios.filter(s => s.tipo === 'paquete')
+  const resto = servicios.filter(s => s.tipo !== 'vuelo' && s.tipo !== 'otro' && s.tipo !== 'paquete')
   const destinoDelNegocio = ciudadCorta(viaje.destino) ?? 'El viaje'
   const tramos = new Map<string, TramoDelViaje & { fecha: string }>()
   for (const s of resto) {
@@ -372,6 +375,7 @@ export function viajeEnOrden(
       servicios: t.servicios.sort((a, b) => ORDEN_TIPO[a.tipo] - ORDEN_TIPO[b.tipo] || (a.fecha ?? '9999').localeCompare(b.fecha ?? '9999')),
     }))
   return [
+    ...(paquetes.length > 0 ? [{ clave: 'paquetes', titulo: paquetes.length > 1 ? 'Paquetes de bloqueo' : 'Paquete de bloqueo', servicios: paquetes }] : []),
     ...(vuelos.length > 0 ? [{ clave: 'vuelos', titulo: 'Vuelos', servicios: vuelos }] : []),
     ...destinos,
     ...(otros.length > 0 ? [{ clave: 'otros', titulo: 'Otros servicios', servicios: otros }] : []),
