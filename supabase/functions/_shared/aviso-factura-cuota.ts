@@ -2,9 +2,14 @@
  * El aviso de factura cargada: reglas puras (pedido de Mauricio, 2026-10-22: «debemos enviar una
  * notificación al usuario pagador cuando quede cargada la factura. Ahí a la campanita de ONE»).
  *
- * Cuando el cobrador (metrik) carga la factura electrónica de una cuota (`cargarFacturaCuota`), el
- * espacio que PAGA el contrato recibe un aviso en la campana con el enlace a la pestaña Pagos de
- * `/suscripcion`, que es donde la descarga.
+ * Cuando el cobrador (metrik) registra la factura electrónica de una cuota, el espacio que PAGA el
+ * contrato recibe un aviso en la campana con el enlace a la pestaña Pagos de `/suscripcion`, que es
+ * donde la descarga.
+ *
+ * Desde el 2026-10-28 lo dispara la BASE (trigger en `facturas_cuota` → cola `envios_factura_cuota`
+ * → edge function `enviar-factura-cuota`), no la server action: así sale también cuando la factura
+ * entra por SQL o por script. Módulo puro, sin Deno ni red: lo importan la edge function y vitest.
+ * Vive aquí y no en `src/` porque las edge functions se despliegan solas y no alcanzan `src/`.
  *
  * ## A quién
  *
