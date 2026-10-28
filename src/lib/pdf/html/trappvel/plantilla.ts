@@ -246,6 +246,13 @@ const ciudadSola = (s: string | null) => (s ?? '').replace(/\s*\(?\b[A-Z]{3}\b\)
 
 // ── Secciones ─────────────────────────────────────────────────────────────────
 
+/** Parte una lista de tarjetas en filas de `n`. */
+function enFilas<T>(xs: T[], n: number): T[][] {
+  const filas: T[][] = []
+  for (let i = 0; i < xs.length; i += n) filas.push(xs.slice(i, i + n))
+  return filas
+}
+
 function encabezadoDeSeccion(icon: string, titulo: string, sub: string | null): string {
   return `<div class="sh"><div class="sq">${icono(icon)}</div><div><h2>${esc(titulo)}</h2>${sub ? `<div class="st">${esc(sub)}</div>` : ''}</div></div>`
 }
@@ -672,8 +679,10 @@ function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
     const imagen = conImagen ? imagenDeTarjeta(fotos[i], extras, lugar ? `<div class="where">${esc(lugar)}</div>` : '') : ''
     return `<div class="oc">${imagen}<div class="b"><div class="n">${esc(o.nombre)}</div>${!imagen && lugar ? `<div class="caps">${esc(lugar)}</div>` : ''}${o.descripcion ? `<div class="muted">${esc(o.descripcion)}</div>` : ''}<div class="foot"><span class="muted">${esc(o.unidad ?? '')}</span><span class="pr money">${esc(valor)}</span></div></div></div>`
   })
-  return `<section class="sec nobr">\n${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
-  <div class="opcs">${tarjetas.join('\n')}</div>\n</section>`
+  // Por filas: el título va con la primera y las demás pueden pasar a la hoja siguiente.
+  const [primera, ...resto] = enFilas(tarjetas, COLUMNAS_OPCIONALES).map((f) => `<div class="opcs">${f.join('\n')}</div>`)
+  return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
+  ${primera}</div>\n${resto.join('\n')}\n</section>`
 }
 
 // ── Información útil ──────────────────────────────────────────────────────────
@@ -845,7 +854,7 @@ export function bloquesDeTerminos(texto: string | null): { titulo: string | null
  * Lo que incluye y los términos en una sola fila de tarjetas (hasta tres por fila), como las de
  * «Información útil» del formato de Edgar: así la hoja de precios cabe en una hoja.
  */
-function incluyeYCondiciones(m: ModeloPropuesta): string {
+function incluyeYCondiciones(m: ModeloPropuesta, firma: string): string {
   const xs = m.precio.incluye.length > 0
     ? m.precio.incluye
     : m.tarifas.length > 0
@@ -859,28 +868,45 @@ function incluyeYCondiciones(m: ModeloPropuesta): string {
     (b) => `<div class="card"><span class="caps">${esc(b.titulo ?? 'Términos y condiciones')}</span>${lista(b.puntos)}</div>`,
   )
   const tarjetas = [...tarjetasIncluye, ...tarjetasTerminos]
-  if (tarjetas.length === 0) return ''
+  if (tarjetas.length === 0) return firma
   const titulo = tarjetasIncluye.length === 0 ? 'Términos y condiciones' : tarjetasTerminos.length === 0 ? 'Qué incluye' : 'Qué incluye y condiciones'
-  return `<div class="sec nobr">${encabezadoDeSeccion('doc', titulo, null)}<div class="cards" style="grid-template-columns:repeat(${Math.min(3, tarjetas.length)},1fr)">${tarjetas.join('\n')}</div></div>`
+  // Por filas de tres: el título va con la primera; con más bloques, las del medio pueden pasar a la
+  // hoja siguiente. Cada tarjeta (`.card`) no se parte, y la firma va pegada a la última fila: sola
+  // arriba de una hoja la dejaba casi vacía.
+  const columnas = Math.min(3, tarjetas.length)
+  const filas = enFilas(tarjetas, columnas).map(
+    (f) => `<div class="cards" style="grid-template-columns:repeat(${columnas},1fr)">${f.join('\n')}</div>`,
+  )
+  const encabezado = encabezadoDeSeccion('doc', titulo, null)
+  if (filas.length === 1) return `<div class="sec"><div class="nobr">${encabezado}${filas[0]}${firma}</div></div>`
+  const [primera, ...resto] = filas
+  const ultima = resto.pop()!
+  return `<div class="sec"><div class="nobr">${encabezado}${primera}</div>${resto.join('\n')}<div class="nobr">${ultima}${firma}</div></div>`
 }
 
-function firmaYCreditos(m: ModeloPropuesta, r: RecursosPropuesta): string {
+function firmaDe(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const firma = m.formal.firma
-  const creditos = [...new Set([...m.formal.creditos, ...(r.creditosExtra ?? [])])]
   return `<div class="sign">
     <div>${firma ? `<b class="pop">${esc(firma.nombre)}</b><br><span class="muted small">${esc([firma.cargo, firma.contacto].filter(Boolean).join(' · '))}</span>` : ''}</div>
     ${marcaDe(r, '9mm')}
-  </div>
-  ${creditos.length > 0 ? `<div class="credits"><b>Fotografías:</b> ${creditos.map(esc).join(' · ')}</div>` : ''}`
+  </div>`
 }
 
-/** La hoja de precios del final: arranca en hoja nueva (decisión de Mauricio del 2026-10-27). */
+function creditosDe(m: ModeloPropuesta, r: RecursosPropuesta): string {
+  const creditos = [...new Set([...m.formal.creditos, ...(r.creditosExtra ?? [])])]
+  return creditos.length > 0 ? `<div class="credits"><b>Fotografías:</b> ${creditos.map(esc).join(' · ')}</div>` : ''
+}
+
+/**
+ * Los precios al final. Ya no arrancan en hoja nueva (pedido de Edgar del 2026-10-28: menos blanco y
+ * menos hojas): siguen a lo anterior y solo saltan si su primer bloque no cabe.
+ */
 function hojaDePrecios(m: ModeloPropuesta, r: RecursosPropuesta): string {
-  return `<section class="sec brk precios">
+  return `<section class="sec precios">
 ${eligeTuVersion(m)}
 ${cuantoYCuando(m)}
-${incluyeYCondiciones(m)}
-${firmaYCreditos(m, r)}
+${incluyeYCondiciones(m, firmaDe(m, r))}
+${creditosDe(m, r)}
 </section>`
 }
 

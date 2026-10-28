@@ -27,5 +27,11 @@ eso se reescribieron). QA en `proyectos/trappvel/clarity/qa/2026-10-27_pdf-forma
   minúscula, mixto se respeta) y la empresa solo si `tipo_persona <> 'natural'`. Aviso «Propuesta de viaje para …»
   y cuarta tarjeta «Cotizada para»; sin contacto vuelve a pasajeros / «Incluye». La empresa de relleno «Cliente»
   de la acción NO cuenta. El doble `test/cotizacion-pdf-doble.ts` ya proyecta `empresas(` y `contactos(` del negocio.
-- Con 3 versiones (Europa) la hoja de precios ocupa 2 hojas; con 2 cabe en una.
+- Desde el 2026-10-28 (pedido de Edgar, rama `trappvel/pdf-compacto`) NO hay saltos forzados: los precios
+  siguen a lo anterior. Atómicos solo las unidades (vuelo, hotel, día, versión, tabla de pagos, tarjeta de
+  condiciones, firma pegada a la última fila). Un `.sh` va siempre en un `.nobr` con su primer bloque:
+  `break-after: avoid` solo, Chromium no lo respeta.
+- La holgura es fina: con textos como la COT-2026-0004 real la hoja 3 sobra por ~5 mm. Si alguien sube un
+  espaciado vertical, vuelve a 4 hojas: medir con `pdftotext -bbox` (última palabra sobre el pie) antes de
+  tocar márgenes. Fixture «curazao-largo» (textos largos ficticios) vive solo en el test temporal de la QA.
 - Ver [[propuesta-motor-html-h33]] y [[fotos-catalogo]].
