@@ -5,7 +5,8 @@ import { textoLatinoProfundo } from '@/lib/texto/texto-latino';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCachedUser } from '@/lib/supabase/auth-user';
 import { accesoValida } from '@/lib/valida/acceso-servidor';
-import { credencialValida, leerSaldoValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
+import { credencialValida, leerSaldoValida } from '@/lib/valida/credencial-servidor';
+import { pdfDeValidaDelEspacio } from '@/lib/valida/reporte-servidor';
 import type { MotivoCorte } from '@/lib/valida/corte-bolsa';
 import {
   CONSULTAS_POR_PDF,
@@ -423,9 +424,6 @@ export async function pdfLoteValida(
   const l = await leerLote(svc, acceso.workspaceId, loteId);
   if (!l) return { ok: false, error: 'lote_no_encontrado' };
 
-  const { llave } = await credencialValida(acceso.workspaceId);
-  if (!llave) return { ok: false, error: 'valida_api_key_no_configurada' };
-
   const desde = Math.max(0, Math.floor(parte)) * CONSULTAS_POR_PDF;
   const [{ data: filas, error }, { count }] = await Promise.all([
     svc
@@ -451,23 +449,11 @@ export async function pdfLoteValida(
   const numero = Math.floor(desde / CONSULTAS_POR_PDF) + 1;
   const titulo = partes > 1 ? `${l.titulo ?? 'Cargue'} · parte ${numero} de ${partes}` : l.titulo;
 
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte-lote`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${llave}` },
-      body: JSON.stringify({ consulta_ids: ids, titulo: titulo ?? null }),
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    const sufijo = partes > 1 ? `-parte-${numero}` : '';
-    return { ok: true, data: { base64: buf.toString('base64'), filename: `valida-cargue-${l.id.slice(0, 8)}${sufijo}.pdf` } };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf_lote' };
-  }
+  // Con la llave o, si venció (fin de la prueba, reverso del pago), firmado como ONE (cláusula 11.2).
+  const r = await pdfDeValidaDelEspacio(acceso.workspaceId, { tipo: 'lote', consultaIds: ids, titulo: titulo ?? null });
+  if (!r.ok) return r;
+  const sufijo = partes > 1 ? `-parte-${numero}` : '';
+  return { ok: true, data: { base64: r.bytes.toString('base64'), filename: `valida-cargue-${l.id.slice(0, 8)}${sufijo}.pdf` } };
 }
 
 /** Los resultados del lote en un XLSX, una fila por fila del archivo, en su orden. */
