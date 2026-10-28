@@ -2,9 +2,9 @@
 
 ## Project memories
 
-- ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 SIN aplicar; trigger, no webhook; sin deploy
+- ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy
 - ⚠️⚠️ [Factura de cuota sale siempre (#1317)](project_factura_cuota_correo_siempre.md) — 20261028120000 SIN aplicar; edge enviar-factura-cuota; webhook después de la migración
-- ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; SQL config SIN aplicar; puntos fuera de precio_venta; `–` no `−` en PDF
+- ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; puntos fuera de precio_venta; `–` no `−` en PDF; causas en causas-margen.ts
 - ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje
 - ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 APLICADA; no mergear sin DNS
 - ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 SIN aplicar; migrar antes del merge (datos.ts lee la columna)

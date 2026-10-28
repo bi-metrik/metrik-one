@@ -1,6 +1,6 @@
 ---
 name: soe031-confirmacion-entrega
-description: SOE-031 (2026-10-28) — acuse de Resend marca sola la «Confirmación de entrega» de SOENA vía trigger en avisos_cliente; migraciones 20261028163000/163100 SIN aplicar; bloque tipo avisos_cliente
+description: SOE-031 (2026-10-28) — acuse de Resend marca sola la «Confirmación de entrega» de SOENA vía trigger en avisos_cliente; migraciones 20261028163000/163100 APLICADAS (28-oct, archivos de 27aa2405); bloque tipo avisos_cliente
 metadata:
   type: project
 ---
@@ -20,6 +20,6 @@ confirmación se marca sola al llegar; si rebota, la plataforma avisa para corre
 
 **Why:** promesa explícita a SOENA; el bloque viejo «Correo de entrega» no mandaba nada.
 
-**How to apply:** orden 163000 → 163100 → merge. Ninguna edge function que desplegar. Si otro workspace lo
+**How to apply:** ya aplicadas en prod y en el ledger: NO tocar esos dos archivos; un cambio va en migración nueva. Ninguna edge function que desplegar. Si otro workspace lo
 quiere: crear un bloque `avisos_cliente` en la etapa con `confirmar.bloque_config_id`. Relacionado:
 [[aviso-mismo-hecho]], [[resend-pro-alarma-volumen]].

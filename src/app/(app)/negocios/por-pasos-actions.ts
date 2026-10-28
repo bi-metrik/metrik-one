@@ -35,7 +35,7 @@ import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
 import { createServiceClient } from '@/lib/supabase/server'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES } from '@/lib/cotizaciones/piso-salida-datos'
-import { pctTexto } from '@/lib/cotizaciones/piso-salida'
+import { detalleDeCausas } from '@/lib/cotizaciones/causas-margen'
 import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
@@ -608,9 +608,8 @@ export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<R
   const negocioId = (cot?.negocio_id ?? null) as string | null
   if (!negocioId) return { success: false, error: 'La cotización no tiene negocio.' }
   const codigo = (cot?.codigo || cot?.consecutivo || 'la cotización') as string
-  const detalle = (salida.medicion?.bajoPiso ?? [])
-    .map(s => `${s.tipo === 'tarifa' ? `tarifa ${s.nombre}` : 'cotización'} al ${s.margenRealPct === null ? 'sin margen medible' : pctTexto(s.margenRealPct, salida.medicion!.pisoPct)}`)
-    .join(', ')
+  // Brief del 2026-10-28 · la causa real: un hotel bajo su piso se nombra, no se dice como margen global.
+  const detalle = detalleDeCausas(salida.medicion?.bajoPiso ?? [], salida.medicion?.pisoPct ?? 0)
   const log = await registrarActividad(supabase, {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
