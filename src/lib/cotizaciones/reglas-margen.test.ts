@@ -7,6 +7,7 @@ import {
   colchonDeLinea,
   colchonDeTiquete,
   comisionDePublica,
+  margenHeredado,
   leerReglasDeCotizacion,
   motivoReglasInvalidas,
   paramsPorOpcion,
@@ -332,5 +333,71 @@ describe('la política: de la línea a la cotización', () => {
     expect(tipoParaMargen('hotel')).toBe('hotel')
     expect(tipoParaMargen('traslado')).toBe('otro')
     expect(tipoParaMargen(null)).toBe('otro')
+  })
+})
+
+describe('el paquete de bloqueo se margina como hotel (brief del bloqueo, punto 6)', () => {
+  // El caso visto en producción (trappvel, 2026-10-28), con el costo del paquete y datos ficticios.
+  const GRUPO = 'paquete de bloqueo: Paquete de bloqueo'
+  const COSTO = 14_355_561
+  const paquete = (id: string, comision: 'neta' | 'publica', extra: Partial<ItemParaCascada> = {}) =>
+    linea({
+      id,
+      grupo: GRUPO,
+      nombre: 'Hotel Ficticio del Paquete',
+      subtotal: COSTO,
+      tarifa_pax: { tipoTarifa: { tipo: comision, origen: 'persona', por: null, en: '' } },
+      // «Incluida» la deja la acción en 0; «por incluir» en null (hereda).
+      margen_porcentaje: comision === 'publica' ? 0 : null,
+      ...extra,
+    })
+
+  it('su ranura es la del hotel para el margen; un «paquete» suelto sigue siendo lo demás', () => {
+    expect(tipoParaMargen(GRUPO)).toBe('hotel')
+    expect(tipoParaMargen('paquete de bloqueo')).toBe('hotel')
+    expect(tipoParaMargen('paquete')).toBe('otro')
+  })
+
+  it('comisión por incluir (Neta) hereda el margen de la cotización: precio = costo / 0,85', () => {
+    const c = calcularCascada([paquete('pq', 'neta')], params({}, 15))
+    expect(de(c, 'pq').margenAplicado).toBe(15)
+    expect(de(c, 'pq').precioLinea).toBe(Math.round(COSTO / 0.85))
+    expect(c.margenRealPct).toBeCloseTo(15, 1)
+    expect(c.reglas?.hotelesBajoPiso ?? []).toEqual([])
+  })
+
+  it('comisión incluida (Pública) queda en 0 %: precio = costo', () => {
+    const c = calcularCascada([paquete('pq', 'publica')], params({}, 15))
+    expect(de(c, 'pq').precioLinea).toBe(COSTO)
+    expect(de(c, 'pq').margenAplicado).toBe(0)
+    // Aun sin el 0 que escribe la acción, una Pública no hereda.
+    const sinCero = calcularCascada([paquete('pq', 'publica', { margen_porcentaje: null })], params({}, 15))
+    expect(de(sinCero, 'pq').precioLinea).toBe(COSTO)
+  })
+
+  it('no suma colchón de vuelo: el vuelo de adentro no es una línea con costo', () => {
+    const c = calcularCascada([paquete('pq', 'neta')], params({}, 15))
+    expect(de(c, 'pq').reglas?.colchon).toBeNull()
+  })
+
+  it('recibe puntos extra como el hotel (Neta), no si es Pública', () => {
+    const neta = calcularCascada([paquete('pq', 'neta')], params({ puntosExtra: 2 }, 15))
+    expect(de(neta, 'pq').reglas?.puntos).toBeGreaterThan(0)
+    const pub = calcularCascada([paquete('pq', 'publica')], params({ puntosExtra: 2 }, 15))
+    expect(de(pub, 'pq').reglas?.puntos ?? 0).toBe(0)
+  })
+
+  it('el margen heredado fuera de la cascada (precios a mano) también es el de la cotización', () => {
+    expect(margenHeredado(GRUPO, 15, reglas())).toBe(15)
+    expect(margenHeredado('hotel', 15, reglas())).toBe(15)
+    expect(margenHeredado('actividad', 15, reglas())).toBe(0)
+    expect(margenHeredado(GRUPO, 15, null)).toBe(15)
+  })
+
+  it('hotel y vuelo no cambian', () => {
+    const c = calcularCascada([hotel('h', 850_000), vuelo('v', 500_000)], params({}, 15))
+    expect(de(c, 'h').precioLinea).toBe(1_000_000)
+    expect(de(c, 'v').reglas?.colchon?.colchon).toBe(50_000)
+    expect(de(c, 'v').precioLinea).toBe(550_000)
   })
 })
