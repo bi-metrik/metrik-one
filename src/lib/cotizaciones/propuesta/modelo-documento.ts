@@ -115,6 +115,8 @@ export interface LineaDoc {
   unidad: string | null
   total: number
   adicionales: string[]
+  /** Reglas de margen: «Descuento · motivo: −$X» bajo la opción con descuento. `null` = nada. */
+  nota: string | null
 }
 
 export interface TarifaDoc {
@@ -129,6 +131,8 @@ export interface TarifaDoc {
   /** «Incluye IVA de $ X» con `linea_incluida`; si no, `null`. Igual que hoy. */
   notaIva: string | null
   lineas: LineaDoc[]
+  /** Reglas de margen: los descuentos sobre el total de esta tarifa, con su descripción. */
+  descuentos: { descripcion: string; valor: number }[]
   /** Las estrellas que tienen TODOS sus hoteles con categoría («4★»); `null` si varían o no hay. */
   estrellas: number | null
   hoteles: { nombre: string; estrellas: number | null; ciudad: string | null }[]
@@ -281,6 +285,8 @@ export interface ModeloPropuesta {
     totalEsDeLaRecomendada: boolean
     /** Sin tarifas: las líneas del documento («Inversión» de hoy). */
     lineas: LineaDoc[]
+    /** Reglas de margen: los descuentos sobre el TOTAL, con su descripción. Vacío = ninguno. */
+    descuentos: { descripcion: string; valor: number }[]
     incluye: string[]
     noIncluye: string[]
     /** Uno por tarifa (en el orden de `tarifas`), o uno solo con el total. Vacío sin plan en la línea. */
@@ -333,7 +339,7 @@ const ORDEN_CLAVE: Record<ClaveTarifa, number> = { economica: 0, recomendada: 1,
  * cargar @react-pdf en un módulo puro; la prueba de paridad la vigila.
  */
 export function lineasDelDocumento(
-  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number }[],
+  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number; nota?: string | null }[],
 ): LineaDoc[] {
   return items.map((i) => {
     const cantidad = i.cantidad ?? 1
@@ -344,6 +350,7 @@ export function lineasDelDocumento(
       unidad: i.unidad ?? null,
       total: base + (i.valorAdicionales ?? 0),
       adicionales: i.adicionales ?? [],
+      nota: i.nota ?? null,
     }
   })
 }
@@ -489,6 +496,7 @@ export function modeloDePropuesta({
       precio: it.precio,
       notaIva: ivaDelBloque > 0 ? `Incluye IVA de ${pesos(ivaDelBloque)}` : null,
       lineas: lineasDelDocumento(it.items),
+      descuentos: it.descuentos ?? [],
       estrellas: null,
       hoteles: [],
       vuelos: [],
@@ -704,6 +712,7 @@ export function modeloDePropuesta({
       notaIva,
       totalEsDeLaRecomendada,
       lineas,
+      descuentos: props.descuentosTotal ?? [],
       incluye: porTarifas ? incluyeDeTodas(v?.incluye ?? [], { hoteles, vuelos, tarifas: bloques.length, noches: nochesDeHotel }) : v?.incluye ?? [],
       noIncluye,
       planes,

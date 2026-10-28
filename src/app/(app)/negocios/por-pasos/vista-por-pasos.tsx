@@ -20,6 +20,7 @@ import {
   margenDeLaCotizacionEnOpciones,
   margenPorPasos,
   moverOpcionPorPasos,
+  reglasPorPasos,
   pedirAutorizacionPorPasos,
   retirarAutorizacionPorPasos,
   separarOpcionPorPasos,
@@ -35,6 +36,7 @@ import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
+import { tipoParaMargen, type ReglasDeCotizacion } from '@/lib/cotizaciones/reglas-margen'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
 import { estadosPermitidos, type EstadoServicio } from '@/lib/cotizaciones/estado-servicio'
 import { YA_CAMBIO } from '@/lib/cotizaciones/deshacer-por-pasos'
@@ -158,6 +160,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   // (V3: < 300 ms, sin pedir nada). Se borra cuando llega la versión del servidor.
   const [overrides, setOverrides] = useState<Record<string, Override>>({})
   const [margenLocal, setMargenLocal] = useState<number | null>(null)
+  // Reglas de margen (2026-10-27): los puntos extra y los descuentos recién escritos, hasta que
+  // llegue la versión del servidor. La pantalla los muestra ya, como el margen.
+  const [reglasLocal, setReglasLocal] = useState<ReglasDeCotizacion | null>(null)
   const [ocultos, setOcultos] = useState<ReadonlySet<string>>(() => new Set())
   // D2 (H5) · las opciones que «Deshacer» acaba de reponer, mientras el servidor no las trae: sin
   // ellas, la tarifa se calculaba un momento sin la opción repuesta (una cifra que no existe).
@@ -166,13 +171,14 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   // elección de las tarifas con las tarifas, lo oculto con las líneas. Hasta H5 una sola clave
   // borraba todo en cuanto llegaban las líneas (la vista fresca, antes que el refresco de las
   // tarifas), y la tarifa se pintaba un momento con la elección vieja del servidor.
-  const claveTarifas = JSON.stringify(p.tarifasDelServidor) + p.margenPct
+  const claveTarifas = JSON.stringify(p.tarifasDelServidor) + p.margenPct + JSON.stringify(p.params.reglas ?? null)
   const claveFilas = p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}`).join(',')
   const [claveVistaTarifas, setClaveVistaTarifas] = useState(claveTarifas)
   if (claveVistaTarifas !== claveTarifas) {
     setClaveVistaTarifas(claveTarifas)
     setOverrides({})
     setMargenLocal(null)
+    setReglasLocal(null)
   }
   const [claveVistaFilas, setClaveVistaFilas] = useState(claveFilas)
   if (claveVistaFilas !== claveFilas) {
@@ -189,7 +195,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
 
   // ── Lo calculado en el navegador ──
   const filasVivas = useMemo(() => filasDeLaVista.filter(f => !ocultos.has(f.id)), [filasDeLaVista, ocultos])
-  const params = useMemo(() => (margenLocal === null ? p.params : { ...p.params, margenPct: margenLocal }), [p.params, margenLocal])
+  const params = useMemo(() => ({
+    ...p.params,
+    ...(margenLocal === null ? {} : { margenPct: margenLocal }),
+    ...(reglasLocal === null ? {} : { reglas: reglasLocal }),
+  }), [p.params, margenLocal, reglasLocal])
   const lineas = useMemo(() => lineasParaLaCascada(filasVivas, p.adicionalesPorItem), [filasVivas, p.adicionalesPorItem])
   const tarifasPantalla = useMemo(
     () => p.tarifasDelServidor.map(t => ({ ...t, ...(overrides[t.id] ?? {}), vaEnPropuesta: overrides[t.id]?.va ?? t.vaEnPropuesta })),
@@ -233,7 +243,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     .map(s => ({ ...s, candidatas: candidatasPorServicio.get(s.grupo) ?? [] }))
   const renglones = loQueSuma(tramos, tarifas, precios)
   const vanAlCliente = tarifas.filter(t => t.esPrincipal || (t.vaEnPropuesta && !t.igualA))
-  const bajoMinimo = vanAlCliente.filter(t => t.margenReal !== null && t.margenReal < p.umbrales.pisoPct)
+  // Con reglas de margen, un hotel bajo su piso (con su descuento) también pide la autorización.
+  const bajoMinimo = vanAlCliente.filter(t => (t.margenReal !== null && t.margenReal < p.umbrales.pisoPct) || (t.cascada?.reglas?.hotelesBajoPiso.length ?? 0) > 0)
   const autorizacionVigente = !!p.salida?.excepcion
   const sinCosto = renglones
     .filter(r => !r.noSuma && (r.sinCosto || (r.opcionId && faltaPrecio(r.opcionId))))
@@ -323,7 +334,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
 
   // Punto 2 (reunión del 2026-10-22): las opciones Netas que no siguen el margen de la cotización.
   const propios = useMemo(
-    () => lineasConMargenPropio(lineas, Number(params.margenPct) || 0, params.convencionMargen)
+    // Con reglas de margen, el de la cotización es el de los HOTELES: solo ellos lo heredan.
+    () => lineasConMargenPropio(params.reglas ? lineas.filter(l => tipoParaMargen(l.grupo) === 'hotel') : lineas, Number(params.margenPct) || 0, params.convencionMargen)
       .map(l => ({ id: l.id, margen: Number(l.margen_porcentaje) })),
     [lineas, params],
   )
@@ -342,6 +354,22 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       const r = await margenPorPasos(p.cotizacionId, pct)
       if (!r.success) { toast.error(r.error); setMargenLocal(null); return }
       ofrecer('Cambiaste el margen de la cotización: vale para las tres tarifas.', deshacerCon({ tipo: 'margen', cotizacionId: p.cotizacionId, escrito: pct, anterior: r.anterior }))
+      p.refrescar()
+    })
+  }
+
+  const cambiarReglas = (cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number }[] }, texto: string) => {
+    const actuales = params.reglas
+    if (!actuales) return
+    setReglasLocal({
+      ...actuales,
+      ...(cambio.puntosExtra !== undefined ? { puntosExtra: cambio.puntosExtra } : {}),
+      ...(cambio.descuentos ? { descuentos: cambio.descuentos.map((d, i) => ({ id: d.id ?? `nuevo-${i}`, descripcion: d.descripcion, pct: d.pct })) } : {}),
+    })
+    void correr(async () => {
+      const r = await reglasPorPasos(p.cotizacionId, cambio)
+      if (!r.success) { toast.error(r.error); setReglasLocal(null); return }
+      toast.success(texto)
       p.refrescar()
     })
   }
@@ -594,6 +622,16 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       onElegir={elegir}
       onMandar={mandar}
       onMargen={margen}
+      reglas={params.reglas
+        ? {
+            puntosExtra: params.reglas.puntosExtra,
+            puntosMax: params.reglas.politica.puntosExtraMax,
+            descuentos: params.reglas.descuentos,
+            pisoHotelPct: params.reglas.politica.pisoHotelPct,
+          }
+        : null}
+      onPuntos={n => cambiarReglas({ puntosExtra: n }, n === 0 ? 'Quitaste los puntos extra.' : 'Los puntos extra quedaron en el precio de hoteles y planes.')}
+      onDescuentos={lista => cambiarReglas({ descuentos: lista }, 'Quedaron los descuentos sobre el total.')}
       propios={propios.map(x => ({ ...x, nombre: nombreDeOpcion(x.id) }))}
       onSeguirMargen={seguirMargen}
       onPedir={() => void correr(async () => {

@@ -9,7 +9,8 @@ import { validateCorregir, type EstadoCotizacion } from '@/lib/cotizaciones/stat
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
-import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
+import { politicaYReglasDelNegocio } from '@/lib/cotizaciones/convencion-margen'
+import { reglasAlNacer } from '@/lib/cotizaciones/reglas-margen'
 import { motivoParaNoSalir, recortarParaLog } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { precioAprobadoDeCotizacion, preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
@@ -53,7 +54,9 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // cotización y ahí se quedan. Si se leyeran de la línea en cada recálculo,
   // reconfigurar la línea le movería el precio —y el veredicto del margen— a
   // cotizaciones ya enviadas a clientes.
-  const { convencion, defaultPct, pisoPct, avisoPct } = await politicaMargenDelNegocio(supabase, negocioId)
+  // Las reglas de margen (brief del 2026-10-27) nacen copiadas igual, solo si la línea las declara.
+  const { politica, reglas } = await politicaYReglasDelNegocio(supabase, negocioId)
+  const { convencion, defaultPct, pisoPct, avisoPct } = politica
 
   // Los términos también nacen COPIADOS de la línea (C5, 2026-09-23), solo con la plantilla
   // que imprime el texto del cliente (Trappvel). Sin texto base, o en otro workspace, `null`
@@ -84,6 +87,9 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     piso_margen_pct: pisoPct,
     aviso_margen_pct: avisoPct,
     ...(terminos ? { terminos_condiciones: terminos } : {}),
+    // Solo con reglas en la línea: sin ellas la fila nace igual que antes (y no nombra una
+    // columna que la migración `reglas_margen` todavía no haya creado).
+    ...(reglas ? { reglas_margen: reglasAlNacer(reglas) } : {}),
   }).select('id').single()
 
   if (dbError) return { success: false as const, error: dbError.message ?? 'Error al crear cotización' }

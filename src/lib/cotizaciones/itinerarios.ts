@@ -408,7 +408,10 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
  * Sin líneas Públicas es exactamente la cuenta de siempre. Si TODO es Público, `null`, y
  * `exentaDelMinimo` dice que no hay nada que exigir (no es «falta el costo»).
  */
-export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas'] }): number | null {
+export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas']; reglas?: Cascada['reglas'] }): number | null {
+  // Reglas de margen (2026-10-27, `reglas-margen.ts`): se juzga el margen GLOBAL, ya con
+  // colchones, puntos extra, descuentos y las Públicas con su comisión.
+  if (cascada.reglas) return cascada.publicas?.exentaDelMinimo === true ? null : cascada.reglas.margenGlobalPct
   const p = cascada.publicas
   if (!p || p.lineas === 0) {
     if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
@@ -436,7 +439,8 @@ export function exentaDelMinimo(cascada: { publicas?: Cascada['publicas'] }): bo
  * El margen contra el que se juzga el mínimo donde el piso NO se exige en la salida (la regla de
  * siempre: sin precio, `null`, que no bloquea). Con líneas de tarifa pública, el de las Netas.
  */
-export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas'] }): number | null {
+export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas']; reglas?: Cascada['reglas'] }): number | null {
+  if (cascada.reglas) return margenMedible(cascada)
   if (!cascada.publicas || cascada.publicas.lineas === 0) return cascada.margenRealPct
   return margenMedible(cascada)
 }
@@ -445,6 +449,8 @@ export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costo
 export type MotivoRechazo =
   | { tipo: 'incompleto'; grupos: string[] }
   | { tipo: 'bajo_piso'; margenRealPct: number | null; pisoPct: number }
+  /** Reglas de margen: un hotel, ya con su descuento, quedó bajo el piso de hotel. */
+  | { tipo: 'hotel_bajo_piso'; hoteles: { nombre: string | null; margenPct: number }[]; pisoHotelPct: number }
 
 /**
  * ¿Este itinerario puede marcarse `va_en_propuesta = true`?
@@ -472,14 +478,24 @@ export function motivoDeRechazo(args: {
    * completitud se exige igual.
    */
   exenta?: boolean
+  /**
+   * Reglas de margen (2026-10-27): los hoteles que, con su descuento, quedaron bajo el piso de
+   * hotel. Piden la misma autorización que el margen global. Ausente = sin reglas.
+   */
+  hotelesBajoPiso?: { nombre: string | null; margenPct: number }[]
+  pisoHotelPct?: number
 }): MotivoRechazo | null {
   if (args.ranurasFaltantes.length > 0) {
     return { tipo: 'incompleto', grupos: args.ranurasFaltantes }
   }
-  if (args.exenta === true) return null
-  const nivel = nivelDeMargen(args.margenRealPct, { pisoPct: args.pisoPct, avisoPct: args.pisoPct })
-  if (nivel === 'bajo_piso' || nivel === 'sin_dato') {
-    return { tipo: 'bajo_piso', margenRealPct: args.margenRealPct, pisoPct: args.pisoPct }
+  if (args.exenta !== true) {
+    const nivel = nivelDeMargen(args.margenRealPct, { pisoPct: args.pisoPct, avisoPct: args.pisoPct })
+    if (nivel === 'bajo_piso' || nivel === 'sin_dato') {
+      return { tipo: 'bajo_piso', margenRealPct: args.margenRealPct, pisoPct: args.pisoPct }
+    }
+  }
+  if (args.hotelesBajoPiso && args.hotelesBajoPiso.length > 0) {
+    return { tipo: 'hotel_bajo_piso', hoteles: args.hotelesBajoPiso, pisoHotelPct: args.pisoHotelPct ?? 0 }
   }
   return null
 }
@@ -498,6 +514,10 @@ export function textoDeRechazo(motivo: MotivoRechazo): string {
     return motivo.grupos.length === 1
       ? `Falta elegir ${lista}: una tarifa incompleta no puede ir en la propuesta`
       : `Faltan por elegir: ${lista}. Una tarifa incompleta no puede ir en la propuesta`
+  }
+  if (motivo.tipo === 'hotel_bajo_piso') {
+    const lista = motivo.hoteles.map(h => `${h.nombre?.trim() || 'un hotel'} (${formatoPct(h.margenPct)})`).join(', ')
+    return `Con su descuento, ${motivo.hoteles.length === 1 ? 'el hotel' : 'los hoteles'} ${lista} ${motivo.hoteles.length === 1 ? 'queda' : 'quedan'} por debajo del margen mínimo de hotel de ${formatoPct(motivo.pisoHotelPct)}`
   }
   const piso = formatoPct(motivo.pisoPct)
   if (motivo.margenRealPct === null) {

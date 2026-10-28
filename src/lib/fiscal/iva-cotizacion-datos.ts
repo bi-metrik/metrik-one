@@ -16,6 +16,7 @@
 
 import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { cascadaDeItinerario } from '@/lib/cotizaciones/itinerarios'
+import { paramsPorOpcion, pctDescuentoTotal } from '@/lib/cotizaciones/reglas-margen'
 import {
   cascadaVigente,
   contextoDeCotizacion,
@@ -97,12 +98,13 @@ export async function ivaDeLaCotizacion(
   }
   const opciones = {
     tarifaPct: tarifaIvaDelVendedor(perfil),
-    descuentoComercialPct: ctx.params.descuentoComercialPct,
+    // Con reglas de margen, los descuentos sobre el total también bajan la base.
+    descuentoComercialPct: pctDescuentoTotal(ctx.params),
     // Encima o adentro del precio: la misma cuenta que hace el editor con su pantalla.
     precio: args.config.precio,
   }
 
-  const todas = liquidarIva(lineasParaIva(calcularCascada(ctx.items, ctx.params).lineas, metaDe), opciones)
+  const todas = liquidarIva(lineasParaIva(calcularCascada(ctx.items, paramsPorOpcion(ctx.params)).lineas, metaDe), opciones)
   const vigente = liquidarIva(lineasParaIva(cascadaVigente(ctx, filas).lineas, metaDe), opciones)
 
   // Una línea sin costo solo importa si el cliente la puede comprar: la cotización de hoy

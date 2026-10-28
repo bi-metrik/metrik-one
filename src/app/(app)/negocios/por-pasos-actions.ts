@@ -42,6 +42,7 @@ import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
+import { leerReglasDeCotizacion, motivoReglasInvalidas, reglasAJsonb } from '@/lib/cotizaciones/reglas-margen'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -366,6 +367,41 @@ export async function margenPorPasos(
   const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
   if (!c.success) return c
   return { success: true, anterior, valorTotal: c.valorTotal }
+}
+
+/**
+ * Los puntos extra y los descuentos sobre el total de una cotización con reglas de margen
+ * (`reglas-margen.ts`, brief del 2026-10-27). Solo en una cotización que nació con reglas: la
+ * política (colchón, piso de hotel, tope de puntos) no se toca aquí, es la que se copió de la línea.
+ *
+ * `descuentos` reemplaza la lista entera (la pantalla la manda como queda). Devuelve lo anterior.
+ */
+export async function reglasPorPasos(
+  cotizacionId: string,
+  cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number }[] },
+): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  // `*`: la columna la agrega una migración; sin ella llega `undefined` y se dice, sin escribir.
+  const { data: cot } = await supabase.from('cotizaciones').select('*').eq('id', cotizacionId).maybeSingle()
+  const actuales = leerReglasDeCotizacion((cot as { reglas_margen?: unknown } | null)?.reglas_margen)
+  if (!actuales) return { success: false, error: 'Esta cotización no tiene reglas de margen.' }
+  if ((cot as { estado?: string | null } | null)?.estado !== 'borrador') return { success: false, error: 'Solo se cambia en una cotización en borrador.' }
+  const descuentos = cambio.descuentos?.map((d, i) => ({ id: (d.id ?? '').trim() || `d${Date.now().toString(36)}${i}`, descripcion: (d.descripcion ?? '').trim(), pct: Number(d.pct) }))
+  const invalido = motivoReglasInvalidas(actuales.politica, { puntosExtra: cambio.puntosExtra, descuentos })
+  if (invalido) return { success: false, error: invalido }
+  const siguientes = {
+    ...actuales,
+    ...(cambio.puntosExtra !== undefined ? { puntosExtra: Math.round(cambio.puntosExtra * 100) / 100 } : {}),
+    ...(descuentos ? { descuentos } : {}),
+  }
+  const { error: errUpd } = await supabase.from('cotizaciones').update({ reglas_margen: reglasAJsonb(siguientes) } as never).eq('id', cotizacionId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return c
+  return { success: true, valorTotal: c.valorTotal }
 }
 
 /**

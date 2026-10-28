@@ -23,6 +23,7 @@
  */
 
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from './precio-item'
+import { politicaReglasDeLinea, type PoliticaReglasMargen } from './reglas-margen'
 
 /** Lo que la línea declara, ya resuelto y con sus valores por defecto puestos. */
 export interface PoliticaMargen {
@@ -175,6 +176,19 @@ export async function politicaMargenDelNegocio(
   supabase: any,
   negocioId: string,
 ): Promise<PoliticaMargen> {
+  return (await politicaYReglasDelNegocio(supabase, negocioId)).politica
+}
+
+/**
+ * La política de margen del negocio y, si su línea las declara, sus reglas de margen
+ * (`reglas-margen.ts`, brief del 2026-10-27). Una sola lectura de la línea para las dos: las dos
+ * se copian a la cotización al nacer.
+ */
+export async function politicaYReglasDelNegocio(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  negocioId: string,
+): Promise<{ politica: PoliticaMargen; reglas: PoliticaReglasMargen | null }> {
   const { data } = await supabase
     .from('negocios')
     .select('lineas_negocio(config_extra)')
@@ -187,7 +201,7 @@ export async function politicaMargenDelNegocio(
   const fila = Array.isArray(linea) ? linea[0] : linea
   const configExtra = (fila as { config_extra?: unknown } | null | undefined)?.config_extra
 
-  return politicaMargenDeLinea(configExtra)
+  return { politica: politicaMargenDeLinea(configExtra), reglas: politicaReglasDeLinea(configExtra) }
 }
 
 // ── Umbrales de margen: uno avisa, el otro marca en rojo ─────────────────────
