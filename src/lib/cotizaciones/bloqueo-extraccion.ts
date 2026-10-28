@@ -209,11 +209,20 @@ export const PROMPT_VUELO_BLOQUEO = [
   'Devuelve:',
   '- es_vuelo: false si la imagen no muestra vuelos (por ejemplo, es la oferta de un hotel).',
   '- tramos: UNO por cada vuelo, en el orden en que aparecen. Para cada uno:',
-  '  aerolinea (nombre o código que se lea en el logo o el texto; null si no se lee), numero_vuelo (solo el número o',
+  '  aerolinea (ver abajo), numero_vuelo (solo el número o',
   '  código, sin la palabra «vuelo»), origen y destino (el código de 3 letras o la ciudad, tal cual), fecha (la de',
   '  salida, AAAA-MM-DD; si no muestra el año, null), hora_salida y hora_llegada (HH:MM, 24 horas),',
   '  fecha_llegada (AAAA-MM-DD), directo (true si dice directo o sin escalas; false si dice escalas),',
   '  escalas (número de escalas; 0 si es directo; null si no se ve).',
+  '',
+  'La aerolinea:',
+  '- Si reconoces la aerolínea por su logo o su nombre, devuelve SOLO su nombre comercial: «JetSMART», «Avianca»,',
+  '  «LATAM», «Wingo», «Copa», «Satena».',
+  '- NO le pegues al nombre el código IATA de 2 caracteres que suele ir al lado del logo («JA», «AV», «LA»), ni las',
+  '  letras que forman el logo. Un logo «JS» con «JA» al lado es JetSMART, no «JSJA».',
+  '- Si solo se ve un código y no reconoces la aerolínea, devuelve el código tal cual («JA»). No lo traduzcas a un',
+  '  nombre que no se ve ni lo inventes.',
+  '- null si no se ve ni logo ni nombre ni código.',
 ].join('\n')
 
 export const ESQUEMA_VUELO_BLOQUEO = {
@@ -242,6 +251,40 @@ export const ESQUEMA_VUELO_BLOQUEO = {
   required: ['es_vuelo', 'tramos'],
 } as const
 
+/**
+ * Las aerolíneas que se nombran por su nombre comercial. `logo` son las letras del logo, que solo
+ * cuentan PEGADAS a un código («JSJA»: logo «JS» de JetSMART + su código «JA», prueba en producción
+ * del 2026-10-28). Solas no se traducen: «JS» suelto es un código y se deja tal cual.
+ */
+const AEROLINEAS: readonly { nombre: string; alias: readonly string[]; logo?: readonly string[] }[] = [
+  { nombre: 'JetSMART', alias: ['jetsmart', 'jetsmartairlines'], logo: ['js'] },
+  { nombre: 'Avianca', alias: ['avianca'] },
+  { nombre: 'LATAM', alias: ['latam', 'latamairlines'] },
+  { nombre: 'Wingo', alias: ['wingo'] },
+  { nombre: 'Copa', alias: ['copa', 'copaairlines'] },
+  { nombre: 'Satena', alias: ['satena'] },
+]
+
+const compacto = (t: string): string => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '')
+
+/**
+ * La aerolínea de un tramo como la escribe la asesora: el nombre comercial cuando se reconoce, sin
+ * el código IATA ni las letras del logo que el modelo a veces le pega («JSJA», «JetSMART JA»,
+ * «Avianca (AV)»). Si solo vino un código, queda el código: no se adivina el nombre.
+ */
+export function aerolineaLegible(v: unknown): string | null {
+  const t = textoCorto(v, 60)
+  if (!t) return null
+  const c = compacto(t)
+  for (const a of AEROLINEAS) {
+    if (a.alias.includes(c)) return a.nombre
+    // El nombre (o las letras del logo) con el código de 2 caracteres pegado al final.
+    const cabeza = c.length > 2 ? c.slice(0, -2) : ''
+    if (cabeza && (a.alias.includes(cabeza) || (a.logo ?? []).includes(cabeza))) return a.nombre
+  }
+  return t
+}
+
 export type LecturaVueloBloqueo =
   | { ok: true; vuelo: VueloBloqueo }
   | { ok: false; motivo: string }
@@ -258,7 +301,7 @@ export function vueloDesdeLectura(raw: unknown): LecturaVueloBloqueo {
     const numero = textoCorto(typeof t.numero_vuelo === 'string' ? t.numero_vuelo.replace(/^\s*vuelo\s*/i, '') : t.numero_vuelo, 20)
     const escalas = t.directo === true ? 0 : entero(t.escalas, 0, 5)
     const tramo: TramoBloqueo = {
-      aerolinea: textoCorto(t.aerolinea, 60),
+      aerolinea: aerolineaLegible(t.aerolinea),
       numeroVuelo: numero,
       origen: textoCorto(t.origen, 60),
       destino: textoCorto(t.destino, 60),
