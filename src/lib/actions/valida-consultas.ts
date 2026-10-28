@@ -1,7 +1,8 @@
 'use server';
 
 import { createServiceClient } from '@/lib/supabase/server';
-import { credencialValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
+import { credencialValida } from '@/lib/valida/credencial-servidor';
+import { pdfDeValidaDelEspacio } from '@/lib/valida/reporte-servidor';
 import { motivoCorteDeError } from '@/lib/valida/corte-bolsa';
 import { resolverNombresUsuarios } from './_usuarios';
 import { accesoValida as accesoValidaBase } from '@/lib/valida/acceso-servidor';
@@ -113,9 +114,6 @@ async function accesoValida(
   return r.ok ? r : { ok: false, error: r.error };
 }
 
-async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
-  return (await credencialValida(workspaceId)).llave;
-}
 
 /**
  * En el REINTENTO de una fila del cargue masivo: ¿el primer intento ya alcanzo a guardar esta
@@ -336,32 +334,18 @@ export async function descargarPDFConsultaValida(
 > {
   const acceso = await accesoValida();
   if (!acceso.ok) return acceso;
-  const workspaceId = acceso.workspaceId;
 
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
-  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
-
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte/${validaConsultaId}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return {
-      ok: true,
-      data: {
-        base64: buf.toString('base64'),
-        filename: `valida-reporte-${validaConsultaId.slice(0, 8)}.pdf`,
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf' };
-  }
+  // Con la llave o, si venció (fin de la prueba, reverso del pago), firmado como ONE: la cláusula 11.2
+  // deja los reportes al cliente durante la suspensión. Ver `@/lib/valida/reporte-pdf`.
+  const r = await pdfDeValidaDelEspacio(acceso.workspaceId, { tipo: 'consulta', consultaId: validaConsultaId });
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    data: {
+      base64: r.bytes.toString('base64'),
+      filename: `valida-reporte-${validaConsultaId.slice(0, 8)}.pdf`,
+    },
+  };
 }
 
 // ─── Generar PDF de lote completo ─────────────────────────────────────────
@@ -375,9 +359,6 @@ export async function generarPDFLoteValida(
   const acceso = await accesoValida();
   if (!acceso.ok) return acceso;
   const workspaceId = acceso.workspaceId;
-
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
-  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
@@ -399,34 +380,15 @@ export async function generarPDFLoteValida(
     return { ok: false, error: 'lote_sin_consultas_validas' };
   }
 
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte-lote`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        consulta_ids: consultaIds,
-        titulo: titulo ?? null,
-      }),
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return {
-      ok: true,
-      data: {
-        base64: buf.toString('base64'),
-        filename: `valida-cargue-${loteId.slice(0, 8)}.pdf`,
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf_lote' };
-  }
+  const r = await pdfDeValidaDelEspacio(workspaceId, { tipo: 'lote', consultaIds, titulo: titulo ?? null });
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    data: {
+      base64: r.bytes.toString('base64'),
+      filename: `valida-cargue-${loteId.slice(0, 8)}.pdf`,
+    },
+  };
 }
 
 // ─── Historial ────────────────────────────────────────────────────────────
