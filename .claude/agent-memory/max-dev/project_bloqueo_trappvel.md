@@ -21,6 +21,10 @@ asesora no cotiza vuelo ni hotel por separado.
   sin íconos todo `null`; `seguro: false` o `sin_identificar` → lista para la asesora, nunca `true`.
 - `retencion.test.ts` falla con cualquier «N años» en prosa del repo (el prompt de CHD lo tuvo).
 - `tarjeta-se-refresca-e2e` cuenta exactamente 3 `onCambio={refrescar}` en el editor: usar `() => refrescar()`.
+- El tipo de ranura se lee por SLUG (`tipoDeDefinicion`), no por `grupos[0]`: el del paquete es «paquete de bloqueo»
+  y antes de fix/trappvel-bloqueo-etiqueta-aerolinea (28-oct) quedaba sin tipo → chip «Otro» en «Otros servicios», y
+  `formaDesdeGrupo`/`bloquesPorRanura` lo trataban como línea suelta. Una ranura nueva con sinónimo ≠ tipo: igual.
+- Aerolínea: `aerolineaLegible` quita código/logo pegado («JSJA» → JetSMART); un código solo queda tal cual.
 - Sin QA en pantalla ni lectura real del modelo (solo fixtures simulados).
 
 Relacionado: [[cotizacion-otro-servicio]], [[tarifa-publica-neta]], [[cotizacion-integrada-c1-c6]].
