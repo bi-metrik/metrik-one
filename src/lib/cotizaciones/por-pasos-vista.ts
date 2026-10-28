@@ -234,7 +234,7 @@ export interface TramoDelViaje {
   servicios: ServicioDelViaje[]
 }
 
-const ORDEN_TIPO: Record<TipoRanura | 'otro', number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
+const ORDEN_TIPO: Record<TipoRanura | 'otro', number> = { paquete: -1, vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
 
 function sinTildes(t: string): string {
   return t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()

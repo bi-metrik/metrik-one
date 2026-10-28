@@ -54,6 +54,13 @@ export type ResultadoPagoEnLinea =
   | 'sin_cobro'
   | 'requiere_revision'
 
+/**
+ * La frase del detalle de un pago que entra sobre una cuota ya pagada. La lee el corte por reverso de
+ * Valida (`corte-reverso-servidor.ts`): un segundo pago aprobado de la cuota es «otro pago válido» y el
+ * reverso del primero no corta el plan. Cambiarla aquí la cambia allá.
+ */
+export const FRASE_DOBLE_PAGO = 'posible doble pago'
+
 /** Resultados con los que una notificación se da por terminada: repetirla no hace nada. */
 export const RESULTADOS_FINALES: readonly string[] = ['registrado', 'ya_pagado', 'ignorado', 'sin_cobro', 'requiere_revision']
 
@@ -195,7 +202,7 @@ export async function registrarPagoAprobado(
     }
     return {
       resultado: 'requiere_revision',
-      detalle: `Entró un pago en línea (${refPago}) sobre una cuota que ya estaba pagada (${cobro.fecha}${cobro.externalRef ? `, ${cobro.externalRef}` : ''}): posible doble pago.`,
+      detalle: `Entró un pago en línea (${refPago}) sobre una cuota que ya estaba pagada (${cobro.fecha}${cobro.externalRef ? `, ${cobro.externalRef}` : ''}): ${FRASE_DOBLE_PAGO}.`,
       cobroId: cobro.id,
       cobro,
     }

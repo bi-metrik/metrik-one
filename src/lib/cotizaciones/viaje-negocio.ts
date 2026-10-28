@@ -20,6 +20,7 @@
 import { nivelDetalleDesde, type NivelDetalle } from './detalle-viaje'
 import { normalizarComposicion, type Composicion } from './tarifa-pasajero'
 import { memoDeAceptacion } from './memo-de-aceptacion'
+import { A_MEDIDA, modalidadDesdeFilas, SLUG_MODALIDAD, SLUG_OPERADOR, type ModalidadDelViaje } from './bloqueo-modalidad'
 
 export interface ViajeDelNegocio {
   composicion: Composicion | null
@@ -83,11 +84,16 @@ export function viajeDesdeFilas(filas: Record<string, unknown>[]): ViajeDelNegoc
   }
 }
 
+/**
+ * El viaje del negocio. De la MISMA lectura sale la modalidad (A medida | Bloqueo, `bloqueo-modalidad.ts`):
+ * la página de la cotización la necesita y una consulta más rompería su presupuesto de idas. Va aparte de
+ * `viaje` a propósito: `ViajeDelNegocio` lo compara medio motor y no tiene por qué cambiar.
+ */
 export async function leerViajeDelNegocio(
   supabase: unknown,
   negocioId: string | null,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null }> {
-  if (!negocioId) return { viaje: VIAJE_VACIO, error: null }
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje }> {
+  if (!negocioId) return { viaje: VIAJE_VACIO, error: null, modalidad: A_MEDIDA }
   // Dentro de una aceptación de la forma por pasos (una o un lote) el viaje no cambia: se lee una
   // vez (`memo-de-aceptacion.ts`). Fuera, como siempre.
   return memoDeAceptacion(`viaje:${negocioId}`, () => leerViajeSinMemo(supabase, negocioId))
@@ -96,7 +102,7 @@ export async function leerViajeDelNegocio(
 async function leerViajeSinMemo(
   supabase: unknown,
   negocioId: string,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')
@@ -105,9 +111,12 @@ async function leerViajeSinMemo(
       + 'fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso, '
       // Los tres que alimentan la portada del documento del cliente. Un bloque que no los
       // declara devuelve null en esas columnas: no hay 400 que tolerar ni nada que romper.
-      + 'destino:data->destino, presentacion_destino:data->presentacion_destino, nivel_detalle:data->nivel_detalle',
+      + 'destino:data->destino, presentacion_destino:data->presentacion_destino, nivel_detalle:data->nivel_detalle, '
+      // Viaje en bloqueo (brief del 2026-10-27). Un bloque que no los declara devuelve null.
+      + `${SLUG_MODALIDAD}:data->>${SLUG_MODALIDAD}, ${SLUG_OPERADOR}:data->>${SLUG_OPERADOR}`,
     )
     .eq('negocio_id', negocioId)
-  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message }
-  return { viaje: viajeDesdeFilas((data ?? []) as Record<string, unknown>[]), error: null }
+  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA }
+  const filas = (data ?? []) as Record<string, unknown>[]
+  return { viaje: viajeDesdeFilas(filas), error: null, modalidad: modalidadDesdeFilas(filas) }
 }

@@ -104,6 +104,8 @@ let correos: { to: string[]; subject: string; text: string }[]
 beforeEach(() => {
   correos = []
   vi.stubEnv('RESEND_API_KEY', 're_prueba')
+  // Sin secreto de Valida: el corte del plan nunca sale a la red desde esta prueba.
+  vi.stubEnv('ONE_VALIDA_SECRET', '')
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
     if (!String(url).includes('api.resend.com')) throw new Error(`fetch inesperado: ${url}`)
     correos.push(JSON.parse(String(init.body)))
@@ -167,7 +169,7 @@ describe('conciliación: ePayco reporta reversado y la confirmación no llegó',
     // El evento: el mismo id que la confirmación del reverso.
     const ev = tablas.pasarela_eventos.find((e) => e.evento_id === '390720992-6')
     expect(ev?.resultado).toBe('requiere_revision')
-    expect(String(ev?.detalle)).toContain('NO canceló la suscripción ni cerró el ciclo')
+    expect(String(ev?.detalle)).toContain('NO canceló la suscripción')
 
     // La suscripción no se tocó.
     expect(tablas.suscripciones_producto[0].estado).toBe('activa')
@@ -333,7 +335,7 @@ describe('el ciclo de Valida que abrió el pago reversado', () => {
     })
   }
 
-  it('lo marca como reversado (sin cerrarlo) y lo dice en el evento y en el aviso; la confirmación repetida no lo vuelve a tocar', async () => {
+  it('lo marca como reversado y deja el corte pendiente si Valida no responde (sin secreto en la prueba); la confirmación repetida no lo vuelve a tocar', async () => {
     const { db, tablas } = crear(conCiclo())
     const repo = repoPagoEnLinea(db, 'epayco', epaycoDoble({}).adapter)
     const e = parsearConfirmacionEpayco(confirmacionReverso())
@@ -344,10 +346,10 @@ describe('el ciclo de Valida que abrió el pago reversado', () => {
     const config = tablas.workspaces[0].config_extra as Record<string, unknown>
     const plan = config.valida_plan as Record<string, unknown>
     // El ciclo sigue igual (mismas consultas y vencimiento) y lleva la marca; el resto del espacio, intacto.
-    expect(plan).toMatchObject({ ...PLAN, reversado: { referencia_pago: 'epayco-390720992' } })
+    expect(plan).toMatchObject({ ...PLAN, reversado: { referencia_pago: 'epayco-390720992', corte: { estado: 'pendiente', monto: 150000, intentos: 1 } } })
     expect(typeof (plan.reversado as { at: string }).at).toBe('string')
     expect(config.origen_registro).toBe('valida_autogestion')
-    expect(r.detalle).toContain('SIGUE ABIERTO en Valida')
+    expect(r.detalle).toContain('ONE pidió cerrar el plan en Valida y no se pudo todavía')
     expect(r.detalle).toContain('hasta el 2026-11-21')
     expect(correos).toHaveLength(1)
     expect(correos[0].text).toContain('3.000 consultas')

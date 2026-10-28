@@ -7,6 +7,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { generarEnlacePagoCuota } from '@/lib/cobros/enlace-pago-cuota-servidor'
 import { enlaceDeCuotaPendiente } from '@/lib/seccion-suscripcion/pagar-ahora'
+import { enlaceDeReactivacion, SIN_SUSPENSION } from '@/lib/valida-registro/reactivacion-servidor'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { comprarLicencia, cotizarLicencia, liberarLicencia } from '@/lib/seccion-suscripcion/licencias-servidor'
@@ -287,6 +288,13 @@ export async function pagarCuotaPendiente(): Promise<Resultado<{ url: string }>>
   const r = await ctxEscritura()
   if (!r.ok) return r
   const db = createServiceClient() as unknown as SupabaseClient
+  // Un plan suspendido por la reversión del pago se reactiva pagando el período con su propio cobro
+  // (`reactivacion-servidor.ts`): el de la cuota quedó anulado y no admite enlace.
+  const reactivacion = await enlaceDeReactivacion(r.ctx.workspaceId, { db })
+  if (reactivacion.ok || reactivacion.error !== SIN_SUSPENSION) {
+    if (reactivacion.ok) refrescar()
+    return reactivacion
+  }
   const res = await enlaceDeCuotaPendiente(r.ctx, {
     db,
     generar: async (p) => {

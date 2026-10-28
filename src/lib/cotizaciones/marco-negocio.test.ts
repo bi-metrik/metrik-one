@@ -152,6 +152,16 @@ describe('solicitudDesdeFilas', () => {
     expect(s.tienePresupuesto).toBe(true)
   })
 
+  it('viaje en bloqueo: la fila Modalidad con el operador, justo después del destino; A medida no se pinta', () => {
+    const s = solicitudDesdeFilas([{}, { ...COMPLETA, modalidad_viaje: 'bloqueo', operador_bloqueo: 'Aliados Travel' }], VIAJE, CAMPOS)
+    expect(s.filas.slice(0, 2).map(f => [f.label, f.valor])).toEqual([
+      ['Destino', 'Isla Ficticia · Internacional · Playa'],
+      ['Modalidad', 'Bloqueo · Aliados Travel'],
+    ])
+    expect(solicitudDesdeFilas([{ modalidad_viaje: 'a_medida', operador_bloqueo: 'Aliados' }], VIAJE, CAMPOS).filas.find(f => f.clave === 'modalidad')).toBeUndefined()
+    expect(solicitudDesdeFilas([{ modalidad_viaje: 'Bloqueo' }], VIAJE, CAMPOS).filas.find(f => f.clave === 'modalidad')?.valor).toBe('Bloqueo')
+  })
+
   it('un valor sin opción que coincida: primera letra en mayúscula y «_» → espacio', () => {
     const s = solicitudDesdeFilas([{ plan_alimentacion: 'media_pension', tipo_viaje: 'crucero_fluvial' }], VIAJE, CAMPOS)
     expect(s.filas.find(f => f.clave === 'alimentacion')?.valor).toBe('Media pension')

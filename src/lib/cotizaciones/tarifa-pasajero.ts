@@ -33,6 +33,7 @@ import { firmaDeEstadia } from './estadia'
 import { registroDeReserva, resumenDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
 import { leerOrigenTarifaExtraida, type OrigenTarifaExtraida } from './origen-tarifa'
 import { leerTipoTarifa, type DecisionTipoTarifa } from './tarifa-publica'
+import { leerPaqueteBloqueo } from './bloqueo-paquete'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -1785,6 +1786,12 @@ export type PreciosAMano = Record<string, PrecioAMano>
 export const claveDeHabitacion = (numero: number) => `hab:${numero}`
 
 export interface TarifaPax {
+  /**
+   * El paquete de un viaje en BLOQUEO (brief del 2026-10-27, `bloqueo-paquete.ts`): los dos
+   * pantallazos (hotel y vuelo) leídos y revisados, la distribución por acomodación y lo que incluye.
+   * Ausente en toda línea que no es un paquete. Se guarda crudo y se lee con `leerPaqueteBloqueo`.
+   */
+  bloqueo?: unknown
   /** La composición propia del ítem (CC4b). Ausente = la del viaje. */
   composicion?: Composicion | null
   casillas?: CasillasLeidas
@@ -2116,6 +2123,7 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
   const tipoTarifa = leerTipoTarifa(r.tipoTarifa)
   const vaConHotel = typeof r.vaConHotel === 'string' && r.vaConHotel.trim() ? r.vaConHotel.slice(0, 100) : null
+  const bloqueo = leerPaqueteBloqueo(r.bloqueo)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -2146,6 +2154,8 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(tipoTarifa ? { tipoTarifa } : {}),
     // Igual: un servicio general (sin hotel) no lleva la llave.
     ...(vaConHotel ? { vaConHotel } : {}),
+    // Igual: solo un paquete de bloqueo lleva la llave.
+    ...(bloqueo ? { bloqueo } : {}),
   }
 }
 
