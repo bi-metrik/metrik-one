@@ -34,7 +34,7 @@ import type { SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { ItemMenu, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
-import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { exentaDelMinimo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { tipoParaMargen, type ReglasDeCotizacion } from '@/lib/cotizaciones/reglas-margen'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
@@ -59,6 +59,7 @@ import {
   preciosDeLasOpciones,
   sigue,
   tarifasCalculadas,
+  margenDelEncabezado as margenDeTotal,
   viajeEnOrden,
   type FilaDeLinea,
   type NumeroDePaso,
@@ -207,6 +208,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   )
   const tarifas = useMemo(() => tarifasCalculadas(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
   const total = useMemo(() => cascadaDelTotal(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
+  // Brief del 2026-10-28 (falla 1) · UNA cifra para el encabezado y para «Tarifas». Con reglas es el
+  // margen global (el que se juzga contra el mínimo, `margenMedible`); sin reglas, el de siempre.
+  const margenDelEncabezado = margenDeTotal(total, params)
   const precios = useMemo(() => preciosDeLasOpciones(lineas, params), [lineas, params])
   // V2 · los bloques que se están aceptando se pintan en el viaje; al total y a las tarifas no
   // entran (no tienen precio todavía).
@@ -244,7 +248,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const renglones = loQueSuma(tramos, tarifas, precios)
   const vanAlCliente = tarifas.filter(t => t.esPrincipal || (t.vaEnPropuesta && !t.igualA))
   // Con reglas de margen, un hotel bajo su piso (con su descuento) también pide la autorización.
-  const bajoMinimo = vanAlCliente.filter(t => (t.margenReal !== null && t.margenReal < p.umbrales.pisoPct) || (t.cascada?.reglas?.hotelesBajoPiso.length ?? 0) > 0)
+  const bajoMinimo: { nombre: string | null }[] = vanAlCliente.filter(t => (t.margenReal !== null && t.margenReal < p.umbrales.pisoPct) || (t.cascada?.reglas?.hotelesBajoPiso.length ?? 0) > 0)
+  // Sin tarifas que vayan al cliente se mide el total (lo mismo que hace la salida).
+  if (vanAlCliente.length === 0 && p.salida?.aplica && ((!exentaDelMinimo(total) && margenDelEncabezado !== null && margenDelEncabezado < p.umbrales.pisoPct) || (total.reglas?.hotelesBajoPiso.length ?? 0) > 0)) {
+    bajoMinimo.push({ nombre: 'La cotización' })
+  }
   const autorizacionVigente = !!p.salida?.excepcion
   const sinCosto = renglones
     .filter(r => !r.noSuma && (r.sinCosto || (r.opcionId && faltaPrecio(r.opcionId))))
@@ -632,6 +640,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         : null}
       onPuntos={n => cambiarReglas({ puntosExtra: n }, n === 0 ? 'Quitaste los puntos extra.' : 'Los puntos extra quedaron en el precio de hoteles y planes.')}
       onDescuentos={lista => cambiarReglas({ descuentos: lista }, 'Quedaron los descuentos sobre el total.')}
+      delTotal={{ margenPct: margenDelEncabezado, exenta: exentaDelMinimo(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }}
       propios={propios.map(x => ({ ...x, nombre: nombreDeOpcion(x.id) }))}
       onSeguirMargen={seguirMargen}
       onPedir={() => void correr(async () => {
@@ -745,7 +754,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
             faltaPrecio,
             total: total.precioVenta,
             costo: total.costoDeVenta,
-            margenPct: total.margenRealPct,
+            margenPct: margenDelEncabezado,
             otrasQueVan: vanAlCliente.filter(t => !t.esPrincipal).map(t => ({ nombre: t.nombre ?? 'Tarifa', precio: t.precio })),
             pantallazosEnBandeja: p.pantallazosPorAceptar,
             incompleto: sinCosto.length > 0,
