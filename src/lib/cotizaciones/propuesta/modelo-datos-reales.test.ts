@@ -98,8 +98,11 @@ describe('el orden del viaje, no el de las líneas', () => {
       'Paris Nord - Amsterdam Centraal · Eurostar 9325, Standard',
       null,
     ])
-    const ruta = html.slice(html.indexOf('class="route"'), html.indexOf('Lo que van a vivir'))
-    for (const tren of ['AVE 03071 Renfe', 'TGV INOUI 9714', 'Eurostar 9325']) expect(ruta).toContain(tren)
+    // Cada tren, con su nombre corto, en su tarjeta de «Vuelos y tren» (formato de Edgar, 2026-10-27).
+    const i = html.indexOf('>Vuelos y tren<')
+    expect(i).toBeGreaterThan(-1)
+    const vuelos = html.slice(i, html.indexOf('</section>', i))
+    for (const tren of ['AVE 03071 Renfe', 'TGV INOUI 9714', 'Eurostar 9325']) expect(vuelos).toContain(`<span class="num">${tren}</span>`)
   })
 })
 

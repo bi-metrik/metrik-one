@@ -1,6 +1,6 @@
 ---
 name: reglas-margen-cotizacion
-description: Trappvel 2026-10-27 (feat/cotizacion-reglas-margen) — colchón de vuelo, descuento por hotel, 0 % lo demás, puntos extra, descuentos sobre el total y margen global; migración reglas_margen y SQL de config SIN aplicar
+description: Trappvel 2026-10-27 (feat/cotizacion-reglas-margen) — colchón de vuelo, descuento por hotel, 0 % lo demás, puntos extra, descuentos sobre el total y margen global; migración reglas_margen aplicada; SQL de config SIN aplicar
 metadata:
   type: project
 ---
@@ -8,9 +8,8 @@ metadata:
 Brief `proyectos/trappvel/clarity/briefs/2026-10-27_brief-max-reglas-de-margen-cotizacion.md`. Núcleo en
 `src/lib/cotizaciones/reglas-margen.ts` y `totales.ts › conReglas`. Sin `params.reglas` la cascada es idéntica (C0 verde).
 
-- ⚠️⚠️ Migración `20261027150000_cotizaciones_reglas_margen.sql` (columna jsonb) y SQL de config
-  `sql/trappvel/2026-10-27_reglas-margen-PENDIENTE.sql` (reglas + piso 12/aviso 12) SIN aplicar. Orden: migración →
-  deploy → SQL. Solo cotizaciones NUEVAS nacen con reglas (se copian al crear); los borradores viejos siguen planos.
+- Migración `20261027150000_cotizaciones_reglas_margen.sql` (columna jsonb) YA aplicada (28-oct). SQL de config
+  `sql/trappvel/2026-10-27_reglas-margen-PENDIENTE.sql` (reglas + piso 12/aviso 12) SIN aplicar; va después del deploy. Solo cotizaciones NUEVAS nacen con reglas (se copian al crear); los borradores viejos siguen planos.
 - Puntos extra viven en `precioConAdicionales` (por tarifa), NUNCA en `precioLinea` (va a `items.precio_venta`). Toda
   cascada sobre TODAS las opciones usa `paramsPorOpcion` (sin puntos ni descuentos). El PDF toma el precio de cada línea
   de su bloque (`reglasDelDocumento`).
