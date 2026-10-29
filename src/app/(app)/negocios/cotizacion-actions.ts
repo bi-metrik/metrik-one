@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerReglasDeCotizacion, margenHeredado } from '@/lib/cotizaciones/reglas-margen'
+import { margenDeLaCotizacion, motivoMargenDeCotizacionInvalido } from '@/lib/cotizaciones/margen-de-cotizacion'
 import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
@@ -153,6 +154,13 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
     const motivo = await motivoParaNoSalir(supabase, {
       servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
     })
+    if (motivo) return { success: false, error: motivo }
+  }
+  // D4 (2026-10-29): el margen general no queda en 0 si la línea declara el suyo (se leería como
+  // «sin dato», `margen-de-cotizacion.ts`). Una opción a costo se escribe en esa opción.
+  if (updates.margen_porcentaje !== undefined && updates.margen_porcentaje !== null) {
+    const { data: actual } = await supabase.from('cotizaciones').select('margen_default_pct').eq('id', id).maybeSingle()
+    const motivo = motivoMargenDeCotizacionInvalido(Number(updates.margen_porcentaje), (actual as { margen_default_pct?: number | null } | null)?.margen_default_pct ?? null)
     if (motivo) return { success: false, error: motivo }
   }
   // Con tarifas, aprobar exige escoger cuál tomó el cliente: por aquí no hay cómo, y
@@ -1089,7 +1097,8 @@ export async function recalcularTotales(cotizacionId: string) {
   // P4 · los adicionales sin precio a mano siguen al margen global: si cambió el margen (o
   // su costo), su precio se reescribe AQUÍ, antes de la cascada, para que el PDF, la
   // pantalla y la huella lean la misma cifra. Los de precio a mano no se tocan.
-  const margenGlobal = cot?.margen_porcentaje ?? cot?.margen_default_pct ?? null
+  // D4 (2026-10-29): un 0 en la cotización no anula el margen de la línea (`margen-de-cotizacion.ts`).
+  const margenGlobal = margenDeLaCotizacion(cot)
   const resincronizar = preciosPorResincronizar(filasAdicionales, {
     margenPct: margenGlobal === null ? null : Number(margenGlobal),
     convencion: cot?.convencion_margen ?? null,
@@ -1107,7 +1116,7 @@ export async function recalcularTotales(cotizacionId: string) {
   const params = {
     administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
     // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
-    margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
+    margenPct: margenGlobal,
     descuentoComercialPct: cot?.descuento_porcentaje,
     convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
     // Reglas de margen (2026-10-27, `reglas-margen.ts`): las que la cotización copió al nacer.

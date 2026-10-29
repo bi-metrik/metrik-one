@@ -8,6 +8,7 @@ import { MAX_MOTIVO_DESCUENTO, motivoDescuentoInvalido, textoColchon } from '@/l
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import type { DescuentoClienteGuardado } from '@/lib/cotizaciones/tarifa-pasajero'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * Lo que las reglas de margen (brief del 2026-10-27) agregan a la tarjeta de UNA opción, debajo
@@ -17,15 +18,16 @@ import { parseMontoCop } from '@/lib/negocios/monto-cop'
  *    cualquier margen; escrito a mano, deja de seguir el colchón.
  *  · **Hotel**: el descuento que el cliente ve en esta opción, con su motivo, en % (puntos de
  *    margen que se ceden) o en pesos.
- *  · **Pública**: la comisión que trae la tarifa. Con ella la línea entra al margen global; sin
- *    ella no cuenta (no lo puede hundir a ciegas).
+ *  · **Pública**: la comisión de la agencia, en % o en pesos (`CampoComision`). Obligatoria (D3 de
+ *    Mauricio, 2026-10-29): sin ella el margen general no se puede medir y la cotización no se envía.
  *
- * Solo en la cotización por pasos y solo con reglas: sin ellas la tarjeta es la de siempre.
+ * Solo en la cotización por pasos y solo con reglas: sin ellas la tarjeta es la de siempre (la
+ * comisión de una Pública sí se pide igual, con `CampoComision` suelto).
  */
 export function ReglasDeOpcion({
   reglas,
   descuento,
-  comisionPct,
+  comision,
   publica,
   editable,
   ocupado,
@@ -35,20 +37,19 @@ export function ReglasDeOpcion({
   reglas: ReglasDeLinea
   /** El descuento guardado en la opción (`tarifa_pax.descuentoCliente`). */
   descuento: DescuentoClienteGuardado | null
-  /** La comisión guardada en la decisión de Pública. */
-  comisionPct: number | null
+  /** La comisión guardada en la decisión de Pública, en % o en pesos. */
+  comision: ComisionEscrita | null
   publica: boolean
   editable: boolean
   ocupado: boolean
   onDescuento: (d: { motivo: string; tipo: 'pct' | 'monto'; valor: number } | null) => void
-  onComision: (pct: number | null) => void
+  onComision: (c: ComisionEscrita | null) => void
 }) {
   const [abierto, setAbierto] = useState(false)
   const [motivo, setMotivo] = useState(descuento?.motivo ?? '')
   const [tipo, setTipo] = useState<'pct' | 'monto'>(descuento?.tipo ?? 'pct')
   const [valor, setValor] = useState(descuento ? String(descuento.valor).replace('.', ',') : '')
   const [error, setError] = useState<string | null>(null)
-  const [comisionEscrita, setComisionEscrita] = useState<string | null>(null)
 
   const guardarDescuento = () => {
     const n = tipo === 'pct' ? Number(valor.replace(',', '.')) : parseMontoCop(valor)
@@ -58,16 +59,6 @@ export function ReglasDeOpcion({
     setError(null)
     setAbierto(false)
     onDescuento(d)
-  }
-
-  const guardarComision = () => {
-    if (comisionEscrita === null) return
-    const t = comisionEscrita.trim()
-    const v = t === '' ? null : Number(t.replace(',', '.'))
-    setComisionEscrita(null)
-    if (v !== null && (!Number.isFinite(v) || v < 0 || v >= 100)) return
-    if (v === comisionPct) return
-    onComision(v)
   }
 
   if (reglas.tipo === 'vuelo' && reglas.colchon) {
@@ -83,31 +74,7 @@ export function ReglasDeOpcion({
     )
   }
 
-  if (publica) {
-    return (
-      <label className="flex flex-wrap items-center gap-2 text-[13px] text-[#191713]" data-comision-publica>
-        <span>Comisión de esta tarifa</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          aria-label="Comisión de la tarifa pública"
-          className={`${INPUT.replace('w-full ', '')} w-[70px] tabular-nums`}
-          placeholder="—"
-          value={comisionEscrita ?? (comisionPct === null ? '' : String(comisionPct).replace('.', ','))}
-          onChange={e => setComisionEscrita(e.target.value)}
-          onBlur={guardarComision}
-          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-          disabled={!editable || ocupado}
-        />
-        %
-        <span className="basis-full text-xs text-[#6E6A62]">
-          {comisionPct === null
-            ? 'Sin comisión, esta línea no entra al margen global de la cotización.'
-            : `Entra al margen global con su comisión de ${porcentaje(comisionPct)}.`}
-        </span>
-      </label>
-    )
-  }
+  if (publica) return <CampoComision comision={comision} editable={editable} ocupado={ocupado} onComision={onComision} />
 
   if (reglas.tipo !== 'hotel') return null
   const d = reglas.descuento
@@ -185,6 +152,89 @@ export function ReglasDeOpcion({
           </span>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * «Comisión de la agencia» de una opción Pública (D3 de Mauricio, 2026-10-29): la asesora la escribe a
+ * mano, en % del precio público o en pesos por toda la opción. Siempre visible y obligatoria: sin ella
+ * la cotización no se puede enviar y el PDF sale como borrador. Se guarda al salir de la casilla.
+ */
+export function CampoComision({
+  comision,
+  editable,
+  ocupado,
+  onComision,
+  etiqueta = 'Comisión de la agencia',
+}: {
+  comision: ComisionEscrita | null
+  editable: boolean
+  ocupado: boolean
+  onComision: (c: ComisionEscrita | null) => void
+  etiqueta?: string
+}) {
+  const [tipo, setTipo] = useState<'pct' | 'monto'>(comision?.tipo ?? 'pct')
+  const [escrito, setEscrito] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const guardado = comision && comision.tipo === tipo ? comision.valor : null
+  const visible = escrito ?? (guardado === null ? '' : tipo === 'pct' ? String(guardado).replace('.', ',') : guardado.toLocaleString('es-CO'))
+
+  const guardar = (t: 'pct' | 'monto', texto: string | null) => {
+    if (texto === null) return
+    setEscrito(null)
+    const limpio = texto.trim()
+    // Vaciar la casilla quita la comisión (y la cotización vuelve a no poder enviarse).
+    if (limpio === '') { setError(null); if (comision) onComision(null); return }
+    const valor = t === 'pct' ? Number(limpio.replace(',', '.')) : Number(parseMontoCop(limpio))
+    const c = { tipo: t, valor }
+    const invalida = motivoComisionInvalida(c)
+    if (invalida) { setError(invalida); return }
+    setError(null)
+    if (comision && comision.tipo === c.tipo && comision.valor === c.valor) return
+    onComision(c)
+  }
+
+  return (
+    <div className="flex flex-col gap-1 text-[13px] text-[#191713]" data-comision-publica>
+      <span className="flex flex-wrap items-center gap-2">
+        <span>{etiqueta}</span>
+        <span role="radiogroup" aria-label="Comisión en % o en pesos" className="inline-flex overflow-hidden rounded-md border border-[#CFCAC0]">
+          {(['pct', 'monto'] as const).map(t => (
+            <button
+              key={t}
+              type="button"
+              role="radio"
+              aria-checked={tipo === t}
+              disabled={!editable || ocupado}
+              onClick={() => { setTipo(t); setEscrito(null); setError(null) }}
+              className={`border-0 px-2 py-0.5 text-xs font-semibold ${tipo === t ? 'bg-[#191713] text-[#F3F1EC]' : 'bg-white text-[#191713]'} ${t === 'monto' ? 'border-l border-[#CFCAC0]' : ''}`}
+              data-comision-tipo={t}
+            >
+              {t === 'pct' ? '%' : '$'}
+            </button>
+          ))}
+        </span>
+        <input
+          type="text"
+          inputMode={tipo === 'pct' ? 'decimal' : 'numeric'}
+          aria-label={tipo === 'pct' ? 'Comisión de la agencia en %' : 'Comisión de la agencia en pesos'}
+          className={`${INPUT.replace('w-full ', '')} ${tipo === 'pct' ? 'w-[70px]' : 'w-[120px]'} tabular-nums`}
+          placeholder={tipo === 'pct' ? '—' : '$'}
+          value={visible}
+          onChange={e => setEscrito(e.target.value)}
+          onBlur={() => guardar(tipo, escrito)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          disabled={!editable || ocupado}
+        />
+        {tipo === 'pct' && <span>%</span>}
+      </span>
+      {error && <span className="text-xs text-[#B3382C]" data-comision-error>{error}</span>}
+      <span className={`text-xs ${comision ? 'text-[#6E6A62]' : 'font-semibold text-[#B3382C]'}`} data-comision-estado={comision ? 'escrita' : 'falta'}>
+        {comision
+          ? `Entra al margen de la cotización: la agencia paga el precio público menos ${comision.tipo === 'pct' ? porcentaje(comision.valor) : pesos(comision.valor)}.`
+          : 'Escribe la comisión: sin ella la cotización no se puede enviar y el PDF sale como borrador.'}
+      </span>
     </div>
   )
 }

@@ -16,12 +16,14 @@
  * lectura, sus precios a mano y su origen. Ausente = Neta. Se guarda también una Neta ELEGIDA por
  * una persona, para que una propuesta posterior del tarifario no la pise.
  *
- * ## El margen mínimo
+ * ## El margen mínimo (decisiones D2 y D3 de Mauricio, 2026-10-29)
  *
- * Una línea Pública NO entra en la medida del margen mínimo: su ganancia es la comisión, que ONE
- * no conoce al cotizar. Medirla al 0 % pediría la autorización del gerente por algo que nadie puede
- * subir. El mínimo se mide sobre las líneas Netas (`margenMedible`, `itinerarios.ts`); si una
- * tarifa solo tiene Públicas, no hay margen que exigir (`exentaDelMinimo`).
+ * El margen general es el de TODAS las líneas: (lo que paga el cliente − lo que paga la agencia) /
+ * lo que paga el cliente. Por una Pública la agencia paga el precio público menos su comisión, que
+ * la asesora escribe a mano en % o en pesos (`comisionPct` / `comisionMonto`). Sin comisión, el
+ * margen no se puede medir y la cotización no se puede enviar (el PDF sale como borrador). Hasta
+ * el 2026-10-29 una Pública quedaba fuera de la medida y una tarifa solo de Públicas quedaba
+ * exenta del mínimo: así salía limpia una cotización con dos Netas a costo (COT-2026-0009).
  *
  * Puro: lo usan la cascada (`totales.ts`), la tarjeta y las acciones.
  */
@@ -42,6 +44,11 @@ export interface DecisionTipoTarifa {
    * ella, sale de la base. Ausente en toda decisión anterior y en toda Neta.
    */
   comisionPct?: number | null
+  /**
+   * La comisión en PESOS, por toda la línea (D3, 2026-10-29: «en % o en pesos»). Excluye a
+   * `comisionPct`: la decisión guarda una de las dos. Ausente en todo lo anterior.
+   */
+  comisionMonto?: number | null
 }
 
 type Obj = Record<string, unknown>
@@ -52,7 +59,10 @@ export function leerTipoTarifa(raw: unknown): DecisionTipoTarifa | null {
   if (!esObj(raw)) return null
   if (raw.tipo !== 'neta' && raw.tipo !== 'publica') return null
   const comision = Number(raw.comisionPct)
-  const conComision = raw.tipo === 'publica' && raw.comisionPct !== null && raw.comisionPct !== undefined
+  const monto = Number(raw.comisionMonto)
+  const conMonto = raw.tipo === 'publica' && raw.comisionMonto !== null && raw.comisionMonto !== undefined && raw.comisionMonto !== ''
+    && Number.isFinite(monto) && monto >= 0
+  const conComision = !conMonto && raw.tipo === 'publica' && raw.comisionPct !== null && raw.comisionPct !== undefined
     && Number.isFinite(comision) && comision >= 0 && comision < 100
   return {
     tipo: raw.tipo,
@@ -61,6 +71,7 @@ export function leerTipoTarifa(raw: unknown): DecisionTipoTarifa | null {
     en: typeof raw.en === 'string' ? raw.en : '',
     // Sin comisión la llave no aparece: la decisión se lee igual que antes.
     ...(conComision ? { comisionPct: comision } : {}),
+    ...(conMonto ? { comisionMonto: Math.round(monto) } : {}),
   }
 }
 
@@ -116,6 +127,45 @@ export function margenAlElegirTipo(tipo: TipoTarifa, margenDelProveedor: number 
   return tipo === 'publica' ? 0 : null
 }
 
+// ── La comisión de una Pública (D3 de Mauricio, 2026-10-29) ──────────────────
+
+/** La comisión como la escribe la asesora: en % del precio público o en pesos por toda la línea. */
+export interface ComisionEscrita {
+  tipo: 'pct' | 'monto'
+  valor: number
+}
+
+/** La comisión guardada en la decisión, como se escribe. `null` = nadie la escribió. */
+export function comisionEscrita(d: DecisionTipoTarifa | null | undefined): ComisionEscrita | null {
+  if (!d || d.tipo !== 'publica') return null
+  if (d.comisionMonto !== null && d.comisionMonto !== undefined) return { tipo: 'monto', valor: d.comisionMonto }
+  if (d.comisionPct !== null && d.comisionPct !== undefined) return { tipo: 'pct', valor: d.comisionPct }
+  return null
+}
+
+/** ¿Se puede guardar esta comisión? `null` = sí. */
+export function motivoComisionInvalida(c: ComisionEscrita): string | null {
+  if (c.tipo !== 'pct' && c.tipo !== 'monto') return 'La comisión es en % o en pesos.'
+  if (!Number.isFinite(c.valor) || c.valor < 0) return 'Escribe la comisión: un número desde 0.'
+  if (c.tipo === 'pct' && c.valor >= 100) return 'La comisión en % va de 0 a 99,9.'
+  if (c.tipo === 'monto' && c.valor > 100_000_000_000) return 'Escribe la comisión en pesos, sin puntos ni símbolo.'
+  return null
+}
+
+/**
+ * La decisión de Pública con esta comisión (o sin ninguna, con `null`). Guarda UNA de las dos llaves:
+ * `comisionPct` o `comisionMonto`.
+ */
+export function conComision(d: DecisionTipoTarifa, c: ComisionEscrita | null): DecisionTipoTarifa {
+  const { comisionPct: _p, comisionMonto: _m, ...resto } = d
+  void _p
+  void _m
+  if (!c) return resto
+  return c.tipo === 'pct'
+    ? { ...resto, comisionPct: Math.round(c.valor * 100) / 100 }
+    : { ...resto, comisionMonto: Math.round(c.valor) }
+}
+
 /** Cómo se dice el tipo en la tarjeta. */
 export const ETIQUETA_TIPO_TARIFA: Record<TipoTarifa, string> = {
   neta: 'Neta',
@@ -125,5 +175,5 @@ export const ETIQUETA_TIPO_TARIFA: Record<TipoTarifa, string> = {
 /** La explicación corta de cada tipo, para el `title` y el aviso de la tarjeta. */
 export const AYUDA_TIPO_TARIFA: Record<TipoTarifa, string> = {
   neta: 'Neta: es el precio del proveedor. Se le suma tu margen.',
-  publica: 'Pública: el precio ya trae tu comisión. El cliente paga ese precio y no pide autorización por margen.',
+  publica: 'Pública: el precio ya trae tu comisión. El cliente paga ese precio; escribe tu comisión para que entre al margen de la cotización.',
 }

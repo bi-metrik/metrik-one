@@ -30,6 +30,7 @@ import { CONVENCION_MARGEN_POR_DEFECTO, margenParaPrecio, type ConvencionMargen 
 import { margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
 import { leerReglasDeCotizacion, paramsPorOpcion, pctDescuentoTotal } from '@/lib/cotizaciones/reglas-margen'
+import { margenDeLaCotizacion } from '@/lib/cotizaciones/margen-de-cotizacion'
 import {
   nombreDelMargen,
   nivelDeMargen,
@@ -175,13 +176,14 @@ import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
-import { crearPaqueteBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
+import { crearPaqueteBloqueo, paqueteEnPropuesta } from '@/app/(app)/negocios/bloqueo-actions'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
-import { listaUnica } from '@/lib/cotizaciones/lista-unica'
+import { listaUnica, opcionesFueraDeLaPropuesta } from '@/lib/cotizaciones/lista-unica'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
 import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
+import { motivoPublicasSinComision, publicasSinComisionQueSalen } from '@/lib/cotizaciones/comision-publica'
 import { estadoDeLinea } from '@/lib/cotizaciones/estado-servicio'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
@@ -899,7 +901,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // El margen de la cotización, con el default de la línea de negocio como respaldo:
   // una cotización recién creada todavía no tiene el suyo, y sin este respaldo el pie
   // mostraría 0% sobre un negocio que sí tiene margen configurado.
-  const margenCotizacion = cotizacion.margen_porcentaje ?? Number(cotizacion.margen_default_pct) ?? 0
+  // D4 (2026-10-29): un 0 guardado no anula el de la línea (`margen-de-cotizacion.ts`).
+  const margenCotizacion = margenDeLaCotizacion(cotizacion) ?? 0
 
   // Los números de la cotización salen de la MISMA cascada que aplica el servidor al
   // guardar. Calcularlos aquí por separado fue exactamente el defecto anterior: la
@@ -1136,8 +1139,17 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     bloqueo?.edadesMenores ?? null,
   )
   const motivoPaquete = motivoPaquetesIncompletos(paquetesSinCompletar)
+  // D3 (2026-10-29): una Pública que va al cliente sin la comisión de la agencia no se envía.
+  const idsQueSalen = new Set(tarifasEnPropuesta.length > 0
+    ? tarifasEnPropuesta.flatMap(t => itemsDelItinerario(lineasSinAjuste as never[], t.seleccion))
+    : itemsQueAportanAlTotal(lineasSinAjuste as never[]))
+  const publicasSinComisionDelEnvio = publicasSinComisionQueSalen(
+    lineasSinAjuste.map(i => ({ id: i.id, nombre: i.nombre ?? null, es_ajuste: false, tarifa_pax: i.tarifa_pax })),
+    idsQueSalen,
+  )
+  const motivoComision = motivoPublicasSinComision(publicasSinComisionDelEnvio)
   // La autorización de datos va primero: es lo primero que revisa el servidor al enviar.
-  const motivoBotonEnviar = motivoAutorizacionDatos ?? motivoPaquete ?? motivoEnvio ?? motivoMargen
+  const motivoBotonEnviar = motivoAutorizacionDatos ?? motivoPaquete ?? motivoComision ?? motivoEnvio ?? motivoMargen
 
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
@@ -3368,7 +3380,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         ofrecerAdministrativos={!lineasPorTipo}
         onMargenChange={pct => {
           startTransition(async () => {
-            await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+            const r = await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+            if (!r.success) { toast.error(r.error ?? 'No se pudo cambiar el margen'); refrescar(); return }
             await recalcularTotales(cotizacion.id)
             refrescar()
           })
@@ -3766,6 +3779,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       autorizacionDatos: motivoAutorizacionDatos,
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
       paquetes: paquetesSinCompletar,
+      publicasSinComision: publicasSinComisionDelEnvio,
       capturas: motivoEnvio ? { motivo: motivoEnvio, itemId: desactualizadas[0]?.itemId ?? null } : null,
       tarifas: tarifasDeLaPagina,
       salida: salidaVista as never,
@@ -3778,6 +3792,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
       viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
       ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+      // Brief del 2026-10-29, punto 3 · el hotel o vuelo cargado que no sale en la propuesta.
+      fueraDeLaPropuesta: opcionesFueraDeLaPropuesta(lineasConLectura as never[], tarifasDeLaPagina).map(o => {
+        const i = itemPorIdVista.get(o.itemId)
+        return { ...o, nombre: (i ? nombreVisibleDeLinea(i as never) : '') || i?.nombre || 'Una opción' }
+      }),
       // Decisión del 2026-10-14 · la reserva de varias habitaciones que no cuadra con el viaje.
       reservasQueNoCuadran: lineasConLectura.flatMap(i => {
         if (!idsQueSalen.has(i.id) || ranuraDeGrupo(i.grupo ?? null)?.slug !== 'hotel_detalle') return []
@@ -3871,6 +3890,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               registro={registroPaquetes}
               reglasDeLinea={paramsCascada.reglas ? lineaPorItem.get(item.id)?.reglas ?? null : null}
               margenAplicado={lineaPorItem.get(item.id)?.margenAplicado ?? null}
+              // D5 (2026-10-29): el «va en la propuesta» de la tarifa del paquete.
+              enPropuesta={(() => {
+                const suya = (itinerarios?.itinerarios ?? []).find(t => t.seleccion.includes(item.id))
+                return suya ? suya.vaEnPropuesta : null
+              })()}
+              onEnPropuesta={va => startTransition(async () => {
+                const r = await paqueteEnPropuesta(item.id, va)
+                if (!r.success) toast.error(r.error)
+                refrescar()
+              })}
             />
           )
         }
@@ -4212,8 +4241,10 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
               step="0.01"
               className="w-full rounded border bg-background py-1.5 pl-2 pr-6 text-sm tabular-nums"
               onBlur={e => {
-                const pct = Number(e.target.value) || 0
-                if (pct === margenPct) return
+                // D4 (2026-10-29): borrar la casilla no es escribir un 0 (`Number('')` es 0).
+                if (e.target.value.trim() === '') return
+                const pct = Number(e.target.value)
+                if (!Number.isFinite(pct) || pct === margenPct) return
                 onMargenChange(pct)
               }}
               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}

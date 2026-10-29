@@ -39,6 +39,7 @@ import {
 } from './itinerarios'
 import { cabeConLosHoteles, hotelesAsociados, opcionParaLosHoteles } from './va-con-hotel'
 import { claveTarifa, esRecomendada, NOMBRES_TARIFA, recomendadaDe, type NombreTarifa } from './tarifas'
+import { ranuraDeGrupo } from './ranuras-pantallazo'
 
 /** Una tarifa como la ve el plan. */
 export interface TarifaDelPlan {
@@ -56,7 +57,11 @@ export interface EstadoDeTarifas {
 }
 
 export interface TarifaNueva {
-  nombre: NombreTarifa
+  /**
+   * Una de las tres, o `null` (la plantilla la numera «Opción N»): la de cada paquete de bloqueo que
+   * no es la Recomendada (D5, `planDeTarifasDeBloqueo`).
+   */
+  nombre: NombreTarifa | null
   orden: number
   vaEnPropuesta: boolean
   seleccion: string[]
@@ -153,6 +158,9 @@ export function planDeTarifas(args: {
   const plan = vacio()
 
   const ranuras = ranurasConAlternativas(despues.items)
+  // Viaje en bloqueo con varios paquetes (D5 de Mauricio, 2026-10-29): una tarifa por paquete.
+  const paquetes = ranuras.find(r => esRanuraDePaquete(r.grupo))
+  if (paquetes) return planDeTarifasDeBloqueo(despues, paquetes.candidatos)
   const ranurasAntes = new Map(ranurasConAlternativas(antes.items).map(r => [r.grupo, r]))
   const hayCombinables = ranuras.some(r => r.combinable)
 
@@ -294,6 +302,88 @@ export function planDeTarifas(args: {
     if (quitar.length > 0 || poner.length > 0) plan.seleccion.push({ itinerarioId: t.id, quitar, poner })
     const va = vaFinal.get(t) ?? t.vaAntes
     if (va !== t.vaAntes) plan.marcas.push({ itinerarioId: t.id, vaEnPropuesta: va })
+  }
+  return plan
+}
+
+const esRanuraDePaquete = (grupo: string) => ranuraDeGrupo(grupo)?.slug === 'paquete_detalle'
+
+/**
+ * VIAJE EN BLOQUEO: UNA TARIFA POR PAQUETE (decisión D5 de Mauricio, 2026-10-29).
+ *
+ * En un bloqueo el cliente escoge entre los paquetes del operador (mismo vuelo, otro hotel): cada
+ * paquete es una opción completa con su precio. La asesora incluye o saca cada uno de la propuesta,
+ * de forma reversible, con el «va en la propuesta» de su tarifa. Hasta el 2026-10-29 crear o guardar
+ * un paquete no tocaba las tarifas y el PDF mostraba solo el primero (el supuesto de la ranura).
+ *
+ * La propuesta de Económica / Recomendada / Premium (la más barata, la primera, la más cara) no
+ * sirve aquí: con tres paquetes, la más barata suele ser la primera y el del medio no salía nunca.
+ *
+ * Reglas:
+ *  · cada paquete tiene su tarifa; la del primero (por `orden`) nace como la Recomendada, las demás
+ *    sin nombre (la plantilla las numera «Opción N»), y todas nacen en la propuesta;
+ *  · lo que la asesora decidió se respeta: qué tarifa lleva qué paquete y si va o no va;
+ *  · la Recomendada siempre va (decisión E);
+ *  · una tarifa sin paquete (lo borraron) toma uno que no tenga tarifa; si no queda ninguno, lleva el
+ *    de la Recomendada y sale de la propuesta (es idéntica a ella);
+ *  · los demás servicios con opciones (un traslado, una actividad) toman en cada tarifa la opción que
+ *    ya nombran o, si no nombran ninguna, la de la Recomendada (o la primera).
+ */
+export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: readonly string[]): PlanDeTarifas {
+  const plan = vacio()
+  const otras = ranurasConAlternativas(despues.items).filter(r => !esRanuraDePaquete(r.grupo))
+  const tarifas = [...despues.tarifas].sort((a, b) => a.orden - b.orden)
+  const rec = recomendadaDe(tarifas).fila
+
+  // Qué paquete lleva cada tarifa (la primera que lo nombra se lo queda).
+  const duena = new Map<string, TarifaDelPlan>()
+  const paqueteDe = new Map<TarifaDelPlan, string | null>()
+  for (const t of tarifas) {
+    const p = paquetes.find(id => t.seleccion.includes(id)) ?? null
+    if (p && !duena.has(p)) { duena.set(p, t); paqueteDe.set(t, p) } else paqueteDe.set(t, null)
+  }
+  const libres = paquetes.filter(id => !duena.has(id))
+  // La Recomendada primero: si perdió su paquete, toma el primero libre.
+  const huerfanas = tarifas.filter(t => paqueteDe.get(t) === null).sort((a, b) => (a === rec ? -1 : b === rec ? 1 : a.orden - b.orden))
+  const sinLugar = new Set<TarifaDelPlan>()
+  for (const t of huerfanas) {
+    const p = libres.shift()
+    if (p) { paqueteDe.set(t, p); duena.set(p, t) } else sinLugar.add(t)
+  }
+  const paqueteDeLaRec = rec ? paqueteDe.get(rec) ?? null : null
+  for (const t of sinLugar) paqueteDe.set(t, paqueteDeLaRec ?? paquetes[0])
+
+  // La opción de los demás servicios: la que la tarifa nombra, o la de la Recomendada, o la primera.
+  const eleccionDe = (r: (typeof otras)[number], seleccion: readonly string[]): string => {
+    const propia = r.candidatos.find(id => seleccion.includes(id))
+    if (propia) return propia
+    const deRec = rec ? r.candidatos.find(id => rec.seleccion.includes(id)) : undefined
+    return deRec ?? r.candidatos[0]
+  }
+  const todosLosCandidatos = new Set([...paquetes, ...otras.flatMap(r => r.candidatos)])
+
+  for (const t of tarifas) {
+    const sel = [
+      ...t.seleccion.filter(id => !todosLosCandidatos.has(id)),
+      paqueteDe.get(t) as string,
+      ...otras.map(r => eleccionDe(r, t.seleccion)),
+    ]
+    const actual = new Set(t.seleccion)
+    const nueva = new Set(sel)
+    const quitar = [...actual].filter(id => !nueva.has(id))
+    const poner = [...nueva].filter(id => !actual.has(id))
+    if (quitar.length > 0 || poner.length > 0) plan.seleccion.push({ itinerarioId: t.id, quitar, poner })
+    const va = t === rec ? true : sinLugar.has(t) ? false : t.vaEnPropuesta
+    if (va !== t.vaEnPropuesta) plan.marcas.push({ itinerarioId: t.id, vaEnPropuesta: va })
+  }
+
+  // Los paquetes que todavía no tienen tarifa: una cada uno, en la propuesta.
+  let orden = tarifas.reduce((m, t) => Math.max(m, t.orden), 0)
+  let hayRec = rec !== null
+  for (const p of libres) {
+    const nombre: NombreTarifa | null = hayRec ? null : 'Recomendada'
+    hayRec = true
+    plan.crear.push({ nombre, orden: ++orden, vaEnPropuesta: true, seleccion: [p, ...otras.map(r => eleccionDe(r, []))] })
   }
   return plan
 }

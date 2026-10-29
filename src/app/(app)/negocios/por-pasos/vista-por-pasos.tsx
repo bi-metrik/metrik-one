@@ -34,7 +34,7 @@ import type { SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { ItemMenu, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
-import { exentaDelMinimo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { publicasSinComision, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { tipoParaMargen, type ReglasDeCotizacion } from '@/lib/cotizaciones/reglas-margen'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
@@ -250,7 +250,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   // Con reglas de margen, un hotel bajo su piso (con su descuento) también pide la autorización.
   const bajoMinimo: { nombre: string | null }[] = vanAlCliente.filter(t => (t.margenReal !== null && t.margenReal < p.umbrales.pisoPct) || (t.cascada?.reglas?.hotelesBajoPiso.length ?? 0) > 0)
   // Sin tarifas que vayan al cliente se mide el total (lo mismo que hace la salida).
-  if (vanAlCliente.length === 0 && p.salida?.aplica && ((!exentaDelMinimo(total) && margenDelEncabezado !== null && margenDelEncabezado < p.umbrales.pisoPct) || (total.reglas?.hotelesBajoPiso.length ?? 0) > 0)) {
+  if (vanAlCliente.length === 0 && p.salida?.aplica && ((publicasSinComision(total) === 0 && margenDelEncabezado !== null && margenDelEncabezado < p.umbrales.pisoPct) || (total.reglas?.hotelesBajoPiso.length ?? 0) > 0)) {
     bajoMinimo.push({ nombre: 'La cotización' })
   }
   const autorizacionVigente = !!p.salida?.excepcion
@@ -291,6 +291,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const irDesdeLaLista = (d: DestinoDeIr) => {
     if (d.a === 'opcion') { setPaso(1); p.onAbrirOpcion(d.itemId); return }
     if (d.a === 'tarifas') { irAPaso(2); return }
+    // El arreglo a un toque (punto 3 del 2026-10-29): la misma elección de Tarifas, con su «Deshacer».
+    if (d.a === 'poner-en-tarifa') { elegir(d.itinerarioId, d.grupo, d.itemId); return }
     if (d.a === 'bandeja' || d.a === 'viaje') { irAPaso(1); return }
     if (typeof document !== 'undefined') document.getElementById('doc')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -645,7 +647,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         : null}
       onPuntos={n => cambiarReglas({ puntosExtra: n }, n === 0 ? 'Quitaste los puntos extra.' : 'Los puntos extra quedaron en el precio de hoteles y planes.')}
       onDescuentos={lista => cambiarReglas({ descuentos: lista }, 'Quedaron los descuentos sobre el total.')}
-      delTotal={{ margenPct: margenDelEncabezado, exenta: exentaDelMinimo(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }}
+      delTotal={{ margenPct: margenDelEncabezado, sinComision: publicasSinComision(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }}
       propios={propios.map(x => ({ ...x, nombre: nombreDeOpcion(x.id) }))}
       onSeguirMargen={seguirMargen}
       onPedir={() => void correr(async () => {

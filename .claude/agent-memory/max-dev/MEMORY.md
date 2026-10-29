@@ -2,7 +2,9 @@
 
 ## Project memories
 
-- ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — v2: datos en asignaciones.json fuera del repo; arnés con Haiku; SQL SIN aplicar
+- ⚠️⚠️ [Decisiones D1–D6 de la cotización (29-oct)](project_decisiones_1029_cotizacion.md) — batería #1338; sin exención de Públicas; comisión obligatoria; 0 = sin dato; tarifa por paquete
+- ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337/1339; reparto de hotel sobrante a Mauricio; fotos = datos
+- ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — orden publicado = por clave (cambia a Haiku); --fichas-base v3; SQL SIN aplicar
 - ⚠️ [Bloqueo: prueba real 29-oct (INF, barra, edad, marca PDF)](project_bloqueo_prueba_real_1029.md) — #1326; PDF recibe porPasos del llamador (N4); edad de la Solicitud cuenta en el freno
 - ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy
 - ⚠️⚠️ [Factura de cuota sale siempre (#1317)](project_factura_cuota_correo_siempre.md) — 20261028120000 SIN aplicar; edge enviar-factura-cuota; webhook después de la migración
@@ -20,7 +22,7 @@
 - ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
 - ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
-- ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
+- ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — la exención de Públicas la quitó D2 (29-oct); SQL gate E1→E2 SIN aplicar
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
 - ⚠️⚠️ [Reportes con la llave vencida (28-oct)](project_valida_reportes_llave_vencida.md) — Valida#83 primero; llave y luego firma en 401; id UUID en ruta firmada
 - ⚠️ [Términos autoservicio v2.2 (11.3 reverso)](project_valida_terminos_v2_2_reverso.md) — solo registros nuevos; re-aceptación v2.1 sin construir; 13.1 ≠ CDA
