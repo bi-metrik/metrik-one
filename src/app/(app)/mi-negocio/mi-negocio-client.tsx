@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange, KeyRound } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
@@ -61,6 +62,8 @@ interface MiNegocioClientProps {
   /** Alguna línea del workspace usa margen mínimo o recargo. Sin eso no hay sección. */
   usaPoliticaDePrecio?: boolean
   /** El espacio tiene propuesta de viaje (`tienePropuestaHtml`): ve «Temporadas». */
+  /** La persona está en la lista de editores de plantillas de documentos del espacio. */
+  editaPlantillas?: boolean
   tienePropuestaViaje?: boolean
   sectionScores: {
     fiscal: number
@@ -135,6 +138,7 @@ export default function MiNegocioClient({
   lineaActivaId = null,
   usaPoliticaDePrecio = false,
   tienePropuestaViaje = false,
+  editaPlantillas = false,
   sectionScores,
   workspaceTipo,
 }: MiNegocioClientProps) {
@@ -240,6 +244,20 @@ export default function MiNegocioClient({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Plantillas de documentos: solo para la lista de editores del espacio ── */}
+      {editaPlantillas && (
+        <Link
+          href="/mi-negocio/plantillas"
+          className="flex items-center gap-3 rounded-xl border bg-card p-3 hover:bg-muted/50"
+        >
+          <FileText className="h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Plantillas de documentos</p>
+            <p className="text-xs text-muted-foreground">Declaración juramentada y Relación de facturas</p>
+          </div>
+        </Link>
       )}
 
       {/* ── Onboarding Welcome ── */}

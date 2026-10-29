@@ -38,3 +38,25 @@ export function fuentesDelDocumento(): FuenteEmbebida[] {
   }))
   return cache
 }
+
+/**
+ * Liberation Sans 2.1 (SIL OFL 1.1), métrica de Helvetica/Arial: la de los documentos del
+ * expediente (DJ, Relación de facturas) que antes imprimía @react-pdf con Helvetica. Con la
+ * misma métrica el renglón corta casi en el mismo sitio y la hoja sale igual. Mismo
+ * subconjunto latino, hecho con `pyftsubset` desde el paquete Debian `fonts-liberation`.
+ */
+const ARCHIVOS_FORMULARIOS: Array<Omit<FuenteEmbebida, 'datos'> & { archivo: string }> = [
+  { familia: 'Liberation Sans', peso: 400, estilo: 'normal', archivo: 'liberation-sans-400.woff2' },
+  { familia: 'Liberation Sans', peso: 700, estilo: 'normal', archivo: 'liberation-sans-700.woff2' },
+]
+
+let cacheFormularios: FuenteEmbebida[] | null = null
+
+export function fuentesDeFormularios(): FuenteEmbebida[] {
+  if (cacheFormularios) return cacheFormularios
+  cacheFormularios = ARCHIVOS_FORMULARIOS.map(({ archivo, ...f }) => ({
+    ...f,
+    datos: readFileSync(path.join(DIR_FUENTES, archivo)),
+  }))
+  return cacheFormularios
+}

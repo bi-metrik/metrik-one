@@ -2,8 +2,8 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Plantillas editables DJ/Relación (29-oct)](project_plantillas_editables.md) — 203000/203100 APLICADAS (29-oct); siembra SOENA sin activar; Chromium sin respaldo; IVA exacto
 - [Prueba corta del #1352 (29-oct)](project_qa_corta_1352.md) — «Ir» con 3 causas; noches salen de paradas (sin zona = 0); créditos en .sign
-
 - ⚠️ [Defectos QA del #1342 (29-oct)](project_defectos_qa_1342.md) — costoDeAgencia; «Opción N» como el PDF; «Incluye» de ONE sin revisar; swap insert→delete
 - ⚠️⚠️ [Términos CDA v1.5 por aviso (1-nov)](project_valida_terminos_v15.md) — transición 11.7 en plazos.ts; 16.4 SIN construir (22-dic); 20261029190000 opcional
 - ⚠️⚠️ [Asistente de ventas Dimpro + Bold (29-oct)](project_dimpro_asistente_ventas_bold.md) — 20261029150000 y sql/dimpro APLICADOS en prod (29-oct, bot activo:false); solo Messenger 151556; forma_pago sigue anticipado

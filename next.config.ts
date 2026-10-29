@@ -87,6 +87,18 @@ const nextConfig: NextConfig = {
       './node_modules/@sparticuz/chromium/bin/**/*',
       './src/lib/pdf/chromium/fuentes/**/*',
     ],
+    // Plantillas editables de documentos (DJ, Relación de facturas; 2026-10-29). Con una versión
+    // activa, `generarFormulario` imprime con Chromium: la server action corre en la función de
+    // la página del negocio. `/negocios/*` (con «contains») cubre `/negocios/[id]`. La vista
+    // previa en PDF corre en su propia ruta.
+    '/negocios/*': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+    ],
+    '/api/plantillas-documento/*': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+    ],
   },
   // Se cargan con require de Node, no por el bundler: @sparticuz/chromium ubica su binario
   // relativo a su propio paquete y puppeteer-core trae dependencias opcionales nativas.
