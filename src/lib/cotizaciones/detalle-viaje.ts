@@ -195,6 +195,12 @@ export interface HotelPDF {
   fotoRef?: string
   /** Ancho entre alto de la foto guardada. */
   fotoProporcion?: number | null
+  /**
+   * La entrada y la salida NO salieron de la captura: son las de la solicitud del viaje (7.4,
+   * «(del viaje)») y nadie las corrigió. El documento las cambia por las de los servicios
+   * cuando el vuelo dice otra cosa (`fechas-del-viaje.ts`). Ausente = leídas o corregidas.
+   */
+  fechasDelViaje?: true
 }
 
 /**
@@ -450,6 +456,20 @@ function detalleDelItem(item: ItemConLectura): Record<string, string> {
 const texto = (d: Record<string, string>, slug: string): string | null => d[slug] ?? null
 
 /**
+ * ¿La entrada y la salida del hotel son las de la solicitud y no las de la captura? Las dos
+ * marcadas «(del viaje)» y ninguna fecha corregida (COT-2026-0008: la captura no mostraba
+ * fechas y la ficha decía las del rango que dio la cliente, 21 jun – 4 jul).
+ */
+function fechasTomadasDelViaje(item: ItemConLectura, ranura: DefinicionRanura): boolean {
+  if (fechasCorregidas(leerTarifaPax(item.tarifa_pax).correcciones)) return false
+  const campos = casillaDelItem(item)?.campos ?? []
+  const etiqueta = new Map(ranura.campos.map(c => [c.slug, c.label]))
+  const delViaje = (slug: string) =>
+    campos.some(c => c.label === etiqueta.get(slug) && /\(del viaje\)\s*$/i.test(String(c.valor ?? '')))
+  return delViaje('check_in') && delViaje('check_out')
+}
+
+/**
  * ⚠️ Lee lo GUARDADO tal como lo devolvió el modelo, con o sin punto de miles: por eso pasa
  * por el normalizador único (`parseMontoCop`). Con `Number()` sobre el texto limpio,
  * «50.080» salía en la tabla de cargos en destino del PDF como «50,08 COP» (ensayo del
@@ -619,7 +639,8 @@ function ocupacionDeLaUnicaQueVa(r: RepartoHabitaciones): string | null {
 export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
   const out: HotelPDF[] = []
   for (const item of items) {
-    if (ranuraDelItem(item)?.slug !== 'hotel_detalle') continue
+    const ranura = ranuraDelItem(item)
+    if (ranura?.slug !== 'hotel_detalle') continue
     const d = detalleDelItem(item)
     // Con varias habitaciones, la acomodación es la de TODAS (el cliente ve el reparto
     // entero); la ocupación del primer pantallazo solo describe su habitación.
@@ -669,6 +690,8 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       nota: notaDeLaLinea(item),
       // Sin foto del hotel la llave no aparece: la ficha de siempre se arma igual que antes.
       ...(tarifa.fotoHotel ? { fotoRef: tarifa.fotoHotel.ref, fotoProporcion: tarifa.fotoHotel.proporcion } : {}),
+      // Sin la marca la llave no aparece: la ficha de siempre se arma igual que antes.
+      ...(fechasTomadasDelViaje(item, ranura) ? { fechasDelViaje: true as const } : {}),
     })
   }
   return out
