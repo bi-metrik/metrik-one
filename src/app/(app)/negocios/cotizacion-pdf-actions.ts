@@ -66,7 +66,7 @@ import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
-import { hotelesDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
+import { hotelesDePaquetes, noIncluyeDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
 import { esLineaDePaquete } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
@@ -1422,6 +1422,8 @@ export async function generateCotizacionPDF(
       vuelos: vuelosDelDocumento,
       hoteles: hotelesDelDocumento,
       cargosEnDestino,
+      // V5 (QA del 2026-10-29): lo que el paquete de bloqueo no incluye, si se leyó o se escribió.
+      ...(() => { const n = noIncluyeDePaquetes(paraLectura); return n.length > 0 ? { noIncluye: n } : {} })(),
       nivelDetalle: delNegocio.nivelDetalle,
       // Brief del 2026-10-29, punto 5 · el pie y la firma con los datos de la asesora (la
       // responsable del negocio, o quien genera). Sin su ficha, los configurados de siempre.

@@ -182,7 +182,8 @@ export function validarFechasEditadas(
   tipo: string,
   e: FechasEditadas,
 ): { ok: true; fechas: FechasServicio } | { ok: false; error: string } {
-  if (tipo === 'vuelo' && Array.isArray(e.tramos)) {
+  // «otro» con tramos: el paquete de bloqueo y su vuelo (H10, 2026-10-29).
+  if ((tipo === 'vuelo' || tipo === 'otro') && Array.isArray(e.tramos)) {
     if (e.tramos.length > MAX_TRAMOS) return { ok: false, error: `Un vuelo tiene hasta ${MAX_TRAMOS} tramos.` }
     const tramos: TramoServicio[] = []
     for (const [i, t] of e.tramos.entries()) {
@@ -253,3 +254,11 @@ export function resumenDeFechas(f: FechasServicio): string | null {
 }
 
 export const FALTA_LA_FECHA = 'Falta la fecha'
+
+/** «JetSMART 5260 BOG → ADZ · JetSMART 5261 ADZ → BOG»: los vuelos de una fila, en una línea. */
+export function vuelosEnLinea(tramos: readonly TramoServicio[] | null | undefined): string | null {
+  const partes = (tramos ?? [])
+    .map(t => [[t.aerolinea, t.numero_vuelo].filter(Boolean).join(' '), [t.origen, t.destino].filter(Boolean).join(' → ')].filter(Boolean).join(' '))
+    .filter(Boolean)
+  return partes.length > 0 ? partes.join(' · ') : null
+}
