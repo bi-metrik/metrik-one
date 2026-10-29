@@ -21,3 +21,6 @@ aprobadas por Mauricio TAL CUAL.
 **Why:** son documentos que van a la DIAN y se firman bajo juramento. Sin radicado, ningún documento afirma el certificado.
 **How to apply:** antes de cambiar otra vez estas plantillas, mira las pruebas de texto del PDF. Si Deisy confirma el texto
 degradado sin UPME, quita el PENDIENTE de la nota 3 de la DJ.
+
+29-oct (#1355): el «IVA solicitado» pasó a ser el IVA EXACTO (decisión de Mauricio); `fmtAlMil` y `redondearAlMil`
+se borraron. El texto «(valor aproximado como lo establece el artículo 577…)» de CUARTO sigue: lo decide Mauricio.

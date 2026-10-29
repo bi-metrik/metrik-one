@@ -400,3 +400,43 @@ const CASO_E: CasoBateria = {
 }
 
 export const CASOS: readonly CasoBateria[] = [CASO_A, CASO_B, CASO_C, CASO_D, CASO_E]
+
+// ── Prueba corta del #1352 (fuera de CASOS: no entra a la foto I8) ─────────────
+
+/**
+ * La forma de la prueba corta en navegador del #1352 (2026-10-29): tres paquetes de bloqueo con vuelo,
+ * 4 noches y sin zona (la pantalla del operador no la traía), en este orden: uno Neto con desayuno y traslados, uno Público (que después sale de la
+ * propuesta) y uno Neto SIN alimentación ni traslados. Nombres y cifras ficticios.
+ */
+function paqueteConVuelo(hotel: string, precio: number, plan: string | null, casillas: Partial<Record<'alimentacion' | 'planes_tours' | 'traslados' | 'seguro_medico', boolean>>): Fila {
+  const t = (origen: string, destino: string, fecha: string, sale: string, llega: string, numero: string) =>
+    ({ aerolinea: 'Aviones Ficticios', numeroVuelo: numero, origen, destino, fecha, horaSalida: sale, horaLlegada: llega, fechaLlegada: fecha, escalas: 0 })
+  return {
+    version: 1,
+    operador: 'Operador Ficticio',
+    hotel: {
+      hotel, zona: null, noches: 4, habitacion: 'Estándar', planAlimentacion: plan, temporada: null,
+      tarifaPromo: false, compraAntesDe: null, moneda: 'COP', precios: [{ acomodacion: 'doble', precioPorPersona: precio }], nino: null, infante: null,
+    },
+    vuelo: { tramos: [t('Bogotá BOG', 'San Andrés ADZ', '2027-02-10', '06:00', '08:10', 'AF 9001'), t('San Andrés ADZ', 'Bogotá BOG', '2027-02-14', '18:00', '20:10', 'AF 9002')] },
+    salidaManual: null,
+    incluye: {
+      casillas: { tiquete_aereo: true, alimentacion: false, planes_tours: false, traslados: false, seguro_medico: false, ...casillas },
+      sinIdentificar: [], texto: null,
+    },
+    distribucion: { habitaciones: { doble: 1 }, ninos: 0, infantes: 0, edadesNinos: [] },
+    imagenes: { hotel: null, vuelo: null },
+  }
+}
+
+const QA_COT = 'cot-bateria-qa1352'
+export const CASO_QA_1352 = {
+  cotizacionId: QA_COT,
+  viaje: { composicion: { adultos: 2, ninos: 0, infantes: 0 }, fechas: { inicio: '2027-02-10', fin: '2027-02-14' }, destino: 'San Andrés', edadesMenores: null } as ViajeDelCaso,
+  tablas: () => tablasBase({ cot: QA_COT, neg: 'neg-bateria-qa1352', consecutivo: 'COT-2026-9152', destino: 'San Andrés', margen: null, reglas: REGLAS(), items: [] }),
+  paquetes: [
+    { paquete: paqueteConVuelo('Hotel Mar Azul Ficticio', 1_900_000, 'Desayuno', { alimentacion: true, traslados: true, seguro_medico: true }), comision: 'por_incluir' as const },
+    { paquete: paqueteConVuelo('Hotel Coral QA Ficticio', 2_300_000, 'Desayuno', { alimentacion: true, traslados: true, seguro_medico: true }), comision: 'incluida' as const },
+    { paquete: paqueteConVuelo('Hotel Brisa Ficticio', 1_600_000, null, { seguro_medico: true }), comision: 'por_incluir' as const },
+  ],
+}

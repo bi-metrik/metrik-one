@@ -27,7 +27,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
-import { CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
+import { CASO_QA_1352, CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
 import { algunoBajoElPiso, clave, lineaEsperada, margenEsperado, soloDesayuno } from '@/lib/cotizaciones/__fixtures__/bateria/oraculo'
 import { modeloDePropuesta, type EntradaModeloPropuesta, type ModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
@@ -109,6 +109,8 @@ import { itemsDelItinerario } from '@/lib/cotizaciones/itinerarios'
 import { medirSalida } from '@/lib/cotizaciones/piso-salida'
 import { costoDeAgencia, cascadaDeItinerario } from '@/lib/cotizaciones/itinerarios'
 import { nombresVisiblesDeTarifas } from '@/lib/cotizaciones/tarifas'
+import { tarifasCalculadas } from '@/lib/cotizaciones/por-pasos-vista'
+import { motivoPublicasSinComision, publicasSinComisionQueSalen } from '@/lib/cotizaciones/comision-publica'
 import { htmlDePropuesta, type RecursosPropuesta } from '@/lib/pdf/html/trappvel/plantilla'
 
 // ── Lo que hoy falla, y por qué decisión ─────────────────────────────────────
@@ -556,4 +558,111 @@ describe('QA del #1342 · bloqueo con un paquete Público (acciones reales)', ()
       expect(await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), true)).toEqual({ success: true })
     }, 60_000)
   })
+})
+
+// ── Prueba corta en navegador del #1352 (2026-10-29): tres paquetes con vuelo, sin zona ─────────
+
+describe('Prueba corta del #1352 · bloqueo de tres paquetes, uno sin alimentación ni traslados (acciones reales)', () => {
+  const caso = CASO_QA_1352 as unknown as CasoBateria
+  const idDe = (nombre: string) => (base.tablas.items as Fila[]).find(i => clave(i.nombre as string) === clave(nombre))!.id as string
+  const RECURSOS: RecursosPropuesta = { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'Agencia de prueba' }
+  const seccion = (h: string, titulo: string) => {
+    const i = h.indexOf(`>${titulo}<`)
+    return i < 0 ? null : h.slice(i, h.indexOf('</section>', i)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  }
+  const opcion = (r: Resultado, hotel: string) => r.modelo.hoteles.flatMap(c => c.opciones).find(o => o.hotel === hotel)!
+  const PAQUETES = ['Hotel Mar Azul Ficticio', 'Hotel Coral QA Ficticio', 'Hotel Brisa Ficticio']
+  async function conEnPropuesta(van: string[]) {
+    for (const n of PAQUETES) if (van.includes(n)) expect(await paqueteEnPropuesta(idDe(n), true)).toEqual({ success: true })
+    for (const n of PAQUETES) if (!van.includes(n)) expect(await paqueteEnPropuesta(idDe(n), false)).toEqual({ success: true })
+    return medir(caso, { incluyePorOne: true })
+  }
+  beforeAll(async () => { await correr(caso) }, 60_000)
+
+  it('D2 · dos versiones: «Incluido en todas» es la intersección; lo de una sola va en su tarjeta', async () => {
+    const r = await conEnPropuesta(['Hotel Mar Azul Ficticio', 'Hotel Brisa Ficticio'])
+    expect(r.modelo.tarifas).toHaveLength(2)
+    const incluye = r.modelo.precio.incluye
+    // Brisa no trae alimentación ni traslados: no son «de todas».
+    expect(incluye).not.toContain('Alimentación')
+    expect(incluye).not.toContain('Traslados')
+    // El seguro sí lo traen las dos.
+    expect(incluye).toContain('Seguro médico')
+    // El mismo vuelo en las dos versiones no «cambia según la versión».
+    expect(incluye.join(' | ')).not.toMatch(/aerolínea cambia/)
+    // Cada tarjeta dice lo suyo: Mar Azul lo que incluye; Brisa lo que no trae y la otra sí.
+    expect(opcion(r, 'Hotel Mar Azul Ficticio').incluye).toBe('Alimentación, Traslados, Seguro médico')
+    expect(opcion(r, 'Hotel Brisa Ficticio').incluye).toBe('Seguro médico')
+    expect(opcion(r, 'Hotel Brisa Ficticio').noIncluye).toBe('Alimentación, Traslados')
+    expect(opcion(r, 'Hotel Mar Azul Ficticio').noIncluye).toBeUndefined()
+    const h = htmlDePropuesta(r.modelo, RECURSOS)
+    const hospedaje = seccion(h, 'Hospedaje')!
+    // «Desayuno en todos los hoteles» con un hotel sin alimentación era falso.
+    expect(hospedaje).not.toContain('en todos los hoteles')
+    expect(hospedaje).toContain('No incluye Alimentación, Traslados')
+    expect(seccion(h, 'Qué incluye')).not.toMatch(/Traslados/)
+  }, 60_000)
+
+  it('D3 · dos versiones sin zona (no hay paradas): el renglón del hotel lleva las noches', async () => {
+    const r = await conEnPropuesta(['Hotel Mar Azul Ficticio', 'Hotel Brisa Ficticio'])
+    // La causa: sin ciudad no hay paradas y las noches de la ruta daban 0 («Hoteles; …»).
+    expect(r.modelo.ruta.paradas).toEqual([])
+    expect(r.modelo.precio.incluye).toContain('4 noches de hotel; el hotel cambia según la versión')
+    expect(r.modelo.precio.incluye.some(x => x.startsWith('Hoteles;'))).toBe(false)
+  }, 60_000)
+
+  it('tres versiones: Coral trae lo mismo que Mar Azul; Brisa sigue sin alimentación ni traslados', async () => {
+    const r = await conEnPropuesta(PAQUETES)
+    expect(r.modelo.tarifas).toHaveLength(3)
+    expect(r.modelo.precio.incluye).not.toContain('Traslados')
+    expect(r.modelo.precio.incluye).toContain('Seguro médico')
+    expect(opcion(r, 'Hotel Brisa Ficticio').noIncluye).toBe('Alimentación, Traslados')
+  }, 60_000)
+
+  it('una versión: como siempre, el hotel con sus noches y todas sus casillas en «Incluido»', async () => {
+    const r = await conEnPropuesta(['Hotel Mar Azul Ficticio'])
+    const incluye = r.modelo.precio.incluye
+    expect(incluye.some(x => x.startsWith('4 noches en Hotel Mar Azul Ficticio'))).toBe(true)
+    for (const c of ['Alimentación', 'Traslados', 'Seguro médico']) expect(incluye).toContain(c)
+    expect(opcion(r, 'Hotel Mar Azul Ficticio').noIncluye).toBeUndefined()
+  }, 60_000)
+
+  it('menor · «Opción N» en el mismo orden en «Tarifas» y en el PDF (la que no va, al final)', async () => {
+    const r = await conEnPropuesta(['Hotel Mar Azul Ficticio', 'Hotel Brisa Ficticio'])
+    const supabase = clienteFalso()
+    const ctx = (await contextoDeCotizacion(supabase, caso.cotizacionId))!
+    const filas = (await leerItinerarios(supabase, caso.cotizacionId))!
+    const pantalla = tarifasCalculadas(ctx.items as never, ctx.params, filas)
+    // Coral (no va) tiene `orden` 2: antes salía «Opción 3» arriba de «Opción 2».
+    expect(pantalla.map(t => t.nombre)).toEqual(['Recomendada', 'Opción 2', 'Opción 3'])
+    const paqueteDe = (t: { seleccion: string[] }) => PAQUETES.find(n => t.seleccion.includes(idDe(n)))
+    expect(pantalla.map(paqueteDe)).toEqual(['Hotel Mar Azul Ficticio', 'Hotel Brisa Ficticio', 'Hotel Coral QA Ficticio'])
+    // El PDF numera igual las que van.
+    const delPdf = [...r.modelo.tarifas].sort((a, b) => a.indice - b.indice).map(t => t.nombre)
+    expect(delPdf).toEqual(['Recomendada', 'Opción 2'])
+    expect((r.props.itinerarios ?? []).map(b => clave((b.items as LineaPdf[])[0].nombre))).toEqual(['hotel mar azul ficticio', 'hotel brisa ficticio'])
+  }, 60_000)
+
+  it('menor · «Falta la comisión…» nombra el paquete como su tarjeta (no «Hotel Coral Qa Ficticio»)', async () => {
+    const r = await conEnPropuesta(PAQUETES)
+    expect(r.motivos).toContain('comision_publica')
+    const items = (base.tablas.items as Fila[]).filter(i => i.cotizacion_id === caso.cotizacionId)
+    const coral = items.find(i => i.id === idDe('Hotel Coral QA Ficticio'))!
+    // La línea guarda el nombre en mayúscula: así nacía el «Qa».
+    expect(coral.nombre).toBe('HOTEL CORAL QA FICTICIO')
+    const lista = publicasSinComisionQueSalen(items.map(i => ({ id: i.id as string, nombre: i.nombre as string, tarifa_pax: i.tarifa_pax })), new Set(items.map(i => i.id as string)))
+    expect(lista).toEqual([{ itemId: coral.id, nombre: 'Hotel Coral QA Ficticio' }])
+    expect(motivoPublicasSinComision(lista)).toContain('«Hotel Coral QA Ficticio»')
+  }, 60_000)
+
+  it('menor · los créditos de las fotos van en la fila de la firma: no abren una hoja casi vacía', async () => {
+    const r = await conEnPropuesta(['Hotel Mar Azul Ficticio', 'Hotel Brisa Ficticio'])
+    expect(r.modelo.formal.creditos.length).toBeGreaterThan(0)
+    const h = htmlDePropuesta(r.modelo, RECURSOS)
+    // La firma va en el último bloque que no se parte; los créditos, en su misma fila (entre el nombre
+    // de la asesora y la marca), una sola vez. Con Chromium (QA, fuera de CI) el caso que dejaba los
+    // créditos solos en una 3.ª hoja sale en 2.
+    expect((h.match(/class="credits"/g) ?? []).length).toBe(1)
+    expect(h).toMatch(/<div class="sign">\s*<div>(?:(?!<\/div>)[\s\S])*<\/div>\s*<div class="credits"><b>Fotografías:<\/b>/)
+  }, 60_000)
 })

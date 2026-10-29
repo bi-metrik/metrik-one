@@ -46,37 +46,14 @@ import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { generacionNegadaPorDisputa } from '@/lib/negocios/disputa-generacion'
 import { filaDelFormulario } from '@/lib/negocios/fila-formulario'
 import { createElement } from 'react'
+import { resolverCamposFuente, type CampoFuente } from '@/lib/formularios/resolver-campos-fuente'
+import { admitePlantillaEditable, leerVersionActiva } from '@/lib/plantillas-documento/servidor'
+import { imprimirPlantilla } from '@/lib/plantillas-documento/imprimir'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any { return client }
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-interface FuenteCampo {
-  // Referencia ESTABLE al bloque fuente por slug. Prioritaria sobre el par
-  // (etapa_orden, bloque_orden), que se rompe al reordenar etapas/bloques y queda
-  // como fallback legacy. Ver docs/specs/2026-05-26_block-references-by-slug.md
-  bloque_slug?: string
-  etapa_orden: number
-  bloque_orden: number
-  campo_slug?: string // un campo
-  campos_slug?: string[] // varios campos concatenados (ej. marca + línea/modelo del certificado)
-  join?: string // separador para campos_slug (default " ")
-  tipo: string // 'ai' | 'field'
-}
-
-interface CampoFuente {
-  slug: string
-  // Si `optional`, no se reporta como faltante cuando no hay valor (queda null y
-  // la casilla del overlay se dibuja vacía). Ej.: fecha de expedición del 1668,
-  // que el banco puede completar a mano.
-  optional?: boolean
-  source: FuenteCampo
-  // Fuentes alternativas: se prueban en orden si la principal no da valor. Útil
-  // cuando el dato vive en un bloque condicional (ej. el valor del IVA sale del
-  // Contrato de leasing si existe, y si no, de la Factura).
-  source_alternatives?: FuenteCampo[]
-}
 
 // ── Resolve source campos ────────────────────────────────────────────────────
 
@@ -251,87 +228,6 @@ function aplicarDeterministas(
     const telManual = 'telefono' in overrides && telOverride != null && telOverride.trim() !== ''
     if (!telManual) datosFinal.telefono = telefonoCasilla25(datosFinal.telefono)
   }
-}
-
-async function resolverCamposFuente(
-  supabase: unknown,
-  negocioId: string,
-  lineaId: string,
-  camposFuente: CampoFuente[],
-): Promise<{ datos: Record<string, string | null>; faltantes: string[] }> {
-  // Get all negocio_bloques with their config context
-  const { data: bloques } = await db(supabase)
-    .from('negocio_bloques')
-    .select(`
-      data,
-      bloque_configs!inner(
-        orden,
-        slug,
-        config_extra,
-        etapa_id,
-        etapas_negocio!inner(orden, linea_id)
-      )
-    `)
-    .eq('negocio_id', negocioId)
-
-  if (!bloques || bloques.length === 0) {
-    return { datos: {}, faltantes: camposFuente.map(c => c.slug) }
-  }
-
-  // Dos índices: por (etapaOrden:bloqueOrden) legacy y por slug estable.
-  const lookup = new Map<string, { data: Record<string, unknown> }>()
-  const lookupPorSlug = new Map<string, { data: Record<string, unknown> }>()
-  for (const b of bloques) {
-    const bc = b.bloque_configs as {
-      orden: number
-      slug: string | null
-      config_extra: Record<string, unknown>
-      etapas_negocio: { orden: number; linea_id: string }
-    }
-    if (bc.etapas_negocio.linea_id !== lineaId) continue
-    const entry = { data: (b.data as Record<string, unknown>) ?? {} }
-    lookup.set(`${bc.etapas_negocio.orden}:${bc.orden}`, entry)
-    if (bc.slug) lookupPorSlug.set(bc.slug, entry)
-  }
-
-  // Resuelve el valor de UNA fuente (bloque + campo, o varios concatenados).
-  // Vía preferida: slug estable. Fallback legacy: (etapa_orden:bloque_orden).
-  const resolverUna = (src: FuenteCampo): string | null => {
-    const bloque =
-      (src.bloque_slug ? lookupPorSlug.get(src.bloque_slug) : undefined) ??
-      lookup.get(`${src.etapa_orden}:${src.bloque_orden}`)
-    if (!bloque) return null
-    const readOne = (slug: string): string | null => {
-      if (src.tipo === 'ai') {
-        const campos = bloque.data.campos as Record<string, { value: string | null; confidence: number }> | undefined
-        const cd = campos?.[slug]
-        return (cd?.value && cd.confidence >= 0.70) ? cd.value : null
-      }
-      const raw = bloque.data[slug]
-      return (raw !== null && raw !== undefined && raw !== '') ? String(raw) : null
-    }
-    if (src.campos_slug && src.campos_slug.length > 0) {
-      const parts = src.campos_slug.map(readOne).filter((v): v is string => !!v)
-      return parts.length > 0 ? parts.join(src.join ?? ' ') : null
-    }
-    return src.campo_slug ? readOne(src.campo_slug) : null
-  }
-
-  const datos: Record<string, string | null> = {}
-  const faltantes: string[] = []
-
-  for (const campo of camposFuente) {
-    // Probar la fuente principal y luego las alternativas; usar la primera con valor.
-    let value: string | null = null
-    for (const src of [campo.source, ...(campo.source_alternatives ?? [])]) {
-      value = resolverUna(src)
-      if (value) break
-    }
-    datos[campo.slug] = value
-    if (!value && !campo.optional) faltantes.push(campo.slug)
-  }
-
-  return { datos, faltantes }
 }
 
 // ── Template registry ────────────────────────────────────────────────────────
@@ -685,8 +581,22 @@ export async function generarFormularioCore(
     const fechaGeneracion = new Date().toISOString()
 
     // 4. Render PDF
+    // Plantilla editable (DJ, Relación de facturas): si el workspace ACTIVÓ una versión, el
+    // documento sale de ese texto por Chromium; si no, del componente @react-pdf de siempre.
+    // Todo lo de arriba (datos, overrides, faltantes, guardas) es el mismo camino. Un fallo
+    // de Chromium NO cae al formato viejo: el espacio activó otro texto y un PDF distinto en
+    // silencio sería peor que pedir que se reintente. Ver docs/specs/2026-10-29_plantillas-editables.md
     let buffer: Buffer
-    if (template === 'formulario-010') {
+    let plantillaUsada: { id: string; version_n: number } | null = null
+    const plantillaActiva = admitePlantillaEditable(template)
+      ? await leerVersionActiva(supabase, workspaceId, template)
+      : null
+    if (plantillaActiva && admitePlantillaEditable(template)) {
+      const impreso = await imprimirPlantilla(template, plantillaActiva.contenido, datosFinal, { fechaGeneracion, codigoNegocio })
+      if (!impreso.ok) return { success: false, campos_usados: datosFinal, error: impreso.error }
+      buffer = impreso.pdf
+      plantillaUsada = { id: plantillaActiva.id, version_n: plantillaActiva.version_n }
+    } else if (template === 'formulario-010') {
       // Overlay sobre el PDF oficial de la DIAN (no se modifica el fondo).
       const f010Datos = datosFinal as unknown as Formulario010Datos
       const f010Constantes = { ...constantesFinal, ...seccionalExtra } as unknown as Formulario010Constantes
@@ -790,6 +700,8 @@ export async function generarFormularioCore(
       template,
       generated_at: fechaGeneracion,
       version_actual: versionN,
+      // Qué versión de la plantilla editable imprimió este PDF (null = formato de fábrica).
+      plantilla_version: plantillaUsada,
     }
 
     await db(supabase)

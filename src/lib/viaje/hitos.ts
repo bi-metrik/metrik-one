@@ -34,7 +34,7 @@
 import { esDiaHabil, siguienteDiaHabil } from '@/lib/dates/dias-habiles'
 import { anteriorDiaHabil, sumarDias } from '@/lib/recordatorios/reglas'
 import { ETAPA_VIAJE_CONFIRMADO } from './mis-pendientes'
-import { fechaEnPalabras, leerTramos, horaHHMM, type TramoServicio } from './fechas-servicio'
+import { fechaDeLlegada, fechaEnPalabras, leerTramos, horaHHMM, type TramoServicio } from './fechas-servicio'
 
 // ── Catálogo ────────────────────────────────────────────────────────────────
 
@@ -538,7 +538,11 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
   // El paquete de bloqueo (tipo «otro» con los tramos de su vuelo, H10 del 2026-10-29) se vuela igual.
   const vuelaConTramos = (s: (typeof vivos)[number]) => s.tipo === 'vuelo' || (s.tipo === 'otro' && (leerTramos(s.tramos)?.length ?? 0) > 0)
   const vuelos = vivos.filter(vuelaConTramos)
-  const primerTramo = vuelos.map(s => leerTramos(s.tramos)?.[0]?.fecha ?? s.fecha_servicio).filter((f): f is string => !!f).sort()[0] ?? null
+  // El traslado de llegada es el día en que ATERRIZA el primer tramo: en un vuelo nocturno, el
+  // siguiente al de salida (QA 2026-10-29, S9-2).
+  const primerTramo = vuelos
+    .map(s => { const t = leerTramos(s.tramos)?.[0]; return t ? fechaDeLlegada(t) : s.fecha_servicio })
+    .filter((f): f is string => !!f).sort()[0] ?? null
   const trasladosSinFecha = vivos.filter(s => s.tipo === 'traslado' && !s.fecha_servicio).length
   let preregistroPuesto = false
 
