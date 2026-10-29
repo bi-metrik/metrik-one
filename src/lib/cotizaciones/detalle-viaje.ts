@@ -580,8 +580,13 @@ export function tramosDelItem(
   detalle: Record<string, string> = detalleDelItem(item),
 ): { tramos: TramoVuelo[]; numerosSinTramo: string | null } {
   const derivados = tramosDeCampos(slug => detalle[slug])
-  const guardados = leerTramos(item.tramos)
+  let guardados = leerTramos(item.tramos)
   if (!guardados) return derivados
+  // M9-3: el regreso fantasma se guardaba y se llevaba el número (uno solo no se reparte). Sin él,
+  // la ida guardada sin número toma el de la lectura, que ya es solo suyo.
+  if (guardados.length === 1 && !guardados[0].numero && derivados.tramos.length === 1 && derivados.tramos[0].numero) {
+    guardados = [{ ...guardados[0], numero: derivados.tramos[0].numero }]
+  }
   return {
     tramos: guardados,
     numerosSinTramo: guardados.some(t => t.numero) ? null : derivados.numerosSinTramo,

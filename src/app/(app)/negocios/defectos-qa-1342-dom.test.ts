@@ -381,7 +381,7 @@ describe('defecto 11 · «Confirmación · El cliente dijo sí» solo con algo q
       estado: { confirmado: !!confirmacion, planVigente: false, anticipoConSoporte: false },
       gates: [], gateMensajes: {}, etapaConfirmacion: { id: 'e4', nombre: 'Confirmación', numero: 4 },
       etapaActual: { id: 'e2', nombre: 'Cotización', numero: 2, orden: 2 }, antesDeConfirmacion: true, enConfirmacion: false,
-      terminosBase: null, agencia: 'Agencia', comercial: null, hayPago: false, aprobadores: [], prerreservaVencida: false,
+      terminosBase: null, agencia: 'Agencia', comercial: null, hayPago: false, aprobadores: [], prerreservaVencida: false, negocioAbierto: true,
     })
     const pintar = (v: unknown) => renderToStaticMarkup(React.createElement(Panel, { vista: v as never, puedeConfirmar: true, esDireccion: false }))
     expect(pintar(vista('borrador'))).toBe('')

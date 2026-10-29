@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import EmptyState from '@/components/empty-state';
 import { getWorkspace } from '@/lib/actions/get-workspace';
@@ -31,6 +32,9 @@ import { ModificacionTerminosCda } from './modificacion-terminos-cda';
 import { suspensionPorReversoEnPantalla } from '@/lib/valida-registro/corte-reverso-servidor';
 import { frasesSuspension } from '@/lib/valida-registro/corte-reverso';
 import { PlanSuspendidoPorReverso } from './plan-suspendido-reverso';
+import { COOKIE_POSPONER_V15, esTerminosV15, pospuestaHoy, textosPantallaV15 } from '@/lib/valida-cda/terminos-v1-5';
+import { datosPantallaV15 } from '@/lib/valida-cda/terminos-v1-5-servidor';
+import { TerminosV15Cda } from './terminos-v15-cda';
 
 export const dynamic = 'force-dynamic';
 // El cargue masivo despierta su trabajador con `after()` desde las acciones de esta página
@@ -134,6 +138,29 @@ export default async function ValidaPage({ searchParams }: Props) {
           documentos={entrada.modificaciones}
           entrada={pagina?.estado === 'pendiente' ? pagina : null}
           hoy={entrada.hoy}
+          designadoNombre={designadoNombre}
+          aviso={textoAvisoPolitica('valida_cda')}
+          politicaUrl={POLITICA_DATOS_VALIDA.url}
+          politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+        />
+      );
+    }
+    // La v1.5 (anexo A de Emilio, 2026-10-29): desde su publicación, la pantalla de aceptación al entrar a
+    // Valida, para TODOS. «Ahora no, recordármelo» la cierra por esta sesión y este día (cookie): queda el
+    // aviso de arriba y Valida opera igual. No bloquea nada.
+    const v15 = entrada.modificaciones.find(esTerminosV15);
+    if (v15 && !pospuestaHoy((await cookies()).get(COOKIE_POSPONER_V15)?.value, v15.documentoId, entrada.hoy)) {
+      const [datos, pagina] = await Promise.all([
+        datosPantallaV15({ doc: v15, servicioContratadoId: entrada.servicioContratadoId, hoy: entrada.hoy }),
+        firmaModificacion && entrada.modificacion
+          ? armarEstadoEntradaPagina({ workspaceId: entrada.workspaceId }, entrada.modificacion)
+          : Promise.resolve(null),
+      ]);
+      return (
+        <TerminosV15Cda
+          documentoId={v15.documentoId}
+          textos={textosPantallaV15(datos)}
+          entrada={pagina?.estado === 'pendiente' ? pagina : null}
           designadoNombre={designadoNombre}
           aviso={textoAvisoPolitica('valida_cda')}
           politicaUrl={POLITICA_DATOS_VALIDA.url}

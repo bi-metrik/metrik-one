@@ -179,6 +179,7 @@ import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
+import { AvisoVersionNueva } from '@/app/(app)/negocios/aviso-version-nueva'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
 import { crearPaqueteBloqueo, paqueteEnPropuesta } from '@/app/(app)/negocios/bloqueo-actions'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
@@ -428,6 +429,11 @@ interface Props {
    * tarjeta de paquete (hotel + vuelo).
    */
   bloqueo?: { operador: string | null; edadesMenores?: string | null } | null
+  /**
+   * H10-1: otra cotización del negocio ya está enviada. Con esta en borrador, el editor lo dice
+   * arriba y «Enviar» la reemplaza (la enviada queda rechazada). `null` = no hay otra enviada.
+   */
+  otraEnviada?: { id: string; consecutivo: string | null } | null
 }
 
 /** Lo que la cotización por pasos le pide a la tarjeta de una opción (`TarjetaOpcion.porPasos`). */
@@ -436,7 +442,7 @@ type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null, otraEnviada = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -650,9 +656,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     setExpandedItems(todosExpandidos ? new Set() : new Set(itemsVisibles.map(i => i.id)))
   }
 
+  // H10-1: la enviada que esta versión reemplaza al salir (solo un borrador reemplaza).
+  const reemplaza = cotizacion.estado === 'borrador' ? otraEnviada : null
   const handleEnviar = () => {
     startTransition(async () => {
-      const res = await enviarCotizacion(cotizacion.id)
+      const res = await enviarCotizacion(cotizacion.id, 'enviar', reemplaza?.id ?? null)
       if (res.success) {
         toast.success('Cotización enviada')
         refrescar()
@@ -686,8 +694,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const confirmarEnvio = () => {
     startTransition(async () => {
       const res = porPasosOn
-        ? await enviarPorPasos(cotizacion.id, 'descargado')
-        : await enviarCotizacion(cotizacion.id, 'descargado')
+        ? await enviarPorPasos(cotizacion.id, 'descargado', reemplaza?.id ?? null)
+        : await enviarCotizacion(cotizacion.id, 'descargado', reemplaza?.id ?? null)
       setPreguntandoEnvio(false)
       if (res.success) {
         toast.success('Quedó enviada: arranca el seguimiento.')
@@ -3852,6 +3860,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       leyendo={conteoBandeja.leyendo}
       pasoInicial={pasoInicial}
       motivoBotonEnviar={motivoBotonEnviar}
+      reemplaza={reemplaza}
       listaUnica={listaPorPasos}
       conteoLista={listaPorPasos ? { rojos: listaPorPasos.impide.length, ambar: listaPorPasos.revisar.length - (conteoBandeja.porAceptar > 0 ? 1 : 0) } : {
         rojos: motivoBotonEnviar ? 1 : 0,
@@ -4019,6 +4028,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           conTarifasDeProveedor
         />
       )}
+      {editable && reemplaza && <AvisoVersionNueva consecutivo={reemplaza.consecutivo} />}
       {porPasosOn ? vistaPorPasos : lineasPorTipo ? pasosDelViaje : (
         <div className="space-y-3">
           {jsxExpandir}

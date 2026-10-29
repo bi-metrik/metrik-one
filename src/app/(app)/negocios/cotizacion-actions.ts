@@ -1,6 +1,7 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { decidirEnvioConOtraEnviada } from '@/lib/cotizaciones/state-machine'
 import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { revalidatePath } from 'next/cache'
@@ -770,7 +771,7 @@ export async function deleteRubro(id: string) {
  * tras descargar el PDF (H33, 2026-10-14): mismas guardas, mismo UPDATE, solo cambia el canal que
  * queda en la actividad. Cualquier otro valor cuenta como «Enviar»: el canal llega del navegador.
  */
-export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargado') {
+export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargado', reemplazarId?: string | null) {
   const canalEnvio: 'enviar' | 'descargado' = canal === 'descargado' ? 'descargado' : 'enviar'
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -783,11 +784,11 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
   const sinTipos = supabase as any
   const conNegocio = await sinTipos
     .from('cotizaciones')
-    .select(`oportunidad_id, negocio_id, valor_total, ${EMBED_NEGOCIO_ENVIO}`)
+    .select(`oportunidad_id, negocio_id, valor_total, consecutivo, ${EMBED_NEGOCIO_ENVIO}`)
     .eq('id', id)
     .single()
   const { data: cot } = conNegocio.error
-    ? await sinTipos.from('cotizaciones').select('oportunidad_id, negocio_id, valor_total').eq('id', id).single()
+    ? await sinTipos.from('cotizaciones').select('oportunidad_id, negocio_id, valor_total, consecutivo').eq('id', id).single()
     : conNegocio
 
   if (!cot) return { success: false, error: 'Cotización no encontrada' }
@@ -816,16 +817,40 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
 
   const { data: existente } = await supabase
     .from('cotizaciones')
-    .select('consecutivo')
+    .select('id, consecutivo')
     .eq(parentField as never, parentId)
     .eq('estado', 'enviada')
+    .neq('id', id)
     .maybeSingle()
 
-  if (existente) {
-    return {
-      success: false,
-      error: `Ya hay una cotización enviada. Apruébala o recházala antes de enviar otra.`,
+  // H10-1: con otra ya enviada, esta sale solo si la REEMPLAZA (quien envía la nombró).
+  const decision = decidirEnvioConOtraEnviada(
+    (existente as { id: string; consecutivo: string | null } | null) ?? null,
+    reemplazarId ?? null,
+  )
+  if (!decision.ok) return { success: false, error: decision.error }
+  const reemplazada = decision.reemplaza
+  if (reemplazada) {
+    const { data: rechazadas, error: errRechazo } = await supabase
+      .from('cotizaciones')
+      .update({ estado: 'rechazada' } as never)
+      .eq('id', reemplazada.id)
+      .eq(parentField as never, parentId)
+      .eq('estado', 'enviada')
+      .select('id')
+    if (errRechazo) return { success: false, error: errRechazo.message }
+    if (!Array.isArray(rechazadas) || rechazadas.length === 0) {
+      return { success: false, error: 'La cotización enviada cambió mientras tanto. Recarga la página y vuelve a intentarlo.' }
     }
+  }
+  // Si esta no queda enviada, la reemplazada vuelve a como estaba: nunca quedan las dos fuera.
+  const deshacerReemplazo = async () => {
+    if (!reemplazada) return
+    await supabase
+      .from('cotizaciones')
+      .update({ estado: 'enviada' } as never)
+      .eq('id', reemplazada.id)
+      .eq('estado', 'rechazada')
   }
 
   const { data: marcadas, error: dbError } = await supabase
@@ -839,11 +864,26 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
     .eq('estado', 'borrador')
     .select('id')
 
-  if (dbError) return { success: false, error: dbError.message }
+  if (dbError) {
+    await deshacerReemplazo()
+    return { success: false, error: dbError.message }
+  }
   // Sin fila, la cotización ya no estaba en borrador (otra pestaña la envió o la aprobó). Antes
   // esto devolvía éxito sin haber escrito nada; con la pregunta de H33 diría «quedó enviada».
   if (!Array.isArray(marcadas) || marcadas.length === 0) {
+    await deshacerReemplazo()
     return { success: false, error: 'Solo se pueden enviar cotizaciones en borrador' }
+  }
+
+  if (reemplazada && cot.negocio_id) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: cot.negocio_id,
+      tipo: 'cambio',
+      autor_id: staffId ?? null,
+      contenido: `La ${reemplazada.consecutivo ?? 'cotización enviada'} quedó rechazada: la reemplaza la ${(cot as { consecutivo?: string | null }).consecutivo ?? 'versión nueva'}.`,
+    }, 'enviarCotizacion')
   }
 
   if (cot.negocio_id) {

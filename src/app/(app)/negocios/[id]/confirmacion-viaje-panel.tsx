@@ -118,6 +118,9 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
 
   // Antes de confirmar y sin cotización para confirmar, no hay nada que mostrar.
   if (!conf && (!vista.cotizacion || !(vista.antesDeConfirmacion || vista.enConfirmacion))) return null
+  // H10-2 (QA del 2026-10-29): un negocio perdido o desistido no ofrece «El cliente confirmó». La
+  // acción ya lo rechaza en el servidor; la pantalla no debe invitar a un clic que va a fallar.
+  if (!conf && !vista.negocioAbierto) return null
   // QA del #1342 · un borrador no le ha llegado al cliente: no hay qué confirmar y la tarjeta
   // «Confirmación · El cliente dijo sí» no sale. Con la confirmación registrada sale siempre.
   if (!conf && !cotizacionConfirmable(vista.cotizacion?.estado)) return null
