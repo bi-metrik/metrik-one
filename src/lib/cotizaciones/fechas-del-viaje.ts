@@ -14,8 +14,9 @@
  * ⚠️ Solo cambia lo que se DESCRIBE. El costo del hotel es el que se cargó: ni se prorratea
  * ni se recalcula.
  */
-import type { HotelPDF, VueloPDF } from './detalle-viaje'
-import { fechaCorta } from './detalle-viaje'
+import type { HotelPDF, ItemConLectura, VueloPDF } from './detalle-viaje'
+import { fechaCorta, hotelesDeItems, vuelosDeItems } from './detalle-viaje'
+import { hotelesDePaquetes, vuelosDePaquetes } from './bloqueo-documento'
 import { conAnio, filasDelVuelo, leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 export interface RangoDelViaje {
@@ -100,5 +101,27 @@ export function hotelesConFechasDelViaje<T extends HotelPDF>(hoteles: T[], rango
   const noches = Math.round((Date.parse(`${e.salida}T00:00:00Z`) - Date.parse(`${e.entrada}T00:00:00Z`)) / 86_400_000)
   return hoteles.map(h =>
     h.fechasDelViaje ? { ...h, checkIn: fechaCorta(e.entrada), checkOut: fechaCorta(e.salida), noches } : h,
+  )
+}
+
+/**
+ * El rango del viaje cotizado leído directo de las líneas que el documento describe: los vuelos y
+ * hoteles de las casillas y los de los paquetes en bloqueo, igual que el PDF.
+ *
+ * Lo usa la pantalla (Revisar y enviar) para que «Así puedes pagar» cuente desde el mismo día del
+ * viaje que el documento (segunda vuelta de la COT-2026-0008, punto 2): la pantalla no arma el
+ * documento y antes contaba desde el inicio de la solicitud.
+ */
+export function rangoDeLasLineas(
+  lineas: readonly ItemConLectura[],
+  solicitud: { inicio: string | null; fin: string | null },
+): RangoDelViaje {
+  const xs = [...lineas]
+  return rangoDelViajeCotizado(
+    {
+      vuelos: [...vuelosDeItems(xs), ...vuelosDePaquetes(xs)],
+      hoteles: [...hotelesDeItems(xs), ...hotelesDePaquetes(xs, solicitud)],
+    },
+    solicitud,
   )
 }
