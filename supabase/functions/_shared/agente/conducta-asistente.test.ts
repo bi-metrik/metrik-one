@@ -145,7 +145,7 @@ describe('1-2 · lo reenviado antes de abrir el viaje se carga al abrirlo, con s
 // ── 3. Una pregunta respondida no vuelve a salir ────────────────────────────────────────────────────────────────
 
 describe('3 · una pregunta ya hecha no vuelve: se propone la lectura más probable y queda corregible', () => {
-  it('el rango del regreso: la segunda vez el modelo vuelve a dudar, el código no la repite y deja el valor marcado', async () => {
+  it('el rango del regreso: la segunda vez el modelo vuelve a dudar, el código no la repite; la ventana va al texto, sin fijar fecha', async () => {
     const vistos: Visto[] = []
     const PREGUNTA = '"regreso puede ser un rango de fecha": ¿entre qué fechas podría regresar?'
     const M1 = `${COD}: sale el 10 de marzo, el regreso puede ser un rango de fecha`
@@ -156,11 +156,12 @@ describe('3 · una pregunta ya hecha no vuelve: se propone la lectura más proba
     ])
     const extraer = extraccionGuionada([
       (textos) => crudo(textos, { fecha_salida: { valor: '2027-03-10', frase: 'sale el 10 de marzo' } }, [{ campo: 'fecha_regreso', pregunta: PREGUNTA }]),
-      // Lo que hizo el modelo en vivo: vuelve a preguntar lo mismo aunque ya le contestaron (y esta vez propone el tope).
+      // Lo que hizo el modelo en vivo: vuelve a preguntar lo mismo aunque ya le contestaron. Una ventana no es fecha
+      // (caso real del 29-oct, E1 26 1): el regreso queda sin definir y la ventana va al texto.
       (textos) => crudo(textos, {
         fecha_salida: { valor: '2027-03-10', frase: 'sale el 10 de marzo' },
-        fecha_regreso: { valor: '2027-03-20', frase: 'entre el 15 y el 20 de marzo', como: 'deducido', calculo: 'el tope del rango' },
         fechas_tipo: { valor: 'moviles', frase: 'el regreso puede ser un rango de fecha', como: 'deducido' },
+        requisitos_especiales: { valor: 'Regreso entre el 15 y el 20 de marzo', frase: 'entre el 15 y el 20 de marzo' },
       }, [{ campo: 'fecha_regreso', pregunta: PREGUNTA }]),
     ], vistos)
     const e = await escenario({
@@ -171,10 +172,13 @@ describe('3 · una pregunta ya hecha no vuelve: se propone la lectura más proba
     expect(t1[0].texto).toMatch(/¿entre qué fechas podría regresar\?/i)
     const t2 = await e.escribe(M2)
     expect(t2[0].texto).not.toMatch(/entre qué fechas/i)
-    expect(t2[0].texto).toContain('• Fecha de regreso: 20 mar (deducido)')
+    expect(t2[0].texto).not.toContain('• Fecha de regreso:')
+    expect(t2[0].texto).toContain('Regreso entre el 15 y el 20 de marzo')
     // La extracción supo qué se le había preguntado ya.
     expect(vistos[1].instrucciones).toContain('Lo que ya le preguntaste')
     expect(vistos[1].instrucciones).toMatch(/¿entre qué fechas podría regresar\?/i)
+    // Y la regla de la ventana: no se fija una fecha.
+    expect(vistos[1].instrucciones).toMatch(/Una ventana [\s\S]* no es fecha/)
     // En toda la conversación, la pregunta salió una sola vez.
     expect(delBot(e.almacen.filas).filter((t) => /entre qué fechas/i.test(t))).toHaveLength(1)
   })

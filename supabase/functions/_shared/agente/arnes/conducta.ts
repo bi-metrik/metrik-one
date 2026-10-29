@@ -41,6 +41,8 @@ interface CasoConducta {
   prohibidas: Prohibida[];
   /** Lo que el viaje abierto en el caso tiene que tener al final (lo reenviado y lo escrito). */
   final: Record<string, unknown>;
+  /** Solo dieron una ventana de fechas («entre el 21 de junio y el 4 de julio, lo proponemos»): ni salida ni regreso. */
+  sinFechas?: boolean;
 }
 
 const PASOS_BONAIRE: PasoGuion[] = [
@@ -88,6 +90,19 @@ const PASOS_JAMAICA: PasoGuion[] = [
   { toca: 'Anotar' },
 ];
 
+// La conversación de Mauricio con la mano derecha (29-oct, 17:18, viaje E1 26 1), rehecha con otra clienta: dos dudas de
+// la extracción volvieron en los tres turnos de anotar aunque las contestó.
+const PASOS_GUZMAN: PasoGuion[] = [
+  { escribe: 'Hola, vamos a crear un nuevo viaje para la señora Rincón, es un viaje para dos adultos, le vamos a dar un rango de fechas o sea fechas móviles para que por favor propongamos entre el 21 de junio y el 4 de julio del otro año, entre esas dos fechas lo que salga mejor, la mejor tarifa posible. Van solos, van sin niños, quieren hoteles de entre tres y cuatro estrellas, veamos qué opciones le podemos ofrecer entre esas dos categorías. Dime qué más hace falta.' },
+  { escribe: 'Es Marta Rincón con celular 3155550142.' },
+  { toca: 'Crear' },
+  { escribe: 'Asígneselo a Beto Ventas, por favor.', },
+  { toca: 'Sí, ábrelo' },
+  { escribe: 'Propongamos algunos hoteles de tres estrellas y otros de cuatro estrellas, las dos opciones, y que ella elija' },
+  { escribe: 'Ella quiere viajar a Curazao. Saldría desde Bogotá. La fecha de salida y la de regreso las tenemos que proponer nosotros. Te doy el margen, entre el 21 de junio y el 4 de julio. Y la categoría del hotel tres o cuatro estrellas, proponerle las dos categorías.' },
+  { toca: 'Anotar' },
+];
+
 export const CASOS_CONDUCTA: CasoConducta[] = [
   {
     id: 'k-bonaire', titulo: 'Reenvíos antes de abrir, rango del regreso y «3, 4 y 5 estrellas» (28-oct)',
@@ -112,12 +127,23 @@ export const CASOS_CONDUCTA: CasoConducta[] = [
     ],
     final: { adultos: 2, ninos: 1, categoria_hotel: '5' },
   },
+  {
+    id: 'k-guzman', titulo: 'Ventana de fechas que propone la agencia y «3 o 4 estrellas, las dos» (29-oct, mano derecha)',
+    contactos: [], pasos: PASOS_GUZMAN,
+    prohibidas: [
+      // La ventana y las categorías las dijo en el primer mensaje: no se preguntan ni se fija una fecha.
+      { desde: 0, que: 'fechas', re: /(fecha|salida|regreso|rango).{0,80}\?/i },
+      { desde: 0, que: 'categoría', re: /(categor[ií]a|estrellas).{0,80}\?/i },
+    ],
+    final: { adultos: 2, categoria_hotel: '3' },
+    sinFechas: true,
+  },
 ];
 
 interface Medida {
   id: string; corrida: number; daninas: string[]; error?: string;
   reenvioPerdido: boolean; clienteDice: number; repetidas: string[]; trabado: boolean;
-  propuestas: number; propuestasLargas: number; maxPropuesta: number; reenviame: number; final: Record<string, unknown>; transcripcion: string[]; diagnostico: string[];
+  propuestas: number; propuestasLargas: number; maxPropuesta: number; reenviame: number; fechaInventada: boolean; final: Record<string, unknown>; transcripcion: string[]; diagnostico: string[];
 }
 
 async function tocarOEscribir(e: Escenario, titulo: string, oEscribe = 'sí'): Promise<string> {
@@ -175,6 +201,7 @@ async function correrCaso(c: CasoConducta, corrida: number): Promise<Medida> {
     trabado: Object.entries(c.final).some(([k, v]) => k === 'categoria_hotel' && final[k] !== v) || (c.id === 'k-bonaire' && !final.categoria_hotel),
     propuestas: propuestas.length, propuestasLargas: propuestas.filter(LARGA).length, maxPropuesta: Math.max(0, ...propuestas.map((t) => t.length)),
     reenviame: todas.filter((t) => /Reenv[ií]ame lo que te escribi/.test(t)).length,
+    fechaInventada: !!c.sinFechas && (!!final.fecha_salida || !!final.fecha_regreso || propuestas.some((t) => /• Fecha de (salida|regreso):/.test(t))),
     final, transcripcion, diagnostico,
   };
 }
@@ -204,6 +231,7 @@ if (import.meta.main) {
     preguntas_repetidas: suma((m) => m.repetidas.length),
     trabado: suma((m) => (m.trabado ? 1 : 0)),
     reenviame: suma((m) => m.reenviame),
+    fecha_inventada: suma((m) => (m.fechaInventada ? 1 : 0)),
     propuestas: suma((m) => m.propuestas),
     propuestas_largas: suma((m) => m.propuestasLargas),
     max_propuesta: Math.max(0, ...medidas.map((m) => m.maxPropuesta)),
