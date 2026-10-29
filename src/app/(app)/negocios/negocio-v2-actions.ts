@@ -53,7 +53,7 @@ import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanon
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { valorSinIvaDeFactura } from '@/lib/upme/valor-factura'
-import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { revisarTarifaEnBloque } from '@/lib/upme/tarifa-confirmada'
 import { cortarVersionCronograma } from '@/lib/cronograma/cortar-version'
@@ -6757,6 +6757,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   autorizacionPendiente?: boolean
   /** Con la autorización pendiente, lo mismo que responde «Enviar» (`MENSAJE_ENVIO`). */
   motivoAutorizacion?: string | null
+  /** Con la autorización pendiente, QUÉ falta (N7-2): la general, la de menores o el contacto. */
+  faltaAutorizacion?: 'sin_contacto' | 'generales' | 'menores' | null
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -8530,6 +8532,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     etapasLinea: base.etapasLinea,
     autorizacionPendiente,
     motivoAutorizacion: autorizacionPendiente && faltaLeida ? MENSAJE_ENVIO[faltaLeida] : null,
+    faltaAutorizacion: autorizacionPendiente && faltaLeida && faltaLeida !== 'error' ? faltaLeida : null,
     etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente

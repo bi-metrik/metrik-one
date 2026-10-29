@@ -86,37 +86,26 @@ export default async function CotizacionNegocioPage({
   // Check if any cotizacion in this negocio has estado='aceptada'
   let frozen = false
   // H10-1: otra cotización del negocio ya enviada. Con esta en borrador, el editor lo dice desde
-  // que se abre y «Enviar» la reemplaza. Si la lectura falla, nada: el servidor frena igual.
+  // que se abre y «Enviar» la reemplaza. Sale de la MISMA consulta de la aceptada (sin idas de más);
+  // si la lectura falla, nada: el servidor frena igual.
   let otraEnviada: { id: string; consecutivo: string | null } | null = null
-  if ((cotizacion as { estado?: string } | null)?.estado === 'borrador') {
-    try {
-      const { supabase: sbEnviada } = await getWorkspace()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data: enviadas } = await (sbEnviada as any)
-        .from('cotizaciones')
-        .select('id, consecutivo')
-        .eq('negocio_id', id)
-        .eq('estado', 'enviada')
-        .neq('id', cotId)
-        .limit(1)
-      const fila = Array.isArray(enviadas) ? (enviadas[0] as { id: string; consecutivo: string | null } | undefined) : undefined
-      if (fila) otraEnviada = { id: fila.id, consecutivo: fila.consecutivo ?? null }
-    } catch {
-      // No crítico.
-    }
-  }
   try {
     const { supabase: sbCheck } = await getWorkspace()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: accepted } = await (sbCheck as any)
+    const { data: abiertas } = await (sbCheck as any)
       .from('cotizaciones')
-      .select('id')
+      .select('id, estado, consecutivo')
       .eq('negocio_id', id)
-      .eq('estado', 'aceptada')
-      .limit(1)
+      .in('estado', ['aceptada', 'enviada'])
+    const filas = (Array.isArray(abiertas) ? abiertas : []) as { id: string; estado: string; consecutivo: string | null }[]
+    const accepted = filas.filter(f => f.estado === 'aceptada')
     // Freeze if there's an accepted quote AND the current one is NOT the accepted one
-    if (accepted && accepted.length > 0 && accepted[0].id !== cotId) {
+    if (accepted.length > 0 && accepted[0].id !== cotId) {
       frozen = true
+    }
+    const enviada = filas.find(f => f.estado === 'enviada' && f.id !== cotId)
+    if (enviada && (cotizacion as { estado?: string } | null)?.estado === 'borrador') {
+      otraEnviada = { id: enviada.id, consecutivo: enviada.consecutivo ?? null }
     }
   } catch {
     // Non-critical — if check fails, don't freeze

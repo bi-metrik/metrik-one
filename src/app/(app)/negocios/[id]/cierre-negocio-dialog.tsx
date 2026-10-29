@@ -86,7 +86,7 @@ function PerderForm({ negocioId, esBuzonLeads, motivosPerdida, onClose }: { nego
 
   return (
     <>
-      <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : 'Desistir del negocio'}</h3>
+      <h3 className="text-sm font-bold text-tinta">{esBuzonLeads ? 'Descartar lead' : conSeguimiento ? 'Se perdió' : 'Desistir del negocio'}</h3>
       <p className="text-xs text-tinta-suave">
         {esBuzonLeads ? 'Motivo del descarte (obligatorio)' : conSeguimiento ? '¿Por qué se perdió?' : 'Selecciona la razon principal'}
       </p>

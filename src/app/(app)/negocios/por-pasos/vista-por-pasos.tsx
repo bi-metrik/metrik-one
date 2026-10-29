@@ -728,7 +728,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       onDescargar={p.onDescargar}
       reemplaza={p.reemplaza ? p.reemplaza.consecutivo : undefined}
       onEnviar={() => void correr(async () => {
-        const r = await enviarPorPasos(p.cotizacionId, undefined, p.reemplaza?.id ?? null)
+        const r = p.reemplaza ? await enviarPorPasos(p.cotizacionId, undefined, p.reemplaza.id) : await enviarPorPasos(p.cotizacionId)
         if (!r.success) { toast.error(r.error); return }
         toast.success('Cotización enviada')
         p.refrescar()
