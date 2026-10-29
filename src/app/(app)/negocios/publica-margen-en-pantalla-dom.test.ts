@@ -169,7 +169,8 @@ describe('falla 2 · «Ver el cálculo» cuadra con el encabezado', () => {
     await montarCalculo({ tipo: 'pct', valor: 20 })
     const t = texto()
     expect(t).not.toContain('Margen general')
-    expect(contenedor.querySelector('[data-margen-general]')).toBeNull()
+    // Solo queda la casilla del descuento comercial: la del margen no está.
+    expect(contenedor.querySelectorAll('input[type="number"]').length).toBe(1)
     const fila = contenedor.querySelector('[data-margen-de-hoteles]')
     expect(fila?.textContent).toContain('no lo toma ninguna opción')
     expect(fila?.textContent).not.toContain('15')

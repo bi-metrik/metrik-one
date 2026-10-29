@@ -4266,7 +4266,6 @@ export function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoP
               real del negocio queda impreso abajo, al lado del precio de venta. */}
           <label
             className="text-xs font-medium text-muted-foreground"
-            data-margen-general
             title={convencionMargen === 'sobre_venta'
               ? 'Se calcula sobre la venta: el número que escribes ES el margen real.'
               : `Se calcula como ${nombreDelMargen(convencionMargen).toLowerCase()} sobre el costo, así que el margen real sale un poco por debajo. Lo ves abajo, junto al precio de venta.`}
