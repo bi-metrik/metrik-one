@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Asistente de ventas Dimpro + Bold (29-oct)](project_dimpro_asistente_ventas_bold.md) — 20261029150000 y sql/dimpro SIN aplicar; solo Messenger 151556; forma_pago sigue anticipado
 - ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — v2: datos en asignaciones.json fuera del repo; arnés con Haiku; SQL SIN aplicar
 - ⚠️ [Bloqueo: prueba real 29-oct (INF, barra, edad, marca PDF)](project_bloqueo_prueba_real_1029.md) — #1326; PDF recibe porPasos del llamador (N4); edad de la Solicitud cuenta en el freno
 - ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy
