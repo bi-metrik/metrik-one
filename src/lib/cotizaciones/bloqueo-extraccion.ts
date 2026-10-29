@@ -50,7 +50,7 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '  No confundas los botones de «+ N PAX» con precios.',
   '- nino: el precio por niño (CHD, menor) y su rango de edad en años (ej. «CHD 02-11» → edad_min 2, edad_max 11). null si',
   '  no aparece.',
-  '- infante: el precio por infante (INF, bebé, menor de 2 años; ej. «INF 180.000» → precio 180000). Si dice que el',
+  '- infante: el precio por infante (INF, bebé de menos de 24 meses; ej. «INF 180.000» → precio 180000). Si dice que el',
   '  infante no paga o es gratis, precio 0. null si la pantalla no muestra infante. No lo confundas con el niño (CHD).',
   '- iconos: CADA ícono de la fila de servicios incluidos (pequeños dibujos junto al hotel), en orden. Para cada uno:',
   '  descripcion (qué dibujo es, en pocas palabras) y categoria, una de: tiquete_aereo (avión, tiquete, pasabordo),',

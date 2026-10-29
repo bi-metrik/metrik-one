@@ -363,16 +363,16 @@ export function leerDistribucion(v: unknown): DistribucionBloqueo {
 }
 
 /**
- * Las edades de los NIÑOS que dice la Solicitud del negocio (`edades_menores`, texto libre: «8 años»,
+ * Las edades de los NIÑOS que dice la Solicitud del negocio (`edades_menores`, texto libre: «edad 8»,
  * «9, 4», «7, 1.5»), para precargar la tarjeta del paquete (prueba real del 2026-10-29: la ficha decía
- * «8 años» y la tarjeta la pedía vacía). Las de 0-17 años, enteras.
+ * la edad 8 y la tarjeta la pedía vacía). Las de 0 a 17, enteras.
  *
- * El campo trae niños E infantes: con infantes en la solicitud, las edades bajo 2 años son de ellos
- * y no cuentan como niño. Una edad en meses («6 meses») es de un infante y nunca se lee como años. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
+ * El campo trae niños E infantes: con infantes en la solicitud, las edades bajo 2 son de ellos
+ * y no cuentan como niño. Una edad en meses («6 meses») es de un infante y nunca se lee como edad en años cumplidos. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
  */
 export function edadesNinosDeLaSolicitud(valor: unknown, pasajeros: { ninos: number; infantes: number } | null): number[] {
   const texto = typeof valor === 'number' ? String(valor) : typeof valor === 'string' ? valor : ''
-  // «6 meses», «18 meses»: es un bebé (infante), nunca «6 años». No se toma como edad de niño.
+  // «6 meses», «18 meses»: es un bebé (infante), nunca la edad 6. No se toma como edad de niño.
   const crudas = [...texto.matchAll(/(\d+(?:\.\d+)?)\s*(mes(?:es)?\b)?/gi)]
     .map(m => ({ valor: Number(m[1]), enMeses: !!m[2] }))
     .filter(x => Number.isFinite(x.valor) && x.valor >= 0 && (x.enMeses || x.valor < 18))
