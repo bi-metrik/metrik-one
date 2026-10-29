@@ -192,7 +192,7 @@ export default function ViajeFinalPanel({
         <ul className="divide-y rounded-md border">
           {c.filas.map(f => (
             <li key={f.id} className="flex flex-wrap justify-between gap-2 p-2">
-              <span className="min-w-0 flex-1">{f.nombre}</span>
+              <span className="min-w-0 flex-1">{f.nombre}{f.sacado ? <span className="text-amber-800"> · sacado del viaje</span> : null}</span>
               <span className="tabular-nums text-muted-foreground">cotizado {pesosCierre(f.cotizado)}</span>
               <span className={`tabular-nums ${f.sinCosto ? 'text-red-700' : ''}`}>{f.sinCosto ? 'falta el costo real' : `real ${pesosCierre(f.real)}`}</span>
             </li>

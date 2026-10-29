@@ -244,13 +244,37 @@ export function fechaEnPalabras(fecha: string): string {
   return `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} ${MESES[d.getUTCMonth()]}`
 }
 
+/**
+ * ¿El tramo aterriza al día siguiente? (QA 2026-10-29, S9-2). El tramo guarda UNA fecha, la de
+ * salida: una llegada a una hora anterior a la de salida es del día siguiente (vuelo nocturno).
+ * Sin las dos horas no se adivina.
+ */
+export function llegaAlDiaSiguiente(t: Pick<TramoServicio, 'hora_salida' | 'hora_llegada'>): boolean {
+  const sale = horaHHMM(t.hora_salida)
+  const llega = horaHHMM(t.hora_llegada)
+  return !!sale && !!llega && llega < sale
+}
+
+/** La fecha en que aterriza el tramo: la de salida, o la del día siguiente si es nocturno. */
+export function fechaDeLlegada(t: Pick<TramoServicio, 'fecha' | 'hora_salida' | 'hora_llegada'>): string {
+  return llegaAlDiaSiguiente(t) ? sumarDiasIso(t.fecha, 1) : t.fecha
+}
+
+export const TEXTO_MAS_UN_DIA = '(+1 día)'
+
 /** «lun 10 nov · 06:10 → sáb 15 nov» o `null` si no hay inicio («Falta la fecha»). */
 export function resumenDeFechas(f: FechasServicio): string | null {
   if (!f.fecha_servicio) return null
   const inicio = `${fechaEnPalabras(f.fecha_servicio)}${f.hora_inicio ? ` · ${f.hora_inicio}` : ''}`
   if (!f.fecha_fin || (f.fecha_fin === f.fecha_servicio && !f.hora_fin)) return inicio
   const fin = f.fecha_fin === f.fecha_servicio ? (f.hora_fin as string) : `${fechaEnPalabras(f.fecha_fin)}${f.hora_fin ? ` · ${f.hora_fin}` : ''}`
-  return `${inicio} → ${fin}`
+  // S9-2: el último tramo aterriza al día siguiente de la fecha que guarda (vuelo nocturno). Sin
+  // tramos, el mismo día con la hora de fin antes que la de inicio es lo mismo.
+  const ultimo = f.tramos && f.tramos.length > 0 ? f.tramos[f.tramos.length - 1] : null
+  const nocturno = ultimo
+    ? llegaAlDiaSiguiente(ultimo)
+    : f.fecha_fin === f.fecha_servicio && !!f.hora_inicio && !!f.hora_fin && f.hora_fin < f.hora_inicio
+  return `${inicio} → ${fin}${nocturno ? ` ${TEXTO_MAS_UN_DIA}` : ''}`
 }
 
 export const FALTA_LA_FECHA = 'Falta la fecha'

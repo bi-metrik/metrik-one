@@ -46,6 +46,7 @@ import {
   type MedioPagoProveedor,
 } from '@/lib/viaje/reglas-pago'
 import { confirmacionFueraDeLoPactado } from '@/lib/viaje/pago-fuera-de-lo-pactado'
+import { confirmacionCambioLocalizador, confirmacionSacarDelViaje } from '@/lib/viaje/sacar-del-viaje'
 import {
   actualizarServicio,
   adjuntarArchivoServicio,
@@ -400,7 +401,14 @@ function HojaServicio({
         disabled={!puedeEditar}
         onBlur={e => {
           const nuevo = e.target.value.trim()
-          if (nuevo !== (valor ?? '')) guardar({ [clave]: nuevo }, { [clave]: valor ?? '' }, `${etiqueta}: guardado.`)
+          if (nuevo === (valor ?? '')) return
+          // H9-4: un localizador ya guardado no se pisa sin decirlo.
+          const seguro = clave === 'localizador' ? confirmacionCambioLocalizador(valor, nuevo) : null
+          if (seguro && !window.confirm(seguro)) {
+            e.target.value = valor ?? ''
+            return
+          }
+          guardar({ [clave]: nuevo }, { [clave]: valor ?? '' }, `${etiqueta}: guardado.`)
         }}
         className="h-11 w-full rounded-md border px-2 text-sm disabled:bg-muted"
       />
@@ -506,7 +514,11 @@ function HojaServicio({
             </button>
           )}
           {s.estado !== 'cancelado' ? (
-            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'cancelado' }, { estado: s.estado }, 'Sacado del viaje.')}
+            <button type="button" disabled={isPending} onClick={() => {
+              // N9-9 / H9-3: se confirma, con lo que pasa con la plata del servicio.
+              if (!window.confirm(confirmacionSacarDelViaje({ nombre: s.nombre, costoCotizado: s.costo_cotizado, pagadoProveedor: v.pagado }))) return
+              guardar({ estado: 'cancelado' }, { estado: s.estado }, 'Sacado del viaje.')
+            }}
               className="min-h-11 rounded-md px-3 text-xs text-muted-foreground underline disabled:opacity-60">
               Sacar del viaje
             </button>
