@@ -16,7 +16,7 @@ import {
   cascadaDeItinerario,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
-  exentaDelMinimo,
+  publicasSinComision,
   margenMedible,
   normalizarGrupo,
   ranurasConAlternativas,
@@ -143,14 +143,14 @@ export interface TarifaCalculada extends TarifaDeLaPantalla {
   precio: number
   costo: number
   /**
-   * El margen real medible (sin costo o sin precio, `null`). Sin las líneas de tarifa pública
-   * (`tarifa-publica.ts`): es el que se juzga contra el mínimo.
+   * El margen general (D2, 2026-10-29): el de todas las líneas, las Públicas con su comisión. `null`
+   * sin costo, sin precio o con una Pública sin comisión. Es el que se juzga contra el mínimo.
    */
   margenReal: number | null
-  /** Cuántas líneas de tarifa pública suma esta tarifa (no entran en `margenReal`). */
+  /** Cuántas líneas de tarifa pública suma esta tarifa. */
   publicas: number
-  /** Todo lo que cobra es de tarifa pública: no hay margen que exigir. */
-  exenta: boolean
+  /** Cuántas de esas no tienen su comisión escrita (D3: la tarifa no puede salir). */
+  sinComision: number
   /** La opción que cobra en cada servicio con opciones. */
   opcionPorServicio: Record<string, string>
   /** «Recomendada» o «Económica» si es idéntica a una que va antes; `null` si no. */
@@ -164,7 +164,7 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
   const ranuras = ranurasConAlternativas(lineas)
   const ordenadas = [...tarifas].sort((a, b) => a.orden - b.orden)
   const calculadas = ordenadas.map(t => {
-    const cascada = cascadaDeItinerario(lineas, t.seleccion, params)
+    const cascada = cascadaDeItinerario(lineas, t.seleccion, params, t.id)
     const dentro = new Set(itemsDelItinerario(lineas, t.seleccion))
     const opcionPorServicio: Record<string, string> = {}
     for (const r of ranuras) {
@@ -180,7 +180,7 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
       costo: cascada.costoDeVenta,
       margenReal: margenMedible(cascada),
       publicas: cascada.publicas.lineas,
-      exenta: exentaDelMinimo(cascada),
+      sinComision: publicasSinComision(cascada),
       opcionPorServicio,
       igualA: null as string | null,
       cascada,
@@ -201,7 +201,8 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
 export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCascada, tarifas: readonly TarifaDeLaPantalla[]): Cascada {
   const principal = tarifas.find(t => t.id === idDelPrincipal(tarifas)) ?? null
   const aportan = new Set(principal ? itemsDelItinerario(lineas, principal.seleccion) : itemsQueAportanAlTotal(lineas))
-  return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), params)
+  // Con principal, la cascada de ESA tarifa: lleva sus descuentos propios (`descuentoAplicaA`).
+  return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), principal ? { ...params, tarifaId: principal.id } : params)
 }
 
 /**
@@ -210,7 +211,9 @@ export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCasc
  * de margen es el global (el que se juzga contra el mínimo); sin reglas, el de siempre.
  */
 export function margenDelEncabezado(total: Cascada, params: ParametrosCascada): number | null {
-  return params.reglas ? margenMedible(total) ?? total.margenRealPct : total.margenRealPct
+  // D2 (2026-10-29): con Públicas, también sin reglas, el general (las Públicas con su comisión).
+  if (params.reglas || total.publicas.lineas > 0) return margenMedible(total) ?? total.margenRealPct
+  return total.margenRealPct
 }
 
 /** El precio de cada opción (con sus adicionales): no depende de la tarifa, el margen es uno. */

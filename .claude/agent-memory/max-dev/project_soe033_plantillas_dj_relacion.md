@@ -1,6 +1,6 @@
 ---
 name: project-soe033-plantillas-dj-relacion
-description: SOE-033 (29-oct) — DJ y Relación de facturas de SOENA con plantilla del 28-oct; migración 20261029114700 SIN aplicar; DJ copropiedad en 2 páginas
+description: SOE-033 (29-oct) — DJ y Relación de facturas de SOENA con plantilla del 28-oct; migración 20261029114700 APLICADA (29-oct); DJ copropiedad en 2 páginas
 metadata:
   type: project
 ---
@@ -8,7 +8,7 @@ metadata:
 PR #1329 (feat/soe-033-plantillas-soena): DJ y Relación de facturas pasan a las plantillas que mandó Deisy el 2026-10-28,
 aprobadas por Mauricio TAL CUAL.
 
-- Migración `20261029114700_relacion_facturas_plantilla_soe033.sql` **SIN aplicar** al abrir el PR. Copia `fecha_factura`,
+- Migración `20261029114700_relacion_facturas_plantilla_soe033.sql` SIN aplicar al abrir el PR; la aplicó la sesión principal el 29-oct. Copia `fecha_factura`,
   `numero_caso_upme` y `fecha_certificado` de la config VIVA de la DJ (f2878f39) con un SELECT, sin transcribirlos. Toca la
   copia de Envío 2f7c6a0b solo si conserva `template = relacion-facturas`. No se sabe desde el repo si la copia hereda: el
   dry-run lo dice.

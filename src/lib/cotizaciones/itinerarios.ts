@@ -382,9 +382,17 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
   items: T[],
   seleccion: string[],
   params: ParametrosCascada,
+  /**
+   * El id del itinerario (la tarifa). Con él entran también los descuentos sobre el total que son
+   * SOLO de esa tarifa (2026-10-29, `descuentoAplicaA`); sin él, solo los de «todas».
+   */
+  tarifaId?: string | null,
 ): Cascada {
   const incluidos = new Set(itemsDelItinerario(items, seleccion))
-  return calcularCascada(items.filter(i => incluidos.has(i.id)), params)
+  return calcularCascada(
+    items.filter(i => incluidos.has(i.id)),
+    tarifaId !== undefined ? { ...params, tarifaId } : params,
+  )
 }
 
 // ── El piso de margen: aquí sí bloquea ───────────────────────────────────────
@@ -400,44 +408,35 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
  * Es del AGREGADO a propósito: una línea sin costo dentro de un agregado que sí lo tiene
  * (el recargo fijo, un fee) no lo vuelve inmedible.
  *
- * ## Tarifa pública (2026-10-22, `tarifa-publica.ts`)
+ * ## Tarifa pública (D2 de Mauricio, 2026-10-29, `tarifa-publica.ts`)
  *
- * Las líneas de tarifa PÚBLICA no entran: su ganancia es la comisión, que ONE no conoce al
- * cotizar, y medirlas al 0 % hundía el margen de la tarifa entera. Se mide sobre las Netas: su
- * venta (con su parte del descuento comercial, que se reparte en proporción) contra su costo.
- * Sin líneas Públicas es exactamente la cuenta de siempre. Si TODO es Público, `null`, y
- * `exentaDelMinimo` dice que no hay nada que exigir (no es «falta el costo»).
+ * El margen general es el de TODAS las líneas: (lo que paga el cliente − lo que paga la agencia) /
+ * lo que paga el cliente. Por una Pública la agencia paga el precio público menos su comisión.
+ * Con una Pública sin comisión no hay con qué medirlo: `null`, que frena (D3 lo dice con su motivo).
+ * Sin líneas Públicas es exactamente la cuenta de siempre. Hasta el 2026-10-29 las Públicas no
+ * entraban y una tarifa solo de Públicas quedaba exenta del mínimo.
  */
 export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas']; reglas?: Cascada['reglas'] }): number | null {
   // Reglas de margen (2026-10-27, `reglas-margen.ts`): se juzga el margen GLOBAL, ya con
   // colchones, puntos extra, descuentos y las Públicas con su comisión.
-  if (cascada.reglas) return cascada.publicas?.exentaDelMinimo === true ? null : cascada.reglas.margenGlobalPct
+  if (cascada.reglas) return cascada.reglas.margenGlobalPct
   const p = cascada.publicas
-  if (!p || p.lineas === 0) {
-    if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
-    return cascada.margenRealPct
-  }
-  if (p.exentaDelMinimo) return null
-  const bruta = Number(cascada.ventaBruta) || 0
-  const factor = bruta > 0 ? cascada.precioVenta / bruta : 1
-  const precio = (bruta - p.ventaBruta) * factor
-  const costo = cascada.costoDeVenta - p.costoDeVenta
-  if (!(precio > 0) || !(costo > 0)) return null
-  return ((precio - costo) / precio) * 100
+  if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
+  if (!p || p.lineas === 0) return cascada.margenRealPct
+  if (p.sinComision > 0) return null
+  // Lo que paga la agencia: todo el costo, menos la comisión de las Públicas.
+  const costo = cascada.costoDeVenta - p.comision
+  return ((cascada.precioVenta - costo) / cascada.precioVenta) * 100
 }
 
-/**
- * ¿Este agregado no tiene margen que exigir? Solo cuando lo que cobra es de tarifa pública
- * (`PesoDeLasPublicas.exentaDelMinimo`): ahí `margenMedible` es `null` y NO significa «falta el
- * costo».
- */
-export function exentaDelMinimo(cascada: { publicas?: Cascada['publicas'] }): boolean {
-  return cascada.publicas?.exentaDelMinimo === true
+/** ¿Alguna Pública de este agregado no tiene su comisión escrita? (D3: no puede salir.) */
+export function publicasSinComision(cascada: { publicas?: Cascada['publicas'] }): number {
+  return cascada.publicas?.sinComision ?? 0
 }
 
 /**
  * El margen contra el que se juzga el mínimo donde el piso NO se exige en la salida (la regla de
- * siempre: sin precio, `null`, que no bloquea). Con líneas de tarifa pública, el de las Netas.
+ * siempre: sin precio, `null`, que no bloquea). Con líneas de tarifa pública, el general de D2.
  */
 export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas']; reglas?: Cascada['reglas'] }): number | null {
   if (cascada.reglas) return margenMedible(cascada)
@@ -449,6 +448,8 @@ export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costo
 export type MotivoRechazo =
   | { tipo: 'incompleto'; grupos: string[] }
   | { tipo: 'bajo_piso'; margenRealPct: number | null; pisoPct: number }
+  /** D3 (2026-10-29): una Pública sin su comisión escrita: el margen no se puede medir. */
+  | { tipo: 'sin_comision'; publicas: number }
   /** Reglas de margen: un hotel, ya con su descuento, quedó bajo el piso de hotel. */
   | { tipo: 'hotel_bajo_piso'; hoteles: { nombre: string | null; margenPct: number }[]; pisoHotelPct: number }
 
@@ -474,10 +475,10 @@ export function motivoDeRechazo(args: {
   margenRealPct: number | null
   pisoPct: number
   /**
-   * Todo lo que cobra es de tarifa pública (`exentaDelMinimo`): no hay margen que exigir. La
-   * completitud se exige igual.
+   * Cuántas Públicas no tienen su comisión (D3, 2026-10-29). Con alguna, el margen no se puede
+   * medir y el motivo es ese, no «bajo el piso». Ausente = ninguna.
    */
-  exenta?: boolean
+  sinComision?: number
   /**
    * Reglas de margen (2026-10-27): los hoteles que, con su descuento, quedaron bajo el piso de
    * hotel. Piden la misma autorización que el margen global. Ausente = sin reglas.
@@ -488,11 +489,10 @@ export function motivoDeRechazo(args: {
   if (args.ranurasFaltantes.length > 0) {
     return { tipo: 'incompleto', grupos: args.ranurasFaltantes }
   }
-  if (args.exenta !== true) {
-    const nivel = nivelDeMargen(args.margenRealPct, { pisoPct: args.pisoPct, avisoPct: args.pisoPct })
-    if (nivel === 'bajo_piso' || nivel === 'sin_dato') {
-      return { tipo: 'bajo_piso', margenRealPct: args.margenRealPct, pisoPct: args.pisoPct }
-    }
+  if ((args.sinComision ?? 0) > 0) return { tipo: 'sin_comision', publicas: args.sinComision as number }
+  const nivel = nivelDeMargen(args.margenRealPct, { pisoPct: args.pisoPct, avisoPct: args.pisoPct })
+  if (nivel === 'bajo_piso' || nivel === 'sin_dato') {
+    return { tipo: 'bajo_piso', margenRealPct: args.margenRealPct, pisoPct: args.pisoPct }
   }
   if (args.hotelesBajoPiso && args.hotelesBajoPiso.length > 0) {
     return { tipo: 'hotel_bajo_piso', hoteles: args.hotelesBajoPiso, pisoHotelPct: args.pisoHotelPct ?? 0 }
@@ -515,6 +515,7 @@ export function textoDeRechazo(motivo: MotivoRechazo): string {
       ? `Falta elegir ${lista}: una tarifa incompleta no puede ir en la propuesta`
       : `Faltan por elegir: ${lista}. Una tarifa incompleta no puede ir en la propuesta`
   }
+  if (motivo.tipo === 'sin_comision') return textoSinComision(motivo.publicas)
   if (motivo.tipo === 'hotel_bajo_piso') {
     const lista = motivo.hoteles.map(h => `${h.nombre?.trim() || 'un hotel'} (${formatoPct(h.margenPct)})`).join(', ')
     return `Con su descuento, ${motivo.hoteles.length === 1 ? 'el hotel' : 'los hoteles'} ${lista} ${motivo.hoteles.length === 1 ? 'queda' : 'quedan'} por debajo del margen mínimo de hotel de ${formatoPct(motivo.pisoHotelPct)}`
@@ -524,6 +525,12 @@ export function textoDeRechazo(motivo: MotivoRechazo): string {
     return `Este itinerario todavía no tiene margen medible (sin costo o sin precio) y el margen mínimo es ${piso}`
   }
   return `Margen ${formatoPct(motivo.margenRealPct)}, por debajo del margen mínimo de ${piso}`
+}
+
+/** D3: «Falta la comisión de 1 tarifa Pública…», con qué hacer. */
+export function textoSinComision(publicas: number): string {
+  const cuantas = publicas === 1 ? '1 opción de tarifa Pública' : `${publicas} opciones de tarifa Pública`
+  return `Falta la comisión de ${cuantas}: escríbela (en % o en pesos) para poder medir el margen y enviar`
 }
 
 /**

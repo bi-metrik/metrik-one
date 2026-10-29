@@ -15,7 +15,7 @@ import path from 'node:path'
 import { calcularCascada, type LineaCalculada } from '@/lib/cotizaciones/totales'
 import { paramsPorOpcion } from '@/lib/cotizaciones/reglas-margen'
 import { cascadaDelTotal, margenDelEncabezado, preciosDeLasOpciones, tarifasCalculadas, type LineaDeCascada, type TarifaDeLaPantalla } from '@/lib/cotizaciones/por-pasos-vista'
-import { exentaDelMinimo } from '@/lib/cotizaciones/itinerarios'
+import { margenMedible, publicasSinComision } from '@/lib/cotizaciones/itinerarios'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { lineasDelCaso, NOMBRES_DEL_CASO, paramsDelCaso, TARIFAS_DEL_CASO } from '../../../../test/caso-reglas-margen'
 
@@ -66,7 +66,8 @@ function tarjeta(id: string, descuento: 3 | 7 = 3) {
     onCambio: () => {},
     apilable: true,
     tipoTarifa: tarifa.tipoTarifa?.tipo ?? 'neta',
-    reglas: { linea: l.reglas!, descuento: tarifa.descuentoCliente ?? null, comisionPct: tarifa.tipoTarifa?.comisionPct ?? null },
+    reglas: { linea: l.reglas!, descuento: tarifa.descuentoCliente ?? null },
+    comision: tarifa.tipoTarifa?.comisionPct !== undefined ? { tipo: 'pct' as const, valor: tarifa.tipoTarifa.comisionPct } : null,
   }
   return renderToStaticMarkup(React.createElement(TarjetaCosto, props))
 }
@@ -79,7 +80,7 @@ function tarifas(descuento: 3 | 7, opciones: { params?: ParametrosCascada; tarif
   const precios = preciosDeLasOpciones(lineas, params)
   // Lo que la vista le pasa: el total de la cotización, con la misma cifra que el encabezado.
   const total = cascadaDelTotal(lineas, params, pantalla)
-  const delTotal = { margenPct: margenDelEncabezado(total, params), exenta: exentaDelMinimo(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }
+  const delTotal = { margenPct: margenDelEncabezado(total, params), sinComision: publicasSinComision(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }
   return renderToStaticMarkup(React.createElement(TarifasPorPasos, {
     tarifas: calculadas,
     servicios: [{ grupo: 'hotel', tipo: 'hotel', nombre: 'Hotel en San Andrés', opciones: ['h-eco', 'h-rec', 'h-pre'], estado: 'incluido', lugar: 'San Andrés', fecha: null, candidatas: ['h-eco', 'h-rec', 'h-pre'] }],
@@ -123,11 +124,11 @@ describe('la tarjeta de cada opción', () => {
     expect(html).toContain('Con este margen necesitas autorización')
   })
 
-  it('Pública: la comisión entra al margen global', () => {
+  it('Pública: la comisión de la agencia entra al margen de la cotización (D2/D3)', () => {
     const html = tarjeta('a-tour')
     expect(html).toContain('data-comision-publica')
     expect(html).toContain('value="15"')
-    expect(texto(html)).toContain('Entra al margen global con su comisión de 15 %')
+    expect(texto(html)).toContain('Entra al margen de la cotización: la agencia paga el precio público menos 15 %')
   })
 
   it('un plan nuevo nace en 0 % y no muestra nada de reglas', () => {
@@ -204,13 +205,16 @@ describe('falla 1 · el margen global en «Tarifas» lleva cifra y es la del enc
     expect(new Set(cifras).size).toBe(3)
   })
 
-  it('con reglas el encabezado es el margen global (el que se juzga); sin reglas, el de siempre', () => {
+  it('con reglas el encabezado es el margen global (el que se juzga); sin reglas y con una Pública, el general de D2', () => {
     const params = paramsDelCaso()
     const total = cascadaDelTotal(lineasDelCaso(3), params, TARIFAS_DEL_CASO)
     expect(margenDelEncabezado(total, params)).toBe(total.reglas!.margenGlobalPct)
     const sinReglas = { ...params, reglas: undefined }
     const plano = cascadaDelTotal(lineasDelCaso(3), sinReglas, TARIFAS_DEL_CASO)
-    expect(margenDelEncabezado(plano, sinReglas)).toBe(plano.margenRealPct)
+    // El caso lleva un tour Público con su comisión: el general la cuenta (D2, 2026-10-29).
+    expect(plano.publicas.lineas).toBeGreaterThan(0)
+    expect(margenDelEncabezado(plano, sinReglas)).toBe(margenMedible(plano))
+    expect(margenDelEncabezado(plano, sinReglas)).not.toBe(plano.margenRealPct)
   })
 })
 
@@ -257,5 +261,35 @@ describe('falla 2 · el aviso de aprobación dice la causa real', () => {
     expect(html).toContain('data-autorizacion')
     expect(causas(html)).toEqual([['hotel', 'Hotel Ficticio Arena queda en 8 %, mínimo 10 %']])
     expect(texto(html)).toContain('Bajo el mínimo')
+  })
+})
+
+describe('un descuento sobre el total a una sola tarifa (2026-10-29)', () => {
+  const causas = (html: string) => [...html.matchAll(/data-causa-margen="(\w+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]])
+
+  it('el chip dice a qué tarifa aplica y el de siempre dice «Todas las tarifas»', () => {
+    const params = paramsDelCaso({
+      descuentos: [
+        { id: 'dt', descripcion: 'Cliente recurrente', pct: 2 },
+        { id: 'dp', descripcion: 'Suba a Premium', pct: 8, aplicaA: 'tf-pre' },
+      ],
+    })
+    const html = tarifas(3, { params })
+    volcar('descuento-por-tarifa', html)
+    expect(html).toContain('data-aplica-a="todas"')
+    expect(html).toContain('data-aplica-a="tf-pre"')
+    expect(html).toMatch(/<option value="tf-pre" selected="">Solo Premium<\/option>/)
+    // El 8 % de la Premium la deja bajo el 12 %: frena ella sola, con su nombre.
+    const c = causas(html)
+    expect(c.length).toBe(1)
+    expect(c[0][0]).toBe('global')
+    expect(c[0][1]).toMatch(/^Premium: margen \d+(,\d)? %, mínimo 12 %$/)
+  })
+
+  it('un descuento cuya tarifa se borró lo dice y no frena a ninguna', () => {
+    const params = paramsDelCaso({ descuentos: [{ id: 'dp', descripcion: 'Suba a Premium', pct: 8, aplicaA: 'tf-borrada' }] })
+    const html = tarifas(3, { params })
+    expect(texto(html)).toContain('Su tarifa ya no existe: no se aplica')
+    expect(causas(html)).toEqual([])
   })
 })

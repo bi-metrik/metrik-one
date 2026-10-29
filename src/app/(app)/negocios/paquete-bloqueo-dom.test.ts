@@ -17,11 +17,12 @@ for (const k of GLOBALES) {
 Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: globalThis })
 
 const leer = vi.hoisted(() => vi.fn(async (_c: string, _cual: string, _d: string): Promise<unknown> => ({ ok: false, elegir: true, mensaje: 'No se reconoce si es el pantallazo del hotel o el del vuelo. Elige cuál es.' })))
+const guardar = vi.hoisted(() => vi.fn(async (_id: string, entrada: { paquete: unknown }) => ({ success: true, paquete: entrada.paquete, costo: null, falta: [] })))
 vi.mock('sonner', () => ({ toast: Object.assign(() => {}, { success: () => {}, error: () => {}, warning: () => {} }) }))
 vi.mock('@/app/(app)/negocios/bloqueo-actions', () => ({
   leerPantallazoBloqueo: leer,
   crearPaqueteBloqueo: async () => ({ success: true, itemId: 'x' }),
-  guardarPaqueteBloqueo: async () => ({ success: true }),
+  guardarPaqueteBloqueo: guardar,
   ajustarReglasDelPaquete: async () => ({ success: true }),
 }))
 vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({}))
@@ -61,13 +62,23 @@ const DATA = 'data:image/png;base64,AAAA'
 const texto = () => (contenedor.textContent ?? '').replace(/\s+/g, ' ')
 const clic = async (el: Element) => { await act(async () => { (el as HTMLElement).click() }) }
 
-async function montar(registro: InstanceType<typeof Registro> | null, tarifaPax: unknown = null, margenAplicado: number | null = null, edadesNinosSolicitud: number[] | null = null) {
+async function montar(registro: InstanceType<typeof Registro> | null, tarifaPax: unknown = null, margenAplicado: number | null = null, edadesNinosSolicitud: number[] | null = null, extra: Record<string, unknown> = {}) {
   await act(async () => {
     root!.render(React.createElement(Tarjeta, {
       cotizacionId: 'cot-1', itemId: 'pq-1', tarifaPax, precioVenta: null, editable: true, operador: 'Aliados Travel',
       pasajeros: null, vueloSugerido: null, onCambio: () => {}, onEliminar: () => {}, registro, margenAplicado, edadesNinosSolicitud,
+      ...extra,
     }))
   })
+}
+
+async function escribir(input: HTMLInputElement, valor: string) {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')!.set!
+  await act(async () => {
+    setter.call(input, valor)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
 }
 
 describe('«¿Es el hotel o el vuelo?» en la tarjeta', () => {
@@ -151,5 +162,63 @@ describe('la edad del niño viene precargada de la Solicitud (prueba real del 20
     await montar(null, conNino([]), null, null)
     await abrir()
     expect(casilla()?.value).toBe('')
+  })
+})
+
+describe('D3 · la comisión de la agencia en la tarjeta del paquete (2026-10-29)', () => {
+  const radio = (t: string) => [...contenedor.querySelectorAll('label')].find(l => l.textContent?.includes(t))!.querySelector('input')!
+  const guardarPaquete = async () => clic([...contenedor.querySelectorAll('button')].find(b => b.textContent?.includes('Guardar paquete'))!)
+
+  it('con «Pública», la comisión se pide desde el inicio (antes de guardar) y es obligatoria', async () => {
+    guardar.mockClear()
+    await montar(null)
+    expect(contenedor.querySelector('[data-comision-paquete]')).toBeNull()
+    await clic(radio('Pública'))
+    expect(contenedor.querySelector('[data-comision-paquete]')).not.toBeNull()
+    expect(contenedor.querySelector('[data-comision-estado]')?.getAttribute('data-comision-estado')).toBe('falta')
+    expect(texto()).toContain('sin ella la cotización no se puede enviar')
+    expect(texto()).not.toContain('margen 0 %')
+  })
+
+  it('en %: «12» se guarda con el paquete como 12 %', async () => {
+    guardar.mockClear()
+    await montar(null)
+    await clic(radio('Pública'))
+    await escribir(contenedor.querySelector('input[aria-label="Comisión de la agencia en %"]') as HTMLInputElement, '12')
+    await guardarPaquete()
+    expect(guardar).toHaveBeenCalledTimes(1)
+    expect(guardar.mock.calls[0][1]).toMatchObject({ comision: 'incluida', comisionAgencia: { tipo: 'pct', valor: 12 } })
+  })
+
+  it('en pesos: «$ 250.000» se guarda como 250.000 pesos', async () => {
+    guardar.mockClear()
+    await montar(null)
+    await clic(radio('Pública'))
+    await clic(contenedor.querySelector('[data-comision-tipo="monto"]')!)
+    await escribir(contenedor.querySelector('input[aria-label="Comisión de la agencia en pesos"]') as HTMLInputElement, '$ 250.000')
+    expect(contenedor.querySelector('[data-comision-estado]')?.getAttribute('data-comision-estado')).toBe('escrita')
+    await guardarPaquete()
+    expect(guardar.mock.calls[0][1]).toMatchObject({ comision: 'incluida', comisionAgencia: { tipo: 'monto', valor: 250_000 } })
+  })
+
+  it('«Neta» no manda comisión', async () => {
+    guardar.mockClear()
+    await montar(null)
+    await clic(radio('Neta'))
+    await guardarPaquete()
+    expect(guardar.mock.calls[0][1]).not.toHaveProperty('comisionAgencia')
+  })
+})
+
+describe('D5 · «Va en la propuesta» en la tarjeta del paquete', () => {
+  it('sin tarifas no aparece; con ellas, quitarlo y ponerlo llama a la acción con el valor', async () => {
+    await montar(null)
+    expect(contenedor.querySelector('[data-paquete-en-propuesta]')).toBeNull()
+    const onEnPropuesta = vi.fn()
+    await montar(null, null, null, null, { enPropuesta: true, onEnPropuesta })
+    const check = contenedor.querySelector('[data-paquete-en-propuesta] input') as HTMLInputElement
+    expect(check.checked).toBe(true)
+    await clic(check)
+    expect(onEnPropuesta).toHaveBeenCalledWith(false)
   })
 })

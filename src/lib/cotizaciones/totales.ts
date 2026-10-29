@@ -48,7 +48,9 @@ import { esTarifaPublica } from './tarifa-publica'
 import {
   colchonDeLinea,
   comisionDePublica,
+  comisionEnPesos,
   descuentoDeLinea,
+  descuentosDeTarifa,
   tipoParaMargen,
   type ColchonDeLinea,
   type ReglasDeCotizacion,
@@ -115,6 +117,12 @@ export interface ParametrosCascada {
    * la de siempre.
    */
   reglas?: ReglasDeCotizacion | null
+  /**
+   * De qué tarifa es esta cascada (el id del itinerario), para los descuentos sobre el total que
+   * son de UNA tarifa (`reglas-margen.ts › descuentoAplicaA`, 2026-10-29). Ausente = la cascada no
+   * es de ninguna tarifa: solo entran los descuentos de «todas», como hasta hoy.
+   */
+  tarifaId?: string | null
 }
 
 export interface LineaCalculada {
@@ -179,8 +187,13 @@ export interface LineaCalculada {
    * tiene que decirlo.
    */
   margenRealPct: number | null
-  /** La línea es de tarifa pública (`tarifa-publica.ts`): no entra en la medida del mínimo. */
+  /** La línea es de tarifa pública (`tarifa-publica.ts`). */
   publica: boolean
+  /**
+   * Una Pública: la comisión de la agencia en pesos (D3, 2026-10-29), sobre el precio público de la
+   * línea. `null` = nadie la escribió, o la línea es Neta.
+   */
+  comisionPesos: number | null
   /**
    * Lo que agregan las reglas de margen. Ausente sin reglas: la línea de siempre.
    *
@@ -232,25 +245,28 @@ export interface ResultadoReglas {
   /** Los hoteles cuyo margen (ya con su descuento) quedó bajo el piso de hotel. */
   hotelesBajoPiso: { id: string | undefined; margenPct: number }[]
   pisoHotelPct: number
-  /** Las Públicas sin comisión: no entran al margen global. */
+  /** Las Públicas sin comisión: con alguna, el margen global no se puede medir (D2/D3). */
   publicasSinComision: number
 }
 
 /**
  * Lo que pesan las líneas de tarifa PÚBLICA dentro de la cascada (`tarifa-publica.ts`). Con
  * `lineas: 0` la cascada es exactamente la de siempre.
+ *
+ * Decisión D2 de Mauricio (2026-10-29): ya no hay exención. El margen general es el de TODAS las
+ * líneas, y lo que la agencia paga por una Pública es su precio público menos su comisión. Una
+ * Pública sin comisión no deja medir el margen (`sinComision`), y la cotización no sale (D3).
  */
 export interface PesoDeLasPublicas {
   lineas: number
-  /** Su costo de venta (con su parte de administrativos y sus adicionales). */
+  /** Su costo de venta (con su parte de administrativos y sus adicionales): el precio público. */
   costoDeVenta: number
   /** Lo que suman a la venta bruta, adicionales incluidos. */
   ventaBruta: number
-  /**
-   * No hay margen que exigir: todo lo que cobra la tarifa es Público, o lo demás no tiene costo
-   * pero sí precio (el recargo fijo). Una línea Neta sin costo NI precio no exime: falta su costo.
-   */
-  exentaDelMinimo: boolean
+  /** La suma de sus comisiones en pesos (solo las que la tienen). */
+  comision: number
+  /** Cuántas no tienen comisión escrita. */
+  sinComision: number
 }
 
 export interface Cascada {
@@ -347,12 +363,12 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
    * las dos variables valen lo mismo y todo esto es un no-op.
    */
   let costoBaseDeAdministrativos = 0
-  // Tarifa pública (2026-10-22): lo que pesa, para medir el mínimo sin ella.
+  // Tarifa pública (2026-10-22): lo que pesa, y su comisión (D2/D3, 2026-10-29).
   let publicasLineas = 0
   let publicasCosto = 0
   let publicasVenta = 0
-  let netaConCosto = false
-  let netaSinNada = false
+  let publicasComision = 0
+  let publicasSinComision = 0
 
   for (const item of items) {
     const costoUnitario = item.es_ajuste === true
@@ -449,13 +465,14 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     const precioConAdicionales = precioLinea + adic.precio
     ventaBruta += precioConAdicionales
 
+    // La comisión de una Pública, en pesos, sobre su precio público (su costo de venta).
+    const comisionPesos = publica ? comisionEnPesos(item.tarifa_pax, costoDeVentaLinea) : null
     if (publica) {
       publicasLineas++
       publicasCosto += costoDeVentaLinea + adic.costo
       publicasVenta += precioConAdicionales
-    } else if (item.es_ajuste !== true) {
-      if (costoLinea + adic.costo > 0) netaConCosto = true
-      else if (!(precioConAdicionales > 0)) netaSinNada = true
+      if (comisionPesos === null) publicasSinComision++
+      else publicasComision += comisionPesos
     }
 
     const linea: LineaCalculada = {
@@ -474,6 +491,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       // cifras impresas al lado, y el usuario no tiene cómo saber cuál falla.
       margenRealPct: margenRealDeLinea(Math.round(costoDeVentaLinea), Math.round(precioLinea)),
       publica,
+      comisionPesos: comisionPesos === null ? null : Math.round(comisionPesos),
     }
     if (reglas && tipo) {
       const sinDescuento = descuentoCliente ? Math.round(cuadrarAlPeso(precioSinDescuento, cantidadLinea, porPasajero)) : 0
@@ -504,6 +522,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
   if (reglas) {
     return conReglas({
       reglas,
+      tarifaId: params.tarifaId ?? null,
       lineas,
       paraPuntos,
       ventaBruta,
@@ -511,7 +530,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       administrativos,
       costoDeVenta,
       descComercial,
-      publicas: { lineas: publicasLineas, costo: publicasCosto, venta: publicasVenta, netaConCosto, netaSinNada },
+      publicas: { lineas: publicasLineas, costo: publicasCosto, venta: publicasVenta, comision: publicasComision, sinComision: publicasSinComision },
     })
   }
 
@@ -531,16 +550,17 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
       lineas: publicasLineas,
       costoDeVenta: Math.round(publicasCosto),
       ventaBruta: Math.round(publicasVenta),
-      exentaDelMinimo: publicasLineas > 0 && !netaConCosto && !netaSinNada,
+      comision: Math.round(publicasComision),
+      sinComision: publicasSinComision,
     },
   }
 }
 
 /**
- * La base del margen global: venta y costo de cada línea. Una Pública entra solo si alguien
- * escribió su comisión, y entonces su costo es el precio público menos la comisión (su margen es
- * la comisión). Sin comisión no entra: su costo registrado ES el precio público, y medirla en 0 %
- * le pediría autorización a toda cotización con Públicas.
+ * La base del margen global (D2, 2026-10-29): venta y costo de TODAS las líneas. Lo que la agencia
+ * paga por una Pública es su precio público menos su comisión. Una Pública sin comisión no tiene
+ * costo de agencia conocido: se cuenta en `sinComision` y el margen global queda sin medir (`null`),
+ * que frena la salida (D3). Sigue fuera de la suma para que los puntos extra se repartan igual.
  */
 function baseDelMargenGlobal(lineas: readonly LineaCalculada[]): { venta: number; costo: number; sinComision: number } {
   let venta = 0
@@ -549,10 +569,9 @@ function baseDelMargenGlobal(lineas: readonly LineaCalculada[]): { venta: number
   for (const l of lineas) {
     if (l.reglas === undefined) continue
     if (l.publica) {
-      const c = l.reglas.comisionPct
-      if (c === null) { sinComision++; continue }
+      if (l.comisionPesos === null) { sinComision++; continue }
       venta += l.precioConAdicionales
-      costo += l.precioConAdicionales * (1 - c / 100)
+      costo += l.costoDeVentaLinea + l.costoAdicionales - l.comisionPesos
       continue
     }
     venta += l.precioConAdicionales
@@ -600,6 +619,7 @@ function repartirPuntos(paraPuntos: ParaPuntos[], extra: number): number {
  */
 function conReglas(a: {
   reglas: ReglasDeCotizacion
+  tarifaId: string | null
   lineas: LineaCalculada[]
   paraPuntos: ParaPuntos[]
   ventaBruta: number
@@ -607,7 +627,7 @@ function conReglas(a: {
   administrativos: number
   costoDeVenta: number
   descComercial: number
-  publicas: { lineas: number; costo: number; venta: number; netaConCosto: boolean; netaSinNada: boolean }
+  publicas: { lineas: number; costo: number; venta: number; comision: number; sinComision: number }
 }): Cascada {
   const { reglas, lineas } = a
   const politica = reglas.politica
@@ -628,8 +648,9 @@ function conReglas(a: {
   // ── 5 · Descuentos sobre el total: después de los puntos, cada uno al peso ──
   // El descuento comercial de siempre (`cotizaciones.descuento_porcentaje`), si alguien lo puso,
   // es uno más: con reglas el cliente ve todo descuento con su nombre.
+  // Solo los de esta tarifa: los de «todas» y los que nombran su id (`descuentoAplicaA`).
   const pedidos = [
-    ...reglas.descuentos,
+    ...descuentosDeTarifa(reglas.descuentos, a.tarifaId),
     ...(a.descComercial > 0 ? [{ id: 'comercial', descripcion: 'Descuento comercial', pct: a.descComercial }] : []),
   ]
   const descuentos = pedidos.map(d => ({ ...d, valor: Math.round(ventaBruta * (d.pct / 100)) }))
@@ -641,7 +662,8 @@ function conReglas(a: {
   // Los descuentos se reparten en proporción a la venta, igual que `margenMedible` reparte el
   // descuento comercial entre las Netas.
   const factor = ventaBruta > 0 ? precioVenta / ventaBruta : 1
-  const margenGlobalPct = margenDe(despues.venta * factor, despues.costo)
+  // D2/D3: con una Pública sin comisión, el margen general no se puede medir.
+  const margenGlobalPct = despues.sinComision > 0 ? null : margenDe(despues.venta * factor, despues.costo)
 
   const pisoHotel = politica.pisoHotelPct
   const hotelesBajoPiso = lineas
@@ -662,9 +684,8 @@ function conReglas(a: {
       lineas: p.lineas,
       costoDeVenta: Math.round(p.costo),
       ventaBruta: Math.round(p.venta),
-      // Con reglas, una Pública con comisión SÍ tiene margen que exigir: exenta solo si lo único
-      // que cobra son Públicas sin comisión.
-      exentaDelMinimo: p.lineas > 0 && !p.netaConCosto && !p.netaSinNada && despues.venta === 0,
+      comision: Math.round(p.comision),
+      sinComision: p.sinComision,
     },
     reglas: {
       margenGlobalPct,

@@ -41,6 +41,10 @@ export type ResultadoReactivacion = { ok: true; url: string } | { ok: false; err
 
 export const SIN_SUSPENSION = 'Tu plan no está suspendido por la reversión de un pago.'
 
+/** ⚠️ PENDIENTE DE VERA: texto propuesto por Max el 2026-10-29 (solo sale con la terminación encendida). */
+export const PLAN_TERMINADO =
+  'Tu plan terminó después de 30 días de suspensión sin pago (cláusula 11.2 de los Términos). Escríbenos a mauricio.moreno@metrik.com.co.'
+
 export async function enlaceDeReactivacion(workspacePagadorId: string, deps: DepsReactivacion): Promise<ResultadoReactivacion> {
   const db = deps.db as Db
   const ahoraMs = deps.ahoraMs ?? Date.now()
@@ -50,6 +54,8 @@ export async function enlaceDeReactivacion(workspacePagadorId: string, deps: Dep
   const config = (ws.data?.config_extra ?? {}) as Record<string, unknown>
   const plan = planSuspendidoPorReverso(config)
   if (!plan) return { ok: false, error: SIN_SUSPENSION }
+  // Terminada por la 11.2: pagar ya no reabre el plan (el contrato está terminado y ningún ciclo se abre).
+  if (plan.terminacion?.estado === 'terminada') return { ok: false, error: PLAN_TERMINADO }
 
   // El cobro reversado: el cliente, el plan y el valor del período.
   const rev = await db

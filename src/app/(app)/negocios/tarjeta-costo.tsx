@@ -22,10 +22,10 @@ import {
   type FilaCosto,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
-import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import type { DescuentoClienteGuardado } from '@/lib/cotizaciones/tarifa-pasajero'
-import { ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
+import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
 
 /**
  * «Costo y precio» de la tarjeta (prototipo del 2026-09-24): UNA tabla (Pasajero / Cant. /
@@ -61,6 +61,7 @@ export default function TarjetaCosto({
   tipoTarifa = 'neta',
   tipoPropuesto = false,
   reglas = null,
+  comision = null,
 }: {
   itemId: string
   editable: boolean
@@ -102,7 +103,9 @@ export default function TarjetaCosto({
    * línea, el descuento guardado y la comisión. Solo en la cotización por pasos con reglas;
    * ausente, la tarjeta es la de siempre.
    */
-  reglas?: { linea: ReglasDeLinea; descuento: DescuentoClienteGuardado | null; comisionPct: number | null } | null
+  reglas?: { linea: ReglasDeLinea; descuento: DescuentoClienteGuardado | null } | null
+  /** La comisión de una Pública, en % o en pesos (D3, 2026-10-29). Se pide con o sin reglas. */
+  comision?: ComisionEscrita | null
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
@@ -446,19 +449,28 @@ export default function TarjetaCosto({
         <p className="m-0 text-xs text-[#6E6A62]" data-aviso-publica>
           {reglas
             ? 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión.'
-            : 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. No entra en el margen mínimo ni pide autorización.'}
+            : 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. Escríbela: entra al margen de la cotización.'}
         </p>
       )}
       {reglas && apilable && (
         <ReglasDeOpcion
           reglas={reglas.linea}
           descuento={reglas.descuento}
-          comisionPct={reglas.comisionPct}
+          comision={comision ?? null}
           publica={publica}
           editable={editable}
           ocupado={isPending}
           onDescuento={d => guardar(() => ajustarOpcion(itemId, { descuentoCliente: d }), () => {})}
-          onComision={c => guardar(() => ajustarOpcion(itemId, { comisionPct: c }), () => {})}
+          onComision={c => guardar(() => ajustarOpcion(itemId, cambiosDeComision(c)), () => {})}
+        />
+      )}
+      {/* D3 (2026-10-29): la comisión de una Pública se pide también sin reglas de margen. */}
+      {!reglas && apilable && publica && (
+        <CampoComision
+          comision={comision ?? null}
+          editable={editable}
+          ocupado={isPending}
+          onComision={c => guardar(() => ajustarOpcion(itemId, cambiosDeComision(c)), () => {})}
         />
       )}
 
@@ -625,4 +637,10 @@ function FormAdicional({
       </div>
     </form>
   )
+}
+
+/** La comisión escrita, como la pide `ajustarOpcion` (D3): en % o en pesos; `null` la quita. */
+function cambiosDeComision(c: ComisionEscrita | null): { comisionPct: number | null } | { comisionMonto: number } {
+  if (!c) return { comisionPct: null }
+  return c.tipo === 'monto' ? { comisionMonto: c.valor } : { comisionPct: c.valor }
 }
