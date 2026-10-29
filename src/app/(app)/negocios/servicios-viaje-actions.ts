@@ -31,6 +31,9 @@ import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import {
   configReglasPago,
+  desviacion,
+  desviacionDelViaje,
+  baseDesviacion,
   reglasQueRompe,
   reglasSinAprobar,
   totalTrasPago,
@@ -46,10 +49,12 @@ import {
   puedeAdjuntarVoucher,
   puedeEditarServicios,
   puedeTraerServicios,
+  pagadoDelServicio,
   serviciosViajeActivo,
+  viajeParaReglas,
   type QuienEdita,
 } from '@/lib/viaje/estado-servicio'
-import { columnasDeFechas, generarServiciosDesdeTarifa } from '@/lib/viaje/servicios-viaje-datos'
+import { columnasDeFechas, generarServiciosDesdeTarifa, leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
 import { validarFechasEditadas, type FechasEditadas } from '@/lib/viaje/fechas-servicio'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -67,6 +72,7 @@ interface Contexto {
   staffId: string | null
   quien: QuienEdita
   activo: boolean
+  configLinea: unknown
 }
 
 /** Sesión, módulo, negocio abierto y quién es, en una sola pasada. */
@@ -95,6 +101,7 @@ async function contextoDelNegocio(negocioId: string): Promise<Contexto | { error
     workspaceId,
     staffId: staffId ?? null,
     activo: serviciosViajeActivo(config),
+    configLinea: config,
     quien: {
       role,
       areas: (areas ?? []) as string[],
@@ -159,6 +166,12 @@ export interface CambiosServicio {
   fecha_limite_pago?: string | null
   /** Solo los estados que se escriben (Vera C6). Pagado y Confirmado salen de la plata. */
   estado?: 'por_reservar' | 'reservado' | 'cancelado'
+  /**
+   * Lo que el proveedor cobra de verdad, cuando cobró MENOS de lo cotizado (QA 2026-10-29, M3-4).
+   * `null` vuelve a lo cotizado. Más de lo cotizado no se escribe aquí: un sobrecosto entra por
+   * el pago y pasa por la regla de Edgar.
+   */
+  valor_por_pagar?: number | null
 }
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/
@@ -180,6 +193,28 @@ export async function actualizarServicio(servicioId: string, cambios: CambiosSer
   if (!puedeEditarServicios(ctx.quien)) return { ok: false, error: SIN_PERMISO }
 
   const patch: Record<string, unknown> = {}
+  let cambioValor: { antes: number | null; ahora: number | null; cotizado: number; nombre: string } | null = null
+  if ('valor_por_pagar' in cambios) {
+    const pago = await servicioParaPago(supabase, workspaceId, servicioId)
+    if (!pago) return { ok: false, error: 'Servicio no encontrado' }
+    const v = cambios.valor_por_pagar
+    if (v === null || v === undefined) {
+      patch.valor_por_pagar = null
+    } else {
+      const n = Math.round(Number(v))
+      if (!Number.isFinite(n) || n <= 0) return { ok: false, error: 'Escribe lo que cobra el proveedor.' }
+      if (n > pago.costo_cotizado) {
+        return { ok: false, error: 'Si el proveedor cobra más de lo cotizado, registra el pago: Edgar lo revisa ahí.' }
+      }
+      // Igual a lo cotizado es no decir nada: se guarda vacío.
+      patch.valor_por_pagar = n === pago.costo_cotizado ? null : n
+    }
+    if ((patch.valor_por_pagar ?? null) !== (pago.valor_por_pagar ?? null)) {
+      cambioValor = { antes: pago.valor_por_pagar, ahora: (patch.valor_por_pagar as number | null) ?? null, cotizado: pago.costo_cotizado, nombre: pago.nombre }
+    } else {
+      delete patch.valor_por_pagar
+    }
+  }
   if ('proveedor_nombre' in cambios) patch.proveedor_nombre = limpiarTexto(cambios.proveedor_nombre, 200)
   if ('localizador' in cambios) patch.localizador = limpiarTexto(cambios.localizador, 100)
   if ('fecha_limite_pago' in cambios) {
@@ -202,6 +237,25 @@ export async function actualizarServicio(servicioId: string, cambios: CambiosSer
     .eq('id', servicioId)
     .eq('workspace_id', ctx.workspaceId)
   if (upErr) return { ok: false, error: upErr.message }
+  if (cambioValor) {
+    await registrarActividad(ctx.supabase, {
+      workspace_id: ctx.workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: fila.negocio_id,
+      tipo: 'cambio',
+      autor_id: ctx.staffId,
+      contenido: (cambioValor.ahora === null
+        ? `${cambioValor.nombre}: vuelve a pagarse lo cotizado (${pesosCOP(cambioValor.cotizado)}).`
+        : `${cambioValor.nombre}: el proveedor cobra ${pesosCOP(cambioValor.ahora)}, ${pesosCOP(cambioValor.cotizado - cambioValor.ahora)} menos de lo cotizado.`).slice(0, 280),
+    }, 'actualizarServicio')
+    // Lo que cobra un proveedor mueve el costo del viaje: las desviaciones de las otras filas se
+    // vuelven a medir (H3-4). Si falla, lo pedido sigue pedido: Edgar decide, nada se suelta solo.
+    try {
+      await revisarDesviacionesDelViaje(ctx, fila.negocio_id)
+    } catch (e) {
+      console.error('[actualizarServicio] desviaciones del viaje:', e instanceof Error ? e.message : e)
+    }
+  }
   revalidatePath(`/negocios/${fila.negocio_id}`)
   return { ok: true }
 }
@@ -356,17 +410,78 @@ interface ServicioParaPago {
   proveedor_nombre: string | null
   estado: string
   costo_cotizado: number
+  valor_por_pagar: number | null
 }
 
 async function servicioParaPago(supabase: unknown, workspaceId: string, servicioId: string): Promise<ServicioParaPago | null> {
   const { data } = await db(supabase)
     .from('negocio_servicios')
-    .select('id, negocio_id, nombre, proveedor_nombre, estado, costo_cotizado')
+    .select('id, negocio_id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar')
     .eq('id', servicioId)
     .eq('workspace_id', workspaceId)
     .maybeSingle()
   const s = data as ServicioParaPago | null
-  return s ? { ...s, costo_cotizado: Number(s.costo_cotizado) || 0 } : null
+  if (!s) return null
+  const v = s.valor_por_pagar === null || s.valor_por_pagar === undefined ? null : Number(s.valor_por_pagar)
+  return { ...s, costo_cotizado: Number(s.costo_cotizado) || 0, valor_por_pagar: v !== null && Number.isFinite(v) ? v : null }
+}
+
+/**
+ * El viaje para la regla de desviación (H3-4). Si no se puede leer, `null`: la regla vuelve a ser
+ * por servicio, que pide MÁS aprobaciones, nunca menos.
+ */
+async function viajeDelServicio(ctx: Contexto, negocioId: string, servicioId: string) {
+  const filas = await leerServiciosDelNegocio(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId })
+  return filas ? viajeParaReglas(filas, servicioId) : null
+}
+
+/**
+ * Después de cambiar lo que cobra un proveedor, vuelve a medir las desviaciones de las OTRAS filas
+ * contra el viaje (H3-4):
+ *  · una pedida a Edgar que el viaje ya compensa caduca (el hotel salió más barato y el vuelo se
+ *    pasó lo mismo: el margen del viaje no se movió);
+ *  · un sobrecosto que estaba compensado y deja de estarlo (se borró el ahorro) se vuelve a pedir.
+ * Las aprobadas y las rechazadas no se tocan: son decisiones de Edgar.
+ */
+async function revisarDesviacionesDelViaje(ctx: Contexto, negocioId: string): Promise<void> {
+  const filas = await leerServiciosDelNegocio(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId })
+  if (!filas) throw new Error('No se pudieron leer los servicios del viaje.')
+  const reglas = configReglasPago(ctx.configLinea)
+  const svc = createServiceClient() as ReturnType<typeof db>
+  for (const f of filas) {
+    if (f.estado === 'cancelado') continue
+    const viaje = viajeParaReglas(filas, f.id)
+    const pagado = pagadoDelServicio(f.gastos)
+    const pedidas = f.aprobaciones.filter(a => a.tipo === 'desviacion_costo' && a.estado === 'solicitada' && a.id)
+    for (const a of pedidas) {
+      const det = (a.detalle ?? {}) as Record<string, unknown>
+      const total = Number.isFinite(Number(det.total)) && Number(det.total) > 0 ? Number(det.total) : pagado
+      if (desviacionDelViaje(total, { costoCotizado: f.costo_cotizado, valorPorPagar: f.valor_por_pagar }, viaje) > reglas.pisoPesos) continue
+      await svc.from('aprobaciones_excepcion').update({ estado: 'caducada' }).eq('id', a.id).eq('estado', 'solicitada')
+      await registrarActividad(ctx.supabase, {
+        workspace_id: ctx.workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: negocioId,
+        tipo: 'cambio',
+        autor_id: ctx.staffId,
+        contenido: `${f.nombre}: ya no hace falta que Edgar apruebe el sobrecosto, el viaje entero no se pasa de lo cotizado.`.slice(0, 280),
+      }, 'revisarDesviacionesDelViaje')
+    }
+    // ¿Un sobrecosto pagado que ya no está compensado y nadie ha pedido ni decidido?
+    if (f.gastos.length === 0) continue
+    const yaTiene = f.aprobaciones.some(a => a.tipo === 'desviacion_costo' && a.estado !== 'caducada')
+    if (yaTiene) continue
+    const d = desviacion(pagado, baseDesviacion(f.costo_cotizado, f.valor_por_pagar))
+    if (!(d.pesos > 0 && d.pct > reglas.umbralPct && d.pesos > reglas.pisoPesos)) continue
+    if (desviacionDelViaje(pagado, { costoCotizado: f.costo_cotizado, valorPorPagar: f.valor_por_pagar }, viaje) <= reglas.pisoPesos) continue
+    const ultimo = f.gastos[f.gastos.length - 1]
+    const medio = (await mediosDelEspacio(ctx.workspaceId)).find(m => m.id === ultimo.medio_pago)
+    if (!medio || !ultimo.id) continue
+    await aplicarReglasDePago(ctx, {
+      id: f.id, negocio_id: negocioId, nombre: f.nombre, proveedor_nombre: f.proveedor_nombre ?? null,
+      estado: f.estado, costo_cotizado: f.costo_cotizado, valor_por_pagar: f.valor_por_pagar,
+    }, { monto: Number(ultimo.monto) || 0, medio, configLinea: ctx.configLinea, gastoId: ultimo.id })
+  }
 }
 
 async function pagadoAntes(supabase: unknown, servicioId: string): Promise<number> {
@@ -390,14 +505,17 @@ async function aplicarReglasDePago(
   args: { monto: number; medio: MedioPagoProveedor; configLinea: unknown; gastoId: string | null },
 ): Promise<ReglaRota[]> {
   const svc = createServiceClient() as ReturnType<typeof db>
-  const [antes, plata] = await Promise.all([
+  const [antes, plata, viaje] = await Promise.all([
     args.gastoId ? pagadoAntes(ctx.supabase, servicio.id).then(t => t - args.monto) : pagadoAntes(ctx.supabase, servicio.id),
     plataDelCliente(ctx.supabase, ctx.workspaceId, servicio.negocio_id),
+    viajeDelServicio(ctx, servicio.negocio_id, servicio.id),
   ])
   const rotas = reglasQueRompe({
     monto: args.monto,
     pagadoAntes: antes,
     costoCotizado: servicio.costo_cotizado,
+    valorPorPagar: servicio.valor_por_pagar,
+    viaje,
     medio: args.medio,
     cobradoCliente: plata.cobrado,
     precioAprobado: plata.precio,
@@ -539,6 +657,8 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
       negocio_id: servicio.negocio_id,
       servicio_id: servicio.id,
       fecha: input.fecha,
+      // El día en que salió la plata (QA 2026-10-29, M3-5): los reportes de pagos leen esta.
+      fecha_pago: input.fecha,
       monto,
       categoria: 'proveedor_viaje',
       clasificacion_costo: 'variable',

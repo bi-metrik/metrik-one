@@ -174,6 +174,7 @@ function constructor(tabla: string) {
 }
 
 import {
+  actualizarServicio,
   decidirAprobacionServicio,
   pedirAprobacionServicio,
   registrarPagoServicio,
@@ -426,5 +427,70 @@ describe('gate servicios_listos (F3-7)', () => {
       const falta = await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })
       expect(falta.map(f => f.texto), t).toEqual(['No se pudieron leer los servicios del viaje. Intenta de nuevo.'])
     }
+  })
+})
+
+describe('QA Trappvel 2026-10-29: el proveedor cobra menos y la desviación del viaje', () => {
+  const SOPORTE_HOTEL = `one://ve-documentos/${WS}/negocios/${NEG}/servicios/sv-hotel/soporte-1.jpg`
+  const confirmarTodo = () => { for (const s of tablas.negocio_servicios) s.confirmacion_ref = 'one://ve-documentos/x/confirmacion.pdf' }
+  const gate = async () => (await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })).map(f => f.texto)
+
+  it('M3-4: el hotel cobró menos; operaciones lo dice y el gate pasa sin inventar un pago', async () => {
+    await registrarPagoServicio(pagoVuelo())
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    confirmarTodo()
+    expect(await gate()).toEqual(['Hotel Arena Blanca: falta pagar $310.000'])
+
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })).toEqual({ ok: true })
+    expect(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!.valor_por_pagar).toBe(2_100_000)
+    expect(await gate()).toEqual([])
+    expect(tablas.gastos).toHaveLength(2)
+    expect(tablas.activity_log.some(a => String(a.contenido).includes('$310.000 menos de lo cotizado'))).toBe(true)
+  })
+
+  it('M3-4: más de lo cotizado, cero o sin permiso no se escribe; igual a lo cotizado queda vacío', async () => {
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_500_000 })).toMatchObject({ ok: false })
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 0 })).toMatchObject({ ok: false })
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_410_000 })).toEqual({ ok: true })
+    expect(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!.valor_por_pagar).toBeNull()
+    areas = ['comercial']; staffId = 's-dani'
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_000_000 })).toMatchObject({ ok: false, error: expect.stringContaining('no permite') })
+  })
+
+  it('H3-4: el vuelo se pasa lo mismo que el hotel ahorró; la aprobación pedida caduca y el viaje sigue', async () => {
+    // Viaje 03: el vuelo se paga primero (+$310.000, pide a Edgar), luego el hotel sale $310.000 más barato.
+    await registrarPagoServicio(pagoVuelo({ monto: 1_490_000 }))
+    expect(aprobacionesDe('sv-vuelo')).toEqual([expect.objectContaining({ tipo: 'desviacion_costo', estado: 'solicitada' })])
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    expect(aprobacionesDe('sv-vuelo').map(a => a.estado)).toEqual(['caducada'])
+    confirmarTodo()
+    expect(await gate()).toEqual([])
+    expect(tablas.activity_log.some(a => String(a.contenido).includes('el viaje entero no se pasa'))).toBe(true)
+  })
+
+  it('H3-4: con el ahorro ya registrado, el sobrecosto del vuelo no pide aprobación', async () => {
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    expect(await registrarPagoServicio(pagoVuelo({ monto: 1_490_000 }))).toMatchObject({ ok: true, esperando: [] })
+    // Si el viaje SÍ se pasa (un peso más), se pide como siempre.
+    sembrar({ anticipo: 2_000_000 })
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    expect(await registrarPagoServicio(pagoVuelo({ monto: 1_490_001 }))).toMatchObject({ ok: true, esperando: [expect.stringContaining('más de lo cotizado')] })
+  })
+
+  it('H3-4: borrar el ahorro que compensaba vuelve a pedir la aprobación del sobrecosto', async () => {
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    await registrarPagoServicio(pagoVuelo({ monto: 1_490_000 }))
+    expect(aprobacionesDe('sv-vuelo')).toHaveLength(0)
+    await actualizarServicio('sv-hotel', { valor_por_pagar: null })
+    expect(aprobacionesDe('sv-vuelo')).toEqual([expect.objectContaining({ tipo: 'desviacion_costo', estado: 'solicitada', huella: 'desviacion_costo|1490000' })])
+  })
+
+  it('M3-5: el pago a proveedor deja la fecha del pago', async () => {
+    await registrarPagoServicio(pagoVuelo())
+    expect(tablas.gastos[0]).toMatchObject({ fecha: HOY, fecha_pago: HOY })
   })
 })
