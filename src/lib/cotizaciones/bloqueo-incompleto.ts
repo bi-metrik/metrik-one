@@ -14,7 +14,7 @@
  * Puro: lo usan `enviarPorPasos` (el control) y el editor (la puerta visible y la lista única).
  */
 
-import { FALTA_EL_COSTO, faltasDelPaquete, leerPaqueteBloqueo, type FaltaDelPaquete } from './bloqueo-paquete'
+import { FALTA_EL_COSTO, conEdadesDeLaSolicitud, edadesNinosDeLaSolicitud, faltasDelPaquete, leerPaqueteBloqueo, type FaltaDelPaquete } from './bloqueo-paquete'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax, type Composicion } from './tarifa-pasajero'
 
@@ -41,17 +41,22 @@ export const esLineaDePaquete = (l: Pick<LineaParaPaquete, 'grupo' | 'es_ajuste'
  *
  * @param idsQueSalen Con tarifas marcadas para la propuesta, las líneas que entran en ellas. `null` =
  *   sin tarifas: todos los paquetes se ofrecen.
+ * @param edadesMenores `edades_menores` de la Solicitud (texto libre, `leerViajeDelNegocio`). Con
+ *   ella, un paquete sin edades guardadas toma las de la Solicitud, como la tarjeta: la edad que ya
+ *   está en la ficha no frena con «Falta la edad de un niño». Ausente = solo las guardadas.
  */
 export function paquetesIncompletos(
   lineas: readonly LineaParaPaquete[],
   idsQueSalen: ReadonlySet<string> | null,
   composicionViaje: Composicion | null,
+  edadesMenores?: unknown,
 ): PaqueteIncompleto[] {
   const paquetes = lineas.filter(esLineaDePaquete)
   const ofrecidos = idsQueSalen ? paquetes.filter(l => idsQueSalen.has(l.id)) : paquetes
+  const deLaSolicitud = edadesNinosDeLaSolicitud(edadesMenores ?? null, composicionViaje)
   const out: PaqueteIncompleto[] = []
   ofrecidos.forEach(l => {
-    const paquete = leerPaqueteBloqueo(leerTarifaPax(l.tarifa_pax ?? null).bloqueo)
+    const paquete = conEdadesDeLaSolicitud(leerPaqueteBloqueo(leerTarifaPax(l.tarifa_pax ?? null).bloqueo), deLaSolicitud)
     const faltas = faltasDelPaquete(paquete, composicionViaje)
     if (faltas.length === 0) return
     const n = paquetes.indexOf(l) + 1

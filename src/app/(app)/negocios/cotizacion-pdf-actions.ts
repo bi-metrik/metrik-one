@@ -65,6 +65,7 @@ import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { hotelesDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
+import { esLineaDePaquete } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
@@ -91,6 +92,8 @@ import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
+import { frenosDePaqueteYPasajero } from '@/lib/cotizaciones/frenos-de-paquete-y-pasajero'
+import { autorizacionDelNegocioLeido, MENSAJE_ENVIO, type NegocioParaEnvio } from '@/lib/autorizacion-datos/envio'
 import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { claveDeHotel, fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
 import type { OpcionalDelDocumento } from '@/lib/fotos/catalogo-propuesta'
@@ -265,7 +268,15 @@ export async function generateCotizacionPDF(
    * del dueño, ni el almacenamiento, ni Drive, ni el registro de la salida. Sin la opción, todo como
    * siempre.
    */
-  opciones?: { vistaPrevia?: boolean },
+  opciones?: {
+    vistaPrevia?: boolean
+    /**
+     * Quien llama dice si la cotización se trabaja por pasos (el PDF no mira el interruptor, criterio
+     * N4). Con él, el precio por pasajero que falta (P12) también deja el PDF como borrador, porque
+     * así frena `enviarPorPasos`. Solo AGREGA la marca: sin la opción, como siempre.
+     */
+    porPasos?: boolean
+  },
 ) {
   const vistaPrevia = opciones?.vistaPrevia === true
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
@@ -300,7 +311,8 @@ export async function generateCotizacionPDF(
    * la propuesta el total sería un supuesto, así que el PDF sale como borrador, igual que
    * bajo el margen mínimo. Sin tarifas (`[]`, R6) no dice nada y todo sigue como antes.
    */
-  const sinRecomendada = motivoSinRecomendada((await leerItinerarios(supabase, cotizacionId)) ?? [])
+  const tarifasDelPdf = (await leerItinerarios(supabase, cotizacionId)) ?? []
+  const sinRecomendada = motivoSinRecomendada(tarifasDelPdf)
 
   // Get empresa: primero por oportunidad, luego por negocio, luego fallback
   type EmpresaRow = {
@@ -333,6 +345,8 @@ export async function generateCotizacionPDF(
   type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null; configLinea: unknown }
   let negocioInfo: NegocioInfo | null = null
   let contactoDelNegocio: string | null = null
+  // El negocio con las etapas de su línea, para la autorización de datos (la regla de «Enviar»).
+  let negocioParaEnvio: NegocioParaEnvio | null = null
 
   if (cot.negocio_id) {
     const { data: negocio } = await supabase
@@ -340,7 +354,7 @@ export async function generateCotizacionPDF(
       // La línea viaja en la MISMA ida (embed): «Así puedes pagar» lee su `config_extra` y una
       // consulta aparte le sumaba una ida a todo PDF de negocio (presupuesto V5 de C0).
       // El contacto también (2026-10-27): la propuesta de viaje dice a quién va dirigida.
-      .select('id, nombre, carpeta_url, linea_id, empresa_id, lineas_negocio(config_extra), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento), contactos(nombre)')
+      .select('id, nombre, carpeta_url, linea_id, empresa_id, contacto_id, lineas_negocio(config_extra, etapas_negocio(config_extra)), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento), contactos(nombre)')
       .eq('id', cot.negocio_id)
       .single()
     if (negocio) {
@@ -352,6 +366,11 @@ export async function generateCotizacionPDF(
         carpeta_url: negocio.carpeta_url,
         linea_id: (negocio as { linea_id?: string | null }).linea_id ?? null,
         configLinea: (filaLinea as { config_extra?: unknown } | null | undefined)?.config_extra ?? null,
+      }
+      negocioParaEnvio = {
+        linea_id: negocioInfo.linea_id,
+        contacto_id: (negocio as { contacto_id?: string | null }).contacto_id ?? null,
+        lineas_negocio: (filaLinea as NegocioParaEnvio['lineas_negocio']) ?? null,
       }
       if (!empresa) {
         empresa = (negocio.empresas as EmpresaRow | null) ?? null
@@ -544,12 +563,16 @@ export async function generateCotizacionPDF(
    * (`precioPorPasajeroDeItem`).
    *
    * Los pasajeros del viaje se leen UNA vez y solo si alguna línea tiene tarifa por
-   * pasajero: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
+   * pasajero o es un paquete de bloqueo: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
    * falla, borrador: sin los pasajeros no se puede saber si el precio es el de hoy, y un
    * PDF limpio lo afirmaría.
    */
   const conTarifaPorPasajero = hayTarifaPorPasajero(items)
-  const lecturaDelViaje = negocioInfo && conTarifaPorPasajero
+  // Un bloqueo de solo paquetes no trae tarifa por pasajero (`tarifa_pax.bloqueo`), pero su freno
+  // necesita los pasajeros y las edades de la Solicitud, como `enviarPorPasos` (Vera sobre el #1326).
+  const conPaquete = items.some(i => esLineaDePaquete({ grupo: i.grupo ?? null, es_ajuste: i.es_ajuste ?? null })
+    || !!(i.tarifa_pax && typeof i.tarifa_pax === 'object' && (i.tarifa_pax as { bloqueo?: unknown }).bloqueo))
+  const lecturaDelViaje = negocioInfo && (conTarifaPorPasajero || conPaquete)
     ? await leerViajeDelNegocio(supabase, negocioInfo.id)
     : null
   const viajeDelNegocio = lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.viaje : null
@@ -572,6 +595,27 @@ export async function generateCotizacionPDF(
   const motivoPantallazos = sinPasajerosDelViaje
     ? MENSAJE_SIN_PASAJEROS
     : motivoParaNoEnviar(desactualizadas)
+
+  /**
+   * Lo que frena «Enviar» antes del margen (prueba real del bloqueo de Trappvel, 2026-10-29): la
+   * autorización de datos del cliente (la regla de `enviarCotizacion`, con el negocio ya leído), el
+   * paquete de bloqueo incompleto y, por pasos, el precio por pasajero (P12). Las mismas funciones
+   * que el envío: si «Enviar» frena, el PDF sale con la marca. La Neta con margen sano y la
+   * autorización pendiente salía limpia (heredado de #1257, 2026-10-25).
+   */
+  const motivoDatos = negocioInfo
+    ? await (async () => {
+        const v = await autorizacionDelNegocioLeido(supabase, { workspaceId, negocioId: negocioInfo!.id, negocio: negocioParaEnvio })
+        return v.falta ? MENSAJE_ENVIO[v.falta] : null
+      })()
+    : null
+  const frenos = frenosDePaqueteYPasajero({
+    items: items.filter(i => i.id).map(i => ({ ...i, id: i.id as string })),
+    tarifas: tarifasDelPdf,
+    composicion: composicionViaje,
+    edadesMenores: lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.edadesMenores ?? null : null,
+    conPrecioPorPasajero: opciones?.porPasos === true,
+  })
 
   // Calculate fiscal
   type Regimen = FiscalProfile['regimen_tributario']
@@ -648,22 +692,30 @@ export async function generateCotizacionPDF(
   // exactamente el OR de las condiciones. La Recomendada fuera de la propuesta tiene su
   // propio motivo: sin ella el total es un supuesto, y eso no es un problema de margen.
   const motivosBorrador = motivosDeBorrador({
+    autorizacionDatos: motivoDatos !== null,
+    precioPorPasajero: frenos.precioPorPasajero !== null,
+    paqueteIncompleto: frenos.paquete !== null,
     pantallazos: motivoPantallazos !== null,
     sinRecomendada: sinRecomendada !== null,
     faltaCosto: salida?.aplica === true && salida.faltaCosto !== null,
     faltaTasa: salida?.aplica === true && salida.faltaTasa === true,
-    margen: salidaBloquea,
+    // Con un paquete incompleto su costo no está en la cuenta: «margen bajo el mínimo» señalaría la
+    // causa equivocada (la misma regla que la lista única de Revisar).
+    margen: salidaBloquea && frenos.paquete === null,
     ivaSinCalcular,
     ivaIncluidoSinPlantilla,
   })
   const esBorrador = motivosBorrador.length > 0
   const avisoBorrador = esBorrador
     ? avisoDeBorrador(motivosBorrador, {
+        autorizacion_datos: motivoDatos,
+        precio_por_pasajero: frenos.precioPorPasajero,
+        paquete_incompleto: frenos.paquete,
         pantallazos: motivoPantallazos,
         recomendada: sinRecomendada,
         incompleto: salida?.aplica === true ? salida.faltaCosto : null,
         incompleto_tasa: salida?.aplica === true ? salida.faltaCosto : null,
-        margen: salidaBloquea ? salida!.mensaje : null,
+        margen: salidaBloquea && frenos.paquete === null ? salida!.mensaje : null,
         iva_sin_calcular: ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
         iva_incluido_sin_plantilla: ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
       })

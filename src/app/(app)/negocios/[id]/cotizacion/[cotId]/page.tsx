@@ -242,15 +242,17 @@ export default async function CotizacionNegocioPage({
   // El nivel de detalle del documento: la hoja del cliente de cada opción lo respeta.
   let nivelDetalle: NivelDetalle | null = null
   let modalidadViaje: ModalidadDelViaje | null = null
+  let edadesMenoresViaje: string | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
-    const { viaje, error: errViaje, modalidad } = await leerViajeDelNegocio(sbViaje, id)
+    const { viaje, error: errViaje, modalidad, edadesMenores } = await leerViajeDelNegocio(sbViaje, id)
     if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
     composicionViaje = viaje.composicion
     destinoViaje = viaje.destino
     fechasViaje = viaje.fechas
     nivelDetalle = viaje.nivelDetalle
     modalidadViaje = modalidad ?? null
+    edadesMenoresViaje = edadesMenores ?? null
   } catch {
     // Sin composición del viaje la pantalla la pide por línea.
   }
@@ -320,7 +322,7 @@ export default async function CotizacionNegocioPage({
   const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
   // Viaje en bloqueo (brief del 2026-10-27): sale de la misma lectura del viaje, sin consultas de más, y
   // solo cuenta con la forma por pasos. Sin respuesta, A medida (el servidor lo exige en cada acción).
-  const bloqueo = estadoPasos.encendido && modalidadViaje?.bloqueo ? { operador: modalidadViaje.operador } : null
+  const bloqueo = estadoPasos.encendido && modalidadViaje?.bloqueo ? { operador: modalidadViaje.operador, edadesMenores: edadesMenoresViaje } : null
   // La carga del negocio que pinta el marco (cotización de viaje): se lee UNA vez, aquí, y de ella
   // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
   // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.

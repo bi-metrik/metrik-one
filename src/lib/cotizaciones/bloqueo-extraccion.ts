@@ -20,6 +20,7 @@ import {
   esCategoriaIncluye,
   fechaIso,
   horaHHMM,
+  montoNoNegativo,
   montoPositivo,
   textoCorto,
   type CategoriaIncluye,
@@ -49,10 +50,12 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '  No confundas los botones de «+ N PAX» con precios.',
   '- nino: el precio por niño (CHD, menor) y su rango de edad en años (ej. «CHD 02-11» → edad_min 2, edad_max 11). null si',
   '  no aparece.',
+  '- infante: el precio por infante (INF, bebé de menos de 24 meses; ej. «INF 180.000» → precio 180000). Si dice que el',
+  '  infante no paga o es gratis, precio 0. null si la pantalla no muestra infante. No lo confundas con el niño (CHD).',
   '- iconos: CADA ícono de la fila de servicios incluidos (pequeños dibujos junto al hotel), en orden. Para cada uno:',
   '  descripcion (qué dibujo es, en pocas palabras) y categoria, una de: tiquete_aereo (avión, tiquete, pasabordo),',
   '  alimentacion (cubiertos, plato, copa), planes_tours (lancha, barco, cámara, tour, mapa, actividad), traslados',
-  '  (bus, van, carro, transfer), seguro_medico (maletín o cruz médica, escudo de salud). Si un ícono no encaja con',
+  '  (bus, van, carro, transfer), seguro_medico (maletín o cruz médica, escudo de salud, asistencia médica). Si un ícono no encaja con',
   '  certeza en una de las cinco, categoria = sin_identificar. Los íconos cambian de un operador a otro: interpreta el',
   '  dibujo, no supongas una leyenda. seguro = true solo si estás seguro de la categoría.',
   '  NO cuentes como íconos de servicios las estrellas, el logo del operador, ni los íconos de ubicación.',
@@ -60,6 +63,10 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '- texto_incluye: el texto de la pantalla que diga qué incluye (ej. «Receptivos… traslados in y out»), tal cual;',
   '  null si no hay.',
   '- incluye_por_texto: las categorías (de las cinco) que ese texto dice EXPLÍCITAMENTE que incluye. [] si ninguna.',
+  '',
+  'Seguro: seguro_medico es SOLO el seguro médico, de viaje o la asistencia médica al viajero. El «seguro hotelero»',
+  '(o tarjeta/impuesto hotelero) es un cargo del hotel, NO es seguro médico: no lo marques como seguro_medico ni por',
+  'ícono ni por texto.',
 ].join('\n')
 
 const NULO = { nullable: true }
@@ -95,6 +102,13 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
         precio: { type: 'number', ...NULO },
         edad_min: { type: 'integer', ...NULO },
         edad_max: { type: 'integer', ...NULO },
+      },
+    },
+    infante: {
+      type: 'object',
+      ...NULO,
+      properties: {
+        precio: { type: 'number', ...NULO },
       },
     },
     iconos: {
@@ -137,6 +151,25 @@ function acomodacionDe(v: unknown): PrecioAcomodacion['acomodacion'] | null {
   return null
 }
 
+const sinTildes = (t: string): string => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
+/** «seguro hotelero», «tarjeta hotelera»: cargos del hotel, no seguro médico (prueba real del 2026-10-29). */
+const HOTELERO = /\b(seguro|tarjeta|impuesto|tasa)s?\s+hotel(er[oa]s?)?\b/
+/** Lo que sí es seguro médico: «seguro médico», «asistencia médica», «seguro de viaje», «salud». */
+const MEDICO = /\bmedic[oa]s?\b|\basistencia\b|\bseguro (de )?viaje\b|\bsalud\b|\bassist\b/
+
+/** El texto respalda un seguro médico: lo menciona y no es solo el seguro hotelero. */
+function textoDiceSeguroMedico(texto: unknown): boolean {
+  if (typeof texto !== 'string') return true
+  const t = sinTildes(texto)
+  if (MEDICO.test(t)) return true
+  return !HOTELERO.test(t)
+}
+
+/** Un ícono que el modelo describió como del seguro hotelero no es seguro médico. */
+const iconoEsHotelero = (descripcion: unknown): boolean =>
+  typeof descripcion === 'string' && HOTELERO.test(sinTildes(descripcion)) && !MEDICO.test(sinTildes(descripcion))
+
 /**
  * Qué incluye, de los íconos y del texto que los acompaña.
  *
@@ -144,6 +177,8 @@ function acomodacionDe(v: unknown): PrecioAcomodacion['acomodacion'] | null {
  *  · Con íconos: lo que no tiene ícono es NO incluido (`false`); cada ícono seguro de su categoría la marca.
  *    El que no encaja con certeza va a `sinIdentificar` y NO marca nada.
  *  · El texto que dice explícitamente que incluye algo («traslados in y out») marca esa categoría.
+ *  · El «seguro hotelero» NO es seguro médico: si el texto solo habla del hotelero, `seguro_medico` por
+ *    texto no se marca, y el ícono descrito como seguro hotelero tampoco (prueba real del 2026-10-29).
  */
 export function incluyeDesdeLectura(raw: unknown): IncluyeBloqueo {
   const r = esObj(raw) ? raw : {}
@@ -154,11 +189,15 @@ export function incluyeDesdeLectura(raw: unknown): IncluyeBloqueo {
   if (iconos.length > 0) {
     for (const c of CATEGORIAS_INCLUYE) casillas[c] = false
     for (const i of iconos) {
+      if (i.categoria === 'seguro_medico' && iconoEsHotelero(i.descripcion)) continue
       if (esCategoriaIncluye(i.categoria) && i.seguro === true) casillas[i.categoria] = true
       else sinIdentificar.push({ descripcion: textoCorto(i.descripcion, 120) ?? 'Ícono', categoria: null })
     }
   }
-  for (const c of porTexto) casillas[c] = true
+  for (const c of porTexto) {
+    if (c === 'seguro_medico' && !textoDiceSeguroMedico(r.texto_incluye)) continue
+    casillas[c] = true
+  }
   return { casillas, sinIdentificar, texto: textoCorto(r.texto_incluye, 400) }
 }
 
@@ -195,8 +234,8 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
     moneda: (textoCorto(raw.moneda, 3) ?? 'COP').toUpperCase(),
     precios,
     nino: nino && (nino.precio !== null || nino.edadMin !== null || nino.edadMax !== null) ? nino : null,
-    // El infante casi nunca está en la pantalla del operador: lo escribe la asesora.
-    infante: null,
+    // Si la pantalla trae «INF 180.000», se lee; si no, lo escribe la asesora. 0 = el infante no paga.
+    infante: esObj(raw.infante) && montoNoNegativo(raw.infante.precio) !== null ? { precio: montoNoNegativo(raw.infante.precio) } : null,
   }
   return { ok: true, hotel, incluye: incluyeDesdeLectura(raw) }
 }

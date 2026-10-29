@@ -177,7 +177,7 @@ import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
 import { crearPaqueteBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
-import { leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
+import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
 import { listaUnica } from '@/lib/cotizaciones/lista-unica'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
@@ -421,7 +421,7 @@ interface Props {
    * medida, la pantalla de siempre. Cada opción de la ranura «Paquete de bloqueo» se pinta con su
    * tarjeta de paquete (hotel + vuelo).
    */
-  bloqueo?: { operador: string | null } | null
+  bloqueo?: { operador: string | null; edadesMenores?: string | null } | null
 }
 
 /** Lo que la cotización por pasos le pide a la tarjeta de una opción (`TarjetaOpcion.porPasos`). */
@@ -694,7 +694,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
   const handleDescargarPDF = () => {
     startTransition(async () => {
-      const res = await generateCotizacionPDF(cotizacion.id)
+      const res = await generateCotizacionPDF(cotizacion.id, { porPasos: porPasos?.encendido === true })
       if (res.success && res.pdf) {
         // Convert base64 to blob and trigger download
         const byteChars = atob(res.pdf)
@@ -1129,6 +1129,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     lineasSinAjuste.map(i => ({ id: i.id, nombre: i.nombre ?? null, grupo: i.grupo ?? null, es_ajuste: false, tarifa_pax: i.tarifa_pax })),
     tarifasEnPropuesta.length > 0 ? new Set(tarifasEnPropuesta.flatMap(t => itemsDelItinerario(lineasSinAjuste as never[], t.seleccion))) : null,
     composicionViaje ?? null,
+    // La edad del niño que ya dice la Solicitud cuenta, como en la tarjeta y en el servidor.
+    bloqueo?.edadesMenores ?? null,
   )
   const motivoPaquete = motivoPaquetesIncompletos(paquetesSinCompletar)
   // La autorización de datos va primero: es lo primero que revisa el servidor al enviar.
@@ -3859,6 +3861,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               editable={editable}
               operador={bloqueo?.operador ?? null}
               pasajeros={composicionViaje ? { adultos: composicionViaje.adultos, ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null}
+              edadesNinosSolicitud={edadesNinosDeLaSolicitud(bloqueo?.edadesMenores ?? null, composicionViaje ? { ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null)}
               vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
               onCambio={() => refrescar()}
               onEliminar={pp.onEliminar}

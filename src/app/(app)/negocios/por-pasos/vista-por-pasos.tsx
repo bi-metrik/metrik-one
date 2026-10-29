@@ -271,6 +271,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     // el precio por pasajero que falta y la línea sin costo. Sumarle `sinCosto` contaba dos veces lo
     // mismo («2 cosas impiden enviar» con una sola en la lista). Sin la lista, como siempre.
     rojos: p.listaUnica ? p.listaUnica.impide.length : p.conteoLista.rojos + (sinCosto.length > 0 ? 1 : 0),
+    // La barra dice lo mismo que la lista y que el botón: el primer motivo que impide enviar.
+    primerImpide: p.listaUnica
+      ? (p.listaUnica.impide[0]?.texto ?? null)
+      : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null),
+    impide: p.listaUnica ? p.listaUnica.impide : null,
     ambar: p.conteoLista.ambar + p.pantallazosPorAceptar,
     texto: p.texto,
     enviada: p.enviada,
@@ -708,9 +713,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       enviada={p.enviada}
       editable={p.editable}
       ocupado={ocupado}
-      motivoParaNoEnviar={p.listaUnica
-        ? (p.listaUnica.impide[0]?.texto ?? null)
-        : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null)}
+      motivoParaNoEnviar={entradaPasos.primerImpide}
       lista={p.listaUnica ? <ListaUnicaPorPasos lista={p.listaUnica} onIr={irDesdeLaLista} /> : p.revisarLista}
       documento={(
         <>

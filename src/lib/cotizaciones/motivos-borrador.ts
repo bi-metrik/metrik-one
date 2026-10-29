@@ -1,8 +1,9 @@
 /**
  * Por qué un PDF de cotización sale como BORRADOR, en UN solo sitio.
  *
- * Un PDF sale como borrador (marca de agua, sin guardarse ni registrarse) por cinco motivos:
- * pantallazos de otros pasajeros, una cotización con tarifas sin la Recomendada en la
+ * Un PDF sale como borrador (marca de agua, sin guardarse ni registrarse) cuando «Enviar» está
+ * frenado, por cualquier causa: la autorización de datos del cliente, el precio por pasajero (P12),
+ * un paquete de bloqueo incompleto, pantallazos de otros pasajeros, una cotización con tarifas sin la Recomendada en la
  * propuesta (de ella sale el TOTAL, decisión del 2026-09-22), margen bajo el mínimo sin la
  * firma del dueño, una línea cuyo IVA no se puede calcular, o el IVA dentro del precio con
  * una plantilla que no lo sabe imprimir. Hasta el 2026-09-23 la marca decía siempre «margen bajo el mínimo»: los dos del
@@ -20,6 +21,9 @@
  */
 
 export type MotivoDeBorrador =
+  | 'autorizacion_datos'
+  | 'precio_por_pasajero'
+  | 'paquete_incompleto'
   | 'pantallazos'
   | 'recomendada'
   | 'incompleto'
@@ -35,6 +39,11 @@ export type MotivoDeBorrador =
  * caben todos.
  */
 export const ORDEN_DE_MOTIVOS: readonly MotivoDeBorrador[] = [
+  // Los tres que «Enviar» revisa primero (`enviarPorPasos`), en su orden (prueba real del 2026-10-29:
+  // con la autorización de datos pendiente el PDF salía limpio y la pantalla prometía la marca).
+  'autorizacion_datos',
+  'precio_por_pasajero',
+  'paquete_incompleto',
   'pantallazos',
   'recomendada',
   'incompleto',
@@ -45,6 +54,9 @@ export const ORDEN_DE_MOTIVOS: readonly MotivoDeBorrador[] = [
 ]
 
 const ETIQUETAS: Record<MotivoDeBorrador, string> = {
+  autorizacion_datos: 'falta la autorización de datos',
+  precio_por_pasajero: 'falta el precio por pasajero',
+  paquete_incompleto: 'paquete incompleto',
   pantallazos: 'pantallazos por actualizar',
   recomendada: 'falta la tarifa Recomendada',
   incompleto: 'borrador incompleto: falta un costo',
@@ -61,6 +73,12 @@ export function etiquetaDeMotivo(motivo: MotivoDeBorrador): string {
 }
 
 export interface CondicionesDeBorrador {
+  /** El cliente no autorizó sus datos y la línea lo exige (`autorizacion-datos/envio.ts`). Ausente = no. */
+  autorizacionDatos?: boolean
+  /** P12, con la forma por pasos (`frenos-de-paquete-y-pasajero.ts`). Ausente = no. */
+  precioPorPasajero?: boolean
+  /** Un paquete de bloqueo incompleto (`bloqueo-incompleto.ts`). Ausente = no. */
+  paqueteIncompleto?: boolean
   pantallazos: boolean
   /** Con tarifas: no hay una sola Recomendada marcada «va en propuesta» (`motivoSinRecomendada`). */
   sinRecomendada: boolean
@@ -82,6 +100,9 @@ export interface CondicionesDeBorrador {
 /** Los motivos que aplican, en `ORDEN_DE_MOTIVOS`. Vacío = el PDF no es borrador. */
 export function motivosDeBorrador(c: CondicionesDeBorrador): MotivoDeBorrador[] {
   const aplica: Record<MotivoDeBorrador, boolean> = {
+    autorizacion_datos: c.autorizacionDatos === true,
+    precio_por_pasajero: c.precioPorPasajero === true,
+    paquete_incompleto: c.paqueteIncompleto === true,
     pantallazos: c.pantallazos,
     recomendada: c.sinRecomendada,
     incompleto: c.faltaCosto === true && c.faltaTasa !== true,

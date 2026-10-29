@@ -362,6 +362,61 @@ export function leerDistribucion(v: unknown): DistribucionBloqueo {
   return { habitaciones, ninos: enteroEntre(v.ninos, 0, 200) ?? 0, infantes: enteroEntre(v.infantes, 0, 200) ?? 0, edadesNinos }
 }
 
+/**
+ * Las edades de los NIÑOS que dice la Solicitud del negocio (`edades_menores`, texto libre: «edad 8»,
+ * «9, 4», «7, 1.5»), para precargar la tarjeta del paquete (prueba real del 2026-10-29: la ficha decía
+ * la edad 8 y la tarjeta la pedía vacía). Las de 0 a 17, enteras.
+ *
+ * El campo trae niños E infantes: con infantes en la solicitud, las edades bajo 2 son de ellos
+ * y no cuentan como niño. Una edad en meses («6 meses») es de un infante y nunca se lee como edad en años cumplidos. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
+ */
+export function edadesNinosDeLaSolicitud(valor: unknown, pasajeros: { ninos: number; infantes: number } | null): number[] {
+  const texto = typeof valor === 'number' ? String(valor) : typeof valor === 'string' ? valor : ''
+  // «6 meses», «18 meses»: es un bebé (infante), nunca la edad 6. No se toma como edad de niño.
+  const crudas = [...texto.matchAll(/(\d+(?:\.\d+)?)\s*(mes(?:es)?\b)?/gi)]
+    .map(m => ({ valor: Number(m[1]), enMeses: !!m[2] }))
+    .filter(x => Number.isFinite(x.valor) && x.valor >= 0 && (x.enMeses || x.valor < 18))
+  let infantes = pasajeros?.infantes ?? 0
+  const ninos: number[] = []
+  for (const { valor, enMeses } of crudas) {
+    if (enMeses) {
+      // En meses: si son menos de 24 es un infante (ocupa su lugar); si no, se pasa a años.
+      if (valor < 24) { if (infantes > 0) infantes--; continue }
+      const anios = Math.floor(valor / 12)
+      if (anios < 18) ninos.push(anios)
+      continue
+    }
+    if (infantes > 0 && valor < 2) { infantes--; continue }
+    ninos.push(Math.floor(valor))
+  }
+  const tope = pasajeros ? pasajeros.ninos : ninos.length
+  return ninos.slice(0, Math.max(0, tope))
+}
+
+/**
+ * El paquete con la edad de cada niño que dice la Solicitud, si no tiene las suyas (Vera sobre el
+ * #1326: la edad precargada en la tarjeta tiene que contar también en el freno, sin esperar a
+ * Guardar). Solo con niños en el paquete: sin ellos, una edad de la Solicitud no frena por rango CHD.
+ * No muta el paquete.
+ */
+export function conEdadesDeLaSolicitud<P extends PaqueteBloqueo | null>(paquete: P, deLaSolicitud: readonly number[] | null | undefined): P {
+  if (!paquete) return paquete
+  const d = paquete.distribucion
+  if (d.ninos <= 0) return paquete
+  const edades = edadesIniciales(d.edadesNinos, deLaSolicitud).slice(0, d.ninos)
+  if (edades.length === (d.edadesNinos ?? []).length) return paquete
+  return { ...paquete, distribucion: { ...d, edadesNinos: edades } }
+}
+
+/**
+ * Las edades con que abre la tarjeta: las guardadas mandan; sin ellas, las de la Solicitud. Siempre
+ * editables (la asesora las cambia en la casilla).
+ */
+export function edadesIniciales(guardadas: readonly number[] | null | undefined, deLaSolicitud: readonly number[] | null | undefined): number[] {
+  if (guardadas && guardadas.length > 0) return [...guardadas]
+  return [...(deLaSolicitud ?? [])]
+}
+
 function refImagen(v: unknown): string | null {
   return typeof v === 'string' && v.startsWith('sbext://') ? v.slice(0, 500) : null
 }

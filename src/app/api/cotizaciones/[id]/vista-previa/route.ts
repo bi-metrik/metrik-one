@@ -14,6 +14,8 @@ import { NextResponse } from 'next/server'
 
 import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actions'
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
+import { getWorkspace } from '@/lib/actions/get-workspace'
+import { estadoPorPasosDeCotizacion } from '@/lib/cotizaciones/por-pasos-datos'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -25,7 +27,12 @@ const SIN_CACHE = { 'cache-control': 'no-store' }
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   if (!id) return NextResponse.json({ ok: false }, { status: 400, headers: SIN_CACHE })
-  const r = await enPeticionDeRuta(() => generateCotizacionPDF(id, { vistaPrevia: true })) as {
+  // El PDF no mira el interruptor (N4): se lo dice la ruta, para que P12 deje la marca como frena «Enviar».
+  const r = await enPeticionDeRuta(async () => {
+    const { supabase, error } = await getWorkspace()
+    const porPasos = !error && (await estadoPorPasosDeCotizacion(supabase, id).catch(() => null))?.encendido === true
+    return generateCotizacionPDF(id, { vistaPrevia: true, porPasos })
+  }) as {
     success: boolean
     pdf?: string
     filename?: string

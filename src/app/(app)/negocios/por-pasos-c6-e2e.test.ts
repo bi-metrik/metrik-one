@@ -84,6 +84,7 @@ import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/ca
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
 import { itemsDelItinerario, itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
 import { paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
+import { paqueteVacio } from '@/lib/cotizaciones/bloqueo-paquete'
 
 const LECTORES = { recalcularTotales, generateCotizacionPDF, opcionesDeAprobacion, aceptarCotizacionNegocio }
 const tabla = (t: string) => base.tablas[t] ?? []
@@ -352,5 +353,68 @@ describe('C6 · D8 · «Impide enviar» es exactamente lo que rechaza el servido
       'Vuelo San Andrés ⇄ Providencia no va: el cliente no lo verá ni lo paga.',
       'Una actividad incluida no tiene día.', 'Margen bajo el aviso.', 'Falta el recargo.', 'Faltan las fechas.', 'IVA sin calcular.',
     ])
+  })
+})
+
+// ── Bloqueo de solo paquetes (Vera sobre el #1326) ───────────────────────────
+describe('bloqueo de solo paquetes: el PDF lee la Solicitud igual que «Enviar»', () => {
+  /** Un paquete completo salvo la edad del niño (que trae la Solicitud), para el viaje 6 + 1 + 1. */
+  function soloPaquete(edadesMenores: string | null) {
+    sembrar()
+    const muestra = tabla('items')[0] as Fila
+    const p = paqueteVacio('Operador de prueba')
+    p.hotel.hotel = 'Hotel de Prueba'
+    p.hotel.precios = [{ acomodacion: 'doble', precioPorPersona: 1_000_000 }]
+    p.hotel.nino = { precio: 600_000, edadMin: 2, edadMax: 11 }
+    p.hotel.infante = { precio: 0 }
+    p.distribucion = { habitaciones: { doble: 3 }, ninos: 1, infantes: 1, edadesNinos: [] }
+    base.tablas.items = [{
+      ...muestra, id: 'pq-1', nombre: 'HOTEL DE PRUEBA', grupo: 'paquete de bloqueo: Paquete de bloqueo en San Andrés',
+      opcion_de: null, es_ajuste: false, orden: 1, cantidad: 1, subtotal: 6_600_000, precio_venta: 7_764_706,
+      tarifa_pax: { bloqueo: p }, dia_relativo: null, entra_al_precio: true,
+    }]
+    base.tablas.rubros = []
+    base.tablas.cotizacion_itinerarios = []
+    base.tablas.itinerario_opciones = []
+    const nb = tabla('negocio_bloques')[0] as Fila
+    nb.edades_menores = edadesMenores
+    nb.data = { ...(nb.data as Fila), edades_menores: edadesMenores }
+  }
+  const pdfDe = async () => await generateCotizacionPDF(COT_SAN_ANDRES, { porPasos: true }) as { success: boolean; borrador?: boolean; aviso?: string | null; error?: string }
+
+  it('con la edad en la Solicitud, ni «Enviar» ni el PDF piden la edad del niño', async () => {
+    soloPaquete('8 años')
+    await recalcularTotales(COT_SAN_ANDRES)
+    const r = await enviarPorPasos(COT_SAN_ANDRES) as { success: boolean; error?: string }
+    expect(r.error ?? '').not.toMatch(/edad|Paquete/)
+    const pdf = await pdfDe()
+    expect(pdf.success, pdf.error).toBe(true)
+    expect(pdf.aviso ?? '').not.toMatch(/edad|paquete incompleto/i)
+    // Mismo veredicto: si «Enviar» dejó pasar, el PDF no es borrador; si frenó por otra cosa, lo dice igual.
+    expect(pdf.borrador === true).toBe(r.success !== true)
+  })
+
+  it('sin la edad en la Solicitud, los dos frenan por la edad del niño', async () => {
+    soloPaquete(null)
+    await recalcularTotales(COT_SAN_ANDRES)
+    const r = await enviarPorPasos(COT_SAN_ANDRES) as { success: boolean; error?: string }
+    expect(r.error).toBe('Paquete «Hotel de Prueba» incompleto: Falta la edad de un niño.')
+    const pdf = await pdfDe()
+    expect(pdf.borrador).toBe(true)
+    expect(pdf.aviso).toContain('Falta la edad de un niño.')
+  })
+
+  it('el infante de la Solicitud también cuenta en el PDF', async () => {
+    soloPaquete('8 años')
+    const pq = tabla('items')[0] as Fila
+    const b = (pq.tarifa_pax as { bloqueo: ReturnType<typeof paqueteVacio> }).bloqueo
+    b.hotel.infante = null
+    b.distribucion.infantes = 0
+    await recalcularTotales(COT_SAN_ANDRES)
+    const r = await enviarPorPasos(COT_SAN_ANDRES) as { success: boolean; error?: string }
+    expect(r.error).toMatch(/infante/)
+    const pdf = await pdfDe()
+    expect(pdf.borrador).toBe(true)
+    expect(pdf.aviso).toContain(r.error!)
   })
 })
