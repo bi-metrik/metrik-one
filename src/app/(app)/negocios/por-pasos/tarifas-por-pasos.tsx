@@ -266,6 +266,8 @@ export function TarifasPorPasos({
             {reglas.descuentos.map(d => (
               <span key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] px-2.5 py-1.5 text-[13px]" data-descuento-total={d.id}>
                 <span className="min-w-0 flex-1">{d.descripcion}</span>
+                <b className="tabular-nums">{pct(d.pct)}</b>
+                {/* A qué tarifa aplica (2026-10-29): después de la cifra, para que «descripción %» se lea junto. */}
                 {editable ? (
                   <select
                     aria-label={`A qué tarifa aplica «${d.descripcion}»`}
@@ -282,7 +284,6 @@ export function TarifasPorPasos({
                 ) : (
                   <small className="text-xs text-[#6E6A62]" data-aplica-a={d.aplicaA ?? 'todas'}>{aplicaATexto(d.aplicaA)}</small>
                 )}
-                <b className="tabular-nums">{pct(d.pct)}</b>
                 {editable && (
                   <button
                     type="button"
