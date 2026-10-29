@@ -4,6 +4,7 @@
  * del bucket ni ids de staff.
  */
 import type { CategoriaFoto } from './categoria'
+import { formaAdmitida } from './forma'
 import { fotoImprimible, MAX_FOTOS_POR_ELEMENTO, objetivo, TIPOS_FOTO, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 
 export interface FotoVista {
@@ -14,8 +15,13 @@ export interface FotoVista {
   origen: OrigenFoto
   /** «Autora · CC BY-SA 4.0» (Commons, de antes) o `null` (propia). */
   fuente: string | null
-  /** ¿Sale en la propuesta? (una de la página oficial no; un hotel que nadie eligió no). */
+  /** ¿Sale en la propuesta? (una de la página oficial no; un hotel que nadie eligió no; un collage o una vertical de hotel no). */
   seImprime: boolean
+  /**
+   * Hotel con forma de collage o de foto vertical (`formaAdmitida`, regla del 2026-10-29): queda en
+   * la biblioteca, marcada, y el documento no la usa.
+   */
+  collageOVertical?: boolean
   /** Hotel: fachada, habitación, zonas comunes u otra; `null` sin categoría. */
   categoria: CategoriaFoto | null
 }
@@ -60,6 +66,7 @@ interface FilaParaVista {
   licencia: string | null
   revisada: boolean
   categoria?: CategoriaFoto | null
+  proporcion?: number | string | null
 }
 
 function fuenteDeFila(f: Pick<FilaParaVista, 'origen' | 'autor' | 'licencia'>): string | null {
@@ -80,16 +87,20 @@ export function vistaDeElemento(
     ciudad: e.ciudad,
     admiteOtra: e.fotos.length < MAX_FOTOS_POR_ELEMENTO,
     alias: e.alias ?? [],
-    fotos: e.fotos.slice(0, MAX_FOTOS_POR_ELEMENTO).map((f, i) => ({
-      id: f.id,
-      url: urls.get(f.ref) ?? null,
-      // La primera del orden es la principal aunque la fila no lo diga (código anterior).
-      principal: i === 0,
-      origen: f.origen,
-      fuente: fuenteDeFila(f),
-      seImprime: fotoImprimible(e.tipo, f.origen, f.revisada),
-      categoria: f.categoria ?? null,
-    })),
+    fotos: e.fotos.slice(0, MAX_FOTOS_POR_ELEMENTO).map((f, i) => {
+      const collageOVertical = e.tipo === 'hotel' && !formaAdmitida(f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion))
+      return {
+        id: f.id,
+        url: urls.get(f.ref) ?? null,
+        // La primera del orden es la principal aunque la fila no lo diga (código anterior).
+        principal: i === 0,
+        origen: f.origen,
+        fuente: fuenteDeFila(f),
+        seImprime: fotoImprimible(e.tipo, f.origen, f.revisada) && !collageOVertical,
+        collageOVertical,
+        categoria: f.categoria ?? null,
+      }
+    }),
   }
 }
 

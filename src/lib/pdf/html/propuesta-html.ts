@@ -52,16 +52,32 @@ async function bytesDe(src: string, timeoutMs: number): Promise<Buffer | null> {
  * una imagen: el documento sale sin esa foto, nunca con un hueco roto.
  */
 export async function reducirFoto(src: string | null | undefined, ancho: number, calidad = 72, timeoutMs = 6000): Promise<string | null> {
+  return (await reducirFotoConProporcion(src, ancho, calidad, timeoutMs))?.src ?? null
+}
+
+/**
+ * Lo mismo que `reducirFoto`, con el ancho entre el alto de la foto ya girada: la plantilla lo usa
+ * para no imprimir collages ni verticales y para escoger cómo van las fotos de cada ficha de hotel
+ * (regla de fotos del 2026-10-29). Medida aquí, sirve también para las fotos sin `proporcion` en la
+ * base y para la foto propia de una opción.
+ */
+export async function reducirFotoConProporcion(
+  src: string | null | undefined,
+  ancho: number,
+  calidad = 72,
+  timeoutMs = 6000,
+): Promise<{ src: string; proporcion: number | null } | null> {
   if (!src) return null
   const datos = await bytesDe(src, timeoutMs)
   if (!datos) return null
   try {
-    const salida = await sharp(datos)
+    const { data, info } = await sharp(datos)
       .rotate()
       .resize({ width: ancho, withoutEnlargement: true })
       .jpeg({ quality: calidad, mozjpeg: true })
-      .toBuffer()
-    return `data:image/jpeg;base64,${salida.toString('base64')}`
+      .toBuffer({ resolveWithObject: true })
+    const proporcion = info.width > 0 && info.height > 0 ? info.width / info.height : null
+    return { src: `data:image/jpeg;base64,${data.toString('base64')}`, proporcion }
   } catch {
     return null
   }
@@ -97,6 +113,10 @@ export interface FotoDeCatalogo {
   /** La línea de crédito («Park Güell, Autora (Wikimedia Commons, CC BY-SA 3.0)»); `null` = propia. */
   credito: string | null
   foco?: { x: number; y: number } | null
+  /** Ancho entre alto guardado en la biblioteca (`null` = sin dato: se mide al reducirla). */
+  proporcion?: number | null
+  /** Hotel: qué muestra (fachada, habitación, zonas comunes, otra). Ordena las fotos de la ficha. */
+  categoria?: string | null
 }
 
 /** Lo que el documento le pide al catálogo. Cada uno `null` = no hay foto. */
@@ -230,10 +250,12 @@ export async function prepararPropuestaHtml(
   for (const f of deOpcional.values()) for (const x of f.extras ?? []) pedir(x.src, ANCHO_FOTO.extra)
 
   const [resueltas, logo] = await Promise.all([
-    Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFoto(url, ancho)] as const)),
+    Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFotoConProporcion(url, ancho)] as const)),
     reducirLogo(opts.logoUrl),
   ])
-  const porUrl = new Map(resueltas.filter((x): x is readonly [string, string] => x[1] !== null))
+  const conMedida = resueltas.filter((x): x is readonly [string, { src: string; proporcion: number | null }] => x[1] !== null)
+  const porUrl = new Map(conMedida.map(([url, f]) => [url, f.src] as const))
+  const proporcionDe = new Map(conMedida.map(([url, f]) => [url, f.proporcion] as const))
   const focoDe = new Map<string, FotoPDF['foco']>()
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
@@ -245,7 +267,7 @@ export async function prepararPropuestaHtml(
   const resolver = (url: string | null | undefined): FotoResuelta | null => {
     if (!url) return null
     const src = porUrl.get(url)
-    return src ? { src, foco: focoDe.get(url) ?? null } : null
+    return src ? { src, foco: focoDe.get(url) ?? null, proporcion: proporcionDe.get(url) ?? null } : null
   }
 
   // Las extras solo salen junto a su principal: sin ella, ni foto ni crédito.

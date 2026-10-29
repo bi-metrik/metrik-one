@@ -180,13 +180,13 @@ describe('las fotos de los hoteles de las tres tarifas llegan al PDF', () => {
     expect(palma.extras ?? []).toEqual([])
   })
 
-  it('el HTML del documento las imprime: 3 (principal + 2), 2 (principal + 1) y 1, sin recuadro vacío', () => {
-    const recuadros = captura.html.match(/class="img[^"]*"/g) ?? []
+  it('el HTML del documento las imprime todas con foto, del mismo alto y sin recuadro vacío (regla de fotos del 2026-10-29)', () => {
+    const recuadros = captura.html.match(/class="img[^"]*" style="height:[\d.]+mm/g) ?? []
+    expect(recuadros).toHaveLength(3)
     expect(recuadros.filter(c => c.includes('sinfoto'))).toEqual([])
-    expect(recuadros).toContain('class="img mosaico n2"')
-    expect(recuadros).toContain('class="img mosaico n1"')
-    // Las extras: 2 del primero y 1 del segundo.
-    expect(captura.html.split('class="mx"').length - 1).toBe(3)
+    expect(new Set(recuadros.map(c => c.replace(/.*height:/, ''))).size).toBe(1)
+    // La Premium tiene una sola foto: manda una foto ancha en las tres fichas.
+    expect(recuadros.every(c => c.startsWith('class="img" '))).toBe(true)
   })
 })
 

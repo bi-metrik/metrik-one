@@ -28,6 +28,7 @@ vi.mock('./catalogo-almacen', async (original) => {
 })
 
 import { creditoDeFila, elementosDe, filaDe, fotosDe, leerCatalogo, MENSAJE_TOPE, ponerFotoPropia, quitarFotoPorId, reordenarFotos, type FilaCatalogo } from './catalogo'
+import { MENSAJE_FORMA } from './forma'
 import { fotoImprimible, MAX_FOTOS_POR_ELEMENTO, objetivo } from './clave'
 import { rutaDeReferencia } from './referencia-catalogo'
 
@@ -161,6 +162,21 @@ describe('la foto subida o pegada', () => {
     expect(basura.ok).toBe(false)
     expect(db.filas).toHaveLength(0)
     expect(almacen.guardadas).toHaveLength(0)
+  })
+
+  it('un hotel no recibe un collage ni una foto vertical: «sube una foto sola», y no se sube nada (regla del 2026-10-29)', { timeout: 30_000 }, async () => {
+    const db = dobleConLlaves()
+    const de = (width: number, height: number) => sharp({ create: { width, height, channels: 3, background: { r: 10, g: 60, b: 120 } } }).jpeg().toBuffer()
+    // Un tríptico (2,79) y una vertical (0,67), como los dos de la biblioteca de Trappvel.
+    for (const [w, h] of [[1460, 524], [534, 800]]) {
+      const r = await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: hotel, bytes: await de(w, h), autorizacion: AUTORIZADA })
+      expect(r).toEqual({ ok: false, mensaje: MENSAJE_FORMA })
+    }
+    expect(db.filas).toHaveLength(0)
+    expect(almacen.guardadas).toHaveLength(0)
+    // La panorámica de 2:1 sí entra; y un tour o una ciudad no tienen esta regla.
+    expect((await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: hotel, bytes: await de(1600, 800), autorizacion: AUTORIZADA })).ok).toBe(true)
+    expect((await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: plan, bytes: await de(1460, 524), autorizacion: AUTORIZADA })).ok).toBe(true)
   })
 
   it('un tour no lleva categoría (es de hotel)', { timeout: 30_000 }, async () => {
