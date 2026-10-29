@@ -134,7 +134,7 @@ export function instruccionesCarga(
     ...(sabidos.length ? ['', 'Lo que el viaje YA tiene:', ...sabidos] : ['', 'El viaje todavía no tiene datos.']),
     ...(enEspera.length ? ['', 'Lo que ya le propusiste al comercial y todavía no confirma:', ...enEspera] : []),
     '',
-    '«(reenviado)» es del cliente; «(escrito por el comercial)», del comercial que te habla. «Ya te dije X»: X está antes.',
+    '«(reenviado)»: el cliente; «(escrito por el comercial)»: quien te habla (lo del viaje es clase cliente). «Ya te dije X»: está antes.',
     ...(o.preguntas?.length ? ['', 'Lo que ya le preguntaste al comercial de este viaje (no lo vuelvas a preguntar; si su respuesta deja dos lecturas, propón la más probable como deducido):', ...o.preguntas.map((q) => `- ${q}`)] : []),
     '',
     'Devuelve:',
