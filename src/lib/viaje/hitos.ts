@@ -535,14 +535,16 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
   }
 
   // ── Por servicio ──
-  const vuelos = vivos.filter(s => s.tipo === 'vuelo')
+  // El paquete de bloqueo (tipo «otro» con los tramos de su vuelo, H10 del 2026-10-29) se vuela igual.
+  const vuelaConTramos = (s: (typeof vivos)[number]) => s.tipo === 'vuelo' || (s.tipo === 'otro' && (leerTramos(s.tramos)?.length ?? 0) > 0)
+  const vuelos = vivos.filter(vuelaConTramos)
   const primerTramo = vuelos.map(s => leerTramos(s.tramos)?.[0]?.fecha ?? s.fecha_servicio).filter((f): f is string => !!f).sort()[0] ?? null
   const trasladosSinFecha = vivos.filter(s => s.tipo === 'traslado' && !s.fecha_servicio).length
   let preregistroPuesto = false
 
   for (const s of vivos) {
     const resp = delServicio(s)
-    if (s.tipo === 'vuelo') {
+    if (vuelaConTramos(s)) {
       const tramos = leerTramos(s.tramos) ?? []
       // Sin tramos leídos pero con fecha de inicio: un tramo con lo que hay (sin hora ni ruta).
       const lista: TramoServicio[] = tramos.length > 0
