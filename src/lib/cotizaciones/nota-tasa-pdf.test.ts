@@ -16,13 +16,13 @@ describe('nota de la tasa de cambio en el PDF (H8 · QA Trappvel 2026-10-29)', (
       { grupo: 'traslado', tarifa_pax: conf('USD', 4150) },
     ])
     expect(notas).toEqual([
-      'Los hoteles y el traslado se le pagan al proveedor en dólares (USD). Los valores en pesos de esta cotización se calcularon con una tasa de $4.150 por dólar.',
+      'Los hoteles y el traslado tienen tarifa en dólares (USD). Sus valores en pesos en esta cotización se calcularon con una tasa de $4.150 por dólar.',
     ])
   })
 
   it('una sola línea en EUR, en singular; dos tasas distintas se dicen las dos', () => {
     expect(notasDeTasaDeCambio([{ grupo: 'actividad', tarifa_pax: conf('EUR', 4500) }])).toEqual([
-      'La actividad se le paga al proveedor en euros (EUR). Los valores en pesos de esta cotización se calcularon con una tasa de $4.500 por euro.',
+      'La actividad tiene tarifa en euros (EUR). Su valor en pesos en esta cotización se calculó con una tasa de $4.500 por euro.',
     ])
     expect(notasDeTasaDeCambio([
       { grupo: 'hotel', tarifa_pax: conf('USD', 4200) },
@@ -38,6 +38,6 @@ describe('nota de la tasa de cambio en el PDF (H8 · QA Trappvel 2026-10-29)', (
 
   it('con otra moneda, la tarjeta va al final de los términos', () => {
     const t = terminosConTasaDeCambio('- Las tarifas están sujetas a cambios.', [{ grupo: 'hotel', tarifa_pax: conf('USD', 4150) }])
-    expect(t).toBe('- Las tarifas están sujetas a cambios.\n\nTasa de cambio\n- El hotel se le paga al proveedor en dólares (USD). Los valores en pesos de esta cotización se calcularon con una tasa de $4.150 por dólar.')
+    expect(t).toBe('- Las tarifas están sujetas a cambios.\n\nTasa de cambio\n- El hotel tiene tarifa en dólares (USD). Su valor en pesos en esta cotización se calculó con una tasa de $4.150 por dólar.')
   })
 })

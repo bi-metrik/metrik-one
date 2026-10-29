@@ -143,6 +143,12 @@ export interface FilaCierre {
   diferencia: number
   /** El servicio va y no tiene ningún pago: su costo real no se conoce. */
   sinCosto: boolean
+  /**
+   * Se sacó del viaje (`cancelado`) después de que el cliente aceptó el precio que lo incluía (QA
+   * 2026-10-29, H9-3). Su costo cotizado sigue en el margen cotizado y su diferencia se explica:
+   * sin esto, la plata del servicio pasaba a margen sin verse como desviación.
+   */
+  sacado: boolean
 }
 
 export interface Cierre {
@@ -188,7 +194,8 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   const ingresoNeto = ingresoReal - iva - recargo
   const costoReal = e.gastos.reduce((a, g) => a + r0(g.monto), 0)
   const margenReal = ingresoNeto - costoReal
-  const van = e.servicios.filter(s => s.estado !== 'cancelado')
+  // Todos los servicios, también los sacados: el precio aprobado se armó con ellos (H9-3).
+  const van = e.servicios
   const costoCotizado = van.reduce((a, s) => a + r0(s.costo_cotizado), 0)
   const margenCotizado = precio - iva - costoCotizado
   const pagadoDe = new Map<string, number>()
@@ -202,7 +209,8 @@ export function calcularCierre(e: EntradaCierre): Cierre {
       cotizado: r0(s.costo_cotizado),
       real,
       diferencia: real - r0(s.costo_cotizado),
-      sinCosto: real === 0 && r0(aPagar) > 0,
+      sinCosto: s.estado !== 'cancelado' && real === 0 && r0(aPagar) > 0,
+      sacado: s.estado === 'cancelado',
     }
   })
   const cortesias = e.gastos.filter(esCortesia).map(g => ({ descripcion: (g.descripcion ?? 'Cortesía').trim() || 'Cortesía', monto: r0(g.monto) }))
@@ -211,13 +219,14 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   const razones: string[] = []
   for (const f of filas) {
     if (f.diferencia === 0 || f.sinCosto) continue
+    const cifra = `${f.diferencia > 0 ? '+' : '-'}${pesosCierre(Math.abs(f.diferencia))}`
+    if (f.sacado) { razones.push(`${f.nombre} sacado del viaje (${cifra})`); continue }
     // H6-3 · lo que movió la TRM se nombra como tal: no es que el proveedor cobrara más.
     const s = van.find(x => x.id === f.id)
     const cambio = diferenciaDeCambioDelServicio(s?.moneda, e.gastos.filter(g => g.servicio_id === f.id)).pesos
-    const signo = f.diferencia > 0 ? '+' : '-'
-    if (cambio !== 0 && Math.abs(cambio - f.diferencia) <= 1) razones.push(`${f.nombre} (${signo}${pesosCierre(Math.abs(f.diferencia))}, diferencia de cambio)`)
-    else if (cambio !== 0) razones.push(`${f.nombre} (${signo}${pesosCierre(Math.abs(f.diferencia))}, de ellos ${pesosCierre(cambio)} de diferencia de cambio)`)
-    else razones.push(`${f.nombre} (${signo}${pesosCierre(Math.abs(f.diferencia))})`)
+    if (cambio !== 0 && Math.abs(cambio - f.diferencia) <= 1) razones.push(`${f.nombre} (${cifra}, diferencia de cambio)`)
+    else if (cambio !== 0) razones.push(`${f.nombre} (${cifra}, de ellos ${pesosCierre(cambio)} de diferencia de cambio)`)
+    else razones.push(`${f.nombre} (${cifra})`)
   }
   if (cortesias.length === 1) razones.push(`una cortesía (${pesosCierre(cortesias[0].monto)})`)
   else if (cortesias.length > 1) razones.push(`${cortesias.length} cortesías (${pesosCierre(cortesias.reduce((a, c) => a + c.monto, 0))})`)

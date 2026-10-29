@@ -66,10 +66,11 @@ describe('fuentes y estilo', () => {
     expect(pie).toContain('class="totalPages"')
   })
 
-  it('las nueve fuentes del repo son woff2 de verdad', () => {
+  it('las once fuentes del repo son woff2 de verdad', () => {
     const dir = path.join(__dirname, 'fuentes')
     const archivos = readdirSync(dir).filter((f) => f.endsWith('.woff2'))
-    expect(archivos).toHaveLength(9)
+    // 9 de la propuesta + Liberation Sans 400/700 de los documentos del expediente (2026-10-29).
+    expect(archivos).toHaveLength(11)
     for (const f of archivos) expect(readFileSync(path.join(dir, f)).subarray(0, 4).toString('latin1')).toBe('wOF2')
   })
 })

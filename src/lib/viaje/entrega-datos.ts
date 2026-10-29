@@ -27,7 +27,6 @@ import {
   cobroMinimo,
   configEntrega,
   esInternacional,
-  faltaDocumentos,
   huellaVouchers,
   leerPaqueteEnviado,
   mensajeCobroMinimo,
@@ -41,6 +40,13 @@ import {
   type PaqueteEnviado,
   type Vouchers,
 } from './entrega'
+import {
+  documentosPorViajero,
+  leerDocumentosViajero,
+  mensajeDocumentosViaje,
+  viajerosDelViaje,
+  type EstadoDocumentosViaje,
+} from './documentos-por-viajero'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -60,6 +66,11 @@ export interface VistaEntrega {
   cuentaRegresiva: string
   internacional: boolean | null
   documentos: Array<DocumentoViajero & { aviso: string | null }>
+  /**
+   * Los documentos de CADA viajero (QA 2026-10-29, H9-5/H6-4): pasaporte por viajero y, de los
+   * menores, registro civil y permiso de salida si no viajan con sus dos padres.
+   */
+  porViajero: EstadoDocumentosViaje
   faltaDocumento: string | null
   /** La asistencia médica que va en el viaje (Noor §11). Vacío si la cotización no la incluye. */
   asistencias: AsistenciaDelViaje[]
@@ -147,6 +158,13 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
   const cobro = cobroMinimo({ total, pagado: cobradoConfirmado(cobros), cuotas, fechaSalida: viaje.fechas.inicio, hoy, regla })
   const internacional = esInternacional(tipoDestino)
   const docs = await documentosDelContacto(db, workspaceId, contacto?.id ?? null)
+  const porViajero = documentosPorViajero({
+    internacional,
+    documentos: docs,
+    guardados: leerDocumentosViajero(base.negocio.metadata),
+    viajeros: viajerosDelViaje(viaje.composicion, nombre),
+    fechaRegreso: viaje.fechas.fin,
+  })
   const paquete = leerPaqueteEnviado(base.negocio.metadata)
   return {
     negocioId,
@@ -163,7 +181,8 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
     cuentaRegresiva: textoCuentaRegresiva(cobro, cuotas),
     internacional,
     documentos: docs.map(d => ({ ...d, aviso: avisoVencimiento(d, viaje.fechas.fin, nombre) })),
-    faltaDocumento: faltaDocumentos({ internacional, documentos: docs, fechaRegreso: viaje.fechas.fin, nombreContacto: nombre }),
+    porViajero,
+    faltaDocumento: mensajeDocumentosViaje(porViajero),
     asistencias: asistenciasDelViaje(filas),
     paquete,
     cambioVoucher: !!paquete && paquete.huella_vouchers !== huellaVouchers(filas),

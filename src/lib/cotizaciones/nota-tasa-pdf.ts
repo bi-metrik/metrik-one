@@ -76,8 +76,10 @@ function monedaDeLinea(l: LineaParaNotaTasa): { moneda: string; tasa: number } |
 }
 
 /**
- * Una viñeta por moneda: «Los hoteles y el traslado se le pagan al proveedor en dólares (USD). Los
- * valores en pesos de esta cotización se calcularon con una tasa de $4.150 por dólar.»
+ * Una viñeta por moneda (texto revisado por Vera el 2026-10-29): «Los hoteles y el traslado tienen
+ * tarifa en dólares (USD). Sus valores en pesos en esta cotización se calcularon con una tasa de
+ * $4.150 por dólar.» Con un solo servicio: «El hotel tiene tarifa en dólares (USD). Su valor en pesos
+ * en esta cotización se calculó con una tasa de $4.150 por dólar.»
  * Vacío si todo está en pesos.
  */
 export function notasDeTasaDeCambio(lineas: readonly LineaParaNotaTasa[]): string[] {
@@ -101,8 +103,8 @@ export function notasDeTasaDeCambio(lineas: readonly LineaParaNotaTasa[]): strin
     const tasas = acc.tasas.sort((a, b) => a - b).map(t => `$${tasaComoTexto(t)}`)
     const porUnidad = nombre ? `por ${nombre.unidad}` : `por cada ${moneda}`
     out.push(
-      `${sujeto.charAt(0).toUpperCase()}${sujeto.slice(1)} ${plural ? 'se le pagan' : 'se le paga'} al proveedor en ${enMoneda}. ` +
-      `Los valores en pesos de esta cotización se calcularon con ${tasas.length === 1 ? 'una tasa' : 'tasas'} de ${lista(tasas)} ${porUnidad}.`,
+      `${sujeto.charAt(0).toUpperCase()}${sujeto.slice(1)} ${plural ? 'tienen' : 'tiene'} tarifa en ${enMoneda}. ` +
+      `${plural ? 'Sus valores en pesos en esta cotización se calcularon' : 'Su valor en pesos en esta cotización se calculó'} con ${tasas.length === 1 ? 'una tasa' : 'tasas'} de ${lista(tasas)} ${porUnidad}.`,
     )
   }
   return out

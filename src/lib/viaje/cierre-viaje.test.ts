@@ -46,6 +46,19 @@ describe('cierre económico (F6-4, C8)', () => {
     expect(c.comisiones).toEqual([{ servicioId: 'hotel', proveedor: 'Andino', esperada: 45_000, estado: 'por_cobrar' }])
   })
 
+  it('un servicio sacado del viaje no pasa a margen en silencio: sigue en lo cotizado y se explica (H9-3)', () => {
+    const conAvion = [...servicios, { id: 'avion', nombre: 'Air France', proveedor_nombre: 'AF', estado: 'cancelado', costo_cotizado: 300_000, valor_por_pagar: null, comision_esperada: null, comision_estado: null }]
+    const c = calcularCierre({ ...A, precioAprobado: 4_052_000 + 300_000, cobrado: 4_076_300 + 300_000, servicios: conAvion })
+    // El margen cotizado es el del precio que aceptó el cliente, con el avión dentro.
+    expect(c.costoCotizado).toBe(3_400_000)
+    expect(c.margenCotizado).toBe(800_000)
+    expect(c.margenReal).toBe(960_000)
+    const avion = c.filas.find(f => f.id === 'avion')!
+    expect(avion).toMatchObject({ sacado: true, sinCosto: false, real: 0, diferencia: -300_000 })
+    expect(c.explicacion).toBe('Dejó $160.000 más de lo cotizado: Hotel (+$90.000), Air France sacado del viaje (-$300.000), una cortesía ($50.000).')
+    expect(faltaParaCerrar(c, leerCierreGuardado({}), 'Valeria')).not.toContain('Falta el costo real de Air France.')
+  })
+
   it('sin IVA en la línea: todo se recalcula con la misma fórmula', () => {
     const c = calcularCierre({ ...A, precioAprobado: 3_900_000, cobrado: 3_900_000, iva: 0, recargo: 0 })
     expect(c.margenReal).toBe(660_000)
