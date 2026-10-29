@@ -586,12 +586,16 @@ export async function leerCapturaEnBorrador(
   const ranura = definicionDeTipo(tipo)
   const reservaVariasHabitaciones = tipo === 'hotel' && opciones?.porPasos === true
     && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
+  // Brief del 2026-10-29, punto 4 · el traslado de ida y regreso de un solo pantallazo.
+  const trasladoIdaYRegreso = tipo === 'traslado' && opciones?.porPasos === true
+    && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
   const r = await leerImagenDeCaptura({
     ranura,
     dataUrl,
     viaje: ctx.viaje,
     enfoque,
     ...(reservaVariasHabitaciones ? { opciones: { reservaVariasHabitaciones: true } } : {}),
+    ...(trasladoIdaYRegreso ? { opciones: { trasladoIdaYRegreso: true } } : {}),
   })
   if (!r.ok) return r
   const leida = r.leida
