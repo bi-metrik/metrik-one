@@ -37,6 +37,10 @@ Lo no obvio:
   invariante de respaldo (citar las palabras) y ~20 pruebas guionadas apuntan `dicho_en` a mensajes que no lo dicen.
 - Una ficha de rol reescrita mueve casos lejanos: cambiar el texto de `g.natural` tumbó r-yo 3/3. Medir antes de
   tocar fichas compartidas por los dos roles.
+- `cargar_tanda` NO lleva a la extracción lo que el comercial escribió al pedirla («cárgalo, pero salen el 10»):
+  a-choque falla ~1/3 en la mano derecha (el texto dice 10, el resumen 8). Meterlo en `textos` cambia la huella de la
+  re-propuesta (rompe toque-conversacion-no-ejecuta y el «Cargar» de c1-1215): va como contexto aparte del puerto.
+- Quitar el nombre `cargar_tanda` de una frase de `g.viaje_o_gasto` tumbó md-yo a 0/3. Cada cambio de ficha = corrida.
 - Las fichas de archivos de ONE (`g.soporte`…) dan por hecho que todo archivo es un gasto: en la mano derecha van con
   `cuando` acotado a recibos/comprobantes, o la solicitud en PDF se trata como soporte.
 
