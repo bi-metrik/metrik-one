@@ -605,8 +605,9 @@ describe('Prueba corta del #1352 · bloqueo de tres paquetes, uno sin alimentaci
 
   it('D3 · dos versiones sin zona (no hay paradas): el renglón del hotel lleva las noches', async () => {
     const r = await conEnPropuesta(['Hotel Mar Azul Ficticio', 'Hotel Brisa Ficticio'])
-    // La causa: sin ciudad no hay paradas y las noches de la ruta daban 0 («Hoteles; …»).
-    expect(r.modelo.ruta.paradas).toEqual([])
+    // La causa: sin ciudad no había paradas y las noches de la ruta daban 0 («Hoteles; …»). Desde el
+    // QA G7 (V6) el paquete sin ciudad duerme en el destino del viaje: una parada, sin la zona.
+    expect(r.modelo.ruta.paradas.map(p => p.ciudad)).toEqual(['San Andrés'])
     expect(r.modelo.precio.incluye).toContain('4 noches de hotel; el hotel cambia según la versión')
     expect(r.modelo.precio.incluye.some(x => x.startsWith('Hoteles;'))).toBe(false)
   }, 60_000)
