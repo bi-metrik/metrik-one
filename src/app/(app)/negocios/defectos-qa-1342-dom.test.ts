@@ -345,7 +345,7 @@ describe('defecto 4 · el aviso del PDF de borrador se va cuando la cotización 
   it('la huella cambia con la comisión, con un paquete nuevo y con lo que va; no con nada más', async () => {
     const { huellaDelAvisoDelPdf } = await import('@/lib/cotizaciones/aviso-pdf-borrador')
     const base = {
-      items: [{ id: 'pq-a', subtotal: 4_300_000, precio_venta: 4_300_000, margen_porcentaje: 0, cantidad: 1, tarifa_pax: paquetePublico({ comisionPct: 5.8 }) }],
+      items: [{ id: 'pq-a', subtotal: 4_300_000, precio_venta: 4_300_000, margen_porcentaje: 0 as number | null, cantidad: 1, tarifa_pax: paquetePublico({ comisionPct: 5.8 }) }],
       tarifas: [{ id: 't1', vaEnPropuesta: true, seleccion: ['pq-a'] }],
       cotizacion: { margen_porcentaje: 15, estado: 'borrador' },
     }
