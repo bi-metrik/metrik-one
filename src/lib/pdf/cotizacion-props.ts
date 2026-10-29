@@ -96,11 +96,6 @@ export interface FocoDeFoto {
 export interface ViajePDF {
   /** «2 adultos y 1 niño». `null` si nadie declaró la composición del grupo. */
   viajeros: string | null
-  /**
-   * Cuántos viajan (adultos + niños + infantes). La propuesta le habla a UNA persona con usted y a
-   * varias con ustedes (S3 del QA del 2026-10-29). Opcional: ausente, ustedes, como siempre.
-   */
-  numeroDeViajeros?: number | null
   destino: string | null
   /** «23 oct 2026 – 30 oct 2026». `null` si no hay fechas. */
   fechas: string | null

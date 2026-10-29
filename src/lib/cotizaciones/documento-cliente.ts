@@ -512,7 +512,6 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
 export function huellaDeViaje(v: ViajeParaRedactar): string {
   // `alcance` se deriva de vuelos, hoteles y destino, que ya están en la huella: sumarlo cambiaría
   // la huella de todos los textos guardados sin que nada del viaje haya cambiado.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { alcance: _alcance, ...resto } = v
   const s = JSON.stringify(resto)
   let h1 = 0xdeadbeef

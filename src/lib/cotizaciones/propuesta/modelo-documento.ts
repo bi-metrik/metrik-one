@@ -107,6 +107,11 @@ export interface EntradaModeloPropuesta {
   lugaresDeOpcionales?: ({ ciudad: string | null; fecha: string | null } | null)[]
   /** El contacto y la empresa del negocio: a quién va dirigida la propuesta (2026-10-27). */
   cliente?: ClienteDelNegocio | null
+  /**
+   * S3 (QA del 2026-10-29): cuántos viajan (adultos, niños e infantes). Con uno, el documento le habla
+   * de usted; con varios o sin dato, de ustedes.
+   */
+  numeroDeViajeros?: number | null
 }
 
 // ── Salida ────────────────────────────────────────────────────────────────────
@@ -572,7 +577,9 @@ export function cargoParaElCliente(c: CargoEnDestinoPDF): { concepto: string; mo
       ? 'Tasa turística'
       : /impuesto|tasa|tax/.test(k)
         ? 'Impuestos y tasas de hospedaje'
-        : 'Impuestos o cargos del hotel'
+        : c.concepto && c.concepto !== 'Impuestos y tasas de hospedaje'
+          ? c.concepto
+          : 'Impuestos o cargos del hotel'
   if (!c.porNoche || typeof c.valor !== 'number') return { concepto, monto: c.monto }
   const cifra = (v: number) => `${v.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${c.moneda ? ` ${c.moneda}` : ''}`
   const total = c.noches && c.noches > 1 ? ` (${cifra(Math.round(c.valor * c.noches * 100) / 100)} por ${c.noches} noches)` : ''
@@ -590,6 +597,7 @@ export function modeloDePropuesta({
   asesora = null,
   lugaresDeOpcionales = [],
   cliente = null,
+  numeroDeViajeros: viajerosDeclarados = null,
 }: EntradaModeloPropuesta): ModeloPropuesta {
   const v = props.viaje ?? null
   const inicio = v?.fechaInicio ?? null
@@ -814,7 +822,7 @@ export function modeloDePropuesta({
     ? `${diasDelViaje} ${diasDelViaje === 1 ? 'día' : 'días'} · ${nochesDeHotel} ${nochesDeHotel === 1 ? 'noche' : 'noches'}`
     : v?.duracion ?? null
   // S3 (QA del 2026-10-29): con un solo viajero el documento le habla a él (usted), no al grupo.
-  const numeroDeViajeros = typeof v?.numeroDeViajeros === 'number' && v.numeroDeViajeros > 0 ? v.numeroDeViajeros : null
+  const numeroDeViajeros = typeof viajerosDeclarados === 'number' && viajerosDeclarados > 0 ? viajerosDeclarados : null
   const voz = vozPorViajeros(numeroDeViajeros)
   const introGuardado = v?.intro?.trim() || null
   const intro = introGuardado && textoConLaVozDelDocumento(introGuardado, nochesDeHotel, voz)

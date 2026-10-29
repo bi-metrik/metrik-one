@@ -553,7 +553,7 @@ function detalleDelAlquiler(t: TrayectoDoc): string {
   const a = t.alquiler
   if (!a) return ''
   const devolucion = [a.devolucion ? `devolución en ${a.devolucion}` : null, diaMes(a.fechaDevolucion)].filter(Boolean).join(', ')
-  return [a.recogida ? `Recogida en ${a.recogida}` : null, devolucion || null, a.vehiculo ? mayuscula(a.vehiculo.toLowerCase()) : null].filter(Boolean).join(' · ')
+  return [a.recogida ? `Recogida en ${a.recogida}` : null, devolucion || null, a.vehiculo].filter(Boolean).join(' · ')
 }
 
 function traslados(m: ModeloPropuesta): string {
