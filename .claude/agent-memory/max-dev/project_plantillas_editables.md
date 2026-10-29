@@ -1,15 +1,15 @@
 ---
 name: project-plantillas-editables
-description: Plantillas editables de documentos (DJ y Relación) por workspace — 29-oct; migraciones 20261029203000/203100 SIN aplicar; siembra SOENA sin activar; Chromium sin respaldo
+description: Plantillas editables de documentos (DJ y Relación) por workspace — 29-oct; migraciones 20261029203000/203100 APLICADAS (29-oct); siembra SOENA sin activar; Chromium sin respaldo
 metadata:
   type: project
 ---
 
 Módulo `src/lib/plantillas-documento/` + pantalla `/mi-negocio/plantillas` (aprobado por Mauricio el 2026-10-29, proyecto SOENA).
-Apilado sobre #1355 (IVA exacto): mergear #1355 primero y rebasar.
+PR #1356. El IVA exacto (#1355) ya está en main.
 
-- Migraciones SIN aplicar al abrir el PR: `20261029203000` (3 tablas, RLS) y `20261029203100` (SOENA: 4 editores
-  buscados por nombre, ABORTA si alguno no aparece 1 vez; v1 de DJ y Relación SIN activar).
+- Migraciones `20261029203000` (3 tablas, RLS) y `20261029203100` (SOENA: 4 editores
+  buscados por nombre, ABORTA si alguno no aparece 1 vez; v1 de DJ y Relación SIN activar). Las aplicó la sesión principal el 29-oct, antes del merge.
 - La lista de editores es por SQL, nunca por rol. Leidy (supervisor) fuera a propósito.
 - Sin fila en `plantillas_documento_activas` = componente @react-pdf de siempre. Con activa, Chromium y SIN
   respaldo: si falla, error (no imprime el texto viejo). `leerVersionActiva` trata la tabla ausente como «sin activa».

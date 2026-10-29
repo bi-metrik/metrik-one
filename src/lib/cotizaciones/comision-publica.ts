@@ -14,6 +14,7 @@
  */
 
 import { leerTipoTarifa, comisionEscrita, esTarifaPublica } from './tarifa-publica'
+import { leerPaqueteBloqueo } from './bloqueo-paquete'
 
 export interface LineaParaComision {
   id: string
@@ -30,6 +31,18 @@ export interface PublicaSinComision {
 const sinMayusculas = (t: string) => (t === t.toLocaleUpperCase('es-CO') && /[A-ZÁÉÍÓÚÑ]/.test(t)
   ? t.toLocaleLowerCase('es-CO').replace(/(^|\s)\p{L}/gu, m => m.toLocaleUpperCase('es-CO'))
   : t)
+
+/**
+ * El nombre que la asesora ve en la tarjeta. Un paquete de bloqueo se titula con su hotel tal como
+ * se leyó («Hotel Coral QA»); la línea guarda el nombre en MAYÚSCULA y pasarlo a tipo título daba
+ * «Hotel Coral Qa» (prueba corta del #1352). Las demás líneas, como siempre.
+ */
+function nombreVisible(l: LineaParaComision): string {
+  const raw = (l.tarifa_pax as { bloqueo?: unknown } | null)?.bloqueo
+  const hotel = raw ? leerPaqueteBloqueo(raw)?.hotel.hotel?.trim() : null
+  if (hotel) return hotel
+  return sinMayusculas((l.nombre ?? '').trim()) || 'Una opción'
+}
 
 /** ¿Esta línea es Pública y nadie escribió su comisión? */
 export function esPublicaSinComision(l: Pick<LineaParaComision, 'es_ajuste' | 'tarifa_pax'>): boolean {
@@ -50,7 +63,7 @@ export function publicasSinComisionQueSalen(
 ): PublicaSinComision[] {
   return lineas
     .filter(l => idsQueSalen.has(l.id) && esPublicaSinComision(l))
-    .map(l => ({ itemId: l.id, nombre: sinMayusculas((l.nombre ?? '').trim()) || 'Una opción' }))
+    .map(l => ({ itemId: l.id, nombre: nombreVisible(l) }))
 }
 
 /** El motivo con que «Enviar» se rechaza. `null` = todas las Públicas que salen tienen su comisión. */

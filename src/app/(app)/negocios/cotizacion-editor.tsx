@@ -180,6 +180,7 @@ import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { AvisoVersionNueva } from '@/app/(app)/negocios/aviso-version-nueva'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
+import { tarjetaDeOpcionEn } from '@/lib/cotizaciones/enfocar-comision'
 import { crearPaqueteBloqueo, paqueteEnPropuesta } from '@/app/(app)/negocios/bloqueo-actions'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
@@ -644,7 +645,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     abrirLinea(itemId)
     let intentos = 0
     const buscar = () => {
-      const el = document.querySelector(`[data-linea-id="${CSS.escape(itemId)}"]`)
+      // La línea o el paquete de bloqueo (`data-item-id`): prueba corta del #1352.
+      const el = tarjetaDeOpcionEn(document, itemId)
       if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
       if (++intentos < 20) setTimeout(buscar, 250)
     }
