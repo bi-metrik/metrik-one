@@ -222,10 +222,27 @@ describe('webhook de Bold: links del asistente de ventas (Ferretería)', () => {
     expect(ferreteria).not.toHaveBeenCalled()
   })
 
-  it('Ferretería falla: 500 para que Bold reintente', async () => {
+  it('si no se pudo revisar Ferretería, el pago de funciones (Sabor) se registra igual', async () => {
+    const b = base()
+    const c = evento()
+    const r = await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria: async () => { throw new Error('tabla caída') } })
+    expect(r.status).toBe(200)
+    expect(b.registros).toEqual([{ p_workspace_id: WS_A, p_referencia: 'LNK_ABC123', p_estado: 'aprobado', p_monto_recibido: 120000 }])
+  })
+
+  it('un link de Ferretería que falla adentro responde su 500 (Bold reintenta) y no pasa a funciones', async () => {
     const b = base()
     const c = evento({ ref: 'LNK_FER1' })
-    const r = await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria: async () => { throw new Error('base caída') } })
-    expect(r).toEqual({ status: 500, body: { ok: false, motivo: 'error_interno' } })
+    const r = await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria: async () => ({ status: 500, body: { ok: false, motivo: 'error_interno' } }) })
+    expect(r.status).toBe(500)
+    expect(b.rpc.mock.calls.some(([fn]) => fn === 'funcion_registrar_pago')).toBe(false)
+  })
+
+  it('la moneda del aviso llega a Ferretería', async () => {
+    const b = base()
+    const visto: unknown[] = []
+    const c = evento({ ref: 'LNK_FER1' })
+    await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria: async (...a) => { visto.push(a[4]); return { status: 200, body: { ok: true } } } })
+    expect(visto).toEqual(['COP'])
   })
 })

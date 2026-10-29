@@ -2,6 +2,7 @@ import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { createServiceClient } from '@/lib/supabase/server'
+import { consultarLinkBold, llavesBoldDelWorkspace } from '../../../supabase/functions/_shared/funciones/bold-workspace.ts'
 import { procesarPagoBold, type LinkBoldFila, type RepoLinksBold, type SalidaPagoBold } from './bold-pagos'
 import { puertoNegociosSistema } from './negocios-puerto'
 import { ROLES_EDITORES } from './reglas'
@@ -52,15 +53,33 @@ export function repoLinksBold(ws: string, cliente: SupabaseClient = createServic
       const { data } = await db.from('ferreteria_links_bold').select('veces_recibido').eq('id', id).maybeSingle()
       await db.from('ferreteria_links_bold').update({ veces_recibido: Number(data?.veces_recibido ?? 0) + 1 }).eq('id', id)
     },
-    async reclamar(id) {
+    async reclamar(id, ahoraIso, vencidoAntesDe) {
+      // Un solo UPDATE condicional: o está libre, o es un `procesando` viejo (un corte). Dos a la vez: gana uno.
       const { data, error } = await db
         .from('ferreteria_links_bold')
-        .update({ registro: 'procesando' })
+        .update({ registro: 'procesando', reclamado_at: ahoraIso })
         .eq('id', id)
-        .in('registro', ['creado', 'rechazado', 'error'])
+        .or(`registro.in.(creado,rechazado,error),and(registro.eq.procesando,reclamado_at.lt.${vencidoAntesDe})`)
         .select('id')
       if (error) throw new Error(`reclamar link de Bold: ${error.message}`)
       return (data ?? []).length === 1
+    },
+    async leer(id) {
+      const { data, error } = await db.from('ferreteria_links_bold').select(COLUMNAS).eq('id', id).maybeSingle()
+      if (error) throw new Error(`leer link de Bold: ${error.message}`)
+      return data ? aFila(data) : null
+    },
+    async anotarVenta(id, ventaId) {
+      const { error } = await db.from('ferreteria_links_bold').update({ venta_id: ventaId }).eq('id', id)
+      if (error) throw new Error(`anotar la venta en el link de Bold: ${error.message}`)
+    },
+    async marcarRechazado(id, ahoraIso) {
+      const { error } = await db
+        .from('ferreteria_links_bold')
+        .update({ registro: 'rechazado', motivo: 'Bold avisó un pago rechazado.', procesado_at: ahoraIso })
+        .eq('id', id)
+        .in('registro', ['creado', 'error'])
+      if (error) throw new Error(`marcar rechazo del link de Bold: ${error.message}`)
     },
     async cerrar(id, cierre, ahoraIso) {
       const { error } = await db
@@ -158,19 +177,38 @@ export async function atenderPagoBoldFerreteria(
   referencia: string,
   estado: 'aprobado' | 'fallido',
   monto: number | null,
+  moneda: string | null = null,
 ): Promise<SalidaPagoBold | null> {
   const links = repoLinksBold(ws)
-  const fila = await links.porReferencia(referencia)
+  let fila: LinkBoldFila | null
+  try {
+    fila = await links.porReferencia(referencia)
+  } catch (e) {
+    // No se pudo saber si es de Ferretería: el pago sigue por funciones (un link de Sabor no se queda sin registrar).
+    console.error(`[ferreteria/bold] no se pudo leer el link ${referencia}:`, (e as Error).message)
+    return null
+  }
   if (!fila) return null
   const ahora = new Date()
-  return procesarPagoBold(fila, { estado, monto }, {
+  const db = createServiceClient() as unknown as Db
+  return procesarPagoBold(fila, { estado, monto, moneda }, {
     ws,
     repo: repoSupabase(),
     links,
     negocios: () => puertoNegociosSistema(ws, 'Bold'),
+    consultarLink: async (ref) => {
+      const llaves = await llavesBoldDelWorkspace(db, ws).catch(() => ({ identidad: null }))
+      if (!llaves.identidad) return null
+      const r = await consultarLinkBold(llaves.identidad, ref)
+      return r ? { estado: r.estado, total: r.total } : null
+    },
     avisar: (texto, linkId) => avisarEquipo(ws, texto, linkId),
     confirmarEnChatwoot: (ref) => confirmarEnChatwoot(ws, ref),
     ahoraIso: ahora.toISOString(),
     hoyISO: todayBogotaISO(ahora),
+  }).catch((e): SalidaPagoBold => {
+    // Es un link de Ferretería y la base falló antes de tomarlo: 500 para que Bold reintente (nunca a funciones).
+    console.error(`[ferreteria/bold] pago ${referencia} sin procesar:`, (e as Error).message)
+    return { status: 500, body: { ok: false, motivo: 'error_interno' } }
   })
 }

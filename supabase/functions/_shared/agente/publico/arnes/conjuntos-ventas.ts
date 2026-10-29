@@ -83,7 +83,56 @@ export const CASOS_VENTAS: CasoPublico[] = [
       e.ventas!.pedidos[0]?.cuerpo.amount.total_amount === 265000 ? ok('Bold cobra $265.000') : no(`Bold cobra ${e.ventas!.pedidos[0]?.cuerpo.amount.total_amount}`),
       e.ventas!.links[0]?.direccion === 'Calle 1 # 2-3' && e.ventas!.links[0]?.cuentaId === e.llave.cuentaId ? ok('link guardado con la conversación') : no('el link no quedó guardado con la conversación'),
       contiene(e, 'Bold confirma tu pago'), persona(e, 'despachar'), nota(e, 'Pedido: MP-01'), nota(e, 'LNK_PRUEBA1'),
+      // El webhook todavía no registró la venta: la nota lo dice para que nadie despache a ciegas.
+      nota(e, 'AÚN NO está registrada en ONE'),
     ),
+  },
+  {
+    id: 'v-pagado-y-registrado', conjunto: 'ventas', titulo: '«Ya pagué» con la venta ya registrada por el webhook: la nota lo dice',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_LINK.pasos, { hacer: (e) => { e.ventas!.pagar('LNK_PRUEBA1'); e.ventas!.registrar('LNK_PRUEBA1'); } }, { escribe: 'ya pagué' }],
+    guion: [...HASTA_LINK.guion, VERIFICAR],
+    esperado: (e) => todos(persona(e, 'despachar'), nota(e, 'la venta ya quedó registrada en ONE')),
+  },
+  {
+    id: 'v-pagado-otro-monto', conjunto: 'ventas', titulo: 'Bold dice PAID con otro total: no confirma; persona (pago)',
+    ventas: { productos: PRODUCTOS_PRUEBA, consulta: { total: 100000 } },
+    pasos: [...HASTA_LINK.pasos, { hacer: (e) => { e.ventas!.pagar('LNK_PRUEBA1'); } }, { escribe: 'ya pagué' }],
+    guion: [...HASTA_LINK.guion, VERIFICAR],
+    esperado: (e) => todos(noContiene(e, 'Bold confirma tu pago'), persona(e, 'pago'), nota(e, 'el link era por $265.000')),
+  },
+  {
+    id: 'v-pagado-sandbox', conjunto: 'ventas', titulo: 'Bold dice PAID pero el link es de pruebas en un espacio real: no confirma; persona (pago)',
+    ventas: { productos: PRODUCTOS_PRUEBA, consulta: { sandbox: true } },
+    pasos: [...HASTA_LINK.pasos, { hacer: (e) => { e.ventas!.pagar('LNK_PRUEBA1'); } }, { escribe: 'ya pagué' }],
+    guion: [...HASTA_LINK.guion, VERIFICAR],
+    esperado: (e) => todos(noContiene(e, 'Bold confirma tu pago'), persona(e, 'pago'), nota(e, 'de pruebas')),
+  },
+  {
+    id: 'v-pagado-sandbox-espacio-pruebas', conjunto: 'ventas', titulo: 'Link de pruebas en un espacio de pruebas: sí confirma',
+    ventas: { productos: PRODUCTOS_PRUEBA, consulta: { sandbox: true, espacioDePruebas: true } },
+    pasos: [...HASTA_LINK.pasos, { hacer: (e) => { e.ventas!.pagar('LNK_PRUEBA1'); } }, { escribe: 'ya pagué' }],
+    guion: [...HASTA_LINK.guion, VERIFICAR],
+    esperado: (e) => todos(contiene(e, 'Bold confirma tu pago'), persona(e, 'despachar')),
+  },
+  {
+    id: 'v-aviso-chatwoot-caido', conjunto: 'ventas', titulo: 'El aviso del webhook no sale (Chatwoot caído): suelta el candado y «ya pagué» confirma después',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [
+      ...HASTA_LINK.pasos,
+      {
+        hacer: async (e) => {
+          e.ventas!.pagar('LNK_PRUEBA1');
+          e.chatwoot.fallar = 'rechazo';
+          const r = await avisarPagoAprobado(e.deps, 'LNK_PRUEBA1');
+          e.chatwoot.fallar = 'no';
+          if (r !== 'fallo') throw new Error(`el aviso con Chatwoot caído devolvió ${r}`);
+        },
+      },
+      { escribe: 'ya pagué' },
+    ],
+    guion: [...HASTA_LINK.guion, VERIFICAR],
+    esperado: (e) => todos(contiene(e, 'Bold confirma tu pago'), persona(e, 'despachar'), e.chatwoot.notas.filter((x) => x.texto.includes('despachar')).length === 1 ? ok('una nota de despacho') : no('notas de despacho ≠ 1')),
   },
   {
     id: 'v-descuento', conjunto: 'ventas', titulo: 'Pide descuento: precio autorizado, sin negociar ni pasar a persona',

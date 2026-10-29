@@ -54,7 +54,7 @@ export interface CasoPublico {
    * Dominio de ventas (Dimpro): el catálogo y la pasarela en memoria. Con esto el caso corre con el reglamento de Dimpro
    * (`ventas/reglamento-dimpro.ts`) y `config.dominio = 'ventas'`.
    */
-  ventas?: { productos: import('../ventas/catalogo-ventas.ts').ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean };
+  ventas?: { productos: import('../ventas/catalogo-ventas.ts').ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean; consulta?: { total?: number | null; sandbox?: boolean; espacioDePruebas?: boolean } };
   /** Casos de la petición del webhook, sin conversación. */
   soloCodigo?: () => Promise<Veredicto>;
 }

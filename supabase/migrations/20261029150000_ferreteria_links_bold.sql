@@ -53,7 +53,11 @@ create table public.ferreteria_links_bold (
     check (registro in ('creado', 'procesando', 'registrada', 'rechazado', 'error')),
   motivo text,
   monto_recibido numeric(14, 2),
-  venta_id uuid references public.ferreteria_ventas(id),
+  -- La venta, anotada APENAS se inserta (antes de crear su negocio): un reintento de Bold tras un corte a mitad la
+  -- encuentra y no crea otra. Si la venta se borra (limpieza de un registro fallido), el link queda sin ella.
+  venta_id uuid references public.ferreteria_ventas(id) on delete set null,
+  -- Cuándo lo tomó el webhook (`procesando`). Un `procesando` de más de 2 minutos es un corte: se vuelve a reclamar.
+  reclamado_at timestamptz,
   veces_recibido integer not null default 0 check (veces_recibido >= 0),
   created_at timestamptz not null default now(),
   procesado_at timestamptz,

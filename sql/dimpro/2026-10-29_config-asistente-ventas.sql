@@ -7,9 +7,8 @@
 -- Cuenta de Chatwoot 189134 (plan Startups, con API); bandeja «Dimpro Messenger», inbox 151556 (página Ingeniería
 -- Dimpro). Messenger entra como canal `otro` del asistente: ventana de 24 h. Instagram queda fuera por ahora.
 --
--- Queda APAGADO (`activo: false`). Antes de encenderlo:
---   1. Reemplazar <TERMINOS_URL_DIMPRO> por el link real de términos y política de datos (el bloque se niega a correr con
---      el marcador; sin él, el aviso de bot mostraría el link de ejemplo).
+-- Queda APAGADO (`activo: false`). Términos: https://dimpro.com.co/terminos/ (publicada; el bloque se niega a correr con
+-- un link que no sea https). Antes de encenderlo:
 --   2. Secretos de la Edge Function: CHATWOOT_WEBHOOK_SECRET_DIMPRO y CHATWOOT_API_TOKEN_DIMPRO.
 --   3. Agent Bot en la cuenta 189134 apuntando a …/functions/v1/chatwoot-agente?ws=dimpro, asignado al inbox 151556.
 --   4. Llaves de Bold en la bóveda de dimpro y el webhook de Bold → /api/webhooks/bold/funciones/67f7af44-b5ac-4d5c-aa9e-44954368447c.
@@ -19,11 +18,11 @@
 do $$
 declare
   v_ws constant uuid := '67f7af44-b5ac-4d5c-aa9e-44954368447c';
-  v_terminos constant text := '<TERMINOS_URL_DIMPRO>';
+  v_terminos constant text := 'https://dimpro.com.co/terminos/';
   v_chatwoot jsonb;
 begin
   if v_terminos like '<%' or v_terminos not like 'https://%' then
-    raise exception 'falta el link de términos de Dimpro (reemplaza <TERMINOS_URL_DIMPRO> por un https://…)';
+    raise exception 'falta el link de términos de Dimpro (un https://…)';
   end if;
   if not exists (select 1 from public.workspaces where id = v_ws and slug = 'dimpro') then
     raise exception 'esta configuración es solo del workspace dimpro';

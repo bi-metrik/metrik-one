@@ -56,7 +56,7 @@ export function ventasSupabase(supabase: SupabaseClient, workspaceId: string, f:
       const llaves = await llavesBoldDelWorkspace(supabase, workspaceId);
       if (!llaves.identidad) return 'sin_llaves';
       const r = await consultarLinkBold(llaves.identidad, referencia, f);
-      return r ? { estado: r.estado, total: r.total } : null;
+      return r ? { estado: r.estado, total: r.total, sandbox: r.sandbox, espacioDePruebas: llaves.espacioDePruebas === true } : null;
     },
     async linkPorHuella(huella) {
       const { data, error } = await supabase.from('ferreteria_links_bold').select(COLUMNAS_LINK).eq('workspace_id', workspaceId).eq('huella', huella).maybeSingle();

@@ -35,7 +35,11 @@ export interface LinkGuardado extends NuevoLink {
   registro: string;
 }
 
-export type EstadoLink = { estado: string; total: number | null } | 'sin_llaves' | null;
+/**
+ * El link en Bold: estado, total cobrado, si es del ambiente de pruebas y si el workspace es un espacio de pruebas (la
+ * marca de Vault de #1294: solo ahí vale un link de pruebas).
+ */
+export type EstadoLink = { estado: string; total: number | null; sandbox: boolean; espacioDePruebas: boolean } | 'sin_llaves' | null;
 
 export interface PuertosVentas {
   /** Las publicaciones activas con precio, con su producto. Lanza si la base falla. */
@@ -51,7 +55,11 @@ export interface PuertosVentas {
 }
 
 /** El doble: catálogo fijo, pasarela en memoria (o ninguna), estados de link que el caso fija a mano. */
-export function ventasEnMemoria(o: { productos: ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean }) {
+export function ventasEnMemoria(o: {
+  productos: ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean;
+  /** Lo que Bold responde al consultar (por defecto: el total del link, de producción). */
+  consulta?: { total?: number | null; sandbox?: boolean; espacioDePruebas?: boolean };
+}) {
   // Como Bold: arma el cuerpo real del pedido (valida monto y vencimiento) y devuelve un `LNK_…` con su checkout.
   const pedidos: Array<{ pedido: PedidoLink; cuerpo: CuerpoLinkBold }> = [];
   let n = 0;
@@ -73,7 +81,11 @@ export function ventasEnMemoria(o: { productos: ProductoVenta[]; sinLlaves?: boo
       consultas.push(referencia);
       if (o.sinLlaves) return 'sin_llaves';
       const l = links.find((x) => x.referencia === referencia);
-      return l ? { estado: estados.get(referencia) ?? 'ACTIVE', total: l.monto } : null;
+      if (!l) return null;
+      return {
+        estado: estados.get(referencia) ?? 'ACTIVE', total: o.consulta && 'total' in o.consulta ? o.consulta.total ?? null : l.monto,
+        sandbox: o.consulta?.sandbox ?? false, espacioDePruebas: o.consulta?.espacioDePruebas ?? false,
+      };
     },
     linkPorHuella: async (h) => structuredClone(links.find((x) => x.huella === h) ?? null),
     linkPorReferencia: async (r) => structuredClone(links.find((x) => x.referencia === r) ?? null),
@@ -84,5 +96,10 @@ export function ventasEnMemoria(o: { productos: ProductoVenta[]; sinLlaves?: boo
       return structuredClone(g);
     },
   };
-  return { puertos, links, estados, consultas, pedidos, pagar: (referencia: string) => estados.set(referencia, 'PAID') };
+  return {
+    puertos, links, estados, consultas, pedidos,
+    pagar: (referencia: string) => estados.set(referencia, 'PAID'),
+    /** Lo que haría el webhook al registrar la venta en ONE. */
+    registrar: (referencia: string) => { const l = links.find((x) => x.referencia === referencia); if (l) l.registro = 'registrada'; },
+  };
 }

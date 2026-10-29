@@ -82,6 +82,13 @@ export async function registrarVenta(
   entrada: EntradaVenta,
   autor: Autor,
   hoyISO: string,
+  opciones: {
+    /**
+     * Apenas la venta existe (antes de su negocio): el pago de Bold la anota en su link para que un reintento tras un
+     * corte a mitad no cree otra. Si lanza, la venta recién insertada se borra y el error sigue.
+     */
+    alInsertar?: (ventaId: string) => Promise<void>
+  } = {},
 ): Promise<{ ok: true; ventaId: string; negocioId: string; ganancia: number; avisos: string[] } | Fallo> {
   if (!FECHA.test(entrada.fecha_venta)) return { ok: false, mensaje: 'La fecha de la venta no es válida.' }
   if (entrada.fecha_venta > hoyISO) return { ok: false, mensaje: 'La fecha de la venta no puede ser futura.' }
@@ -122,6 +129,14 @@ export async function registrarVenta(
     registrado_por: autor.tipo === 'persona' ? autor.id : null,
     ...(cantidad > 1 ? { cantidad } : {}),
   })
+  if (opciones.alInsertar) {
+    try {
+      await opciones.alInsertar(venta.id)
+    } catch (e) {
+      await repo.borrarVenta(ws, venta.id)
+      throw e
+    }
+  }
 
   const creado = await negocios.crear({
     nombre: nombreNegocioVenta(pub),

@@ -192,7 +192,8 @@ async function pagoAprobado(supabase: SupabaseClient, req: Request, slug: string
     workspaceNombre: slug, precios: [], ahoraMs: () => Date.now(), reloj: () => performance.now(), nuevoId: () => crypto.randomUUID(),
     dormir: (ms) => new Promise((x) => setTimeout(x, ms)), escalamientos: escalamientosSupabase(supabase), ventas,
   }, referencia);
-  return json(200, { ok: true, resultado: r });
+  // 502 si Chatwoot no aceptó: el webhook lo deja en su log (la venta ya está); «ya pagué» lo vuelve a intentar.
+  return json(r === 'fallo' ? 502 : 200, { ok: r !== 'fallo', resultado: r });
 }
 
 Deno.serve(async (req) => {

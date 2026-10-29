@@ -13,9 +13,15 @@
  * referencia `BOLD-<LNK>` (fuente Bold). Después: campana al equipo y aviso al asistente para que le confirme al cliente
  * y pase a persona con `despachar`.
  *
- * Idempotencia por `LNK_…` (Bold reintenta): una fila por link; una ya `registrada` no hace nada; para trabajarla hay
- * que RECLAMARLA (`procesando` solo desde `creado`, `rechazado` o `error`), así dos entregas simultáneas no registran
- * dos ventas. Además `venta_id` es único en la tabla.
+ * Idempotencia por `LNK_…` (Bold reintenta): una fila por link; una ya `registrada` no hace nada. Para trabajarla hay
+ * que RECLAMARLA: `procesando` desde `creado`, `rechazado` o `error`, o desde un `procesando` de más de 2 minutos (un
+ * corte entre reclamar y cerrar). Dos entregas simultáneas no registran dos ventas; la que no pudo reclamar responde 500
+ * (`en_proceso`) y Bold reintenta: la encuentra cerrada, o vieja y la retoma.
+ * La venta queda anotada en el link APENAS se inserta (antes de su negocio). Si el proceso se corta después, el reintento
+ * la encuentra: con negocio la retoma como registrada; sin negocio la borra y registra de nuevo. Nunca dos ventas.
+ *
+ * El monto: el del aviso tiene que ser el del link y en COP. Si el aviso no trae monto, se le pregunta a Bold por el link
+ * (`consultarLink`, `PAID` con su total); si tampoco lo dice, no se registra.
  */
 import { formatoPesos } from './reglas'
 import { registrarVenta } from './ventas'
@@ -42,8 +48,11 @@ export interface LinkBoldFila {
   venta_id: string | null
 }
 
+/** Cuánto vive un `procesando` antes de leerse como un corte y volverse a reclamar. */
+export const PROCESANDO_VENCE_MS = 2 * 60_000
+
 export interface CierreLinkBold {
-  registro: 'registrada' | 'rechazado' | 'error'
+  registro: 'registrada' | 'error'
   motivo?: string | null
   venta_id?: string | null
   monto_recibido?: number | null
@@ -52,9 +61,18 @@ export interface CierreLinkBold {
 export interface RepoLinksBold {
   /** Suma una recepción del aviso (para ver los reintentos de Bold). */
   recibido(id: string): Promise<void>
-  /** Pasa la fila a `procesando` solo desde `creado`, `rechazado` o `error`. `false` = otro la tiene o ya terminó. */
-  reclamar(id: string): Promise<boolean>
+  /**
+   * Pasa la fila a `procesando` (con `reclamado_at`) desde `creado`, `rechazado` o `error`, o desde un `procesando`
+   * reclamado antes de `vencidoAntesDe`. `false` = otro la tiene ahora o ya terminó.
+   */
+  reclamar(id: string, ahoraIso: string, vencidoAntesDe: string): Promise<boolean>
+  /** La fila como está ahora en la base. */
+  leer(id: string): Promise<LinkBoldFila | null>
+  /** Anota (o quita) la venta del link sin cambiar su `registro`. */
+  anotarVenta(id: string, ventaId: string | null): Promise<void>
   cerrar(id: string, cierre: CierreLinkBold, ahoraIso: string): Promise<void>
+  /** Un pago rechazado: solo si la fila sigue en `creado` o `error` (nunca pisa una venta registrada ni una en curso). */
+  marcarRechazado(id: string, ahoraIso: string): Promise<void>
   /** La conversación de origen como fila de `ferreteria_conversaciones` (resultado `vendio`). Null si no se pudo. */
   conversacion(fila: LinkBoldFila, hoyISO: string): Promise<string | null>
 }
@@ -64,6 +82,8 @@ export interface DepsPagoBold {
   repo: RepoFerreteria
   links: RepoLinksBold
   negocios(): Promise<PuertoNegocios | { error: string }>
+  /** El link en Bold (`GET /online/link/v1/{LNK}`), para el aviso que no trae el monto. Null si no respondió. */
+  consultarLink(referencia: string): Promise<{ estado: string; total: number | null } | null>
   /** La campana del equipo. No lanza. */
   avisar(texto: string, linkId: string): Promise<void>
   /** El aviso al asistente (Chatwoot: confirmar y pasar a persona con `despachar`). No lanza. */
@@ -96,38 +116,72 @@ export function textoAvisoBold(tipo: 'registrada' | 'error', fila: LinkBoldFila,
 const listo = (body: Record<string, unknown>): SalidaPagoBold => ({ status: 200, body: { ok: true, ...body } })
 
 export async function procesarPagoBold(
-  fila: LinkBoldFila,
-  evento: { estado: 'aprobado' | 'fallido'; monto: number | null },
+  filaRecibida: LinkBoldFila,
+  evento: { estado: 'aprobado' | 'fallido'; monto: number | null; moneda?: string | null },
   deps: DepsPagoBold,
 ): Promise<SalidaPagoBold> {
-  await deps.links.recibido(fila.id)
-  if (fila.registro === 'registrada') return listo({ resultado: 'registrada', repetida: true })
+  const id = filaRecibida.id
+  await deps.links.recibido(id)
+  if (filaRecibida.registro === 'registrada') return listo({ resultado: 'registrada', repetida: true })
 
   if (evento.estado === 'fallido') {
     // El link sigue abierto en Bold: un rechazo no cierra nada; queda anotado por si el cliente vuelve a intentar.
-    if (fila.registro !== 'procesando') await deps.links.cerrar(fila.id, { registro: 'rechazado', motivo: 'Bold avisó un pago rechazado.' }, deps.ahoraIso)
+    await deps.links.marcarRechazado(id, deps.ahoraIso)
     return listo({ resultado: 'rechazado' })
   }
 
-  if (!(await deps.links.reclamar(fila.id))) return listo({ resultado: 'en_proceso' })
-  // Desde aquí la fila es de este proceso: cualquier salida la cierra.
-  const error = async (motivo: string, codigo: string | null, avisar = true): Promise<SalidaPagoBold> => {
-    await deps.links.cerrar(fila.id, { registro: 'error', motivo, monto_recibido: evento.monto }, deps.ahoraIso)
-    if (avisar) await deps.avisar(textoAvisoBold('error', fila, codigo, motivo), fila.id)
-    return listo({ resultado: 'error' })
+  const vencido = new Date(Date.parse(deps.ahoraIso) - PROCESANDO_VENCE_MS).toISOString()
+  if (!(await deps.links.reclamar(id, deps.ahoraIso, vencido))) {
+    return { status: 500, body: { ok: false, resultado: 'en_proceso' } }
   }
 
-  if (evento.monto !== null && Math.round(evento.monto) !== Math.round(fila.monto)) {
-    return error(`Bold cobró ${formatoPesos(evento.monto)} y el link era por ${formatoPesos(fila.monto)}: revisar antes de despachar.`, null)
+  // Desde aquí la fila es de este proceso: toda salida la cierra, y los cierres van dentro del try.
+  let ventaInsertada: string | null = null
+  let codigo: string | null = null
+  let fila = filaRecibida
+  const error = async (motivo: string, monto: number | null): Promise<SalidaPagoBold> => {
+    await deps.links.cerrar(id, { registro: 'error', motivo, monto_recibido: monto }, deps.ahoraIso)
+    await deps.avisar(textoAvisoBold('error', fila, codigo, motivo), id)
+    return listo({ resultado: 'error' })
   }
-  const pub = await deps.repo.publicacionPorId(deps.ws, fila.publicacion_id)
-  if (!pub) return error('La publicación del link ya no existe.', null)
-  let r: Awaited<ReturnType<typeof registrarVenta>>
   try {
+    fila = (await deps.links.leer(id)) ?? filaRecibida
+    const pub = await deps.repo.publicacionPorId(deps.ws, fila.publicacion_id)
+    codigo = pub?.codigo ?? null
+
+    // Un intento anterior se cortó con la venta ya insertada: con negocio se retoma; sin él, se limpia y se repite.
+    if (fila.venta_id) {
+      const previa = await deps.repo.ventaPorId(deps.ws, fila.venta_id)
+      if (previa?.negocio_id) {
+        await deps.links.cerrar(
+          id,
+          { registro: 'registrada', venta_id: previa.id, monto_recibido: evento.monto, motivo: 'Retomada tras un corte: revisar el pago anticipado en el negocio.' },
+          deps.ahoraIso,
+        )
+        await deps.avisar(textoAvisoBold('registrada', fila, codigo), id)
+        await deps.confirmarEnChatwoot(fila.referencia)
+        return listo({ resultado: 'registrada', venta: previa.id, retomada: true })
+      }
+      await deps.links.anotarVenta(id, null)
+      if (previa) await deps.repo.borrarVenta(deps.ws, previa.id)
+    }
+
+    if (evento.moneda && evento.moneda !== 'COP') return await error(`Bold avisó un pago en ${evento.moneda}, no en COP.`, evento.monto)
+    let monto = evento.monto
+    if (monto === null) {
+      const c = await deps.consultarLink(fila.referencia)
+      if (!c || c.estado !== 'PAID' || c.total === null) return await error('El aviso de Bold no trae el monto y Bold no lo confirmó al consultar el link.', null)
+      monto = c.total
+    }
+    if (Math.round(monto) !== Math.round(fila.monto)) {
+      return await error(`Bold cobró ${formatoPesos(monto)} y el link era por ${formatoPesos(fila.monto)}: revisar antes de despachar.`, monto)
+    }
+    if (!pub) return await error('La publicación del link ya no existe.', monto)
     const negocios = await deps.negocios()
-    if ('error' in negocios) return error(negocios.error, pub.codigo)
+    if ('error' in negocios) return await error(negocios.error, monto)
+
     const conversacionId = await deps.links.conversacion(fila, deps.hoyISO)
-    r = await registrarVenta(
+    const r = await registrarVenta(
       deps.repo,
       negocios,
       deps.ws,
@@ -145,20 +199,41 @@ export async function procesarPagoBold(
       },
       AUTOR_BOLD,
       deps.hoyISO,
+      {
+        alInsertar: async (ventaId) => {
+          await deps.links.anotarVenta(id, ventaId)
+          ventaInsertada = ventaId
+        },
+      },
     )
+    if (!r.ok) {
+      // registrarVenta ya borró la venta si no pudo crear el negocio: el link la suelta.
+      if (ventaInsertada) await deps.links.anotarVenta(id, null)
+      return await error(r.mensaje, monto)
+    }
+    await deps.links.cerrar(
+      id,
+      { registro: 'registrada', venta_id: r.ventaId, monto_recibido: monto, motivo: r.avisos.length ? r.avisos.join(' ') : null },
+      deps.ahoraIso,
+    )
+    await deps.avisar(textoAvisoBold('registrada', fila, codigo), id)
+    await deps.confirmarEnChatwoot(fila.referencia)
+    return listo({ resultado: 'registrada', venta: r.ventaId })
   } catch (e) {
-    // La base falló a mitad: Bold reintenta y la fila (en `error`) se vuelve a reclamar.
-    await deps.links.cerrar(fila.id, { registro: 'error', motivo: `Falló el registro de la venta: ${(e as Error).message}` }, deps.ahoraIso).catch(() => undefined)
+    // La base falló a mitad. Una venta sin negocio se borra (como en el fallo normal); con negocio queda anotada y el
+    // reintento la retoma. La fila pasa a `error` y Bold reintenta (500).
+    try {
+      if (ventaInsertada) {
+        const v = await deps.repo.ventaPorId(deps.ws, ventaInsertada)
+        if (v && !v.negocio_id) {
+          await deps.links.anotarVenta(id, null)
+          await deps.repo.borrarVenta(deps.ws, v.id)
+        }
+      }
+      await deps.links.cerrar(id, { registro: 'error', motivo: `Falló el registro de la venta: ${(e as Error).message}` }, deps.ahoraIso)
+    } catch {
+      // Sin base no se puede ni limpiar: la fila queda en `procesando` y se retoma cuando venza.
+    }
     return { status: 500, body: { ok: false, motivo: 'error_interno' } }
   }
-  if (!r.ok) return error(r.mensaje, pub.codigo)
-
-  await deps.links.cerrar(
-    fila.id,
-    { registro: 'registrada', venta_id: r.ventaId, monto_recibido: evento.monto, motivo: r.avisos.length ? r.avisos.join(' ') : null },
-    deps.ahoraIso,
-  )
-  await deps.avisar(textoAvisoBold('registrada', fila, pub.codigo), fila.id)
-  await deps.confirmarEnChatwoot(fila.referencia)
-  return listo({ resultado: 'registrada', venta: r.ventaId })
 }

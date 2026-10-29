@@ -78,6 +78,14 @@ describe('ferreteria_links_bold', () => {
     expect(await falla(link('LNK_A3', 'h4', { cantidad: '4' }))).toMatch(/check/)
   })
 
+  it('reclamado_at existe; borrar la venta suelta el link (on delete set null)', async () => {
+    await db.query(`insert into public.ferreteria_ventas (id) values ('00000000-0000-4000-8000-0000000000c9')`)
+    expect(await falla(link('LNK_D1', 'hd', { venta_id: `'00000000-0000-4000-8000-0000000000c9'`, reclamado_at: 'now()' }))).toBeNull()
+    await db.query(`delete from public.ferreteria_ventas where id = '00000000-0000-4000-8000-0000000000c9'`)
+    const r = await db.query<{ venta_id: string | null }>(`select venta_id from public.ferreteria_links_bold where referencia = 'LNK_D1'`)
+    expect(r.rows[0].venta_id).toBeNull()
+  })
+
   it('registrada exige venta, y una venta es de un solo link', async () => {
     expect(await falla(`update public.ferreteria_links_bold set registro = 'registrada' where referencia = 'LNK_A1'`)).toMatch(/registrada_con_venta/)
     expect(await falla(`update public.ferreteria_links_bold set registro = 'registrada', venta_id = '${VENTA}' where referencia = 'LNK_A1'`)).toBeNull()

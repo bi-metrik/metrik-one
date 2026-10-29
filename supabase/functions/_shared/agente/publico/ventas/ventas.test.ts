@@ -73,19 +73,19 @@ describe('configuración y reglamento de Dimpro', () => {
     expect(sis).not.toContain('Este es tu link de pago')
   })
 
-  it('el SQL de configuración: se niega sin el link de términos; con él deja dimpro en ventas, Messenger, apagado y sin pisar lo demás', async () => {
+  it('el SQL de configuración: se niega sin un link https de términos; con el publicado deja dimpro en ventas, Messenger, apagado y sin pisar lo demás', async () => {
     const sql = readFileSync(join(process.cwd(), 'sql/dimpro/2026-10-29_config-asistente-ventas.sql'), 'utf8')
     const db = new PGlite()
     await db.exec(`create table public.workspaces (id uuid primary key, slug text, config_extra jsonb);
       insert into public.workspaces values ('67f7af44-b5ac-4d5c-aa9e-44954368447c', 'dimpro', '{"bot_conversacional": {"activo": true, "chatwoot": {"rafaga_ms": 3000}}, "otra": 1}');`)
-    await expect(db.exec(sql)).rejects.toThrow(/términos/)
-    await db.exec(sql.replaceAll('<TERMINOS_URL_DIMPRO>', 'https://dimpro.example/terminos'))
+    await expect(db.exec(sql.replace("'https://dimpro.com.co/terminos/'", "'<sin link>'"))).rejects.toThrow(/términos/)
+    await db.exec(sql)
     const r = await db.query<{ c: Record<string, unknown> }>(`select config_extra as c from public.workspaces`)
     const c = r.rows[0].c as { otra: number; bot_conversacional: Record<string, unknown> }
     expect(c.otra).toBe(1)
     expect(c.bot_conversacional.activo).toBe(true)
     const cfg = leerConfigPublico(c.bot_conversacional)
-    expect(cfg).toMatchObject({ activo: false, dominio: 'ventas', cuentaId: 189134, rafagaMs: 3000, terminosUrl: 'https://dimpro.example/terminos', inboxes: [{ id: 151556, canal: 'otro', anuncio7Dias: false }] })
+    expect(cfg).toMatchObject({ activo: false, dominio: 'ventas', cuentaId: 189134, rafagaMs: 3000, terminosUrl: 'https://dimpro.com.co/terminos/', inboxes: [{ id: 151556, canal: 'otro', anuncio7Dias: false }] })
     await db.close()
   }, 30_000)
 

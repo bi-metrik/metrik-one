@@ -365,9 +365,20 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, 'rf.persona.pago') || respuestaFija(r, 'rf.persona') }], datos: { referencia: ref, estado: 'sin_respuesta' }, privado: { persona: { motivo: 'pago', pidio: 'dice que ya pagó; Bold no respondió al verificar' } } };
         }
         if (e.estado === 'PAID') {
+          // Lo que dice Bold tiene que ser ESTE pago: el total del link, de producción (un link de pruebas solo vale en un
+          // espacio de pruebas). Si no cuadra, lo revisa una persona; no se confirma nada.
+          const link = await o.puertos.linkPorReferencia(ref);
+          const montoLink = link?.monto ?? u.link?.monto ?? Number(u.datos.total);
+          const raro = e.sandbox && !e.espacioDePruebas ? 'Bold dice que el link es de pruebas'
+            : e.total === null ? 'Bold no devolvió el total cobrado'
+              : Math.round(e.total) !== Math.round(montoLink) ? `Bold cobró ${pesos(e.total)} y el link era por ${pesos(montoLink)}` : null;
+          if (raro) {
+            return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, 'rf.persona.pago') || respuestaFija(r, 'rf.persona') }], datos: { referencia: ref, estado: 'PAID', revisar: true }, privado: { persona: { motivo: 'pago', pidio: `dice que ya pagó; ${raro}: revisar antes de despachar` } } };
+          }
+          const enOne = link?.registro === 'registrada' ? 'la venta ya quedó registrada en ONE' : 'la venta AÚN NO está registrada en ONE: revisar el webhook de Bold antes de despachar';
           const primera = !motivosYaPasados(filas).includes('despachar') && await o.unaVez(claveConfirmacionPago(ctx.workspaceId, ref));
           if (!primera) return { ok: true, salidas: [{ tipo: 'texto', texto: fija(RF_PAGO_YA_CONFIRMADO) }], datos: { referencia: ref, estado: 'PAID' } };
-          return { ok: true, salidas: [{ tipo: 'texto', texto: fija(RF_PAGO_CONFIRMADO) }], datos: { referencia: ref, estado: 'PAID' }, privado: { persona: { motivo: 'despachar', pidio: 'pagó el pedido (Bold: PAID); despachar' } } };
+          return { ok: true, salidas: [{ tipo: 'texto', texto: fija(RF_PAGO_CONFIRMADO) }], datos: { referencia: ref, estado: 'PAID' }, privado: { persona: { motivo: 'despachar', pidio: `pagó el pedido (Bold: PAID, ${pesos(montoLink)}); ${enOne}` } } };
         }
         if (['ACTIVE', 'PROCESSING', 'PENDING', ''].includes(e.estado)) {
           return { ok: true, salidas: [{ tipo: 'texto', texto: fija(RF_PAGO_PENDIENTE) }], datos: { referencia: ref, estado: e.estado || 'ACTIVE' } };

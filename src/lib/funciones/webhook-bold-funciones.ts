@@ -48,7 +48,7 @@ export interface DepsWebhookFunciones {
    * El despacho a Ferretería (links del asistente de ventas). `null` = no es de ahí. Por defecto el real; con un `cliente`
    * de prueba y sin esto, no se despacha (las pruebas de funciones no tocan la base de Ferretería).
    */
-  ferreteria?: ((ws: string, referencia: string, estado: 'aprobado' | 'fallido', monto: number | null) => Promise<RespuestaWebhook | null>) | null
+  ferreteria?: ((ws: string, referencia: string, estado: 'aprobado' | 'fallido', monto: number | null, moneda: string | null) => Promise<RespuestaWebhook | null>) | null
 }
 
 export interface RespuestaWebhook {
@@ -127,12 +127,13 @@ export async function atenderWebhookBoldFunciones(
 
   const ferreteria = deps.ferreteria !== undefined ? deps.ferreteria : deps.cliente ? null : atenderPagoBoldFerreteria
   if (ferreteria) {
+    // Un link de Ferretería responde aquí (su 500 incluido). Si ni siquiera se pudo saber si era de Ferretería, se
+    // registra en el log y el pago sigue por funciones: un pago de Sabor no se queda sin registrar por la tabla de Dimpro.
     try {
-      const r = await ferreteria(workspaceId, evento.referencia, estado, evento.monto === null ? null : Math.round(evento.monto))
+      const r = await ferreteria(workspaceId, evento.referencia, estado, evento.monto === null ? null : Math.round(evento.monto), evento.moneda)
       if (r) return { status: r.status, body: { ...r.body, modo } }
     } catch (e) {
-      console.error(`[webhook-bold-funciones] pago de Ferretería falló (${workspaceId}): ${(e as Error).message.slice(0, 200)}`)
-      return no(500, 'error_interno')
+      console.error(`[webhook-bold-funciones] no se pudo revisar si el pago es de Ferretería (${workspaceId}): ${(e as Error).message.slice(0, 200)}`)
     }
   }
 

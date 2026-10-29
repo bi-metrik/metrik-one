@@ -742,8 +742,9 @@ export async function atenderConversacion(d: DepsPublico): Promise<number> {
  * si la conversación sigue con el bot (`pending`) y la ventana del canal está abierta; la nota, la etiqueta y el paso a
  * persona van siempre.
  */
-export async function avisarPagoAprobado(d: DepsPublico, referencia: string): Promise<'hecho' | 'ya'> {
-  if (!(await d.almacen.tomarCandado(claveConfirmacionPago(d.llave.workspaceId, referencia), 30 * 24 * 3600))) return 'ya';
+export async function avisarPagoAprobado(d: DepsPublico, referencia: string): Promise<'hecho' | 'ya' | 'fallo'> {
+  const clave = claveConfirmacionPago(d.llave.workspaceId, referencia);
+  if (!(await d.almacen.tomarCandado(clave, 30 * 24 * 3600))) return 'ya';
   const desde = new Date(d.ahoraMs() - DIAS_DE_CONVERSACION * 24 * 3600 * 1000).toISOString();
   const filas = await d.almacen.leer(d.llave, desde);
   const turnoId = d.nuevoId();
@@ -759,13 +760,26 @@ export async function avisarPagoAprobado(d: DepsPublico, referencia: string): Pr
   } else {
     traza.sin_publicar = !v.abierta ? `ventana: ${v.motivo}` : `la conversación está en «${estado}»: la tiene una persona`;
   }
-  const pidio = `pagó el link ${referencia} (aviso de Bold)`;
+  if (errores.length) {
+    // Chatwoot no aceptó la confirmación: se suelta el candado para que «ya pagué» (o el próximo aviso) lo intente.
+    await d.almacen.soltarCandado(clave);
+    console.error(`[asistente] el aviso del pago ${referencia} no salió: ${errores.join('; ')}`);
+    return 'fallo';
+  }
+  const pidio = `pagó el link ${referencia} (aviso de Bold; la venta ya quedó registrada en ONE)`;
   const paso: PasoAPersona = {
     motivo: 'despachar', etiqueta: ETIQUETA_MOTIVO.despachar, equipo: equipoDe(ESCALAMIENTO_CHATWOOT_HOY, 'despachar', d.config.equipos),
     nota: notaPersona({ motivo: 'despachar', pidio, filas, reserva: null, herramientas: [], ahoraIso: new Date(d.ahoraMs()).toISOString(), ventas: true }),
   };
   traza.persona = paso;
-  errores.push(...(await pasarAPersona(d, turnoId, paso)));
+  const fallasPaso = await pasarAPersona(d, turnoId, paso);
+  if (fallasPaso.includes('toggle_status') || fallasPaso.some((x) => x.startsWith('nota:'))) {
+    // Sin la nota o sin abrir la conversación, el equipo no se entera: se suelta para reintentar.
+    await d.almacen.soltarCandado(clave);
+    console.error(`[asistente] el paso a persona del pago ${referencia} no salió: ${fallasPaso.join('; ')}`);
+    return 'fallo';
+  }
+  errores.push(...fallasPaso);
   await registrarEscalamiento(d.escalamientos, {
     workspace_id: d.llave.workspaceId, rol_clave: d.rol?.clave ?? BOT_PUBLICO, canal: 'chatwoot', conversacion: `cw:${llaveTexto(d.llave)}`,
     motivo: 'despachar', resumen: resumenTraspaso('despachar', pidio), modo: 'pasado',

@@ -24,6 +24,8 @@ const inv = (clave: string, hacer: string, fuente = 'Diseño asistente público 
 const alc = (clave: string, cuando: string, hacer: string, fuente = 'Diseño asistente público §7.2, adaptado a ventas'): Ficha => ({ clave, tipo: 'alcance', carga: 'siempre', cuando, hacer, fuente });
 const persona = (clave: string, cuando: string, hacer: string): Ficha => ({ clave: `persona.${clave}`, tipo: 'guia', carga: 'siempre', cuando, hacer, fuente: 'brief ventas Dimpro §6' });
 const pol = (clave: string, texto: string): Ficha => ({ clave: `pol.${clave}`, tipo: 'guia', carga: 'con_herramienta', herramientas: [], hacer: texto, fuente: ENSAYO });
+/** Texto igual al de la página publicada de términos (https://dimpro.com.co/terminos/), con la revisión legal de Emilio (29-oct). */
+const polLegal = (clave: string, texto: string): Ficha => ({ clave: `pol.${clave}`, tipo: 'guia', carga: 'con_herramienta', herramientas: [], hacer: texto, fuente: 'Términos publicados de Dimpro (dimpro.com.co/terminos), revisión de Emilio 29-oct' });
 
 /** Versión de los textos legales del ensayo (aviso y autorización): la que queda en la prueba de cada consentimiento. */
 export const VERSION_TEXTOS_DIMPRO = '2026-10-29.ensayo-1';
@@ -68,7 +70,7 @@ export const REGLAMENTO_DIMPRO: Ficha[] = [
   persona('fuera_de_zona', 'la entrega es fuera de Bogotá urbana', 'pasar_a_persona motivo fuera_de_zona: una persona cotiza el flete y manda el link'),
   persona('cantidad', 'quiere más de 3 unidades', 'pasar_a_persona motivo cantidad'),
   persona('factura', 'pide factura a nombre de una empresa o con datos especiales', 'pasar_a_persona motivo factura'),
-  persona('garantia', 'habla de garantía, de un producto con falla, de un cambio o de una devolución', 'pasar_a_persona motivo garantia'),
+  persona('garantia', 'habla de garantía, de un producto con falla, de un cambio, de retractarse o de una devolución', 'pasar_a_persona motivo garantia (puedes contar antes la política con consultar_reglas garantia o cambios)'),
   persona('no_en_catalogo', 'pide un producto que no está en el catálogo', 'pasar_a_persona motivo no_en_catalogo'),
   persona('queja', 'hay una queja', 'pasar_a_persona motivo queja'),
   persona('no_entiende', 'van dos turnos seguidos sin entender, o la persona se frustra', 'pasar_a_persona motivo no_entiende'),
@@ -98,7 +100,7 @@ export const REGLAMENTO_DIMPRO: Ficha[] = [
   rf('rf.persona.fuera_de_zona', 'Para entregas fuera de Bogotá, una persona del equipo cotiza el flete y te envía el link de pago por aquí.'),
   rf('rf.persona.cantidad', 'Para pedidos de más de 3 unidades, una persona del equipo te atiende por aquí.'),
   rf('rf.persona.factura', 'Una persona del equipo te ayuda con los datos de la factura por aquí.'),
-  rf('rf.persona.garantia', 'La garantía y los cambios los atiende una persona del equipo de Dimpro; te escribe por aquí.'),
+  rf('rf.persona.garantia', 'La garantía, el retracto y las devoluciones los tramita DIMPRO: una persona del equipo te escribe por aquí.'),
   rf('rf.persona.no_entiende', 'Te paso con una persona del equipo para que te ayude mejor.'),
   rf('rf.persona.no_en_catalogo', 'Ese producto no lo tengo en el catálogo. Una persona del equipo te dice si lo pueden conseguir.'),
   rf('rf.persona.menor', 'Para hacer un pedido necesitamos que escriba un adulto. Te paso con alguien del equipo.'),
@@ -124,11 +126,12 @@ export const REGLAMENTO_DIMPRO: Ficha[] = [
     },
     fuente: ENSAYO,
   },
-  pol('despacho_bogota', 'Dentro de Bogotá urbana el flete es fijo de $15.000. Se entrega el día hábil siguiente al pago si pagas antes de las 2:00 p. m.; si no, el segundo día hábil. Aplica a lo que Dimpro tenga en bodega; si no hay, una persona del equipo te avisa.'),
+  pol('despacho_bogota', 'Dentro de Bogotá urbana el flete es fijo de $15.000. Se entrega el día hábil siguiente al pago si pagas antes de las 2:00 p. m.; si no, el segundo día hábil. Aplica a lo que Dimpro tenga en bodega; si no hay, una persona del equipo te avisa. Si un producto se pide a bodega, te decimos el plazo antes de pagar; nunca más de 30 días calendario.'),
   pol('recoger', 'Puedes recoger gratis en el punto de venta de Dimpro, con cita, desde el día hábil siguiente al pago. El equipo te escribe para agendar.'),
   pol('fuera_de_bogota', 'Fuera de Bogotá, una persona del equipo cotiza el flete y te envía el link de pago.'),
-  pol('pago', 'Un solo link de Bold con el producto y el flete. Pagas con tarjeta, PSE o Nequi, según lo que muestre Bold. El producto no se separa sin pago.'),
-  pol('garantia', 'La garantía es la del fabricante. El reclamo se tramita con Dimpro: te atiende una persona del equipo.'),
-  pol('cambios', 'Cambios con el producto sin usar y en su caja, dentro de los 5 días calendario siguientes a la entrega. El flete del cambio lo paga el cliente.'),
+  pol('pago', 'Un solo link de Bold con el producto y el flete. Pagas con tarjeta, PSE o Nequi, según lo que muestre Bold. El producto no se separa sin pago. El link lo genera METRIK IA S.A.S., aliado tecnológico de DIMPRO, por cuenta de DIMPRO; por eso puede aparecer ese nombre al pagar.'),
+  polLegal('garantia', 'Todos los productos tienen la garantía legal: el término que indique el fabricante o, si no lo indica, un año. DIMPRO recibe y tramita el reclamo; no tienes que ir primero al fabricante. Te atiende una persona del equipo.'),
+  // Derecho de retracto (compra a distancia). Sigue pasando a persona con motivo garantia.
+  polLegal('cambios', 'Como la compra es a distancia, puedes retractarte dentro de los 5 días hábiles siguientes a la entrega. El producto se devuelve en las mismas condiciones en que lo recibiste y el transporte de la devolución lo pagas tú. Te devolvemos lo pagado dentro de los 30 días calendario siguientes.'),
   pol('factura', 'La factura la emite Dimpro.'),
 ];
