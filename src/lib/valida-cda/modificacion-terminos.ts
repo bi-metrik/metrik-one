@@ -16,7 +16,7 @@
 
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { DocumentoContractual } from '@/lib/valida-api/resultados'
-import { SLUG_TERMINOS_CDA } from './plazos'
+import { SLUG_TERMINOS_CDA, sumarDias } from './plazos'
 
 /** A quién se le escribe para terminar sin penalidad (cláusula 15.1: el correo registrado de METRIK). */
 export const CORREO_TERMINACION = 'mauricio.moreno@metrik.com.co'
@@ -80,6 +80,17 @@ function queCambia(doc: Pick<DocumentoContractual, 'slug' | 'version' | 'titulo'
       `días sigue igual, y para una empresa al día nada cambia. Precio, alcance, usuarios y plazo no cambian.`
     )
   }
+  if (doc.slug === SLUG_TERMINOS_CDA && doc.version === 'v1.5') {
+    const alDia = fechaLarga(sumarDias(doc.vigenteDesde.slice(0, 10), -1))
+    return (
+      `Con esta versión, Valida funciona como una suscripción mensual, de fecha a fecha: pagas por anticipado ` +
+      `antes de tu fecha de renovación y tienes 5 días de gracia; del día 6 al 30 sin pago la suscripción queda ` +
+      `Suspendida por pago (sin consultas nuevas, con tu historial y tus reportes) y desde el día 31 queda ` +
+      `Cancelada. Los períodos que empiezan antes del ${desde} se pagan a más tardar el ${alDia}. Al terminar el ` +
+      `plazo de tu contrato (cláusula 16.4) necesitarás haberla aceptado para seguir consultando. El precio, las ` +
+      `consultas ilimitadas y los tres usuarios no cambian.`
+    )
+  }
   return `METRIK modifica los ${doc.titulo}. Lee el documento completo para ver qué cambia.`
 }
 
@@ -111,10 +122,17 @@ export function textosAvisoModificacion(
  */
 export function textoQuienAceptaModificacion(
   designadoNombre: string | null,
-  doc: Pick<DocumentoContractual, 'vigenteDesde'>,
+  doc: Pick<DocumentoContractual, 'vigenteDesde'> & Partial<Pick<DocumentoContractual, 'slug' | 'version'>>,
 ): string {
   const desde = fechaLarga(doc.vigenteDesde)
   const quien = designadoNombre ? `La persona designada por tu empresa, ${designadoNombre},` : 'La persona designada por tu empresa'
+  // La v1.5 sí se exige al terminar el plazo del contrato (cláusula 16.4): no se dice «no es obligatorio».
+  if (doc.slug === SLUG_TERMINOS_CDA && doc.version === 'v1.5') {
+    return (
+      `${quien} puede aceptar esta versión desde Valida. Mientras tanto Valida sigue funcionando, y la versión ` +
+      `rige desde el ${desde} en todo caso.`
+    )
+  }
   return (
     `${quien} puede aceptar esta versión desde Valida. Aceptarla no es obligatorio para seguir usando Valida, ` +
     `pero el cambio rige desde el ${desde} en todo caso.`
