@@ -9,7 +9,7 @@
 
 import { entornoPorDefecto, fetchModelo } from '../../llm-anthropic.ts';
 import { esquemaCarga, esquemaCargaCompacta } from '../bandeja/extraccion.ts';
-import { mensajesDeTextos } from '../bandeja/carga.ts';
+import { mensajesDeCarga } from '../bandeja/carga.ts';
 import { textoParaModelo } from '../../wa-guardianes.ts';
 import type { ExtractorMemoria } from '../memoria.ts';
 
@@ -30,14 +30,14 @@ export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; en
 export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean; fetch?: typeof fetch; modelo?: string } = {}): ExtractorMemoria {
   // `o.fetch`: el del arnés con Haiku (`proveedor-haiku.ts`), sin Gemini; `o.modelo`, el nombre que va en la URL.
   const f = o.fetch ?? fetchModelo;
-  return async ({ textos, campos, instrucciones, perfil }) => {
+  return async ({ textos, campos, instrucciones, perfil, pedido }) => {
     const t0 = performance.now();
     const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${o.modelo ?? MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(llave ? { 'x-goog-api-key': llave } : {}) },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
-        contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}` }] }],
+        contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido))}` }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: o.compacta ? esquemaCargaCompacta(campos, { perfil }) : esquemaCarga(campos, { perfil }) },
       }),
     });
