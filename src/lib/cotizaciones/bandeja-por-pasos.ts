@@ -18,7 +18,8 @@ import {
 } from './destino-por-pasos'
 import type { FilaDeLoteParaEnviar } from './bandeja-red'
 import type { Borrador } from './proceso-captura'
-import { definicionDeTipo, type TipoRanura } from './ranuras-cotizacion'
+import { normalizarGrupo } from './itinerarios'
+import { definicionDeTipo, grupoDeRanura, type TipoRanura } from './ranuras-cotizacion'
 import type { Composicion } from './tarifa-pasajero'
 import type { LineaParaUbicar } from './ubicar-lectura'
 import { resolverRanura } from './ranuras-pantallazo'
@@ -96,6 +97,74 @@ export function fraseDeFila(args: {
   return { destino: deOne, frase: fraseDeDestino(deOne, nuevo, lineas), capturaDestino: null }
 }
 
+/**
+ * Las frases de TODA la bandeja, como pasará al tocar «Aceptar los N» (G1 · M3, QA del
+ * 2026-10-29).
+ *
+ * El servidor acepta el lote en el orden en que se pegaron, y cada captura se ubica contra la
+ * cotización que dejaron las anteriores: la segunda de tres vuelos BOG–CUR va como opción del
+ * bloque que abrió la primera. La frase de cada fila se decía solo contra la página, así que las
+ * tres decían «Suma aparte» y al aceptar pasaba otra cosa (viajes 06, 07 y 08). Aquí cada fila
+ * se decide también contra las filas de ARRIBA en el orden de pegado; si cae con una de ellas,
+ * la frase la nombra («Otra opción de: … (en la bandeja)») y el lote la manda detrás de ella
+ * (`capturaDestino`), que es lo que de verdad hará el servidor.
+ *
+ * Solo toca lo que dicen las REGLAS: lo que eligió la persona o decidió el modelo queda igual.
+ * `capturas` va como la muestra la bandeja: lo nuevo arriba.
+ */
+export function frasesDeLaBandeja(args: {
+  capturas: readonly CapturaLista[]
+  lineas: readonly LineaParaUbicar[]
+  composicion: Composicion | null
+  destinoViaje: string | null
+  modelo: (capturaId: string) => DecisionDelModelo | null
+  eleccion: (capturaId: string) => Eleccion | null
+}): Map<string, FraseDeFila> {
+  const out = new Map<string, FraseDeFila>()
+  let simuladas: LineaParaUbicar[] = [...args.lineas]
+  /** El grupo provisional de una fila que abriría servicio, con quién lo abre. */
+  const deFila = new Map<string, { capturaId: string; titulo: string; servicio: string }>()
+  const enOrden = [...args.capturas].reverse()
+  enOrden.forEach((c, i) => {
+    const b = c.borrador
+    let f = fraseDeFila({
+      captura: c, lineas: args.lineas, composicion: args.composicion, destinoViaje: args.destinoViaje,
+      modelo: args.modelo(c.id), eleccion: args.eleccion(c.id),
+    })
+    if (f.destino.fuente === 'reglas' && !f.capturaDestino) {
+      const sim = destinoDeReglas({ tipo: b.tipo, lectura: b.lectura, pistas: b.pistas, lineas: simuladas, grupoViaje: args.composicion })
+      const grupo = sim.grupo ? normalizarGrupo(sim.grupo) : null
+      const otra = grupo ? deFila.get(grupo) : undefined
+      if (otra && (sim.como === 'hermana' || sim.como === 'habitacion')) {
+        const destino: DestinoPorPasos = {
+          como: sim.como, itemId: null, grupo: null, duda: false, fuente: 'reglas',
+          razon: sim.como === 'hermana'
+            ? `Mismo tipo, ruta o lugar y fechas que ${otra.titulo}, que también está en la bandeja: compite con él.`
+            : `Mismo hotel y mismas fechas que ${otra.titulo}, que también está en la bandeja: suma dentro de la opción.`,
+        }
+        const frase = sim.como === 'hermana'
+          ? `Otra opción de: ${otra.servicio} (en la bandeja)`
+          : `Otra habitación de: ${otra.titulo} (en la bandeja)`
+        f = { destino, frase, capturaDestino: otra.capturaId }
+      }
+    }
+    out.set(c.id, f)
+    // Lo que la cotización tendría después de aceptar esta fila, para decidir las de abajo.
+    const lectura = { id: `bandeja:${c.id}`, nombre: b.lectura.nombre ?? null, tarifa_pax: { casillas: { grupo_completo: b.lectura } } }
+    if (f.destino.como === 'nueva' && !f.capturaDestino) {
+      const grupo = grupoDeRanura({ tipo: b.tipo, numero: 900 + i, nombre: null })
+      deFila.set(normalizarGrupo(grupo) ?? grupo, { capturaId: c.id, titulo: c.titulo, servicio: nombreNuevo(b, args.destinoViaje) })
+      simuladas = [...simuladas, { ...lectura, grupo }]
+    } else if (f.destino.como === 'hermana' && f.capturaDestino) {
+      const grupo = [...deFila.entries()].find(([, v]) => v.capturaId === f.capturaDestino)?.[0]
+      if (grupo) simuladas = [...simuladas, { ...lectura, grupo }]
+    } else if (f.destino.como === 'hermana' && f.destino.grupo) {
+      simuladas = [...simuladas, { ...lectura, grupo: f.destino.grupo }]
+    }
+  })
+  return out
+}
+
 /** Una entrada del menú de la frase. */
 export interface EntradaDeMenu {
   etiqueta: string
@@ -143,7 +212,8 @@ export function cuerpoDeAceptar(
   const d = decisionParaAceptar(frase.destino)
   return {
     tipo: b.tipo, lecturaJson: b.lecturaJson, firma: b.firma, pistas: b.pistas,
-    decision: frase.capturaDestino ? 'hermana' : d.decision,
+    // «Otra habitación de» una fila de la bandeja (M3) va como habitación de la opción que deje.
+    decision: frase.capturaDestino ? (frase.destino.como === 'habitacion' ? 'habitacion' : 'hermana') : d.decision,
     destinoId: frase.capturaDestino ? (extra.destinoId ?? null) : d.destinoId,
     imagen: extra.imagen, correcciones: extra.correcciones, idAceptacion: extra.idAceptacion,
   }
