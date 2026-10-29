@@ -56,6 +56,7 @@ import {
 } from '@/lib/viaje/estado-servicio'
 import { columnasDeFechas, generarServiciosDesdeTarifa, leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
 import { validarFechasEditadas, type FechasEditadas } from '@/lib/viaje/fechas-servicio'
+import { rastroCambioLocalizador, rastroSacarDelViaje } from '@/lib/viaje/sacar-del-viaje'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const db = (c: unknown): any => c
@@ -182,6 +183,21 @@ function limpiarTexto(v: string | null | undefined, max: number): string | null 
 }
 
 /** Guardar un campo de la fila (al salir de él). */
+/** Lo que el rastro necesita de la fila ANTES de cambiarla: nombre, estado, localizador y lo pagado. */
+async function servicioParaRastro(supabase: unknown, workspaceId: string, servicioId: string): Promise<{ nombre: string; estado: string; localizador: string | null; costo_cotizado: number; pagado: number } | null> {
+  const { data } = await db(supabase)
+    .from('negocio_servicios')
+    .select('nombre, estado, localizador, costo_cotizado')
+    .eq('id', servicioId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle()
+  const f = data as { nombre: string | null; estado: string; localizador: string | null; costo_cotizado: number | null } | null
+  if (!f) return null
+  const { data: gastos } = await db(supabase).from('gastos').select('monto').eq('servicio_id', servicioId)
+  const pagado = ((gastos ?? []) as Array<{ monto: number | null }>).reduce((a, g) => a + (Number(g.monto) || 0), 0)
+  return { nombre: (f.nombre ?? '').trim(), estado: f.estado, localizador: f.localizador, costo_cotizado: Number(f.costo_cotizado) || 0, pagado }
+}
+
 export async function actualizarServicio(servicioId: string, cambios: CambiosServicio): Promise<Resultado> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, error: 'No autenticado' }
@@ -217,6 +233,8 @@ export async function actualizarServicio(servicioId: string, cambios: CambiosSer
   }
   if ('proveedor_nombre' in cambios) patch.proveedor_nombre = limpiarTexto(cambios.proveedor_nombre, 200)
   if ('localizador' in cambios) patch.localizador = limpiarTexto(cambios.localizador, 100)
+  // H9-3 / H9-4: sacar un servicio, devolverlo o cambiar un localizador ya guardado deja rastro.
+  const antes = ('estado' in cambios || 'localizador' in cambios) ? await servicioParaRastro(ctx.supabase, ctx.workspaceId, servicioId) : null
   if ('fecha_limite_pago' in cambios) {
     const f = (cambios.fecha_limite_pago ?? '').trim()
     if (f !== '' && !FECHA.test(f)) return { ok: false, error: 'La fecha límite no es válida.' }
@@ -237,6 +255,28 @@ export async function actualizarServicio(servicioId: string, cambios: CambiosSer
     .eq('id', servicioId)
     .eq('workspace_id', ctx.workspaceId)
   if (upErr) return { ok: false, error: upErr.message }
+  if (antes) {
+    const rastros: string[] = []
+    const sale = patch.estado === 'cancelado' && antes.estado !== 'cancelado'
+    const vuelve = antes.estado === 'cancelado' && typeof patch.estado === 'string' && patch.estado !== 'cancelado'
+    if (sale || vuelve) {
+      rastros.push(rastroSacarDelViaje({ nombre: antes.nombre, costoCotizado: antes.costo_cotizado, pagadoProveedor: antes.pagado, vuelve }))
+    }
+    if ('localizador' in patch) {
+      const r = rastroCambioLocalizador(antes.nombre, antes.localizador, (patch.localizador as string | null) ?? null)
+      if (r) rastros.push(r)
+    }
+    for (const contenido of rastros) {
+      await registrarActividad(ctx.supabase, {
+        workspace_id: ctx.workspaceId,
+        entidad_tipo: 'negocio',
+        entidad_id: fila.negocio_id,
+        tipo: 'cambio',
+        autor_id: ctx.staffId,
+        contenido,
+      }, 'actualizarServicio')
+    }
+  }
   if (cambioValor) {
     await registrarActividad(ctx.supabase, {
       workspace_id: ctx.workspaceId,
