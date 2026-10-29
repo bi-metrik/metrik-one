@@ -226,6 +226,7 @@ import {
   type AtencionCita,
   type EstadoBloque,
 } from '@/lib/negocios/seguimiento-citas'
+import { cerrarCotizacionesDelNegocioPerdido, textoCotizacionesCerradas } from '@/lib/cotizaciones/cerrar-al-perder'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
@@ -8901,6 +8902,9 @@ export async function perderNegocio(
 
   if (updErr) return { error: (updErr as { message: string }).message }
 
+  // H10-3: perdido el negocio, sus cotizaciones abiertas no siguen «enviadas» ni en borrador.
+  const cerradas = await cerrarCotizacionesDelNegocioPerdido(db(supabase), { workspaceId, negocioId })
+
   // Log en activity_log
   const razonLabel = etiquetaMotivoPerdida(cfgSeguimiento, razon)
   if (staffId) {
@@ -8910,7 +8914,7 @@ export async function perderNegocio(
       entidad_id: negocioId,
       tipo: 'cambio_estado',
       autor_id: staffId,
-      contenido: `Negocio desistido. Motivo: ${razonLabel}`,
+      contenido: `Negocio desistido. Motivo: ${razonLabel}${textoCotizacionesCerradas(cerradas)}`,
       valor_nuevo: 'perdido',
     }, 'perderNegocio')
   }
@@ -9007,6 +9011,8 @@ export async function pausarNegocio(
       .eq('id', negocioId)
       .eq('workspace_id', workspaceId)
     if (updErr) return { error: (updErr as { message: string }).message }
+    // H10-3: el auto-perdido también cierra sus cotizaciones abiertas.
+    await cerrarCotizacionesDelNegocioPerdido(db(supabase), { workspaceId, negocioId })
 
     if (staffId) {
       await registrarActividad(supabase, {

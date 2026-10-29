@@ -104,6 +104,8 @@ export interface PropsVistaPorPasos {
   pasoInicial: NumeroDePaso
   /** Por qué no se envía (lo de siempre): pantallazos de otros pasajeros, margen, costo. */
   motivoBotonEnviar: string | null
+  /** H10-1: la enviada que esta versión reemplaza al enviarse. `null` = no hay otra enviada. */
+  reemplaza?: { id: string; consecutivo: string | null } | null
   /** Cuántas cosas rojas y ámbar muestra la lista de Revisar (C6 la vuelve única). */
   conteoLista: { rojos: number; ambar: number }
   bandeja: ReactNode
@@ -724,8 +726,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         </>
       )}
       onDescargar={p.onDescargar}
+      reemplaza={p.reemplaza ? p.reemplaza.consecutivo : undefined}
       onEnviar={() => void correr(async () => {
-        const r = await enviarPorPasos(p.cotizacionId)
+        const r = await enviarPorPasos(p.cotizacionId, undefined, p.reemplaza?.id ?? null)
         if (!r.success) { toast.error(r.error); return }
         toast.success('Cotización enviada')
         p.refrescar()

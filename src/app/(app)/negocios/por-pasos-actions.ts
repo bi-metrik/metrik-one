@@ -745,8 +745,9 @@ export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ p
  * interruptor encendido: apagado, el envío de siempre no la conoce.
  *
  * `canal = 'descargado'` es el «Sí, ya se la mandé» tras descargar el PDF (H33).
+ * `reemplazarId`: la enviada que esta versión reemplaza (H10-1, ver `decidirEnvioConOtraEnviada`).
  */
-export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado'): Promise<ResultadoPorPasos> {
+export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado', reemplazarId?: string | null): Promise<ResultadoPorPasos> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
@@ -766,6 +767,6 @@ export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'd
   if (frenos.paquete) return { success: false, error: frenos.paquete }
   // D3 (2026-10-29): sin la comisión de una Pública no se sabe el margen; frena con su causa.
   if (frenos.comision) return { success: false, error: frenos.comision }
-  const r = await enviarCotizacion(cotizacionId, canal)
+  const r = await enviarCotizacion(cotizacionId, canal, reemplazarId ?? null)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }

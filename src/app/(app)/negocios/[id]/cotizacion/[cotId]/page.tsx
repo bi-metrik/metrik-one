@@ -85,6 +85,26 @@ export default async function CotizacionNegocioPage({
 
   // Check if any cotizacion in this negocio has estado='aceptada'
   let frozen = false
+  // H10-1: otra cotización del negocio ya enviada. Con esta en borrador, el editor lo dice desde
+  // que se abre y «Enviar» la reemplaza. Si la lectura falla, nada: el servidor frena igual.
+  let otraEnviada: { id: string; consecutivo: string | null } | null = null
+  if ((cotizacion as { estado?: string } | null)?.estado === 'borrador') {
+    try {
+      const { supabase: sbEnviada } = await getWorkspace()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: enviadas } = await (sbEnviada as any)
+        .from('cotizaciones')
+        .select('id, consecutivo')
+        .eq('negocio_id', id)
+        .eq('estado', 'enviada')
+        .neq('id', cotId)
+        .limit(1)
+      const fila = Array.isArray(enviadas) ? (enviadas[0] as { id: string; consecutivo: string | null } | undefined) : undefined
+      if (fila) otraEnviada = { id: fila.id, consecutivo: fila.consecutivo ?? null }
+    } catch {
+      // No crítico.
+    }
+  }
   try {
     const { supabase: sbCheck } = await getWorkspace()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -338,6 +358,7 @@ export default async function CotizacionNegocioPage({
       bloqueo={bloqueo}
       pedidoAutorizacion={pedidoAutorizacion}
       motivoAutorizacionDatos={motivoAutorizacionDatos}
+      otraEnviada={otraEnviada}
       pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el

@@ -350,6 +350,27 @@ describe('apagado: nada cambia (§7.1)', () => {
   })
 })
 
+describe('H10-2 · un negocio perdido no se confirma (QA del 2026-10-29)', () => {
+  it('desistido en Seguimiento: la acción se niega y no toca la cotización, el plan ni la confirmación', async () => {
+    sembrar()
+    tablas.negocios[0].estado = 'perdido'
+    const r = await confirmarClienteViaje(entrada())
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/cerrado/)
+    expect(tablas.cotizaciones[0].estado).toBe('enviada')
+    expect(planes()).toHaveLength(0)
+    expect(meta().confirmacion_cliente).toBeUndefined()
+  })
+
+  it('la vista lo dice: `negocioAbierto` en falso', async () => {
+    sembrar()
+    tablas.negocios[0].estado = 'perdido'
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.negocioAbierto).toBe(false)
+  })
+})
+
 describe('«El cliente confirmó» en una acción (F2-2)', () => {
   beforeEach(() => sembrar())
 
