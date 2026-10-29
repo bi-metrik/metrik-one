@@ -37,7 +37,7 @@ import { ciudadComparable, mismoLugar } from '@/lib/cotizaciones/bandeja-captura
 import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
 import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
-import { anchoDeCasilla, filasDeFichas, fotosDeFicha, fotosQueFaltan, type FilaDeFichas, type FotosDeFicha } from './fotos-ficha'
+import { anchoDeFoto, filasDeFichas, fotosDeFicha, fotosQueFaltan, type FilaDeFichas, type FotosDeFicha } from './fotos-ficha'
 import { encuadreDeFoto } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { formaAdmitida } from '@/lib/fotos/forma'
 
@@ -48,6 +48,8 @@ export interface FotoResuelta {
   foco?: { x: number; y: number } | null
   /** Ancho entre alto de la foto (medido al reducirla). `null`/ausente = no se sabe. */
   proporcion?: number | null
+  /** Paneles iguales en que está partida (díptico 2, tríptico 3; `paneles.ts`). Ausente = 1. */
+  paneles?: number | null
 }
 
 export interface RecursosPropuesta {
@@ -229,9 +231,13 @@ function fondoEnRecuadro(f: FotoResuelta, recuadro: number, extra = ''): string 
  */
 function imagenDeFichaDeHotel(fotos: FotoResuelta[], alto: number, dentro: string): string {
   const altura = `height:${alto}mm;`
-  const forma = anchoDeCasilla(ANCHO_FOTO_FICHA_MM, fotos.length) / alto
-  if (fotos.length === 1) return `<div class="img"${fondoEnRecuadro(fotos[0], forma, altura)}>${dentro}</div>`
-  return `<div class="img fila n${fotos.length}" style="${altura}grid-template-columns:repeat(${fotos.length},1fr)">${fotos.map((f) => `<div class="mx"${fondoEnRecuadro(f, forma)}></div>`).join('')}${dentro}</div>`
+  const paneles = (f: FotoResuelta) => Math.max(1, Math.round(f.paneles ?? 1))
+  const n = fotos.reduce((s, f) => s + paneles(f), 0)
+  const forma = (f: FotoResuelta) => anchoDeFoto(ANCHO_FOTO_FICHA_MM, n, paneles(f)) / alto
+  if (fotos.length === 1 && n === 1) return `<div class="img"${fondoEnRecuadro(fotos[0], forma(fotos[0]), altura)}>${dentro}</div>`
+  // Una foto de paneles ocupa tantas casillas como paneles tiene.
+  const casilla = (f: FotoResuelta) => `<div class="mx"${fondoEnRecuadro(f, forma(f), paneles(f) > 1 ? `grid-column:span ${paneles(f)};` : '')}></div>`
+  return `<div class="img fila n${n}" style="${altura}grid-template-columns:repeat(${n},1fr)">${fotos.map(casilla).join('')}${dentro}</div>`
 }
 
 /**
@@ -255,15 +261,17 @@ export function fotosDeLasFichas(m: ModeloPropuesta, r: RecursosPropuesta): {
       const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
       hoteles.push(o.hotel)
       ciudades.push(c.ciudad ?? null)
-      buenas.push((foto ? [foto, ...extras] : []).filter((f) => formaAdmitida(f.proporcion)))
+      // Regla de fotos: un collage irregular o una vertical no entra; una de paneles iguales, sí.
+      buenas.push((foto ? [foto, ...extras] : []).filter((f) => formaAdmitida(f.proporcion) || ((f.paneles ?? 1) > 1 && formaAdmitida((f.proporcion ?? 0) / (f.paneles ?? 1)))))
     }
   }
-  const fichas = buenas.map((fs) => fotosDeFicha(fs.map((f) => f.proporcion), ANCHO_FOTO_FICHA_MM))
+  const fichas = buenas.map((fs) => fotosDeFicha(fs, ANCHO_FOTO_FICHA_MM))
+  const elegidas = buenas.map((fs, i) => fichas[i].fotos.map((j) => fs[j]))
   return {
     hoteles,
-    fotos: buenas.map((fs, i) => fichas[i].fotos.map((j) => fs[j])),
+    fotos: elegidas,
     fichas,
-    filas: filasDeFichas(fichas, ciudades, COLUMNAS_HOTELES),
+    filas: filasDeFichas(fichas, elegidas, ciudades, COLUMNAS_HOTELES, ANCHO_FOTO_FICHA_MM),
   }
 }
 

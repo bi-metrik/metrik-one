@@ -18,11 +18,13 @@ const fila = (id: string, extra: Partial<FilaCatalogo>): FilaCatalogo =>
 describe('el documento no usa los collages ni las verticales de hotel que ya estaban', () => {
   it('se saltan y las demás van por categoría: fachada → sin categoría → habitación → zonas comunes', () => {
     const filas = [
-      fila('triptico', { principal: true, posicion: 1, proporcion: 2.786 }),
+      fila('triptico', { principal: true, posicion: 1, proporcion: 7 }),
+      fila('diptico', { posicion: 4, orden: 4, proporcion: 2.786, categoria: 'otra' }),
       fila('zonas', { posicion: 2, orden: 2, categoria: 'zonas_comunes' }),
       fila('vertical', { posicion: 3, orden: 3, proporcion: 0.669, categoria: 'fachada' }),
     ]
-    expect(fotosParaElDocumento(filas, { tipo: 'hotel', clave: 'kunuku|willemstad' }).map((f) => f.id)).toEqual(['zonas'])
+    // El díptico (2,79) puede ser de paneles iguales: pasa y el PDF lo confirma con los píxeles.
+    expect(fotosParaElDocumento(filas, { tipo: 'hotel', clave: 'kunuku|willemstad' }).map((f) => f.id)).toEqual(['zonas', 'diptico'])
     const ordenadas = [
       fila('hab', { principal: true, posicion: 1, categoria: 'habitacion' }),
       fila('sin', { posicion: 2, orden: 2 }),
@@ -38,7 +40,7 @@ describe('el documento no usa los collages ni las verticales de hotel que ya est
 
   it('en la biblioteca quedan marcadas («parece un collage o una foto vertical») y la tarjeta muestra la primera que sí sale', () => {
     const e = vistaDeElemento(
-      { tipo: 'hotel', clave: 'kunuku|willemstad', nombre: 'Kunuku', ciudad: 'Willemstad', fotos: [fila('triptico', { principal: true, proporcion: 2.786 }), fila('hab', { posicion: 2, categoria: 'habitacion', proporcion: '1.365' as unknown as number })] },
+      { tipo: 'hotel', clave: 'kunuku|willemstad', nombre: 'Kunuku', ciudad: 'Willemstad', fotos: [fila('triptico', { principal: true, proporcion: 7 }), fila('hab', { posicion: 2, categoria: 'habitacion', proporcion: '1.365' as unknown as number })] },
       new Map(),
     )
     expect(e.fotos.map((f) => [f.id, f.seImprime, f.collageOVertical])).toEqual([

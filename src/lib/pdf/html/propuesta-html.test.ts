@@ -192,6 +192,27 @@ describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => 
     expect(hoteles).not.toContain('background-image')
   })
 
+  it('un díptico de paneles iguales ocupa dos casillas de la ficha (PDF final aprobado, 2026-10-29)', { timeout: 60_000 }, async () => {
+    const datos = Buffer.alloc(360 * 262 * 3)
+    for (let i = 0; i < datos.length; i++) datos[i] = (i * 7) % 200
+    const p = await sharp(datos, { raw: { width: 360, height: 262, channels: 3 } }).png().toBuffer()
+    const diptico = await sharp({ create: { width: 730, height: 262, channels: 3, background: { r: 255, g: 255, b: 255 } } })
+      .composite([{ input: p, left: 0, top: 0 }, { input: p, left: 370, top: 0 }])
+      .jpeg()
+      .toBuffer()
+    const habitacion = await sharp(datos, { raw: { width: 360, height: 262, channels: 3 } }).jpeg().toBuffer()
+    const conDiptico: typeof CATALOGO_EUROPA = {
+      ...CATALOGO_EUROPA,
+      hotel: (h) => (/pullman/i.test(h)
+        ? { src: `data:image/jpeg;base64,${diptico.toString('base64')}`, origen: 'asesora', credito: null, extras: [{ src: `data:image/jpeg;base64,${habitacion.toString('base64')}`, origen: 'asesora', credito: null }] }
+        : null),
+    }
+    const { html, avisosFotos } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opciones(conDiptico))
+    const hoteles = html.slice(html.indexOf('>Hospedaje<'), html.indexOf('</section>', html.indexOf('>Hospedaje<')))
+    expect(hoteles).toMatch(/class="img fila n3" style="height:[\d.]+mm;grid-template-columns:repeat\(3,1fr\)"><div class="mx" style="grid-column:span 2;background-image/)
+    expect(avisosFotos.find((a) => /Pullman/.test(a.hotel))).toBeUndefined()
+  })
+
   it('un hotel no lleva una extra automática (sin elegir): ni la foto ni su crédito', { timeout: 60_000 }, async () => {
     const { html } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opciones(CATALOGO_EUROPA_BIBLIOTECA))
     expect(html).not.toContain(CREDITO_EXTRA_HOTEL_AUTOMATICA)

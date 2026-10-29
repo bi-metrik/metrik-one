@@ -11,16 +11,16 @@ import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
 import type { CatalogoPropuesta, FotoDeCatalogo } from '@/lib/pdf/html/propuesta-html'
 import { creditoDeFila, dataUrlDeFila, fotosDe, leerCatalogo, type FilaCatalogo } from './catalogo'
 import { claveDeFoto, fotoImprimible, MAX_FOTOS_EXTRA, nombreLlano, objetivo, sinRepetir, type ObjetivoFoto } from './clave'
-import { formaAdmitida, ordenarPorCategoria } from './forma'
+import { formaPosible, ordenarPorCategoria } from './forma'
 
 /**
  * Las fotos de una llave que pueden salir en el documento, en su orden. Las de un hotel, además,
- * sin collages ni verticales (`formaAdmitida`: quedan en la biblioteca, marcadas, pero no se
- * imprimen) y por categoría: fachada → habitación → zonas comunes (regla de fotos, 2026-10-29).
+ * sin collages irregulares ni verticales (`formaPosible`: quedan en la biblioteca, marcadas, pero no
+ * se imprimen; una de paneles iguales la confirma el PDF con los píxeles) y por categoría: fachada → habitación → zonas comunes (regla de fotos, 2026-10-29).
  */
 export function fotosParaElDocumento(filas: FilaCatalogo[], o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): FilaCatalogo[] {
   const todas = fotosDe(filas, o)
-  return o.tipo === 'hotel' ? ordenarPorCategoria(todas.filter((f) => formaAdmitida(f.proporcion))) : todas
+  return o.tipo === 'hotel' ? ordenarPorCategoria(todas.filter((f) => formaPosible(f.proporcion))) : todas
 }
 
 /**

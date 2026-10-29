@@ -4,7 +4,7 @@
  * del bucket ni ids de staff.
  */
 import type { CategoriaFoto } from './categoria'
-import { formaAdmitida } from './forma'
+import { formaPosible } from './forma'
 import { fotoImprimible, MAX_FOTOS_POR_ELEMENTO, objetivo, TIPOS_FOTO, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 
 export interface FotoVista {
@@ -88,7 +88,7 @@ export function vistaDeElemento(
     admiteOtra: e.fotos.length < MAX_FOTOS_POR_ELEMENTO,
     alias: e.alias ?? [],
     fotos: e.fotos.slice(0, MAX_FOTOS_POR_ELEMENTO).map((f, i) => {
-      const collageOVertical = e.tipo === 'hotel' && !formaAdmitida(f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion))
+      const collageOVertical = e.tipo === 'hotel' && !formaPosible(f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion))
       return {
         id: f.id,
         url: urls.get(f.ref) ?? null,

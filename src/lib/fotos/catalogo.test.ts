@@ -179,6 +179,18 @@ describe('la foto subida o pegada', () => {
     expect((await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: plan, bytes: await de(1460, 524), autorizacion: AUTORIZADA })).ok).toBe(true)
   })
 
+  it('un díptico de paneles iguales (como el del Kunuku) sí entra: ocupa dos casillas en la ficha', { timeout: 30_000 }, async () => {
+    const db = dobleConLlaves()
+    const datos = Buffer.alloc(360 * 262 * 3)
+    for (let i = 0; i < datos.length; i++) datos[i] = (i * 7) % 200
+    const p = await sharp(datos, { raw: { width: 360, height: 262, channels: 3 } }).png().toBuffer()
+    const diptico = await sharp({ create: { width: 730, height: 262, channels: 3, background: { r: 255, g: 255, b: 255 } } })
+      .composite([{ input: p, left: 0, top: 0 }, { input: p, left: 370, top: 0 }])
+      .jpeg()
+      .toBuffer()
+    expect((await ponerFotoPropia({ supabase: db, workspaceId: WS, staffId: 's1', objetivo: hotel, bytes: diptico, autorizacion: AUTORIZADA })).ok).toBe(true)
+  })
+
   it('un tour no lleva categoría (es de hotel)', { timeout: 30_000 }, async () => {
     const db = dobleConLlaves()
     await subir(db, plan, 0, { categoria: 'habitacion' })

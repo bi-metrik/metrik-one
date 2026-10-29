@@ -43,6 +43,26 @@ export function formaAdmitida(proporcion: number | null | undefined): boolean {
 }
 
 /**
+ * Cuántos paneles iguales PODRÍA tener una foto demasiado ancha para ser una sola (aprobación de
+ * Mauricio del PDF final del 2026-10-29): un díptico o un tríptico del sitio oficial, con cada panel
+ * de forma buena, ocupa tantas casillas de la ficha como paneles tenga. Solo la forma: si de verdad
+ * está partida en paneles lo dicen los píxeles (`paneles.ts`). De más paneles primero.
+ */
+export function panelesPosibles(proporcion: number | null | undefined): number[] {
+  const p = Number(proporcion)
+  if (!Number.isFinite(p) || p <= PROPORCION_MAXIMA) return []
+  return [3, 2].filter((n) => formaAdmitida(p / n))
+}
+
+/**
+ * ¿Puede salir en la ficha? Una foto sola de forma buena, o una que puede ser de paneles iguales.
+ * Lo usan la biblioteca y el catálogo, que no tienen los píxeles: el PDF confirma los paneles.
+ */
+export function formaPosible(proporcion: number | null | undefined): boolean {
+  return formaAdmitida(proporcion) || panelesPosibles(proporcion).length > 0
+}
+
+/**
  * El orden de las fotos de un hotel en su ficha: fachada (o piscina) primero, luego las que no
  * dicen qué muestran (las de antes del 2026-10-16: la asesora las ordenó a mano y la principal
  * suele ser la fachada), luego habitación, luego zonas comunes, luego «otra». A igual categoría, el

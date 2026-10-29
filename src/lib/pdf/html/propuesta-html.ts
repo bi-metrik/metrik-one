@@ -18,6 +18,8 @@ import sharp from 'sharp'
 import { modeloDePropuesta, type EntradaModeloPropuesta, type ModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { FotoPDF } from '@/lib/pdf/cotizacion-props'
 import { fotoImprimible, type OrigenFoto } from '@/lib/fotos/clave'
+import { formaAdmitida } from '@/lib/fotos/forma'
+import { panelesDeFoto } from '@/lib/fotos/paneles'
 import { fuentesDelDocumento } from '@/lib/pdf/chromium/fuentes'
 import { cssDeFuentes, inyectarEstilo } from '@/lib/pdf/chromium/recursos'
 import { imprimirHtmlAPdf, type MedidasRender } from '@/lib/pdf/chromium/render-chromium'
@@ -66,7 +68,7 @@ export async function reducirFotoConProporcion(
   ancho: number,
   calidad = 72,
   timeoutMs = 6000,
-): Promise<{ src: string; proporcion: number | null } | null> {
+): Promise<{ src: string; proporcion: number | null; paneles?: number } | null> {
   if (!src) return null
   const datos = await bytesDe(src, timeoutMs)
   if (!datos) return null
@@ -77,7 +79,9 @@ export async function reducirFotoConProporcion(
       .jpeg({ quality: calidad, mozjpeg: true })
       .toBuffer({ resolveWithObject: true })
     const proporcion = info.width > 0 && info.height > 0 ? info.width / info.height : null
-    return { src: `data:image/jpeg;base64,${data.toString('base64')}`, proporcion }
+    // Demasiado ancha para una sola: ¿es un díptico o un tríptico? (lo dicen los píxeles).
+    const paneles = proporcion !== null && !formaAdmitida(proporcion) ? await panelesDeFoto(datos, proporcion) : 1
+    return { src: `data:image/jpeg;base64,${data.toString('base64')}`, proporcion, ...(paneles > 1 ? { paneles } : {}) }
   } catch {
     return null
   }
@@ -257,9 +261,10 @@ export async function prepararPropuestaHtml(
     Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFotoConProporcion(url, ancho)] as const)),
     reducirLogo(opts.logoUrl),
   ])
-  const conMedida = resueltas.filter((x): x is readonly [string, { src: string; proporcion: number | null }] => x[1] !== null)
+  const conMedida = resueltas.filter((x): x is readonly [string, { src: string; proporcion: number | null; paneles?: number }] => x[1] !== null)
   const porUrl = new Map(conMedida.map(([url, f]) => [url, f.src] as const))
   const proporcionDe = new Map(conMedida.map(([url, f]) => [url, f.proporcion] as const))
+  const panelesDe = new Map(conMedida.map(([url, f]) => [url, f.paneles ?? 1] as const))
   const focoDe = new Map<string, FotoPDF['foco']>()
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
@@ -271,7 +276,8 @@ export async function prepararPropuestaHtml(
   const resolver = (url: string | null | undefined): FotoResuelta | null => {
     if (!url) return null
     const src = porUrl.get(url)
-    return src ? { src, foco: focoDe.get(url) ?? null, proporcion: proporcionDe.get(url) ?? null } : null
+    const paneles = panelesDe.get(url) ?? 1
+    return src ? { src, foco: focoDe.get(url) ?? null, proporcion: proporcionDe.get(url) ?? null, ...(paneles > 1 ? { paneles } : {}) } : null
   }
 
   // Las extras solo salen junto a su principal: sin ella, ni foto ni crédito.
