@@ -185,8 +185,8 @@ thead { display: table-header-group; }
 .img.mosaico.n2 { grid-template-rows: 1fr 1fr; }
 .img.mosaico .m0 { grid-row: 1 / -1; background-size: cover; background-position: center; }
 .img.mosaico .mx { background-size: cover; background-position: center; }
-.img.mosaico .hueco { background: linear-gradient(135deg,#fdf2f7,#f2e9f9); display:flex; align-items:center; justify-content:center; }
-.img.mosaico .hueco .ic { width: 7mm; height: 7mm; color: #e6197a; opacity: .28; vertical-align: 0; }
+.img.fila { display:grid; grid-template-rows: 1fr; gap: .6mm; background: #fff; }
+.img.fila .mx { background-size: cover; background-position: center; }
 `
 
 /** Los símbolos SVG que usa el documento (`<use href="#plane"/>`). */

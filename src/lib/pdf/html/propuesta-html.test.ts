@@ -148,11 +148,10 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
     expect(conFoto).toEqual(['Catalonia Puerta del Sol', 'H10 Metropolitan', 'Pullman Paris Tour Eiffel'])
     const hoteles = seccion(html, 'Hospedaje')
     // Regla de fotos (2026-10-29): la de Catalonia es vertical (0,67): queda el degradado.
-    // H10 y Pullman: su foto en la grande y las dos pequeñas, juntas, con el degradado.
-    expect((hoteles.match(/class="img mosaico n2" style="height:[\d.]+mm;/g) ?? []).length).toBe(2)
-    expect((hoteles.match(/background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(2)
-    expect((hoteles.match(/<div class="mx hueco" style="grid-row:1 \/ -1;"><svg/g) ?? []).length).toBe(2)
-    expect((hoteles.match(/class="img sinfoto"/g) ?? []).length).toBe(10)
+    // H10 y Pullman: su foto sola a todo lo ancho. Catalonia y los demás, sin recuadro (nunca un relleno).
+    expect((hoteles.match(/class="img" style="height:[\d.]+mm;background-image:url\(data:image\/jpeg/g) ?? []).length).toBe(2)
+    expect(hoteles).not.toContain('sinfoto')
+    expect(hoteles).not.toContain('hueco')
     // El aviso de «Revisar y enviar», una vez por hotel.
     expect(avisosFotos.find((a) => a.hotel === 'H10 Metropolitan')?.texto).toBe('Al H10 Metropolitan le faltan 2 fotos para la ficha: súbelas en su perfil.')
     expect(avisosFotos.find((a) => a.hotel === 'Catalonia Puerta del Sol')?.faltan).toBe(3)
@@ -166,18 +165,19 @@ describe('prepararPropuestaHtml con el catálogo de fotos (PR 4)', () => {
 describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => {
   const opciones = (catalogo: typeof CATALOGO_EUROPA) => ({ marca: 'A', logoUrl: null, fotoDeCiudad: bancoComoFotoPDF, catalogo })
 
-  it('las fichas de hotel siguen la regla de fotos (2026-10-29): grande + dos apiladas con sus fotos buenas, todas del mismo alto, sin verticales', { timeout: 60_000 }, async () => {
+  it('las fichas de hotel siguen la regla de fotos (2026-10-29): sus fotos buenas lado a lado y del mismo tamaño, sin verticales ni recuadros vacíos', { timeout: 60_000 }, async () => {
     // Catalonia sin su principal vertical (2 fotos); H10 sin la automática ni la vertical (2);
-    // Pullman con 1. Las tres con la misma composición.
+    // Pullman con 1.
     const { html, avisosFotos } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opciones(CATALOGO_EUROPA_BIBLIOTECA))
     const hoteles = html.slice(html.indexOf('>Hospedaje<'), html.indexOf('</section>', html.indexOf('>Hospedaje<')))
-    expect((hoteles.match(/class="img mosaico n2" style="height:[\d.]+mm;grid-template-columns:[\d.]+fr [\d.]+fr"/g) ?? []).length).toBe(3)
+    expect((hoteles.match(/class="img fila n2" style="height:[\d.]+mm;grid-template-columns:repeat\(2,1fr\)"/g) ?? []).length).toBe(2)
+    expect((hoteles.match(/class="img" style="height:[\d.]+mm;background-image/g) ?? []).length).toBe(1)
     expect((hoteles.match(/background-image/g) ?? []).length).toBe(5)
-    expect(new Set(hoteles.match(/class="img[^"]*" style="height:[\d.]+mm/g)?.map((x) => x.replace(/.*height:/, ''))).size).toBe(1)
+    expect(hoteles).not.toMatch(/sinfoto|hueco|mosaico/)
     expect(avisosFotos.map((a) => [a.hotel, a.faltan])).toEqual(expect.arrayContaining([['Catalonia Puerta del Sol', 1], ['H10 Metropolitan', 1], ['Pullman Paris Tour Eiffel', 2]]))
     expect(avisosFotos.find((a) => a.faltan === 1)?.texto).toMatch(/le falta 1 foto para la ficha: súbela en su perfil\.$/)
-    // El plan opcional sigue con su mosaico de principal + 2 (4 en total con los 3 hoteles).
-    expect((html.match(/class="img mosaico n2"/g) ?? []).length).toBe(4)
+    // El plan opcional sigue con su mosaico de principal + 2.
+    expect((html.match(/class="img mosaico n2"/g) ?? []).length).toBe(1)
   })
 
   it('un collage de hotel no sale aunque quepa en una ficha ancha (la forma lo frena, no el recorte)', { timeout: 60_000 }, async () => {

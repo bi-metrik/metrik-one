@@ -181,16 +181,14 @@ describe('las fotos de los hoteles de las tres tarifas llegan al PDF', () => {
     expect(palma.extras ?? []).toEqual([])
   })
 
-  it('el HTML del documento las imprime todas con foto, del mismo alto y sin recuadro vacío (regla de fotos del 2026-10-29)', () => {
-    const recuadros = captura.html.match(/class="img[^"]*" style="height:[\d.]+mm/g) ?? []
-    expect(recuadros).toHaveLength(3)
-    // La misma composición en las tres (grande + dos apiladas), del mismo alto.
-    expect(recuadros.every(c => c.startsWith('class="img mosaico n2" '))).toBe(true)
-    expect(new Set(recuadros.map(c => c.replace(/.*height:/, ''))).size).toBe(1)
-    // 3 + 2 + 1 fotos; la casilla vacía de la segunda y las dos de la tercera (juntas), el tono suave.
+  it('el HTML del documento las imprime todas, lado a lado y del mismo tamaño, sin recuadro vacío (regla de fotos del 2026-10-29)', () => {
     const hoteles = captura.html.slice(captura.html.indexOf('>Hospedaje<'), captura.html.indexOf('</section>', captura.html.indexOf('>Hospedaje<')))
+    // 3, 2 y 1 fotos: tres iguales, dos iguales y una sola a todo lo ancho.
+    expect(hoteles).toMatch(/class="img fila n3" style="height:[\d.]+mm;grid-template-columns:repeat\(3,1fr\)"/)
+    expect(hoteles).toMatch(/class="img fila n2" style="height:[\d.]+mm;grid-template-columns:repeat\(2,1fr\)"/)
+    expect(hoteles).toMatch(/class="img" style="height:[\d.]+mm;background-image/)
     expect((hoteles.match(/background-image:url\(data:image/g) ?? []).length).toBe(6)
-    expect((hoteles.match(/class="mx hueco"/g) ?? []).length).toBe(2)
+    expect(hoteles).not.toMatch(/sinfoto|hueco/)
     // «Revisar y enviar» recibe el aviso (no bloquea): a la segunda le falta 1; a la tercera, 2.
     expect(captura.avisosFotos).toEqual([
       expect.stringMatching(/^Al .+ le falta 1 foto para la ficha: súbela en su perfil\.$/),
