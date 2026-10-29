@@ -291,6 +291,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const irDesdeLaLista = (d: DestinoDeIr) => {
     if (d.a === 'opcion') { setPaso(1); p.onAbrirOpcion(d.itemId); return }
     if (d.a === 'tarifas') { irAPaso(2); return }
+    // El arreglo a un toque (punto 3 del 2026-10-29): la misma elección de Tarifas, con su «Deshacer».
+    if (d.a === 'poner-en-tarifa') { elegir(d.itinerarioId, d.grupo, d.itemId); return }
     if (d.a === 'bandeja' || d.a === 'viaje') { irAPaso(1); return }
     if (typeof document !== 'undefined') document.getElementById('doc')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
