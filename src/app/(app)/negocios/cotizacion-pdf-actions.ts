@@ -1424,6 +1424,9 @@ export async function generateCotizacionPDF(
     const viaje = {
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
+      ...(delNegocio.composicion
+        ? { numeroDeViajeros: delNegocio.composicion.adultos + delNegocio.composicion.ninos + delNegocio.composicion.infantes }
+        : {}),
       destino,
       fechas: rangoDeFechas(rango.inicio, rango.fin),
       duracion: duracionDelViaje(rango.inicio, rango.fin),

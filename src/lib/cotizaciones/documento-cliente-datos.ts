@@ -126,7 +126,7 @@ export async function leerContextoTextoCliente(
   }))
 
   const negocioId = typeof fila.negocio_id === 'string' ? fila.negocio_id : null
-  const { viaje: delNegocio } = await leerViajeDelNegocio(supabase, negocioId)
+  const { viaje: delNegocio, visaEnTramite } = await leerViajeDelNegocio(supabase, negocioId)
 
   // Los nombres del cliente NO van al modelo: se usan para borrarlos del texto libre.
   // La línea del negocio trae los términos base y la voz de la agencia.
@@ -152,6 +152,7 @@ export async function leerContextoTextoCliente(
     fechas: delNegocio.fechas,
     composicion: delNegocio.composicion,
     nombresDelCliente: nombres,
+    visaEnTramite: visaEnTramite === true,
   })
 
   return {

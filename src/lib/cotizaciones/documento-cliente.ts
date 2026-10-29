@@ -36,6 +36,7 @@ import {
   type ItemConLectura,
 } from './detalle-viaje'
 import { normalizarTerminos } from './terminos-cotizacion'
+import { dondeQueda } from './vuelo-internacional'
 import { hotelesDePaquetes, vuelosDePaquetes } from './bloqueo-documento'
 import { incluyeConPropias } from './incluye-por-one'
 import type { ParrafoViejo } from './parrafo-viejo'
@@ -314,6 +315,17 @@ export interface ViajeParaRedactar {
   otrosServicios: string[]
   /** Lo que se paga allá, sin el monto. */
   cargosEnDestino: { concepto: string; ciudad: string | null }[]
+  /**
+   * QA Trappvel del 2026-10-29 (V3, V5): `nacional` si todo el viaje queda en Colombia,
+   * `internacional` si algún vuelo o el destino quedan fuera, ausente si no se sabe. Decide si el
+   * consejo es la cédula o el pasaporte (y si un adaptador de enchufe tiene sentido). NO entra en la
+   * huella: sale de los vuelos y el destino, que ya están en ella.
+   */
+  alcance?: 'nacional' | 'internacional'
+  /** V8-2: la solicitud registra una visa en trámite (`visaEnTramite`). Ausente = no. */
+  visaEnTramite?: true
+  /** S7-4 / N7-4: los carros de alquiler (que ya no van en `traslados`). Ausente = ninguno. */
+  alquilerDeCarro?: string[]
 }
 
 export interface ItemParaRedactar extends ItemConLectura {
@@ -331,6 +343,23 @@ export interface EntradaRedactor {
    * del texto libre que sí va, por si alguien los escribió en el nombre de una línea.
    */
   nombresDelCliente: string[]
+  /** V8-2 · la solicitud registra una visa en trámite (`condicion-visa.ts`). */
+  visaEnTramite?: boolean
+}
+
+/**
+ * ¿El viaje es nacional o internacional? Internacional si un vuelo o el destino quedan fuera de
+ * Colombia; nacional si todo lo que se reconoce queda en Colombia. Sin nada reconocible, `null`:
+ * el redactor no afirma ninguna de las dos.
+ */
+export function alcanceDelViaje(
+  lugares: readonly (string | null | undefined)[],
+  destino: string | null | undefined,
+): 'nacional' | 'internacional' | null {
+  const donde = [...lugares, destino].filter((l): l is string => typeof l === 'string' && l.trim() !== '').map((l) => dondeQueda(l).donde)
+  if (donde.includes('exterior')) return 'internacional'
+  const conocidos = donde.filter((d) => d !== 'desconocido')
+  return conocidos.length > 0 && conocidos.every((d) => d === 'colombia') ? 'nacional' : null
 }
 
 /** Texto sin tildes y en minúscula, con el mapa de vuelta a las posiciones originales. */
@@ -423,7 +452,8 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
   const rango = rangoDelViajeCotizado({ vuelos: vuelosPdf, hoteles: hotelesLeidos }, e.fechas)
   const hoteles = hotelesConFechasDelViaje(hotelesLeidos, rango).map(h => ({
     nombre: limpio(h.hotel),
-    ciudad: limpio(h.ciudad),
+    // La zona del paquete (V6) sigue llegando al redactor como antes: la entrada no cambia.
+    ciudad: limpio(h.ciudad ?? h.zona ?? null),
     estrellas: h.estrellas,
     entrada: h.checkIn,
     salida: h.checkOut,
@@ -453,10 +483,23 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
     viajeros: c ? { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes } : null,
     vuelos,
     hoteles,
-    traslados: servicios.filter(s => s.tipo === 'traslado').map(conFecha).filter((x): x is string => x !== null),
+    traslados: servicios.filter(s => s.tipo === 'traslado' && !s.esAlquiler).map(conFecha).filter((x): x is string => x !== null),
     actividades: servicios.filter(s => s.tipo === 'actividad').map(conFecha).filter((x): x is string => x !== null),
     otrosServicios,
     cargosEnDestino: cargosEnDestinoDeItems(items).map(g => ({ concepto: g.concepto, ciudad: limpio(g.ciudad) })),
+    // Las claves nuevas solo cuando dicen algo: un viaje sin ellas tiene la misma huella de antes.
+    ...(() => {
+      const alcance = alcanceDelViaje(
+        [...vuelosPdf.flatMap(v => [v.origen, v.destino]), ...hotelesLeidos.map(h => h.ciudad)],
+        e.destino,
+      )
+      const carros = servicios.filter(s => s.esAlquiler).map(conFecha).filter((x): x is string => x !== null)
+      return {
+        ...(alcance ? { alcance } : {}),
+        ...(e.visaEnTramite ? { visaEnTramite: true as const } : {}),
+        ...(carros.length > 0 ? { alquilerDeCarro: carros } : {}),
+      }
+    })(),
   }
 }
 
@@ -467,7 +510,11 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
  * entrada?». Corre igual en el servidor y en el navegador.
  */
 export function huellaDeViaje(v: ViajeParaRedactar): string {
-  const s = JSON.stringify(v)
+  // `alcance` se deriva de vuelos, hoteles y destino, que ya están en la huella: sumarlo cambiaría
+  // la huella de todos los textos guardados sin que nada del viaje haya cambiado.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { alcance: _alcance, ...resto } = v
+  const s = JSON.stringify(resto)
   let h1 = 0xdeadbeef
   let h2 = 0x41c6ce57
   for (let i = 0; i < s.length; i++) {
@@ -765,23 +812,28 @@ export function promptDelRedactor(ejemplos: readonly TextoCliente[] = []): strin
   const partes = [
     `Eres redactor comercial de Trappvel, una agencia de viajes colombiana. Escribes el texto que acompaña una cotización de viaje que se le envía a un cliente.
 
-Recibirás un JSON con los datos del viaje (destino, fechas, viajeros, vuelos, hoteles, traslados, actividades, otros servicios y cargos que se pagan en destino). Es TODO lo que sabes del viaje.
+Recibirás un JSON con los datos del viaje (destino, fechas, viajeros, vuelos, hoteles, traslados, actividades, otros servicios y cargos que se pagan en destino; y, cuando aplican, "alcance" (nacional o internacional), "visaEnTramite" y "alquilerDeCarro"). Es TODO lo que sabes del viaje.
 
 Produce:
 1. "titular": una frase corta (máximo 70 caracteres) que nombre el destino. Sin precios ni nombres de personas.
 2. "intro": una o dos frases (máximo 260 caracteres) que presenten el viaje. Primero el dato (a dónde, cuántas noches, qué hotel) y después UN atributo real del destino, de conocimiento general (el mar, una zona arqueológica, el clima), sin prometer servicios.
-3. "incluye": de 3 a 8 renglones con lo que el cliente RECIBE, cada uno descrito como servicio y con sus detalles útiles. Ejemplos de forma: "Tiquetes aéreos Bogotá – San Andrés – Bogotá con Avianca, con equipaje de mano y de bodega", "5 noches en el Hotel X con desayuno", "Traslado aeropuerto – hotel – aeropuerto".
-4. "antes_de_viajar": de 2 a 5 consejos prácticos para el viajero de este viaje: documentos, clima, llegar con anticipación al aeropuerto, cargos que se pagan en destino. Tono de consejo.
+3. "incluye": de 3 a 8 renglones con lo que el cliente RECIBE, cada uno descrito como servicio y con sus detalles útiles. Ejemplos de forma: "Tiquetes aéreos Bogotá – San Andrés – Bogotá con Avianca, con equipaje de mano y de bodega", "5 noches en el Hotel X con desayuno", "Traslado aeropuerto – hotel – aeropuerto", "Alquiler de carro con recogida en el aeropuerto de Orlando y devolución en el de Miami".
+4. "antes_de_viajar": de 2 a 6 consejos prácticos para los viajeros de este viaje: documentos, clima, llegar con anticipación al aeropuerto, cargos que se pagan en destino. Tono de consejo.
 
 REGLAS (obligatorias):
 - No inventes nada que no esté en el JSON: ni hoteles, ni alimentación, ni traslados, ni actividades, ni seguros, ni equipaje, ni horarios. Si un dato no está (por ejemplo, el régimen de alimentación), no lo menciones.
-- Cada renglón de "incluye" tiene que corresponder a un elemento del JSON (un vuelo, un hotel, un traslado, una actividad o un otro servicio). Nunca copies el nombre interno de una línea ni códigos de reserva; describe el servicio.
+- Cada renglón de "incluye" tiene que corresponder a un elemento del JSON (un vuelo, un hotel, un traslado, un alquiler de carro, una actividad o un otro servicio). Nunca copies el nombre interno de una línea ni códigos de reserva; describe el servicio.
+- Un elemento de "alquilerDeCarro" es un carro que los viajeros manejan, no un traslado: descríbelo como alquiler de carro, nunca como traslado.
 - Los cargos que se pagan en destino NO van en "incluye": si existen, recuérdalos en "antes_de_viajar" diciendo que se pagan allá, sin montos.
 - "antes_de_viajar" son consejos para el viajero, no condiciones de la reserva: nunca incluye validez de tarifas, disponibilidad, cambios, cancelaciones, penalidades ni formas de pago. Eso va en los términos y condiciones, que tú no escribes.
 - En "antes_de_viajar" puedes incluir recomendaciones generales y conocidas del destino y del tipo de viaje (documentos de identidad, anticipación en el aeropuerto, requisitos de ingreso del destino, clima), sin cifras, sin precios y sin horarios que no estén en el JSON.
+- Un consejo tiene que aplicar a ESTE viaje. Si "alcance" es "nacional": el documento es la cédula (y el registro civil o la tarjeta de identidad de los menores); no hables de pasaporte, visa, adaptadores de enchufe, cambio de moneda ni requisitos de ingreso de otro país. Si "alcance" es "internacional": el pasaporte vigente es obligatorio para cada viajero; dilo sin condicionales como "si aplica" o "si lo requiere". Si "alcance" no viene, no supongas ninguno de los dos.
+- Si viajan niños o infantes ("viajeros"), un consejo sobre sus documentos. En un viaje internacional: cada menor, también el bebé, necesita su propio pasaporte vigente; conviene llevar su registro civil de nacimiento; y el menor que viaje con uno solo de sus padres, o sin ellos, necesita el permiso de salida del país firmado por quien no viaja y autenticado en notaría. En un viaje nacional: el registro civil o la tarjeta de identidad de cada menor.
+- Si "visaEnTramite" es true, un consejo que recuerde que la visa tiene que estar aprobada antes de la fecha del viaje y que le avisen a la agencia apenas tengan la respuesta. Sin hablar de pagos, reembolsos ni cancelaciones.
+- Si hay "alquilerDeCarro", un consejo para manejar allá: la licencia de conducción vigente (y el permiso internacional de conducción si el destino lo pide), una tarjeta de crédito a nombre de quien maneja para el depósito, los peajes del recorrido y, si viajan niños, las sillas para ellos.
 - Nada de precios, montos ni monedas en ningún campo.
 - No uses nombres de personas.
-- Español de Colombia. Si te diriges al cliente, trátalo de usted; nunca lo tutees.
+- Español de Colombia. Nunca tutees. Si en "viajeros" viaja una sola persona, háblale de usted en singular ("Recuerde", "Lleve"); si viajan dos o más, o no se sabe cuántos, de ustedes en plural ("Recuerden", "Lleven"). Nunca mezcles las dos formas en el mismo texto.
 - Ortografía del español: después de dos puntos va minúscula, y nada de mayúsculas de título en frases.
 
 ESTILO (obligatorio): el de Trappvel, cálido y sin exagerar. Lo firma una agencia real, no un folleto.

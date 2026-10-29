@@ -92,7 +92,10 @@ export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: F
     out.push({
       linea: (item.nombre ?? '').trim(),
       hotel: p.hotel.hotel,
-      ciudad: p.hotel.zona,
+      // V6 (QA del 2026-10-29): la zona («Centro», «Playa Bávaro») no es la ciudad. La propuesta
+      // tomaba la zona como destino («DESTINOS: Centro»); sin ciudad, usa la del viaje.
+      ciudad: null,
+      zona: p.hotel.zona,
       habitacion: p.hotel.habitacion,
       regimen: p.hotel.planAlimentacion,
       checkIn: fechaCorta(fechas.entrada),
