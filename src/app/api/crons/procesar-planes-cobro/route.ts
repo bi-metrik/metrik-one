@@ -26,6 +26,7 @@ import { detectarReversosEpayco, type ResumenReversos } from '@/lib/cobros/rever
 import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } from '@/lib/valida-registro/cobro-prueba-servidor'
 import { conciliarRegistrosConCobroPendiente, type ResumenRegistrosCobroPendiente } from '@/lib/valida-registro/cargo-tardio-servidor'
 import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
+import { avisarFallaCron, fallasDeResumen } from '@/lib/alertas-internas/vigias'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -614,7 +615,7 @@ export async function GET(req: NextRequest) {
     avisoSuspensionError = err instanceof Error ? err.message : String(err)
   }
 
-  return NextResponse.json({
+  const respuesta = {
     ok: true,
     fecha: hoyStr,
     cobros_creados: cobrosCreados,
@@ -655,5 +656,13 @@ export async function GET(req: NextRequest) {
     ciclos_valida_error: ciclosValidaError,
     aviso_suspension: avisoSuspension,
     aviso_suspension_error: avisoSuspensionError,
-  })
+  }
+
+  // Correo interno a MéTRIK si algún paso falló entero (los `*_error`) o si el ciclo de suscripciones no
+  // pudo ni leer sus filas. Las fallas de un registro suelto siguen solo en el resumen.
+  const fallas = fallasDeResumen(respuesta)
+  for (const e of suscripcionesErrores) if (e.suscripcion_id === '*') fallas.push(`suscripciones: ${e.error}`)
+  await avisarFallaCron('procesar-planes-cobro', fallas, { ventana: 'dia' })
+
+  return NextResponse.json(respuesta)
 }
