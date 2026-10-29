@@ -10,6 +10,7 @@ import { buscarProductos, fichaDe, numeroDeCodigo, productoParaModelo, productoP
 import { productosDeFilas } from './produccion-ventas'
 import { REGLAMENTO_DIMPRO } from './reglamento-dimpro'
 import { semillaSqlDimpro } from './semilla-sql-dimpro'
+import { PGlite } from '@electric-sql/pglite'
 
 const reglamento = async () => ({ id: 'r', version: 1, huella: await huellaDe(REGLAMENTO_DIMPRO), fichas: REGLAMENTO_DIMPRO })
 
@@ -66,11 +67,27 @@ describe('configuración y reglamento de Dimpro', () => {
     expect(REGLAMENTO_DIMPRO.map(fichaValida).every(Boolean)).toBe(true)
     const sis = sistemaPublico(await reglamento(), CONFIG_POR_DEFECTO, { herramientas: HERRAMIENTAS_VENTAS })
     expect(sis).toContain('acción compra')
-    expect(sis).toContain('Messenger o Instagram')
+    expect(sis).toContain('por Messenger, en')
     expect(sis).not.toContain('ver_funciones')
     expect(sis).not.toContain('15000')
     expect(sis).not.toContain('Este es tu link de pago')
   })
+
+  it('el SQL de configuración: se niega sin el link de términos; con él deja dimpro en ventas, Messenger, apagado y sin pisar lo demás', async () => {
+    const sql = readFileSync(join(process.cwd(), 'sql/dimpro/2026-10-29_config-asistente-ventas.sql'), 'utf8')
+    const db = new PGlite()
+    await db.exec(`create table public.workspaces (id uuid primary key, slug text, config_extra jsonb);
+      insert into public.workspaces values ('67f7af44-b5ac-4d5c-aa9e-44954368447c', 'dimpro', '{"bot_conversacional": {"activo": true, "chatwoot": {"rafaga_ms": 3000}}, "otra": 1}');`)
+    await expect(db.exec(sql)).rejects.toThrow(/términos/)
+    await db.exec(sql.replaceAll('<TERMINOS_URL_DIMPRO>', 'https://dimpro.example/terminos'))
+    const r = await db.query<{ c: Record<string, unknown> }>(`select config_extra as c from public.workspaces`)
+    const c = r.rows[0].c as { otra: number; bot_conversacional: Record<string, unknown> }
+    expect(c.otra).toBe(1)
+    expect(c.bot_conversacional.activo).toBe(true)
+    const cfg = leerConfigPublico(c.bot_conversacional)
+    expect(cfg).toMatchObject({ activo: false, dominio: 'ventas', cuentaId: 189134, rafagaMs: 3000, terminosUrl: 'https://dimpro.example/terminos', inboxes: [{ id: 151556, canal: 'otro', anuncio7Dias: false }] })
+    await db.close()
+  }, 30_000)
 
   it('la semilla SQL es exactamente la salida del generador y solo corre en dimpro', () => {
     const archivo = readFileSync(join(process.cwd(), 'sql/dimpro/2026-10-29_reglamento-asistente-ventas-ENSAYO.sql'), 'utf8')
