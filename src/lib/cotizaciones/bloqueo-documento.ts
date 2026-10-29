@@ -42,11 +42,15 @@ export function acomodacionDelPaquete(p: PaqueteBloqueo): string | null {
       const nombre = ETIQUETA_ACOMODACION[a].toLowerCase()
       return `${n} ${n === 1 ? nombre : `${nombre}s`}`
     })
+  const conNino = p.distribucion.adultoConNino ?? 0
+  if (conNino > 0) habitaciones.push(`${conNino} ${conNino === 1 ? 'habitación' : 'habitaciones'} de 1 adulto + 1 niño`)
   const partes: string[] = []
   if (habitaciones.length > 0) {
     partes.push(habitaciones.length === 1 ? habitaciones[0] : `${habitaciones.slice(0, -1).join(', ')} y ${habitaciones[habitaciones.length - 1]}`)
   }
-  if (p.distribucion.ninos > 0) partes.push(plural(p.distribucion.ninos, 'niño', 'niños'))
+  // Los niños que duermen con su adulto ya están dichos en su habitación.
+  const otrosNinos = Math.max(0, p.distribucion.ninos - conNino)
+  if (otrosNinos > 0) partes.push(conNino > 0 ? plural(otrosNinos, 'niño más', 'niños más') : plural(otrosNinos, 'niño', 'niños'))
   if ((p.distribucion.infantes ?? 0) > 0) partes.push(plural(p.distribucion.infantes as number, 'infante', 'infantes'))
   return partes.length > 0 ? partes.join(' · ') : null
 }
@@ -150,3 +154,25 @@ export function vuelosDePaquetes(items: readonly ItemConLectura[]): VueloPDF[] {
   }
   return out
 }
+
+/**
+ * Lo que los paquetes NO incluyen (V5 del QA del 2026-10-29: «No incluye: tarjeta de turismo,
+ * propinas» no llegaba al cliente). Un renglón por paquete que lo diga, para «A tener en cuenta»;
+ * con varios paquetes distintos, cada renglón nombra su hotel. Sin repetidos.
+ */
+export function noIncluyeDePaquetes(items: readonly ItemConLectura[]): string[] {
+  const conTexto = items
+    .map(paqueteDe)
+    .filter((p): p is PaqueteBloqueo => !!p && !!p.incluye.noIncluye)
+  const textos = [...new Set(conTexto.map(p => (p.incluye.noIncluye as string).trim()))]
+  if (textos.length <= 1) return textos.map(t => `No incluido en el paquete: ${minusculaInicial(t)}`)
+  const vistos = new Set<string>()
+  const out: string[] = []
+  for (const p of conTexto) {
+    const r = `No incluido en el paquete${p.hotel.hotel ? ` ${p.hotel.hotel}` : ''}: ${minusculaInicial((p.incluye.noIncluye as string).trim())}`
+    if (!vistos.has(r)) { vistos.add(r); out.push(r) }
+  }
+  return out
+}
+
+const minusculaInicial = (t: string) => (t && t !== t.toLocaleUpperCase('es-CO') ? t.charAt(0).toLocaleLowerCase('es-CO') + t.slice(1) : t)

@@ -21,7 +21,6 @@ import {
   fechaIso,
   horaHHMM,
   montoNoNegativo,
-  montoPositivo,
   textoCorto,
   type CategoriaIncluye,
   type HotelBloqueo,
@@ -48,6 +47,12 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '- precios_por_persona: UNA entrada por cada acomodación que aparezca con su precio (sencilla, doble, triple,',
   '  cuadruple). Solo las que aparezcan: si no hay cuádruple, no la pongas. precio = el número sin puntos ni símbolo.',
   '  No confundas los botones de «+ N PAX» con precios.',
+  '- VARIAS COLUMNAS DE PRECIO: si la tabla trae más de un precio por acomodación (ej. «Pública», «Pública con',
+  '  descuento», «Neta agencia», o un precio tachado y otro vigente), pon en columnas CADA precio con su rótulo tal',
+  '  cual y su tipo: neta (lo que paga la agencia: «neta», «neto», «agencia», «costo»), publica_descuento (la pública',
+  '  con descuento o el precio vigente junto a uno tachado), publica (la pública de lista o la tachada), unica (una sola',
+  '  columna). Y en precio pon la NETA de la agencia si existe; si no, la pública con descuento; si no, la única.',
+  '  Lo mismo para el niño y el infante (sus columnas).',
   '- nino: el precio por niño (CHD, menor) y su rango de edad en años (ej. «CHD 02-11» → edad_min 2, edad_max 11). null si',
   '  no aparece.',
   '- infante: el precio por infante (INF, bebé de menos de 24 meses; ej. «INF 180.000» → precio 180000). Si dice que el',
@@ -63,6 +68,8 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '- texto_incluye: el texto de la pantalla que diga qué incluye (ej. «Receptivos… traslados in y out»), tal cual;',
   '  null si no hay.',
   '- incluye_por_texto: las categorías (de las cinco) que ese texto dice EXPLÍCITAMENTE que incluye. [] si ninguna.',
+  '- texto_no_incluye: lo que la pantalla dice que NO incluye (ej. «No incluye: tarjeta de turismo, propinas»), tal',
+  '  cual, sin las palabras «No incluye»; null si no lo dice.',
   '',
   'Seguro: seguro_medico es SOLO el seguro médico, de viaje o la asistencia médica al viajero. El «seguro hotelero»',
   '(o tarjeta/impuesto hotelero) es un cargo del hotel, NO es seguro médico: no lo marques como seguro_medico ni por',
@@ -70,6 +77,23 @@ export const PROMPT_HOTEL_BLOQUEO = [
 ].join('\n')
 
 const NULO = { nullable: true }
+
+/** Los tipos de columna de precio que se le piden al modelo (M5-1 / M2-1 del QA del 2026-10-29). */
+export const TIPOS_COLUMNA = ['neta', 'publica_descuento', 'publica', 'unica'] as const
+export type TipoColumna = (typeof TIPOS_COLUMNA)[number]
+
+const COLUMNAS = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      rotulo: { type: 'string', ...NULO },
+      tipo: { type: 'string', enum: [...TIPOS_COLUMNA] },
+      precio: { type: 'number', ...NULO },
+    },
+    required: ['tipo', 'precio'],
+  },
+} as const
 
 export const ESQUEMA_HOTEL_BLOQUEO = {
   type: 'object',
@@ -91,6 +115,7 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
         properties: {
           acomodacion: { type: 'string', enum: [...ACOMODACIONES] },
           precio: { type: 'number', ...NULO },
+          columnas: COLUMNAS,
         },
         required: ['acomodacion', 'precio'],
       },
@@ -102,6 +127,7 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
         precio: { type: 'number', ...NULO },
         edad_min: { type: 'integer', ...NULO },
         edad_max: { type: 'integer', ...NULO },
+        columnas: COLUMNAS,
       },
     },
     infante: {
@@ -109,6 +135,7 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
       ...NULO,
       properties: {
         precio: { type: 'number', ...NULO },
+        columnas: COLUMNAS,
       },
     },
     iconos: {
@@ -124,6 +151,7 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
       },
     },
     texto_incluye: { type: 'string', ...NULO },
+    texto_no_incluye: { type: 'string', ...NULO },
     incluye_por_texto: { type: 'array', items: { type: 'string', enum: [...CATEGORIAS_INCLUYE] } },
   },
   required: ['es_oferta_de_hotel', 'precios_por_persona', 'iconos', 'incluye_por_texto'],
@@ -198,7 +226,59 @@ export function incluyeDesdeLectura(raw: unknown): IncluyeBloqueo {
     if (c === 'seguro_medico' && !textoDiceSeguroMedico(r.texto_incluye)) continue
     casillas[c] = true
   }
-  return { casillas, sinIdentificar, texto: textoCorto(r.texto_incluye, 400) }
+  const noIncluye = typeof r.texto_no_incluye === 'string' ? r.texto_no_incluye.replace(/^\s*no\s+incluye\s*:?\s*/i, '') : r.texto_no_incluye
+  return { casillas, sinIdentificar, texto: textoCorto(r.texto_incluye, 400), noIncluye: textoCorto(noIncluye, 400) }
+}
+
+// ── Varias columnas de precio: el costo es la NETA de la agencia ─────────────
+
+/**
+ * El tipo de una columna por su RÓTULO, que manda sobre lo que dijo el modelo (el rótulo es lo que
+ * se ve; el tipo es su interpretación). Sin rótulo legible, el tipo del modelo.
+ */
+export function tipoDeColumna(rotulo: unknown, delModelo: unknown): TipoColumna | null {
+  const t = typeof rotulo === 'string' ? sinTildes(rotulo) : ''
+  if (/\bnet[oa]s?\b|\bnet\b|agencia|\bcosto\b/.test(t)) return 'neta'
+  if (/descuento|\bdto\b|\bdcto\b|oferta|promo|vigente|ahora/.test(t)) return 'publica_descuento'
+  if (/public[oa]|\blista\b|\bfull\b|\brack\b|antes|tachad/.test(t)) return 'publica'
+  return (TIPOS_COLUMNA as readonly unknown[]).includes(delModelo) ? (delModelo as TipoColumna) : null
+}
+
+/** El orden en que se elige la columna del costo: lo que paga la agencia primero; la pública de lista nunca antes que su descuento. */
+const PREFERENCIA: readonly TipoColumna[] = ['neta', 'publica_descuento', 'unica', 'publica']
+
+export interface PrecioElegido {
+  precio: number | null
+  /** El rótulo de la columna elegida («Neta agencia»), o su tipo si no se leyó rótulo. `null` sin columnas. */
+  columna: string | null
+}
+
+/**
+ * El precio de costo de una entrada con varias columnas (M5-1 / M2-1, QA del 2026-10-29): la neta de
+ * la agencia si la hay; si no, la pública con descuento; si no, la única; la pública de lista, al
+ * final. Sin columnas legibles, el `precio` que dio el modelo. La regla vive aquí y no en el modelo:
+ * si el modelo pone la «con descuento» en `precio` pero la tabla trae la neta, gana la neta.
+ */
+export function precioDeCosto(entrada: unknown): PrecioElegido {
+  const e = esObj(entrada) ? entrada : {}
+  const columnas = (Array.isArray(e.columnas) ? e.columnas : [])
+    .filter(esObj)
+    .map(c => ({ tipo: tipoDeColumna(c.rotulo, c.tipo), rotulo: textoCorto(c.rotulo, 60), precio: montoNoNegativo(c.precio) }))
+    .filter((c): c is { tipo: TipoColumna; rotulo: string | null; precio: number } => c.tipo !== null && c.precio !== null)
+  if (columnas.length >= 2 || (columnas.length === 1 && montoNoNegativo(e.precio) === null)) {
+    for (const tipo of PREFERENCIA) {
+      const c = columnas.find(x => x.tipo === tipo)
+      if (c) return { precio: c.precio, columna: c.rotulo ?? ETIQUETA_COLUMNA[tipo] }
+    }
+  }
+  return { precio: montoNoNegativo(e.precio), columna: null }
+}
+
+export const ETIQUETA_COLUMNA: Record<TipoColumna, string> = {
+  neta: 'Neta agencia',
+  publica_descuento: 'Pública con descuento',
+  publica: 'Pública',
+  unica: 'Precio',
 }
 
 export type LecturaHotelBloqueo =
@@ -213,15 +293,25 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
   }
   const vistas = new Set<string>()
   const precios: PrecioAcomodacion[] = []
+  // La columna de la que salió el costo (la primera entrada que tenía varias).
+  let columnaCosto: string | null = null
+  const costoDe = (entrada: unknown): number | null => {
+    const c = precioDeCosto(entrada)
+    if (c.columna && !columnaCosto) columnaCosto = c.columna
+    return c.precio
+  }
   for (const p of Array.isArray(raw.precios_por_persona) ? raw.precios_por_persona : []) {
     if (!esObj(p)) continue
     const a = acomodacionDe(p.acomodacion)
     if (!a || vistas.has(a)) continue
     vistas.add(a)
-    precios.push({ acomodacion: a, precioPorPersona: montoPositivo(p.precio) })
+    const precio = costoDe(p)
+    precios.push({ acomodacion: a, precioPorPersona: precio !== null && precio > 0 ? precio : null })
   }
   const n = esObj(raw.nino) ? raw.nino : null
-  const nino = n ? { precio: montoPositivo(n.precio), edadMin: entero(n.edad_min, 0, 17), edadMax: entero(n.edad_max, 0, 17) } : null
+  const precioNino = n ? costoDe(n) : null
+  const nino = n ? { precio: precioNino !== null && precioNino > 0 ? precioNino : null, edadMin: entero(n.edad_min, 0, 17), edadMax: entero(n.edad_max, 0, 17) } : null
+  const precioInfante = esObj(raw.infante) ? costoDe(raw.infante) : null
   const hotel: HotelBloqueo = {
     hotel: textoCorto(raw.hotel),
     zona: textoCorto(typeof raw.zona === 'string' ? raw.zona.replace(/^\s*zona\s+/i, '') : raw.zona),
@@ -235,7 +325,8 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
     precios,
     nino: nino && (nino.precio !== null || nino.edadMin !== null || nino.edadMax !== null) ? nino : null,
     // Si la pantalla trae «INF 180.000», se lee; si no, lo escribe la asesora. 0 = el infante no paga.
-    infante: esObj(raw.infante) && montoNoNegativo(raw.infante.precio) !== null ? { precio: montoNoNegativo(raw.infante.precio) } : null,
+    infante: precioInfante !== null ? { precio: precioInfante } : null,
+    columnaCosto,
   }
   return { ok: true, hotel, incluye: incluyeDesdeLectura(raw) }
 }

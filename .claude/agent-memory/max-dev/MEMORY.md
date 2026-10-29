@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Términos CDA v1.5 por aviso (1-nov)](project_valida_terminos_v15.md) — transición 11.7 en plazos.ts; 16.4 SIN construir (22-dic); 20261029190000 opcional
+- ⚠️⚠️ [Asistente de ventas Dimpro + Bold (29-oct)](project_dimpro_asistente_ventas_bold.md) — 20261029150000 y sql/dimpro APLICADOS en prod (29-oct, bot activo:false); solo Messenger 151556; forma_pago sigue anticipado
 - ⚠️ [SOE-033: plantillas DJ y Relación (29-oct)](project_soe033_plantillas_dj_relacion.md) — #1329; 20261029114700 APLICADA (29-oct); copia campos de la DJ viva; DJ coprop. 2 págs
 - ⚠️⚠️ [Decisiones D1–D6 de la cotización (29-oct)](project_decisiones_1029_cotizacion.md) — batería #1338; sin exención de Públicas; comisión obligatoria; 0 = sin dato; tarifa por paquete
 - ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337/1339; reparto de hotel sobrante a Mauricio; fotos = datos
