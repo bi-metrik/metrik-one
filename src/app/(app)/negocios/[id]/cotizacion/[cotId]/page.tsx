@@ -86,18 +86,27 @@ export default async function CotizacionNegocioPage({
 
   // Check if any cotizacion in this negocio has estado='aceptada'
   let frozen = false
+  // H10-1: otra cotización del negocio ya enviada. Con esta en borrador, el editor lo dice desde
+  // que se abre y «Enviar» la reemplaza. Sale de la MISMA consulta de la aceptada (sin idas de más);
+  // si la lectura falla, nada: el servidor frena igual.
+  let otraEnviada: { id: string; consecutivo: string | null } | null = null
   try {
     const { supabase: sbCheck } = await getWorkspace()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: accepted } = await (sbCheck as any)
+    const { data: abiertas } = await (sbCheck as any)
       .from('cotizaciones')
-      .select('id')
+      .select('id, estado, consecutivo')
       .eq('negocio_id', id)
-      .eq('estado', 'aceptada')
-      .limit(1)
+      .in('estado', ['aceptada', 'enviada'])
+    const filas = (Array.isArray(abiertas) ? abiertas : []) as { id: string; estado: string; consecutivo: string | null }[]
+    const accepted = filas.filter(f => f.estado === 'aceptada')
     // Freeze if there's an accepted quote AND the current one is NOT the accepted one
-    if (accepted && accepted.length > 0 && accepted[0].id !== cotId) {
+    if (accepted.length > 0 && accepted[0].id !== cotId) {
       frozen = true
+    }
+    const enviada = filas.find(f => f.estado === 'enviada' && f.id !== cotId)
+    if (enviada && (cotizacion as { estado?: string } | null)?.estado === 'borrador') {
+      otraEnviada = { id: enviada.id, consecutivo: enviada.consecutivo ?? null }
     }
   } catch {
     // Non-critical — if check fails, don't freeze
@@ -346,6 +355,7 @@ export default async function CotizacionNegocioPage({
       bloqueo={bloqueo}
       pedidoAutorizacion={pedidoAutorizacion}
       motivoAutorizacionDatos={motivoAutorizacionDatos}
+      otraEnviada={otraEnviada}
       pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
