@@ -35,7 +35,8 @@ import type { SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { ItemMenu, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
-import { publicasSinComision, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { costoDeAgencia, publicasSinComision, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { pedirFocoEnComision } from '@/lib/cotizaciones/enfocar-comision'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { tipoParaMargen, type ReglasDeCotizacion } from '@/lib/cotizaciones/reglas-margen'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
@@ -294,7 +295,13 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   }
   /** «Ir» de la lista única: la tarjeta, la tarifa, la bandeja o el párrafo exacto. */
   const irDesdeLaLista = (d: DestinoDeIr) => {
-    if (d.a === 'opcion') { setPaso(1); p.onAbrirOpcion(d.itemId); return }
+    if (d.a === 'opcion') {
+      setPaso(1)
+      p.onAbrirOpcion(d.itemId)
+      // QA del #1342 · «Falta la comisión»: la tarjeta se abre y el foco queda en la casilla.
+      if (d.campo === 'comision') void pedirFocoEnComision(d.itemId)
+      return
+    }
     if (d.a === 'tarifas') { irAPaso(2); return }
     // El arreglo a un toque (punto 3 del 2026-10-29): la misma elección de Tarifas, con su «Deshacer».
     if (d.a === 'poner-en-tarifa') { elegir(d.itinerarioId, d.grupo, d.itemId); return }
@@ -713,6 +720,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     p.margenPct,
     JSON.stringify(p.tarifasDelServidor),
     p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}:${f.subtotal ?? ''}:${f.precio_venta ?? ''}`).join(','),
+    // QA del #1342 · la comisión de una Pública no mueve ni el costo ni el precio, pero sí la marca
+    // de borrador y el margen: sin ella aquí, el documento de Revisar quedaba con la marca vieja.
+    p.filas.map(f => JSON.stringify((f.tarifa_pax as { tipoTarifa?: unknown } | null)?.tipoTarifa ?? null)).join(','),
   ].join('|')
   const paso3 = (
     <RevisarPorPasos
@@ -764,8 +774,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
             nombreDeOpcion,
             faltaPrecio,
             total: total.precioVenta,
-            costo: total.costoDeVenta,
+            costo: costoDeAgencia(total),
             margenPct: margenDelEncabezado,
+            sinComision: publicasSinComision(total) > 0,
             otrasQueVan: vanAlCliente.filter(t => !t.esPrincipal).map(t => ({ nombre: t.nombre ?? 'Tarifa', precio: t.precio })),
             pantallazosEnBandeja: p.pantallazosPorAceptar,
             incompleto: sinCosto.length > 0,

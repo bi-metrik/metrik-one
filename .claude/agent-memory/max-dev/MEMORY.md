@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Plantillas editables DJ/Relación (29-oct)](project_plantillas_editables.md) — 203000/203100 SIN aplicar; siembra SOENA sin activar; Chromium sin respaldo; IVA exacto
+- ⚠️ [Defectos QA del #1342 (29-oct)](project_defectos_qa_1342.md) — costoDeAgencia; «Opción N» como el PDF; «Incluye» de ONE sin revisar; swap insert→delete
 - ⚠️⚠️ [Términos CDA v1.5 por aviso (1-nov)](project_valida_terminos_v15.md) — transición 11.7 en plazos.ts; 16.4 SIN construir (22-dic); 20261029190000 opcional
 - ⚠️⚠️ [Asistente de ventas Dimpro + Bold (29-oct)](project_dimpro_asistente_ventas_bold.md) — 20261029150000 y sql/dimpro APLICADOS en prod (29-oct, bot activo:false); solo Messenger 151556; forma_pago sigue anticipado
 - ⚠️ [SOE-033: plantillas DJ y Relación (29-oct)](project_soe033_plantillas_dj_relacion.md) — #1329; 20261029114700 APLICADA (29-oct); copia campos de la DJ viva; DJ coprop. 2 págs

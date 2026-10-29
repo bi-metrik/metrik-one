@@ -11,7 +11,15 @@
 
 export type Fila = Record<string, unknown>
 
-export const base: { tablas: Record<string, Fila[]>; secuencia: number } = { tablas: {}, secuencia: 0 }
+export const base: {
+  tablas: Record<string, Fila[]>
+  secuencia: number
+  /**
+   * Una escritura que falla a propósito (para probar el orden de escrituras sin transacción):
+   * devuelve `true` y esa operación responde con error sin tocar la tabla. Ausente = nada falla.
+   */
+  fallar?: ((tabla: string, operacion: 'insert' | 'update' | 'delete') => boolean) | null
+} = { tablas: {}, secuencia: 0 }
 
 export function clienteFalso() {
   return {
@@ -105,6 +113,7 @@ function constructor(tabla: string) {
       const filas = [...fotos.map(f => ({ ...f, clave_pedida: f.clave })), ...deAlias].filter(f => filtros.every(fn => fn(f)))
       return { data: filas, error: null }
     }
+    if (operacion !== 'select' && base.fallar?.(tabla, operacion)) return { data: null, error: { message: `falla inyectada: ${operacion} en ${tabla}` } }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {

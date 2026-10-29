@@ -22,7 +22,8 @@ import { motivoPaquetesIncompletos, type PaqueteIncompleto } from './bloqueo-inc
 import { motivoPublicasSinComision, type PublicaSinComision } from './comision-publica'
 
 export type DestinoDeIr =
-  | { a: 'opcion'; itemId: string }
+  /** `campo`: además de abrir la opción, pone el foco en esa casilla (QA del #1342: la comisión). */
+  | { a: 'opcion'; itemId: string; campo?: 'comision' }
   | { a: 'tarifas' }
   | { a: 'bandeja' }
   | { a: 'texto' }
@@ -102,6 +103,11 @@ export interface OpcionFuera {
   grupo: string
   /** La tarifa que repite la opción de otra en ese servicio: ahí cabe sin quitar nada. `null` = ninguna. */
   arreglo: { itinerarioId: string; tarifa: string } | null
+  /**
+   * La opción SÍ está en una tarifa, pero esa tarifa no se manda al cliente (QA del #1342: un paquete
+   * de bloqueo sacado de la propuesta decía «no va en ninguna tarifa»). Ausente = en ninguna.
+   */
+  enUnaQueNoVa?: boolean
 }
 
 /**
@@ -135,7 +141,8 @@ export function opcionesFueraDeLaPropuesta(
     for (const itemId of fuera) {
       const t = repiten.find(x => !usadas.has(x.id)) ?? null
       if (t) usadas.add(t.id)
-      salida.push({ itemId, grupo: r.grupo, arreglo: t ? { itinerarioId: t.id, tarifa: t.nombre ?? 'tarifa' } : null })
+      const enUnaQueNoVa = tarifas.some(x => !x.vaEnPropuesta && eleccion(x) === itemId)
+      salida.push({ itemId, grupo: r.grupo, arreglo: t ? { itinerarioId: t.id, tarifa: t.nombre ?? 'tarifa' } : null, ...(enUnaQueNoVa ? { enUnaQueNoVa } : {}) })
     }
   }
   return salida
@@ -156,7 +163,7 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   if (paquete) impide.push({ clave: 'paquete-incompleto', texto: paquete, ir: { a: 'opcion', itemId: e.paquetes![0].itemId } })
   // D3: justo después del paquete, como `enviarPorPasos`.
   const comision = motivoPublicasSinComision(e.publicasSinComision ?? [])
-  if (comision) impide.push({ clave: 'comision-publica', texto: comision, ir: { a: 'opcion', itemId: e.publicasSinComision![0].itemId } })
+  if (comision) impide.push({ clave: 'comision-publica', texto: comision, ir: { a: 'opcion', itemId: e.publicasSinComision![0].itemId, campo: 'comision' } })
   if (e.capturas) impide.push({ clave: 'capturas', texto: e.capturas.motivo, ir: e.capturas.itemId ? { a: 'opcion', itemId: e.capturas.itemId } : null })
   const rec = motivoSinRecomendada(e.tarifas)
   if (rec) impide.push({ clave: 'recomendada', texto: rec, ir: { a: 'tarifas' } })
@@ -197,7 +204,9 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   for (const o of e.fueraDeLaPropuesta ?? []) {
     revisar.push({
       clave: `fuera:${o.itemId}`,
-      texto: `${o.nombre} no va en ninguna tarifa: no saldrá en la propuesta.`,
+      texto: o.enUnaQueNoVa
+        ? `${o.nombre} va en una opción que no se manda al cliente: no saldrá en la propuesta.`
+        : `${o.nombre} no va en ninguna tarifa: no saldrá en la propuesta.`,
       ir: o.arreglo
         ? { a: 'poner-en-tarifa', itinerarioId: o.arreglo.itinerarioId, tarifa: o.arreglo.tarifa, grupo: o.grupo, itemId: o.itemId }
         : { a: 'tarifas' },

@@ -30,8 +30,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // El PDF no mira el interruptor (N4): se lo dice la ruta, para que P12 deje la marca como frena «Enviar».
   const r = await enPeticionDeRuta(async () => {
     const { supabase, error } = await getWorkspace()
-    const porPasos = !error && (await estadoPorPasosDeCotizacion(supabase, id).catch(() => null))?.encendido === true
-    return generateCotizacionPDF(id, { vistaPrevia: true, porPasos })
+    const estado = error ? null : await estadoPorPasosDeCotizacion(supabase, id).catch(() => null)
+    const porPasos = estado?.encendido === true
+    return generateCotizacionPDF(id, { vistaPrevia: true, porPasos, incluyePorOne: porPasos && estado?.piezas.incluye_por_one === true })
   }) as {
     success: boolean
     pdf?: string
