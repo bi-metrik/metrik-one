@@ -7,7 +7,7 @@
 // arnés es la de PRUEBAS.
 // ============================================================
 
-import { fetchModelo } from '../../llm-anthropic.ts';
+import { entornoPorDefecto, fetchModelo } from '../../llm-anthropic.ts';
 import { esquemaCarga, esquemaCargaCompacta } from '../bandeja/extraccion.ts';
 import { mensajesDeTextos } from '../bandeja/carga.ts';
 import { textoParaModelo } from '../../wa-guardianes.ts';
@@ -18,7 +18,7 @@ import type { ExtractorMemoria } from '../memoria.ts';
  * el 2026-10-09). La llave de pruebas no lo alcanza: Google responde 404 «no longer available to new users» y recomienda
  * `gemini-3.5-flash-lite`. El arnés usa ese (o `ARNES_MODELO_EXTRACCION`): lo que mide es el prompt, en un modelo vecino.
  */
-export const MODELO_EXTRACCION = Deno.env.get('ARNES_MODELO_EXTRACCION') || 'gemini-3.5-flash-lite';
+export const MODELO_EXTRACCION = entornoPorDefecto('ARNES_MODELO_EXTRACCION') || 'gemini-3.5-flash-lite';
 
 /** Lo que se mide de cada llamado: tiempo y tokens (la latencia de flash-lite va casi toda en los de salida). */
 export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; entrada?: number; razonamiento?: number }
@@ -27,12 +27,14 @@ export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; en
  * `compacta`: el esquema de `esquemaCargaCompacta` (las instrucciones las arma quien llama, con `{ compacta }`). El
  * `perfil` lo dice quien arma las instrucciones (el bot siempre lo pide): esquema e instrucciones van juntos.
  */
-export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean } = {}): ExtractorMemoria {
+export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean; fetch?: typeof fetch; modelo?: string } = {}): ExtractorMemoria {
+  // `o.fetch`: el del arnés con Haiku (`proveedor-haiku.ts`), sin Gemini; `o.modelo`, el nombre que va en la URL.
+  const f = o.fetch ?? fetchModelo;
   return async ({ textos, reenviados, campos, instrucciones, perfil }) => {
     const t0 = performance.now();
-    const res = await fetchModelo(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_EXTRACCION}:generateContent`, {
+    const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${o.modelo ?? MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': llave },
+      headers: { 'Content-Type': 'application/json', ...(llave ? { 'x-goog-api-key': llave } : {}) },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
         contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos, reenviados))}` }] }],

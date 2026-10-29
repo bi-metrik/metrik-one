@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert, CalendarCheck, AlarmClock, FileText } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert, CalendarCheck, AlarmClock, FileText, MailWarning } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import {
   marcarCompletada,
@@ -52,6 +52,8 @@ const TIPO_ICON: Record<string, React.ElementType> = {
   // Hitos de gestión del viaje (2026-10-22): el resumen del día abre la Agenda; el vencido, el viaje.
   agenda_del_dia: CalendarCheck,
   hito_vencido: AlarmClock,
+  // SOE-031: el correo al cliente rebotó; hay que corregir su dirección.
+  aviso_cliente_rebotado: MailWarning,
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -72,6 +74,7 @@ const TIPO_COLOR: Record<string, string> = {
   factura_cargada: 'var(--acento)',
   agenda_del_dia: 'var(--acento)',
   hito_vencido: 'var(--alerta)',
+  aviso_cliente_rebotado: 'var(--alerta)',
 }
 
 // ── Componente principal ──────────────────────────────

@@ -69,6 +69,7 @@ import {
 } from '@/lib/cotizaciones/revision-captura'
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
+import type { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { EventoProvisional } from '@/lib/cotizaciones/aceptar-optimista'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
@@ -348,6 +349,19 @@ export function textoDelPie(otros: number): string | null {
   return otros === 1 ? 'Otro pantallazo ya está en la cotización.' : `Otros ${otros} pantallazos ya están en la cotización.`
 }
 
+/**
+ * Viaje en BLOQUEO (QA del 2026-10-29, `bloqueo-pegado.ts`): lo que se pega va al paquete, no al
+ * lector genérico (que a un vuelo sin precio lo rechazaba con RX4).
+ */
+export interface BloqueoDeBandeja {
+  registro: RegistroDePaquetes
+  /** Los paquetes de la cotización, para «¿A qué paquete va?». */
+  paquetes: { itemId: string; titulo: string }[]
+  /** Despliega la opción del paquete (la tarjeta se monta y recibe lo que espera en su buzón). */
+  abrir: (itemId: string) => void
+  crearPaquete: () => Promise<{ ok: true; itemId: string } | { ok: false; error: string }>
+}
+
 let contador = 0
 const SIN_UBICACIONES: Record<string, Ubicacion> = {}
 // Con azar: el id es también la llave de «Aceptar» (`idDeAceptacion`) y no puede repetirse
@@ -371,6 +385,7 @@ export default function BandejaCapturas({
   onProvisional,
   onVistaFresca,
   conTarifasDeProveedor = false,
+  bloqueo = null,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -414,6 +429,8 @@ export default function BandejaCapturas({
    * «Escríbelo a mano» va «Usar tarifa de proveedor» (brief del 2026-10-21, punto 2).
    */
   conTarifasDeProveedor?: boolean
+  /** Viaje en bloqueo: el pegado va al paquete (`BloqueoDeBandeja`). `null` = lo de siempre. */
+  bloqueo?: BloqueoDeBandeja | null
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -514,14 +531,8 @@ export default function BandejaCapturas({
     await procesarCaptura(dependencias(id, dataUrl), tipoElegido)
   }, [dependencias])
 
-  const agregar = useCallback((archivo: File) => {
-    if (!archivo.type.startsWith('image/')) {
-      toast.error('Eso no es una imagen. Pega o sube el pantallazo del proveedor.')
-      return
-    }
-    const lector = new FileReader()
-    lector.onload = ev => void (async () => {
-      const dataUrl = ev.target?.result as string
+  const agregarDesdeDataUrl = useCallback((dataUrl: string) => {
+    void (async () => {
       const id = nuevoId()
       const huella = await huellaDeImagen(dataUrl)
       const base: Captura = {
@@ -549,8 +560,61 @@ export default function BandejaCapturas({
       setCapturas(cs => [base, ...cs])
       void procesar(id, dataUrl)
     })()
-    lector.readAsDataURL(archivo)
   }, [actualizar, procesar])
+
+  // Viaje en bloqueo (QA del 2026-10-29): lo pegado va al paquete abierto; sin uno, se pregunta.
+  const bloqueoVivo = useRef(bloqueo)
+  useEffect(() => { bloqueoVivo.current = bloqueo }, [bloqueo])
+  const [porUbicar, setPorUbicar] = useState<{ id: string; dataUrl: string }[]>([])
+  const alPaquete = useCallback((dataUrl: string): boolean => {
+    const b = bloqueoVivo.current
+    if (!b) return false
+    const d = b.registro.destino()
+    if (d.a === 'paquete') {
+      b.registro.entregar(d.itemId, dataUrl, d.casilla)
+      return true
+    }
+    setPorUbicar(xs => [{ id: nuevoId(), dataUrl }, ...xs])
+    raiz.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return true
+  }, [])
+
+  /**
+   * `alPaqueteSiBloqueo`: solo el Ctrl+V de la ventana va al paquete (Vera, 2026-10-29). Lo que
+   * entra por «Subir» o arrastrado A LA BANDEJA se quiso poner aquí: sigue el camino de siempre.
+   */
+  const agregar = useCallback((archivo: File, alPaqueteSiBloqueo = false) => {
+    if (!archivo.type.startsWith('image/')) {
+      toast.error('Eso no es una imagen. Pega o sube el pantallazo del proveedor.')
+      return
+    }
+    const lector = new FileReader()
+    lector.onload = ev => {
+      const dataUrl = ev.target?.result as string
+      if (!(alPaqueteSiBloqueo && alPaquete(dataUrl))) agregarDesdeDataUrl(dataUrl)
+    }
+    lector.readAsDataURL(archivo)
+  }, [agregarDesdeDataUrl, alPaquete])
+
+  // «Otro servicio» desde la tarjeta del paquete: vuelve aquí, a la lectura de siempre.
+  const registroDelBloqueo = bloqueo?.registro ?? null
+  useEffect(() => registroDelBloqueo?.conectarBandeja(agregarDesdeDataUrl), [registroDelBloqueo, agregarDesdeDataUrl])
+
+  function ubicar(x: { id: string; dataUrl: string }, a: { paquete: string } | 'nuevo' | 'otro' | 'nada') {
+    setPorUbicar(xs => xs.filter(y => y.id !== x.id))
+    const b = bloqueoVivo.current
+    if (a === 'nada') return
+    if (a === 'otro' || !b) { agregarDesdeDataUrl(x.dataUrl); return }
+    if (a === 'nuevo') {
+      void b.crearPaquete().then(r => {
+        if (!r.ok) { toast.error(r.error); setPorUbicar(xs => [x, ...xs]); return }
+        b.registro.entregar(r.itemId, x.dataUrl, null)
+      })
+      return
+    }
+    b.registro.entregar(a.paquete, x.dataUrl, null)
+    b.abrir(a.paquete)
+  }
 
   // Lo que devuelve una opción eliminada entra como recién leído: con su borrador firmado, y se
   // revisa contra la cotización de ahora (sin la opción que se fue).
@@ -672,13 +736,14 @@ export default function BandejaCapturas({
       e.preventDefault()
       for (const i of imagenes) {
         const archivo = i.getAsFile()
-        if (archivo) agregar(archivo)
+        if (archivo) agregar(archivo, true)
       }
       // Un pegado que no cayó en ninguna casilla viene aquí. Si la bandeja no está a la vista
       // (la persona está abajo, en la tarjeta), se dice dónde quedó: sin esto, pegar el
       // pantallazo 2 sin hacer clic en su casilla «no hacía nada» (brief del 2026-10-01, punto 7).
       const caja = raiz.current?.getBoundingClientRect()
-      if (caja && fueraDeVista(caja, window.innerHeight)) {
+      // En un bloqueo lo pegado fue al paquete (o a «¿A qué paquete va?», que se trae a la vista).
+      if (!bloqueoVivo.current && caja && fueraDeVista(caja, window.innerHeight)) {
         toast(MENSAJE_PEGADO_EN_BANDEJA, {
           action: { label: 'Ver', onClick: () => raiz.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) },
         })
@@ -1147,7 +1212,17 @@ export default function BandejaCapturas({
                 onBorrar={() => borrar(c)}
                 onDescartar={() => borrar(c, 'descartada')}
                 onDeshacer={() => void deshacer(c)}
-                onElegirTipo={t => void procesar(c.id, c.dataUrl, t)}
+                onElegirTipo={t => {
+                  // «Es paquete de bloqueo» en un viaje en bloqueo: lo lee el lector del BLOQUEO, en
+                  // el paquete (QA del 2026-10-29), no la ranura genérica que pide hotel y precio.
+                  if (t === 'paquete' && bloqueo && c.dataUrl) {
+                    nuevoTurno(c.id)
+                    actualizar(c.id, { estado: { fase: 'descartada' } })
+                    alPaquete(c.dataUrl)
+                    return
+                  }
+                  void procesar(c.id, c.dataUrl, t)
+                }}
                 tiposElegibles={porPasos ? TIPOS_RANURA : TIPOS_CON_PANTALLAZO}
                 onReintentar={() => reintentar(c)}
                 onElegirOpcion={o => elegirOpcion(c, o)}
@@ -1158,6 +1233,25 @@ export default function BandejaCapturas({
               />
             )
           })}
+        </ul>
+      )}
+      {porUbicar.length > 0 && bloqueo && (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" data-por-ubicar-bloqueo>
+          {porUbicar.map(x => (
+            <li key={x.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] p-2 text-[13px]" data-pegado-bloqueo>
+              {/* eslint-disable-next-line @next/next/no-img-element -- vista local del pantallazo pegado (data URL) */}
+              <img src={x.dataUrl} alt="Pantallazo pegado" className="max-h-12 rounded" />
+              <span className="min-w-0 flex-1 font-semibold">¿A qué paquete va este pantallazo?</span>
+              <span className="flex flex-wrap gap-1.5">
+                {bloqueo.paquetes.map(pq => (
+                  <button key={pq.itemId} type="button" className={BTN} data-ubicar-en={pq.itemId} onClick={() => ubicar(x, { paquete: pq.itemId })}>{pq.titulo}</button>
+                ))}
+                <button type="button" className={BTN} data-ubicar-nuevo onClick={() => ubicar(x, 'nuevo')}>+ Paquete nuevo</button>
+                <button type="button" className={BTN} data-ubicar-otro onClick={() => ubicar(x, 'otro')}>Otro servicio (traslado, actividad…)</button>
+                <button type="button" className={BTN_X} aria-label="Quitar" onClick={() => ubicar(x, 'nada')}><X className="h-3.5 w-3.5" /></button>
+              </span>
+            </li>
+          ))}
         </ul>
       )}
       {pie && <p className="m-0 text-xs text-[#6E6A62]" data-bandeja-pie>{pie}</p>}

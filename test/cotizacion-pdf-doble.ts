@@ -62,6 +62,11 @@ function constructor(tabla: string) {
     if (tabla === 'negocios' && columnas.includes('lineas_negocio(etapas_negocio(')) {
       salida.lineas_negocio = f.linea_id ? { etapas_negocio: etapasDe(f.linea_id) } : null
     }
+    // El PDF lee la línea con su config Y sus etapas en una ida (`lineas_negocio(config_extra, etapas_negocio(...))`).
+    if (tabla === 'negocios' && columnas.includes('lineas_negocio(config_extra, etapas_negocio(')) {
+      const l = (tablas.lineas_negocio ?? []).find(x => x.id === f.linea_id)
+      salida.lineas_negocio = l ? { config_extra: l.config_extra, etapas_negocio: etapasDe(f.linea_id) } : null
+    }
     // El cliente del negocio para el PDF (`cotizacion-pdf-actions.ts`): su empresa y su contacto.
     if (tabla === 'negocios' && columnas.includes('empresas(')) {
       const e = (tablas.empresas ?? []).find(x => x.id === f.empresa_id)

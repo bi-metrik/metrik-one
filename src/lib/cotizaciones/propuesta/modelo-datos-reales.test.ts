@@ -183,7 +183,7 @@ describe('«Incluido en todas» de verdad en todas', () => {
 
   it('sin tarifas (una sola versión), el texto revisado tal cual', () => {
     const lineas = ['3 noches en el Hotel Catalonia Puerta del Sol']
-    expect(incluyeDeTodas(lineas, { hoteles: [{ ciudad: 'Madrid', desde: null, hasta: null, noches: 3, opciones: [{ tarifas: [], hotel: 'Catalonia Puerta del Sol', estrellas: 4, habitacion: null, regimen: null, cancelacion: null, cargoEnDestino: null, foto: null }] }], vuelos: [], tarifas: 1, noches: 3 })).toEqual(lineas)
+    expect(incluyeDeTodas(lineas, { hoteles: [{ ciudad: 'Madrid', desde: null, hasta: null, noches: 3, opciones: [{ tarifas: [], hotel: 'Catalonia Puerta del Sol', estrellas: 4, habitacion: null, regimen: null, incluye: null, cancelacion: null, cargoEnDestino: null, foto: null }] }], vuelos: [], tarifas: 1, noches: 3 })).toEqual(lineas)
   })
 })
 

@@ -17,7 +17,7 @@ export function ListaUnicaPorPasos({ lista, onIr }: { lista: ListaUnica; onIr: (
       <span className="min-w-0 flex-1 text-[13px]">{r.texto}</span>
       {r.ir && (
         <button type="button" onClick={() => onIr(r.ir!)} className="text-[13px] font-semibold text-[#0E5C43] underline-offset-2 hover:underline" data-ir={r.ir.a}>
-          Ir
+          {r.ir.a === 'poner-en-tarifa' ? `Ponerlo en la ${r.ir.tarifa}` : 'Ir'}
         </button>
       )}
     </li>

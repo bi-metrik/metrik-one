@@ -84,7 +84,7 @@ describe('con cobro: Condiciones v2.1 completas, aviso v1.2 y casilla con cobro'
 
   it('versión 2.1 y aviso 1.2', () => {
     expect(t).toMatch(/^CONDICIONES DE LA PRUEBA GRATIS DE VALIDA · Versión 2\.1/)
-    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.5+terminos-auto-2.1')
+    expect(versionAceptada(VIGENTES_CON_COBRO)).toBe('condiciones-2.1+aviso-1.5+terminos-auto-2.2')
     // El texto es el de `proyectos/metrik/valida/docs/legal/condiciones-prueba-valida-v2.1.md` (los tres bloques
     // `text`, unidos con una línea en blanco), comparado letra por letra el 2026-10-14 con el 7.3 final de Emilio.
     expect(sha(t)).toBe('59e74708b7cd41bda2bbbc6052de8d953b49aa101b9fe6549565e4252146e07b')

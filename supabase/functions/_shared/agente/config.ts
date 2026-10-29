@@ -54,6 +54,11 @@ export interface ConfigAgente {
     texto: number;
     turnoMs: number;
     ventanaHoras: number;
+    /**
+     * Topes de los bloques del prompt (tokens) que reemplazan los de `contexto.ts` (`TOPES_BLOQUE`) en este turno. No
+     * se lee de la base: lo pone el turno de un rol con dos motores (viajes + ONE, `bandeja/turno-con-rol.ts`).
+     */
+    bloques?: { siempre?: number; indice?: number; estado?: number };
   };
   /** Cupo de uso justo: turnos del modelo por mes. Pasarlo NO corta: avisa a MéTRIK. */
   cupoTurnosMes: number;

@@ -23,9 +23,9 @@ import { fotoDeTarifas, type FotoDeTarifas } from '@/lib/cotizaciones/tarifas-po
 import { cerrarAccionPorPasos as cerrarAccion, type ResultadoPorPasos } from '@/lib/cotizaciones/por-pasos-cierre'
 import { firmaDeTarifa } from '@/lib/cotizaciones/tarifas-por-pasos'
 import { leerCabecera } from '@/lib/cotizaciones/itinerarios-datos'
-import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { itemsDelItinerario, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
-import { motivoSinPrecioPorPasajero, opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { frenosDePaqueteYPasajero } from '@/lib/cotizaciones/frenos-de-paquete-y-pasajero'
 import { enviarCotizacion } from '@/app/(app)/negocios/cotizacion-actions'
 import { esRecomendada, recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { etiquetaDeRanura, grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -43,6 +43,7 @@ import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { leerReglasDeCotizacion, motivoReglasInvalidas, reglasAJsonb } from '@/lib/cotizaciones/reglas-margen'
+import { motivoMargenDeCotizacionInvalido } from '@/lib/cotizaciones/margen-de-cotizacion'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -360,7 +361,11 @@ export async function margenPorPasos(
   if (!Number.isFinite(pct) || pct < 0 || pct >= 100) return { success: false, error: 'El margen tiene que estar entre 0 % y 99 %.' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
-  const { data: cot } = await supabase.from('cotizaciones').select('margen_porcentaje').eq('id', cotizacionId).maybeSingle()
+  const { data: cot } = await supabase.from('cotizaciones').select('margen_porcentaje, margen_default_pct').eq('id', cotizacionId).maybeSingle()
+  // D4 (2026-10-29): un 0 en el margen general dejaría todas las Netas a costo; se rechaza diciendo
+  // cómo dejar UNA opción a costo (`margen-de-cotizacion.ts`).
+  const invalido = motivoMargenDeCotizacionInvalido(pct, (cot as { margen_default_pct?: number | null } | null)?.margen_default_pct ?? null)
+  if (invalido) return { success: false, error: invalido }
   const anterior = (cot?.margen_porcentaje ?? null) as number | null
   const { error: errUpd } = await supabase.from('cotizaciones').update({ margen_porcentaje: pct }).eq('id', cotizacionId)
   if (errUpd) return { success: false, error: errUpd.message }
@@ -378,7 +383,7 @@ export async function margenPorPasos(
  */
 export async function reglasPorPasos(
   cotizacionId: string,
-  cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number }[] },
+  cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[] },
 ): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -389,7 +394,18 @@ export async function reglasPorPasos(
   const actuales = leerReglasDeCotizacion((cot as { reglas_margen?: unknown } | null)?.reglas_margen)
   if (!actuales) return { success: false, error: 'Esta cotización no tiene reglas de margen.' }
   if ((cot as { estado?: string | null } | null)?.estado !== 'borrador') return { success: false, error: 'Solo se cambia en una cotización en borrador.' }
-  const descuentos = cambio.descuentos?.map((d, i) => ({ id: (d.id ?? '').trim() || `d${Date.now().toString(36)}${i}`, descripcion: (d.descripcion ?? '').trim(), pct: Number(d.pct) }))
+  const descuentos = cambio.descuentos?.map((d, i) => {
+    const aplicaA = typeof d.aplicaA === 'string' && d.aplicaA.trim() ? d.aplicaA.trim() : null
+    return { id: (d.id ?? '').trim() || `d${Date.now().toString(36)}${i}`, descripcion: (d.descripcion ?? '').trim(), pct: Number(d.pct), ...(aplicaA ? { aplicaA } : {}) }
+  })
+  // Un descuento de UNA tarifa (2026-10-29) nombra una tarifa de ESTA cotización. Uno que ya venía
+  // guardado con una tarifa que se borró se deja pasar tal cual: no se aplica a ninguna.
+  const nuevasTarifas = (descuentos ?? []).filter(d => d.aplicaA && !actuales.descuentos.some(x => x.id === d.id && x.aplicaA === d.aplicaA))
+  if (nuevasTarifas.length > 0) {
+    const { data: its } = await supabase.from('cotizacion_itinerarios').select('id').eq('cotizacion_id', cotizacionId)
+    const existen = new Set(((its ?? []) as { id: string }[]).map(x => x.id))
+    if (nuevasTarifas.some(d => !existen.has(d.aplicaA as string))) return { success: false, error: 'Esa tarifa ya no existe. Vuelve a cargar la cotización.' }
+  }
   const invalido = motivoReglasInvalidas(actuales.politica, { puntosExtra: cambio.puntosExtra, descuentos })
   if (invalido) return { success: false, error: invalido }
   const siguientes = {
@@ -741,15 +757,15 @@ export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'd
   // Es lo primero que dice la lista única de Revisar.
   const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: foto.ctx.negocioId })
   if (motivoDatos) return { success: false, error: motivoDatos }
-  const vanAlCliente = foto.filas.filter(f => f.vaEnPropuesta)
-  const ids = new Set(
-    vanAlCliente.length > 0
-      ? vanAlCliente.flatMap(f => itemsDelItinerario(foto.ctx.items, f.seleccion))
-      : itemsQueAportanAlTotal(foto.ctx.items),
-  )
-  const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
-  const motivo = motivoSinPrecioPorPasajero(opcionesSinPrecio(foto.ctx.items, ids, viaje.composicion))
-  if (motivo) return { success: false, error: motivo }
+  const { viaje, edadesMenores } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
+  // P12 y el paquete incompleto (QA del 2026-10-29), la MISMA revisión que la marca de borrador del
+  // PDF (`frenos-de-paquete-y-pasajero.ts`). El paquete va antes que el margen de `enviarCotizacion`:
+  // un paquete en cero frenaba como «bajo el mínimo», que no es lo que pasa.
+  const frenos = frenosDePaqueteYPasajero({ items: foto.ctx.items, tarifas: foto.filas, composicion: viaje.composicion, edadesMenores: edadesMenores ?? null, conPrecioPorPasajero: true })
+  if (frenos.precioPorPasajero) return { success: false, error: frenos.precioPorPasajero }
+  if (frenos.paquete) return { success: false, error: frenos.paquete }
+  // D3 (2026-10-29): sin la comisión de una Pública no se sabe el margen; frena con su causa.
+  if (frenos.comision) return { success: false, error: frenos.comision }
   const r = await enviarCotizacion(cotizacionId, canal)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }

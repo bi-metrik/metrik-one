@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { escenarioOne } from './escenario'
 import { modeloGuionado } from '../modelo-guionado'
-import { DIAS_ATRAS_GASTO, fechaConDia, fechaDelGasto, fotoDe, gastoParecido, gastosDeLaConversacion, nombreNegocio, permisosDe, telefonoEnLaConversacion } from './dominio'
+import { DIAS_ATRAS_GASTO, fechaConDia, fechaDelGasto, fotoDe, gastoParecido, gastosDeLaConversacion, niegaElParecido, nombreNegocio, permisosDe, telefonoEnLaConversacion } from './dominio'
 import { agenteOnePorDefecto, CORTE_ONE_MS, dominioDelAgente, leerConfigOne } from '../config'
 import { declaraciones } from '../herramientas'
 import { dominioOne } from './dominio'
@@ -594,6 +594,30 @@ describe('gasto que parece repetido (caso real 2026-10-28: «Resend» de $65.000
     expect(gastoParecido([{ ...g, negocio: null }], { monto: 65000, negocio: null, fecha: '2026-10-28' })).toMatchObject({ id: 'g-1' })
     expect(gastoParecido([{ ...g, negocio: null }], { monto: 65000.5, negocio: null, fecha: '2026-11-04' })).toMatchObject({ id: 'g-1' })
     expect(gastoParecido([{ ...g, negocio: null }], { monto: 65000, negocio: null, fecha: '2026-11-05' })).toBeNull()
+  })
+
+  it('el texto no puede decir que el gasto ya no existe si hay uno parecido (caso real 2026-10-29)', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', texto: 'El gasto de $65.000 en Resend que registramos antes ya no existe en la base, así que lo registro de nuevo.', datos: { monto: 65000, negocio: 'V1 26 5', categoria: 'software', descripcion: 'Resend' } } },
+      (p) => {
+        const r = JSON.stringify(p.mensajes.at(-1)!.parts)
+        expect(r).toContain('en la base hay uno parecido: $65.000 el domingo 18-oct')
+        return { name: 'proponer', args: { accion: 'gasto', texto: 'Ya hay un gasto así del 18-oct; si es el mismo, toca No.', datos: { monto: 65000, negocio: 'V1 26 5', categoria: 'software', descripcion: 'Resend' } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, gastos: [{ ...yaRegistrado }] })
+    const t = await e.escribe('65 mil de Resend para V1 26 5')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['texto_contra_propuesta'])
+    expect(t[0].texto).not.toMatch(/no existe/)
+    expect(t[0].texto).toContain('⚠️ Ya hay uno parecido')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('sin gasto parecido, decir que uno anterior ya no existe no se frena (puede ser cierto)', () => {
+    expect(niegaElParecido('ese gasto ya no existe', { accion: 'gasto', datos: { parecido: null } })).toBe(false)
+    expect(niegaElParecido('ese gasto ya no existe', { accion: 'gasto', datos: { parecido: { monto: 1, fecha: '2026-10-18', descripcion: null } } })).toBe(true)
+    expect(niegaElParecido('lo borraron en la app', { accion: 'gasto', datos: { parecido: { monto: 1, fecha: '2026-10-18', descripcion: null } } })).toBe(true)
+    expect(niegaElParecido('Ya hay uno parecido del 18-oct', { accion: 'gasto', datos: { parecido: { monto: 1, fecha: '2026-10-18', descripcion: null } } })).toBe(false)
   })
 
   it('otro negocio, otro monto o más de 10 días: sin aviso', async () => {

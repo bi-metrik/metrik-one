@@ -469,6 +469,8 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
         ['Estancia', estancia],
         ['Habitación', o.habitacion],
         ['Régimen', o.regimen],
+        // D6 (2026-10-29): lo que marca el paquete del operador (alimentación, traslados, seguro…).
+        ['Incluye', o.incluye],
       ].filter((x): x is [string, string] => Boolean(x[1]))
       const enTexto = imagen ? '' : `${tagsHtml}`
       return `<div class="hc">${imagen}<div class="b">${enTexto}<div class="n">${esc(o.hotel)}${!imagen && stars ? ` ${estrellas(o.estrellas)}` : ''}</div>${c.ciudad ? `<div class="caps zona">${esc(c.ciudad)}</div>` : ''}${filas.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>${o.cargoEnDestino ? `<div class="pie">${esc(o.cargoEnDestino)}, se paga en el hotel.</div>` : ''}</div>`

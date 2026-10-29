@@ -26,6 +26,7 @@ import { detectarReversosEpayco, type ResumenReversos } from '@/lib/cobros/rever
 import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } from '@/lib/valida-registro/cobro-prueba-servidor'
 import { conciliarRegistrosConCobroPendiente, type ResumenRegistrosCobroPendiente } from '@/lib/valida-registro/cargo-tardio-servidor'
 import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
+import { terminarSuspensionesVencidas, type ResumenTerminacion } from '@/lib/valida-registro/terminacion-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -72,6 +73,11 @@ import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida
 //      al pagar; este paso recoge lo que no alcanzo (ver `src/lib/valida-registro/ciclo-servidor.ts`).
 //   8b. Valida autogestionada: el aviso por correo antes de suspender por una cuota sin pagar
 //      (ver `src/lib/valida-registro/suspension-servidor.ts`).
+//   8c. Valida autogestionada: a los 30 dias calendario de suspension (por mora o por reverso) sin pago,
+//      la suscripcion termina (Terminos de autoservicio 11.2): contrato terminado, plan sin cobros,
+//      suscripcion cancelada y se pide a ePayco borrar la tarjeta. Sin correo al cliente; aviso interno.
+//      APAGADA en produccion (`TERMINACION_30_DIAS_APROBADA`): ahi solo registra `por_terminar` y avisa
+//      (ver `src/lib/valida-registro/terminacion-servidor.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -614,6 +620,16 @@ export async function GET(req: NextRequest) {
     avisoSuspensionError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 8c. Valida: terminación a los 30 días de suspensión sin pago (Términos de autoservicio 11.2) ──
+  // Después del 8: el pago que llegó y abre su ciclo en esta corrida levanta la suspensión antes de mirar.
+  let terminacion: ResumenTerminacion | null = null
+  let terminacionError: string | null = null
+  try {
+    terminacion = await terminarSuspensionesVencidas({ db: supabase, ahoraMs: hoy.getTime() })
+  } catch (err) {
+    terminacionError = err instanceof Error ? err.message : String(err)
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -655,5 +671,7 @@ export async function GET(req: NextRequest) {
     ciclos_valida_error: ciclosValidaError,
     aviso_suspension: avisoSuspension,
     aviso_suspension_error: avisoSuspensionError,
+    terminacion_valida: terminacion,
+    terminacion_valida_error: terminacionError,
   })
 }

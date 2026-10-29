@@ -5,6 +5,9 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
+import { cerrarAccionPorPasos } from '@/lib/cotizaciones/por-pasos-cierre'
+import { leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
+import { recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
@@ -16,6 +19,8 @@ import { leerPantallazoDeBloqueo, type LecturaBloqueo } from '@/lib/cotizaciones
 import { costoDelPaquete, descripcionDelPaquete, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { guardarImagenDeCaptura } from '@/lib/cotizaciones/imagen-captura'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
+import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * Las acciones del PAQUETE DE BLOQUEO en la cotización por pasos (brief del 2026-10-27).
@@ -60,17 +65,87 @@ export async function crearPaqueteBloqueo(cotizacionId: string): Promise<{ succe
   const grupo = ((filas ?? []) as { grupo: string | null; es_ajuste: boolean | null }[])
     .find(i => i.es_ajuste !== true && ranuraDeGrupo(i.grupo)?.slug === 'paquete_detalle')?.grupo ?? null
 
-  if (grupo) {
-    const r = await agregarOpcionARanura(cotizacionId, normalizarGrupo(grupo) ?? grupo)
-    return r.success ? { success: true, itemId: r.itemId } : { success: false, error: r.error }
-  }
-  const r = await crearRanuraConOpcion(cotizacionId, 'paquete')
-  return r.success ? { success: true, itemId: r.itemId } : { success: false, error: r.error }
+  const r = grupo
+    ? await agregarOpcionARanura(cotizacionId, normalizarGrupo(grupo) ?? grupo)
+    : await crearRanuraConOpcion(cotizacionId, 'paquete')
+  if (!r.success) return { success: false, error: r.error }
+  // D5 (2026-10-29): cada paquete es una opción de la propuesta, con su tarifa. Sin esto el PDF
+  // mostraba solo el primero.
+  const c = await cerrarAccionPorPasos(supabase, { workspaceId, cotizacionId, antes: null })
+  if (!c.success) return { success: false, error: c.error }
+  return { success: true, itemId: r.itemId }
 }
 
-/** Lee UNO de los dos pantallazos del paquete. No escribe nada. */
-export async function leerPantallazoBloqueo(cotizacionId: string, cual: 'hotel' | 'vuelo', dataUrl: string): Promise<LecturaBloqueo> {
-  if (cual !== 'hotel' && cual !== 'vuelo') return { ok: false, mensaje: 'Casilla desconocida.' }
+/**
+ * «Va en la propuesta» de un paquete (D5 de Mauricio, 2026-10-29): la asesora incluye o saca cada
+ * paquete, sin borrarlo y de forma reversible. Es el «va en la propuesta» de la tarifa del paquete.
+ *
+ * La Recomendada siempre va (decisión E): sacar el paquete de la Recomendada le pasa a ella el
+ * siguiente paquete que va, y el sacado queda en la tarifa de ese, fuera de la propuesta. Si es el
+ * único que va, no se puede sacar.
+ */
+export async function paqueteEnPropuesta(itemId: string, va: boolean): Promise<{ success: true } | { success: false; error: string }> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const sb = supabase as Supabase
+  const { data: item } = await sb.from('items').select('id, cotizacion_id, grupo, es_ajuste, cotizaciones(estado, negocio_id)').eq('id', itemId).maybeSingle()
+  if (!item) return { success: false, error: 'La línea no existe o no es de este workspace.' }
+  const cot = (item.cotizaciones ?? {}) as { estado?: string }
+  if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
+    return { success: false, error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
+  }
+  if (ranuraDeGrupo(item.grupo as string | null)?.slug !== 'paquete_detalle') return { success: false, error: 'Esta línea no es un paquete de bloqueo.' }
+  const cotizacionId = item.cotizacion_id as string
+  const b = await exigirBloqueo(sb, cotizacionId)
+  if (!b.ok) return { success: false, error: b.error }
+
+  // Las tarifas al día primero: un paquete recién creado ya tiene la suya.
+  const antes = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!antes.success) return { success: false, error: antes.error }
+  const tarifas = (await leerItinerarios(sb, cotizacionId)) ?? []
+  const suya = tarifas.find(t => t.seleccion.includes(itemId))
+  if (!suya) return { success: false, error: 'Este paquete todavía no tiene su opción en Tarifas. Recarga la página.' }
+  if (suya.vaEnPropuesta === va) return { success: true }
+  const rec = recomendadaDe(tarifas).fila
+
+  if (va || suya.id !== rec?.id) {
+    const { error: e } = await sb.from('cotizacion_itinerarios').update({ va_en_propuesta: va }).eq('id', suya.id)
+    if (e) return { success: false, error: e.message as string }
+  } else {
+    // Sacar el de la Recomendada: ella toma el siguiente paquete que va.
+    const otra = [...tarifas].sort((x, y) => x.orden - y.orden).find(t => t.id !== suya.id && t.vaEnPropuesta)
+    if (!otra) return { success: false, error: 'Es el único paquete en la propuesta: el cliente tiene que recibir al menos uno.' }
+    const deOtra = await paqueteDeTarifa(sb, otra.seleccion)
+    if (!deOtra) return { success: false, error: 'No se pudo cambiar la Recomendada. Recarga la página.' }
+    const cambios = [
+      sb.from('itinerario_opciones').delete().eq('itinerario_id', suya.id).in('item_id', [itemId]),
+      sb.from('itinerario_opciones').delete().eq('itinerario_id', otra.id).in('item_id', [deOtra]),
+    ]
+    for (const c of cambios) { const { error: e } = await c; if (e) return { success: false, error: e.message as string } }
+    const { error: e1 } = await sb.from('itinerario_opciones').insert([{ itinerario_id: suya.id, item_id: deOtra }, { itinerario_id: otra.id, item_id: itemId }])
+    if (e1) return { success: false, error: e1.message as string }
+    const { error: e2 } = await sb.from('cotizacion_itinerarios').update({ va_en_propuesta: false }).eq('id', otra.id)
+    if (e2) return { success: false, error: e2.message as string }
+  }
+  const c = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return { success: false, error: c.error }
+  return { success: true }
+}
+
+/** El paquete que nombra una tarifa (la opción de la ranura «Paquete de bloqueo»). */
+async function paqueteDeTarifa(supabase: Supabase, seleccion: readonly string[]): Promise<string | null> {
+  if (seleccion.length === 0) return null
+  const { data } = await supabase.from('items').select('id, grupo').in('id', [...seleccion])
+  const fila = ((data ?? []) as { id: string; grupo: string | null }[]).find(i => ranuraDeGrupo(i.grupo)?.slug === 'paquete_detalle')
+  return fila?.id ?? null
+}
+
+/**
+ * Lee UNO de los dos pantallazos del paquete. No escribe nada. `'detectar'`: llegó por el pegado de la
+ * ventana o por «Es paquete de bloqueo» y ONE decide si es el hotel o el vuelo (`bloqueo-leer.ts`).
+ */
+export async function leerPantallazoBloqueo(cotizacionId: string, cual: 'hotel' | 'vuelo' | 'detectar', dataUrl: string): Promise<LecturaBloqueo> {
+  if (cual !== 'hotel' && cual !== 'vuelo' && cual !== 'detectar') return { ok: false, mensaje: 'Casilla desconocida.' }
   if (!(await exigirModulo(REQUISITO.clarity)).ok) return { ok: false, mensaje: MENSAJE_MODULO_NO_ACTIVO }
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { ok: false, mensaje: 'No autenticado' }
@@ -90,10 +165,16 @@ export interface EntradaPaqueteBloqueo {
   imagenes?: { hotel?: ImagenNueva | null; vuelo?: ImagenNueva | null }
   /** La casilla de comisión: incluida (Pública, margen 0) o por incluir (Neta). Ausente = no se toca. */
   comision?: 'incluida' | 'por_incluir'
+  /**
+   * La comisión de la agencia de una Pública, en % o en pesos (D3, 2026-10-29), escrita en la misma
+   * tarjeta antes de guardar. `undefined` = se conserva la guardada; `null` la quita.
+   */
+  comisionAgencia?: ComisionEscrita | null
 }
 
 export type ResultadoPaquete =
-  | { success: true; paquete: PaqueteBloqueo; costo: number | null; falta: string[] }
+  /** `descuentoQuitado`: el motivo del descuento que se quitó al pasar a Pública (se avisa). */
+  | { success: true; paquete: PaqueteBloqueo; costo: number | null; falta: string[]; descuentoQuitado?: string }
   | { success: false; error: string }
 
 /**
@@ -124,6 +205,10 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   if (entrada.comision !== undefined && entrada.comision !== 'incluida' && entrada.comision !== 'por_incluir') {
     return { success: false, error: 'Elige si la comisión está incluida o por incluir.' }
   }
+  if (entrada.comisionAgencia) {
+    const invalida = motivoComisionInvalida(entrada.comisionAgencia)
+    if (invalida) return { success: false, error: invalida }
+  }
 
   const paquete = leerPaqueteBloqueo(entrada.paquete)
   if (!paquete) return { success: false, error: 'El paquete llegó incompleto. Recarga la página.' }
@@ -148,6 +233,7 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   const costo = costoDelPaquete(paquete)
   const en = new Date().toISOString()
   const siguiente: TarifaPax = { ...tarifa, bloqueo: paquete, actualizadaEn: en }
+  let descuentoQuitado: string | undefined
   const patch: Record<string, unknown> = {
     subtotal: costo.total ?? 0,
     cantidad: 1,
@@ -160,14 +246,118 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
     let por: string | null = null
     const { data: perfil } = await sb.from('profiles').select('full_name').eq('id', userId).maybeSingle()
     por = (perfil?.full_name as string | null | undefined)?.trim() || null
-    siguiente.tipoTarifa = { tipo: entrada.comision === 'incluida' ? 'publica' : 'neta', origen: 'persona', por, en }
+    const tipo = entrada.comision === 'incluida' ? 'publica' : 'neta'
+    // La comisión propia de la tarifa (QA del 2026-10-29) es de la decisión de Pública: se queda si
+    // sigue siendo Pública y se va si vuelve a Neta.
+    // La comisión (en % o en pesos) es de la decisión de Pública: la escrita en la tarjeta, o la que ya
+    // tenía mientras siga siéndolo.
+    const comision = tipo === 'publica'
+      ? (entrada.comisionAgencia !== undefined ? entrada.comisionAgencia : comisionEscrita(tarifa.tipoTarifa))
+      : null
+    siguiente.tipoTarifa = conComision({ tipo, origen: 'persona', por, en }, comision)
     patch.margen_porcentaje = entrada.comision === 'incluida' ? 0 : null
+    // Pública = el precio público: un descuento guardado de cuando era Neta quedaría aplicado sin
+    // verse (la tarjeta de la Pública muestra la comisión). Se quita y se avisa (Vera, 2026-10-29).
+    if (tipo === 'publica' && siguiente.descuentoCliente) {
+      descuentoQuitado = siguiente.descuentoCliente.motivo || 'sin motivo'
+      delete siguiente.descuentoCliente
+    }
   }
   patch.tarifa_pax = siguiente
 
   const { error: errUpd } = await sb.from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message as string }
+  // D5 (2026-10-29): las tarifas siguen a los paquetes (cada uno con la suya); después, el total.
+  const c = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId: item.cotizacion_id as string, antes: null })
+  if (!c.success) return { success: false, error: c.error }
+  if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
+  return { success: true, paquete, costo: costo.total, falta: costo.falta, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
+}
+
+export interface ReglasDelPaquete {
+  /**
+   * El descuento que el cliente ve en este paquete, con su motivo, igual que el del hotel
+   * (`tarifa_pax.descuentoCliente`, `reglas-margen.ts`). `null` lo quita.
+   */
+  descuentoCliente?: { motivo: string; tipo: 'pct' | 'monto'; valor: number } | null
+  /**
+   * La comisión de una tarifa Pública, en % (`tarifa_pax.tipoTarifa.comisionPct`). Obligatoria para
+   * enviar (D3, 2026-10-29). `null` la quita.
+   */
+  comisionPct?: number | null
+  /** La misma comisión en PESOS por todo el paquete (`comisionMonto`, D3). Excluye a `comisionPct`. */
+  comisionMonto?: number | null
+}
+
+/**
+ * «Comisión de esta tarifa» y «+ Descuento para el cliente» del paquete (decisión de Mauricio del
+ * 2026-10-29): lo mismo que `ajustarOpcion` hace con el hotel, sobre la línea del paquete. Sin
+ * migración: vive en `tarifa_pax`. Después, el recálculo de siempre (el piso de hotel aplica igual:
+ * el paquete se margina como hotel).
+ */
+export async function ajustarReglasDelPaquete(itemId: string, cambios: ReglasDelPaquete): Promise<{ success: true } | { success: false; error: string }> {
+  const { supabase, workspaceId, userId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const sb = supabase as Supabase
+  const { data: item, error: errItem } = await sb
+    .from('items')
+    .select('*, cotizaciones(estado, negocio_id)')
+    .eq('id', itemId)
+    .maybeSingle()
+  if (errItem) return { success: false, error: errItem.message as string }
+  if (!item) return { success: false, error: 'La línea no existe o no es de este workspace.' }
+  const cot = (item.cotizaciones ?? {}) as { estado?: string; negocio_id?: string | null }
+  if (!isEditable((cot.estado ?? 'borrador') as EstadoCotizacion)) {
+    return { success: false, error: 'Esta cotización ya no se edita. Duplícala para trabajar sobre una nueva.' }
+  }
+  if (ranuraDeGrupo(item.grupo as string | null)?.slug !== 'paquete_detalle') {
+    return { success: false, error: 'Esta línea no es un paquete de bloqueo.' }
+  }
+  const b = await exigirBloqueo(sb, item.cotizacion_id as string)
+  if (!b.ok) return { success: false, error: b.error }
+
+  const tarifa = leerTarifaPax(item.tarifa_pax)
+  if (cambios.descuentoCliente) {
+    const motivo = motivoDescuentoInvalido(cambios.descuentoCliente)
+    if (motivo) return { success: false, error: motivo }
+  }
+  const comision: ComisionEscrita | null | undefined = cambios.comisionMonto !== undefined
+    ? (cambios.comisionMonto === null ? null : { tipo: 'monto', valor: cambios.comisionMonto })
+    : cambios.comisionPct !== undefined
+      ? (cambios.comisionPct === null ? null : { tipo: 'pct', valor: cambios.comisionPct })
+      : undefined
+  if (comision) {
+    const invalida = motivoComisionInvalida(comision)
+    if (invalida) return { success: false, error: invalida }
+    if (tarifa.tipoTarifa?.tipo !== 'publica') return { success: false, error: 'La comisión es de una tarifa Pública. Guarda el paquete así primero.' }
+  }
+  if (cambios.descuentoCliente && tarifa.tipoTarifa?.tipo === 'publica') {
+    return { success: false, error: 'Una tarifa con la comisión incluida va al precio público: el descuento es de una tarifa por incluir (Neta).' }
+  }
+
+  const { data: perfil } = await sb.from('profiles').select('full_name').eq('id', userId).maybeSingle()
+  const por = (perfil?.full_name as string | null | undefined)?.trim() || null
+  const en = new Date().toISOString()
+  const siguiente: TarifaPax = { ...tarifa, actualizadaEn: en }
+  if (comision !== undefined && siguiente.tipoTarifa?.tipo === 'publica') {
+    siguiente.tipoTarifa = conComision(siguiente.tipoTarifa, comision)
+  }
+  if (cambios.descuentoCliente !== undefined) {
+    if (cambios.descuentoCliente === null) delete siguiente.descuentoCliente
+    else {
+      const d = cambios.descuentoCliente
+      siguiente.descuentoCliente = {
+        motivo: d.motivo.trim(),
+        tipo: d.tipo,
+        valor: d.tipo === 'pct' ? Math.round(d.valor * 100) / 100 : Math.round(d.valor),
+        por,
+        en,
+      }
+    }
+  }
+  const { error: errUpd } = await sb.from('items').update({ tarifa_pax: siguiente }).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message as string }
   await recalcularTotales(item.cotizacion_id as string)
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
-  return { success: true, paquete, costo: costo.total, falta: costo.falta }
+  return { success: true }
 }

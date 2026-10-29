@@ -1386,7 +1386,7 @@ export default function CotizacionTrappvelPDF({
   const entradas: EntradaTiempo[] = []
   for (const d of bloquesDia) {
     const [primero, ...resto] = d.items
-    const fecha = fechaDelDia(v.fechaInicio, d.dia)
+    const fecha = fechaDelDia(v.inicioDeLosDias ?? v.fechaInicio, d.dia)
     // La condición de cancelación del proveedor no sale al cliente (`sinCancelacionDelProveedor`).
     const nota = (it: { descripcion?: string | null }) => sinCancelacionDelProveedor(it.descripcion)
     entradas.push({

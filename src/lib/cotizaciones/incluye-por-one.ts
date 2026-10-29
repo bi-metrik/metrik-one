@@ -26,7 +26,8 @@ import { idDelPrincipal } from './tarifas'
 import { itemsDelItinerario, itemsQueAportanAlTotal, type ItemConGrupo } from './itinerarios'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { comoNombrePropio } from './ranuras-cotizacion'
-import { claveTexto } from './tarifa-pasajero'
+import { claveTexto, leerTarifaPax } from './tarifa-pasajero'
+import { incluidoEnPalabras, leerPaqueteBloqueo, type PaqueteBloqueo } from './bloqueo-paquete'
 
 /** El valor de la marca. */
 export const INCLUYE_POR_ONE = 'one'
@@ -74,10 +75,17 @@ export function incluyeDeOne(items: readonly ItemConLectura[], nivel: NivelDetal
     const que = comoNombrePropio(s.descripcion)
     out.push(s.tipo === 'traslado' ? `Traslado ${que}${fecha}` : `${que}${fecha}`)
   }
+  // El paquete de bloqueo (D6 de Mauricio, 2026-10-29): su hotel, sus vuelos y lo que marcan las
+  // casillas de «incluye» del operador (alimentación, traslados, seguro…). Antes salía solo su nombre.
+  for (const i of items) {
+    if (ranuraDeGrupo(i.grupo ?? null)?.slug !== 'paquete_detalle') continue
+    const p = leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)
+    if (p) out.push(...incluyeDelPaquete(p, { corto, detallado }))
+  }
   // Lo que no es vuelo, hotel, traslado ni actividad (un seguro, una asistencia médica).
   for (const i of items) {
     const slug = ranuraDeGrupo(i.grupo ?? null)?.slug
-    if (slug === 'vuelo_detalle' || slug === 'hotel_detalle' || slug === 'traslado_detalle' || slug === 'actividad_detalle') continue
+    if (slug === 'vuelo_detalle' || slug === 'hotel_detalle' || slug === 'traslado_detalle' || slug === 'actividad_detalle' || slug === 'paquete_detalle') continue
     // «Otro servicio» escrito o leído (por pasos): lo que es y, salvo en «general», quién lo presta
     // («Asistencia médica (Assist Card, plan Básico)», como el prototipo de Noor).
     const otro = otroServicioDeItem(i)
@@ -86,6 +94,36 @@ export function incluyeDeOne(items: readonly ItemConLectura[], nivel: NivelDetal
     if (nombre) out.push(`${comoFrase(nombre)}${proveedor}`)
   }
   return sinRepetidos(out.map(limpio).filter(r => r !== '' && !DINERO.test(r)))
+}
+
+/**
+ * Los renglones de UN paquete de bloqueo: el hotel con sus noches y su régimen tal cual, los tiquetes
+ * si el paquete trae vuelo, y cada casilla de «incluye» marcada (lo no marcado no se afirma).
+ */
+export function incluyeDelPaquete(p: PaqueteBloqueo, nivel: { corto: boolean; detallado: boolean }): string[] {
+  const out: string[] = []
+  const h = p.hotel
+  if (h.hotel) {
+    const cuantas = noches(h.noches)
+    const zona = h.zona && !nivel.corto ? ` (${h.zona})` : ''
+    const regimen = !nivel.corto && h.planAlimentacion ? `, con ${h.planAlimentacion}` : ''
+    const habitacion = nivel.detallado && h.habitacion ? ` · ${h.habitacion}` : ''
+    out.push(`${cuantas ? `${cuantas} en ` : 'Alojamiento en '}${h.hotel}${zona}${regimen}${habitacion}`)
+  }
+  const tramos = p.vuelo?.tramos ?? []
+  if (tramos.length > 0) {
+    const ida = tramos[0]
+    const ruta = [ida.origen, ida.destino].filter(Boolean).join(' – ')
+    const regreso = tramos.length > 1 && ida.origen ? ` – ${ida.origen}` : ''
+    const con = ida.aerolinea ? ` con ${ida.aerolinea}` : ''
+    out.push(ruta ? `Tiquetes aéreos ${ruta}${regreso}${con}` : `Tiquetes aéreos${con}`)
+  }
+  for (const etiqueta of incluidoEnPalabras(p.incluye)) {
+    // El tiquete ya va con su ruta cuando el paquete trae el vuelo.
+    if (etiqueta === 'Tiquete aéreo' && tramos.length > 0) continue
+    out.push(etiqueta)
+  }
+  return out
 }
 
 /** «ASISTENCIA MÉDICA» → «Asistencia médica»: lo que escribió el equipo en mayúscula, en frase. */

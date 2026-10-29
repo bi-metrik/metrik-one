@@ -39,6 +39,7 @@ const READONLY_TIPOS = new Set([
   'resumen_financiero',
   'resultado',
   'ejecucion',
+  'avisos_cliente',
 ])
 
 export interface RutaDeclarada {

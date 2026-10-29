@@ -176,12 +176,13 @@ describe('fechas y avisos', () => {
     p.incluye.casillas.tiquete_aereo = false
     expect(avisosDelPaquete(p, ctx).map(a => a.clave)).toEqual(['sin_tiquete'])
   })
-  it('personas que no son los pasajeros de la solicitud → aviso; infantes sin precio → aviso', () => {
+  it('personas que no son los pasajeros de la solicitud → aviso; infantes sin precio → ROJO (QA 2026-10-29)', () => {
     const p = paqueteAliados()
     p.distribucion = { habitaciones: { doble: 2, sencilla: 1, triple: 3 }, ninos: 0 }
     const a = avisosDelPaquete(p, { hoy: '2026-10-27', pasajeros: { adultos: 12, ninos: 2, infantes: 1 } })
-    expect(a.map(x => x.clave)).toEqual(['personas', 'infantes'])
-    expect(a[0].texto).toContain('14 adultos')
+    expect(a.map(x => x.clave)).toEqual(['infantes', 'personas'])
+    expect(a[0].nivel).toBe('rojo')
+    expect(a[1].texto).toContain('14 adultos')
   })
   it('falta de costo es rojo', () => {
     const a = avisosDelPaquete(paqueteAliados(), ctx)
@@ -192,7 +193,8 @@ describe('fechas y avisos', () => {
 describe('guardado: tarifa_pax.bloqueo', () => {
   it('ida y vuelta por JSON se lee igual', () => {
     const p = paqueteAliados()
-    p.distribucion = { habitaciones: { doble: 2 }, ninos: 1 }
+    p.distribucion = { habitaciones: { doble: 2 }, ninos: 1, infantes: 1, edadesNinos: [7] }
+    p.hotel.infante = { precio: 0 }
     p.imagenes = { hotel: 'sbext://a/b.png', vuelo: null }
     expect(leerPaqueteBloqueo(JSON.parse(JSON.stringify(p)))).toEqual(p)
   })
@@ -200,7 +202,7 @@ describe('guardado: tarifa_pax.bloqueo', () => {
     expect(leerPaqueteBloqueo({})).toBeNull()
     expect(leerPaqueteBloqueo(null)).toBeNull()
     const raro = leerPaqueteBloqueo({ version: 1, distribucion: { habitaciones: { doble: -2, triple: '3', suite: 4 }, ninos: 'x' }, imagenes: { hotel: 'https://x' } })
-    expect(raro?.distribucion).toEqual({ habitaciones: { triple: 3 }, ninos: 0 })
+    expect(raro?.distribucion).toEqual({ habitaciones: { triple: 3 }, ninos: 0, infantes: 0, edadesNinos: [] })
     expect(raro?.imagenes.hotel).toBeNull()
   })
   it('el segundo paquete ofrece el vuelo del primero', () => {

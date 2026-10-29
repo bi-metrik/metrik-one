@@ -46,7 +46,7 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
-import { margenAlElegirTipo, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import { conComision, margenAlElegirTipo, motivoComisionInvalida, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
@@ -169,6 +169,11 @@ export type ResultadoTarifa = {
    * faltante queda en su bloque (R1, reunión del 2026-09-23). `CONTEXTO` y `ERROR` sí frenan.
    */
   codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
+  /**
+   * Solo `ajustarOpcion`: el motivo del descuento al cliente que se quitó porque la opción quedó
+   * Pública (se avisa: la tarjeta de la Pública no lo muestra).
+   */
+  descuentoQuitado?: string
   /**
    * Solo `ponerFotoDelHotel` en un espacio con biblioteca de fotos: el hotel como quedó en la
    * biblioteca (la foto ya NO se guarda en la opción). Ausente = se guardó en la opción, como antes.
@@ -581,12 +586,16 @@ export async function leerCapturaEnBorrador(
   const ranura = definicionDeTipo(tipo)
   const reservaVariasHabitaciones = tipo === 'hotel' && opciones?.porPasos === true
     && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
+  // Brief del 2026-10-29, punto 4 · el traslado de ida y regreso de un solo pantallazo.
+  const trasladoIdaYRegreso = tipo === 'traslado' && opciones?.porPasos === true
+    && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
   const r = await leerImagenDeCaptura({
     ranura,
     dataUrl,
     viaje: ctx.viaje,
     enfoque,
     ...(reservaVariasHabitaciones ? { opciones: { reservaVariasHabitaciones: true } } : {}),
+    ...(trasladoIdaYRegreso ? { opciones: { trasladoIdaYRegreso: true } } : {}),
   })
   if (!r.ok) return r
   const leida = r.leida
@@ -1394,10 +1403,12 @@ export interface CambiosDeAjuste {
    */
   descuentoCliente?: { motivo: string; tipo: 'pct' | 'monto'; valor: number } | null
   /**
-   * Reglas de margen: la comisión que trae una tarifa Pública. Con ella la línea entra al margen
-   * global; `null` la quita y la línea vuelve a quedar fuera de esa base.
+   * La comisión que trae una tarifa Pública, en % (decisión D3, 2026-10-29). Con ella la línea entra
+   * al margen general; `null` la quita, y sin comisión la cotización no se puede enviar.
    */
   comisionPct?: number | null
+  /** La misma comisión escrita en PESOS por toda la línea (D3). Excluye a `comisionPct`. */
+  comisionMonto?: number | null
 }
 
 /**
@@ -1421,12 +1432,21 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
     const motivo = motivoDescuentoInvalido(cambios.descuentoCliente)
     if (motivo) return { success: false, error: motivo }
   }
-  if (cambios.comisionPct !== undefined && cambios.comisionPct !== null) {
-    const c = cambios.comisionPct
-    if (!Number.isFinite(c) || c < 0 || c >= 100) return { success: false, error: 'La comisión va de 0 a 99,9 %.' }
+  // D3 (2026-10-29): la comisión en % o en pesos. `undefined` = no se toca.
+  const comision: ComisionEscrita | null | undefined = cambios.comisionMonto !== undefined
+    ? (cambios.comisionMonto === null ? null : { tipo: 'monto', valor: cambios.comisionMonto })
+    : cambios.comisionPct !== undefined
+      ? (cambios.comisionPct === null ? null : { tipo: 'pct', valor: cambios.comisionPct })
+      : undefined
+  if (comision) {
+    const invalida = motivoComisionInvalida(comision)
+    if (invalida) return { success: false, error: invalida }
     if ((cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo ?? 'neta') !== 'publica') {
       return { success: false, error: 'La comisión es de una tarifa Pública.' }
     }
+  }
+  if (cambios.descuentoCliente && (cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo) === 'publica') {
+    return { success: false, error: 'Una tarifa Pública va al precio público: el descuento es de una tarifa Neta.' }
   }
   const margenDelProveedor = conf?.margenProveedor
     ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
@@ -1453,17 +1473,14 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
 
   const { por, porId } = await quienEscribe(supabase)
   const en = new Date().toISOString()
+  let descuentoQuitado: string | undefined
   const guardado = await guardarTarifa(supabase, itemId, leida => {
     const actual: TarifaPax = cambios.tipoTarifa !== undefined
       ? { ...leida, tipoTarifa: { tipo: cambios.tipoTarifa, origen: 'persona', por, en } }
       : { ...leida }
     // La comisión vive en la decisión de Pública: es de ella, y se va si la línea vuelve a Neta.
-    if (cambios.comisionPct !== undefined && actual.tipoTarifa?.tipo === 'publica') {
-      const { comisionPct: _antes, ...resto } = actual.tipoTarifa
-      void _antes
-      actual.tipoTarifa = cambios.comisionPct === null
-        ? resto
-        : { ...resto, comisionPct: Math.round(cambios.comisionPct * 100) / 100 }
+    if (comision !== undefined && actual.tipoTarifa?.tipo === 'publica') {
+      actual.tipoTarifa = conComision(actual.tipoTarifa, comision)
     }
     if (cambios.descuentoCliente !== undefined) {
       if (cambios.descuentoCliente === null) delete actual.descuentoCliente
@@ -1477,6 +1494,13 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
           en,
         }
       }
+    }
+    // Pública = el precio público: un descuento guardado de cuando era Neta quedaría aplicado en
+    // la cascada sin verse (la tarjeta de la Pública muestra la comisión). Se quita y se avisa,
+    // igual que en el paquete de bloqueo (Vera, 2026-10-29).
+    if (actual.tipoTarifa?.tipo === 'publica' && actual.descuentoCliente) {
+      descuentoQuitado = actual.descuentoCliente.motivo || 'sin motivo'
+      delete actual.descuentoCliente
     }
     const precios = cambios.volverACalculado ? {} : { ...(actual.preciosAMano ?? {}) }
     for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
@@ -1498,7 +1522,7 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
   if (errItem) return { success: false, error: errItem.message }
   await recalcularTotales(item.cotizacionId)
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
-  return { success: true, tarifa: guardado.tarifa }
+  return { success: true, tarifa: guardado.tarifa, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
 }
 
 /**
