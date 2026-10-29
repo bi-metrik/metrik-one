@@ -8,6 +8,9 @@
 //   asignación de equipo y `toggle_status`. SIN VERIFICAR (D7): que el token del Agent Bot pueda crear notas privadas,
 //   etiquetar y cambiar el estado en la cuenta real; plan B: token de un usuario de servicio con el rol más bajo que
 //   alcance (es otro valor de `CHATWOOT_API_TOKEN_<SLUG>`, sin cambiar código).
+//   Fotos (ventas, 29-oct): `publicarFoto` baja la imagen del bucket `ferreteria-fotos` (solo ese host y ruta, sin
+//   redirecciones, ≤ 5 MB, 8 s) y la sube por multipart `attachments[]`. SIN VERIFICAR contra Chatwoot Cloud: que el
+//   token del Agent Bot pueda subir adjuntos y que Messenger muestre la foto con el pie.
 // · `puertosEntradaSupabase`: lo que necesita la petición del webhook (`entrada.ts`).
 // · `alertaCaidaChatwoot` y `avisosPorCorreo` (spec 2026-10-26, §4.1): el correo si se cae el modelo y el aviso del
 //   presupuesto diario, por correo a MéTRIK (Resend) y ya no por WhatsApp.

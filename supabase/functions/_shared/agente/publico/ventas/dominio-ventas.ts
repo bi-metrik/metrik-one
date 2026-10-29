@@ -4,8 +4,11 @@
 // El mismo asistente público (cola, consentimientos, candados, Chatwoot), con un producto que es un SKU del catálogo de
 // Ferretería de ONE en vez de una experiencia. Se elige con `config_extra.bot_conversacional.chatwoot.dominio = 'ventas'`.
 //
-//   · `ver_catalogo`      lectura. Busca en ONE por texto libre («taladro», «bomba 1 HP») o por código MP-xx. Precio de
+//   · `ver_catalogo`      lectura. Busca en ONE por texto libre («taladro», «bomba 1 HP») o por código MP-xx, con el
+//                         `uso` del cliente si ya lo dijo. Venta consultiva (Mauricio, 29-oct): nunca más de 3 productos;
+//                         con más coincidencias y sin uso devuelve `preguntar_uso` y los tipos, no una lista. Precio de
 //                         la publicación activa; la ficha partida en verificado y «según el catálogo del fabricante».
+//                         Las fotos de lo que la respuesta nombra las manda el código (`fotos-ventas.ts`, `cola.ts`).
 //   · `consultar_reglas`  lectura. Las políticas `pol.*` del reglamento (despacho, recoger, pago, garantía…).
 //   · `proponer` (acción `compra`). Exige la autorización `general`. El código arma el resumen con el TOTAL (precio ×
 //     cantidad + flete de la tabla del reglamento) desde el catálogo y lo que el cliente escribió DESPUÉS del «sí»
