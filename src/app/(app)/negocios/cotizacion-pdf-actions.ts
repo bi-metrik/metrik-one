@@ -64,6 +64,7 @@ import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { hotelesDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
@@ -1211,8 +1212,13 @@ export async function generateCotizacionPDF(
       descripcion: i.descripcion ?? null,
     })
     const paraLectura = itemsImpresos.map(paraLecturaDe)
-    const vuelos = vuelosDeItems(paraLectura)
-    const hoteles = hotelesDeItems(paraLectura)
+    // Viaje en bloqueo (QA del 2026-10-29): el hotel y los vuelos del paquete viven en
+    // `tarifa_pax.bloqueo`, no en las casillas del pantallazo. Solo se DESCRIBEN aquí: no entran a
+    // `vuelosDeItems`, que también usan el margen y el recargo.
+    const vuelosDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...vuelosDeItems(xs), ...vuelosDePaquetes(xs)]
+    const hotelesDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...hotelesDeItems(xs), ...hotelesDePaquetes(xs)]
+    const vuelos = vuelosDoc(paraLectura)
+    const hoteles = hotelesDoc(paraLectura)
 
     /**
      * Con VARIAS tarifas en la propuesta, los vuelos y hoteles del documento son los de las
@@ -1243,8 +1249,8 @@ export async function generateCotizacionPDF(
         .map(id => itemPorId.get(id))
         .filter((i): i is ItemRow => i !== undefined)
       const marcar = <T,>(lista: T[], i: ItemRow) => lista.map(x => ({ ...x, tarifas: tarifasDe.get(i.id as string) ?? [] }))
-      vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDeItems([paraLecturaDe(i)]), i))
-      hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
+      vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDoc([paraLecturaDe(i)]), i))
+      hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDoc([paraLecturaDe(i)]), i))
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
     // La ficha fijada en cada línea de hotel: sus fotos son las que la tarjeta muestra y guarda.

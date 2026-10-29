@@ -297,6 +297,12 @@ export function costoDeLinea(item: ItemParaCascada): number {
  * El precio de una línea, cuadrado al peso como lo imprime el documento: por pasajero si la línea
  * se vende por pasajero (punto 11 del brief del 2026-10-05), si no por unidad («VLR. UNIT.»).
  */
+/** El margen que da un precio sobre un costo, en la convención de la cotización. */
+function margenDePrecio(costo: number, precio: number, convencion: ConvencionMargen): number {
+  if (convencion === 'sobre_venta') return precio > 0 ? ((precio - costo) / precio) * 100 : 0
+  return costo > 0 ? ((precio - costo) / costo) * 100 : 0
+}
+
 function cuadrarAlPeso(precio: number, cantidad: number, pasajeros: ItemParaCascada['pasajeros'] | false): number {
   return pasajeros
     ? precioCuadradoPorPasajero(precio / cantidad, pasajeros) * cantidad
@@ -409,6 +415,12 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
         ? precioConMargen(costoDeVentaLinea, margenAplicado - descuentoCliente.valor, convencion)
         : precioLinea - descuentoCliente.valor
       precioLinea = Math.max(0, precioLinea)
+      // El margen que se le APLICÓ es el que queda después del descuento (QA del bloqueo,
+      // 2026-10-29): un paquete Neto al 15 % con 6 de descuento se vende al 9 %, y la tarjeta, el
+      // «Ajustar» y el precio por fila tienen que decir 9, no 15.
+      margenAplicado = descuentoCliente.tipo === 'pct'
+        ? margenAplicado - descuentoCliente.valor
+        : margenDePrecio(costoDeVentaLinea, precioLinea, convencion)
     }
 
     // El precio de la línea se cuadra al peso POR UNIDAD, que es la cifra que se

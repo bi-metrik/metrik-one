@@ -1,10 +1,12 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
-import { AlertTriangle, ImageIcon, Loader2, Package, Plane, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { AlertTriangle, ImageIcon, Loader2, Package, Plane, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, type ImagenNueva } from '@/app/(app)/negocios/bloqueo-actions'
+import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
+import { ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
+import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import {
   ACOMODACIONES,
   CATEGORIAS_INCLUYE,
@@ -22,6 +24,7 @@ import {
   type TramoBloqueo,
   type VueloBloqueo,
 } from '@/lib/cotizaciones/bloqueo-paquete'
+import { casillaParaPegado, type CasillaPaquete, type RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 
@@ -102,6 +105,19 @@ export interface PropsTarjetaPaquete {
   vueloSugerido: VueloBloqueo | null
   onCambio: () => void
   onEliminar: () => void
+  /**
+   * El puente con la bandeja (QA del 2026-10-29): el Ctrl+V de la ventana y «Es paquete de bloqueo»
+   * llegan aquí, a la casilla vacía o a la que diga la detección. Sin él, solo la casilla con foco.
+   */
+  registro?: RegistroDePaquetes | null
+  /**
+   * Lo que la cascada dice de esta línea con reglas de margen (decisión de Mauricio del 2026-10-29):
+   * con ella la tarjeta ofrece «Comisión de esta tarifa» (Pública) y «+ Descuento para el cliente»
+   * (Neta), como el hotel. `null` sin reglas.
+   */
+  reglasDeLinea?: ReglasDeLinea | null
+  /** El margen que de verdad se aplicó (ya con el descuento). */
+  margenAplicado?: number | null
 }
 
 type Comision = 'incluida' | 'por_incluir'
@@ -115,16 +131,23 @@ const numeroONulo = (v: string) => {
   const n = Number(v.replace(/[^\d]/g, ''))
   return v.trim() === '' || !Number.isFinite(n) ? null : n
 }
+/** «5, 8» → [5, 8]. Lo que no es una edad de 0 a 17 se ignora. */
+const edadesDeTexto = (v: string) => v.split(/[^\d]+/).filter(Boolean).map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 17)
 
 export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const guardado = useMemo(() => leerPaqueteBloqueo(leerTarifaPax(p.tarifaPax).bloqueo), [p.tarifaPax])
-  const tipoGuardado = leerTarifaPax(p.tarifaPax).tipoTarifa?.tipo ?? null
+  const tarifaGuardada = leerTarifaPax(p.tarifaPax)
+  const tipoGuardado = tarifaGuardada.tipoTarifa?.tipo ?? null
   const [abierto, setAbierto] = useState(guardado === null)
   const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => guardado ?? paqueteVacio(p.operador))
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
   const [imagenes, setImagenes] = useState<{ hotel?: ImagenNueva & { vista: string }; vuelo?: ImagenNueva & { vista: string } }>({})
   const [leyendo, setLeyendo] = useState<{ hotel: boolean; vuelo: boolean }>({ hotel: false, vuelo: false })
   const [rechazo, setRechazo] = useState<{ hotel?: string; vuelo?: string }>({})
+  // Un pegado que la detección no supo ubicar: la asesora dice si es el hotel o el vuelo.
+  const [porElegir, setPorElegir] = useState<{ dataUrl: string; mensaje: string } | null>(null)
+  const [detectando, setDetectando] = useState(false)
+  const [edadesTexto, setEdadesTexto] = useState(() => (guardado?.distribucion.edadesNinos ?? []).join(', '))
   const [guardando, empezar] = useTransition()
 
   const costo = costoDelPaquete(paquete)
@@ -136,21 +159,65 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
     setPaquete(x => f(structuredClone(x)))
   }
 
-  async function leer(cual: 'hotel' | 'vuelo', dataUrl: string) {
+  async function leer(cual: CasillaPaquete, dataUrl: string) {
+    setPorElegir(null)
     setLeyendo(l => ({ ...l, [cual]: true }))
     setRechazo(r => ({ ...r, [cual]: undefined }))
     try {
       const r = await leerPantallazoBloqueo(p.cotizacionId, cual, dataUrl)
       if (!r.ok) { setRechazo(x => ({ ...x, [cual]: r.mensaje })); return }
-      setImagenes(i => ({ ...i, [cual]: { dataUrl, huella: r.huella, vista: dataUrl } }))
-      if (r.cual === 'hotel') cambiar(x => ({ ...x, hotel: r.hotel, incluye: r.incluye }))
-      else cambiar(x => ({ ...x, vuelo: r.vuelo }))
+      ponerLectura(r, dataUrl)
     } catch {
       setRechazo(x => ({ ...x, [cual]: 'La lectura se interrumpió. Vuelve a pegar el pantallazo.' }))
     } finally {
       setLeyendo(l => ({ ...l, [cual]: false }))
     }
   }
+
+  function ponerLectura(r: Extract<Awaited<ReturnType<typeof leerPantallazoBloqueo>>, { ok: true }>, dataUrl: string) {
+    setImagenes(i => ({ ...i, [r.cual]: { dataUrl, huella: r.huella, vista: dataUrl } }))
+    if (r.cual === 'hotel') cambiar(x => ({ ...x, hotel: { ...r.hotel, infante: x.hotel.infante ?? null }, incluye: r.incluye }))
+    else cambiar(x => ({ ...x, vuelo: r.vuelo }))
+  }
+
+  /** Con las dos casillas vacías (o llenas), ONE decide con la detección; si no sabe, pregunta. */
+  async function leerDetectando(dataUrl: string) {
+    setPorElegir(null)
+    setDetectando(true)
+    try {
+      const r = await leerPantallazoBloqueo(p.cotizacionId, 'detectar', dataUrl)
+      if (r.ok) { ponerLectura(r, dataUrl); return }
+      setPorElegir({ dataUrl, mensaje: r.mensaje })
+    } catch {
+      setPorElegir({ dataUrl, mensaje: 'La lectura se interrumpió. Elige la casilla o vuelve a pegar el pantallazo.' })
+    } finally {
+      setDetectando(false)
+    }
+  }
+
+  // El pegado de la ventana y «Es paquete de bloqueo» de la bandeja entran por aquí (QA 2026-10-29).
+  const vivo = useRef({ abierto, paquete, imagenes, leer, leerDetectando })
+  useEffect(() => { vivo.current = { abierto, paquete, imagenes, leer, leerDetectando } })
+  const registro = p.registro ?? null
+  useEffect(() => {
+    if (!registro) return
+    const lleno = () => {
+      const v = vivo.current
+      return {
+        hotelLleno: !!(v.paquete.hotel.hotel || v.paquete.hotel.precios.length > 0 || v.paquete.imagenes.hotel || v.imagenes.hotel),
+        vueloLleno: !!((v.paquete.vuelo?.tramos.length ?? 0) > 0 || v.paquete.imagenes.vuelo || v.imagenes.vuelo),
+      }
+    }
+    return registro.registrar(p.itemId, {
+      estado: () => ({ itemId: p.itemId, abierto: vivo.current.abierto, ...lleno() }),
+      recibir: (dataUrl, casilla) => {
+        setAbierto(true)
+        const cual = casilla ?? casillaParaPegado(lleno())
+        if (cual) void vivo.current.leer(cual, dataUrl)
+        else void vivo.current.leerDetectando(dataUrl)
+      },
+    })
+  }, [registro, p.itemId])
 
   function guardar() {
     empezar(async () => {
@@ -170,11 +237,20 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
     })
   }
 
-  const ocupado = guardando || leyendo.hotel || leyendo.vuelo
+  const ocupado = guardando || leyendo.hotel || leyendo.vuelo || detectando
+
+  function ajustarReglas(cambios: ReglasDelPaquete) {
+    empezar(async () => {
+      const r = await ajustarReglasDelPaquete(p.itemId, cambios)
+      if (!r.success) { toast.error(r.error); return }
+      p.onCambio()
+    })
+  }
   const disponibles = ACOMODACIONES.filter(a => !h.precios.some(x => x.acomodacion === a))
 
   return (
-    <article data-paquete-bloqueo className="rounded-lg border bg-white p-3 text-xs">
+    <article data-paquete-bloqueo data-item-id={p.itemId} className="rounded-lg border bg-white p-3 text-xs"
+      onFocusCapture={() => registro?.activar(p.itemId)} onPointerDownCapture={() => registro?.activar(p.itemId)}>
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="m-0 text-sm font-semibold">{h.hotel ?? 'Paquete sin hotel'}</p>
@@ -186,6 +262,9 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         <div className="text-right">
           <p className="m-0 text-[11px] text-[#6E6A62]">Costo {pesos(guardado ? costoDelPaquete(guardado).total : null)}</p>
           <p className="m-0 text-sm font-semibold tabular-nums">{pesos(p.precioVenta)}</p>
+          {p.margenAplicado !== null && p.margenAplicado !== undefined && guardado && (
+            <p className="m-0 text-[11px] text-[#6E6A62]" data-margen-paquete>Margen {String(Math.round(p.margenAplicado * 10) / 10).replace('.', ',')} %</p>
+          )}
         </div>
       </header>
 
@@ -208,6 +287,19 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                 vista={imagenes.hotel?.vista ?? null} guardada={!!paquete.imagenes.hotel} onImagen={d => leer('hotel', d)} />
               <CasillaPantallazo titulo="Vuelo" icono={<Plane className="h-3.5 w-3.5" />} leyendo={leyendo.vuelo} rechazo={rechazo.vuelo}
                 vista={imagenes.vuelo?.vista ?? null} guardada={!!paquete.imagenes.vuelo} onImagen={d => leer('vuelo', d)} />
+            </div>
+          )}
+          {detectando && (
+            <p className="m-0 flex items-center gap-1.5 text-[11px] text-[#6E6A62]" data-detectando-paquete>
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Leyendo el pantallazo pegado…
+            </p>
+          )}
+          {porElegir && p.editable && (
+            <div data-elegir-casilla className="flex flex-wrap items-center gap-2 rounded bg-amber-50 p-1.5 text-[11px] font-medium text-amber-900">
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+              {porElegir.mensaje}
+              <button type="button" data-es-casilla="hotel" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => void leer('hotel', porElegir.dataUrl)}>Es el hotel</button>
+              <button type="button" data-es-casilla="vuelo" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => void leer('vuelo', porElegir.dataUrl)}>Es el vuelo</button>
             </div>
           )}
 
@@ -266,8 +358,24 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                   <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'nino')?.total ?? null)}</td>
                   <td />
                 </tr>
+                <tr data-acomodacion="infante">
+                  <td>Infante</td>
+                  <td><input aria-label="Precio por infante" className={`${CAJA} w-28`} inputMode="numeric" placeholder="0 si no paga" value={h.infante?.precio ?? ''}
+                    onChange={e => cambiar(x => { x.hotel.infante = { precio: numeroONulo(e.target.value) }; return x })} /></td>
+                  <td colSpan={2}><input aria-label="Infantes" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.infantes || ''}
+                    onChange={e => cambiar(x => { x.distribucion.infantes = numeroONulo(e.target.value) ?? 0; return x })} /> infantes</td>
+                  <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'infante')?.total ?? null)}</td>
+                  <td />
+                </tr>
               </tbody>
             </table>
+            {paquete.distribucion.ninos > 0 && (
+              <label className={`${ETIQUETA} max-w-xs`}>
+                Edad de cada niño (para revisar el rango CHD)
+                <input aria-label="Edades de los niños" className={CAJA} placeholder="Ej.: 5, 8" value={edadesTexto}
+                  onChange={e => { setEdadesTexto(e.target.value); const edades = edadesDeTexto(e.target.value); cambiar(x => { x.distribucion.edadesNinos = edades; return x }) }} />
+              </label>
+            )}
             {disponibles.length > 0 && p.editable && (
               <select aria-label="Agregar acomodación" className={CAJA} value=""
                 onChange={e => { const a = e.target.value as Acomodacion; if (a) cambiar(x => { x.hotel.precios.push({ acomodacion: a, precioPorPersona: null }); return x }) }}>
@@ -365,6 +473,23 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
             <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'por_incluir'} onChange={() => setComision('por_incluir')} /> Por incluir (margen de la cotización)</label>
           </fieldset>
 
+          {/* Comisión propia y descuento al cliente, como el hotel (decisión del 2026-10-29). Sobre lo
+              GUARDADO: la comisión es de una tarifa ya guardada como «Incluida». */}
+          {p.reglasDeLinea && guardado && (
+            <div data-reglas-paquete>
+              <ReglasDeOpcion
+                reglas={p.reglasDeLinea}
+                descuento={tarifaGuardada.descuentoCliente ?? null}
+                comisionPct={tarifaGuardada.tipoTarifa?.comisionPct ?? null}
+                publica={tipoGuardado === 'publica'}
+                editable={p.editable}
+                ocupado={ocupado}
+                onDescuento={d => ajustarReglas({ descuentoCliente: d })}
+                onComision={c => ajustarReglas({ comisionPct: c })}
+              />
+            </div>
+          )}
+
           {avisos.length > 0 && (
             <ul className="m-0 list-none space-y-1 p-0" data-avisos-paquete>
               {avisos.map((a, i) => (
@@ -409,6 +534,7 @@ function CasillaPantallazo({ titulo, icono, leyendo, rechazo, vista, guardada, o
   onImagen: (dataUrl: string) => void
 }) {
   const entrada = useRef<HTMLInputElement>(null)
+  const zona = useRef<HTMLDivElement>(null)
   function desdeArchivo(archivo: File | null | undefined) {
     if (!archivo || !archivo.type.startsWith('image/')) return
     const lector = new FileReader()
@@ -417,9 +543,11 @@ function CasillaPantallazo({ titulo, icono, leyendo, rechazo, vista, guardada, o
   }
   return (
     <div data-casilla-paquete={titulo.toLowerCase()} className="space-y-1">
+      {/* QA del 2026-10-29: el clic ENFOCA la casilla para pegar; abrir archivos es «Subir archivo». */}
       <div
+        ref={zona}
         tabIndex={0}
-        role="button"
+        role="textbox"
         aria-label={`Pega el pantallazo del ${titulo.toLowerCase()} de este paquete`}
         onPaste={e => {
           const i = Array.from(e.clipboardData.items).find(x => x.type.startsWith('image/'))
@@ -429,14 +557,17 @@ function CasillaPantallazo({ titulo, icono, leyendo, rechazo, vista, guardada, o
         }}
         onDragOver={e => e.preventDefault()}
         onDrop={e => { e.preventDefault(); desdeArchivo(e.dataTransfer.files?.[0]) }}
-        onClick={() => entrada.current?.click()}
-        className="flex min-h-[64px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed bg-[#F5F4F2] p-2 text-[11px] text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30"
+        onClick={() => zona.current?.focus()}
+        className="flex min-h-[64px] cursor-text items-center justify-center gap-1.5 rounded-lg border border-dashed bg-[#F5F4F2] p-2 text-[11px] text-[#6B7280] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- vista local del pantallazo pegado (data URL) */}
         {vista ? <img src={vista} alt={`Pantallazo del ${titulo.toLowerCase()}`} className="max-h-16 rounded" /> : (leyendo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icono)}
-        <span>{leyendo ? `Leyendo el ${titulo.toLowerCase()}…` : `${titulo}: pega (Ctrl+V / Cmd+V), arrastra o elige el pantallazo${guardada && !vista ? ' · ya hay uno guardado' : ''}`}</span>
-        <input ref={entrada} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => desdeArchivo(e.target.files?.[0])} />
+        <span>{leyendo ? `Leyendo el ${titulo.toLowerCase()}…` : `${titulo}: haz clic aquí y pega (Ctrl+V / Cmd+V), o arrastra el pantallazo${guardada && !vista ? ' · ya hay uno guardado' : ''}`}</span>
       </div>
+      <button type="button" data-subir-archivo className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0E5C43]" onClick={() => entrada.current?.click()}>
+        <Upload className="h-3 w-3" aria-hidden /> Subir archivo
+      </button>
+      <input ref={entrada} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => { desdeArchivo(e.target.files?.[0]); e.target.value = '' }} />
       {rechazo && <p className="m-0 text-[11px] font-medium text-red-700">{rechazo}</p>}
     </div>
   )
