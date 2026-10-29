@@ -142,7 +142,7 @@ async function registrarPagoViajeroSinClave(input: EntradaPagoViajero): Promise<
       soporte,
       external_ref: input.referencia?.trim().slice(0, 120) || null,
       notas: input.banco ? `Desde ${input.banco.trim().slice(0, 80)}` : null,
-      created_by: ctx.staffId,
+      created_by: ctx.userId,
     })
     .select('id')
     .single()
@@ -262,7 +262,7 @@ async function deshacerPagoViajeroSinClave(negocioId: string, cobroId: string) {
   if (!fila) return { ok: true as const }
   if (fila.siigo_recibo) return { ok: false as const, error: 'El recibo ya salió: el pago se anula con motivo, no se deshace.' }
   const edad = Date.now() - Date.parse(fila.created_at ?? '')
-  if (!(edad >= 0 && edad <= VENTANA_DESHACER_MS) || (fila.created_by && fila.created_by !== c.ctx.staffId)) {
+  if (!(edad >= 0 && edad <= VENTANA_DESHACER_MS) || (fila.created_by && fila.created_by !== c.ctx.userId)) {
     return { ok: false as const, error: 'Ya pasó el momento de deshacer: el pago se anula con motivo.' }
   }
   const { error } = await c.ctx.supabase.from('cobros').delete().eq('id', cobroId).eq('workspace_id', c.ctx.workspaceId)

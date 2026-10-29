@@ -164,7 +164,7 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
   const ranuras = ranurasConAlternativas(lineas)
   const ordenadas = [...tarifas].sort((a, b) => a.orden - b.orden)
   const calculadas = ordenadas.map(t => {
-    const cascada = cascadaDeItinerario(lineas, t.seleccion, params)
+    const cascada = cascadaDeItinerario(lineas, t.seleccion, params, t.id)
     const dentro = new Set(itemsDelItinerario(lineas, t.seleccion))
     const opcionPorServicio: Record<string, string> = {}
     for (const r of ranuras) {
@@ -201,7 +201,8 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
 export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCascada, tarifas: readonly TarifaDeLaPantalla[]): Cascada {
   const principal = tarifas.find(t => t.id === idDelPrincipal(tarifas)) ?? null
   const aportan = new Set(principal ? itemsDelItinerario(lineas, principal.seleccion) : itemsQueAportanAlTotal(lineas))
-  return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), params)
+  // Con principal, la cascada de ESA tarifa: lleva sus descuentos propios (`descuentoAplicaA`).
+  return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), principal ? { ...params, tarifaId: principal.id } : params)
 }
 
 /**

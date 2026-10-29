@@ -685,6 +685,9 @@ describe('riel de cobro: registrar el pago del viajero (F2-5, F2-8)', () => {
     expect(r.ok).toBe(true)
     expect(tablas.cobros).toHaveLength(1)
     expect(tablas.cobros[0]).toMatchObject({ monto: 1_215_000, fecha: HOY, tipo_cobro: 'anticipo', cuenta_recaudo: 'bancolombia-3241', external_ref: 'M4471023' })
+    // `cobros.created_by` apunta a auth.users: va el usuario, no el staff (con el staff, la FK
+    // rechazaba todo pago en producción; QA de punta a punta del 2026-10-29).
+    expect(tablas.cobros[0].created_by).toBe('p-s-dani')
     expect((tablas.cobros[0].soporte as Fila).url).toBe(`one://ve-documentos/${SOPORTE.storage_path}`)
     if (!r.ok) return
     expect(r.avanzo).toBe('Reservas y pagos')
@@ -721,6 +724,14 @@ describe('riel de cobro: registrar el pago del viajero (F2-5, F2-8)', () => {
     areas = ['operaciones']
     expect((await registrarPagoViajero(pagoEntrada())).ok).toBe(false)
     expect(tablas.cobros).toHaveLength(0)
+  })
+
+  it('Deshacer: otra persona no deshace el pago de quien lo registró', async () => {
+    const r = await registrarPagoViajero(pagoEntrada())
+    if (!r.ok) throw new Error(r.error)
+    staffId = 's-edgar'
+    expect((await deshacerPagoViajero(NEG, r.cobroId)).ok).toBe(false)
+    expect(tablas.cobros).toHaveLength(1)
   })
 
   it('Deshacer (8): el pago desaparece y el negocio vuelve a Confirmación', async () => {

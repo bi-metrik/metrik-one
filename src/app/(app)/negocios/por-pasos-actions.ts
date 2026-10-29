@@ -378,7 +378,7 @@ export async function margenPorPasos(
  */
 export async function reglasPorPasos(
   cotizacionId: string,
-  cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number }[] },
+  cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[] },
 ): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -389,7 +389,18 @@ export async function reglasPorPasos(
   const actuales = leerReglasDeCotizacion((cot as { reglas_margen?: unknown } | null)?.reglas_margen)
   if (!actuales) return { success: false, error: 'Esta cotización no tiene reglas de margen.' }
   if ((cot as { estado?: string | null } | null)?.estado !== 'borrador') return { success: false, error: 'Solo se cambia en una cotización en borrador.' }
-  const descuentos = cambio.descuentos?.map((d, i) => ({ id: (d.id ?? '').trim() || `d${Date.now().toString(36)}${i}`, descripcion: (d.descripcion ?? '').trim(), pct: Number(d.pct) }))
+  const descuentos = cambio.descuentos?.map((d, i) => {
+    const aplicaA = typeof d.aplicaA === 'string' && d.aplicaA.trim() ? d.aplicaA.trim() : null
+    return { id: (d.id ?? '').trim() || `d${Date.now().toString(36)}${i}`, descripcion: (d.descripcion ?? '').trim(), pct: Number(d.pct), ...(aplicaA ? { aplicaA } : {}) }
+  })
+  // Un descuento de UNA tarifa (2026-10-29) nombra una tarifa de ESTA cotización. Uno que ya venía
+  // guardado con una tarifa que se borró se deja pasar tal cual: no se aplica a ninguna.
+  const nuevasTarifas = (descuentos ?? []).filter(d => d.aplicaA && !actuales.descuentos.some(x => x.id === d.id && x.aplicaA === d.aplicaA))
+  if (nuevasTarifas.length > 0) {
+    const { data: its } = await supabase.from('cotizacion_itinerarios').select('id').eq('cotizacion_id', cotizacionId)
+    const existen = new Set(((its ?? []) as { id: string }[]).map(x => x.id))
+    if (nuevasTarifas.some(d => !existen.has(d.aplicaA as string))) return { success: false, error: 'Esa tarifa ya no existe. Vuelve a cargar la cotización.' }
+  }
   const invalido = motivoReglasInvalidas(actuales.politica, { puntosExtra: cambio.puntosExtra, descuentos })
   if (invalido) return { success: false, error: invalido }
   const siguientes = {

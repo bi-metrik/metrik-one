@@ -259,3 +259,33 @@ describe('falla 2 · el aviso de aprobación dice la causa real', () => {
     expect(texto(html)).toContain('Bajo el mínimo')
   })
 })
+
+describe('un descuento sobre el total a una sola tarifa (2026-10-29)', () => {
+  const causas = (html: string) => [...html.matchAll(/data-causa-margen="(\w+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]])
+
+  it('el chip dice a qué tarifa aplica y el de siempre dice «Todas las tarifas»', () => {
+    const params = paramsDelCaso({
+      descuentos: [
+        { id: 'dt', descripcion: 'Cliente recurrente', pct: 2 },
+        { id: 'dp', descripcion: 'Suba a Premium', pct: 8, aplicaA: 'tf-pre' },
+      ],
+    })
+    const html = tarifas(3, { params })
+    volcar('descuento-por-tarifa', html)
+    expect(html).toContain('data-aplica-a="todas"')
+    expect(html).toContain('data-aplica-a="tf-pre"')
+    expect(html).toMatch(/<option value="tf-pre" selected="">Solo Premium<\/option>/)
+    // El 8 % de la Premium la deja bajo el 12 %: frena ella sola, con su nombre.
+    const c = causas(html)
+    expect(c.length).toBe(1)
+    expect(c[0][0]).toBe('global')
+    expect(c[0][1]).toMatch(/^Premium: margen \d+(,\d)? %, mínimo 12 %$/)
+  })
+
+  it('un descuento cuya tarifa se borró lo dice y no frena a ninguna', () => {
+    const params = paramsDelCaso({ descuentos: [{ id: 'dp', descripcion: 'Suba a Premium', pct: 8, aplicaA: 'tf-borrada' }] })
+    const html = tarifas(3, { params })
+    expect(texto(html)).toContain('Su tarifa ya no existe: no se aplica')
+    expect(causas(html)).toEqual([])
+  })
+})

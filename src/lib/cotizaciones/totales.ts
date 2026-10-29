@@ -49,6 +49,7 @@ import {
   colchonDeLinea,
   comisionDePublica,
   descuentoDeLinea,
+  descuentosDeTarifa,
   tipoParaMargen,
   type ColchonDeLinea,
   type ReglasDeCotizacion,
@@ -115,6 +116,12 @@ export interface ParametrosCascada {
    * la de siempre.
    */
   reglas?: ReglasDeCotizacion | null
+  /**
+   * De qué tarifa es esta cascada (el id del itinerario), para los descuentos sobre el total que
+   * son de UNA tarifa (`reglas-margen.ts › descuentoAplicaA`, 2026-10-29). Ausente = la cascada no
+   * es de ninguna tarifa: solo entran los descuentos de «todas», como hasta hoy.
+   */
+  tarifaId?: string | null
 }
 
 export interface LineaCalculada {
@@ -504,6 +511,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
   if (reglas) {
     return conReglas({
       reglas,
+      tarifaId: params.tarifaId ?? null,
       lineas,
       paraPuntos,
       ventaBruta,
@@ -600,6 +608,7 @@ function repartirPuntos(paraPuntos: ParaPuntos[], extra: number): number {
  */
 function conReglas(a: {
   reglas: ReglasDeCotizacion
+  tarifaId: string | null
   lineas: LineaCalculada[]
   paraPuntos: ParaPuntos[]
   ventaBruta: number
@@ -628,8 +637,9 @@ function conReglas(a: {
   // ── 5 · Descuentos sobre el total: después de los puntos, cada uno al peso ──
   // El descuento comercial de siempre (`cotizaciones.descuento_porcentaje`), si alguien lo puso,
   // es uno más: con reglas el cliente ve todo descuento con su nombre.
+  // Solo los de esta tarifa: los de «todas» y los que nombran su id (`descuentoAplicaA`).
   const pedidos = [
-    ...reglas.descuentos,
+    ...descuentosDeTarifa(reglas.descuentos, a.tarifaId),
     ...(a.descComercial > 0 ? [{ id: 'comercial', descripcion: 'Descuento comercial', pct: a.descComercial }] : []),
   ]
   const descuentos = pedidos.map(d => ({ ...d, valor: Math.round(ventaBruta * (d.pct / 100)) }))

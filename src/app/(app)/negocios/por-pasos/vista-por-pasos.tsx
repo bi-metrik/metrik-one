@@ -371,13 +371,13 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     })
   }
 
-  const cambiarReglas = (cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number }[] }, texto: string) => {
+  const cambiarReglas = (cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[] }, texto: string) => {
     const actuales = params.reglas
     if (!actuales) return
     setReglasLocal({
       ...actuales,
       ...(cambio.puntosExtra !== undefined ? { puntosExtra: cambio.puntosExtra } : {}),
-      ...(cambio.descuentos ? { descuentos: cambio.descuentos.map((d, i) => ({ id: d.id ?? `nuevo-${i}`, descripcion: d.descripcion, pct: d.pct })) } : {}),
+      ...(cambio.descuentos ? { descuentos: cambio.descuentos.map((d, i) => ({ id: d.id ?? `nuevo-${i}`, descripcion: d.descripcion, pct: d.pct, ...(d.aplicaA ? { aplicaA: d.aplicaA } : {}) })) } : {}),
     })
     void correr(async () => {
       const r = await reglasPorPasos(p.cotizacionId, cambio)
