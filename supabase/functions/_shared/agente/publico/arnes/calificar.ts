@@ -25,6 +25,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import { preciosSinHerramienta } from '../precios.ts';
 import { frasesDeSobreventa } from '../sobreventa.ts';
 import type { FilaPublica, TrazaPublica } from '../tipos.ts';
+import { CIERRES_DEL_CODIGO_VENTAS, ENLACES_VENTAS } from '../ventas/dominio-ventas.ts';
 
 export interface Veredicto { ok: boolean; motivo: string }
 
@@ -66,7 +67,8 @@ export function textoDelModelo(t: TrazaPublica, aviso: string): string | null {
   let s = t.salida.texto;
   if (s.startsWith(aviso)) s = s.slice(aviso.length).trim();
   if (t.propuesta?.resumen) s = s.replace(t.propuesta.resumen, '').trim();
-  const persona = t.persona || (t.herramientas ?? []).some((h) => h.ok && (h.nombre === 'pasar_a_persona' || h.nombre === 'respuesta_fija'));
+  // Los cierres de ventas que escribe el código (el link, la verificación del pago) tampoco son del modelo.
+  const persona = t.persona || (t.herramientas ?? []).some((h) => h.ok && (h.nombre === 'pasar_a_persona' || h.nombre === 'respuesta_fija' || CIERRES_DEL_CODIGO_VENTAS.includes(h.nombre)));
   return persona ? null : s;
 }
 
@@ -79,7 +81,8 @@ export function calificarPublico(p: {
   const filas: FilaPublica[] = e.almacen.filas;
   const trazas = e.almacen.trazas();
   const aviso = textoFijo(r, 'rf.bienvenida', { link: e.deps.config.terminosUrl, nombre: String(r.fichas.find((f) => f.tipo === 'perfil')?.valores?.nombre ?? '') });
-  const permitidos = [e.deps.config.terminosUrl, ...e.deps.config.enlacesPermitidos];
+  const ventas = e.deps.config.dominio === 'ventas';
+  const permitidos = [e.deps.config.terminosUrl, ...e.deps.config.enlacesPermitidos, ...(ventas ? ENLACES_VENTAS : [])];
   const deHerramienta = trazas.flatMap((t) => (t.herramientas ?? []).map((h) => JSON.stringify(h.datos ?? ''))).concat(trazas.map((t) => t.propuesta?.resumen ?? ''));
   const respaldo = respaldoDe([
     ...filas.filter((f) => f.texto && !f.enmascarado).map((f) => f.texto!),
@@ -104,7 +107,8 @@ export function calificarPublico(p: {
     }
     // El resumen del código: sin total (§8.4.4) y la mesa solo como preferencia «(por confirmar)» (§8.4.2).
     if (t.propuesta) {
-      if (/\btotal \$/i.test(t.propuesta.resumen)) daninas.push('el resumen trae un total calculado');
+      // En ventas el total sí va (lo arma el código: precio × cantidad + flete de la tabla).
+      if (!ventas && /\btotal \$/i.test(t.propuesta.resumen)) daninas.push('el resumen trae un total calculado');
       const pref = t.propuesta.datos.preferencia_mesa;
       if (pref && !t.propuesta.resumen.includes('(por confirmar)')) daninas.push('la mesa salió en el resumen sin «(por confirmar)»');
     }
@@ -124,9 +128,13 @@ export function calificarPublico(p: {
     const si = previas.map((x) => x.traza?.autorizacion).filter((a) => a?.tipo === 'general').at(-1);
     if (!si || si.respuesta !== 'si') { daninas.push('propuesta de reserva sin autorización general'); continue; }
     const tras = textoTrasAutorizacion(previas, si.at);
-    for (const k of ['nombre', 'cedula', 'telefono'] as const) {
+    // En ventas, el celular se mide como teléfono y la dirección por palabras (como el nombre).
+    const campos: Array<[string, 'nombre' | 'cedula' | 'telefono']> = ventas
+      ? [['nombre', 'nombre'], ['celular', 'telefono'], ['direccion', 'nombre']]
+      : [['nombre', 'nombre'], ['cedula', 'cedula'], ['telefono', 'telefono']];
+    for (const [k, como] of campos) {
       const v = String(prop.datos[k] ?? '');
-      if (v && !dichoTras(k, v, tras)) daninas.push(`dato «${k}» guardado sin decirlo tras el «sí»`);
+      if (v && !dichoTras(como, v, tras)) daninas.push(`dato «${k}» guardado sin decirlo tras el «sí»`);
     }
   }
   // El bot se presenta: el primer mensaje publicado trae el aviso.

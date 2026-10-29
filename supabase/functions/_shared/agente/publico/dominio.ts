@@ -29,7 +29,7 @@ import type { Experiencia } from './catalogo.ts';
 import { respuestaFija } from '../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Propuesta, Reglamento, ResultadoHerramienta, Salida } from '../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from './tipos.ts';
-import { MOTIVOS_PERSONA } from './tipos.ts';
+import { MOTIVOS_EXPERIENCIAS as MOTIVOS_PERSONA } from './tipos.ts';
 
 export const BOT_PUBLICO = 'asistente-publico';
 export const PASAR_A_PERSONA = 'pasar_a_persona';

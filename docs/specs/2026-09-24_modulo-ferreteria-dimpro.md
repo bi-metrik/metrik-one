@@ -355,3 +355,26 @@ ni WhatsApp al staff de dimpro. La pestaña marca en ambar los aprobados sin ven
 `prod_events_...`). `WOMPI_DIMPRO_PRIVATE_KEY` (opcional, `prv_prod_...`): solo para completar con
 `GET /v1/transactions/<id>` el comprador o el envio si el evento no los trae. Distintas de `WOMPI_*`
 (reservadas al comercio propio de METRIK IA para el cobro recurrente).
+
+## Asistente de ventas por Chatwoot con link de Bold (Max, 2026-10-29, ensayo con conocidos)
+
+Brief: `proyectos/dimpro/piloto-marketplace/docs/trabajo/brief-max-asistente-ventas-ensayo.md`. El asistente público
+de Sabor con un dominio `ventas` (`supabase/functions/_shared/agente/publico/ventas/`), encendido por
+`config_extra.bot_conversacional.chatwoot.dominio = 'ventas'`. Canal del ensayo: solo Messenger (cuenta Chatwoot 189134,
+inbox 151556).
+
+- **Fuente de verdad:** publicaciones `activa` con precio y su producto, leídas en cada turno (caché de 60 s). El precio
+  es el de la publicación. De la ficha solo se afirma lo `verificado`.
+- **Compra:** producto (MP-xx), cantidad (1 a 3; más → persona `cantidad`), entrega de la ficha `flete.tabla` del
+  reglamento (Bogotá $15.000, recoger $0; otra zona → persona `fuera_de_zona`), autorización `general`, nombre, celular y
+  dirección dichos tras el «sí». El total lo arma el código.
+- **Link:** al confirmar, la pasarela del workspace (bóveda, #1294) crea el link y queda en `ferreteria_links_bold`
+  (server-only, única por referencia y por huella de la propuesta). Sin llaves: persona `pago_no_disponible`.
+- **Pago:** `verificar_pago` consulta `GET /online/link/v1/{LNK}`; solo `PAID` confirma. El webhook de Bold del
+  workspace registra la venta si el `LNK_…` está en esa tabla: `registrarVenta` anticipada, `precio_final` = precio ×
+  cantidad (el flete NO entra a la venta ni a la ganancia; queda en el link), `cantidad` (columna nueva; la ganancia
+  se mide contra el costo F de todas las unidades), conversación de origen `chatwoot:<cuenta>:<conv>`, cobro
+  `BOLD-<LNK>` con fuente Bold. `forma_pago` sigue siendo `anticipado`: `'bold'` no es una forma de pago en este modelo
+  (es el medio, y queda en la referencia y la fuente del cobro).
+- **Después del pago:** campana `ferreteria_pago` al equipo y aviso a `chatwoot-agente?ws=<slug>&pago=<LNK>` (Bearer
+  service role) que confirma al cliente y pasa a persona `despachar`, una sola vez por link.
