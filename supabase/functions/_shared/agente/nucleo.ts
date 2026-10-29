@@ -102,7 +102,7 @@ export function propuestas(filas: FilaConversacion[]): Array<{ p: PropuestaGuard
  * (2026-10-09, 12:51) «¿Abro este viaje?» siguió pendiente después de «Listo, retomamos M1 26 1», volvió pegada a una
  * respuesta fija y un «sí» escrito la habría ejecutado. Estructural: lee la traza, no el texto. Pura.
  */
-export function propuestaVigente(filas: FilaConversacion[], o: { venceConRespuesta?: boolean } = {}): PropuestaGuardada | null {
+export function propuestaVigente(filas: FilaConversacion[], o: { venceConRespuesta?: boolean | ((accion: string) => boolean) } = {}): PropuestaGuardada | null {
   const ps = propuestas(filas);
   const u = ps.at(-1);
   if (!u || u.resultado) return null;
@@ -112,7 +112,8 @@ export function propuestaVigente(filas: FilaConversacion[], o: { venceConRespues
   if (atras) return null;
   // Con `venceConRespuesta`: cualquier mensaje posterior del modelo que no reenvía ESTA propuesta (sus botones llevan su
   // huella) la deja atrás. Estructural: mira los ids de los botones que salieron, no el texto.
-  if (o.venceConRespuesta && despues.some((f) => f.traza?.tipo === 'modelo' && f.traza.salida && !reenviaLa(f.traza.salida, u.p.huella))) return null;
+  const vence = typeof o.venceConRespuesta === 'function' ? o.venceConRespuesta(u.p.accion) : o.venceConRespuesta === true;
+  if (vence && despues.some((f) => f.traza?.tipo === 'modelo' && f.traza.salida && !reenviaLa(f.traza.salida, u.p.huella))) return null;
   return u.p;
 }
 
@@ -121,9 +122,12 @@ function reenviaLa(s: Salida, huella: string): boolean {
   return 'opciones' in s && s.opciones.some((x) => x.id.includes(`|${huella}|`));
 }
 
-/** La vigente según el dominio (si sus propuestas vencen con cualquier respuesta). */
-export function vigenteDe(filas: FilaConversacion[], d: Pick<Dominio, 'propuestaVenceConRespuesta'>): PropuestaGuardada | null {
-  return propuestaVigente(filas, { venceConRespuesta: d.propuestaVenceConRespuesta === true });
+/**
+ * La vigente según el dominio (si sus propuestas vencen con cualquier respuesta). Un dominio compuesto de dos motores
+ * (2026-10-29, viajes + ONE) lo dice por acción: `venceConRespuesta(accion)`, la bandera del motor dueño de esa acción.
+ */
+export function vigenteDe(filas: FilaConversacion[], d: Pick<Dominio, 'propuestaVenceConRespuesta' | 'venceConRespuesta'>): PropuestaGuardada | null {
+  return propuestaVigente(filas, { venceConRespuesta: d.venceConRespuesta ?? d.propuestaVenceConRespuesta === true });
 }
 
 export async function huellaPropuesta(accion: string, datos: unknown, turnoId: string): Promise<string> {
@@ -280,7 +284,7 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
   if (regs !== null) traza.registros = regs === 'error' ? 'error' : regs.map((x) => ({ alias: x.alias, estado: x.estado }));
   const est = await estado(deps, e, regs);
   const sis = deps.sistema ? { texto: deps.sistema(r, c) } : sistema(r, c);
-  const usuario = mensajeDelTurno({ estado: est, filas: anotarRegistrosBorrados(e.filas, regs), nuevos: e.nuevos, quien: e.ctx.remitente.nombre });
+  const usuario = mensajeDelTurno({ estado: est, filas: anotarRegistrosBorrados(e.filas, regs), nuevos: e.nuevos, quien: e.ctx.remitente.nombre, topeEstado: c.topes.bloques?.estado });
   const decl = [...declaraciones(d, r), ...(e.tras ? [DECLARACION_TERMINAR] : [])];
   const todas = decl.map((x) => x.name);
   const declRespaldo = declaracionesRespaldo(decl);
