@@ -1,0 +1,357 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen de la cotización en 0 > I8 · la foto del resumen no cambia sin que se vea en el PR 1`] = `
+{
+  "borrador": false,
+  "dias": 1,
+  "incluye": [
+    "Hotel arena ficticio",
+  ],
+  "intro": "5 noches en San Andrés. Todos los hoteles incluyen el desayuno. Los días libres quedan abiertos para que ustedes decidan.",
+  "lineas": [
+    {
+      "costo": 6000000,
+      "margen": 0,
+      "nombre": "HOTEL ARENA FICTICIO",
+      "precio": 6000000,
+    },
+    {
+      "costo": 7200000,
+      "margen": null,
+      "nombre": "HOTEL CORAL FICTICIO",
+      "precio": 7200000,
+    },
+    {
+      "costo": 8400000,
+      "margen": null,
+      "nombre": "HOTEL PALMA FICTICIO",
+      "precio": 8400000,
+    },
+  ],
+  "motivos": [],
+  "opciones": [
+    {
+      "bajoPiso": false,
+      "lineas": [
+        "HOTEL ARENA FICTICIO",
+      ],
+      "margen": null,
+      "nombre": null,
+      "total": 6000000,
+    },
+  ],
+  "pdf": [
+    {
+      "lineas": [
+        "Hotel Arena Ficticio",
+      ],
+      "nombre": null,
+      "precio": 6000000,
+    },
+  ],
+  "valorTotal": 6000000,
+}
+`;
+
+exports[`(b) Cancún: vuelo internacional + 3 hoteles Pública sin comisión + 2 traslados Neta al 5 % > I8 · la foto del resumen no cambia sin que se vea en el PR 1`] = `
+{
+  "borrador": true,
+  "dias": 8,
+  "incluye": [
+    "Tiquetes aéreos Bogotá BOG – Cancún CUN – Bogotá BOG con Aviones Ficticios, artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+    "7 noches de hotel; el hotel cambia según la versión",
+    "Traslado Aeropuerto Cancún - Hotel",
+    "Traslado Hotel - Aeropuerto Cancún",
+  ],
+  "intro": "7 noches en Cancún. Los días libres quedan abiertos para que ustedes decidan.",
+  "lineas": [
+    {
+      "costo": 4800000,
+      "margen": null,
+      "nombre": "AVIONES FICTICIOS BOGOTÁ ⇄ CANCÚN",
+      "precio": 5040000,
+    },
+    {
+      "costo": 7000000,
+      "margen": 0,
+      "nombre": "HOTEL LAGUNA FICTICIO",
+      "precio": 7000000,
+    },
+    {
+      "costo": 5600000,
+      "margen": 0,
+      "nombre": "HOTEL CORAL AZUL FICTICIO",
+      "precio": 5600000,
+    },
+    {
+      "costo": 9800000,
+      "margen": 0,
+      "nombre": "HOTEL GRAN PALMAR FICTICIO",
+      "precio": 9800000,
+    },
+    {
+      "costo": 180000,
+      "margen": 5,
+      "nombre": "AEROPUERTO CANCÚN - HOTEL",
+      "precio": 189474,
+    },
+    {
+      "costo": 180000,
+      "margen": 5,
+      "nombre": "HOTEL - AEROPUERTO CANCÚN",
+      "precio": 189474,
+    },
+  ],
+  "motivos": [
+    "margen",
+  ],
+  "opciones": [
+    {
+      "bajoPiso": true,
+      "lineas": [
+        "AVIONES FICTICIOS BOGOTÁ ⇄ CANCÚN",
+        "HOTEL CORAL AZUL FICTICIO",
+        "AEROPUERTO CANCÚN - HOTEL",
+        "HOTEL - AEROPUERTO CANCÚN",
+      ],
+      "margen": 4.78,
+      "nombre": "Económica",
+      "total": 11018948,
+    },
+    {
+      "bajoPiso": true,
+      "lineas": [
+        "AVIONES FICTICIOS BOGOTÁ ⇄ CANCÚN",
+        "HOTEL LAGUNA FICTICIO",
+        "AEROPUERTO CANCÚN - HOTEL",
+        "HOTEL - AEROPUERTO CANCÚN",
+      ],
+      "margen": 4.78,
+      "nombre": "Recomendada",
+      "total": 12418948,
+    },
+    {
+      "bajoPiso": true,
+      "lineas": [
+        "AVIONES FICTICIOS BOGOTÁ ⇄ CANCÚN",
+        "HOTEL GRAN PALMAR FICTICIO",
+        "AEROPUERTO CANCÚN - HOTEL",
+        "HOTEL - AEROPUERTO CANCÚN",
+      ],
+      "margen": 4.78,
+      "nombre": "Premium",
+      "total": 15218948,
+    },
+  ],
+  "pdf": [
+    {
+      "lineas": [
+        "Aviones Ficticios Bogotá ⇄ Cancún",
+        "Hotel Laguna Ficticio",
+        "AEROPUERTO CANCÚN - HOTEL",
+        "HOTEL - AEROPUERTO CANCÚN",
+      ],
+      "nombre": "Recomendada",
+      "precio": 12418948,
+    },
+    {
+      "lineas": [
+        "Aviones Ficticios Bogotá ⇄ Cancún",
+        "Hotel Coral Azul Ficticio",
+        "AEROPUERTO CANCÚN - HOTEL",
+        "HOTEL - AEROPUERTO CANCÚN",
+      ],
+      "nombre": "Económica",
+      "precio": 11018948,
+    },
+    {
+      "lineas": [
+        "Aviones Ficticios Bogotá ⇄ Cancún",
+        "Hotel Gran Palmar Ficticio",
+        "AEROPUERTO CANCÚN - HOTEL",
+        "HOTEL - AEROPUERTO CANCÚN",
+      ],
+      "nombre": "Premium",
+      "precio": 15218948,
+    },
+  ],
+  "valorTotal": 12418948,
+}
+`;
+
+exports[`(c) Santa Marta: hotel, vuelo y traslado por tipo de pasajero (adulto/niño/infante), sin reglas > I8 · la foto del resumen no cambia sin que se vea en el PR 1`] = `
+{
+  "borrador": false,
+  "dias": 7,
+  "incluye": [
+    "Tiquetes aéreos Bogotá BOG – Santa Marta SMR – Bogotá BOG con Aviones Ficticios, artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+    "6 noches en Hotel Sierra Ficticio (Santa Marta), con alojamiento y desayuno",
+    "Traslado Aeropuerto - Hotel - Aeropuerto Santa Marta",
+  ],
+  "intro": "6 noches en Santa Marta. Todos los hoteles incluyen el desayuno. Los días libres quedan abiertos para que ustedes decidan.",
+  "lineas": [
+    {
+      "costo": 1570000,
+      "margen": null,
+      "nombre": "AVIONES FICTICIOS BOGOTÁ ⇄ SANTA MARTA",
+      "precio": 1847060,
+    },
+    {
+      "costo": 3000000,
+      "margen": null,
+      "nombre": "HOTEL SIERRA FICTICIO",
+      "precio": 3529412,
+    },
+    {
+      "costo": 210000,
+      "margen": null,
+      "nombre": "AEROPUERTO - HOTEL - AEROPUERTO SANTA MARTA",
+      "precio": 247059,
+    },
+  ],
+  "motivos": [],
+  "opciones": [
+    {
+      "bajoPiso": false,
+      "lineas": [
+        "AVIONES FICTICIOS BOGOTÁ ⇄ SANTA MARTA",
+        "HOTEL SIERRA FICTICIO",
+        "AEROPUERTO - HOTEL - AEROPUERTO SANTA MARTA",
+      ],
+      "margen": 15,
+      "nombre": null,
+      "total": 5623531,
+    },
+  ],
+  "pdf": [
+    {
+      "lineas": [
+        "Aviones Ficticios Bogotá ⇄ Santa Marta",
+        "Hotel Sierra Ficticio",
+        "AEROPUERTO - HOTEL - AEROPUERTO SANTA MARTA",
+      ],
+      "nombre": null,
+      "precio": 5623531,
+    },
+  ],
+  "valorTotal": 5623531,
+}
+`;
+
+exports[`(d) Cartagena y Barú: Neta + Pública con comisión 20 %, descuento del 5 % sobre el total > I8 · la foto del resumen no cambia sin que se vea en el PR 1`] = `
+{
+  "borrador": false,
+  "dias": 5,
+  "incluye": [
+    "Tiquetes aéreos Bogotá BOG – Cartagena CTG – Bogotá BOG con Aviones Ficticios, artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+    "2 noches en Hotel Murallas Ficticio (Cartagena), con alojamiento y desayuno",
+    "2 noches en Hotel Barú Ficticio (Barú), con solo alojamiento",
+    "Tour Islas del Rosario",
+  ],
+  "intro": "4 noches en Cartagena y Barú. Los días libres quedan abiertos para que ustedes decidan.",
+  "lineas": [
+    {
+      "costo": 900000,
+      "margen": null,
+      "nombre": "AVIONES FICTICIOS BOGOTÁ ⇄ CARTAGENA",
+      "precio": 990000,
+    },
+    {
+      "costo": 2400000,
+      "margen": 0,
+      "nombre": "HOTEL MURALLAS FICTICIO",
+      "precio": 2400000,
+    },
+    {
+      "costo": 1700000,
+      "margen": null,
+      "nombre": "HOTEL BARÚ FICTICIO",
+      "precio": 2000000,
+    },
+    {
+      "costo": 500000,
+      "margen": 20,
+      "nombre": "TOUR ISLAS DEL ROSARIO",
+      "precio": 625000,
+    },
+  ],
+  "motivos": [],
+  "opciones": [
+    {
+      "bajoPiso": false,
+      "lineas": [
+        "AVIONES FICTICIOS BOGOTÁ ⇄ CARTAGENA",
+        "HOTEL MURALLAS FICTICIO",
+        "HOTEL BARÚ FICTICIO",
+        "TOUR ISLAS DEL ROSARIO",
+      ],
+      "margen": 12.15,
+      "nombre": null,
+      "total": 5714250,
+    },
+  ],
+  "pdf": [
+    {
+      "lineas": [
+        "Aviones Ficticios Bogotá ⇄ Cartagena",
+        "Hotel Murallas Ficticio",
+        "Hotel Barú Ficticio",
+        "TOUR ISLAS DEL ROSARIO",
+      ],
+      "nombre": null,
+      "precio": 5714250,
+    },
+  ],
+  "valorTotal": 5714250,
+}
+`;
+
+exports[`(e) Medellín: vuelo + hotel Neta al 15 %, sin reglas (sana) > I8 · la foto del resumen no cambia sin que se vea en el PR 1`] = `
+{
+  "borrador": false,
+  "dias": 4,
+  "incluye": [
+    "Tiquetes aéreos Bogotá BOG – Medellín MDE – Bogotá BOG con Aviones Ficticios, artículo personal + equipaje de mano de 10 kg + equipaje de bodega de 23 kg",
+    "3 noches en Hotel Poblado Ficticio (Medellín), con alojamiento y desayuno",
+  ],
+  "intro": "3 noches en Medellín. Todos los hoteles incluyen el desayuno. Los días libres quedan abiertos para que ustedes decidan.",
+  "lineas": [
+    {
+      "costo": 700000,
+      "margen": null,
+      "nombre": "AVIONES FICTICIOS BOGOTÁ ⇄ MEDELLÍN",
+      "precio": 823529,
+    },
+    {
+      "costo": 1500000,
+      "margen": null,
+      "nombre": "HOTEL POBLADO FICTICIO",
+      "precio": 1764706,
+    },
+  ],
+  "motivos": [],
+  "opciones": [
+    {
+      "bajoPiso": false,
+      "lineas": [
+        "AVIONES FICTICIOS BOGOTÁ ⇄ MEDELLÍN",
+        "HOTEL POBLADO FICTICIO",
+      ],
+      "margen": 15,
+      "nombre": null,
+      "total": 2588235,
+    },
+  ],
+  "pdf": [
+    {
+      "lineas": [
+        "Aviones Ficticios Bogotá ⇄ Medellín",
+        "Hotel Poblado Ficticio",
+      ],
+      "nombre": null,
+      "precio": 2588235,
+    },
+  ],
+  "valorTotal": 2588235,
+}
+`;
