@@ -1,6 +1,6 @@
 ---
 name: project-valida-reverso-corta-plan
-description: Reverso del pago de un ciclo de Valida autogestionada corta el plan en el acto (decisión 2026-10-27); estado en valida_plan.reversado.corte, reactivación por cobro sin plan, correo retenido en prod hasta Vera
+description: Reverso del pago de un ciclo de Valida autogestionada corta el plan en el acto (decisión 2026-10-27); estado en valida_plan.reversado.corte, reactivación por cobro sin plan, correo al cliente ENCENDIDO en prod desde el PR del 29-oct (Vera aprobó)
 metadata:
   type: project
 ---
@@ -18,8 +18,9 @@ MéTRIK NO corta. «Otro pago válido» = FIFO sigue cubriendo la cuota, o un ev
   tiene el anulado y su referencia one-ciclo quedó anulada en Valida para siempre. Por eso la reactivación es un
   cobro programado SIN plan ni cuota (`reactivacion-servidor.ts`); el emisor de facturas (fuera del repo) no se
   verificó con un cobro sin plan.
-- Correo al cliente detrás de `AVISO_REVERSO_CLIENTE_APROBADO=false` (prod lo retiene; preview lo manda). Solo el
-  mismo día de Bogotá del corte; después queda `vencido`.
+- Correo al cliente: `AVISO_REVERSO_CLIENTE_APROBADO=true` desde el PR feat/valida-aviso-reverso-cliente
+  (2026-10-29, Vera ACTIVAR en segunda vuelta tras metrik-valida#83 + ONE #1315). Sale a `valida_registros.correo`
+  solo el mismo día de Bogotá del corte; después queda `vencido`. `retenido` solo reaparece si el flag vuelve a false.
 - 7b NO carga la tarjeta mientras `corteVigente` (pendiente/anulado), ni la reversada ni la siguiente (Mik,
   27-oct: invita otro contracargo). OJO: el `pagadas` de 7b sigue contando el anulado con `fecha` como pagado;
   lo que lo frena es la guarda por plan. La mora/Pagos (FIFO, `mis_cobros_de_servicio`) ya lo cuenta no pagado.

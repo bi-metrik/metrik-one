@@ -10,7 +10,7 @@ import { pagarPeriodoReactivacion } from './reactivar-acciones'
  * pagar el período, solo para quien maneja el pago. Los textos salen de `frasesSuspension`, los mismos
  * del correo al cliente.
  *
- * ⚠️ PENDIENTE DE VERA, con el correo.
+ * Aprobado por Vera el 2026-10-29 junto con el correo (segunda vuelta, tras #1315).
  */
 export const TITULO_SUSPENSION_REVERSO = 'Tu plan de Valida está suspendido por la reversión del pago'
 export const HISTORIAL_DISPONIBLE = 'Tus reportes y tu historial siguen disponibles en la pestaña Historial.'
