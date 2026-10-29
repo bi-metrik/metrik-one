@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-Dominio `ventas` del asistente público (29-oct, rama `feat/dimpro-asistente-ventas`). Estado al cerrar: migración
+Dominio `ventas` del asistente público (29-oct, rama `feat/dimpro-asistente-ventas`, #1336). Más tarde el 29-oct ya estaba VIVO en Messenger (config activo, reglamento publicado); lo que sigue es el estado al cerrar ese PR: migración
 `20261029150000_ferreteria_links_bold.sql` SIN aplicar; `sql/dimpro/*reglamento*` y `*config*` SIN correr ; `chatwoot-agente` sin redesplegar; sandbox de Bold sin probar.
 
 - Canal del ensayo: SOLO Messenger, cuenta Chatwoot 189134, inbox 151556 → canal `otro` del asistente (ventana 24 h).

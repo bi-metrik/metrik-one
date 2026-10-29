@@ -4,8 +4,11 @@
 // El mismo asistente público (cola, consentimientos, candados, Chatwoot), con un producto que es un SKU del catálogo de
 // Ferretería de ONE en vez de una experiencia. Se elige con `config_extra.bot_conversacional.chatwoot.dominio = 'ventas'`.
 //
-//   · `ver_catalogo`      lectura. Busca en ONE por texto libre («taladro», «bomba 1 HP») o por código MP-xx. Precio de
+//   · `ver_catalogo`      lectura. Busca en ONE por texto libre («taladro», «bomba 1 HP») o por código MP-xx, con el
+//                         `uso` del cliente si ya lo dijo. Venta consultiva (Mauricio, 29-oct): nunca más de 3 productos;
+//                         con más coincidencias y sin uso devuelve `preguntar_uso` y los tipos, no una lista. Precio de
 //                         la publicación activa; la ficha partida en verificado y «según el catálogo del fabricante».
+//                         Las fotos de lo que la respuesta nombra las manda el código (`fotos-ventas.ts`, `cola.ts`).
 //   · `consultar_reglas`  lectura. Las políticas `pol.*` del reglamento (despacho, recoger, pago, garantía…).
 //   · `proponer` (acción `compra`). Exige la autorización `general`. El código arma el resumen con el TOTAL (precio ×
 //     cantidad + flete de la tabla del reglamento) desde el catálogo y lo que el cliente escribió DESPUÉS del «sí»
@@ -30,7 +33,7 @@ import {
 import { respuestaFija } from '../../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Hechos, Propuesta, Reglamento, ResultadoHerramienta } from '../../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
-import { buscarProductos, productoParaModelo, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
+import { MAX_SUGERENCIAS, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
 
@@ -156,8 +159,16 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const lecturas: DeclaracionHerramienta[] = [
     {
       name: 'ver_catalogo',
-      description: 'Busca en el catálogo de productos publicados: por texto libre (`buscar`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (`codigo`, p. ej. MP-12). Devuelve código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo.',
-      parameters: { type: 'object', properties: { buscar: { type: 'string', description: 'Lo que busca el cliente, con sus palabras.' }, codigo: { type: 'string', description: 'El código MP-xx, si lo dio.' } }, required: [] },
+      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay: haz UNA pregunta de uso y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Las fotos de los productos que nombres con su código las manda el sistema: no pegues links de fotos.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          buscar: { type: 'string', description: 'Lo que busca el cliente, con sus palabras (el tipo de producto).' },
+          codigo: { type: 'string', description: 'El código MP-xx, si lo dio.' },
+          uso: { type: 'string', description: 'Para qué lo va a usar, si ya lo dijo (material, lugar, inalámbrico o de cable…). Vacío si no lo ha dicho.' },
+        },
+        required: [],
+      },
     },
     {
       name: 'consultar_reglas',
@@ -218,9 +229,25 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       if (nombre === 'ver_catalogo') {
         const ps = await o.puertos.catalogo();
         if (!ps.length) return { ok: false, datos: null, error: 'No hay productos publicados. No inventes: pasar_a_persona con motivo falla.' };
-        const hallados = buscarProductos(ps, { buscar: args.buscar ? String(args.buscar) : null, codigo: args.codigo ? String(args.codigo) : null });
-        if (!hallados.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. No ofrezcas otro como si fuera el mismo: si lo quiere, pasar_a_persona con motivo no_en_catalogo.' } };
-        return { ok: true, datos: { productos: hallados.map(productoParaModelo) } };
+        const sug = sugerirProductos(ps, { buscar: args.buscar ? String(args.buscar) : null, codigo: args.codigo ? String(args.codigo) : null, uso: args.uso ? String(args.uso) : null });
+        if (sug.tipo === 'preguntar') {
+          return {
+            ok: true,
+            datos: {
+              productos: [], coincidencias: sug.coincidencias, preguntar_uso: true, tipos: sug.tipos,
+              que_hacer: `Hay ${sug.coincidencias} productos que coinciden. No los listes: hazle UNA pregunta de uso para saber cuál le sirve (para qué material o trabajo, en casa u obra, inalámbrico o de cable; según los tipos que hay). Con su respuesta, vuelve a llamar ver_catalogo con buscar y uso, y sugiere como máximo ${MAX_SUGERENCIAS}.`,
+            },
+          };
+        }
+        if (!sug.productos.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. No ofrezcas otro como si fuera el mismo: si lo quiere, pasar_a_persona con motivo no_en_catalogo.' } };
+        if (sug.tipo === 'codigo') return { ok: true, datos: { productos: sug.productos.map(productoParaModelo) } };
+        return {
+          ok: true,
+          datos: {
+            productos: sug.productos.map(productoParaModelo), coincidencias: sug.coincidencias,
+            nota: `Sugiere como máximo estos ${sug.productos.length}, cada uno con su código, nombre corto, precio y una razón de una línea que salga del nombre o de las especificaciones verificadas. No nombres otros productos.`,
+          },
+        };
       }
       if (nombre === 'consultar_reglas') {
         const clave = String(args.clave ?? '');
