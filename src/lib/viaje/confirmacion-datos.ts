@@ -131,6 +131,8 @@ export interface VistaConfirmacion {
   antesDeConfirmacion: boolean
   enConfirmacion: boolean
   terminosBase: string | null
+  /** La Solicitud registra una visa en trámite (`condicion-visa.ts`): el mensaje lleva la condición. */
+  visaEnTramite: boolean
   agencia: string
   comercial: string | null
   hayPago: boolean
@@ -431,6 +433,7 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     antesDeConfirmacion: !!etapaConf && !!etapaActual && etapaActual.orden < etapaConf.orden,
     enConfirmacion: !!etapaConf && etapaActual?.id === etapaConf.id,
     terminosBase: typeof configLinea.terminos_base === 'string' ? configLinea.terminos_base : null,
+    visaEnTramite: viajeRes.visaEnTramite ?? false,
     agencia: ((wsRes.data as { name?: string } | null)?.name ?? '').trim() || 'la agencia',
     comercial: responsables.map((r) => r.staff?.full_name?.trim()).find(Boolean) ?? null,
     hayPago,

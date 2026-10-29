@@ -213,7 +213,7 @@ describe('punto 1 · las fechas del documento salen del vuelo, no de la solicitu
  * el 21 de junio, día del viaje» (el inicio de la solicitud) y el 80 % vencía el 6 de junio.
  */
 describe('punto 2 · el plan de pagos usa la fecha del viaje cotizado', () => {
-  it('el saldo vence el 26 de junio, día del viaje, y el 80 % quince días antes (11 de junio)', async () => {
+  it('el saldo vence el 25 de junio, un día antes del viaje (26), y el 80 % quince días antes (11 de junio)', async () => {
     sembrar({ planPagos: true })
     const { entrada, m, texto } = await documento()
     expect(entrada.props.asiPuedesPagar?.fechaSalida).toBe('2027-06-26')
@@ -221,9 +221,9 @@ describe('punto 2 · el plan de pagos usa la fecha del viaje cotizado', () => {
     expect(filas.map(f => f.cuando)).toEqual([
       'al confirmar (anticipo)',
       'hasta el 11 de junio',
-      'hasta el 26 de junio, día del viaje',
+      'hasta el 25 de junio, un día antes del viaje',
     ])
-    expect(texto).toContain('26 de junio, día del viaje')
+    expect(texto).toContain('25 de junio, un día antes del viaje')
     expect(texto).not.toContain('21 de junio')
   })
 

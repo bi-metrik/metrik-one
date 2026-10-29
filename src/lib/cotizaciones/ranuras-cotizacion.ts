@@ -22,6 +22,7 @@
  * y el reparto por precio. Lo que toca la base vive en `ranuras-datos.ts`.
  */
 
+import { indiceRecomendada } from './recomendada-por-precio'
 import {
   etiquetaDeRanura,
   grupoDeInstancia,
@@ -360,8 +361,9 @@ export function ranurasDelTipo<T extends LineaParaBloque>(
  * Posición dentro de las `n` opciones con precio, de la más barata a la más cara:
  *  · Económica: la primera.
  *  · Premium: la última.
- *  · Recomendada: la del medio; con un número PAR, la más barata de las dos del medio
- *    (`floor((n-1)/2)`). Con dos opciones, la Recomendada lleva la misma que la Económica.
+ *  · Recomendada: la intermedia por precio (`indiceRecomendada`, decisión de Mauricio
+ *    2026-10-29): con tres, la del medio; con cuatro o más, la más cercana al punto medio entre
+ *    la más barata y la más cara; con dos, la más cara (`RECOMENDADA_CON_DOS_OPCIONES`).
  *
  * ⚠️ Una opción sin precio (todavía no se pegó su captura) NO entra al reparto: ponerla en la
  * Económica por «costar cero» sería elegir la opción que nadie ha costeado. Una ranura sin
@@ -389,7 +391,7 @@ export function repartoPorPrecio(
     if (n === 0) continue
     const posicion: Record<(typeof NOMBRES_TARIFA)[number], number> = {
       Económica: 0,
-      Recomendada: Math.floor((n - 1) / 2),
+      Recomendada: indiceRecomendada(conPrecio.map(c => c.precio)),
       Premium: n - 1,
     }
     for (const nombre of NOMBRES_TARIFA) reparto[nombre].push(conPrecio[posicion[nombre]].id)

@@ -1477,7 +1477,7 @@ describe('«Así puedes pagar» (F2-1, PR 7)', () => {
 
   it('sin fecha de salida: la regla en palabras y ningún monto', async () => {
     const t = plano(await texto(props({ asiPuedesPagar: { ...entrada, fechaSalida: null } })))
-    expect(t).toContain('El 80 % quince días antes de salir y el resto el día del viaje.')
+    expect(t).toContain('El 80 % quince días antes de salir y el resto un día antes del viaje.')
     expect(t).not.toContain('al confirmar (anticipo)')
   })
 })

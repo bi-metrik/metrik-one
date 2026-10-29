@@ -119,7 +119,10 @@ describe('el plan de las tarifas (por pasos)', () => {
     const general = { ...TRASLADO_GENERAL, orden: 4 }
     const especifico = { ...TRASLADO_A, orden: 5, tarifa_pax: null }
     const antes = [VUELO, HOTEL_A, HOTEL_B, general, especifico]
-    const tarifas = correr(null, { items: antes, tarifas: [] })
+    // Desde 2026-10-29 la Recomendada propone el hotel más caro de dos: la asesora le pone el A.
+    const armadas = correr(null, { items: antes, tarifas: [] })
+    const conA = armadas.map(t => (t.nombre === 'Recomendada' ? { ...t, seleccion: [...t.seleccion.filter(id => id !== 'hotel-b'), 'hotel-a'] } : t))
+    const tarifas = correr({ items: antes, tarifas: armadas }, { items: antes, tarifas: conA })
     const rec = tarifas.find(t => t.nombre === 'Recomendada')!
     expect([hotel(rec), rec.seleccion.includes('traslado-general')]).toEqual(['hotel-a', true])
     const despues = [VUELO, HOTEL_A, HOTEL_B, general, { ...especifico, tarifa_pax: conHotel('hotel-a') }]
