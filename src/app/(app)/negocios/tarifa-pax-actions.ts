@@ -170,6 +170,11 @@ export type ResultadoTarifa = {
    */
   codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
   /**
+   * Solo `ajustarOpcion`: el motivo del descuento al cliente que se quitó porque la opción quedó
+   * Pública (se avisa: la tarjeta de la Pública no lo muestra).
+   */
+  descuentoQuitado?: string
+  /**
    * Solo `ponerFotoDelHotel` en un espacio con biblioteca de fotos: el hotel como quedó en la
    * biblioteca (la foto ya NO se guarda en la opción). Ausente = se guardó en la opción, como antes.
    */
@@ -1428,6 +1433,9 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
       return { success: false, error: 'La comisión es de una tarifa Pública.' }
     }
   }
+  if (cambios.descuentoCliente && (cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo) === 'publica') {
+    return { success: false, error: 'Una tarifa Pública va al precio público: el descuento es de una tarifa Neta.' }
+  }
   const margenDelProveedor = conf?.margenProveedor
     ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
     : null
@@ -1453,6 +1461,7 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
 
   const { por, porId } = await quienEscribe(supabase)
   const en = new Date().toISOString()
+  let descuentoQuitado: string | undefined
   const guardado = await guardarTarifa(supabase, itemId, leida => {
     const actual: TarifaPax = cambios.tipoTarifa !== undefined
       ? { ...leida, tipoTarifa: { tipo: cambios.tipoTarifa, origen: 'persona', por, en } }
@@ -1478,6 +1487,13 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
         }
       }
     }
+    // Pública = el precio público: un descuento guardado de cuando era Neta quedaría aplicado en
+    // la cascada sin verse (la tarjeta de la Pública muestra la comisión). Se quita y se avisa,
+    // igual que en el paquete de bloqueo (Vera, 2026-10-29).
+    if (actual.tipoTarifa?.tipo === 'publica' && actual.descuentoCliente) {
+      descuentoQuitado = actual.descuentoCliente.motivo || 'sin motivo'
+      delete actual.descuentoCliente
+    }
     const precios = cambios.volverACalculado ? {} : { ...(actual.preciosAMano ?? {}) }
     for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
       if (v === null) delete precios[clave]
@@ -1498,7 +1514,7 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
   if (errItem) return { success: false, error: errItem.message }
   await recalcularTotales(item.cotizacionId)
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
-  return { success: true, tarifa: guardado.tarifa }
+  return { success: true, tarifa: guardado.tarifa, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
 }
 
 /**
