@@ -16,7 +16,9 @@
  *  2. **La Recomendada siempre va** (decisión E): `va_en_propuesta = true` escrito como dato,
  *     nunca como regla de lectura.
  *  3. **Propuesta de ONE (decisión A)** para lo que se pega: Económica = la opción más barata,
- *     Recomendada = la primera que se pegó, Premium = la más cara. Mientras la asesora no
+ *     Recomendada = la intermedia por precio en vuelos y hoteles (`indiceRecomendada`, decisión
+ *     de Mauricio 2026-10-29) y la primera que se pegó en traslados y actividades, Premium = la
+ *     más cara. Mientras la asesora no
  *     cambie la elección de una tarifa, la propuesta se rehace cuando el servicio gana o pierde
  *     opciones (es lo que hace el prototipo: la elección por defecto es «viva»).
  *  4. **Al escribir se guarda lo que hoy cuenta** (criterio N8): en un traslado o actividad que
@@ -40,6 +42,7 @@ import {
 import { cabeConLosHoteles, hotelesAsociados, opcionParaLosHoteles } from './va-con-hotel'
 import { claveTarifa, esIntermedia, esRecomendada, NOMBRES_TARIFA, recomendadaDe, TARIFA_INTERMEDIA, type NombreTarifa } from './tarifas'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { indiceRecomendada } from './recomendada-por-precio'
 
 /** Una tarifa como la ve el plan. */
 export interface TarifaDelPlan {
@@ -97,14 +100,28 @@ function nombreCanonico(nombre: string | null): NombreTarifa | null {
  * La propuesta de ONE para UNA tarifa en UN servicio (decisión A). Los candidatos vienen por
  * `orden`, así que el primero es «la primera que se pegó». Una opción sin costo no compite por
  * más barata ni por más cara: si ninguna tiene costo, todas proponen la primera.
+ *
+ * La Recomendada, en un vuelo u hotel (`combinable`), es la intermedia por precio
+ * (`indiceRecomendada`, decisión de Mauricio 2026-10-29). En un traslado o una actividad sigue
+ * siendo la primera pegada: ahí la Recomendada suele ser la ÚNICA tarifa (P9) y escoger por
+ * precio subiría el total solo por pegar una opción más cara (una lancha privada).
  */
 export function propuestaDeOne(
   nombre: string | null,
   candidatos: readonly string[],
   costoDe: (id: string) => number | null,
+  combinable = true,
 ): string {
   const canon = nombreCanonico(nombre)
   if (candidatos.length === 0) throw new Error('propuestaDeOne: servicio sin candidatos')
+  if (canon === 'Recomendada' && combinable) {
+    const conCosto = candidatos
+      .map((id, orden) => ({ id, orden, costo: costoDe(id) }))
+      .filter((c): c is { id: string; orden: number; costo: number } => c.costo !== null && c.costo > 0)
+      .sort((a, b) => (a.costo - b.costo) || (a.orden - b.orden))
+    if (conCosto.length === 0) return candidatos[0]
+    return conCosto[indiceRecomendada(conCosto.map(c => c.costo))].id
+  }
   if (canon !== 'Económica' && canon !== 'Premium') return candidatos[0]
   const conCosto = candidatos
     .map((id, orden) => ({ id, orden, costo: costoDe(id) }))
@@ -218,7 +235,7 @@ export function planDeTarifas(args: {
     /** Lo que eligió el plan en cada servicio, y si fue la propuesta de ONE (no una elección). */
     const porServicio: { r: (typeof ranuras)[number]; elegida: string; propuesta: boolean }[] = []
     for (const r of ranuras) {
-      const propuestaAhora = propuestaDeOne(t.nombre, r.candidatos, costoDe)
+      const propuestaAhora = propuestaDeOne(t.nombre, r.candidatos, costoDe, r.combinable)
       const previa = ranurasAntes.get(r.grupo)
       // Un servicio que antes no tenía opciones (o no existía): no había nada escogido. Propone ONE.
       if (!previa) { elegidas.push(propuestaAhora); porServicio.push({ r, elegida: propuestaAhora, propuesta: true }); continue }
@@ -239,7 +256,7 @@ export function planDeTarifas(args: {
       if (contaba === null) {
         elegida = propuestaAhora
         propuesta = true
-      } else if (cambiaron && propuestaDeOne(t.nombre, candAntes, costoAntesDe) === contaba) {
+      } else if (cambiaron && propuestaDeOne(t.nombre, candAntes, costoAntesDe, previa.combinable) === contaba) {
         // El servicio ganó o perdió opciones y la tarifa seguía con la propuesta de ONE: se
         // rehace. Si la asesora ya había escogido otra, se respeta.
         elegida = propuestaAhora

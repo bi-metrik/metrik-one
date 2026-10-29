@@ -49,14 +49,19 @@ const elegida = (items: Item[], t: TarifaDelPlan, grupo: string) =>
   ranurasConAlternativas(items).find(r => r.grupo === grupo)!.candidatos.find(id => t.seleccion.includes(id)) ?? null
 
 describe('C2 · la propuesta de ONE (decisión A)', () => {
-  it('Económica la más barata, Recomendada la primera pegada, Premium la más cara', () => {
+  it('Económica la más barata, Recomendada la intermedia, Premium la más cara (Mauricio, 2026-10-29)', () => {
     const cands = ['h-posada', 'h-agua-dulce']
     const costo = (id: string) => (id === 'h-posada' ? 1_229_098 : 4_352_838)
     expect(propuestaDeOne('Económica', cands, costo)).toBe('h-posada')
-    expect(propuestaDeOne('Recomendada', cands, costo)).toBe('h-posada')
-    expect(propuestaDeOne('Premium', cands, costo)).toBe('h-agua-dulce')
-    // Con la cara pegada primero, la Recomendada sigue siendo la primera pegada.
+    // Con dos opciones, la más cara (RECOMENDADA_CON_DOS_OPCIONES), sin importar el orden de pegado.
+    expect(propuestaDeOne('Recomendada', cands, costo)).toBe('h-agua-dulce')
     expect(propuestaDeOne('Recomendada', ['h-agua-dulce', 'h-posada'], costo)).toBe('h-agua-dulce')
+    expect(propuestaDeOne('Premium', cands, costo)).toBe('h-agua-dulce')
+    // S2 (Cartagena): Caribe, Movich y Casa San Agustín → Movich, aunque Caribe se pegó primero.
+    const cartagena: Record<string, number> = { caribe: 1_100_000, movich: 1_500_000, casa: 6_000_000 }
+    expect(propuestaDeOne('Recomendada', ['caribe', 'casa', 'movich'], id => cartagena[id])).toBe('movich')
+    // En un traslado o actividad (no se cruza), la Recomendada sigue siendo la primera pegada.
+    expect(propuestaDeOne('Recomendada', ['h-posada', 'h-agua-dulce'], costo, false)).toBe('h-posada')
   })
 
   it('una opción sin costo no compite: si ninguna tiene, todas proponen la primera', () => {
@@ -64,19 +69,22 @@ describe('C2 · la propuesta de ONE (decisión A)', () => {
     expect(propuestaDeOne('Económica', ['a', 'b'], id => (id === 'a' ? 0 : 100))).toBe('b')
   })
 
-  it('el caso fijo armado desde cero: tres tarifas, la Económica igual a la Recomendada no se manda', () => {
+  it('el caso fijo armado desde cero: tres tarifas, la Recomendada con el hotel más caro de dos', () => {
     const items = itemsDelCaso()
     const tarifas = correr(null, { items, tarifas: [] })
     expect(tarifas.map(t => [t.nombre, t.vaEnPropuesta])).toEqual([
-      ['Económica', false], ['Recomendada', true], ['Premium', true],
+      ['Económica', true], ['Recomendada', true], ['Premium', true],
     ])
     const rec = porNombre(tarifas, 'Recomendada')
     const prem = porNombre(tarifas, 'Premium')
-    // Es exactamente lo que el fixture de C0 fija como las tarifas que propone ONE.
-    for (const t of TARIFAS_CASO_FIJO) {
+    // Económica y Premium, como el fixture de C0. La Recomendada (2026-10-29): con dos hoteles
+    // por servicio, el más caro; la actividad, la primera pegada.
+    for (const t of TARIFAS_CASO_FIJO.filter(x => x.fila.nombre !== 'Recomendada')) {
       const nuestra = porNombre(tarifas, t.fila.nombre as string)
       expect(firmaDeTarifa(items, nuestra.seleccion)).toBe(firmaDeTarifa(items, t.seleccion))
     }
+    expect(elegida(items, rec, 'hotel: Hotel en Providencia')).toBe('h-agua-dulce')
+    expect(elegida(items, rec, 'hotel 2: Hotel en San Andrés')).toBe('h-lord-pierre')
     expect(elegida(items, rec, 'actividad: Cayo Cangrejo')).toBe('a-cayo-compartida')
     expect(elegida(items, prem, 'actividad: Cayo Cangrejo')).toBe('a-cayo-privada')
     expect(violacionDeInvariante({ items, tarifas })).toBeNull()
@@ -123,7 +131,8 @@ describe('C2 · al escribir se guarda lo que hoy cuenta (N8)', () => {
     const rec = porNombre(despues, 'Recomendada')
     expect(rec.vaEnPropuesta).toBe(true)
     expect(elegida(items, rec, 'hotel: Hotel en Providencia')).toBe('h-posada')
-    expect(elegida(items, rec, 'hotel 2: Hotel en San Andrés')).toBe('h-verde-mar')
+    // Lo que faltaba lo completa la propuesta de ONE: la intermedia (con dos, la más cara).
+    expect(elegida(items, rec, 'hotel 2: Hotel en San Andrés')).toBe('h-lord-pierre')
     expect(violacionDeInvariante({ items, tarifas: despues })).toBeNull()
   })
 })
@@ -131,7 +140,11 @@ describe('C2 · al escribir se guarda lo que hoy cuenta (N8)', () => {
 describe('C2 · tarifa idéntica (P8) y solo traslados o actividades (P9)', () => {
   it('la Económica que deja de ser igual a la Recomendada vuelve a mandarse', () => {
     const items = itemsDelCaso()
-    const base = correr(null, { items, tarifas: [] })
+    // La asesora deja la Recomendada igual a la Económica: la Económica deja de mandarse.
+    const armada = correr(null, { items, tarifas: [] })
+    const ecoSel = porNombre(armada, 'Económica').seleccion
+    const iguales = armada.map(t => (t.nombre === 'Recomendada' ? { ...t, seleccion: [...ecoSel] } : t))
+    const base = correr({ items, tarifas: armada }, { items, tarifas: iguales })
     const eco = porNombre(base, 'Económica')
     expect(eco.vaEnPropuesta).toBe(false)
     // La asesora le cambia el hotel de San Andrés a la Económica.
@@ -182,8 +195,36 @@ describe('C2 · la propuesta es viva mientras nadie la cambie', () => {
     const conNueva: Item[] = [...items, { id: 'h-deep-blue', grupo: 'hotel: Hotel en Providencia', orden: 12, es_ajuste: false, dia_relativo: null, entra_al_precio: true, costo: 7_800_000 }]
     const despues = correr({ items, tarifas: base }, { items: conNueva, tarifas: base })
     expect(elegida(conNueva, porNombre(despues, 'Premium'), 'hotel: Hotel en Providencia')).toBe('h-deep-blue')
-    // La Recomendada sigue con la primera pegada.
-    expect(elegida(conNueva, porNombre(despues, 'Recomendada'), 'hotel: Hotel en Providencia')).toBe('h-posada')
+    // La Recomendada, que seguía con la propuesta, pasa a la intermedia de las tres.
+    expect(elegida(conNueva, porNombre(despues, 'Recomendada'), 'hotel: Hotel en Providencia')).toBe('h-agua-dulce')
+  })
+
+  it('si la asesora escogió a mano la Recomendada, ONE no se la cambia: ni al agregar, ni al quitar, ni al recalcular, ni al recargar', () => {
+    const items = itemsDelCaso()
+    const HOTEL = 'hotel: Hotel en Providencia'
+    // ONE propone Agua Dulce; la asesora deja en la Recomendada la más barata, Posada.
+    const base = correr(null, { items, tarifas: [] }).map(t => t.nombre === 'Recomendada'
+      ? { ...t, seleccion: [...t.seleccion.filter(id => id !== 'h-agua-dulce'), 'h-posada'] }
+      : t)
+    const rec = (its: Item[], ts: TarifaDelPlan[]) => elegida(its, porNombre(ts, 'Recomendada'), HOTEL)
+    // Recargar (o cualquier acción que no cambia opciones): igual.
+    const recargada = correr(null, { items, tarifas: base })
+    expect(rec(items, recargada)).toBe('h-posada')
+    // Agregar una opción (más cara y más barata).
+    const conNueva: Item[] = [...items, { id: 'h-deep-blue', grupo: HOTEL, orden: 12, es_ajuste: false, dia_relativo: null, entra_al_precio: true, costo: 7_800_000 }]
+    const tras1 = correr({ items, tarifas: recargada }, { items: conNueva, tarifas: recargada })
+    expect(rec(conNueva, tras1)).toBe('h-posada')
+    const conBarata: Item[] = [...conNueva, { id: 'h-mini', grupo: HOTEL, orden: 13, es_ajuste: false, dia_relativo: null, entra_al_precio: true, costo: 500_000 }]
+    const tras2 = correr({ items: conNueva, tarifas: tras1 }, { items: conBarata, tarifas: tras1 })
+    expect(rec(conBarata, tras2)).toBe('h-posada')
+    // Quitar otra opción.
+    const sinDeep = conBarata.filter(i => i.id !== 'h-deep-blue')
+    const tras3 = correr({ items: conBarata, tarifas: tras2 }, { items: sinDeep, tarifas: tras2.map(t => ({ ...t, seleccion: t.seleccion.filter(id => id !== 'h-deep-blue') })) })
+    expect(rec(sinDeep, tras3)).toBe('h-posada')
+    // Recalcular (cambian los costos, p. ej. llega la TRM): igual.
+    const recalc = sinDeep.map(i => ({ ...i, costo: (i.costo ?? 0) * 2 }))
+    const tras4 = correr({ items: sinDeep, tarifas: tras3 }, { items: recalc, tarifas: tras3 })
+    expect(rec(recalc, tras4)).toBe('h-posada')
   })
 
   it('si la asesora ya había escogido otra en la Premium, la opción nueva no se la cambia', () => {

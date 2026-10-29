@@ -25,5 +25,12 @@ PR 2 rama fix/cotizacion-d2-d6.
   la Recomendada al siguiente que va.
 - **D6**: `incluyeDelPaquete`, `regimenSoloDesayuno`, `fechasDelHotelDelPaquete(p, delNegocio.fechas)`.
 
+- **Pantalla (brief 29-oct, rama fix/publica-margen-en-pantalla)**: la cascada SIGUE guardando el costo de una
+  Pública como precio público (`costoDeVenta`, `margenRealPct` crudos: registro, cierre, IVA los leen). Lo que se
+  PINTA pasa por `calculo-en-pantalla.ts` (costo − comisión, margen = el del encabezado). Con reglas, la casilla
+  de la cotización = «Margen de hoteles» (solo `ReglasDeLinea.tomaElGeneral`); sin ninguna que la tome, «—».
+  Tarjeta de una Pública: `margenDeOpcionPublica` (comisión / precio público; sin comisión «—»). Un atributo
+  nuevo en el editor sin reglas rompe R6 (byte a byte).
+
 **How to apply:** antes de tocar margen, Públicas o bloqueo, correr la batería; si una cifra del snapshot cambia,
 explicar por qué en el PR. Relacionado: [[tarifa-publica-neta]], [[bloqueo-trappvel]], [[pruebas-por-mutacion]].

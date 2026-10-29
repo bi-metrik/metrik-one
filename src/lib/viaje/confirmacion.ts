@@ -11,6 +11,7 @@
 
 import { describirOcupacion, type Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { fechaCorta, pesos, type CuotaPlan } from './plan-pagos'
+import { CONDICION_VISA_EN_TRAMITE_TU, TITULO_CONDICION_VISA } from './condicion-visa'
 
 // ── Titular de facturación (Vera C4, P3; Max §3.3) ───────────────────────────
 
@@ -156,6 +157,8 @@ export interface DatosMensajeConfirmacion {
   /** Firma: nombre de la comercial. */
   comercial: string | null
   agencia: string
+  /** La Solicitud registra una visa en trámite: va la condición (`condicion-visa.ts`). */
+  visaEnTramite?: boolean
 }
 
 export function primerNombre(nombre: string): string {
@@ -197,6 +200,11 @@ export function mensajeConfirmacion(d: DatosMensajeConfirmacion): string {
     lineas.push('')
     lineas.push('*Cómo pagar:*')
     for (const m of d.terminos.mediosPago) lineas.push(m.startsWith('  ') ? m : `- ${m}`)
+  }
+  if (d.visaEnTramite) {
+    lineas.push('')
+    lineas.push(`*${TITULO_CONDICION_VISA}:*`)
+    lineas.push(CONDICION_VISA_EN_TRAMITE_TU)
   }
   if (d.terminos.condiciones.length > 0) {
     lineas.push('')

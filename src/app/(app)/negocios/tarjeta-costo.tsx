@@ -22,7 +22,7 @@ import {
   type FilaCosto,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
-import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, margenDeOpcionPublica, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import type { DescuentoClienteGuardado } from '@/lib/cotizaciones/tarifa-pasajero'
 import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
@@ -167,11 +167,15 @@ export default function TarjetaCosto({
   const precioTotal = filas.length > 0 ? T.precio : precioVivo
   // El margen de verdad, también cuando es negativo: `margenParaPrecio` devuelve `null` con el
   // precio por debajo del costo, que es justo cuando más hace falta verlo.
-  const margenReal = costoTotal > 0 && precioTotal > 0
-    ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
-    : null
   // Una Pública no pide autorización por margen: su ganancia es la comisión (`tarifa-publica.ts`).
   const publica = tipoTarifa === 'publica'
+  // Una Pública mide su margen con la comisión: lo que la agencia paga es el precio público menos
+  // ella (brief del 2026-10-29, falla 1). Sin comisión, «—»: un 0 se leería como «a costo».
+  const margenReal = publica
+    ? margenDeOpcionPublica({ comision: comision ?? null, precioPublico: costoLinea * (1 + administrativosPct / 100), costo: costoTotal, precio: precioTotal })
+    : costoTotal > 0 && precioTotal > 0
+      ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
+      : null
   const bajo = !publica && margenReal !== null && margenReal < pisoPct
 
   function guardar(fn: () => Promise<{ success: boolean; error?: string; descuentoQuitado?: string }>, limpiar: () => void) {

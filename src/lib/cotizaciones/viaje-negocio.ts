@@ -21,6 +21,7 @@ import { nivelDetalleDesde, type NivelDetalle } from './detalle-viaje'
 import { normalizarComposicion, type Composicion } from './tarifa-pasajero'
 import { memoDeAceptacion } from './memo-de-aceptacion'
 import { A_MEDIDA, modalidadDesdeFilas, SLUG_MODALIDAD, SLUG_OPERADOR, type ModalidadDelViaje } from './bloqueo-modalidad'
+import { visaEnTramite } from '@/lib/viaje/condicion-visa'
 
 export interface ViajeDelNegocio {
   composicion: Composicion | null
@@ -103,7 +104,7 @@ export function edadesMenoresDesdeFilas(filas: readonly Record<string, unknown>[
 export async function leerViajeDelNegocio(
   supabase: unknown,
   negocioId: string | null,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje; edadesMenores?: string | null }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje; edadesMenores?: string | null; visaEnTramite?: boolean }> {
   if (!negocioId) return { viaje: VIAJE_VACIO, error: null, modalidad: A_MEDIDA }
   // Dentro de una aceptación de la forma por pasos (una o un lote) el viaje no cambia: se lee una
   // vez (`memo-de-aceptacion.ts`). Fuera, como siempre.
@@ -113,7 +114,7 @@ export async function leerViajeDelNegocio(
 async function leerViajeSinMemo(
   supabase: unknown,
   negocioId: string,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje; edadesMenores: string | null }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje; edadesMenores: string | null; visaEnTramite: boolean }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')
@@ -126,10 +127,18 @@ async function leerViajeSinMemo(
       // Viaje en bloqueo (brief del 2026-10-27). Un bloque que no los declara devuelve null.
       + `${SLUG_MODALIDAD}:data->>${SLUG_MODALIDAD}, ${SLUG_OPERADOR}:data->>${SLUG_OPERADOR}, `
       // Las edades de los menores de la Solicitud: precargan la edad del niño del paquete (2026-10-29).
-      + 'edades_menores:data->>edades_menores',
+      + 'edades_menores:data->>edades_menores, '
+      // Visa en trámite (Mauricio 2026-10-29): la condición del PDF y del mensaje (`condicion-visa.ts`).
+      + 'requisitos_especiales:data->>requisitos_especiales',
     )
     .eq('negocio_id', negocioId)
-  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA, edadesMenores: null }
+  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA, edadesMenores: null, visaEnTramite: false }
   const filas = (data ?? []) as Record<string, unknown>[]
-  return { viaje: viajeDesdeFilas(filas), error: null, modalidad: modalidadDesdeFilas(filas), edadesMenores: edadesMenoresDesdeFilas(filas) }
+  return {
+    viaje: viajeDesdeFilas(filas),
+    error: null,
+    modalidad: modalidadDesdeFilas(filas),
+    edadesMenores: edadesMenoresDesdeFilas(filas),
+    visaEnTramite: filas.some(f => visaEnTramite(typeof f.requisitos_especiales === 'string' ? f.requisitos_especiales : null)),
+  }
 }

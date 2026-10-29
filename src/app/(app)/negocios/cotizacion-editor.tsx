@@ -138,16 +138,15 @@ import {
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
 import {
-  costoDeAgencia,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
   margenParaElMinimo,
-  publicasSinComision,
   normalizarGrupo,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
 import { nombresVisiblesDeTarifas } from '@/lib/cotizaciones/tarifas'
 import { huellaDelAvisoDelPdf, idAvisoPdfBorrador } from '@/lib/cotizaciones/aviso-pdf-borrador'
+import { calculoEnPantalla } from '@/lib/cotizaciones/calculo-en-pantalla'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import {
   soloConfirmados,
@@ -3724,9 +3723,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <span className="text-base font-semibold tabular-nums">{formatCOP(cascadaTotal.precioVenta)}</span>
                 </div>
                 <div className="mt-0.5 flex justify-between gap-2 text-muted-foreground">
-                  {/* QA del #1342 · lo que paga la agencia (Públicas menos su comisión) y, sin comisión, que falta. */}
-                  <span>Costo {costoDeAgencia(cascadaTotal) === null ? '—' : formatCOP(costoDeAgencia(cascadaTotal)!)}</span>
-                  <span>Margen {publicasSinComision(cascadaTotal) > 0 ? 'falta la comisión' : formatMargenPct(margenParaElMinimo(cascadaTotal)) ?? '—'}</span>
+                  {/* QA del #1342 · lo que paga la agencia y, con una Pública sin comisión, que falta. */}
+                  <span>Costo {calculoEnPantalla(cascadaTotal).publicasSinComision > 0 ? '—' : formatCOP(calculoEnPantalla(cascadaTotal).costoDeVenta)}</span>
+                  <span>Margen {calculoEnPantalla(cascadaTotal).publicasSinComision > 0 ? 'falta la comisión' : formatMargenPct(calculoEnPantalla(cascadaTotal).margenDelViajePct) ?? '—'}</span>
                 </div>
                 {enPropuesta.length > 0 && (
                   <ul className="mt-2 space-y-0.5 border-t pt-2">
@@ -4127,6 +4126,12 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
   )
 }
 
+/** A cuántas líneas se aplica el margen de hoteles (con reglas de margen). */
+function notaMargenDeHoteles(n: number): string {
+  if (n === 0) return 'no lo toma ninguna opción: cada una lleva el suyo'
+  return n === 1 ? 'lo toma 1 hotel Neta sin margen propio' : `lo toman ${n} hoteles Neta sin margen propio`
+}
+
 /**
  * El pie de la cotización: la cascada completa, de lo que cuesta a lo que se cobra.
  *
@@ -4135,7 +4140,7 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
  * diera: el cliente veía una línea "Administración e imprevistos" que nadie había
  * cotizado, y el margen no se podía leer en ninguna parte.
  */
-function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, ofrecerAdministrativos = true, onMargenChange, onAIUChange, onDescuentoChange }: {
+export function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, ofrecerAdministrativos = true, onMargenChange, onAIUChange, onDescuentoChange }: {
   cascada: Cascada
   margenPct: number
   convencionMargen: ConvencionMargen
@@ -4171,12 +4176,19 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   // El margen real se separa del general cuando alguna línea margina distinto, trae
   // precio a mano, o cuando la cotización quedó en la convención vieja de recargo
   // sobre el costo. Si no pasa nada de eso, son el mismo número.
-  const margenRealEsOtraCosa =
-    cascada.margenRealPct !== null && Math.abs(cascada.margenRealPct - margenPct) >= 0.05
+  // Con tarifas Públicas o reglas de margen, el costo y el margen se dicen como los mide el
+  // encabezado: la agencia paga el precio público menos la comisión (brief del 2026-10-29, falla 2).
+  const enPantalla = calculoEnPantalla(cascada)
+  const margenDelViaje = enPantalla.margenDelViajePct
+  // Con reglas, la casilla de la cotización es el margen de los HOTELES Neta: no se compara con el
+  // del viaje (un plan o una Pública no lo toman), así que el del viaje se dice siempre «real».
+  const conReglas = enPantalla.lineasQueTomanElMargen !== null
+  const margenRealEsOtraCosa = conReglas
+    || (margenDelViaje !== null && Math.abs(margenDelViaje - margenPct) >= 0.05)
 
-  // El nivel (rojo/ámbar) se juzga como el mínimo: sin las líneas de tarifa pública.
+  // El nivel (rojo/ámbar) se juzga como el mínimo, y la cifra es la misma que se juzga.
   const nivelConsolidado = nivelDeMargen(margenParaElMinimo(cascada), umbrales)
-  const margenConsolidado = formatMargenPct(cascada.margenRealPct)
+  const margenConsolidado = formatMargenPct(margenDelViaje)
 
   return (
     <div className="rounded-lg bg-muted/50 p-4 space-y-2">
@@ -4253,13 +4265,39 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
         />
       )}
 
+      {/* La comisión de las tarifas Públicas: la agencia paga el precio público menos ella (D2). */}
+      {enPantalla.comisionPublicas > 0 && (
+        <Renglon
+          etiqueta="Comisión de tarifas públicas"
+          valor={enPantalla.comisionPublicas}
+          nota="la agencia paga el precio público menos su comisión"
+          tono="rojo"
+        />
+      )}
+
       <div className="border-t pt-2">
-        <Renglon etiqueta="Costo de venta" valor={cascada.costoDeVenta} nota="lo que hay que poner" fuerte />
+        <Renglon etiqueta="Costo de venta" valor={enPantalla.costoDeVenta} nota="lo que hay que poner" fuerte />
       </div>
+
+      {/* Con reglas de margen la casilla de la cotización solo la toman los hoteles Neta sin margen
+          propio (en por pasos se edita arriba, «Margen de hoteles»). Se llama igual, dice a cuántas
+          líneas se aplica y, si no la toma ninguna, no muestra un porcentaje que no está en el precio
+          (brief del 2026-10-29, falla 2). */}
+      {conReglas && (!editable || enPantalla.lineasQueTomanElMargen === 0) && (
+        <div className="flex items-baseline justify-between gap-2 border-t pt-2 text-sm" data-margen-de-hoteles>
+          <span className="text-muted-foreground">
+            Margen de hoteles
+            <span className="ml-1 text-[10px]">{notaMargenDeHoteles(enPantalla.lineasQueTomanElMargen ?? 0)}</span>
+          </span>
+          <span className="font-medium tabular-nums">
+            {enPantalla.lineasQueTomanElMargen === 0 ? '—' : formatMargenPct(margenPct)}
+          </span>
+        </div>
+      )}
 
       {/* MARGEN — el de la cotización completa. Las líneas que traen el suyo lo dicen
           en su propia fila, así que el número de aquí no las alcanza. */}
-      {editable && (
+      {editable && (!conReglas || (enPantalla.lineasQueTomanElMargen ?? 0) > 0) && (
         <div className="flex items-center justify-between gap-2 border-t pt-2">
           {/* Se llama "Margen general" porque es como lo nombra quien cotiza. El
               matiz de la convención no se pierde: va en el tooltip, y el margen
@@ -4270,7 +4308,8 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
               ? 'Se calcula sobre la venta: el número que escribes ES el margen real.'
               : `Se calcula como ${nombreDelMargen(convencionMargen).toLowerCase()} sobre el costo, así que el margen real sale un poco por debajo. Lo ves abajo, junto al precio de venta.`}
           >
-            Margen general
+            {conReglas ? 'Margen de hoteles' : 'Margen general'}
+            {conReglas && <span className="ml-1 text-[10px] font-normal">{notaMargenDeHoteles(enPantalla.lineasQueTomanElMargen ?? 0)}</span>}
           </label>
           <div className="relative w-24">
             <input
@@ -4337,6 +4376,12 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
             cuando ya era malo.
             La etiqueta cambia a "Margen real" cuando NO coincide con el general,
             que es lo que obliga a mirar los dos por separado. */}
+        {!margenConsolidado && enPantalla.publicasSinComision > 0 && (
+          <div className="mt-0.5 flex items-baseline justify-between gap-2" data-margen-sin-comision>
+            <span className="text-[11px] text-muted-foreground">Margen real del viaje</span>
+            <span className="text-[11px] font-semibold text-red-600">sin medir · falta la comisión de una tarifa pública</span>
+          </div>
+        )}
         {margenConsolidado && cascada.costoDeVenta > 0 && (
           <div className="mt-0.5 flex items-baseline justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">
