@@ -296,6 +296,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   /** «Ir» de la lista única: la tarjeta, la tarifa, la bandeja o el párrafo exacto. */
   const irDesdeLaLista = (d: DestinoDeIr) => {
     if (d.a === 'opcion') {
+      // Prueba corta del #1352: la opción vive dentro de su servicio, plegado al llegar al Paso 1.
+      const grupo = servicios.find(s => s.opciones.includes(d.itemId))?.grupo
+      if (grupo) setAbiertos(a => (a.has(grupo) ? a : new Set([...a, grupo])))
       setPaso(1)
       p.onAbrirOpcion(d.itemId)
       // QA del #1342 · «Falta la comisión»: la tarjeta se abre y el foco queda en la casilla.
