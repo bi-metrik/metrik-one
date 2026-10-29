@@ -30,8 +30,11 @@
 
 export type TipoTarifa = 'neta' | 'publica'
 
-/** Quién decidió el tipo: una persona en la tarjeta, o ONE con lo que dice el tarifario. */
-export type OrigenTipoTarifa = 'persona' | 'tarifario'
+/**
+ * Quién decidió el tipo: una persona en la tarjeta, ONE con lo que dice el tarifario, o ONE con lo
+ * que dice el pantallazo (precio público + comisión de la agencia, QA Trappvel M6 del 2026-10-29).
+ */
+export type OrigenTipoTarifa = 'persona' | 'tarifario' | 'pantallazo'
 
 export interface DecisionTipoTarifa {
   tipo: TipoTarifa
@@ -66,7 +69,7 @@ export function leerTipoTarifa(raw: unknown): DecisionTipoTarifa | null {
     && Number.isFinite(comision) && comision >= 0 && comision < 100
   return {
     tipo: raw.tipo,
-    origen: raw.origen === 'tarifario' ? 'tarifario' : 'persona',
+    origen: raw.origen === 'tarifario' || raw.origen === 'pantallazo' ? raw.origen : 'persona',
     por: typeof raw.por === 'string' ? raw.por.slice(0, 200) : null,
     en: typeof raw.en === 'string' ? raw.en : '',
     // Sin comisión la llave no aparece: la decisión se lee igual que antes.
@@ -107,7 +110,8 @@ export function propuestaDelTarifario(
   canal: string | null | undefined,
   en: string,
 ): DecisionTipoTarifa | 'quitar' | null {
-  if (actual?.origen === 'persona') return null
+  // Lo que propuso el pantallazo tampoco lo pisa el tarifario: es la lectura de ESTA tarifa.
+  if (actual?.origen === 'persona' || actual?.origen === 'pantallazo') return null
   const tipo = tipoPropuestoPorCanal(canal)
   if (tipo === null || tipo === 'neta') return actual ? 'quitar' : null
   if (actual?.tipo === tipo) return null
@@ -198,4 +202,103 @@ export const ETIQUETA_TIPO_TARIFA: Record<TipoTarifa, string> = {
 export const AYUDA_TIPO_TARIFA: Record<TipoTarifa, string> = {
   neta: 'Neta: es el precio del proveedor. Se le suma tu margen.',
   publica: 'Pública: el precio ya trae tu comisión. El cliente paga ese precio; escribe tu comisión para que entre al margen de la cotización.',
+}
+
+// ── La Pública que trae el pantallazo (QA Trappvel M6 y M7, 2026-10-29) ─────
+
+/** Lo que la confirmación anotó de los dos precios de la captura (`margen-proveedor.ts`). */
+export interface DosPreciosDelPantallazo {
+  precioCliente: number
+  costoAgencia: number
+  margenPct: number
+}
+
+/**
+ * Cuántas veces el precio público cabe en el costo guardado de la línea.
+ *
+ * Cuando el pantallazo trae el precio al público Y lo que paga la agencia (o la comisión), el costo
+ * de la línea se guarda NETO (`montoDeCosto`, hallazgo 7.1) y su margen propio es la comisión: el
+ * precio sale igual al público. Para una Pública eso quiere decir que su precio público NO es su
+ * costo sino `costo × precioCliente / costoAgencia`. Sin los dos precios, 1: el costo ES el precio
+ * público, como en toda Pública de siempre (las cifras no cambian).
+ */
+export function factorPublicoDelPantallazo(dos: DosPreciosDelPantallazo | null | undefined): number {
+  if (!dos) return 1
+  const p = Number(dos.precioCliente)
+  const c = Number(dos.costoAgencia)
+  if (!Number.isFinite(p) || !Number.isFinite(c) || c <= 0 || p <= c) return 1
+  return p / c
+}
+
+/** Los dos precios anotados en `tarifa_pax.confirmada.margenProveedor`, leídos del jsonb crudo. */
+export function dosPreciosDeTarifa(tarifaPax: unknown): DosPreciosDelPantallazo | null {
+  if (!esObj(tarifaPax) || !esObj(tarifaPax.confirmada)) return null
+  const m = tarifaPax.confirmada.margenProveedor
+  if (!esObj(m)) return null
+  const precioCliente = Number(m.precioCliente)
+  const costoAgencia = Number(m.costoAgencia)
+  const margenPct = Number(m.margenPct)
+  if (![precioCliente, costoAgencia, margenPct].every(Number.isFinite)) return null
+  return { precioCliente, costoAgencia, margenPct }
+}
+
+/** La comisión que dice el pantallazo, en % del precio público (la casilla de la tarjeta). */
+export function comisionDelPantallazo(dos: DosPreciosDelPantallazo): ComisionEscrita | null {
+  const pct = Math.round(dos.margenPct * 100) / 100
+  return Number.isFinite(pct) && pct > 0 && pct < 100 ? { tipo: 'pct', valor: pct } : null
+}
+
+/**
+ * M6 (QA Trappvel, viaje 04): el pantallazo dice el precio al público y la comisión de la agencia
+ * («Tarifa Pública, comisión agencia 12 % incluida»). Eso ES una tarifa Pública: ONE la propone así,
+ * con la comisión leída, en vez de dejarla Neta. El precio y el margen no cambian (el costo sigue
+ * siendo el neto y el margen la comisión); cambia cómo se dice y que la comisión ya viene escrita.
+ *
+ * Devuelve la decisión nueva, `'quitar'` (la propuesta del pantallazo ya no aplica) o `null` (nada
+ * que cambiar). Nunca pisa lo que eligió una persona ni lo que propuso el tarifario.
+ */
+export function propuestaDelPantallazo(
+  actual: DecisionTipoTarifa | null,
+  dos: DosPreciosDelPantallazo | null,
+  traeComision: boolean,
+  en: string,
+): DecisionTipoTarifa | 'quitar' | null {
+  if (actual && actual.origen !== 'pantallazo') return null
+  const comision = dos && traeComision ? comisionDelPantallazo(dos) : null
+  if (!comision) return actual ? 'quitar' : null
+  const nueva = conComision({ tipo: 'publica', origen: 'pantallazo', por: null, en }, comision)
+  if (actual && actual.tipo === 'publica' && actual.comisionPct === nueva.comisionPct && actual.comisionMonto === undefined) return null
+  return nueva
+}
+
+/**
+ * M7 (QA Trappvel, viaje 04): en una Pública, «Ajustar» deja escribir un precio distinto del
+ * público. Decisión de Mauricio del 2026-10-29: ante un valor fuera de lo pactado, una confirmación
+ * «¿Estás seguro? …» con la cifra, sin bloquear ni avisar a nadie. `null` = el precio es el público
+ * (al peso). Puro: lo usa la tarjeta antes de guardar.
+ *
+ * @param que «el precio por adulto», «el precio de la opción».
+ */
+export function confirmacionFueraDeLaPublica(a: { precio: number; publico: number; que: string }): string | null {
+  const precio = Math.round(Number(a.precio) || 0)
+  const publico = Math.round(Number(a.publico) || 0)
+  if (!(publico > 0) || Math.abs(precio - publico) <= 1) return null
+  const diferencia = Math.abs(precio - publico)
+  const pesos = (n: number) => '$' + n.toLocaleString('es-CO').replace(/,/g, '.')
+  return `¿Estás seguro? Esto está por fuera de la tarifa pública: ${a.que} queda en ${pesos(precio)} y la tarifa pública es ${pesos(publico)} (${pesos(diferencia)} ${precio < publico ? 'menos' : 'más'}).`
+}
+
+/**
+ * ¿El pantallazo dice la comisión de la agencia? Sí cuando el neto se derivó de ella, o cuando
+ * la lectura trae la casilla «Comisión de la agencia» (en plata o en %) aunque también trajera el
+ * neto escrito: la captura del viaje 04 decía «Tarifa Pública (comisión agencia 12 % incluida)»,
+ * el neto y la comisión. Un neto sin comisión (solo «precio neto») no basta para llamarla Pública.
+ */
+export function lecturaTraeComision(lectura: {
+  costoAgenciaOrigen?: string | null
+  campos?: readonly { label: string; valor: string | null }[] | null
+} | null | undefined): boolean {
+  if (!lectura) return false
+  if (lectura.costoAgenciaOrigen === 'derivado_comision') return true
+  return (lectura.campos ?? []).some(c => c.label.startsWith('Comisión de la agencia') && !!c.valor && Number(String(c.valor).replace(',', '.')) > 0)
 }
