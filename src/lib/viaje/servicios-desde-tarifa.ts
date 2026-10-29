@@ -26,7 +26,7 @@ import { lineaConAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { lecturaDeOpcion } from '@/lib/cotizaciones/habitaciones'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
-import { leerTramos as leerTramosDelItem } from '@/lib/cotizaciones/tramos-vuelo'
+import { leerTramos as leerTramosDelItem, regresoEsLaLlegadaDeLaIda } from '@/lib/cotizaciones/tramos-vuelo'
 import {
   SIN_FECHAS,
   esFechaIso,
@@ -184,11 +184,18 @@ function tramosLeidos(lectura: Lectura): TramoServicio[] {
     numero_vuelo: campoLeido(lectura, 'Nº de vuelo'),
   }]
   const regreso = fechaIso(id.fecha_regreso)
-  if (regreso && regreso >= ida) {
+  const salidaRegreso = horaHHMM(campoLeido(lectura, 'Hora de salida (regreso)'))
+  const llegadaRegreso = horaHHMM(campoLeido(lectura, 'Hora de llegada (regreso)'))
+  // M9-3: la llegada al día siguiente de un vuelo nocturno no es un regreso.
+  const fantasma = regresoEsLaLlegadaDeLaIda(
+    { fecha: ida, salida: tramos[0].hora_salida, llegada: tramos[0].hora_llegada },
+    { fecha: regreso, salida: salidaRegreso, llegada: llegadaRegreso },
+  )
+  if (regreso && regreso >= ida && !fantasma) {
     tramos.push({
       fecha: regreso,
-      hora_salida: horaHHMM(campoLeido(lectura, 'Hora de salida (regreso)')),
-      hora_llegada: horaHHMM(campoLeido(lectura, 'Hora de llegada (regreso)')),
+      hora_salida: salidaRegreso,
+      hora_llegada: llegadaRegreso,
       origen: destino,
       destino: origen,
       aerolinea,
