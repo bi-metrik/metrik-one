@@ -6,7 +6,7 @@
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
-import { sendTextMessage, sendTextMessageABsuid, sendButtons, sendCtaUrl, sendFlow, enBackground } from '../_shared/wa-respond.ts';
+import { sendTextMessage, sendTextMessageABsuid, sendButtons, enBackground } from '../_shared/wa-respond.ts';
 import { extraerEntrante, extraerStatuses } from '../_shared/wa-webhook-payload.ts';
 import { verificarFirmaMeta } from '../_shared/wa-firma.ts';
 import type { MensajeSinTelefono } from '../_shared/wa-webhook-payload.ts';
@@ -17,22 +17,8 @@ import {
   previewSinTelefono,
   variablesAvisoSinTelefono,
 } from '../_shared/wa-sin-telefono.ts';
+import { INTENT_DESCONOCIDO, MENSAJE_DESCONOCIDO, responderDesconocido } from '../_shared/wa-desconocido.ts';
 import { getOrCreateSession, isAwaitingResponse, updateSession } from '../_shared/wa-session.ts';
-import {
-  resolverEstudioChat,
-  chatCardumenAbierto,
-  startCardumenChat,
-  continueCardumenChat,
-  resolverEstudioMiniwebPorTrigger,
-  urlMiniwebParaParticipante,
-  esEstadoObjetos,
-  resolverEstudioObjetosPorTrigger,
-  startObjetos,
-  continueObjetos,
-} from '../_shared/cardumen/index.ts';
-import { ctxCardumen } from '../_shared/cardumen/telemetria.ts';
-import { isVeTrigger, hasOpenVeChat, startVeChat, continueVeChat, VE_APAGADO, cerrarVeChatPorApagado } from '../_shared/venezuela/index.ts';
-import { resolverCustomerTrigger, hasOpenCustomerChat, startCustomerChat, continueCustomerChat } from '../_shared/customer/index.ts';
 import { checkInboundLimit, logMessage } from '../_shared/wa-rate-limit.ts';
 import { enviarAvisoInterno } from '../_shared/wa-alerta.ts';
 import { aplicarStatuses } from '../_shared/wa-envios.ts';
@@ -180,17 +166,14 @@ Deno.serve(async (req) => {
 // Numeros que no reconocemos
 // ============================================================
 
-/** Marca con la que estas conversaciones quedan buscables en `wa_message_log`. */
-const INTENT_DESCONOCIDO = 'numero_desconocido';
-
 /**
  * Alguien que no esta registrado le escribio al bot.
  *
- * Antes solo se le contestaba "no te reconozco" y ahi moria: el mensaje no se guardaba y
- * nadie se enteraba. Si un cliente responde por WhatsApp a un contrato o a un cobro, cae
- * justo por aca, y su respuesta se perdia.
- *
- * Dos cosas, en este orden: queda registrado SIEMPRE, y se avisa a quien pueda contestar.
+ * Decision de Mauricio (2026-10-29): por este numero solo habla quien esta registrado en ONE, y el
+ * numero dice de que workspace es y con que rol habla. A quien no esta registrado no se le intenta
+ * clasificar ni se avisa a nadie: una sola respuesta que lo manda a su administrador o al WhatsApp
+ * de MeTRIK. El mensaje queda en `wa_message_log` siempre; la respuesta sale una vez cada 24 h por
+ * numero, para que veinte mensajes no sean veinte respuestas.
  */
 async function atenderDesconocido(
   supabase: ReturnType<typeof getServiceClient>,
@@ -198,44 +181,19 @@ async function atenderDesconocido(
 ): Promise<void> {
   const preview = (message.text || '').trim() || `[${message.type}]`;
 
-  // Se decide ANTES de insertar: si se consulta despues, la fila recien escrita apaga
-  // su propio aviso y no se notifica nunca.
-  const avisar = !(await avisoReciente(supabase, message.phone));
+  // Se cuenta ANTES de registrar: si no, la fila recien escrita apaga su propia respuesta.
+  const responder = responderDesconocido(await contarDesconocidoRecientes(supabase, message.phone));
 
   await logMessage(supabase, message.phone, 'inbound', undefined, INTENT_DESCONOCIDO, preview);
 
-  await sendTextMessage(message.phone,
-    'Hola, no reconozco este número todavía.\n\nSi aún no tienes cuenta, puedes crearla en metrikone.co. Si ya usas MéTRIK ONE, pídele a tu admin que registre este número en Configuración → Equipo.');
-
-  if (!avisar) return;
-
-  const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
-  if (!admin) {
-    console.warn(`[wa-webhook] ${message.phone} no reconocido y sin avisar: falta WA_ADMIN_NOTIFY_PHONE`);
-    return;
-  }
-
-  // Pasa por el resolvedor de plantillas: si `WA_ALERT_TEMPLATES` declara una para este
-  // intent, sale como plantilla y llega con la ventana de 24 h cerrada. Si no, sale como
-  // texto libre — o sea como hoy — y Meta lo entrega solo si el admin le escribio al bot
-  // en las ultimas 24 h. El rechazo (131047) queda en `wa_envios` con su codigo.
-  //
-  // Ojo con la ventana de quien: la abre el ADMIN al escribirle al bot, no el desconocido
-  // que disparo el aviso. Que el desconocido acabe de escribir no habilita nada aqui.
-  await enviarAvisoInterno(
-    admin,
-    INTENT_DESCONOCIDO,
-    `📵 Un número no registrado le escribió al bot.\n\nDe: +${message.phone}\nDice: ${preview.slice(0, 200)}\n\nNo hay a quién enrutarlo. Si es un cliente, contéstale desde tu WhatsApp.`,
-    { telefono: `+${message.phone}`, mensaje: preview.slice(0, 200) },
-  );
+  if (responder) await sendTextMessage(message.phone, MENSAJE_DESCONOCIDO);
 }
 
-/** True si a este numero ya se le abrio un aviso en las ultimas 24h. Evita que un spammer
- *  con veinte mensajes se convierta en veinte notificaciones. */
-async function avisoReciente(
+/** Mensajes de este numero sin registrar en las ultimas 24 h. `null` si la consulta falla. */
+async function contarDesconocidoRecientes(
   supabase: ReturnType<typeof getServiceClient>,
   phone: string,
-): Promise<boolean> {
+): Promise<number | null> {
   const desde = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const { count, error } = await supabase
     .from('wa_message_log')
@@ -244,12 +202,11 @@ async function avisoReciente(
     .eq('intent', INTENT_DESCONOCIDO)
     .gte('created_at', desde);
 
-  // Si la consulta falla se avisa igual: perder un aviso es peor que repetirlo.
   if (error) {
-    console.error('[wa-webhook] no se pudo revisar el aviso previo:', error.message);
-    return false;
+    console.error('[wa-webhook] no se pudo contar los mensajes previos del numero desconocido:', error.message);
+    return null;
   }
-  return (count ?? 0) > 0;
+  return count ?? 0;
 }
 
 // ============================================================
@@ -318,192 +275,17 @@ async function contarSinTelefonoRecientes(
 async function processMessage(message: IncomingMessage): Promise<void> {
   const supabase = getServiceClient();
 
-  // 0. Aceptacion de terminos — toque de "Acepto" / "No acepto". Va PRIMERO, antes que cualquier
-  //    aislamiento: el id del boton es inequivoco (`terminos:...`) y ese toque no puede terminar
-  //    como texto dentro de una entrevista de Cardumen o en el flujo de gastos.
+  // 0. Aceptacion de terminos — toque de "Acepto" / "No acepto". Va PRIMERO, antes de identificar:
+  //    quien acepta casi nunca es del equipo, y el id del boton es inequivoco (`terminos:...`), asi
+  //    que ese toque no puede terminar como texto en el flujo de gastos.
+  //    Por este numero solo entra MeTRIK ONE (2026-10-29): los flujos aislados que iban aqui
+  //    (Cardumen, Venezuela, Customer, turismo) se apagaron y nada se clasifica antes de saber
+  //    quien escribe.
   //    Si el toque es el del aviso de datos del bot, `cerrarAviso` confirma y procesa (aqui mismo,
   //    en orden) lo que la persona escribio antes de aceptar.
   if (await atenderBotonTerminos(supabase, message, {
     alResponderAviso: (fila, decision, respondidoAt) => cerrarAviso(supabase, fila, decision, respondidoAt, processMessage),
   })) return;
-
-  // 0a. Cardumen — Flow completado: guardar la respuesta y agradecer. Va PRIMERO (participantes ≠ usuarios ONE).
-  if (message.type === 'flow_response') {
-    await storeCardumenFlowResponse(supabase, message.phone, message.flow_response || '');
-    const gracias = '🐟 ¡Gracias! Tu historia ya forma parte del cardumen.';
-    await sendTextMessage(message.phone, gracias, ctxCardumen(estudioFlow(), gracias));
-    return;
-  }
-
-  // 0a-ve. Voz de Venezuela — AISLAMIENTO TOTAL (mismo patron que CardumenChat). Si hay una conversacion
-  //     de escucha ABIERTA para este telefono, TODO mensaje (texto o audio) va al motor Gemini de escucha
-  //     y retorna ANTES de cualquier logica de ONE. Estudio aparte: estado en ve_chat_sessions.
-  if (await hasOpenVeChat(supabase, message.phone)) {
-    // Bot apagado (2026-10-20): la conversación abierta se cierra con despedida y no cae a la lógica de ONE.
-    if (VE_APAGADO) {
-      await cerrarVeChatPorApagado(supabase, message.phone, message.text || '');
-      return;
-    }
-    let texto = message.text || '';
-    if (message.type === 'audio' && message.audio_id) {
-      const result = await transcribeAudio(message.audio_id);
-      if (!result.text) {
-        await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Me lo puedes escribir o repetir?');
-        return;
-      }
-      texto = result.text;
-    }
-    if (message.type === 'location' && message.location) {
-      const loc = message.location;
-      const etiqueta = loc.name || loc.address;
-      const textoUbic = etiqueta ? `(Comparto mi ubicación: ${etiqueta})` : '(Comparto mi ubicación actual por WhatsApp.)';
-      await continueVeChat(supabase, message.phone, textoUbic, message.wa_message_id, loc);
-      return;
-    }
-    if (!texto.trim()) {
-      await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
-      return;
-    }
-    await continueVeChat(supabase, message.phone, texto, message.wa_message_id);
-    return;
-  }
-  // 0a-ve trigger. Palabra clave publica "venezuela" abre la conversacion de escucha (solo si no hay una abierta).
-  if (!VE_APAGADO && message.type === 'text' && isVeTrigger(message.text)) {
-    await startVeChat(supabase, message.phone, message.wa_message_id, message.bot_phone);
-    return;
-  }
-
-  // 0b. CardumenChat — AISLAMIENTO TOTAL. Si hay una conversacion Cardumen ABIERTA para este telefono,
-  //     TODO mensaje (texto o audio) va al entrevistador y retorna ANTES de cualquier logica de ONE.
-  //     Un audio (u otro mensaje) en medio de Cardumen NUNCA debe caer en el flujo de gastos/intents.
-  const chatCardumen = await chatCardumenAbierto(supabase, message.phone);
-  if (chatCardumen) {
-    // 0b-obj. Cardumen modo `objetos` — se desvia ANTES de todo lo demas de este bloque.
-    //     La secuencia de objetos sueltos guarda su estado en la MISMA tabla
-    //     `cardumen_chat_sessions` que Navigate (la demo viva de Grupo Progreso), asi que
-    //     esta consulta tambien la ve. Sin esta rama, el texto de vuelta de la pagina
-    //     ("Listo preocupaciones 50-30-20") entraria al entrevistador de chat como si fuera
-    //     una narrativa — y la palabra de consentimiento por defecto del encuadre de chat es
-    //     justamente "LISTO". Lo que distingue la sesion es `state.modo = 'objetos'`.
-    //     Va antes de la transcripcion de este bloque: quien decide si vale la pena
-    //     transcribir es `continueObjetos`, que sabe en que paso va la persona.
-    if (esEstadoObjetos(chatCardumen.state)) {
-      // El audio NO se transcribe aqui: `continueObjetos` lo hace solo si el paso pendiente
-      // es un relato (en un paso de reparto la respuesta llega por el enlace de vuelta, y
-      // transcribir seria gastar una llamada para nada).
-      await continueObjetos(supabase, message.phone, chatCardumen.state, {
-        texto: message.text || '',
-        audioId: message.type === 'audio' ? (message.audio_id ?? null) : null,
-        botonId: message.interactive_reply ?? null,
-      });
-      return;
-    }
-    // Lo que el webhook contesta aqui tambien es Cardumen: va marcado con el estudio.
-    const avisarCardumen = (t: string) => sendTextMessage(message.phone, t, ctxCardumen(chatCardumen.estudio, t));
-    let texto = message.text || '';
-    if (message.type === 'audio' && message.audio_id) {
-      const result = await transcribeAudio(message.audio_id);
-      if (!result.text) {
-        await avisarCardumen('No alcancé a entender el audio. ¿Me lo puedes escribir o repetir?');
-        return;
-      }
-      texto = result.text;
-    }
-    if (!texto.trim()) {
-      await avisarCardumen('Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
-      return;
-    }
-    // El id del boton viaja aparte del titulo: Navigate decide por id y acepta el texto
-    // escrito como equivalente.
-    await continueCardumenChat(supabase, message.phone, texto, message.wa_message_id, message.interactive_reply);
-    return;
-  }
-
-  // 0c. Cardumen — disparadores PÚBLICOS por palabra clave (solo si NO hay conversacion abierta).
-  //     El usuario escribió la palabra → ventana de servicio 24h (mensaje gratis).
-  //     La palabra resuelve QUE estudio se abre (catálogo `cardumen_estudio_triggers`), así que
-  //     varios estudios conviven. Si no resuelve ninguno, cae a la palabra fija de siempre.
-  if (message.type === 'text') {
-    const estudioChat = await resolverEstudioChat(supabase, message.text);
-    if (estudioChat) {
-      await startCardumenChat(supabase, message.phone, estudioChat, message.wa_message_id);
-      return;
-    }
-  }
-  // 0c-bis. Cardumen modo `miniweb` — el instrumento es una página, no una conversación.
-  //     MISMA tabla de triggers que el chat: el bloque de arriba ya se quedó con las palabras
-  //     de los estudios de chat (`cardumen` → `navigate`), así que ninguna palabra viva cambia
-  //     de dueño. El destino sale de `cardumen_estudios.url`: publicar un instrumento nuevo es
-  //     sembrar dos filas, no redesplegar esta función.
-  //     Va ANTES de los disparadores viejos (`cardumenflow`, `cardumen`, `turismo`), que se
-  //     quedan en pie por retrocompatibilidad.
-  if (message.type === 'text') {
-    const miniweb = await resolverEstudioMiniwebPorTrigger(supabase, message.text);
-    if (miniweb) {
-      const url = urlMiniwebParaParticipante(miniweb.url, message.phone);
-      const cuerpo = '🐟 *Cardumen*\n\nGracias por participar. Toca el botón para responder — toma pocos minutos y es confidencial.';
-      // CTA → abre el navegador interno de WhatsApp (un link de texto plano saca de la app).
-      await sendCtaUrl(message.phone, cuerpo, 'Abrir', url, ctxCardumen(miniweb.estudio, cuerpo));
-      console.log(`[wa-webhook] Cardumen miniweb '${miniweb.estudio}' enviado a ${message.phone}`);
-      return;
-    }
-  }
-  // 0c-ter. Cardumen modo `objetos` — la entrevista vive en el chat y la pagina sirve UN
-  //     paso de reparto por vez (`?obj=<id>`). MISMA tabla de triggers que el chat y el
-  //     miniweb: los bloques de arriba ya se quedaron con las palabras de los estudios
-  //     vivos, y la PK de `cardumen_estudio_triggers` impide que una palabra abra dos.
-  if (message.type === 'text') {
-    const objetos = await resolverEstudioObjetosPorTrigger(supabase, message.text);
-    if (objetos) {
-      await startObjetos(supabase, message.phone, objetos, message.wa_message_id);
-      return;
-    }
-  }
-  if (message.type === 'text' && isCardumenFlowTrigger(message.text)) {
-    await sendCardumenFlow(message.phone);
-    return;
-  }
-  if (message.type === 'text' && isCardumenTrigger(message.text)) {
-    await sendCardumenLink(message.phone);
-    return;
-  }
-  if (message.type === 'text' && isTurismoTrigger(message.text)) {
-    await sendTurismoLink(message.phone);
-    return;
-  }
-
-  // 0d. Customer service — AISLAMIENTO TOTAL, mismo patron que Cardumen y Venezuela.
-  //     Quien escribe aqui NO es del equipo: es un cliente final de un cliente nuestro.
-  //     Por eso va ANTES de identificar staff — si cayera despues, el numero de una
-  //     persona desconocida entraria al flujo de gastos/intents de ONE.
-  //     OPT-IN: solo responde a workspaces con config_extra.wa_customer_bot.
-  if (await hasOpenCustomerChat(supabase, message.phone)) {
-    let texto = message.text || '';
-    if (message.type === 'audio' && message.audio_id) {
-      const result = await transcribeAudio(message.audio_id);
-      if (!result.text) {
-        await sendTextMessage(message.phone, 'No alcancé a entender el audio. ¿Me lo puedes escribir?');
-        return;
-      }
-      texto = result.text;
-    }
-    if (!texto.trim()) {
-      await sendTextMessage(message.phone, 'Por ahora respóndeme con un mensaje de texto o de voz, por favor.');
-      return;
-    }
-    await continueCustomerChat(supabase, message.phone, texto, message.wa_message_id);
-    return;
-  }
-
-  // 0e. Customer service — disparador por palabra clave (solo si NO hay conversacion abierta).
-  //     El disparador lo define cada workspace en su config; se resuelve contra la base.
-  if (message.type === 'text' && message.text) {
-    const cs = await resolverCustomerTrigger(supabase, message.text);
-    if (cs) {
-      await startCustomerChat(supabase, message.phone, cs.workspaceId, cs.config, message.wa_message_id);
-      return;
-    }
-  }
 
   // 1. Identify user by phone number
   const user = await identifyUser(supabase, message.phone);
@@ -703,109 +485,6 @@ async function processMessage(message: IncomingMessage): Promise<void> {
 
   // 9. Route to handler
   await routeToHandler(ctx);
-}
-
-// ============================================================
-// Cardumen — disparador de estudio conversacional (SenseMaker)
-// ============================================================
-
-// Palabras clave que abren el cuestionario Cardumen. Coincidencia exacta (normalizada),
-// para no chocar con los flujos de ONE. Ajustable sin tocar la lógica.
-const CARDUMEN_KEYWORDS = ['cardumen'];
-const CARDUMEN_APP_URL = 'https://cardumen-app-delta.vercel.app';
-const CARDUMEN_ESTUDIO = 'fede';
-
-/** Estudio con el que se guardan las respuestas del Flow (el mismo criterio de storeCardumenFlowResponse). */
-function estudioFlow(): string {
-  return Deno.env.get('CARDUMEN_ESTUDIO') || 'fede';
-}
-
-function isCardumenTrigger(text: string): boolean {
-  const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
-  return CARDUMEN_KEYWORDS.includes(t);
-}
-
-// --- Variante Flow (in-chat, sin navegador) ---
-const CARDUMEN_FLOW_KEYWORDS = ['cardumenflow', 'cardumen flow'];
-function isCardumenFlowTrigger(text: string): boolean {
-  const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
-  return CARDUMEN_FLOW_KEYWORDS.includes(t);
-}
-
-async function sendCardumenFlow(phone: string): Promise<void> {
-  const flowId = Deno.env.get('CARDUMEN_FLOW_ID');
-  if (!flowId) {
-    const noPublicado = 'El cuestionario por Flow todavía no está publicado. Vuelve a intentar en un momento.';
-    await sendTextMessage(phone, noPublicado, ctxCardumen(estudioFlow(), noPublicado));
-    console.warn('[wa-webhook] CARDUMEN_FLOW_ID no configurado');
-    return;
-  }
-  const mode = (Deno.env.get('CARDUMEN_FLOW_MODE') as 'draft' | 'published') || 'published';
-  // flow_token = número del participante → liga la respuesta a esta conversación.
-  await sendFlow(
-    phone,
-    '🐟 *Cardumen*\n\nGracias por sumar tu historia. Toca el botón para responder — todo ocurre aquí dentro de WhatsApp y es confidencial.',
-    'Responder',
-    flowId,
-    `wa:${phone}`,
-    'CONSENT',
-    mode,
-    ctxCardumen(estudioFlow()),
-  );
-  console.log(`[wa-webhook] Cardumen Flow (${mode}) enviado a ${phone}`);
-}
-
-async function storeCardumenFlowResponse(
-  supabase: ReturnType<typeof getServiceClient>,
-  phone: string,
-  responseJson: string,
-): Promise<void> {
-  let data: Record<string, unknown> = {};
-  try { data = responseJson ? JSON.parse(responseJson) : {}; } catch { /* deja vacío */ }
-  // Guardamos el payload crudo del Flow; el mapeo fino al schema FEDE (regiones→percentX/Y) lo hace el pipeline.
-  const payload = { source: 'flow', collection_mode: 'event_live', raw: data };
-  const { error } = await supabase.from('cardumen_respuestas').insert({
-    estudio: estudioFlow(),
-    token: phone,
-    lang: 'es',
-    payload,
-  });
-  if (error) console.error('[wa-webhook] Error guardando respuesta Flow:', error.message);
-}
-
-// --- Estudio Turismo / La Araucanía (mini-web) ---
-const TURISMO_KEYWORDS = ['turismo', 'araucania', 'araucanía'];
-function isTurismoTrigger(text: string): boolean {
-  const t = (text || '').trim().toLowerCase().replace(/[!¡.,]/g, '');
-  return TURISMO_KEYWORDS.includes(t);
-}
-async function sendTurismoLink(phone: string): Promise<void> {
-  const token = encodeURIComponent(phone);
-  const url = `${CARDUMEN_APP_URL}/turismo.html?token=${token}&estudio=turismo`;
-  await sendCtaUrl(
-    phone,
-    '🐟 *La Araucanía*\n\nGracias por sumar tu historia sobre hacer negocios en la región. Toca el botón para compartirla — toma unos minutos y es confidencial.',
-    'Compartir historia',
-    url,
-    ctxCardumen('turismo'),
-  );
-  console.log(`[wa-webhook] Turismo link enviado a ${phone}`);
-}
-
-async function sendCardumenLink(phone: string): Promise<void> {
-  // token = número del participante → liga el envío del formulario a esta conversación.
-  const token = encodeURIComponent(phone);
-  const url = `${CARDUMEN_APP_URL}/?token=${token}&estudio=${CARDUMEN_ESTUDIO}`;
-  // Botón CTA → abre el In-App Browser (sin salir de WhatsApp) en números habilitados.
-  // Un link de texto plano abriría el navegador externo.
-  await sendCtaUrl(
-    phone,
-    '🐟 *Cardumen*\n\nGracias por sumar tu historia. Toca el botón para compartirla — toma pocos minutos y es confidencial.',
-    'Abrir cuestionario',
-    url,
-    ctxCardumen(CARDUMEN_ESTUDIO),
-  );
-  console.log(`[wa-webhook] Cardumen CTA enviado a ${phone}`);
 }
 
 // ============================================================
