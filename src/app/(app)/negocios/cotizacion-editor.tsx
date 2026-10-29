@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import {
@@ -138,12 +138,16 @@ import {
   type PoliticaRecargo,
 } from '@/lib/cotizaciones/recargo-linea'
 import {
+  costoDeAgencia,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
   margenParaElMinimo,
+  publicasSinComision,
   normalizarGrupo,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
+import { nombresVisiblesDeTarifas } from '@/lib/cotizaciones/tarifas'
+import { huellaDelAvisoDelPdf, idAvisoPdfBorrador } from '@/lib/cotizaciones/aviso-pdf-borrador'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import {
   soloConfirmados,
@@ -694,6 +698,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // QA del #1342 · el aviso ámbar del PDF de borrador nombra cifras de ESE momento (el margen, la
+  // comisión que faltaba). Cuando la cotización cambia, se quita: el próximo PDF dice lo vigente.
+  const huellaAviso = useMemo(() => huellaDelAvisoDelPdf({
+    items: initialItems,
+    tarifas: (itinerarios?.itinerarios ?? []).map(t => ({ id: t.id, vaEnPropuesta: t.vaEnPropuesta, seleccion: t.seleccion })),
+    cotizacion: cotizacion as unknown as Record<string, unknown>,
+  }), [initialItems, itinerarios, cotizacion])
+  const huellaDelAviso = useRef<string | null>(null)
+  useEffect(() => {
+    if (huellaDelAviso.current === null || huellaDelAviso.current === huellaAviso) return
+    huellaDelAviso.current = null
+    toast.dismiss(idAvisoPdfBorrador(cotizacion.id))
+  }, [huellaAviso, cotizacion.id])
+
   const handleDescargarPDF = () => {
     startTransition(async () => {
       const res = await generateCotizacionPDF(cotizacion.id, {
@@ -719,7 +737,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           // Bajo el margen mínimo sin autorización, o con pantallazos de otros pasajeros:
           // el PDF lleva marca de agua y no se guardó. Se dice en ámbar y se queda en
           // pantalla, no como un «listo».
-          toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
+          // QA del #1342 · con su id: se quita solo cuando la cotización cambia (ver abajo).
+          toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { id: idAvisoPdfBorrador(cotizacion.id), duration: Infinity, closeButton: true })
+          huellaDelAviso.current = huellaAviso
         } else {
           toast.success('PDF descargado')
           // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
@@ -3584,6 +3604,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     estadoCotizacion: cotizacion.estado,
   })
   const enPropuesta = (itinerarios?.itinerarios ?? []).filter(i => i.vaEnPropuesta)
+  // Sin nombre, «Opción N» como el documento (QA del #1342), no «Tarifa».
+  const nombresDeTarifas = nombresVisiblesDeTarifas(itinerarios?.itinerarios ?? [])
   // Las actividades opcionales y las que no van se cuentan aparte, sin sumarlas (punto 0).
   const notaFuera = notaDeActividadesFuera(itemsParaDia)
   const resumenDeComponentes = `${resumenDeBloques(estadosDeBloque)}${notaFuera ? ` · ${notaFuera}` : ''}`
@@ -3694,14 +3716,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <span className="text-base font-semibold tabular-nums">{formatCOP(cascadaTotal.precioVenta)}</span>
                 </div>
                 <div className="mt-0.5 flex justify-between gap-2 text-muted-foreground">
-                  <span>Costo {formatCOP(cascadaTotal.costoDeVenta)}</span>
-                  <span>Margen {formatMargenPct(cascadaTotal.margenRealPct) ?? '—'}</span>
+                  {/* QA del #1342 · lo que paga la agencia (Públicas menos su comisión) y, sin comisión, que falta. */}
+                  <span>Costo {costoDeAgencia(cascadaTotal) === null ? '—' : formatCOP(costoDeAgencia(cascadaTotal)!)}</span>
+                  <span>Margen {publicasSinComision(cascadaTotal) > 0 ? 'falta la comisión' : formatMargenPct(margenParaElMinimo(cascadaTotal)) ?? '—'}</span>
                 </div>
                 {enPropuesta.length > 0 && (
                   <ul className="mt-2 space-y-0.5 border-t pt-2">
                     {enPropuesta.map(t => (
                       <li key={t.id} className="flex justify-between gap-2">
-                        <span>{t.nombre ?? 'Tarifa'}</span>
+                        <span>{nombresDeTarifas.get(t.id) ?? t.nombre ?? 'Tarifa'}</span>
                         <span className="tabular-nums">
                           {formatCOP(t.precio)}
                           <span className="ml-1 text-muted-foreground">· {formatMargenPct(t.margenRealPct) ?? '—'}</span>
@@ -3898,11 +3921,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                 const suya = (itinerarios?.itinerarios ?? []).find(t => t.seleccion.includes(item.id))
                 return suya ? suya.vaEnPropuesta : null
               })()}
-              onEnPropuesta={va => startTransition(async () => {
+              // QA del #1342 · fuera de la transición del editor: la tarjeta muestra el cambio y
+              // «Guardando…» mientras tanto, y el refresco trae las tarifas nuevas (al quitar la
+              // Recomendada, la pasa a otro paquete: cambian dos tarjetas y el total).
+              onEnPropuesta={async va => {
                 const r = await paqueteEnPropuesta(item.id, va)
                 if (!r.success) toast.error(r.error)
                 refrescar()
-              })}
+                return r.success
+              }}
             />
           )
         }

@@ -76,6 +76,14 @@ const BOTON = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-
 const BOTON_PRIMARIO = `${BOTON} bg-[#10B981] text-white hover:bg-[#059669]`
 const BOTON_SECUNDARIO = `${BOTON} border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:bg-gray-50`
 
+/**
+ * ¿El cliente pudo decir que sí a esta cotización? Solo si ya le llegó (enviada) o ya la aceptó. Un
+ * borrador no (QA del #1342: la tarjeta salía en un borrador sin aceptación).
+ */
+export function cotizacionConfirmable(estado: string | null | undefined): boolean {
+  return estado === 'enviada' || estado === 'aceptada'
+}
+
 function Linea({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-2 text-sm">
@@ -110,6 +118,9 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
 
   // Antes de confirmar y sin cotización para confirmar, no hay nada que mostrar.
   if (!conf && (!vista.cotizacion || !(vista.antesDeConfirmacion || vista.enConfirmacion))) return null
+  // QA del #1342 · un borrador no le ha llegado al cliente: no hay qué confirmar y la tarjeta
+  // «Confirmación · El cliente dijo sí» no sale. Con la confirmación registrada sale siempre.
+  if (!conf && !cotizacionConfirmable(vista.cotizacion?.estado)) return null
 
   function yaLoMande() {
     startTransition(async () => {

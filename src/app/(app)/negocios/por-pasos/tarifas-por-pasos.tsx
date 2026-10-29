@@ -549,7 +549,14 @@ export function TarifasPorPasos({
       <div className="flex flex-wrap items-end gap-3 border-t-2 border-[#191713] pt-2" data-total-tarifa>
         <span className="min-w-0 flex-1">
           <small className="block text-[11px] font-bold uppercase tracking-wide text-[#6E6A62]">Total {t.nombre}</small>
-          <small className="block text-xs text-[#6E6A62] tabular-nums">costo {pesos(t.costo)} · ganas {pesos(t.precio - t.costo)} · margen {reglas ? 'global' : 'real'} {margenDeTarifa(t)}{notaPublicas(t)}</small>
+          {/* QA del #1342 · el costo es lo que PAGA la agencia (D2): con una Pública, su precio público
+              menos la comisión. Sin la comisión no se sabe: decía «ganas $0» junto a un 5,8 %. */}
+          <small className="block text-xs text-[#6E6A62] tabular-nums" data-costo-tarifa>
+            {t.costoAgencia === null
+              ? <>costo y ganancia: <b className="text-[#B3382C]">falta la comisión</b></>
+              : <>costo {pesos(t.costoAgencia)} · ganas {pesos(t.precio - t.costoAgencia)}</>}
+            {' · '}margen {reglas ? 'global' : 'real'} {margenDeTarifa(t)}{notaPublicas(t)}
+          </small>
           {reglas && t.cascada?.reglas && (t.cascada.reglas.puntosPesos > 0 || t.cascada.reglas.descuentos.length > 0) && (
             <small className="block text-xs text-[#6E6A62] tabular-nums" data-desglose-tarifa>
               {t.cascada.reglas.puntosPesos > 0 ? `incluye ${pesos(t.cascada.reglas.puntosPesos)} de puntos extra · ` : ''}
