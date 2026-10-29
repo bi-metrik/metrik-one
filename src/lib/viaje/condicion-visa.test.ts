@@ -56,7 +56,8 @@ describe('la condición en los términos del PDF', () => {
   it('el texto va en usted y dice las dos cosas: para qué es el anticipo y qué pasa si niegan la visa', () => {
     expect(CONDICION_VISA_EN_TRAMITE).toMatch(/anticipo/)
     expect(CONDICION_VISA_EN_TRAMITE).toMatch(/niegan la visa/)
-    expect(CONDICION_VISA_EN_TRAMITE).toMatch(/no responde por el valor pagado/)
+    expect(CONDICION_VISA_EN_TRAMITE).toMatch(/política de cancelación/)
+    expect(CONDICION_VISA_EN_TRAMITE).not.toMatch(/no responde por el valor pagado/)
     expect(CONDICION_VISA_EN_TRAMITE).not.toMatch(/\b(tu|tú|te|tienes)\b/i)
   })
 })

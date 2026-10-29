@@ -17,7 +17,7 @@ import {
   telefonoParaWa,
 } from './confirmacion'
 import { planSugerido } from './plan-pagos'
-import { CONDICION_VISA_EN_TRAMITE, TITULO_CONDICION_VISA } from './condicion-visa'
+import { CONDICION_VISA_EN_TRAMITE_TU, TITULO_CONDICION_VISA } from './condicion-visa'
 
 const HOY = '2026-10-13'
 const SALIDA = '2026-12-04'
@@ -44,8 +44,8 @@ describe('mensaje de confirmación con visa en trámite (Mauricio 2026-10-29, V8
       terminos: seccionesDeTerminos(TERMINOS_BASE_TRAPPVEL), extra: null, comercial: 'Daniela', agencia: 'Trappvel',
       visaEnTramite: true,
     })
-    expect(t).toContain(`*${TITULO_CONDICION_VISA}:*\n${CONDICION_VISA_EN_TRAMITE}`)
-    expect(t.indexOf(CONDICION_VISA_EN_TRAMITE)).toBeLessThan(t.indexOf('*Condiciones:*'))
+    expect(t).toContain(`*${TITULO_CONDICION_VISA}:*\n${CONDICION_VISA_EN_TRAMITE_TU}`)
+    expect(t.indexOf(CONDICION_VISA_EN_TRAMITE_TU)).toBeLessThan(t.indexOf('*Condiciones:*'))
   })
 })
 
