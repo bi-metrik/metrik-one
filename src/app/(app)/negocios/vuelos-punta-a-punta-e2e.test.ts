@@ -325,7 +325,8 @@ describe('el check «Va en la cotización» de un vuelo', () => {
     // Puesto otra vez, la huella vuelve a ser la misma y el aviso se va.
     await marcarActividadEnCotizacion('v-satena', { va: true })
     expect(await aviso()).toBeNull()
-  })
+    // Arma el PDF tres veces: roza los 5 s por defecto y se agotaba a veces también en main.
+  }, 20_000)
 
   it('un vuelo no es «Opcional», y el interruptor genérico no lo saca del precio', async () => {
     const opcional = await marcarActividadEnCotizacion('v-satena', { modo: 'opcional' })
