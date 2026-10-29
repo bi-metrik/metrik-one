@@ -14,6 +14,7 @@
 import { calcularCascada, type Cascada, type ParametrosCascada } from './totales'
 import {
   cascadaDeItinerario,
+  costoDeAgencia,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
   publicasSinComision,
@@ -26,7 +27,7 @@ import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre } from './cuadre-pasajero'
 import { adjuntarAdicionales, type Adicional, type FilaAdicional } from './adicionales'
 import { esBaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
-import { claveTarifa, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, type NombreTarifa } from './tarifas'
+import { claveTarifa, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, nombresVisiblesDeTarifas, type NombreTarifa } from './tarifas'
 import { firmaDeTarifa } from './tarifas-por-pasos'
 import { estadoDelServicio, type EstadoServicio } from './estado-servicio'
 import { resolverRanura } from './ranuras-pantallazo'
@@ -139,9 +140,19 @@ export interface TarifaDeLaPantalla {
 export interface TarifaCalculada extends TarifaDeLaPantalla {
   /** Económica, Recomendada, Premium, o `null` (una tarifa extra). */
   canon: NombreTarifa | null
+  /**
+   * El nombre GUARDADO (`nombre` es el que se ve: sin nombre, «Opción N» como el documento,
+   * `nombresVisiblesDeTarifas`). Renombrar y lo que se escribe miran este.
+   */
+  nombreGuardado: string | null
   esPrincipal: boolean
   precio: number
   costo: number
+  /**
+   * Lo que paga la agencia (`costoDeAgencia`): el costo menos la comisión de las Públicas. Es el que
+   * va junto a «ganas». `null` con una Pública sin comisión (QA del #1342).
+   */
+  costoAgencia: number | null
   /**
    * El margen general (D2, 2026-10-29): el de todas las líneas, las Públicas con su comisión. `null`
    * sin costo, sin precio o con una Pública sin comisión. Es el que se juzga contra el mínimo.
@@ -163,6 +174,7 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
   const principal = idDelPrincipal(tarifas)
   const ranuras = ranurasConAlternativas(lineas)
   const ordenadas = [...tarifas].sort((a, b) => a.orden - b.orden)
+  const visibles = nombresVisiblesDeTarifas(tarifas)
   const calculadas = ordenadas.map(t => {
     const cascada = cascadaDeItinerario(lineas, t.seleccion, params, t.id)
     const dentro = new Set(itemsDelItinerario(lineas, t.seleccion))
@@ -174,10 +186,13 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
     const k = claveTarifa(t.nombre)
     return {
       ...t,
+      nombre: visibles.get(t.id) ?? t.nombre,
+      nombreGuardado: t.nombre,
       canon: NOMBRES_TARIFA.find(n => claveTarifa(n) === k) ?? null,
       esPrincipal: t.id === principal,
       precio: cascada.precioVenta,
       costo: cascada.costoDeVenta,
+      costoAgencia: costoDeAgencia(cascada),
       margenReal: margenMedible(cascada),
       publicas: cascada.publicas.lineas,
       sinComision: publicasSinComision(cascada),
@@ -212,6 +227,9 @@ export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCasc
  */
 export function margenDelEncabezado(total: Cascada, params: ParametrosCascada): number | null {
   // D2 (2026-10-29): con Públicas, también sin reglas, el general (las Públicas con su comisión).
+  // Con una Pública sin comisión el margen no se puede medir: `null`, nunca el «0 %» de tomar el
+  // precio público como costo (QA del #1342). Quien lo pinta dice «falta la comisión».
+  if (publicasSinComision(total) > 0) return null
   if (params.reglas || total.publicas.lineas > 0) return margenMedible(total) ?? total.margenRealPct
   return total.margenRealPct
 }

@@ -151,6 +151,29 @@ export function idDelPrincipal(filas: readonly TarifaParaRegla[]): string | null
 }
 
 /**
+ * El nombre con que la PANTALLA dice cada tarifa: el suyo o, sin nombre, «Opción N» con la MISMA
+ * cuenta que el documento (QA del #1342: la tarifa de cada paquete de bloqueo nace sin nombre y la
+ * pantalla decía «Tarifa» —«Al cliente van: Recomendada, Tarifa»— mientras el PDF decía «Opción 2»).
+ *
+ * El PDF (`bloquesParaPDF` → `tituloDeBloquePDF`) numera las que van, el principal primero y las
+ * demás por `orden`. Aquí igual; las que no van siguen la cuenta después, para que dos tarifas sin
+ * nombre nunca se llamen igual en la pantalla.
+ */
+export function nombresVisiblesDeTarifas(filas: readonly TarifaParaRegla[]): Map<string, string> {
+  const principal = idDelPrincipal(filas)
+  const porOrden = [...filas].sort((a, b) => a.orden - b.orden)
+  const enLaCuenta = [
+    ...porOrden.filter(f => f.id === principal),
+    ...porOrden.filter(f => f.id !== principal && f.vaEnPropuesta),
+    ...porOrden.filter(f => f.id !== principal && !f.vaEnPropuesta),
+  ]
+  return new Map(enLaCuenta.map((f, i) => {
+    const propio = (f.nombre ?? '').trim()
+    return [f.id, propio === '' ? `Opción ${i + 1}` : propio]
+  }))
+}
+
+/**
  * Por qué una cotización con tarifas no puede salir al cliente por la regla de la
  * Recomendada. `null` = puede (o no tiene tarifas: la lista plana sigue como hoy).
  *

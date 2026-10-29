@@ -429,6 +429,18 @@ export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVen
   return ((cascada.precioVenta - costo) / cascada.precioVenta) * 100
 }
 
+/**
+ * Lo que PAGA la agencia (D2, 2026-10-29): todo el costo de venta menos la comisión de las Públicas.
+ * Es el «costo» que la pantalla pone junto a «ganas»: con el precio público como costo, una Pública
+ * de $4.300.000 con $250.000 de comisión decía «ganas $0» con un margen de 5,8 % al lado (QA del
+ * #1342). `null` con una Pública sin comisión: lo que paga la agencia no se sabe (D3).
+ */
+export function costoDeAgencia(cascada: Pick<Cascada, 'costoDeVenta'> & { publicas?: Cascada['publicas'] }): number | null {
+  const p = cascada.publicas
+  if (p && p.sinComision > 0) return null
+  return cascada.costoDeVenta - (p?.comision ?? 0)
+}
+
 /** ¿Alguna Pública de este agregado no tiene su comisión escrita? (D3: no puede salir.) */
 export function publicasSinComision(cascada: { publicas?: Cascada['publicas'] }): number {
   return cascada.publicas?.sinComision ?? 0

@@ -696,7 +696,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
 
   const handleDescargarPDF = () => {
     startTransition(async () => {
-      const res = await generateCotizacionPDF(cotizacion.id, { porPasos: porPasos?.encendido === true })
+      const res = await generateCotizacionPDF(cotizacion.id, {
+        porPasos: porPasos?.encendido === true,
+        incluyePorOne: porPasos?.encendido === true && porPasos.piezas.incluye_por_one === true,
+      })
       if (res.success && res.pdf) {
         // Convert base64 to blob and trigger download
         const byteChars = atob(res.pdf)

@@ -278,6 +278,12 @@ export async function generateCotizacionPDF(
      * así frena `enviarPorPasos`. Solo AGREGA la marca: sin la opción, como siempre.
      */
     porPasos?: boolean
+    /**
+     * La pieza `incluye_por_one` de la forma por pasos (QA del #1342): «Incluye» lo arma ONE con lo
+     * que se cobra aunque el texto para el cliente no esté revisado ni tenga la marca. Solo lo pasa
+     * quien sabe que la pieza está encendida (el PDF no mira el interruptor, N4).
+     */
+    incluyePorOne?: boolean
   },
 ) {
   const vistaPrevia = opciones?.vistaPrevia === true
@@ -1391,11 +1397,15 @@ export async function generateCotizacionPDF(
       : null
     // C6 · con la marca `incluye_origen = 'one'`, «Incluye» lo arma ONE con lo que se cobra en
     // lo que el documento describe. Sin la marca no se calcula nada: el documento de siempre.
+    // QA del #1342 · con la pieza `incluye_por_one` (lo dice quien llama, N4) «Incluye» lo arma ONE
+    // aunque el texto no tenga la marca ni esté revisado: es lo que promete la pantalla.
+    const incluyePorOne = documentoCliente?.incluye_origen === 'one' || (opciones?.incluyePorOne === true && plantillaUsaTextoDelCliente(templateSlug))
     const textoCliente = textoParaElViaje(
       documentoCliente,
-      documentoCliente?.incluye_origen === 'one'
+      incluyePorOne
         ? incluyeDeOne(itemsImpresos.filter(i => i.entra_al_precio !== false).map(paraLecturaDe), delNegocio.nivelDetalle)
         : null,
+      { incluyeSinRevisar: incluyePorOne },
     )
     avisoTexto = avisoDelTextoEnPdf(documentoCliente)
     // El texto revisado que quedó viejo (brief del 2026-10-08): la misma huella que el panel del
