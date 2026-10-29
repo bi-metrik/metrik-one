@@ -130,7 +130,8 @@ function rangoCorto(desde: string | null, hasta: string | null): string | null {
   return `${a.getUTCDate()}${mesA} – ${b.getUTCDate()} ${MESES[b.getUTCMonth()]}`
 }
 
-const LETRA: Record<ClaveTarifa, string> = { economica: 'E', recomendada: 'R', superior: 'P', otra: 'N' }
+// La Intermedia toma el color de la Superior: nunca van juntas en un documento.
+const LETRA: Record<ClaveTarifa, string> = { economica: 'E', intermedia: 'P', recomendada: 'R', superior: 'P', otra: 'N' }
 
 function etiqueta(t: TarifaDoc): string {
   return `<span class="tag t${LETRA[t.clave]}">${esc(t.nombre)}</span>`

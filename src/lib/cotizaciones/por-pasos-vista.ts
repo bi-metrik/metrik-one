@@ -27,7 +27,7 @@ import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre } from './cuadre-pasajero'
 import { adjuntarAdicionales, type Adicional, type FilaAdicional } from './adicionales'
 import { esBaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
-import { claveTarifa, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, nombresVisiblesDeTarifas, type NombreTarifa } from './tarifas'
+import { claveTarifa, esIntermedia, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, nombresVisiblesDeTarifas, type NombreTarifa } from './tarifas'
 import { firmaDeTarifa } from './tarifas-por-pasos'
 import { estadoDelServicio, type EstadoServicio } from './estado-servicio'
 import { resolverRanura } from './ranuras-pantallazo'
@@ -169,11 +169,23 @@ export interface TarifaCalculada extends TarifaDeLaPantalla {
   cascada: Cascada
 }
 
+/**
+ * La Intermedia se muestra entre la Económica y la Recomendada, como en el documento: solo existe
+ * cuando la Recomendada es la más cara (segunda vuelta de la COT-2026-0008). Conserva su `orden`.
+ */
+function conIntermediaAntesDeLaRecomendada<T extends { nombre: string | null }>(xs: T[]): T[] {
+  const iRec = xs.findIndex(t => esRecomendada(t.nombre))
+  const iInt = xs.findIndex(t => esIntermedia(t.nombre))
+  if (iRec < 0 || iInt < 0 || iInt < iRec) return xs
+  const sin = xs.filter((_, i) => i !== iInt)
+  return [...sin.slice(0, iRec), xs[iInt], ...sin.slice(iRec)]
+}
+
 /** El precio, el costo y el margen de cada tarifa, y si es idéntica a otra (decisión C). */
 export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCascada, tarifas: readonly TarifaDeLaPantalla[]): TarifaCalculada[] {
   const principal = idDelPrincipal(tarifas)
   const ranuras = ranurasConAlternativas(lineas)
-  const ordenadas = [...tarifas].sort((a, b) => a.orden - b.orden)
+  const ordenadas = conIntermediaAntesDeLaRecomendada([...tarifas].sort((a, b) => a.orden - b.orden))
   const visibles = nombresVisiblesDeTarifas(tarifas)
   const calculadas = ordenadas.map(t => {
     const cascada = cascadaDeItinerario(lineas, t.seleccion, params, t.id)

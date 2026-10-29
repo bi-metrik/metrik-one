@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { HotelPDF, VueloPDF } from './detalle-viaje'
-import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from './fechas-del-viaje'
+import { hotelesConFechasDelViaje, inicioDelViajeDeLaCotizacion, rangoDelViajeCotizado } from './fechas-del-viaje'
 
 const vuelo = (extra: Partial<VueloPDF> = {}): VueloPDF => ({
   linea: 'VUELO', aerolinea: 'Aerolínea Ficticia', origen: 'BOG', destino: 'CUR',
@@ -69,5 +69,34 @@ describe('hotelesConFechasDelViaje', () => {
     const r = rangoDelViajeCotizado({ vuelos: [], hoteles: [] }, solicitud)
     const hs = [hotel()]
     expect(hotelesConFechasDelViaje(hs, r)).toBe(hs)
+  })
+})
+
+describe('inicioDelViajeDeLaCotizacion (la pantalla, segunda vuelta punto 2)', () => {
+  const campo = (label: string, valor: string) => ({ label, valor })
+  const filaVuelo = (id: string, salida: string, regreso: string, extra: Record<string, unknown> = {}) => ({
+    id, nombre: `VUELO ${id}`, grupo: 'vuelo: Vuelo', orden: 1,
+    tarifa_pax: { casillas: { grupo_completo: { leidaEn: id, moneda: 'COP', total: 1, nombre: id, campos: [
+      campo('Aerolínea', 'Aerolínea Ficticia'), campo('Origen', 'Bogotá BOG'), campo('Destino', 'Willemstad CUR'),
+      campo('Salida', salida), campo('Regreso', regreso),
+    ] } } },
+    ...extra,
+  })
+
+  it('con un vuelo fechado, el día del viaje es la salida del vuelo, no el inicio de la solicitud', () => {
+    expect(inicioDelViajeDeLaCotizacion([filaVuelo('v1', '2027-06-26', '2027-06-30')], null, solicitud)).toBe('2027-06-26')
+  })
+
+  it('sin servicios fechados, el inicio de la solicitud', () => {
+    expect(inicioDelViajeDeLaCotizacion([{ id: 'x', nombre: 'Seguro', grupo: null }], null, solicitud)).toBe('2027-06-21')
+  })
+
+  it('con la Recomendada en la propuesta, cuenta su vuelo y no el de una alternativa más temprana', () => {
+    const items = [
+      filaVuelo('v1', '2027-06-26', '2027-06-30'),
+      filaVuelo('v2', '2027-06-23', '2027-06-30', { opcion_de: 'v1', orden: 2 }),
+    ]
+    expect(inicioDelViajeDeLaCotizacion(items, { seleccion: ['v1'] }, solicitud)).toBe('2027-06-26')
+    expect(inicioDelViajeDeLaCotizacion(items, { seleccion: ['v2'] }, solicitud)).toBe('2027-06-23')
   })
 })

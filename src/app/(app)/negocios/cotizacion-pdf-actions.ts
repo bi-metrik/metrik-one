@@ -1253,13 +1253,6 @@ export async function generateCotizacionPDF(
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
     const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
-    if (negocioInfo.linea_id) {
-      // Sin poder leer la línea, apagado: el documento sale como hoy.
-      entradaPlan = entradaAsiPuedesPagar(
-        negocioInfo.configLinea,
-        { fechaSalida: delNegocio.fechas.inicio, hoy: todayBogotaISO() },
-      )
-    }
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -1288,6 +1281,15 @@ export async function generateCotizacionPDF(
     const hotelesLeidos = hotelesDoc(paraLectura)
     const rango = rangoDelViajeCotizado({ vuelos, hoteles: hotelesLeidos }, delNegocio.fechas)
     const hoteles = hotelesConFechasDelViaje(hotelesLeidos, rango)
+    if (negocioInfo.linea_id) {
+      // Sin poder leer la línea, apagado: el documento sale como hoy. El «día del viaje» es el
+      // inicio del viaje COTIZADO, el mismo de la portada (segunda vuelta de la COT-2026-0008,
+      // punto 2): con el de la solicitud el plan decía «21 de junio» en un documento del 26.
+      entradaPlan = entradaAsiPuedesPagar(
+        negocioInfo.configLinea,
+        { fechaSalida: rango.inicio, hoy: todayBogotaISO() },
+      )
+    }
 
     /**
      * Con VARIAS tarifas en la propuesta, los vuelos y hoteles del documento son los de las

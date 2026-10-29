@@ -101,7 +101,7 @@ const lecturaHotel = (hotel: string, checkIn = '2027-06-21 (del viaje)', checkOu
   ],
 })
 
-function sembrar(opts: { hotel?: ReturnType<typeof lecturaHotel>; sinVuelo?: boolean } = {}) {
+function sembrar(opts: { hotel?: ReturnType<typeof lecturaHotel>; sinVuelo?: boolean; planPagos?: boolean } = {}) {
   base.secuencia = 0
   motor.llamadas = []
   base.tablas = {
@@ -122,7 +122,7 @@ function sembrar(opts: { hotel?: ReturnType<typeof lecturaHotel>; sinVuelo?: boo
     cotizacion_itinerarios: [],
     itinerario_opciones: [],
     negocios: [{ id: NEG, workspace_id: WS, linea_id: 'linea-viaje', nombre: 'P9 27 1', carpeta_url: null, empresa_id: null, precio_aprobado: null, etapa_actual_id: 'e1' }],
-    lineas_negocio: [{ id: 'linea-viaje', config_extra: {} }],
+    lineas_negocio: [{ id: 'linea-viaje', config_extra: opts.planPagos ? { plan_pagos: { activo: true } } : {} }],
     etapas_negocio: [{ id: 'e1', linea_id: 'linea-viaje', orden: 1, config_extra: {} }],
     bloque_configs: [], rubros: [], item_adicionales: [], activity_log: [], decisiones_combinacion: [],
     negocio_bloques: [], cotizacion_excepciones_margen: [], cotizacion_ranuras: [], cobros: [],
@@ -204,5 +204,32 @@ describe('punto 1 · las fechas del documento salen del vuelo, no de la solicitu
     const { m } = await documento()
     expect(m.portada.fechas).toBe('21 jun 2027 – 4 jul 2027')
     expect(m.hoteles[0]).toMatchObject({ desde: '2027-06-21', hasta: '2027-07-04', noches: 13 })
+  })
+})
+
+/**
+ * Segunda vuelta (brief del 2026-10-29, punto 2) · el plan de pagos cuenta desde el día del viaje
+ * COTIZADO. Con #1330 el documento decía 26–30 jun, pero «Así puedes pagar» seguía diciendo «hasta
+ * el 21 de junio, día del viaje» (el inicio de la solicitud) y el 80 % vencía el 6 de junio.
+ */
+describe('punto 2 · el plan de pagos usa la fecha del viaje cotizado', () => {
+  it('el saldo vence el 26 de junio, día del viaje, y el 80 % quince días antes (11 de junio)', async () => {
+    sembrar({ planPagos: true })
+    const { entrada, m, texto } = await documento()
+    expect(entrada.props.asiPuedesPagar?.fechaSalida).toBe('2027-06-26')
+    const filas = m.precio.planes[0]?.plan.filas ?? []
+    expect(filas.map(f => f.cuando)).toEqual([
+      'al confirmar (anticipo)',
+      'hasta el 11 de junio',
+      'hasta el 26 de junio, día del viaje',
+    ])
+    expect(texto).toContain('26 de junio, día del viaje')
+    expect(texto).not.toContain('21 de junio')
+  })
+
+  it('sin ningún servicio con fecha, el plan cuenta desde el inicio de la solicitud como siempre', async () => {
+    sembrar({ planPagos: true, sinVuelo: true })
+    const { entrada } = await documento()
+    expect(entrada.props.asiPuedesPagar?.fechaSalida).toBe('2027-06-21')
   })
 })

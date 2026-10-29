@@ -52,6 +52,20 @@ export const NOMBRES_TARIFA = ['Económica', 'Recomendada', 'Premium'] as const
 export type NombreTarifa = (typeof NOMBRES_TARIFA)[number]
 
 /**
+ * La tarifa del medio (segunda vuelta de la COT-2026-0008, opción 2 de Mauricio, 2026-10-29).
+ *
+ * Cuando la Recomendada que eligió la asesora es el hotel MÁS CARO y sobra un hotel sin tarifa, la
+ * Premium (que la repetía) toma ese hotel y pasa a llamarse «Intermedia»: va entre la Económica y la
+ * Recomendada, y esa cotización no lleva Premium. Ocupa el lugar de la Premium: con ella, la
+ * Premium no «falta» (`tarifasQueFaltan`). Lo decide `planDeTarifas` (`tarifas-por-pasos.ts`).
+ */
+export const TARIFA_INTERMEDIA = 'Intermedia'
+
+export function esIntermedia(nombre: string | null | undefined): boolean {
+  return claveTarifa(nombre) === claveTarifa(TARIFA_INTERMEDIA)
+}
+
+/**
  * La llave con la que se reconoce una tarifa ya creada: sin tildes ni mayúsculas.
  *
  * ⚠️ Sin normalizar las tildes, una tarifa que alguien guardó como «Economica» no se
@@ -84,6 +98,8 @@ export function tarifasQueFaltan(
   nombresExistentes: readonly (string | null | undefined)[],
 ): NombreTarifa[] {
   const ya = new Set(nombresExistentes.map(claveTarifa).filter(k => k !== ''))
+  // La Intermedia ocupa el lugar de la Premium: con ella no se vuelve a crear la Premium.
+  if (ya.has(claveTarifa(TARIFA_INTERMEDIA))) ya.add(claveTarifa('Premium'))
   return NOMBRES_TARIFA.filter(n => !ya.has(claveTarifa(n)))
 }
 
@@ -95,7 +111,7 @@ export function tarifasQueFaltan(
  */
 export function esTarifaConNombre(nombre: string | null | undefined): boolean {
   const k = claveTarifa(nombre)
-  return k !== '' && NOMBRES_TARIFA.some(n => claveTarifa(n) === k)
+  return k !== '' && (NOMBRES_TARIFA.some(n => claveTarifa(n) === k) || esIntermedia(nombre))
 }
 
 // ── La Recomendada manda el documento (decisión de Mauricio, 2026-09-22) ─────

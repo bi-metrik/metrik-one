@@ -8,6 +8,7 @@ import { causasBajoMinimo } from '@/lib/cotizaciones/causas-margen'
 import { MOTIVOS_COMBINACION } from '@/lib/cotizaciones/motivo-combinacion'
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import type { ServicioDelViaje, TarifaCalculada } from '@/lib/cotizaciones/por-pasos-vista'
+import { esIntermedia } from '@/lib/cotizaciones/tarifas'
 
 /**
  * Paso 2 · TARIFAS (diseño, Paso 2, «Cómo se ve», rehecho el 2026-10-12).
@@ -206,7 +207,7 @@ export function TarifasPorPasos({
       </small>
       {/* N12 (H8) · una tarifa que no es Económica, Recomendada ni Premium lo dice: no es una pestaña más. */}
       {/* En un bloqueo cada paquete es su tarifa (D5): ahí no es «extra». */}
-      {t.canon === null && !conPaquete && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
+      {t.canon === null && !conPaquete && !esIntermedia(t.nombre) && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
     </>
   )
 
