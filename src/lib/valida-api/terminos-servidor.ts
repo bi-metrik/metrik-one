@@ -4,7 +4,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { esFuncionAusente, mapearDocumentos } from './mapeo'
 import type { DocumentoContractual } from './resultados'
-import type { VersionContratada } from './terminos'
+import { sinAvisosFuturos, type VersionContratada } from './terminos'
 
 /**
  * Lecturas de servidor de los términos del contrato. Las reglas viven en `terminos.ts`; aquí solo
@@ -26,7 +26,10 @@ async function leerDocumentos(): Promise<LecturaDocumentos> {
     console.error('[valida-api] mis_documentos_de_servicio:', r.error.message)
     return { ok: false, motivo: 'base' }
   }
-  return { ok: true, documentos: mapearDocumentos(r.data ?? []) }
+  // Una modificación por aviso registrada antes de su publicación no existe para el cliente hasta ese
+  // instante (20261029190000): esta es la única lectura de documentos del cliente, así que filtrarla aquí
+  // la saca de la puerta, el aviso, la pantalla, la aceptación y la pestaña Documentos a la vez.
+  return { ok: true, documentos: sinAvisosFuturos(mapearDocumentos(r.data ?? []), new Date().toISOString()) }
 }
 
 /** Una sola lectura por request aunque la pidan la página, la pestaña y la puerta del módulo. */
