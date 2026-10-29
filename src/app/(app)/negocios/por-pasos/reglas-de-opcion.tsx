@@ -159,7 +159,9 @@ export function ReglasDeOpcion({
 /**
  * «Comisión de la agencia» de una opción Pública (D3 de Mauricio, 2026-10-29): la asesora la escribe a
  * mano, en % del precio público o en pesos por toda la opción. Siempre visible y obligatoria: sin ella
- * la cotización no se puede enviar y el PDF sale como borrador. Se guarda al salir de la casilla.
+ * la cotización no se puede enviar y el PDF sale como borrador. Avisa con `onComision` al salir de la
+ * casilla; quien la usa decide si eso la guarda (la línea y el paquete ya guardado) o si espera a
+ * «Guardar paquete» (el paquete nuevo), y lo dice con `nota`.
  */
 export function CampoComision({
   comision,
@@ -167,12 +169,18 @@ export function CampoComision({
   ocupado,
   onComision,
   etiqueta = 'Comisión de la agencia',
+  nota = null,
 }: {
   comision: ComisionEscrita | null
   editable: boolean
   ocupado: boolean
   onComision: (c: ComisionEscrita | null) => void
   etiqueta?: string
+  /**
+   * Cuándo queda guardada (QA del #1342): «al salir de la casilla» si se guarda sola, o «con
+   * “Guardar paquete”» si espera al botón. `null` = no se dice.
+   */
+  nota?: string | null
 }) {
   const [tipo, setTipo] = useState<'pct' | 'monto'>(comision?.tipo ?? 'pct')
   const [escrito, setEscrito] = useState<string | null>(null)
@@ -239,6 +247,7 @@ export function CampoComision({
             ? `Escribe la comisión ${tipo === 'pct' ? 'en %' : 'en pesos'}: al guardarla reemplaza la que está ${comision.tipo === 'pct' ? 'en %' : 'en pesos'}.`
             : 'Escribe la comisión: sin ella la cotización no se puede enviar y el PDF sale como borrador.'}
       </span>
+      {nota && <span className="text-xs text-[#6E6A62]" data-comision-nota>{nota}</span>}
     </div>
   )
 }

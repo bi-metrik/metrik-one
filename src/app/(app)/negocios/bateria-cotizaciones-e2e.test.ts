@@ -24,7 +24,7 @@
  * (`FALLA_HOY`): CI queda verde, y el PR que arregle una decisión tiene que pasar su caso a `it`
  * (si lo arregla y no lo pasa, `it.fails` se pone rojo solo).
  */
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
 import { CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
@@ -107,6 +107,9 @@ import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, pa
 import { cascadaVigente, contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsDelItinerario } from '@/lib/cotizaciones/itinerarios'
 import { medirSalida } from '@/lib/cotizaciones/piso-salida'
+import { costoDeAgencia, cascadaDeItinerario } from '@/lib/cotizaciones/itinerarios'
+import { nombresVisiblesDeTarifas } from '@/lib/cotizaciones/tarifas'
+import { htmlDePropuesta, type RecursosPropuesta } from '@/lib/pdf/html/trappvel/plantilla'
 
 // ── Lo que hoy falla, y por qué decisión ─────────────────────────────────────
 
@@ -158,7 +161,7 @@ async function correr(caso: CasoBateria): Promise<Resultado> {
 }
 
 /** Lo que mide el motor y lo que imprime el PDF de la cotización tal como está en el doble. */
-async function medir(caso: CasoBateria): Promise<Resultado> {
+async function medir(caso: CasoBateria, opciones: { incluyePorOne?: boolean } = {}): Promise<Resultado> {
   estado.motor = []
   estado.motivos = null
   const supabase = clienteFalso()
@@ -174,7 +177,7 @@ async function medir(caso: CasoBateria): Promise<Resultado> {
     return { nombre: s.nombre, lineas: ids.map(id => nombreDe.get(id) ?? id), total: s.total, margen: s.margenRealPct, bajoPiso: s.bajoPiso }
   })
 
-  const r = (await generateCotizacionPDF(caso.cotizacionId, { vistaPrevia: true, porPasos: true })) as { success: boolean; error?: string; borrador?: boolean }
+  const r = (await generateCotizacionPDF(caso.cotizacionId, { vistaPrevia: true, porPasos: true, ...opciones })) as { success: boolean; error?: string; borrador?: boolean }
   if (!r.success) throw new Error(r.error)
   const entrada = estado.motor[0] as EntradaModeloPropuesta | undefined
   if (!entrada) throw new Error('el motor html no recibió la propuesta')
@@ -396,4 +399,161 @@ describe('D3 · la comisión del paquete Público, en % o en pesos, levanta el f
     expect((item.tarifa_pax as { tipoTarifa: Record<string, unknown> }).tipoTarifa).toMatchObject({ tipo: 'publica', comisionPct: 20 })
     expect((item.tarifa_pax as { tipoTarifa: Record<string, unknown> }).tipoTarifa).not.toHaveProperty('comisionMonto')
   }, 60_000)
+})
+
+// ── QA en navegador del #1342 (2026-10-29): lo que vio la asesora, con las acciones reales ─────
+
+describe('QA del #1342 · bloqueo con un paquete Público (acciones reales)', () => {
+  const caso = CASOS.find(c => c.clave === 'a-bloqueo-san-andres')!
+  const idDe = (nombre: string) => (base.tablas.items as Fila[]).find(i => clave(i.nombre as string) === clave(nombre))!.id as string
+  const cot = () => (base.tablas.cotizaciones as Fila[]).find(c => c.id === caso.cotizacionId)!
+  beforeAll(async () => { await correr(caso) }, 60_000)
+
+  it('defecto 1 · el costo junto a «ganas» es lo que paga la agencia: precio público menos la comisión', async () => {
+    const supabase = clienteFalso()
+    const recomendada = async () => {
+      const ctx = (await contextoDeCotizacion(supabase, caso.cotizacionId))!
+      const filas = (await leerItinerarios(supabase, caso.cotizacionId))!
+      const rec = filas.find(f => f.nombre === 'Recomendada')!
+      return cascadaDeItinerario(ctx.items, rec.seleccion, ctx.params, rec.id)
+    }
+    // Sin comisión no se sabe lo que paga la agencia (D3): nada de «ganas $0».
+    expect(costoDeAgencia(await recomendada())).toBeNull()
+    expect(await ajustarReglasDelPaquete(idDe('Hotel Arena Ficticio'), { comisionMonto: 250_000 })).toEqual({ success: true })
+    const c = await recomendada()
+    expect(c.precioVenta).toBe(6_000_000)
+    expect(costoDeAgencia(c)).toBe(5_750_000)
+    expect(c.precioVenta - costoDeAgencia(c)!).toBe(250_000)
+    // El costo de venta sigue siendo el precio público: lo que cambió es lo que se pinta.
+    expect(c.costoDeVenta).toBe(6_000_000)
+    expect(await ajustarReglasDelPaquete(idDe('Hotel Arena Ficticio'), { comisionMonto: null })).toEqual({ success: true })
+  }, 60_000)
+
+  it('defecto 5 · la pantalla nombra cada tarifa sin nombre como el documento («Opción 2», «Opción 3»)', async () => {
+    const r = await medir(caso)
+    const filas = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
+    expect(filas.filter(f => f.nombre === null)).toHaveLength(2)
+    const visibles = nombresVisiblesDeTarifas(filas)
+    const delDocumento = [...r.modelo.tarifas].sort((a, b) => a.indice - b.indice).map(t => t.nombre)
+    const tarifaDelBloque = (fs: typeof filas, b: { items: unknown[] }) => fs.find(f => f.seleccion.includes(idDe((b.items as LineaPdf[])[0].nombre)))!.id
+    const enLaPantalla = (r.props.itinerarios ?? []).map(b => visibles.get(tarifaDelBloque(filas, b)))
+    expect(enLaPantalla).toEqual(delDocumento)
+    expect(enLaPantalla).toEqual(['Recomendada', 'Opción 2', 'Opción 3'])
+    // Con el segundo fuera, el tercero es «Opción 2» en los dos lados.
+    expect(await paqueteEnPropuesta(idDe('Hotel Coral Ficticio'), false)).toEqual({ success: true })
+    const sin = await medir(caso)
+    const filas2 = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
+    const v2 = nombresVisiblesDeTarifas(filas2)
+    expect((sin.props.itinerarios ?? []).map(b => v2.get(tarifaDelBloque(filas2, b))))
+      .toEqual([...sin.modelo.tarifas].sort((a, b) => a.indice - b.indice).map(t => t.nombre))
+    expect(await paqueteEnPropuesta(idDe('Hotel Coral Ficticio'), true)).toEqual({ success: true })
+  }, 60_000)
+
+  describe('defecto 3 · «Incluido» al final del PDF sin texto revisado', () => {
+    const RECURSOS: RecursosPropuesta = { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'Agencia de prueba' }
+    const seccionIncluye = (r: Resultado) => {
+      const h = htmlDePropuesta(r.modelo, RECURSOS)
+      const i = h.indexOf('>Qué incluye')
+      if (i < 0) return null
+      return h.slice(i, h.indexOf('</section>', i)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    }
+    const lasCasillas = ['Alimentación', 'Planes / tours', 'Traslados', 'Seguro médico']
+    let documento: unknown
+    beforeAll(() => {
+      documento = cot().documento_cliente
+      // El texto para el cliente lo escribió ONE y nadie lo revisó: lo que tenía la prueba real.
+      // Sin la marca `incluye_origen` (un texto que nunca se guardó desde la forma por pasos).
+      const { incluye_origen: _marca, ...sinMarca } = documento as Record<string, unknown>
+      void _marca
+      cot().documento_cliente = { ...sinMarca, revisado_por: null, revisado_por_nombre: null, revisado_en: null, origen: 'one' }
+    })
+    afterAll(async () => {
+      cot().documento_cliente = documento
+      for (const n of ['Hotel Arena Ficticio', 'Hotel Coral Ficticio', 'Hotel Palma Ficticio']) await paqueteEnPropuesta(idDe(n), true)
+    })
+
+    it('se reproduce: sin la pieza, una versión imprime solo el nombre del paquete y dos no imprimen la sección', async () => {
+      expect(await paqueteEnPropuesta(idDe('Hotel Palma Ficticio'), false)).toEqual({ success: true })
+      expect(await paqueteEnPropuesta(idDe('Hotel Coral Ficticio'), false)).toEqual({ success: true })
+      expect(seccionIncluye(await medir(caso))).toContain('Incluido Hotel Arena Ficticio Asesora')
+      expect(await paqueteEnPropuesta(idDe('Hotel Coral Ficticio'), true)).toEqual({ success: true })
+      expect(seccionIncluye(await medir(caso))).toBeNull()
+    }, 60_000)
+
+    for (const [nombre, sacar] of [['una versión', ['Hotel Coral Ficticio', 'Hotel Palma Ficticio']], ['dos versiones', ['Hotel Palma Ficticio']], ['tres versiones', []]] as const) {
+      it(`con la pieza encendida, ${nombre}: el hotel y cada casilla marcada del paquete`, async () => {
+        for (const n of ['Hotel Arena Ficticio', 'Hotel Coral Ficticio', 'Hotel Palma Ficticio']) await paqueteEnPropuesta(idDe(n), true)
+        for (const n of sacar) expect(await paqueteEnPropuesta(idDe(n), false)).toEqual({ success: true })
+        const r = await medir(caso, { incluyePorOne: true })
+        const seccion = seccionIncluye(r)
+        expect(seccion, 'no hay sección «Qué incluye»').not.toBeNull()
+        for (const c of lasCasillas) expect(seccion).toContain(c)
+        expect(seccion).not.toContain('Tiquete aéreo')
+        // El hotel: con una versión, el suyo con sus noches; con varias, el renglón que dice que cambia.
+        if (sacar.length === 2) expect(seccion).toContain('5 noches en Hotel Arena Ficticio')
+        else expect(seccion).toContain('5 noches de hotel; el hotel cambia según la versión')
+        // El titular sin revisar no se imprime: solo «Incluye» lo arma ONE.
+        expect(r.modelo.portada.titulo).not.toBe('Su viaje a San Andrés')
+      }, 60_000)
+    }
+
+    it('con la marca `incluye_origen` y el texto sin revisar, también (sin que lo diga quien llama)', async () => {
+      for (const n of ['Hotel Arena Ficticio', 'Hotel Coral Ficticio', 'Hotel Palma Ficticio']) await paqueteEnPropuesta(idDe(n), true)
+      expect(await paqueteEnPropuesta(idDe('Hotel Palma Ficticio'), false)).toEqual({ success: true })
+      const doc = cot().documento_cliente as Record<string, unknown>
+      cot().documento_cliente = { ...doc, incluye_origen: 'one' }
+      const seccion = seccionIncluye(await medir(caso))
+      cot().documento_cliente = doc
+      for (const c of lasCasillas) expect(seccion).toContain(c)
+    }, 60_000)
+  })
+
+  describe('defecto 7 · sacar la Recomendada sin transacción nunca deja un paquete sin tarifa', () => {
+    const estadoDeTarifas = async () => {
+      const filas = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
+      const paquetes = ['Hotel Arena Ficticio', 'Hotel Coral Ficticio', 'Hotel Palma Ficticio'].map(idDe)
+      return filas
+        .sort((a, b) => a.orden - b.orden)
+        .map(f => ({ nombre: f.nombre, va: f.vaEnPropuesta, paquetes: f.seleccion.filter(id => paquetes.includes(id)) }))
+    }
+    afterEach(() => { base.fallar = null })
+
+    const casos: [string, (tabla: string, op: string) => boolean][] = [
+      ['falla el insert', (t, op) => t === 'itinerario_opciones' && op === 'insert'],
+      ['falla el primer delete', (t, op) => t === 'itinerario_opciones' && op === 'delete'],
+    ]
+    for (const [nombre, fallar] of casos) {
+      it(`${nombre}: todo queda como estaba y lo dice`, async () => {
+        const antes = await estadoDeTarifas()
+        // Una sola vez: lo que deshace el cambio sí se escribe.
+        let ya = false
+        base.fallar = (t, op) => !ya && fallar(t, op) && (ya = true)
+        const r = await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), false)
+        base.fallar = null
+        expect(r.success).toBe(false)
+        expect(await estadoDeTarifas()).toEqual(antes)
+      }, 60_000)
+    }
+
+    it('falla el segundo delete: se deshace lo hecho y cada tarifa queda con su paquete', async () => {
+      const antes = await estadoDeTarifas()
+      let deletes = 0
+      base.fallar = (t, op) => t === 'itinerario_opciones' && op === 'delete' && ++deletes === 2
+      const r = await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), false)
+      base.fallar = null
+      expect(r.success).toBe(false)
+      const despues = await estadoDeTarifas()
+      expect(despues).toEqual(antes)
+      for (const t of despues) expect(t.paquetes).toHaveLength(1)
+    }, 60_000)
+
+    it('sin fallas, la Recomendada pasa al siguiente y el sacado queda en una opción que no va', async () => {
+      expect(await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), false)).toEqual({ success: true })
+      const t = await estadoDeTarifas()
+      for (const x of t) expect(x.paquetes).toHaveLength(1)
+      expect(t.find(x => x.nombre === 'Recomendada')!.paquetes).toEqual([idDe('Hotel Coral Ficticio')])
+      expect(t.find(x => x.paquetes[0] === idDe('Hotel Arena Ficticio'))!.va).toBe(false)
+      expect(await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), true)).toEqual({ success: true })
+    }, 60_000)
+  })
 })

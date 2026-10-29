@@ -112,7 +112,7 @@ describe('D3 · la comisión de la agencia, en % o en pesos, y obligatoria', () 
     const l = listaUnica(entrada)
     expect(l.impide.map(r => r.clave)).toContain('comision-publica')
     expect(l.impide.map(r => r.clave)).not.toContain('margen')
-    expect(l.impide.find(r => r.clave === 'comision-publica')!.ir).toEqual({ a: 'opcion', itemId: 'h-pub' })
+    expect(l.impide.find(r => r.clave === 'comision-publica')!.ir).toEqual({ a: 'opcion', itemId: 'h-pub', campo: 'comision' })
   })
 })
 
