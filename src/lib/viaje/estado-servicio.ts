@@ -55,6 +55,26 @@ export function pagadoDelServicio(gastos: readonly GastoDelServicio[]): number {
   return gastos.reduce((s, g) => s + (Number.isFinite(Number(g.monto)) ? Number(g.monto) : 0), 0)
 }
 
+/**
+ * El viaje visto desde una fila, para la regla de desviación (H3-4, `reglas-pago.ts`): lo cotizado
+ * de todas las filas que van y lo comprometido de las OTRAS (cada una por lo mayor entre lo pagado
+ * y lo que hay que pagarle). Un ahorro solo cuenta si quedó registrado: pagado de menos sin decir
+ * que el proveedor cobra menos sigue contando por lo cotizado.
+ */
+export function viajeParaReglas(
+  filas: ReadonlyArray<ServicioParaEstado & { id: string; gastos: readonly GastoDelServicio[] }>,
+  servicioId: string,
+): { cotizado: number; comprometidoOtros: number } {
+  let cotizado = 0
+  let comprometidoOtros = 0
+  for (const f of filas) {
+    if (f.estado === 'cancelado') continue
+    cotizado += Number(f.costo_cotizado) || 0
+    if (f.id !== servicioId) comprometidoOtros += Math.max(pagadoDelServicio(f.gastos), valorAPagar(f))
+  }
+  return { cotizado: Math.round(cotizado), comprometidoOtros: Math.round(comprometidoOtros) }
+}
+
 function gastoCompleto(g: GastoDelServicio): boolean {
   return !!g.soporte_url && !!g.medio_pago && (g.titular_medio === 'empresa' || g.titular_medio === 'personal')
 }

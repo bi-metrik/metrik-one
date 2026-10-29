@@ -21,7 +21,7 @@ import { llavesDelTexto, tieneLlave } from '../../wa-cliente-reglas.ts';
 import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
 import { propuestaVigente } from '../nucleo.ts';
-import { adjuntosDe, cargaDelViaje, filasDelViaje, mismoEntendido, nombramientos, partirCarga, preguntasPrevias, textoParaCarga } from './carga.ts';
+import { adjuntosDe, cargaDelViaje, filasDelViaje, mismoEntendido, nombramientos, partirCarga, pedidoDeTanda, preguntasPrevias, textoParaCarga } from './carga.ts';
 import type { AdjuntoCarga, OpcionesCarga } from './carga.ts';
 import { esAdjuntoEntrante, preparadorDeAdjuntos, sinLectura } from '../adjuntos.ts';
 import type { PuertoAdjuntos } from '../adjuntos.ts';
@@ -89,6 +89,7 @@ export interface PuertoBandeja {
   /**
    * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
    * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
+   * `o`: quién dijo cada texto, lo ya preguntado del viaje y lo escrito al pedir una tanda (`OpcionesCarga`).
    */
   prepararCarga(viajeId: string, textos: string[], previo?: unknown, o?: OpcionesCarga): Promise<CargaPreparada>;
   /** `escritos`: lo que quedó escrito, por etiqueta y legible (`registradoDe`). */
@@ -691,7 +692,9 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
         const t = tanda(ctx.conversacion);
         if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje.', candado: 'tanda_vacia' };
         // Una foto o un PDF de la tanda entra con lo que dice el archivo (si se leyó) y queda de soporte con el toque.
-        const prep = await puerto.prepararCarga(r.v.id, t.map(textoParaCarga).filter(Boolean), undefined, { preguntas: preguntasPrevias(ctx.conversacion, r.v.id) });
+        // Lo que escribió al pedirla («cárgalo en el G1 26 7, pero salen el 10») va aparte: manda si choca con la tanda.
+        const pedido = pedidoDeTanda(ctx.conversacion, t, r.v.codigo, opcionNombrada, await sueltosDe(ctx));
+        const prep = await puerto.prepararCarga(r.v.id, t.map(textoParaCarga).filter(Boolean), undefined, { preguntas: preguntasPrevias(ctx.conversacion, r.v.id), ...(pedido.length ? { pedido } : {}) });
         return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, t.map((f) => f.id), puerto.soportesEnViaje ? adjuntosDe(t) : []) };
       }
       // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo

@@ -20,6 +20,7 @@ import { leerLineasPorTipo } from '@/lib/cotizaciones/por-pasos-datos'
 import { estadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import { configSeguimiento } from '@/lib/negocios/seguimiento'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { inicioDelViajeDeLaCotizacion } from '@/lib/cotizaciones/fechas-del-viaje'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { MENSAJE_ENVIO_PENDIENTE } from '@/lib/autorizacion-datos/mensajes'
@@ -257,6 +258,13 @@ export default async function CotizacionNegocioPage({
     // Sin composición del viaje la pantalla la pide por línea.
   }
 
+  // «Así puedes pagar» cuenta desde el día del viaje COTIZADO, el mismo que imprime el PDF (segunda
+  // vuelta de la COT-2026-0008, punto 2): las líneas de la Recomendada si va en la propuesta.
+  const principalEnPropuesta = itinerarios.itinerarios.find(it => it.vaEnPropuesta && it.esPrincipal) ?? null
+  const inicioDelViajeCotizado = fechasViaje
+    ? inicioDelViajeDeLaCotizacion(items, principalEnPropuesta, fechasViaje)
+    : null
+
   // ¿Líneas por tipo («+ Vuelo», «+ Hotel»…) en vez de nombre libre? Solo si la línea del
   // negocio declara quiénes viajan (`lineas-por-tipo.ts`). Si no se puede leer, la pantalla
   // queda como siempre: preferible a ofrecer tipos de viaje a quien no cotiza viajes.
@@ -367,7 +375,7 @@ export default async function CotizacionNegocioPage({
       fechasViaje={fechasViaje}
       leidaEn={leidaEn}
       seguimiento={seguimientoActivo}
-      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: fechasViaje?.inicio ?? null, hoy: todayBogotaISO() })}
+      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: inicioDelViajeCotizado, hoy: todayBogotaISO() })}
     />
   )
 

@@ -66,7 +66,7 @@ import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
-import { hotelesDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
+import { hotelesDePaquetes, noIncluyeDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
 import { esLineaDePaquete } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
@@ -1247,13 +1247,6 @@ export async function generateCotizacionPDF(
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
     const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
-    if (negocioInfo.linea_id) {
-      // Sin poder leer la línea, apagado: el documento sale como hoy.
-      entradaPlan = entradaAsiPuedesPagar(
-        negocioInfo.configLinea,
-        { fechaSalida: delNegocio.fechas.inicio, hoy: todayBogotaISO() },
-      )
-    }
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -1282,6 +1275,15 @@ export async function generateCotizacionPDF(
     const hotelesLeidos = hotelesDoc(paraLectura)
     const rango = rangoDelViajeCotizado({ vuelos, hoteles: hotelesLeidos }, delNegocio.fechas)
     const hoteles = hotelesConFechasDelViaje(hotelesLeidos, rango)
+    if (negocioInfo.linea_id) {
+      // Sin poder leer la línea, apagado: el documento sale como hoy. El «día del viaje» es el
+      // inicio del viaje COTIZADO, el mismo de la portada (segunda vuelta de la COT-2026-0008,
+      // punto 2): con el de la solicitud el plan decía «21 de junio» en un documento del 26.
+      entradaPlan = entradaAsiPuedesPagar(
+        negocioInfo.configLinea,
+        { fechaSalida: rango.inicio, hoy: todayBogotaISO() },
+      )
+    }
 
     /**
      * Con VARIAS tarifas en la propuesta, los vuelos y hoteles del documento son los de las
@@ -1422,6 +1424,8 @@ export async function generateCotizacionPDF(
       vuelos: vuelosDelDocumento,
       hoteles: hotelesDelDocumento,
       cargosEnDestino,
+      // V5 (QA del 2026-10-29): lo que el paquete de bloqueo no incluye, si se leyó o se escribió.
+      ...(() => { const n = noIncluyeDePaquetes(paraLectura); return n.length > 0 ? { noIncluye: n } : {} })(),
       nivelDetalle: delNegocio.nivelDetalle,
       // Brief del 2026-10-29, punto 5 · el pie y la firma con los datos de la asesora (la
       // responsable del negocio, o quien genera). Sin su ficha, los configurados de siempre.

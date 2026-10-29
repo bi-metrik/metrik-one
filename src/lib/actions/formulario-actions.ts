@@ -410,6 +410,12 @@ function getTemplateComponent(
           municipio: string | null
           email: string | null
           telefono: string | null
+          // SOE-033 (plantilla del 2026-10-28): fecha de expedición y certificado
+          // UPME en la ficha. Los dos del certificado son `optional: true` en
+          // `campos_fuente`, con las mismas fuentes que la declaración juramentada.
+          fecha_factura?: string | null
+          numero_caso_upme?: string | null
+          fecha_certificado?: string | null
           nombre_solicitante_2?: string | null
           numero_identificacion_2?: string | null
           email_2?: string | null

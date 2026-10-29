@@ -59,6 +59,7 @@ import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import type { CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { completoCierraLaEdicion } from '@/lib/negocios/cierre-por-tipo'
 import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
 import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
@@ -1742,7 +1743,9 @@ function BloqueRenderer({
     // factura, la IA extrae un dato mal, el bloque se marca completo en ese instante
     // y ya no puede corregirlo aunque el negocio siga en su etapa. Corregir un campo
     // recién extraído es parte de cargarlo, no una corrección hacia atrás.
-    if (bloque.instancia?.estado === 'completo' && tipo !== 'datos' && tipo !== 'documento') return 'visible'
+    // Servicios del viaje tampoco: su estado lo pone el gate y el voucher, la fecha límite y la
+    // confirmación se siguen cargando con la fila confirmada (QA 2026-10-29, M1-1). Ver `cierre-por-tipo`.
+    if (bloque.instancia?.estado === 'completo' && completoCierraLaEdicion(tipo)) return 'visible'
     switch (tipo) {
       case 'datos':
         // Misma regla que `guardarPagosMulti` en el servidor (`lib/permissions/multi-pago.ts`).

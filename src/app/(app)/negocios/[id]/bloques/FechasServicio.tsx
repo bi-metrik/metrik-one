@@ -10,6 +10,7 @@ import {
   fechasDeFila,
   resumenDeFechas,
   validarFechasEditadas,
+  vuelosEnLinea,
   type FechasEditadas,
   type TramoEditado,
 } from '@/lib/viaje/fechas-servicio'
@@ -28,9 +29,12 @@ const tramoVacio = (): TramoEditado => ({ fecha: '', hora_salida: '', hora_llega
 
 /** La línea de fechas de la fila cerrada: «lun 10 nov · 06:10 → sáb 15 nov» o «Falta la fecha». */
 export function LineaDeFechas({ s }: { s: ServicioDelNegocio }) {
-  const resumen = resumenDeFechas(fechasDeFila(s))
+  const f = fechasDeFila(s)
+  const resumen = resumenDeFechas(f)
+  // El paquete de bloqueo lleva su vuelo dentro (H10, 2026-10-29): se ve para que Reservas lo confirme.
+  const vuelos = s.tipo !== 'vuelo' ? vuelosEnLinea(f.tramos) : null
   return resumen
-    ? <span className="tabular-nums text-foreground">{resumen}</span>
+    ? <span className="tabular-nums text-foreground">{resumen}{vuelos ? <span className="text-muted-foreground"> · Vuelo {vuelos}</span> : null}</span>
     : <span className="text-amber-600">{FALTA_LA_FECHA}</span>
 }
 
@@ -46,7 +50,8 @@ export default function FechasServicio({
   alGuardar: () => void
 }) {
   const f = fechasDeFila(s)
-  const esVuelo = s.tipo === 'vuelo'
+  // El paquete de bloqueo con su vuelo se corrige por tramos, como un vuelo (H10, 2026-10-29).
+  const esVuelo = s.tipo === 'vuelo' || (s.tipo === 'otro' && (f.tramos?.length ?? 0) > 0)
   const [tramos, setTramos] = useState<TramoEditado[]>(() =>
     f.tramos && f.tramos.length > 0
       ? f.tramos.map(t => ({ ...t }))
