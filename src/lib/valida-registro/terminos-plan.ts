@@ -25,6 +25,12 @@
  * encabezado, la fila «Fin del plazo para cancelar la prueba» de la Orden y las cláusulas 0.5, 3.5 y
  * 16.6. ⚠️ Texto de Max: lo aprueba Emilio antes de encender y lo lleva a `terminos-valida-v2.1-autoservicio.md`.
  *
+ * v2.2 (texto de Emilio, aprobado por Mauricio el 2026-10-29; `terminos-valida-v2.2-autoservicio.md`):
+ * el reverso del pago corta el plan en el acto, como hace el código desde #1322 (`corte-reverso.ts`).
+ * Cambian el encabezado, la frase final de la 3.6, la 11.2 («o por reversión del pago») y la 11.3 nueva.
+ * Copia literal del archivo, del título a la 16.6. Quien aceptó la v2.1 sigue con ella mientras no
+ * acepte la v2.2 (13.1): este archivo solo cambia lo que acepta un registro nuevo.
+ *
  * ## Dos partes, como el documento
  *
  *   - **Parte I, la Orden** (`PARTE_I_ORDEN`): los datos que el Cliente dio al registrarse. Sus campos
@@ -48,7 +54,7 @@ export const MARCADOR_TERMINOS_PENDIENTES = /\[TEXTO (EMILIO|LUCÍA|LUCIA)\b/
 /** Parte I: la Orden de Suscripción, con sus campos `{campo}`. */
 export const PARTE_I_ORDEN = `# TÉRMINOS DE USO DE VALIDA
 
-**Variante: Autoservicio · Versión 2.1 · Rige desde {fecha_publicacion}**
+**Variante: Autoservicio · Versión 2.2 · Rige desde {fecha_publicacion}**
 
 **EL PRESTADOR:** METRIK IA S.A.S., NIT 902.079.601-9, domiciliada en la Calle 24A Bis # 100-71, Bogotá D.C., representada legalmente por Brallan Mauricio Moreno Guzmán. Correo: mauricio.moreno@metrik.com.co ("METRIK").
 
@@ -148,7 +154,7 @@ export const PARTE_II_TERMINOS = `## PARTE II. TÉRMINOS
 
 3.5. **Pago automático.** El pago es anticipado y automático. El Cliente autoriza a METRIK a cobrar el valor mensual de la Orden al medio de pago que registró en la pasarela ePayco: el primer mes, en el momento en que el Cliente confirma en su cuenta que activa el plan, confirmación que Valida le pide cuando intenta una consulta después de agotar las 10 de la prueba y que también puede dar antes con el botón "Activar plan", viendo el valor y los últimos 4 dígitos de la tarjeta; o, si no la da, después de que se cumplan los 7 días de la prueba y nunca antes; y después cada mes, en el mismo día del mes del primer cobro, o el último día del mes cuando ese día no exista, hasta que el Cliente se retire. METRIK no guarda los datos de la tarjeta; los guarda la pasarela. Por cada cobro, METRIK envía la factura electrónica al correo de notificaciones. El Cliente puede reemplazar el medio de pago escribiendo a mauricio.moreno@metrik.com.co o desde su cuenta, cuando esa opción esté disponible. La autorización de cobro termina cuando el Cliente se retira (cláusula 12.3): retirarse es la forma de revocarla.
 
-3.6. **Si un cobro falla.** Si el primer cobro es rechazado, aplica el numeral 7.5 de las Condiciones de la prueba gratis. Si es rechazado un cobro mensual posterior, METRIK lo informa al correo de notificaciones, envía un enlace de pago y puede intentar el cobro de nuevo al mismo medio de pago durante los 10 días calendario siguientes. Si en ese plazo no se paga, aplica la cláusula 11.1.
+3.6. **Si un cobro falla.** Si el primer cobro es rechazado, aplica el numeral 7.5 de las Condiciones de la prueba gratis. Si es rechazado un cobro mensual posterior, METRIK lo informa al correo de notificaciones, envía un enlace de pago y puede intentar el cobro de nuevo al mismo medio de pago durante los 10 días calendario siguientes. Si en ese plazo no se paga, aplica la cláusula 11.1. Si un pago ya hecho se reversa, aplica la cláusula 11.3.
 
 3.7. **Cambio de precio.** METRIK puede modificar el precio con aviso al correo de notificaciones de treinta (30) días, desde el período siguiente a que se cumpla ese plazo. El Cliente puede retirarse antes de que el cambio rija, sin penalidad.
 
@@ -236,7 +242,9 @@ export const PARTE_II_TERMINOS = `## PARTE II. TÉRMINOS
 
 11.1. METRIK puede suspender el Servicio, previo aviso por correo, cuando el cobro de un período no se haya podido hacer ni se haya pagado dentro de los 10 días calendario de la cláusula 3.6. Puede suspenderlo de inmediato ante uso indebido de credenciales, cesión de accesos a terceros, orden de autoridad o actividades que comprometan la seguridad de la plataforma o de la información.
 
-11.2. La suspensión detiene las consultas nuevas. El Cliente conserva el acceso a sus reportes y a la exportación de su bitácora, y la evidencia ya generada permanece íntegra. El pago de lo vencido restablece el Servicio. Si pasan treinta (30) días calendario de suspensión por falta de pago sin que el Cliente pague, la suscripción termina sin más aviso y METRIK pide a la pasarela eliminar el medio de pago.
+11.2. La suspensión detiene las consultas nuevas. El Cliente conserva el acceso a sus reportes y a la exportación de su bitácora, y la evidencia ya generada permanece íntegra. El pago de lo vencido restablece el Servicio. Si pasan treinta (30) días calendario de suspensión por falta de pago o por reversión del pago sin que el Cliente pague, la suscripción termina sin más aviso y METRIK pide a la pasarela eliminar el medio de pago.
+
+11.3. **Reversión del pago.** Si el pago de un período se reversa ante la pasarela o el banco emisor, incluido un contracargo, ese período queda sin pagar y METRIK puede suspender el Servicio de inmediato, sin el aviso previo de la cláusula 11.1. METRIK informa la suspensión al correo de notificaciones el mismo día. Aplica la cláusula 11.2. El pago del período reversado restablece el Servicio.
 
 ### 12. Vigencia, renovación y retiro
 
@@ -295,7 +303,7 @@ export const SEPARADOR_PARTES = '\n\n---\n\n'
 
 export const TERMINOS_PLAN = {
   slug: 'terminos-uso-valida-autogestion',
-  version: 'v2.1',
+  version: 'v2.2',
   titulo: 'Términos de Uso de VALIDA',
   plantilla: `${PARTE_I_ORDEN}${SEPARADOR_PARTES}${PARTE_II_TERMINOS}`,
 } as const
