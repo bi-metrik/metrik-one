@@ -28,14 +28,14 @@ export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; en
  * `perfil` lo dice quien arma las instrucciones (el bot siempre lo pide): esquema e instrucciones van juntos.
  */
 export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean } = {}): ExtractorMemoria {
-  return async ({ textos, campos, instrucciones, perfil }) => {
+  return async ({ textos, reenviados, campos, instrucciones, perfil }) => {
     const t0 = performance.now();
     const res = await fetchModelo(`https://generativelanguage.googleapis.com/v1beta/models/${MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': llave },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
-        contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}` }] }],
+        contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos, reenviados))}` }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: o.compacta ? esquemaCargaCompacta(campos, { perfil }) : esquemaCarga(campos, { perfil }) },
       }),
     });

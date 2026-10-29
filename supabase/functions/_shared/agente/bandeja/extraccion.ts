@@ -115,7 +115,7 @@ export function instruccionesCarga(
   yaTiene: Record<string, unknown> = {},
   propuesto: Record<string, unknown> = {},
   chat?: ChatPegado,
-  o: { compacta?: boolean; perfil?: boolean; documentos?: boolean } = {},
+  o: { compacta?: boolean; perfil?: boolean; documentos?: boolean; preguntas?: ReadonlyArray<string> } = {},
 ): string {
   const campos = camposEntendibles(fields);
   const deTexto = campos.filter((f) => f.tipo === 'texto' && !opcionesDe(f).length).map((f) => f.slug);
@@ -134,6 +134,9 @@ export function instruccionesCarga(
     ...(sabidos.length ? ['', 'Lo que el viaje YA tiene:', ...sabidos] : ['', 'El viaje todavía no tiene datos.']),
     ...(enEspera.length ? ['', 'Lo que ya le propusiste al comercial y todavía no confirma:', ...enEspera] : []),
     '',
+    '«(reenviado)» es del cliente; «(escrito por el comercial)», del comercial que te habla. «Ya te dije X»: X está antes.',
+    ...(o.preguntas?.length ? ['', 'Lo que ya le preguntaste al comercial de este viaje (no lo vuelvas a preguntar; si su respuesta deja dos lecturas, propón la más probable como deducido):', ...o.preguntas.map((q) => `- ${q}`)] : []),
+    '',
     'Devuelve:',
     '1. mensajes: para CADA mensaje { n, clase }: cliente = habla del viaje (lo pide el cliente o lo cuenta el comercial);',
     '   comercial = una opinión del comercial sobre el cliente o la venta; tercero = una promoción de otra agencia, un pago,',
@@ -147,15 +150,15 @@ export function instruccionesCarga(
       '3. valores: para CADA campo { valor, frase, como, calculo }.',
       '   - valor: el dato en el formato del campo, solo si lo dijeron o se calcula con lo dicho. Si no, "' + POR_DEFINIR + '".',
     ]),
-    '   - frase: las palabras EXACTAS de un mensaje de donde sale el valor (también si lo calculaste).',
+    '   - frase: las palabras EXACTAS de un mensaje de donde sale el valor (también si se calculó).',
     '   - como: escrito = lo dijeron tal cual; calculado = sale de una cuenta con datos dichos (salida + noches, el total',
     '     menos los niños); deducido = lo entendiste de una descripción («él con su esposa» = 2 adultos).',
-    '   - calculo: si es calculado o deducido, cómo, en pocas palabras («salida 2026-11-11 + 5 noches», «él, su esposa y',
-    '     su hijo de 1 año»). Si está escrito tal cual, vacío.',
+    '   - calculo: si es calculado o deducido, cómo, en pocas palabras («salida 2026-11-11 + 5 noches»). Si está escrito',
+    '     tal cual, vacío.',
     '   - Un campo de opciones guarda UNA opción, y solo si lo dicho corresponde a ella. Una preferencia sin el dato que la',
     '     opción pide no es una opción: «económico», «algo bueno», «no muy caro» no son un rango de presupuesto. Ahí el',
     `     campo queda en "${POR_DEFINIR}" y la preferencia va, con sus palabras, al campo de texto que corresponda${alTexto}.`,
-    '     Si nombran dos opciones («3 o 4 estrellas»), elige una de las dos y anota las dos en el texto.',
+    '     Si nombran varias («3, 4 y 5 estrellas»): la más baja, deducido, y todas al texto.',
     '   - La opción de «aún no está definido» (la marcada «solo si lo dicen», o la que su etiqueta dice que no hay dato',
     '     todavía) es un dato: úsala cuando digan explícitamente que el cliente no lo tiene, no lo dio o está abierto («no',
     '     nos dieron un número», «el presupuesto está abierto, propongamos nosotros»). Una preferencia sola («económico»),',
@@ -176,11 +179,11 @@ export function instruccionesCarga(
     '     («un niño de año y medio» es 1 infante y 0 niños). Si queda claro quiénes viajan, pon 0 donde no hay nadie; si',
     '     no, "' + POR_DEFINIR + '". Un total sin desglose («somos 4 con los niños») no se reparte.',
     '   - Si se corrigen («2… mejor 3»), vale lo último. Si un dato del viaje cambia, devuelve el nuevo con su frase.',
-    '4. dudas: cuando lo dicho para un campo no es claro (una preferencia sin cifra, dos lecturas posibles), además de',
-    `   dejarlo en "${POR_DEFINIR}", pregúntalo: { campo, pregunta, opciones }. La pregunta es corta y para el comercial,`,
-    '   con sus palabras entre comillas («"Económico": ¿lo dejo como nota o es un rango?»); opciones, 2 a 4 respuestas',
-    '   concretas («Menos de $3 millones», «Entre $3 y $5 millones», «Solo como nota»). Sin dudas, lista vacía. No',
-    '   preguntes lo que nadie mencionó: eso lo pide el sistema aparte.',
+    '   - Interpreta antes de preguntar: la lectura más probable va como deducido, con su razón en calculo (regreso',
+    '     «entre el 21 de junio y el 4 de julio»: el 4 de julio y el rango al texto).',
+    `4. dudas: solo si un campo no tiene ninguna lectura razonable: queda en "${POR_DEFINIR}" y preguntas { campo, pregunta,`,
+    '   opciones }: corta, sin citar sus palabras; opciones, 2 a 4 respuestas concretas. Sin dudas, lista vacía. No',
+    '   preguntes lo que nadie mencionó ni lo ya preguntado.',
     ...(chat ? [
       '5. otros: una línea corta por cada viaje o persona aparte de ESTE viaje que aparezca en el chat («Viaje de la',
       '   hermana a Madrid en diciembre»), sin teléfonos, correos ni documentos. Sin nada aparte, lista vacía.',
@@ -372,9 +375,22 @@ function otrosDe(raw: unknown): string[] {
   return out.slice(0, MAX_OTROS);
 }
 
-/** La duda como una línea del mensaje: «"Económico": ¿lo dejo como nota o es un rango? (A / B / C)». Pura. */
+/**
+ * La duda como una línea del mensaje: «¿Lo dejo como nota o es un rango? (A / B / C)». Sin la frase citada delante
+ * («"Económico": …»): en vivo (2026-10-28) cada propuesta repetía entre comillas lo que el comercial acababa de escribir.
+ * Pura.
+ */
 export function lineaDuda(d: Duda): string {
-  return `${d.pregunta}${d.opciones.length ? ` (${d.opciones.join(' / ')})` : ''}`;
+  const pregunta = sinFraseCitada(d.pregunta);
+  return `${pregunta}${d.opciones.length ? ` (${d.opciones.join(' / ')})` : ''}`;
+}
+
+/** «"ya te dije la fecha": ¿cuál es el regreso?» → «¿Cuál es el regreso?». Si no hay pregunta después, igual. Pura. */
+export function sinFraseCitada(pregunta: string): string {
+  const m = pregunta.match(/^\s*(?:["“«][^"”»]{1,200}["”»]\s*(?:y\s+(?:luego\s+)?["“«][^"”»]{1,200}["”»]\s*)?):\s*(.+)$/s);
+  if (!m || !m[1].trim()) return pregunta;
+  const resto = m[1].trim();
+  return resto.charAt(0) === '¿' ? `¿${resto.charAt(1).toUpperCase()}${resto.slice(2)}` : `${resto.charAt(0).toUpperCase()}${resto.slice(1)}`;
 }
 
 function fechaReal(v: string): boolean {
@@ -408,7 +424,7 @@ export function validarCarga(
   raw: unknown,
   fields: ReadonlyArray<CampoEntendible>,
   textos: ReadonlyArray<string>,
-  opts: { hoyISO: string; yaTiene?: Record<string, unknown> },
+  opts: { hoyISO: string; yaTiene?: Record<string, unknown>; yaPreguntado?: ReadonlyArray<string> },
 ): CargaValidada {
   const crudo = desdeCompacta(raw);
   const r = (crudo && typeof crudo === 'object' ? crudo : {}) as Record<string, unknown>;
@@ -417,7 +433,9 @@ export function validarCarga(
   const enFuente = fuente.map(normalizarTexto);
   const campos = camposEntendibles(fields);
   const out: CargaValidada = {
-    sugeridos: {}, quitar: {}, dudas: dudasDe(r.dudas, campos), descartados: [], historia: historiaDeCitas(r.citas, fuente.join('\n---\n')), otros: otrosDe(r.otros),
+    // Lo ya preguntado no se vuelve a preguntar (2026-10-22 y 10-28: la misma pregunta hasta cinco veces): la respuesta
+    // está en lo que el comercial escribió después; si el modelo propone un valor, ese queda, marcado, y se corrige.
+    sugeridos: {}, quitar: {}, dudas: dudasDe(r.dudas, campos).filter((d) => !(opts.yaPreguntado ?? []).includes(d.campo)), descartados: [], historia: historiaDeCitas(r.citas, fuente.join('\n---\n')), otros: otrosDe(r.otros),
     // Lo de la persona lo cuenta el cliente o el comercial (no un tercero ni el ruido).
     perfil: separarHechos(r.perfil, textosDelViaje(r, textos, ['cliente', 'comercial'])).guardables,
   };

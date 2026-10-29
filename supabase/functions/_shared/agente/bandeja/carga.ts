@@ -156,6 +156,87 @@ export function filasDelViaje(
   return filas.filter((f, i) => escritoDelEquipo(f) && (tramos.some(([d, h]) => i >= d && i < h) || (!f.turno_id && !deOtro.has(i))));
 }
 
+/**
+ * Los reenvíos de la tanda (sin cargar ni descartar) que son de `codigo`: el viaje nombrado antes que ellos, o, si antes
+ * no se nombró ninguno, el primero que se nombró después (el reenvío llegó antes de que se pidiera abrir el viaje).
+ * Falla en vivo del 2026-10-28: «Curazao entre el 21 de junio al 4 de julio» y «Dos adultos» se reenviaron antes de
+ * abrir P1 26 1, el «Abrí…» pidió reenviarlos y la anotación siguiente solo leyó lo escrito: «ya te dije» dos veces. Pura.
+ */
+export function tandaDelViaje(
+  filas: FilaConversacion[],
+  tanda: ReadonlyArray<FilaConversacion>,
+  codigo: string,
+  opcionNombrada: OpcionNombrada,
+  alias: Record<string, string> = {},
+  sueltos: Record<string, string> = {},
+): FilaConversacion[] {
+  const ev = nombramientos(filas, opcionNombrada, alias, sueltos);
+  return tanda.filter((t) => {
+    const i = filas.findIndex((f) => f.id === t.id);
+    if (i < 0) return false;
+    const antes = ev.filter((x) => x.i <= i).at(-1);
+    if (antes) return antes.clave === codigo;
+    return ev.find((x) => x.i > i)?.clave === codigo;
+  });
+}
+
+/** Un texto de la carga y quién lo dijo: el reenvío es del cliente; lo escrito, del comercial que habla con el bot. */
+export interface TextoCarga { texto: string; reenviado: boolean }
+
+/**
+ * Lo que va a la extracción de `codigo`, en el orden de la conversación: los escritos del comercial y los reenvíos de la
+ * tanda que son de ese viaje, cada uno con su autor (2026-10-28: todo iba como «reenviado» y la extracción le atribuyó
+ * al cliente el «ya te dije la fecha» del comercial). `mensajes`: los ids de esos reenvíos, que el toque consume. Pura.
+ */
+export function cargaDelViaje(
+  filas: FilaConversacion[],
+  tanda: ReadonlyArray<FilaConversacion>,
+  codigo: string,
+  opcionNombrada: OpcionNombrada,
+  alias: Record<string, string> = {},
+  sueltos: Record<string, string> = {},
+): { textos: TextoCarga[]; mensajes: string[] } {
+  const escritas = new Set(filasDelViaje(filas, codigo, opcionNombrada, alias, sueltos).map((f) => f.id));
+  const reenvios = tandaDelViaje(filas, tanda, codigo, opcionNombrada, alias, sueltos);
+  const deReenvio = new Set(reenvios.map((f) => f.id));
+  const todas = filas.filter((f) => escritas.has(f.id) || deReenvio.has(f.id))
+    .map((f) => ({ texto: textoParaCarga(f), reenviado: deReenvio.has(f.id) }))
+    .filter((t) => !!t.texto);
+  const textos = recortarCarga(todas);
+  return { textos, mensajes: reenvios.map((f) => f.id) };
+}
+
+function recortarCarga(textos: TextoCarga[]): TextoCarga[] {
+  const out: TextoCarga[] = [];
+  let total = 0;
+  for (let k = textos.length - 1; k >= 0; k--) {
+    total += textos[k].texto.length;
+    if (total > TOPE_ESCRITOS_CARACTERES && out.length) break;
+    out.unshift(textos[k]);
+  }
+  return out;
+}
+
+/** Una pregunta que ya se le hizo al comercial sobre un viaje (la duda de una propuesta anterior). */
+export interface PreguntaPrevia { campo?: string; texto: string }
+
+/**
+ * Lo que ya se le preguntó al comercial de este viaje en esta conversación: las dudas de las propuestas anteriores
+ * (de anotar o de cargar). La extracción no las vuelve a hacer (2026-10-22: la edad del niño se preguntó cuatro veces;
+ * 2026-10-28: el rango del regreso, cinco). Pura.
+ */
+export function preguntasPrevias(filas: ReadonlyArray<FilaConversacion>, viajeId: string): PreguntaPrevia[] {
+  const out: PreguntaPrevia[] = [];
+  for (const f of filas) {
+    const p = f.traza?.propuesta;
+    if (!p || (p.accion !== 'anotar_en_viaje' && p.accion !== 'cargar_tanda') || p.datos?.viajeId !== viajeId) continue;
+    const texto = typeof p.datos.duda === 'string' ? p.datos.duda.trim() : '';
+    if (!texto || out.some((x) => x.texto === texto)) continue;
+    out.push({ ...(typeof p.datos.dudaCampo === 'string' ? { campo: p.datos.dudaCampo } : {}), texto });
+  }
+  return out;
+}
+
 function recortar(textos: string[]): string[] {
   const out: string[] = [];
   let total = 0;
@@ -190,13 +271,28 @@ export interface Preparada {
   falta: string[];
   /** La duda más importante de la extracción, como una línea para arriba del resumen. No bloquea lo demás. */
   duda?: string;
+  /** El campo de la duda: con él no se vuelve a preguntar en la siguiente propuesta del mismo viaje. */
+  dudaCampo?: string;
   plan: PlanCarga;
 }
 
 type Bloque = { fields: CampoEntendible[]; data: Record<string, unknown> };
 
-export function mensajesDeTextos(textos: ReadonlyArray<string>): MensajeEntrega[] {
-  return textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: true, tipo: 'text', origen: 'texto' })) as MensajeEntrega[];
+/** Los textos como mensajes para la extracción. Sin `reenviados`, todos son del cliente (la tanda). Pura. */
+export function mensajesDeTextos(textos: ReadonlyArray<string>, reenviados?: ReadonlyArray<boolean>): MensajeEntrega[] {
+  return textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: reenviados?.[i] ?? true, tipo: 'text', origen: 'texto' })) as MensajeEntrega[];
+}
+
+/** Lo que acompaña los textos de una carga: quién dijo cada uno y lo que ya se preguntó del viaje. */
+export interface OpcionesCarga {
+  /** Por texto: `true` si es un reenvío del cliente. Sin esto, todos son reenvíos (la tanda). */
+  reenviados?: boolean[];
+  preguntas?: PreguntaPrevia[];
+}
+
+/** `TextoCarga[]` partido en lo que recibe `prepararCarga`. Pura. */
+export function partirCarga(textos: ReadonlyArray<TextoCarga>): { textos: string[]; reenviados: boolean[] } {
+  return { textos: textos.map((t) => t.texto), reenviados: textos.map((t) => t.reenviado) };
 }
 
 /** El plan pendiente (lo que se le propuso al comercial y no ha confirmado), tolerante a una traza vieja. Pura. */
@@ -230,13 +326,16 @@ export function planDeCarga(p: {
   hoyISO: string;
   ahoraIso: string;
   previo?: unknown;
+  /** Lo que ya se le preguntó al comercial de este viaje: no se vuelve a preguntar (`validarCarga`). */
+  preguntas?: ReadonlyArray<PreguntaPrevia>;
 }): Preparada {
   const { fields, valores: yaTiene } = aplanarBloques(p.bloques.map((b) => ({ fields: b.fields, data: b.data })));
   const campos = fields as CampoEntendible[];
   // La pendiente cuenta como sabida para las invariantes (el regreso contra su salida, un `pedir_si`, qué se puede quitar).
   const previo = planPrevio(p.previo);
   const sabido = { ...yaTiene, ...propuestoDe(p.previo) };
-  const v = validarCarga(p.raw, campos, p.textos, { hoyISO: p.hoyISO, yaTiene: sabido });
+  const yaPreguntado = (p.preguntas ?? []).flatMap((x) => (x.campo ? [x.campo] : []));
+  const v = validarCarga(p.raw, campos, p.textos, { hoyISO: p.hoyISO, yaTiene: sabido, yaPreguntado });
 
   // La unión con la pendiente: nunca se descarta en silencio un dato propuesto y no rechazado. Lo que el comercial pidió
   // quitar sale de lo propuesto; un valor nuevo deshace un «quitar» pendiente del mismo campo.
@@ -270,12 +369,13 @@ export function planDeCarga(p: {
   for (const k of quitados) delete quedaria[k];
   const falta = huecos(campos, quedaria).minimo.faltan.map((f) => f.label ?? f.slug);
   const duda = v.dudas[0] ? lineaDuda(v.dudas[0]) : undefined;
+  const dudaCampo = v.dudas[0]?.campo;
   // Lo de la persona: lo pendiente más lo nuevo, sin repetir el mismo texto.
   const perfil = [...previo.perfil];
   for (const h of v.perfil) if (!perfil.some((x) => textoComparable(x.texto) === textoComparable(h.texto))) perfil.push(h);
   if (perfil.length) entendido.push(lineaPerfilSugerido(perfil));
   return {
-    entendido, falta, ...(duda ? { duda } : {}),
+    entendido, falta, ...(duda ? { duda, ...(dudaCampo ? { dudaCampo } : {}) } : {}),
     plan: { sugeridos, ...(Object.keys(quitar).length ? { quitar } : {}), historia: v.historia, ...(perfil.length ? { perfil } : {}) },
   };
 }

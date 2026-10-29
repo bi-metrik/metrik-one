@@ -150,7 +150,7 @@ describe('sin lector la bandeja queda como antes (el texto de Trappvel no cambia
     expect(e.deps.dominio.ventanaAdjuntosMs).toBeUndefined()
     await e.reenvia('Vamos 2 adultos del 3 al 8 de marzo')
     const t = await e.escribe('cárgalo en M1 26 1')
-    expect(t[0].texto).toBe('¿Cargo esto en M1 26 1 · SAN ANDRÉS?\n• Vamos 2 adultos del 3 al 8 de marzo\nPara cotizar faltaría: fecha de salida, fecha de regreso, adultos, niños.')
+    expect(t[0].texto).toBe('¿Cargo esto en M1 26 1 · SAN ANDRÉS?\n• Vamos 2 adultos del 3 al 8 de marzo\nFalta para cotizar: fecha de salida, fecha de regreso, adultos, niños.')
     expect(estado).not.toContain('Archivos (fotos o PDF)')
   })
 
@@ -165,7 +165,7 @@ describe('sin lector la bandeja queda como antes (el texto de Trappvel no cambia
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: [VIAJE], lector: lectorDe({}) })
     await e.reenvia('Vamos 2 adultos del 3 al 8 de marzo')
     const t = await e.escribe('cárgalo en M1 26 1')
-    expect(t[0].texto).toBe('¿Cargo esto en M1 26 1 · SAN ANDRÉS?\n• Vamos 2 adultos del 3 al 8 de marzo\nPara cotizar faltaría: fecha de salida, fecha de regreso, adultos, niños.')
+    expect(t[0].texto).toBe('¿Cargo esto en M1 26 1 · SAN ANDRÉS?\n• Vamos 2 adultos del 3 al 8 de marzo\nFalta para cotizar: fecha de salida, fecha de regreso, adultos, niños.')
     expect(estado).not.toContain('Archivos (fotos o PDF)')
   })
 
