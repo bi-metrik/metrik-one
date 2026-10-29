@@ -362,6 +362,36 @@ export function leerDistribucion(v: unknown): DistribucionBloqueo {
   return { habitaciones, ninos: enteroEntre(v.ninos, 0, 200) ?? 0, infantes: enteroEntre(v.infantes, 0, 200) ?? 0, edadesNinos }
 }
 
+/**
+ * Las edades de los NIÑOS que dice la Solicitud del negocio (`edades_menores`, texto libre: «8 años»,
+ * «9, 4», «7, 1.5»), para precargar la tarjeta del paquete (prueba real del 2026-10-29: la ficha decía
+ * «8 años» y la tarjeta la pedía vacía). Las de 0-17 años, enteras.
+ *
+ * El campo trae niños E infantes: con infantes en la solicitud, las edades bajo 2 años son de ellos
+ * y no cuentan como niño. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
+ */
+export function edadesNinosDeLaSolicitud(valor: unknown, pasajeros: { ninos: number; infantes: number } | null): number[] {
+  const texto = typeof valor === 'number' ? String(valor) : typeof valor === 'string' ? valor : ''
+  const crudas = (texto.match(/\d+(?:\.\d+)?/g) ?? []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n < 18)
+  let infantes = pasajeros?.infantes ?? 0
+  const ninos: number[] = []
+  for (const e of crudas) {
+    if (infantes > 0 && e < 2) { infantes--; continue }
+    ninos.push(Math.floor(e))
+  }
+  const tope = pasajeros ? pasajeros.ninos : ninos.length
+  return ninos.slice(0, Math.max(0, tope))
+}
+
+/**
+ * Las edades con que abre la tarjeta: las guardadas mandan; sin ellas, las de la Solicitud. Siempre
+ * editables (la asesora las cambia en la casilla).
+ */
+export function edadesIniciales(guardadas: readonly number[] | null | undefined, deLaSolicitud: readonly number[] | null | undefined): number[] {
+  if (guardadas && guardadas.length > 0) return [...guardadas]
+  return [...(deLaSolicitud ?? [])]
+}
+
 function refImagen(v: unknown): string | null {
   return typeof v === 'string' && v.startsWith('sbext://') ? v.slice(0, 500) : null
 }

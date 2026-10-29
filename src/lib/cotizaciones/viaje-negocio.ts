@@ -84,6 +84,17 @@ export function viajeDesdeFilas(filas: Record<string, unknown>[]): ViajeDelNegoc
   }
 }
 
+/** El texto de `edades_menores` de la Solicitud. La primera fila con valor gana. */
+export function edadesMenoresDesdeFilas(filas: readonly Record<string, unknown>[]): string | null {
+  for (const f of filas) {
+    const v = f.edades_menores
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+    const t = textoLibre(v)
+    if (t) return t.slice(0, 200)
+  }
+  return null
+}
+
 /**
  * El viaje del negocio. De la MISMA lectura sale la modalidad (A medida | Bloqueo, `bloqueo-modalidad.ts`):
  * la página de la cotización la necesita y una consulta más rompería su presupuesto de idas. Va aparte de
@@ -92,7 +103,7 @@ export function viajeDesdeFilas(filas: Record<string, unknown>[]): ViajeDelNegoc
 export async function leerViajeDelNegocio(
   supabase: unknown,
   negocioId: string | null,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje; edadesMenores?: string | null }> {
   if (!negocioId) return { viaje: VIAJE_VACIO, error: null, modalidad: A_MEDIDA }
   // Dentro de una aceptación de la forma por pasos (una o un lote) el viaje no cambia: se lee una
   // vez (`memo-de-aceptacion.ts`). Fuera, como siempre.
@@ -102,7 +113,7 @@ export async function leerViajeDelNegocio(
 async function leerViajeSinMemo(
   supabase: unknown,
   negocioId: string,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje; edadesMenores: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')
@@ -113,10 +124,12 @@ async function leerViajeSinMemo(
       // declara devuelve null en esas columnas: no hay 400 que tolerar ni nada que romper.
       + 'destino:data->destino, presentacion_destino:data->presentacion_destino, nivel_detalle:data->nivel_detalle, '
       // Viaje en bloqueo (brief del 2026-10-27). Un bloque que no los declara devuelve null.
-      + `${SLUG_MODALIDAD}:data->>${SLUG_MODALIDAD}, ${SLUG_OPERADOR}:data->>${SLUG_OPERADOR}`,
+      + `${SLUG_MODALIDAD}:data->>${SLUG_MODALIDAD}, ${SLUG_OPERADOR}:data->>${SLUG_OPERADOR}, `
+      // Las edades de los menores de la Solicitud: precargan la edad del niño del paquete (2026-10-29).
+      + 'edades_menores:data->>edades_menores',
     )
     .eq('negocio_id', negocioId)
-  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA }
+  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA, edadesMenores: null }
   const filas = (data ?? []) as Record<string, unknown>[]
-  return { viaje: viajeDesdeFilas(filas), error: null, modalidad: modalidadDesdeFilas(filas) }
+  return { viaje: viajeDesdeFilas(filas), error: null, modalidad: modalidadDesdeFilas(filas), edadesMenores: edadesMenoresDesdeFilas(filas) }
 }

@@ -14,6 +14,7 @@ import {
   ETIQUETA_INCLUYE,
   avisosDelPaquete,
   costoDelPaquete,
+  edadesIniciales,
   fechasDelPaquete,
   leerPaqueteBloqueo,
   paqueteVacio,
@@ -101,6 +102,11 @@ export interface PropsTarjetaPaquete {
   operador: string | null
   /** Los pasajeros de la solicitud, para el aviso de personas. */
   pasajeros: { adultos: number; ninos: number; infantes: number } | null
+  /**
+   * Las edades de los niños que dice la Solicitud (`edadesNinosDeLaSolicitud`). Precargan la casilla
+   * «Edad de cada niño» si el paquete no tiene las suyas; la asesora las puede cambiar.
+   */
+  edadesNinosSolicitud?: readonly number[] | null
   /** El vuelo del primer paquete del bloqueo, para ofrecerlo en este. */
   vueloSugerido: VueloBloqueo | null
   onCambio: () => void
@@ -142,7 +148,16 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const comisionGuardada = tipoGuardado === 'publica' ? tarifaGuardada.tipoTarifa?.comisionPct ?? null : null
   const margenVisible = comisionGuardada ?? p.margenAplicado ?? null
   const [abierto, setAbierto] = useState(guardado === null)
-  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => guardado ?? paqueteVacio(p.operador))
+  // La edad de cada niño abre con la de la Solicitud si el paquete no tiene la suya (prueba real del
+  // 2026-10-29). Solo entra a la cuenta con niños en el paquete: sin ellos no frena por rango CHD.
+  const edadesDeInicio = edadesIniciales(guardado?.distribucion.edadesNinos, p.edadesNinosSolicitud)
+  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => {
+    const base = guardado ?? paqueteVacio(p.operador)
+    if (base.distribucion.ninos > 0 && (base.distribucion.edadesNinos ?? []).length === 0 && edadesDeInicio.length > 0) {
+      return { ...base, distribucion: { ...base.distribucion, edadesNinos: edadesDeInicio.slice(0, base.distribucion.ninos) } }
+    }
+    return base
+  })
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
   const [imagenes, setImagenes] = useState<{ hotel?: ImagenNueva & { vista: string }; vuelo?: ImagenNueva & { vista: string } }>({})
   const [leyendo, setLeyendo] = useState<{ hotel: boolean; vuelo: boolean }>({ hotel: false, vuelo: false })
@@ -150,7 +165,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   // Un pegado que la detección no supo ubicar: la asesora dice si es el hotel o el vuelo.
   const [porElegir, setPorElegir] = useState<{ dataUrl: string; mensaje: string } | null>(null)
   const [detectando, setDetectando] = useState(false)
-  const [edadesTexto, setEdadesTexto] = useState(() => (guardado?.distribucion.edadesNinos ?? []).join(', '))
+  const [edadesTexto, setEdadesTexto] = useState(() => edadesDeInicio.join(', '))
   const [guardando, empezar] = useTransition()
 
   const costo = costoDelPaquete(paquete)
@@ -179,7 +194,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
 
   function ponerLectura(r: Extract<Awaited<ReturnType<typeof leerPantallazoBloqueo>>, { ok: true }>, dataUrl: string) {
     setImagenes(i => ({ ...i, [r.cual]: { dataUrl, huella: r.huella, vista: dataUrl } }))
-    if (r.cual === 'hotel') cambiar(x => ({ ...x, hotel: { ...r.hotel, infante: x.hotel.infante ?? null }, incluye: r.incluye }))
+    if (r.cual === 'hotel') cambiar(x => ({ ...x, hotel: { ...r.hotel, infante: r.hotel.infante ?? x.hotel.infante ?? null }, incluye: r.incluye }))
     else cambiar(x => ({ ...x, vuelo: r.vuelo }))
   }
 
@@ -367,7 +382,12 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                   <td><input aria-label="Precio por niño" className={`${CAJA} w-28`} inputMode="numeric" value={h.nino?.precio ?? ''}
                     onChange={e => cambiar(x => { x.hotel.nino = { edadMin: x.hotel.nino?.edadMin ?? null, edadMax: x.hotel.nino?.edadMax ?? null, precio: numeroONulo(e.target.value) }; return x })} /></td>
                   <td colSpan={2}><input aria-label="Niños" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.ninos || ''}
-                    onChange={e => cambiar(x => { x.distribucion.ninos = numeroONulo(e.target.value) ?? 0; return x })} /> niños</td>
+                    onChange={e => cambiar(x => {
+                      x.distribucion.ninos = numeroONulo(e.target.value) ?? 0
+                      // Al poner niños, las edades de la casilla (precargadas de la Solicitud) entran a la cuenta.
+                      if (x.distribucion.ninos > 0 && (x.distribucion.edadesNinos ?? []).length === 0) x.distribucion.edadesNinos = edadesDeTexto(edadesTexto)
+                      return x
+                    })} /> niños</td>
                   <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'nino')?.total ?? null)}</td>
                   <td />
                 </tr>

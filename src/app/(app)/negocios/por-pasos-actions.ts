@@ -23,10 +23,9 @@ import { fotoDeTarifas, type FotoDeTarifas } from '@/lib/cotizaciones/tarifas-po
 import { cerrarAccionPorPasos as cerrarAccion, type ResultadoPorPasos } from '@/lib/cotizaciones/por-pasos-cierre'
 import { firmaDeTarifa } from '@/lib/cotizaciones/tarifas-por-pasos'
 import { leerCabecera } from '@/lib/cotizaciones/itinerarios-datos'
-import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { itemsDelItinerario, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
-import { motivoSinPrecioPorPasajero, opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
-import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
+import { frenosDePaqueteYPasajero } from '@/lib/cotizaciones/frenos-de-paquete-y-pasajero'
 import { enviarCotizacion } from '@/app/(app)/negocios/cotizacion-actions'
 import { esRecomendada, recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { etiquetaDeRanura, grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -742,21 +741,13 @@ export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'd
   // Es lo primero que dice la lista única de Revisar.
   const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: foto.ctx.negocioId })
   if (motivoDatos) return { success: false, error: motivoDatos }
-  const vanAlCliente = foto.filas.filter(f => f.vaEnPropuesta)
-  const ids = new Set(
-    vanAlCliente.length > 0
-      ? vanAlCliente.flatMap(f => itemsDelItinerario(foto.ctx.items, f.seleccion))
-      : itemsQueAportanAlTotal(foto.ctx.items),
-  )
   const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
-  const motivo = motivoSinPrecioPorPasajero(opcionesSinPrecio(foto.ctx.items, ids, viaje.composicion))
-  if (motivo) return { success: false, error: motivo }
-  // Viaje en bloqueo (QA del 2026-10-29): un paquete incompleto no sale. Antes que el margen de
-  // `enviarCotizacion`: un paquete en cero frenaba como «bajo el mínimo», que no es lo que pasa.
-  const motivoPaquete = motivoPaquetesIncompletos(
-    paquetesIncompletos(foto.ctx.items, vanAlCliente.length > 0 ? ids : null, viaje.composicion),
-  )
-  if (motivoPaquete) return { success: false, error: motivoPaquete }
+  // P12 y el paquete incompleto (QA del 2026-10-29), la MISMA revisión que la marca de borrador del
+  // PDF (`frenos-de-paquete-y-pasajero.ts`). El paquete va antes que el margen de `enviarCotizacion`:
+  // un paquete en cero frenaba como «bajo el mínimo», que no es lo que pasa.
+  const frenos = frenosDePaqueteYPasajero({ items: foto.ctx.items, tarifas: foto.filas, composicion: viaje.composicion, conPrecioPorPasajero: true })
+  if (frenos.precioPorPasajero) return { success: false, error: frenos.precioPorPasajero }
+  if (frenos.paquete) return { success: false, error: frenos.paquete }
   const r = await enviarCotizacion(cotizacionId, canal)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }

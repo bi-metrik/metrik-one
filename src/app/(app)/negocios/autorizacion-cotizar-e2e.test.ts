@@ -18,6 +18,21 @@ vi.mock('@/lib/actions/get-workspace', () => ({
   }),
 }))
 vi.mock('@/lib/supabase/server', () => ({ createServiceClient: () => clienteFalso(), createClient: async () => clienteFalso() }))
+// El PDF: un borrador no se guarda; uno limpio se guarda en el almacenamiento externo (doble).
+vi.mock('@/lib/almacenamiento/proveedor', () => ({ usaAlmacenamientoExterno: async () => true }))
+vi.mock('@/lib/almacenamiento/supabase-externo', () => ({
+  almacenamientoExternoDe: async () => ({
+    subirArchivo: async (a: { nombre: string }) => ({ referencia: `sbext://one-documentos/${a.nombre}`, path: '', bytes: 0, sha256: '' }),
+  }),
+}))
+vi.mock('@/lib/google-drive', () => ({
+  uploadFileToDrive: async () => { throw new Error('Drive no debe llamarse') },
+  createDriveFolder: async () => { throw new Error('Drive no debe llamarse') },
+}))
+vi.mock('@/lib/pdf/pdf-render-client', () => ({
+  isPdfRenderConfigured: () => false,
+  renderViaService: async () => { throw new Error('no debería llamarse') },
+}))
 const autorizado = vi.hoisted(() => ({ si: false }))
 vi.mock('@/lib/autorizacion-datos/servidor', () => ({
   estadoDelContacto: async () => ({
@@ -29,6 +44,8 @@ vi.mock('@/lib/autorizacion-datos/servidor', () => ({
 import { enviarCotizacion } from './cotizacion-actions'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
 import { ajustarOpcion } from './tarifa-pax-actions'
+import { generateCotizacionPDF } from './cotizacion-pdf-actions'
+import { PDFDocument } from 'pdf-lib'
 import { MENSAJE_ENVIO_PENDIENTE } from '@/lib/autorizacion-datos/mensajes'
 
 const WS = 'ws-agencia'
@@ -110,5 +127,31 @@ describe('punto 1 · «Pública» y «Neta» en la tarjeta', () => {
     expect(item().margen_porcentaje).toBeNull()
     expect((item().tarifa_pax as { tipoTarifa?: { tipo: string } }).tipoTarifa?.tipo).toBe('neta')
     expect(item().precio_venta).toBe(590_588)
+  })
+})
+
+describe('prueba real del 2026-10-29 · Neta con margen sano y la autorización pendiente', () => {
+  type ResultadoPDF = { success: boolean; pdf: string; filename: string; borrador?: boolean; aviso?: string | null }
+  const marca = async (r: ResultadoPDF) => (await PDFDocument.load(Buffer.from(r.pdf, 'base64'))).getTitle()
+
+  it('«Enviar» frena por la autorización, y el PDF sale con la marca de borrador que dice por qué', async () => {
+    // Neta: hereda el 15 % de la cotización, sobre el mínimo (5 %). Solo falta la autorización.
+    await ajustarOpcion('traslado', { tipoTarifa: 'neta' })
+    expect((await enviarCotizacion(COT)).error).toBe(MENSAJE_ENVIO_PENDIENTE)
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.success).toBe(true)
+    expect(pdf.borrador).toBe(true)
+    expect(pdf.filename).toMatch(/BORRADOR\.pdf$/)
+    expect(await marca(pdf)).toBe('BORRADOR · falta la autorización de datos · no enviar')
+    expect(pdf.aviso).toContain(MENSAJE_ENVIO_PENDIENTE)
+  })
+
+  it('con la autorización firmada, el mismo PDF sale limpio', async () => {
+    await ajustarOpcion('traslado', { tipoTarifa: 'neta' })
+    autorizado.si = true
+    const pdf = await generateCotizacionPDF(COT) as ResultadoPDF
+    expect(pdf.success).toBe(true)
+    expect(pdf.borrador).toBeUndefined()
+    expect(pdf.filename).not.toMatch(/BORRADOR/)
   })
 })
