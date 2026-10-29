@@ -8,6 +8,7 @@ import {
   MAX_TRAMOS,
   fechaEnPalabras,
   fechasDeFila,
+  llegaAlDiaSiguiente,
   resumenDeFechas,
   validarFechasEditadas,
   vuelosEnLinea,
@@ -129,7 +130,8 @@ export default function FechasServicio({
                   <input type="time" value={t.hora_salida ?? ''} disabled={deshabilitado} onChange={e => cambiarTramo(i, 'hora_salida', e.target.value)} className={CAMPO} />
                 </label>
                 <label className="block space-y-1">
-                  <span className="text-xs">Llega</span>
+                  {/* S9-2: un vuelo nocturno aterriza al día siguiente de la fecha del tramo. */}
+                  <span className="text-xs">Llega{llegaAlDiaSiguiente({ hora_salida: t.hora_salida ?? null, hora_llegada: t.hora_llegada ?? null }) ? ' (+1 día)' : ''}</span>
                   <input type="time" value={t.hora_llegada ?? ''} disabled={deshabilitado} onChange={e => cambiarTramo(i, 'hora_llegada', e.target.value)} className={CAMPO} />
                 </label>
                 <label className="block space-y-1">
