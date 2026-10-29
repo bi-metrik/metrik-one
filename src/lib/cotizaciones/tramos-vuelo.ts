@@ -128,10 +128,74 @@ function booleano(v: string | null | undefined): boolean | null {
   return null
 }
 
+/** «2027-07-01», «2027-07-01/jue» o «--07-01/jue» → año (si lo trae), mes y día. */
+function partesDeFecha(f: string | null): { anio: number | null; mes: number; dia: number } | null {
+  const m = /^(?:(\d{4})|-)-(\d{2})-(\d{2})/.exec((f ?? '').trim())
+  if (!m) return null
+  return { anio: m[1] ? Number(m[1]) : null, mes: Number(m[2]), dia: Number(m[3]) }
+}
+
+/** ¿`b` es el día siguiente de `a`? Sin año en alguna, se toma el de la otra (o uno cualquiera). */
+function esDiaSiguiente(a: string | null, b: string | null): boolean {
+  const pa = partesDeFecha(a)
+  const pb = partesDeFecha(b)
+  if (!pa || !pb) return false
+  const anioA = pa.anio ?? pb.anio ?? 2001
+  // Sin año en la de regreso, el 31-dic → 1-ene cruza de año.
+  const anioB = pb.anio ?? (pa.mes === 12 && pb.mes === 1 ? anioA + 1 : anioA)
+  const da = Date.UTC(anioA, pa.mes - 1, pa.dia)
+  const db = Date.UTC(anioB, pb.mes - 1, pb.dia)
+  return db - da === 86_400_000
+}
+
+/** «16:55», «4:55 p. m.» → minutos del día. `null` si no se reconoce. */
+function minutosDelDia(h: string | null): number | null {
+  const t = (h ?? '').trim().toLowerCase()
+  const m = /(\d{1,2})[:.h](\d{2})/.exec(t)
+  if (!m) return null
+  let hora = Number(m[1])
+  const min = Number(m[2])
+  if (hora > 23 || min > 59) return null
+  const pm = /p\.?\s*m/.test(t)
+  const am = /a\.?\s*m/.test(t)
+  if (pm && hora < 12) hora += 12
+  if (am && hora === 12) hora = 0
+  return hora * 60 + min
+}
+
+/**
+ * ¿El «regreso» leído es en realidad la LLEGADA de la ida? (M9-3, QA del 2026-10-29.)
+ *
+ * Un vuelo nocturno de solo ida (Iberia BOG 16:55 → MAD 08:45 del día siguiente) trae en la
+ * pantalla dos fechas: la salida y la llegada. La lectura tomó la llegada como «Regreso» y
+ * copió las horas de la ida: ONE imprimió un MAD→BOG que nadie pidió, en el PDF, el día a día,
+ * los servicios y el recordatorio de check-in.
+ *
+ * La firma, toda junta: el regreso cae el día siguiente de la salida, la ida llega a una hora
+ * anterior a la de salida (cruza la medianoche) y el regreso no trae horas propias (vacías o las
+ * mismas de la ida). Llegada +1 día NO es fecha de regreso. Sin las horas de la ida no se puede
+ * saber, y entonces se respeta lo leído: un regreso real no se borra por sospecha.
+ */
+export function regresoEsLaLlegadaDeLaIda(
+  ida: { fecha: string | null; salida: string | null; llegada: string | null },
+  regreso: { fecha: string | null; salida: string | null; llegada: string | null },
+): boolean {
+  if (!esDiaSiguiente(ida.fecha, regreso.fecha)) return false
+  const sale = minutosDelDia(ida.salida)
+  const llega = minutosDelDia(ida.llegada)
+  if (sale === null || llega === null || llega >= sale) return false
+  const mismaHora = (r: string | null, i: number) => {
+    if (texto(r) === null) return true
+    return minutosDelDia(r) === i
+  }
+  return mismaHora(regreso.salida, sale) && mismaHora(regreso.llegada, llega)
+}
+
 /**
  * Los tramos de un vuelo a partir de sus campos leídos (slug → valor, con lo corregido
  * encima). Siempre la ida; el regreso solo si la captura leyó algo suyo (fecha u horas):
- * un viaje de solo ida no produce un tramo vacío.
+ * un viaje de solo ida no produce un tramo vacío. Tampoco lo produce la llegada al día
+ * siguiente de un vuelo nocturno leída como regreso (`regresoEsLaLlegadaDeLaIda`).
  */
 export function tramosDeCampos(valor: (slug: string) => string | null | undefined): {
   tramos: TramoVuelo[]
@@ -140,7 +204,11 @@ export function tramosDeCampos(valor: (slug: string) => string | null | undefine
   const origen = texto(valor('origen'))
   const destino = texto(valor('destino'))
   const equipaje = equipajeDeCampos(valor)
-  const hayRegreso = [valor('fecha_regreso'), valor('hora_salida_regreso'), valor('hora_llegada_regreso')]
+  const fantasma = regresoEsLaLlegadaDeLaIda(
+    { fecha: texto(valor('fecha_salida')), salida: texto(valor('hora_salida')), llegada: texto(valor('hora_llegada')) },
+    { fecha: texto(valor('fecha_regreso')), salida: texto(valor('hora_salida_regreso')), llegada: texto(valor('hora_llegada_regreso')) },
+  )
+  const hayRegreso = !fantasma && [valor('fecha_regreso'), valor('hora_salida_regreso'), valor('hora_llegada_regreso')]
     .some(v => texto(v) !== null)
   const numeros = numerosDeVuelo(texto(valor('numero_vuelo')), hayRegreso)
   const escalas = texto(valor('escalas'))
@@ -242,6 +310,8 @@ export function leerTramos(raw: unknown): TramoVuelo[] | null {
   }
   if (out[0].sentido !== 'ida') return null
   if (out.length === 2 && out[1].sentido !== 'regreso') return null
+  // Los guardados antes de M9-3 pueden traer el regreso fantasma: se leen sin él.
+  if (out.length === 2 && regresoEsLaLlegadaDeLaIda(out[0], out[1])) return [out[0]]
   return out
 }
 

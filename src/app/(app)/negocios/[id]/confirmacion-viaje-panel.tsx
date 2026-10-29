@@ -32,6 +32,7 @@ import {
   pesos,
   planSugerido,
   reglaEnPalabras,
+  fechaLimiteSaldo,
   validarPlan,
   type CuotaPlan,
 } from '@/lib/viaje/plan-pagos'
@@ -110,6 +111,9 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
 
   // Antes de confirmar y sin cotización para confirmar, no hay nada que mostrar.
   if (!conf && (!vista.cotizacion || !(vista.antesDeConfirmacion || vista.enConfirmacion))) return null
+  // H10-2 (QA del 2026-10-29): un negocio perdido o desistido no ofrece «El cliente confirmó». La
+  // acción ya lo rechaza en el servidor; la pantalla no debe invitar a un clic que va a fallar.
+  if (!conf && !vista.negocioAbierto) return null
 
   function yaLoMande() {
     startTransition(async () => {
@@ -344,6 +348,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
     extra,
     comercial: vista.comercial ? primerNombre(vista.comercial) : null,
     agencia: vista.agencia,
+    visaEnTramite: vista.visaEnTramite,
   }), [vista, tarifa, total, cuotas, v.fechaMinimo, hoy, extra])
 
   const puedeConfirmarYa = !motivoAutorizacion && !!tarifa && v.cuadra && !v.despuesDelViaje && (v.dentroDeRegla || aprobadaParaEste)
@@ -535,7 +540,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
               ))}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ?? hoy, concepto: null }])}>
+              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ? fechaLimiteSaldo(vista.viaje.fechaSalida, hoy) : hoy, concepto: null }])}>
                 <Plus className="h-4 w-4" /> Cuota
               </button>
               <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>

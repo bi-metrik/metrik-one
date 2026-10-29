@@ -15,7 +15,7 @@ describe('asiPuedesPagar', () => {
     expect(r.filas).toEqual([
       { monto: 1_216_000, cuando: 'al confirmar (anticipo)', llevas: null },
       { monto: 2_026_000, cuando: 'hasta el 6 de noviembre', llevas: 3_242_000 },
-      { monto: 810_000, cuando: 'hasta el 21 de noviembre, día del viaje', llevas: null },
+      { monto: 810_000, cuando: 'hasta el 20 de noviembre, un día antes del viaje', llevas: null },
     ])
     expect(r.suma).toBe(4_052_000)
     expect(notaDeFila(r.filas![1], r.pctMinimo, pesos)).toBe('con esto llevas el 80 % ($3.242.000)')
@@ -28,18 +28,18 @@ describe('asiPuedesPagar', () => {
     }
   })
 
-  it('a 15 días o menos: 80 % al confirmar y el resto el día del viaje', () => {
+  it('a 15 días o menos: 80 % al confirmar y el resto un día antes del viaje', () => {
     const r = asiPuedesPagar(1_000_000, entrada('2026-10-20'))
     expect(r.filas).toEqual([
       { monto: 800_000, cuando: 'al confirmar (anticipo)', llevas: 800_000 },
-      { monto: 200_000, cuando: 'hasta el 20 de octubre, día del viaje', llevas: null },
+      { monto: 200_000, cuando: 'hasta el 19 de octubre, un día antes del viaje', llevas: null },
     ])
   })
 
   it('sin fecha de salida o con la salida pasada: la regla en palabras, sin montos', () => {
     expect(asiPuedesPagar(4_052_000, entrada(null))).toMatchObject({ filas: null, suma: 0, regla: reglaEnPalabras() })
     expect(asiPuedesPagar(4_052_000, entrada('2026-10-01')).filas).toBeNull()
-    expect(reglaEnPalabras()).toBe('El 80 % quince días antes de salir y el resto el día del viaje.')
+    expect(reglaEnPalabras()).toBe('El 80 % quince días antes de salir y el resto un día antes del viaje.')
   })
 
   it('fecha en palabras', () => {

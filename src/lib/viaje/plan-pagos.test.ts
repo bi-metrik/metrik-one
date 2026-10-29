@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   configPlanPagos,
+  fechaLimiteSaldo,
   huellaPlan,
   leerCuotas,
   lineasDeValidacion,
@@ -16,22 +17,33 @@ import {
 const HOY = '2026-10-13'
 const SALIDA = '2026-12-04'
 
-describe('planSugerido (C2: 30 % hoy, completa el 80 % a T-15, 20 % el día del viaje)', () => {
-  it('el caso de Noor: $9.165.000 con salida el 4 dic', () => {
+describe('planSugerido (C2: 30 % hoy, completa el 80 % a T-15, 20 % el día ANTERIOR al viaje)', () => {
+  it('el caso de Noor: $9.165.000 con salida el 4 dic; el saldo vence el 3 dic (decisión 2026-10-29)', () => {
     expect(planSugerido({ total: 9_165_000, fechaSalida: SALIDA, hoy: HOY })).toEqual([
       { numero: 0, monto: 2_750_000, fecha: HOY, concepto: 'Anticipo' },
       { numero: 1, monto: 4_582_000, fecha: '2026-11-19', concepto: null },
-      { numero: 2, monto: 1_833_000, fecha: SALIDA, concepto: 'Saldo' },
+      { numero: 2, monto: 1_833_000, fecha: '2026-12-03', concepto: 'Saldo' },
     ])
   })
 
-  it('a 15 días o menos: 80 % al confirmar y 20 % el día del viaje', () => {
+  it('a 15 días o menos: 80 % al confirmar y 20 % el día anterior al viaje', () => {
     expect(planSugerido({ total: 5_000_000, fechaSalida: '2026-10-23', hoy: HOY })).toEqual([
       { numero: 0, monto: 4_000_000, fecha: HOY, concepto: 'Anticipo' },
-      { numero: 1, monto: 1_000_000, fecha: '2026-10-23', concepto: 'Saldo' },
+      { numero: 1, monto: 1_000_000, fecha: '2026-10-22', concepto: 'Saldo' },
     ])
     // T-15 exactamente hoy cuenta como «ya pasó».
     expect(planSugerido({ total: 5_000_000, fechaSalida: '2026-10-28', hoy: HOY })?.[0].monto).toBe(4_000_000)
+  })
+
+  it('con la salida mañana u hoy, el 100 % al confirmar en una sola cuota', () => {
+    expect(planSugerido({ total: 5_000_000, fechaSalida: '2026-10-14', hoy: HOY })).toEqual([
+      { numero: 0, monto: 5_000_000, fecha: HOY, concepto: 'Anticipo' },
+    ])
+    expect(planSugerido({ total: 5_000_000, fechaSalida: HOY, hoy: HOY })).toEqual([
+      { numero: 0, monto: 5_000_000, fecha: HOY, concepto: 'Anticipo' },
+    ])
+    expect(fechaLimiteSaldo('2026-10-14', HOY)).toBe(HOY)
+    expect(fechaLimiteSaldo(SALIDA, HOY)).toBe('2026-12-03')
   })
 
   it('sin fecha o con la salida ya pasada no hay sugerido', () => {
@@ -42,7 +54,7 @@ describe('planSugerido (C2: 30 % hoy, completa el 80 % a T-15, 20 % el día del 
 
   it('para cualquier total suma al peso y queda dentro de su propia regla (redondeo del 80 % hacia arriba)', () => {
     for (let total = 1_001_001; total < 40_000_000; total += 777_777) {
-      for (const salida of [SALIDA, '2026-10-20', '2026-11-01']) {
+      for (const salida of [SALIDA, '2026-10-20', '2026-11-01', '2026-10-14', HOY]) {
         const c = planSugerido({ total, fechaSalida: salida, hoy: HOY })!
         const v = validarPlan(c, { total, fechaSalida: salida, hoy: HOY })
         expect(v.suma).toBe(total)
@@ -77,13 +89,24 @@ describe('validarPlan (F2-3)', () => {
   it('el 80 % justo al T-15 cumple; un peso menos no', () => {
     const justo: CuotaPlan[] = [
       { numero: 0, monto: 7_332_000, fecha: '2026-11-19', concepto: null },
-      { numero: 1, monto: 1_833_000, fecha: SALIDA, concepto: null },
+      { numero: 1, monto: 1_833_000, fecha: '2026-12-03', concepto: null },
     ]
     expect(validarPlan(justo, ctx).dentroDeRegla).toBe(true)
     const menos = [{ ...justo[0], monto: 7_331_999 }, { ...justo[1], monto: 1_833_001 }]
     expect(validarPlan(menos, ctx).dentroDeRegla).toBe(false)
     // La cuota del 80 % un día después del T-15 tampoco cumple.
     expect(validarPlan([{ ...justo[0], fecha: '2026-11-20' }, justo[1]], ctx).dentroDeRegla).toBe(false)
+  })
+
+  it('el saldo el mismo día del viaje queda fuera de la regla (pide aprobación), con su texto', () => {
+    const c = base.map((x, i) => (i === base.length - 1 ? { ...x, fecha: SALIDA } : x))
+    const v = validarPlan(c, ctx)
+    expect(v.despuesDelViaje).toBe(false)
+    expect(v.saldoTarde).toBe(true)
+    expect(v.cuadra).toBe(true)
+    expect(v.dentroDeRegla).toBe(false)
+    expect(lineasDeValidacion(v, ctx)[2]).toEqual({ ok: false, texto: 'El viaje debe quedar pagado el jueves 3 dic, el día antes de salir.' })
+    expect(lineasDeValidacion(validarPlan(base, ctx), ctx)[2]).toEqual({ ok: true, texto: 'Todo pagado el día antes del viaje' })
   })
 
   it('una cuota después del viaje queda fuera, con su texto', () => {

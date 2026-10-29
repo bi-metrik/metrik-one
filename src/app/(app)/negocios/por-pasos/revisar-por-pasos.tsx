@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 
 import { BTN, BTN_PRIM } from '@/components/viaje/estilo'
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
+import { textoReemplazo } from '@/app/(app)/negocios/aviso-version-nueva'
 
 /**
  * Paso 3 · REVISAR Y ENVIAR (diseño, Paso 3). Arriba lo que hay que resolver; luego el documento;
@@ -24,6 +25,7 @@ export function RevisarPorPasos({
   onDescargar,
   onEnviar,
   onSeguir,
+  reemplaza,
 }: {
   total: number
   enviada: boolean
@@ -38,6 +40,11 @@ export function RevisarPorPasos({
   onDescargar: () => void
   onEnviar: () => void
   onSeguir: () => void
+  /**
+   * H10-1: el consecutivo de la enviada que esta versión reemplaza (`null` si no lo tiene).
+   * Ausente = no reemplaza nada.
+   */
+  reemplaza?: string | null
 }) {
   const [confirmando, setConfirmando] = useState(false)
   return (
@@ -81,6 +88,7 @@ export function RevisarPorPasos({
           <div className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-[#CFCAC0] bg-[#F8F7F3] p-2.5 text-[13px]" role="alertdialog" aria-label="Confirmar el envío" data-confirmar-envio>
             <span className="min-w-0 flex-1">
               ¿Enviar al cliente la cotización por <b className="tabular-nums">{pesos(total)}</b>? Es lo único que no se puede deshacer: queda enviada y ya no se edita.
+              {reemplaza !== undefined && textoReemplazo(reemplaza)}
             </span>
             <button type="button" className={BTN_PRIM} disabled={ocupado} onClick={() => { setConfirmando(false); onEnviar() }}>Sí, enviar</button>
             <button type="button" className={BTN} onClick={() => setConfirmando(false)}>Cancelar</button>

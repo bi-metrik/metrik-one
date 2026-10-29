@@ -126,9 +126,32 @@ export function documentoAceptable(
 }
 
 /**
+ * Las versiones que el cliente puede ver HOY: todas, menos una modificación por aviso registrada antes
+ * de su publicación (`publicada_at` en el futuro, 20261029190000). Hasta ese instante no existe para el
+ * cliente: ni aviso, ni pantalla, ni documento, ni PDF, ni transición de la mora. La base tampoco deja
+ * aceptarla antes (`aceptaciones_terminos_modulo()`, paso 1). Una fecha de publicación ilegible tampoco
+ * se muestra: «no sé cuándo se publica» no es «ya se publicó».
+ */
+export function sinAvisosFuturos<T extends Pick<DocumentoContractual, 'rigePorAviso' | 'publicadaAt'>>(
+  documentos: readonly T[],
+  ahoraISO: string,
+): T[] {
+  const ahora = Date.parse(ahoraISO)
+  return documentos.filter((d) => {
+    if (d.rigePorAviso !== true) return true
+    const publicada = d.publicadaAt ? Date.parse(d.publicadaAt) : Number.NaN
+    return !Number.isNaN(publicada) && !Number.isNaN(ahora) && publicada <= ahora
+  })
+}
+
+/**
  * Las modificaciones por aviso publicadas que el contrato todavía no aceptó y que modifican algo que
  * sí aceptó: las que la plataforma anuncia a todos y la persona designada puede aceptar (voluntario).
  * Una por versión, de la que rige primero a la última.
+ *
+ * Una modificación que ya fue reemplazada por OTRA modificación publicada (la v1.4 sin aceptar, cuando
+ * se publica la v1.5 que la reemplaza) deja de ofrecerse: lo que se acepta es la última, y la anterior
+ * rige solo hasta la vigencia de la nueva (su `vigente_hasta`).
  */
 export function modificacionesPorAceptar(
   documentos: readonly DocumentoContractual[],
@@ -139,10 +162,19 @@ export function modificacionesPorAceptar(
     const previo = porVersion.get(d.documentoId)
     porVersion.set(d.documentoId, { doc: previo?.doc ?? d, aceptado: (previo?.aceptado ?? false) || d.aceptadoAt !== null })
   }
+  const reemplazadas = new Set(
+    [...porVersion.values()]
+      .filter(({ doc }) => doc.rigePorAviso === true && doc.reemplazaId && documentoAceptable(doc, hoy))
+      .map(({ doc }) => doc.reemplazaId as string),
+  )
   return [...porVersion.values()]
     .filter(
       ({ doc, aceptado }) =>
-        !aceptado && doc.rigePorAviso === true && documentoAceptable(doc, hoy) && cubiertaPorAviso(doc, documentos),
+        !aceptado &&
+        doc.rigePorAviso === true &&
+        !reemplazadas.has(doc.documentoId) &&
+        documentoAceptable(doc, hoy) &&
+        cubiertaPorAviso(doc, documentos),
     )
     .map(({ doc }) => doc)
     .sort((a, b) => a.vigenteDesde.localeCompare(b.vigenteDesde) || a.slug.localeCompare(b.slug))

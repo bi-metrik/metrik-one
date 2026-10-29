@@ -41,6 +41,7 @@ import {
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from '@/lib/cotizaciones/fechas-del-viaje'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { terminosConCondicionVisa } from '@/lib/viaje/condicion-visa'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
@@ -1244,9 +1245,13 @@ export async function generateCotizacionPDF(
   let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
   let avisoTexto: string | null = null
+  // Visa en trámite en la Solicitud (Mauricio 2026-10-29): la condición va en los términos.
+  let conVisaEnTramite = false
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
-    const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
+    const lectura = lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje : await leerViajeDelNegocio(supabase, negocioInfo.id)
+    const delNegocio = lectura.viaje
+    conVisaEnTramite = lectura.visaEnTramite ?? false
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -1456,7 +1461,7 @@ export async function generateCotizacionPDF(
       notas: cot.notas,
       descuento_porcentaje: cot.descuento_porcentaje ?? 0,
       descuento_valor: cot.descuento_valor ?? 0,
-      terminos_condiciones: (cot as unknown as CotizacionNuevosCampos).terminos_condiciones,
+      terminos_condiciones: terminosConCondicionVisa((cot as unknown as CotizacionNuevosCampos).terminos_condiciones, conVisaEnTramite),
     },
     empresa: {
       nombre: empresa.nombre ?? '',

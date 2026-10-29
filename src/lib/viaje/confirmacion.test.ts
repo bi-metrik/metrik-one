@@ -17,6 +17,7 @@ import {
   telefonoParaWa,
 } from './confirmacion'
 import { planSugerido } from './plan-pagos'
+import { CONDICION_VISA_EN_TRAMITE_TU, TITULO_CONDICION_VISA } from './condicion-visa'
 
 const HOY = '2026-10-13'
 const SALIDA = '2026-12-04'
@@ -31,6 +32,20 @@ describe('términos a viñetas (D-9)', () => {
   })
   it('sin texto, sin secciones', () => {
     expect(seccionesDeTerminos(null)).toEqual({ condiciones: [], mediosPago: [] })
+  })
+})
+
+describe('mensaje de confirmación con visa en trámite (Mauricio 2026-10-29, V8-2)', () => {
+  it('lleva la condición visible, antes de las condiciones generales', () => {
+    const cuotas = planSugerido({ total: 9_165_000, fechaSalida: SALIDA, hoy: HOY })!
+    const t = mensajeConfirmacion({
+      nombreCliente: 'Esteban', destino: 'Nueva York', fechaSalida: SALIDA, fechaRegreso: null, composicion: null,
+      tarifaNombre: 'Recomendada', total: 9_165_000, cuotas, fechaMinimo: '2026-11-19', pctMinimo: 80, hoy: HOY,
+      terminos: seccionesDeTerminos(TERMINOS_BASE_TRAPPVEL), extra: null, comercial: 'Daniela', agencia: 'Trappvel',
+      visaEnTramite: true,
+    })
+    expect(t).toContain(`*${TITULO_CONDICION_VISA}:*\n${CONDICION_VISA_EN_TRAMITE_TU}`)
+    expect(t.indexOf(CONDICION_VISA_EN_TRAMITE_TU)).toBeLessThan(t.indexOf('*Condiciones:*'))
   })
 })
 
@@ -61,13 +76,15 @@ describe('mensaje de confirmación (Noor §7.1 con C1, D-9, X1)', () => {
     expect(texto).toContain('*Total:* $9.165.000')
     expect(texto).toContain('1. $2.750.000 · hoy, 13 oct (anticipo)')
     expect(texto).toContain('2. $4.582.000 · 19 nov')
-    expect(texto).toContain('3. $1.833.000 · 4 dic')
+    expect(texto).toContain('3. $1.833.000 · 3 dic')
     expect(texto).toContain('El 19 nov debes llevar el 80 % pagado.')
     expect(texto).toContain('NIT 900.945.317-1')
     expect(texto).toContain('recargo promedio del 3 %')
     expect(texto).toContain('- Los servicios que no se tomen no son reembolsables.')
     expect(texto).toContain('Te espero en el aeropuerto.')
     expect(texto.trim().endsWith('Daniela · Trappvel')).toBe(true)
+    // Sin visa en trámite, nada de visa.
+    expect(texto).not.toContain('visa')
   })
 
   it('no promete un link de pago que la agencia no tiene ni dice que «sale por WhatsApp» (X1, C1); nada técnico (§7.6)', () => {

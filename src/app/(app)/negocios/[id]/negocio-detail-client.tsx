@@ -1119,7 +1119,10 @@ function SelectorEtapa({
   // trabaja en la etapa, no si el proceso termina ahi. Ver `lib/negocios/etapa-cierre.ts`.
   const cierreConfig = {
     cerrar: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
-    perder: { label: 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    // N10-2 (QA del 2026-10-29): con el seguimiento encendido, la guía de Seguimiento y el diálogo
+    // hablan de «Se perdió» («¿Por qué se perdió?», toast «Se perdió. Quedó el motivo.»): el botón
+    // se llama igual. Sin seguimiento, «Desistir» de siempre.
+    perder: { label: seguimiento?.activo ? 'Se perdió' : 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
     cancelar: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
   }[accionDeCierre(etapaParaCierre, hayEtapaCierre)]
 
@@ -1211,11 +1214,12 @@ function SelectorEtapa({
               <button
                 onClick={() => setShowPausaDialog(true)}
                 disabled={isPending}
-                title={`Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
+                title={seguimiento?.activo ? `Aplazar (${vecesPausado}/${MAX_PAUSAS} usados)` : `Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
                 className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
               >
                 <Pause className="h-3 w-3" />
-                <span className="hidden sm:inline">Pausar</span>
+                {/* N10-2: con seguimiento, el diálogo ya se llama «Aplazar»; el botón también. */}
+                <span className="hidden sm:inline">{seguimiento?.activo ? 'Aplazar' : 'Pausar'}</span>
               </button>
             )}
             <ReprocesoBoton

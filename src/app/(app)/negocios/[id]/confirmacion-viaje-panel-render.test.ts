@@ -28,7 +28,7 @@ vi.mock('../confirmacion-viaje-actions', () => ({
   pedirAprobacionPlan: async () => ({ ok: true }),
 }))
 
-const { HojaConfirmacion } = await import('./confirmacion-viaje-panel')
+const { HojaConfirmacion, default: ConfirmacionViajePanel } = await import('./confirmacion-viaje-panel')
 
 const HOY = todayBogotaISO()
 
@@ -53,9 +53,11 @@ function vista(tarifas: TarifaConfirmable[], extra: Partial<VistaConfirmacion> =
     gateMensajes: {},
     etapaConfirmacion: null,
     etapaActual: null,
+    negocioAbierto: true,
     antesDeConfirmacion: false,
     enConfirmacion: true,
     terminosBase: null,
+    visaEnTramite: false,
     agencia: 'Trappvel',
     comercial: 'Daniela',
     hayPago: false,
@@ -144,5 +146,20 @@ describe('sin la autorización de datos del cliente (2026-10-25)', () => {
     const html = render(vista(tarifas))
     expect(html).not.toContain('data-confirmacion-sin-autorizacion')
     expect(botonPrincipal(html).apagado).toBe(false)
+  })
+})
+
+describe('H10-2 · un negocio perdido no ofrece «El cliente confirmó»', () => {
+  const tarifas: TarifaConfirmable[] = [{ itinerarioId: null, nombre: 'Total de la cotización', esRecomendada: false, precio: TOTAL, motivo: null }]
+  const panel = (v: VistaConfirmacion) =>
+    renderToStaticMarkup(React.createElement(ConfirmacionViajePanel, { vista: v, puedeConfirmar: true, esDireccion: false }))
+
+  it('abierto: el botón está', () => {
+    expect(texto(panel(vista(tarifas, { enConfirmacion: false, antesDeConfirmacion: true })))).toContain('El cliente confirmó')
+  })
+
+  it('perdido en Seguimiento: no se pinta el botón', () => {
+    const html = panel(vista(tarifas, { enConfirmacion: false, antesDeConfirmacion: true, negocioAbierto: false }))
+    expect(texto(html)).not.toContain('El cliente confirmó')
   })
 })

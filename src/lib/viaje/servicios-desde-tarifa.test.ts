@@ -191,6 +191,28 @@ describe('número de vuelo por tramo', () => {
     expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
   })
 
+  it('M9-3 · Iberia BOG→MAD nocturno de solo ida: el servicio no lleva un regreso MAD→BOG', () => {
+    const LECTURA_NOCTURNO = lectura(
+      { aerolinea: 'Iberia', origen: 'Bogotá', destino: 'Madrid', fecha_salida: '2027-07-01', fecha_regreso: '2027-07-02' },
+      [
+        { label: 'Hora de salida (ida)', valor: '16:55' },
+        { label: 'Hora de llegada (ida)', valor: '08:45' },
+        { label: 'Hora de salida (regreso)', valor: '16:55' },
+        { label: 'Hora de llegada (regreso)', valor: '08:45' },
+        { label: 'Nº de vuelo', valor: 'IB 6584' },
+      ],
+    )
+    const guardados = [
+      tramo('ida', { origen: 'Bogotá', destino: 'Madrid', fecha: '2027-07-01', salida: '16:55', llegada: '08:45' }),
+      tramo('regreso', { origen: 'Madrid', destino: 'Bogotá', fecha: '2027-07-02', salida: '16:55', llegada: '08:45' }),
+    ]
+    for (const tramos of [guardados, null]) {
+      const f = vuelo({ tarifa_pax: LECTURA_NOCTURNO, tramos })
+      expect(f.tramos).toHaveLength(1)
+      expect(f.tramos?.[0]).toMatchObject({ fecha: '2027-07-01', origen: 'Bogotá', destino: 'Madrid' })
+    }
+  })
+
   it('items.tramos con forma rota (regreso primero) no se usa: manda la lectura', () => {
     const f = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: [TRAMOS_REDONDO[1], TRAMOS_REDONDO[0]] })
     expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])

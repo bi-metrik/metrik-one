@@ -401,7 +401,7 @@ export function lineaDuda(d: Duda): string {
 
 /** «"ya te dije la fecha": ¿cuál es el regreso?» → «¿Cuál es el regreso?». Si no hay pregunta después, igual. Pura. */
 export function sinFraseCitada(pregunta: string): string {
-  const m = pregunta.match(/^\s*(?:["“«][^"”»]{1,200}["”»]\s*(?:y\s+(?:luego\s+)?["“«][^"”»]{1,200}["”»]\s*)?):\s*(.+)$/s);
+  const m = pregunta.match(/^\s*(?:["“«][^"”»]{1,200}["”»]\s*(?:y\s+(?:luego\s+)?["“«][^"”»]{1,200}["”»]\s*)?):\s*([\s\S]+)$/);
   if (!m || !m[1].trim()) return pregunta;
   const resto = m[1].trim();
   return resto.charAt(0) === '¿' ? `¿${resto.charAt(1).toUpperCase()}${resto.slice(2)}` : `${resto.charAt(0).toUpperCase()}${resto.slice(1)}`;
