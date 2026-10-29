@@ -21,7 +21,7 @@ import { llavesDelTexto, tieneLlave } from '../../wa-cliente-reglas.ts';
 import type { FichaCliente, Llave } from '../../wa-cliente-reglas.ts';
 import { normal } from '../verificador.ts';
 import { propuestaVigente } from '../nucleo.ts';
-import { adjuntosDe, escritosDelViaje, filasDelViaje, mismoEntendido, nombramientos, textoParaCarga } from './carga.ts';
+import { adjuntosDe, escritosDelViaje, filasDelViaje, mismoEntendido, nombramientos, pedidoDeTanda, textoParaCarga } from './carga.ts';
 import type { AdjuntoCarga } from './carga.ts';
 import { esAdjuntoEntrante, preparadorDeAdjuntos, sinLectura } from '../adjuntos.ts';
 import type { PuertoAdjuntos } from '../adjuntos.ts';
@@ -89,8 +89,10 @@ export interface PuertoBandeja {
   /**
    * La extracción de hoy, sin escribir: lo que cambiaría y lo que faltaría. `plan` es lo que se escribe con el toque.
    * `previo`: el plan de la propuesta pendiente del mismo viaje, que se une (lo nuevo gana solo en el mismo campo).
+   * `pedido`: lo que el comercial escribió al pedir la carga de una tanda (`pedidoDeTanda`). La extracción lo lee aparte,
+   * después de los textos, y manda sobre ellos cuando chocan; no es parte de lo que la propuesta consume.
    */
-  prepararCarga(viajeId: string, textos: string[], previo?: unknown): Promise<CargaPreparada>;
+  prepararCarga(viajeId: string, textos: string[], previo?: unknown, pedido?: string[]): Promise<CargaPreparada>;
   /** `escritos`: lo que quedó escrito, por etiqueta y legible (`registradoDe`). */
   cargar(viajeId: string, plan: unknown): Promise<{ lineas: string[]; escritos?: Record<string, string> }>;
   crearCliente(nombre: string, llave: Llave): Promise<{ ok: true; id: string; nombre: string } | { ok: false; motivo: string }>;
@@ -683,7 +685,11 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
         const t = tanda(ctx.conversacion);
         if (!t.length) return { ok: false, error: 'No hay mensajes reenviados sin cargar. Si el comercial escribió el dato, usa anotar_en_viaje.', candado: 'tanda_vacia' };
         // Una foto o un PDF de la tanda entra con lo que dice el archivo (si se leyó) y queda de soporte con el toque.
-        const prep = await puerto.prepararCarga(r.v.id, t.map(textoParaCarga).filter(Boolean));
+        // Lo que escribió al pedirla («cárgalo en el G1 26 7, pero salen el 10») va aparte: manda si choca con la tanda.
+        const pedido = pedidoDeTanda(ctx.conversacion, t, r.v.codigo, opcionNombrada, await sueltosDe(ctx));
+        const prep = pedido.length
+          ? await puerto.prepararCarga(r.v.id, t.map(textoParaCarga).filter(Boolean), undefined, pedido)
+          : await puerto.prepararCarga(r.v.id, t.map(textoParaCarga).filter(Boolean));
         return { ok: true, propuesta: propuestaDeCarga(accion, r.v, prep, t.map((f) => f.id), puerto.soportesEnViaje ? adjuntosDe(t) : []) };
       }
       // anotar_en_viaje: lo que el comercial escribió de ESE viaje en la conversación, no solo el texto del modelo
@@ -707,6 +713,18 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
       if (pendiente && mismoEntendido([...prep.entendido, ...(prep.duda ? [prep.duda] : [])], [...((pendiente.datos.entendido as string[] | undefined) ?? []), ...(typeof pendiente.datos.duda === 'string' ? [pendiente.datos.duda] : [])])) {
         // Nada nuevo frente a la pendiente: es la misma (el núcleo la reenvía con sus botones, misma huella).
         return { ok: true, propuesta: { accion, sobre: r.v.codigo, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
+      }
+      // Nada nuevo en lo que ESCRIBIÓ, pero hay reenvíos sin cargar: «cárgalo en el G1 26 7» habla de la tanda, y la
+      // duda o el «ya está» de lo escrito no aplican (arnés del 2026-10-29, mano derecha: con la orden sola, la extracción
+      // preguntaba «¿qué significa G1 26 7?» o el modelo decía que lo del PDF «quedó registrado»). Lo dice el estado, no
+      // una palabra: el modelo decide si el pedido es la tanda.
+      const pendientes = !prep.entendido.length ? tanda(ctx.conversacion) : [];
+      if (pendientes.length) {
+        return {
+          ok: false,
+          error: `Lo que el comercial escribió de ${r.v.codigo} no trae datos del viaje, y hay ${pendientes.length === 1 ? '1 mensaje reenviado' : `${pendientes.length} mensajes reenviados`} sin cargar (la tanda: ${pendientes.map((f) => `#${f.id}`).join(', ')}). Si lo que pide es cargar eso en ${r.v.codigo}, propón \`cargar_tanda\` en ese viaje; nada quedó escrito todavía.`,
+          candado: prep.duda ? 'solo_duda' : 'sin_datos_nuevos',
+        };
       }
       if (!prep.entendido.length && prep.duda) {
         return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos para anotar, pero hay algo que no quedó claro. No propongas anotar: pregúntale con \`responder\`, tal cual: ${prep.duda}`, candado: 'solo_duda' };

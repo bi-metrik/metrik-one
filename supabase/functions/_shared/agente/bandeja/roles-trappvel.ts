@@ -93,6 +93,19 @@ function oneParaLaAgencia(f: Ficha): Ficha | null {
       return { ...f, cuando: 'piden facturas, crear planes de cobro, pagos que no son de una cuota programada, cambios de etapa, horas, cartera, cerrar viajes, borrar un gasto, cotizar o cambiarle a un gasto algo distinto del monto y el soporte (el monto de un gasto sin revisar sí: `corregir_gasto`; el soporte que le falta: `adjuntar_soporte`)' };
     case 'glo.negocio':
       return { ...f, hacer: 'negocio = en la agencia, cada viaje es un negocio de ONE con el MISMO código («M1 26 5»). Un gasto, un pago recibido o una actividad «del viaje M1 26 5» van a ese negocio; `buscar_negocios`, `ver_negocio` y `negocios_abiertos` también ven los viajes.' };
+    // Las de los archivos de ONE dan por hecho que todo archivo es el soporte de un gasto; en la agencia casi siempre es lo
+    // que mandó un cliente (la solicitud, un pantallazo). Con el «cuando» de ONE, en el arnés del 2026-10-29 el modelo
+    // trataba la solicitud en PDF como soporte (`anotar_en_viaje` con el texto del archivo en vez de `cargar_tanda`) y
+    // una factura reenviada con la tanda frenaba la carga del viaje. Aquí aplican solo al recibo de algo que se pagó o al
+    // comprobante de un dinero que entró; qué es cada archivo lo decide el modelo por el contexto (`g.viaje_o_gasto`).
+    case 'g.soporte':
+      return { ...f, cuando: 'llega una foto o un PDF que es el recibo o la factura de algo que se pagó, o el comprobante de un dinero que entró, o la persona habla del soporte de un gasto (lo que mandó un cliente para su viaje no es soporte de un gasto)' };
+    case 'g.varios_soportes':
+      return { ...f, cuando: 'llegan varios recibos o facturas seguidos para registrar como gastos' };
+    case 'g.foto_sola':
+      return { ...f, cuando: 'llega una foto o un PDF sin texto, sin «lo que dice el archivo», que no es de un viaje y sin ningún gasto en curso ni registrado sin soporte' };
+    case 'g.adjunto_leido':
+      return { ...f, cuando: 'hay «lo que dice el archivo» en el soporte de un gasto o de un ingreso' };
     case 'g.nombrar_negocio':
       return { ...f, cuando: 'nombras un negocio al proponer o consultar un gasto, un ingreso o una actividad' };
     case 'g.ayuda':
@@ -103,10 +116,12 @@ function oneParaLaAgencia(f: Ficha): Ficha | null {
 }
 
 const MANO_DERECHA_PROPIAS: Ficha[] = [
+  // «Si no lo dijo, pregunta quién lo lleva» ya lo dice `g.natural`: repetido aquí, el modelo preguntaba quién lleva el
+  // viaje antes de crear al cliente nuevo y no lo creaba con «sí, créala» (arnés del 2026-10-29, r-cliente-nuevo).
   g('g.rol_dueno', 'siempre', null,
-    'Quien te escribe es el dueño de la agencia: trato directo, sin rodeos. Puede abrir un viaje para cualquiera del equipo comercial: si dice «yo» o «lo llevo yo», lo lleva él (si está en el equipo comercial); si nombra a alguien, esa persona; si no lo dijo, pregunta quién lo lleva (nunca lo asumas).'),
+    'Quien te escribe es el dueño de la agencia: trato directo, sin rodeos. Puede abrir un viaje para cualquiera del equipo comercial: si dice «yo» o «lo llevo yo», lo lleva él (si está en el equipo comercial); si nombra a alguien, esa persona.'),
   g('g.viaje_o_gasto', 'siempre', 'llega algo que puede ser de un viaje o de la plata (una foto, un PDF, un audio, un reenvío)',
-    'decide por el contexto, no preguntes por costumbre: un pedido o datos de un cliente (destino, fechas, pasajeros, lo que quiere) van al viaje (`anotar_en_viaje`, `cargar_tanda`, `viaje_nuevo`); un recibo o una factura de algo que se pagó es un gasto (`proponer(gasto)`); un comprobante de dinero que entró es un ingreso. Una llamada, una reunión o una nota de gestión va como actividad del negocio, no como dato del viaje. Si de verdad no se sabe, pregunta en una línea si es para el viaje o un gasto.'),
+    'decide por el contexto, no preguntes por costumbre: un pedido o datos de un cliente (destino, fechas, pasajeros, lo que quiere) van al viaje (`anotar_en_viaje`, `cargar_tanda`, `viaje_nuevo`); un recibo o una factura de algo que se pagó es un gasto (`proponer(gasto)`); un comprobante de dinero que entró es un ingreso. Una llamada, una reunión o una nota de gestión va como actividad del negocio, no como dato del viaje. Si piden cargar una tanda en un viaje y entre lo reenviado viene un recibo que no es del viaje, no frenes la carga por eso: propón `cargar_tanda` con lo del viaje y di en una línea que ese recibo no parece del viaje y que, si quiere, lo registras como gasto después. Si de verdad no se sabe, pregunta en una línea si es para el viaje o un gasto.'),
 ];
 
 /** El perfil y los temas de la mano derecha: los de la bandeja (con sus valores) más lo de ONE. */

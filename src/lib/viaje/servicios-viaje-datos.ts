@@ -11,7 +11,7 @@
  */
 
 import { contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
-import { fechasDelServicio, filasDeServicioDeTarifa, type FilaServicioNueva, type TipoServicio } from './servicios-desde-tarifa'
+import { empresaDelOperador, fechasDelServicio, filasDeServicioDeTarifa, type FilaServicioNueva, type TipoServicio } from './servicios-desde-tarifa'
 import { completadoDeFila, fechasDeFila, leerTramos, type FechasServicio, type TramoServicio } from './fechas-servicio'
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
 import { GATE_SERVICIOS_LISTOS, faltaParaServiciosListos, type FaltaServicio } from './gate-servicios'
@@ -106,7 +106,8 @@ export async function generarServiciosDesdeTarifa(
       existentes > 0 ? (await completarFechasDeServicios(db, { workspaceId: args.workspaceId, negocioId: args.negocioId, salidaViaje })).completadas : 0
     if (faltan.length === 0) return { ok: true, creadas: 0, existentes, completadas: await completar() }
 
-    const filas = faltan.map(f => aFila(f, args, itinerarioId))
+    const empresas = await empresasDeOperadores(db, args.workspaceId, faltan)
+    const filas = faltan.map(f => aFila(f, args, itinerarioId, empresas))
     const { error: insErr } = await db.from('negocio_servicios').insert(filas)
     if (!insErr) return { ok: true, creadas: filas.length, existentes, completadas: await completar() }
     if (!esChoqueDeUnico(insErr)) return { ok: false, error: insErr.message }
@@ -135,6 +136,7 @@ function aFila(
   f: FilaServicioNueva,
   args: { workspaceId: string; negocioId: string; cotizacionId: string; staffId?: string | null },
   itinerarioId: string | null,
+  empresas: ReadonlyArray<{ id: string; nombre?: string | null; razon_social?: string | null }> = [],
 ) {
   return {
     workspace_id: args.workspaceId,
@@ -145,6 +147,7 @@ function aFila(
     tipo: f.tipo,
     nombre: f.nombre,
     proveedor_nombre: f.proveedor_nombre,
+    proveedor_empresa_id: f.buscarEmpresa ? empresaDelOperador(f.proveedor_nombre, empresas) : null,
     ...columnasDeFechas(f),
     fechas_leidas_at: new Date().toISOString(),
     costo_cotizado: f.costo_cotizado,
@@ -153,6 +156,21 @@ function aFila(
     estado: 'por_reservar',
     created_by: args.staffId ?? null,
   }
+}
+
+/**
+ * Las empresas del Directorio que podrían ser el operador de un paquete de bloqueo (H10, 2026-10-29).
+ * Solo se consulta si alguna fila lo pide; si la lectura falla, ninguna (la fila queda con el texto).
+ */
+async function empresasDeOperadores(
+  db: Db,
+  workspaceId: string,
+  filas: readonly FilaServicioNueva[],
+): Promise<Array<{ id: string; nombre: string | null; razon_social: string | null }>> {
+  if (!filas.some(f => f.buscarEmpresa && f.proveedor_nombre)) return []
+  const { data, error } = await db.from('empresas').select('id, nombre, razon_social').eq('workspace_id', workspaceId)
+  if (error) return []
+  return (data ?? []) as Array<{ id: string; nombre: string | null; razon_social: string | null }>
 }
 
 /**

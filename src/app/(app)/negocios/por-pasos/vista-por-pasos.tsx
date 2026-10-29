@@ -27,6 +27,7 @@ import {
   agregarOpcionPorPasos,
 } from '@/app/(app)/negocios/por-pasos-actions'
 import { borrarOpcionesPorPasos, reponerOpcionesPorPasos, soltarImagenesPorPasos } from '@/app/(app)/negocios/por-pasos-borrar-actions'
+import { avisosDeTrayectoRepetido } from '@/lib/cotizaciones/trayecto-repetido'
 import { autorizarBajoElMinimo } from '@/app/(app)/negocios/margen-salida-actions'
 import { eliminarItinerario, guardarMotivoDeTarifa, renombrarItinerario } from '@/app/(app)/negocios/itinerario-actions'
 import type { LecturaDevuelta } from '@/app/(app)/negocios/tarifa-pax-actions'
@@ -242,6 +243,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     if (!f) return null
     return textoCortoDeOpcion({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
   }, [porId, p.composicionViaje])
+  // G1 · M9-1 · un vuelo y un traslado (el tren) del mismo trayecto y día se cobran los dos: se dice.
+  const trayectoRepetido = useMemo(() => avisosDeTrayectoRepetido(tramos.flatMap(t => t.servicios), id => porId.get(id)), [tramos, porId])
   const asociados = useMemo(() => hotelesAsociados(lineas), [lineas])
   const candidatasPorServicio = useMemo(() => new Map(ranurasConAlternativas(lineas).map(r => [r.grupo, r.candidatos])), [lineas])
   const conOpciones: ServicioConOpciones[] = servicios
@@ -516,7 +519,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                 const resumen = s.opciones.length > 1
                   ? `${s.opciones.length} opciones · ${s.opciones.map(nombreDeOpcion).join(' · ')}`
                   : resumenDeOpcion(porId.get(s.opciones[0])!) ?? nombreDeOpcion(s.opciones[0])
-                const avisoServicio = s.opciones.map(faltaPrecio).find(Boolean) ?? (renglon?.sinCosto ? 'Falta el costo' : null)
+                const avisoServicio = s.opciones.map(faltaPrecio).find(Boolean) ?? (renglon?.sinCosto ? 'Falta el costo' : null) ?? trayectoRepetido.get(s.grupo) ?? null
                 return (
                   <ServicioPorPasos
                     key={s.grupo}

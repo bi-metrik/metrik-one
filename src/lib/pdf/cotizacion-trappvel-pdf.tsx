@@ -1339,6 +1339,8 @@ export default function CotizacionTrappvelPDF({
   // Con varias tarifas hay un cargo por hotel, y tres hoteles de la misma ciudad dirían tres
   // veces lo mismo: la línea se escribe una vez.
   const noIncluye = [
+    // Lo que el operador del paquete dice que no incluye (V5, 2026-10-29): es un hecho del documento.
+    ...(v.noIncluye ?? []).map(t => t.trim()).filter(Boolean),
     ...new Set(v.cargosEnDestino.map(c => `${c.concepto}${c.ciudad ? ` (${c.ciudad})` : ''}, que se pagan en destino`)),
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]

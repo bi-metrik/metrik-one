@@ -207,6 +207,8 @@ import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
 import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
+import { areaNoCierraElBloque } from '@/lib/negocios/cierre-por-tipo'
+import { configEntrega, GATE_VOUCHERS } from '@/lib/viaje/entrega'
 import { autorizacionEstaPendiente, faltaAutorizacionDelNegocio, lineaExigeAutorizacion, MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
@@ -278,6 +280,9 @@ export type EtapaNegocio = {
   // etapa de MAYOR orden se queda sin ninguna después, el cálculo devuelve null y la
   // pantalla concluye que el proceso termina ahí, dejándola sin botón de avanzar.
   routing?: { default_etapa_orden?: number } | null
+  // config_extra.gates → los gates con nombre de la etapa. Hoy solo lo lee el estado derivado del
+  // bloque de servicios: en la etapa que pide los vouchers, el bloque no está completo sin ellos.
+  gates?: string[]
 }
 
 /**
@@ -1440,6 +1445,7 @@ async function getNegocioDetalle(id: string): Promise<{
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
       reproceso_operativo: tiposReprocesoOperativo(e.config_extra as Record<string, unknown> | null),
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
+      gates: (((e.config_extra as { gates?: unknown } | null)?.gates ?? []) as unknown[]).filter((g): g is string => typeof g === 'string'),
     }))
 
     // ── Desenlace que devolvió el caso a una etapa anterior ────────────────────
@@ -8319,7 +8325,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // aunque la etapa pertenezca a otra. Sin la marca, el resultado es el de antes.
     const invitadoAEsteBloque = ((configExtra.areas_editoras ?? []) as Area[])
       .some(a => areasEfectivasUsuario.has(a))
-    if (areaReadonly && !invitadoAEsteBloque) enrichedConfigExtra._areaReadonly = true
+    // Servicios del viaje: los permisos son POR FILA (`puedeEditarServicios`, `puedeAdjuntarVoucher`)
+    // y el servidor los revisa en cada acción. Cerrarlo por área dejaba a la comercial responsable
+    // sin el voucher que le llega a ella en Reservas y pagos (QA 2026-10-29, H3-1).
+    if (areaReadonly && !invitadoAEsteBloque && !areaNoCierraElBloque(defTipo)) enrichedConfigExtra._areaReadonly = true
     // Devolución en la copia heredada: la capacidad la declara el bloque ORIGINAL una sola
     // vez y la copia la hereda junto con el archivo. Declararla en cada copia sería
     // declarar lo mismo cuatro veces y garantizar que se desincronicen, con un síntoma
@@ -8477,14 +8486,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // (barrido 2026-10-22). Se deriva con la MISMA regla del gate, se pinta y se persiste en los dos
   // sentidos: una autorización revocada vuelve a pendiente. Ver `estado-bloques-derivado.ts`.
   {
-    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown> }
-    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[] }> = []
+    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown>; etapa_id?: string }
+    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[]; exigeVouchers?: boolean }> = []
+    // En la etapa cuyo gate pide los vouchers (Documentos y entrega), el bloque de servicios no
+    // está completo sin ellos: antes nacía «Completo» con el gate pidiéndolos (QA 2026-10-29, M1-1).
+    const entregaActiva = configEntrega(lineaConfigExtra).activo
+    const pideVouchers = (etapaId: string | undefined) =>
+      entregaActiva && !!etapaId && (base.etapasLinea.find(e => e.id === etapaId)?.gates ?? []).includes(GATE_VOUCHERS)
     const recoger = (lista: ConInstancia[]) => lista.forEach((b, i) => {
       const tipo = tipoDerivado(b.bloque_definitions?.tipo, b.config_extra)
       if (!tipo || !b.instancia) return
       candidatos.push({
         lista, i, instanciaId: b.instancia.id, actual: b.instancia.estado, tipo,
         ...(tipo === 'ficha' ? { campos: (b.config_extra.campos ?? []) as CampoContacto[] } : {}),
+        ...(tipo === 'servicios' ? { exigeVouchers: pideVouchers(b.etapa_id) } : {}),
       })
     })
     recoger(bloquesConExtra as unknown as ConInstancia[])

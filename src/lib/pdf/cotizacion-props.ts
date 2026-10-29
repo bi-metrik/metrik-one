@@ -142,6 +142,11 @@ export interface ViajePDF {
    * «Inversión» repetida.
    */
   incluye?: string[]
+  /**
+   * Lo que el paquete de bloqueo NO incluye, como lo dijo el operador (V5 del QA del 2026-10-29).
+   * Sale en «A tener en cuenta». Ausente = nada que decir.
+   */
+  noIncluye?: string[]
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]

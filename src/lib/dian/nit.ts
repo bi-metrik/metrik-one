@@ -109,6 +109,30 @@ export function nitConGuion(raw: string | null | undefined): string | null {
   return sep.dv != null ? `${sep.base}-${sep.dv}` : sep.base
 }
 
+/**
+ * NIT del proveedor partido en { base, dv } para la ficha de la Relación de facturas
+ * (plantilla del 2026-10-28, SOE-033), que imprime el NIT SIN DV y el DV en su propia
+ * casilla.
+ *
+ * ⚠️ NO adivina. El `nit_proveedor` de la Factura ya llega sin DV: la extracción lo
+ * normaliza con `nit_sin_dv` desde el 2026-06-29. Pasarlo otra vez por `separarNitDv`
+ * le volvería a quitar el último dígito a todo NIT limpio cuyo último dígito resulte
+ * ser un DV válido (Bancolombia, 890903938 → 89090393; ver el aviso de ÁMBITO). Por
+ * eso aquí solo se separa lo que viene separado EXPLÍCITAMENTE con guion (un override
+ * escrito a mano como «860019063-8»); el resto se toma entero como base.
+ *
+ * El DV siempre se CALCULA sobre la base (módulo 11): es determinista, y uno tecleado
+ * o leído puede venir mal.
+ */
+export function nitBaseYDv(raw: string | null | undefined): { base: string; dv: string | null } | null {
+  const texto = (raw ?? '').trim()
+  if (!soloDigitos(texto)) return null
+  const conGuion = texto.match(/^([\d.\s]+)-\s*\d$/)
+  const base = soloDigitos(conGuion ? conGuion[1] : texto)
+  if (!base) return null
+  return { base, dv: calcularDvNit(base) }
+}
+
 // ── El NIT del RUT con el DV pegado ──────────────────────────────────────────
 //
 // Desde ~2026-08-21 la extracción del RUT devuelve la casilla 5 con el DV de la

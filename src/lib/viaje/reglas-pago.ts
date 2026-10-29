@@ -12,6 +12,11 @@
  *   · `desviacion_costo`: lo pagado al servicio supera lo cotizado en más del umbral (5 %) Y en
  *     más del piso en pesos (sale en $0; el piso de $50.000 se le propone a Edgar, Vera N1). SOLO
  *     cuenta hacia arriba: un pago más barato o la primera parte de un pago partido no piden nada.
+ *     Si quien llama pasa el VIAJE (`viaje`), el sobrecosto que otros servicios ya compensaron no
+ *     pide nada (QA Trappvel 2026-10-29, H3-4): Edgar cuida el margen del viaje, no el de cada
+ *     fila. Compensar es haber REGISTRADO el ahorro (lo pagado o lo que el proveedor dijo que
+ *     cobra), nunca suponerlo: una fila sin registrar cuenta por lo cotizado. Si el proveedor de
+ *     esta misma fila dijo que cobra menos (`valorPorPagar`), la desviación se mide contra eso.
  *
  * La aprobación guarda una HUELLA de lo aprobado. Si cambia el monto (o el medio), la huella ya no
  * coincide y la aprobación no sirve: hay que volver a pedirla (F3-3).
@@ -88,6 +93,18 @@ export interface EntradaReglasPago {
   pagadoAntes: number
   /** Lo cotizado del servicio (contra esto se mide la desviación, Noor §5). */
   costoCotizado: number
+  /**
+   * Lo que el proveedor dijo que cobra, si es distinto de lo cotizado (`valor_por_pagar`). Si es
+   * MENOR, la desviación se mide contra él: el ahorro ya declarado no se gasta sin aprobación.
+   */
+  valorPorPagar?: number | null
+  /**
+   * El viaje entero, para medir la desviación contra él (H3-4). Sin esto, la regla es la de
+   * siempre: por servicio. `cotizado`: Σ lo cotizado de las filas que van (esta incluida).
+   * `comprometidoOtros`: Σ de las OTRAS filas que van, cada una por lo mayor entre lo pagado y
+   * lo que hay que pagarle (`valor_por_pagar` o lo cotizado).
+   */
+  viaje?: { cotizado: number; comprometidoOtros: number } | null
   medio: MedioPagoProveedor
   /** Cobrado confirmado al cliente en el negocio (pagos con fecha). */
   cobradoCliente: number
@@ -136,6 +153,28 @@ export function desviacion(total: number, costoCotizado: number): { pesos: numbe
   return { pesos: sobre, pct: cot > 0 ? (sobre / cot) * 100 : Infinity }
 }
 
+/** La base contra la que se mide la desviación del servicio: lo cotizado o, si el proveedor dijo que cobra menos, eso. */
+export function baseDesviacion(costoCotizado: number, valorPorPagar?: number | null): number {
+  const cot = Number(costoCotizado) || 0
+  const v = valorPorPagar === null || valorPorPagar === undefined ? NaN : Number(valorPorPagar)
+  return Number.isFinite(v) && v >= 0 && v < cot ? v : cot
+}
+
+/**
+ * Cuánto se pasa el VIAJE de lo cotizado con este pago (pesos, nunca negativo): las otras filas
+ * por lo comprometido y esta por lo mayor entre el total tras el pago y lo que hay que pagarle.
+ */
+export function desviacionDelViaje(
+  total: number,
+  propio: { costoCotizado: number; valorPorPagar?: number | null },
+  viaje: { cotizado: number; comprometidoOtros: number },
+): number {
+  const v = propio.valorPorPagar === null || propio.valorPorPagar === undefined ? NaN : Number(propio.valorPorPagar)
+  const aPagarPropio = Number.isFinite(v) ? v : Number(propio.costoCotizado) || 0
+  const proyectado = (Number(viaje.comprometidoOtros) || 0) + Math.max(Number(total) || 0, aPagarPropio)
+  return Math.max(0, Math.round(proyectado - (Number(viaje.cotizado) || 0)))
+}
+
 /** ¿El cliente ya abonó lo suficiente para pagarle a un proveedor? */
 export function clienteAbono(cobrado: number, precioAprobado: number, config: Pick<ConfigReglasPago, 'abonoMinimoPct'>): boolean {
   const c = Number(cobrado) || 0
@@ -165,15 +204,27 @@ export function reglasQueRompe(e: EntradaReglasPago): ReglaRota[] {
       detalle: { medio: e.medio.id, medio_label: e.medio.label },
     })
   }
-  const d = desviacion(total, e.costoCotizado)
-  if (d.pesos > 0 && d.pct > e.config.umbralPct && d.pesos > e.config.pisoPesos) {
+  const base = baseDesviacion(e.costoCotizado, e.valorPorPagar)
+  const contraLoQueCobra = base < (Number(e.costoCotizado) || 0)
+  const d = desviacion(total, base)
+  const viaje = e.viaje ? desviacionDelViaje(total, e, e.viaje) : null
+  // El viaje compensa: lo que esta fila se pasa ya lo ahorraron otras (registrado, no supuesto).
+  const compensado = viaje !== null && viaje <= e.config.pisoPesos
+  if (d.pesos > 0 && d.pct > e.config.umbralPct && d.pesos > e.config.pisoPesos && !compensado) {
     out.push({
       tipo: 'desviacion_costo',
       huella: huellaRegla('desviacion_costo', total, e.medio.id),
-      texto: Number.isFinite(d.pct)
-        ? `Costó ${pesos(d.pesos)} más de lo cotizado (+${pct1(d.pct)} %).`
-        : `Costó ${pesos(d.pesos)} y no tenía costo cotizado.`,
-      detalle: { cotizado: Math.round(Number(e.costoCotizado) || 0), total, sobrecosto: d.pesos, pct: Number.isFinite(d.pct) ? Math.round(d.pct * 10) / 10 : null },
+      texto: (contraLoQueCobra
+        ? `Costó ${pesos(d.pesos)} más de lo que dijo que cobraba el proveedor (${pesos(base)}).`
+        : Number.isFinite(d.pct)
+          ? `Costó ${pesos(d.pesos)} más de lo cotizado (+${pct1(d.pct)} %).`
+          : `Costó ${pesos(d.pesos)} y no tenía costo cotizado.`)
+        + (viaje !== null && viaje < d.pesos ? ` El viaje entero se pasa ${pesos(viaje)}.` : ''),
+      detalle: {
+        cotizado: Math.round(Number(e.costoCotizado) || 0), total, sobrecosto: d.pesos, pct: Number.isFinite(d.pct) ? Math.round(d.pct * 10) / 10 : null,
+        ...(contraLoQueCobra ? { valor_por_pagar: Math.round(base) } : {}),
+        ...(e.viaje ? { viaje_cotizado: Math.round(Number(e.viaje.cotizado) || 0), viaje_sobrecosto: viaje } : {}),
+      },
     })
   }
   return out

@@ -115,7 +115,7 @@ export function instruccionesCarga(
   yaTiene: Record<string, unknown> = {},
   propuesto: Record<string, unknown> = {},
   chat?: ChatPegado,
-  o: { compacta?: boolean; perfil?: boolean; documentos?: boolean } = {},
+  o: { compacta?: boolean; perfil?: boolean; documentos?: boolean; pedido?: boolean } = {},
 ): string {
   const campos = camposEntendibles(fields);
   const deTexto = campos.filter((f) => f.tipo === 'texto' && !opcionesDe(f).length).map((f) => f.slug);
@@ -131,6 +131,7 @@ export function instruccionesCarga(
     `Hoy es ${hoyISO} (Bogotá).`,
     ...(chat ? parrafoChat(chat) : []),
     ...(o.documentos ? PARRAFO_DOCUMENTOS : []),
+    ...(o.pedido ? PARRAFO_PEDIDO : []),
     ...(sabidos.length ? ['', 'Lo que el viaje YA tiene:', ...sabidos] : ['', 'El viaje todavía no tiene datos.']),
     ...(enEspera.length ? ['', 'Lo que ya le propusiste al comercial y todavía no confirma:', ...enEspera] : []),
     '',
@@ -203,6 +204,19 @@ export const PARRAFO_DOCUMENTOS = [
   'palabras. El archivo manda en los datos duros (fechas exactas, nombres, cantidades, edades); el comercial manda en lo',
   'que pide cambiar o aclarar. Si el archivo y lo escrito chocan en un dato, no elijas: deja el campo en "' + POR_DEFINIR + '" y',
   'pregúntalo en dudas con las dos versiones. Un comprobante de pago es «tercero»: no sostiene valores del viaje.',
+];
+
+/**
+ * Solo cuando la carga trae lo que el comercial escribió al pedirla (`cargar_tanda`, 2026-10-29): lo suyo va al final,
+ * «escrito por el comercial», y manda sobre lo reenviado o lo leído de un archivo cuando chocan. Sin pedido, el prompt
+ * es el de siempre.
+ */
+export const PARRAFO_PEDIDO = [
+  '',
+  'Los últimos mensajes, «escrito por el comercial», son lo que el comercial escribió al pedir que se cargara lo',
+  'reenviado. Sostienen valores como los demás. Si lo que escribió choca con un reenvío o con un archivo en un dato',
+  '(«pero salen el 10»), manda lo que escribió el comercial, también frente a un archivo: es su corrección. Devuelve su',
+  'valor con la frase de su mensaje; no lo dejes sin definir ni lo preguntes. Lo que no toca, sale de lo reenviado.',
 ];
 
 /** El `responseSchema` de la extracción, generado de la config. */

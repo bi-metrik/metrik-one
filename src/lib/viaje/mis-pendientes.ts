@@ -259,7 +259,8 @@ export interface ServicioProximo {
 
 function momentosDe(s: ServicioPendiente): Array<{ fecha: string; hora: string | null; momento: string | null }> {
   const tramos = leerTramos(s.tramos) ?? []
-  if (s.tipo === 'vuelo' && tramos.length > 0) {
+  // Un vuelo, o el paquete de bloqueo con los tramos de su vuelo (H10, 2026-10-29).
+  if ((s.tipo === 'vuelo' || s.tipo === 'otro') && tramos.length > 0) {
     return tramos.map((t, i) => ({
       fecha: t.fecha,
       hora: t.hora_salida,
