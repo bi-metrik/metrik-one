@@ -90,9 +90,9 @@ const s = StyleSheet.create({
   fichaTituloTexto: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#FFFFFF' },
   fila: { flexDirection: 'row' },
   etiqueta: { backgroundColor: '#EEF1F4', padding: '4 5', borderRight: BORDE, borderBottom: BORDE, justifyContent: 'center' },
-  etiquetaTexto: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#111827' },
+  etiquetaTexto: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#111827', lineHeight: 1.2 },
   valor: { padding: '4 5', borderRight: BORDE, borderBottom: BORDE, justifyContent: 'center' },
-  valorTexto: { fontSize: 9 },
+  valorTexto: { fontSize: 9, lineHeight: 1.2 },
   // Totales: tabla de tres columnas
   totales: { borderTop: BORDE, borderLeft: BORDE, marginBottom: 12 },
   totalCelda: { width: '33.333%', padding: '4 5', borderRight: BORDE, borderBottom: BORDE, alignItems: 'center' },
@@ -102,7 +102,9 @@ const s = StyleSheet.create({
   closing: { marginBottom: 8, textAlign: 'justify' },
   constancia: { marginBottom: 6, textAlign: 'justify' },
   // Firma
+  firmas: { flexDirection: 'row', justifyContent: 'space-between' },
   signatureBlock: { marginTop: 8, width: '50%' },
+  signatureBlockDoble: { marginTop: 8, width: '47%' },
   signatureLine: { borderTop: '1 solid #111827', marginTop: 36, paddingTop: 3 },
   signatureName: { fontSize: 10, fontFamily: 'Helvetica-Bold' },
   signatureDetail: { fontSize: 9, color: '#444444', marginTop: 1 },
@@ -265,18 +267,21 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
           {` a los ${dia} días del mes de ${mes} de ${anio}.`}
         </Text>
 
-        {/* Firmas — una por titular. `wrap={false}`: ver la nota en la declaración
-            juramentada. Aquí se vio el corte al mirar el PDF con dos firmantes. */}
-        {titulares.map((t, i) => (
-          <View key={i} style={s.signatureBlock} wrap={false}>
-            <View style={s.signatureLine}>
-              <Text style={s.signatureName}>{t.nombre}</Text>
-              <Text style={s.signatureDetail}>{`C.C. No. ${t.identificacion ?? '[N.° DE CÉDULA]'}`}</Text>
-              <Text style={s.signatureDetail}>{`Correo electrónico: ${t.email ?? '[CORREO]'}`}</Text>
-              <Text style={s.signatureDetail}>{`Celular: ${t.telefono ?? '[CELULAR]'}`}</Text>
+        {/* Firmas — una por titular, en un bloque `wrap={false}` (ver la nota en la
+            declaración juramentada: se vio el corte al mirar el PDF con dos
+            firmantes). En copropiedad van lado a lado para no saltar de hoja. */}
+        <View style={s.firmas} wrap={false}>
+          {titulares.map((t, i) => (
+            <View key={i} style={titulares.length > 1 ? s.signatureBlockDoble : s.signatureBlock}>
+              <View style={s.signatureLine}>
+                <Text style={s.signatureName}>{t.nombre}</Text>
+                <Text style={s.signatureDetail}>{`C.C. No. ${t.identificacion ?? '[N.° DE CÉDULA]'}`}</Text>
+                <Text style={s.signatureDetail}>{`Correo electrónico: ${t.email ?? '[CORREO]'}`}</Text>
+                <Text style={s.signatureDetail}>{`Celular: ${t.telefono ?? '[CELULAR]'}`}</Text>
+              </View>
             </View>
-          </View>
-        ))}
+          ))}
+        </View>
 
       </Page>
     </Document>

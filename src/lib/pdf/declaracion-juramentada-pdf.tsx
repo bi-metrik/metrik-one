@@ -131,7 +131,9 @@ const s = StyleSheet.create({
   bold: { fontFamily: 'Helvetica-Bold' },
   // Firmas: línea, «Firma» en gris pequeño, nombre y cédula (como la plantilla).
   firmaRol: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#374151', marginBottom: 2 },
+  firmas: { flexDirection: 'row', justifyContent: 'space-between' },
   firmaBloque: { marginTop: 18, width: '50%' },
+  firmaBloqueDoble: { marginTop: 14, width: '47%' },
   firmaRaya: { borderTop: '1 solid #111827', marginTop: 28, paddingTop: 2 },
   firmaEtiqueta: { fontSize: 8, color: '#7A7A7A' },
   firmaLinea: { fontSize: 10 },
@@ -296,31 +298,38 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
           y 443 del Código Penal colombiano).
         </Text>
 
-        {/* Ciudad y fecha: la ciudad del domicilio del solicitante y el día en que se
-            genera el documento (en Bogotá, no en UTC). */}
-        <Text style={s.ciudadFecha} hyphenationCallback={sinCortes}>
-          {`Ciudad y fecha: ${ciudadFirma}, ${hoy.dia} de ${hoy.mes} de ${hoy.anio}`}
-        </Text>
-
-        {/* Firmas — una por titular.
-            `wrap={false}` es obligatorio: con dos firmantes el bloque se partía
-            entre páginas y el nombre quedaba en una hoja y su cédula en la
-            siguiente (PR #277). Una firma partida en un documento que va a la DIAN
-            no sirve; así el bloque completo salta de página si no cabe. */}
-        {titulares.map((t, i) => (
-          <View key={i} style={s.firmaBloque} wrap={false}>
-            {dos && (
-              <Text style={s.firmaRol}>
-                {i === 0 ? 'PRIMER PROPIETARIO – SOLICITANTE' : 'SEGUNDO PROPIETARIO'}
-              </Text>
-            )}
-            <View style={s.firmaRaya}>
-              <Text style={s.firmaEtiqueta}>Firma</Text>
-            </View>
-            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>{`Nombre: ${t.nombre}`}</Text>
-            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>{`C.C.: ${t.identificacion ?? MARCADOR.cedula}`}</Text>
+        {/* Ciudad y fecha + firmas, en UN bloque `wrap={false}`.
+            · Ciudad y fecha: la del domicilio del solicitante y el día en que se
+              genera el documento (en Bogotá, no en UTC). Va pegada a las firmas para
+              que no quede sola al pie de una hoja con las firmas en la siguiente.
+            · Una firma por titular. `wrap={false}` es obligatorio: con dos firmantes
+              el bloque se partía entre páginas y el nombre quedaba en una hoja y su
+              cédula en la siguiente (PR #277). Una firma partida en un documento que
+              va a la DIAN no sirve; así el bloque completo salta de página si no cabe.
+            · En copropiedad las dos firmas van lado a lado: apiladas, el texto más
+              largo de la plantilla del 2026-10-28 las mandaba siempre a una segunda
+              hoja. */}
+        <View wrap={false}>
+          <Text style={s.ciudadFecha} hyphenationCallback={sinCortes}>
+            {`Ciudad y fecha: ${ciudadFirma}, ${hoy.dia} de ${hoy.mes} de ${hoy.anio}`}
+          </Text>
+          <View style={s.firmas}>
+            {titulares.map((t, i) => (
+              <View key={i} style={dos ? s.firmaBloqueDoble : s.firmaBloque}>
+                {dos && (
+                  <Text style={s.firmaRol}>
+                    {i === 0 ? 'PRIMER PROPIETARIO – SOLICITANTE' : 'SEGUNDO PROPIETARIO'}
+                  </Text>
+                )}
+                <View style={s.firmaRaya}>
+                  <Text style={s.firmaEtiqueta}>Firma</Text>
+                </View>
+                <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>{`Nombre: ${t.nombre}`}</Text>
+                <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>{`C.C.: ${t.identificacion ?? MARCADOR.cedula}`}</Text>
+              </View>
+            ))}
           </View>
-        ))}
+        </View>
 
       </Page>
     </Document>
