@@ -24,6 +24,7 @@
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
 - ⚠️⚠️ [Reportes con la llave vencida (28-oct)](project_valida_reportes_llave_vencida.md) — Valida#83 primero; llave y luego firma en 401; id UUID en ruta firmada
 - ⚠️ [Términos autoservicio v2.2 (11.3 reverso)](project_valida_terminos_v2_2_reverso.md) — solo registros nuevos; re-aceptación v2.1 sin construir; 13.1 ≠ CDA
+- ⚠️⚠️ [Terminación a los 30 días de suspensión (11.2)](project_valida_terminacion_30_dias.md) — paso 8c; APAGADA en prod; tras terminar la puerta queda libre y reabre reportes
 - ⚠️⚠️ [Reverso corta el plan de Valida (27-oct)](project_valida_reverso_corta_plan.md) — Valida#82 primero; estado en reversado.corte; reactivación = cobro sin plan; correo al cliente encendido (29-oct)
 - ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco SÍ manda el 6; 7d es red; desde 27-oct el ciclo se corta (ver arriba)
 - ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — causa: deploy tras la aceptación; paso 7e; (d) abierto
