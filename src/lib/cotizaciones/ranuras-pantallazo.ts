@@ -775,7 +775,9 @@ export function ranuraSoloPorPasos(ranura: Pick<DefinicionRanura, 'slug'> | null
  * segunda lista para la misma pregunta se desincroniza el día que se agregue un
  * sinónimo: el síntoma sería una columna que desaparece de la tabla sin que nada falle.
  */
-export const RANURAS_COMBINABLES: readonly string[] = [VUELO.slug, HOTEL.slug]
+// El paquete de bloqueo (hotel + vuelo del operador, D5 de Mauricio, 2026-10-29) se cruza como un hotel:
+// cada tarifa lleva UN paquete y la propuesta muestra cada paquete con su precio.
+export const RANURAS_COMBINABLES: readonly string[] = [VUELO.slug, HOTEL.slug, PAQUETE.slug]
 
 /**
  * ¿Un `items.grupo` abre columna en la tabla de combinaciones?

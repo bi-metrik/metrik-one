@@ -421,6 +421,21 @@ export function comisionDePublica(tarifaPax: unknown): number | null {
 }
 
 /**
+ * La comisión de una línea Pública EN PESOS (D2/D3, 2026-10-29): la escrita en pesos, o el % sobre
+ * el precio público de la línea. `null` = nadie la escribió (o la línea no es Pública). Nunca más
+ * que el precio público.
+ */
+export function comisionEnPesos(tarifaPax: unknown, precioPublico: number): number | null {
+  if (!esObj(tarifaPax)) return null
+  const decision = leerTipoTarifa(tarifaPax.tipoTarifa)
+  if (!decision || decision.tipo !== 'publica') return null
+  const base = Math.max(0, Number(precioPublico) || 0)
+  if (decision.comisionMonto !== null && decision.comisionMonto !== undefined) return Math.min(base, decision.comisionMonto)
+  const c = decision.comisionPct
+  return c !== null && c !== undefined && Number.isFinite(c) && c >= 0 && c < 100 ? (c / 100) * base : null
+}
+
+/**
  * Los parámetros para calcular el precio de CADA opción por separado (la tarjeta, «Lo que suma»):
  * sin puntos extra ni descuentos sobre el total. Los puntos se reparten entre las líneas de UNA
  * tarifa y los descuentos son del total: sobre todas las opciones a la vez no significan nada.

@@ -24,6 +24,7 @@ export type MotivoDeBorrador =
   | 'autorizacion_datos'
   | 'precio_por_pasajero'
   | 'paquete_incompleto'
+  | 'comision_publica'
   | 'pantallazos'
   | 'recomendada'
   | 'incompleto'
@@ -44,6 +45,8 @@ export const ORDEN_DE_MOTIVOS: readonly MotivoDeBorrador[] = [
   'autorizacion_datos',
   'precio_por_pasajero',
   'paquete_incompleto',
+  // D3 (2026-10-29): sin la comisión de una Pública el margen no se puede medir.
+  'comision_publica',
   'pantallazos',
   'recomendada',
   'incompleto',
@@ -57,6 +60,7 @@ const ETIQUETAS: Record<MotivoDeBorrador, string> = {
   autorizacion_datos: 'falta la autorización de datos',
   precio_por_pasajero: 'falta el precio por pasajero',
   paquete_incompleto: 'paquete incompleto',
+  comision_publica: 'falta la comisión de una tarifa Pública',
   pantallazos: 'pantallazos por actualizar',
   recomendada: 'falta la tarifa Recomendada',
   incompleto: 'borrador incompleto: falta un costo',
@@ -79,6 +83,8 @@ export interface CondicionesDeBorrador {
   precioPorPasajero?: boolean
   /** Un paquete de bloqueo incompleto (`bloqueo-incompleto.ts`). Ausente = no. */
   paqueteIncompleto?: boolean
+  /** Una opción Pública que va al cliente sin su comisión (`comision-publica.ts`, D3). Ausente = no. */
+  comisionPublica?: boolean
   pantallazos: boolean
   /** Con tarifas: no hay una sola Recomendada marcada «va en propuesta» (`motivoSinRecomendada`). */
   sinRecomendada: boolean
@@ -103,6 +109,7 @@ export function motivosDeBorrador(c: CondicionesDeBorrador): MotivoDeBorrador[] 
     autorizacion_datos: c.autorizacionDatos === true,
     precio_por_pasajero: c.precioPorPasajero === true,
     paquete_incompleto: c.paqueteIncompleto === true,
+    comision_publica: c.comisionPublica === true,
     pantallazos: c.pantallazos,
     recomendada: c.sinRecomendada,
     incompleto: c.faltaCosto === true && c.faltaTasa !== true,

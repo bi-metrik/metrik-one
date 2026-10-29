@@ -46,7 +46,7 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
-import { margenAlElegirTipo, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import { conComision, margenAlElegirTipo, motivoComisionInvalida, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
@@ -1403,10 +1403,12 @@ export interface CambiosDeAjuste {
    */
   descuentoCliente?: { motivo: string; tipo: 'pct' | 'monto'; valor: number } | null
   /**
-   * Reglas de margen: la comisión que trae una tarifa Pública. Con ella la línea entra al margen
-   * global; `null` la quita y la línea vuelve a quedar fuera de esa base.
+   * La comisión que trae una tarifa Pública, en % (decisión D3, 2026-10-29). Con ella la línea entra
+   * al margen general; `null` la quita, y sin comisión la cotización no se puede enviar.
    */
   comisionPct?: number | null
+  /** La misma comisión escrita en PESOS por toda la línea (D3). Excluye a `comisionPct`. */
+  comisionMonto?: number | null
 }
 
 /**
@@ -1430,9 +1432,15 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
     const motivo = motivoDescuentoInvalido(cambios.descuentoCliente)
     if (motivo) return { success: false, error: motivo }
   }
-  if (cambios.comisionPct !== undefined && cambios.comisionPct !== null) {
-    const c = cambios.comisionPct
-    if (!Number.isFinite(c) || c < 0 || c >= 100) return { success: false, error: 'La comisión va de 0 a 99,9 %.' }
+  // D3 (2026-10-29): la comisión en % o en pesos. `undefined` = no se toca.
+  const comision: ComisionEscrita | null | undefined = cambios.comisionMonto !== undefined
+    ? (cambios.comisionMonto === null ? null : { tipo: 'monto', valor: cambios.comisionMonto })
+    : cambios.comisionPct !== undefined
+      ? (cambios.comisionPct === null ? null : { tipo: 'pct', valor: cambios.comisionPct })
+      : undefined
+  if (comision) {
+    const invalida = motivoComisionInvalida(comision)
+    if (invalida) return { success: false, error: invalida }
     if ((cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo ?? 'neta') !== 'publica') {
       return { success: false, error: 'La comisión es de una tarifa Pública.' }
     }
@@ -1471,12 +1479,8 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
       ? { ...leida, tipoTarifa: { tipo: cambios.tipoTarifa, origen: 'persona', por, en } }
       : { ...leida }
     // La comisión vive en la decisión de Pública: es de ella, y se va si la línea vuelve a Neta.
-    if (cambios.comisionPct !== undefined && actual.tipoTarifa?.tipo === 'publica') {
-      const { comisionPct: _antes, ...resto } = actual.tipoTarifa
-      void _antes
-      actual.tipoTarifa = cambios.comisionPct === null
-        ? resto
-        : { ...resto, comisionPct: Math.round(cambios.comisionPct * 100) / 100 }
+    if (comision !== undefined && actual.tipoTarifa?.tipo === 'publica') {
+      actual.tipoTarifa = conComision(actual.tipoTarifa, comision)
     }
     if (cambios.descuentoCliente !== undefined) {
       if (cambios.descuentoCliente === null) delete actual.descuentoCliente

@@ -698,13 +698,15 @@ export async function generateCotizacionPDF(
     autorizacionDatos: motivoDatos !== null,
     precioPorPasajero: frenos.precioPorPasajero !== null,
     paqueteIncompleto: frenos.paquete !== null,
+    comisionPublica: frenos.comision !== null,
     pantallazos: motivoPantallazos !== null,
     sinRecomendada: sinRecomendada !== null,
     faltaCosto: salida?.aplica === true && salida.faltaCosto !== null,
     faltaTasa: salida?.aplica === true && salida.faltaTasa === true,
     // Con un paquete incompleto su costo no está en la cuenta: «margen bajo el mínimo» señalaría la
     // causa equivocada (la misma regla que la lista única de Revisar).
-    margen: salidaBloquea && frenos.paquete === null,
+    // Lo mismo con una Pública sin comisión (D3): el margen no se puede medir; la causa es la comisión.
+    margen: salidaBloquea && frenos.paquete === null && frenos.comision === null,
     ivaSinCalcular,
     ivaIncluidoSinPlantilla,
   })
@@ -714,11 +716,12 @@ export async function generateCotizacionPDF(
         autorizacion_datos: motivoDatos,
         precio_por_pasajero: frenos.precioPorPasajero,
         paquete_incompleto: frenos.paquete,
+        comision_publica: frenos.comision,
         pantallazos: motivoPantallazos,
         recomendada: sinRecomendada,
         incompleto: salida?.aplica === true ? salida.faltaCosto : null,
         incompleto_tasa: salida?.aplica === true ? salida.faltaCosto : null,
-        margen: salidaBloquea && frenos.paquete === null ? salida!.mensaje : null,
+        margen: salidaBloquea && frenos.paquete === null && frenos.comision === null ? salida!.mensaje : null,
         iva_sin_calcular: ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
         iva_incluido_sin_plantilla: ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
       })
@@ -1270,7 +1273,8 @@ export async function generateCotizacionPDF(
     // `tarifa_pax.bloqueo`, no en las casillas del pantallazo. Solo se DESCRIBEN aquí: no entran a
     // `vuelosDeItems`, que también usan el margen y el recargo.
     const vuelosDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...vuelosDeItems(xs), ...vuelosDePaquetes(xs)]
-    const hotelesDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...hotelesDeItems(xs), ...hotelesDePaquetes(xs)]
+    // D6 (2026-10-29): un paquete sin vuelo ni salida manual toma las fechas del viaje del negocio.
+    const hotelesDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...hotelesDeItems(xs), ...hotelesDePaquetes(xs, delNegocio.fechas)]
     const vuelos = vuelosDoc(paraLectura)
     // Las fechas del viaje COTIZADO (brief del 2026-10-29, punto 1): las de los servicios; el
     // rango de la solicitud solo si ninguno tiene fecha. El hotel sin fechas en su captura toma

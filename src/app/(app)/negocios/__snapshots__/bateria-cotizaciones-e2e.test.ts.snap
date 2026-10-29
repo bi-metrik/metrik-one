@@ -2,12 +2,16 @@
 
 exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen de la cotización en 0 > I8 · la foto del resumen no cambia sin que se vea en el PR 1`] = `
 {
-  "borrador": false,
-  "dias": 1,
+  "borrador": true,
+  "dias": 6,
   "incluye": [
-    "Hotel arena ficticio",
+    "5 noches de hotel; el hotel cambia según la versión",
+    "Alimentación",
+    "Planes / tours",
+    "Traslados",
+    "Seguro médico",
   ],
-  "intro": "5 noches en San Andrés. Todos los hoteles incluyen el desayuno. Los días libres quedan abiertos para que ustedes decidan.",
+  "intro": "5 noches en San Andrés. Los días libres quedan abiertos para que ustedes decidan.",
   "lineas": [
     {
       "costo": 6000000,
@@ -19,25 +23,45 @@ exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen
       "costo": 7200000,
       "margen": null,
       "nombre": "HOTEL CORAL FICTICIO",
-      "precio": 7200000,
+      "precio": 8470588,
     },
     {
       "costo": 8400000,
       "margen": null,
       "nombre": "HOTEL PALMA FICTICIO",
-      "precio": 8400000,
+      "precio": 9882353,
     },
   ],
-  "motivos": [],
+  "motivos": [
+    "comision_publica",
+  ],
   "opciones": [
     {
-      "bajoPiso": false,
+      "bajoPiso": true,
       "lineas": [
         "HOTEL ARENA FICTICIO",
       ],
       "margen": null,
-      "nombre": null,
+      "nombre": "Recomendada",
       "total": 6000000,
+    },
+    {
+      "bajoPiso": false,
+      "lineas": [
+        "HOTEL CORAL FICTICIO",
+      ],
+      "margen": 15,
+      "nombre": "Opción 2",
+      "total": 8470588,
+    },
+    {
+      "bajoPiso": false,
+      "lineas": [
+        "HOTEL PALMA FICTICIO",
+      ],
+      "margen": 15,
+      "nombre": "Opción 3",
+      "total": 9882353,
     },
   ],
   "pdf": [
@@ -45,8 +69,22 @@ exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen
       "lineas": [
         "Hotel Arena Ficticio",
       ],
-      "nombre": null,
+      "nombre": "Recomendada",
       "precio": 6000000,
+    },
+    {
+      "lineas": [
+        "Hotel Coral Ficticio",
+      ],
+      "nombre": null,
+      "precio": 8470588,
+    },
+    {
+      "lineas": [
+        "Hotel Palma Ficticio",
+      ],
+      "nombre": null,
+      "precio": 9882353,
     },
   ],
   "valorTotal": 6000000,
@@ -103,7 +141,7 @@ exports[`(b) Cancún: vuelo internacional + 3 hoteles Pública sin comisión + 2
     },
   ],
   "motivos": [
-    "margen",
+    "comision_publica",
   ],
   "opciones": [
     {
@@ -114,7 +152,7 @@ exports[`(b) Cancún: vuelo internacional + 3 hoteles Pública sin comisión + 2
         "AEROPUERTO CANCÚN - HOTEL",
         "HOTEL - AEROPUERTO CANCÚN",
       ],
-      "margen": 4.78,
+      "margen": null,
       "nombre": "Económica",
       "total": 11018948,
     },
@@ -126,7 +164,7 @@ exports[`(b) Cancún: vuelo internacional + 3 hoteles Pública sin comisión + 2
         "AEROPUERTO CANCÚN - HOTEL",
         "HOTEL - AEROPUERTO CANCÚN",
       ],
-      "margen": 4.78,
+      "margen": null,
       "nombre": "Recomendada",
       "total": 12418948,
     },
@@ -138,7 +176,7 @@ exports[`(b) Cancún: vuelo internacional + 3 hoteles Pública sin comisión + 2
         "AEROPUERTO CANCÚN - HOTEL",
         "HOTEL - AEROPUERTO CANCÚN",
       ],
-      "margen": 4.78,
+      "margen": null,
       "nombre": "Premium",
       "total": 15218948,
     },

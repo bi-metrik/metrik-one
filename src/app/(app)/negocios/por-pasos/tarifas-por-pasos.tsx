@@ -137,11 +137,12 @@ export function TarifasPorPasos({
    * vayan al cliente (un solo hotel, nada que escoger) es lo único que hay que medir: sin él, el
    * rótulo «Margen global (no se edita):» quedaba vacío (falla 1 del brief del 2026-10-28).
    */
-  delTotal?: { margenPct: number | null; exenta: boolean; hotelesBajoPiso: { id: string | undefined; margenPct: number }[] } | null
+  delTotal?: { margenPct: number | null; sinComision: number; hotelesBajoPiso: { id: string | undefined; margenPct: number }[] } | null
 }) {
   // Un paquete de bloqueo se margina como hotel (`tipoParaMargen`): la casilla lo nombra.
   const conPaquete = servicios.some(s => s.tipo === 'paquete')
-  const soloRecomendada = servicios.length > 0 && !servicios.some(s => s.tipo === 'vuelo' || s.tipo === 'hotel')
+  // El paquete de bloqueo se escoge como un hotel: cada paquete es una tarifa (D5, 2026-10-29).
+  const soloRecomendada = servicios.length > 0 && !servicios.some(s => s.tipo === 'vuelo' || s.tipo === 'hotel' || s.tipo === 'paquete')
   const visibles = servicios.length === 0 || soloRecomendada ? tarifas.filter(t => t.canon === 'Recomendada' || t.esPrincipal) : tarifas
   const [ver, setVer] = useState<string>(() => (visibles.find(t => t.canon === 'Recomendada') ?? visibles[0])?.id ?? 'comparar')
   const actual = visibles.find(t => t.id === ver) ?? null
@@ -157,31 +158,28 @@ export function TarifasPorPasos({
    * Lo que se mide: las tarifas que van al cliente o, sin ninguna, el total (el que pinta el
    * encabezado). Cada uno con su margen y sus hoteles bajo el piso.
    */
-  const medidos: { id: string; nombre: string | null; margenReal: number | null; exenta: boolean; hoteles: { id: string | undefined; margenPct: number }[]; tarifa: TarifaCalculada | null }[] =
+  const medidos: { id: string; nombre: string | null; margenReal: number | null; sinComision: number; hoteles: { id: string | undefined; margenPct: number }[]; tarifa: TarifaCalculada | null }[] =
     tarifas.some(vanAlCliente)
-      ? tarifas.filter(vanAlCliente).map(t => ({ id: t.id, nombre: t.nombre, margenReal: t.margenReal, exenta: t.exenta, hoteles: hotelesBajos(t), tarifa: t }))
+      ? tarifas.filter(vanAlCliente).map(t => ({ id: t.id, nombre: t.nombre, margenReal: t.margenReal, sinComision: t.sinComision, hoteles: hotelesBajos(t), tarifa: t }))
       : delTotal
-        ? [{ id: 'total', nombre: null, margenReal: delTotal.margenPct, exenta: delTotal.exenta, hoteles: delTotal.hotelesBajoPiso, tarifa: null }]
+        ? [{ id: 'total', nombre: null, margenReal: delTotal.margenPct, sinComision: delTotal.sinComision, hoteles: delTotal.hotelesBajoPiso, tarifa: null }]
         : []
-  const globalBajo = (t: { exenta: boolean; margenReal: number | null }) => !t.exenta && t.margenReal !== null && t.margenReal < pisoPct
+  // D3 (2026-10-29): una Pública sin comisión no se autoriza: se escribe la comisión. No va aquí.
+  const globalBajo = (t: { sinComision: number; margenReal: number | null }) => t.sinComision === 0 && t.margenReal !== null && t.margenReal < pisoPct
   const bajoMinimo = medidos.filter(t => globalBajo(t) || t.hoteles.length > 0)
   /** Por qué pide la autorización, cada causa por separado (`causas-margen.ts`). */
   const causasDe = (t: (typeof medidos)[number]) => causasBajoMinimo({
     nombre: t.nombre,
-    margenPct: t.exenta ? null : t.margenReal,
+    margenPct: t.sinComision > 0 ? null : t.margenReal,
     hoteles: t.hoteles.map(h => ({ nombre: nombreDeOpcion(h.id ?? ''), margenPct: h.margenPct })),
     pisoHotelPct: reglas?.pisoHotelPct ?? 0,
   }, pisoPct)
-  /** El margen real de una tarifa, dicho con las líneas de tarifa pública que no cuenta. */
-  const margenDeTarifa = (t: { exenta: boolean; margenReal: number | null }) => (t.exenta ? 'solo tarifa pública' : pct(t.margenReal))
-  // Con reglas, las Públicas CON comisión sí cuentan: la nota nombra solo las que no.
-  const sinContar = (t: TarifaCalculada) => (reglas ? t.cascada?.reglas?.publicasSinComision ?? 0 : t.publicas)
+  /** El margen general de una tarifa (D2); con una Pública sin comisión no se puede medir (D3). */
+  const margenDeTarifa = (t: { sinComision: number; margenReal: number | null }) => (t.sinComision > 0 ? 'falta la comisión' : pct(t.margenReal))
   const notaPublicas = (t: TarifaCalculada) => {
-    const n = sinContar(t)
-    if (t.exenta || n === 0) return ''
-    return reglas
-      ? ` (sin ${n === 1 ? '1 pública sin comisión' : `${n} públicas sin comisión`})`
-      : ` (sin ${n === 1 ? '1 de tarifa pública' : `${n} de tarifa pública`})`
+    const n = t.sinComision
+    if (n === 0) return ''
+    return ` (${n === 1 ? '1 pública sin comisión' : `${n} públicas sin comisión`})`
   }
   const [puntosEscritos, setPuntosEscritos] = useState<string | null>(null)
   const [nuevoDescuento, setNuevoDescuento] = useState<{ descripcion: string; pct: string; aplicaA: string } | null>(null)
@@ -193,7 +191,7 @@ export function TarifasPorPasos({
   }
 
   const pregunta = (() => {
-    const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : `qué opción de ${s.nombre}`))]
+    const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : s.tipo === 'paquete' ? 'qué paquete' : `qué opción de ${s.nombre}`))]
     const lista = que.length <= 1 ? que.join('') : `${que.slice(0, -1).join(', ')} y ${que[que.length - 1]}`
     const t = `¿${lista} va${visibles.length > 1 ? ' en cada tarifa' : ''}?`
     return t.charAt(0) + t.charAt(1).toUpperCase() + t.slice(2)
@@ -207,7 +205,8 @@ export function TarifasPorPasos({
         {t.canon === 'Recomendada' ? 'siempre se manda' : vanAlCliente(t) ? 'se manda al cliente' : 'no se manda'}
       </small>
       {/* N12 (H8) · una tarifa que no es Económica, Recomendada ni Premium lo dice: no es una pestaña más. */}
-      {t.canon === null && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
+      {/* En un bloqueo cada paquete es su tarifa (D5): ahí no es «extra». */}
+      {t.canon === null && !conPaquete && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
     </>
   )
 
@@ -224,7 +223,10 @@ export function TarifasPorPasos({
           onChange={e => setMargenEscrito(e.target.value)}
           onBlur={() => {
             if (margenEscrito === null) return
-            const v = Number(margenEscrito.replace(',', '.'))
+            // D4 (2026-10-29): borrar la casilla no es escribir un 0 (`Number('')` es 0): era el 0
+            // que dejaba las Netas a costo (COT-2026-0009).
+            const t = margenEscrito.trim()
+            const v = t === '' ? Number.NaN : Number(t.replace(',', '.'))
             setMargenEscrito(null)
             if (Number.isFinite(v) && v !== margenPct) onMargen(v)
           }}
@@ -374,7 +376,7 @@ export function TarifasPorPasos({
         {medidos.map((t, i) => (
           <span key={t.id}>
             {i > 0 && ' · '}
-            <b className={`whitespace-nowrap ${t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}`} data-margen-medido={t.id}>
+            <b className={`whitespace-nowrap ${t.sinComision > 0 ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}`} data-margen-medido={t.id}>
               {t.nombre ? `${t.nombre} ` : ''}{margenDeTarifa(t)}
             </b>
             {t.tarifa && notaPublicas(t.tarifa) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t.tarifa)}</span>}
