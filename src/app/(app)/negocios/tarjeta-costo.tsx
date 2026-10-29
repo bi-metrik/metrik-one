@@ -171,10 +171,11 @@ export default function TarjetaCosto({
   const publica = tipoTarifa === 'publica'
   const bajo = !publica && margenReal !== null && margenReal < pisoPct
 
-  function guardar(fn: () => Promise<{ success: boolean; error?: string }>, limpiar: () => void) {
+  function guardar(fn: () => Promise<{ success: boolean; error?: string; descuentoQuitado?: string }>, limpiar: () => void) {
     startTransition(async () => {
       const r = await fn()
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
+      if (r.descuentoQuitado) toast.warning(`Se quitó el descuento para el cliente («${r.descuentoQuitado}»): la tarifa Pública es el precio público.`)
       limpiar()
       onCambio()
     })

@@ -112,3 +112,37 @@ describe('punto 1 · «Pública» y «Neta» en la tarjeta', () => {
     expect(item().precio_venta).toBe(590_588)
   })
 })
+
+describe('descuento al cliente y Pública (QA de Vera del 2026-10-29)', () => {
+  const descuento = { motivo: 'Cliente frecuente', tipo: 'pct' as const, valor: 10 }
+  const guardado = () => (item().tarifa_pax as { descuentoCliente?: unknown }).descuentoCliente
+
+  it('Neta con descuento que pasa a Pública: el descuento se quita, se avisa y el precio vuelve al público', async () => {
+    expect((await ajustarOpcion('traslado', { descuentoCliente: descuento })).success).toBe(true)
+    expect(guardado()).toBeDefined()
+    const r = await ajustarOpcion('traslado', { tipoTarifa: 'publica' })
+    expect(r.success).toBe(true)
+    expect(r.descuentoQuitado).toBe('Cliente frecuente')
+    expect(guardado()).toBeUndefined()
+    expect(item().precio_venta).toBe(502_000)
+  })
+
+  it('Pública: un descuento nuevo se rechaza y no se guarda', async () => {
+    await ajustarOpcion('traslado', { tipoTarifa: 'publica' })
+    const r = await ajustarOpcion('traslado', { descuentoCliente: descuento })
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/precio público/)
+    expect(guardado()).toBeUndefined()
+  })
+
+  it('pasar a Pública con descuento en la misma llamada se rechaza', async () => {
+    const r = await ajustarOpcion('traslado', { tipoTarifa: 'publica', descuentoCliente: descuento })
+    expect(r.success).toBe(false)
+    expect((item().tarifa_pax as { tipoTarifa?: unknown }).tipoTarifa).toBeUndefined()
+  })
+
+  it('Neta sin descuento que pasa a Pública no avisa nada', async () => {
+    const r = await ajustarOpcion('traslado', { tipoTarifa: 'publica' })
+    expect(r.descuentoQuitado).toBeUndefined()
+  })
+})
