@@ -24,6 +24,11 @@ Brief `proyectos/trappvel/clarity/briefs/2026-10-27_brief-max-reglas-de-margen-c
   función, `por-pasos-vista.ts › margenDelEncabezado` (con reglas = global, no `margenRealPct`). Sin tarifas que vayan
   al cliente, «Tarifas» mide el total (`delTotal`). Toda frase de «bajo el mínimo» se arma con `causas-margen.ts`
   (hotel con su opción vs. 10 %, global como siempre); no escribir otra a mano.
+- 2026-10-29 (feat/trappvel-descuento-por-tarifa): cada descuento sobre el total lleva `aplicaA` (id de
+  `cotizacion_itinerarios`, jsonb `aplica_a`; sin él = todas). Filtra `conReglas` con `params.tarifaId`, que pone
+  `cascadaDeItinerario(..., tarifaId)` (4º arg). Toda cascada NUEVA de una tarifa tiene que pasar `fila.id`, o
+  pierde sus descuentos propios en silencio. Sin principal no hay tarifa: solo «todas». Tarifa borrada = no aplica.
+  IVA del PDF es por ítem (`porItem`, solo «todas»): con IVA encima no ve el descuento propio (como los puntos).
 - Abierto: hotel con precios de fila a mano no recibe descuento ni puntos; cotizaciones viejas con `piso_margen_pct`
   null pasan a medirse contra 12 tras el SQL; QA en navegador real sin hacer.
 
