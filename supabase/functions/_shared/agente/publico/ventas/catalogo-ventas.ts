@@ -32,6 +32,34 @@ export interface ProductoVenta {
   /** Pesos, el de la publicación activa. */
   precio: number;
   ficha: DatoFicha[];
+  /**
+   * Las fotos del producto (`ferreteria_productos.fotos`), SOLO las del bucket propio (`urlFotoPermitida`). El modelo
+   * no las ve: las manda el código con los productos que nombró (`fotosDelTurno`).
+   */
+  fotos?: string[];
+}
+
+/** El bucket de las fotos del catálogo de Ferretería: solo de ahí sale una foto al cliente. */
+export const BUCKET_FOTOS = 'ferreteria-fotos';
+
+/**
+ * ¿La foto es del bucket propio? https, el host del proyecto de Supabase (`hostPermitido`) y la ruta pública de
+ * `ferreteria-fotos`. Sin host permitido, ninguna. Pura.
+ */
+export function urlFotoPermitida(url: unknown, hostPermitido: string | null | undefined): url is string {
+  if (typeof url !== 'string' || !hostPermitido) return false;
+  try {
+    const u = new URL(url);
+    return u.protocol === 'https:' && u.host === hostPermitido && !u.username && !u.password
+      && u.pathname.startsWith(`/storage/v1/object/public/${BUCKET_FOTOS}/`) && !u.pathname.includes('..');
+  } catch {
+    return false;
+  }
+}
+
+/** Las fotos jsonb de `ferreteria_productos` que pasan la lista blanca, en orden. Pura. */
+export function fotosDe(crudo: unknown, hostPermitido: string | null | undefined): string[] {
+  return (Array.isArray(crudo) ? crudo : []).filter((u): u is string => urlFotoPermitida(u, hostPermitido));
 }
 
 const s = (x: unknown): string | null => (typeof x === 'string' && x.trim() ? x.trim() : null);
@@ -103,7 +131,10 @@ export function productoPorCodigo(ps: ProductoVenta[], codigo: string): Producto
   return sku ? ps.find((x) => normal(x.sku).replace(/ /g, '') === sku) ?? null : null;
 }
 
-/** Lo que ve el modelo de un producto: precio en pesos y la ficha partida en verificado y del fabricante. Pura. */
+/**
+ * Lo que ve el modelo de un producto: precio en pesos, la ficha partida en verificado y del fabricante y si tiene foto
+ * (la URL nunca: la foto la manda el código). Pura.
+ */
 export function productoParaModelo(p: ProductoVenta): Record<string, unknown> {
   const ver = p.ficha.filter((d) => d.verificado).map((d) => `${d.etiqueta}: ${d.valor}`);
   const fab = p.ficha.filter((d) => !d.verificado).map((d) => `${d.etiqueta}: ${d.valor}`);
@@ -114,7 +145,137 @@ export function productoParaModelo(p: ProductoVenta): Record<string, unknown> {
     precio: pesos(p.precio),
     especificaciones_verificadas: ver,
     ...(fab.length ? { segun_catalogo_del_fabricante: fab } : {}),
+    tiene_foto: (p.fotos?.length ?? 0) > 0,
   };
+}
+
+// ── Venta consultiva: pocas sugerencias, las que mejor encajan con el uso ────
+
+/** Cuántos productos sugiere el asistente a la vez (y cuántas fotos manda). Ni el catálogo ni la respuesta pasan de aquí. */
+export const MAX_SUGERENCIAS = 3;
+
+/**
+ * El tipo de un producto, para la pregunta de uso: el título hasta la marca («Taladro magnético Ferton de 40 mm» →
+ * «Taladro magnético»); sin marca en el título, sus tres primeras palabras. Pura.
+ */
+export function tipoDe(p: ProductoVenta): string {
+  const t = (p.titulo || p.nombre).trim();
+  const marca = p.marca?.trim();
+  const i = marca ? t.toLowerCase().indexOf(marca.toLowerCase()) : -1;
+  const corte = i > 0 ? t.slice(0, i) : t.split(/\s+/).slice(0, 3).join(' ');
+  return corte.replace(/[\s,(]+(de|del|con|para)?\s*$/i, '').trim() || t;
+}
+
+/**
+ * Las palabras de uso que el cliente dice y cómo aparecen en el catálogo. La búsqueda las cruza con el título, las
+ * etiquetas y la ficha. «cable» no está aquí: es lo contrario de inalámbrico (`DE_CABLE`).
+ */
+const SINONIMOS_USO: Record<string, string[]> = {
+  metal: ['metal', 'acero', 'hierro', 'metalmecanica', 'metalica', 'metalico', 'lamina'],
+  acero: ['metal', 'acero', 'hierro', 'metalmecanica', 'metalica', 'metalico'],
+  estructura: ['estructura', 'magnetico', 'metalmecanica'],
+  magnetico: ['magnetico'],
+  concreto: ['concreto', 'ladrillo', 'muro', 'sds', 'rotomartillo', 'demolicion', 'cincelar'],
+  ladrillo: ['ladrillo', 'concreto', 'muro'],
+  muro: ['muro', 'concreto', 'ladrillo'],
+  pared: ['muro', 'concreto', 'ladrillo'],
+  madera: ['madera', 'carpinteria', 'ebanisteria'],
+  carpinteria: ['madera', 'carpinteria', 'ebanisteria'],
+  inalambrico: ['inalambrico', 'inalambrica', 'bateria'],
+  bateria: ['inalambrico', 'inalambrica', 'bateria'],
+  hogar: ['hogar', 'casa', 'mueble'],
+  casa: ['hogar', 'casa', 'mueble'],
+  obra: ['obra', 'construccion', 'concreto', 'demolicion'],
+  construccion: ['obra', 'construccion', 'concreto'],
+  taller: ['taller', 'mecanica', 'industrial'],
+  industrial: ['industrial', 'taller'],
+  carro: ['carro', 'automotriz', 'llanta', 'mecanica'],
+  moto: ['moto', 'automotriz', 'mecanica'],
+};
+const DE_CABLE = new Set(['cable', 'cord', 'corriente', 'enchufe', 'toma', 'electrico', 'alambrico']);
+const INALAMBRICO = new Set(['inalambrico', 'inalambrica', 'bateria']);
+
+const palabrasDe = (p: ProductoVenta, conFicha: boolean) => new Set(normal([
+  p.titulo, p.nombre, p.marca ?? '', p.categoria ?? '', ...p.etiquetas, ...(conFicha ? p.ficha.map((d) => `${d.etiqueta} ${d.valor}`) : []),
+].join(' ')).split(' ').map(raiz));
+
+export type Sugerencia =
+  | { tipo: 'codigo'; productos: ProductoVenta[] }
+  /** Más de `MAX_SUGERENCIAS` y sin uso: el asistente pregunta el uso. `tipos` le da con qué preguntar. */
+  | { tipo: 'preguntar'; coincidencias: number; tipos: string[] }
+  | { tipo: 'sugerir'; productos: ProductoVenta[]; coincidencias: number };
+
+/**
+ * La búsqueda de la venta consultiva. Con código (MP-xx) o SKU: ese producto. Con texto: los que traen las palabras de
+ * `buscar` (como `buscarProductos`, sin tope). Si son más de `MAX_SUGERENCIAS` y el cliente no dijo para qué lo quiere
+ * (`uso` vacío), no devuelve productos: pide preguntar el uso. Con uso (o con pocos), los `MAX_SUGERENCIAS` que mejor
+ * encajan: más palabras de uso en el título, las etiquetas o la ficha; «de cable» deja fuera lo inalámbrico (y al
+ * revés); el título que empieza por lo que busca gana al accesorio («Soporte para taladro»); y a lo sumo dos del mismo
+ * tipo (salvo el tipo que pidió con todas sus palabras), para que haya de dónde escoger. Pura.
+ */
+export function sugerirProductos(ps: ProductoVenta[], q: { buscar?: string | null; codigo?: string | null; uso?: string | null }): Sugerencia {
+  const cod = numeroDeCodigo(`${q.codigo ?? ''} ${q.buscar ?? ''}`);
+  const sku = normal(q.codigo ?? '').replace(/ /g, '');
+  if (cod !== null || sku) {
+    const p = productoPorCodigo(ps, q.codigo || q.buscar || '');
+    if (p) return { tipo: 'codigo', productos: [p] };
+    // Un código que no está, sin otras palabras: nada (nunca una búsqueda aproximada en su lugar).
+    if (!palabrasDeBusqueda((q.buscar ?? '').replace(/\bmp\s*-?\s*\d+\b/gi, '')).length) return { tipo: 'codigo', productos: [] };
+  }
+  const todos = buscarProductos(ps, { buscar: q.buscar ?? null, codigo: null }, Number.MAX_SAFE_INTEGER);
+  const uso = palabrasDeBusqueda(q.uso ?? '');
+  if (!uso.length && todos.length > MAX_SUGERENCIAS) {
+    return { tipo: 'preguntar', coincidencias: todos.length, tipos: [...new Set(todos.map(tipoDe))].slice(0, 8) };
+  }
+  const buscar = palabrasDeBusqueda(q.buscar ?? '');
+  const cable = uso.some((w) => DE_CABLE.has(w));
+  const quiereInal = uso.some((w) => INALAMBRICO.has(w));
+  const objetivo = uso.filter((w) => !DE_CABLE.has(w)).map((w) => SINONIMOS_USO[w] ?? [w]);
+  const puntuados = todos.map((p, orden) => {
+    const hay = palabrasDe(p, true);
+    const inal = [...INALAMBRICO].some((w) => hay.has(w));
+    const titulo = normal(p.titulo || p.nombre).split(' ').map(raiz);
+    return {
+      p, orden, inal,
+      uso: objetivo.filter((grupo) => grupo.some((w) => hay.has(raiz(w)))).length,
+      // Desempate: cuántas palabras de uso trae (el rotomartillo «concreto, SDS, demolición» gana al que solo dice «ladrillo»).
+      aciertos: objetivo.flat().filter((w) => hay.has(raiz(w))).length,
+      principal: buscar.length > 0 && buscar.includes(titulo[0]) ? 1 : 0,
+      // «Soporte para taladro» cuando busca un taladro: accesorio, va al final.
+      accesorio: !buscar.includes(titulo[0]) && buscar.some((w) => titulo.some((x, i) => x === w && titulo[i - 1] === 'para')) ? 1 : 0,
+    };
+  });
+  // «De cable» saca lo inalámbrico, e «inalámbrico» lo de cable, salvo que no quede nada.
+  const filtrados = cable || quiereInal ? puntuados.filter((x) => (cable ? !x.inal : x.inal)) : puntuados;
+  const base = filtrados.length ? filtrados : puntuados;
+  const orden = [...base].sort((a, b) => a.accesorio - b.accesorio || b.uso - a.uso || b.aciertos - a.aciertos || b.principal - a.principal || a.orden - b.orden);
+  const elegidos: typeof orden = [];
+  const porTipo = new Map<string, number>();
+  for (const x of orden) {
+    const t = normal(tipoDe(x.p));
+    // El tope de dos por tipo no vale para el tipo que el cliente nombró entero («taladro magnético»).
+    const pidioEseTipo = t.split(' ').filter((w) => w && !VACIAS.has(w)).map(raiz).every((w) => buscar.includes(w));
+    if (!pidioEseTipo && (porTipo.get(t) ?? 0) >= 2) continue;
+    porTipo.set(t, (porTipo.get(t) ?? 0) + 1);
+    elegidos.push(x);
+    if (elegidos.length === MAX_SUGERENCIAS) break;
+  }
+  // Si la regla de dos por tipo dejó cupo libre, se llena con los siguientes.
+  for (const x of orden) {
+    if (elegidos.length >= MAX_SUGERENCIAS) break;
+    if (!elegidos.includes(x)) elegidos.push(x);
+  }
+  return { tipo: 'sugerir', productos: elegidos.map((x) => x.p), coincidencias: base.length };
+}
+
+/** Los códigos MP-xx que nombra un texto, sin repetir y en orden (como «MP-17», normalizados). Pura. */
+export function codigosEnTexto(texto: string): string[] {
+  const out: string[] = [];
+  for (const m of String(texto ?? '').matchAll(/\bmp\s*-?\s*0*(\d{1,4})\b/gi)) {
+    const c = `MP-${String(Number(m[1])).padStart(2, '0')}`;
+    if (!out.includes(c)) out.push(c);
+  }
+  return out;
 }
 
 // ── Tabla de flete (ficha `flete.tabla` del reglamento) ──────────────────────

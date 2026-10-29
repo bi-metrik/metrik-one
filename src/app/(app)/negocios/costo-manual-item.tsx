@@ -10,6 +10,7 @@ import { costoManualVigente, normalizarCostoManual } from '@/lib/cotizaciones/co
 import { leerTarifaPax, MONEDAS_FRECUENTES } from '@/lib/cotizaciones/tarifa-pasajero'
 import { formatCOP } from '@/lib/contacts/constants'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { tasaComoTexto, textoTasaPropagada, type TasaDeCotizacion } from '@/lib/cotizaciones/tasa-cotizacion'
 
 /**
  * El costo unitario escrito a mano en una línea de viaje, con su moneda (brief del
@@ -27,12 +28,15 @@ export default function CostoManualItem({
   itemId,
   subtotalPesos,
   tarifaPax,
+  tasasCotizacion = {},
   onCambio,
 }: {
   itemId: string
   /** `items.subtotal`: el costo unitario en pesos que hay hoy. */
   subtotalPesos: number
   tarifaPax: unknown
+  /** La tasa de la cotización por moneda (H5/H28): al elegir otra moneda, la tasa arranca con ella. */
+  tasasCotizacion?: Record<string, TasaDeCotizacion>
   onCambio: () => void
 }) {
   const anotado = leerTarifaPax(tarifaPax).costoManual
@@ -59,6 +63,7 @@ export default function CostoManualItem({
     startTransition(async () => {
       const r = await guardarCostoManualEnMoneda(itemId, e)
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar el costo'); return }
+      if (r.propagadas) toast.success(textoTasaPropagada(e.moneda ?? '', r.propagadas))
       onCambio()
     })
   }
@@ -70,9 +75,12 @@ export default function CostoManualItem({
           value={moneda}
           onChange={e => {
             setMoneda(e.target.value)
+            // La tasa de la cotización para esa moneda, si ya hay (H5/H28): editable.
+            const deLaCotizacion = tasasCotizacion[e.target.value]?.tasa ?? null
+            if (deLaCotizacion !== null && !tasa) setTasa(tasaComoTexto(deLaCotizacion))
             // A pesos se guarda en el acto; a otra moneda, cuando haya tasa (sin avisar
             // todavía: la persona apenas la está escribiendo).
-            guardar({ ...entrada, moneda: e.target.value }, false)
+            guardar({ ...entrada, moneda: e.target.value, tasa: entrada.tasa ?? deLaCotizacion }, false)
           }}
           aria-label="Moneda del costo"
           className="rounded border bg-background px-1 py-1.5 text-xs"

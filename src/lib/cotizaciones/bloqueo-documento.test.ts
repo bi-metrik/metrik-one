@@ -47,7 +47,9 @@ describe('el paquete en el documento', () => {
   it('el hotel del paquete es una ficha de hospedaje: hotel, zona, plan, noches, fechas del vuelo y acomodación', () => {
     const [h] = hotelesDePaquetes([linea])
     expect(h.hotel).toBe('Hotel Cartagena Dubai')
-    expect(h.ciudad).toBe('Bocagrande')
+    // V6 (QA del 2026-10-29): la zona va aparte; la ciudad la pone el viaje.
+    expect(h.ciudad).toBeNull()
+    expect(h.zona).toBe('Bocagrande')
     expect(h.noches).toBe(p.hotel.noches)
     expect(h.checkIn).toBe('5 feb 2027')
     expect(h.ocupacion).toBe(acomodacionDelPaquete(p))

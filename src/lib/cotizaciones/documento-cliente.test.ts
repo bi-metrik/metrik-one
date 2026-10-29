@@ -425,7 +425,11 @@ describe('el prompt del redactor (C3 y C4)', () => {
     for (const f of ['sumérgete', 'descubre', 'paraíso', 'experiencia inolvidable', 'no te pierdas', 'ideal para']) expect(p).toContain(`"${f}"`)
     expect(p).toContain('Nada de guion largo (—)')
     expect(p).toContain('Nada de emojis')
-    expect(p).toContain('trátalo de usted')
+    // S3 (QA del 2026-10-29): usted a una persona, ustedes a varias; nunca tú ni las dos mezcladas.
+    expect(p).toContain('Nunca tutees')
+    expect(p).toContain('háblale de usted en singular')
+    expect(p).toContain('de ustedes en plural')
+    expect(p).toContain('Nunca mezcles las dos formas')
     // El prompt no se contradice: ya no pide un titular que «dé ganas de viajar».
     expect(p).not.toContain('dé ganas de viajar')
   })

@@ -42,6 +42,7 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from '@/lib/cotizaciones/fechas-del-viaje'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { terminosConCondicionVisa } from '@/lib/viaje/condicion-visa'
+import { terminosConTasaDeCambio } from '@/lib/cotizaciones/nota-tasa-pdf'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
@@ -1247,6 +1248,9 @@ export async function generateCotizacionPDF(
   const fichasDeHotel = new Map<string, string>()
   // Motor `html`: la ciudad y el día de cada plan opcional, para ponerlo en los días libres.
   let lugaresOpcionalesDoc: LugarDeOpcional[] = []
+  // S3 (QA del 2026-10-29): cuántos viajan, para que la propuesta le hable a uno (usted) o a varios
+  // (ustedes). Va aparte de las props a propósito: las de @react-pdf no cambian.
+  let numeroDeViajerosDoc: number | null = null
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
   let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
@@ -1421,6 +1425,9 @@ export async function generateCotizacionPDF(
       const ctxTexto = await leerContextoTextoCliente(supabase, cotizacionId)
       avisoTexto = avisoDelTextoViejoEnPdf(documentoCliente, ctxTexto?.huella ?? null)
     }
+    if (delNegocio.composicion) {
+      numeroDeViajerosDoc = delNegocio.composicion.adultos + delNegocio.composicion.ninos + delNegocio.composicion.infantes
+    }
     const viaje = {
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
@@ -1471,7 +1478,8 @@ export async function generateCotizacionPDF(
       notas: cot.notas,
       descuento_porcentaje: cot.descuento_porcentaje ?? 0,
       descuento_valor: cot.descuento_valor ?? 0,
-      terminos_condiciones: terminosConCondicionVisa((cot as unknown as CotizacionNuevosCampos).terminos_condiciones, conVisaEnTramite),
+      // H8 (QA 2026-10-29): si alguna línea se costeó en otra moneda, la tarjeta «Tasa de cambio».
+      terminos_condiciones: terminosConCondicionVisa(terminosConTasaDeCambio((cot as unknown as CotizacionNuevosCampos).terminos_condiciones, items), conVisaEnTramite),
     },
     empresa: {
       nombre: empresa.nombre ?? '',
@@ -1545,6 +1553,7 @@ export async function generateCotizacionPDF(
         fichasDeHotel,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         cliente: clienteDelNegocio,
+        numeroDeViajeros: numeroDeViajerosDoc,
         // El botón de apartar abre el WhatsApp de la MISMA asesora que firma (punto 5).
         staffId: staffDeLaAsesora,
         workspaceId,
@@ -1654,6 +1663,8 @@ async function propuestaConMotorHtml(
     documentoCliente: unknown
     /** El contacto y la empresa del negocio: a quién va dirigida la propuesta. */
     cliente: ClienteDelNegocio
+    /** S3 · cuántos viajan; `null` = no se sabe (ustedes). */
+    numeroDeViajeros?: number | null
     staffId: string | null
     workspaceId: string
     marca: string
@@ -1683,6 +1694,7 @@ async function propuestaConMotorHtml(
       anticipo: leerAnticipo(e.documentoCliente),
       asesora,
       cliente: e.cliente,
+      numeroDeViajeros: e.numeroDeViajeros ?? null,
     },
     {
       marca: e.marca,

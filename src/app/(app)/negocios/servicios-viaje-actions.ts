@@ -13,6 +13,8 @@
  * `lib/viaje/reglas-pago.ts` (las mismas del bot de WhatsApp).
  */
 
+import { diferenciaDeCambio, diferenciaDeCambioDelServicio, marcaTrm, tasaPagoValida } from '@/lib/viaje/moneda-servicio'
+import { tasaComoTexto } from '@/lib/cotizaciones/tasa-cotizacion'
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
@@ -467,15 +469,6 @@ async function servicioParaPago(supabase: unknown, workspaceId: string, servicio
 }
 
 /**
- * El viaje para la regla de desviación (H3-4). Si no se puede leer, `null`: la regla vuelve a ser
- * por servicio, que pide MÁS aprobaciones, nunca menos.
- */
-async function viajeDelServicio(ctx: Contexto, negocioId: string, servicioId: string) {
-  const filas = await leerServiciosDelNegocio(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId })
-  return filas ? viajeParaReglas(filas, servicioId) : null
-}
-
-/**
  * Después de cambiar lo que cobra un proveedor, vuelve a medir las desviaciones de las OTRAS filas
  * contra el viaje (H3-4):
  *  · una pedida a Edgar que el viaje ya compensa caduca (el hotel salió más barato y el vuelo se
@@ -511,7 +504,7 @@ async function revisarDesviacionesDelViaje(ctx: Contexto, negocioId: string): Pr
     if (f.gastos.length === 0) continue
     const yaTiene = f.aprobaciones.some(a => a.tipo === 'desviacion_costo' && a.estado !== 'caducada')
     if (yaTiene) continue
-    const d = desviacion(pagado, baseDesviacion(f.costo_cotizado, f.valor_por_pagar))
+    const d = desviacion(pagado, Math.max(0, baseDesviacion(f.costo_cotizado, f.valor_por_pagar) + diferenciaDeCambioDelServicio(f.moneda, f.gastos).pesos))
     if (!(d.pesos > 0 && d.pct > reglas.umbralPct && d.pesos > reglas.pisoPesos)) continue
     if (desviacionDelViaje(pagado, { costoCotizado: f.costo_cotizado, valorPorPagar: f.valor_por_pagar }, viaje) <= reglas.pisoPesos) continue
     const ultimo = f.gastos[f.gastos.length - 1]
@@ -542,20 +535,30 @@ async function pagadoAntes(supabase: unknown, servicioId: string): Promise<numbe
 async function aplicarReglasDePago(
   ctx: Contexto,
   servicio: ServicioParaPago,
-  args: { monto: number; medio: MedioPagoProveedor; configLinea: unknown; gastoId: string | null },
+  args: { monto: number; medio: MedioPagoProveedor; configLinea: unknown; gastoId: string | null; tasaPago?: number | null },
 ): Promise<ReglaRota[]> {
   const svc = createServiceClient() as ReturnType<typeof db>
-  const [antes, plata, viaje] = await Promise.all([
+  const [antes, plata, filas] = await Promise.all([
     args.gastoId ? pagadoAntes(ctx.supabase, servicio.id).then(t => t - args.monto) : pagadoAntes(ctx.supabase, servicio.id),
     plataDelCliente(ctx.supabase, ctx.workspaceId, servicio.negocio_id),
-    viajeDelServicio(ctx, servicio.negocio_id, servicio.id),
+    leerServiciosDelNegocio(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId: servicio.negocio_id }),
   ])
+  // Sin el viaje, la regla vuelve a ser por servicio: pide MÁS aprobaciones, nunca menos.
+  const viaje = filas ? viajeParaReglas(filas, servicio.id) : null
+  // H6-3 · lo que la TRM movió no es sobrecosto del proveedor. Los pagos ya registrados dicen su
+  // TRM en el texto; el que se pide antes de pagar, en `tasaPago`.
+  const fila = filas?.find(f => f.id === servicio.id) ?? null
+  const diferenciaCambio = diferenciaDeCambioDelServicio(fila?.moneda, fila?.gastos ?? []).pesos
+    + (!args.gastoId && fila?.moneda && tasaPagoValida(args.tasaPago, fila.moneda.tasa)
+      ? diferenciaDeCambio(args.monto, fila.moneda.tasa, args.tasaPago)
+      : 0)
   const rotas = reglasQueRompe({
     monto: args.monto,
     pagadoAntes: antes,
     costoCotizado: servicio.costo_cotizado,
     valorPorPagar: servicio.valor_por_pagar,
     viaje,
+    diferenciaCambio,
     medio: args.medio,
     cobradoCliente: plata.cobrado,
     precioAprobado: plata.precio,
@@ -631,6 +634,25 @@ async function aplicarReglasDePago(
   return pendientes
 }
 
+/**
+ * H6-3 · la TRM escrita para el pago, contra la moneda en que se cotizó el servicio. Sin TRM, nada.
+ * Un servicio en pesos no lleva TRM; una muy lejos de la cotizada (±20 %) es un error de dedo.
+ */
+async function tasaDelPago(
+  ctx: Contexto,
+  servicio: ServicioParaPago,
+  tasaPago: number | null | undefined,
+): Promise<{ moneda: string | null; tasa: number | null } | { error: string }> {
+  if (tasaPago === null || tasaPago === undefined) return { moneda: null, tasa: null }
+  const filas = await leerServiciosDelNegocio(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId: servicio.negocio_id })
+  const m = filas?.find(f => f.id === servicio.id)?.moneda ?? null
+  if (!m) return { error: 'Este servicio se cotizó en pesos: no lleva TRM.' }
+  if (!tasaPagoValida(tasaPago, m.tasa)) {
+    return { error: `La TRM del pago está muy lejos de la cotizada (${tasaComoTexto(m.tasa)}): revísala.` }
+  }
+  return { moneda: m.moneda, tasa: tasaPago }
+}
+
 function pesosCOP(n: number): string {
   return '$' + Math.round(n).toLocaleString('es-CO').replace(/,/g, '.')
 }
@@ -657,6 +679,11 @@ export interface EntradaPagoServicio {
   medioId: string
   /** Referencia `one://` del soporte que devolvió `subirSoporteServicio`. */
   soporteRef: string
+  /**
+   * H6-3 · la TRM a la que se pagó un servicio cotizado en otra moneda. Queda en el texto del gasto
+   * (`marcaTrm`) y separa la diferencia de cambio del sobrecosto. Opcional.
+   */
+  tasaPago?: number | null
 }
 
 export type ResultadoPagoServicio =
@@ -690,6 +717,9 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
   if ('error' in cm) return { ok: false, error: cm.error }
 
   const proveedor = servicio.proveedor_nombre?.trim() || null
+  const tp = await tasaDelPago(ctx, servicio, input.tasaPago)
+  if ('error' in tp) return { ok: false, error: tp.error }
+  const marca = tp.moneda && tp.tasa !== null ? ` ${marcaTrm(tp.moneda, tp.tasa)}` : ''
   const { data: gasto, error: insErr } = await db(ctx.supabase)
     .from('gastos')
     .insert({
@@ -704,7 +734,7 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
       clasificacion_costo: 'variable',
       retencion: 0,
       deducible: false,
-      descripcion: (proveedor ? `Pago a ${proveedor} · ${servicio.nombre}` : `Pago · ${servicio.nombre}`).slice(0, 300),
+      descripcion: (proveedor ? `Pago a ${proveedor} · ${servicio.nombre}` : `Pago · ${servicio.nombre}`).slice(0, 300 - marca.length) + marca,
       tipo: 'directo',
       estado_pago: 'pagado',
       soporte_url: input.soporteRef,
@@ -736,7 +766,7 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
     entidad_id: servicio.negocio_id,
     tipo: 'cambio',
     autor_id: ctx.staffId,
-    contenido: `Pagó ${pesosCOP(monto)} a ${proveedor ?? 'el proveedor'} (${servicio.nombre}) con ${cm.medio.label}${esperando.length > 0 ? ', esperando a Edgar' : ''}.`.slice(0, 280),
+    contenido: `Pagó ${pesosCOP(monto)} a ${proveedor ?? 'el proveedor'} (${servicio.nombre}) con ${cm.medio.label}${marca ? ` (${tp.moneda} a TRM ${tasaComoTexto(tp.tasa as number)})` : ''}${esperando.length > 0 ? ', esperando a Edgar' : ''}.`.slice(0, 280),
   }, 'registrarPagoServicio')
   revalidatePath(`/negocios/${servicio.negocio_id}`)
   return { ok: true, gastoId, esperando: esperando.map(r => r.texto) }
@@ -753,6 +783,8 @@ export interface EntradaPedirAprobacion {
   servicioId: string
   monto: number
   medioId: string
+  /** H6-3 · la TRM a la que se va a pagar (servicio en otra moneda). Opcional. */
+  tasaPago?: number | null
 }
 
 /**
@@ -773,8 +805,10 @@ async function pedirAprobacionServicioSinClave(input: EntradaPedirAprobacion): P
   if (!Number.isFinite(monto) || monto <= 0) return { ok: false, error: 'Escribe el valor que vas a pagar.' }
   const cm = await configYMedio(ctx, servicio.negocio_id, input.medioId)
   if ('error' in cm) return { ok: false, error: cm.error }
+  const tp = await tasaDelPago(ctx, servicio, input.tasaPago)
+  if ('error' in tp) return { ok: false, error: tp.error }
   try {
-    const pendientes = await aplicarReglasDePago(ctx, servicio, { monto, medio: cm.medio, configLinea: cm.configLinea, gastoId: null })
+    const pendientes = await aplicarReglasDePago(ctx, servicio, { monto, medio: cm.medio, configLinea: cm.configLinea, gastoId: null, tasaPago: tp.tasa })
     if (pendientes.length === 0) return { ok: false, error: 'Este pago no necesita aprobación: regístralo.' }
     await registrarActividad(ctx.supabase, {
       workspace_id: ctx.workspaceId,

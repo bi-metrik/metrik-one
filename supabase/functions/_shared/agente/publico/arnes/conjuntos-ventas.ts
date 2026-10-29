@@ -45,6 +45,24 @@ export const PRODUCTOS_PRUEBA: ProductoVenta[] = [
   },
 ];
 
+/** Catálogo INVENTADO con fotos para la venta consultiva (no es de Dimpro): cinco taladros y una pulidora. */
+const FOTO = (sku: string) => `https://ejemplo.supabase.co/storage/v1/object/public/ferreteria-fotos/prueba/${sku}/1.jpg`;
+const prod = (n: number, titulo: string, precio: number, o: Partial<ProductoVenta> = {}): ProductoVenta => ({
+  publicacionId: `00000000-0000-4000-9000-0000000001${String(n).padStart(2, '0')}`, codigo: `MP-${String(n).padStart(2, '0')}`, sku: `EJ-${n}`,
+  titulo, nombre: titulo, marca: 'MarcaEjemplo', categoria: 'Herramientas', etiquetas: [], precio, ficha: [], fotos: [FOTO(`EJ-${n}`)], ...o,
+});
+export const PRODUCTOS_CONSULTIVA: ProductoVenta[] = [
+  prod(11, 'Taladro percutor inalámbrico MarcaEjemplo 20V', 320000, { ficha: [{ etiqueta: 'Batería', valor: '20V 2.0Ah', verificado: true }] }),
+  prod(12, 'Taladro MarcaEjemplo de 13 mm 550 W', 125000, { ficha: [{ etiqueta: 'Potencia', valor: '550 W', verificado: true }], fotos: [] }),
+  prod(13, 'Taladro magnético MarcaEjemplo de 28 mm', 1900000, { etiquetas: ['metalmecánica', 'estructuras metálicas'] }),
+  prod(14, 'Taladro magnético MarcaEjemplo de 40 mm 1200W', 2300000, { etiquetas: ['metalmecánica', 'estructuras metálicas'] }),
+  prod(15, 'Taladro magnético MarcaEjemplo TLM de 32 mm', 2100000, { etiquetas: ['metalmecánica'] }),
+  prod(16, 'Rotomartillo MarcaEjemplo SDS-Plus 26 mm', 345000, { etiquetas: ['taladro percutor', 'concreto'] }),
+  prod(17, 'Pulidora angular MarcaEjemplo 4-1/2" 720 W', 133000),
+];
+const fotos = (e: EscenarioPublico) => e.chatwoot.fotos;
+const codigosPublicados = (e: EscenarioPublico) => [...new Set([...publico(e).matchAll(/MP-\d+/g)].map((m) => m[0]))];
+
 const R = (texto: string, tema = 'compra') => ({ name: 'responder', args: { tema, texto } });
 const VC = (args: Record<string, unknown>) => ({ name: 'ver_catalogo', args });
 const FIJA = (clave: string) => ({ name: 'respuesta_fija', args: { clave } });
@@ -225,6 +243,89 @@ export const CASOS_VENTAS: CasoPublico[] = [
     pasos: [...HASTA_LINK.pasos, { escribe: 'sí' }, { escribe: 'no me llegó el link' }],
     guion: [...HASTA_LINK.guion, R('El link ya salió arriba. ¿Te lo reenvío?'), REENVIAR],
     esperado: (e) => todos(links(e, 1), publico(e).split('LNK_PRUEBA1').length - 1 >= 2 ? ok('reenvió el mismo link') : no('no reenvió el link'), noContiene(e, 'LNK_PRUEBA2')),
+  },
+  // ── Venta consultiva (Mauricio, 29-oct): pregunta de uso, máximo 3 sugerencias y fotos ──
+  {
+    id: 'v-consultiva-pregunta-uso', conjunto: 'ventas', titulo: '«Quiero un taladro»: el catálogo no devuelve lista; pregunta el uso, sin productos ni fotos',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: 'Hola, quiero un taladro' }],
+    guion: [VC({ buscar: 'taladro' }), R('¡Claro! ¿Para qué lo vas a usar: concreto, metal o madera? ¿Lo prefieres inalámbrico o de cable?', 'producto')],
+    esperado: (e) => {
+      const h = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((x) => x.nombre === 'ver_catalogo');
+      const d = h?.datos as { productos?: unknown[]; preguntar_uso?: boolean; tipos?: string[] } | undefined;
+      return todos(
+        d?.preguntar_uso === true && d.productos?.length === 0 ? ok('ver_catalogo pide preguntar el uso, sin productos') : no(`ver_catalogo devolvió ${JSON.stringify(d).slice(0, 120)}`),
+        d?.tipos?.includes('Taladro magnético') ? ok('trae los tipos') : no('sin los tipos'),
+        codigosPublicados(e).length === 0 ? ok('no listó productos') : no(`listó ${codigosPublicados(e).join(', ')}`),
+        fotos(e).length === 0 ? ok('sin fotos') : no('mandó fotos'), contiene(e, /para qué lo vas a usar/i), sinPersona(e),
+      );
+    },
+  },
+  {
+    id: 'v-consultiva-sugiere-con-fotos', conjunto: 'ventas', titulo: '«Taladro para metal, de cable»: máximo 3 sugerencias, sin el inalámbrico, con una foto por producto',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: 'Necesito un taladro para metal, de cable' }],
+    guion: [
+      VC({ buscar: 'taladro', uso: 'metal, de cable' }),
+      R('Te sirven estos:\nMP-13 Taladro magnético 28 mm, $1.900.000: se fija a la estructura metálica.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\nMP-12 Taladro 13 mm, $125.000: para trabajos livianos.\n¿Cuál te sirve más?', 'producto'),
+    ],
+    esperado: (e) => {
+      const h = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((x) => x.nombre === 'ver_catalogo');
+      const cods = ((h?.datos as { productos?: Array<{ codigo: string }> } | undefined)?.productos ?? []).map((p) => p.codigo);
+      return todos(
+        cods.length <= 3 && cods.length > 0 && !cods.includes('MP-11') ? ok(`catálogo: ${cods.join(', ')}`) : no(`catálogo devolvió ${cods.join(', ')}`),
+        codigosPublicados(e).length <= 3 ? ok('≤ 3 productos en la respuesta') : no(`${codigosPublicados(e).length} productos en la respuesta`),
+        // MP-12 no tiene foto: salen las de los otros dos, con su pie.
+        JSON.stringify(fotos(e).map((f) => f.texto.split(' ·')[0])) === '["MP-13","MP-14"]' ? ok('fotos de MP-13 y MP-14') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
+        fotos(e).every((f) => f.url.includes('/ferreteria-fotos/')) ? ok('URLs del catálogo') : no('una foto fuera del catálogo'),
+        contiene(e, '¿Cuál te sirve más?'),
+      );
+    },
+  },
+  {
+    id: 'v-consultiva-sin-foto', conjunto: 'ventas', titulo: 'Producto sin foto: solo el texto',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }],
+    guion: [VC({ codigo: 'MP-12' }), R('El MP-12 Taladro 13 mm vale $125.000: 550 W. ¿Te sirve?', 'precio')],
+    esperado: (e) => todos(contiene(e, 'MP-12'), fotos(e).length === 0 ? ok('sin fotos') : no('mandó foto'), e.almacen.trazas().some((t) => t.fotos?.length) ? no('anotó fotos') : ok('sin fotos en la traza')),
+  },
+  {
+    id: 'v-consultiva-foto-falla', conjunto: 'ventas', titulo: 'La foto falla al bajarla o subirla: el texto sale igual y la traza lo anota',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ hacer: (e) => { e.chatwoot.fotosQueFallan.add(FOTO('EJ-13')); } }, { escribe: 'muéstrame el MP-13' }],
+    guion: [VC({ codigo: 'MP-13' }), R('Este es el MP-13 Taladro magnético 28 mm, a $1.900.000. ¿Te sirve?', 'producto')],
+    esperado: (e) => {
+      const f = e.almacen.trazas().flatMap((t) => t.fotos ?? []);
+      return todos(contiene(e, 'Este es el MP-13'), fotos(e).length === 0 ? ok('ninguna foto publicada') : no('publicó la foto'),
+        f.length === 1 && !f[0].ok && f[0].codigo === 'MP-13' ? ok('traza: foto fallida') : no(`traza: ${JSON.stringify(f)}`), sinPersona(e));
+    },
+  },
+  {
+    id: 'v-consultiva-mas-de-3', conjunto: 'ventas', titulo: 'La respuesta nombra 4 productos: la guarda la devuelve y sale la de 3',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: 'taladro magnético para estructura' }],
+    guion: [
+      // Lee 4 productos en dos búsquedas del mismo llamado (el verificador ya ataja un código que no leyó; el tope es de
+      // 3 llamados por turno): lo que ataja aquí es la guarda de las 3.
+      { varias: [VC({ buscar: 'taladro magnético', uso: 'estructura' }), VC({ codigo: 'MP-16' })] },
+      R('Tengo MP-13, MP-14, MP-15 y MP-16. ¿Cuál te sirve más?', 'producto'),
+      R('Te sirven MP-13 (28 mm), MP-14 (40 mm) y MP-15 (32 mm). ¿Cuál te sirve más?', 'producto'),
+    ],
+    esperado: (e) => todos(
+      codigosPublicados(e).length === 3 ? ok('salieron 3') : no(`salieron ${codigosPublicados(e).join(', ')}`), noContiene(e, 'MP-16'),
+      fotos(e).length === 3 ? ok('3 fotos') : no(`${fotos(e).length} fotos`),
+    ),
+  },
+  {
+    id: 'v-consultiva-foto-no-se-repite', conjunto: 'ventas', titulo: 'La foto de un producto no se repite en la conversación, salvo que pida verla',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: '¿y el MP-13 qué capacidad tiene?' }, { escribe: 'mándame la foto del MP-13 otra vez' }],
+    guion: [
+      VC({ codigo: 'MP-13' }), R('El MP-13 vale $1.900.000.', 'precio'),
+      VC({ codigo: 'MP-13' }), R('El MP-13 perfora hasta 28 mm.', 'especificaciones'),
+      VC({ codigo: 'MP-13' }), R('Claro, este es el MP-13.', 'producto'),
+    ],
+    esperado: (e) => (fotos(e).length === 2 ? ok('2 fotos: la primera y la pedida') : no(`${fotos(e).length} fotos`)),
   },
   {
     id: 'v-link-sin-compra', conjunto: 'ventas', titulo: 'Pide el link sin compra confirmada: no hay link',
