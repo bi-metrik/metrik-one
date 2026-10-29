@@ -135,6 +135,28 @@ export interface ComisionEscrita {
   valor: number
 }
 
+/**
+ * El margen REAL de una opción Pública (brief del 2026-10-29, falla 1): lo que queda de su precio
+ * después de pagar lo que la agencia paga por ella, el costo menos la comisión. Con el precio igual
+ * al público es comisión / precio público: $300.000 sobre $2.000.000 da 15 %, y 20 % da 20 %. La
+ * comisión en % va sobre el precio público (`comisionEnPesos`); en pesos, nunca más que él.
+ * `null` sin comisión escrita o sin precio: no hay con qué medirlo (D3).
+ */
+export function margenDeOpcionPublica(a: {
+  comision: ComisionEscrita | null
+  precioPublico: number
+  costo: number
+  precio: number
+}): number | null {
+  const c = a.comision
+  if (!c || !Number.isFinite(c.valor) || c.valor < 0) return null
+  if (!(a.precio > 0)) return null
+  const base = Math.max(0, Number(a.precioPublico) || 0)
+  const pesos = c.tipo === 'monto' ? Math.min(base, c.valor) : c.valor < 100 ? (c.valor / 100) * base : null
+  if (pesos === null) return null
+  return ((a.precio - (a.costo - pesos)) / a.precio) * 100
+}
+
 /** La comisión guardada en la decisión, como se escribe. `null` = nadie la escribió. */
 export function comisionEscrita(d: DecisionTipoTarifa | null | undefined): ComisionEscrita | null {
   if (!d || d.tipo !== 'publica') return null
