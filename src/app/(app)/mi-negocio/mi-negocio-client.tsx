@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange, KeyRound } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
 
@@ -23,6 +23,7 @@ import PilaSection from './pila-section'
 import TerminosSection from './terminos-section'
 import MargenSection from './margen-section'
 import TemporadasSection from './temporadas-section'
+import BovedaSection from './boveda-section'
 import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 // ── Types ──────────────────────────────────────────
@@ -105,6 +106,8 @@ const SECTIONS: SectionDef[] = [
   // Calendario de temporadas de la agencia (2026-10-19). Sin `wsTipo` por lo mismo que los términos.
   { key: 'temporadas', label: 'Temporadas', icon: CalendarRange, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPropuestaViaje: true },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
+  // Bóveda de llaves (2026-10-26): solo la ve el dueño, y solo el dueño real la cambia (no «Ver como» ni MéTRIK).
+  { key: 'boveda-llaves', label: 'Bóveda de llaves', icon: KeyRound, maxScore: 0, scoreKey: 'marca', roles: ['owner'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
 
@@ -185,6 +188,8 @@ export default function MiNegocioClient({
         return 'Alta, media y baja'
       case 'reglas-validacion':
         return 'Listas cautelares'
+      case 'boveda-llaves':
+        return 'Llaves de integraciones'
       default:
         return ''
     }
@@ -425,6 +430,8 @@ function renderSection(
       return <TerminosSection />
     case 'temporadas':
       return <TemporadasSection />
+    case 'boveda-llaves':
+      return <BovedaSection />
 
     case 'margen':
       return <MargenSection />
