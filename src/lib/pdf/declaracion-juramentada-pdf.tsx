@@ -44,6 +44,9 @@ import { fmtCurrency, fmtAlMil, fechaLarga, fechaDeGeneracion } from './formato'
  *    expediente no tiene: se caen la segunda frase de PRIMERO, la mención UPME de
  *    SEGUNDO y el «y del Certificado UPME No.» de TERCERO y CUARTO — ver `upme`
  *    dentro del componente. Nunca se imprime un marcador en su lugar.
+ *    ⚠️ PENDIENTE con Deisy Ramírez (SOENA): el texto degradado («…corresponde a la
+ *    adquisición del vehículo descrito en la cláusula anterior.») es decisión de
+ *    MéTRIK; ninguna de las dos plantillas lo trae.
  */
 interface DeclaracionJuramentadaProps {
   datos: {
