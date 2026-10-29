@@ -16,6 +16,7 @@ import { completadoDeFila, fechasDeFila, leerTramos, type FechasServicio, type T
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
 import { GATE_SERVICIOS_LISTOS, faltaParaServiciosListos, type FaltaServicio } from './gate-servicios'
 import { configReglasPago } from './reglas-pago'
+import { monedaDelServicio, type MonedaDelServicio } from './moneda-servicio'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -363,6 +364,11 @@ export interface ServicioDelNegocio {
   origen: 'cotizacion' | 'manual'
   gastos: GastoDeServicio[]
   aprobaciones: AprobacionDeServicio[]
+  /**
+   * H6-1 / H9-1 · la moneda en que se cotizó (del ítem de la cotización, `moneda-servicio.ts`).
+   * `null` o ausente = en pesos.
+   */
+  moneda?: MonedaDelServicio | null
 }
 
 export interface GastoDeServicio {
@@ -373,6 +379,8 @@ export interface GastoDeServicio {
   soporte_url: string | null
   medio_pago: string | null
   titular_medio: string | null
+  /** El texto del gasto: trae la TRM del pago en otra moneda (`marcaTrm`). */
+  descripcion?: string | null
 }
 
 export interface AprobacionDeServicio {
@@ -405,7 +413,7 @@ export async function leerServiciosDelNegocio(
   if (filas.length === 0) return []
   const ids = filas.map(f => f.id)
   const [gastosRes, aprobRes] = await Promise.all([
-    db.from('gastos').select('id, fecha, servicio_id, monto, soporte_url, medio_pago, titular_medio').in('servicio_id', ids).order('fecha', { ascending: true }),
+    db.from('gastos').select('id, fecha, servicio_id, monto, soporte_url, medio_pago, titular_medio, descripcion').in('servicio_id', ids).order('fecha', { ascending: true }),
     // Las caducadas no pintan nada: la vigente o la última decisión son las que cuentan.
     db.from('aprobaciones_excepcion')
       .select('id, entidad_id, tipo, estado, huella, motivo, detalle, solicitada_por, decidida_at')
@@ -420,6 +428,7 @@ export async function leerServiciosDelNegocio(
     return null
   }
   const gastos = (gastosRes.data ?? []) as Array<GastoDeServicio & { servicio_id: string }>
+  const itemDe = await itemsDeServicios(db, filas)
   const aprob = (aprobRes.data ?? []) as Array<AprobacionDeServicio & { entidad_id: string }>
   return filas.map(f => ({
     ...f,
@@ -434,7 +443,11 @@ export async function leerServiciosDelNegocio(
       soporte_url: g.soporte_url,
       medio_pago: g.medio_pago,
       titular_medio: g.titular_medio,
+      descripcion: g.descripcion ?? null,
     })),
+    moneda: f.item_id && itemDe.has(f.item_id)
+      ? monedaDelServicio(itemDe.get(f.item_id)!.tarifa_pax, Number(f.costo_cotizado) || 0, itemDe.get(f.item_id)!.subtotal)
+      : null,
     aprobaciones: vigentesPorTipo(aprob.filter(a => a.entidad_id === f.id)).map(a => ({
       id: a.id,
       tipo: a.tipo,
@@ -446,6 +459,25 @@ export async function leerServiciosDelNegocio(
       decidida_at: a.decidida_at ?? null,
     })),
   }))
+}
+
+/**
+ * `tarifa_pax` y `subtotal` de los ítems de las filas, para la moneda de cada servicio. Si no se
+ * pueden leer, ninguno: la fila se ve en pesos, como antes del 2026-10-29.
+ */
+async function itemsDeServicios(
+  db: Db,
+  filas: ReadonlyArray<{ item_id?: string | null }>,
+): Promise<Map<string, { tarifa_pax: unknown; subtotal: number | null }>> {
+  const ids = [...new Set(filas.map(f => f.item_id).filter((x): x is string => !!x))]
+  if (ids.length === 0) return new Map()
+  try {
+    const { data, error } = await db.from('items').select('id, tarifa_pax, subtotal').in('id', ids)
+    if (error || !Array.isArray(data)) return new Map()
+    return new Map((data as Array<{ id: string; tarifa_pax: unknown; subtotal: number | null }>).map(i => [i.id, { tarifa_pax: i.tarifa_pax, subtotal: i.subtotal }]))
+  } catch {
+    return new Map()
+  }
 }
 
 /**

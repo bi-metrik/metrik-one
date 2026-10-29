@@ -42,6 +42,7 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from '@/lib/cotizaciones/fechas-del-viaje'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { terminosConCondicionVisa } from '@/lib/viaje/condicion-visa'
+import { terminosConTasaDeCambio } from '@/lib/cotizaciones/nota-tasa-pdf'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
@@ -1471,7 +1472,8 @@ export async function generateCotizacionPDF(
       notas: cot.notas,
       descuento_porcentaje: cot.descuento_porcentaje ?? 0,
       descuento_valor: cot.descuento_valor ?? 0,
-      terminos_condiciones: terminosConCondicionVisa((cot as unknown as CotizacionNuevosCampos).terminos_condiciones, conVisaEnTramite),
+      // H8 (QA 2026-10-29): si alguna línea se costeó en otra moneda, la tarjeta «Tasa de cambio».
+      terminos_condiciones: terminosConCondicionVisa(terminosConTasaDeCambio((cot as unknown as CotizacionNuevosCampos).terminos_condiciones, items), conVisaEnTramite),
     },
     empresa: {
       nombre: empresa.nombre ?? '',

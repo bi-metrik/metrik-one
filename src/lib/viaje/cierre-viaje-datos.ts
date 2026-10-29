@@ -5,6 +5,7 @@ import 'server-only'
  * cliente y el workspace de quien llama, que ya pasó su guarda.
  */
 
+import { monedaDelServicio } from './moneda-servicio'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
@@ -53,18 +54,37 @@ export async function gastosDelNegocio(db: Db, workspaceId: string, negocioId: s
 async function serviciosDelCierre(db: Db, workspaceId: string, negocioId: string): Promise<ServicioCierre[]> {
   const { data, error } = await db
     .from('negocio_servicios')
-    .select('id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, comision_esperada, comision_estado, orden')
+    .select('id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, comision_esperada, comision_estado, orden, item_id')
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
     .order('orden', { ascending: true })
   if (error) throw new Error(`No se pudieron leer los servicios: ${error.message}`)
-  return ((data ?? []) as ServicioCierre[]).map(s => ({
+  const filas = (data ?? []) as Array<ServicioCierre & { item_id?: string | null }>
+  const itemDe = await itemsDeLosServicios(db, filas)
+  return filas.map(s => ({
     ...s,
+    // H6-3 · la moneda en que se cotizó, para separar la diferencia de cambio en la explicación.
+    moneda: s.item_id && itemDe.has(s.item_id)
+      ? monedaDelServicio(itemDe.get(s.item_id)!.tarifa_pax, Number(s.costo_cotizado) || 0, itemDe.get(s.item_id)!.subtotal)
+      : null,
     costo_cotizado: Number(s.costo_cotizado) || 0,
     valor_por_pagar: s.valor_por_pagar === null || s.valor_por_pagar === undefined ? null : Number(s.valor_por_pagar),
     comision_esperada: s.comision_esperada === null || s.comision_esperada === undefined ? null : Number(s.comision_esperada),
     comision_estado: s.comision_estado ?? null,
   }))
+}
+
+/** `tarifa_pax` y `subtotal` de los ítems de los servicios. Si no se pueden leer, ninguno (todo en pesos). */
+async function itemsDeLosServicios(db: Db, filas: ReadonlyArray<{ item_id?: string | null }>): Promise<Map<string, { tarifa_pax: unknown; subtotal: number | null }>> {
+  const ids = [...new Set(filas.map(f => f.item_id).filter((x): x is string => !!x))]
+  if (ids.length === 0) return new Map()
+  try {
+    const { data, error } = await db.from('items').select('id, tarifa_pax, subtotal').in('id', ids)
+    if (error || !Array.isArray(data)) return new Map()
+    return new Map((data as Array<{ id: string; tarifa_pax: unknown; subtotal: number | null }>).map(i => [i.id, { tarifa_pax: i.tarifa_pax, subtotal: i.subtotal }]))
+  } catch {
+    return new Map()
+  }
 }
 
 /**

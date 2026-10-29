@@ -354,6 +354,13 @@ export interface LecturaCasilla {
    */
   costoPendiente?: true
   /**
+   * M7-1 / M9-2 (QA Trappvel 2026-10-29) · la persona dijo que el total de este pantallazo es el de
+   * UNA habitación para todo el grupo (la habitación familiar con precio por habitación): el costo
+   * es ese total y no se pide la resta de pantallazos («Solo adultos», «Sin el infante»). Vive en la
+   * lectura: pegar otro pantallazo en la casilla 1 la quita sola. Ausente en toda otra lectura.
+   */
+  totalDeHabitacion?: { por: string | null; en: string }
+  /**
    * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
    * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
    * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
@@ -1067,6 +1074,15 @@ export function origenDeLaOcupacion(a: {
  */
 export const MONEDAS_FRECUENTES: readonly string[] = ['COP', 'USD', 'EUR', 'MXN']
 
+/**
+ * Las monedas del selector de una línea: las frecuentes y, si la línea está en otra, también esa.
+ * El selector arranca en la moneda de la línea (N9-3, QA Trappvel 2026-10-29).
+ */
+export function opcionesDeMoneda(actual: string | null | undefined): readonly string[] {
+  const m = (actual ?? '').toUpperCase()
+  return m && !MONEDAS_FRECUENTES.includes(m) ? [...MONEDAS_FRECUENTES, m] : MONEDAS_FRECUENTES
+}
+
 /** Lo que se le dice a quien intenta confirmar con la moneda supuesta. */
 export const MENSAJE_MONEDA_ASUMIDA =
   'La captura no muestra la moneda: se asumió COP. Acéptala o cámbiala antes de confirmar el costo.'
@@ -1271,6 +1287,20 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * `opciones.moneda` es la moneda con la que se costea la línea (`monedaDeTarifa`): la que
  * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
+/** M7-1 / M9-2 · lo que dice la línea de hotel cuyo total es el de la habitación. */
+export const MENSAJE_TOTAL_DE_HABITACION = 'El total es el de la habitación para todo el grupo: el costo es'
+
+/**
+ * ¿Se puede ofrecer «El total es de la habitación»? Un hotel cuyo pantallazo 1 trae un solo total
+ * para un grupo con menores, sin otra captura para restar (M7-1 / M9-2, QA Trappvel 2026-10-29).
+ */
+export function ofreceTotalDeHabitacion(estado: EstadoTarifa | null | undefined, ranuraSlug: string | null | undefined, casillas: CasillasLeidas | null | undefined): boolean {
+  if (ranuraSlug !== 'hotel_detalle' || estado?.estado !== 'falta') return false
+  const l1 = casillas?.grupo_completo
+  if (!l1 || l1.costoPendiente || l1.totalDeHabitacion) return false
+  return !casillas?.sin_infantes && !casillas?.solo_adultos
+}
+
 /** Lo que dice la opción escrita a mano sin costo mientras nadie lo elige. */
 export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo con «Usar tarifa de proveedor», pega un pantallazo o escríbelo a mano.'
 
@@ -1465,6 +1495,23 @@ function resolverTarifaPorFuente(
       costoTotal: costo,
       origen: 'habitaciones',
       mensaje: `Una reserva de ${registro.length} habitaciones en un pantallazo: el costo es su total, ${formatoMonto(costo, moneda)}. No hace falta nada más.`,
+      porHabitacion: [{ numero: 1, ocupacion: c, total: costo, nombre }],
+    }
+  }
+
+  // 2e · hotel con menores cuyo total es el de la habitación (M7-1 / M9-2): lo dijo una persona
+  // con «El total es de la habitación». Sin partirlo por pasajero, como la reserva de 2d. Con otra
+  // captura pegada para restar, manda la resta.
+  if (ranuraSlug === 'hotel_detalle' && l1.totalDeHabitacion && !defs.slice(1).some(d => casillas[d.clave])) {
+    const costo = montoDeCosto(l1)
+    const nombre = (l1.identidad.tipo_habitacion ?? '').trim() || 'Habitación'
+    return {
+      estado: 'resuelta',
+      costos: [],
+      moneda,
+      costoTotal: costo,
+      origen: 'habitaciones',
+      mensaje: `${MENSAJE_TOTAL_DE_HABITACION} ${formatoMonto(costo, moneda)}. No hace falta nada más.`,
       porHabitacion: [{ numero: 1, ocupacion: c, total: costo, nombre }],
     }
   }

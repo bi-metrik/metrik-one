@@ -105,6 +105,12 @@ export interface EntradaReglasPago {
    * lo que hay que pagarle (`valor_por_pagar` o lo cotizado).
    */
   viaje?: { cotizado: number; comprometidoOtros: number } | null
+  /**
+   * H6-3 (QA Trappvel 2026-10-29) · lo que los pagos de un servicio cotizado en otra moneda se
+   * movieron por la TRM (`moneda-servicio.ts`, pesos; positiva si la TRM subió). No es sobrecosto
+   * del proveedor: la desviación se mide contra lo cotizado MÁS esto. Ausente = 0.
+   */
+  diferenciaCambio?: number | null
   medio: MedioPagoProveedor
   /** Cobrado confirmado al cliente en el negocio (pagos con fecha). */
   cobradoCliente: number
@@ -206,7 +212,8 @@ export function reglasQueRompe(e: EntradaReglasPago): ReglaRota[] {
   }
   const base = baseDesviacion(e.costoCotizado, e.valorPorPagar)
   const contraLoQueCobra = base < (Number(e.costoCotizado) || 0)
-  const d = desviacion(total, base)
+  const cambio = Math.round(Number(e.diferenciaCambio) || 0)
+  const d = desviacion(total, Math.max(0, base + cambio))
   const viaje = e.viaje ? desviacionDelViaje(total, e, e.viaje) : null
   // El viaje compensa: lo que esta fila se pasa ya lo ahorraron otras (registrado, no supuesto).
   const compensado = viaje !== null && viaje <= e.config.pisoPesos
@@ -219,10 +226,12 @@ export function reglasQueRompe(e: EntradaReglasPago): ReglaRota[] {
         : Number.isFinite(d.pct)
           ? `Costó ${pesos(d.pesos)} más de lo cotizado (+${pct1(d.pct)} %).`
           : `Costó ${pesos(d.pesos)} y no tenía costo cotizado.`)
+        + (cambio !== 0 ? ` Sin contar ${pesos(Math.abs(cambio))} de diferencia de cambio${cambio < 0 ? ' a favor' : ''}.` : '')
         + (viaje !== null && viaje < d.pesos ? ` El viaje entero se pasa ${pesos(viaje)}.` : ''),
       detalle: {
         cotizado: Math.round(Number(e.costoCotizado) || 0), total, sobrecosto: d.pesos, pct: Number.isFinite(d.pct) ? Math.round(d.pct * 10) / 10 : null,
         ...(contraLoQueCobra ? { valor_por_pagar: Math.round(base) } : {}),
+        ...(cambio !== 0 ? { diferencia_cambio: cambio } : {}),
         ...(e.viaje ? { viaje_cotizado: Math.round(Number(e.viaje.cotizado) || 0), viaje_sobrecosto: viaje } : {}),
       },
     })

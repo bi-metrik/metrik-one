@@ -1,5 +1,8 @@
 'use client'
 
+import { diferenciaDeCambio, diferenciaDeCambioDelServicio, montoEnMoneda, tasaPagoValida, textoDiferenciaDeCambio, textoPagoEnMoneda } from '@/lib/viaje/moneda-servicio'
+import { tasaComoTexto } from '@/lib/cotizaciones/tasa-cotizacion'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -238,7 +241,7 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable,
 }
 
 /** ¿Este pago pediría a Edgar? Lo mismo que decide el servidor (`reglas-pago`). */
-function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, medio: MedioPagoProveedor | null): string[] {
+function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, medio: MedioPagoProveedor | null, diferenciaCambio = 0): string[] {
   if (!medio || !(monto > 0)) return []
   const rotas = reglasQueRompe({
     monto,
@@ -246,6 +249,7 @@ function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, me
     costoCotizado: v.servicio.costo_cotizado,
     valorPorPagar: v.servicio.valor_por_pagar,
     viaje: viajeParaReglas(datos.filas, v.servicio.id),
+    diferenciaCambio,
     medio,
     cobradoCliente: datos.cobradoCliente ?? 0,
     precioAprobado: datos.precioAprobado ?? 0,
@@ -283,7 +287,9 @@ function FilaServicio({
   const detalle = [s.proveedor_nombre ?? 'Falta el proveedor', s.localizador ? `loc. ${s.localizador}` : null]
     .filter(Boolean)
     .join(' · ')
-  const d = desviacion(v.pagado, s.costo_cotizado)
+  // H6-3 · lo que movió la TRM no es sobrecosto del proveedor: se dice aparte.
+  const cambio = diferenciaDeCambioDelServicio(s.moneda, s.gastos)
+  const d = desviacion(v.pagado, Math.max(0, s.costo_cotizado + cambio.pesos))
   const umbral = (datos.reglas ?? configReglasPago(null)).umbralPct
   const pctTexto = Number.isFinite(d.pct) ? ` +${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %` : ''
   // M3-4: lo que el proveedor cobró de menos queda a la vista (no se «pierde» en lo cotizado).
@@ -304,7 +310,10 @@ function FilaServicio({
             {v.estado !== 'cancelado' && <LineaDeFechas s={s} />}
             {fecha && <span className={COLOR_FECHA[fecha.color]}>{fecha.texto}</span>}
             <span className="tabular-nums text-muted-foreground">
-              Cotizado {formatCOP(s.costo_cotizado)} · Pagado {formatCOP(v.pagado)}
+              Cotizado {formatCOP(s.costo_cotizado)}{s.moneda ? ` (${montoEnMoneda(s.moneda.monto, s.moneda.moneda)} a ${tasaComoTexto(s.moneda.tasa)})` : ''} · Pagado {formatCOP(v.pagado)}
+              {s.moneda && cambio.pesos !== 0 && (
+                <span className="text-muted-foreground"> · {cambio.pesos > 0 ? '+' : '−'}{formatCOP(Math.abs(cambio.pesos))} de {textoDiferenciaDeCambio(s.moneda, cambio.tasas)}</span>
+              )}
               {d.pesos > 0 && (
                 <span className={d.pct > umbral ? 'text-red-600' : 'text-amber-600'}> +{formatCOP(d.pesos)}{pctTexto}</span>
               )}
@@ -584,6 +593,7 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   const medios = datos.medios ?? []
   const falta = Math.max(0, v.aPagar - v.pagado)
   const [montoTexto, setMontoTexto] = useState(falta > 0 ? String(Math.round(falta)) : '')
+  const [trmTexto, setTrmTexto] = useState('')
   const [medioId, setMedioId] = useState(medios.length === 1 ? medios[0].id : '')
   const [fecha, setFecha] = useState(todayBogotaISO())
   const [soporte, setSoporte] = useState<string | null>(null)
@@ -598,10 +608,16 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
 
   const monto = Math.round(Number(montoTexto.replace(/[^\d]/g, '')) || 0)
   const medio = medios.find(m => m.id === medioId) ?? null
-  const motivos = pideAEdgar(v, datos, monto, medio)
+  // H6-3 · servicio cotizado en otra moneda: la TRM del pago separa la diferencia de cambio.
+  const enMoneda = v.servicio.moneda ?? null
+  const tasaPago = parseMontoCop(trmTexto)
+  const tasaPagoOk = !!enMoneda && tasaPagoValida(tasaPago, enMoneda.tasa)
+  const cambioPrevio = diferenciaDeCambioDelServicio(enMoneda, v.servicio.gastos).pesos
+  const cambioTotal = cambioPrevio + (enMoneda && tasaPagoOk ? diferenciaDeCambio(monto, enMoneda.tasa, tasaPago as number) : 0)
+  const motivos = pideAEdgar(v, datos, monto, medio, cambioTotal)
   const total = totalTrasPago({ monto, pagadoAntes: v.pagado })
   const base = baseDesviacion(v.servicio.costo_cotizado, v.servicio.valor_por_pagar)
-  const d = desviacion(total, base)
+  const d = desviacion(total, Math.max(0, base + cambioTotal))
   const sobreViaje = desviacionDelViaje(total, { costoCotizado: v.servicio.costo_cotizado, valorPorPagar: v.servicio.valor_por_pagar }, viajeParaReglas(datos.filas, v.servicio.id))
   const listo = monto > 0 && !!medio && !!soporte
 
@@ -633,7 +649,7 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
     })
     if (fuera && !window.confirm(fuera)) return
     startTransition(async () => {
-      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte }, intencion.clave())
+      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte, tasaPago: tasaPagoOk ? tasaPago : null }, intencion.clave())
       intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
@@ -649,7 +665,7 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   function pedir() {
     if (!medio || !(monto > 0)) return
     startTransition(async () => {
-      const r = await pedirAprobacionServicio({ servicioId: v.servicio.id, monto, medioId: medio.id }, intencion.clave())
+      const r = await pedirAprobacionServicio({ servicioId: v.servicio.id, monto, medioId: medio.id, tasaPago: tasaPagoOk ? tasaPago : null }, intencion.clave())
       intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
@@ -662,6 +678,31 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
 
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+      {enMoneda && (
+        <div className="space-y-1" data-pago-en-moneda>
+          <p className="text-xs text-muted-foreground">{textoPagoEnMoneda(enMoneda)}</p>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium">TRM del pago ({enMoneda.moneda} → COP)</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={trmTexto}
+              placeholder={`ej. ${tasaComoTexto(enMoneda.tasa)}`}
+              onChange={e => {
+                setTrmTexto(e.target.value)
+                // Con la TRM, el valor en pesos de lo que falta pagar en la moneda (editable).
+                const t = parseMontoCop(e.target.value)
+                if (falta > 0 && tasaPagoValida(t, enMoneda.tasa)) setMontoTexto(String(Math.round((falta / enMoneda.tasa) * (t as number))))
+              }}
+              disabled={isPending}
+              className="h-11 w-full rounded-md border px-2 text-sm tabular-nums sm:w-48"
+            />
+          </label>
+          {trmTexto.trim() !== '' && !tasaPagoOk && (
+            <p className="text-xs text-amber-700">Esa TRM está muy lejos de la cotizada ({tasaComoTexto(enMoneda.tasa)}): revísala.</p>
+          )}
+        </div>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block space-y-1">
           <span className="text-xs font-medium">Valor pagado</span>
@@ -688,6 +729,11 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
         </select>
       </label>
       {medio && <p className="text-xs text-muted-foreground">Titular: {medio.titular === 'personal' ? 'Personal' : 'Empresa'}</p>}
+      {enMoneda && cambioTotal !== 0 && monto > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {cambioTotal > 0 ? '+' : '−'}{formatCOP(Math.abs(cambioTotal))} de diferencia de cambio: no es sobrecosto del proveedor.
+        </p>
+      )}
       {d.pesos > 0 && monto > 0 && (
         <p className={`text-xs ${motivos.length > 0 ? 'text-red-600' : 'text-amber-600'}`}>
           +{formatCOP(d.pesos)} sobre {base < v.servicio.costo_cotizado ? 'lo que cobra el proveedor' : 'lo cotizado'}{Number.isFinite(d.pct) ? ` (+${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %)` : ''}

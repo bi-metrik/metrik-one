@@ -1,5 +1,6 @@
 'use client'
 
+import { tasasDeCotizacion, type LineaConTasa } from '@/lib/cotizaciones/tasa-cotizacion'
 import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
@@ -464,6 +465,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   )
   const initialItems: ItemRow[] = aPintar.items
   const frescaVigente = aPintar.deLaLecturaPropia
+  // La tasa de la cotización por moneda (H5/H28, `tasa-cotizacion.ts`): la casilla de la tasa de
+  // cada línea arranca con ella, y el servidor la propaga al escribirla.
+  const tasasCotizacion = tasasDeCotizacion(initialItems as unknown as LineaConTasa[])
   // Sin lectura propia, el MISMO objeto de la página: fuera del viaje el editor no cambia en nada.
   const adicionales: NonNullable<Props['adicionales']> = frescaVigente
     ? { ...adicionalesDeLaPagina, porItem: aPintar.adicionalesPorItem }
@@ -1777,6 +1781,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   composicionViaje={composicionViaje}
                   tarifaPax={item.tarifa_pax}
                   costoUnitarioLinea={costoUnitario}
+                  tasasCotizacion={tasasCotizacion}
                   sugeridosGuardados={rubrosSugeridos}
                   onCambio={() => refrescar()}
                 />
@@ -1842,6 +1847,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           itemId={item.id}
                           subtotalPesos={costoManual}
                           tarifaPax={item.tarifa_pax}
+                          tasasCotizacion={tasasCotizacion}
                           onCambio={() => refrescar()}
                         />
                       ) : (
