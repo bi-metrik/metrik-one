@@ -6,8 +6,8 @@
 // a persona con `pago_no_disponible` (nunca inventa un link ni usa la llave de MéTRIK del servidor).
 // ============================================================
 
-import type { PasarelaPagos } from '../../../funciones/pasarela.ts';
-import { pasarelaEnMemoria } from '../../../funciones/pasarela.ts';
+import type { CuerpoLinkBold, PasarelaPagos, PedidoLink } from '../../../funciones/pasarela.ts';
+import { cuerpoLinkBold } from '../../../funciones/pasarela.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 
 /** Lo que se guarda de un link creado (tabla `ferreteria_links_bold`). */
@@ -52,13 +52,23 @@ export interface PuertosVentas {
 
 /** El doble: catálogo fijo, pasarela en memoria (o ninguna), estados de link que el caso fija a mano. */
 export function ventasEnMemoria(o: { productos: ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean }) {
-  const doble = pasarelaEnMemoria({ falla: o.pasarelaCaida });
+  // Como Bold: arma el cuerpo real del pedido (valida monto y vencimiento) y devuelve un `LNK_…` con su checkout.
+  const pedidos: Array<{ pedido: PedidoLink; cuerpo: CuerpoLinkBold }> = [];
+  let n = 0;
+  const pasarela: PasarelaPagos = {
+    async crearLink(p) {
+      if (o.pasarelaCaida) return { ok: false, error: 'pasarela caída (doble)' };
+      pedidos.push({ pedido: structuredClone(p), cuerpo: cuerpoLinkBold(p) });
+      const referencia = `LNK_PRUEBA${++n}`;
+      return { ok: true, referencia, url: `https://checkout.bold.co/${referencia}` };
+    },
+  };
   const links: LinkGuardado[] = [];
   const estados = new Map<string, string>();
   const consultas: string[] = [];
   const puertos: PuertosVentas = {
     catalogo: async () => structuredClone(o.productos),
-    pasarela: async () => (o.sinLlaves ? null : doble.pasarela),
+    pasarela: async () => (o.sinLlaves ? null : pasarela),
     async consultarLink(referencia) {
       consultas.push(referencia);
       if (o.sinLlaves) return 'sin_llaves';
@@ -74,5 +84,5 @@ export function ventasEnMemoria(o: { productos: ProductoVenta[]; sinLlaves?: boo
       return structuredClone(g);
     },
   };
-  return { puertos, links, estados, consultas, pedidos: doble.pedidos, pagar: (referencia: string) => estados.set(referencia, 'PAID') };
+  return { puertos, links, estados, consultas, pedidos, pagar: (referencia: string) => estados.set(referencia, 'PAID') };
 }

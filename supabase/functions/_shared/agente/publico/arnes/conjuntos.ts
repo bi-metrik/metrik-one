@@ -38,7 +38,7 @@ export type PasoCaso =
 
 export interface CasoPublico {
   id: string;
-  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion';
+  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion' | 'ventas';
   titulo: string;
   canal?: Canal;
   config?: Partial<ConfigPublico>;
@@ -49,6 +49,11 @@ export interface CasoPublico {
   guion?: Paso[];
   envolver?: (m: Modelo, e: () => EscenarioPublico) => Modelo;
   esperado?: (e: EscenarioPublico) => Veredicto;
+  /**
+   * Dominio de ventas (Dimpro): el catálogo y la pasarela en memoria. Con esto el caso corre con el reglamento de Dimpro
+   * (`ventas/reglamento-dimpro.ts`) y `config.dominio = 'ventas'`.
+   */
+  ventas?: { productos: import('../ventas/catalogo-ventas.ts').ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean };
   /** Casos de la petición del webhook, sin conversación. */
   soloCodigo?: () => Promise<Veredicto>;
 }

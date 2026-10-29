@@ -12,12 +12,17 @@ import { REGLAMENTO_SABOR } from './reglamento-sabor.ts';
 import { BOT_PUBLICO } from './dominio.ts';
 import type { Ficha } from '../tipos.ts';
 
-const lit = (v: string | null | undefined) => (v === null || v === undefined ? 'null' : `'${v.replace(/'/g, "''")}'`);
-const arr = (v: string[] | null | undefined) => (v === null || v === undefined ? 'null' : v.length ? `array[${v.map(lit).join(', ')}]::text[]` : `'{}'::text[]`);
-const json = (v: unknown) => (v ? `${lit(JSON.stringify(v))}::jsonb` : 'null');
+export const lit = (v: string | null | undefined) => (v === null || v === undefined ? 'null' : `'${v.replace(/'/g, "''")}'`);
+export const arr = (v: string[] | null | undefined) => (v === null || v === undefined ? 'null' : v.length ? `array[${v.map(lit).join(', ')}]::text[]` : `'{}'::text[]`);
+export const json = (v: unknown) => (v ? `${lit(JSON.stringify(v))}::jsonb` : 'null');
+
+/** Las filas `values` de `bot_parametros` de unas fichas (con `v_ws` del bloque). */
+export function filasFichas(fichas: Ficha[]): string[] {
+  return fichas.map((f) => `    (v_ws, ${lit(BOT_PUBLICO)}, ${lit(f.clave)}, ${lit(f.tipo)}, ${lit(f.carga)}, ${lit(f.cuando)}, ${lit(f.hacer)}, ${arr(f.herramientas)}, ${f.prioridad ?? 'null'}, ${lit(f.fuente || null)}, ${json(f.valores)})`);
+}
 
 export function semillaSqlSabor(fichas: Ficha[] = REGLAMENTO_SABOR): string {
-  const filas = fichas.map((f) => `    (v_ws, ${lit(BOT_PUBLICO)}, ${lit(f.clave)}, ${lit(f.tipo)}, ${lit(f.carga)}, ${lit(f.cuando)}, ${lit(f.hacer)}, ${arr(f.herramientas)}, ${f.prioridad ?? 'null'}, ${lit(f.fuente || null)}, ${json(f.valores)})`);
+  const filas = filasFichas(fichas);
   return `-- Reglamento del asistente público de Sabor & Experiencias, borrador etapa 1 — SOLO PARA UN WORKSPACE DE PRUEBA.
 --
 -- GENERADO desde supabase/functions/_shared/agente/publico/reglamento-sabor.ts (semilla-sql.ts). No se edita a mano.
