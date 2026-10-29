@@ -19,6 +19,7 @@
  */
 
 import { calcularCascada, type ParametrosCascada } from '@/lib/cotizaciones/totales'
+import { monedaDelServicio, type MonedaDelServicio } from './moneda-servicio'
 import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { esTipoRanura, tipoDeDefinicion } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -61,6 +62,11 @@ export interface FilaServicioNueva {
    * la liga. Ausente = no se busca.
    */
   buscarEmpresa?: boolean
+  /**
+   * H6-1 / H9-1 (QA G9) · la moneda en que se cotizó (del ítem: `monedaDelServicio`), con lo
+   * cotizado ya cuadrado al peso. `null` = en pesos. Va a `negocio_servicios.moneda/costo_moneda/tasa_cotizada`.
+   */
+  moneda?: MonedaDelServicio | null
 }
 
 /**
@@ -409,6 +415,11 @@ export function filasDeServicioDeTarifa(args: {
   if (residuo !== 0 && filas.length > 0) {
     const mayor = filas.reduce((a, f) => (f.costo_cotizado > a.costo_cotizado ? f : a), filas[0])
     mayor.costo_cotizado = Math.max(0, mayor.costo_cotizado + residuo)
+  }
+  // H6-1 / H9-1 · la moneda y la tasa del ítem viajan con la fila (sobre lo cotizado ya cuadrado).
+  for (const f of filas) {
+    const item = porId.get(f.item_id)
+    f.moneda = item ? monedaDelServicio(item.tarifa_pax, f.costo_cotizado, item.subtotal) : null
   }
   return filas
 }

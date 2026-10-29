@@ -13,7 +13,7 @@
  * `lib/viaje/reglas-pago.ts` (las mismas del bot de WhatsApp).
  */
 
-import { diferenciaDeCambio, diferenciaDeCambioDelServicio, marcaTrm, tasaPagoValida } from '@/lib/viaje/moneda-servicio'
+import { columnasMonedaGasto, diferenciaDeCambio, diferenciaDeCambioDelServicio, esColumnaFaltante, marcaTrm, tasaPagoValida } from '@/lib/viaje/moneda-servicio'
 import { tasaComoTexto } from '@/lib/cotizaciones/tasa-cotizacion'
 import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
@@ -720,34 +720,36 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
   const tp = await tasaDelPago(ctx, servicio, input.tasaPago)
   if ('error' in tp) return { ok: false, error: tp.error }
   const marca = tp.moneda && tp.tasa !== null ? ` ${marcaTrm(tp.moneda, tp.tasa)}` : ''
-  const { data: gasto, error: insErr } = await db(ctx.supabase)
-    .from('gastos')
-    .insert({
-      workspace_id: ctx.workspaceId,
-      negocio_id: servicio.negocio_id,
-      servicio_id: servicio.id,
-      fecha: input.fecha,
-      // El día en que salió la plata (QA 2026-10-29, M3-5): los reportes de pagos leen esta.
-      fecha_pago: input.fecha,
-      monto,
-      categoria: 'proveedor_viaje',
-      clasificacion_costo: 'variable',
-      retencion: 0,
-      deducible: false,
-      descripcion: (proveedor ? `Pago a ${proveedor} · ${servicio.nombre}` : `Pago · ${servicio.nombre}`).slice(0, 300 - marca.length) + marca,
-      tipo: 'directo',
-      estado_pago: 'pagado',
-      soporte_url: input.soporteRef,
-      soporte_pendiente: false,
-      medio_pago: cm.medio.id,
-      titular_medio: cm.medio.titular,
-      canal_registro: 'app',
-      created_by: userId ?? null,
-      centro_costos: 'directa_negocio',
-      origen_asignacion: 'sugerido',
-    })
-    .select('id')
-    .single()
+  const filaGasto: Record<string, unknown> = {
+    workspace_id: ctx.workspaceId,
+    negocio_id: servicio.negocio_id,
+    servicio_id: servicio.id,
+    fecha: input.fecha,
+    // El día en que salió la plata (QA 2026-10-29, M3-5): los reportes de pagos leen esta.
+    fecha_pago: input.fecha,
+    monto,
+    categoria: 'proveedor_viaje',
+    clasificacion_costo: 'variable',
+    retencion: 0,
+    deducible: false,
+    descripcion: (proveedor ? `Pago a ${proveedor} · ${servicio.nombre}` : `Pago · ${servicio.nombre}`).slice(0, 300 - marca.length) + marca,
+    tipo: 'directo',
+    estado_pago: 'pagado',
+    soporte_url: input.soporteRef,
+    soporte_pendiente: false,
+    medio_pago: cm.medio.id,
+    titular_medio: cm.medio.titular,
+    canal_registro: 'app',
+    created_by: userId ?? null,
+    centro_costos: 'directa_negocio',
+    origen_asignacion: 'sugerido',
+  }
+  // H6-3 (QA G9) · la moneda, lo pagado en ella y la TRM quedan en columnas, además del texto.
+  const enMoneda = columnasMonedaGasto(tp.moneda, tp.tasa, monto)
+  const insertar = (fila: Record<string, unknown>) => db(ctx.supabase).from('gastos').insert(fila).select('id').single()
+  let { data: gasto, error: insErr } = await insertar(enMoneda.moneda ? { ...filaGasto, ...enMoneda } : filaGasto)
+  // Sin la migración, la base no tiene las columnas: el pago se registra como antes (TRM en el texto).
+  if (enMoneda.moneda && esColumnaFaltante(insErr)) ({ data: gasto, error: insErr } = await insertar(filaGasto))
   if (insErr || !gasto) return { ok: false, error: `No se pudo registrar el pago: ${insErr?.message ?? 'sin respuesta'}` }
   const gastoId = (gasto as { id: string }).id
 

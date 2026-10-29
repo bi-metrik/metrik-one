@@ -5,7 +5,7 @@ import 'server-only'
  * cliente y el workspace de quien llama, que ya pasó su guarda.
  */
 
-import { monedaDelServicio } from './moneda-servicio'
+import { esColumnaFaltante, monedaDelServicioConRespaldo } from './moneda-servicio'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
 import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
@@ -42,31 +42,37 @@ interface Base {
 
 /** Los gastos del negocio (costo real): cada uno una vez (§7.2.2). */
 export async function gastosDelNegocio(db: Db, workspaceId: string, negocioId: string): Promise<GastoCierre[]> {
-  const { data, error } = await db
+  const leer = (columnas: string) => db
     .from('gastos')
-    .select('monto, servicio_id, categoria, descripcion, titular_medio')
+    .select(columnas)
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
+  const BASE = 'monto, servicio_id, categoria, descripcion, titular_medio'
+  // QA G9 · la moneda y la TRM del pago; sin la migración, como antes (la TRM sale del texto).
+  let { data, error } = await leer(`${BASE}, moneda, tasa_cambio`)
+  if (esColumnaFaltante(error)) ({ data, error } = await leer(BASE))
   if (error) throw new Error(`No se pudieron leer los gastos: ${error.message}`)
   return ((data ?? []) as GastoCierre[]).map(g => ({ ...g, monto: Number(g.monto) || 0, servicio_id: g.servicio_id ?? null }))
 }
 
 async function serviciosDelCierre(db: Db, workspaceId: string, negocioId: string): Promise<ServicioCierre[]> {
-  const { data, error } = await db
+  const leer = (columnas: string) => db
     .from('negocio_servicios')
-    .select('id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, comision_esperada, comision_estado, orden, item_id')
+    .select(columnas)
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
     .order('orden', { ascending: true })
+  const BASE = 'id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, comision_esperada, comision_estado, orden, item_id'
+  // QA G9 · la moneda en sus columnas; sin la migración, del ítem (#1364).
+  let { data, error } = await leer(`${BASE}, moneda, costo_moneda, tasa_cotizada`)
+  if (esColumnaFaltante(error)) ({ data, error } = await leer(BASE))
   if (error) throw new Error(`No se pudieron leer los servicios: ${error.message}`)
-  const filas = (data ?? []) as Array<ServicioCierre & { item_id?: string | null }>
+  const filas = (data ?? []) as Array<Omit<ServicioCierre, 'moneda'> & { item_id?: string | null; moneda?: unknown; costo_moneda?: unknown; tasa_cotizada?: unknown }>
   const itemDe = await itemsDeLosServicios(db, filas)
   return filas.map(s => ({
     ...s,
     // H6-3 · la moneda en que se cotizó, para separar la diferencia de cambio en la explicación.
-    moneda: s.item_id && itemDe.has(s.item_id)
-      ? monedaDelServicio(itemDe.get(s.item_id)!.tarifa_pax, Number(s.costo_cotizado) || 0, itemDe.get(s.item_id)!.subtotal)
-      : null,
+    moneda: monedaDelServicioConRespaldo(s, s.item_id ? itemDe.get(s.item_id) : null, Number(s.costo_cotizado) || 0),
     costo_cotizado: Number(s.costo_cotizado) || 0,
     valor_por_pagar: s.valor_por_pagar === null || s.valor_por_pagar === undefined ? null : Number(s.valor_por_pagar),
     comision_esperada: s.comision_esperada === null || s.comision_esperada === undefined ? null : Number(s.comision_esperada),

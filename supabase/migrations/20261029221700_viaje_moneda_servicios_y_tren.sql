@@ -36,12 +36,14 @@ do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'negocio_servicios_moneda_coherente'
                    and conrelid = 'public.negocio_servicios'::regclass) then
-    -- Las tres juntas o ninguna; la moneda es un código ISO de tres letras y nunca COP (en pesos =
+    -- Las tres juntas o ninguna (los «is not null» explícitos: un CHECK con NULL da «desconocido» y
+    -- pasa); la moneda es un código ISO de tres letras y nunca COP (en pesos =
     -- null); el monto y la tasa, positivos.
     alter table public.negocio_servicios
       add constraint negocio_servicios_moneda_coherente check (
         (moneda is null and costo_moneda is null and tasa_cotizada is null)
-        or (moneda ~ '^[A-Z]{3}$' and moneda <> 'COP' and costo_moneda > 0 and tasa_cotizada > 0)
+        or (moneda is not null and costo_moneda is not null and tasa_cotizada is not null
+            and moneda ~ '^[A-Z]{3}$' and moneda <> 'COP' and costo_moneda > 0 and tasa_cotizada > 0)
       );
   end if;
 end $$;
@@ -67,7 +69,8 @@ begin
     alter table public.gastos
       add constraint gastos_moneda_coherente check (
         (moneda is null and monto_moneda is null and tasa_cambio is null)
-        or (moneda ~ '^[A-Z]{3}$' and moneda <> 'COP' and monto_moneda > 0 and tasa_cambio > 0)
+        or (moneda is not null and monto_moneda is not null and tasa_cambio is not null
+            and moneda ~ '^[A-Z]{3}$' and moneda <> 'COP' and monto_moneda > 0 and tasa_cambio > 0)
       );
   end if;
 end $$;
