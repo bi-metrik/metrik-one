@@ -486,6 +486,17 @@ export function prometeCompletoSinNota(texto: string, p: Pick<Propuesta, 'accion
   return /\b(complet[oa]s?|enter[oa]s?|integr[oa]s?|tal cual|sin cortes?|textual(mente)?)\b/.test(t);
 }
 
+/**
+ * ¿El texto dice que el gasto ya no existe cuando la base tiene uno parecido? (caso real 2026-10-29: «El gasto de
+ * $65.000 en Resend que registramos antes ya no existe en la base, así que lo registro de nuevo» con el del 25-oct en la
+ * base: el modelo hablaba del de prueba que se borró y la propuesta salió contradiciendo su propio aviso). Pura.
+ */
+export function niegaElParecido(texto: string, p: Pick<Propuesta, 'accion' | 'datos'>): boolean {
+  if (p.accion !== 'gasto' || !p.datos.parecido) return false;
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\bno existe\b|\bya no (esta|aparece|figura|hay)\b|\b(fue|se|lo|la) (borr|elimin)/.test(t);
+}
+
 const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 
 /**
@@ -863,6 +874,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
           // `mensaje_original` NO va aquí: cambia con cada mensaje y la misma propuesta dejaría de ser «la misma»
           // (`propuesta_repetida`). Se toma al ejecutar.
           centro: cc.centro, origen: cc.origen,
+          parecido: parecido ? { monto: parecido.monto, fecha: parecido.fecha, descripcion: parecido.descripcion || null } : null,
         },
         resumen, ...(negocio ? { sobre: negocio.codigo } : {}), si: 'Registrar', no: 'No',
       },
@@ -1195,9 +1207,16 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     // La base manda (2026-10-21): los gastos que la conversación dice que se registraron, revisados en este turno.
     registros: async (ctx) => registrosDeGastos(await gastosVigentes(ctx)),
     revisarRespuesta: (s) => listaDeDestinoDelModelo(s),
-    revisarTextoPropuesta: (texto, p) => prometeCompletoSinNota(texto, p)
-      ? 'No se envió: el texto dice que va el mensaje completo, y lo que se guarda es el `texto` que escribiste tú. Si la persona pidió registrar su nota, pon `nota: "#n"` (va tal cual); si no, quita esa frase.'
-      : null,
+    revisarTextoPropuesta: (texto, p) => {
+      if (prometeCompletoSinNota(texto, p)) {
+        return 'No se envió: el texto dice que va el mensaje completo, y lo que se guarda es el `texto` que escribiste tú. Si la persona pidió registrar su nota, pon `nota: "#n"` (va tal cual); si no, quita esa frase.';
+      }
+      if (niegaElParecido(texto, p)) {
+        const x = p.datos.parecido as { monto: number; fecha: string; descripcion: string | null };
+        return `No se envió: el texto dice que el gasto ya no existe, y en la base hay uno parecido: ${formatCOP(x.monto)} el ${fechaConDia(x.fecha)}${x.descripcion ? ` («${x.descripcion}»)` : ''}. No digas que no existe: di que ya hay uno así y que, si es el mismo, toque No.`;
+      }
+      return null;
+    },
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',

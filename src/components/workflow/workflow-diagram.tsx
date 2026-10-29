@@ -78,6 +78,7 @@ const READONLY_BLOQUE_TIPOS = new Set([
   'resumen_financiero',
   'resultado',
   'ejecucion',
+  'avisos_cliente',
 ])
 
 function isReadonlyTipo(tipo: string): boolean {

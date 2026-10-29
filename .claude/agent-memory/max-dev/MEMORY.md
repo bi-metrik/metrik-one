@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy
 - ⚠️⚠️ [Factura de cuota sale siempre (#1317)](project_factura_cuota_correo_siempre.md) — 20261028120000 SIN aplicar; edge enviar-factura-cuota; webhook después de la migración
 - ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; puntos fuera de precio_venta; `–` no `−` en PDF; causas en causas-margen.ts
 - ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje; pegado vía RegistroDePaquetes; paquete en 0 no cae en faltantes
