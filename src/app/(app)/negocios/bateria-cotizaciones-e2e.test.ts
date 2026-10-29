@@ -103,7 +103,7 @@ vi.mock('@/lib/pdf/marca-borrador', async importOriginal => {
 
 import { generateCotizacionPDF } from './cotizacion-pdf-actions'
 import { recalcularTotales } from './cotizacion-actions'
-import { crearPaqueteBloqueo, guardarPaqueteBloqueo } from './bloqueo-actions'
+import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, paqueteEnPropuesta } from './bloqueo-actions'
 import { cascadaVigente, contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsDelItinerario } from '@/lib/cotizaciones/itinerarios'
 import { medirSalida } from '@/lib/cotizaciones/piso-salida'
@@ -117,31 +117,9 @@ type Invariante = 'I1' | 'I2' | 'I3' | 'I3b' | 'I4' | 'I5' | 'I6' | 'I7'
  * pasa mientras siga fallando. Al arreglar la decisión, se borra de aquí (el `it.fails` se pondría
  * rojo al dejar de fallar).
  */
-const FALLA_HOY: Partial<Record<ClaveCaso, Partial<Record<Invariante, string>>>> = {
-  'a-bloqueo-san-andres': {
-    // D4: el 0 de `cotizaciones.margen_porcentaje` (nadie lo escribió a propósito) anula el 15 de la
-    // línea y las dos Netas salen a costo (`cotizacion-actions.ts`, `itinerarios-datos.ts`).
-    I1: 'D4 (un 0 en la cotización anula el margen por defecto: las Netas salen a costo)',
-    // D2 + D5: solo se mide el primer paquete (el supuesto), y como es Público queda exento.
-    I2: 'D2 (exención de las Públicas) y D5 (solo se mide el primer paquete)',
-    // D2: con solo el paquete Público en la cuenta, `exentaDelMinimo` deja salir el PDF limpio.
-    I3: 'D2 (la cotización «solo Pública» queda exenta del mínimo y sale limpia)',
-    I3b: 'D3 (la Pública sin comisión no tiene motivo propio; hoy ni siquiera frena)',
-    // D5: crear/guardar paquete no sincroniza las tarifas; el PDF muestra solo el primer paquete.
-    I4: 'D5 (el PDF muestra solo el primer paquete)',
-    // D6: «Incluye» (`incluye-por-one.ts`) no mira `bloqueo.incluye.casillas`.
-    I5: 'D6 («Incluye» no refleja las casillas del paquete)',
-    // D6: «Todos los hoteles incluyen el desayuno» con «(FULL) Desayuno, Almuer.».
-    I6: 'D6 (afirma «incluyen el desayuno» con un régimen FULL)',
-    // D6: sin vuelo ni salida manual el paquete no tiene fechas y el itinerario sale de 1 día.
-    I7: 'D6 (paquete sin vuelo ni salida: itinerario de 1 día)',
-  },
-  'b-cancun-publicas': {
-    // D2: las Públicas sin comisión salen de la medida y el margen se calcula solo con las Netas.
-    I2: 'D2 (las Públicas sin comisión no entran al margen general)',
-    I3b: 'D3 (la Pública sin comisión frena como «margen bajo el mínimo», no por su motivo)',
-  },
-}
+// Vacío desde el PR de D2–D6 (2026-10-29): todos los casos cumplen. El PR que deje uno sin cumplir
+// a propósito lo anota aquí con la decisión que lo explica.
+const FALLA_HOY: Partial<Record<ClaveCaso, Partial<Record<Invariante, string>>>> = {}
 
 // ── Correr un caso ───────────────────────────────────────────────────────────
 
@@ -176,7 +154,13 @@ async function correr(caso: CasoBateria): Promise<Resultado> {
     cot.margen_porcentaje = caso.margenDeLaCotizacionAlFinal
   }
   await recalcularTotales(caso.cotizacionId)
+  return medir(caso)
+}
 
+/** Lo que mide el motor y lo que imprime el PDF de la cotización tal como está en el doble. */
+async function medir(caso: CasoBateria): Promise<Resultado> {
+  estado.motor = []
+  estado.motivos = null
   const supabase = clienteFalso()
   const ctx = await contextoDeCotizacion(supabase, caso.cotizacionId)
   const filas = await leerItinerarios(supabase, caso.cotizacionId)
@@ -333,3 +317,83 @@ for (const caso of CASOS) {
     })
   })
 }
+
+// ── D5 y D3 con las acciones reales: quitar y volver a poner un paquete ──────
+
+describe('D5 · la asesora saca un paquete de la propuesta y lo vuelve a poner (acciones reales)', () => {
+  const caso = CASOS.find(c => c.clave === 'a-bloqueo-san-andres')!
+  const idDe = (nombre: string) => (base.tablas.items as Fila[]).find(i => clave(i.nombre as string) === clave(nombre))!.id as string
+  const opciones = (r: Resultado) => opcionesDelPdf(r.props).map(o => o.lineas.map(clave).join(' + '))
+  let inicial: Resultado
+  beforeAll(async () => { inicial = await correr(caso) }, 60_000)
+
+  it('los tres paquetes salen, cada uno con su precio', () => {
+    expect(opciones(inicial)).toEqual(['hotel arena ficticio', 'hotel coral ficticio', 'hotel palma ficticio'])
+  })
+
+  it('sacar el segundo lo quita del PDF sin borrarlo; ponerlo otra vez lo devuelve igual', async () => {
+    const coral = idDe('Hotel Coral Ficticio')
+    expect(await paqueteEnPropuesta(coral, false)).toEqual({ success: true })
+    const sin = await medir(caso)
+    expect(opciones(sin)).toEqual(['hotel arena ficticio', 'hotel palma ficticio'])
+    expect((base.tablas.items as Fila[]).some(i => i.id === coral)).toBe(true)
+    expect(await paqueteEnPropuesta(coral, true)).toEqual({ success: true })
+    const con = await medir(caso)
+    expect(opcionesDelPdf(con.props)).toEqual(opcionesDelPdf(inicial.props))
+  }, 60_000)
+
+  it('sacar el de la Recomendada le pasa la Recomendada al siguiente que va; el total es el de ese', async () => {
+    const arena = idDe('Hotel Arena Ficticio')
+    expect(await paqueteEnPropuesta(arena, false)).toEqual({ success: true })
+    const r = await medir(caso)
+    expect(opciones(r)).toEqual(['hotel coral ficticio', 'hotel palma ficticio'])
+    const rec = r.props.itinerarios!.find(b => b.esPrincipal)!
+    expect(rec.items.map(i => clave(i.nombre))).toEqual(['hotel coral ficticio'])
+    expect(r.valorTotal).toBe(rec.precio)
+    // Sin la Pública sin comisión en la propuesta, ya no frena por su comisión.
+    expect(r.motivos).not.toContain('comision_publica')
+    // Y vuelve.
+    expect(await paqueteEnPropuesta(arena, true)).toEqual({ success: true })
+    expect(opciones(await medir(caso))).toHaveLength(3)
+  }, 60_000)
+
+  it('el único paquete que va no se puede sacar', async () => {
+    for (const n of ['Hotel Coral Ficticio', 'Hotel Palma Ficticio']) expect(await paqueteEnPropuesta(idDe(n), false)).toEqual({ success: true })
+    const r = await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), false)
+    expect(r.success).toBe(false)
+    for (const n of ['Hotel Coral Ficticio', 'Hotel Palma Ficticio']) await paqueteEnPropuesta(idDe(n), true)
+  }, 60_000)
+})
+
+describe('D3 · la comisión del paquete Público, en % o en pesos, levanta el freno (acciones reales)', () => {
+  const caso = CASOS.find(c => c.clave === 'a-bloqueo-san-andres')!
+  const arena = () => (base.tablas.items as Fila[]).find(i => clave(i.nombre as string) === 'hotel arena ficticio')!.id as string
+  beforeAll(async () => { await correr(caso) }, 60_000)
+
+  it('sin comisión frena; con 15 % entra al margen general con ella y el PDF sale limpio', async () => {
+    expect((await medir(caso)).motivos).toEqual(['comision_publica'])
+    expect(await ajustarReglasDelPaquete(arena(), { comisionPct: 15 })).toEqual({ success: true })
+    const r = await medir(caso)
+    expect(r.motivos).toEqual([])
+    expect(r.borrador).toBe(false)
+    const rec = r.sujetosDelMotor.find(s => s.nombre === 'Recomendada')!
+    // Cliente 6.000.000; agencia 6.000.000 − 900.000.
+    expect(rec.margen!).toBeCloseTo(15, 6)
+  }, 60_000)
+
+  it('en pesos: $300.000 sobre $6.000.000 es un 5 %: bajo el piso del 12 %, pide la autorización', async () => {
+    expect(await ajustarReglasDelPaquete(arena(), { comisionMonto: 300_000 })).toEqual({ success: true })
+    const r = await medir(caso)
+    expect(r.sujetosDelMotor.find(s => s.nombre === 'Recomendada')!.margen!).toBeCloseTo(5, 6)
+    expect(r.motivos).toEqual(['margen'])
+  }, 60_000)
+
+  it('«Guardar paquete» con la comisión escrita en la tarjeta la deja guardada (visible desde el inicio)', async () => {
+    const item = (base.tablas.items as Fila[]).find(i => i.id === arena())!
+    const paquete = (item.tarifa_pax as { bloqueo: unknown }).bloqueo
+    const r = await guardarPaqueteBloqueo(arena(), { paquete: structuredClone(paquete), comision: 'incluida', comisionAgencia: { tipo: 'pct', valor: 20 } })
+    expect(r.success).toBe(true)
+    expect((item.tarifa_pax as { tipoTarifa: Record<string, unknown> }).tipoTarifa).toMatchObject({ tipo: 'publica', comisionPct: 20 })
+    expect((item.tarifa_pax as { tipoTarifa: Record<string, unknown> }).tipoTarifa).not.toHaveProperty('comisionMonto')
+  }, 60_000)
+})

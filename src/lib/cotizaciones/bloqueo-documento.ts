@@ -51,13 +51,38 @@ export function acomodacionDelPaquete(p: PaqueteBloqueo): string | null {
   return partes.length > 0 ? partes.join(' · ') : null
 }
 
+/** Las fechas del viaje (la Solicitud del negocio), ISO. */
+export interface FechasDeRespaldo {
+  inicio: string | null
+  fin: string | null
+}
+
+/**
+ * Las fechas del hotel del paquete: las del vuelo o la salida manual; si el paquete no trae ninguna,
+ * las del viaje del negocio (D6 de Mauricio, 2026-10-29). Sin esto, un paquete sin vuelo ni salida
+ * manual daba un itinerario de un solo día.
+ */
+export function fechasDelHotelDelPaquete(p: PaqueteBloqueo, respaldo?: FechasDeRespaldo | null): { entrada: string | null; salida: string | null } {
+  const f = fechasDelPaquete(p)
+  // Con vuelo o salida manual, lo de siempre.
+  if (f.origen !== null) return { entrada: f.salida, salida: f.regreso }
+  const entrada = respaldo?.inicio ?? null
+  const salida = entrada && p.hotel.noches ? sumarDiasIso(entrada, p.hotel.noches) : respaldo?.fin ?? null
+  return { entrada, salida }
+}
+
+function sumarDiasIso(iso: string, dias: number): string {
+  const [a, m, d] = iso.split('-').map(Number)
+  return new Date(Date.UTC(a, m - 1, d + dias)).toISOString().slice(0, 10)
+}
+
 /** El hotel de cada paquete de bloqueo, como la ficha de «Hospedaje». */
-export function hotelesDePaquetes(items: readonly ItemConLectura[]): HotelPDF[] {
+export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: FechasDeRespaldo | null): HotelPDF[] {
   const out: HotelPDF[] = []
   for (const item of items) {
     const p = paqueteDe(item)
     if (!p || !p.hotel.hotel) continue
-    const fechas = fechasDelPaquete(p)
+    const fechas = fechasDelHotelDelPaquete(p, respaldo)
     const incluye = incluidoEnPalabras(p.incluye).filter(x => x !== 'Tiquete aéreo')
     const nino = p.hotel.nino
     out.push({
@@ -66,8 +91,8 @@ export function hotelesDePaquetes(items: readonly ItemConLectura[]): HotelPDF[] 
       ciudad: p.hotel.zona,
       habitacion: p.hotel.habitacion,
       regimen: p.hotel.planAlimentacion,
-      checkIn: fechaCorta(fechas.salida),
-      checkOut: fechaCorta(fechas.regreso),
+      checkIn: fechaCorta(fechas.entrada),
+      checkOut: fechaCorta(fechas.salida),
       noches: p.hotel.noches,
       ocupacion: acomodacionDelPaquete(p),
       cancelacion: null,

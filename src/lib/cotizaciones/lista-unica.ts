@@ -19,6 +19,7 @@ import { motivoSinPrecioPorPasajero, type OpcionSinPrecio } from './precio-que-f
 import { esRecomendada, motivoSinRecomendada, type TarifaParaRegla } from './tarifas'
 import { ranurasConAlternativas, type ItemConGrupo } from './itinerarios'
 import { motivoPaquetesIncompletos, type PaqueteIncompleto } from './bloqueo-incompleto'
+import { motivoPublicasSinComision, type PublicaSinComision } from './comision-publica'
 
 export type DestinoDeIr =
   | { a: 'opcion'; itemId: string }
@@ -54,6 +55,8 @@ export interface EntradaDeLista {
    * infante sin costo, niño fuera del rango CHD, acomodación sin precio). Ausente = ninguno.
    */
   paquetes?: readonly PaqueteIncompleto[]
+  /** D3 (2026-10-29): las opciones Públicas que van al cliente sin su comisión. Ausente = ninguna. */
+  publicasSinComision?: readonly PublicaSinComision[]
   /** El texto de `motivoParaNoEnviar` (capturas de otros pasajeros) y la primera línea que lo causa. */
   capturas: { motivo: string; itemId: string | null } | null
   /** Las tarifas, para la regla de la Recomendada. */
@@ -151,6 +154,9 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   // `enviarPorPasos` lo revisa justo después de P12, antes del margen de `enviarCotizacion`.
   const paquete = motivoPaquetesIncompletos(e.paquetes ?? [])
   if (paquete) impide.push({ clave: 'paquete-incompleto', texto: paquete, ir: { a: 'opcion', itemId: e.paquetes![0].itemId } })
+  // D3: justo después del paquete, como `enviarPorPasos`.
+  const comision = motivoPublicasSinComision(e.publicasSinComision ?? [])
+  if (comision) impide.push({ clave: 'comision-publica', texto: comision, ir: { a: 'opcion', itemId: e.publicasSinComision![0].itemId } })
   if (e.capturas) impide.push({ clave: 'capturas', texto: e.capturas.motivo, ir: e.capturas.itemId ? { a: 'opcion', itemId: e.capturas.itemId } : null })
   const rec = motivoSinRecomendada(e.tarifas)
   if (rec) impide.push({ clave: 'recomendada', texto: rec, ir: { a: 'tarifas' } })
@@ -158,7 +164,8 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   const motivoMargen = 'motivoBoton' in nota ? nota.motivoBoton : null
   // Con un paquete incompleto el margen no se puede medir (su costo no está en la cuenta): decir
   // «bajo el mínimo» señalaría la causa equivocada. Lo que impide es el paquete.
-  if (motivoMargen && !(paquete && nota.tipo !== 'incompleta')) {
+  // Con una Pública sin comisión, igual: el margen no se puede medir y la causa es la comisión.
+  if (motivoMargen && !((paquete || comision) && nota.tipo !== 'incompleta')) {
     const primera = e.salida?.faltaCostoLineas?.[0]?.id ?? null
     impide.push({
       clave: nota.tipo === 'incompleta' ? 'falta-costo' : 'margen',

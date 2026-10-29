@@ -207,6 +207,11 @@ export interface OpcionHotelDoc {
   estrellas: number | null
   habitacion: string | null
   regimen: string | null
+  /**
+   * Lo que incluye la opción además del régimen: las casillas del paquete de bloqueo, o lo escrito en
+   * el ingreso manual (D6, 2026-10-29). `null` = nada que decir.
+   */
+  incluye: string | null
   /** Ver la cabecera: viaja en el modelo, imprimirla es decisión aparte. */
   cancelacion: string | null
   /** Lo que se paga en el hotel («Tasa turística: 41,28 EUR»). */
@@ -535,6 +540,7 @@ export function modeloDePropuesta({
     estrellas: h.estrellas ?? null,
     habitacion: h.habitacion,
     regimen: h.regimen,
+    incluye: h.incluye ?? null,
     cancelacion: h.cancelacion,
     cargoEnDestino: cargoDelHotel(props, h),
     foto: h.foto ?? null,
@@ -819,6 +825,16 @@ export function enLaVozDelDocumento(texto: string): string {
     .trim()
 }
 
+/**
+ * ¿El régimen es SOLO alojamiento con desayuno? (D6 de Mauricio, 2026-10-29.) «Todos los hoteles
+ * incluyen el desayuno» se decía de «(FULL) Desayuno, Almuer.» porque nombra el desayuno: el cliente
+ * leía un plan que no es el suyo. Un plan con almuerzo, cena, pensión o todo incluido no se resume así.
+ */
+export function regimenSoloDesayuno(regimen: string | null | undefined): boolean {
+  const r = llano(regimen ?? '')
+  return /desayuno/.test(r) && !/(almuer|cena|full|todo incluido|pension|all inclusive|media pension|completa)/.test(r)
+}
+
 /** «A», «A y B», «A, B y C». */
 function yLista(xs: string[]): string {
   return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
@@ -833,7 +849,7 @@ export function introDeterminista(p: { paradas: ParadaDoc[]; trenes: number; hot
   const tren = p.trenes > 0 && p.paradas.length > 1 ? ', y entre ciudades van en tren, de centro a centro' : ''
   const frases = [`${abre}${tren}.`]
   const regimenes = p.hoteles.flatMap((c) => c.opciones.map((o) => o.regimen ?? ''))
-  if (regimenes.length > 0 && regimenes.every((r) => /desayuno/i.test(r))) frases.push('Todos los hoteles incluyen el desayuno.')
+  if (regimenes.length > 0 && regimenes.every(regimenSoloDesayuno)) frases.push('Todos los hoteles incluyen el desayuno.')
   if (p.dias.some((d) => d.libre)) frases.push('Los días libres quedan abiertos para que ustedes decidan.')
   return frases.join(' ')
 }
@@ -858,7 +874,7 @@ export function incluyeDeTodas(
     const t = ` ${llano(linea).replace(/[^a-z0-9]+/g, ' ')} `
     return lista.some((n) => t.includes(` ${n.replace(/[^a-z0-9]+/g, ' ').trim()} `))
   }
-  const desayuno = m.hoteles.length > 0 && m.hoteles.every((c) => c.opciones.every((o) => /desayuno/i.test(o.regimen ?? '')))
+  const desayuno = m.hoteles.length > 0 && m.hoteles.every((c) => c.opciones.every((o) => regimenSoloDesayuno(o.regimen ?? '')))
   const lineaHotel = `${m.noches > 0 ? `${m.noches} ${m.noches === 1 ? 'noche' : 'noches'} de hotel` : 'Hoteles'}${desayuno ? ' con desayuno' : ''}; el hotel cambia según la versión`
   const lineaVuelo = 'Tiquetes aéreos de ida y regreso; la aerolínea cambia según la versión'
   const salida: string[] = []

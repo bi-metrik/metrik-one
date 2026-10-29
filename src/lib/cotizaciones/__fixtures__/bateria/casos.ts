@@ -229,7 +229,7 @@ const CASO_A: CasoBateria = {
   descuentoTotalPct: 0,
   pisoPct: 12,
   regimenes: [REGIMEN_FULL, REGIMEN_FULL, REGIMEN_FULL],
-  incluyeCasillas: { marcadas: ['Alimentación', 'Planes y tours', 'Traslados', 'Seguro médico'], noMarcadas: ['Tiquete aéreo'] },
+  incluyeCasillas: { marcadas: ['Alimentación', 'Planes / tours', 'Traslados', 'Seguro médico'], noMarcadas: ['Tiquete aéreo'] },
   diasDelViaje: 6,
 }
 

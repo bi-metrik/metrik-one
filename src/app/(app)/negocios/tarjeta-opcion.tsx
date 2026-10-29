@@ -89,6 +89,7 @@ import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
 import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { comisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -694,8 +695,9 @@ export default function TarjetaOpcion({
             tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
             tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
             reglas={reglasDeLinea
-              ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null, comisionPct: tarifa.tipoTarifa?.comisionPct ?? null }
+              ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null }
               : null}
+            comision={comisionEscrita(tarifa.tipoTarifa)}
           />
 
           {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,

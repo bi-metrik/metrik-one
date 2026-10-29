@@ -5,7 +5,8 @@ import { AlertTriangle, ImageIcon, Loader2, Package, Plane, Plus, Trash2, Upload
 import { toast } from 'sonner'
 
 import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
-import { ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
+import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
+import { comisionEscrita, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import {
   ACOMODACIONES,
@@ -125,6 +126,13 @@ export interface PropsTarjetaPaquete {
   reglasDeLinea?: ReglasDeLinea | null
   /** El margen que de verdad se aplicó (ya con el descuento). */
   margenAplicado?: number | null
+  /**
+   * ¿El paquete va en la propuesta? (D5 de Mauricio, 2026-10-29): el «va en la propuesta» de su
+   * tarifa. `null` = todavía no hay tarifas (un solo paquete): no se muestra la casilla.
+   */
+  enPropuesta?: boolean | null
+  /** Incluir o sacar el paquete de la propuesta (reversible). */
+  onEnPropuesta?: (va: boolean) => void
 }
 
 type Comision = 'incluida' | 'por_incluir'
@@ -145,8 +153,15 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const guardado = useMemo(() => leerPaqueteBloqueo(leerTarifaPax(p.tarifaPax).bloqueo), [p.tarifaPax])
   const tarifaGuardada = leerTarifaPax(p.tarifaPax)
   const tipoGuardado = tarifaGuardada.tipoTarifa?.tipo ?? null
-  // Una Pública con comisión gana su comisión: «Margen 0 %» diría que se vende a costo (Vera).
-  const comisionGuardada = tipoGuardado === 'publica' ? tarifaGuardada.tipoTarifa?.comisionPct ?? null : null
+  // Una Pública con comisión gana su comisión: «Margen 0 %» diría que se vende a costo (Vera). La
+  // comisión puede estar en % o en pesos (D3, 2026-10-29): en pesos se dice sobre el costo guardado.
+  const comisionGuardadaEscrita = comisionEscrita(tarifaGuardada.tipoTarifa)
+  const costoGuardado = guardado ? costoDelPaquete(guardado).total : null
+  const comisionGuardada = comisionGuardadaEscrita === null
+    ? null
+    : comisionGuardadaEscrita.tipo === 'pct'
+      ? comisionGuardadaEscrita.valor
+      : costoGuardado && costoGuardado > 0 ? (comisionGuardadaEscrita.valor / costoGuardado) * 100 : null
   const margenVisible = comisionGuardada ?? p.margenAplicado ?? null
   const [abierto, setAbierto] = useState(guardado === null)
   // La edad de cada niño abre con la de la Solicitud si el paquete no tiene la suya (prueba real del
@@ -154,6 +169,8 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const edadesDeInicio = edadesIniciales(guardado?.distribucion.edadesNinos, p.edadesNinosSolicitud)
   const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => conEdadesDeLaSolicitud(guardado ?? paqueteVacio(p.operador), p.edadesNinosSolicitud))
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
+  // La comisión de la agencia (D3): visible desde el inicio con «Pública», y se guarda con el paquete.
+  const [comisionAgencia, setComisionAgencia] = useState<ComisionEscrita | null>(comisionGuardadaEscrita)
   const [imagenes, setImagenes] = useState<{ hotel?: ImagenNueva & { vista: string }; vuelo?: ImagenNueva & { vista: string } }>({})
   const [leyendo, setLeyendo] = useState<{ hotel: boolean; vuelo: boolean }>({ hotel: false, vuelo: false })
   const [rechazo, setRechazo] = useState<{ hotel?: string; vuelo?: string }>({})
@@ -241,6 +258,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
           vuelo: imagenes.vuelo ? { dataUrl: imagenes.vuelo.dataUrl, huella: imagenes.vuelo.huella } : null,
         },
         comision,
+        ...(comision === 'incluida' ? { comisionAgencia } : {}),
       })
       if (!r.success) { toast.error(r.error); return }
       setPaquete(r.paquete)
@@ -288,9 +306,16 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         <button type="button" className="text-[11px] font-semibold text-[#0E5C43] underline" onClick={() => setAbierto(a => !a)}>
           {abierto ? 'Cerrar' : 'Ver y editar el paquete'}
         </button>
+        {/* D5 (2026-10-29): incluir o sacar el paquete de la propuesta, sin borrarlo. */}
+        {p.enPropuesta !== null && p.enPropuesta !== undefined && p.onEnPropuesta && (
+          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#191713]" data-paquete-en-propuesta={p.enPropuesta ? 'si' : 'no'}>
+            <input type="checkbox" checked={p.enPropuesta} disabled={!p.editable || ocupado} onChange={e => p.onEnPropuesta!(e.target.checked)} />
+            Va en la propuesta
+          </label>
+        )}
         {p.editable && (
           <button type="button" className="inline-flex items-center gap-1 text-[11px] text-red-700" onClick={p.onEliminar}>
-            <Trash2 className="h-3 w-3" aria-hidden /> Quitar paquete
+            <Trash2 className="h-3 w-3" aria-hidden /> Borrar paquete
           </button>
         )}
       </div>
@@ -494,26 +519,31 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
             )}
           </fieldset>
 
-          {/* ── Comisión: la casilla de siempre (Pública / Neta) ── */}
-          <fieldset disabled={!p.editable} className="flex flex-wrap gap-3 text-[11px]">
-            <legend className="text-[11px] font-semibold uppercase tracking-wide text-[#6E6A62]">Comisión</legend>
-            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'incluida'} onChange={() => setComision('incluida')} /> Incluida en el precio (margen 0 %)</label>
-            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'por_incluir'} onChange={() => setComision('por_incluir')} /> Por incluir (margen de la cotización)</label>
+          {/* ── Tarifa: Pública (con la comisión de la agencia, obligatoria) o Neta (D3, 2026-10-29) ── */}
+          <fieldset disabled={!p.editable} className="flex flex-col gap-1.5 text-[11px]">
+            <legend className="text-[11px] font-semibold uppercase tracking-wide text-[#6E6A62]">Tarifa del operador</legend>
+            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'incluida'} onChange={() => setComision('incluida')} /> Pública: el precio ya trae la comisión de la agencia</label>
+            {comision === 'incluida' && (
+              <div className="pl-5" data-comision-paquete>
+                <CampoComision comision={comisionAgencia} editable={p.editable} ocupado={ocupado} onComision={setComisionAgencia} />
+              </div>
+            )}
+            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'por_incluir'} onChange={() => setComision('por_incluir')} /> Neta: por incluir (margen de la cotización)</label>
           </fieldset>
 
-          {/* Comisión propia y descuento al cliente, como el hotel (decisión del 2026-10-29). Sobre lo
-              GUARDADO: la comisión es de una tarifa ya guardada como «Incluida». */}
-          {p.reglasDeLinea && guardado && (
+          {/* Descuento al cliente de un paquete Neto, como el hotel (decisión del 2026-10-29). Sobre lo
+              GUARDADO. La comisión de la Pública va arriba, con el tipo de tarifa. */}
+          {p.reglasDeLinea && guardado && tipoGuardado !== 'publica' && (
             <div data-reglas-paquete>
               <ReglasDeOpcion
                 reglas={p.reglasDeLinea}
                 descuento={tarifaGuardada.descuentoCliente ?? null}
-                comisionPct={tarifaGuardada.tipoTarifa?.comisionPct ?? null}
-                publica={tipoGuardado === 'publica'}
+                comision={null}
+                publica={false}
                 editable={p.editable}
                 ocupado={ocupado}
                 onDescuento={d => ajustarReglas({ descuentoCliente: d })}
-                onComision={c => ajustarReglas({ comisionPct: c })}
+                onComision={() => {}}
               />
             </div>
           )}
