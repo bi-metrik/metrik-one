@@ -58,7 +58,7 @@ import { leeSoportes } from '../bandeja/turno-con-rol.ts';
 import { lectorMixto } from '../bandeja/lectura-mixta.ts';
 import { lectorDeSoportes } from '../one/lectura-adjunto.ts';
 import { casosDelRol } from './conjuntos-roles.ts';
-import { fichaValida } from '../reglamento.ts';
+import { fichaValida, ordenPublicado } from '../reglamento.ts';
 import { MODELO_HAIKU, PRECIOS_HAIKU, humoHaiku, proveedorHaiku } from './proveedor-haiku.ts';
 import type { Ficha } from '../tipos.ts';
 import type { PuertoMemoria } from '../memoria.ts';
@@ -95,7 +95,10 @@ async function fichasBase(): Promise<Ficha[]> {
   if (!fichas.length) throw new Error(`--fichas-base: ${ruta} no trae fichas`);
   return fichas;
 }
-const FICHAS_ROL: Ficha[] | null = ROL ? fichasDelRol(ROL, await fichasBase()) : null;
+// En el orden de una versión publicada (por clave), que es el que lee producción: el del código es otro prompt.
+const FICHAS_ROL: Ficha[] | null = ROL ? ordenPublicado(fichasDelRol(ROL, await fichasBase())) : null;
+/** La línea base: la bandeja de hoy, también en el orden publicado. */
+const FICHAS_BANDEJA: Ficha[] = ordenPublicado(conPerfil(REGLAMENTO_ANEXO_A));
 
 /** En seco, el lector de soportes falso (la factura sintética). */
 const lectorSecoSoporte: Lector = async (a) => (a.nombre?.startsWith('factura')
@@ -183,7 +186,7 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
   const conExtraccion = caso.extraccion ? { campos: CAMPOS_ARNES, extraer: seco ? extraccionSeca : HAIKU ? extraccionGemini('', extracciones, { fetch: HAIKU.fetch, modelo: MODELO_HAIKU }) : extraccionGemini(LLAVE, extracciones) } : {};
   // El reglamento que tendrá Trappvel al publicar las fichas del perfil (2026-10-12): todos los casos corren con él. Con
   // `--rol`, el del rol.
-  const reglamento = await reglamentoDePrueba(FICHAS_ROL ?? conPerfil(REGLAMENTO_ANEXO_A));
+  const reglamento = await reglamentoDePrueba(FICHAS_ROL ?? FICHAS_BANDEJA);
   // El lector de documentos solo en los casos con archivos (los demás corren exactamente como antes). Un rol que
   // registra gastos lee cada archivo también como soporte de pago (el lector mixto, como en producción).
   const conArchivos = (caso.pasos ?? []).some((p) => p.adjunta);
@@ -350,7 +353,7 @@ if (import.meta.main) {
   await Deno.writeTextFile(`${salida}/transcripciones.md`, resumen);
   // El banco para publicar (`asistente_publicar_rol`), con la huella de las fichas con que corrieron los casos.
   const banco = await bancoDelArnes({
-    fichas: FICHAS_ROL ?? conPerfil(REGLAMENTO_ANEXO_A), k,
+    fichas: FICHAS_ROL ?? FICHAS_BANDEJA, k,
     arnes: `arnes/correr.ts ${ROL ? `--rol ${ROL}${arg('--fichas-base') ? ' --fichas-base <json>' : ''}` : `--conjunto ${conjunto}`}${solo ? ` --solo ${solo.join(',')}` : ''}${arg('--excluir') ? ` --excluir ${arg('--excluir')}` : ''}`,
     modelo: seco ? 'seco' : HAIKU ? MODELO_HAIKU : CONFIG_POR_DEFECTO.principal.modelo, seco,
     resultados: [...porCaso].map(([id, x]) => ({ id, pasa: x.pasa, daninas: x.daninas })),
