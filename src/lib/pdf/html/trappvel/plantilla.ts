@@ -24,6 +24,7 @@
 import type {
   CiudadDoc,
   ClaveTarifa,
+  VozDelDocumento,
   DiaDoc,
   EventoDoc,
   FilaVueloDoc,
@@ -32,7 +33,6 @@ import type {
   TarifaDoc,
   TrayectoDoc,
 } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { notaDeFila } from '@/lib/viaje/asi-puedes-pagar'
 import { ciudadComparable, mismoLugar } from '@/lib/cotizaciones/bandeja-capturas'
 import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
@@ -66,6 +66,67 @@ export interface RecursosPropuesta {
   /** Créditos de fotos que el documento usó además de las del modelo (las de ciudad por parada). */
   creditosExtra?: string[]
 }
+
+// ── La voz (S3 del QA del 2026-10-29) ───────────────────────────────────────────
+
+/**
+ * Lo que el documento le dice al cliente, en las dos voces: `singular` cuando viaja una persona
+ * (usted) y `plural` cuando viajan varias o no se sabe (ustedes). Nunca tú. Antes un viajero solo
+ * leía «Precio total para el grupo», «Elijan» y «Día abierto para ustedes», y el pie de pagos lo
+ * tuteaba («Puedes repartirlo… contigo») junto a «Escríbannos».
+ */
+export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
+  diaLibre: string
+  sumarPlan: string
+  subItinerario: string
+  subOpcionales: string
+  eligeVersion: string
+  apartarCon: (monto: string) => string
+  apartarSinMonto: string
+  apartarRotulo: string
+  quiereApartarVersion: string
+  quiereApartarViaje: string
+  cuantoYCuando: string
+  llevan: string
+  pieDePagos: string
+  llegan: string
+}> = {
+  plural: {
+    diaLibre: 'Día abierto para ustedes.',
+    sumarPlan: ' Pueden sumar uno de los planes del final.',
+    subItinerario: 'Lo que dice «Incluida» ya está en el precio. Los días libres los pueden llenar con los planes opcionales.',
+    subOpcionales: 'Escojan los que quieran y los sumamos a la reserva. Precio total de cada plan.',
+    eligeVersion: 'Elijan su versión',
+    apartarCon: (monto) => `Apártenlo con ${monto}.`,
+    apartarSinMonto: '¿Les gusta? Escríbannos y se lo apartamos.',
+    apartarRotulo: 'Aparten su viaje',
+    quiereApartarVersion: 'queremos apartar la versión',
+    quiereApartarViaje: 'queremos apartar el viaje',
+    cuantoYCuando: 'Cuánto pagan y cuándo',
+    llevan: 'con esto llevan el',
+    pieDePagos: 'Pueden repartirlo en más cuotas: lo acordamos con ustedes.',
+    llegan: 'Llegan a ',
+  },
+  singular: {
+    diaLibre: 'Día abierto para usted.',
+    sumarPlan: ' Puede sumar uno de los planes del final.',
+    subItinerario: 'Lo que dice «Incluida» ya está en el precio. Los días libres los puede llenar con los planes opcionales.',
+    subOpcionales: 'Escoja los que quiera y los sumamos a la reserva. Precio total de cada plan.',
+    eligeVersion: 'Elija su versión',
+    apartarCon: (monto) => `Apártelo con ${monto}.`,
+    apartarSinMonto: '¿Le gusta? Escríbanos y se lo apartamos.',
+    apartarRotulo: 'Aparte su viaje',
+    quiereApartarVersion: 'quiero apartar la versión',
+    quiereApartarViaje: 'quiero apartar el viaje',
+    cuantoYCuando: 'Cuánto paga y cuándo',
+    llevan: 'con esto lleva el',
+    pieDePagos: 'Puede repartirlo en más cuotas: lo acordamos con usted.',
+    llegan: 'Llega a ',
+  },
+}
+
+/** Los textos de la voz del modelo; sin voz (un modelo armado a mano en una prueba), ustedes. */
+const vozDe = (m: ModeloPropuesta) => TEXTOS_DE_VOZ[m.voz ?? 'plural']
 
 // ── Formato ───────────────────────────────────────────────────────────────────
 
@@ -268,6 +329,7 @@ function resumenIncluye(m: ModeloPropuesta): string | null {
   if (trenes > 0) partes.push(`${trenes} ${trenes === 1 ? 'tren' : 'trenes'}`)
   const traslados = m.trayectos.filas.filter((t) => t.tipo === 'traslado').length
   if (traslados > 0) partes.push(`${traslados} ${traslados === 1 ? 'traslado' : 'traslados'}`)
+  if (m.trayectos.filas.some((t) => t.tipo === 'alquiler')) partes.push('carro de alquiler')
   const visitas = m.dias.flatMap((d) => d.eventos).filter((e) => e.tipo === 'actividad').length
   if (visitas > 0) partes.push(`${visitas} ${visitas === 1 ? 'visita' : 'visitas'}`)
   if (partes.length === 0) return null
@@ -480,7 +542,7 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
         ['No incluye', o.noIncluye ?? null],
       ].filter((x): x is [string, string] => Boolean(x[1]))
       const enTexto = imagen ? '' : `${tagsHtml}`
-      return `<div class="hc">${imagen}<div class="b">${enTexto}<div class="n">${esc(o.hotel)}${!imagen && stars ? ` ${estrellas(o.estrellas)}` : ''}</div>${c.ciudad ? `<div class="caps zona">${esc(c.ciudad)}</div>` : ''}${filas.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>${o.cargoEnDestino ? `<div class="pie">${esc(o.cargoEnDestino)}, se paga en el hotel.</div>` : ''}</div>`
+      return `<div class="hc">${imagen}<div class="b">${enTexto}<div class="n">${esc(o.hotel)}${!imagen && stars ? ` ${estrellas(o.estrellas)}` : ''}</div>${o.zona || c.ciudad ? `<div class="caps zona">${esc(o.zona || c.ciudad)}</div>` : ''}${filas.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>${o.cargoEnDestino ? `<div class="pie">${esc(o.cargoEnDestino)}, se paga en el hotel.</div>` : ''}</div>`
     }),
   )
   const filas: string[] = []
@@ -491,9 +553,20 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
 
 // ── Traslados ─────────────────────────────────────────────────────────────────
 
+/** «Recogida en Aeropuerto Orlando (MCO) · devolución en Aeropuerto Miami (MIA), 29 jun · SUV estándar». */
+function detalleDelAlquiler(t: TrayectoDoc): string {
+  const a = t.alquiler
+  if (!a) return ''
+  const devolucion = [a.devolucion ? `devolución en ${a.devolucion}` : null, diaMes(a.fechaDevolucion)].filter(Boolean).join(', ')
+  return [a.recogida ? `Recogida en ${a.recogida}` : null, devolucion || null, a.vehiculo].filter(Boolean).join(' · ')
+}
+
 function traslados(m: ModeloPropuesta): string {
-  const filas = m.trayectos.filas.filter((t) => t.tipo === 'traslado')
+  // N7-4 / V7-3 · el carro de alquiler va en esta tabla con su rótulo, no como un traslado.
+  const filas = m.trayectos.filas.filter((t) => t.tipo === 'traslado' || t.tipo === 'alquiler')
   if (filas.length === 0) return ''
+  const hayAlquiler = filas.some((t) => t.tipo === 'alquiler')
+  const titulo = !hayAlquiler ? 'Traslados' : filas.every((t) => t.tipo === 'alquiler') ? 'Alquiler de carro' : 'Traslados y alquiler de carro'
   const porIndice = tarifaPorIndice(m)
   const conVersion = m.tarifas.length > 0 && !m.trayectos.igualEnTodas
   const sub = m.tarifas.length > 1 && m.trayectos.igualEnTodas ? 'Iguales en todas las versiones.' : null
@@ -501,6 +574,9 @@ function traslados(m: ModeloPropuesta): string {
     const [trayecto, ...resto] = t.descripcion.split(' · ')
     const dia = diaMes(t.fecha) ?? t.fecha
     const derecha = [t.hora ? esc(t.hora) : '', conVersion ? etiquetasDe(t.tarifas, porIndice) : ''].filter(Boolean).join(' ')
+    if (t.tipo === 'alquiler') {
+      return `<tr><td>${esc([dia, 'Alquiler de carro'].filter(Boolean).join(' · '))}</td><td>${esc(detalleDelAlquiler(t))}</td><td class="est">${derecha}</td></tr>`
+    }
     return `<tr><td>${esc([dia, flecha(trayecto).replace(/^hotel\b/, 'Hotel')].filter(Boolean).join(' · '))}</td><td>${esc(mayuscula(resto.join(' · ')))}</td><td class="est">${derecha}</td></tr>`
   })
   // El título va en un bloque que no se parte con las primeras filas (en una tabla aparte, con las
@@ -509,7 +585,7 @@ function traslados(m: ModeloPropuesta): string {
   const columnas = '<colgroup><col style="width:49%"><col><col style="width:16%"></colgroup>'
   const tabla = (tbodies: string[], clase: string) => `<table class="${clase}">${columnas}\n${tbodies.join('\n')}\n</table>`
   return `<section class="sec">
-<div class="nobr">${encabezadoDeSeccion('van', 'Traslados', sub)}
+<div class="nobr">${encabezadoDeSeccion('van', titulo, sub)}
 ${tabla([`<tbody class="nobr">${juntas.join('\n')}</tbody>`], 'tr fija')}</div>
 ${medio ? tabla([`<tbody>${medio.join('\n')}</tbody>`, `<tbody class="nobr">${cola!.join('\n')}</tbody>`], 'tr fija sigue') : ''}
 </section>`
@@ -555,19 +631,19 @@ function esTrasladoAlLlegar(texto: string): boolean {
   return extremos.length === 2 && /\bhotel\b/i.test(extremos[1]) && !/\bhotel\b/i.test(extremos[0])
 }
 
-const PALABRA_EVENTO: Record<EventoDoc['tipo'], string> = { vuelo: 'Vuelo', tren: 'Tren', traslado: 'Traslado', hotel: 'Hotel', actividad: 'Incluida' }
+const PALABRA_EVENTO: Record<EventoDoc['tipo'], string> = { vuelo: 'Vuelo', tren: 'Tren', traslado: 'Traslado', hotel: 'Hotel', actividad: 'Incluida', carro: 'Carro' }
 
 /**
  * Un renglón del día: la hora en morado a la izquierda (o, sin hora, la palabra del hecho, como
  * «Llegada» o «Libre» en el formato de Edgar) y el texto en frase. Nada que no esté en los datos.
  */
-function renglonDeEvento(e: EventoDoc, d: DiaDoc): string {
+function renglonDeEvento(e: EventoDoc, d: DiaDoc, voz: (typeof TEXTOS_DE_VOZ)[VozDelDocumento] = TEXTOS_DE_VOZ.plural): string {
   let etiquetaIzq = e.hora ?? ''
   let texto: string
   switch (e.tipo) {
     case 'vuelo':
       if (e.momento === 'llegada') {
-        texto = esc(e.texto.replace(/^Llegada a /, 'Llegan a '))
+        texto = esc(e.texto.replace(/^Llegada a /, voz.llegan))
         etiquetaIzq ||= 'Llegada'
       } else {
         texto = `${etiquetaIzq ? 'Vuelo ' : ''}${esc(e.texto)}`
@@ -632,11 +708,11 @@ function itinerario(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const bloques = m.dias.map((d, i) => {
     const f = fecha(d.fecha)
     const titulo = tituloDelDia(d, i, m.dias, m)
-    const renglones = d.eventos.map((e) => renglonDeEvento(e, d))
+    const renglones = d.eventos.map((e) => renglonDeEvento(e, d, vozDe(m)))
     const chips = d.eventos.flatMap((e) => chipsDeVuelo(e, porIndice))
     if (d.libre) {
-      const resto = d.opcionales.length > 0 ? '' : hayOpcionales && sueltos ? ' Pueden sumar uno de los planes del final.' : ''
-      renglones.push(`<div class="ev"><span class="h">Libre</span><span>Día abierto para ustedes.${resto}</span></div>`)
+      const resto = d.opcionales.length > 0 ? '' : hayOpcionales && sueltos ? vozDe(m).sumarPlan : ''
+      renglones.push(`<div class="ev"><span class="h">Libre</span><span>${esc(vozDe(m).diaLibre)}${resto}</span></div>`)
     }
     if (d.opcionales.length > 0) chips.push(`<span class="chip">Opcional: ${esc(oLista(d.opcionales))} (ver «Planes para los días libres»)</span>`)
     if (d.sugerencia) renglones.push(`<div class="ev"><span class="h">Idea</span><span>${esc(d.sugerencia)}</span></div>`)
@@ -656,9 +732,7 @@ function itinerario(m: ModeloPropuesta, r: RecursosPropuesta): string {
     // La píldora no queda sola al pie: va pegada a su día.
     return pildora ? `<div class="nobr">${pildora}${dia}</div>` : dia
   })
-  const sub = hayOpcionales
-    ? 'Lo que dice «Incluida» ya está en el precio. Los días libres los pueden llenar con los planes opcionales.'
-    : 'Lo que dice «Incluida» ya está en el precio.'
+  const sub = hayOpcionales ? vozDe(m).subItinerario : 'Lo que dice «Incluida» ya está en el precio.'
   // El encabezado va pegado al primer día en un bloque que no se parte: `break-after: avoid` del
   // `.sh` Chromium no lo respeta y el título quedaba solo al pie de la hoja.
   const [primero, ...resto] = bloques
@@ -690,7 +764,7 @@ function opcionales(m: ModeloPropuesta, r: RecursosPropuesta): string {
   })
   // Por filas: el título va con la primera y las demás pueden pasar a la hoja siguiente.
   const [primera, ...resto] = enFilas(tarjetas, COLUMNAS_OPCIONALES).map((f) => `<div class="opcs">${f.join('\n')}</div>`)
-  return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('sun', 'Planes para los días libres', 'Escojan los que quieran y los sumamos a la reserva. Precio para el grupo.')}
+  return `<section class="sec">\n<div class="nobr">${encabezadoDeSeccion('sun', 'Planes para los días libres', vozDe(m).subOpcionales)}
   ${primera}</div>\n${resto.join('\n')}\n</section>`
 }
 
@@ -715,7 +789,8 @@ function enlaceWhatsApp(numero: string, texto: string): string {
 function apartar(m: ModeloPropuesta): string {
   const a = m.precio.anticipo
   const asesora = m.formal.asesora
-  const titulo = a ? `Apártenlo con ${pesos(a.monto)}.` : '¿Les gusta? Escríbannos y se lo apartamos.'
+  const voz = vozDe(m)
+  const titulo = a ? voz.apartarCon(pesos(a.monto)) : voz.apartarSinMonto
   const detalle = a?.texto ?? null
   const numero = asesora?.whatsapp ?? null
   const saludo = asesora?.nombre ? `Hola ${asesora.nombre.split(/\s+/)[0]}` : 'Hola'
@@ -724,12 +799,12 @@ function apartar(m: ModeloPropuesta): string {
     : m.tarifas.length > 0
       ? m.tarifas.map(
           (t) =>
-            `<a class="btn b${LETRA[t.clave]}" href="${esc(enlaceWhatsApp(numero, `${saludo}, queremos apartar la versión ${t.nombre} de la propuesta ${m.portada.consecutivo}.`))}"><span>${esc(t.nombre)}</span><b>Apartar por WhatsApp</b></a>`,
+            `<a class="btn b${LETRA[t.clave]}" href="${esc(enlaceWhatsApp(numero, `${saludo}, ${voz.quiereApartarVersion} ${t.nombre} de la propuesta ${m.portada.consecutivo}.`))}"><span>${esc(t.nombre)}</span><b>Apartar por WhatsApp</b></a>`,
         )
-      : [`<a class="btn bR" href="${esc(enlaceWhatsApp(numero, `${saludo}, queremos apartar el viaje de la propuesta ${m.portada.consecutivo}.`))}"><span>${esc(asesora?.nombre ?? 'Su asesora')}</span><b>Apartar por WhatsApp</b></a>`]
+      : [`<a class="btn bR" href="${esc(enlaceWhatsApp(numero, `${saludo}, ${voz.quiereApartarViaje} de la propuesta ${m.portada.consecutivo}.`))}"><span>${esc(asesora?.nombre ?? 'Su asesora')}</span><b>Apartar por WhatsApp</b></a>`]
   return `<div class="cta${botones.length === 0 ? ' solo' : ''}">
     <div class="ctl">
-      <div class="caps">Aparta tu viaje</div>
+      <div class="caps">${esc(voz.apartarRotulo)}</div>
       <div class="ctt">${esc(titulo)}</div>
       ${detalle ? `<div class="small" style="opacity:.85">${esc(detalle)}</div>` : ''}
     </div>
@@ -768,7 +843,7 @@ function eligeTuVersion(m: ModeloPropuesta): string {
           .map((d) => `<tr><td>${esc(d.descripcion)}</td><td class="r money">−${esc(pesos(d.valor))}</td></tr>`)
           .join('')}`
       : ''
-    return `<div class="nobr">${encabezadoDeSeccion('tag', 'Precio del viaje', 'Precio total para el grupo.')}
+    return `<div class="nobr">${encabezadoDeSeccion('tag', 'Precio del viaje', 'Precio total del viaje.')}
   <table class="tr pagos">${lineas}${descuentos}
   <tr class="tot"><td>Total</td><td class="r money">${esc(pesos(m.precio.total))}</td></tr></table>
   ${m.precio.notaIva ? `<p class="small muted">${esc(m.precio.notaIva)}</p>` : ''}</div>
@@ -776,7 +851,7 @@ function eligeTuVersion(m: ModeloPropuesta): string {
   }
   const tarjetas = m.tarifas.map((t) => {
     const precio = t.esPrincipal ? m.precio.total : t.precio
-    const pp = ['el grupo', t.estrellas ? `${t.estrellas}★` : null].filter(Boolean).join(' · ')
+    const pp = ['total del viaje', t.estrellas ? `${t.estrellas}★` : null].filter(Boolean).join(' · ')
     const filasVuelo = gruposDeVuelos(t.vuelos, m).map((g) => {
       const f = g.filas[0]
       const vuelo = [nombreDeAerolinea(f.aerolinea, f.numero), f.numero].filter(Boolean).join(' ')
@@ -804,9 +879,9 @@ function eligeTuVersion(m: ModeloPropuesta): string {
     </div>`
   })
   const sub = m.igualEnTodas.length > 0
-    ? 'Precio total para el grupo. Lo demás va igual en todas; cambian los vuelos y los hoteles.'
-    : 'Precio total para el grupo.'
-  return `<div class="nobr">${encabezadoDeSeccion('tag', 'Elijan su versión', sub)}
+    ? 'Precio total del viaje. Lo demás va igual en todas; cambian los vuelos y los hoteles.'
+    : 'Precio total del viaje.'
+  return `<div class="nobr">${encabezadoDeSeccion('tag', vozDe(m).eligeVersion, sub)}
   <div class="tarifas nobr" style="grid-template-columns:repeat(${Math.min(3, m.tarifas.length)},1fr)">${tarjetas.join('\n')}</div></div>
   ${apartar(m)}`
 }
@@ -830,7 +905,7 @@ function cuantoYCuando(m: ModeloPropuesta): string {
     for (let i = 0; i < n; i++) {
       const ref = conFilas.find((p) => p.plan.filas![i])!.plan
       const f = ref.filas![i]
-      const nota = notaDeFila(f, ref.pctMinimo, pesos)
+      const nota = f.llevas === null ? null : `${vozDe(m).llevan} ${ref.pctMinimo} % (${pesos(f.llevas)})`
       filas.push(
         `<tr><td><b>${esc(mayuscula(f.cuando))}</b>${nota && planes.length === 1 ? ` <span class="muted">(${esc(nota)})</span>` : ''}</td>${planes
           .map((p) => `<td class="r money">${p.plan.filas?.[i] ? esc(pesos(p.plan.filas[i].monto)) : ''}</td>`)
@@ -839,9 +914,9 @@ function cuantoYCuando(m: ModeloPropuesta): string {
     }
     filas.push(`<tr class="tot"><td>Total</td>${planes.map((p) => `<td class="r money">${esc(pesos(p.plan.suma))}</td>`).join('')}</tr>`)
     // El total va en el mismo bloque que las cuotas: nunca se separa de ellas.
-    cuerpo = `<table class="tr pagos">${cabecera}${filas.join('\n')}</table><p class="small muted">${esc(conFilas[0].plan.regla)} ${esc(conFilas[0].plan.pie)}</p>`
+    cuerpo = `<table class="tr pagos">${cabecera}${filas.join('\n')}</table><p class="small muted">${esc(conFilas[0].plan.regla)} ${esc(vozDe(m).pieDePagos)}</p>`
   }
-  return `<div class="sec nobr">${encabezadoDeSeccion('cal', 'Cuánto pagan y cuándo', null)}${cuerpo}</div>`
+  return `<div class="sec nobr">${encabezadoDeSeccion('cal', vozDe(m).cuantoYCuando, null)}${cuerpo}</div>`
 }
 
 /**

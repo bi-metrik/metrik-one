@@ -386,7 +386,8 @@ describe('las secciones del prototipo', () => {
 
   it('lo que no incluye y lo formal salen como en el documento de hoy', () => {
     expect(m.precio.noIncluye).toEqual([
-      'Tasa turística (Barcelona), que se pagan en destino',
+      // V7-2 (QA del 2026-10-29): dice en qué versión se paga.
+      'Tasa turística en Barcelona: se paga en el hotel, solo en la versión Recomendada',
       'Las actividades opcionales listadas al final de este documento',
     ])
     expect(m.formal.pie).toBe('Agencia de ejemplo · contacto@agencia.example')

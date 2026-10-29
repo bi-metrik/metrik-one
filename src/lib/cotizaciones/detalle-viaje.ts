@@ -154,6 +154,11 @@ export interface HotelPDF {
   linea: string
   hotel: string | null
   ciudad: string | null
+  /**
+   * El barrio o la zona del hotel, cuando se sabe aparte de la ciudad (el paquete de bloqueo la
+   * lee como «zona»). La propuesta la imprime en la tarjeta del hotel, nunca como destino (V6).
+   */
+  zona?: string | null
   habitacion: string | null
   regimen: string | null
   checkIn: string | null
@@ -227,6 +232,13 @@ export interface CargoEnDestinoPDF {
   concepto: string
   monto: string
   observacion: string
+  /** Cómo lo llama la captura («Resort fee», «City tax»). Ausente en lecturas anteriores. */
+  conceptoLeido?: string
+  /** El valor es POR NOCHE (V7-2). Con `noches`, el documento dice también el total. */
+  porNoche?: true
+  valor?: number
+  moneda?: string | null
+  noches?: number
   /** Ver `VueloPDF.tarifas`: las tarifas de la propuesta que duermen en ese hotel. */
   tarifas?: number[]
 }
@@ -724,6 +736,8 @@ export interface ServicioPDF {
   /** «Aeropuerto - hotel · Privado», «Tour Johnny Cay · Día completo · San Andrés». */
   descripcion: string
   fecha: string | null
+  /** N7-4 (QA del 2026-10-29): el traslado es un carro de alquiler (`esAlquilerDeCarro`). */
+  esAlquiler?: true
 }
 
 export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
@@ -743,9 +757,30 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
       tipo: slug === 'traslado_detalle' ? 'traslado' : 'actividad',
       descripcion,
       fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+      ...(esTraslado && esAlquilerDeCarro(item) ? { esAlquiler: true as const } : {}),
     })
   }
   return out
+}
+
+/**
+ * ¿Esta línea de traslado es un CARRO DE ALQUILER? (QA Trappvel del 2026-10-29, N7-4 y V7-3.)
+ *
+ * No hay tipo de servicio «alquiler de carro»: el carro entra por la ranura de traslado y el
+ * documento le decía al cliente «Traslado Aeropuerto Orlando (MCO) → Aeropuerto Miami (MIA)» el día
+ * que llegaba. Se reconoce por las palabras del alquiler o por la arrendadora que lo presta (lo que
+ * se lee en el nombre de la línea, el trayecto, el vehículo o el proveedor). Ante la duda, NO: un
+ * traslado de verdad rotulado como carro sería peor que lo de hoy.
+ */
+const PALABRAS_DE_ALQUILER = /\b(alquiler|car\s+rental|rental\s+car|rent\s*a\s*car|renta\s+de\s+(?:carro|auto|veh[ií]culo)|carro\s+rentado|auto\s+rentado)\b/i
+const ARRENDADORAS = /\b(alamo|hertz|avis|budget|enterprise\s+rent|enterprise|national\s+car|sixt|thrifty|dollar\s+rent|europcar|localiza|payless\s+car|fox\s+rent|rentacar|rent\s+a\s+car)\b/i
+
+export function esAlquilerDeCarro(item: ItemConLectura): boolean {
+  if (ranuraDelItem(item)?.slug !== 'traslado_detalle') return false
+  const d = detalleDelItem(item)
+  const textos = [item.nombre, item.grupo, texto(d, 'trayecto'), texto(d, 'tipo_vehiculo')].filter(Boolean).join(' · ')
+  if (PALABRAS_DE_ALQUILER.test(textos)) return true
+  return ARRENDADORAS.test(texto(d, 'proveedor') ?? '')
 }
 
 /**
@@ -847,6 +882,17 @@ export function cargosEnDestinoDeItems(items: ItemConLectura[]): CargoEnDestinoP
       concepto: 'Impuestos y tasas de hospedaje',
       monto: `${cargo.valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${cargo.moneda ? ` ${cargo.moneda}` : ''}`,
       observacion: 'Se paga en el hotel. No está incluido en el precio.',
+      // V7-2 (QA del 2026-10-29): cómo lo llama la pantalla y si es por noche. Solo en lecturas
+      // nuevas; sin ellas las llaves no aparecen y el redactor ve lo de siempre.
+      ...(() => {
+        const leido = texto(d, 'impuestos_destino_concepto')
+        const base = texto(d, 'impuestos_destino_base')
+        const noches = nochesDe(d, leerTarifaPax(item.tarifa_pax).correcciones)
+        return {
+          ...(leido ? { conceptoLeido: leido } : {}),
+          ...(base === 'por_noche' ? { porNoche: true as const, valor: cargo.valor, moneda: cargo.moneda, ...(noches ? { noches } : {}) } : {}),
+        }
+      })(),
     })
   }
   return out

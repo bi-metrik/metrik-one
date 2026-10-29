@@ -67,12 +67,25 @@ function horaDe(texto: string | null | undefined): string | null {
 }
 
 /** Los pares origen–destino de un trayecto leído. Vacío si no se reconoce. */
+/**
+ * «… y regreso», «… y vuelta» o «(ida y regreso)» al final: el traslado es de ida y vuelta.
+ * QA del 2026-10-29 (V7, S6-1): «aeropuerto Hato \n hotel en Willemstad y regreso» salía como un
+ * solo trayecto y el regreso al aeropuerto no aparecía en ningún día.
+ */
+const Y_REGRESO = /\s*\(?\s*(?:ida\s+)?y\s+(?:regreso|vuelta)\s*\)?\s*$/i
+
 function pares(trayecto: string): [string, string][] {
   const limpio = trayecto.replace(/\r/g, '')
   // «A \n hotel y hotel \n B»: el renglón del medio es el final de uno y el comienzo del otro.
   if (limpio.includes('\n')) {
     const partes = limpio.split(/\s*\n\s*/).map((p) => p.trim()).filter(Boolean)
-    if (partes.length === 2) return [[partes[0], partes[1]]]
+    if (partes.length === 2) {
+      if (Y_REGRESO.test(partes[1])) {
+        const destino = partes[1].replace(Y_REGRESO, '').trim()
+        if (destino) return [[partes[0], destino], [destino, partes[0]]]
+      }
+      return [[partes[0], partes[1]]]
+    }
     if (partes.length === 3) {
       const medio = /^(.+?)\s+y\s+(.+)$/i.exec(partes[1])
       if (medio) return [[partes[0], medio[1]], [medio[2], partes[2]]]
@@ -80,8 +93,8 @@ function pares(trayecto: string): [string, string][] {
     }
     return []
   }
-  const idaYVuelta = /\(?\s*ida\s+y\s+vuelta\s*\)?/i.test(limpio)
-  const sinMarca = limpio.replace(/\(?\s*(ida\s+y\s+vuelta|solo\s+ida)\s*\)?/gi, ' ').trim()
+  const idaYVuelta = /\(?\s*ida\s+y\s+vuelta\s*\)?/i.test(limpio) || Y_REGRESO.test(limpio)
+  const sinMarca = limpio.replace(Y_REGRESO, ' ').replace(/\(?\s*(ida\s+y\s+vuelta|solo\s+ida)\s*\)?/gi, ' ').trim()
   // «A -> B y B -> C»: dos trayectos.
   const tramos = sinMarca.split(/\s+y\s+/i)
   if (tramos.length > 1 && tramos.every((t) => t.split(FLECHA).length === 2)) {

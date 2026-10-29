@@ -154,7 +154,9 @@ describe('con el interruptor apagado el lector es el de siempre, byte a byte', (
   // ya elegida), medido sobre `origin/main` (ed66eb76) antes de este cambio.
   const DE_MAIN: Record<string, string> = {
     vuelo_detalle: '18cbfb1f8bf8d0a817f01bd37924f72567a6a8469683bbb74645080f9096e810',
-    hotel_detalle: '80b266c2ce742d4d9dca25abf09446db3ab77881f3984692726d322683da5bbb',
+    // QA Trappvel G7 (2026-10-29, V7-2): el hotel lee además el concepto del cargo en destino y si
+    // es por noche (`impuestos_destino_concepto`, `impuestos_destino_base`). Cambio buscado del lector.
+    hotel_detalle: '961bcc13cc71166a17dc930d75da63720ebcfa847a11a2d22db760fee9c1abaa',
     actividad_detalle: '226ce269035055eae7085e9ddfd2d57b3d6ac44e8029eba5d026309d4be9ef8b',
     traslado_detalle: 'c6166410ec33220ba1d1c0ba1185815325cab98f9529907e8a9571321e009927',
     otro_detalle: 'b2450381b66f3ec58e7cd98923a6c042e122625ed9fe01b4f2c2f92bd34088d6',

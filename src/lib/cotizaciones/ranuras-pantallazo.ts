@@ -627,6 +627,27 @@ const HOTEL: DefinicionRanura = {
       min: false,
       descripcion_ai: 'Código ISO 4217 de la moneda de esos impuestos en destino (MXN, USD, EUR...). null si no aparece.',
     },
+    // QA Trappvel del 2026-10-29 (V7-2): «Resort fee US$ 35.00 por noche» se guardaba como «35 USD»
+    // y el documento lo llamaba «Impuestos»: el cliente leía un sexto de lo que paga allá.
+    {
+      slug: 'impuestos_destino_concepto',
+      label: 'Concepto del cargo en destino',
+      tipo: 'texto',
+      min: false,
+      descripcion_ai:
+        'Cómo llama la pantalla a ese cargo que se paga en destino, tal cual: «Resort fee», «Destination fee», ' +
+        '«City tax», «Tasa turística», «Impuestos y tasas». null si no hay cargo en destino.',
+    },
+    {
+      slug: 'impuestos_destino_base',
+      label: 'El cargo en destino es',
+      tipo: 'enum',
+      min: false,
+      opciones: ['total', 'por_noche'],
+      descripcion_ai:
+        'Si el valor del cargo en destino es por toda la estadía (total) o por cada noche (por_noche: «per night», ' +
+        '«por noche», «/noche»). Responde exactamente uno de: total, por_noche. null si no hay cargo o la pantalla no lo dice.',
+    },
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
