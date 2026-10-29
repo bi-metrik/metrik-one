@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import aliadosHotel from './__fixtures__/bloqueo/aliados-hotel.json'
 import { PROMPT_HOTEL_BLOQUEO, ESQUEMA_HOTEL_BLOQUEO, hotelDesdeLectura, incluyeDesdeLectura } from './bloqueo-extraccion'
-import { edadesIniciales, edadesNinosDeLaSolicitud, paqueteVacio, type PaqueteBloqueo } from './bloqueo-paquete'
+import { conEdadesDeLaSolicitud, edadesIniciales, edadesNinosDeLaSolicitud, paqueteVacio, type PaqueteBloqueo } from './bloqueo-paquete'
 import { paquetesIncompletos } from './bloqueo-incompleto'
 import { frenosDePaqueteYPasajero } from './frenos-de-paquete-y-pasajero'
 import { listaUnica, type EntradaDeLista } from './lista-unica'
@@ -156,5 +156,62 @@ describe('4 · si «Enviar» frena, el PDF lleva la marca', () => {
   it('P12 solo cuenta si quien llama dice que es por pasos (el PDF no mira el interruptor)', () => {
     const f = frenosDePaqueteYPasajero({ items: [linea('pq-1', completo())], tarifas: [], composicion: VIAJE, conPrecioPorPasajero: false })
     expect(f).toEqual({ precioPorPasajero: null, paquete: null })
+  })
+})
+
+describe('ajustes de Vera sobre el #1326', () => {
+  const baseLista: EntradaDeLista = {
+    sinPrecio: [], capturas: null, tarifas: [], salida: null,
+    pantallazosPorAceptar: 0, texto: 'ok', noVan: [], faltaDia: null, margenBajoAviso: null, recargo: null, viaje: null, ivaSinCalcular: null,
+  }
+  const pasos = (lista: ReturnType<typeof listaUnica>, texto: EntradaDePasos['texto']): EntradaDePasos & { pasoActual: 1 | 2 | 3 } => ({
+    servicios: 1, conOpciones: 0, pantallazosPorAceptar: 0, leyendo: 0, sinCosto: [], bajoMinimo: [], tarifasVistas: true,
+    vanAlCliente: ['Recomendada'], rojos: lista.impide.length, ambar: 0, texto, enviada: false,
+    primerImpide: lista.impide[0]?.texto ?? null, impide: lista.impide, pasoActual: 1,
+  })
+
+  it('1 · la edad de la Solicitud cuenta en el freno sin esperar a Guardar (servidor, editor y PDF)', () => {
+    const p = completo()
+    p.distribucion.edadesNinos = []
+    const items = [linea('pq-1', p)]
+    // Sin la Solicitud, frena como antes.
+    expect(paquetesIncompletos(items, null, VIAJE)[0].faltas.map(f => f.clave)).toEqual(['nino_sin_edad'])
+    // Con «8 años» en la Solicitud, no frena.
+    expect(paquetesIncompletos(items, null, VIAJE, '8 años')).toEqual([])
+    expect(frenosDePaqueteYPasajero({ items, tarifas: [], composicion: VIAJE, edadesMenores: '8 años', conPrecioPorPasajero: true }).paquete).toBeNull()
+    // La de la Solicitud también se revisa contra el rango CHD.
+    expect(paquetesIncompletos(items, null, VIAJE, '13 años')[0].faltas.map(f => f.clave)).toEqual(['nino_fuera_de_rango'])
+    // La guardada manda sobre la de la Solicitud.
+    const guardada = completo()
+    guardada.distribucion.edadesNinos = [7]
+    expect(paquetesIncompletos([linea('pq-1', guardada)], null, VIAJE, '13 años')).toEqual([])
+    // Sin niños en el paquete, la edad de la Solicitud no entra.
+    const sinNinos = completo()
+    sinNinos.distribucion = { ...sinNinos.distribucion, ninos: 0, edadesNinos: [] }
+    expect(conEdadesDeLaSolicitud(sinNinos, [13]).distribucion.edadesNinos).toEqual([])
+  })
+
+  it('2 · con el texto sin revisar, «Sigue:» pide leerlo antes que la autorización de datos', () => {
+    const lista = listaUnica({ ...baseLista, autorizacionDatos: 'Falta la autorización de datos del cliente.' })
+    expect(sigue(pasos(lista, 'sinrevisar')).texto).toBe('Lee lo que le llega al cliente y márcalo como revisado.')
+    expect(sigue(pasos(lista, 'viejo')).texto).toBe('Lee lo que le llega al cliente y márcalo como revisado.')
+    // Con el texto leído, la autorización.
+    expect(sigue(pasos(lista, 'ok')).texto).toBe('Falta la autorización de datos del cliente.')
+  })
+
+  it('2 · lo que la asesora sí puede arreglar (un paquete) va antes que el texto', () => {
+    const p = completo()
+    p.distribucion.edadesNinos = []
+    const lista = listaUnica({ ...baseLista, autorizacionDatos: 'Falta la autorización de datos del cliente.', paquetes: paquetesIncompletos([linea('pq-1', p)], null, VIAJE) })
+    expect(sigue(pasos(lista, 'sinrevisar')).texto).toBe('Paquete «Hotel Cartagena Dubai» incompleto: Falta la edad de un niño.')
+  })
+
+  it('3 · «6 meses» es un infante, nunca 6 años', () => {
+    expect(edadesNinosDeLaSolicitud('6 meses', { ninos: 1, infantes: 0 })).toEqual([])
+    expect(edadesNinosDeLaSolicitud('8 años y 6 meses', { ninos: 1, infantes: 1 })).toEqual([8])
+    expect(edadesNinosDeLaSolicitud('6 meses, 8', { ninos: 1, infantes: 1 })).toEqual([8])
+    expect(edadesNinosDeLaSolicitud('1 mes', { ninos: 1, infantes: 1 })).toEqual([])
+    // 30 meses ya son 2 años: niño.
+    expect(edadesNinosDeLaSolicitud('30 meses', { ninos: 1, infantes: 0 })).toEqual([2])
   })
 })

@@ -368,19 +368,44 @@ export function leerDistribucion(v: unknown): DistribucionBloqueo {
  * «8 años» y la tarjeta la pedía vacía). Las de 0-17 años, enteras.
  *
  * El campo trae niños E infantes: con infantes en la solicitud, las edades bajo 2 años son de ellos
- * y no cuentan como niño. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
+ * y no cuentan como niño. Una edad en meses («6 meses») es de un infante y nunca se lee como años. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
  */
 export function edadesNinosDeLaSolicitud(valor: unknown, pasajeros: { ninos: number; infantes: number } | null): number[] {
   const texto = typeof valor === 'number' ? String(valor) : typeof valor === 'string' ? valor : ''
-  const crudas = (texto.match(/\d+(?:\.\d+)?/g) ?? []).map(Number).filter(n => Number.isFinite(n) && n >= 0 && n < 18)
+  // «6 meses», «18 meses»: es un bebé (infante), nunca «6 años». No se toma como edad de niño.
+  const crudas = [...texto.matchAll(/(\d+(?:\.\d+)?)\s*(mes(?:es)?\b)?/gi)]
+    .map(m => ({ valor: Number(m[1]), enMeses: !!m[2] }))
+    .filter(x => Number.isFinite(x.valor) && x.valor >= 0 && (x.enMeses || x.valor < 18))
   let infantes = pasajeros?.infantes ?? 0
   const ninos: number[] = []
-  for (const e of crudas) {
-    if (infantes > 0 && e < 2) { infantes--; continue }
-    ninos.push(Math.floor(e))
+  for (const { valor, enMeses } of crudas) {
+    if (enMeses) {
+      // En meses: si son menos de 24 es un infante (ocupa su lugar); si no, se pasa a años.
+      if (valor < 24) { if (infantes > 0) infantes--; continue }
+      const anios = Math.floor(valor / 12)
+      if (anios < 18) ninos.push(anios)
+      continue
+    }
+    if (infantes > 0 && valor < 2) { infantes--; continue }
+    ninos.push(Math.floor(valor))
   }
   const tope = pasajeros ? pasajeros.ninos : ninos.length
   return ninos.slice(0, Math.max(0, tope))
+}
+
+/**
+ * El paquete con la edad de cada niño que dice la Solicitud, si no tiene las suyas (Vera sobre el
+ * #1326: la edad precargada en la tarjeta tiene que contar también en el freno, sin esperar a
+ * Guardar). Solo con niños en el paquete: sin ellos, una edad de la Solicitud no frena por rango CHD.
+ * No muta el paquete.
+ */
+export function conEdadesDeLaSolicitud<P extends PaqueteBloqueo | null>(paquete: P, deLaSolicitud: readonly number[] | null | undefined): P {
+  if (!paquete) return paquete
+  const d = paquete.distribucion
+  if (d.ninos <= 0) return paquete
+  const edades = edadesIniciales(d.edadesNinos, deLaSolicitud).slice(0, d.ninos)
+  if (edades.length === (d.edadesNinos ?? []).length) return paquete
+  return { ...paquete, distribucion: { ...d, edadesNinos: edades } }
 }
 
 /**

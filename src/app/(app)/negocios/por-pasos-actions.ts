@@ -741,11 +741,11 @@ export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'd
   // Es lo primero que dice la lista única de Revisar.
   const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: foto.ctx.negocioId })
   if (motivoDatos) return { success: false, error: motivoDatos }
-  const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
+  const { viaje, edadesMenores } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
   // P12 y el paquete incompleto (QA del 2026-10-29), la MISMA revisión que la marca de borrador del
   // PDF (`frenos-de-paquete-y-pasajero.ts`). El paquete va antes que el margen de `enviarCotizacion`:
   // un paquete en cero frenaba como «bajo el mínimo», que no es lo que pasa.
-  const frenos = frenosDePaqueteYPasajero({ items: foto.ctx.items, tarifas: foto.filas, composicion: viaje.composicion, conPrecioPorPasajero: true })
+  const frenos = frenosDePaqueteYPasajero({ items: foto.ctx.items, tarifas: foto.filas, composicion: viaje.composicion, edadesMenores: edadesMenores ?? null, conPrecioPorPasajero: true })
   if (frenos.precioPorPasajero) return { success: false, error: frenos.precioPorPasajero }
   if (frenos.paquete) return { success: false, error: frenos.paquete }
   const r = await enviarCotizacion(cotizacionId, canal)

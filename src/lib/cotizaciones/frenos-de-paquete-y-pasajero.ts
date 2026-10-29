@@ -28,6 +28,8 @@ export function frenosDePaqueteYPasajero(args: {
   /** Las tarifas de la cotización (`leerItinerarios`). */
   tarifas: readonly { vaEnPropuesta: boolean; seleccion: string[] }[]
   composicion: Composicion | null
+  /** `edades_menores` de la Solicitud (`leerViajeDelNegocio().edadesMenores`): precarga la edad del niño. */
+  edadesMenores?: string | null
   /** P12 solo cuenta con la forma por pasos encendida (así lo exige `enviarPorPasos`). */
   conPrecioPorPasajero: boolean
 }): FrenosDePaqueteYPasajero {
@@ -41,6 +43,6 @@ export function frenosDePaqueteYPasajero(args: {
   const precioPorPasajero = args.conPrecioPorPasajero
     ? motivoSinPrecioPorPasajero(opcionesSinPrecio(items.map(i => ({ ...i, nombre: i.nombre ?? null })), ids, args.composicion))
     : null
-  const paquete = motivoPaquetesIncompletos(paquetesIncompletos(items, vanAlCliente.length > 0 ? ids : null, args.composicion))
+  const paquete = motivoPaquetesIncompletos(paquetesIncompletos(items, vanAlCliente.length > 0 ? ids : null, args.composicion, args.edadesMenores ?? null))
   return { precioPorPasajero, paquete }
 }

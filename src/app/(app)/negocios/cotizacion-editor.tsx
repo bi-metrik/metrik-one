@@ -1129,6 +1129,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     lineasSinAjuste.map(i => ({ id: i.id, nombre: i.nombre ?? null, grupo: i.grupo ?? null, es_ajuste: false, tarifa_pax: i.tarifa_pax })),
     tarifasEnPropuesta.length > 0 ? new Set(tarifasEnPropuesta.flatMap(t => itemsDelItinerario(lineasSinAjuste as never[], t.seleccion))) : null,
     composicionViaje ?? null,
+    // La edad del niño que ya dice la Solicitud cuenta, como en la tarjeta y en el servidor.
+    bloqueo?.edadesMenores ?? null,
   )
   const motivoPaquete = motivoPaquetesIncompletos(paquetesSinCompletar)
   // La autorización de datos va primero: es lo primero que revisa el servidor al enviar.

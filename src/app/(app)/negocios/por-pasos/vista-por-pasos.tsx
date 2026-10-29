@@ -275,6 +275,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     primerImpide: p.listaUnica
       ? (p.listaUnica.impide[0]?.texto ?? null)
       : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null),
+    impide: p.listaUnica ? p.listaUnica.impide : null,
     ambar: p.conteoLista.ambar + p.pantallazosPorAceptar,
     texto: p.texto,
     enviada: p.enviada,

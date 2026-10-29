@@ -13,6 +13,7 @@ import {
   ETIQUETA_ACOMODACION,
   ETIQUETA_INCLUYE,
   avisosDelPaquete,
+  conEdadesDeLaSolicitud,
   costoDelPaquete,
   edadesIniciales,
   fechasDelPaquete,
@@ -151,13 +152,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   // La edad de cada niño abre con la de la Solicitud si el paquete no tiene la suya (prueba real del
   // 2026-10-29). Solo entra a la cuenta con niños en el paquete: sin ellos no frena por rango CHD.
   const edadesDeInicio = edadesIniciales(guardado?.distribucion.edadesNinos, p.edadesNinosSolicitud)
-  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => {
-    const base = guardado ?? paqueteVacio(p.operador)
-    if (base.distribucion.ninos > 0 && (base.distribucion.edadesNinos ?? []).length === 0 && edadesDeInicio.length > 0) {
-      return { ...base, distribucion: { ...base.distribucion, edadesNinos: edadesDeInicio.slice(0, base.distribucion.ninos) } }
-    }
-    return base
-  })
+  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => conEdadesDeLaSolicitud(guardado ?? paqueteVacio(p.operador), p.edadesNinosSolicitud))
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
   const [imagenes, setImagenes] = useState<{ hotel?: ImagenNueva & { vista: string }; vuelo?: ImagenNueva & { vista: string } }>({})
   const [leyendo, setLeyendo] = useState<{ hotel: boolean; vuelo: boolean }>({ hotel: false, vuelo: false })

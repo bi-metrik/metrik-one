@@ -608,6 +608,7 @@ export async function generateCotizacionPDF(
     items: items.filter(i => i.id).map(i => ({ ...i, id: i.id as string })),
     tarifas: tarifasDelPdf,
     composicion: composicionViaje,
+    edadesMenores: lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.edadesMenores ?? null : null,
     conPrecioPorPasajero: opciones?.porPasos === true,
   })
 
