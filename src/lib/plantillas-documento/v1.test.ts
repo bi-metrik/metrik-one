@@ -85,7 +85,7 @@ export const CASOS: Record<string, { dj: Datos; rel: Datos }> = {
 
 async function pdfReact(tipo: TipoPlantilla, datos: Datos): Promise<Buffer> {
   const Comp = (tipo === 'declaracion-juramentada' ? DeclaracionJuramentadaPDF : RelacionFacturasPDF) as unknown as (
-    p: unknown,
+    p: { datos: Datos; fechaGeneracion: string; codigoNegocio: string },
   ) => null
   const el = createElement(Comp, { datos, fechaGeneracion: FECHA, codigoNegocio: 'V0000' })
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

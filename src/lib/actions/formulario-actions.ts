@@ -47,6 +47,8 @@ import { generacionNegadaPorDisputa } from '@/lib/negocios/disputa-generacion'
 import { filaDelFormulario } from '@/lib/negocios/fila-formulario'
 import { createElement } from 'react'
 import { resolverCamposFuente, type CampoFuente } from '@/lib/formularios/resolver-campos-fuente'
+import { admitePlantillaEditable, leerVersionActiva } from '@/lib/plantillas-documento/servidor'
+import { imprimirPlantilla } from '@/lib/plantillas-documento/imprimir'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function db(client: unknown): any { return client }
@@ -579,8 +581,22 @@ export async function generarFormularioCore(
     const fechaGeneracion = new Date().toISOString()
 
     // 4. Render PDF
+    // Plantilla editable (DJ, Relación de facturas): si el workspace ACTIVÓ una versión, el
+    // documento sale de ese texto por Chromium; si no, del componente @react-pdf de siempre.
+    // Todo lo de arriba (datos, overrides, faltantes, guardas) es el mismo camino. Un fallo
+    // de Chromium NO cae al formato viejo: el espacio activó otro texto y un PDF distinto en
+    // silencio sería peor que pedir que se reintente. Ver docs/specs/2026-10-29_plantillas-editables.md
     let buffer: Buffer
-    if (template === 'formulario-010') {
+    let plantillaUsada: { id: string; version_n: number } | null = null
+    const plantillaActiva = admitePlantillaEditable(template)
+      ? await leerVersionActiva(supabase, workspaceId, template)
+      : null
+    if (plantillaActiva && admitePlantillaEditable(template)) {
+      const impreso = await imprimirPlantilla(template, plantillaActiva.contenido, datosFinal, { fechaGeneracion, codigoNegocio })
+      if (!impreso.ok) return { success: false, campos_usados: datosFinal, error: impreso.error }
+      buffer = impreso.pdf
+      plantillaUsada = { id: plantillaActiva.id, version_n: plantillaActiva.version_n }
+    } else if (template === 'formulario-010') {
       // Overlay sobre el PDF oficial de la DIAN (no se modifica el fondo).
       const f010Datos = datosFinal as unknown as Formulario010Datos
       const f010Constantes = { ...constantesFinal, ...seccionalExtra } as unknown as Formulario010Constantes
@@ -684,6 +700,8 @@ export async function generarFormularioCore(
       template,
       generated_at: fechaGeneracion,
       version_actual: versionN,
+      // Qué versión de la plantilla editable imprimió este PDF (null = formato de fábrica).
+      plantilla_version: plantillaUsada,
     }
 
     await db(supabase)

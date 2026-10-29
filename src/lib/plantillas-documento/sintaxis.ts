@@ -208,7 +208,7 @@ export function parsearInline(texto: string, lineaInicial: number, errores: Erro
     if (t.t === 'negrita') {
       errores.push({ linea: t.linea, mensaje: 'Negrita sin cerrar: falta el segundo **.' })
       destino(top()).push({ t: 'negrita', hijos: t.hijos })
-    } else {
+    } else if (t.t !== 'raiz') {
       const nombre = t.t
       errores.push({ linea: t.linea, mensaje: `Falta {{/${nombre}}} en el mismo párrafo.` })
       destino(top()).push(t.nodo)
