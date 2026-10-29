@@ -493,7 +493,7 @@ export function fechasDelPaquete(p: Pick<PaqueteBloqueo, 'vuelo' | 'salidaManual
 // ── Los avisos ────────────────────────────────────────────────────────────────
 
 export interface AvisoBloqueo {
-  clave: 'falta_costo' | 'fechas_noches' | 'compra_vencida' | 'sin_tiquete' | 'personas' | 'infantes' | 'nino_fuera_de_rango' | 'acomodacion_sin_precio' | 'sin_fechas' | 'moneda' | 'iconos_sin_clasificar'
+  clave: 'falta_costo' | 'fechas_noches' | 'compra_vencida' | 'sin_tiquete' | 'personas' | 'infantes' | 'nino_fuera_de_rango' | 'nino_sin_edad' | 'acomodacion_sin_precio' | 'sin_fechas' | 'moneda' | 'iconos_sin_clasificar'
   /** `rojo` = no se puede guardar el costo; `ambar` = se guarda, pero hay que mirarlo. */
   nivel: 'rojo' | 'ambar'
   texto: string
@@ -569,7 +569,7 @@ export function avisosDelPaquete(p: PaqueteBloqueo, ctx: ContextoAvisos): AvisoB
 // ── Paquete incompleto: frena «Enviar» (QA del 2026-10-29) ───────────────────
 
 export interface FaltaDelPaquete {
-  clave: 'falta_costo' | 'infantes' | 'nino_fuera_de_rango' | 'acomodacion_sin_precio'
+  clave: 'falta_costo' | 'infantes' | 'nino_fuera_de_rango' | 'nino_sin_edad' | 'acomodacion_sin_precio'
   texto: string
 }
 
@@ -593,6 +593,11 @@ function faltasFueraDelCosto(p: PaqueteBloqueo, pasajeros: ContextoAvisos['pasaj
   const infantes = pasajeros?.infantes ?? 0
   if (infantes > 0 && infantesDelPaquete === 0 && (p.hotel.infante?.precio ?? null) === null) {
     out.push({ clave: 'infantes', texto: `${infantes === 1 ? 'Va 1 infante' : `Van ${infantes} infantes`} y el paquete no tiene su costo: pregúntalo al operador y escríbelo (0 si no paga).` })
+  }
+  // Sin la edad de cada niño no se sabe si es tarifa de niño (Vera, 2026-10-29).
+  const sinEdad = p.distribucion.ninos - (p.distribucion.edadesNinos ?? []).length
+  if (sinEdad > 0) {
+    out.push({ clave: 'nino_sin_edad', texto: sinEdad === 1 ? 'Falta la edad de un niño.' : `Falta la edad de ${sinEdad} niños.` })
   }
   const min = p.hotel.nino?.edadMin ?? null
   const max = p.hotel.nino?.edadMax ?? null

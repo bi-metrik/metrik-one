@@ -76,6 +76,20 @@ export class RegistroDePaquetes {
   private receptores = new Map<string, ReceptorDePaquete>()
   private buzon = new Map<string, { dataUrl: string; casilla: CasillaPaquete | null }>()
   private activo: string | null = null
+  private bandeja: ((dataUrl: string) => void) | null = null
+
+  /** La bandeja se conecta para recibir lo que la tarjeta devuelve como «Otro servicio». */
+  conectarBandeja(f: (dataUrl: string) => void): () => void {
+    this.bandeja = f
+    return () => { if (this.bandeja === f) this.bandeja = null }
+  }
+
+  /** «Otro servicio»: el pantallazo vuelve a la bandeja y lo lee la lectura de siempre. */
+  aLaBandeja(dataUrl: string): boolean {
+    if (!this.bandeja) return false
+    this.bandeja(dataUrl)
+    return true
+  }
 
   /** La tarjeta se registra al montarse. Devuelve con qué darse de baja. */
   registrar(itemId: string, r: ReceptorDePaquete): () => void {

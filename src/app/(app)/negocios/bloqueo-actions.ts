@@ -97,7 +97,8 @@ export interface EntradaPaqueteBloqueo {
 }
 
 export type ResultadoPaquete =
-  | { success: true; paquete: PaqueteBloqueo; costo: number | null; falta: string[] }
+  /** `descuentoQuitado`: el motivo del descuento que se quitó al pasar a Pública (se avisa). */
+  | { success: true; paquete: PaqueteBloqueo; costo: number | null; falta: string[]; descuentoQuitado?: string }
   | { success: false; error: string }
 
 /**
@@ -152,6 +153,7 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   const costo = costoDelPaquete(paquete)
   const en = new Date().toISOString()
   const siguiente: TarifaPax = { ...tarifa, bloqueo: paquete, actualizadaEn: en }
+  let descuentoQuitado: string | undefined
   const patch: Record<string, unknown> = {
     subtotal: costo.total ?? 0,
     cantidad: 1,
@@ -170,6 +172,12 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
     const comisionPct = tipo === 'publica' ? tarifa.tipoTarifa?.comisionPct ?? null : null
     siguiente.tipoTarifa = { tipo, origen: 'persona', por, en, ...(comisionPct !== null ? { comisionPct } : {}) }
     patch.margen_porcentaje = entrada.comision === 'incluida' ? 0 : null
+    // Pública = el precio público: un descuento guardado de cuando era Neta quedaría aplicado sin
+    // verse (la tarjeta de la Pública muestra la comisión). Se quita y se avisa (Vera, 2026-10-29).
+    if (tipo === 'publica' && siguiente.descuentoCliente) {
+      descuentoQuitado = siguiente.descuentoCliente.motivo || 'sin motivo'
+      delete siguiente.descuentoCliente
+    }
   }
   patch.tarifa_pax = siguiente
 
@@ -177,7 +185,7 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   if (errUpd) return { success: false, error: errUpd.message as string }
   await recalcularTotales(item.cotizacion_id as string)
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
-  return { success: true, paquete, costo: costo.total, falta: costo.falta }
+  return { success: true, paquete, costo: costo.total, falta: costo.falta, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
 }
 
 export interface ReglasDelPaquete {
@@ -229,6 +237,9 @@ export async function ajustarReglasDelPaquete(itemId: string, cambios: ReglasDel
     const c = cambios.comisionPct
     if (!Number.isFinite(c) || c < 0 || c >= 100) return { success: false, error: 'La comisión va de 0 a 99,9 %.' }
     if (tarifa.tipoTarifa?.tipo !== 'publica') return { success: false, error: 'La comisión es de una tarifa con la comisión incluida (Pública). Guarda el paquete así primero.' }
+  }
+  if (cambios.descuentoCliente && tarifa.tipoTarifa?.tipo === 'publica') {
+    return { success: false, error: 'Una tarifa con la comisión incluida va al precio público: el descuento es de una tarifa por incluir (Neta).' }
   }
 
   const { data: perfil } = await sb.from('profiles').select('full_name').eq('id', userId).maybeSingle()

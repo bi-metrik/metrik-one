@@ -138,6 +138,9 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const guardado = useMemo(() => leerPaqueteBloqueo(leerTarifaPax(p.tarifaPax).bloqueo), [p.tarifaPax])
   const tarifaGuardada = leerTarifaPax(p.tarifaPax)
   const tipoGuardado = tarifaGuardada.tipoTarifa?.tipo ?? null
+  // Una Pública con comisión gana su comisión: «Margen 0 %» diría que se vende a costo (Vera).
+  const comisionGuardada = tipoGuardado === 'publica' ? tarifaGuardada.tipoTarifa?.comisionPct ?? null : null
+  const margenVisible = comisionGuardada ?? p.margenAplicado ?? null
   const [abierto, setAbierto] = useState(guardado === null)
   const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => guardado ?? paqueteVacio(p.operador))
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
@@ -232,6 +235,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
       if (!r.success) { toast.error(r.error); return }
       setPaquete(r.paquete)
       setImagenes({})
+      if (r.descuentoQuitado) toast.warning(`Se quitó el descuento para el cliente («${r.descuentoQuitado}»): la tarifa con la comisión incluida es el precio público.`)
       toast.success(r.costo === null ? 'Paquete guardado, todavía sin costo.' : 'Paquete guardado.')
       p.onCambio()
     })
@@ -262,8 +266,10 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         <div className="text-right">
           <p className="m-0 text-[11px] text-[#6E6A62]">Costo {pesos(guardado ? costoDelPaquete(guardado).total : null)}</p>
           <p className="m-0 text-sm font-semibold tabular-nums">{pesos(p.precioVenta)}</p>
-          {p.margenAplicado !== null && p.margenAplicado !== undefined && guardado && (
-            <p className="m-0 text-[11px] text-[#6E6A62]" data-margen-paquete>Margen {String(Math.round(p.margenAplicado * 10) / 10).replace('.', ',')} %</p>
+          {margenVisible !== null && guardado && (
+            <p className="m-0 text-[11px] text-[#6E6A62]" data-margen-paquete>
+              Margen {String(Math.round(margenVisible * 10) / 10).replace('.', ',')} %{comisionGuardada !== null ? ' (comisión)' : ''}
+            </p>
           )}
         </div>
       </header>
@@ -300,6 +306,13 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
               {porElegir.mensaje}
               <button type="button" data-es-casilla="hotel" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => void leer('hotel', porElegir.dataUrl)}>Es el hotel</button>
               <button type="button" data-es-casilla="vuelo" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => void leer('vuelo', porElegir.dataUrl)}>Es el vuelo</button>
+              {registro && (
+                <button type="button" data-es-casilla="otro" className="rounded border border-amber-300 bg-white px-2 py-0.5"
+                  onClick={() => { if (registro.aLaBandeja(porElegir.dataUrl)) setPorElegir(null); else toast.error('No se pudo devolver a la bandeja. Pégalo allí.') }}>
+                  Otro servicio
+                </button>
+              )}
+              <button type="button" data-es-casilla="descartar" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => setPorElegir(null)}>Descartar</button>
             </div>
           )}
 

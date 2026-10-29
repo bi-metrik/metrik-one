@@ -36,6 +36,9 @@ asesora no cotiza vuelo ni hotel por separado.
   de vuelo (`reglas-margen`) y el recargo también la usan y le cambiarían el precio.
 - `margenAplicado` ya refleja el descuento al cliente, y eso también cambió para el hotel.
 - `guardarPaqueteBloqueo` conserva `comisionPct` mientras la tarifa siga siendo Pública.
+- Vera (29-oct): la casilla de «Ajustar» edita el margen de ANTES del descuento (`reglas.descuento.margenAntes`). Si
+  editara `margenAplicado`, que ya trae el descuento, lo restaría dos veces. Solo el Ctrl+V global va al paquete.
+- El borrador doble NO es atómico: hacerlo pide una migración (índice o lock). Queda la ventana de 15 s.
 - Sin QA en navegador real: el pegado se probó con happy-dom y el modelo con un doble.
 
 Relacionado: [[cotizacion-otro-servicio]], [[tarifa-publica-neta]], [[cotizacion-integrada-c1-c6]].

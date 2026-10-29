@@ -265,3 +265,29 @@ describe('comisión propia y descuento al cliente del paquete (decisión del 202
     expect(item().tarifa_pax).toBeNull()
   })
 })
+
+describe('pasar a Pública con un descuento guardado (Vera, 2026-10-29)', () => {
+  it('el descuento se quita y se avisa: nada queda aplicado sin verse', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeTruthy()
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    expect(r.success && r.descuentoQuitado).toBe('Reserva esta semana')
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeUndefined()
+  })
+
+  it('a una Pública no se le pone descuento', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    const r = await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 2 } })
+    expect(r.success).toBe(false)
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeUndefined()
+  })
+
+  it('seguir en Neta conserva el descuento', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    expect(r.success && r.descuentoQuitado).toBeFalsy()
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente?.motivo).toBe('Reserva esta semana')
+  })
+})

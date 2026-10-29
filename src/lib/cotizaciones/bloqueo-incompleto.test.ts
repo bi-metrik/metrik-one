@@ -65,6 +65,17 @@ describe('paquete incompleto', () => {
     expect(r[0].faltas[0].texto).toContain('2-11 años')
   })
 
+  it('un niño sin edad escrita frena: «Falta la edad de un niño»', () => {
+    const p = completo()
+    p.distribucion.ninos = 2
+    p.hotel.nino = { precio: 900_000, edadMin: 2, edadMax: 11 }
+    const r = paquetesIncompletos([linea('a', p)], null, { ...VIAJE, ninos: 2 })
+    expect(r[0].faltas.map(f => f.clave)).toEqual(['nino_sin_edad'])
+    expect(motivoPaquetesIncompletos(r)).toBe('Paquete «Hotel Cartagena Dubai» incompleto: Falta la edad de un niño.')
+    p.distribucion.edadesNinos = [7, 9]
+    expect(paquetesIncompletos([linea('a', p)], null, { ...VIAJE, ninos: 2 })).toEqual([])
+  })
+
   it('4 · una acomodación sin precio', () => {
     const p = completo()
     p.hotel.precios.push({ acomodacion: 'triple', precioPorPersona: null })

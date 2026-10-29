@@ -9,6 +9,7 @@ import { acomodacionDelPaquete, hotelesDePaquetes, vuelosDePaquetes } from './bl
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from './nombre-visible'
 import { modeloDePropuesta } from './propuesta/modelo-documento'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { viajeParaRedactar } from './documento-cliente'
 import { htmlDePropuesta, type RecursosPropuesta } from '@/lib/pdf/html/trappvel/plantilla'
 
 /**
@@ -92,5 +93,20 @@ describe('el paquete en el documento', () => {
     expect(t).toContain('Hotel Cartagena Dubai')
     expect(t).toContain('JetSMART')
     expect(t).not.toContain('HOTEL CARTAGENA DUBAI')
+  })
+})
+
+describe('el texto del modelo conoce el paquete (Vera, 2026-10-29)', () => {
+  it('viajeParaRedactar recibe el hotel y los vuelos del paquete, sin el nombre de la línea', () => {
+    const p = paqueteAliados()
+    const v = viajeParaRedactar({
+      items: [{ ...lineaDelPaquete(p), es_ajuste: false } as never],
+      destino: 'Cartagena', fechas: { inicio: '2027-02-05', fin: '2027-02-08' }, composicion: { adultos: 2, ninos: 1, infantes: 0 }, nombresDelCliente: [],
+    })
+    expect(v.hoteles.map(h => h.nombre)).toEqual(['Hotel Cartagena Dubai'])
+    expect(v.hoteles[0].ciudad).toBe('Bocagrande')
+    expect(v.vuelos).toHaveLength(1)
+    expect(v.vuelos[0]).toMatchObject({ aerolinea: 'JetSMART', desde: 'BOG', hasta: 'CTG', directo: true })
+    expect(v.otrosServicios).toEqual([])
   })
 })

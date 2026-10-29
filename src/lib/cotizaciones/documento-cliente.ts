@@ -35,6 +35,7 @@ import {
   type ItemConLectura,
 } from './detalle-viaje'
 import { normalizarTerminos } from './terminos-cotizacion'
+import { hotelesDePaquetes, vuelosDePaquetes } from './bloqueo-documento'
 import { incluyeConPropias } from './incluye-por-one'
 import type { ParrafoViejo } from './parrafo-viejo'
 
@@ -385,7 +386,9 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
   const limpios = (xs: string[]) => xs.map(limpio).filter((x): x is string => x !== null)
   const items = e.items.filter(i => !i.es_ajuste)
 
-  const vuelosPdf = vuelosDeItems(items)
+  // Viaje en bloqueo (Vera, 2026-10-29): el hotel y los vuelos del paquete viven en
+  // `tarifa_pax.bloqueo`; sin esto el redactor no sabía a qué hotel ni en qué vuelo va el cliente.
+  const vuelosPdf = [...vuelosDeItems(items), ...vuelosDePaquetes(items)]
   const vuelos = vuelosPdf.map(v => ({
     aerolinea: limpio(v.aerolinea),
     desde: limpio(v.origen),
@@ -399,7 +402,7 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
     equipaje: v.equipaje,
     adicionales: limpios(v.adicionales),
   }))
-  const hoteles = hotelesDeItems(items).map(h => ({
+  const hoteles = [...hotelesDeItems(items), ...hotelesDePaquetes(items)].map(h => ({
     nombre: limpio(h.hotel),
     ciudad: limpio(h.ciudad),
     estrellas: h.estrellas,

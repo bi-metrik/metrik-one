@@ -152,3 +152,47 @@ describe('pegado global en una cotización de bloqueo', () => {
     expect(envios.some(u => u.includes('leer-captura'))).toBe(false)
   })
 })
+
+describe('con un paquete abierto, solo el Ctrl+V de la ventana va al paquete (Vera, 2026-10-29)', () => {
+  function registroConPaqueteAbierto() {
+    const registro = new Registro()
+    const recibidos: (string | null)[] = []
+    registro.registrar('pq-1', {
+      estado: () => ({ itemId: 'pq-1', abierto: true, hotelLleno: true, vueloLleno: false }),
+      recibir: (_d, c) => recibidos.push(c),
+    })
+    return { registro, recibidos }
+  }
+  const archivo = () => new ventana.File([Buffer.from(PNG, 'base64')], 'traslado.png', { type: 'image/png' })
+
+  it('«Subir» en la bandeja sigue el camino de siempre', async () => {
+    const { registro, recibidos } = registroConPaqueteAbierto()
+    await montar(registro)
+    const entrada = contenedor.querySelector('input[type="file"]') as HTMLInputElement
+    Object.defineProperty(entrada, 'files', { configurable: true, value: [archivo()] })
+    await act(async () => { entrada.dispatchEvent(new Event('change', { bubbles: true })) })
+    await esperar(80)
+    expect(recibidos).toEqual([])
+    expect(envios.some(u => u.includes('detectar-captura'))).toBe(true)
+  })
+
+  it('arrastrar a la bandeja sigue el camino de siempre', async () => {
+    const { registro, recibidos } = registroConPaqueteAbierto()
+    await montar(registro)
+    const bandeja = contenedor.querySelector('[data-bandeja-capturas]')!
+    const e = new ventana.Event('drop', { bubbles: true, cancelable: true }) as unknown as Event
+    Object.defineProperty(e, 'dataTransfer', { value: { files: [archivo()], types: ['Files'] } })
+    await act(async () => { bandeja.dispatchEvent(e as never) })
+    await esperar(80)
+    expect(recibidos).toEqual([])
+    expect(envios.some(u => u.includes('detectar-captura'))).toBe(true)
+  })
+
+  it('«Otro servicio» desde la tarjeta vuelve a la bandeja, a la lectura de siempre', async () => {
+    const { registro } = registroConPaqueteAbierto()
+    await montar(registro)
+    expect(registro.aLaBandeja('data:image/png;base64,' + PNG)).toBe(true)
+    await esperar(80)
+    expect(envios.some(u => u.includes('detectar-captura'))).toBe(true)
+  })
+})

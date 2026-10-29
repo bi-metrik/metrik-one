@@ -579,7 +579,11 @@ export default function BandejaCapturas({
     return true
   }, [])
 
-  const agregar = useCallback((archivo: File) => {
+  /**
+   * `alPaqueteSiBloqueo`: solo el Ctrl+V de la ventana va al paquete (Vera, 2026-10-29). Lo que
+   * entra por «Subir» o arrastrado A LA BANDEJA se quiso poner aquí: sigue el camino de siempre.
+   */
+  const agregar = useCallback((archivo: File, alPaqueteSiBloqueo = false) => {
     if (!archivo.type.startsWith('image/')) {
       toast.error('Eso no es una imagen. Pega o sube el pantallazo del proveedor.')
       return
@@ -587,10 +591,14 @@ export default function BandejaCapturas({
     const lector = new FileReader()
     lector.onload = ev => {
       const dataUrl = ev.target?.result as string
-      if (!alPaquete(dataUrl)) agregarDesdeDataUrl(dataUrl)
+      if (!(alPaqueteSiBloqueo && alPaquete(dataUrl))) agregarDesdeDataUrl(dataUrl)
     }
     lector.readAsDataURL(archivo)
   }, [agregarDesdeDataUrl, alPaquete])
+
+  // «Otro servicio» desde la tarjeta del paquete: vuelve aquí, a la lectura de siempre.
+  const registroDelBloqueo = bloqueo?.registro ?? null
+  useEffect(() => registroDelBloqueo?.conectarBandeja(agregarDesdeDataUrl), [registroDelBloqueo, agregarDesdeDataUrl])
 
   function ubicar(x: { id: string; dataUrl: string }, a: { paquete: string } | 'nuevo' | 'otro' | 'nada') {
     setPorUbicar(xs => xs.filter(y => y.id !== x.id))
@@ -728,7 +736,7 @@ export default function BandejaCapturas({
       e.preventDefault()
       for (const i of imagenes) {
         const archivo = i.getAsFile()
-        if (archivo) agregar(archivo)
+        if (archivo) agregar(archivo, true)
       }
       // Un pegado que no cayó en ninguna casilla viene aquí. Si la bandeja no está a la vista
       // (la persona está abajo, en la tarjeta), se dice dónde quedó: sin esto, pegar el
