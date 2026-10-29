@@ -10,6 +10,9 @@ Rama fix/defectos-qa-1342 (un PR, sin migración). Lo no obvio:
 - **Costo en pantalla = `costoDeAgencia(cascada)`** (`itinerarios.ts`): costo de venta − comisión de las
   Públicas; `null` con una Pública sin comisión. `cascada.costoDeVenta` SIGUE siendo el precio público
   (lo usan el PDF y el margen): no cambiarlo, solo lo que se pinta junto a «ganas».
+- En paralelo #1354 metió `calculoEnPantalla` (calculo-en-pantalla.ts) para «Ver el cálculo» y el resumen del
+  editor de 4 pasos: misma idea (costo − comisión). Dos funciones hermanas; si se unifican, `costoDeAgencia`
+  devuelve `null` sin comisión y `calculoEnPantalla.costoDeVenta` no.
 - `margenDelEncabezado` devuelve `null` con una Pública sin comisión (antes caía a `margenRealPct` = 0 %);
   `LoQueSuma` recibe `sinComision` para decir «falta la comisión».
 - **Nombres**: `nombresVisiblesDeTarifas` (tarifas.ts) numera como `bloquesParaPDF`: principal primero,
