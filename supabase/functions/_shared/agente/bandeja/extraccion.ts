@@ -134,13 +134,13 @@ export function instruccionesCarga(
     ...(sabidos.length ? ['', 'Lo que el viaje YA tiene:', ...sabidos] : ['', 'El viaje todavía no tiene datos.']),
     ...(enEspera.length ? ['', 'Lo que ya le propusiste al comercial y todavía no confirma:', ...enEspera] : []),
     '',
-    '«(reenviado)»: el cliente; «(escrito por el comercial)»: quien te habla (lo del viaje es clase cliente). «Ya te dije X»: está antes.',
+    '«(reenviado)» es del cliente; «(escrito por el comercial)», del comercial que te habla. «Ya te dije X»: X está antes.',
     ...(o.preguntas?.length ? ['', 'Lo que ya le preguntaste al comercial de este viaje (no lo vuelvas a preguntar; si su respuesta deja dos lecturas, propón la más probable como deducido):', ...o.preguntas.map((q) => `- ${q}`)] : []),
     '',
     'Devuelve:',
     '1. mensajes: para CADA mensaje { n, clase }: cliente = habla del viaje (lo pide el cliente o lo cuenta el comercial);',
     '   comercial = una opinión del comercial sobre el cliente o la venta; tercero = una promoción de otra agencia, un pago,',
-    '   un proveedor; ruido = saludos y lo que no es del viaje. Solo los mensajes «cliente» sostienen valores.',
+    '   un proveedor; ruido = saludos y lo que no es del viaje. Los «tercero» y «ruido» no sostienen valores.',
     ...(o.compacta ? [
       '2. datos: solo los campos con valor (o "' + QUITAR + '"): { campo, valor, frase, como, calculo }.',
       '3. sin_dato: el slug de CADA campo que queda en "' + POR_DEFINIR + '". Todo campo va en datos o en sin_dato, en uno solo.',
@@ -429,7 +429,10 @@ export function validarCarga(
   const crudo = desdeCompacta(raw);
   const r = (crudo && typeof crudo === 'object' ? crudo : {}) as Record<string, unknown>;
   const valores = (r.valores && typeof r.valores === 'object' ? r.valores : {}) as Record<string, unknown>;
-  const fuente = textosDelViaje(r, textos);
+  // Lo que escribe el comercial también es dato del viaje: con la marca «(escrito por el comercial)», el modelo llegó a
+  // clasificar como «comercial» todos los mensajes, reenvíos incluidos, y se perdían valores escritos tal cual (arnés de
+  // conducta, 2026-10-29: 2 de 8). Lo que no sostiene valores es lo de otro (tercero) y el ruido.
+  const fuente = textosDelViaje(r, textos, ['cliente', 'comercial']);
   const enFuente = fuente.map(normalizarTexto);
   const campos = camposEntendibles(fields);
   const out: CargaValidada = {

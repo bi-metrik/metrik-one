@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mensajesDeTextos, preguntasPrevias, tandaDelViaje } from './bandeja/carga'
-import { sinFraseCitada } from './bandeja/extraccion'
+import { sinFraseCitada, validarCarga } from './bandeja/extraccion'
 import { opcionNombrada, tanda } from './bandeja/dominio'
 import { escenario } from './escenario'
 import type { ExtractorMemoria } from './memoria'
@@ -189,6 +189,22 @@ describe('3 · una pregunta ya hecha no vuelve: se propone la lectura más proba
 })
 
 // ── 4. Varios valores en un campo de una sola opción ────────────────────────────────────────────────────────────
+
+describe('2 · lo que escribe el comercial sostiene datos del viaje aunque el modelo lo clasifique «comercial»', () => {
+  it('un mensaje «comercial» sostiene su valor; uno de «tercero», no', () => {
+    const textos = ['Viajan desde Bogotá', 'Promo de otra agencia: 5 estrellas a mitad de precio']
+    const raw = {
+      mensajes: [{ n: 1, clase: 'comercial' }, { n: 2, clase: 'tercero' }],
+      valores: {
+        ciudad_origen: { valor: 'Bogotá', frase: 'Viajan desde Bogotá', como: 'escrito' },
+        categoria_hotel: { valor: '5', frase: '5 estrellas a mitad de precio', como: 'escrito' },
+      },
+    }
+    const v = validarCarga(raw, CAMPOS, textos, { hoyISO: '2026-10-29' })
+    expect(v.sugeridos.ciudad_origen?.valor).toBe('Bogotá')
+    expect(v.sugeridos.categoria_hotel).toBeUndefined()
+  })
+})
 
 describe('4 · «3, 4 y 5 estrellas» no traba: queda la más baja, marcada, y todo en la nota', () => {
   it('el prompt de la extracción lo pide, y si el modelo insiste en preguntar, la segunda vez el código propone', async () => {

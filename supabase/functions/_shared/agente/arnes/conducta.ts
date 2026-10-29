@@ -117,7 +117,7 @@ export const CASOS_CONDUCTA: CasoConducta[] = [
 interface Medida {
   id: string; corrida: number; daninas: string[]; error?: string;
   reenvioPerdido: boolean; clienteDice: number; repetidas: string[]; trabado: boolean;
-  propuestas: number; propuestasLargas: number; maxPropuesta: number; reenviame: number; final: Record<string, unknown>; transcripcion: string[];
+  propuestas: number; propuestasLargas: number; maxPropuesta: number; reenviame: number; final: Record<string, unknown>; transcripcion: string[]; diagnostico: string[];
 }
 
 async function tocarOEscribir(e: Escenario, titulo: string, oEscribe = 'sí'): Promise<string> {
@@ -133,6 +133,8 @@ async function correrCaso(c: CasoConducta, corrida: number): Promise<Medida> {
   const e = await escenario({ modelo, contactos: structuredClone(c.contactos), viajes: [], reglamento, reloj: () => performance.now(), campos: CAMPOS_ARNES, extraer: extraccionGemini(LLAVE_GEMINI) });
   const transcripcion: string[] = [];
   const salidasPorPaso: string[][] = [];
+  const diagnostico: string[] = [];
+  let cargasVistas = 0;
   let error: string | undefined;
   try {
     for (const p of c.pasos) {
@@ -143,6 +145,13 @@ async function correrCaso(c: CasoConducta, corrida: number): Promise<Medida> {
       const nuevas = e.mensajero.enviados.slice(antes).map((x) => x.salida);
       salidasPorPaso.push(nuevas.map((s) => s.texto));
       for (const s of nuevas) transcripcion.push(`< ${s.texto.replace(/\n/g, '\n  ')}${'opciones' in s ? `  ${s.opciones.map((o) => `[${o.titulo}]`).join(' ')}` : ''}`);
+      // Para diagnosticar: lo que llamó el modelo y lo que recibió cada lectura de este paso.
+      for (const t of e.pasos.at(-1)?.trazas ?? []) {
+        for (const h of t.herramientas ?? []) diagnostico.push(`paso ${salidasPorPaso.length}: ${h.nombre} ${JSON.stringify(h.args).slice(0, 300)}${h.error ? ` → ${h.error.slice(0, 200)}` : ''}`);
+        if (t.propuesta?.args_modelo) diagnostico.push(`paso ${salidasPorPaso.length}: proponer ${JSON.stringify(t.propuesta.args_modelo).slice(0, 300)}`);
+      }
+      for (const cg of e.puerto.cargas.slice(cargasVistas)) diagnostico.push(`paso ${salidasPorPaso.length}: lectura ${JSON.stringify(cg)}`);
+      cargasVistas = e.puerto.cargas.length;
     }
   } catch (err) { error = String(err).slice(0, 300); }
 
@@ -166,7 +175,7 @@ async function correrCaso(c: CasoConducta, corrida: number): Promise<Medida> {
     trabado: Object.entries(c.final).some(([k, v]) => k === 'categoria_hotel' && final[k] !== v) || (c.id === 'k-bonaire' && !final.categoria_hotel),
     propuestas: propuestas.length, propuestasLargas: propuestas.filter(LARGA).length, maxPropuesta: Math.max(0, ...propuestas.map((t) => t.length)),
     reenviame: todas.filter((t) => /Reenv[ií]ame lo que te escribi/.test(t)).length,
-    final, transcripcion,
+    final, transcripcion, diagnostico,
   };
 }
 
@@ -180,9 +189,9 @@ if (import.meta.main) {
     for (let k = 1; k <= K; k++) {
       const m = await correrCaso(c, k);
       medidas.push(m);
-      const { transcripcion, final, ...corto } = m;
+      const { transcripcion, final, diagnostico, ...corto } = m;
       console.log(JSON.stringify(corto));
-      await Deno.writeTextFile(`${SALIDA}/${c.id}-${k}.md`, [`# ${c.titulo} (corrida ${k})`, '', '```', ...transcripcion, '```', '', `Final: ${JSON.stringify(final)}`].join('\n'));
+      await Deno.writeTextFile(`${SALIDA}/${c.id}-${k}.md`, [`# ${c.titulo} (corrida ${k})`, '', '```', ...transcripcion, '```', '', `Final: ${JSON.stringify(final)}`, '', '## Diagnóstico', '', '```', ...diagnostico, '```'].join('\n'));
     }
   }
   const suma = (f: (m: Medida) => number) => medidas.reduce((n, m) => n + f(m), 0);
@@ -200,5 +209,5 @@ if (import.meta.main) {
     max_propuesta: Math.max(0, ...medidas.map((m) => m.maxPropuesta)),
   };
   console.log(JSON.stringify({ resumen }));
-  await Deno.writeTextFile(`${SALIDA}/resumen.json`, JSON.stringify({ resumen, medidas: medidas.map(({ transcripcion: _t, ...m }) => m) }, null, 2));
+  await Deno.writeTextFile(`${SALIDA}/resumen.json`, JSON.stringify({ resumen, medidas: medidas.map(({ transcripcion: _t, diagnostico: _d, ...m }) => m) }, null, 2));
 }

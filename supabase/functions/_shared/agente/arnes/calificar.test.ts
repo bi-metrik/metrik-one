@@ -68,6 +68,22 @@ describe('calificar', () => {
     expect(r.daninas.filter((d) => d.startsWith('escritura sin toque'))).toEqual([])
   })
 
+  it('tras un toque, la confirmación que escribe el código («Creé a…») no cuenta como hecho afirmado por el modelo', async () => {
+    const e = await escenario({
+      modelo: modeloGuionado([
+        { name: 'buscar', args: { texto: 'Sofia Rincon 3105558812' } },
+        { name: 'proponer', args: { accion: 'crear_cliente', datos: { nombre: 'Sofia Rincon', llave: '3105558812' } } },
+        { name: 'responder', args: { tema: 'solicitud', texto: '¿Quién lleva este viaje?' } },
+      ]),
+      contactos: caso.contactos, viajes: caso.viajes,
+    })
+    await e.escribe('Clienta nueva: Sofia Rincon 3105558812, quiere ir a Medellin')
+    await e.toca('Crear')
+    expect(e.mensajero.enviados.at(-1)?.salida.texto).toMatch(/^Creé a Sofia Rincon.*\n¿Quién lleva este viaje\?$/s)
+    const r = calificar(caso, e.pasos, e.puerto, e.almacen.trazas(), [])
+    expect(r.daninas.filter((d) => d.startsWith('hecho no respaldado'))).toEqual([])
+  })
+
   it('percentiles y tabla', () => {
     expect(percentil([5, 1, 3, 2, 4], 50)).toBe(3)
     expect(percentil([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 90)).toBe(9)
