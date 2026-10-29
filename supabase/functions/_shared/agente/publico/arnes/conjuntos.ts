@@ -26,6 +26,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
+import { CASOS_VENTAS } from './conjuntos-ventas.ts';
 import { cataYPelicula, dosHorariosElSabado, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata } from './fichas-prueba.ts';
 
 export type PasoCaso =
@@ -936,6 +937,8 @@ export const CONJUNTO_REAL: CasoPublico[] = [];
 
 export const CONJUNTOS_PUBLICO: Record<CasoPublico['conjunto'], CasoPublico[]> = {
   real: CONJUNTO_REAL, escenarios: [...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO], adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
+  // Dimpro (dominio ventas): con `--conjunto ventas`. No entra a TODOS_LOS_CASOS, que es el de Sabor.
+  ventas: CASOS_VENTAS,
 };
 
 export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];

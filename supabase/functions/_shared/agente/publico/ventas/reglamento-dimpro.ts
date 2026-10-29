@@ -78,7 +78,7 @@ export const REGLAMENTO_DIMPRO: Ficha[] = [
   persona('falla', 'una herramienta falla o el catálogo está vacío', 'pasar_a_persona motivo falla'),
   { clave: 'est.breve', tipo: 'estilo', carga: 'siempre', hacer: 'Breve: una idea por mensaje. Español de Colombia, de tú, cordial y directo. Sin markdown: el canal no lo muestra. Nombra los productos con su código MP-xx.', fuente: '[propuesta Max]' },
   // Textos fijos. Los legales son borrador del ensayo: falta el visto de Emilio y el link de términos de Dimpro (HUECO).
-  rf('rf.bienvenida', 'Hola, soy {nombre}, el asistente virtual de Dimpro. Si sigues la conversación, aceptas nuestros términos y la política de datos: {link}. Si prefieres hablar con alguien del equipo, escríbeme "persona".', { version: VERSION_TEXTOS_DIMPRO }, 'Diseño §5.1 adaptado (borrador; falta el visto de Emilio; link HUECO)'),
+  rf('rf.bienvenida', 'Hola, soy el asistente virtual de Dimpro. Si sigues la conversación, aceptas nuestros términos y la política de datos: {link}. Si prefieres hablar con alguien del equipo, escríbeme "persona".', { version: VERSION_TEXTOS_DIMPRO }, 'Diseño §5.1 adaptado (borrador; falta el visto de Emilio; link HUECO)'),
   rf('rf.autorizacion', 'Para tu pedido usamos tu nombre, celular y dirección según {link}. ¿Autorizas? Sí / No', { version: VERSION_TEXTOS_DIMPRO }, 'Diseño §5.2 adaptado (borrador; falta el visto de Emilio)'),
   rf('rf.autorizacion_no', 'Listo, no tomo tus datos. Te sigo contando de los productos, o si prefieres te paso con alguien del equipo.'),
   rf('rf.demora', 'Un momento, tu respuesta está tomando un poco más de lo esperado.', undefined, 'Diseño §4.1'),

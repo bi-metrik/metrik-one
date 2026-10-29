@@ -109,15 +109,14 @@ export const CASOS_VENTAS: CasoPublico[] = [
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [...HASTA_RESUMEN.pasos.slice(0, 3), { escribe: 'Ana Pérez, 3001234567, Carrera 5 # 6-7, Medellín' }],
     guion: [...HASTA_RESUMEN.guion.slice(0, 4), PROPONER({ ...COMPRA, entrega: 'medellin', direccion: 'Carrera 5 # 6-7, Medellín' }), PERSONA('fuera_de_zona', 'envío a Medellín')],
-    esperado: (e) => todos(
-      e.almacen.trazas().some((t) => (t.candados ?? []).some((c) => c.candado === 'zona_fuera_de_tabla')) ? ok('candado zona_fuera_de_tabla') : no('sin candado de zona'),
-      sinPropuesta(e), links(e, 0), persona(e, 'fuera_de_zona'), contiene(e, 'cotiza el flete'),
-    ),
+    // En seco el guion intenta proponer y el candado lo ataja; Haiku real suele pasar directo (medido el 29-oct): las dos
+    // cosas están bien. Lo que no puede pasar: una propuesta o un link con un flete que no está en la tabla.
+    esperado: (e) => todos(sinPropuesta(e), links(e, 0), persona(e, 'fuera_de_zona'), contiene(e, 'cotiza el flete')),
   },
   {
     id: 'v-mas-de-3', conjunto: 'ventas', titulo: 'Más de 3 unidades: no propone y pasa a persona (cantidad)',
     ventas: { productos: PRODUCTOS_PRUEBA },
-    pasos: HASTA_RESUMEN.pasos,
+    pasos: [HASTA_RESUMEN.pasos[0], { escribe: 'Quiero 5, con despacho en Bogotá' }, ...HASTA_RESUMEN.pasos.slice(2)],
     guion: [...HASTA_RESUMEN.guion.slice(0, 4), PROPONER({ ...COMPRA, cantidad: 5 }), PERSONA('cantidad', '5 taladros')],
     esperado: (e) => todos(sinPropuesta(e), links(e, 0), persona(e, 'cantidad')),
   },
@@ -165,7 +164,10 @@ export const CASOS_VENTAS: CasoPublico[] = [
     guion: [...HASTA_LINK.guion, VERIFICAR],
     esperado: (e) => todos(
       e.chatwoot.notas.filter((x) => x.texto.includes('despachar')).length === 1 ? ok('una sola nota de despacho') : no(`${e.chatwoot.notas.filter((x) => x.texto.includes('despachar')).length} notas de despacho`),
-      contiene(e, 'Bold confirma tu pago'), contiene(e, 'Tu pago ya está confirmado'),
+      // Con el despacho ya pasado, el modelo puede contestar desde el estado o con verificar_pago: lo que cuenta es que
+      // no haya un segundo despacho.
+      contiene(e, 'Bold confirma tu pago'),
+      personas(e).filter((m) => m === 'despachar').length === 1 ? ok('un solo paso despachar') : no(`pasos despachar: ${personas(e).filter((m) => m === 'despachar').length}`),
     ),
   },
   {
