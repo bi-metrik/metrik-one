@@ -68,6 +68,16 @@ describe('servicios: el mismo veredicto de servicios_listos', () => {
   })
 })
 
+describe('servicios en la etapa que pide vouchers (QA 2026-10-29, M1-1 y M6-1)', () => {
+  it('la confirmación del último servicio antes que su voucher: en E5 completo, en E6 pendiente hasta el voucher', () => {
+    const sinVoucher = [{ ...pagada('vuelo'), voucher_ref: 'one://v' }, pagada('traslado')]
+    expect(estadoServicios(sinVoucher, true)).toBe('completo')
+    expect(estadoServicios(sinVoucher, true, true)).toBe('pendiente')
+    const conVoucher = sinVoucher.map(f => ({ ...f, voucher_ref: 'one://v' }))
+    expect(estadoServicios(conVoucher, true, true)).toBe('completo')
+  })
+})
+
 describe('cambiosDeEstado', () => {
   it('escribe solo lo que cambia, en los dos sentidos; sin veredicto o con otro estado no toca', () => {
     expect(cambiosDeEstado([
