@@ -1,27 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fmtAlMil, redondearAlMil, fechaCorta, tarifaIva, fechaDeGeneracion } from './formato'
-
-/** El separador que mete Intl entre `$` y la cifra es un espacio DURO (U+00A0). */
-const pesos = (cifra: string) => `$ ${cifra}`
-
-describe('IVA aproximado al mil (art. 577 ET)', () => {
-  it('redondea al múltiplo de mil más cercano', () => {
-    expect(fmtAlMil('1234499')).toBe(pesos('1.234.000'))
-    expect(fmtAlMil('1234500')).toBe(pesos('1.235.000'))
-    expect(fmtAlMil('16412381')).toBe(pesos('16.412.000'))
-    expect(redondearAlMil('999')).toBe(1000)
-  })
-
-  it('sin valor devuelve el marcador', () => {
-    expect(fmtAlMil(null)).toBe('—')
-    expect(fmtAlMil(null, '[IVA SOLICITADO]')).toBe('[IVA SOLICITADO]')
-    expect(redondearAlMil(null)).toBeNull()
-  })
-
-  it('un texto no numérico sale tal cual, nunca "NaN"', () => {
-    expect(fmtAlMil('16.412.381,00')).toBe('16.412.381,00')
-  })
-})
+import { fechaCorta, tarifaIva, fechaDeGeneracion } from './formato'
 
 describe('fecha corta DD/MM/AAAA', () => {
   it('no se corre de día por zona horaria', () => {

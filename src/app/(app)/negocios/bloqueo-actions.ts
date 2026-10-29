@@ -117,15 +117,33 @@ export async function paqueteEnPropuesta(itemId: string, va: boolean): Promise<{
     if (!otra) return { success: false, error: 'Es el único paquete en la propuesta: el cliente tiene que recibir al menos uno.' }
     const deOtra = await paqueteDeTarifa(sb, otra.seleccion)
     if (!deOtra) return { success: false, error: 'No se pudo cambiar la Recomendada. Recarga la página.' }
-    const cambios = [
-      sb.from('itinerario_opciones').delete().eq('itinerario_id', suya.id).in('item_id', [itemId]),
-      sb.from('itinerario_opciones').delete().eq('itinerario_id', otra.id).in('item_id', [deOtra]),
-    ]
-    for (const c of cambios) { const { error: e } = await c; if (e) return { success: false, error: e.message as string } }
-    const { error: e1 } = await sb.from('itinerario_opciones').insert([{ itinerario_id: suya.id, item_id: deOtra }, { itinerario_id: otra.id, item_id: itemId }])
+    // El cambio de paquete entre las dos tarifas son varias escrituras sin transacción (hacerlo
+    // atómico pide una función en la base). Por eso el ORDEN (QA del #1342): primero se PONE el
+    // paquete nuevo en cada tarifa y después se quita el viejo. Si algo falla a mitad, ninguna
+    // tarifa queda sin paquete: a lo sumo una nombra dos, y se deshace lo puesto; si tampoco se
+    // puede, el plan de bloqueo (`planDeTarifasDeBloqueo`) le deja uno solo en la próxima acción.
+    const puestas = [{ itinerario_id: suya.id, item_id: deOtra }, { itinerario_id: otra.id, item_id: itemId }]
+    const { error: e1 } = await sb.from('itinerario_opciones').insert(puestas)
     if (e1) return { success: false, error: e1.message as string }
+    const quitar = [
+      () => sb.from('itinerario_opciones').delete().eq('itinerario_id', suya.id).in('item_id', [itemId]),
+      () => sb.from('itinerario_opciones').delete().eq('itinerario_id', otra.id).in('item_id', [deOtra]),
+    ]
+    for (let i = 0; i < quitar.length; i++) {
+      const { error: e } = await quitar[i]()
+      if (!e) continue
+      // Se deshace lo hecho, en orden inverso: lo quitado vuelve y lo puesto sale.
+      if (i === 1) await sb.from('itinerario_opciones').insert([{ itinerario_id: suya.id, item_id: itemId }])
+      for (const x of puestas) await sb.from('itinerario_opciones').delete().eq('itinerario_id', x.itinerario_id).in('item_id', [x.item_id])
+      await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId, antes: null, staffId })
+      return { success: false, error: 'No se pudo cambiar la Recomendada: quedó como estaba. Vuelve a intentarlo.' }
+    }
     const { error: e2 } = await sb.from('cotizacion_itinerarios').update({ va_en_propuesta: false }).eq('id', otra.id)
-    if (e2) return { success: false, error: e2.message as string }
+    if (e2) {
+      // Los paquetes ya cambiaron de tarifa y los dos siguen en la propuesta: nada se perdió.
+      await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId, antes: null, staffId })
+      return { success: false, error: 'La Recomendada pasó al otro paquete, pero este sigue en la propuesta. Vuelve a quitarlo.' }
+    }
   }
   const c = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId, antes: null, staffId })
   if (!c.success) return { success: false, error: c.error }

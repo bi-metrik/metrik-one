@@ -196,6 +196,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'el glosario del reglamento de prueba del núcleo conversacional define infante como «menor de 2 años»: ' +
       'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/arnes/conducta.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el guion del arnés de conducta dice «1 niño menor de 11 años»: la EDAD de un pasajero de la ' +
+      'conversación rehecha. No hay plazo de conservación en este archivo.',
+  },
   'supabase/functions/_shared/agente/arnes/conjuntos.ts': {
     tipo: 'no-es-plazo',
     razon:

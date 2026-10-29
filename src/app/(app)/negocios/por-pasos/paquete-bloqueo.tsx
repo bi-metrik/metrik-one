@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
 import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
 import { comisionEscrita, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
+import { EVENTO_ENFOCAR_COMISION, type DetalleEnfocarComision } from '@/lib/cotizaciones/enfocar-comision'
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import {
   ACOMODACIONES,
@@ -132,8 +133,11 @@ export interface PropsTarjetaPaquete {
    * tarifa. `null` = todavía no hay tarifas (un solo paquete): no se muestra la casilla.
    */
   enPropuesta?: boolean | null
-  /** Incluir o sacar el paquete de la propuesta (reversible). */
-  onEnPropuesta?: (va: boolean) => void
+  /**
+   * Incluir o sacar el paquete de la propuesta (reversible). Si devuelve una promesa, la casilla
+   * muestra el cambio en el acto y «Guardando…» hasta que termine; `false` = no se pudo (vuelve).
+   */
+  onEnPropuesta?: (va: boolean) => void | Promise<boolean>
 }
 
 type Comision = 'incluida' | 'por_incluir'
@@ -164,6 +168,14 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
       ? comisionGuardadaEscrita.valor
       : costoGuardado && costoGuardado > 0 ? (comisionGuardadaEscrita.valor / costoGuardado) * 100 : null
   const margenVisible = comisionGuardada ?? p.margenAplicado ?? null
+  // QA del #1342 · una Pública sin comisión no tiene margen («Margen 0 %» decía que se vende a
+  // costo): falta la comisión. Y el costo de una Pública es lo que paga la agencia (D2).
+  const publicaSinComision = tipoGuardado === 'publica' && comisionGuardadaEscrita === null
+  const comisionPesosGuardada = comisionGuardadaEscrita === null || costoGuardado === null
+    ? null
+    : comisionGuardadaEscrita.tipo === 'monto'
+      ? Math.min(costoGuardado, comisionGuardadaEscrita.valor)
+      : (comisionGuardadaEscrita.valor / 100) * costoGuardado
   const [abierto, setAbierto] = useState(guardado === null)
   // La edad de cada niño abre con la de la Solicitud si el paquete no tiene la suya (prueba real del
   // 2026-10-29). Solo entra a la cuenta con niños en el paquete: sin ellos no frena por rango CHD.
@@ -180,6 +192,27 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const [detectando, setDetectando] = useState(false)
   const [edadesTexto, setEdadesTexto] = useState(() => edadesDeInicio.join(', '))
   const [guardando, empezar] = useTransition()
+  // «Va en la propuesta» (QA del #1342): el cambio se ve en el acto. Vale mientras la tarjeta siga
+  // recibiendo el valor de antes del clic; cuando llega otro, manda el del servidor.
+  const [vaPendiente, setVaPendiente] = useState<{ va: boolean; desde: boolean | null | undefined } | null>(null)
+  const [guardandoVa, setGuardandoVa] = useState(false)
+  // Llegó otro valor del servidor: lo optimista ya no sirve (no vuelve si el valor regresa después).
+  if (vaPendiente && vaPendiente.desde !== p.enPropuesta && !guardandoVa) setVaPendiente(null)
+  const vaVisible = vaPendiente && vaPendiente.desde === p.enPropuesta ? vaPendiente.va : p.enPropuesta
+  async function cambiarVa(va: boolean) {
+    if (!p.onEnPropuesta) return
+    setVaPendiente({ va, desde: p.enPropuesta })
+    setGuardandoVa(true)
+    try {
+      const r = await p.onEnPropuesta(va)
+      if (r === false) setVaPendiente(null)
+    } catch {
+      setVaPendiente(null)
+      toast.error('No se pudo cambiar: revisa la conexión y vuelve a intentarlo.')
+    } finally {
+      setGuardandoVa(false)
+    }
+  }
 
   const costo = costoDelPaquete(paquete)
   const fechas = fechasDelPaquete(paquete)
@@ -250,6 +283,19 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
     })
   }, [registro, p.itemId])
 
+  // «Ir» desde «Impide enviar · Falta la comisión» (QA del #1342): la tarjeta se abre en Pública y
+  // `pedirFocoEnComision` pone el foco en la casilla cuando aparece.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
+    const alPedir = (e: Event) => {
+      if ((e as CustomEvent<DetalleEnfocarComision>).detail?.itemId !== p.itemId) return
+      setAbierto(true)
+      setComision('incluida')
+    }
+    window.addEventListener(EVENTO_ENFOCAR_COMISION, alPedir)
+    return () => window.removeEventListener(EVENTO_ENFOCAR_COMISION, alPedir)
+  }, [p.itemId])
+
   function guardar() {
     empezar(async () => {
       const r = await guardarPaqueteBloqueo(p.itemId, {
@@ -272,6 +318,16 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
 
   const ocupado = guardando || leyendo.hotel || leyendo.vuelo || detectando
 
+  // QA del #1342 · la comisión de un paquete YA guardado como Pública se guarda al salir de la
+  // casilla (antes esperaba a «Guardar paquete» y nada lo decía). Uno nuevo, o que todavía no es
+  // Pública en la base, la guarda el botón: lo dice la nota de la casilla.
+  const comisionSeGuardaSola = guardado !== null && tipoGuardado === 'publica' && comision === 'incluida'
+  function alEscribirComision(c: ComisionEscrita | null) {
+    setComisionAgencia(c)
+    if (!comisionSeGuardaSola) return
+    ajustarReglas(c === null ? { comisionPct: null } : c.tipo === 'pct' ? { comisionPct: c.valor } : { comisionMonto: c.valor })
+  }
+
   function ajustarReglas(cambios: ReglasDelPaquete) {
     empezar(async () => {
       const r = await ajustarReglasDelPaquete(p.itemId, cambios)
@@ -293,9 +349,21 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
           </p>
         </div>
         <div className="text-right">
-          <p className="m-0 text-[11px] text-[#6E6A62]">Costo {pesos(guardado ? costoDelPaquete(guardado).total : null)}</p>
+          {guardado && tipoGuardado === 'publica' ? (
+            <p className="m-0 text-[11px] text-[#6E6A62]" data-costo-agencia>
+              {comisionPesosGuardada === null
+                ? <>Costo de la agencia: <b className="text-[#B3382C]">falta la comisión</b></>
+                : <>Costo de la agencia {pesos((costoGuardado ?? 0) - comisionPesosGuardada)}</>}
+            </p>
+          ) : (
+            <p className="m-0 text-[11px] text-[#6E6A62]">Costo {pesos(guardado ? costoDelPaquete(guardado).total : null)}</p>
+          )}
           <p className="m-0 text-sm font-semibold tabular-nums">{pesos(p.precioVenta)}</p>
-          {margenVisible !== null && guardado && (
+          {guardado && publicaSinComision ? (
+            <p className="m-0 text-[11px] font-semibold text-[#B3382C]" data-margen-paquete="falta-comision">
+              Margen: falta la comisión
+            </p>
+          ) : margenVisible !== null && guardado && (
             <p className="m-0 text-[11px] text-[#6E6A62]" data-margen-paquete>
               Margen {String(Math.round(margenVisible * 10) / 10).replace('.', ',')} %{comisionGuardada !== null ? ' (comisión)' : ''}
             </p>
@@ -309,9 +377,14 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         </button>
         {/* D5 (2026-10-29): incluir o sacar el paquete de la propuesta, sin borrarlo. */}
         {p.enPropuesta !== null && p.enPropuesta !== undefined && p.onEnPropuesta && (
-          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#191713]" data-paquete-en-propuesta={p.enPropuesta ? 'si' : 'no'}>
-            <input type="checkbox" checked={p.enPropuesta} disabled={!p.editable || ocupado} onChange={e => p.onEnPropuesta!(e.target.checked)} />
+          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#191713]" data-paquete-en-propuesta={vaVisible ? 'si' : 'no'}>
+            <input type="checkbox" checked={!!vaVisible} disabled={!p.editable || ocupado || guardandoVa} onChange={e => void cambiarVa(e.target.checked)} />
             Va en la propuesta
+            {guardandoVa && (
+              <span className="inline-flex items-center gap-1 font-normal text-[#6E6A62]" data-guardando-propuesta>
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Guardando…
+              </span>
+            )}
           </label>
         )}
         {p.editable && (
@@ -556,7 +629,13 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
             <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'incluida'} onChange={() => setComision('incluida')} /> Pública: el precio ya trae la comisión de la agencia</label>
             {comision === 'incluida' && (
               <div className="pl-5" data-comision-paquete>
-                <CampoComision comision={comisionAgencia} editable={p.editable} ocupado={ocupado} onComision={setComisionAgencia} />
+                <CampoComision
+                  comision={comisionAgencia}
+                  editable={p.editable}
+                  ocupado={ocupado}
+                  onComision={alEscribirComision}
+                  nota={comisionSeGuardaSola ? 'Se guarda al salir de la casilla.' : 'Se guarda con «Guardar paquete».'}
+                />
               </div>
             )}
             <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'por_incluir'} onChange={() => setComision('por_incluir')} /> Neta: por incluir (margen de la cotización)</label>

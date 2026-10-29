@@ -196,9 +196,23 @@ export function textoParaElViaje(
    * documento lleva la marca `incluye_origen = 'one'`; sin la marca, «Incluye» es el guardado.
    */
   incluyeDeOne?: readonly string[] | null,
+  opciones?: {
+    /**
+     * «Incluye» lo arma ONE aunque nadie haya revisado el texto (QA del #1342): con la marca o con
+     * la pieza `incluye_por_one`, la pantalla promete «Sale al final. ONE lo rehace solo» y lo de
+     * ONE no se edita, así que no espera revisión. Sin texto revisado el PDF imprimía la lista
+     * plana («Hotel Isla Coral», un renglón) o, con varias versiones, ninguna sección. Solo
+     * `incluye`: el titular, la intro y las líneas propias siguen esperando la revisión.
+     */
+    incluyeSinRevisar?: boolean
+  },
 ): Partial<Pick<ViajePDF, 'titular' | 'intro' | 'incluye' | 'antesDeViajar'>> {
   const t = textoImprimible(doc)
-  if (!t) return {}
+  if (!t) {
+    return opciones?.incluyeSinRevisar && incluyeDeOne && incluyeDeOne.length > 0
+      ? { incluye: incluyeConPropias(incluyeDeOne, []) }
+      : {}
+  }
   const incluye = doc?.incluye_origen === 'one' && incluyeDeOne ? incluyeConPropias(incluyeDeOne, t.incluye) : t.incluye
   return { titular: t.titular, intro: t.intro, incluye, antesDeViajar: t.antes_de_viajar }
 }
