@@ -32,9 +32,28 @@
  * desde el 6-nov, pausa desde el 15-nov.
  *
  * El pago levanta todo en la petición siguiente: nada de esto se cachea más allá del request.
+ *
+ * ## 3. La transición de la v1.5 (cláusula 11.7, publicada por aviso el 1-nov-2026)
+ *
+ * Para un contrato con una v1.5 registrada (aceptada o por aviso), los períodos que EMPIEZAN antes de la
+ * vigencia de la v1.5 ({{VIGENCIA_AVISO}}, el 1-dic-2026: `vigenciaTransicion`) y no están pagados se
+ * pagan a más tardar el día anterior a esa vigencia (30-nov), y «para efectos de las cláusulas 11.1 a
+ * 11.3, esa es su fecha de renovación». Así que la cuota impaga más vieja, si es de un período así, se
+ * mide con D = 30-nov (o su vencimiento, si fuera posterior): nada hasta el 30-nov, aviso del 1 al 5-dic,
+ * consultas restringidas desde el 6-dic y pausa desde el 31-dic. «No se aplican la restricción ni la
+ * suspensión por mora de las cláusulas 11.1 y 11.3 de la versión 1.4»: por eso la v1.4 deja de restringir
+ * desde el 6-nov a Caquetá, Puertotest y Maxitec (cuota del 23-oct, vencida el 27-oct).
+ *
+ * El período sale del concepto de la cuota («periodo del 23-oct al 22-nov», `leerPeriodoEnConcepto`);
+ * sin él, del vencimiento (las cuotas de los CDA vencen dentro del período que pagan, así que un
+ * vencimiento anterior a la vigencia es de un período que empezó antes). Los períodos que empiezan desde
+ * la vigencia siguen, por ahora, la regla de la v1.4 sobre su vencimiento (D+6 / D+31), que es más
+ * tarde que la de la 11.2/11.3 de la v1.5 (renovación + 6 / + 31): los estados Suspendido por pago y
+ * Cancelado de la v1.5 no son de este cambio.
  */
 
 import type { ProximoPago } from './pago-pendiente'
+import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
 import { DIAS_GRACIA_CICLO } from '@/lib/valida-registro/plan'
 
 /** Días de mora que la cláusula 11.3 tolera antes de suspender (más de 30: se pausa el día 31). */
@@ -116,6 +135,50 @@ export function vigenciaRestriccion(
 
 const FECHA = /^(\d{4})-(\d{2})-(\d{2})$/
 
+/** La primera versión de los Términos del Plan CDA con la transición de la cláusula 11.7. */
+const VERSION_CON_TRANSICION: readonly [number, number] = [1, 5]
+
+/** ¿Es una versión de los Términos del Plan CDA igual o posterior a `minima`? */
+export function esVersionCdaDesde(d: { slug: string; version: string }, minima: readonly [number, number]): boolean {
+  if (d.slug !== SLUG_TERMINOS_CDA) return false
+  const n = numeroDeVersion(d.version)
+  if (!n) return false
+  return n[0] > minima[0] || (n[0] === minima[0] && n[1] >= minima[1])
+}
+
+/**
+ * La vigencia de la transición de la cláusula 11.7 (v1.5) para un contrato: el `vigente_desde` más
+ * temprano de sus versiones v1.5 o posteriores de los Términos del Plan CDA, la haya aceptado o no (rige
+ * por el aviso). `null` = no tiene ninguna registrada (y publicada): la mora sigue la v1.4.
+ */
+export function vigenciaTransicion(
+  documentos: readonly { slug: string; version: string; vigenteDesde: string }[],
+): string | null {
+  const fechas = documentos
+    .filter((d) => esVersionCdaDesde(d, VERSION_CON_TRANSICION))
+    .map((d) => d.vigenteDesde.slice(0, 10))
+    .filter((f) => FECHA.test(f))
+    .sort()
+  return fechas[0] ?? null
+}
+
+/**
+ * La fecha que hace de vencimiento (D) de la cuota impaga más vieja: la suya, o, si es de un período
+ * que empezó antes de la vigencia de la transición, el día anterior a esa vigencia (cláusula 11.7: «esa
+ * es su fecha de renovación»), si es posterior. Ver el encabezado, sección 3.
+ */
+export function vencimientoConTransicion(
+  pago: { concepto: string | null; fechaVencimiento: string },
+  transicion: string | null,
+): string {
+  if (!transicion || !FECHA.test(transicion)) return pago.fechaVencimiento
+  const periodo = leerPeriodoEnConcepto(pago.concepto, pago.fechaVencimiento)
+  const inicio = periodo?.desde && FECHA.test(periodo.desde) ? periodo.desde : pago.fechaVencimiento
+  if (!(inicio < transicion)) return pago.fechaVencimiento
+  const alDia = sumarDias(transicion, -1)
+  return pago.fechaVencimiento > alDia ? pago.fechaVencimiento : alDia
+}
+
 /** 'YYYY-MM-DD' + n días, en calendario (sin horas ni zonas de por medio). */
 export function sumarDias(iso: string, dias: number): string {
   const m = FECHA.exec(iso)
@@ -147,15 +210,19 @@ export type EstadoMora =
 /**
  * `vigenteDesde`: desde cuándo rige la restricción de los 5 días para este contrato (`vigenciaRestriccion`).
  * `null` = no rige: solo la pausa de los 30 días (v1.3).
+ *
+ * `transicion`: la vigencia de la v1.5 del contrato (`vigenciaTransicion`), o `null` sin v1.5. Con ella,
+ * la cuota de un período que empezó antes se mide desde el día anterior a esa vigencia (cláusula 11.7).
  */
 export function estadoMora(
   pago: ProximoPago,
   hoy: string,
   vigenteDesde: string | null = RESTRICCION_VIGENTE_DESDE,
   regla: ReglaMora = REGLA_MORA_CDA,
+  transicion: string | null = null,
 ): EstadoMora {
   if (pago.estado !== 'pendiente') return { estado: 'al_dia' }
-  const vencio = pago.fechaVencimiento
+  const vencio = vencimientoConTransicion(pago, transicion)
   if (!FECHA.test(vencio) || !(vencio < hoy)) return { estado: 'al_dia' }
   const corteDesde = sumarDias(vencio, regla.diaPausa)
   if (corteDesde <= hoy) return { estado: 'suspendido', vencio, corteDesde }

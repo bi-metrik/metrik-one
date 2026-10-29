@@ -3,6 +3,7 @@ import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
 import { BUCKET_DOCUMENTOS_SERVICIO, nombreDescargaRecibo } from '@/lib/valida-api/recibo-manual'
 import { esUuid } from '@/lib/valida-api/reglas'
+import { sinAvisosFuturos } from '@/lib/valida-api/terminos'
 import { nombreDescargaFactura } from './factura-cuota'
 import { entradaSuscripcion } from '@/lib/seccion-suscripcion/entrada-servidor'
 import { entradaValidaCda, puedeVerPagosCda } from './puerta'
@@ -56,9 +57,19 @@ async function resolverPdfTerminos(id: string): Promise<ArchivoCda> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = await (supabase as any).rpc('mis_documentos_de_servicio')
   if (r.error) return { tipo: 'error', status: 503, error: 'no_disponible' }
-  const fila = ((r.data ?? []) as { documento_id: string; pdf_bucket: string | null; pdf_path: string | null }[]).find(
-    (d) => d.documento_id === id && d.pdf_bucket && d.pdf_path,
+  const filas = (r.data ?? []) as {
+    documento_id: string
+    pdf_bucket: string | null
+    pdf_path: string | null
+    rige_por_aviso?: boolean | null
+    publicada_at?: string | null
+  }[]
+  // Una modificación por aviso todavía no publicada no se descarga (ver `sinAvisosFuturos`).
+  const visibles = sinAvisosFuturos(
+    filas.map((d) => ({ ...d, rigePorAviso: d.rige_por_aviso === true, publicadaAt: d.publicada_at ?? null })),
+    new Date().toISOString(),
   )
+  const fila = visibles.find((d) => d.documento_id === id && d.pdf_bucket && d.pdf_path)
   if (!fila?.pdf_bucket || !fila.pdf_path) return NO_ENCONTRADO
 
   const nombre = fila.pdf_path.split('/').pop() || 'terminos.pdf'
