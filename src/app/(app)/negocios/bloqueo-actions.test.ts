@@ -86,7 +86,7 @@ function consulta(tabla: string) {
   return api
 }
 
-const { crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo } = await import('./bloqueo-actions')
+const { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo } = await import('./bloqueo-actions')
 const { leerTarifaPax } = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { leerPaqueteBloqueo } = await import('@/lib/cotizaciones/bloqueo-paquete')
 
@@ -219,5 +219,49 @@ describe('«+ Paquete»', () => {
     tablas.items = []
     expect((await crearPaqueteBloqueo('cot-1')).success).toBe(false)
     expect(tablas.items).toEqual([])
+  })
+})
+
+describe('comisión propia y descuento al cliente del paquete (decisión del 2026-10-29)', () => {
+  it('la comisión de una tarifa Incluida (Pública) se guarda en tarifa_pax y sobrevive a «Guardar paquete»', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    const r = await ajustarReglasDelPaquete('item-1', { comisionPct: 10 })
+    expect(r.success).toBe(true)
+    expect(leerTarifaPax(item().tarifa_pax).tipoTarifa).toMatchObject({ tipo: 'publica', comisionPct: 10 })
+    expect(recalculos).toBe(2)
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    expect(leerTarifaPax(item().tarifa_pax).tipoTarifa?.comisionPct).toBe(10)
+    // Vuelve a Neta: la comisión era de la Pública y se va.
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    expect(leerTarifaPax(item().tarifa_pax).tipoTarifa?.comisionPct).toBeUndefined()
+  })
+
+  it('una comisión sobre una tarifa Neta se rechaza sin escribir', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    const antes = structuredClone(item().tarifa_pax)
+    const r = await ajustarReglasDelPaquete('item-1', { comisionPct: 10 })
+    expect(r.success).toBe(false)
+    expect(item().tarifa_pax).toEqual(antes)
+  })
+
+  it('el descuento al cliente se guarda con su motivo, se quita con null, y sin motivo se rechaza', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    expect((await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: '', tipo: 'pct', valor: 6 } })).success).toBe(false)
+    const r = await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    expect(r.success).toBe(true)
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toMatchObject({ motivo: 'Reserva esta semana', tipo: 'pct', valor: 6, por: 'Tatiana' })
+    // El paquete sigue intacto.
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.hotel.hotel).toBe('Hotel Cartagena Dubai')
+    await ajustarReglasDelPaquete('item-1', { descuentoCliente: null })
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeUndefined()
+  })
+
+  it('en una línea que no es paquete, o una cotización enviada, no escribe', async () => {
+    tablas.items[0].grupo = 'hotel'
+    expect((await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 2 } })).success).toBe(false)
+    tablas.items[0].grupo = GRUPO
+    estadoDeLaCotizacion = 'enviada'
+    expect((await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 2 } })).success).toBe(false)
+    expect(item().tarifa_pax).toBeNull()
   })
 })

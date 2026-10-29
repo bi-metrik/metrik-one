@@ -1,6 +1,6 @@
 ---
 name: bloqueo-trappvel
-description: Viajes en bloqueo de Trappvel (2026-10-27, feat/trappvel-bloqueo) — ranura «paquete» (migración 20261027174500 APLICADA 27-oct) y config modalidad_viaje SIN aplicar; dos pantallazos por paquete; íconos a 5 categorías
+description: Viajes en bloqueo de Trappvel (2026-10-27; QA 29-oct: pegado al paquete, freno de incompleto, comisión/descuento) — ranura «paquete» (migración 20261027174500 APLICADA 27-oct) y config modalidad_viaje SIN aplicar; dos pantallazos por paquete; íconos a 5 categorías
 metadata:
   type: project
 ---
@@ -26,5 +26,16 @@ asesora no cotiza vuelo ni hotel por separado.
   `formaDesdeGrupo`/`bloquesPorRanura` lo trataban como línea suelta. Una ranura nueva con sinónimo ≠ tipo: igual.
 - Aerolínea: `aerolineaLegible` quita código/logo pegado («JSJA» → JetSMART); un código solo queda tal cual.
 - Sin QA en pantalla ni lectura real del modelo (solo fixtures simulados).
+
+**QA estricto (29-oct, fix/cotizacion-bloqueo-qa, sin migración):**
+- El pegado de la ventana en un bloqueo va al paquete por `RegistroDePaquetes` (`bloqueo-pegado.ts`). Una tarjeta sin
+  montar recibe lo pegado de su buzón cuando se abre. Sin paquete abierto, la bandeja pregunta.
+- Un paquete en cero NO aparecía en `conteo.faltantes`: la ranura tiene alternativas y, sin tarifas, la cascada no
+  suma ninguna. Por eso hay un freno propio (`bloqueo-incompleto.ts`) en `enviarPorPasos` antes del margen.
+- La propuesta usa `hotelesDePaquetes`/`vuelosDePaquetes` aparte. NO meter el paquete en `vuelosDeItems`: el colchón
+  de vuelo (`reglas-margen`) y el recargo también la usan y le cambiarían el precio.
+- `margenAplicado` ya refleja el descuento al cliente, y eso también cambió para el hotel.
+- `guardarPaqueteBloqueo` conserva `comisionPct` mientras la tarifa siga siendo Pública.
+- Sin QA en navegador real: el pegado se probó con happy-dom y el modelo con un doble.
 
 Relacionado: [[cotizacion-otro-servicio]], [[tarifa-publica-neta]], [[cotizacion-integrada-c1-c6]].

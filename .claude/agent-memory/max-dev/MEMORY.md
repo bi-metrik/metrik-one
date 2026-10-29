@@ -4,7 +4,7 @@
 
 - ⚠️⚠️ [Factura de cuota sale siempre (#1317)](project_factura_cuota_correo_siempre.md) — 20261028120000 SIN aplicar; edge enviar-factura-cuota; webhook después de la migración
 - ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; puntos fuera de precio_venta; `–` no `−` en PDF; causas en causas-margen.ts
-- ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje
+- ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje; pegado vía RegistroDePaquetes; paquete en 0 no cae en faltantes
 - ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 APLICADA; no mergear sin DNS
 - ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 SIN aplicar; migrar antes del merge (datos.ts lee la columna)
 - ⚠️⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — DNS de Resend bajo <slug> tumba el espacio: CNAME del slug en el mismo paso; logo solo con clave

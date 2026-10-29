@@ -195,6 +195,8 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
     moneda: (textoCorto(raw.moneda, 3) ?? 'COP').toUpperCase(),
     precios,
     nino: nino && (nino.precio !== null || nino.edadMin !== null || nino.edadMax !== null) ? nino : null,
+    // El infante casi nunca está en la pantalla del operador: lo escribe la asesora.
+    infante: null,
   }
   return { ok: true, hotel, incluye: incluyeDesdeLectura(raw) }
 }
