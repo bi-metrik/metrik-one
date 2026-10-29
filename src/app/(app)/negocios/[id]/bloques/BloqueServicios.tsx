@@ -42,6 +42,7 @@ import {
   type AprobacionLeida,
   type MedioPagoProveedor,
 } from '@/lib/viaje/reglas-pago'
+import { confirmacionFueraDeLoPactado } from '@/lib/viaje/pago-fuera-de-lo-pactado'
 import {
   actualizarServicio,
   adjuntarArchivoServicio,
@@ -555,6 +556,15 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
 
   function registrar() {
     if (!listo || !medio || !soporte) return
+    // Fuera de lo pactado (Mauricio 2026-10-29): se pregunta en pantalla antes de registrar.
+    const fuera = confirmacionFueraDeLoPactado({
+      monto,
+      pagadoAntesServicio: v.pagado,
+      costoCotizado: v.servicio.costo_cotizado,
+      pagadoProveedores: totalesDelTablero(filasVista(datos.filas)).pagado,
+      cobradoCliente: datos.cobradoCliente ?? 0,
+    })
+    if (fuera && !window.confirm(fuera)) return
     startTransition(async () => {
       const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte }, intencion.clave())
       intencion.cerrar()

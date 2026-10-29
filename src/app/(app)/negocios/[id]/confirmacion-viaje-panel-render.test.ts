@@ -56,6 +56,7 @@ function vista(tarifas: TarifaConfirmable[], extra: Partial<VistaConfirmacion> =
     antesDeConfirmacion: false,
     enConfirmacion: true,
     terminosBase: null,
+    visaEnTramite: false,
     agencia: 'Trappvel',
     comercial: 'Daniela',
     hayPago: false,

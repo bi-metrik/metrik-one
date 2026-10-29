@@ -85,13 +85,13 @@ async function prepararPlan(ctx: Contexto, input: EntradaPlan) {
   if (!cot) return { ok: false as const, error: 'Cotización no encontrada en este negocio.' }
   const total = await totalDeTarifa(ctx.supabase, { workspaceId: ctx.workspaceId, cotizacionId: cot.id, itinerarioId: input.itinerarioId })
   if (!total.ok) return { ok: false as const, error: total.error }
-  const { viaje } = await leerViajeDelNegocio(ctx.supabase, ctx.negocio.id)
+  const { viaje, visaEnTramite } = await leerViajeDelNegocio(ctx.supabase, ctx.negocio.id)
   const regla = configPlanPagos(ctx.configLinea).regla
   const hoy = todayBogotaISO()
   const v = validarPlan(cuotas, { total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla })
   const sugerido = planSugerido({ total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla })
   const esSugerido = !!sugerido && huellaPlan(sugerido, total.total) === huellaPlan(cuotas, total.total)
-  return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre: total.nombre, viaje, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
+  return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre: total.nombre, viaje, visaEnTramite: visaEnTramite ?? false, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
 }
 
 async function guardarPlanPropuestoSinClave(input: EntradaPlan) {
@@ -407,6 +407,7 @@ async function confirmarClienteViajeSinClave(input: EntradaConfirmacion): Promis
     extra: input.extra?.slice(0, 1000) ?? null,
     comercial: comercial ? primerNombre(comercial) : null,
     agencia,
+    visaEnTramite: p.visaEnTramite,
   })
   const waUrl = enlaceWhatsApp(viajero.telefono, texto)
 

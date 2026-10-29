@@ -259,8 +259,8 @@ describe('armar las tres tarifas', () => {
     const r = await armarTarifas(COT)
     expect(r).toMatchObject({ success: true, creadas: 3 })
     expect(elegidasDe('Económica').sort()).toEqual(['avianca', 'crown'])
-    // Con dos opciones la Recomendada es la más barata de las dos (posición (n-1)/2 hacia abajo).
-    expect(elegidasDe('Recomendada').sort()).toEqual(['avianca', 'sunscape'])
+    // Con dos opciones la Recomendada es la más cara de las dos (Mauricio, 2026-10-29).
+    expect(elegidasDe('Recomendada').sort()).toEqual(['latam', 'sunscape'])
     expect(elegidasDe('Premium').sort()).toEqual(['hyatt', 'latam'])
   })
 
