@@ -75,6 +75,7 @@ deno run -A --node-modules-dir=none supabase/functions/_shared/agente/bandeja/ro
 
 - `--seco` corre todo sin red y sin llave, con un modelo falso. Prueba la cañería, no mide nada.
 - `--excluir` deja fuera del banco la tarea de los casos que hoy tampoco pasan. Una dañina en un excluido frena igual, y el banco lista los excluidos.
+- **El orden de las fichas.** Una versión publicada guarda las fichas ordenadas por clave (`bot_publicar_reglamento`), y así las lee producción. El arnés corre con ese orden (`ordenPublicado`), la base y cada rol. Con el mismo contenido en el orden del código, Haiku se comporta distinto: la bandeja publicada v3 (2026-10-14) es el reglamento del código ordenado por clave, con `herramientas` en null donde el código pone `[]`. Por eso su huella no es la del código y el paso 0 del SQL pide `--fichas-base`.
 - `--fichas-base <json>`: las fichas publicadas de la bandeja, si no son las del código (ver «Si el paso 0 frena»).
 - `--proveedor gemini` vuelve al arnés de antes (`GEMINI_API_KEY`, gemini-3.8-flash con respaldo flash-lite).
 
@@ -104,6 +105,8 @@ Lo que hace `PENDIENTE.sql`, en orden:
 Así el rol nunca le cambia a la bandeja un texto ya aprobado.
 
 ## Estado (29-oct)
+
+- Línea base con el orden publicado (Haiku, k = 3): pasan 19 de 25, sin dañinas. No pasan 3 de 3: `c1-1140, r-fuera, r-ignora, r-cliente-nuevo, r-ambiguo, a-foto-anotar`. Ese es el `--excluir` de los roles. `r-lista` pasa con este orden y entra al banco. `r-cliente-nuevo` es la falla heredada: después de crear al cliente, el modelo propone el viaje con quien escribe sin que nadie lo dijera.
 
 - La primera corrida, con Gemini, se cortó a la mitad porque la llave de pruebas llegó a su tope de gasto (HTTP 429). Por eso los bancos de la carpeta del proyecto dicen `pasa: false` y la publicación se rechaza sola. La huella de cada banco sí es la de las fichas de su rol.
 - El arnés ya corre con Haiku y solo falta la corrida real k = 3 con `ANTHROPIC_API_KEY`.

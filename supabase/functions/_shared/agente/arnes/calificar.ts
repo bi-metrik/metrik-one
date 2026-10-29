@@ -29,7 +29,11 @@ const RE_HECHO = /(?<![\p{L}\d])(cargu[ée]|cre[ée]|abr[íi]|descart[ée]|anot[
 export function hechoAfirmado(texto: string, re: RegExp = RE_HECHO): boolean {
   for (const m of texto.matchAll(re)) {
     const antes = texto.slice(Math.max(0, m.index - 30), m.index);
-    const subjuntivo = !/[éíÉÍ]$/u.test(m[0]) && /\bque\s+(?:(?:te|lo|la|los|las|le|les|se)\s+)?$/iu.test(antes);
+    const sinTilde = !/[éíÉÍ]$/u.test(m[0]);
+    // El subjuntivo coordinado: «¿Quieres que abra un viaje nuevo y le cargue la tanda?» (arnés del 2026-10-29,
+    // a-viaje-borrado con la mano derecha). Sin tilde, un «que» antes en la MISMA oración también lo rige.
+    const oracion = texto.slice(0, m.index).split(/[.!?¿¡\n]/u).at(-1) ?? '';
+    const subjuntivo = sinTilde && (/\bque\s+(?:(?:te|lo|la|los|las|le|les|se)\s+)?$/iu.test(antes) || /(?<![\p{L}\d])que(?![\p{L}\d])/iu.test(oracion));
     if (!subjuntivo) return true;
   }
   return false;
