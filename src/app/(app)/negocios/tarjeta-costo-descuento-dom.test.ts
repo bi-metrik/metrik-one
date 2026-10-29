@@ -79,7 +79,7 @@ async function montar() {
       adicionales: [], adicionalesDisponible: true, margenCotizacion: { margenPct: 15, convencion: 'sobre_venta' },
       moneda: { moneda: 'COP', asumida: false, origen: 'captura', leida: 'COP', decision: null } as never,
       onCambio: () => {}, apilable: true, tipoTarifa: 'neta',
-      reglas: { linea: l.reglas!, descuento: tarifa.descuentoCliente ?? null, comisionPct: null },
+      reglas: { linea: l.reglas!, descuento: tarifa.descuentoCliente ?? null },
     }))
   })
   const abrir = [...contenedor.querySelectorAll('button')].find(b => b.textContent === 'Ajustar')!

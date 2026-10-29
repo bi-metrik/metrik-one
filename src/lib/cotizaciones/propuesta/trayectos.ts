@@ -51,6 +51,16 @@ function fechasDe(texto: string | null | undefined): string[] {
   return [...(texto ?? '').matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => fechaCorta(m[1])).filter((f): f is string => f !== null)
 }
 
+/**
+ * La hora que va pegada a cada fecha («2027-06-26 13:20 y 2027-06-30 05:10»), en el orden de las
+ * fechas; `null` donde la fecha no trae hora. Es la forma del traslado de ida y regreso de un solo
+ * pantallazo (`traslado-ida-y-regreso.ts`).
+ */
+function horasPorFecha(texto: string | null | undefined): (string | null)[] {
+  return [...(texto ?? '').matchAll(/\d{4}-\d{2}-\d{2}(?:[ T]+([01]?\d|2[0-3]):([0-5]\d)\b)?/g)]
+    .map((m) => (m[1] ? `${m[1].padStart(2, '0')}:${m[2]}` : null))
+}
+
 function horaDe(texto: string | null | undefined): string | null {
   const m = HORA.exec(texto ?? '')
   return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null
@@ -115,7 +125,9 @@ export function trayectosDeTraslado(lectura: { trayecto: string | null; vehiculo
   }
   return lista.map(([a, b], i) => {
     const descripcion = [`${extremo(a)} - ${extremo(b)}`, vehiculo].filter(Boolean).join(' · ')
-    if (fechas.length >= lista.length) return { descripcion, fecha: fechas[i], hora: lista.length === 1 && unaFecha ? horaDe(lectura.fecha) : null }
+    if (fechas.length >= lista.length) {
+      return { descripcion, fecha: fechas[i], hora: lista.length === 1 && unaFecha ? horaDe(lectura.fecha) : horasPorFecha(lectura.fecha)[i] ?? null }
+    }
     if (i === 0) return { descripcion, fecha: fechas[0] ?? null, hora: unaFecha && lista.length === 1 ? horaDe(lectura.fecha) : null }
     return { descripcion, fecha: null, hora: null, fechaIda: fechas[0] ?? null }
   })

@@ -155,7 +155,7 @@ describe('4 · si «Enviar» frena, el PDF lleva la marca', () => {
   })
   it('P12 solo cuenta si quien llama dice que es por pasos (el PDF no mira el interruptor)', () => {
     const f = frenosDePaqueteYPasajero({ items: [linea('pq-1', completo())], tarifas: [], composicion: VIAJE, conPrecioPorPasajero: false })
-    expect(f).toEqual({ precioPorPasajero: null, paquete: null })
+    expect(f).toEqual({ precioPorPasajero: null, paquete: null, comision: null })
   })
 })
 

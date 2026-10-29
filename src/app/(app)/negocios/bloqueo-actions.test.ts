@@ -23,6 +23,9 @@ vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: 'ws-1', userId: 'p-1', error: null }),
 }))
 vi.mock('@/app/(app)/negocios/cotizacion-actions', () => ({ recalcularTotales: async () => { recalculos += 1 } }))
+// D5 (2026-10-29): crear y guardar cierran como toda acción por pasos (tarifas + total). Aquí cuenta
+// como el recálculo; las tarifas de cada paquete las prueba la batería (`bateria-cotizaciones-e2e`).
+vi.mock('@/lib/cotizaciones/por-pasos-cierre', () => ({ cerrarAccionPorPasos: async () => { recalculos += 1; return { success: true, valorTotal: null } } }))
 vi.mock('@/lib/cotizaciones/por-pasos-datos', () => ({
   exigirPorPasos: async () => (porPasosEncendido ? { ok: true, estado: {} } : { ok: false, error: 'La cotización por pasos no está encendida' }),
 }))

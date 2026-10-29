@@ -161,12 +161,14 @@ describe('3 · planes, actividades, traslados y lo demás arrancan en 0 %', () =
     expect(de(calcularCascada([plan('p', 300_000, { margen_porcentaje: 10 })], params()), 'p').precioLinea).toBe(333_333)
   })
 
-  it('una Pública sigue en 0 sin aprobación', () => {
+  it('una Pública sigue en 0; sin su comisión el margen no se mide (D2/D3, ya no queda exenta)', () => {
     const pub = plan('pub', 200_000, { tarifa_pax: { tipoTarifa: { tipo: 'publica', origen: 'persona', por: null, en: '' } } })
     const c = calcularCascada([pub], params())
     expect(de(c, 'pub').precioLinea).toBe(200_000)
-    expect(c.publicas.exentaDelMinimo).toBe(true)
+    expect(c.publicas.sinComision).toBe(1)
     expect(margenMedible(c)).toBeNull()
+    const con = calcularCascada([plan('pub', 200_000, { tarifa_pax: { tipoTarifa: { tipo: 'publica', origen: 'persona', por: null, en: '', comisionMonto: 30_000 } } })], params())
+    expect(margenMedible(con)!).toBeCloseTo(15, 6)
   })
 
   it('sin reglas todo hereda el margen de la cotización, como antes', () => {
@@ -274,12 +276,19 @@ describe('6 · margen global: calculado, con piso de aprobación de 12 %', () =>
     expect((150_000 / 1_440_000) * 100).toBeLessThan(12)
   })
 
-  it('una Pública sin comisión sale de la base: tampoco pide aprobación', () => {
+  it('una Pública sin comisión deja el margen general sin medir (D2/D3): frena por su comisión', () => {
     const sinComision = plan('t', 500_000, { tarifa_pax: { tipoTarifa: { tipo: 'publica', origen: 'persona', por: null, en: '' } } })
     const c = calcularCascada([hotel('h', 850_000), sinComision], params())
     expect(c.reglas!.publicasSinComision).toBe(1)
-    expect(margenMedible(c)).toBeCloseTo(15, 6)
-    expect(juzgar(c)).toBeNull()
+    expect(margenMedible(c)).toBeNull()
+    expect(motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margenMedible(c), pisoPct: 12, sinComision: c.publicas.sinComision })?.tipo).toBe('sin_comision')
+  })
+
+  it('una Pública con comisión en pesos entra con lo que la agencia paga: precio público − comisión', () => {
+    const conPesos = plan('t', 500_000, { tarifa_pax: { tipoTarifa: { tipo: 'publica', origen: 'persona', por: null, en: '', comisionMonto: 75_000 } } })
+    const c = calcularCascada([hotel('h', 850_000), conPesos], params())
+    // Cliente: 1.000.000 + 500.000. Agencia: 850.000 + 425.000.
+    expect(margenMedible(c)!).toBeCloseTo(15, 6)
   })
 
   it('la comisión solo vale en una Pública', () => {

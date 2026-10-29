@@ -25,6 +25,7 @@
 import type { AnticipoPropuesta } from './propuesta/anticipo'
 import type { ViajePDF } from '@/lib/pdf/cotizacion-props'
 import type { Composicion } from './tarifa-pasajero'
+import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from './fechas-del-viaje'
 import {
   cargosEnDestinoDeItems,
   duracionDelViaje,
@@ -402,7 +403,11 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
     equipaje: v.equipaje,
     adicionales: limpios(v.adicionales),
   }))
-  const hoteles = [...hotelesDeItems(items), ...hotelesDePaquetes(items)].map(h => ({
+  // Las fechas del viaje cotizado, no las de la solicitud (brief del 2026-10-29, punto 1): el
+  // texto no puede decir 13 noches cuando el documento dice 4.
+  const hotelesLeidos = [...hotelesDeItems(items), ...hotelesDePaquetes(items)]
+  const rango = rangoDelViajeCotizado({ vuelos: vuelosPdf, hoteles: hotelesLeidos }, e.fechas)
+  const hoteles = hotelesConFechasDelViaje(hotelesLeidos, rango).map(h => ({
     nombre: limpio(h.hotel),
     ciudad: limpio(h.ciudad),
     estrellas: h.estrellas,
@@ -428,9 +433,9 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
   const c = e.composicion
   return {
     destino: limpio(e.destino),
-    fechaSalida: fechaIso(e.fechas.inicio),
-    fechaRegreso: fechaIso(e.fechas.fin),
-    duracion: duracionDelViaje(e.fechas.inicio, e.fechas.fin),
+    fechaSalida: fechaIso(rango.inicio),
+    fechaRegreso: fechaIso(rango.fin),
+    duracion: duracionDelViaje(rango.inicio, rango.fin),
     viajeros: c ? { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes } : null,
     vuelos,
     hoteles,
