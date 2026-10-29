@@ -16,6 +16,8 @@
  * Interruptor: `lineas_negocio.config_extra.cierre_viaje.activo === true`. Ausente = apagado.
  */
 
+import { diferenciaDeCambioDelServicio, type MonedaDelServicio } from './moneda-servicio'
+
 // ── Configuración ────────────────────────────────────────────────────────────
 
 export const GATE_MARGEN_CONFIRMADO = 'margen_confirmado'
@@ -108,6 +110,8 @@ export interface ServicioCierre {
   valor_por_pagar: number | null
   comision_esperada: number | null
   comision_estado: string | null
+  /** H6-3 · la moneda en que se cotizó (`moneda-servicio.ts`). Ausente = en pesos. */
+  moneda?: MonedaDelServicio | null
 }
 
 export interface GastoCierre {
@@ -205,7 +209,16 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   const otrosSinServicio = e.gastos.filter(g => !g.servicio_id && !esCortesia(g)).reduce((a, g) => a + r0(g.monto), 0)
 
   const razones: string[] = []
-  for (const f of filas) if (f.diferencia !== 0 && !f.sinCosto) razones.push(`${f.nombre} (${f.diferencia > 0 ? '+' : '-'}${pesosCierre(Math.abs(f.diferencia))})`)
+  for (const f of filas) {
+    if (f.diferencia === 0 || f.sinCosto) continue
+    // H6-3 · lo que movió la TRM se nombra como tal: no es que el proveedor cobrara más.
+    const s = van.find(x => x.id === f.id)
+    const cambio = diferenciaDeCambioDelServicio(s?.moneda, e.gastos.filter(g => g.servicio_id === f.id)).pesos
+    const signo = f.diferencia > 0 ? '+' : '-'
+    if (cambio !== 0 && Math.abs(cambio - f.diferencia) <= 1) razones.push(`${f.nombre} (${signo}${pesosCierre(Math.abs(f.diferencia))}, diferencia de cambio)`)
+    else if (cambio !== 0) razones.push(`${f.nombre} (${signo}${pesosCierre(Math.abs(f.diferencia))}, de ellos ${pesosCierre(cambio)} de diferencia de cambio)`)
+    else razones.push(`${f.nombre} (${signo}${pesosCierre(Math.abs(f.diferencia))})`)
+  }
   if (cortesias.length === 1) razones.push(`una cortesía (${pesosCierre(cortesias[0].monto)})`)
   else if (cortesias.length > 1) razones.push(`${cortesias.length} cortesías (${pesosCierre(cortesias.reduce((a, c) => a + c.monto, 0))})`)
   if (otrosSinServicio > 0) razones.push(`otros gastos (${pesosCierre(otrosSinServicio)})`)
