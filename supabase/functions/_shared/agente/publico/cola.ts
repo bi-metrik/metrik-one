@@ -44,7 +44,9 @@ import { BOT_PUBLICO, PASAR_A_PERSONA, RESPUESTA_FIJA, RF_PERSONA_POR_QUE, domin
 import { enlacesFueraDeLista } from './enlaces.ts';
 import { preciosSinHerramienta } from './precios.ts';
 import { frasesDeSobreventa } from './sobreventa.ts';
-import { sistemaPublico } from './prompt.ts';
+import { HERRAMIENTAS_VENTAS, sistemaPublico } from './prompt.ts';
+import { CIERRES_DEL_CODIGO_VENTAS, ENLACES_VENTAS, RF_PAGO_CONFIRMADO, bloqueNotaVentas, claveConfirmacionPago, dominioVentas } from './ventas/dominio-ventas.ts';
+import type { PuertosVentas } from './ventas/puertos-ventas.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
 import { gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
@@ -92,6 +94,26 @@ export interface DepsPublico {
    * arnés), no se escribe nada y el paso sale igual.
    */
   escalamientos?: PuertoEscalamientos | null;
+  /**
+   * Con `config.dominio = 'ventas'` (Dimpro): el catálogo de Ferretería, la pasarela del workspace y los links guardados.
+   * Sin esto, un workspace de ventas no atiende (falla del turno → persona).
+   */
+  ventas?: PuertosVentas;
+}
+
+/** ¿Este turno es del dominio de ventas? */
+const esVentas = (d: Pick<DepsPublico, 'config'>) => d.config.dominio === 'ventas';
+
+/** El dominio del asistente: el de experiencias (Sabor) o el de ventas (Dimpro). */
+export function dominioDelAsistente(d: DepsPublico, vars: Record<string, string>): Dominio {
+  if (esVentas(d)) {
+    if (!d.ventas) throw new Error('dominio de ventas sin sus puertos (catálogo y pasarela)');
+    return dominioVentas({
+      reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars, puertos: d.ventas, fallar: d.fallarHerramienta,
+      unaVez: (clave) => d.almacen.tomarCandado(clave, 30 * 24 * 3600),
+    });
+  }
+  return dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars, fallar: d.fallarHerramienta });
 }
 
 const DIAS_DE_CONVERSACION = 30;
@@ -140,6 +162,9 @@ export const SIGUIENTE_PASO: Record<MotivoPersona, string> = {
   grupo: 'cotizar el grupo', pide_persona: 'atender lo que pide', queja: 'atender la queja', pago: 'revisar el pago (el asistente no lo vio)',
   no_entiende: 'retomar la conversación', menor: 'pedir que escriba un adulto', crisis: 'atender ya', abuso: 'revisar la conversación',
   duda_abierta: 'contestar la duda (la ficha y las reglas no la cubren)', datos: 'atender la solicitud de datos', falla: 'contestar: el asistente falló',
+  pago_no_disponible: 'enviar el link de pago a mano: el asistente no pudo crearlo', despachar: 'despachar el pedido (el pago está aprobado en Bold)',
+  fuera_de_zona: 'cotizar el flete y enviar el link de pago', cantidad: 'atender el pedido de más de 3 unidades', factura: 'revisar los datos de la factura',
+  garantia: 'atender la garantía o el cambio', no_en_catalogo: 'contestar por el producto (no está en el catálogo)',
 };
 
 /**
@@ -150,9 +175,12 @@ export const SIGUIENTE_PASO: Record<MotivoPersona, string> = {
 export function notaPersona(p: {
   motivo: MotivoPersona; pidio: string; filas: FilaPublica[]; reserva: Record<string, unknown> | null; herramientas: string[]; ahoraIso: string;
   bloques?: string[][]; fueraDeHorario?: EscalamientoChatwoot['horario'];
+  /** El dominio de ventas pone su bloque (el pedido y el link) en vez del de la reserva de Sabor. */
+  ventas?: boolean;
 }): string {
+  const medio = p.ventas ? bloqueNotaVentas({ filas: p.filas, compra: p.reserva }) : bloqueNotaPublico(p);
   return notaComun({
-    motivo: p.motivo, pidio: p.pidio, bloques: p.bloques?.length ? p.bloques : [bloqueNotaPublico(p)], consulto: p.herramientas,
+    motivo: p.motivo, pidio: p.pidio, bloques: p.bloques?.length ? p.bloques : [medio], consulto: p.herramientas,
     siguiente: SIGUIENTE_PASO[p.motivo], fueraDeHorario: p.fueraDeHorario ?? null,
   });
 }
@@ -242,7 +270,7 @@ function ctxDe(d: DepsPublico, filas: FilaPublica[]): ContextoDominio {
 
 /** El dominio público entero y, con un rol, su composición (motor `publico`). Pura. */
 function composicionPublica(d: DepsPublico, log?: (m: string) => void): { base: Dominio; c: Composicion | null } {
-  const base = dominioPublico({ reglamento: d.reglamento, ahoraMs: d.ahoraMs, vars: varsDe(d), fallar: d.fallarHerramienta });
+  const base = dominioDelAsistente(d, varsDe(d));
   if (!d.funciones) return { base, c: null };
   return {
     base,
@@ -297,7 +325,7 @@ function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
     config: configNucleo(d.config, turnoMs),
     ahoraMs: d.ahoraMs,
     reloj: d.reloj,
-    sistema: (r, c) => sistemaPublico(r, c),
+    sistema: (r, c) => sistemaPublico(r, c, esVentas(d) ? { herramientas: HERRAMIENTAS_VENTAS } : {}),
     // Plata solo de herramienta: vuelve al modelo una vez para que corrija (Yuto, 2026-10-21). La guarda del final
     // (antes de publicar) queda igual: nunca sale un monto que no devolvió una herramienta.
     // Más los candados contra la sobreventa de §8.4 (confirmación, escasez, condiciones sumadas o no listadas).
@@ -318,7 +346,8 @@ export function efectosDelTurno(t: TrazaPublica): { persona: { motivo: MotivoPer
   for (const h of t.herramientas ?? []) {
     if (!h.ok) continue;
     const pv = (h.privado ?? {}) as { persona?: { motivo: MotivoPersona; pidio: string }; pide_autorizacion?: 'general' | 'sensible'; enmascarar?: boolean; preferencia_mesa?: string };
-    if (h.nombre === PASAR_A_PERSONA && pv.persona) persona = pv.persona;
+    // `pasar_a_persona` y, en ventas, `verificar_pago` (pago aprobado → despachar) o `generar_link_pago` sin pasarela.
+    if (pv.persona) persona = pv.persona;
     if (h.nombre === RESPUESTA_FIJA) {
       if (pv.pide_autorizacion) pide = pv.pide_autorizacion;
       if (pv.enmascarar) enmascarar = true;
@@ -353,7 +382,7 @@ async function turnoModelo(d: DepsPublico, turnoId: string, filas: FilaPublica[]
     const t: TrazaPublica = { ...des.r.traza, ...base, ...(ef0.preferencia ? { preferencia_mesa: ef0.preferencia } : {}) };
     const ef = ef0;
     const reserva = t.propuesta ? t.propuesta.datos : null;
-    return { salida: des.r.salida, extras: des.r.extras, traza: t, persona: ef.persona, pide: ef.pide, enmascarar: ef.enmascarar, reserva, delModelo: !t.respuesta_fija && !ef.pide && !ef.persona && !ef.enmascarar && !(t.herramientas ?? []).some((h) => h.ok && (h.nombre === RESPUESTA_FIJA || h.nombre === PASAR_A_PERSONA)) };
+    return { salida: des.r.salida, extras: des.r.extras, traza: t, persona: ef.persona, pide: ef.pide, enmascarar: ef.enmascarar, reserva, delModelo: !t.respuesta_fija && !ef.pide && !ef.persona && !ef.enmascarar && !(t.herramientas ?? []).some((h) => h.ok && (h.nombre === RESPUESTA_FIJA || h.nombre === PASAR_A_PERSONA || CIERRES_DEL_CODIGO_VENTAS.includes(h.nombre))) };
   }
   // Rechazo o falla: respuesta fija y persona (falla). La traza del intento queda (cuenta en el uso del día).
   const ultimo = des.tipo === 'rechazo' ? des.r : des.ultimo;
@@ -453,8 +482,12 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
     const traza: TrazaPublica = { ...rt.traza, canal: d.canal };
     const ej = rt.traza.ejecucion;
     const persona = ej?.resultado === 'ejecutada' && (ej.escrituras ?? []).some((e) => e.tipo === 'persona');
-    const reserva = persona ? ((ej!.escrituras ?? []).find((e) => e.tipo === 'persona')?.datos as Record<string, unknown>) : null;
-    return { salida: rt.salida, traza, reserva, persona: persona ? { motivo: 'reserva_lista', pidio: 'reservar (confirmó el resumen)' } : null };
+    const esc = persona ? (ej!.escrituras ?? []).find((e) => e.tipo === 'persona') : undefined;
+    const reserva = esc ? (esc.datos as Record<string, unknown>) : null;
+    // El motivo lo dice la escritura del dominio (Sabor: reserva_lista; ventas: pago_no_disponible).
+    const motivoEsc = (esc?.motivo as MotivoPersona | undefined) ?? 'reserva_lista';
+    const pidio = motivoEsc === 'reserva_lista' ? 'reservar (confirmó el resumen)' : `confirmó la compra; ${String((reserva as { error?: unknown } | null)?.error ?? 'sin link de pago')}`;
+    return { salida: rt.salida, traza, reserva, persona: persona ? { motivo: motivoEsc, pidio } : null };
   }
 
   // 6. «persona» escrito solo (el aviso de bot lo ofrece): sin modelo. Una pregunta por qué, una sola vez en la
@@ -533,7 +566,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   let persona = r.persona ?? null;
   if (salida && r.delModelo) {
     const texto = [salida.texto, ...(r.extras ?? []).map((x) => x.texto)].join('\n');
-    const fuera = enlacesFueraDeLista(texto, [d.config.terminosUrl, ...d.config.enlacesPermitidos]);
+    const fuera = enlacesFueraDeLista(texto, [d.config.terminosUrl, ...d.config.enlacesPermitidos, ...(esVentas(d) ? ENLACES_VENTAS : [])]);
     // 8b'. Plata solo de herramienta (el catálogo) o del resumen del código, nunca de lo que dijo el cliente.
     const deHerramienta = [...filas, ...pend].flatMap((f) => (f.traza?.herramientas ?? []).map((h) => JSON.stringify(h.datos ?? '')))
       .concat((traza.herramientas ?? []).map((h) => JSON.stringify(h.datos ?? '')), traza.propuesta?.resumen ?? '');
@@ -640,7 +673,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
       motivo: persona.motivo, etiqueta: ETIQUETA_MOTIVO[persona.motivo], equipo: equipoDe(esc, persona.motivo, d.config.equipos),
       nota: notaPersona({
         motivo: persona.motivo, pidio: persona.pidio, filas: filasNota, reserva, herramientas, ahoraIso: new Date(d.ahoraMs()).toISOString(),
-        bloques: delRol.bloques({ motivo: persona.motivo, pidio: persona.pidio, filas: filasNota, reserva }), fueraDeHorario: fuera,
+        bloques: delRol.bloques({ motivo: persona.motivo, pidio: persona.pidio, filas: filasNota, reserva }), fueraDeHorario: fuera, ventas: esVentas(d),
       }),
     };
     traza.persona = paso;
@@ -700,6 +733,49 @@ export async function atenderConversacion(d: DepsPublico): Promise<number> {
     if (!pendientesPublico(await d.almacen.leer(d.llave, desde)).length) return turnos;
   }
   return turnos;
+}
+
+/**
+ * El pago de un link de ventas quedó aprobado (lo avisa el webhook de Bold del workspace, después de registrar la venta):
+ * el asistente le confirma al cliente y pasa a persona con `despachar`. Una sola vez por link, con la misma clave que
+ * `verificar_pago` (si el cliente ya dijo «ya pagué» y se confirmó, esto no repite nada). Al cliente solo se le escribe
+ * si la conversación sigue con el bot (`pending`) y la ventana del canal está abierta; la nota, la etiqueta y el paso a
+ * persona van siempre.
+ */
+export async function avisarPagoAprobado(d: DepsPublico, referencia: string): Promise<'hecho' | 'ya'> {
+  if (!(await d.almacen.tomarCandado(claveConfirmacionPago(d.llave.workspaceId, referencia), 30 * 24 * 3600))) return 'ya';
+  const desde = new Date(d.ahoraMs() - DIAS_DE_CONVERSACION * 24 * 3600 * 1000).toISOString();
+  const filas = await d.almacen.leer(d.llave, desde);
+  const turnoId = d.nuevoId();
+  const traza: TrazaPublica = { ...sinTurno(d, { respuesta_fija: RF_PAGO_CONFIRMADO }), tipo: 'sin_turno' };
+  const salida = fija(d, RF_PAGO_CONFIRMADO);
+  const v = ventana({ canal: d.canal, anuncio7Dias: d.anuncio7Dias, filas, ahoraMs: d.ahoraMs(), cuantos: 1 });
+  const estado = v.abierta ? await d.mensajero.estado(d.llave) : null;
+  const errores: string[] = [];
+  let filaTraza: string | null = null;
+  if (v.abierta && (estado === null || estado === 'pending')) {
+    const p = await publicarEn(d, turnoId, 'respuesta', salida);
+    if (p.ok) traza.salida = salida; else errores.push(`respuesta: ${p.motivo}`);
+  } else {
+    traza.sin_publicar = !v.abierta ? `ventana: ${v.motivo}` : `la conversación está en «${estado}»: la tiene una persona`;
+  }
+  const pidio = `pagó el link ${referencia} (aviso de Bold)`;
+  const paso: PasoAPersona = {
+    motivo: 'despachar', etiqueta: ETIQUETA_MOTIVO.despachar, equipo: equipoDe(ESCALAMIENTO_CHATWOOT_HOY, 'despachar', d.config.equipos),
+    nota: notaPersona({ motivo: 'despachar', pidio, filas, reserva: null, herramientas: [], ahoraIso: new Date(d.ahoraMs()).toISOString(), ventas: true }),
+  };
+  traza.persona = paso;
+  errores.push(...(await pasarAPersona(d, turnoId, paso)));
+  await registrarEscalamiento(d.escalamientos, {
+    workspace_id: d.llave.workspaceId, rol_clave: d.rol?.clave ?? BOT_PUBLICO, canal: 'chatwoot', conversacion: `cw:${llaveTexto(d.llave)}`,
+    motivo: 'despachar', resumen: resumenTraspaso('despachar', pidio), modo: 'pasado',
+  });
+  if (errores.length) traza.error = errores.join('; ');
+  // La traza queda en la fila de lo que salió (o en la de la nota): así el turno siguiente sabe que ya pasó por `despachar`.
+  const ultimas = await d.almacen.leer(d.llave, desde);
+  filaTraza = ultimas.filter((f) => f.direccion === 'saliente' && f.turno_id === turnoId).at(-1)?.id ?? null;
+  if (filaTraza) await d.almacen.cerrarTurno({ turnoId, filas: [], filaTraza, traza });
+  return 'hecho';
 }
 
 export type { SalidaTurno };
