@@ -179,7 +179,7 @@ import { crearPaqueteBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
-import { listaUnica } from '@/lib/cotizaciones/lista-unica'
+import { listaUnica, opcionesFueraDeLaPropuesta } from '@/lib/cotizaciones/lista-unica'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
 import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { estadoDeLinea } from '@/lib/cotizaciones/estado-servicio'
@@ -3775,6 +3775,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
       viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
       ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+      // Brief del 2026-10-29, punto 3 · el hotel o vuelo cargado que no sale en la propuesta.
+      fueraDeLaPropuesta: opcionesFueraDeLaPropuesta(lineasConLectura as never[], tarifasDeLaPagina).map(o => {
+        const i = itemPorIdVista.get(o.itemId)
+        return { ...o, nombre: (i ? nombreVisibleDeLinea(i as never) : '') || i?.nombre || 'Una opción' }
+      }),
       // Decisión del 2026-10-14 · la reserva de varias habitaciones que no cuadra con el viaje.
       reservasQueNoCuadran: lineasConLectura.flatMap(i => {
         if (!idsQueSalen.has(i.id) || ranuraDeGrupo(i.grupo ?? null)?.slug !== 'hotel_detalle') return []
