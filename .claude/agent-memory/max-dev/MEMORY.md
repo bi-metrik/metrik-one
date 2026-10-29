@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [SOE-033: plantillas DJ y Relación (29-oct)](project_soe033_plantillas_dj_relacion.md) — #1329; 20261029114700 APLICADA (29-oct); copia campos de la DJ viva; DJ coprop. 2 págs
 - ⚠️⚠️ [Decisiones D1–D6 de la cotización (29-oct)](project_decisiones_1029_cotizacion.md) — batería #1338; sin exención de Públicas; comisión obligatoria; 0 = sin dato; tarifa por paquete
 - ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337/1339; reparto de hotel sobrante a Mauricio; fotos = datos
 - ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — orden publicado = por clave (cambia a Haiku); --fichas-base v3; SQL SIN aplicar
