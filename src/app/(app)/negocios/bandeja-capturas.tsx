@@ -40,7 +40,7 @@ import {
   cuerpoDeAceptar,
   estadoInicial,
   filasDelLote,
-  fraseDeFila,
+  frasesDeLaBandeja,
   menuDeFila,
   nombreNuevo,
   type Eleccion,
@@ -962,19 +962,17 @@ export default function BandejaCapturas({
   // ── La cotización por pasos: la frase de cada fila, su menú y «Aceptar los N» (C5) ──
 
   const frases = useMemo(() => {
-    const m = new Map<string, FraseDeFila>()
-    if (!porPasos) return m
-    for (const c of capturas) {
-      if (c.estado.fase !== 'lista' || !c.borrador) continue
-      const titulo = tituloDeCaptura(c.borrador.tipo, c.borrador.lectura, false) || 'Pantallazo'
-      m.set(c.id, fraseDeFila({
-        captura: { id: c.id, titulo, borrador: c.borrador },
-        lineas: items, composicion, destinoViaje,
-        modelo: modelos.current.get(c.id) ?? null,
-        eleccion: elecciones[c.id] ?? null,
-      }))
-    }
-    return m
+    if (!porPasos) return new Map<string, FraseDeFila>()
+    // M3 · todas juntas, en el orden en que el lote las va a aceptar: una fila que cae con otra
+    // de la bandeja lo dice antes de aceptar (`frasesDeLaBandeja`).
+    const listas = capturas
+      .filter(c => c.estado.fase === 'lista' && !!c.borrador)
+      .map(c => ({ id: c.id, titulo: tituloDeCaptura(c.borrador!.tipo, c.borrador!.lectura, false) || 'Pantallazo', borrador: c.borrador! }))
+    return frasesDeLaBandeja({
+      capturas: listas, lineas: items, composicion, destinoViaje,
+      modelo: id => modelos.current.get(id) ?? null,
+      eleccion: id => elecciones[id] ?? null,
+    })
   }, [porPasos, capturas, items, composicion, destinoViaje, elecciones])
 
   /** La opción que dejó una captura ya aceptada, si la frase apunta a ella. */

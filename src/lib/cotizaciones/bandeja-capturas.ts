@@ -45,18 +45,30 @@ interface LugarComparable {
   nombre: string | null
 }
 
-/** «Bogotá (BOG)» → código BOG y nombre «bogota»; «Bogotá» → solo el nombre. */
+/**
+ * «Bogotá (BOG)» → código BOG y nombre «bogota»; «Bogotá» → solo el nombre.
+ *
+ * G1 (QA del 2026-10-29) · el lector también escribe el código SIN paréntesis, al final:
+ * «Bogotá BOG», «Santa Marta SMR». Antes eso quedaba como el nombre «bogota bog», que no era
+ * «bogota» ni traía código, y el mismo vuelo abría dos bloques que sumaban (M1). Un código
+ * suelto al final cuenta si va en mayúscula detrás de un nombre que no lo está («Nueva York
+ * JFK»), o, si todo viene en mayúscula («BOGOTÁ BOG»), si es un aeropuerto que se conoce.
+ */
 export function lugarComparable(texto: string | null | undefined): LugarComparable | null {
   const t = (texto ?? '').trim()
   if (!t) return null
+  const alFinal = /^(.*[^\s(])\s+([A-Z]{3})$/.exec(t.replace(/\([^)]*\)/g, '').trim())
+  const codigoAlFinal = alFinal && (/\p{Ll}/u.test(alFinal[1]) || alFinal[2] in CIUDAD_DE_AEROPUERTO) ? alFinal[2] : null
   const codigo = /\(([A-Za-z]{3})\)/.exec(t)?.[1]?.toUpperCase()
     ?? (/^[A-Za-z]{3}$/.test(t) ? t.toUpperCase() : null)
-  const sinCodigo = t.replace(/\([^)]*\)/g, '').trim()
+    ?? codigoAlFinal
+  let sinCodigo = t.replace(/\([^)]*\)/g, '').trim()
+  if (codigoAlFinal && alFinal) sinCodigo = alFinal[1].trim()
   const nombre = /^[A-Za-z]{3}$/.test(sinCodigo)
     ? null
     : sinCodigo
       .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .replace(/[^a-z0-9 ]/g, ' ')
       .replace(/\s+/g, ' ')
@@ -65,22 +77,28 @@ export function lugarComparable(texto: string | null | undefined): LugarComparab
 }
 
 /**
- * ¿Es el mismo lugar? Con código en los dos, manda el código; si no, el nombre. `null` = no
- * se puede saber (falta uno de los dos).
+ * ¿Es el mismo lugar? Con código en los dos, manda el código (o la ciudad que los dos sirven:
+ * CDG y ORY son París); si no, el nombre; y un código que se conoce contra un nombre que nombra
+ * su ciudad («CTG» contra «Cartagena de Indias») también. `null` = no se puede saber.
  */
 export function mismoLugar(a: string | null | undefined, b: string | null | undefined): boolean | null {
   const x = lugarComparable(a)
   const y = lugarComparable(b)
   if (!x || !y) return null
-  if (x.codigo && y.codigo) return x.codigo === y.codigo
-  if (x.nombre && y.nombre) return x.nombre === y.nombre
+  if (x.codigo && y.codigo) {
+    if (x.codigo === y.codigo) return true
+    const cx = CIUDAD_DE_AEROPUERTO[x.codigo]
+    return !!cx && cx === CIUDAD_DE_AEROPUERTO[y.codigo]
+  }
+  if (x.nombre && y.nombre && x.nombre === y.nombre) return true
   // H9 (prueba Europa, 2026-10-14) · «MAD» contra «Madrid»: el detector escribe la ciudad y la
   // lectura el código, o al revés. Solo con un código que se conoce; si no, no se sabe.
   const conCodigo = x.codigo ? x : y
-  const conNombre = x.codigo ? y : x
+  const otro = x.codigo ? y : x
   const ciudad = conCodigo.codigo ? CIUDAD_DE_AEROPUERTO[conCodigo.codigo] : undefined
-  if (ciudad && conNombre.nombre) return ` ${conNombre.nombre} `.includes(` ${ciudad} `)
-  return null
+  if (ciudad && otro.nombre && ` ${otro.nombre} `.includes(` ${ciudad} `)) return true
+  if (x.nombre && y.nombre) return false
+  return ciudad && otro.nombre ? false : null
 }
 
 /**
@@ -95,6 +113,21 @@ const CIUDAD_DE_AEROPUERTO: Record<string, string> = {
   MIA: 'miami', MCO: 'orlando', FLL: 'fort lauderdale', JFK: 'nueva york', CUN: 'cancun', PTY: 'panama',
   PUJ: 'punta cana', LIM: 'lima', SCL: 'santiago', EZE: 'buenos aires', GRU: 'sao paulo', MEX: 'ciudad de mexico',
   SJO: 'san jose', UIO: 'quito', CUR: 'curazao', AUA: 'aruba', IST: 'estambul',
+}
+
+/** La ciudad de un aeropuerto que se conoce, sin tildes y en minúscula. `null` si no se conoce. */
+export function ciudadDeAeropuerto(codigo: string | null | undefined): string | null {
+  return (codigo && CIUDAD_DE_AEROPUERTO[codigo.toUpperCase()]) || null
+}
+
+/**
+ * Un lugar en la forma en que se compara entre capturas: «Bogotá (BOG)», «Bogotá BOG», «BOG» y
+ * «Bogotá» → «bogota». Un código que no se conoce queda como código. `null` = vacío.
+ */
+export function ciudadComparable(texto: string | null | undefined): string | null {
+  const l = lugarComparable(texto)
+  if (!l) return null
+  return (l.codigo ? ciudadDeAeropuerto(l.codigo) : null) ?? l.nombre ?? l.codigo
 }
 
 /**
