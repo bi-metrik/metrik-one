@@ -18,4 +18,7 @@ real se corre `generateCotizacionPDF(id, { vistaPrevia: true })` desde un `*.loc
 Validado: el PDF salió byte a byte del mismo tamaño que el descargado de prod (878.251 B). El test y los JSON
 quedan en el scratchpad, nunca en el repo. Leer el texto: `extractText` de `unpdf`; páginas a PNG: pdfjs de
 `unpdf/dist/pdfjs.mjs` en Chromium (`--allow-file-access-from-files`, ruta ABSOLUTA del html).
-Relacionado: [[propuesta-motor-html-h33]].
+Excepción segura (29-oct): dejar pasar POST a `/rest/v1/rpc/autorizacion_datos_estado` (STABLE, Postgres no le
+deja escribir); sin ella la marca dice «falta la autorización de datos» aunque prod no. Hoy las fotos de hotel
+salen de `fotos_catalogo` (bucket por GET): no hace falta mockear `imagenComoDataUrl`. `pdftoppm -r 110` da las PNG.
+Relacionado: [[propuesta-motor-html-h33]], [[regla-fotos-propuesta]].
