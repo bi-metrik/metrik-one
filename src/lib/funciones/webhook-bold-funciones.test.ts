@@ -192,3 +192,40 @@ describe('webhook de Bold por workspace', () => {
     for (const k of ['secretaA-AAAA1111', 'secretaB-BBBB2222', 'idA-AAAA1111', 'idB-BBBB2222', s]) expect(todo).not.toContain(k)
   })
 })
+
+describe('webhook de Bold: links del asistente de ventas (Ferretería)', () => {
+  it('un LNK de Ferretería va a Ferretería y no a funcion_registrar_pago; uno que no es, sigue a funciones', async () => {
+    const b = base()
+    const llamadas: unknown[] = []
+    const ferreteria = vi.fn(async (ws: string, ref: string, estado: 'aprobado' | 'fallido', monto: number | null) => {
+      llamadas.push({ ws, ref, estado, monto })
+      return ref === 'LNK_FER1' ? { status: 200 as const, body: { ok: true, resultado: 'registrada' } } : null
+    })
+    const c = evento({ ref: 'LNK_FER1', total: 515000 })
+    const r = await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria })
+    expect(r).toEqual({ status: 200, body: { ok: true, resultado: 'registrada', modo: 'cuenta' } })
+    expect(llamadas).toEqual([{ ws: WS_A, ref: 'LNK_FER1', estado: 'aprobado', monto: 515000 }])
+    expect(b.rpc.mock.calls.some(([fn]) => fn === 'funcion_registrar_pago')).toBe(false)
+
+    const c2 = evento()
+    const r2 = await atenderWebhookBoldFunciones(WS_A, c2, firma(c2, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria })
+    expect(r2.status).toBe(200)
+    expect(b.registros).toHaveLength(1)
+  })
+
+  it('firma inválida: Ferretería no se toca', async () => {
+    const b = base()
+    const ferreteria = vi.fn(async () => null)
+    const c = evento({ ref: 'LNK_FER1' })
+    const r = await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'otra'), { cliente: b.cliente, ferreteria })
+    expect(r.status).toBe(401)
+    expect(ferreteria).not.toHaveBeenCalled()
+  })
+
+  it('Ferretería falla: 500 para que Bold reintente', async () => {
+    const b = base()
+    const c = evento({ ref: 'LNK_FER1' })
+    const r = await atenderWebhookBoldFunciones(WS_A, c, firma(c, 'secretaA-AAAA1111'), { cliente: b.cliente, ferreteria: async () => { throw new Error('base caída') } })
+    expect(r).toEqual({ status: 500, body: { ok: false, motivo: 'error_interno' } })
+  })
+})

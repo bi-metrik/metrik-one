@@ -53,6 +53,11 @@ export interface EntradaVenta {
    * trae la suya (`WOMPI-<id de transacción>`), que además impide cobrarlo dos veces.
    */
   referencia_pago?: string | null
+  /**
+   * Unidades (asistente de ventas, 1 a 3). `precio_final` es el de todas; la ganancia se mide contra el costo F de
+   * todas (costo del día × cantidad). Sin esto, 1.
+   */
+  cantidad?: number | null
 }
 
 type Fallo = { ok: false; mensaje: string }
@@ -86,6 +91,8 @@ export async function registrarVenta(
   if (!esFormaPago(entrada.forma_pago)) return { ok: false, mensaje: 'Forma de pago desconocida.' }
   const formaPago: FormaPago = entrada.forma_pago
   const comprador = entrada.comprador_nombre?.trim() || null
+  const cantidad = entrada.cantidad ?? 1
+  if (!Number.isInteger(cantidad) || cantidad < 1 || cantidad > 50) return { ok: false, mensaje: 'La cantidad tiene que ser un entero entre 1 y 50.' }
 
   const conversacionId = entrada.conversacion_id?.trim() || null
   if (conversacionId) {
@@ -96,7 +103,7 @@ export async function registrarVenta(
   const costos = (await repo.costos(ws, pub.producto_id)).map((c) => ({ ...c, costo_f: Number(c.costo_f) }))
   const costo = costoEnFecha(costos, entrada.fecha_venta)
   if (!costo) return { ok: false, mensaje: 'No hay una lista de costos vigente en la fecha de la venta.' }
-  const ganancia = gananciaPorVenta(precio, costo.costo_f)
+  const ganancia = gananciaPorVenta(precio, costo.costo_f * cantidad)
 
   const venta = await repo.insertarVenta({
     workspace_id: ws,
@@ -113,6 +120,7 @@ export async function registrarVenta(
     negocio_id: null,
     entregada_at: null,
     registrado_por: autor.tipo === 'persona' ? autor.id : null,
+    ...(cantidad > 1 ? { cantidad } : {}),
   })
 
   const creado = await negocios.crear({
@@ -153,7 +161,7 @@ export async function registrarVenta(
   ])
   await negocios.anotar(
     negocioId,
-    `Venta de Ferretería ${pub.codigo}: ${formatoPesos(precio)}, costo del día ${formatoPesos(costo.costo_f)}, ` +
+    `Venta de Ferretería ${pub.codigo}${cantidad > 1 ? ` (${cantidad} unidades)` : ''}: ${formatoPesos(precio)}, costo del día ${formatoPesos(costo.costo_f)}, ` +
       `ganancia ${formatoPesos(ganancia)}. ${ETIQUETA_FORMA_PAGO[formaPago]}, ${entrada.ruta === 'despacho' ? 'despacho' : 'recoge en punto'}.`,
   )
 
