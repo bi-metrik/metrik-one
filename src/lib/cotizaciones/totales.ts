@@ -44,7 +44,7 @@ import {
 } from './precio-item'
 import { totalesDeAdicionales, type AdicionalParaSuma } from './adicionales'
 import { precioCuadradoPorPasajero, type FilaDePasajeros } from './cuadre-pasajero'
-import { esTarifaPublica } from './tarifa-publica'
+import { dosPreciosDeTarifa, esTarifaPublica, factorPublicoDelPantallazo } from './tarifa-publica'
 import {
   colchonDeLinea,
   comisionDePublica,
@@ -191,7 +191,9 @@ export interface LineaCalculada {
   publica: boolean
   /**
    * Una Pública: la comisión de la agencia en pesos (D3, 2026-10-29), sobre el precio público de la
-   * línea. `null` = nadie la escribió, o la línea es Neta.
+   * línea. `null` = nadie la escribió, o la línea es Neta. Es lo que la agencia paga MENOS que el
+   * costo guardado: si el pantallazo trajo los dos precios, el costo ya es el neto y aquí queda solo
+   * lo que la comisión escrita difiera de la leída (0 si es la misma, QA M6 del 2026-10-29).
    */
   comisionPesos: number | null
   /**
@@ -471,8 +473,13 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     const precioConAdicionales = precioLinea + adic.precio
     ventaBruta += precioConAdicionales
 
-    // La comisión de una Pública, en pesos, sobre su precio público (su costo de venta).
-    const comisionPesos = publica ? comisionEnPesos(item.tarifa_pax, costoDeVentaLinea) : null
+    // La comisión de una Pública, en pesos, sobre su precio público. Lo que entra a la cascada es
+    // lo que la agencia paga MENOS que el costo guardado: con el costo igual al precio público (lo
+    // de siempre) es la comisión entera; cuando el pantallazo trajo los dos precios, el costo ya es
+    // el neto y la comisión ya está descontada (QA Trappvel M6, 2026-10-29: no se resta dos veces).
+    const precioPublicoLinea = publica ? costoDeVentaLinea * factorPublicoDelPantallazo(dosPreciosDeTarifa(item.tarifa_pax)) : 0
+    const comisionSobrePublico = publica ? comisionEnPesos(item.tarifa_pax, precioPublicoLinea) : null
+    const comisionPesos = comisionSobrePublico === null ? null : comisionSobrePublico - (precioPublicoLinea - costoDeVentaLinea)
     if (publica) {
       publicasLineas++
       publicasCosto += costoDeVentaLinea + adic.costo
