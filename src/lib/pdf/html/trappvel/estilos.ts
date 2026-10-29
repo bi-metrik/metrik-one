@@ -178,6 +178,7 @@ thead { display: table-header-group; }
 .sign { margin-top: 3mm; display:flex; justify-content: space-between; align-items: flex-end; break-inside: avoid; }
 .sign b.pop { font: 700 10.5pt Poppins, sans-serif; color: var(--ink); }
 .credits { font-size: 6.4pt; color: var(--mute); margin-top: 4mm; line-height: 1.35; }
+.sign .credits { flex: 1; margin: 0 5mm; text-align: right; align-self: flex-end; }
 
 /* Fotos extra de la biblioteca: en el MISMO recuadro (mismo alto), principal 2/3 y extras 1/3. */
 .img.mosaico { display:grid; grid-template-columns: 2fr 1fr; gap: .6mm; background: #fff; }

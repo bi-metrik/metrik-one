@@ -176,6 +176,12 @@ export interface HotelPDF {
    */
   incluye?: string | null
   /**
+   * Lo que el paquete de bloqueo marca como NO incluido (casilla en «no», nunca la vacía), con las
+   * etiquetas del cliente («Traslados»). Con varias versiones, la tarjeta dice lo que a esta le falta
+   * y otra sí trae (prueba corta del #1352). Ausente = nada marcado en «no».
+   */
+  noIncluidoEnCasillas?: string[]
+  /**
    * El rango de edad del niño que da el hotel, del ingreso manual. Con él el documento dice
    * «Tarifa niño de X a Y años cumplidos a la fecha del viaje»; ausente, no dice nada.
    */

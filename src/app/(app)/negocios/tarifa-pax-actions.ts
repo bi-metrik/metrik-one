@@ -46,7 +46,7 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
-import { conComision, margenAlElegirTipo, motivoComisionInvalida, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import { comisionDelPantallazo, comisionEscrita, conComision, lecturaTraeComision, margenAlElegirTipo, motivoComisionInvalida, propuestaDelPantallazo, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
@@ -1480,7 +1480,13 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
       : { ...leida }
     // La comisión vive en la decisión de Pública: es de ella, y se va si la línea vuelve a Neta.
     if (comision !== undefined && actual.tipoTarifa?.tipo === 'publica') {
-      actual.tipoTarifa = conComision(actual.tipoTarifa, comision)
+      // Quien la escribe se hace dueño de la decisión: releer el pantallazo ya no la pisa.
+      actual.tipoTarifa = conComision({ ...actual.tipoTarifa, origen: actual.tipoTarifa.origen === 'pantallazo' ? 'persona' : actual.tipoTarifa.origen }, comision)
+    } else if (cambios.tipoTarifa === 'publica' && actual.tipoTarifa?.tipo === 'publica' && conf?.margenProveedor) {
+      // M6 (QA Trappvel, 2026-10-29): Pública sobre un pantallazo con los dos precios. La comisión ya
+      // la dijo la captura: viene escrita (la que tenía la decisión anterior, o la leída).
+      const previa = comisionEscrita(leida.tipoTarifa ?? null) ?? comisionDelPantallazo(conf.margenProveedor)
+      if (previa) actual.tipoTarifa = conComision(actual.tipoTarifa, previa)
     }
     if (cambios.descuentoCliente !== undefined) {
       if (cambios.descuentoCliente === null) delete actual.descuentoCliente
@@ -2184,6 +2190,19 @@ export async function confirmarTarifaPorPasajero(
     // El costo a mano deja de aplicar (arriba `subtotal` quedó en 0 y mandan los rubros): su
     // anotación de moneda ya no explica nada.
     delete siguiente.costoManual
+    // M6 (QA Trappvel, 2026-10-29): el pantallazo trae el precio público y la comisión de la agencia
+    // → ONE propone Pública con la comisión leída. Nunca encima de lo que eligió una persona o el
+    // tarifario, ni sobre una opción con descuento al cliente (una Pública no lleva descuento).
+    if (!siguiente.descuentoCliente) {
+      const propuesta = propuestaDelPantallazo(
+        siguiente.tipoTarifa ?? null,
+        margenProveedor,
+        lecturaTraeComision(casillas.grupo_completo),
+        confirmada.confirmadaEn,
+      )
+      if (propuesta === 'quitar') delete siguiente.tipoTarifa
+      else if (propuesta) siguiente.tipoTarifa = propuesta
+    }
     return siguiente
   })
   if ('error' in guardado) return { success: false, error: guardado.error, codigo: 'ERROR' }

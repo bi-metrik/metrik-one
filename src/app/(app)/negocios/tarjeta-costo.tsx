@@ -22,7 +22,7 @@ import {
   type FilaCosto,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
-import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, margenDeOpcionPublica, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, confirmacionFueraDeLaPublica, factorPublicoDelPantallazo, margenDeOpcionPublica, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import type { DescuentoClienteGuardado } from '@/lib/cotizaciones/tarifa-pasajero'
 import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
@@ -96,8 +96,11 @@ export default function TarjetaCosto({
    * arranca en 0 y la opción no pide autorización por margen. Ausente = Neta.
    */
   tipoTarifa?: TipoTarifa
-  /** El tipo lo propuso ONE con lo que dice el tarifario del proveedor (la persona lo cambia). */
-  tipoPropuesto?: boolean
+  /**
+   * El tipo lo propuso ONE (la persona lo cambia): con lo que dice el tarifario del proveedor
+   * (`true` o `'tarifario'`), o con lo que dice el pantallazo (`'pantallazo'`, QA M6 2026-10-29).
+   */
+  tipoPropuesto?: boolean | 'tarifario' | 'pantallazo'
   /**
    * Las reglas de margen de la cotización (brief del 2026-10-27): lo que la cascada dice de esta
    * línea, el descuento guardado y la comisión. Solo en la cotización por pasos con reglas;
@@ -169,10 +172,15 @@ export default function TarjetaCosto({
   // precio por debajo del costo, que es justo cuando más hace falta verlo.
   // Una Pública no pide autorización por margen: su ganancia es la comisión (`tarifa-publica.ts`).
   const publica = tipoTarifa === 'publica'
+  // El precio público de la opción: su costo, o (si el pantallazo trajo los dos precios y el costo
+  // guardado es el neto) el precio al cliente de la captura (QA M6, 2026-10-29).
+  const factorPublico = publica ? factorPublicoDelPantallazo(confirmada?.margenProveedor ?? null) : 1
+  const costoBasePublica = costoLinea * (1 + administrativosPct / 100)
+  const precioPublico = costoBasePublica * factorPublico
   // Una Pública mide su margen con la comisión: lo que la agencia paga es el precio público menos
   // ella (brief del 2026-10-29, falla 1). Sin comisión, «—»: un 0 se leería como «a costo».
   const margenReal = publica
-    ? margenDeOpcionPublica({ comision: comision ?? null, precioPublico: costoLinea * (1 + administrativosPct / 100), costo: costoTotal, precio: precioTotal })
+    ? margenDeOpcionPublica({ comision: comision ?? null, precioPublico, costo: costoTotal + (precioPublico - costoBasePublica), precio: precioTotal })
     : costoTotal > 0 && precioTotal > 0
       ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
       : null
@@ -199,6 +207,16 @@ export default function TarjetaCosto({
     const v = t === '' ? null : Number(t.replace(',', '.'))
     if (v !== null && !Number.isFinite(v)) { setMargenEscrito(null); return }
     if (v === margenDeLaCasilla) { setMargenEscrito(null); return }
+    // M7 (QA Trappvel, 2026-10-29): en una Pública, un margen que saca el precio del público pide
+    // «¿Estás seguro?» (decisión de Mauricio: valores fuera de lo pactado).
+    if (publica && v !== null && !hayManuales) {
+      const fuera = confirmacionFueraDeLaPublica({
+        precio: precioConMargen(costoBasePublica, v, convencion),
+        publico: precioPublico,
+        que: 'el precio de la opción',
+      })
+      if (fuera && !window.confirm(fuera)) { setMargenEscrito(null); return }
+    }
     guardar(() => ajustarOpcion(itemId, { margenPct: v }), () => setMargenEscrito(null))
   }
 
@@ -211,6 +229,16 @@ export default function TarjetaCosto({
     if (f.adicionalId) {
       guardar(() => actualizarAdicional(f.adicionalId!, { precio: n, confirmarPrecioBajo: true }), limpiar)
       return
+    }
+    // M7 (QA Trappvel, 2026-10-29): «Precio c/u» de una Pública distinto del público (un descuento
+    // sin motivo, o cobrar más que el público) pide «¿Estás seguro?» antes de guardar.
+    if (publica && n !== null) {
+      const fuera = confirmacionFueraDeLaPublica({
+        precio: n,
+        publico: f.costoUnitario * (1 + administrativosPct / 100) * factorPublico,
+        que: `el precio por ${f.nombre.toLocaleLowerCase('es-CO')}`,
+      })
+      if (fuera && !window.confirm(fuera)) { limpiar(); return }
     }
     guardar(() => ajustarOpcion(itemId, { precios: { [f.clave]: n } }), limpiar)
   }
@@ -434,7 +462,7 @@ export default function TarjetaCosto({
                 )
               })}
             </span>
-            {tipoPropuesto && <span className="text-[11px] text-[#9A5F0C]" data-tipo-propuesto>según el tarifario</span>}
+            {tipoPropuesto && <span className="text-[11px] text-[#9A5F0C]" data-tipo-propuesto>{tipoPropuesto === 'pantallazo' ? 'según el pantallazo' : 'según el tarifario'}</span>}
           </span>}
           Margen <b className="tabular-nums text-[#191713]">{margenReal === null ? '—' : porcentaje(margenReal)}</b>
           {bajo && (

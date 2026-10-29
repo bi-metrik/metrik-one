@@ -212,6 +212,11 @@ export interface OpcionHotelDoc {
    * el ingreso manual (D6, 2026-10-29). `null` = nada que decir.
    */
   incluye: string | null
+  /**
+   * Con varias versiones: lo que el paquete de ESTA marca como no incluido y otra versión sí trae
+   * («Alimentación, Traslados»). Ausente = nada que decir (prueba corta del #1352).
+   */
+  noIncluye?: string
   /** Ver la cabecera: viaja en el modelo, imprimirla es decisión aparte. */
   cancelacion: string | null
   /** Lo que se paga en el hotel («Tasa turística: 41,28 EUR»). */
@@ -537,7 +542,13 @@ export function modeloDePropuesta({
   // ── Hoteles por ciudad ──
   const hotelesTodos = v?.hoteles ?? []
   const capitulos = capitulosDelViaje(hotelesTodos, principal, v?.destino ?? null).filter((c) => c.hotel || c.alternativas.length > 0)
-  const opcion = (h: HotelPDF): OpcionHotelDoc => ({
+  const noIncluidasDe = new WeakMap<OpcionHotelDoc, string[]>()
+  const opcion = (h: HotelPDF): OpcionHotelDoc => {
+    const o = opcionSinNoIncluye(h)
+    if (h.noIncluidoEnCasillas?.length) noIncluidasDe.set(o, h.noIncluidoEnCasillas)
+    return o
+  }
+  const opcionSinNoIncluye = (h: HotelPDF): OpcionHotelDoc => ({
     tarifas: porTarifas ? [...(h.tarifas ?? [])] : [],
     hotel: h.hotel ?? h.linea,
     estrellas: h.estrellas ?? null,
@@ -563,6 +574,16 @@ export function modeloDePropuesta({
   // En el orden del viaje, no en el de las líneas: la COT-2026-0026 real decía «Madrid ·
   // Ámsterdam · Barcelona · París» porque Ámsterdam se cargó segundo. Sin fecha, al final.
   hoteles.sort((a, b) => (a.desde ?? '9999').localeCompare(b.desde ?? '9999'))
+  // Prueba corta del #1352 · con varias versiones, cada tarjeta dice lo que a su paquete le falta y
+  // otra versión sí trae: «Incluido en todas» ya no lo afirma de todas.
+  if (porTarifas) {
+    const todas = hoteles.flatMap((c) => c.opciones)
+    for (const o of todas) {
+      const faltan = (noIncluidasDe.get(o) ?? []).filter((x) =>
+        todas.some((otra) => otra !== o && (otra.incluye ?? '').split(',').some((y) => llano(y).trim() === llano(x).trim())))
+      if (faltan.length > 0) o.noIncluye = faltan.join(', ')
+    }
+  }
 
   // El trayecto de vuelta sin fecha propia sale el día que termina la estadía donde cae el de ida
   // («Amsterdam Centraal - hotel» el 21 y «hotel - aeropuerto Schiphol» el 23).
@@ -722,7 +743,12 @@ export function modeloDePropuesta({
       totalEsDeLaRecomendada,
       lineas,
       descuentos: props.descuentosTotal ?? [],
-      incluye: porTarifas ? incluyeDeTodas(v?.incluye ?? [], { hoteles, vuelos, tarifas: bloques.length, noches: nochesDeHotel }) : v?.incluye ?? [],
+      incluye: porTarifas
+        ? incluyeDeTodas(v?.incluye ?? [], {
+          hoteles, vuelos, tarifas: bloques.length, noches: nochesDeHotel,
+          nochesPorVersion: bloques.map((_, i) => hotelesTodos.filter((h) => deLaTarifa(h, i)).reduce((a, h) => a + (h.noches ?? 0), 0)),
+        })
+        : v?.incluye ?? [],
       noIncluye,
       planes,
       anticipo: anticipo && anticipo.monto > 0 ? anticipo : null,
@@ -866,19 +892,68 @@ export function introDeterminista(p: { paradas: ParadaDoc[]; trenes: number; hot
  */
 export function incluyeDeTodas(
   incluye: string[],
-  m: { hoteles: CiudadDoc[]; vuelos: FilaVueloDoc[]; tarifas: number; noches: number },
+  m: {
+    hoteles: CiudadDoc[]
+    vuelos: FilaVueloDoc[]
+    tarifas: number
+    noches: number
+    /**
+     * Las noches de hotel de cada versión (prueba corta del #1352). Con paquetes sin ciudad no hay
+     * paradas y `noches` daba 0: el renglón decía «Hoteles» sin noches. Si todas coinciden manda esta
+     * cifra; si no, el rango.
+     */
+    nochesPorVersion?: number[]
+  },
 ): string[] {
   const deUnaVersion = (tarifas: number[]) => tarifas.length > 0 && tarifas.length < m.tarifas
   const nombres = (xs: (string | null)[]) =>
     [...new Set(xs.filter((x): x is string => !!x).flatMap((x) => [llano(x).trim(), llano(x.replace(/^hotel\s+/i, '')).trim()]))].filter((x) => x.length >= 3)
-  const hoteles = nombres(m.hoteles.flatMap((c) => c.opciones.filter((o) => deUnaVersion(o.tarifas)).map((o) => o.hotel)))
-  const aerolineas = nombres(m.vuelos.filter((f) => deUnaVersion(f.tarifas)).map((f) => f.aerolinea))
+  // Prueba corta del #1352 · el mismo hotel o la misma aerolínea en TODAS las versiones (dos filas
+  // iguales, una por versión) no «cambia según la versión»: se cuenta la unión de sus versiones.
+  const cubre = (xs: { nombre: string | null; tarifas: number[] }[]) => {
+    const por = new Map<string, Set<number>>()
+    for (const x of xs) {
+      if (!x.nombre) continue
+      const k = llano(x.nombre).trim()
+      por.set(k, new Set([...(por.get(k) ?? []), ...x.tarifas]))
+    }
+    return (x: { nombre: string | null }) => !x.nombre || (por.get(llano(x.nombre).trim())?.size ?? 0) < m.tarifas
+  }
+  const opcionesHotel = m.hoteles.flatMap((c) => c.opciones).map((o) => ({ nombre: o.hotel, tarifas: o.tarifas }))
+  const filasVuelo = m.vuelos.map((f) => ({ nombre: f.aerolinea, tarifas: f.tarifas }))
+  const hotelCambia = cubre(opcionesHotel)
+  const aerolineaCambia = cubre(filasVuelo)
+  const hoteles = nombres(opcionesHotel.filter((o) => deUnaVersion(o.tarifas) && hotelCambia(o)).map((o) => o.nombre))
+  const aerolineas = nombres(filasVuelo.filter((f) => deUnaVersion(f.tarifas) && aerolineaCambia(f)).map((f) => f.nombre))
   const nombra = (linea: string, lista: string[]) => {
     const t = ` ${llano(linea).replace(/[^a-z0-9]+/g, ' ')} `
     return lista.some((n) => t.includes(` ${n.replace(/[^a-z0-9]+/g, ' ').trim()} `))
   }
   const desayuno = m.hoteles.length > 0 && m.hoteles.every((c) => c.opciones.every((o) => regimenSoloDesayuno(o.regimen ?? '')))
-  const lineaHotel = `${m.noches > 0 ? `${m.noches} ${m.noches === 1 ? 'noche' : 'noches'} de hotel` : 'Hoteles'}${desayuno ? ' con desayuno' : ''}; el hotel cambia según la versión`
+  const porVersion = (m.nochesPorVersion ?? []).length === m.tarifas && (m.nochesPorVersion ?? []).every((n) => n > 0) ? m.nochesPorVersion! : []
+  const minimo = porVersion.length > 0 ? Math.min(...porVersion) : 0
+  const maximo = porVersion.length > 0 ? Math.max(...porVersion) : 0
+  const nochesN = (n: number) => `${n} ${n === 1 ? 'noche' : 'noches'}`
+  const cuantasNoches = porVersion.length > 0
+    ? minimo === maximo ? `${nochesN(minimo)} de hotel` : `De ${minimo} a ${nochesN(maximo)} de hotel`
+    : m.noches > 0 ? `${nochesN(m.noches)} de hotel` : 'Hoteles'
+  const queCambia = porVersion.length > 0 && minimo !== maximo ? 'el hotel y las noches cambian según la versión' : 'el hotel cambia según la versión'
+  const lineaHotel = `${cuantasNoches}${desayuno ? ' con desayuno' : ''}; ${queCambia}`
+  // Prueba corta del #1352 · «Incluido en todas» es la INTERSECCIÓN: lo que una opción de hotel dice
+  // que incluye (las casillas del paquete) solo va aquí si lo incluyen todas las versiones. Lo que
+  // va en algunas ya lo dice la tarjeta de su hotel.
+  const deLaOpcion = (o: OpcionHotelDoc) => (o.incluye ?? '').split(',').map((x) => llano(x).trim()).filter(Boolean)
+  const opciones = m.hoteles.flatMap((c) => c.opciones)
+  const dichoPorAlguna = new Set(opciones.flatMap(deLaOpcion))
+  const enTodasLasVersiones = (linea: string) => {
+    const k = llano(linea).trim()
+    if (!dichoPorAlguna.has(k)) return true
+    for (let i = 0; i < m.tarifas; i++) {
+      const suyas = opciones.filter((o) => o.tarifas.length === 0 || o.tarifas.includes(i))
+      if (!suyas.some((o) => deLaOpcion(o).includes(k))) return false
+    }
+    return true
+  }
   const lineaVuelo = 'Tiquetes aéreos de ida y regreso; la aerolínea cambia según la versión'
   const salida: string[] = []
   for (const linea of incluye) {
@@ -886,7 +961,7 @@ export function incluyeDeTodas(
       if (!salida.includes(lineaHotel)) salida.push(lineaHotel)
     } else if (nombra(linea, aerolineas)) {
       if (!salida.includes(lineaVuelo)) salida.push(lineaVuelo)
-    } else salida.push(linea)
+    } else if (enTodasLasVersiones(linea)) salida.push(linea)
   }
   return salida
 }

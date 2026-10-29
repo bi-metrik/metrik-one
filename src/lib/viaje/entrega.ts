@@ -18,6 +18,7 @@
 
 import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
 import { REGLA_POR_DEFECTO, sumarDiasCivil, type CuotaPlan, type ReglaPlan } from './plan-pagos'
+import { puedeConfirmarCliente, type QuienConfirma } from './confirmacion'
 
 // ── Configuración ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,20 @@ export function configEntrega(configLinea: unknown): ConfigEntrega {
   const activo = !!raw && typeof raw === 'object' && raw.activo === true
   const ce = raw?.contactos_emergencia
   return { activo, contactosEmergencia: typeof ce === 'string' && ce.trim() ? ce.trim().slice(0, 1000) : null }
+}
+
+// ── Quién envía el paquete (Vera §7.4; QA 2026-10-29, H1-3) ─────────────────
+
+/**
+ * Enviar el paquete de viaje: la comercial dueña, la dirección y operaciones ASIGNADA al negocio
+ * (`negocio_responsables`). E6 es la etapa de operaciones: si la deja asignada sin poder enviar, el
+ * viaje se queda quieto esperando a la comercial. Operaciones sin asignar, no; «Enviar igual» sin el
+ * cobro mínimo sigue siendo solo de la dirección.
+ */
+export function puedeEnviarPaquete(q: QuienConfirma): boolean {
+  if (puedeConfirmarCliente(q)) return true
+  if (q.role === 'read_only' || q.role === 'contador') return false
+  return q.esResponsable && (q.areas ?? []).includes('operaciones')
 }
 
 // ── Fechas y pesos (sin depender del ICU del servidor) ───────────────────────
