@@ -15,6 +15,7 @@ import {
   puedeAdjuntarVoucher,
   puedeEditarServicios,
   puedeTraerServicios,
+  viajeParaReglas,
   type EstadoServicio,
 } from '@/lib/viaje/estado-servicio'
 import {
@@ -34,8 +35,10 @@ import {
   type FiltroTablero,
 } from '@/lib/viaje/bloque-servicios'
 import {
+  baseDesviacion,
   configReglasPago,
   desviacion,
+  desviacionDelViaje,
   reglasQueRompe,
   reglasSinAprobar,
   totalTrasPago,
@@ -240,6 +243,8 @@ function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, me
     monto,
     pagadoAntes: v.pagado,
     costoCotizado: v.servicio.costo_cotizado,
+    valorPorPagar: v.servicio.valor_por_pagar,
+    viaje: viajeParaReglas(datos.filas, v.servicio.id),
     medio,
     cobradoCliente: datos.cobradoCliente ?? 0,
     precioAprobado: datos.precioAprobado ?? 0,
@@ -280,6 +285,8 @@ function FilaServicio({
   const d = desviacion(v.pagado, s.costo_cotizado)
   const umbral = (datos.reglas ?? configReglasPago(null)).umbralPct
   const pctTexto = Number.isFinite(d.pct) ? ` +${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %` : ''
+  // M3-4: lo que el proveedor cobró de menos queda a la vista (no se «pierde» en lo cotizado).
+  const aFavor = s.valor_por_pagar !== null && s.valor_por_pagar < s.costo_cotizado ? s.costo_cotizado - s.valor_por_pagar : 0
   return (
     <li className={`rounded-md border border-l-4 ${COLOR_TIPO[s.tipo] ?? COLOR_TIPO.otro} bg-card`}>
       <button
@@ -299,6 +306,9 @@ function FilaServicio({
               Cotizado {formatCOP(s.costo_cotizado)} · Pagado {formatCOP(v.pagado)}
               {d.pesos > 0 && (
                 <span className={d.pct > umbral ? 'text-red-600' : 'text-amber-600'}> +{formatCOP(d.pesos)}{pctTexto}</span>
+              )}
+              {aFavor > 0 && (
+                <span className="text-green-700"> · Cobró {formatCOP(v.aPagar)}: {formatCOP(aFavor)} a favor</span>
               )}
             </span>
           </div>
@@ -385,7 +395,9 @@ function HojaServicio({
         type="text"
         defaultValue={valor ?? ''}
         placeholder={placeholder}
-        disabled={!puedeEditar || isPending}
+        // Sin `isPending`: deshabilitar el campo con el foco dentro lo saca del foco y lo que se
+        // escribe después cae en otro campo (QA 2026-10-29, N1-1).
+        disabled={!puedeEditar}
         onBlur={e => {
           const nuevo = e.target.value.trim()
           if (nuevo !== (valor ?? '')) guardar({ [clave]: nuevo }, { [clave]: valor ?? '' }, `${etiqueta}: guardado.`)
@@ -427,7 +439,9 @@ function HojaServicio({
           key={`limite:${s.fecha_limite_pago ?? ''}`}
           type="date"
           defaultValue={s.fecha_limite_pago ?? ''}
-          disabled={!puedeEditar || isPending}
+          // Sin `isPending`: si otro campo guardaba mientras se escribía la fecha, el campo se
+          // deshabilitaba sin «blur» y la fecha no se guardaba (QA 2026-10-29, M1-2).
+          disabled={!puedeEditar}
           onBlur={e => {
             if (e.target.value !== (s.fecha_limite_pago ?? '')) {
               guardar({ fecha_limite_pago: e.target.value }, { fecha_limite_pago: s.fecha_limite_pago ?? '' }, 'Fecha límite: guardada.')
@@ -438,10 +452,39 @@ function HojaServicio({
       </label>
 
       <p className="text-xs font-semibold">2 Pago</p>
-      <PagosHechos v={v} medios={datos.medios ?? []} />
+      <PagosHechos
+        v={v}
+        medios={datos.medios ?? []}
+        // M3-4: el proveedor cobró menos de lo cotizado. Se dice con un toque, sin inventar un pago.
+        alCobrarMenos={puedeEditar && v.estado !== 'cancelado' && v.estado !== 'esperando'
+          ? () => guardar({ valor_por_pagar: v.pagado }, { valor_por_pagar: s.valor_por_pagar }, `${s.proveedor_nombre?.trim() || 'El proveedor'} cobró ${formatCOP(v.pagado)}: ${formatCOP(s.costo_cotizado - v.pagado)} a favor.`)
+          : null}
+      />
+      {puedeEditar && v.estado !== 'cancelado' && (
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">Lo que cobra el proveedor</span>
+          <input
+            key={`cobra:${s.valor_por_pagar ?? ''}`}
+            type="text"
+            inputMode="numeric"
+            defaultValue={s.valor_por_pagar ?? ''}
+            placeholder={`Lo cotizado: ${formatCOP(s.costo_cotizado)}`}
+            onBlur={e => {
+              const limpio = e.target.value.replace(/[^\d]/g, '')
+              const nuevo = limpio === '' ? null : Number(limpio)
+              if (nuevo !== (s.valor_por_pagar ?? null)) {
+                guardar({ valor_por_pagar: nuevo }, { valor_por_pagar: s.valor_por_pagar }, nuevo === null ? 'Vuelve a lo cotizado.' : 'Lo que cobra el proveedor: guardado.')
+              }
+            }}
+            className="h-11 w-full rounded-md border px-2 text-sm tabular-nums"
+          />
+          <span className="block text-[11px] text-muted-foreground">Solo si cobra menos de lo cotizado. Vacío = lo cotizado.</span>
+        </label>
+      )}
       {v.estado !== 'cancelado' && v.estado !== 'confirmado' && v.estado !== 'pagado' && v.estado !== 'esperando' && (
         puedeEditar
-          ? <FormularioPago v={v} datos={datos} alGuardar={alGuardar} />
+          // La llave con lo pagado: tras un pago el valor sugerido es lo que falta, no el pago anterior (M3-4).
+          ? <FormularioPago key={`pago:${v.pagado}:${v.aPagar}`} v={v} datos={datos} alGuardar={alGuardar} />
           : <p className="text-xs text-muted-foreground">Por pagar {formatCOP(Math.max(0, v.aPagar - v.pagado))}.</p>
       )}
       {v.estado === 'esperando' && (
@@ -480,7 +523,7 @@ function HojaServicio({
 }
 
 /** Los pagos ya registrados de la fila, cada uno con su medio y su soporte. */
-function PagosHechos({ v, medios }: { v: FilaVista; medios: readonly MedioPagoProveedor[] }) {
+function PagosHechos({ v, medios, alCobrarMenos }: { v: FilaVista; medios: readonly MedioPagoProveedor[]; alCobrarMenos: (() => void) | null }) {
   const gastos = v.servicio.gastos
   if (gastos.length === 0) {
     return <p className="text-xs text-muted-foreground">Por pagar {formatCOP(v.aPagar)}. Todavía no hay pagos.</p>
@@ -504,7 +547,17 @@ function PagosHechos({ v, medios }: { v: FilaVista; medios: readonly MedioPagoPr
           </li>
         )
       })}
-      {v.aPagar - v.pagado > 0 && <li className="text-muted-foreground">Falta pagar {formatCOP(v.aPagar - v.pagado)}.</li>}
+      {v.aPagar - v.pagado > 0 && (
+        <li className="space-y-1 text-muted-foreground">
+          <span className="block">Falta pagar {formatCOP(v.aPagar - v.pagado)}.</span>
+          {alCobrarMenos && (
+            <button type="button" onClick={alCobrarMenos}
+              className="min-h-11 rounded-md border px-3 text-xs text-foreground">
+              El proveedor cobró {formatCOP(v.pagado)}: no falta nada
+            </button>
+          )}
+        </li>
+      )}
     </ul>
   )
 }
@@ -535,7 +588,9 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   const medio = medios.find(m => m.id === medioId) ?? null
   const motivos = pideAEdgar(v, datos, monto, medio)
   const total = totalTrasPago({ monto, pagadoAntes: v.pagado })
-  const d = desviacion(total, v.servicio.costo_cotizado)
+  const base = baseDesviacion(v.servicio.costo_cotizado, v.servicio.valor_por_pagar)
+  const d = desviacion(total, base)
+  const sobreViaje = desviacionDelViaje(total, { costoCotizado: v.servicio.costo_cotizado, valorPorPagar: v.servicio.valor_por_pagar }, viajeParaReglas(datos.filas, v.servicio.id))
   const listo = monto > 0 && !!medio && !!soporte
 
   function subir(file: File | null | undefined) {
@@ -623,7 +678,8 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
       {medio && <p className="text-xs text-muted-foreground">Titular: {medio.titular === 'personal' ? 'Personal' : 'Empresa'}</p>}
       {d.pesos > 0 && monto > 0 && (
         <p className={`text-xs ${motivos.length > 0 ? 'text-red-600' : 'text-amber-600'}`}>
-          +{formatCOP(d.pesos)} sobre lo cotizado{Number.isFinite(d.pct) ? ` (+${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %)` : ''}
+          +{formatCOP(d.pesos)} sobre {base < v.servicio.costo_cotizado ? 'lo que cobra el proveedor' : 'lo cotizado'}{Number.isFinite(d.pct) ? ` (+${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %)` : ''}
+          {sobreViaje === 0 ? '. El viaje entero no se pasa de lo cotizado.' : ''}
         </p>
       )}
 

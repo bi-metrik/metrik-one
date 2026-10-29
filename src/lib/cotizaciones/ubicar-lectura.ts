@@ -9,8 +9,8 @@
  * ## Hotel (R8, regla 1)
  *
  *  1. Mismo hotel y mismas fechas que una opción → es una HABITACIÓN de esa opción.
- *  2. Otro hotel con las mismas fechas y el mismo destino → otra OPCIÓN de esa ranura. Solo
- *     abre ranura nueva con otras fechas u otra ciudad. Hasta el 2026-09-24 esto decidía solo
+ *  2. Otro hotel con las mismas fechas → otra OPCIÓN de esa ranura, aunque el lugar leído sea
+ *     otra zona (G1 · M5, 2026-10-29). Solo abre ranura nueva con otras fechas. Hasta el 2026-09-24 esto decidía solo
  *     por el lugar que leyó el detector, y «Providencia» contra «Isla de Providencia» abría
  *     «Hotel 2 en Providencia» (H1).
  *  3. Sin fechas que comparar, el lugar, como siempre (`ubicarCaptura`).
@@ -24,7 +24,7 @@
  * Puro: las líneas de la cotización entran por parámetro.
  */
 
-import { lugarComparable, mismoLugar, ubicarCaptura, type CapturaDetectada, type RanuraCandidata } from './bandeja-capturas'
+import { ciudadComparable, lugarComparable, mismoLugar, ubicarCaptura, type CapturaDetectada, type RanuraCandidata } from './bandeja-capturas'
 import {
   claveOpcionHotel,
   habitacionesDeTarifa,
@@ -37,7 +37,7 @@ import {
 import { normalizarGrupo } from './itinerarios'
 import { lugarDeOpcion, rutaDeVueloDeOpcion } from './opcion-viaje'
 import { ranurasDelTipo, type TipoRanura } from './ranuras-cotizacion'
-import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { ranuraDeGrupo, resolverRanura } from './ranuras-pantallazo'
 import { leerTarifaPax, type Composicion, type LecturaCasilla } from './tarifa-pasajero'
 
 export interface LineaParaUbicar {
@@ -150,7 +150,14 @@ export function ubicarLectura(args: {
     // Con fechas en la captura y en la ranura, mandan las fechas: iguales (y un destino que no
     // se contradiga) es otra opción; distintas es otra ranura, aunque sea la misma ciudad.
     // Las ranuras sin fechas leídas quedan para decidir por el lugar, como siempre.
+    //
+    // G1 · M5 (QA del 2026-10-29) · las mismas noches son la misma estadía aunque el lugar leído
+    // no coincida: Ecohabs en «Parque Tayrona», Zuana en «Santa Marta · Bello Horizonte» y
+    // Mendihuaca en «Mendihuaca» eran tres alternativas para los mismos 4 viajeros y abrían tres
+    // bloques que sumaban ($27,2 M). La zona no es la ciudad, y el grupo no duerme en dos
+    // hoteles a la vez. Con varias ranuras de esas fechas, primero la de un lugar compatible.
     const sinFechas: string[] = []
+    const mismasNoches: { grupo: string; compatible: boolean }[] = []
     const conFechasEnCaptura = !!claveOpcionHotel(lectura)
     for (const r of ranurasConLugar(vivas, 'hotel')) {
       const clave = normalizarGrupo(r.grupo)
@@ -163,10 +170,12 @@ export function ubicarLectura(args: {
         sinFechas.push(r.grupo)
         continue
       }
-      if (leidas.some(l => mismasFechasHotel(l, lectura)) && lugaresDeHotelCompatibles(r.lugar, lugarLeido) !== false) {
-        return { como: 'hermana', grupo: r.grupo }
+      if (leidas.some(l => mismasFechasHotel(l, lectura))) {
+        mismasNoches.push({ grupo: r.grupo, compatible: lugaresDeHotelCompatibles(r.lugar, lugarLeido) !== false })
       }
     }
+    const porNoches = mismasNoches.find(m => m.compatible) ?? mismasNoches[0]
+    if (porNoches) return { como: 'hermana', grupo: porNoches.grupo }
     const sinFechaLeida = ranurasConLugar(vivas, 'hotel').filter(r => sinFechas.includes(r.grupo))
     // Sin fechas que comparar, el lugar, por partes: un barrio y su ciudad son el mismo destino.
     const mismoDestino = lugarLeido ? sinFechaLeida.find(r => lugaresDeHotelCompatibles(r.lugar, lugarLeido) === true) : null
@@ -242,18 +251,46 @@ function ubicarVuelo(
     const u = ubicarCaptura({ tipo: 'vuelo', lugar: null, origen: null, destino: null }, ranuras.map(r => ({ grupo: r.grupo, tipo: 'vuelo' as const, lugar: null, origen: null, destino: null })))
     return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
   }
-  for (const r of ranuras) {
-    const clave = normalizarGrupo(r.grupo)
-    const rutas = vivas
+  const rutasDe = (grupo: string) => {
+    const clave = normalizarGrupo(grupo)
+    return vivas
       .filter(l => normalizarGrupo(l.grupo ?? null) === clave)
       .map(l => rutaDeVueloDeOpcion({ nombre: l.nombre ?? null, grupo: l.grupo ?? null, tarifa_pax: l.tarifa_pax, tramos: l.tramos }))
-    const coincide = rutas.some(ruta =>
+  }
+  for (const r of ranuras) {
+    const coincide = rutasDe(r.grupo).some(ruta =>
       mismoLugar(origen, ruta.origen) === true
       && mismoLugar(destino, ruta.destino) === true
       && mismaFecha(propia.fecha, ruta.fecha) !== false)
     if (coincide) return { como: 'hermana', grupo: r.grupo }
   }
+  // G1 · M1 (viaje 07, QA del 2026-10-29) · el bloque que abriría esta captura se llamaría
+  // igual que uno que ya está («Vuelo Miami–Bogotá»): es el mismo trayecto, aunque sus opciones
+  // no dejen leer la ruta. Dos bloques con el mismo rótulo el mismo día se leen como uno y se
+  // cobran como dos. Otro día sí es otro vuelo.
+  const propio = rotuloDeRuta(origen, destino)
+  if (propio) {
+    for (const r of ranuras) {
+      const nombre = resolverRanura(r.grupo)?.nombre ?? null
+      if (rotuloDeRuta(...rutaDelRotulo(nombre)) !== propio) continue
+      if (rutasDe(r.grupo).some(ruta => mismaFecha(propia.fecha, ruta.fecha) === false)) continue
+      return { como: 'hermana', grupo: r.grupo }
+    }
+  }
   return { como: 'nueva' }
+}
+
+/** «Vuelo 2 Miami–Bogotá» → [«Miami», «Bogotá»]. Sin «–», nada. */
+function rutaDelRotulo(nombre: string | null): [string | null, string | null] {
+  const m = /^\s*vuelo(?:\s+\d+)?\s+(.+?)\s*[–-]\s*(.+?)\s*$/i.exec(nombre ?? '')
+  return m ? [m[1], m[2]] : [null, null]
+}
+
+/** La ruta como la nombraría un bloque, comparable: «bogota>cartagena». Sin las dos puntas, `null`. */
+function rotuloDeRuta(origen: string | null, destino: string | null): string | null {
+  const o = ciudadComparable(origen)
+  const d = ciudadComparable(destino)
+  return o && d ? `${o}>${d}` : null
 }
 
 /**

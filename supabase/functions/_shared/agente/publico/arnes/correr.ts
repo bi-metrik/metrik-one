@@ -5,7 +5,7 @@
 //   deno run -A --node-modules-dir=none supabase/functions/_shared/agente/publico/arnes/correr.ts --salida <dir> --seco
 //   deno run -A --node-modules-dir=none …/correr.ts --salida <dir> --cli [--k 3] [--paralelo 4] [--modelo claude-haiku-5-5]
 //   ANTHROPIC_API_KEY_PRUEBAS=… deno run -A --node-modules-dir=none …/correr.ts --salida <dir> [--k 3]
-//   Comunes: [--conjunto escenarios|adversario|lenguaje|operacion|real|todo] [--solo id1,id2]
+//   Comunes: [--conjunto escenarios|adversario|lenguaje|operacion|real|ventas|todo] [--solo id1,id2]
 //            [--fichas-rol <fichas.json>]   las fichas del ROL que se va a publicar (un arreglo de fichas en JSON); sin
 //                                            él, REGLAMENTO_SABOR. Deja `banco.json`: lo que pide asistente_publicar_rol
 //                                            (`pasa`, `k`, `fecha`, `huella_fichas` = huellaPublicable de esas fichas).

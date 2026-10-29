@@ -40,8 +40,13 @@ export interface InboxPublico {
   anuncio7Dias: boolean;
 }
 
+/** De qué es el asistente: experiencias con reserva (Sabor) o venta de productos del catálogo de Ferretería (Dimpro). */
+export type DominioAsistente = 'experiencias' | 'ventas';
+
 export interface ConfigPublico {
   activo: boolean;
+  /** `chatwoot.dominio`. Sin él (o con otro valor), `experiencias`: lo de siempre. */
+  dominio: DominioAsistente;
   cuentaId: number | null;
   apiUrl: string;
   inboxes: InboxPublico[];
@@ -82,6 +87,7 @@ export const TERMINOS_EJEMPLO = 'https://ejemplo.invalid/sabor/terminos-EJEMPLO'
 
 export const CONFIG_PUBLICO_POR_DEFECTO: ConfigPublico = {
   activo: false,
+  dominio: 'experiencias',
   cuentaId: null,
   apiUrl: 'https://app.chatwoot.com',
   inboxes: [],
@@ -167,6 +173,7 @@ export function leerConfigPublico(botConversacional: unknown): ConfigPublico {
   const presupuesto = c.presupuesto_diario_usd;
   return {
     activo: c.activo === true,
+    dominio: c.dominio === 'ventas' ? 'ventas' : 'experiencias',
     cuentaId: entero(c.cuenta_id),
     apiUrl: enlace(c.api_url)?.replace(/\/+$/, '') ?? d.apiUrl,
     inboxes: leerInboxes(c.inboxes),

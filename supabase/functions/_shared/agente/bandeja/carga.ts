@@ -199,6 +199,41 @@ export function mensajesDeTextos(textos: ReadonlyArray<string>): MensajeEntrega[
   return textos.map((t, i) => ({ n: i + 1, cuerpo: t, reenviado: true, tipo: 'text', origen: 'texto' })) as MensajeEntrega[];
 }
 
+/**
+ * Lo que la extracción lee en una carga: los textos (como siempre, `mensajesDeTextos`) y, numerado después, lo que el
+ * comercial escribió al pedirla (`pedido`, marcado «escrito por el comercial»). Sin `pedido`, igual a `mensajesDeTextos`.
+ * Pura.
+ */
+export function mensajesDeCarga(textos: ReadonlyArray<string>, pedido: ReadonlyArray<string> = []): MensajeEntrega[] {
+  const n0 = textos.length;
+  return [
+    ...mensajesDeTextos(textos),
+    ...pedido.map((t, i) => ({ n: n0 + i + 1, cuerpo: t, reenviado: false, tipo: 'text', origen: 'texto' }) as MensajeEntrega),
+  ];
+}
+
+/**
+ * Lo que el comercial escribió al pedir que se cargue la tanda («cárgalo en el G1 26 7, pero salen el 10»): sus escritos
+ * de ESE viaje desde el primer reenvío de la tanda (arnés con Haiku del 2026-10-29, a-choque: la tanda iba sola a la
+ * extracción y el «salen el 10» se perdía). Va aparte de la tanda: no entra en los mensajes que la propuesta consume.
+ * Solo texto escrito (los archivos propios van por anotar). Pura.
+ */
+export function pedidoDeTanda(
+  filas: FilaConversacion[],
+  tanda: ReadonlyArray<FilaConversacion>,
+  codigo: string,
+  opcionNombrada: OpcionNombrada,
+  sueltos: Record<string, string> = {},
+): string[] {
+  if (!tanda.length) return [];
+  const desde = filas.findIndex((f) => f.id === tanda[0].id);
+  if (desde < 0) return [];
+  const delViaje = new Set(filasDelViaje(filas, codigo, opcionNombrada, {}, sueltos).map((f) => f.id));
+  return recortar(filas.slice(desde)
+    .filter((f) => delViaje.has(f.id) && (f.clase === 'escrito' || f.clase === 'audio'))
+    .map((f) => (f.texto ?? '').trim()).filter(Boolean));
+}
+
 /** El plan pendiente (lo que se le propuso al comercial y no ha confirmado), tolerante a una traza vieja. Pura. */
 export function planPrevio(previo: unknown): { sugeridos: Record<string, SugeridoAgente>; quitar: Record<string, Quitado>; perfil: HechoPerfil[] } {
   const p = (previo && typeof previo === 'object' ? previo : {}) as Partial<PlanCarga>;

@@ -16,10 +16,15 @@ import 'server-only'
  *   3. El pago se registra con `funcion_registrar_pago` (idempotente por referencia: el reintento de Bold no paga dos
  *      veces). La referencia es el `LNK_…` del link, que es lo que Bold trae en `data.metadata.reference`.
  *
+ *   4. Antes de eso, si el `LNK_…` es de un link del ASISTENTE DE VENTAS de Ferretería (`ferreteria_links_bold`, Dimpro,
+ *      29-oct), el pago va a `atenderPagoBoldFerreteria`: registra la venta de Ferretería con su negocio (una vez por
+ *      link) y no toca `funcion_pagos`. Un mismo workspace puede tener los dos: el despacho es por la tabla, no por slug.
+ *
  * Ninguna llave ni firma va a la respuesta ni a los logs.
  */
 import { parsearEventoBold } from '@/lib/suscripciones/pasarela/bold'
 import { createServiceClient } from '@/lib/supabase/server'
+import { atenderPagoBoldFerreteria } from '@/lib/ferreteria/bold-pagos-servidor'
 import {
   CLAVES_BOLD,
   DIAS_SECRETA_ANTERIOR,
@@ -39,6 +44,11 @@ export interface DepsWebhookFunciones {
   cliente?: ClienteRpc
   fetch?: typeof fetch
   ahora?: () => number
+  /**
+   * El despacho a Ferretería (links del asistente de ventas). `null` = no es de ahí. Por defecto el real; con un `cliente`
+   * de prueba y sin esto, no se despacha (las pruebas de funciones no tocan la base de Ferretería).
+   */
+  ferreteria?: ((ws: string, referencia: string, estado: 'aprobado' | 'fallido', monto: number | null, moneda: string | null) => Promise<RespuestaWebhook | null>) | null
 }
 
 export interface RespuestaWebhook {
@@ -114,6 +124,18 @@ export async function atenderWebhookBoldFunciones(
   if (!estado) return { status: 200, body: { ok: true, ignorado: evento.tipoOriginal } }
   // Un pago que no salió de un link (datáfono, QR, botón) no es de funciones.
   if (!evento.referencia || !RE_LINK.test(evento.referencia)) return { status: 200, body: { ok: true, ignorado: 'sin_link' } }
+
+  const ferreteria = deps.ferreteria !== undefined ? deps.ferreteria : deps.cliente ? null : atenderPagoBoldFerreteria
+  if (ferreteria) {
+    // Un link de Ferretería responde aquí (su 500 incluido). Si ni siquiera se pudo saber si era de Ferretería, se
+    // registra en el log y el pago sigue por funciones: un pago de Sabor no se queda sin registrar por la tabla de Dimpro.
+    try {
+      const r = await ferreteria(workspaceId, evento.referencia, estado, evento.monto === null ? null : Math.round(evento.monto), evento.moneda)
+      if (r) return { status: r.status, body: { ...r.body, modo } }
+    } catch (e) {
+      console.error(`[webhook-bold-funciones] no se pudo revisar si el pago es de Ferretería (${workspaceId}): ${(e as Error).message.slice(0, 200)}`)
+    }
+  }
 
   const { data, error } = await cliente.rpc('funcion_registrar_pago', {
     p_workspace_id: workspaceId,

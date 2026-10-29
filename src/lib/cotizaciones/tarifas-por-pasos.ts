@@ -40,7 +40,7 @@ import {
   type ItemConGrupo,
 } from './itinerarios'
 import { cabeConLosHoteles, hotelesAsociados, opcionParaLosHoteles } from './va-con-hotel'
-import { claveTarifa, esRecomendada, NOMBRES_TARIFA, recomendadaDe, type NombreTarifa } from './tarifas'
+import { claveTarifa, esIntermedia, esRecomendada, NOMBRES_TARIFA, recomendadaDe, TARIFA_INTERMEDIA, type NombreTarifa } from './tarifas'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { indiceRecomendada } from './recomendada-por-precio'
 
@@ -64,7 +64,7 @@ export interface TarifaNueva {
    * Una de las tres, o `null` (la plantilla la numera «Opción N»): la de cada paquete de bloqueo que
    * no es la Recomendada (D5, `planDeTarifasDeBloqueo`).
    */
-  nombre: NombreTarifa | null
+  nombre: NombreTarifa | typeof TARIFA_INTERMEDIA | null
   orden: number
   vaEnPropuesta: boolean
   seleccion: string[]
@@ -80,12 +80,14 @@ export interface PlanDeTarifas {
   crear: TarifaNueva[]
   seleccion: CambioDeSeleccion[]
   marcas: { itinerarioId: string; vaEnPropuesta: boolean }[]
+  /** Premium ⇄ Intermedia (`repartoPorPrecio`). Ausente = ningún nombre cambia. */
+  nombres?: { itinerarioId: string; nombre: string }[]
 }
 
 const vacio = (): PlanDeTarifas => ({ crear: [], seleccion: [], marcas: [] })
 
 export function planVacio(p: PlanDeTarifas): boolean {
-  return p.crear.length === 0 && p.seleccion.length === 0 && p.marcas.length === 0
+  return p.crear.length === 0 && p.seleccion.length === 0 && p.marcas.length === 0 && (p.nombres?.length ?? 0) === 0
 }
 
 /** ¿Con qué nombre del catálogo coincide esta tarifa? `null` = tarifa extra o sin nombre. */
@@ -190,6 +192,8 @@ export function planDeTarifas(args: {
   const conEconomicaYPremium = hayCombinables && (existentes.length === 0 || !hayCombinablesAntes)
   const necesarias: NombreTarifa[] = ranuras.length === 0 ? [] : conEconomicaYPremium ? [...NOMBRES_TARIFA] : ['Recomendada']
   const yaEsta = new Set(existentes.map(t => claveTarifa(t.nombre)))
+  // La Intermedia ocupa el lugar de la Premium (`repartoPorPrecio`).
+  if (existentes.some(t => esIntermedia(t.nombre))) yaEsta.add(claveTarifa('Premium'))
   let orden = existentes.reduce((m, t) => Math.max(m, t.orden), 0)
   const porCrear = necesarias.filter(n => !yaEsta.has(claveTarifa(n)))
 
@@ -283,6 +287,22 @@ export function planDeTarifas(args: {
     seleccionFinal.set(t, [...resto, ...elegidas])
   }
 
+  // ── El hotel que sobra: el orden sigue al precio (segunda vuelta de la COT-2026-0008) ──
+  const recPrevia = recomendadaDe(trabajo.map(t => ({ ...t, id: t.id ?? `nueva:${t.nombre}`, vaEnPropuesta: t.vaAntes }))).fila
+  const recPreviaTrabajo = recPrevia ? trabajo.find(t => (t.id ?? `nueva:${t.nombre}`) === recPrevia.id) ?? null : null
+  const nombreFinal = new Map<Trabajo, string | null>()
+  const reparto = repartoPorPrecio({
+    ranuras,
+    tarifas: trabajo.map(t => ({ t, nombre: t.nombre, seleccion: seleccionFinal.get(t) ?? [] })),
+    recomendada: recPreviaTrabajo,
+    costoDe,
+  })
+  if (reparto) {
+    seleccionFinal.set(reparto.tarifa, reparto.seleccion)
+    nombreFinal.set(reparto.tarifa, reparto.nombre)
+  }
+  const nombreDe = (t: Trabajo) => (nombreFinal.has(t) ? nombreFinal.get(t)! : t.nombre)
+
   // ── Qué va al cliente ──
   const firma = (t: Trabajo) => firmaDeTarifa(despues.items, seleccionFinal.get(t) ?? [])
   const firmaAntes = (t: Trabajo) => firmaDeTarifa(antes.items, [...t.seleccionAntes])
@@ -293,7 +313,8 @@ export function planDeTarifas(args: {
   const enOrden = [...trabajo].sort((a, b) => a.orden - b.orden)
   for (const t of enOrden) {
     if (t === recTrabajo) { vaFinal.set(t, true); continue }
-    const canon = nombreCanonico(t.nombre)
+    // La Intermedia cuenta como una de las tres: nace en la propuesta como la Premium.
+    const canon = nombreCanonico(nombreDe(t)) ?? (esIntermedia(nombreDe(t)) ? 'Premium' : null)
     // Con una sola manera de armar vuelo y hotel no hay Económica ni Premium que mandar.
     if (canon !== null && !hayCombinables) { vaFinal.set(t, false); continue }
     const igualARec = recTrabajo !== null && firma(t) === firma(recTrabajo)
@@ -309,9 +330,10 @@ export function planDeTarifas(args: {
   for (const t of trabajo) {
     const sel = seleccionFinal.get(t) ?? []
     if (t.id === null) {
-      plan.crear.push({ nombre: t.nombre as NombreTarifa, orden: t.orden, vaEnPropuesta: vaFinal.get(t) ?? false, seleccion: sel })
+      plan.crear.push({ nombre: nombreDe(t) as TarifaNueva['nombre'], orden: t.orden, vaEnPropuesta: vaFinal.get(t) ?? false, seleccion: sel })
       continue
     }
+    if (nombreDe(t) !== t.nombre) (plan.nombres ??= []).push({ itinerarioId: t.id, nombre: nombreDe(t) as string })
     const actual = t.seleccionActual
     const nueva = new Set(sel)
     const quitar = [...actual].filter(id => !nueva.has(id))
@@ -324,6 +346,75 @@ export function planDeTarifas(args: {
 }
 
 const esRanuraDePaquete = (grupo: string) => ranuraDeGrupo(grupo)?.slug === 'paquete_detalle'
+
+/**
+ * EL HOTEL QUE SOBRA VA EN MEDIO (segunda vuelta de la COT-2026-0008, opción 2 de Mauricio,
+ * 2026-10-29).
+ *
+ * COT-0008: tres hoteles; la Recomendada (la que eligió la asesora) era el más caro, la Premium lo
+ * repetía (idéntica, no se mandaba) y el del medio no salía en la propuesta. Mandarlo en la Premium
+ * dejaba una «Superior» más barata que la Recomendada.
+ *
+ * La regla, para UN solo servicio con opciones que se cruza y que es un hotel, con el costo de
+ * todas sus opciones:
+ *  · **La Recomendada es la más cara** (estrictamente) → la tarifa del lugar de la Premium se llama
+ *    «Intermedia» y lleva un hotel más barato que el de la Recomendada: el que ya tenía si no la
+ *    repetía, o el primero que se pegó de los que no están en ninguna otra tarifa (y no son más
+ *    baratos que el de la Económica). Sin ninguno así, nada cambia (la Premium idéntica no se manda).
+ *  · **La Recomendada no es la más cara** y la tarifa se llama «Intermedia» → vuelve a «Premium»
+ *    con el hotel más caro (el reparto normal por precio).
+ *  · En cualquier otro caso, nada: el aviso de «Revisar y enviar» (#1333) lo dice con su botón.
+ *
+ * Devuelve la tarifa, su selección y su nombre nuevos, o `null` si no cambia nada.
+ */
+function repartoPorPrecio<T>(args: {
+  ranuras: { grupo: string; candidatos: string[]; combinable: boolean }[]
+  tarifas: { t: T; nombre: string | null; seleccion: string[] }[]
+  recomendada: T | null
+  costoDe: (id: string) => number | null
+}): { tarifa: T; seleccion: string[]; nombre: string } | null {
+  const combinables = args.ranuras.filter(r => r.combinable)
+  if (combinables.length !== 1) return null
+  const r = combinables[0]
+  if (ranuraDeGrupo(r.grupo)?.slug !== 'hotel_detalle') return null
+  const costo = new Map(r.candidatos.map(id => [id, args.costoDe(id)]))
+  if ([...costo.values()].some(c => c === null || !(c > 0))) return null
+  const c = (id: string) => costo.get(id) as number
+  const hotelDe = (sel: readonly string[]) => r.candidatos.find(id => sel.includes(id)) ?? null
+
+  const rec = args.tarifas.find(x => x.t === args.recomendada)
+  const recHotel = rec ? hotelDe(rec.seleccion) : null
+  if (!rec || !recHotel) return null
+  // La del lugar de la Premium: la Premium o la que ya es Intermedia (la primera).
+  const p = args.tarifas.find(x => x !== rec && (esIntermedia(x.nombre) || nombreCanonico(x.nombre) === 'Premium'))
+  if (!p) return null
+  const pHotel = hotelDe(p.seleccion)
+  if (!pHotel) return null
+  const cambiar = (nuevo: string, nombre: string) => ({
+    tarifa: p.t,
+    seleccion: [...p.seleccion.filter(id => id !== pHotel), nuevo],
+    nombre,
+  })
+
+  const recEsLaMasCara = r.candidatos.every(id => id === recHotel || c(id) < c(recHotel))
+  if (!recEsLaMasCara) {
+    if (!esIntermedia(p.nombre)) return null
+    return cambiar(propuestaDeOne('Premium', r.candidatos, args.costoDe), 'Premium')
+  }
+
+  const eco = args.tarifas.find(x => x !== rec && x !== p && nombreCanonico(x.nombre) === 'Económica')
+  const ecoHotel = eco ? hotelDe(eco.seleccion) : null
+  const piso = ecoHotel ? c(ecoHotel) : 0
+  if (pHotel !== recHotel) {
+    // Ya lleva un hotel más barato que la Recomendada: es la Intermedia, no una «Superior».
+    if (esIntermedia(p.nombre) || c(pHotel) < piso) return null
+    return { tarifa: p.t, seleccion: p.seleccion, nombre: TARIFA_INTERMEDIA }
+  }
+  const usados = new Set(args.tarifas.filter(x => x !== p).map(x => hotelDe(x.seleccion)).filter((id): id is string => id !== null))
+  const sobra = r.candidatos.find(id => !usados.has(id) && c(id) < c(recHotel) && c(id) >= piso)
+  if (!sobra) return null
+  return cambiar(sobra, TARIFA_INTERMEDIA)
+}
 
 /**
  * VIAJE EN BLOQUEO: UNA TARIFA POR PAQUETE (decisión D5 de Mauricio, 2026-10-29).
@@ -416,6 +507,10 @@ export function aplicarPlan(tarifas: TarifaDelPlan[], plan: PlanDeTarifas, nuevo
   for (const m of plan.marcas) {
     const t = salida.find(x => x.id === m.itinerarioId)
     if (t) t.vaEnPropuesta = m.vaEnPropuesta
+  }
+  for (const r of plan.nombres ?? []) {
+    const t = salida.find(x => x.id === r.itinerarioId)
+    if (t) t.nombre = r.nombre
   }
   for (const n of plan.crear) salida.push({ id: nuevoId(n), nombre: n.nombre, orden: n.orden, vaEnPropuesta: n.vaEnPropuesta, seleccion: [...n.seleccion] })
   return salida

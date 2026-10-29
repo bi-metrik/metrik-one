@@ -106,7 +106,7 @@ export interface EntradaModeloPropuesta {
 
 // ── Salida ────────────────────────────────────────────────────────────────────
 
-export type ClaveTarifa = 'economica' | 'recomendada' | 'superior' | 'otra'
+export type ClaveTarifa = 'economica' | 'intermedia' | 'recomendada' | 'superior' | 'otra'
 
 /** Una línea de dinero, como la imprime «Inversión» hoy (`lineasImpresas` de la plantilla). */
 export interface LineaDoc {
@@ -331,12 +331,15 @@ export function nombreDeTarifaParaCliente(nombre: string | null | undefined, esP
 export function claveDeTarifa(nombre: string | null | undefined): ClaveTarifa {
   const k = claveTarifa(nombre)
   if (k.includes('econom')) return 'economica'
+  if (k.includes('intermedia')) return 'intermedia'
   if (k.includes('recomend')) return 'recomendada'
   if (k.includes('premium') || k.includes('superior')) return 'superior'
   return 'otra'
 }
 
-const ORDEN_CLAVE: Record<ClaveTarifa, number> = { economica: 0, recomendada: 1, superior: 2, otra: 3 }
+// La Intermedia va entre la Económica y la Recomendada: solo existe cuando la Recomendada es la más
+// cara (segunda vuelta de la COT-2026-0008, `repartoPorPrecio`), y el orden sigue al precio.
+const ORDEN_CLAVE: Record<ClaveTarifa, number> = { economica: 0, intermedia: 0.5, recomendada: 1, superior: 2, otra: 3 }
 
 /**
  * Lo mismo que `lineasImpresas` de `cotizacion-trappvel-pdf.tsx`: el total de una línea es

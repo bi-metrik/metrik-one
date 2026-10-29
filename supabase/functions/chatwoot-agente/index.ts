@@ -15,6 +15,8 @@
 //   ANTHROPIC_API_KEY                Claude Haiku 5.5 (sin respaldo de Gemini, D1).
 //   <audio.llave_env>                Gemini del plan PAGO para las notas de voz (por defecto GEMINI_API_KEY_PAGO).
 //   RESEND_API_KEY                   correo a MéTRIK: caída del modelo y presupuesto del día (spec 2026-10-26, §4.1).
+// Dominio de ventas (Dimpro, 29-oct): `config_extra.bot_conversacional.chatwoot.dominio = 'ventas'`. El webhook de Bold del
+// workspace (Next) avisa un pago aprobado con `POST …?ws=<slug>&pago=<LNK_…>` y `Authorization: Bearer <service role>`.
 // Interruptores: `config_extra.bot_conversacional.chatwoot.activo` (sin él, 200 y nada) y la ficha `bot.encendido`
 // del reglamento publicado (bot `asistente-publico`). Quitar el Agent Bot del inbox en Chatwoot también lo apaga.
 // ============================================================
@@ -23,7 +25,8 @@ import { getServiceClient } from '../_shared/supabase-client.ts';
 import { modeloAnthropic } from '../_shared/agente/modelo-anthropic.ts';
 import { modeloGemini } from '../_shared/agente/modelo-gemini.ts';
 import { cargarReglamento } from '../_shared/agente/produccion.ts';
-import { atenderConversacion } from '../_shared/agente/publico/cola.ts';
+import { atenderConversacion, avisarPagoAprobado } from '../_shared/agente/publico/cola.ts';
+import { ventasSupabase } from '../_shared/agente/publico/ventas/produccion-ventas.ts';
 import { variableSecreta } from '../_shared/agente/publico/config.ts';
 import { BOT_PUBLICO } from '../_shared/agente/publico/dominio.ts';
 import { recibir } from '../_shared/agente/publico/entrada.ts';
@@ -145,14 +148,68 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     dormir: (ms) => new Promise((r) => setTimeout(r, ms)),
     // Cada paso a persona deja su fila en `asistente_escalamientos` (spec 2026-10-26, §4.2), a mejor esfuerzo.
     escalamientos: escalamientosSupabase(supabase),
+    // Dominio de ventas (Dimpro): catálogo de Ferretería y Bold con las llaves de la bóveda del workspace.
+    ...(c.dominio === 'ventas' ? { ventas: ventasSupabase(supabase, a.workspace.id) } : {}),
   });
+}
+
+/** Comparación en tiempo constante. */
+function iguales(a: string, b: string): boolean {
+  if (!a || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+
+/**
+ * `POST ?ws=<slug>&pago=<LNK_…>` con `Authorization: Bearer <service role>`: el webhook de Bold del workspace (Next) avisa
+ * que registró la venta de un link del asistente de ventas. Aquí: confirmarle al cliente en Chatwoot y pasar a persona
+ * con `despachar`, una sola vez por link (`avisarPagoAprobado`). No escribe la venta (eso ya lo hizo el webhook).
+ */
+async function pagoAprobado(supabase: SupabaseClient, req: Request, slug: string, referencia: string): Promise<Response> {
+  const json = (status: number, body: Record<string, unknown>) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  const llave = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '');
+  if (!iguales(llave, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')) return json(401, { ok: false, motivo: 'no_autorizado' });
+  if (!/^LNK_[A-Za-z0-9]+$/.test(referencia)) return json(400, { ok: false, motivo: 'referencia_invalida' });
+  const puertos = puertosEntradaSupabase(supabase, () => undefined);
+  const w = await puertos.workspace(slug);
+  if (!w || w.config.dominio !== 'ventas' || w.config.cuentaId === null) return json(404, { ok: false, motivo: 'sin_asistente_de_ventas' });
+  const ventas = ventasSupabase(supabase, w.id);
+  const link = await ventas.linkPorReferencia(referencia);
+  if (!link) return json(404, { ok: false, motivo: 'link_no_es_del_asistente' });
+  const token = Deno.env.get(variableSecreta('CHATWOOT_API_TOKEN', slug)) ?? '';
+  if (!token) return json(503, { ok: false, motivo: 'sin_token_chatwoot' });
+  const reglamento = await cargarReglamento(supabase, w.id, BOT_PUBLICO, w.config.reglamentoId);
+  if (!reglamento) return json(503, { ok: false, motivo: 'sin_reglamento' });
+  const c = w.config;
+  const canal = link.canal === 'instagram' || link.canal === 'whatsapp' || link.canal === 'tiktok' ? link.canal : 'otro';
+  const inbox = c.inboxes.find((i) => i.canal === canal);
+  const r = await avisarPagoAprobado({
+    modelo: { llamar: async () => ({ ok: false, motivo: 'sin modelo en el aviso de pago', usos: [] }) }, reglamento, config: c,
+    almacen: almacenChatwootSupabase(supabase), mensajero: mensajeroChatwootApi({ apiUrl: c.apiUrl, token }),
+    transcriptor: { transcribir: async () => ({ texto: null }) },
+    llave: { workspaceId: w.id, cuentaId: link.cuentaId, conversacionId: link.conversacionId }, canal, anuncio7Dias: inbox?.anuncio7Dias ?? false,
+    workspaceNombre: slug, precios: [], ahoraMs: () => Date.now(), reloj: () => performance.now(), nuevoId: () => crypto.randomUUID(),
+    dormir: (ms) => new Promise((x) => setTimeout(x, ms)), escalamientos: escalamientosSupabase(supabase), ventas,
+  }, referencia);
+  // 502 si Chatwoot no aceptó: el webhook lo deja en su log (la venta ya está); «ya pagué» lo vuelve a intentar.
+  return json(r === 'fallo' ? 502 : 200, { ok: r !== 'fallo', resultado: r });
 }
 
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('método no permitido', { status: 405 });
   const url = new URL(req.url);
-  const cuerpo = await req.text();
   const supabase = getServiceClient();
+  const pago = url.searchParams.get('pago');
+  if (pago) {
+    try {
+      return await pagoAprobado(supabase, req, url.searchParams.get('ws') ?? '', pago);
+    } catch (e) {
+      console.error('[chatwoot-agente] aviso de pago falló:', e);
+      return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { 'content-type': 'application/json' } });
+    }
+  }
+  const cuerpo = await req.text();
   const puertos = puertosEntradaSupabase(supabase, (slug) => Deno.env.get(variableSecreta('CHATWOOT_WEBHOOK_SECRET', slug)));
   let r;
   try {

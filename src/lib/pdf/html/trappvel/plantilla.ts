@@ -33,6 +33,7 @@ import type {
   TrayectoDoc,
 } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import { notaDeFila } from '@/lib/viaje/asi-puedes-pagar'
+import { ciudadComparable, mismoLugar } from '@/lib/cotizaciones/bandeja-capturas'
 import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
 import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
@@ -129,7 +130,8 @@ function rangoCorto(desde: string | null, hasta: string | null): string | null {
   return `${a.getUTCDate()}${mesA} – ${b.getUTCDate()} ${MESES[b.getUTCMonth()]}`
 }
 
-const LETRA: Record<ClaveTarifa, string> = { economica: 'E', recomendada: 'R', superior: 'P', otra: 'N' }
+// La Intermedia toma el color de la Superior: nunca van juntas en un documento.
+const LETRA: Record<ClaveTarifa, string> = { economica: 'E', intermedia: 'P', recomendada: 'R', superior: 'P', otra: 'N' }
 
 function etiqueta(t: TarifaDoc): string {
   return `<span class="tag t${LETRA[t.clave]}">${esc(t.nombre)}</span>`
@@ -731,17 +733,21 @@ function apartar(m: ModeloPropuesta): string {
 }
 
 /** Los vuelos de una versión agrupados por trayecto y fecha, en orden. */
-function gruposDeVuelos(vuelos: FilaVueloDoc[], m: ModeloPropuesta): { titulo: string; filas: FilaVueloDoc[] }[] {
+export function gruposDeVuelos(vuelos: FilaVueloDoc[], m: ModeloPropuesta): { titulo: string; filas: FilaVueloDoc[] }[] {
+  // G1 · V4 (QA del 2026-10-29) · el trayecto se agrupa por la CIUDAD, no por cómo lo escribió
+  // cada captura: «Cartagena → Bogotá» (JetSMART) y «CTG → BOG» (Avianca) son el mismo regreso.
+  // Agrupados por el texto, el de JetSMART salía aparte y rotulado «Vuelo» en vez de «Regreso».
+  const lugar = (t: string | null) => ciudadComparable(t) ?? ''
   const grupos = new Map<string, FilaVueloDoc[]>()
   for (const f of vuelos) {
-    const k = `${f.fecha ?? ''}|${f.desde ?? ''}|${f.hasta ?? ''}`
+    const k = `${f.fecha ?? ''}|${lugar(f.desde)}|${lugar(f.hasta)}`
     grupos.set(k, [...(grupos.get(k) ?? []), f])
   }
-  const casa = (m.ruta.origen ?? '').toLowerCase()
+  const casa = m.ruta.origen ?? ''
   const listaG = [...grupos.values()].sort((a, b) => (a[0].fecha ?? '').localeCompare(b[0].fecha ?? ''))
   return listaG.map((filas, i) => {
     const f = filas[0]
-    const vuelve = casa !== '' && (f.hasta ?? '').toLowerCase() === casa
+    const vuelve = (casa !== '' && mismoLugar(f.hasta, casa) === true) || filas.every((x) => x.sentido === 'regreso')
     return { titulo: vuelve && i > 0 ? 'Regreso' : i === 0 ? 'Ida' : 'Vuelo', filas }
   })
 }

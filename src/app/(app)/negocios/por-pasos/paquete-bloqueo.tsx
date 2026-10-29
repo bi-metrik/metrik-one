@@ -12,6 +12,7 @@ import {
   ACOMODACIONES,
   CATEGORIAS_INCLUYE,
   ETIQUETA_ACOMODACION,
+  ETIQUETA_ADULTO_CON_NINO,
   ETIQUETA_INCLUYE,
   avisosDelPaquete,
   conEdadesDeLaSolicitud,
@@ -397,6 +398,28 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                     </tr>
                   )
                 })}
+                {(h.precios.some(x => x.acomodacion === 'doble') || (paquete.distribucion.adultoConNino ?? 0) > 0) && (
+                  // H2-2 (QA del 2026-10-29): «menor con un adulto, el adulto paga Doble». Cada habitación
+                  // suma un adulto a la Doble; su niño es uno de «Niños» (se sube solo si faltan).
+                  <tr data-acomodacion="adulto_con_nino">
+                    <td>{ETIQUETA_ADULTO_CON_NINO} <span className="text-[#6E6A62]">(adulto a Doble)</span></td>
+                    <td>{pesos(h.precios.find(x => x.acomodacion === 'doble')?.precioPorPersona ?? null)}</td>
+                    <td><input aria-label="Habitaciones de 1 adulto + 1 niño" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.adultoConNino || ''}
+                      onChange={e => cambiar(x => {
+                        const n = numeroONulo(e.target.value) ?? 0
+                        if (n > 0) x.distribucion.adultoConNino = n
+                        else delete x.distribucion.adultoConNino
+                        if (x.distribucion.ninos < n) {
+                          x.distribucion.ninos = n
+                          if ((x.distribucion.edadesNinos ?? []).length === 0) x.distribucion.edadesNinos = edadesDeTexto(edadesTexto)
+                        }
+                        return x
+                      })} /></td>
+                    <td>{costo.filas.find(f => f.clave === 'adulto_con_nino')?.personas ?? 0}</td>
+                    <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'adulto_con_nino')?.total ?? null)}</td>
+                    <td />
+                  </tr>
+                )}
                 <tr data-acomodacion="nino">
                   <td>Niño{h.nino?.edadMin !== null && h.nino?.edadMin !== undefined ? ` (${h.nino.edadMin}-${h.nino.edadMax ?? '?'} años)` : ''}</td>
                   <td><input aria-label="Precio por niño" className={`${CAJA} w-28`} inputMode="numeric" value={h.nino?.precio ?? ''}
@@ -435,6 +458,11 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                 <option value="">+ Acomodación</option>
                 {disponibles.map(a => <option key={a} value={a}>{ETIQUETA_ACOMODACION[a]}</option>)}
               </select>
+            )}
+            {h.columnaCosto && (
+              <p className="m-0 text-[11px] text-[#6E6A62]" data-columna-costo>
+                La pantalla trae varias columnas de precio: el costo es la columna «{h.columnaCosto}».
+              </p>
             )}
             <p className="m-0 text-right text-sm font-semibold tabular-nums" data-costo-paquete>
               {costo.personas} personas · Costo del paquete {pesos(costo.total)}
@@ -475,6 +503,9 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
               </label>
             ))}
             {paquete.incluye.texto && <p className="m-0 text-[11px] text-[#6E6A62]">Dice la pantalla: «{paquete.incluye.texto}»</p>}
+            {/* V5 (QA del 2026-10-29): lo que no incluye sale en «A tener en cuenta» de la propuesta. */}
+            <Campo etiqueta="No incluye (sale en la propuesta)" valor={paquete.incluye.noIncluye ?? null}
+              onCambio={v => cambiar(x => { x.incluye.noIncluye = vacioANulo(v); return x })} />
           </fieldset>
 
           {/* ── Vuelo ── */}
