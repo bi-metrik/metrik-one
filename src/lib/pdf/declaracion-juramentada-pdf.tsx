@@ -1,16 +1,25 @@
 import type { ReactNode } from 'react'
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { titularesDeDatos, concordancia } from './titulares'
-import { fmtCurrency, fechaLarga } from './formato'
+import { fmtCurrency, fmtAlMil, fechaLarga, fechaDeGeneracion } from './formato'
 
 /**
- * Declaración juramentada — plantilla de SOENA recibida el 2026-09-07.
+ * Declaración juramentada — plantilla de SOENA recibida el 2026-10-28 (SOE-033),
+ * aprobada por Mauricio para usarse TAL CUAL. Sustituye a la del 2026-09-07.
  *
- * Reemplaza por completo la carta a la DIAN que se emitía hasta hoy (Art. 7 del
- * Decreto 1165 de 2019, sin ningún dato del vehículo). La plantilla nueva se funda
- * en el Art. 12 de la Ley 1715 de 2014 y en el Concepto DIAN 000673-int-0063 del
- * 16 de enero de 2026, y sí describe la compra: marca, referencia, fecha, vendedor,
- * factura, valor sin IVA e IVA.
+ * Lo que cambió el 2026-10-28 respecto a la de septiembre: cada cláusula ata la
+ * factura con su certificado UPME por NÚMERO («factura No. Y», «Certificado UPME
+ * No. X») —PRIMERO gana una segunda frase, TERCERO y CUARTO nombran los dos
+ * documentos—; el valor de CUARTO pasa a ser el «IVA solicitado, aproximado al mil»
+ * (art. 577 ET, `fmtAlMil`) y ya no el IVA exacto de la factura; y antes de la firma
+ * va «Ciudad y fecha» con el día de generación. La «Nota interna (borrar antes de
+ * enviar)» de la plantilla es una instrucción para quien la llena a mano: NO se
+ * imprime. Esa nota pide repetir los números por factura cuando hay varias; hoy el
+ * expediente tiene una sola factura.
+ *
+ * La plantilla de septiembre se fundó en el Art. 12 de la Ley 1715 de 2014 y en el
+ * Concepto DIAN 000673-int-0063 del 16 de enero de 2026 —reemplazó la carta del
+ * Art. 7 del Decreto 1165 de 2019— y la de octubre conserva esa base.
  *
  * Tres decisiones que NO se deben "arreglar" sin hablar con SOENA:
  *
@@ -21,20 +30,20 @@ import { fmtCurrency, fechaLarga } from './formato'
  *    haya conflicto con eso». Es decir: el total de la factura puede incluir
  *    impuesto al consumo, accesorios o matrícula, y afirmarlo bajo juramento como
  *    valor del vehículo abre una contradicción con la Relación de facturas. Solo
- *    salen `valor_unitario_sin_iva` y `valor_iva`.
+ *    salen `valor_unitario_sin_iva` y `valor_iva` (más el IVA aproximado al mil).
  *
  * 2. La identificación va SIN dígito de verificación. La plantilla identifica al
- *    firmante con CÉDULA DE CIUDADANÍA, no con NIT: `nitConDv()` sale de este
- *    documento (sigue vigente en el Formato 010 y en la Relación de facturas, que
- *    sí hablan de NIT).
+ *    firmante con CÉDULA DE CIUDADANÍA, no con NIT.
  *
  * 3. Los datos del certificado UPME son OPCIONALES en `campos_fuente`, pero eso es
  *    una RED DE SEGURIDAD DEL RENDER, no el camino esperado. Desde el 2026-09-07 la
  *    regla del proceso es que en la rama «solo IVA» el cliente entrega el certificado
  *    en la etapa de Anexos, así que el radicado siempre existe: o viene de
  *    `concepto_upme` (Certificación) o de `concepto_upme_anexos`, que es su
- *    alternativa. La degradación de la cláusula SEGUNDO cubre el expediente
- *    incompleto, no una rama del negocio — ver `clausulaSegundo`.
+ *    alternativa. Si aun así falta, el documento NO afirma un certificado que el
+ *    expediente no tiene: se caen la segunda frase de PRIMERO, la mención UPME de
+ *    SEGUNDO y el «y del Certificado UPME No.» de TERCERO y CUARTO — ver `upme`
+ *    dentro del componente. Nunca se imprime un marcador en su lugar.
  */
 interface DeclaracionJuramentadaProps {
   datos: {
@@ -87,35 +96,44 @@ interface DeclaracionJuramentadaProps {
 const sinCortes = (palabra: string) =>
   palabra.length > 40 ? (palabra.match(/.{1,40}/g) ?? [palabra]) : [palabra]
 
+/**
+ * Marcadores de lo que falta: el texto de los corchetes de la plantilla del
+ * 2026-10-28, para que el operador reconozca la casilla. Los del certificado UPME
+ * NO están aquí a propósito: sin radicado la frase entera se retira (nota 3).
+ */
 const MARCADOR = {
-  cedula: '[NÚMERO DE CÉDULA]',
-  direccion: '[DIRECCIÓN DE DOMICILIO]',
+  cedula: '[N.° DE CÉDULA]',
+  direccion: '[DIRECCIÓN COMPLETA]',
   ciudad: '[CIUDAD]',
   marca: '[MARCA]',
-  linea: '[REFERENCIA / MODELO]',
-  fecha: '[FECHA DE ADQUISICIÓN]',
-  vendedor: '[VENDEDOR]',
-  factura: '[NÚMERO DE FACTURA]',
-  valor: '[VALOR ANTES DE IVA]',
-  iva: '[VALOR DEL IVA]',
+  linea: '[LÍNEA Y MODELO]',
+  fecha: '[FECHA DE LA FACTURA]',
+  vendedor: '[PROVEEDOR]',
+  factura: '[N.° DE FACTURA]',
+  valor: '[VALOR]',
+  iva: '[IVA PAGADO]',
+  ivaAlMil: '[IVA SOLICITADO, APROXIMADO AL MIL]',
 }
 
 const s = StyleSheet.create({
-  page: { paddingTop: 50, paddingBottom: 60, paddingHorizontal: 55, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.6 },
-  // Encabezado: título + norma. La plantilla nueva NO es una carta (no lleva
-  // ciudad, ni "Señores DIAN", ni asunto).
+  page: { paddingTop: 50, paddingBottom: 50, paddingHorizontal: 55, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.5 },
+  // Encabezado: título + norma. La plantilla NO es una carta (no lleva "Señores
+  // DIAN" ni asunto); la ciudad y la fecha van al final, antes de la firma.
   titulo: { fontSize: 13, fontFamily: 'Helvetica-Bold', textAlign: 'center' },
   subtitulo: { fontSize: 10, fontFamily: 'Helvetica-Bold', textAlign: 'center' },
   norma: { fontSize: 10, textAlign: 'center' },
-  encabezado: { marginBottom: 22 },
+  encabezado: { marginBottom: 18 },
   // Cuerpo
-  intro: { marginBottom: 14, textAlign: 'justify' },
-  clause: { marginBottom: 10, textAlign: 'justify' },
-  cierre: { marginTop: 10, marginBottom: 18, textAlign: 'justify' },
+  intro: { marginBottom: 10, textAlign: 'justify' },
+  clause: { marginBottom: 8, textAlign: 'justify' },
+  cierre: { marginTop: 6, marginBottom: 8, textAlign: 'justify' },
+  ciudadFecha: { marginBottom: 6 },
   bold: { fontFamily: 'Helvetica-Bold' },
-  // Firmas
-  firmaRol: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#374151', marginBottom: 6 },
-  firmaBloque: { marginTop: 20 },
+  // Firmas: línea, «Firma» en gris pequeño, nombre y cédula (como la plantilla).
+  firmaRol: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#374151', marginBottom: 2 },
+  firmaBloque: { marginTop: 18, width: '50%' },
+  firmaRaya: { borderTop: '1 solid #111827', marginTop: 28, paddingTop: 2 },
+  firmaEtiqueta: { fontSize: 8, color: '#7A7A7A' },
   firmaLinea: { fontSize: 10 },
 })
 
@@ -138,29 +156,37 @@ const s = StyleSheet.create({
  * `hyphenationCallback` **no lo evita** —ese guion no sale de partir una palabra,
  * sale del límite entre corridas—, así que el único arreglo es no crear el límite.
  * Por eso además el texto se pasa como UNA sola plantilla (`{`${x},`}`) y no como
- * dos hijos: dos hijos vuelven a ser dos corridas.
+ * dos hijos: dos hijos vuelven a ser dos corridas. Lo mismo vale para una expresión
+ * `{...}` que siga a una `</B>`: su texto tiene que empezar con espacio.
  */
 function B({ children }: { children: ReactNode }) {
   return <Text style={s.bold} hyphenationCallback={sinCortes}>{children}</Text>
 }
 
-export default function DeclaracionJuramentadaPDF({ datos }: DeclaracionJuramentadaProps) {
-  const titulares = titularesDeDatos(datos)
+export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: DeclaracionJuramentadaProps) {
+  const titulares = titularesDeDatos(datos, '[NOMBRE COMPLETO DEL SOLICITANTE]')
   const c = concordancia(titulares.length)
   const dos = titulares.length > 1
 
-  // La plantilla dice "vehículo eléctrico", pero la línea de SOENA cubre también
-  // híbridos y PHEV: afirmar bajo juramento que un híbrido es eléctrico contradice
-  // la factura y la Relación de facturas del mismo expediente. Se usa el tipo
-  // extraído de la factura, con el mismo respaldo que ya usa la Relación.
+  // La plantilla dice "[híbrido / eléctrico]": se usa el tipo extraído de la
+  // factura, porque afirmar bajo juramento que un híbrido es eléctrico contradice la
+  // factura y la Relación de facturas del mismo expediente.
   const tipoVehiculo = datos.tipo_vehiculo?.trim().toLowerCase() || 'híbrido / eléctrico'
   const marca = datos.marca?.trim() || MARCADOR.marca
   const linea = datos.linea?.trim() || MARCADOR.linea
+  const factura = datos.numero_factura?.trim() || MARCADOR.factura
   const valorSinIva = fmtCurrency(datos.valor_unitario_sin_iva, MARCADOR.valor)
   const valorIva = fmtCurrency(datos.valor_iva, MARCADOR.iva)
+  const ivaSolicitado = fmtAlMil(datos.valor_iva, MARCADOR.ivaAlMil)
 
+  // Red de seguridad UPME (nota 3): sin radicado, `upme` es null y ninguna cláusula
+  // menciona el certificado. Sin fecha, solo se cae «, de fecha …».
   const radicadoUpme = datos.numero_caso_upme?.trim() || null
   const fechaUpme = datos.fecha_certificado?.trim() ? fechaLarga(datos.fecha_certificado) : null
+  const upme = radicadoUpme ? { radicado: radicadoUpme, fecha: fechaUpme } : null
+
+  const ciudadFirma = titulares[0].municipio?.trim() || MARCADOR.ciudad
+  const hoy = fechaDeGeneracion(fechaGeneracion)
 
   // Ordinal de la cláusula de requisitos legales: corre a SEXTO cuando la variante
   // de copropiedad inserta la autorización como QUINTO.
@@ -199,35 +225,47 @@ export default function DeclaracionJuramentadaPDF({ datos }: DeclaracionJurament
           <B>BAJO LA GRAVEDAD DE JURAMENTO</B> lo siguiente:
         </Text>
 
-        {/* PRIMERO — la compra. Sin "valor total": ver la nota 1 del encabezado. */}
+        {/* PRIMERO — la compra y, si hay radicado, el certificado que la ampara.
+            Sin "valor total": ver la nota 1 del encabezado. */}
         <Text style={s.clause} hyphenationCallback={sinCortes}>
           <B>PRIMERO. </B>
           Que {c.soy} {c.adquirente} del vehículo {tipoVehiculo} marca{' '}
           <B>{`${marca},`}</B> <B>{`${linea},`}</B> adquirido el{' '}
           {fechaLarga(datos.fecha_factura, MARCADOR.fecha)} a {datos.proveedor?.trim() || MARCADOR.vendedor},
-          según factura electrónica <B>{`${datos.numero_factura?.trim() || MARCADOR.factura},`}</B>
+          según factura electrónica <B>{`${factura},`}</B>
           {expedidaANombre} por valor de {valorSinIva}, más IVA de {valorIva}.
+          {upme && ` Que la factura relacionada corresponde a la adquisición del vehículo ${tipoVehiculo} certificado por la UPME mediante Certificado Radicado `}
+          {upme && <B>{`No. ${upme.radicado}`}</B>}
+          {upme && ' (factura '}
+          {upme && <B>{`No. ${factura}).`}</B>}
         </Text>
 
         {/* SEGUNDO — factura ⟷ certificado UPME, con degradación por niveles */}
         <Text style={s.clause} hyphenationCallback={sinCortes}>
           <B>SEGUNDO. </B>
-          {clausulaSegundo(radicadoUpme, fechaUpme)}
+          Que la factura <B>{`No. ${factura}`}</B>
+          {` relacionada en la Relación de Factura adjunta corresponde a la adquisición del vehículo descrito${upme
+            ? `, certificado por la UPME mediante Certificado Radicado No. ${upme.radicado}${upme.fecha ? `, de fecha ${upme.fecha}` : ''}, habilitando los incentivos de la Ley 1715 de 2014.`
+            : ' en la cláusula anterior.'}`}
         </Text>
 
         <Text style={s.clause} hyphenationCallback={sinCortes}>
           <B>TERCERO. </B>
-          Que no se ha efectuado devolución ni compensación, parcial ni total, del IVA pagado en la
-          adquisición del vehículo descrito, ante ninguna entidad pública ni privada
-          {dos ? ', a ninguno de los dos propietarios' : ''}.
+          {`Que no se ha efectuado devolución ni compensación, parcial ni total, del IVA pagado en la adquisición del vehículo descrito, ante ninguna entidad pública ni privada${dos ? ', a ninguno de los dos propietarios' : ''}, respecto de la factura `}
+          {upme
+            ? <><B>{`No. ${factura}`}</B> y del Certificado UPME <B>{`No. ${upme.radicado}.`}</B></>
+            : <B>{`No. ${factura}.`}</B>}
         </Text>
 
         <Text style={s.clause} hyphenationCallback={sinCortes}>
           <B>CUARTO. </B>
-          Que el IVA cuya devolución se solicita por valor de {valorIva}, (valor aproximado como lo
-          establece el artículo 577 del Estatuto Tributario), no ha sido tratado
-          {dos ? ' por ninguno de los propietarios' : ''} como mayor valor del costo del bien, ni como
-          deducción en renta, ni como impuesto descontable en IVA, en ninguna declaración tributaria.
+          {`Que el IVA cuya devolución se solicita por valor de ${ivaSolicitado}, (valor aproximado como lo establece el artículo 577 del Estatuto Tributario), correspondiente a la factura `}
+          {upme
+            ? <><B>{`No. ${factura}`}</B> y al Certificado UPME <B>{`No. ${upme.radicado},`}</B></>
+            : <B>{`No. ${factura},`}</B>}
+          {' '}no ha sido tratado{dos ? ' por ninguno de los propietarios' : ''} como mayor valor del
+          costo del bien, ni como deducción en renta, ni como impuesto descontable en IVA, en ninguna
+          declaración tributaria.
         </Text>
 
         {/* QUINTO — solo en copropiedad: el segundo propietario autoriza al primero
@@ -258,6 +296,12 @@ export default function DeclaracionJuramentadaPDF({ datos }: DeclaracionJurament
           y 443 del Código Penal colombiano).
         </Text>
 
+        {/* Ciudad y fecha: la ciudad del domicilio del solicitante y el día en que se
+            genera el documento (en Bogotá, no en UTC). */}
+        <Text style={s.ciudadFecha} hyphenationCallback={sinCortes}>
+          {`Ciudad y fecha: ${ciudadFirma}, ${hoy.dia} de ${hoy.mes} de ${hoy.anio}`}
+        </Text>
+
         {/* Firmas — una por titular.
             `wrap={false}` es obligatorio: con dos firmantes el bloque se partía
             entre páginas y el nombre quedaba en una hoja y su cédula en la
@@ -270,9 +314,11 @@ export default function DeclaracionJuramentadaPDF({ datos }: DeclaracionJurament
                 {i === 0 ? 'PRIMER PROPIETARIO – SOLICITANTE' : 'SEGUNDO PROPIETARIO'}
               </Text>
             )}
-            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>Firma: ________________</Text>
-            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>Nombre: {t.nombre}</Text>
-            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>C.C.: {t.identificacion ?? MARCADOR.cedula}</Text>
+            <View style={s.firmaRaya}>
+              <Text style={s.firmaEtiqueta}>Firma</Text>
+            </View>
+            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>{`Nombre: ${t.nombre}`}</Text>
+            <Text style={s.firmaLinea} hyphenationCallback={sinCortes}>{`C.C.: ${t.identificacion ?? MARCADOR.cedula}`}</Text>
           </View>
         ))}
 
@@ -280,40 +326,3 @@ export default function DeclaracionJuramentadaPDF({ datos }: DeclaracionJurament
     </Document>
   )
 }
-
-/**
- * Cláusula SEGUNDO, degradada por niveles según lo que haya del certificado UPME.
- *
- * ⚠️ Esto es una RED DE SEGURIDAD, no el camino esperado. La regla del proceso
- * (Mauricio, 2026-09-07) es que en la rama «solo IVA» el cliente entrega el
- * certificado en Anexos, así que el radicado existe siempre: `campos_fuente` lo lee
- * de `concepto_upme` (Certificación, etapa 9) y, si esa etapa no se recorrió, de
- * `concepto_upme_anexos` (Anexos, etapa 18) como alternativa. El tercer nivel de
- * abajo no describe una rama del negocio: describe un expediente al que le falta el
- * documento, y con esta configuración eso deja de ser lo normal.
- *
- * La degradación es la CONSERVADORA: se retira lo que no se puede respaldar, en vez
- * de imprimir un marcador, un "null" o una frase vacía. Este documento se firma bajo
- * juramento; afirmar que existe un certificado UPME cuyo radicado el expediente no
- * tiene es exactamente lo que no puede pasar.
- *
- *  - radicado + fecha → texto íntegro de la plantilla.
- *  - radicado sin fecha → íntegro menos ", de fecha …". Sigue siendo frecuente:
- *    `fecha_certificado` no es obligatoria en la extracción y falta en la mayoría de
- *    los certificados ya cargados.
- *  - sin radicado → solo lo que la factura prueba: que corresponde al vehículo
- *    descrito. Se cae la mención a la UPME y a la Ley 1715 completa.
- *
- * ⚠️ PENDIENTE con Deisy Ramírez (SOENA): confirmar el texto del tercer nivel. Es una
- * decisión de MéTRIK, no un texto que el cliente haya aprobado. Ya no urge tanto como
- * cuando se escribió —dejó de ser el caso de toda una rama— pero sigue abierto.
- */
-function clausulaSegundo(radicado: string | null, fecha: string | null): string {
-  if (!radicado) {
-    return 'Que la factura relacionada en la Relación de Factura adjunta corresponde a la adquisición del vehículo descrito en la cláusula anterior.'
-  }
-  const conFecha = fecha ? `, de fecha ${fecha}` : ''
-  return `Que la factura relacionada en la Relación de Factura adjunta corresponde a la adquisición del vehículo descrito, certificado por la UPME mediante Certificado Radicado No. ${radicado}${conFecha}, habilitando los incentivos de la Ley 1715 de 2014.`
-}
-
-export { clausulaSegundo }
