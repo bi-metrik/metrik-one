@@ -382,9 +382,17 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
   items: T[],
   seleccion: string[],
   params: ParametrosCascada,
+  /**
+   * El id del itinerario (la tarifa). Con él entran también los descuentos sobre el total que son
+   * SOLO de esa tarifa (2026-10-29, `descuentoAplicaA`); sin él, solo los de «todas».
+   */
+  tarifaId?: string | null,
 ): Cascada {
   const incluidos = new Set(itemsDelItinerario(items, seleccion))
-  return calcularCascada(items.filter(i => incluidos.has(i.id)), params)
+  return calcularCascada(
+    items.filter(i => incluidos.has(i.id)),
+    tarifaId !== undefined ? { ...params, tarifaId } : params,
+  )
 }
 
 // ── El piso de margen: aquí sí bloquea ───────────────────────────────────────

@@ -7345,7 +7345,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       if (fila) {
         seleccion = fila.seleccion
         const ctx = await contextoDeCotizacion(supabase, cotizacionAceptada.id)
-        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).costoDirecto : costoRespaldo
+        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id).costoDirecto : costoRespaldo
       }
     }
     presupuestoPorRubro = calcularPresupuestoPorRubro(

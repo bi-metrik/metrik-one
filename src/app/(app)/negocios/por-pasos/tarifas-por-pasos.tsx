@@ -32,7 +32,8 @@ export interface ServicioConOpciones extends ServicioDelViaje {
 export interface ReglasEnTarifas {
   puntosExtra: number
   puntosMax: number
-  descuentos: { id: string; descripcion: string; pct: number }[]
+  /** `aplicaA`: el id de UNA tarifa (2026-10-29); ausente o `null` = a todas. */
+  descuentos: { id: string; descripcion: string; pct: number; aplicaA?: string | null }[]
   pisoHotelPct: number
 }
 
@@ -130,7 +131,7 @@ export function TarifasPorPasos({
    */
   reglas?: ReglasEnTarifas | null
   onPuntos?: (puntos: number) => void
-  onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number }[]) => void
+  onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[]) => void
   /**
    * El margen del total, el MISMO que pinta el encabezado (`margenDelEncabezado`). Sin tarifas que
    * vayan al cliente (un solo hotel, nada que escoger) es lo único que hay que medir: sin él, el
@@ -183,7 +184,13 @@ export function TarifasPorPasos({
       : ` (sin ${n === 1 ? '1 de tarifa pública' : `${n} de tarifa pública`})`
   }
   const [puntosEscritos, setPuntosEscritos] = useState<string | null>(null)
-  const [nuevoDescuento, setNuevoDescuento] = useState<{ descripcion: string; pct: string } | null>(null)
+  const [nuevoDescuento, setNuevoDescuento] = useState<{ descripcion: string; pct: string; aplicaA: string } | null>(null)
+  /** A qué tarifa aplica un descuento, como se lee en su chip (`aplicaA` vacío = todas). */
+  const aplicaATexto = (aplicaA: string | null | undefined) => {
+    if (!aplicaA) return 'Todas las tarifas'
+    const t = tarifas.find(x => x.id === aplicaA)
+    return t ? `Solo ${t.nombre ?? 'esta tarifa'}` : 'Su tarifa ya no existe: no se aplica'
+  }
 
   const pregunta = (() => {
     const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : `qué opción de ${s.nombre}`))]
@@ -259,6 +266,22 @@ export function TarifasPorPasos({
             {reglas.descuentos.map(d => (
               <span key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] px-2.5 py-1.5 text-[13px]" data-descuento-total={d.id}>
                 <span className="min-w-0 flex-1">{d.descripcion}</span>
+                {editable ? (
+                  <select
+                    aria-label={`A qué tarifa aplica «${d.descripcion}»`}
+                    className={`${INPUT} !w-auto !py-0.5 text-xs`}
+                    disabled={ocupado}
+                    value={d.aplicaA ?? ''}
+                    onChange={e => onDescuentos?.(reglas.descuentos.map(x => (x.id === d.id ? { ...x, aplicaA: e.target.value || null } : x)))}
+                    data-aplica-a={d.aplicaA ?? 'todas'}
+                  >
+                    <option value="">Todas las tarifas</option>
+                    {tarifas.map(t => <option key={t.id} value={t.id}>Solo {t.nombre ?? 'esta tarifa'}</option>)}
+                    {d.aplicaA && !tarifas.some(t => t.id === d.aplicaA) && <option value={d.aplicaA}>Su tarifa ya no existe: no se aplica</option>}
+                  </select>
+                ) : (
+                  <small className="text-xs text-[#6E6A62]" data-aplica-a={d.aplicaA ?? 'todas'}>{aplicaATexto(d.aplicaA)}</small>
+                )}
                 <b className="tabular-nums">{pct(d.pct)}</b>
                 {editable && (
                   <button
@@ -296,6 +319,18 @@ export function TarifasPorPasos({
                     onChange={e => setNuevoDescuento({ ...nuevoDescuento, pct: e.target.value })}
                   />
                 </label>
+                <label className="flex flex-col gap-0.5 text-xs text-[#6E6A62]">
+                  <span>Aplica a</span>
+                  <select
+                    className={`${INPUT} !w-auto`}
+                    value={nuevoDescuento.aplicaA}
+                    onChange={e => setNuevoDescuento({ ...nuevoDescuento, aplicaA: e.target.value })}
+                    data-nuevo-aplica-a
+                  >
+                    <option value="">Todas las tarifas</option>
+                    {tarifas.map(t => <option key={t.id} value={t.id}>Solo {t.nombre ?? 'esta tarifa'}</option>)}
+                  </select>
+                </label>
                 <button
                   type="button"
                   className={BTN_PRIM}
@@ -303,7 +338,7 @@ export function TarifasPorPasos({
                   onClick={() => {
                     const v = Number(nuevoDescuento.pct.replace(',', '.'))
                     if (!nuevoDescuento.descripcion.trim() || !Number.isFinite(v) || v <= 0 || v >= 100) return
-                    onDescuentos?.([...reglas.descuentos, { descripcion: nuevoDescuento.descripcion.trim(), pct: v }])
+                    onDescuentos?.([...reglas.descuentos, { descripcion: nuevoDescuento.descripcion.trim(), pct: v, ...(nuevoDescuento.aplicaA ? { aplicaA: nuevoDescuento.aplicaA } : {}) }])
                     setNuevoDescuento(null)
                   }}
                 >
@@ -312,7 +347,7 @@ export function TarifasPorPasos({
                 <button type="button" className={BTN} onClick={() => setNuevoDescuento(null)}>Cancelar</button>
               </span>
             ) : (
-              <button type="button" className={`${LINK} self-start text-[13px]`} disabled={ocupado} onClick={() => setNuevoDescuento({ descripcion: '', pct: '' })} data-agregar-descuento-total>
+              <button type="button" className={`${LINK} self-start text-[13px]`} disabled={ocupado} onClick={() => setNuevoDescuento({ descripcion: '', pct: '', aplicaA: '' })} data-agregar-descuento-total>
                 + Descuento sobre el total
               </button>
             ))}

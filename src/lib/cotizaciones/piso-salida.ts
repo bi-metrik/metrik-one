@@ -138,7 +138,7 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
       ? [...marcadas]
           .sort((a, b) => a.orden - b.orden)
           .map((fila, i) => {
-            const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+            const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
             const faltantes = ranurasSinResolver(ctx.items, fila.seleccion)
             const margen = margenMedible(cascada)
             const hoteles = hotelesBajoPisoDe(ctx, cascada)
@@ -229,7 +229,7 @@ function conteoDeLineas(
 ): ConteoDeLineas {
   const ajuste = new Set(ctx.items.filter(i => i.es_ajuste === true).map(i => i.id))
   const cascadas = marcadas
-    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params))
+    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params, f.id))
     : [cascadaVigente(ctx, filas)]
   const vistas = new Map<string, boolean>()
   for (const cascada of cascadas) {

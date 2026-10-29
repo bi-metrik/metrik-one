@@ -482,7 +482,7 @@ export async function leerCabecera(
  */
 export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario): ItinerarioCalculado {
   const faltantes = ranurasSinResolver(ctx.items, fila.seleccion)
-  const cascada: Cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+  const cascada: Cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
   const motivo = motivoDeRechazo({
     ranurasFaltantes: faltantes,
     // Donde el piso se exige en la salida, el margen es el de `margenMedible` —sin costo
@@ -554,9 +554,10 @@ export function cascadaVigente(ctx: ContextoCotizacion, filas: FilaItinerario[] 
       ? itemsDelItinerario(ctx.items, principal.seleccion)
       : itemsQueAportanAlTotal(ctx.items),
   )
+  // Con principal, la cascada es la de ESA tarifa: lleva también sus descuentos propios.
   return calcularCascada(
     ctx.items.filter(i => aportan.has(i.id) || i.es_ajuste === true),
-    ctx.params,
+    principal ? { ...ctx.params, tarifaId: principal.id } : ctx.params,
   )
 }
 
@@ -581,7 +582,7 @@ export async function totalDelPrincipal(
   if (filas === null || filas.length === 0) return null
   const principal = filas.find(f => f.esPrincipal)
   if (!principal) return null
-  const cascada = cascadaDeItinerario(ctx.items, principal.seleccion, ctx.params)
+  const cascada = cascadaDeItinerario(ctx.items, principal.seleccion, ctx.params, principal.id)
   return {
     precioVenta: cascada.precioVenta,
     costoDirecto: cascada.costoDirecto,
@@ -682,7 +683,7 @@ export async function bloquesParaPDF(
   })
 
   return ordenadas.map(fila => {
-    const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+    const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
     // Reglas de margen (2026-10-27): los puntos extra van dentro del precio de cada línea de
     // ESTA tarifa, y sus descuentos sobre el total salen con su descripción. Sin reglas, nada.
     const reglas = reglasDelDocumento(cascada)

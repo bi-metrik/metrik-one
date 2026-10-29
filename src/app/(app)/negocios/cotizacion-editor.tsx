@@ -977,7 +977,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
    * principal», así que el aviso de abajo solo cubre el hueco que quedaba:
    * alternativas cargadas y NINGUNA combinación construida.
    */
-  const seleccionPrincipal = (itinerarios?.itinerarios ?? []).find(i => i.esPrincipal)?.seleccion ?? null
+  const filaPrincipal = (itinerarios?.itinerarios ?? []).find(i => i.esPrincipal) ?? null
+  const seleccionPrincipal = filaPrincipal?.seleccion ?? null
+  // Con principal el total es el de ESA tarifa: lleva sus descuentos propios (`descuentoAplicaA`).
+  const paramsDelTotal = filaPrincipal ? { ...paramsCascada, tarifaId: filaPrincipal.id } : paramsCascada
   const hayPrincipal = seleccionPrincipal !== null
 
   const aportanAlTotal = new Set(
@@ -987,7 +990,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   )
   const cascadaTotal = calcularCascada(
     paraCascada.filter(i => aportanAlTotal.has(i.id) || i.es_ajuste === true),
-    paramsCascada,
+    paramsDelTotal,
   )
   /**
    * Los supuestos que TODAVÍA aplican.
@@ -1055,7 +1058,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const opcionesIva = {
     tarifaPct: tarifaIvaDelVendedor(fiscalProfile),
     // Con reglas de margen, los descuentos sobre el total también bajan la base del IVA.
-    descuentoComercialPct: pctDescuentoTotal(paramsCascada),
+    descuentoComercialPct: pctDescuentoTotal(paramsDelTotal),
     precio: configIvaEfectiva.precio,
   }
   const ivaPorLinea = conIvaSobreIngresoPropio

@@ -15,7 +15,8 @@
  *  3. **Lo demás** (planes, actividades, traslados, otros): arranca en 0 %.
  *  4. **Puntos extra**: de 0 a 5 puntos de margen sobre toda la cotización, repartidos entre
  *     hoteles y lo demás en proporción a su precio. Los vuelos no reciben nada.
- *  5. **Descuentos sobre el total**: uno o varios, con descripción y %, después de los puntos.
+ *  5. **Descuentos sobre el total**: uno o varios, con descripción y %, después de los puntos. Cada
+ *     uno a todas las tarifas o a una sola (`aplicaA`, 2026-10-29).
  *  6. **Margen global**: `(venta − costo) / venta` después de todo. Se juzga contra el mínimo
  *     de la cotización (12 % en la línea que declara las reglas).
  *
@@ -131,6 +132,29 @@ export interface DescuentoSobreTotal {
   id: string
   descripcion: string
   pct: number
+  /**
+   * A qué tarifa aplica (2026-10-29, Trappvel: «un 5 % solo a la Premium»): el id del itinerario
+   * (`cotizacion_itinerarios.id`, estable aunque la tarifa se renombre). Ausente o `null` = a TODAS
+   * las tarifas, que es como se leen los descuentos guardados antes de que existiera el campo.
+   */
+  aplicaA?: string | null
+}
+
+/**
+ * ¿Este descuento le toca a la cascada de esta tarifa? Los de «todas» siempre; los de una tarifa,
+ * solo en la cascada de ESA tarifa. Una cascada que no es de ninguna tarifa (`tarifaId` ausente:
+ * la cotización sin principal, el precio de cada opción) solo lleva los de «todas».
+ *
+ * Consecuencia buscada: si la tarifa se borra, su descuento no le cae a ninguna otra (ninguna
+ * cascada vuelve a tener ese id); queda guardado sin aplicarse y la pantalla lo dice.
+ */
+export function descuentoAplicaA(d: Pick<DescuentoSobreTotal, 'aplicaA'>, tarifaId: string | null | undefined): boolean {
+  return !d.aplicaA || d.aplicaA === tarifaId
+}
+
+/** Los descuentos sobre el total que le tocan a la cascada de una tarifa (`descuentoAplicaA`). */
+export function descuentosDeTarifa<D extends Pick<DescuentoSobreTotal, 'aplicaA'>>(descuentos: readonly D[], tarifaId: string | null | undefined): D[] {
+  return descuentos.filter(d => descuentoAplicaA(d, tarifaId))
 }
 
 export interface ReglasDeCotizacion {
@@ -154,7 +178,9 @@ function leerDescuentos(raw: unknown): DescuentoSobreTotal[] {
     const pct = Number(d.pct)
     if (!descripcion || !Number.isFinite(pct) || pct <= 0 || pct >= 100) continue
     const id = typeof d.id === 'string' && d.id.trim() ? d.id.slice(0, 40) : `d${out.length + 1}`
-    out.push({ id, descripcion, pct })
+    // Sin el campo (todo lo guardado antes del 2026-10-29), o vacío: a todas las tarifas.
+    const aplicaA = typeof d.aplica_a === 'string' && d.aplica_a.trim() ? d.aplica_a.trim().slice(0, 64) : null
+    out.push({ id, descripcion, pct, ...(aplicaA ? { aplicaA } : {}) })
     if (out.length >= MAX_DESCUENTOS) break
   }
   return out
@@ -174,7 +200,8 @@ export function reglasAJsonb(r: ReglasDeCotizacion): Obj {
     v: 1,
     politica: politicaAJsonb(r.politica),
     puntos_extra: r.puntosExtra,
-    descuentos: r.descuentos.map(d => ({ id: d.id, descripcion: d.descripcion, pct: d.pct })),
+    // `aplica_a` solo cuando el descuento es de una tarifa: el de «todas» se escribe como siempre.
+    descuentos: r.descuentos.map(d => ({ id: d.id, descripcion: d.descripcion, pct: d.pct, ...(d.aplicaA ? { aplica_a: d.aplicaA } : {}) })),
   }
 }
 
@@ -188,7 +215,7 @@ export function reglasAlNacer(politica: PoliticaReglasMargen): Obj {
  */
 export function motivoReglasInvalidas(
   politica: PoliticaReglasMargen,
-  cambio: { puntosExtra?: number; descuentos?: { descripcion: string; pct: number }[] },
+  cambio: { puntosExtra?: number; descuentos?: { descripcion: string; pct: number; aplicaA?: string | null }[] },
 ): string | null {
   if (cambio.puntosExtra !== undefined) {
     const p = cambio.puntosExtra
@@ -203,7 +230,11 @@ export function motivoReglasInvalidas(
       if (d.descripcion.trim().length > MAX_DESCRIPCION_DESCUENTO) return `La descripción va hasta ${MAX_DESCRIPCION_DESCUENTO} letras.`
       if (!Number.isFinite(d.pct) || d.pct <= 0 || d.pct >= 100) return 'El descuento va de 0,1 % a 99 %.'
     }
-    const suma = cambio.descuentos.reduce((a, d) => a + d.pct, 0)
+    // Lo que de verdad se suma en una tarifa: los de todas más los suyos. La que más junte manda.
+    const todas = cambio.descuentos.filter(d => !d.aplicaA).reduce((a, d) => a + d.pct, 0)
+    const porTarifa = new Map<string, number>()
+    for (const d of cambio.descuentos) if (d.aplicaA) porTarifa.set(d.aplicaA, (porTarifa.get(d.aplicaA) ?? 0) + d.pct)
+    const suma = todas + Math.max(0, ...porTarifa.values())
     if (suma >= 100) return 'Los descuentos juntos no pueden llegar al 100 %.'
   }
   return null
@@ -403,10 +434,11 @@ export function paramsPorOpcion<T extends { reglas?: ReglasDeCotizacion | null }
  * El descuento sobre el total, en %, que el IVA tiene que restar: los descuentos de las reglas
  * más el descuento comercial de siempre. Sin reglas es el comercial, como antes.
  */
-export function pctDescuentoTotal(params: { descuentoComercialPct?: number | null; reglas?: ReglasDeCotizacion | null }): number {
+export function pctDescuentoTotal(params: { descuentoComercialPct?: number | null; reglas?: ReglasDeCotizacion | null; tarifaId?: string | null }): number {
   const comercial = Math.min(100, Math.max(0, Number(params.descuentoComercialPct) || 0))
   if (!params.reglas) return comercial
-  return Math.min(100, comercial + params.reglas.descuentos.reduce((a, d) => a + d.pct, 0))
+  // Solo los de esta tarifa (`descuentoAplicaA`): los de otra no bajan esta base.
+  return Math.min(100, comercial + descuentosDeTarifa(params.reglas.descuentos, params.tarifaId).reduce((a, d) => a + d.pct, 0))
 }
 
 // ── Lo que imprime el documento del cliente ──────────────────────────────────
