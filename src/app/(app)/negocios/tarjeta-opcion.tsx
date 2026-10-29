@@ -693,7 +693,7 @@ export default function TarjetaOpcion({
             autorizador={autorizador}
             apilable={porPasos !== null}
             tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
-            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
+            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario' || tarifa.tipoTarifa?.origen === 'pantallazo' ? tarifa.tipoTarifa.origen : false}
             reglas={reglasDeLinea
               ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null }
               : null}
