@@ -4,6 +4,9 @@
  * valor a partir de los datos que ya resuelve `generarFormularioCore` (`campos_fuente`
  * + overrides).
  *
+ * El «IVA solicitado» es el IVA EXACTO de la factura (decisión de Mauricio del 2026-10-29):
+ * no hay variable «aproximada al mil».
+ *
  * Los valores DERIVADOS se calculan con las MISMAS funciones que usan los componentes
  * @react-pdf (`formato.ts`, `titulares.ts`, `nitBaseYDv`): una plantilla editada no puede
  * formatear distinto el mismo peso que la Relación de facturas del mismo expediente.
@@ -16,7 +19,7 @@
  */
 import { nitBaseYDv } from '@/lib/dian/nit'
 import { concordancia, titularesDeDatos, type Titular } from '@/lib/pdf/titulares'
-import { fechaCorta, fechaDeGeneracion, fechaLarga, fmtAlMil, fmtCurrency, tarifaIva } from '@/lib/pdf/formato'
+import { fechaCorta, fechaDeGeneracion, fechaLarga, fmtCurrency, tarifaIva } from '@/lib/pdf/formato'
 
 export type TipoPlantilla = 'declaracion-juramentada' | 'relacion-facturas'
 
@@ -177,7 +180,7 @@ const DJ: DefDocumento = {
     { nombre: 'fecha_factura_corta', etiqueta: 'Fecha de la factura (15/03/2026)', grupo: 'Vehículo y factura' },
     { nombre: 'valor_sin_iva', etiqueta: 'Valor antes de IVA', grupo: 'Valores' },
     { nombre: 'valor_iva', etiqueta: 'IVA pagado', grupo: 'Valores' },
-    { nombre: 'iva_solicitado', etiqueta: 'IVA solicitado, aproximado al mil', grupo: 'Valores', ayuda: 'Art. 577 del Estatuto Tributario.' },
+    { nombre: 'iva_solicitado', etiqueta: 'IVA solicitado (el IVA exacto de la factura)', grupo: 'Valores', ayuda: 'Sin redondear: decisión de Mauricio del 2026-10-29.' },
     { nombre: 'tarifa_iva', etiqueta: 'Tarifa de IVA (19 %)', grupo: 'Valores', ayuda: 'IVA pagado ÷ valor antes de IVA.' },
     { nombre: 'numero_caso_upme', etiqueta: 'Radicado del certificado UPME', grupo: 'Certificado UPME', ayuda: 'Úsalo dentro de «Si hay radicado UPME».' },
     { nombre: 'fecha_certificado_larga', etiqueta: 'Fecha del certificado (8 de mayo de 2026)', grupo: 'Certificado UPME', ayuda: 'Úsala dentro de «Si hay fecha del certificado».' },
@@ -198,7 +201,7 @@ const DJ: DefDocumento = {
     { etiqueta: 'Cédula del solicitante', alguna: ['titular.cedula', 'numero_identificacion'] },
     { etiqueta: 'Número de factura', alguna: ['numero_factura'] },
     { etiqueta: 'IVA pagado', alguna: ['valor_iva'] },
-    { etiqueta: 'IVA solicitado, aproximado al mil', alguna: ['iva_solicitado'] },
+    { etiqueta: 'IVA solicitado', alguna: ['iva_solicitado'] },
     { etiqueta: 'Bloque de firmas ({{#firmas}})', alguna: ['@firmas'] },
   ],
   pagina: { margenVertical: 50, margenLateral: 55, interlineado: 1.5 },
@@ -238,7 +241,8 @@ const DJ: DefDocumento = {
         fecha_factura_corta: fechaCorta(datos.fecha_factura, '[FECHA DE LA FACTURA]'),
         valor_sin_iva: fmtCurrency(datos.valor_unitario_sin_iva, '[VALOR]'),
         valor_iva: fmtCurrency(datos.valor_iva, '[IVA PAGADO]'),
-        iva_solicitado: fmtAlMil(datos.valor_iva, '[IVA SOLICITADO, APROXIMADO AL MIL]'),
+        // El IVA exacto de la factura, sin redondear (decisión de Mauricio, 2026-10-29).
+        iva_solicitado: fmtCurrency(datos.valor_iva, '[IVA SOLICITADO]'),
         tarifa_iva: tarifaIva(datos.valor_iva, datos.valor_unitario_sin_iva, '[TARIFA DE IVA]'),
         numero_caso_upme: radicado || '—',
         fecha_certificado_larga: t(datos.fecha_certificado) ? fechaLarga(datos.fecha_certificado) : '—',
@@ -285,7 +289,7 @@ const RELACION: DefDocumento = {
     { nombre: 'tipo_vehiculo', etiqueta: 'Tipo de vehículo (eléctrico, híbrido…)', grupo: 'Factura' },
     { nombre: 'valor_sin_iva', etiqueta: 'Valor antes de IVA', grupo: 'Valores' },
     { nombre: 'valor_iva', etiqueta: 'IVA pagado', grupo: 'Valores' },
-    { nombre: 'iva_solicitado', etiqueta: 'IVA solicitado, aproximado al mil', grupo: 'Valores', ayuda: 'Art. 577 del Estatuto Tributario.' },
+    { nombre: 'iva_solicitado', etiqueta: 'IVA solicitado (el IVA exacto de la factura)', grupo: 'Valores', ayuda: 'Sin redondear: decisión de Mauricio del 2026-10-29.' },
     { nombre: 'tarifa_iva', etiqueta: 'Tarifa de IVA pagada (19 %)', grupo: 'Valores', ayuda: 'IVA pagado ÷ valor antes de IVA.' },
     { nombre: 'numero_caso_upme', etiqueta: 'N.° del certificado UPME («—» si no hay)', grupo: 'Certificado UPME' },
     { nombre: 'fecha_certificado_corta', etiqueta: 'Fecha del certificado (08/05/2026; «—» sin radicado)', grupo: 'Certificado UPME' },
@@ -308,7 +312,7 @@ const RELACION: DefDocumento = {
     { etiqueta: 'NIT del proveedor', alguna: ['nit_proveedor_base'] },
     { etiqueta: 'Valor antes de IVA', alguna: ['valor_sin_iva'] },
     { etiqueta: 'IVA pagado', alguna: ['valor_iva'] },
-    { etiqueta: 'IVA solicitado, aproximado al mil', alguna: ['iva_solicitado'] },
+    { etiqueta: 'IVA solicitado', alguna: ['iva_solicitado'] },
     { etiqueta: 'Bloque de firmas ({{#firmas}})', alguna: ['@firmas'] },
   ],
   pagina: { margenVertical: 45, margenLateral: 50, interlineado: 1.4 },
@@ -356,7 +360,8 @@ const RELACION: DefDocumento = {
         tipo_vehiculo: tipoVehiculo(datos),
         valor_sin_iva: fmtCurrency(datos.valor_unitario_sin_iva),
         valor_iva: fmtCurrency(datos.valor_iva),
-        iva_solicitado: fmtAlMil(datos.valor_iva),
+        // El IVA exacto de la factura, sin redondear (decisión de Mauricio, 2026-10-29).
+        iva_solicitado: fmtCurrency(datos.valor_iva),
         tarifa_iva: tarifaIva(datos.valor_iva, datos.valor_unitario_sin_iva, '[TARIFA DE IVA]'),
         numero_caso_upme: radicado || VACIO,
         // Sin radicado tampoco se imprime una fecha de certificado suelta (igual que la ficha de hoy).

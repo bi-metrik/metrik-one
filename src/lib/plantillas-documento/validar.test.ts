@@ -139,10 +139,10 @@ describe('resuelve variables y condiciones', () => {
     return h.slice(0, h.indexOf('</p>') + 4)
   }
 
-  it('derivados: IVA al mil, tarifa, fechas largas y de generación en hora de Bogotá', () => {
+  it('derivados: IVA solicitado exacto, tarifa, fechas largas y de generación en hora de Bogotá', () => {
     expect(cuerpo('{{iva_solicitado}}|{{tarifa_iva}}|{{fecha_factura_larga}}|{{fecha_generacion_larga}}', {
       valor_iva: '4319548', valor_unitario_sin_iva: '22734463', fecha_factura: '2026-03-15',
-    })).toBe('<p>$ 4.320.000|19 %|15 de marzo de 2026|29 de octubre de 2026</p>')
+    })).toBe('<p>$ 4.319.548|19 %|15 de marzo de 2026|29 de octubre de 2026</p>')
   })
 
   it('concordancia de uno y de dos titulares', () => {
@@ -187,6 +187,7 @@ describe('resuelve variables y condiciones', () => {
     const r = htmlDelDocumento(DJ, DJ_V1, {}, CTX)
     expect(r.ok).toBe(true)
     expect(r.html).toContain('[NOMBRE COMPLETO DEL SOLICITANTE]')
-    expect(r.html).toContain('[IVA SOLICITADO, APROXIMADO AL MIL]')
+    expect(r.html).toContain('[IVA SOLICITADO]')
+    expect(r.html).not.toMatch(/al mil/i)
   })
 })
