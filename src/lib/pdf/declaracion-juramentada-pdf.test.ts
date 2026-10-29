@@ -2,20 +2,23 @@ import { describe, it, expect } from 'vitest'
 import { createElement } from 'react'
 import fs from 'node:fs'
 import { renderToBuffer } from '@react-pdf/renderer'
-import DeclaracionJuramentadaPDF, { clausulaSegundo } from './declaracion-juramentada-pdf'
+import DeclaracionJuramentadaPDF from './declaracion-juramentada-pdf'
 import { fmtCurrency, fechaLarga } from './formato'
+import { textoDelPDF } from './texto-del-pdf'
 
 /**
  * La declaración juramentada es el documento que el solicitante firma BAJO
  * JURAMENTO, así que lo que se fija aquí no es el diseño (eso se mira renderizado),
  * sino las afirmaciones que el texto hace o deja de hacer según los datos que
- * existan en el expediente.
+ * existan en el expediente. Se afirma sobre el TEXTO DEL PDF, no sobre las props.
+ *
+ * Plantilla vigente: la del 2026-10-28 (SOE-033).
  */
 
 const DATOS_BASE = {
   nombre_solicitante: 'ANA MARIA GOMEZ',
   numero_identificacion: '43567890',
-  direccion: 'CR 43A # 1-50 APTO 902',
+  direccion: 'CR 43A # 1 50 APTO 902',
   municipio: 'Medellín',
   marca: 'BYD',
   linea: 'DOLPHIN MINI GS 2026',
@@ -24,67 +27,136 @@ const DATOS_BASE = {
   proveedor: 'MOTORES Y MAQUINAS S.A.',
   numero_factura: 'FEMM12345',
   valor_unitario_sin_iva: '86380952',
-  valor_iva: '16412381',
+  valor_iva: '4319048',
   numero_caso_upme: 'VEH_GEE20262260',
   fecha_certificado: '2026-05-08',
 }
 
-describe('cláusula SEGUNDO — degradación sin certificado UPME', () => {
-  it('con radicado y fecha imprime el texto íntegro de la plantilla', () => {
-    const t = clausulaSegundo('VEH_GEE20262260', '8 de mayo de 2026')
-    expect(t).toContain('Certificado Radicado No. VEH_GEE20262260')
-    expect(t).toContain(', de fecha 8 de mayo de 2026,')
-    expect(t).toContain('habilitando los incentivos de la Ley 1715 de 2014')
-  })
+const COPROPIEDAD = {
+  nombre_solicitante_2: 'LUIS PEREZ TORO',
+  numero_identificacion_2: '71234567',
+  direccion_2: 'CL 100 # 8 60',
+  municipio_2: 'Bogotá',
+}
 
-  it('con radicado y SIN fecha se cae solo el trozo de la fecha', () => {
-    const t = clausulaSegundo('VEH_GEE20262260', null)
-    expect(t).toContain('Certificado Radicado No. VEH_GEE20262260, habilitando')
-    expect(t).not.toContain('de fecha')
-  })
+type DatosDeclaracion = Parameters<typeof DeclaracionJuramentadaPDF>[0]['datos']
 
-  /**
-   * El caso «solo IVA»: se salta la etapa de Certificación, así que no hay
-   * radicado. La cláusula NO puede afirmar que existe un certificado UPME que el
-   * expediente no tiene, ni dejar un marcador visible en un documento que va a la
-   * DIAN. Se afirma únicamente lo que la factura prueba.
-   */
-  it('sin radicado no menciona la UPME, y no deja hueco ni marcador', () => {
-    const t = clausulaSegundo(null, null)
-    expect(t).not.toMatch(/UPME|Radicado|Ley 1715/)
-    expect(t).not.toMatch(/\[|null|undefined|—/)
-    expect(t).toBe('Que la factura relacionada en la Relación de Factura adjunta corresponde a la adquisición del vehículo descrito en la cláusula anterior.')
-  })
+/**
+ * `renderToBuffer` está tipado contra `DocumentProps`, no contra las props del
+ * componente; el escape es el mismo que usa `formulario-actions` al construir el
+ * elemento con `createElement`.
+ */
+function renderDeclaracion(datos: DatosDeclaracion, fechaGeneracion = '2026-10-29T15:00:00.000Z') {
+  const el = createElement(DeclaracionJuramentadaPDF, { datos, fechaGeneracion, codigoNegocio: 'V0000' })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return renderToBuffer(el as any)
+}
 
-  /** Una fecha suelta sin radicado tampoco resucita la mención al certificado. */
-  it('la fecha sin radicado no basta para afirmar que hay certificado', () => {
-    expect(clausulaSegundo(null, '8 de mayo de 2026')).not.toContain('UPME')
-  })
+/**
+ * El extractor une los trozos con espacios y un renglón puede cortar en cualquier
+ * parte, así que se compara SIN espacios. Lo que se busca son frases, no maquetación.
+ */
+const plano = (t: string) =>
+  // Rayas en WinAnsi (0x96 «–», 0x97 «—») leídas como latin1: a su carácter.
+  t.replace(/\x96/g, '–').replace(/\x97/g, '—').replace(/[\s ]+/g, '')
+
+async function texto(datos: DatosDeclaracion, fecha?: string) {
+  const buf = await renderDeclaracion(datos, fecha)
+  expect(buf.subarray(0, 5).toString()).toBe('%PDF-')
+  return plano(textoDelPDF(buf))
+}
+
+/**
+ * Guiones que el documento trae de verdad: «000673-int-0063» aparece dos veces en el
+ * encabezado y dos en la cláusula de requisitos. Un guion de más es uno inventado por
+ * el motor al cortar el renglón entre dos corridas (ver `B` en el componente). Los
+ * datos de prueba no traen guiones a propósito, para que la cuenta sea exacta.
+ */
+const GUIONES_PROPIOS = 4
+const guiones = (t: string) => (t.match(/-/g) ?? []).length
+
+describe('un titular con el certificado UPME completo', () => {
+  it('ata la factura y el certificado por número en PRIMERO a CUARTO', async () => {
+    const t = await texto(DATOS_BASE)
+    expect(t).toContain(plano('certificado por la UPME mediante Certificado Radicado No. VEH_GEE20262260 (factura No. FEMM12345).'))
+    expect(t).toContain(plano('Que la factura No. FEMM12345 relacionada en la Relación de Factura adjunta'))
+    expect(t).toContain(plano(`Radicado No. VEH_GEE20262260, de fecha ${fechaLarga('2026-05-08')}, habilitando`))
+    expect(t).toContain(plano('respecto de la factura No. FEMM12345 y del Certificado UPME No. VEH_GEE20262260.'))
+    expect(t).toContain(plano('correspondiente a la factura No. FEMM12345 y al Certificado UPME No. VEH_GEE20262260, no ha sido tratado'))
+  }, 30_000)
+
+  it('CUARTO lleva el IVA aproximado al mil; PRIMERO, el IVA exacto', async () => {
+    const t = await texto(DATOS_BASE)
+    expect(t).toContain(plano(`más IVA de ${fmtCurrency('4319048')}.`))
+    expect(t).toContain(plano(`por valor de ${fmtCurrency('4319000')}, (valor aproximado`))
+  }, 30_000)
+
+  it('cierra con ciudad y fecha de generación (en Bogotá) y la firma de la plantilla', async () => {
+    // 21:30 en Bogotá del 29 de octubre = 02:30 UTC del 30.
+    const t = await texto(DATOS_BASE, '2026-10-30T02:30:00.000Z')
+    expect(t).toContain(plano('Ciudad y fecha: Medellín, 29 de octubre de 2026'))
+    expect(t).toContain(plano('Firma Nombre: ANA MARIA GOMEZ C.C.: 43567890'))
+  }, 30_000)
+
+  it('sin marcadores, sin la nota interna, sin valor total y sin guiones inventados', async () => {
+    const t = await texto(DATOS_BASE)
+    expect(t).not.toContain('[')
+    expect(t).not.toMatch(/Notainterna|borrarantes/)
+    expect(t).not.toMatch(/valortotal/i)
+    expect(guiones(t)).toBe(GUIONES_PROPIOS)
+  }, 30_000)
 })
 
-describe('formatos del documento', () => {
-  it('la moneda va en pesos sin decimales', () => {
-    // El separador que mete Intl es un espacio DURO (U+00A0), no uno normal.
-    expect(fmtCurrency('86380952')).toBe('$\u00a086.380.952')
-  })
-
-  it('sin valor devuelve el marcador que se le pase, no "NaN"', () => {
-    expect(fmtCurrency(null, '[VALOR ANTES DE IVA]')).toBe('[VALOR ANTES DE IVA]')
-  })
+describe('red de seguridad UPME', () => {
+  it('sin fecha del certificado se cae solo «, de fecha …»', async () => {
+    const t = await texto({ ...DATOS_BASE, fecha_certificado: null })
+    expect(t).toContain(plano('Certificado Radicado No. VEH_GEE20262260, habilitando'))
+    expect(t).not.toContain(plano('de fecha'))
+    expect(t).toContain(plano('y del Certificado UPME No. VEH_GEE20262260.'))
+    expect(t).not.toContain('[')
+  }, 30_000)
 
   /**
-   * `new Date('2026-03-15')` es medianoche UTC: leída en Bogotá (UTC-5) retrocede
-   * al 14. Una fecha de adquisición corrida un día contradice la factura adjunta.
+   * El documento se firma bajo juramento: sin radicado no puede afirmar que existe
+   * un certificado UPME, ni dejar un marcador visible. Se afirma solo lo que la
+   * factura prueba.
    */
-  it('la fecha larga NO se corre de día por zona horaria', () => {
-    expect(fechaLarga('2026-03-15')).toBe('15 de marzo de 2026')
-    expect(fechaLarga('2026-01-01')).toBe('1 de enero de 2026')
-  })
+  it('sin radicado no menciona la UPME en ninguna cláusula, ni deja hueco ni marcador', async () => {
+    const t = await texto({ ...DATOS_BASE, numero_caso_upme: null, fecha_certificado: null })
+    expect(t).not.toMatch(/UPME|Radicado/)
+    expect(t).not.toContain('[')
+    expect(t).not.toMatch(/null|undefined/)
+    expect(t).toContain(plano('Que la factura No. FEMM12345 relacionada en la Relación de Factura adjunta corresponde a la adquisición del vehículo descrito en la cláusula anterior.'))
+    expect(t).toContain(plano('respecto de la factura No. FEMM12345. CUARTO.'))
+    expect(t).toContain(plano('correspondiente a la factura No. FEMM12345, no ha sido tratado'))
+    // La segunda frase de PRIMERO se retira entera.
+    expect(t).not.toContain(plano('Que la factura relacionada corresponde'))
+    expect(guiones(t)).toBe(GUIONES_PROPIOS)
+  }, 30_000)
 
-  it('lo que no viene en ISO se devuelve tal cual, nunca "Invalid Date"', () => {
-    expect(fechaLarga('15/03/2026')).toBe('15/03/2026')
-    expect(fechaLarga(null, '[FECHA DE ADQUISICIÓN]')).toBe('[FECHA DE ADQUISICIÓN]')
-  })
+  /** Una fecha suelta sin radicado tampoco resucita la mención al certificado. */
+  it('la fecha sin radicado no basta para afirmar que hay certificado', async () => {
+    const t = await texto({ ...DATOS_BASE, numero_caso_upme: null })
+    expect(t).not.toMatch(/UPME|defecha/)
+  }, 30_000)
+})
+
+describe('copropiedad', () => {
+  it('plural, autorización como QUINTO, requisitos como SEXTO y una firma por titular', async () => {
+    const t = await texto({ ...DATOS_BASE, ...COPROPIEDAD })
+    expect(t).toContain(plano('Nosotros, ANA MARIA GOMEZ,'))
+    expect(t).toContain(plano('y LUIS PEREZ TORO,'))
+    expect(t).toContain(plano('manifestamos BAJO LA GRAVEDAD DE JURAMENTO'))
+    expect(t).toContain(plano('expedida a nombre de ANA MARIA GOMEZ y LUIS PEREZ TORO,'))
+    expect(t).toContain(plano('ni privada, a ninguno de los dos propietarios, respecto de la factura No. FEMM12345 y del Certificado UPME No. VEH_GEE20262260.'))
+    expect(t).toContain(plano('no ha sido tratado por ninguno de los propietarios'))
+    expect(t).toContain(plano('QUINTO. Que LUIS PEREZ TORO,'))
+    expect(t).toContain(plano('SEXTO. Que se cumplen todos los requisitos'))
+    expect(t).toContain(plano('Nombre: ANA MARIA GOMEZ C.C.: 43567890'))
+    expect(t).toContain(plano('Nombre: LUIS PEREZ TORO C.C.: 71234567'))
+    expect(t).not.toContain('[')
+    expect(guiones(t)).toBe(GUIONES_PROPIOS)
+  }, 30_000)
 })
 
 /**
@@ -107,45 +179,4 @@ describe('negrita pegada a puntuación', () => {
     const pegadas = [...fuente.matchAll(/<\/B>[,.;:)]/g)].map((m) => m[0])
     expect(pegadas, 'la puntuación va DENTRO de la negrita').toEqual([])
   })
-})
-
-/**
- * Guarda de render: el componente es JSX puro sin pruebas de tipo en tiempo de
- * ejecución, y un `<Text>` mal anidado revienta solo al generar el PDF —es decir,
- * en producción, cuando el operador le da al botón. Estas dos llamadas son lo único
- * que ejercita el árbol completo en CI.
- */
-type DatosDeclaracion = Parameters<typeof DeclaracionJuramentadaPDF>[0]['datos']
-
-/**
- * `renderToBuffer` está tipado contra `DocumentProps`, no contra las props del
- * componente; el escape es el mismo que usa `formulario-actions` al construir el
- * elemento con `createElement`.
- */
-function renderDeclaracion(datos: DatosDeclaracion) {
-  const el = createElement(DeclaracionJuramentadaPDF, {
-    datos, fechaGeneracion: '2026-09-07', codigoNegocio: 'V0000',
-  })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return renderToBuffer(el as any)
-}
-
-describe('render', () => {
-  it('un titular genera un PDF válido', async () => {
-    const buf = await renderDeclaracion(DATOS_BASE)
-    expect(buf.subarray(0, 5).toString()).toBe('%PDF-')
-  }, 30_000)
-
-  it('copropiedad y caso solo IVA también generan PDF válido', async () => {
-    const buf = await renderDeclaracion({
-      ...DATOS_BASE,
-      numero_caso_upme: null,
-      fecha_certificado: null,
-      nombre_solicitante_2: 'LUIS PEREZ TORO',
-      numero_identificacion_2: '71234567',
-      direccion_2: 'CL 100 # 8-60',
-      municipio_2: 'Bogotá',
-    })
-    expect(buf.subarray(0, 5).toString()).toBe('%PDF-')
-  }, 30_000)
 })

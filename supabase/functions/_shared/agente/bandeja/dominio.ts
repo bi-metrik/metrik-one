@@ -708,6 +708,18 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
         // Nada nuevo frente a la pendiente: es la misma (el núcleo la reenvía con sus botones, misma huella).
         return { ok: true, propuesta: { accion, sobre: r.v.codigo, datos: pendiente.datos, resumen: pendiente.resumen, si: pendiente.si, no: pendiente.no } };
       }
+      // Nada nuevo en lo que ESCRIBIÓ, pero hay reenvíos sin cargar: «cárgalo en el G1 26 7» habla de la tanda, y la
+      // duda o el «ya está» de lo escrito no aplican (arnés del 2026-10-29, mano derecha: con la orden sola, la extracción
+      // preguntaba «¿qué significa G1 26 7?» o el modelo decía que lo del PDF «quedó registrado»). Lo dice el estado, no
+      // una palabra: el modelo decide si el pedido es la tanda.
+      const pendientes = !prep.entendido.length ? tanda(ctx.conversacion) : [];
+      if (pendientes.length) {
+        return {
+          ok: false,
+          error: `Lo que el comercial escribió de ${r.v.codigo} no trae datos del viaje, y hay ${pendientes.length === 1 ? '1 mensaje reenviado' : `${pendientes.length} mensajes reenviados`} sin cargar (la tanda: ${pendientes.map((f) => `#${f.id}`).join(', ')}). Si lo que pide es cargar eso en ${r.v.codigo}, propón \`cargar_tanda\` en ese viaje; nada quedó escrito todavía.`,
+          candado: prep.duda ? 'solo_duda' : 'sin_datos_nuevos',
+        };
+      }
       if (!prep.entendido.length && prep.duda) {
         return { ok: false, error: `En lo que el comercial escribió de ${r.v.codigo} no hay datos nuevos para anotar, pero hay algo que no quedó claro. No propongas anotar: pregúntale con \`responder\`, tal cual: ${prep.duda}`, candado: 'solo_duda' };
       }
