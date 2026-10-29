@@ -1881,6 +1881,35 @@ export async function escribirPrecioQueFalta(
   return { success: true, tarifa: c.tarifa ?? guardado.tarifa, anterior, ...(c.success ? {} : { error: c.error }) }
 }
 
+/**
+ * M7-1 / M9-2 (QA Trappvel 2026-10-29) · «El total es de la habitación»: el hotel con menores cuyo
+ * pantallazo trae un solo total para una habitación familiar se costea con ese total, sin pedir la
+ * resta de pantallazos. Después se confirma como cualquier lectura: en otra moneda, con la tasa de
+ * la cotización si ya la hay (`confirmarTarifaPorPasajero`); si no, la tarjeta pide la tasa.
+ * `usar: false` lo deshace y la línea vuelve a pedir el pantallazo que falta.
+ */
+export async function usarTotalDeHabitacion(itemId: string, usar: boolean): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo un hotel cobra por habitación.' }
+  const l1 = ctx.tarifa.casillas?.grupo_completo
+  if (!l1) return { success: false, error: 'Pega primero el pantallazo del hotel.' }
+  const { por } = usar ? await quienEscribe(ctx.supabase) : { por: null }
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    const primera = actual.casillas?.grupo_completo
+    if (!primera) return actual
+    const { totalDeHabitacion: _viejo, ...resto } = primera
+    void _viejo
+    const nueva: LecturaCasilla = usar ? { ...resto, totalDeHabitacion: { por, en: new Date().toISOString() } } : resto
+    return { ...actual, casillas: { ...actual.casillas, grupo_completo: nueva } }
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  const c = usar ? await confirmarTarifaPorPasajero(itemId, null) : null
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  // Sin tasa todavía no es un error: el costo queda por confirmar y la tarjeta pide la tasa.
+  return { success: true, tarifa: c?.tarifa ?? guardado.tarifa }
+}
+
 // ── Composición de la línea (CC4b, P7) ───────────────────────────────────────
 
 /**

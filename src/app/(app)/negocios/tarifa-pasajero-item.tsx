@@ -13,6 +13,7 @@ import {
   elegirMonedaDeTarifa,
   leerCasillaDeItem,
   quitarCasillaDeItem,
+  usarTotalDeHabitacion,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import FichaDeLinea from '@/app/(app)/negocios/ficha-linea-item'
 import HabitacionesDeOpcion, { PegarOtraHabitacion } from '@/app/(app)/negocios/habitaciones-opcion'
@@ -41,6 +42,7 @@ import {
   MONEDAS_FRECUENTES,
   monedaDeTarifa,
   ocupacionObservada,
+  ofreceTotalDeHabitacion,
   origenDeLaOcupacion,
   origenDeLecturas,
   resolverTarifa,
@@ -458,6 +460,33 @@ export default function TarifaPasajeroItem({
           )}
           {estado?.estado === 'falta' && (
             <p className="rounded-md bg-amber-50 p-2 text-[11px] font-medium text-amber-900">{estado.mensaje}</p>
+          )}
+          {/* M7-1 / M9-2 (QA 2026-10-29): la habitación familiar con UN total no tiene «solo adultos»
+              que buscar. Un clic y ese total es el costo; en otra moneda, con la tasa. */}
+          {ofreceTotalDeHabitacion(estado, ranura.slug, casillas) && (
+            <div className="rounded-md border border-amber-200 bg-background p-2" data-total-de-habitacion>
+              <p className="text-[11px] text-muted-foreground">
+                ¿Es una sola habitación para todo el grupo, con precio por habitación? Entonces ese total es el costo y no hace falta otro pantallazo.
+              </p>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => accion(() => usarTotalDeHabitacion(itemId, true), 'El total del pantallazo queda como costo de la habitación.')}
+                className="mt-1.5 inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-[11px] font-medium hover:bg-accent disabled:opacity-50"
+              >
+                <Check className="h-3 w-3" /> El total es de la habitación
+              </button>
+            </div>
+          )}
+          {primera?.totalDeHabitacion && (
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => accion(() => usarTotalDeHabitacion(itemId, false), 'Vuelve a pedir el precio por pasajero.')}
+              className="self-start text-[10px] font-medium text-muted-foreground underline hover:text-foreground disabled:opacity-50"
+            >
+              No es el total de la habitación: pedir el precio por pasajero
+            </button>
           )}
           {estado?.estado === 'inconsistente' && (
             <p className="rounded-md bg-red-50 p-2 text-[11px] font-medium text-red-900">{estado.mensaje}</p>

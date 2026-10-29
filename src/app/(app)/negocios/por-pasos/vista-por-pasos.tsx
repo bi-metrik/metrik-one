@@ -1,5 +1,6 @@
 'use client'
 
+import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
@@ -582,6 +583,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                                 nombre={nombreDeOpcion(id)}
                                 tipos={tipos}
                                 moneda={monedaDeTarifa(leerTarifaPax(f?.tarifa_pax)).moneda}
+                                esHotel={ranuraDeGrupo(f?.grupo ?? null)?.slug === 'hotel_detalle'}
                                 onGuardado={p.refrescar}
                               />
                             ) : null
