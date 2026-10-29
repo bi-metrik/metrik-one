@@ -64,34 +64,6 @@ export function fechaCorta(v: string | null | undefined, marcador = '—'): stri
 }
 
 /**
- * Valor redondeado al múltiplo de mil más cercano (art. 577 del Estatuto Tributario:
- * los valores de las declaraciones se aproximan al múltiplo de mil más cercano).
- * Devuelve el número, o null si el texto no es numérico.
- */
-export function redondearAlMil(v: string | null | undefined): number | null {
-  if (!v) return null
-  const n = Number(v)
-  if (isNaN(n)) return null
-  return Math.round(n / 1000) * 1000
-}
-
-/**
- * «IVA solicitado, aproximado al mil»: `1234499` → `$ 1.234.000`, `1234500` →
- * `$ 1.235.000`. Es la cifra que la declaración juramentada (CUARTO) y la Relación
- * de facturas (ficha y totales) piden desde la plantilla del 2026-10-28 (SOE-033);
- * el «IVA pagado» de la factura sigue saliendo exacto.
- *
- * Sin valor → el marcador. Un texto no numérico se devuelve TAL CUAL, igual que
- * `fmtCurrency`: el operador ve el dato crudo y lo corrige.
- */
-export function fmtAlMil(v: string | null | undefined, marcador = '—'): string {
-  if (!v) return marcador
-  const n = redondearAlMil(v)
-  if (n == null) return v
-  return fmtCurrency(String(n), marcador)
-}
-
-/**
  * Tarifa de IVA pagada, derivada de la factura: `valor_iva / valor_unitario_sin_iva`
  * redondeada a un entero porcentual (`5 %`, `19 %`). La extracción no trae la tarifa
  * como dato propio, y la plantilla de la Relación (SOE-033) la pide.

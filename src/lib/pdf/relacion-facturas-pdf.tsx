@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { nitBaseYDv } from '@/lib/dian/nit'
 import { titularesDeDatos, concordancia } from './titulares'
-import { fmtCurrency, fmtAlMil, fechaCorta, tarifaIva, fechaDeGeneracion } from './formato'
+import { fmtCurrency, fechaCorta, tarifaIva, fechaDeGeneracion } from './formato'
 
 /**
  * Relación de facturas — plantilla de SOENA recibida el 2026-10-28 (SOE-033),
@@ -12,12 +12,16 @@ import { fmtCurrency, fmtAlMil, fechaCorta, tarifaIva, fechaDeGeneracion } from 
  * columnas pasa a ser una FICHA por factura («FACTURA ELECTRÓNICA No. 1», filas
  * etiqueta/valor en dos columnas), con datos que antes no salían: fecha de
  * expedición, tarifa de IVA, el NIT del proveedor SIN DV con el DV en su propia
- * casilla, el «IVA solicitado, aproximado al mil» (art. 577 ET) y el número y la
+ * casilla, el «IVA solicitado» y el número y la
  * fecha del certificado UPME. Los totales pasan a tres (bienes, IVA pagado, IVA
  * solicitado) y el asunto lleva el tipo de vehículo. La «Nota interna (borrar antes
  * de enviar)» de la plantilla no se imprime: el expediente tiene una sola factura.
  *
  * Decisiones que NO salen de la plantilla:
+ *
+ * 0. El «IVA solicitado» (ficha y TOTAL IVA SOLICITADO) es el IVA EXACTO de la
+ *    factura, sin redondear: decisión de Mauricio del 2026-10-29. Hasta ese día salía
+ *    aproximado al mil (art. 577 ET); ya no se redondea en ningún documento.
  *
  * 1. El certificado UPME (`numero_caso_upme`, `fecha_certificado`) es OPCIONAL en
  *    `campos_fuente`, igual que en la declaración juramentada. Si falta, la ficha
@@ -149,7 +153,8 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
 
   const valorSinIva = fmtCurrency(datos.valor_unitario_sin_iva)
   const ivaPagado = fmtCurrency(datos.valor_iva)
-  const ivaSolicitado = fmtAlMil(datos.valor_iva)
+  // IVA exacto de la factura, sin redondear (decisión de Mauricio, 2026-10-29).
+  const ivaSolicitado = fmtCurrency(datos.valor_iva)
 
   const { dia, mes, anio } = fechaDeGeneracion(fechaGeneracion)
 
