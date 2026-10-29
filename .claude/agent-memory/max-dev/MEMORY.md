@@ -21,7 +21,7 @@
 - ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
 - ⚠️⚠️ [Reportes con la llave vencida (28-oct)](project_valida_reportes_llave_vencida.md) — Valida#83 primero; llave y luego firma en 401; id UUID en ruta firmada
-- ⚠️⚠️ [Reverso corta el plan de Valida (27-oct)](project_valida_reverso_corta_plan.md) — Valida#82 primero; estado en reversado.corte; reactivación = cobro sin plan; correo retenido en prod
+- ⚠️⚠️ [Reverso corta el plan de Valida (27-oct)](project_valida_reverso_corta_plan.md) — Valida#82 primero; estado en reversado.corte; reactivación = cobro sin plan; correo al cliente encendido (29-oct)
 - ⚠️⚠️ [Reversos de ePayco (390720992)](project_epayco_reversos.md) — ePayco SÍ manda el 6; 7d es red; desde 27-oct el ciclo se corta (ver arriba)
 - ⚠️⚠️ [Cargo ePayco pendiente decidido tarde (390720992)](project_epayco_cargo_pendiente_tardio.md) — causa: deploy tras la aceptación; paso 7e; (d) abierto
 - [Número de vuelo por tramo en servicios](project_numero_vuelo_por_tramo.md) — items.tramos leído aparte (no en el contexto: P3); filas viejas se releen por contenido
