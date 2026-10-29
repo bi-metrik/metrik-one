@@ -52,6 +52,8 @@ export interface CasoArnes {
   /** El equipo comercial y quien escribe (por defecto, los de `escenario`). */
   equipo?: MiembroEquipo[];
   remitente?: { nombre: string; rol: string };
+  /** El reloj del caso (ISO). Sin él, el del escenario (2026-10-06). */
+  ahora?: string;
   esperado(p: PuertoMemoria, trazas: Traza[]): Veredicto;
 }
 
@@ -646,3 +648,5 @@ export const CONJUNTO_ADJUNTOS: CasoArnes[] = [
 ];
 
 export { preguntaQuienLleva };
+/** Para los casos de los roles (`conjuntos-roles.ts`): el mismo directorio, viajes y equipo inventados. */
+export { DIRECTORIO, VIAJES, viajeCon };

@@ -62,6 +62,12 @@ export interface LecturaAdjunto {
   clase?: ClaseDocumento;
   /** Solo la bandeja: lo que el documento dice que sirve para el viaje, con sus palabras (entra a la carga como dato). */
   texto?: string | null;
+  /**
+   * Lectura mixta (2026-10-29, `bandeja/lectura-mixta.ts`): un rol con viajes Y gastos (la mano derecha de Trappvel) lee
+   * cada archivo con los dos lectores; trae lo del viaje (`clase`, `texto`) y lo del soporte (monto, fecha, comercio, NIT,
+   * concepto, titular). La conversación muestra las dos cosas y el modelo decide por contexto qué es.
+   */
+  mixta?: boolean;
 }
 
 export type ClaseDocumento = 'viaje' | 'identidad' | 'pago' | 'otro';
@@ -264,6 +270,11 @@ export interface Dominio {
    * Sin la bandera (la bandeja) la propuesta sigue viva mientras la conversación no consulte otra cosa (`sobre`).
    */
   propuestaVenceConRespuesta?: boolean;
+  /**
+   * Lo mismo, por acción (2026-10-29): un dominio compuesto de motores con distinta bandera (viajes sin ella, ONE con
+   * ella) dice la del motor dueño de la acción de la propuesta. Si está, manda sobre `propuestaVenceConRespuesta`.
+   */
+  venceConRespuesta?(accion: string): boolean;
   /**
    * Tope en tokens del resultado de una lectura, por nombre, cuando no cabe en el de todas (`TOPES_BLOQUE.resultado`,
    * 400). El asistente público lo sube para `ver_catalogo`: una ficha de experiencia ocupa ~250-300 y con dos vigentes

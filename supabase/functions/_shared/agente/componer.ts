@@ -32,6 +32,12 @@ export interface OpcionesComponer {
    * todas las del motor.
    */
   datosPorAccion?: Record<MotorId, Record<string, string[]>>;
+  /**
+   * El motor que prepara los adjuntos (baja, guarda y LEE cada foto o PDF) cuando hay más de uno que sabe hacerlo. Uno
+   * solo: dos preparadores bajarían el mismo archivo dos veces y la última lectura pisaría a la otra en la fila. Sin
+   * esto, el principal (el primero que aporta algo) si lo hace; si no, el primero que lo hace.
+   */
+  adjuntos?: MotorId;
   log?: (m: string) => void;
 }
 
@@ -150,16 +156,30 @@ export function componerDominio(o: OpcionesComponer): Composicion {
     if (!propias.length) continue;
     const mapa = o.datosPorAccion?.[m];
     const usar = mapa ? new Set(propias.flatMap((a) => mapa[a] ?? [])) : null;
-    for (const [k, v] of Object.entries(o.motores[m].datosProponer)) if (!usar || usar.has(k)) datosProponer[k] = v;
+    for (const [k, v] of Object.entries(o.motores[m].datosProponer)) {
+      if (usar && !usar.has(k)) continue;
+      // Dos motores con la misma propiedad (`texto`: anotar en un viaje y una actividad): una sola, con las dos
+      // descripciones (cada una dice para qué acción es). Con tipos distintos no se puede: queda la primera y el log.
+      datosProponer[k] = k in datosProponer ? unirPropiedad(k, datosProponer[k], v, log) : v;
+    }
   }
 
   const motorDeAccion = (p: Propuesta) => (motorDe[p.accion] ? o.motores[motorDe[p.accion]] : null);
+  // Un solo preparador de adjuntos (ver `adjuntos` arriba).
+  const preparadores = usados.filter((m) => o.motores[m].prepararTurno);
+  const preparador = o.adjuntos && preparadores.includes(o.adjuntos) ? o.adjuntos
+    : preparadores.includes(usados[0]) ? usados[0] : preparadores[0];
+  const deAdjuntos = preparador ? o.motores[preparador] : null;
+  const ventanaAdjuntosMs = principal.ventanaAdjuntosMs ?? deAdjuntos?.ventanaAdjuntosMs;
+  // Si los motores no dicen lo mismo de cuándo vence una propuesta, se dice por acción (la del motor dueño).
+  const vencen = new Set(usados.map((m) => o.motores[m].propuestaVenceConRespuesta === true));
 
   const dominio: Dominio = {
     bot: principal.bot,
     ...(principal.reenvios ? { reenvios: principal.reenvios } : {}),
     ...(principal.propuestaVenceConRespuesta !== undefined ? { propuestaVenceConRespuesta: principal.propuestaVenceConRespuesta } : {}),
-    ...(principal.ventanaAdjuntosMs !== undefined ? { ventanaAdjuntosMs: principal.ventanaAdjuntosMs } : {}),
+    ...(ventanaAdjuntosMs !== undefined ? { ventanaAdjuntosMs } : {}),
+    ...(vencen.size > 1 ? { venceConRespuesta: (accion: string) => (motorDe[accion] ? o.motores[motorDe[accion]] : principal).propuestaVenceConRespuesta === true } : {}),
     ...(deUsados('topesResultado').length ? { topesResultado: Object.assign({}, ...deUsados('topesResultado').map((d) => d.topesResultado)) } : {}),
     lecturas,
     acciones,
@@ -201,11 +221,7 @@ export function componerDominio(o: OpcionesComponer): Composicion {
         return m?.sigueVigente ? m.sigueVigente(p, ctx) : true;
       },
     } as Pick<Dominio, 'sigueVigente'> : {}),
-    ...(deUsados('prepararTurno').length ? {
-      async prepararTurno(ctx) {
-        return (await Promise.all(deUsados('prepararTurno').map((d) => d.prepararTurno!(ctx)))).flat();
-      },
-    } as Pick<Dominio, 'prepararTurno'> : {}),
+    ...(deAdjuntos?.prepararTurno ? { prepararTurno: (ctx) => deAdjuntos.prepararTurno!(ctx) } as Pick<Dominio, 'prepararTurno'> : {}),
     ...(deUsados('estado').length ? {
       async estado(ctx) {
         return (await Promise.all(deUsados('estado').map((d) => d.estado!(ctx)))).flat();
@@ -239,6 +255,19 @@ export function componerDominio(o: OpcionesComponer): Composicion {
     dominio, funciones, parametros, descartadas, errores, duenas, motores: ids,
     declaradas: { lecturas: lecturas.map((x) => x.name), cierres: cierres.map((x) => x.name), acciones },
   };
+}
+
+/** Una propiedad de `datos` que dos motores declaran: las dos descripciones en una (mismo tipo). Pura. */
+function unirPropiedad(k: string, a: unknown, b: unknown, log: (m: string) => void): unknown {
+  if (JSON.stringify(a) === JSON.stringify(b)) return a;
+  const x = a as { type?: unknown; description?: unknown };
+  const y = b as { type?: unknown; description?: unknown };
+  if (JSON.stringify(x.type) !== JSON.stringify(y.type)) {
+    log(`la propiedad «${k}» de proponer tiene tipos distintos en dos motores: queda la del primero`);
+    return a;
+  }
+  const d = [x.description, y.description].filter((s): s is string => typeof s === 'string' && s.length > 0);
+  return { ...x, ...y, ...(d.length ? { description: d.join(' ') } : {}) };
 }
 
 // ── El reglamento del turno ──────────────────────────────────────────────────

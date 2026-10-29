@@ -323,6 +323,36 @@ La traza de cada turno trae `rol: { clave: 'mano_derecha', version: 1, … }`.
 
 **Para Chatwoot (Sabor)** se hace lo mismo con canal `chatwoot`, motor `publico`, funciones `clientes.*` y la asignación por inbox `cw:<cuenta>:<inbox>`. El camino está probado con un catálogo de prueba en `publico/roles-chatwoot.test.ts`: con todas las funciones, el arnés en seco da lo mismo que el dominio público entero.
 
+### 6.1 La bandeja de viajes con roles (Trappvel, 2026-10-29)
+
+La bandeja de solicitudes (Agus, `bandeja/dominio.ts`) es el motor `viajes`. Entra por `atenderConAgente` (`_shared/wa-agente.ts`) y desde el 29-oct también pasa por los roles (`bandeja/turno-con-rol.ts`, `turnoViajes`):
+
+- **Sin roles en `wa_one`**, la bandeja atiende igual que antes: el reglamento `bandeja-solicitudes` y el dominio entero, sin componer.
+- **Con un rol**, el componedor arma el motor `viajes`, más el motor `one` si el rol trae funciones de ONE, más el motor `persona`. El reglamento es `rol:<clave>`.
+- **Usa roles y quien escribe no tiene rol**: responde `RF_SIN_ROL`.
+
+Las funciones de viajes (`funciones/equipo-viajes.ts`). Cada herramienta tiene una sola dueña:
+
+| Función | Herramientas | Requiere |
+|---|---|---|
+| `equipo.viajes_consulta` | `buscar`, `ver_viaje` | — |
+| `equipo.viajes_registro` | `viaje_nuevo`, `cargar_tanda`, `anotar_en_viaje`, `descartar` | consulta |
+| `equipo.clientes_viaje` | `crear_cliente`, `perfil_contacto` | consulta |
+| `equipo.autorizacion_datos` | `link_autorizacion` | consulta |
+
+**Dos motores en un turno** (la mano derecha, viajes + ONE). El componedor lo resuelve igual para cualquier par:
+
+- El principal es el primer motor. Por eso los reenvíos de viajes van a la tanda, sin modelo, como hoy.
+- Cuándo vence una propuesta se decide por acción (`Dominio.venceConRespuesta`): una de ONE vence con cualquier respuesta; una de viajes, no.
+- Los adjuntos los prepara un solo motor (`componerDominio({ adjuntos })`). Con dos preparadores, el mismo archivo se bajaría dos veces y la última lectura pisaría a la otra.
+- La mano derecha lee cada archivo con el lector mixto (`bandeja/lectura-mixta.ts`): lo saca como dato del viaje y como soporte de pago. La conversación muestra las dos lecturas y el modelo decide qué es.
+- Si dos motores declaran la misma propiedad de `proponer` (`texto`), queda una sola con las dos descripciones.
+- Los bloques del prompt suben de tope (`bloquesDelTurno`): juntos, los dos reglamentos no caben en el tope de uno.
+
+**Las fichas de los roles** salen de `bandeja/roles-trappvel.ts`: la bandeja publicada más lo del rol. A la mano derecha se le suman las fichas de ONE. Si una ficha de ONE tiene la misma clave que una de la bandeja, queda la de la bandeja.
+
+**El SQL** lo genera `bandeja/roles-trappvel-sql.ts`: `PENDIENTE`, `ENSAYO` y `REVERSA`. Quién tiene qué rol llega en un JSON de asignaciones que vive fuera del repo, en la carpeta del proyecto del cliente, junto con los bancos del arnés y los SQL generados (ver `docs/asistentes/roles-trappvel.md`). El arnés corre con Haiku, sin Gemini. El paso 0 se niega a publicar si las fichas publicadas de la bandeja no son la base con que corrió el arnés. En ese caso se exportan las publicadas y se corre `arnes/correr.ts --rol <clave> --fichas-base <json> --k 3`.
+
 ## 7. Interruptores y avisos por workspace
 
 Lo que corre alrededor de los asistentes y no es una función del rol. Ninguna de estas piezas trae migración.
@@ -388,6 +418,7 @@ Su interruptor (`config_extra.bot_conversacional.transcripcion.pistas`) y la cor
 | Mapa cargo → funciones de ONE | `…/agente/one/cargos.ts` |
 | Resolución del rol, rol fijo y traza | `…/agente/roles.ts` |
 | Turno de WhatsApp con roles | `…/agente/one/turno-con-rol.ts` (lo usa `_shared/wa-agente.ts`) |
+| Bandeja de viajes con roles (Trappvel) | `…/agente/bandeja/turno-con-rol.ts`, `funciones/equipo-viajes.ts`, `bandeja/roles-trappvel.ts`; arnés `arnes/correr.ts --rol <clave>` |
 | Turno de Chatwoot con roles | `…/agente/publico/turno-con-rol.ts` (lo usa `chatwoot-agente/index.ts`); compone `publico/cola.ts`, `dominioYReglamento` |
 | Pistas para transcribir (constructor, interruptor, gancho de las funciones) | `…/agente/pistas.ts`, lector `pistas-supabase.ts`; arnés en `…/agente/arnes/audios/` |
 | Botones de plantilla (`ag\|t\|`, `payloadPlantilla`, `componenteBotonPlantilla`) | `…/agente/render.ts`; pruebas en `toque-plantilla.test.ts` |

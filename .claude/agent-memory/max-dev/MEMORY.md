@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — v2: datos en asignaciones.json fuera del repo; arnés con Haiku; SQL SIN aplicar
 - ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy
 - ⚠️⚠️ [Factura de cuota sale siempre (#1317)](project_factura_cuota_correo_siempre.md) — 20261028120000 SIN aplicar; edge enviar-factura-cuota; webhook después de la migración
 - ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; puntos fuera de precio_venta; `–` no `−` en PDF; causas en causas-margen.ts
@@ -115,3 +116,4 @@
 - [La referencia manda sobre el diseño](feedback_la_referencia_manda_sobre_el_diseno.md) — si el brief cita un artefacto real, ábrelo
 - ⚠️ [Rebasar el PR de otra sesión](feedback_rebase_pr_ajeno_mirar_reflog.md) — mirar el reflog de la rama local antes del force-push
 - ⚠️ [Squash de WIP contra el merge-base](feedback_squash_wip_contra_sha_fijo.md) — `reset --soft origin/main` revirtió un PR ajeno
+- ⚠️⚠️ [Datos del cliente fuera del repo](feedback_datos_cliente_fuera_del_repo.md) — celulares/nombres/ids reales: el push se niega; JSON en proyectos/

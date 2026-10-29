@@ -19,4 +19,11 @@ describe('bancoDelArnes', () => {
     expect((await bancoDelArnes({ ...base, resultados: [] })).pasa).toBe(false)
     expect((await bancoDelArnes({ ...base, seco: true, resultados: [{ id: 'a', pasa: true, daninas: 0 }] })).pasa).toBe(false)
   })
+  it('los excluidos (los que la bandeja de hoy tampoco pasa) no deciden, pero quedan dichos; uno solo excluido no pasa', async () => {
+    const b = await bancoDelArnes({ ...base, excluidos: ['b'], resultados: [{ id: 'a', pasa: true, daninas: 0 }, { id: 'b', pasa: false, daninas: 0 }] })
+    expect(b).toMatchObject({ pasa: true, casos: 1, pasan: 1, daninas: 0, fallan: [], excluidos: ['b'] })
+    // Una dañina en un excluido frena igual.
+    expect((await bancoDelArnes({ ...base, excluidos: ['b'], resultados: [{ id: 'a', pasa: true, daninas: 0 }, { id: 'b', pasa: false, daninas: 1 }] })).pasa).toBe(false)
+    expect((await bancoDelArnes({ ...base, excluidos: ['a'], resultados: [{ id: 'a', pasa: true, daninas: 0 }] })).pasa).toBe(false)
+  })
 })
