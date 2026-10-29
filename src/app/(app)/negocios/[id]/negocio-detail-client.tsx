@@ -118,6 +118,7 @@ const BloqueMovimientos = dynamic(() => import('./bloques/BloqueMovimientos'))
 const BloqueResultado = dynamic(() => import('./bloques/BloqueResultado'))
 const BloqueServicios = dynamic(() => import('./bloques/BloqueServicios'))
 const BloqueHistorial = dynamic(() => import('./bloques/BloqueHistorial'))
+const BloqueAvisosCliente = dynamic(() => import('./bloques/BloqueAvisosCliente'))
 const BloqueFormulario = dynamic(() => import('./bloques/BloqueFormulario'))
 const BloquePagosEpayco = dynamic(() => import('./bloques/BloquePagosEpayco'))
 const BloquePagoExterno = dynamic(() => import('./bloques/BloquePagoExterno'))
@@ -1785,6 +1786,7 @@ function BloqueRenderer({
       case 'resultado':
       case 'ejecucion':
       case 'historial':
+      case 'avisos_cliente':
         return 'visible'
       default:
         return 'editable'
@@ -2249,6 +2251,10 @@ function BloqueRenderer({
 
     case 'historial':
       return <BloqueHistorial data={historialData} />
+
+    // Correos al cliente de esta etapa y su acuse (SOE-031). Solo lectura: lee `avisos_cliente`.
+    case 'avisos_cliente':
+      return <BloqueAvisosCliente negocioId={negocioId} bloqueConfigId={bloque.id} />
 
     case 'formulario':
       return (
