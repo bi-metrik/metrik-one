@@ -65,6 +65,7 @@ import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { hotelesDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
+import { esLineaDePaquete } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
@@ -562,12 +563,16 @@ export async function generateCotizacionPDF(
    * (`precioPorPasajeroDeItem`).
    *
    * Los pasajeros del viaje se leen UNA vez y solo si alguna línea tiene tarifa por
-   * pasajero: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
+   * pasajero o es un paquete de bloqueo: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
    * falla, borrador: sin los pasajeros no se puede saber si el precio es el de hoy, y un
    * PDF limpio lo afirmaría.
    */
   const conTarifaPorPasajero = hayTarifaPorPasajero(items)
-  const lecturaDelViaje = negocioInfo && conTarifaPorPasajero
+  // Un bloqueo de solo paquetes no trae tarifa por pasajero (`tarifa_pax.bloqueo`), pero su freno
+  // necesita los pasajeros y las edades de la Solicitud, como `enviarPorPasos` (Vera sobre el #1326).
+  const conPaquete = items.some(i => esLineaDePaquete({ grupo: i.grupo ?? null, es_ajuste: i.es_ajuste ?? null })
+    || !!(i.tarifa_pax && typeof i.tarifa_pax === 'object' && (i.tarifa_pax as { bloqueo?: unknown }).bloqueo))
+  const lecturaDelViaje = negocioInfo && (conTarifaPorPasajero || conPaquete)
     ? await leerViajeDelNegocio(supabase, negocioInfo.id)
     : null
   const viajeDelNegocio = lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.viaje : null
