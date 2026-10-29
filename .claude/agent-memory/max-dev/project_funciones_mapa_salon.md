@@ -30,9 +30,17 @@ y tres textos, §1.8 del diseño, que manda sobre lo anterior); P4 (preventa = i
   y parte fija de la plantilla dicen «experiencia»; la puerta cerrada perdió «durante la proyección. 🎬». Caso de cata
   (12 cupos) en `textos.test.ts`, `funciones-sql.test.ts` y caso G de `funciones-concurrencia.sh`, con regex anti-cine.
   Rama `feat/funciones-texto-experiencia` (sin push). `_shared/agente/publico` (asistente) sigue con ejemplos de cine.
-- Plazo del saldo = `funcion_campanas.dias_saldo_antes` (1..30, default 1; viaja dentro de `p_precios` de
-  `funcion_guardar_campana`, como `tope_sobreventa`, para no cambiar la firma). Se eligió ≥ 1 (no 0) para dar margen
-  de verificar el pago antes de la función. La reserva guarda su FOTO (`funcion_reservas.dias_saldo_antes`).
+- Plazo del saldo = `funcion_campanas.dias_saldo_antes` (default 1; viaja dentro de `p_precios` de
+  `funcion_guardar_campana`, como `tope_sobreventa`, para no cambiar la firma). La reserva guarda su FOTO
+  (`funcion_reservas.dias_saldo_antes`). P16 (26-oct, Mauricio): se acepta 0 = hasta que empieza la función
+  (`funcion_plazo_saldo(t,0)=t`), migración `20261026210000_funciones_saldo_plazo_cero.sql` (rama
+  feat/funciones-saldo-plazo-cero; SIN aplicar al abrir el PR; dry-run `scripts/funciones-saldo-plazo-cero-dry-run.mjs`).
+  Las pruebas SQL cargan módulo → puerta cerrada (20261026220000, aplicada) → plazo 0; versión menor que la de la
+  puerta, se dejó así (sin guarda de orden). Textos fijados por Mauricio 28-oct (2.ª versión, pendiente de Vera): oferta
+  con 0 «…con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.» y la bienvenida
+  «…por el chat de su reserva, o durante la experiencia, con nuestro equipo.». Con 0 el mensaje directo pasa de 1.000
+  bytes desde un nombre de campaña de 162 caracteres (agenda de prueba).
+  Una prueba «a N horas de la función con 1 día» cruza la medianoche de Bogotá según la hora en que corre: usar 1 minuto.
 - Saldo (P14a-c, 25-oct): la modalidad se elige AL PAGAR (`funcion_preparar_pago(ws, ids, modalidad)`), no al apartar.
   El saldo es un pago más (`funcion_pagos.concepto`/`medio`); pagado y saldo se calculan en `funcion_saldo_de`, nunca
   se guardan. La verificación a mano crea un pago `manual` (decisión de Max: sin él el saldo sale mal). El link de

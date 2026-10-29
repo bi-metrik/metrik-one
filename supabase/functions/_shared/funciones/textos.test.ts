@@ -201,14 +201,28 @@ describe('a) la oferta: el post de Instagram con todas las funciones', () => {
     expect(con(1).texto).toContain('✨ Reserva con $100.000 por cupo y paga el saldo 1 día antes.')
     expect(con(3).texto).toContain('✨ Reserva con $100.000 por cupo y paga el saldo 3 días antes.')
     expect(con(3).texto).not.toContain('1 día antes')
+    // 0 = link hasta que empieza; ya en la experiencia, con el equipo (Mauricio, 28-oct). Texto exacto, sin «0 días».
+    expect(con(0).texto.split('\n\n')).toContain(
+      '✨ Reserva con $100.000 por cupo. El saldo lo pagas con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.')
+    expect(con(0).texto).not.toMatch(/0 días|paga el saldo/)
+    expect(con(0).copiable).toBe(true)
+    // Con abonos distintos y plazo 0, la variante de varios, también exacta.
+    const variosCero = generarOferta({
+      ficha: FICHA, negocio: NEGOCIO, campana: { dias_saldo_antes: 0 }, ahoraMs: AHORA,
+      funciones: [funcion(SAB_1PM), funcion(DOM_8PM, tarifa({ abono_persona: 120_000 }))],
+    })
+    expect(variosCero.texto.split('\n\n')).toContain(
+      '✨ Reserva con un abono por cupo. El saldo lo pagas con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.')
+    expect(variosCero.texto).not.toMatch(/paga el saldo/)
+    expect(variosCero.copiable).toBe(true)
     // Con abonos distintos entre funciones, el plazo también es el de la campaña.
     const varios = generarOferta({
       ficha: FICHA, negocio: NEGOCIO, campana: { dias_saldo_antes: 2 }, ahoraMs: AHORA,
       funciones: [funcion(SAB_1PM), funcion(DOM_8PM, tarifa({ abono_persona: 120_000 }))],
     })
     expect(varios.texto).toContain('✨ Reserva con un abono por cupo y paga el saldo 2 días antes.')
-    // Un plazo que la base no deja guardar (0, decimal) no se inventa: sale «[FALTA: …]» y no se copia.
-    for (const malo of [0, 1.5]) {
+    // Un plazo que la base no deja guardar (negativo, decimal) no se inventa: sale «[FALTA: …]» y no se copia.
+    for (const malo of [-1, 1.5]) {
       const g = con(malo)
       expect(g.faltantes).toEqual(['días antes para el saldo'])
       expect(g.copiable).toBe(false)
@@ -289,6 +303,23 @@ describe('b) la oferta por mensaje directo: sin la lista de funciones, hasta 1.0
       campana: { nombre: 'J'.repeat(200), dias_saldo_antes: 30 }, funciones: AGENDA, ahoraMs: AHORA,
     })
     expect(largo.bytes).toBeLessThanOrEqual(LIMITE_DIRECTO_BYTES)
+    // Con plazo 0 (28-oct) la línea del abono es la más larga (81 bytes más que «1 día antes»). Con la ficha real de
+    // Jack cabe: 852 bytes. Con esta agenda cabe hasta un nombre de campaña de 161 caracteres (1.000 bytes justos); desde
+    // 162 se pasa, y con el máximo (200) son 1.039: no se deja copiar y avisa (no corta). Texto de Mauricio tal cual.
+    const realCero = generarMensajeDirecto({
+      ficha: FICHA, negocio: { ...NEGOCIO, direccion: 'AK 9 #104A-50, Bogotá' },
+      campana: { nombre: 'El extraño mundo de Jack octubre', dias_saldo_antes: 0 },
+      funciones: [funcion(SAB_1PM, preventa('2026-10-15'))], ahoraMs: AHORA,
+    })
+    expect(realCero.texto).toContain('✨ Reserva con $100.000 por cupo. El saldo lo pagas con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.')
+    expect([realCero.bytes, realCero.copiable]).toEqual([852, true])
+    const cero = (nombre: string) => generarMensajeDirecto({
+      ficha: FICHA, negocio: { ...NEGOCIO, direccion: 'AK 9 #104A-50, Bogotá' },
+      campana: { nombre, dias_saldo_antes: 0 }, funciones: AGENDA, ahoraMs: AHORA,
+    })
+    expect([cero('J'.repeat(161)).bytes, cero('J'.repeat(161)).copiable]).toEqual([1000, true])
+    expect([cero('J'.repeat(162)).bytes, cero('J'.repeat(162)).copiable]).toEqual([1001, false])
+    expect([cero('J'.repeat(200)).bytes, cero('J'.repeat(200)).copiable]).toEqual([1039, false])
   })
 
   it('nombra la campaña y ofrece los horarios aparte; no inventa un precio que no sea de todas', () => {
@@ -344,7 +375,7 @@ describe('c) la bienvenida al grupo de WhatsApp de una función', () => {
     expect(b.texto).toContain('📅 FECHA Y HORA\nSábado 24 de octubre | 1:00 p. m.')
     expect(b.texto).toContain('🕐 LLEGADA: 12:50 p. m.\n✨ INICIAMOS: 1:10 p. m. puntual.')
     expect(b.texto).toContain('📍 LUGAR\n[EJEMPLO] Calle 100 #10-10, Bogotá – Segundo piso')
-    expect(b.texto).toContain('💰 PAGOS PENDIENTES\n\nRecuerden pagar el saldo con el link de pago que les enviamos por el chat de su reserva.')
+    expect(b.texto).toContain('💰 PAGOS PENDIENTES\n\nRecuerden pagar el saldo con el link de pago que les enviamos por el chat de su reserva, o durante la experiencia, con nuestro equipo.')
     expect(b.texto).toContain('cerraremos la puerta de ingreso')
     expect(b.texto.startsWith(FICHA.saludo_grupo!)).toBe(true)
     expect(b.copiable).toBe(true)
@@ -365,8 +396,8 @@ describe('c) la bienvenida al grupo de WhatsApp de una función', () => {
     expect(fijo).not.toMatch(/Jack|Halloween|Christmas|Navidad/)
   })
 
-  it('pagos pendientes: el texto aprobado (23-oct), sin otro medio de pago', () => {
-    expect(b.texto.split('\n\n')).toEqual(expect.arrayContaining(['💰 PAGOS PENDIENTES', 'Recuerden pagar el saldo con el link de pago que les enviamos por el chat de su reserva.']))
+  it('pagos pendientes: el texto de Mauricio (28-oct), sin otro medio de pago', () => {
+    expect(b.texto.split('\n\n')).toEqual(expect.arrayContaining(['💰 PAGOS PENDIENTES', 'Recuerden pagar el saldo con el link de pago que les enviamos por el chat de su reserva, o durante la experiencia, con nuestro equipo.']))
     expect(b.texto.endsWith(`${FICHA.relato_grupo}\n\nCon cariño,\n${NEGOCIO.firma}`)).toBe(true)
     expect(b.texto).not.toMatch(SIN_NEQUI)
     expect(b.copiable).toBe(true)

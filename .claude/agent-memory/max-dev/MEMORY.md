@@ -7,7 +7,7 @@
 - ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; puntos fuera de precio_venta; `–` no `−` en PDF; causas en causas-margen.ts
 - ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje
 - ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 APLICADA; no mergear sin DNS
-- ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 SIN aplicar; migrar antes del merge (datos.ts lee la columna)
+- ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 APLICADA (dicho 28-oct); datos.ts lee la columna
 - ⚠️⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — DNS de Resend bajo <slug> tumba el espacio: CNAME del slug en el mismo paso; logo solo con clave
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — 20261026183000 APLICADA; componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id
@@ -17,7 +17,7 @@
 - ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho conectado en #1285 (fuentesDeComposicion); arnés lo corre Mauricio
 - ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
-- ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
+- ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; plazo 0 en 20261026210000 (texto 28-oct); no solo cine; saldo P14 (modalidad al pagar); pasarela null
 - ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — Pública fuera del mínimo; SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
 - ⚠️⚠️ [Reportes con la llave vencida (28-oct)](project_valida_reportes_llave_vencida.md) — Valida#83 primero; llave y luego firma en 401; id UUID en ruta firmada
