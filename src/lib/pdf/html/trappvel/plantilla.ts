@@ -42,6 +42,8 @@ export interface FotoResuelta {
   src: string
   /** Encuadre: fracciones del ancho y del alto. */
   foco?: { x: number; y: number } | null
+  /** Ancho entre alto de la foto. `null`/ausente = no se sabe (se supone 3:2). */
+  proporcion?: number | null
 }
 
 export interface RecursosPropuesta {
@@ -207,6 +209,23 @@ function imagenDeTarjeta(principal: FotoResuelta | null, extras: FotoResuelta[],
   return `<div class="img mosaico n${extras.length}"><div class="m0"${fondo(principal)}></div>${extras.map((e) => `<div class="mx"${fondo(e)}></div>`).join('')}${dentro}</div>`
 }
 
+/** La forma del recuadro de foto de una ficha de hotel (ancho de la tarjeta × 25 mm). */
+const FORMA_FICHA_HOTEL = (ANCHO_UTIL_MM - SEPARACION_MM.hotel * (COLUMNAS_HOTELES - 1)) / COLUMNAS_HOTELES / ALTO_FOTO_MM.hotel
+
+/**
+ * La ficha de un hotel (punto 2 del 2026-10-29): sus fotos EN FILA, cada una del ancho que su forma
+ * pide, como la del Kunuku. El mosaico de principal grande + dos apiladas recortaba la grande a
+ * una tira (2,5 : 1) y partía el edificio. Cuántas van lo decide su forma (`cuantasFotosCaben`).
+ */
+function imagenDeFichaDeHotel(principal: FotoResuelta | null, extras: FotoResuelta[], dentro: string): string {
+  if (!principal) return `<div class="img sinfoto">${dentro}</div>`
+  const todas = [principal, ...extras]
+  const fotos = todas.slice(0, cuantasFotosCaben(todas, FORMA_FICHA_HOTEL, todas.length))
+  if (fotos.length === 1) return `<div class="img"${fondo(principal)}>${dentro}</div>`
+  const [p, ...xs] = fotos
+  return `<div class="img mosaico fila n${xs.length}" style="grid-template-columns:${columnasDeFotos(fotos)}"><div class="m0"${fondo(p)}></div>${xs.map((e) => `<div class="mx"${fondo(e)}></div>`).join('')}${dentro}</div>`
+}
+
 /** «Madrid Atocha - Barcelona Sants · AVE 03071 Renfe, Estándar» → «AVE 03071 Renfe». */
 function etiquetaDeTren(descripcion: string): string {
   const servicio = descripcion.split(' · ')[1]
@@ -279,15 +298,56 @@ function opcionDeReferencia(c: CiudadDoc, m: ModeloPropuesta) {
 }
 
 /**
- * Las fotos del collage de la portada (hasta 4, como el de Edgar): la de la portada, las de cada
- * ciudad y, si faltan, las de los hoteles de la versión recomendada. Sin repetir; sin ninguna,
- * la banda queda con el degradado oscuro.
+ * Fotos completas (brief del 2026-10-29, punto 2): Edgar no quiere el collage con fotos cortadas.
+ *
+ * Una banda de alto fijo con N fotos «cover» recorta cada una por donde le sobra. El recorte se
+ * minimiza dándole a cada foto un ancho proporcional a SU forma (`fr` = ancho / alto): así todas
+ * se recortan lo mismo, y poco. Y se escoge cuántas van (de 1 al tope) para que la forma de la
+ * fila se parezca lo más posible a la de la banda: dos apaisadas llenan la portada casi sin
+ * recorte; cuatro la partían en tiras.
+ */
+const PROPORCION_SUPUESTA = 1.5
+
+function proporcionDe(f: FotoResuelta): number {
+  const p = f.proporcion
+  return p && Number.isFinite(p) && p > 0.2 && p < 6 ? p : PROPORCION_SUPUESTA
+}
+
+/** Cuántas de `fotos` (en su orden) llenan mejor un recuadro de esta forma, hasta `tope`. */
+export function cuantasFotosCaben(fotos: FotoResuelta[], formaDelRecuadro: number, tope: number): number {
+  let mejor = Math.min(1, fotos.length)
+  let error = Infinity
+  let suma = 0
+  for (let n = 1; n <= Math.min(tope, fotos.length); n++) {
+    suma += proporcionDe(fotos[n - 1])
+    const e = Math.abs(Math.log(suma / formaDelRecuadro))
+    // A igual recorte, más fotos (como el de Edgar): `<=`.
+    if (e <= error + 1e-9) {
+      mejor = n
+      error = e
+    }
+  }
+  return mejor
+}
+
+/** Las columnas de una fila de fotos: cada una tan ancha como su forma pide. */
+export function columnasDeFotos(fotos: FotoResuelta[]): string {
+  return fotos.map((f) => `${Math.round(proporcionDe(f) * 100) / 100}fr`).join(' ')
+}
+
+/** La banda de la portada: 197,9 × 57 mm (`.hero`). */
+const FORMA_PORTADA = 197.9 / 57
+
+/**
+ * Las fotos de la portada: hasta 3, del DESTINO primero (la de la portada y las de cada ciudad) y,
+ * solo si faltan, las de los hoteles de la versión recomendada. Sin repetir; sin ninguna, la banda
+ * queda con el degradado oscuro. Cuántas van lo decide su forma (`cuantasFotosCaben`).
  */
 export function fotosDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoResuelta[] {
   const fotos: FotoResuelta[] = []
   const vistas = new Set<string>()
   const sumar = (f: FotoResuelta | null | undefined) => {
-    if (!f || vistas.has(f.src) || fotos.length >= 4) return
+    if (!f || vistas.has(f.src) || fotos.length >= 3) return
     vistas.add(f.src)
     fotos.push(f)
   }
@@ -300,7 +360,7 @@ export function fotosDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoRe
     if (o && principal) for (const x of r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []) sumar(x)
   }
   for (const c of m.hoteles) for (const o of c.opciones) sumar(r.foto(o.foto?.url))
-  return fotos
+  return fotos.slice(0, cuantasFotosCaben(fotos, FORMA_PORTADA, 3))
 }
 
 function marcaDe(r: RecursosPropuesta, alto?: string): string {
@@ -333,7 +393,7 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
   ].filter((d): d is [string, string] => Boolean(d[1]))
   const fotos = fotosDePortada(m, r)
   const collage = fotos.length > 0
-    ? `<div class="fotos" style="grid-template-columns:repeat(${fotos.length},1fr)">${fotos.map((f) => `<div${fondo(f)}></div>`).join('')}</div>`
+    ? `<div class="fotos" style="grid-template-columns:${columnasDeFotos(fotos)}">${fotos.map((f) => `<div${fondo(f)}></div>`).join('')}</div>`
     : ''
   // El aviso blanco va donde Edgar pone la caja verde de «servicios confirmados»: aquí, el texto
   // revisado del cliente. Sin texto, no hay aviso.
@@ -463,7 +523,7 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
       const stars = o.estrellas && o.estrellas > 0 ? `<span class="stars">${'★'.repeat(Math.min(5, o.estrellas))}</span>` : ''
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
       const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
-      const imagen = foto || conImagen ? imagenDeTarjeta(foto, extras, `${tagsHtml}${stars}`) : ''
+      const imagen = foto || conImagen ? imagenDeFichaDeHotel(foto, extras, `${tagsHtml}${stars}`) : ''
       const estancia = [rangoCorto(c.desde, c.hasta), c.noches ? `(${c.noches} ${c.noches === 1 ? 'noche' : 'noches'})` : null].filter(Boolean).join(' ')
       const filas = [
         ['Estancia', estancia],

@@ -158,7 +158,7 @@ describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => 
   /** El mosaico vuelto recuadro simple, y sin la línea de créditos: lo único que puede cambiar. */
   const sinMosaico = (html: string) =>
     html
-      .replace(/<div class="img mosaico n\d"><div class="m0"( style="[^"]*")><\/div>(?:<div class="mx" style="[^"]*"><\/div>)+/g, '<div class="img"$1>')
+      .replace(/<div class="img mosaico (?:fila )?n\d"(?: style="[^"]*")?><div class="m0"( style="[^"]*")><\/div>(?:<div class="mx" style="[^"]*"><\/div>)+/g, '<div class="img"$1>')
       .replace(/<div class="credits">[\s\S]*?<\/div>/, '')
 
   it('van DENTRO del recuadro de la principal: fuera de él, el documento es el mismo (no agregan hojas ni huecos)', { timeout: 60_000 }, async () => {
@@ -166,7 +166,7 @@ describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => 
     const sin = await prepararPropuestaHtml(e, opciones(CATALOGO_EUROPA))
     const con = await prepararPropuestaHtml(e, opciones(CATALOGO_EUROPA_BIBLIOTECA))
     // 2 hoteles y 1 plan con mosaico de principal + 2.
-    expect((con.html.match(/class="img mosaico n2"/g) ?? []).length).toBe(3)
+    expect((con.html.match(/class="img mosaico (?:fila )?n2"/g) ?? []).length).toBe(3)
     expect(sinMosaico(con.html)).toBe(sinMosaico(sin.html))
     expect(sin.html).not.toContain('mosaico n')
     // El mosaico no le pone alto, margen ni relleno al recuadro: mide lo mismo que la foto sola.
@@ -179,7 +179,7 @@ describe('biblioteca: hasta 2 fotos extra por hotel o plan (2026-10-16)', () => 
     const { html } = await prepararPropuestaHtml(sinFotosDeHotel(entradaComoLaAccion()), opciones(CATALOGO_EUROPA_BIBLIOTECA))
     expect(html).not.toContain(CREDITO_EXTRA_HOTEL_AUTOMATICA)
     const hoteles = html.slice(html.indexOf('>Hospedaje<'), html.indexOf('</section>', html.indexOf('>Hospedaje<')))
-    expect((hoteles.match(/class="img mosaico n2"/g) ?? []).length).toBe(2)
+    expect((hoteles.match(/class="img mosaico fila n2"/g) ?? []).length).toBe(2)
   })
 
   it('cuántas caben sin achicarlas de más: 2 en hoteles de 1 a 3 columnas y en planes de 4; ninguna en tarjetas angostas', () => {

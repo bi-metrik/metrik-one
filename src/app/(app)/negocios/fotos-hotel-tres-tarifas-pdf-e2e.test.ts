@@ -183,8 +183,9 @@ describe('las fotos de los hoteles de las tres tarifas llegan al PDF', () => {
   it('el HTML del documento las imprime: 3 (principal + 2), 2 (principal + 1) y 1, sin recuadro vacío', () => {
     const recuadros = captura.html.match(/class="img[^"]*"/g) ?? []
     expect(recuadros.filter(c => c.includes('sinfoto'))).toEqual([])
-    expect(recuadros).toContain('class="img mosaico n2"')
-    expect(recuadros).toContain('class="img mosaico n1"')
+    // En fila, cada una del ancho de su forma (2026-10-29, fotos completas).
+    expect(recuadros).toContain('class="img mosaico fila n2"')
+    expect(recuadros).toContain('class="img mosaico fila n1"')
     // Las extras: 2 del primero y 1 del segundo.
     expect(captura.html.split('class="mx"').length - 1).toBe(3)
   })

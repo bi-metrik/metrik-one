@@ -52,16 +52,30 @@ async function bytesDe(src: string, timeoutMs: number): Promise<Buffer | null> {
  * una imagen: el documento sale sin esa foto, nunca con un hueco roto.
  */
 export async function reducirFoto(src: string | null | undefined, ancho: number, calidad = 72, timeoutMs = 6000): Promise<string | null> {
+  return (await reducirFotoConProporcion(src, ancho, calidad, timeoutMs))?.src ?? null
+}
+
+/**
+ * Lo mismo que `reducirFoto`, con el ancho entre el alto de la foto ya girada. La plantilla lo usa
+ * para darle a cada foto un recuadro de su forma y no recortarla (brief del 2026-10-29, punto 2).
+ */
+export async function reducirFotoConProporcion(
+  src: string | null | undefined,
+  ancho: number,
+  calidad = 72,
+  timeoutMs = 6000,
+): Promise<{ src: string; proporcion: number | null } | null> {
   if (!src) return null
   const datos = await bytesDe(src, timeoutMs)
   if (!datos) return null
   try {
-    const salida = await sharp(datos)
+    const { data, info } = await sharp(datos)
       .rotate()
       .resize({ width: ancho, withoutEnlargement: true })
       .jpeg({ quality: calidad, mozjpeg: true })
-      .toBuffer()
-    return `data:image/jpeg;base64,${salida.toString('base64')}`
+      .toBuffer({ resolveWithObject: true })
+    const proporcion = info.width > 0 && info.height > 0 ? info.width / info.height : null
+    return { src: `data:image/jpeg;base64,${data.toString('base64')}`, proporcion }
   } catch {
     return null
   }
@@ -230,10 +244,12 @@ export async function prepararPropuestaHtml(
   for (const f of deOpcional.values()) for (const x of f.extras ?? []) pedir(x.src, ANCHO_FOTO.extra)
 
   const [resueltas, logo] = await Promise.all([
-    Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFoto(url, ancho)] as const)),
+    Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFotoConProporcion(url, ancho)] as const)),
     reducirLogo(opts.logoUrl),
   ])
-  const porUrl = new Map(resueltas.filter((x): x is readonly [string, string] => x[1] !== null))
+  const conMedida = resueltas.filter((x): x is readonly [string, { src: string; proporcion: number | null }] => x[1] !== null)
+  const porUrl = new Map(conMedida.map(([url, f]) => [url, f.src] as const))
+  const proporcionDe = new Map(conMedida.map(([url, f]) => [url, f.proporcion] as const))
   const focoDe = new Map<string, FotoPDF['foco']>()
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
@@ -245,7 +261,7 @@ export async function prepararPropuestaHtml(
   const resolver = (url: string | null | undefined): FotoResuelta | null => {
     if (!url) return null
     const src = porUrl.get(url)
-    return src ? { src, foco: focoDe.get(url) ?? null } : null
+    return src ? { src, foco: focoDe.get(url) ?? null, proporcion: proporcionDe.get(url) ?? null } : null
   }
 
   // Las extras solo salen junto a su principal: sin ella, ni foto ni crédito.

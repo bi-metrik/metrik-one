@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { ENTRADA_EUROPA, PRECIO_E, PRECIO_P, PRECIO_R, PROPS_EUROPA } from '../../../../../test/propuesta-europa'
 import { ENTRADA_CURAZAO, PRECIO_CUR_P, PRECIO_CUR_R, TERMINOS_CURAZAO } from '../../../../../test/propuesta-curazao'
 import { modeloDePropuesta, type EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { bloquesDeTerminos, esc, fotosDePortada, htmlDePropuesta, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
+import { bloquesDeTerminos, cuantasFotosCaben, esc, fotosDePortada, htmlDePropuesta, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
 
 const RECURSOS: RecursosPropuesta = {
   foto: (url) => (url ? { src: `data:image/jpeg;base64,FOTO`, foco: null } : null),
@@ -98,7 +98,7 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
 })
 
 describe('portada como la de Edgar', () => {
-  it('collage de hasta 4 fotos: la de portada, las de ciudad y, si faltan, las de los hoteles de la Recomendada', () => {
+  it('portada con fotos completas (2026-10-29): del destino primero, hasta 3, tantas como llenen la banda sin recortarlas', () => {
     const m = modeloDePropuesta(ENTRADA_CURAZAO)
     const r: RecursosPropuesta = {
       ...RECURSOS,
@@ -106,12 +106,17 @@ describe('portada como la de Edgar', () => {
     }
     // Sin foto de portada ni de ciudad: primero el hotel de la Recomendada, después el de la Superior.
     expect(fotosDePortada(m, r).map((f) => f.src)).toEqual(['data:parkplaza.jpg', 'data:pullman.jpg'])
+    // Con la de la ciudad, el destino va primero; dos apaisadas (3:2) llenan la banda mejor que tres.
     const conCiudad = { ...r, fotoDeCiudad: () => ({ src: 'data:ciudad', foco: null }) }
-    expect(fotosDePortada(m, conCiudad).map((f) => f.src)).toEqual(['data:ciudad', 'data:parkplaza.jpg', 'data:pullman.jpg'])
-    const h = htmlDePropuesta(m, conCiudad)
-    expect(h).toContain('<div class="fotos" style="grid-template-columns:repeat(3,1fr)">')
-    // Nunca más de cuatro.
-    expect(fotosDePortada(modeloDePropuesta(ENTRADA_EUROPA), { ...r, fotoDeCiudad: (c) => ({ src: `data:${c}`, foco: null }) })).toHaveLength(4)
+    expect(fotosDePortada(m, conCiudad).map((f) => f.src)).toEqual(['data:ciudad', 'data:parkplaza.jpg'])
+    // Cada foto tan ancha como su forma: nada de columnas iguales que recortan.
+    expect(htmlDePropuesta(m, conCiudad)).toContain('<div class="fotos" style="grid-template-columns:1.5fr 1.5fr">')
+    // Verticales caben tres; nunca más de tres.
+    const vertical = (src: string) => ({ src, foco: null, proporcion: 0.8 })
+    const europa = fotosDePortada(modeloDePropuesta(ENTRADA_EUROPA), { ...r, foto: (u) => (u ? vertical(`data:${u}`) : null), fotoDeCiudad: (c) => vertical(`data:${c}`) })
+    expect(europa).toHaveLength(3)
+    // Una panorámica sola ya llena la banda.
+    expect(cuantasFotosCaben([{ src: 'a', proporcion: 3.4 }, { src: 'b', proporcion: 1.5 }], 197.9 / 57, 3)).toBe(1)
   })
 
   it('sin ninguna foto, la banda queda con el degradado (sin collage)', () => {
