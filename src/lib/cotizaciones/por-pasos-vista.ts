@@ -181,12 +181,27 @@ function conIntermediaAntesDeLaRecomendada<T extends { nombre: string | null }>(
   return [...sin.slice(0, iRec), xs[iInt], ...sin.slice(iRec)]
 }
 
+/**
+ * Las tarifas sin nombre, en el orden de su «Opción N» (prueba corta del #1352). La que no va al
+ * cliente toma el último número (el PDF numera primero las que van), y por `orden` podía quedar
+ * antes: «Opción 3» arriba de «Opción 2». Las que tienen nombre no se mueven: solo se reparten los
+ * lugares que ya ocupaban las sin nombre.
+ */
+function sinNombreEnSuNumero<T extends { id: string; nombre: string | null }>(xs: T[], visibles: ReadonlyMap<string, string>): T[] {
+  const numero = (t: T) => Number(/^Opción (\d+)$/.exec(visibles.get(t.id) ?? '')?.[1] ?? NaN)
+  const sinNombre = xs.filter(t => (t.nombre ?? '').trim() === '' && Number.isFinite(numero(t)))
+  if (sinNombre.length < 2) return xs
+  const enOrden = [...sinNombre].sort((a, b) => numero(a) - numero(b))
+  let i = 0
+  return xs.map(t => (sinNombre.includes(t) ? enOrden[i++] : t))
+}
+
 /** El precio, el costo y el margen de cada tarifa, y si es idéntica a otra (decisión C). */
 export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCascada, tarifas: readonly TarifaDeLaPantalla[]): TarifaCalculada[] {
   const principal = idDelPrincipal(tarifas)
   const ranuras = ranurasConAlternativas(lineas)
-  const ordenadas = conIntermediaAntesDeLaRecomendada([...tarifas].sort((a, b) => a.orden - b.orden))
   const visibles = nombresVisiblesDeTarifas(tarifas)
+  const ordenadas = sinNombreEnSuNumero(conIntermediaAntesDeLaRecomendada([...tarifas].sort((a, b) => a.orden - b.orden)), visibles)
   const calculadas = ordenadas.map(t => {
     const cascada = cascadaDeItinerario(lineas, t.seleccion, params, t.id)
     const dentro = new Set(itemsDelItinerario(lineas, t.seleccion))
