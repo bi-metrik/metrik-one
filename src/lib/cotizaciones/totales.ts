@@ -223,6 +223,12 @@ export interface ReglasDeLinea {
   puntos: number
   /** La comisión de una línea Pública, si alguien la escribió. */
   comisionPct: number | null
+  /**
+   * ¿Esta línea toma el margen de la cotización (la casilla «Margen de hoteles»)? Solo un hotel Neta
+   * sin margen propio y con precio que sale del costo. «Ver el cálculo» lo usa para no mostrar como
+   * aplicado un margen que no toma ninguna línea (brief del 2026-10-29, falla 2).
+   */
+  tomaElGeneral: boolean
 }
 
 /** Lo que las reglas de margen dejan en la cascada. Ausente sin reglas. */
@@ -503,6 +509,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
           : null,
         puntos: 0,
         comisionPct: publica ? comisionDePublica(item.tarifa_pax) : null,
+        tomaElGeneral: tipo === 'hotel' && !publica && !margenPropio && derivaDelCosto,
       }
       // Reciben puntos extra el hotel y lo demás, nunca el vuelo (el cliente compara el tiquete en
       // internet), ni una Pública (su precio es el público), ni un precio escrito a mano.

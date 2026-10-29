@@ -231,9 +231,13 @@ export function CampoComision({
       </span>
       {error && <span className="text-xs text-[#B3382C]" data-comision-error>{error}</span>}
       <span className={`text-xs ${comision ? 'text-[#6E6A62]' : 'font-semibold text-[#B3382C]'}`} data-comision-estado={comision ? 'escrita' : 'falta'}>
-        {comision
+        {/* La ayuda sigue a la casilla (brief del 2026-10-29): al pasar de $ a % la casilla queda
+            vacía, y decir «menos $300.000» ahí habla de algo que ya no se ve. */}
+        {comision && comision.tipo === tipo
           ? `Entra al margen de la cotización: la agencia paga el precio público menos ${comision.tipo === 'pct' ? porcentaje(comision.valor) : pesos(comision.valor)}.`
-          : 'Escribe la comisión: sin ella la cotización no se puede enviar y el PDF sale como borrador.'}
+          : comision
+            ? `Escribe la comisión ${tipo === 'pct' ? 'en %' : 'en pesos'}: al guardarla reemplaza la que está ${comision.tipo === 'pct' ? 'en %' : 'en pesos'}.`
+            : 'Escribe la comisión: sin ella la cotización no se puede enviar y el PDF sale como borrador.'}
       </span>
     </div>
   )
