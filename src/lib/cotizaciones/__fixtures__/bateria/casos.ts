@@ -436,7 +436,7 @@ export const CASO_QA_1352 = {
   tablas: () => tablasBase({ cot: QA_COT, neg: 'neg-bateria-qa1352', consecutivo: 'COT-2026-9152', destino: 'San Andrés', margen: null, reglas: REGLAS(), items: [] }),
   paquetes: [
     { paquete: paqueteConVuelo('Hotel Mar Azul Ficticio', 1_900_000, 'Desayuno', { alimentacion: true, traslados: true, seguro_medico: true }), comision: 'por_incluir' as const },
-    { paquete: paqueteConVuelo('Hotel Coral Ficticio', 2_300_000, 'Desayuno', { alimentacion: true, traslados: true, seguro_medico: true }), comision: 'incluida' as const },
+    { paquete: paqueteConVuelo('Hotel Coral QA Ficticio', 2_300_000, 'Desayuno', { alimentacion: true, traslados: true, seguro_medico: true }), comision: 'incluida' as const },
     { paquete: paqueteConVuelo('Hotel Brisa Ficticio', 1_600_000, null, { seguro_medico: true }), comision: 'por_incluir' as const },
   ],
 }
