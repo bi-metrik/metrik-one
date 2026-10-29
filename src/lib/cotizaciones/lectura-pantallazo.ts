@@ -48,7 +48,15 @@ import {
   type HabitacionDeReservaCruda,
 } from './reserva-habitaciones'
 
+import {
+  fechaDeIdaYRegreso,
+  trasladoDeIdaYRegreso,
+  trayectoDeIdaYRegreso,
+  type TrayectoReservaCrudo,
+} from './traslado-ida-y-regreso'
+
 export type { HabitacionDeReservaCruda } from './reserva-habitaciones'
+export type { TrayectoReservaCrudo } from './traslado-ida-y-regreso'
 
 // ── Lo que devuelve el modelo, antes de juzgarlo ─────────────────────────────
 
@@ -160,6 +168,11 @@ export interface LecturaCruda {
    * toda otra lectura.
    */
   habitacionesReserva?: HabitacionDeReservaCruda[]
+  /**
+   * Los trayectos del resumen de UNA reserva de traslado (ida y regreso, `traslado-ida-y-regreso.ts`).
+   * Solo la ranura de traslado; ausente en toda otra lectura.
+   */
+  trayectosReserva?: TrayectoReservaCrudo[]
 }
 
 /**
@@ -320,15 +333,23 @@ export function evaluarLectura(
   const reserva = ranura.slug === 'hotel_detalle' && cruda.veredicto === 'detalle_unico' && cruda.habitacionesReserva
     ? reservaDeVariasHabitaciones(cruda.habitacionesReserva, parseMontoCop(limpio(cruda.campos.precio_total)))
     : null
-  const contradice = cruda.veredicto === 'detalle_unico' && !cruda.elegida && !reserva
+  // Brief del 2026-10-29, punto 4 · el resumen de UN traslado con su ida y su regreso (el segundo
+  // trayecto es el primero al revés) no es una lista para elegir: se juntan y se suman. Dos o más
+  // trayectos que NO son ida y regreso siguen siendo «¿cuál?», aunque el modelo diga detalle único.
+  const trayectos = ranura.slug === 'traslado_detalle' ? cruda.trayectosReserva ?? [] : []
+  const idaYRegreso = trayectos.length > 0 ? trasladoDeIdaYRegreso(trayectos) : null
+  const variosTrayectos = trayectos.length >= 2 && !idaYRegreso
+  const contradice = cruda.veredicto === 'detalle_unico' && !cruda.elegida && !reserva && !idaYRegreso
     && typeof cruda.opcionesVisibles === 'number' && cruda.opcionesVisibles >= 2
-  if (cruda.veredicto === 'varias_opciones' || contradice) {
+  if ((cruda.veredicto === 'varias_opciones' && !idaYRegreso) || contradice || variosTrayectos) {
     return {
       ok: false,
       codigo: 'RX1',
       motivo: `La captura muestra más de una opción tarifaria. ${cruda.observacion ?? ''}`.trim(),
       instruccion: instruccionRX1(ranura),
-      opciones: opcionesParaElegir(cruda.opcionesVistas),
+      opciones: variosTrayectos
+        ? opcionesParaElegir(trayectos.map(t => ({ nombre: [t.desde, t.hasta].filter(Boolean).join(' → '), precio: t.precio, seleccionada: false })))
+        : opcionesParaElegir(cruda.opcionesVistas),
     }
   }
   if (cruda.veredicto === 'otra_ranura') {
@@ -445,6 +466,34 @@ export function evaluarLectura(
       campo.alertaRevision = true
       avisosDelItem.push(deducido.aviso)
     }
+  }
+
+  // Punto 4 · el traslado de ida y regreso: un trayecto «A -> B y B -> A», cada fecha con su hora
+  // (el año se deduce igual que en cualquier fecha; el regreso no puede quedar antes de la ida) y
+  // el costo de los dos.
+  if (idaYRegreso) {
+    const resolver = (valor: string | null, noAntesDe: string | null): string | null => {
+      if (!valor) return null
+      if (!esFechaSinAnio(valor)) return fechaSinDiaDeLaSemana(valor)
+      const d = deducirAnio({ valor, hoy, viaje: contexto.fechasViaje ?? null, noAntesDe, nombre: 'la fecha del traslado' })
+      if (d?.aviso) avisosDelItem.push(d.aviso)
+      return d?.fecha ?? null
+    }
+    const fechaIda = resolver(idaYRegreso.ida.fecha, null)
+    const fechaRegreso = resolver(idaYRegreso.regreso.fecha, fechaIda)
+    const fijar = (slug: string, valor: string | null) => {
+      const c = porSlug.get(slug)
+      if (!c || valor === null) return
+      c.valor = valor
+      c.confidence = Math.max(c.confidence, CONFIANZA_MINIMA)
+    }
+    fijar('trayecto', trayectoDeIdaYRegreso(idaYRegreso))
+    fijar('fecha_hora', fechaDeIdaYRegreso([fechaIda, fechaRegreso], idaYRegreso))
+    fijar('precio_total', String(idaYRegreso.total))
+    avisosDelItem.push(
+      `Traslado de ida y regreso: se juntaron los dos trayectos de la reserva y el costo es la suma ` +
+      `(${idaYRegreso.ida.precio.toLocaleString('es-CO')} + ${idaYRegreso.regreso.precio.toLocaleString('es-CO')}).`,
+    )
   }
 
   // 7.4 · la tarjeta de hotel no muestra las fechas: se toman las del viaje, marcadas.
