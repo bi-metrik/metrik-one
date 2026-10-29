@@ -85,10 +85,12 @@ describe('un titular con el certificado UPME completo', () => {
     expect(t).toContain(plano('correspondiente a la factura No. FEMM12345 y al Certificado UPME No. VEH_GEE20262260, no ha sido tratado'))
   }, 30_000)
 
-  it('CUARTO lleva el IVA aproximado al mil; PRIMERO, el IVA exacto', async () => {
+  // Decisión de Mauricio (2026-10-29): el IVA solicitado es el IVA EXACTO, sin redondear al mil.
+  it('CUARTO y PRIMERO llevan el IVA exacto de la factura, sin redondear', async () => {
     const t = await texto(DATOS_BASE)
     expect(t).toContain(plano(`más IVA de ${fmtCurrency('4319048')}.`))
-    expect(t).toContain(plano(`por valor de ${fmtCurrency('4319000')}, (valor aproximado`))
+    expect(t).toContain(plano(`por valor de ${fmtCurrency('4319048')}, (valor aproximado`))
+    expect(t).not.toContain(plano(fmtCurrency('4319000')))
   }, 30_000)
 
   it('cierra con ciudad y fecha de generación (en Bogotá) y la firma de la plantilla', async () => {

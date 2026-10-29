@@ -80,7 +80,7 @@ describe('un titular con el certificado UPME completo', () => {
       'Descripción del bien BYD DOLPHIN MINI GS 2026',
       `Valor antes de IVA (COP) ${fmtCurrency('86380952')}`,
       `IVA pagado (COP) ${fmtCurrency('4319048')}`,
-      `Valor IVA solicitado (COP) ${fmtCurrency('4319000')}`,
+      `Valor IVA solicitado (COP) ${fmtCurrency('4319048')}`,
       'N.° certificado UPME VEH_GEE20262260',
       'Fecha certificado UPME 08/05/2026',
     ]) {
@@ -88,11 +88,13 @@ describe('un titular con el certificado UPME completo', () => {
     }
   }, 30_000)
 
-  it('tres totales: bienes, IVA pagado e IVA solicitado al mil', async () => {
+  // Decisión de Mauricio (2026-10-29): el IVA solicitado es el IVA EXACTO, sin redondear al mil.
+  it('tres totales: bienes, IVA pagado e IVA solicitado exacto', async () => {
     const t = await texto(DATOS_BASE)
     expect(t).toContain(plano(
-      `TOTAL VALOR BIENES TOTAL IVA PAGADO TOTAL IVA SOLICITADO ${fmtCurrency('86380952')} ${fmtCurrency('4319048')} ${fmtCurrency('4319000')}`,
+      `TOTAL VALOR BIENES TOTAL IVA PAGADO TOTAL IVA SOLICITADO ${fmtCurrency('86380952')} ${fmtCurrency('4319048')} ${fmtCurrency('4319048')}`,
     ))
+    expect(t).not.toContain(plano(fmtCurrency('4319000')))
   }, 30_000)
 
   it('firma con nombre, cédula, correo y celular; sin marcadores ni guiones', async () => {

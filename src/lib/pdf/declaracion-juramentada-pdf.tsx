@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
 import { titularesDeDatos, concordancia } from './titulares'
-import { fmtCurrency, fmtAlMil, fechaLarga, fechaDeGeneracion } from './formato'
+import { fmtCurrency, fechaLarga, fechaDeGeneracion } from './formato'
 
 /**
  * Declaración juramentada — plantilla de SOENA recibida el 2026-10-28 (SOE-033),
@@ -10,8 +10,7 @@ import { fmtCurrency, fmtAlMil, fechaLarga, fechaDeGeneracion } from './formato'
  * Lo que cambió el 2026-10-28 respecto a la de septiembre: cada cláusula ata la
  * factura con su certificado UPME por NÚMERO («factura No. Y», «Certificado UPME
  * No. X») —PRIMERO gana una segunda frase, TERCERO y CUARTO nombran los dos
- * documentos—; el valor de CUARTO pasa a ser el «IVA solicitado, aproximado al mil»
- * (art. 577 ET, `fmtAlMil`) y ya no el IVA exacto de la factura; y antes de la firma
+ * documentos—; el valor de CUARTO es el «IVA solicitado»; y antes de la firma
  * va «Ciudad y fecha» con el día de generación. La «Nota interna (borrar antes de
  * enviar)» de la plantilla es una instrucción para quien la llena a mano: NO se
  * imprime. Esa nota pide repetir los números por factura cuando hay varias; hoy el
@@ -30,7 +29,13 @@ import { fmtCurrency, fmtAlMil, fechaLarga, fechaDeGeneracion } from './formato'
  *    haya conflicto con eso». Es decir: el total de la factura puede incluir
  *    impuesto al consumo, accesorios o matrícula, y afirmarlo bajo juramento como
  *    valor del vehículo abre una contradicción con la Relación de facturas. Solo
- *    salen `valor_unitario_sin_iva` y `valor_iva` (más el IVA aproximado al mil).
+ *    salen `valor_unitario_sin_iva` y `valor_iva`.
+ *
+ * 1b. El «IVA solicitado» de CUARTO es el IVA EXACTO de la factura, sin redondear:
+ *    decisión de Mauricio del 2026-10-29 (hasta ese día salía aproximado al mil). El
+ *    texto «(valor aproximado como lo establece el artículo 577 del Estatuto
+ *    Tributario)» de CUARTO es de la plantilla del cliente y NO se toca aquí: lo
+ *    decide Mauricio.
  *
  * 2. La identificación va SIN dígito de verificación. La plantilla identifica al
  *    firmante con CÉDULA DE CIUDADANÍA, no con NIT.
@@ -115,7 +120,7 @@ const MARCADOR = {
   factura: '[N.° DE FACTURA]',
   valor: '[VALOR]',
   iva: '[IVA PAGADO]',
-  ivaAlMil: '[IVA SOLICITADO, APROXIMADO AL MIL]',
+  ivaSolicitado: '[IVA SOLICITADO]',
 }
 
 const s = StyleSheet.create({
@@ -182,7 +187,8 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
   const factura = datos.numero_factura?.trim() || MARCADOR.factura
   const valorSinIva = fmtCurrency(datos.valor_unitario_sin_iva, MARCADOR.valor)
   const valorIva = fmtCurrency(datos.valor_iva, MARCADOR.iva)
-  const ivaSolicitado = fmtAlMil(datos.valor_iva, MARCADOR.ivaAlMil)
+  // IVA exacto de la factura, sin redondear (decisión de Mauricio, 2026-10-29).
+  const ivaSolicitado = fmtCurrency(datos.valor_iva, MARCADOR.ivaSolicitado)
 
   // Red de seguridad UPME (nota 3): sin radicado, `upme` es null y ninguna cláusula
   // menciona el certificado. Sin fecha, solo se cae «, de fecha …».
