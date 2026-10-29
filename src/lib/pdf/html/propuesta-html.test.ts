@@ -39,7 +39,7 @@ describe('la imagen de la portada (regla de fotos del 2026-10-29)', () => {
     const opciones = (catalogo: typeof CATALOGO_EUROPA) => ({ marca: 'A', logoUrl: null, fotoDeCiudad: bancoComoFotoPDF, catalogo })
     const conCommons = await prepararPropuestaHtml(sinFotoDeDestino(), opciones(CATALOGO_EUROPA))
     expect(conCommons.modelo.portada.foto).toBeNull()
-    expect(conCommons.html).toContain('<div class="hero marca')
+    expect(conCommons.html).not.toContain('hero confoto')
     const propia = { ...CATALOGO_EUROPA, ciudad: (c: string) => { const f = CATALOGO_EUROPA.ciudad(c); return f ? { ...f, origen: 'asesora' as const, credito: null } : null } }
     const conPropia = await prepararPropuestaHtml(sinFotoDeDestino(), opciones(propia))
     expect(conPropia.modelo.portada.foto?.rotulo).toBe('BARCELONA')

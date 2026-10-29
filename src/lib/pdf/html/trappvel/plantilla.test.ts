@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { ENTRADA_EUROPA, PRECIO_E, PRECIO_P, PRECIO_R, PROPS_EUROPA } from '../../../../../test/propuesta-europa'
 import { ENTRADA_CURAZAO, PRECIO_CUR_P, PRECIO_CUR_R, TERMINOS_CURAZAO } from '../../../../../test/propuesta-curazao'
 import { modeloDePropuesta, type EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { bloquesDeTerminos, esc, fotoDePortada, htmlDePropuesta, ROTULO_IMAGEN_PORTADA, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
+import { bloquesDeTerminos, creditoCortoDePortada, esc, fotoDePortada, htmlDePropuesta, ROTULO_IMAGEN_PORTADA, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
 
 const RECURSOS: RecursosPropuesta = {
   foto: (url) => (url ? { src: `data:image/jpeg;base64,FOTO`, foco: null } : null),
@@ -98,37 +98,42 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
 })
 
 describe('portada como la de Edgar', () => {
-  it('una sola imagen del destino a todo lo ancho, con «Imagen ilustrativa»; nunca fotos de hotel ni collage (regla de fotos del 2026-10-29)', () => {
+  it('con imagen aprobada del destino: esa sola, con «Imagen ilustrativa» y su crédito; sin ella, la portada de siempre (regla de fotos del 2026-10-29)', () => {
     const m = modeloDePropuesta(ENTRADA_CURAZAO)
     const r: RecursosPropuesta = {
       ...RECURSOS,
       foto: (url) => (url ? { src: `data:${url.split('/').pop()}`, foco: null } : null),
-      fotoDeCiudad: () => ({ src: 'data:ciudad', foco: null }),
     }
-    // Sin foto de destino: ni la del hotel de la Recomendada ni la de la ciudad.
+    // Sin imagen del destino: el collage de siempre (los hoteles de la Recomendada), nunca la banda de colores.
     expect(fotoDePortada(m, r)).toBeNull()
     const sin = htmlDePropuesta(m, r)
     const heroSin = sin.slice(sin.indexOf('<div class="hero'), sin.indexOf('<div class="aviso"'))
-    expect(heroSin).toMatch(/^<div class="hero marca conaviso"><div class="in">/)
-    expect(heroSin).not.toContain('background-image')
+    expect(heroSin).toMatch(/^<div class="hero conaviso"><div class="fotos" style="grid-template-columns:repeat\(2,1fr\)">/)
     expect(heroSin).not.toContain(ROTULO_IMAGEN_PORTADA)
-    // Con foto de destino: esa sola, con el rótulo.
-    m.portada.foto = { url: '/banco/curazao.jpg', rotulo: 'CURAZAO', credito: null }
+    expect(sin).not.toMatch(/hero marca|#e6197a,#8a2cb5 55%,#1ca2b8\); \}\n\.hero/)
+    // Con imagen del destino: esa sola, con el rótulo y el crédito corto.
+    m.portada.foto = { url: '/banco/curazao.jpg', rotulo: 'CURAZAO', credito: 'Handelskade, Willemstad, Charles Hoffman (Wikimedia Commons, CC BY-SA 2.0)' }
     expect(fotoDePortada(m, r)?.src).toBe('data:curazao.jpg')
     const con = htmlDePropuesta(m, r)
     const heroCon = con.slice(con.indexOf('<div class="hero'), con.indexOf('<div class="aviso"'))
     expect(heroCon).toContain('<div class="hero confoto conaviso"><div class="foto" style="background-image:url(data:curazao.jpg)')
-    expect(heroCon).toContain(`<span class="ilustrativa">${ROTULO_IMAGEN_PORTADA}</span>`)
+    expect(heroCon).toContain(`<span class="ilustrativa">${ROTULO_IMAGEN_PORTADA}</span><span class="ilustrativa credito">Foto: Charles Hoffman · CC BY-SA 2.0</span>`)
     expect((heroCon.match(/background-image/g) ?? []).length).toBe(1)
-    expect(con).not.toContain('class="fotos"')
-    // La sombra de abajo para el título y el rótulo siempre encima.
-    expect(con).toMatch(/\.hero\.confoto::after \{[^}]*rgba\(27,31,59,\.72\) 100%/)
+    expect(heroCon).not.toContain('class="fotos"')
+    // La sombra más oscura del PDF final y el rótulo siempre encima.
+    expect(con).toMatch(/\.hero\.confoto::after \{[^}]*rgba\(27,31,59,\.72\) 100%[^}]*rgba\(27,31,59,\.62\) 0%/)
     expect(con).toMatch(/\.hero \.ilustrativa \{[^}]*z-index:2/)
   })
 
-  it('sin ninguna foto, la banda queda con el color de Trappvel (sin collage)', () => {
+  it('el crédito corto de la portada', () => {
+    expect(creditoCortoDePortada('Handelskade, Willemstad, Charles Hoffman (Wikimedia Commons, CC BY-SA 2.0)')).toBe('Foto: Charles Hoffman · CC BY-SA 2.0')
+    expect(creditoCortoDePortada('Felviper (Wikimedia Commons, CC BY-SA 4.0)')).toBe('Foto: Felviper · CC BY-SA 4.0')
+    expect(creditoCortoDePortada(null)).toBeNull()
+  })
+
+  it('sin ninguna foto, la banda queda con el degradado oscuro de siempre (sin collage)', () => {
     const h = html(ENTRADA_CURAZAO, { ...RECURSOS, foto: () => null })
-    expect(h).toContain('<div class="hero marca conaviso"><div class="in">')
+    expect(h).toContain('<div class="hero conaviso"><div class="in">')
     expect(h).not.toContain('class="fotos"')
   })
 
@@ -139,7 +144,7 @@ describe('portada como la de Edgar', () => {
     m.portada.intro = null
     const sinIntro = htmlDePropuesta(m, RECURSOS)
     expect(sinIntro).not.toContain('class="aviso"')
-    expect(sinIntro).toMatch(/<div class="hero (marca|confoto)">/)
+    expect(sinIntro).toMatch(/<div class="hero(?: confoto)?">/)
   })
 
   it('las 4 tarjetas rosadas y una ficha por viajero con sus iniciales (los menores sin autorización no salen)', () => {
