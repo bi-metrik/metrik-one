@@ -709,7 +709,9 @@ export function modeloDePropuesta({
   // El trayecto de vuelta sin fecha propia sale el día que termina la estadía donde cae el de ida
   // («Amsterdam Centraal - hotel» el 21 y «hotel - aeropuerto Schiphol» el 23).
   const serviciosConFecha: ServicioDelDocumento[] = servicios.map((s) => {
-    if (s.alquiler) return { ...s, alquiler: { ...s.alquiler, fechaDevolucion: s.alquiler.fechaDevolucion ?? fechaDeDevolucion(s, vuelos, inicio) } }
+    // La fecha de devolución del carro solo sale si la trae la lectura (Vera, 2026-10-29): deducirla
+    // del primer vuelo y mostrarla al cliente sería afirmar algo que nadie leyó.
+    if (s.alquiler) return s
     if (s.fecha || !s.fechaIda) return s
     const ida = fechaIso(s.fechaIda, inicio)
     const estadia = ida ? hoteles.find((h) => h.desde && h.hasta && ida >= h.desde && ida < h.hasta) : undefined
@@ -1125,23 +1127,6 @@ export function incluyeDeTodas(
     } else if (enTodasLasVersiones(linea)) salida.push(linea)
   }
   return salida
-}
-
-/**
- * N7-4 (QA del 2026-10-29) · el día que se devuelve el carro: el del primer vuelo que SALE del
- * aeropuerto de devolución después de recogerlo (el carro se entrega antes de volar). Sin un
- * vuelo así, `null`: el documento no inventa la fecha.
- */
-function fechaDeDevolucion(s: ServicioDelDocumento, vuelos: FilaVueloDoc[], inicio: string | null): string | null {
-  const donde = s.alquiler?.devolucion ?? ''
-  const codigo = /\b([A-Z]{3})\b/.exec(donde)?.[1] ?? null
-  const recogida = fechaIso(s.fecha, inicio)
-  if (!codigo || !recogida) return null
-  const salen = vuelos
-    .filter((f) => f.fecha && f.fecha > recogida && new RegExp(`\\b${codigo}\\b`).test(f.desde ?? ''))
-    .map((f) => f.fecha as string)
-    .sort()
-  return salen[0] ?? null
 }
 
 /** «Walt Disney World · 4 días · Orlando» → 4. Solo de 2 a 14: más es un dato mal leído. */

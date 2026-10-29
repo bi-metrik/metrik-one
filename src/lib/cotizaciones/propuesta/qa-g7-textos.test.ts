@@ -174,16 +174,21 @@ describe('N7-4 · V7-3 · el carro de alquiler no es un traslado', () => {
     const [s] = serviciosDelDocumento([CARRO], '2026-12-10')
     expect(s.alquiler).toEqual({ recogida: 'Aeropuerto Orlando (MCO)', devolucion: 'Aeropuerto Miami (MIA)', vehiculo: 'SUV Estándar' })
     const v = ENTRADA_EUROPA.props.viaje!
-    // Un vuelo sale de MIA el 20 dic: ese día se devuelve el carro.
+    // Aunque un vuelo salga de MIA el 20 dic, la devolución NO lleva fecha: no la trae la lectura (Vera).
     const vuelos = [...v.vuelos, { ...v.vuelos[0], linea: 'AA MIA', origen: 'Miami MIA', destino: 'Bogotá BOG', fechaSalida: '20 dic 2026', fechaRegreso: null, tarifas: undefined }]
     const entrada: EntradaModeloPropuesta = { ...ENTRADA_EUROPA, props: { ...ENTRADA_EUROPA.props, viaje: { ...v, vuelos } }, servicios: [s] }
     const m = modeloDePropuesta(entrada)
     const fila = m.trayectos.filas.find((t) => t.tipo === 'alquiler')!
-    expect(fila.alquiler?.fechaDevolucion).toBe('2026-12-20')
+    expect(fila.alquiler?.fechaDevolucion).toBeNull()
     const html = htmlDePropuesta(m, recursos)
     expect(html).toContain('Alquiler de carro')
-    expect(html).toContain('Recogida en Aeropuerto Orlando (MCO) · devolución en Aeropuerto Miami (MIA), 20 dic · SUV Estándar')
-    expect(html).toContain('Devolución del carro en Aeropuerto Miami (MIA)')
+    expect(html).toContain('<td>Recogida en Aeropuerto Orlando (MCO) · devolución en Aeropuerto Miami (MIA) · SUV Estándar</td>')
+    expect(html).not.toContain('Devolución del carro')
+    // Con la fecha leída del pantallazo, sí: en la fila y en el día a día.
+    const conFecha = modeloDePropuesta({ ...entrada, servicios: [{ ...s, alquiler: { ...s.alquiler!, fechaDevolucion: '2026-12-20' } }] })
+    const html2 = htmlDePropuesta(conFecha, recursos)
+    expect(html2).toContain('devolución en Aeropuerto Miami (MIA), 20 dic · SUV Estándar')
+    expect(html2).toContain('Devolución del carro en Aeropuerto Miami (MIA)')
     expect(html).not.toContain('Traslado Aeropuerto Orlando')
   })
 })
