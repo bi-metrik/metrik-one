@@ -196,7 +196,16 @@ export interface ReglasDeLinea {
   /** Solo en un vuelo que hereda el margen: el colchón que lo decide. */
   colchon: ColchonDeLinea | null
   /** El descuento que ve el cliente en esta opción, ya en pesos (`precioLinea` ya lo descontó). */
-  descuento: { motivo: string; valor: number; precioSinDescuento: number } | null
+  descuento: {
+    motivo: string
+    valor: number
+    precioSinDescuento: number
+    /**
+     * El margen ANTES del descuento: el que se guarda en `margen_porcentaje` y el que se edita en
+     * «Ajustar» (Vera, 2026-10-29). `margenAplicado` ya es el de después.
+     */
+    margenAntes: number
+  } | null
   /** Los pesos que le tocan de los puntos extra en ESTA cascada. */
   puntos: number
   /** La comisión de una línea Pública, si alguien la escribió. */
@@ -297,6 +306,12 @@ export function costoDeLinea(item: ItemParaCascada): number {
  * El precio de una línea, cuadrado al peso como lo imprime el documento: por pasajero si la línea
  * se vende por pasajero (punto 11 del brief del 2026-10-05), si no por unidad («VLR. UNIT.»).
  */
+/** El margen que da un precio sobre un costo, en la convención de la cotización. */
+function margenDePrecio(costo: number, precio: number, convencion: ConvencionMargen): number {
+  if (convencion === 'sobre_venta') return precio > 0 ? ((precio - costo) / precio) * 100 : 0
+  return costo > 0 ? ((precio - costo) / costo) * 100 : 0
+}
+
 function cuadrarAlPeso(precio: number, cantidad: number, pasajeros: ItemParaCascada['pasajeros'] | false): number {
   return pasajeros
     ? precioCuadradoPorPasajero(precio / cantidad, pasajeros) * cantidad
@@ -403,12 +418,19 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
     // sobre un precio que sale del costo: un precio escrito a mano ya dice lo que se cobra.
     const descuentoCliente = reglas && derivaDelCosto ? descuentoDeLinea(item.tarifa_pax) : null
     const precioSinDescuento = precioLinea
+    const margenAntesDelDescuento = margenAplicado
     if (descuentoCliente) {
       precioLinea = descuentoCliente.tipo === 'pct'
         // Puntos de margen que se ceden: 15 % con 3 de descuento queda en 12 %.
         ? precioConMargen(costoDeVentaLinea, margenAplicado - descuentoCliente.valor, convencion)
         : precioLinea - descuentoCliente.valor
       precioLinea = Math.max(0, precioLinea)
+      // El margen que se le APLICÓ es el que queda después del descuento (QA del bloqueo,
+      // 2026-10-29): un paquete Neto al 15 % con 6 de descuento se vende al 9 %, y la tarjeta, el
+      // «Ajustar» y el precio por fila tienen que decir 9, no 15.
+      margenAplicado = descuentoCliente.tipo === 'pct'
+        ? margenAplicado - descuentoCliente.valor
+        : margenDePrecio(costoDeVentaLinea, precioLinea, convencion)
     }
 
     // El precio de la línea se cuadra al peso POR UNIDAD, que es la cifra que se
@@ -459,7 +481,7 @@ export function calcularCascada(items: ItemParaCascada[], params: ParametrosCasc
         tipo,
         colchon,
         descuento: descuentoCliente
-          ? { motivo: descuentoCliente.motivo, valor: Math.max(0, sinDescuento - linea.precioLinea), precioSinDescuento: sinDescuento }
+          ? { motivo: descuentoCliente.motivo, valor: Math.max(0, sinDescuento - linea.precioLinea), precioSinDescuento: sinDescuento, margenAntes: margenAntesDelDescuento }
           : null,
         puntos: 0,
         comisionPct: publica ? comisionDePublica(item.tarifa_pax) : null,

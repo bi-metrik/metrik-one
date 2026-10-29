@@ -175,10 +175,13 @@ import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
+import { crearPaqueteBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
+import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
 import { listaUnica } from '@/lib/cotizaciones/lista-unica'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { estadoDeLinea } from '@/lib/cotizaciones/estado-servicio'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
@@ -534,6 +537,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // La tarjeta de la opción (prototipo del 2026-09-24): lo que una opción eliminada devuelve a
   // la bandeja y qué opciones de hotel tienen un pantallazo esperando decisión en ella.
   const receptorBandeja = useRef<ReceptorDeBandeja>(null)
+  // Viaje en bloqueo (QA del 2026-10-29): el puente entre el pegado de la bandeja y las tarjetas
+  // de los paquetes. Uno por editor; sin bloqueo nadie lo usa.
+  const [registroPaquetes] = useState(() => new RegistroDePaquetes())
   const [pendientesEnBandeja, setPendientesEnBandeja] = useState<Record<string, string>>({})
 
   // Catalog
@@ -1114,8 +1120,19 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     : salida
   const notaMargen = notaDeMargen(salidaVista)
   const motivoMargen = 'motivoBoton' in notaMargen ? notaMargen.motivoBoton : null
+  // Viaje en bloqueo (QA del 2026-10-29): un paquete incompleto (costo 0, infante sin costo, niño
+  // fuera del rango CHD, acomodación sin precio) no sale. La misma cuenta que `enviarPorPasos`, que
+  // la revisa antes del margen: un paquete en cero no es «margen bajo el mínimo».
+  const tarifasEnPropuesta = (itinerarios?.itinerarios ?? []).filter(t => t.vaEnPropuesta)
+  const lineasSinAjuste = initialItems.filter(i => !i.es_ajuste)
+  const paquetesSinCompletar = paquetesIncompletos(
+    lineasSinAjuste.map(i => ({ id: i.id, nombre: i.nombre ?? null, grupo: i.grupo ?? null, es_ajuste: false, tarifa_pax: i.tarifa_pax })),
+    tarifasEnPropuesta.length > 0 ? new Set(tarifasEnPropuesta.flatMap(t => itemsDelItinerario(lineasSinAjuste as never[], t.seleccion))) : null,
+    composicionViaje ?? null,
+  )
+  const motivoPaquete = motivoPaquetesIncompletos(paquetesSinCompletar)
   // La autorización de datos va primero: es lo primero que revisa el servidor al enviar.
-  const motivoBotonEnviar = motivoAutorizacionDatos ?? motivoEnvio ?? motivoMargen
+  const motivoBotonEnviar = motivoAutorizacionDatos ?? motivoPaquete ?? motivoEnvio ?? motivoMargen
 
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
@@ -3743,6 +3760,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     return listaUnica({
       autorizacionDatos: motivoAutorizacionDatos,
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
+      paquetes: paquetesSinCompletar,
       capturas: motivoEnvio ? { motivo: motivoEnvio, itemId: desactualizadas[0]?.itemId ?? null } : null,
       tarifas: tarifasDeLaPagina,
       salida: salidaVista as never,
@@ -3807,6 +3825,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           destinoViaje={destinoViaje}
           onCambio={refrescar}
           conTarifasDeProveedor
+          bloqueo={bloqueo ? {
+            registro: registroPaquetes,
+            paquetes: initialItems
+              .filter(i => !i.es_ajuste && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle')
+              .map((i, n) => ({ itemId: i.id, titulo: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)?.hotel.hotel || `Paquete ${n + 1}` })),
+            abrir: mostrarOpcion,
+            crearPaquete: async () => {
+              const r = await crearPaqueteBloqueo(cotizacion.id)
+              if (!r.success) return { ok: false as const, error: r.error }
+              refrescar()
+              mostrarOpcion(r.itemId)
+              return { ok: true as const, itemId: r.itemId }
+            },
+          } : null}
         />
       )}
       agregarSinPantallazo={jsxAgregar}
@@ -3830,6 +3862,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
               onCambio={() => refrescar()}
               onEliminar={pp.onEliminar}
+              registro={registroPaquetes}
+              reglasDeLinea={paramsCascada.reglas ? lineaPorItem.get(item.id)?.reglas ?? null : null}
+              margenAplicado={lineaPorItem.get(item.id)?.margenAplicado ?? null}
             />
           )
         }

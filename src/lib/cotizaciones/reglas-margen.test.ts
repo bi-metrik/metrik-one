@@ -401,3 +401,67 @@ describe('el paquete de bloqueo se margina como hotel (brief del bloqueo, punto 
     expect(de(c, 'v').precioLinea).toBe(550_000)
   })
 })
+
+describe('el paquete de bloqueo con comisión propia y descuento al cliente (decisión de Mauricio del 2026-10-29)', () => {
+  const GRUPO = 'paquete de bloqueo: Paquete de bloqueo en San Andrés'
+  const paquete = (id: string, costo: number, tarifa: Record<string, unknown>, extra: Partial<ItemParaCascada> = {}) =>
+    linea({ id, grupo: GRUPO, nombre: 'Hotel Ficticio del Paquete', subtotal: costo, tarifa_pax: tarifa, ...extra })
+  const publica = (comisionPct?: number) => ({ tipoTarifa: { tipo: 'publica', origen: 'persona', por: null, en: '', ...(comisionPct !== undefined ? { comisionPct } : {}) } })
+  const neta = { tipoTarifa: { tipo: 'neta', origen: 'persona', por: null, en: '' } }
+  const traslado = (id: string, costo: number) => linea({ id, grupo: 'traslado', nombre: 'Traslado ficticio', subtotal: costo, margen_porcentaje: 0 })
+
+  it('Pública al 10 % + traslado Neto al 0 %: el margen global sale de la comisión, no queda en 0', () => {
+    const items = [paquete('pq', 10_000_000, publica(10), { margen_porcentaje: 0 }), traslado('t', 500_000)]
+    const c = calcularCascada(items, params({}, 15))
+    expect(de(c, 'pq').precioLinea).toBe(10_000_000)
+    expect(de(c, 'pq').reglas?.comisionPct).toBe(10)
+    // (10,5 M − 9 M − 0,5 M) / 10,5 M
+    expect(c.reglas?.margenGlobalPct).toBeCloseTo((1_000_000 / 10_500_000) * 100, 4)
+    expect(margenMedible(c)).toBeGreaterThan(0)
+    // Sin la comisión, el paquete no cuenta y lo único medible es el traslado a costo: 0 %.
+    const sin = calcularCascada([paquete('pq', 10_000_000, publica(), { margen_porcentaje: 0 }), traslado('t', 500_000)], params({}, 15))
+    expect(sin.reglas?.margenGlobalPct ?? 0).toBeCloseTo(0, 6)
+  })
+
+  it('Neto al 15 % con 6 de descuento: precio al 9 % y margenAplicado 9 (no 15)', () => {
+    const pq = paquete('pq', 10_000_000, { ...neta, descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    const c = calcularCascada([pq], params({}, 15))
+    const l = de(c, 'pq')
+    expect(l.margenAplicado).toBe(9)
+    expect(l.precioLinea).toBe(Math.round(10_000_000 / 0.91))
+    expect(l.margenRealPct).toBeCloseTo(9, 3)
+    expect(l.reglas?.descuento).toMatchObject({ motivo: 'Reserva esta semana', precioSinDescuento: Math.round(10_000_000 / 0.85) })
+    // En pesos, margenAplicado también dice el margen que quedó.
+    const enPesos = de(calcularCascada([paquete('pq', 10_000_000, { ...neta, descuentoCliente: { motivo: 'X', tipo: 'monto', valor: 500_000 } })], params({}, 15)), 'pq')
+    expect(enPesos.margenAplicado).toBeCloseTo(enPesos.margenRealPct!, 2)
+    expect(enPesos.margenAplicado).toBeLessThan(15)
+  })
+
+  it('un descuento que lo deja bajo el piso de hotel pide autorización, como el hotel', () => {
+    const pq = paquete('pq', 10_000_000, { ...neta, descuentoCliente: { motivo: 'Cliente frecuente', tipo: 'pct', valor: 7 } })
+    const c = calcularCascada([pq], params({}, 15))
+    expect(c.reglas?.hotelesBajoPiso).toEqual([{ id: 'pq', margenPct: expect.closeTo(8, 3) }])
+    const motivo = motivoDeRechazo({
+      ranurasFaltantes: [],
+      margenRealPct: margenMedible(c),
+      pisoPct: 5,
+      hotelesBajoPiso: [{ nombre: 'Hotel Ficticio del Paquete', margenPct: 8 }],
+      pisoHotelPct: P.pisoHotelPct,
+    })
+    expect(motivo?.tipo).toBe('hotel_bajo_piso')
+  })
+
+  it('combinado con descuentos sobre el total: el paquete Neto y el 5 % de pronto pago se miden juntos', () => {
+    const pq = paquete('pq', 10_000_000, neta)
+    const c = calcularCascada([pq], params({ descuentos: [{ id: 'd1', descripcion: 'Pronto pago', pct: 5 }] }, 15))
+    const venta = Math.round(10_000_000 / 0.85)
+    expect(c.ventaBruta).toBe(venta)
+    expect(c.reglas?.descuentos).toEqual([{ id: 'd1', descripcion: 'Pronto pago', pct: 5, valor: Math.round(venta * 0.05) }])
+    expect(c.precioVenta).toBe(venta - Math.round(venta * 0.05))
+    expect(c.reglas?.margenGlobalPct).toBeCloseTo(((c.precioVenta - 10_000_000) / c.precioVenta) * 100, 2)
+    // Con descuento al cliente en el paquete Y descuento sobre el total, los dos se aplican.
+    const ambos = calcularCascada([paquete('pq', 10_000_000, { ...neta, descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 3 } })], params({ descuentos: [{ id: 'd1', descripcion: 'Pronto pago', pct: 5 }] }, 15))
+    expect(ambos.ventaBruta).toBe(Math.round(10_000_000 / 0.88))
+    expect(ambos.precioVenta).toBe(ambos.ventaBruta - Math.round(ambos.ventaBruta * 0.05))
+  })
+})

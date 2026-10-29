@@ -26,6 +26,7 @@ import { leerCabecera } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { motivoSinPrecioPorPasajero, opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { enviarCotizacion } from '@/app/(app)/negocios/cotizacion-actions'
 import { esRecomendada, recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { etiquetaDeRanura, grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -750,6 +751,12 @@ export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'd
   const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
   const motivo = motivoSinPrecioPorPasajero(opcionesSinPrecio(foto.ctx.items, ids, viaje.composicion))
   if (motivo) return { success: false, error: motivo }
+  // Viaje en bloqueo (QA del 2026-10-29): un paquete incompleto no sale. Antes que el margen de
+  // `enviarCotizacion`: un paquete en cero frenaba como «bajo el mínimo», que no es lo que pasa.
+  const motivoPaquete = motivoPaquetesIncompletos(
+    paquetesIncompletos(foto.ctx.items, vanAlCliente.length > 0 ? ids : null, viaje.composicion),
+  )
+  if (motivoPaquete) return { success: false, error: motivoPaquete }
   const r = await enviarCotizacion(cotizacionId, canal)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }

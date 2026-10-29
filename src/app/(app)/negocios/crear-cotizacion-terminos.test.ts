@@ -11,6 +11,8 @@ const estado = {
   slug: 'trappvel' as string | null,
   configExtra: null as unknown,
   inserts: [] as Record<string, unknown>[],
+  /** Las cotizaciones del negocio creadas en la ventana del doble clic. */
+  recientes: [] as Record<string, unknown>[],
 }
 
 function fakeSupabase() {
@@ -21,6 +23,7 @@ function fakeSupabase() {
       const b = {
         select() { return b },
         eq() { return b },
+        gte() { return Promise.resolve({ data: estado.recientes, error: null }) },
         insert(v: Record<string, unknown>) { valores = v; return b },
         async single() {
           if (valores) estado.inserts.push(valores)
@@ -49,6 +52,7 @@ beforeEach(() => {
   estado.slug = 'trappvel'
   estado.configExtra = null
   estado.inserts = []
+  estado.recientes = []
 })
 
 describe('createCotizacionDetalladaNegocio: términos al nacer', () => {
@@ -77,5 +81,25 @@ describe('createCotizacionDetalladaNegocio: términos al nacer', () => {
     estado.configExtra = { terminos_base: 'Condiciones.' }
     await createCotizacionDetalladaNegocio('neg-1')
     expect(estado.inserts[0]).not.toHaveProperty('terminos_condiciones')
+  })
+})
+
+describe('createCotizacionDetalladaNegocio: un doble clic no crea dos borradores (QA del 2026-10-29)', () => {
+  it('con un borrador vacío creado hace un segundo, lo devuelve y no inserta otro', async () => {
+    estado.recientes = [{ id: 'cot-de-hace-un-segundo', estado: 'borrador', created_at: new Date(Date.now() - 1000).toISOString(), valor_total: 0 }]
+    const res = await createCotizacionDetalladaNegocio('neg-1')
+    expect(res).toEqual({ success: true, id: 'cot-de-hace-un-segundo' })
+    expect(estado.inserts).toHaveLength(0)
+  })
+
+  it('un borrador que ya tiene valor, o uno enviado, no se reusa: crea la nueva', async () => {
+    const hace = new Date(Date.now() - 1000).toISOString()
+    estado.recientes = [
+      { id: 'con-valor', estado: 'borrador', created_at: hace, valor_total: 5_000_000 },
+      { id: 'enviada', estado: 'enviada', created_at: hace, valor_total: 0 },
+    ]
+    const res = await createCotizacionDetalladaNegocio('neg-1')
+    expect(res).toEqual({ success: true, id: 'cot-nueva' })
+    expect(estado.inserts).toHaveLength(1)
   })
 })

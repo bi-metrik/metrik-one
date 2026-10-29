@@ -83,6 +83,7 @@ import { listaUnica, type EntradaDeLista } from '@/lib/cotizaciones/lista-unica'
 import { lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
 import { itemsDelItinerario, itemsQueAportanAlTotal } from '@/lib/cotizaciones/itinerarios'
+import { paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
 
 const LECTORES = { recalcularTotales, generateCotizacionPDF, opcionesDeAprobacion, aceptarCotizacionNegocio }
 const tabla = (t: string) => base.tablas[t] ?? []
@@ -250,6 +251,7 @@ async function listaDelEstado() {
   const motivoCapturas = motivoParaNoEnviar(desact)
   const entrada: EntradaDeLista = {
     sinPrecio: opcionesSinPrecio(items as never, ids, VIAJE),
+    paquetes: paquetesIncompletos(items, vanAlCliente.length > 0 ? ids : null, VIAJE),
     capturas: motivoCapturas ? { motivo: motivoCapturas, itemId: desact[0]?.itemId ?? null } : null,
     tarifas,
     salida: await getSalidaDeCotizacion(COT_SAN_ANDRES) as never,
@@ -294,6 +296,22 @@ describe('C6 · D8 · «Impide enviar» es exactamente lo que rechaza el servido
     expect(lista.impide.map(x => x.clave)[0]).toBe('precio-por-pasajero')
     expect(lista.impide[0].texto).toBe(r.error)
     expect(lista.impide[0].ir).toEqual({ a: 'opcion', itemId: 'v-satena' })
+  })
+
+  it('viaje en bloqueo (QA 2026-10-29): un paquete sin costo en la propuesta dice «Falta el costo del paquete», no margen', async () => {
+    sembrar()
+    const items = tabla('items')
+    const molde = items.find(i => i.id === 'h-lord-pierre')!
+    items.push({
+      ...structuredClone(molde), id: 'pq-1', nombre: 'OPCIÓN 1', grupo: 'paquete de bloqueo: Paquete de bloqueo en San Andrés',
+      subtotal: 0, precio_venta: 0, precio_manual: false, margen_porcentaje: null, tarifa_pax: null, tramos: null, opcion_de: null,
+    })
+    for (const t of tabla('cotizacion_itinerarios')) tabla('itinerario_opciones').push({ itinerario_id: t.id, item_id: 'pq-1' })
+    await recalcularTotales(COT_SAN_ANDRES)
+    const { lista, r } = await comparar()
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/^Falta el costo del paquete/)
+    expect(lista.impide[0]).toMatchObject({ clave: 'paquete-incompleto', texto: r.error, ir: { a: 'opcion', itemId: 'pq-1' } })
   })
 
   it('la Recomendada que no va en la propuesta', async () => {

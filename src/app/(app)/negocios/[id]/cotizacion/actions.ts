@@ -26,6 +26,7 @@ import { EMBED_NEGOCIO_ENVIO, motivoAutorizacionDeCotizacion, motivoAutorizacion
 import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
+import { borradorRecienCreado, VENTANA_MS } from '@/lib/cotizaciones/crear-sin-duplicar'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -43,6 +44,16 @@ export async function getCotizacionesNegocio(negocioId: string) {
 export async function createCotizacionDetalladaNegocio(negocioId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // Un doble clic en «Nueva cotización» no crea dos borradores (COT-2026-0005 y 0006 de Trappvel,
+  // un segundo de diferencia): el borrador vacío recién creado de este negocio se reusa.
+  const { data: recientes } = await supabase
+    .from('cotizaciones')
+    .select('id, estado, created_at, valor_total')
+    .eq('negocio_id' as never, negocioId)
+    .gte('created_at', new Date(Date.now() - VENTANA_MS).toISOString())
+  const reciente = borradorRecienCreado((recientes ?? []) as never, Date.now())
+  if (reciente) return { success: true as const, id: reciente }
 
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,

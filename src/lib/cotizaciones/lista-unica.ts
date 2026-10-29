@@ -17,6 +17,7 @@
 import { notaDeMargen, type SalidaParaNota } from './nota-margen'
 import { motivoSinPrecioPorPasajero, type OpcionSinPrecio } from './precio-que-falta'
 import { motivoSinRecomendada, type TarifaParaRegla } from './tarifas'
+import { motivoPaquetesIncompletos, type PaqueteIncompleto } from './bloqueo-incompleto'
 
 export type DestinoDeIr =
   | { a: 'opcion'; itemId: string }
@@ -45,6 +46,11 @@ export interface EntradaDeLista {
   autorizacionDatos?: string | null
   /** P12 · las opciones que van al cliente sin un precio por pasajero. */
   sinPrecio: readonly OpcionSinPrecio[]
+  /**
+   * Viaje en bloqueo (QA del 2026-10-29): los paquetes que se ofrecen y están incompletos (costo 0,
+   * infante sin costo, niño fuera del rango CHD, acomodación sin precio). Ausente = ninguno.
+   */
+  paquetes?: readonly PaqueteIncompleto[]
   /** El texto de `motivoParaNoEnviar` (capturas de otros pasajeros) y la primera línea que lo causa. */
   capturas: { motivo: string; itemId: string | null } | null
   /** Las tarifas, para la regla de la Recomendada. */
@@ -89,12 +95,17 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   if (e.autorizacionDatos) impide.push({ clave: 'autorizacion-datos', texto: e.autorizacionDatos, ir: null })
   const p12 = motivoSinPrecioPorPasajero(e.sinPrecio)
   if (p12) impide.push({ clave: 'precio-por-pasajero', texto: p12, ir: e.sinPrecio[0] ? { a: 'opcion', itemId: e.sinPrecio[0].id } : null })
+  // `enviarPorPasos` lo revisa justo después de P12, antes del margen de `enviarCotizacion`.
+  const paquete = motivoPaquetesIncompletos(e.paquetes ?? [])
+  if (paquete) impide.push({ clave: 'paquete-incompleto', texto: paquete, ir: { a: 'opcion', itemId: e.paquetes![0].itemId } })
   if (e.capturas) impide.push({ clave: 'capturas', texto: e.capturas.motivo, ir: e.capturas.itemId ? { a: 'opcion', itemId: e.capturas.itemId } : null })
   const rec = motivoSinRecomendada(e.tarifas)
   if (rec) impide.push({ clave: 'recomendada', texto: rec, ir: { a: 'tarifas' } })
   const nota = notaDeMargen(e.salida)
   const motivoMargen = 'motivoBoton' in nota ? nota.motivoBoton : null
-  if (motivoMargen) {
+  // Con un paquete incompleto el margen no se puede medir (su costo no está en la cuenta): decir
+  // «bajo el mínimo» señalaría la causa equivocada. Lo que impide es el paquete.
+  if (motivoMargen && !(paquete && nota.tipo !== 'incompleta')) {
     const primera = e.salida?.faltaCostoLineas?.[0]?.id ?? null
     impide.push({
       clave: nota.tipo === 'incompleta' ? 'falta-costo' : 'margen',

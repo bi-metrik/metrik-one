@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { detectarTipoDeCaptura } from '@/lib/ai/detectar-tipo-captura'
 import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
 import { extraerConReintento, type ResultadoExtraccion } from '@/lib/ai/reintentar-extraccion'
 import { getServerKey } from '@/lib/server-keys'
@@ -13,6 +14,7 @@ import {
   vueloDesdeLectura,
 } from './bloqueo-extraccion'
 import type { HotelBloqueo, IncluyeBloqueo, VueloBloqueo } from './bloqueo-paquete'
+import { casillaDesdeDeteccion } from './bloqueo-pegado'
 
 /**
  * La lectura de los dos pantallazos de un paquete de bloqueo, SIN escribir nada (la escritura es de
@@ -39,7 +41,10 @@ const MIMES: Record<string, string> = {
 export type LecturaBloqueo =
   | { ok: true; cual: 'hotel'; hotel: HotelBloqueo; incluye: IncluyeBloqueo; huella: string | null }
   | { ok: true; cual: 'vuelo'; vuelo: VueloBloqueo; huella: string | null }
-  | { ok: false; mensaje: string; detalle?: string }
+  /** `elegir`: la detección no supo si es el hotel o el vuelo; la tarjeta pregunta. */
+  | { ok: false; mensaje: string; detalle?: string; elegir?: true }
+
+export const MENSAJE_ELEGIR_CASILLA = 'No se reconoce si es el pantallazo del hotel o el del vuelo. Elige cuál es.'
 
 async function unaLlamada(base64: string, mime: string, prompt: string, esquema: unknown, apiKey: string): Promise<ResultadoExtraccion<unknown>> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent?key=${apiKey}`
@@ -76,12 +81,28 @@ async function unaLlamada(base64: string, mime: string, prompt: string, esquema:
   }
 }
 
-export async function leerPantallazoDeBloqueo(cual: 'hotel' | 'vuelo', dataUrl: string): Promise<LecturaBloqueo> {
+/**
+ * @param pedido `'detectar'` (QA del 2026-10-29): el pantallazo llegó por el pegado global o por «Es
+ *   paquete de bloqueo» de la bandeja, con las dos casillas vacías (o llenas). Primero se pregunta qué
+ *   es con el clasificador corto de siempre (`detectarTipoDeCaptura`) y después se lee con el lector
+ *   del BLOQUEO, que a un vuelo no le pide precio. Nunca pasa por el lector genérico (RX4).
+ */
+export async function leerPantallazoDeBloqueo(pedido: 'hotel' | 'vuelo' | 'detectar', dataUrl: string): Promise<LecturaBloqueo> {
   const m = /^data:([^;]+);base64,([\s\S]+)$/.exec(dataUrl ?? '')
   const mime = m ? MIMES[m[1].toLowerCase()] : undefined
   if (!m || !mime) return { ok: false, mensaje: 'La imagen no llegó en un formato legible (PNG, JPG o WEBP). Vuelve a pegarla.' }
   const apiKey = getServerKey('gemini')
   if (!apiKey) return { ok: false, mensaje: 'Falta configurar la lectura de capturas. Avísale a MeTRIK.' }
+
+  let cual: 'hotel' | 'vuelo'
+  if (pedido === 'detectar') {
+    const d = await detectarTipoDeCaptura(Buffer.from(m[2].trim(), 'base64'), mime, apiKey)
+    const casilla = casillaDesdeDeteccion(d.data?.tipo ?? null)
+    if (!casilla) return { ok: false, mensaje: MENSAJE_ELEGIR_CASILLA, elegir: true, ...(d.error ? { detalle: d.error } : {}) }
+    cual = casilla
+  } else {
+    cual = pedido
+  }
 
   const [lectura, huella] = await Promise.all([
     extraerConReintento(

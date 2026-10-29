@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { EnlaceNuevaCotizacion } from './enlace-nueva-cotizacion'
 import { ClipboardList, FileText, Plus, UserRound } from 'lucide-react'
 import { ESTADO_COTIZACION_CONFIG } from '@/lib/catalogos/constants'
 import { formatCOP } from '@/lib/cobros/format'
@@ -153,14 +154,13 @@ export default function PanelViaje({ viaje, cotActualId }: { viaje: MarcoDelNego
             })}
           </ul>
           {viaje.puedeCrearCotizacion && (
-            <Link
-              href={`/negocios/${viaje.negocioId}/cotizacion/nueva`}
-              prefetch={false}
+            <EnlaceNuevaCotizacion
+              negocioId={viaje.negocioId}
               className="mt-1 inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-primary hover:underline"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
               Nueva cotización
-            </Link>
+            </EnlaceNuevaCotizacion>
           )}
         </section>
       )}
