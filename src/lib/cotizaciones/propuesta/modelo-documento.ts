@@ -955,7 +955,7 @@ function diaADia(p: {
   // `servicios-del-documento.ts`): pintarlo otra vez daba la actividad dos veces y «2 visitas» en
   // la portada con un solo servicio (brief del 2026-10-22, punto 1). Se reconoce por la línea.
   for (const d of p.props.dias ?? []) {
-    const fecha = iso(fechaDelDia(p.inicio, d.dia))
+    const fecha = iso(fechaDelDia(p.props.viaje?.inicioDeLosDias ?? p.inicio, d.dia))
     for (const it of d.items) {
       if (it.id && yaEnServicios.has(it.id)) continue
       poner(fecha, { tipo: 'actividad', hora: null, texto: it.nombre, porTarifa: [] })

@@ -16,7 +16,8 @@
 
 import { notaDeMargen, type SalidaParaNota } from './nota-margen'
 import { motivoSinPrecioPorPasajero, type OpcionSinPrecio } from './precio-que-falta'
-import { motivoSinRecomendada, type TarifaParaRegla } from './tarifas'
+import { esRecomendada, motivoSinRecomendada, type TarifaParaRegla } from './tarifas'
+import { ranurasConAlternativas, type ItemConGrupo } from './itinerarios'
 import { motivoPaquetesIncompletos, type PaqueteIncompleto } from './bloqueo-incompleto'
 
 export type DestinoDeIr =
@@ -25,6 +26,8 @@ export type DestinoDeIr =
   | { a: 'bandeja' }
   | { a: 'texto' }
   | { a: 'viaje' }
+  /** El arreglo a un toque: poner la opción que quedó fuera en la tarifa que repetía otra. */
+  | { a: 'poner-en-tarifa'; itinerarioId: string; tarifa: string; grupo: string; itemId: string }
 
 export interface RenglonDeLista {
   /** Estable, para la prueba y para el DOM. */
@@ -83,6 +86,56 @@ export interface EntradaDeLista {
    * viajeros (`avisoDeReservaQueNoCuadra`). Avisa, no impide (decisión del 2026-10-14).
    */
   reservasQueNoCuadran?: readonly { itemId: string; texto: string }[]
+  /**
+   * Brief del 2026-10-29, punto 3 · las opciones de vuelo u hotel que no van en ninguna tarifa que
+   * se manda (`opcionesFueraDeLaPropuesta`), con su nombre. Ausente = ninguna.
+   */
+  fueraDeLaPropuesta?: readonly (OpcionFuera & { nombre: string })[]
+}
+
+/** Una opción de vuelo u hotel que no sale en la propuesta, y dónde ponerla de un toque. */
+export interface OpcionFuera {
+  itemId: string
+  grupo: string
+  /** La tarifa que repite la opción de otra en ese servicio: ahí cabe sin quitar nada. `null` = ninguna. */
+  arreglo: { itinerarioId: string; tarifa: string } | null
+}
+
+/**
+ * Brief del 2026-10-29, punto 3 (COT-2026-0008) · las opciones de vuelo u hotel cargadas que no van
+ * en NINGUNA tarifa que se manda: el cliente no las verá. El Sunscape estaba en «En ninguna tarifa»
+ * y Alejandra no lo entendió; el aviso lo dice antes del PDF, en palabras, con el arreglo.
+ *
+ * El arreglo: la tarifa (no la Recomendada) que en ese servicio repite la opción de otra. Primero
+ * las que no se mandan (quedaron idénticas a otra), luego las demás. Sin ninguna que repita, se
+ * avisa sin arreglo (hay que ir a Tarifas).
+ */
+export function opcionesFueraDeLaPropuesta(
+  items: ItemConGrupo[],
+  tarifas: readonly (TarifaParaRegla & { seleccion: readonly string[] })[],
+): OpcionFuera[] {
+  if (tarifas.length === 0) return []
+  const salida: OpcionFuera[] = []
+  const usadas = new Set<string>()
+  for (const r of ranurasConAlternativas(items).filter(x => x.combinable)) {
+    const eleccion = (t: (typeof tarifas)[number]) => r.candidatos.find(id => t.seleccion.includes(id)) ?? null
+    const enLaPropuesta = new Set(tarifas.filter(t => t.vaEnPropuesta).map(eleccion).filter((id): id is string => id !== null))
+    const fuera = r.candidatos.filter(id => !enLaPropuesta.has(id))
+    if (fuera.length === 0) continue
+    const repiten = tarifas
+      .filter(t => !esRecomendada(t.nombre))
+      .filter(t => {
+        const mia = eleccion(t)
+        return mia !== null && tarifas.some(o => o.id !== t.id && eleccion(o) === mia)
+      })
+      .sort((a, b) => Number(a.vaEnPropuesta) - Number(b.vaEnPropuesta) || b.orden - a.orden)
+    for (const itemId of fuera) {
+      const t = repiten.find(x => !usadas.has(x.id)) ?? null
+      if (t) usadas.add(t.id)
+      salida.push({ itemId, grupo: r.grupo, arreglo: t ? { itinerarioId: t.id, tarifa: t.nombre ?? 'tarifa' } : null })
+    }
+  }
+  return salida
 }
 
 /** «Nada impide enviar y no hay nada por revisar.» */
@@ -134,5 +187,14 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
   if (e.viaje) revisar.push({ clave: 'viaje', texto: e.viaje, ir: { a: 'viaje' } })
   if (e.ivaSinCalcular) revisar.push({ clave: 'iva', texto: e.ivaSinCalcular, ir: null })
   for (const r of e.reservasQueNoCuadran ?? []) revisar.push({ clave: `reserva:${r.itemId}`, texto: r.texto, ir: { a: 'opcion', itemId: r.itemId } })
+  for (const o of e.fueraDeLaPropuesta ?? []) {
+    revisar.push({
+      clave: `fuera:${o.itemId}`,
+      texto: `${o.nombre} no va en ninguna tarifa: no saldrá en la propuesta.`,
+      ir: o.arreglo
+        ? { a: 'poner-en-tarifa', itinerarioId: o.arreglo.itinerarioId, tarifa: o.arreglo.tarifa, grupo: o.grupo, itemId: o.itemId }
+        : { a: 'tarifas' },
+    })
+  }
   return { impide, revisar }
 }
