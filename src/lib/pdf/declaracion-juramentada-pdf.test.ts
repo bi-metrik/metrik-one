@@ -56,7 +56,9 @@ function renderDeclaracion(datos: DatosDeclaracion, fechaGeneracion = '2026-10-2
  * El extractor une los trozos con espacios y un renglón puede cortar en cualquier
  * parte, así que se compara SIN espacios. Lo que se busca son frases, no maquetación.
  */
-const plano = (t: string) => t.replace(/[\s ]+/g, '')
+const plano = (t: string) =>
+  // Rayas en WinAnsi (0x96 «–», 0x97 «—») leídas como latin1: a su carácter.
+  t.replace(/\x96/g, '–').replace(/\x97/g, '—').replace(/[\s ]+/g, '')
 
 async function texto(datos: DatosDeclaracion, fecha?: string) {
   const buf = await renderDeclaracion(datos, fecha)

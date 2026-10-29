@@ -1,8 +1,37 @@
+import type { ReactNode } from 'react'
 import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer'
-import { nitConGuion } from '@/lib/dian/nit'
+import { nitBaseYDv } from '@/lib/dian/nit'
 import { titularesDeDatos, concordancia } from './titulares'
-import { MESES, fmtCurrency } from './formato'
+import { fmtCurrency, fmtAlMil, fechaCorta, tarifaIva, fechaDeGeneracion } from './formato'
 
+/**
+ * Relación de facturas — plantilla de SOENA recibida el 2026-10-28 (SOE-033),
+ * aprobada por Mauricio para usarse TAL CUAL.
+ *
+ * Lo que cambió respecto a la versión anterior: la tabla horizontal de siete
+ * columnas pasa a ser una FICHA por factura («FACTURA ELECTRÓNICA No. 1», filas
+ * etiqueta/valor en dos columnas), con datos que antes no salían: fecha de
+ * expedición, tarifa de IVA, el NIT del proveedor SIN DV con el DV en su propia
+ * casilla, el «IVA solicitado, aproximado al mil» (art. 577 ET) y el número y la
+ * fecha del certificado UPME. Los totales pasan a tres (bienes, IVA pagado, IVA
+ * solicitado) y el asunto lleva el tipo de vehículo. La «Nota interna (borrar antes
+ * de enviar)» de la plantilla no se imprime: el expediente tiene una sola factura.
+ *
+ * Decisiones que NO salen de la plantilla:
+ *
+ * 1. El certificado UPME (`numero_caso_upme`, `fecha_certificado`) es OPCIONAL en
+ *    `campos_fuente`, igual que en la declaración juramentada. Si falta, la ficha
+ *    muestra «—» y el párrafo inicial NO dice «certificado por la UPME»: el
+ *    documento no afirma un certificado que el expediente no tiene.
+ * 2. La tarifa de IVA no es un dato extraído: se DERIVA de `valor_iva /
+ *    valor_unitario_sin_iva` (`tarifaIva`). Si no se puede calcular queda un
+ *    marcador, nunca una tarifa supuesta.
+ * 3. El NIT del proveedor ya llega sin DV de la extracción, así que se separa con
+ *    `nitBaseYDv`, que NO adivina (ver su comentario: `separarNitDv` mutila NIT
+ *    limpios). El DV se calcula.
+ * 4. El firmante se identifica con CÉDULA, no con NIT. Cada documento conserva su
+ *    convención.
+ */
 interface RelacionFacturasProps {
   datos: {
     numero_factura: string | null
@@ -18,8 +47,13 @@ interface RelacionFacturasProps {
     municipio: string | null
     email: string | null
     telefono: string | null
+    // Desde SOE-033 (2026-10-28). Opcionales en el tipo porque una config que aún no
+    // los declare tiene que seguir generando: la ficha muestra «—».
+    fecha_factura?: string | null
+    numero_caso_upme?: string | null
+    fecha_certificado?: string | null
     // Segundo titular (copropiedad). OPCIONAL: sin estos campos el documento sale
-    // idéntico al de antes. La DIAN exige que en copropiedad firmen los dos.
+    // con un solo firmante. La DIAN exige que en copropiedad firmen los dos.
     nombre_solicitante_2?: string | null
     numero_identificacion_2?: string | null
     email_2?: string | null
@@ -29,74 +63,100 @@ interface RelacionFacturasProps {
   codigoNegocio: string
 }
 
+const VACIO = '—'
+
+/** Ver `sinCortes` en la declaración juramentada: sin separación silábica inglesa. */
+const sinCortes = (palabra: string) =>
+  palabra.length > 40 ? (palabra.match(/.{1,40}/g) ?? [palabra]) : [palabra]
+
+const BORDE = '1 solid #C9CFD6'
+
 const s = StyleSheet.create({
-  page: { paddingTop: 50, paddingBottom: 60, paddingHorizontal: 50, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.5 },
-  // Letter header
+  page: { paddingTop: 45, paddingBottom: 45, paddingHorizontal: 50, fontSize: 10, fontFamily: 'Helvetica', color: '#111827', lineHeight: 1.4 },
+  // Encabezado de carta
   ciudad: { fontSize: 10, marginBottom: 14 },
   destinatario: { marginBottom: 4 },
   destLine: { fontSize: 10 },
   destBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  asunto: { marginBottom: 16, marginTop: 14 },
+  asunto: { marginBottom: 12, marginTop: 12 },
   asuntoBold: { fontFamily: 'Helvetica-Bold', fontSize: 10 },
-  // Body
-  intro: { marginBottom: 14, textAlign: 'justify' },
-  // Table
-  table: { borderTop: '1 solid #374151', borderLeft: '1 solid #374151', marginBottom: 10 },
-  headerRow: { flexDirection: 'row', backgroundColor: '#374151' },
-  headerCell: { padding: '4 4', borderRight: '1 solid #374151', borderBottom: '1 solid #374151', justifyContent: 'center' },
-  headerText: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: '#FFFFFF', textAlign: 'center' },
-  dataRow: { flexDirection: 'row' },
-  dataCell: { padding: '5 4', borderRight: '1 solid #374151', borderBottom: '1 solid #374151', justifyContent: 'center' },
-  dataText: { fontSize: 8, color: '#111827', textAlign: 'center' },
-  totalRow: { flexDirection: 'row' },
-  totalLabelCell: { padding: '5 4', borderRight: '1 solid #374151', borderBottom: '1 solid #374151', justifyContent: 'center' },
-  totalValueCell: { padding: '5 4', borderRight: '1 solid #374151', borderBottom: '1 solid #374151', justifyContent: 'center' },
-  totalLabel: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#111827', textAlign: 'right' },
-  totalValue: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#111827', textAlign: 'center' },
-  // Totales fuera de tabla
-  totalesBlock: { marginBottom: 14 },
-  totalLine: { fontSize: 10 },
-  // Closing
-  closing: { marginBottom: 14, textAlign: 'justify' },
-  constancia: { marginBottom: 20, textAlign: 'justify' },
-  // Signature
-  signatureBlock: { marginTop: 10, width: '65%' },
-  signatureLine: { borderTop: '1 solid #111827', marginTop: 50, paddingTop: 6 },
+  bold: { fontFamily: 'Helvetica-Bold' },
+  // Cuerpo
+  intro: { marginBottom: 10, textAlign: 'justify' },
+  // Ficha de la factura: 4 columnas etiqueta/valor/etiqueta/valor, con la proporción
+  // de la plantilla (1900/2900/1900/3140 twips).
+  ficha: { borderTop: BORDE, borderLeft: BORDE, marginBottom: 12 },
+  fichaTitulo: { backgroundColor: '#2D3B4A', padding: '4 6', borderRight: BORDE, borderBottom: BORDE },
+  fichaTituloTexto: { fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#FFFFFF' },
+  fila: { flexDirection: 'row' },
+  etiqueta: { backgroundColor: '#EEF1F4', padding: '4 5', borderRight: BORDE, borderBottom: BORDE, justifyContent: 'center' },
+  etiquetaTexto: { fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#111827' },
+  valor: { padding: '4 5', borderRight: BORDE, borderBottom: BORDE, justifyContent: 'center' },
+  valorTexto: { fontSize: 9 },
+  // Totales: tabla de tres columnas
+  totales: { borderTop: BORDE, borderLeft: BORDE, marginBottom: 12 },
+  totalCelda: { width: '33.333%', padding: '4 5', borderRight: BORDE, borderBottom: BORDE, alignItems: 'center' },
+  totalEtiqueta: { fontSize: 8, fontFamily: 'Helvetica-Bold' },
+  totalValor: { fontSize: 9 },
+  // Cierre
+  closing: { marginBottom: 8, textAlign: 'justify' },
+  constancia: { marginBottom: 6, textAlign: 'justify' },
+  // Firma
+  signatureBlock: { marginTop: 8, width: '50%' },
+  signatureLine: { borderTop: '1 solid #111827', marginTop: 36, paddingTop: 3 },
   signatureName: { fontSize: 10, fontFamily: 'Helvetica-Bold' },
-  signatureDetail: { fontSize: 9, color: '#374151', marginTop: 2 },
+  signatureDetail: { fontSize: 9, color: '#444444', marginTop: 1 },
 })
 
-const COL = {
-  no: '6%',
-  factura: '16%',
-  nitProv: '14%',
-  nombreProv: '20%',
-  descripcion: '18%',
-  valor: '13%',
-  iva: '13%',
+const COL = { e1: '19.3%', v1: '29.5%', e2: '19.3%', v2: '31.9%', vAncho: '80.7%' }
+
+/**
+ * Negrita del cuerpo. Misma regla que en la declaración juramentada: **una `<B>`
+ * nunca va seguida de puntuación pegada** —la coma va DENTRO—, porque `@react-pdf`
+ * imprime un guion inexistente si el renglón corta entre una corrida que termina y
+ * otra que empieza con puntuación.
+ */
+function B({ children }: { children: ReactNode }) {
+  return <Text style={s.bold} hyphenationCallback={sinCortes}>{children}</Text>
+}
+
+function Etiqueta({ ancho, children }: { ancho: string; children: string }) {
+  return (
+    <View style={[s.etiqueta, { width: ancho }]}>
+      <Text style={s.etiquetaTexto} hyphenationCallback={sinCortes}>{children}</Text>
+    </View>
+  )
+}
+
+function Valor({ ancho, children, negrita }: { ancho: string; children: string; negrita?: boolean }) {
+  return (
+    <View style={[s.valor, { width: ancho }]}>
+      <Text style={negrita ? [s.valorTexto, s.bold] : s.valorTexto} hyphenationCallback={sinCortes}>{children}</Text>
+    </View>
+  )
 }
 
 export default function RelacionFacturasPDF({ datos, fechaGeneracion }: RelacionFacturasProps) {
-  // Aquí el firmante se identifica con CÉDULA, no con NIT: este documento no
-  // recompone dígito de verificación (a diferencia de la declaración juramentada
-  // y del 010, que sí hablan de NIT). Cada documento conserva su convención.
-  const titulares = titularesDeDatos(datos)
+  const titulares = titularesDeDatos(datos, '[NOMBRE COMPLETO DEL SOLICITANTE]')
   const c = concordancia(titulares.length)
-  const ciudad = datos.municipio ?? '[Ciudad]'
-  const tipoVehiculo = datos.tipo_vehiculo?.toLowerCase() ?? 'híbrido / eléctrico'
-  const descripcion = [datos.marca, datos.linea].filter(Boolean).join(' ') || '—'
+  const ciudad = datos.municipio?.trim() || '[CIUDAD]'
+  const tipoVehiculo = datos.tipo_vehiculo?.trim().toLowerCase() || 'híbrido / eléctrico'
+  const descripcion = [datos.marca, datos.linea].map((v) => v?.trim()).filter(Boolean).join(' ') || VACIO
+  const nit = nitBaseYDv(datos.nit_proveedor)
+  const radicadoUpme = datos.numero_caso_upme?.trim() || null
 
-  const d = new Date(fechaGeneracion)
-  const dia = d.getUTCDate()
-  const mes = MESES[d.getUTCMonth()] ?? ''
-  const anio = d.getUTCFullYear()
+  const valorSinIva = fmtCurrency(datos.valor_unitario_sin_iva)
+  const ivaPagado = fmtCurrency(datos.valor_iva)
+  const ivaSolicitado = fmtAlMil(datos.valor_iva)
+
+  const { dia, mes, anio } = fechaDeGeneracion(fechaGeneracion)
 
   return (
     <Document>
       <Page size="LETTER" style={s.page}>
 
         {/* Ciudad y fecha */}
-        <Text style={s.ciudad}>{ciudad}, {dia} de {mes} de {anio}</Text>
+        <Text style={s.ciudad}>{`${ciudad}, ${dia} de ${mes} de ${anio}`}</Text>
 
         {/* Destinatario */}
         <View style={s.destinatario}>
@@ -107,72 +167,102 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
 
         {/* Asunto */}
         <View style={s.asunto}>
-          <Text>
-            <Text style={s.asuntoBold}>ASUNTO: RELACIÓN DETALLADA DE FACTURAS ELECTRÓNICAS{'\n'}</Text>
-            <Text style={{ fontSize: 10 }}>(Solicitud de devolución de IVA – Adquisición de vehículo híbrido / eléctrico)</Text>
-          </Text>
+          <Text style={s.asuntoBold}>ASUNTO: RELACIÓN DETALLADA DE FACTURAS ELECTRÓNICAS</Text>
+          <Text>{`(Solicitud de devolución de IVA – Adquisición de vehículo ${tipoVehiculo})`}</Text>
         </View>
 
         {/* Introducción */}
-        <Text style={s.intro}>
+        <Text style={s.intro} hyphenationCallback={sinCortes}>
           {c.yo},
           {titulares.map((t, i) => (
-            <Text key={i}>
+            <Text key={i} hyphenationCallback={sinCortes}>
               {i > 0 ? ' y ' : ' '}
-              <Text style={{ fontFamily: 'Helvetica-Bold' }}>{t.nombre}</Text>, {c.identificado} con cédula de ciudadanía No.{' '}
-              <Text style={{ fontFamily: 'Helvetica-Bold' }}>{t.identificacion ?? '[Número de Cédula]'}</Text>
+              <B>{`${t.nombre},`}</B> {c.identificado} con cédula de ciudadanía No.{' '}
+              {/* La coma solo tras el último: «No. X y LUIS …, identificado …, No. Y, en calidad». */}
+              <B>{`${t.identificacion ?? '[N.° DE CÉDULA]'}${i === titulares.length - 1 ? ',' : ''}`}</B>
             </Text>
           ))}
-          , en calidad de {c.solicitante}, {c.presento} la siguiente relación detallada de las facturas electrónicas correspondientes a la adquisición del vehículo <Text style={{ fontFamily: 'Helvetica-Bold' }}>{tipoVehiculo}</Text>, certificado por la UPME:
+          {` en calidad de ${c.solicitante}, ${c.presento} la siguiente relación detallada de las facturas electrónicas correspondientes a la adquisición del vehículo `}
+          {/* Sin radicado no se afirma el certificado (nota 1 del encabezado). */}
+          {radicadoUpme
+            ? <B>{`${tipoVehiculo},`}</B>
+            : <B>{`${tipoVehiculo}:`}</B>}
+          {radicadoUpme ? ' certificado por la UPME:' : ''}
         </Text>
 
-        {/* Tabla */}
-        <View style={s.table}>
-          <View style={s.headerRow}>
-            <View style={[s.headerCell, { width: COL.no }]}><Text style={s.headerText}>No.</Text></View>
-            <View style={[s.headerCell, { width: COL.factura }]}><Text style={s.headerText}>Número de factura{'\n'}(incluye prefijo)</Text></View>
-            <View style={[s.headerCell, { width: COL.nitProv }]}><Text style={s.headerText}>Identificación del proveedor{'\n'}(NIT / C.C.)</Text></View>
-            <View style={[s.headerCell, { width: COL.nombreProv }]}><Text style={s.headerText}>Nombre del{'\n'}proveedor</Text></View>
-            <View style={[s.headerCell, { width: COL.descripcion }]}><Text style={s.headerText}>Descripción del{'\n'}vehículo</Text></View>
-            <View style={[s.headerCell, { width: COL.valor }]}><Text style={s.headerText}>Valor{'\n'}(COP)</Text></View>
-            <View style={[s.headerCell, { width: COL.iva }]}><Text style={s.headerText}>IVA pagado{'\n'}(COP)</Text></View>
+        {/* Ficha de la factura */}
+        <View style={s.ficha} wrap={false}>
+          <View style={s.fichaTitulo}>
+            <Text style={s.fichaTituloTexto}>FACTURA ELECTRÓNICA No. 1</Text>
           </View>
-          <View style={s.dataRow}>
-            <View style={[s.dataCell, { width: COL.no }]}><Text style={s.dataText}>1</Text></View>
-            <View style={[s.dataCell, { width: COL.factura }]}><Text style={s.dataText}>{datos.numero_factura ?? '—'}</Text></View>
-            <View style={[s.dataCell, { width: COL.nitProv }]}><Text style={s.dataText}>{nitConGuion(datos.nit_proveedor) ?? '—'}</Text></View>
-            <View style={[s.dataCell, { width: COL.nombreProv }]}><Text style={[s.dataText, { textAlign: 'left' }]}>{datos.nombre_proveedor ?? '—'}</Text></View>
-            <View style={[s.dataCell, { width: COL.descripcion }]}><Text style={[s.dataText, { textAlign: 'left' }]}>{descripcion}</Text></View>
-            <View style={[s.dataCell, { width: COL.valor }]}><Text style={s.dataText}>{fmtCurrency(datos.valor_unitario_sin_iva)}</Text></View>
-            <View style={[s.dataCell, { width: COL.iva }]}><Text style={s.dataText}>{fmtCurrency(datos.valor_iva)}</Text></View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Tipo de documento</Etiqueta>
+            <Valor ancho={COL.v1}>Factura electrónica de venta</Valor>
+            <Etiqueta ancho={COL.e2}>N.° de factura (incluye prefijo)</Etiqueta>
+            <Valor ancho={COL.v2}>{datos.numero_factura?.trim() || VACIO}</Valor>
           </View>
-          <View style={s.totalRow}>
-            <View style={[s.totalLabelCell, { width: '74%' }]}>
-              <Text style={s.totalLabel}>TOTAL</Text>
-            </View>
-            <View style={[s.totalValueCell, { width: COL.valor }]}>
-              <Text style={s.totalValue}>{fmtCurrency(datos.valor_unitario_sin_iva)}</Text>
-            </View>
-            <View style={[s.totalValueCell, { width: COL.iva }]}>
-              <Text style={s.totalValue}>{fmtCurrency(datos.valor_iva)}</Text>
-            </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Fecha de expedición</Etiqueta>
+            <Valor ancho={COL.v1}>{fechaCorta(datos.fecha_factura)}</Valor>
+            <Etiqueta ancho={COL.e2}>Tarifa de IVA pagada</Etiqueta>
+            <Valor ancho={COL.v2}>{tarifaIva(datos.valor_iva, datos.valor_unitario_sin_iva, '[TARIFA DE IVA]')}</Valor>
+          </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>NIT del proveedor</Etiqueta>
+            <Valor ancho={COL.v1}>{nit?.base ?? VACIO}</Valor>
+            <Etiqueta ancho={COL.e2}>Dígito de verificación (DV)</Etiqueta>
+            <Valor ancho={COL.v2}>{nit?.dv ?? VACIO}</Valor>
+          </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Nombre o razón social</Etiqueta>
+            <Valor ancho={COL.vAncho}>{datos.nombre_proveedor?.trim() || VACIO}</Valor>
+          </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Descripción del bien</Etiqueta>
+            <Valor ancho={COL.vAncho}>{descripcion}</Valor>
+          </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Valor antes de IVA (COP)</Etiqueta>
+            <Valor ancho={COL.v1}>{valorSinIva}</Valor>
+            <Etiqueta ancho={COL.e2}>IVA pagado (COP)</Etiqueta>
+            <Valor ancho={COL.v2}>{ivaPagado}</Valor>
+          </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Valor IVA solicitado (COP)</Etiqueta>
+            <Valor ancho={COL.v1} negrita>{ivaSolicitado}</Valor>
+            <Etiqueta ancho={COL.e2}>N.° certificado UPME</Etiqueta>
+            <Valor ancho={COL.v2}>{radicadoUpme ?? VACIO}</Valor>
+          </View>
+          <View style={s.fila}>
+            <Etiqueta ancho={COL.e1}>Fecha certificado UPME</Etiqueta>
+            {/* Sin radicado tampoco se imprime una fecha de certificado suelta. */}
+            <Valor ancho={COL.vAncho}>{radicadoUpme ? fechaCorta(datos.fecha_certificado) : VACIO}</Valor>
           </View>
         </View>
 
-        {/* Totales textuales */}
-        <View style={s.totalesBlock}>
-          <Text style={s.totalLine}>TOTAL VALOR BIENES: {fmtCurrency(datos.valor_unitario_sin_iva)}</Text>
-          <Text style={s.totalLine}>TOTAL IVA PAGADO: {fmtCurrency(datos.valor_iva)}</Text>
+        {/* Totales */}
+        <View style={s.totales} wrap={false}>
+          <View style={s.fila}>
+            <View style={[s.totalCelda, { backgroundColor: '#EEF1F4' }]}><Text style={s.totalEtiqueta}>TOTAL VALOR BIENES</Text></View>
+            <View style={[s.totalCelda, { backgroundColor: '#EEF1F4' }]}><Text style={s.totalEtiqueta}>TOTAL IVA PAGADO</Text></View>
+            <View style={[s.totalCelda, { backgroundColor: '#EEF1F4' }]}><Text style={s.totalEtiqueta}>TOTAL IVA SOLICITADO</Text></View>
+          </View>
+          <View style={s.fila}>
+            <View style={s.totalCelda}><Text style={s.totalValor}>{valorSinIva}</Text></View>
+            <View style={s.totalCelda}><Text style={s.totalValor}>{ivaPagado}</Text></View>
+            <View style={s.totalCelda}><Text style={[s.totalValor, s.bold]}>{ivaSolicitado}</Text></View>
+          </View>
         </View>
 
         {/* Declaración de veracidad */}
-        <Text style={s.closing}>
-          {c.declaro} que la información contenida en la presente relación corresponde fielmente a las facturas electrónicas aportadas como soporte de la solicitud de devolución.
+        <Text style={s.closing} hyphenationCallback={sinCortes}>
+          {`${c.declaro} que la información contenida en la presente relación corresponde fielmente a las facturas electrónicas aportadas como soporte de la solicitud de devolución.`}
         </Text>
 
         {/* Para constancia */}
-        <Text style={s.constancia}>
-          Para constancia, se firma en la ciudad de <Text style={{ fontFamily: 'Helvetica-Bold' }}>{ciudad}</Text>, a los {dia} días del mes de {mes} de {anio}.
+        <Text style={s.constancia} hyphenationCallback={sinCortes}>
+          Para constancia, se firma en la ciudad de <B>{`${ciudad},`}</B>
+          {` a los ${dia} días del mes de ${mes} de ${anio}.`}
         </Text>
 
         {/* Firmas — una por titular. `wrap={false}`: ver la nota en la declaración
@@ -181,9 +271,9 @@ export default function RelacionFacturasPDF({ datos, fechaGeneracion }: Relacion
           <View key={i} style={s.signatureBlock} wrap={false}>
             <View style={s.signatureLine}>
               <Text style={s.signatureName}>{t.nombre}</Text>
-              <Text style={s.signatureDetail}>C.C. No. {t.identificacion ?? '[Número de Cédula]'}</Text>
-              <Text style={s.signatureDetail}>Correo electrónico: {t.email ?? '[DIRECCIÓN DE CORREO]'}</Text>
-              <Text style={s.signatureDetail}>Celular: {t.telefono ?? '[NÚMERO DE CELULAR]'}</Text>
+              <Text style={s.signatureDetail}>{`C.C. No. ${t.identificacion ?? '[N.° DE CÉDULA]'}`}</Text>
+              <Text style={s.signatureDetail}>{`Correo electrónico: ${t.email ?? '[CORREO]'}`}</Text>
+              <Text style={s.signatureDetail}>{`Celular: ${t.telefono ?? '[CELULAR]'}`}</Text>
             </View>
           </View>
         ))}
