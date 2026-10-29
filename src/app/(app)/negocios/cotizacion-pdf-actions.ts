@@ -38,6 +38,7 @@ import {
   vuelosDeItems,
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from '@/lib/cotizaciones/fechas-del-viaje'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
@@ -1270,7 +1271,12 @@ export async function generateCotizacionPDF(
     const vuelosDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...vuelosDeItems(xs), ...vuelosDePaquetes(xs)]
     const hotelesDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...hotelesDeItems(xs), ...hotelesDePaquetes(xs)]
     const vuelos = vuelosDoc(paraLectura)
-    const hoteles = hotelesDoc(paraLectura)
+    // Las fechas del viaje COTIZADO (brief del 2026-10-29, punto 1): las de los servicios; el
+    // rango de la solicitud solo si ninguno tiene fecha. El hotel sin fechas en su captura toma
+    // la llegada y el regreso del vuelo.
+    const hotelesLeidos = hotelesDoc(paraLectura)
+    const rango = rangoDelViajeCotizado({ vuelos, hoteles: hotelesLeidos }, delNegocio.fechas)
+    const hoteles = hotelesConFechasDelViaje(hotelesLeidos, rango)
 
     /**
      * Con VARIAS tarifas en la propuesta, los vuelos y hoteles del documento son los de las
@@ -1302,7 +1308,7 @@ export async function generateCotizacionPDF(
         .filter((i): i is ItemRow => i !== undefined)
       const marcar = <T,>(lista: T[], i: ItemRow) => lista.map(x => ({ ...x, tarifas: tarifasDe.get(i.id as string) ?? [] }))
       vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDoc([paraLecturaDe(i)]), i))
-      hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDoc([paraLecturaDe(i)]), i))
+      hotelesDelDocumento = hotelesConFechasDelViaje(itemsDeLaPropuesta.flatMap(i => marcar(hotelesDoc([paraLecturaDe(i)]), i)), rango)
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
     // La ficha fijada en cada línea de hotel: sus fotos son las que la tarjeta muestra y guarda.
@@ -1397,15 +1403,17 @@ export async function generateCotizacionPDF(
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
       destino,
-      fechas: rangoDeFechas(delNegocio.fechas.inicio, delNegocio.fechas.fin),
-      duracion: duracionDelViaje(delNegocio.fechas.inicio, delNegocio.fechas.fin),
+      fechas: rangoDeFechas(rango.inicio, rango.fin),
+      duracion: duracionDelViaje(rango.inicio, rango.fin),
       presentacion: delNegocio.presentacion,
       // Las fotos salen del banco PROVISIONAL (`fotos-ciudad.ts`) y solo para la plantilla
       // que las imprime. `fotosDeCiudad` es la única puerta al banco: cuando llegue el real
       // (async, en la base), se cambia allá y esta línea sigue igual.
       foto: fotos?.portada ?? null,
       fotosCiudades: fotos?.ciudades ?? [],
-      fechaInicio: delNegocio.fechas.inicio,
+      fechaInicio: rango.inicio,
+      // Los días asignados («día 3») cuentan desde la solicitud, como en la pantalla.
+      ...(rango.inicio !== delNegocio.fechas.inicio ? { inicioDeLosDias: delNegocio.fechas.inicio } : {}),
       vuelos: vuelosDelDocumento,
       hoteles: hotelesDelDocumento,
       cargosEnDestino,
