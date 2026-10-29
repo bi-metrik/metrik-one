@@ -17,6 +17,8 @@
 import type { HotelPDF, ItemConLectura, VueloPDF } from './detalle-viaje'
 import { fechaCorta, hotelesDeItems, vuelosDeItems } from './detalle-viaje'
 import { hotelesDePaquetes, vuelosDePaquetes } from './bloqueo-documento'
+import { itemsDelItinerario } from './itinerarios'
+import { aportaAlTotal, lineasQueDescribeElDocumento } from './lineas-del-documento'
 import { conAnio, filasDelVuelo, leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
 
 export interface RangoDelViaje {
@@ -124,4 +126,52 @@ export function rangoDeLasLineas(
     },
     solicitud,
   )
+}
+
+/** Una fila de `items` como la lee la pantalla de la cotización (sin tipar: `select('*')`). */
+export interface FilaDeItemParaFechas {
+  id?: string | null
+  nombre?: string | null
+  grupo?: string | null
+  opcion_de?: string | null
+  es_ajuste?: boolean | null
+  orden?: number | null
+  dia_relativo?: number | null
+  entra_al_precio?: boolean | null
+  tarifa_pax?: unknown
+  tramos?: unknown
+}
+
+/**
+ * El inicio del viaje que el documento va a describir, calculado desde la pantalla: con una tarifa
+ * Recomendada en la propuesta, sus líneas (las mismas que imprime el PDF); sin ella, las que aportan
+ * al total. Es lo que «Así puedes pagar» de Revisar y enviar usa como «día del viaje».
+ */
+export function inicioDelViajeDeLaCotizacion(
+  items: readonly FilaDeItemParaFechas[],
+  principal: { seleccion: string[] } | null,
+  solicitud: { inicio: string | null; fin: string | null },
+): string | null {
+  const filas = items.map(i => ({ ...i, id: i.id ?? undefined }))
+  const conGrupo = filas
+    .filter((i): i is typeof i & { id: string } => typeof i.id === 'string')
+    .map(i => ({
+      id: i.id,
+      grupo: i.grupo ?? null,
+      opcion_de: i.opcion_de ?? null,
+      es_ajuste: i.es_ajuste ?? false,
+      orden: i.orden ?? 0,
+      dia_relativo: i.dia_relativo ?? null,
+      entra_al_precio: i.entra_al_precio ?? null,
+      tarifa_pax: i.tarifa_pax,
+    }))
+  const idsDelPrincipal = principal ? itemsDelItinerario(conGrupo, principal.seleccion) : null
+  const describe = lineasQueDescribeElDocumento(filas, idsDelPrincipal, aportaAlTotal(filas))
+  const lineas: ItemConLectura[] = describe.map(i => ({
+    nombre: i.nombre ?? '',
+    grupo: i.grupo ?? null,
+    tarifa_pax: i.tarifa_pax,
+    tramos: i.tramos ?? null,
+  }))
+  return rangoDeLasLineas(lineas, solicitud).inicio
 }
