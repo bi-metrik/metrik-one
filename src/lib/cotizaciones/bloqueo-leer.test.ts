@@ -11,6 +11,8 @@ import { PROMPT_HOTEL_BLOQUEO, PROMPT_VUELO_BLOQUEO } from './bloqueo-extraccion
  */
 
 const detectado = { tipo: 'vuelo' as string | null }
+/** Lo que «devuelve el modelo» para el hotel; `null` = el fixture de Aliados. */
+const respuestaHotel = { valor: null as unknown }
 const prompts: string[] = []
 
 vi.mock('@/lib/server-keys', () => ({ getServerKey: () => 'llave-de-prueba' }))
@@ -24,7 +26,7 @@ vi.mock('@/lib/ai/modelo-llm', () => ({
     const cuerpo = JSON.parse(init.body) as { system_instruction: { parts: { text: string }[] } }
     const prompt = cuerpo.system_instruction.parts[0].text
     prompts.push(prompt)
-    const respuesta = prompt === PROMPT_VUELO_BLOQUEO ? aliadosVuelos : aliadosHotel
+    const respuesta = prompt === PROMPT_VUELO_BLOQUEO ? aliadosVuelos : (respuestaHotel.valor ?? aliadosHotel)
     return new Response(JSON.stringify({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: JSON.stringify(respuesta) }] } }] }), { status: 200 })
   },
 }))
@@ -35,6 +37,7 @@ const IMAGEN = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFc
 beforeEach(() => {
   prompts.length = 0
   detectado.tipo = 'vuelo'
+  respuestaHotel.valor = null
 })
 
 describe('lector del bloqueo con detección', () => {
@@ -63,5 +66,23 @@ describe('lector del bloqueo con detección', () => {
     const r = await leerPantallazoDeBloqueo('vuelo', IMAGEN)
     expect(prompts).toEqual([PROMPT_VUELO_BLOQUEO])
     expect(r.ok && r.cual).toBe('vuelo')
+  })
+})
+
+describe('prueba real del 2026-10-29: «INF 180.000» y «seguro hotelero»', () => {
+  it('el precio del infante que lee el modelo llega a la tarjeta; el seguro hotelero no es seguro médico', async () => {
+    respuestaHotel.valor = {
+      ...aliadosHotel,
+      iconos: [],
+      infante: { precio: 180000 },
+      texto_incluye: 'Incluye traslados in y out y seguro hotelero',
+      incluye_por_texto: ['traslados', 'seguro_medico'],
+    }
+    const r = await leerPantallazoDeBloqueo('hotel', IMAGEN)
+    expect(prompts).toEqual([PROMPT_HOTEL_BLOQUEO])
+    if (!r.ok || r.cual !== 'hotel') throw new Error('debía leer el hotel')
+    expect(r.hotel.infante).toEqual({ precio: 180000 })
+    expect(r.incluye.casillas.traslados).toBe(true)
+    expect(r.incluye.casillas.seguro_medico).toBeNull()
   })
 })

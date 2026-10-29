@@ -458,6 +458,18 @@ export interface EntradaDePasos {
   vanAlCliente: string[]
   /** Lo que «Revisar y enviar» cuenta en rojo y en ámbar. */
   rojos: number
+  /**
+   * El primer renglón rojo de la lista (el mismo motivo con que el servidor rechaza «Enviar»). Con
+   * él, «Sigue:» no dice «Todo listo» mientras la lista frena (prueba real del bloqueo, 2026-10-29:
+   * «Paquete incompleto: Falta la edad de un niño» con la barra en «Todo listo»).
+   */
+  primerImpide?: string | null
+  /**
+   * Los renglones rojos de la lista única, con su clave. Con ellos «Sigue:» deja la autorización de
+   * datos (que depende del cliente) DESPUÉS de leer el texto (Vera sobre el #1326). Ausente = sin
+   * lista única: manda `primerImpide`.
+   */
+  impide?: readonly { clave: string; texto: string }[] | null
   ambar: number
   texto: 'nada' | 'sinrevisar' | 'ok' | 'viejo'
   enviada: boolean
@@ -501,6 +513,9 @@ export function estadoDeLosPasos(e: EntradaDePasos): Record<NumeroDePaso, Estado
   return { 1: armar, 2: tarifas, 3: revisar }
 }
 
+/** La clave del renglón de la autorización de datos en la lista única (`lista-unica.ts`). */
+const CLAVE_AUTORIZACION_DATOS = 'autorizacion-datos'
+
 export type AccionSigue = { tipo: 'pegar' } | { tipo: 'aceptar' } | { tipo: 'paso'; paso: NumeroDePaso } | { tipo: 'ninguna' }
 
 /** «Sigue:» con UNA acción (copys del diseño). */
@@ -514,6 +529,17 @@ export function sigue(e: EntradaDePasos & { pasoActual: NumeroDePaso }): { texto
   if (e.sinCosto.length > 0) return { texto: `${e.sinCosto[0].motivo}: ${e.sinCosto[0].servicio}.`, accion: { tipo: 'paso', paso: 1 }, boton: 'Ir' }
   if (e.conOpciones > 0 && !e.tarifasVistas) return { texto: 'Escoge qué opción va en cada tarifa. ONE ya propuso una.', accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
   if (e.bajoMinimo.length > 0) return { texto: `${e.bajoMinimo[0]} queda bajo el margen mínimo: pide la autorización o sube el margen.`, accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
+  // Lo demás que impide enviar (paquete incompleto, capturas, Recomendada, margen): la misma revisión
+  // que la lista y que `enviarPorPasos`. Nunca «Todo listo» con un rojo. La autorización de datos
+  // depende del cliente: va después de leer el texto, para no taparlo.
+  const freno = (texto: string) => ({ texto, accion: { tipo: 'paso', paso: 3 } as AccionSigue, boton: e.pasoActual === 3 ? null : 'Ver qué falta' })
+  const porArreglar = e.impide ? e.impide.filter(r => r.clave !== CLAVE_AUTORIZACION_DATOS) : null
+  if (porArreglar) {
+    if (porArreglar.length > 0) return freno(porArreglar[0].texto)
+  } else if (e.rojos > 0 || e.primerImpide) {
+    return freno(e.primerImpide ?? `${e.rojos} ${e.rojos === 1 ? 'cosa impide' : 'cosas impiden'} enviar: míralas en Revisar y enviar.`)
+  }
   if (e.texto === 'sinrevisar' || e.texto === 'viejo') return { texto: 'Lee lo que le llega al cliente y márcalo como revisado.', accion: { tipo: 'paso', paso: 3 }, boton: 'Revisar el texto' }
+  if (e.impide && e.impide.length > 0) return freno(e.impide[0].texto)
   return { texto: 'Todo listo: descarga el PDF o envíalo al cliente.', accion: { tipo: 'paso', paso: 3 }, boton: e.pasoActual === 3 ? null : 'Revisar y enviar' }
 }

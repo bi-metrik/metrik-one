@@ -61,11 +61,11 @@ const DATA = 'data:image/png;base64,AAAA'
 const texto = () => (contenedor.textContent ?? '').replace(/\s+/g, ' ')
 const clic = async (el: Element) => { await act(async () => { (el as HTMLElement).click() }) }
 
-async function montar(registro: InstanceType<typeof Registro> | null, tarifaPax: unknown = null, margenAplicado: number | null = null) {
+async function montar(registro: InstanceType<typeof Registro> | null, tarifaPax: unknown = null, margenAplicado: number | null = null, edadesNinosSolicitud: number[] | null = null) {
   await act(async () => {
     root!.render(React.createElement(Tarjeta, {
       cotizacionId: 'cot-1', itemId: 'pq-1', tarifaPax, precioVenta: null, editable: true, operador: 'Aliados Travel',
-      pasajeros: null, vueloSugerido: null, onCambio: () => {}, onEliminar: () => {}, registro, margenAplicado,
+      pasajeros: null, vueloSugerido: null, onCambio: () => {}, onEliminar: () => {}, registro, margenAplicado, edadesNinosSolicitud,
     }))
   })
 }
@@ -117,5 +117,39 @@ describe('margen de un paquete Público con comisión', () => {
     await montar(null, { bloqueo: p, tipoTarifa: { tipo: 'publica', origen: 'persona', por: null, en: '', comisionPct: 10 } }, 0)
     expect(contenedor.querySelector('[data-margen-paquete]')?.textContent).toBe('Margen 10 % (comisión)')
     expect(texto()).not.toContain('Margen 0 %')
+  })
+})
+
+describe('la edad del niño viene precargada de la Solicitud (prueba real del 2026-10-29)', () => {
+  const conNino = (edades: number[]) => {
+    const p = paqueteVacio('Aliados Travel')
+    p.hotel.hotel = 'Hotel de prueba'
+    p.hotel.precios = [{ acomodacion: 'doble', precioPorPersona: 1_000_000 }]
+    p.distribucion = { habitaciones: { doble: 1 }, ninos: 1, infantes: 0, edadesNinos: edades }
+    return { bloqueo: p }
+  }
+  const casilla = () => contenedor.querySelector('input[aria-label="Edades de los niños"]') as HTMLInputElement | null
+  const abrir = async () => {
+    const b = [...contenedor.querySelectorAll('button')].find(x => x.textContent === 'Ver y editar el paquete')
+    if (b) await clic(b)
+  }
+
+  it('el paquete sin edad abre con la de la Solicitud («8 años») y se puede cambiar', async () => {
+    await montar(null, conNino([]), null, [8])
+    await abrir()
+    expect(casilla()?.value).toBe('8')
+    expect(casilla()?.readOnly).toBe(false)
+    // Ya no se pide como falta (el aviso de «Falta la edad» no aparece en la tarjeta).
+    expect(texto()).not.toContain('Falta la edad de un niño')
+  })
+  it('la edad ya guardada en el paquete manda sobre la de la Solicitud', async () => {
+    await montar(null, conNino([5]), null, [8])
+    await abrir()
+    expect(casilla()?.value).toBe('5')
+  })
+  it('sin edad en la Solicitud, la casilla queda vacía como antes', async () => {
+    await montar(null, conNino([]), null, null)
+    await abrir()
+    expect(casilla()?.value).toBe('')
   })
 })
