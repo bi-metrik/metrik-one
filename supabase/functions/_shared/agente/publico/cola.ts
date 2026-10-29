@@ -47,6 +47,8 @@ import { frasesDeSobreventa } from './sobreventa.ts';
 import { HERRAMIENTAS_VENTAS, sistemaPublico } from './prompt.ts';
 import { CIERRES_DEL_CODIGO_VENTAS, ENLACES_VENTAS, RF_PAGO_CONFIRMADO, bloqueNotaVentas, claveConfirmacionPago, dominioVentas } from './ventas/dominio-ventas.ts';
 import type { PuertosVentas } from './ventas/puertos-ventas.ts';
+import { demasiadosProductos, fotosDelTurno } from './ventas/fotos-ventas.ts';
+import type { FotoDelTurno } from './ventas/fotos-ventas.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
 import { gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
@@ -227,6 +229,24 @@ async function publicarEn(d: DepsPublico, turnoId: string, ranura: string, s: Sa
   return { ok: false, id: null, motivo: r.motivo };
 }
 
+/** Publica las fotos de un turno de ventas, cada una en su ranura (`foto_1`…). Nunca lanza. */
+async function publicarFotos(d: DepsPublico, turnoId: string, fotos: FotoDelTurno[]): Promise<NonNullable<TrazaPublica['fotos']>> {
+  const out: NonNullable<TrazaPublica['fotos']> = [];
+  for (const [i, f] of fotos.entries()) {
+    try {
+      // En la conversación queda el pie (el modelo ve en el historial que la foto salió), no la URL.
+      const id = await d.almacen.reservarSalida({ llave: d.llave, canal: d.canal, turnoId, ranura: `foto_${i + 1}`, salida: { tipo: 'texto', texto: `[Foto] ${f.texto}` } });
+      if (!id) { out.push({ codigo: f.codigo, ok: false, motivo: 'ranura ya tomada' }); continue; }
+      const r = await d.mensajero.publicarFoto(d.llave, { url: f.url, texto: f.texto });
+      await d.almacen.marcarSalida(id, r.ok ? { estado: 'publicado', chatwootMessageId: r.id } : { estado: r.incierto ? 'incierto' : 'fallido' });
+      out.push(r.ok ? { codigo: f.codigo, ok: true } : { codigo: f.codigo, ok: false, motivo: r.motivo.slice(0, 160) });
+    } catch (e) {
+      out.push({ codigo: f.codigo, ok: false, motivo: String(e).slice(0, 160) });
+    }
+  }
+  return out;
+}
+
 async function pasarAPersona(d: DepsPublico, turnoId: string, p: PasoAPersona): Promise<string[]> {
   const errores: string[] = [];
   const nota = await d.almacen.reservarSalida({ llave: d.llave, canal: d.canal, turnoId, ranura: 'nota_persona', salida: { tipo: 'texto', texto: p.nota }, nota: true });
@@ -333,6 +353,8 @@ function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
       ...preciosSinHerramienta(texto, herramientas)
         .map((x) => `el monto ${x} no viene de ver_catalogo/ver_funciones; no lo repitas, usa el precio de la herramienta o di que no lo puedes confirmar`),
       ...frasesDeSobreventa(texto, herramientas),
+      // Ventas: nunca más de 3 productos en una respuesta (venta consultiva, Mauricio 29-oct).
+      ...(esVentas(d) ? demasiadosProductos(texto) : []),
     ],
   };
 }
@@ -595,6 +617,19 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   }
   const extras = salida === r.salida ? (r.extras ?? []) : [];
 
+  // Ventas: las fotos de los productos que nombró la respuesta del modelo (las decide el código; nunca bloquean).
+  let fotos: FotoDelTurno[] = [];
+  if (esVentas(d) && d.ventas && salida && salida === r.salida && r.delModelo && !persona && !traza.propuesta) {
+    try {
+      fotos = fotosDelTurno({
+        texto: salida.texto, herramientas: traza.herramientas, catalogo: await d.ventas.catalogo(), filas,
+        pedido: pend.map((f) => f.texto ?? '').join(' '),
+      });
+    } catch (e) {
+      console.error('[asistente-ventas] no se pudieron elegir las fotos:', String(e).slice(0, 120));
+    }
+  }
+
   // Con un rol, la señal del código (§4.2): dos «no pude» seguidos o tres correcciones de lo mismo pasan a persona
   // (en Chatwoot se pasa directo, sin ofrecer). Sin rol, Sabor sigue como siempre.
   const delRol = personaDelRol(d);
@@ -635,6 +670,11 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
       persona = !v.abierta ? persona : null;
       avisoAparte = null;
     }
+    // Las fotos solo si caben en la ventana junto con el texto (TikTok cuenta los mensajes seguidos); si no, no salen.
+    if (salida && fotos.length && !ventana({ canal: d.canal, anuncio7Dias: d.anuncio7Dias, filas, ahoraMs: d.ahoraMs(), cuantos: cuantos + fotos.length }).abierta) {
+      traza.fotos = fotos.map((f) => ({ codigo: f.codigo, ok: false, motivo: 'no caben en la ventana del canal' }));
+      fotos = [];
+    }
   }
 
   // 9. Publicar.
@@ -655,6 +695,8 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     if (p.ok) {
       tramos.publicacion_ms = Math.round(d.reloj() - tp);
       tramos.interno_ms = Math.max(0, Math.round(d.ahoraMs() - Date.parse(ultima.created_at) - (tramos.rafaga_ms ?? 0)));
+      // Las fotos, después del texto: si una falla, se anota y sigue (el texto ya salió).
+      if (fotos.length) traza.fotos = await publicarFotos(d, turnoId, fotos);
     }
   }
   traza.salida = salida;

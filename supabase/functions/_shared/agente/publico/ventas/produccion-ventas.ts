@@ -6,7 +6,7 @@
 
 import type { SupabaseClient } from '../../../types.ts';
 import { consultarLinkBold, llavesBoldDelWorkspace, pasarelaConLlaves } from '../../../funciones/bold-workspace.ts';
-import { fichaDe } from './catalogo-ventas.ts';
+import { fichaDe, fotosDe } from './catalogo-ventas.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 import type { LinkGuardado, NuevoLink, PuertosVentas } from './puertos-ventas.ts';
 
@@ -23,30 +23,40 @@ export function linkDeFila(x: Fila): LinkGuardado {
   };
 }
 
-/** Las publicaciones activas con precio, con su producto. Pura (sobre las filas del select). */
-export function productosDeFilas(filas: Fila[]): ProductoVenta[] {
-  return filas.map((x) => {
+/**
+ * Las publicaciones activas con precio, con su producto. Las fotos, solo las del bucket propio en `hostFotos` (el host
+ * del proyecto de Supabase); sin host, ninguna. Pura (sobre las filas del select).
+ */
+export function productosDeFilas(filas: Fila[], hostFotos: string | null = null): ProductoVenta[] {
+  return filas.map((x): ProductoVenta | null => {
     const p = (Array.isArray(x.producto) ? x.producto[0] : x.producto) as Fila | null;
     const precio = Number(x.precio);
     if (!p || !(precio > 0)) return null;
     return {
       publicacionId: String(x.id), codigo: String(x.codigo), sku: String(p.sku ?? ''), titulo: String(x.titulo ?? ''), nombre: String(p.nombre ?? ''),
       marca: (p.marca as string | null) ?? null, categoria: (p.categoria as string | null) ?? null, etiquetas: Array.isArray(x.etiquetas) ? x.etiquetas.map(String) : [],
-      precio, ficha: fichaDe(p.ficha),
+      precio, ficha: fichaDe(p.ficha), fotos: fotosDe(p.fotos, hostFotos),
     };
   }).filter((x): x is ProductoVenta => !!x).sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }));
 }
 
-export function ventasSupabase(supabase: SupabaseClient, workspaceId: string, f: typeof fetch = (u, i) => globalThis.fetch(u, i)): PuertosVentas {
+/** El host de la URL del proyecto (`SUPABASE_URL`), o null. Pura. */
+export function hostDe(url: string | null | undefined): string | null {
+  try { return url ? new URL(url).host : null; } catch { return null; }
+}
+
+export function ventasSupabase(
+  supabase: SupabaseClient, workspaceId: string, f: typeof fetch = (u, i) => globalThis.fetch(u, i), o: { hostFotos?: string | null } = {},
+): PuertosVentas {
   let cache: { ps: ProductoVenta[]; vence: number } | null = null;
   return {
     async catalogo() {
       if (cache && cache.vence > Date.now()) return cache.ps;
       const { data, error } = await supabase.from('ferreteria_publicaciones')
-        .select('id, codigo, titulo, precio, etiquetas, producto:ferreteria_productos!inner(sku, nombre, marca, categoria, ficha)')
+        .select('id, codigo, titulo, precio, etiquetas, producto:ferreteria_productos!inner(sku, nombre, marca, categoria, ficha, fotos)')
         .eq('workspace_id', workspaceId).eq('estado', 'activa').not('precio', 'is', null).limit(500);
       if (error) throw new Error(`no se pudo leer el catálogo: ${error.message}`);
-      const ps = productosDeFilas((data ?? []) as Fila[]);
+      const ps = productosDeFilas((data ?? []) as Fila[], o.hostFotos ?? null);
       cache = { ps, vence: Date.now() + 60_000 };
       return ps;
     },

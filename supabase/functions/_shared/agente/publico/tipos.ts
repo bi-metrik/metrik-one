@@ -129,6 +129,11 @@ export type TrazaPublica = Traza & {
   preferencia_mesa?: string | null;
   /** Topes que actuaron (presupuesto, turnos por conversación, anti-spam). */
   topes?: string[];
+  /**
+   * Ventas: las fotos de los productos que nombró la respuesta (una por producto, máximo 3), con lo que pasó. Una que
+   * falla no frena nada: el texto ya salió.
+   */
+  fotos?: Array<{ codigo: string; ok: boolean; motivo?: string }>;
 };
 
 /** Lo que el turno publica: la salida y, si aplica, el paso a persona después. */

@@ -17,6 +17,8 @@
 //   RESEND_API_KEY                   correo a MéTRIK: caída del modelo y presupuesto del día (spec 2026-10-26, §4.1).
 // Dominio de ventas (Dimpro, 29-oct): `config_extra.bot_conversacional.chatwoot.dominio = 'ventas'`. El webhook de Bold del
 // workspace (Next) avisa un pago aprobado con `POST …?ws=<slug>&pago=<LNK_…>` y `Authorization: Bearer <service role>`.
+// Con las sugerencias salen las fotos de los productos como adjuntos (multipart), bajadas solo del bucket
+// `ferreteria-fotos` del host de SUPABASE_URL.
 // Interruptores: `config_extra.bot_conversacional.chatwoot.activo` (sin él, 200 y nada) y la ficha `bot.encendido`
 // del reglamento publicado (bot `asistente-publico`). Quitar el Agent Bot del inbox en Chatwoot también lo apaga.
 // ============================================================
@@ -26,7 +28,7 @@ import { modeloAnthropic } from '../_shared/agente/modelo-anthropic.ts';
 import { modeloGemini } from '../_shared/agente/modelo-gemini.ts';
 import { cargarReglamento } from '../_shared/agente/produccion.ts';
 import { atenderConversacion, avisarPagoAprobado } from '../_shared/agente/publico/cola.ts';
-import { ventasSupabase } from '../_shared/agente/publico/ventas/produccion-ventas.ts';
+import { hostDe, ventasSupabase } from '../_shared/agente/publico/ventas/produccion-ventas.ts';
 import { variableSecreta } from '../_shared/agente/publico/config.ts';
 import { BOT_PUBLICO } from '../_shared/agente/publico/dominio.ts';
 import { recibir } from '../_shared/agente/publico/entrada.ts';
@@ -44,6 +46,9 @@ import type { FuentePistaDelTurno } from '../_shared/agente/pistas.ts';
 import { leerBasePistas } from '../_shared/agente/pistas-supabase.ts';
 import type { Modelo } from '../_shared/agente/tipos.ts';
 import type { SupabaseClient } from '../_shared/types.ts';
+
+/** El host de Supabase: de ahí (bucket `ferreteria-fotos`) y de ningún otro lado se bajan las fotos del catálogo. */
+const HOST_FOTOS = hostDe(Deno.env.get('SUPABASE_URL'));
 
 function enSegundoPlano(p: Promise<unknown>): void {
   const rt = (globalThis as unknown as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } }).EdgeRuntime;
@@ -129,7 +134,7 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     modelo, reglamento, config: c,
     ...(turno.funciones ? { funciones: turno.funciones, rol: turno.rol } : {}),
     almacen: almacenChatwootSupabase(supabase),
-    mensajero: mensajeroChatwootApi({ apiUrl: c.apiUrl, token }),
+    mensajero: mensajeroChatwootApi({ apiUrl: c.apiUrl, token, hostFotos: c.dominio === 'ventas' ? HOST_FOTOS : null }),
     transcriptor: {
       transcribir: async (x) => transcribirAudio(x, {
         llave: llaveAudio, modelo: c.audio.modelo, maxBytes: c.audio.maxBytes, pistas: await pistasDeLaNota(x.fuentesDePistas),
@@ -149,7 +154,7 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     // Cada paso a persona deja su fila en `asistente_escalamientos` (spec 2026-10-26, §4.2), a mejor esfuerzo.
     escalamientos: escalamientosSupabase(supabase),
     // Dominio de ventas (Dimpro): catálogo de Ferretería y Bold con las llaves de la bóveda del workspace.
-    ...(c.dominio === 'ventas' ? { ventas: ventasSupabase(supabase, a.workspace.id) } : {}),
+    ...(c.dominio === 'ventas' ? { ventas: ventasSupabase(supabase, a.workspace.id, undefined, { hostFotos: HOST_FOTOS }) } : {}),
   });
 }
 
