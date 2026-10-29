@@ -22,7 +22,6 @@
  * dice el documento son los que el modelo deja pasar (`portada.nombres`).
  */
 import type {
-  CiudadDoc,
   ClaveTarifa,
   DiaDoc,
   EventoDoc,
@@ -274,36 +273,19 @@ function resumenIncluye(m: ModeloPropuesta): string | null {
   return mayuscula(yLista(partes))
 }
 
-/** El hotel que el documento nombra en una ciudad: el de la tarifa recomendada, o el primero. */
-function opcionDeReferencia(c: CiudadDoc, m: ModeloPropuesta) {
-  const principal = m.tarifas.find((t) => t.esPrincipal)?.indice
-  return (principal !== undefined ? c.opciones.find((x) => x.tarifas.includes(principal)) : undefined) ?? c.opciones[0]
+/**
+ * La imagen de la portada (regla de fotos del 2026-10-29, punto 2): UNA sola imagen del DESTINO, a
+ * todo lo ancho, nunca fotos de hotel ni el collage. Es la foto de portada del documento: la del
+ * banco de ciudades (curado por MeTRIK) o la que una persona eligió para la ciudad en la biblioteca
+ * (`prepararPropuestaHtml` no toma una de Commons sin revisar). Sin ella, `null`: la banda queda
+ * con el color de Trappvel y el título.
+ */
+export function fotoDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoResuelta | null {
+  return r.foto(m.portada.foto?.url)
 }
 
-/**
- * Las fotos del collage de la portada (hasta 4, como el de Edgar): la de la portada, las de cada
- * ciudad y, si faltan, las de los hoteles de la versión recomendada. Sin repetir; sin ninguna,
- * la banda queda con el degradado oscuro.
- */
-export function fotosDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoResuelta[] {
-  const fotos: FotoResuelta[] = []
-  const vistas = new Set<string>()
-  const sumar = (f: FotoResuelta | null | undefined) => {
-    if (!f || vistas.has(f.src) || fotos.length >= 4) return
-    vistas.add(f.src)
-    fotos.push(f)
-  }
-  sumar(r.foto(m.portada.foto?.url))
-  for (const p of m.ruta.paradas) sumar(r.fotoDeCiudad(p.ciudad))
-  for (const c of m.hoteles) {
-    const o = opcionDeReferencia(c, m)
-    const principal = o ? r.foto(o.foto?.url) : null
-    sumar(principal)
-    if (o && principal) for (const x of r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []) sumar(x)
-  }
-  for (const c of m.hoteles) for (const o of c.opciones) sumar(r.foto(o.foto?.url))
-  return fotos
-}
+/** El rótulo que lleva siempre la imagen de la portada (condición de Emilio, 2026-10-29). */
+export const ROTULO_IMAGEN_PORTADA = 'Imagen ilustrativa'
 
 function marcaDe(r: RecursosPropuesta, alto?: string): string {
   return r.logo
@@ -333,10 +315,8 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
     ['Viajeros', p.viajeros],
     para ? ['Cotizada para', para] : ['Incluye', resumenIncluye(m)],
   ].filter((d): d is [string, string] => Boolean(d[1]))
-  const fotos = fotosDePortada(m, r)
-  const collage = fotos.length > 0
-    ? `<div class="fotos" style="grid-template-columns:repeat(${fotos.length},1fr)">${fotos.map((f) => `<div${fondo(f)}></div>`).join('')}</div>`
-    : ''
+  const foto = fotoDePortada(m, r)
+  const imagen = foto ? `<div class="foto"${fondo(foto)}></div><span class="ilustrativa">${ROTULO_IMAGEN_PORTADA}</span>` : ''
   // El aviso blanco va donde Edgar pone la caja verde de «servicios confirmados»: aquí, el texto
   // revisado del cliente. Sin texto, no hay aviso.
   const aviso = p.intro
@@ -345,7 +325,7 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const largo = p.titulo.length > 46
   return [
     `<div class="top"><span class="k"><i></i>Propuesta de viaje · ${esc(p.consecutivo)}</span>${marcaDe(r)}</div>`,
-    `<div class="hero${aviso ? ' conaviso' : ''}">${collage}<div class="in">`,
+    `<div class="hero ${foto ? 'confoto' : 'marca'}${aviso ? ' conaviso' : ''}">${imagen}<div class="in">`,
     p.fechas ? `<div class="dt">${esc(p.fechas)}</div>` : '',
     `<h1${largo ? ' class="largo"' : ''}>${esc(p.titulo)}</h1>`,
     sub ? `<div class="sub">${esc(sub)}</div>` : '',

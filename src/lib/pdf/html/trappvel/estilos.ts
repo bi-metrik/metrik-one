@@ -37,11 +37,15 @@ h3 { font: 700 10.5pt/1.25 Poppins, sans-serif; margin: 0 0 1.5mm; color: var(--
 .top img { height: 8.8mm; display:block; }
 .top b.pop { font-size: 15pt; color: var(--ink); }
 
-/* Portada: collage de fotos con banda oscura */
+/* Portada: UNA imagen del destino a todo lo ancho, con sombra abajo para el título y el rótulo
+   «Imagen ilustrativa» siempre a la vista; sin imagen, el color de Trappvel (regla de fotos del
+   2026-10-29). Nunca fotos de hotel ni collage. */
 .hero { position:relative; height: 57mm; border-radius: 3.7mm; overflow:hidden; background: linear-gradient(120deg,#1b1f3b,#3b2a6b 60%,#1e2e5c); }
-.hero .fotos { position:absolute; inset:0; display:grid; gap: .5mm; }
-.hero .fotos div { background-size: cover; background-position: center; }
-.hero::after { content:""; position:absolute; inset:0; background: linear-gradient(90deg, rgba(27,31,59,.6) 0%, rgba(27,31,59,.3) 55%, rgba(27,31,59,.08) 100%), linear-gradient(rgba(27,31,59,0) 45%, rgba(27,31,59,.3)); }
+.hero.marca { background: linear-gradient(120deg,#e6197a,#8a2cb5 55%,#1ca2b8); }
+.hero .foto { position:absolute; inset:0; background-size: cover; background-position: center; }
+.hero.confoto::after { content:""; position:absolute; inset:0; background: linear-gradient(rgba(27,31,59,0) 30%, rgba(27,31,59,.72) 100%), linear-gradient(90deg, rgba(27,31,59,.35) 0%, rgba(27,31,59,0) 60%); }
+.hero.marca::after { content:""; position:absolute; inset:0; background: linear-gradient(rgba(27,31,59,0) 40%, rgba(27,31,59,.25)); }
+.hero .ilustrativa { position:absolute; top: 2.8mm; right: 3.4mm; z-index:2; font: 600 6.2pt/1.2 Inter, sans-serif; letter-spacing: .4px; color:#fff; background: rgba(27,31,59,.5); padding: .6mm 2mm; border-radius: 1mm; }
 .hero .in { position:absolute; left: 7.8mm; right: 10mm; bottom: 7mm; z-index:1; color:#fff; }
 .hero.conaviso .in { bottom: 14.5mm; }
 .hero .dt { font: 700 8.6pt Inter, sans-serif; letter-spacing: 2.6px; text-transform: uppercase; color: #fff; opacity: .92; }

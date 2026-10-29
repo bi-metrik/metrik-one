@@ -30,6 +30,24 @@ function entradaComoLaAccion() {
   }
 }
 
+describe('la imagen de la portada (regla de fotos del 2026-10-29)', () => {
+  const sinFotoDeDestino = () => {
+    const e = entradaComoLaAccion()
+    return { ...e, props: { ...e.props, viaje: { ...e.props.viaje!, foto: null } } }
+  }
+  it('sin foto de destino en el banco, una de Commons sin revisar NO va a la portada; la que eligió una persona sí', { timeout: 30_000 }, async () => {
+    const opciones = (catalogo: typeof CATALOGO_EUROPA) => ({ marca: 'A', logoUrl: null, fotoDeCiudad: bancoComoFotoPDF, catalogo })
+    const conCommons = await prepararPropuestaHtml(sinFotoDeDestino(), opciones(CATALOGO_EUROPA))
+    expect(conCommons.modelo.portada.foto).toBeNull()
+    expect(conCommons.html).toContain('<div class="hero marca')
+    const propia = { ...CATALOGO_EUROPA, ciudad: (c: string) => { const f = CATALOGO_EUROPA.ciudad(c); return f ? { ...f, origen: 'asesora' as const, credito: null } : null } }
+    const conPropia = await prepararPropuestaHtml(sinFotoDeDestino(), opciones(propia))
+    expect(conPropia.modelo.portada.foto?.rotulo).toBe('BARCELONA')
+    expect(conPropia.html).toContain('<div class="hero confoto')
+    expect(conPropia.html).toContain('<span class="ilustrativa">Imagen ilustrativa</span>')
+  })
+})
+
 describe('reducirFoto', () => {
   it('baja una foto de disco a JPEG del ancho pedido, como data URL', async () => {
     const url = await reducirFoto(`${process.cwd()}/src/lib/pdf/templates/fotos-ciudad/madrid-1.jpg`, 300)
