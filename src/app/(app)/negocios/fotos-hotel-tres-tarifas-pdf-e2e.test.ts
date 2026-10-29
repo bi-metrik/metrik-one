@@ -17,7 +17,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
 
-const captura = vi.hoisted(() => ({ html: '' as string, catalogo: null as unknown, pdfHecho: false }))
+const captura = vi.hoisted(() => ({ html: '' as string, catalogo: null as unknown, pdfHecho: false, avisosFotos: undefined as string[] | undefined }))
 const jpegs = vi.hoisted(() => new Map<string, Buffer>())
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }))
@@ -52,7 +52,7 @@ vi.mock('@/lib/pdf/html/propuesta-html', async (original) => {
     ...real,
     pdfDePropuestaHtml: async (entrada: Parameters<typeof real.prepararPropuestaHtml>[0], opts: Parameters<typeof real.prepararPropuestaHtml>[1]) => {
       captura.catalogo = opts.catalogo ?? null
-      const { html } = await real.prepararPropuestaHtml(entrada, opts)
+      const { html, avisosFotos } = await real.prepararPropuestaHtml(entrada, opts)
       captura.html = html
       if (process.env.VOLCAR_HTML_PROPUESTA) (await import('node:fs')).writeFileSync(process.env.VOLCAR_HTML_PROPUESTA, html)
       // Para las capturas del PR: con `PDF_FOTOS_SALIDA` y `CHROMIUM_EJECUTABLE`, el PDF de verdad.
@@ -63,7 +63,7 @@ vi.mock('@/lib/pdf/html/propuesta-html', async (original) => {
       }
       const doc = await PDFDocument.create()
       doc.addPage()
-      return { pdf: Buffer.from(await doc.save()), modelo: null, html, medidas: { totalMs: 1, pdfBytes: 1, peticionesBloqueadas: [] } }
+      return { pdf: Buffer.from(await doc.save()), modelo: null, html, medidas: { totalMs: 1, pdfBytes: 1, peticionesBloqueadas: [] }, avisosFotos }
     },
   }
 })
@@ -154,8 +154,9 @@ beforeAll(async () => {
     fotos_catalogo: fotos,
   } as Record<string, Fila[]>
   await recalcularTotales(COT)
-  const r = (await generateCotizacionPDF(COT, { vistaPrevia: true })) as { success: boolean; error?: string }
+  const r = (await generateCotizacionPDF(COT, { vistaPrevia: true })) as { success: boolean; error?: string; avisosFotos?: string[] }
   if (!r.success) throw new Error(r.error)
+  captura.avisosFotos = r.avisosFotos
 }, 60_000)
 
 type Foto = { src: string; extras?: { src: string }[] }
@@ -183,10 +184,18 @@ describe('las fotos de los hoteles de las tres tarifas llegan al PDF', () => {
   it('el HTML del documento las imprime todas con foto, del mismo alto y sin recuadro vacío (regla de fotos del 2026-10-29)', () => {
     const recuadros = captura.html.match(/class="img[^"]*" style="height:[\d.]+mm/g) ?? []
     expect(recuadros).toHaveLength(3)
-    expect(recuadros.filter(c => c.includes('sinfoto'))).toEqual([])
+    // La misma composición en las tres (grande + dos apiladas), del mismo alto.
+    expect(recuadros.every(c => c.startsWith('class="img mosaico n2" '))).toBe(true)
     expect(new Set(recuadros.map(c => c.replace(/.*height:/, ''))).size).toBe(1)
-    // La Premium tiene una sola foto: manda una foto ancha en las tres fichas.
-    expect(recuadros.every(c => c.startsWith('class="img" '))).toBe(true)
+    // 3 + 2 + 1 fotos; la casilla vacía de la segunda y las dos de la tercera (juntas), el tono suave.
+    const hoteles = captura.html.slice(captura.html.indexOf('>Hospedaje<'), captura.html.indexOf('</section>', captura.html.indexOf('>Hospedaje<')))
+    expect((hoteles.match(/background-image:url\(data:image/g) ?? []).length).toBe(6)
+    expect((hoteles.match(/class="mx hueco"/g) ?? []).length).toBe(2)
+    // «Revisar y enviar» recibe el aviso (no bloquea): a la segunda le falta 1; a la tercera, 2.
+    expect(captura.avisosFotos).toEqual([
+      expect.stringMatching(/^Al .+ le falta 1 foto para la ficha: súbela en su perfil\.$/),
+      expect.stringMatching(/^Al .+ le faltan 2 fotos para la ficha: súbelas en su perfil\.$/),
+    ])
   })
 })
 

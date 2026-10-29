@@ -20,6 +20,20 @@ export const PROPORCION_MAXIMA = 2.1
 
 export const MENSAJE_FORMA = 'Parece un collage o una foto vertical: sube una foto sola.'
 
+/** La cabecera de la vista previa del documento con los hoteles a los que les faltan fotos. */
+export const CABECERA_AVISOS_FOTOS = 'x-avisos-fotos'
+
+/** Lee la cabecera: la lista de avisos, o vacía si no viene o no se entiende. */
+export function leerAvisosFotos(valor: string | null | undefined): string[] {
+  if (!valor) return []
+  try {
+    const x = JSON.parse(decodeURIComponent(valor))
+    return Array.isArray(x) ? x.filter((t): t is string => typeof t === 'string').slice(0, 20) : []
+  } catch {
+    return []
+  }
+}
+
 /** ¿Esta proporción (ancho entre alto) es la de una foto sola? Sin dato, no se frena. */
 export function formaAdmitida(proporcion: number | null | undefined): boolean {
   if (proporcion === null || proporcion === undefined) return true

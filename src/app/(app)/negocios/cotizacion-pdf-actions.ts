@@ -1533,11 +1533,13 @@ export async function generateCotizacionPDF(
   let buffer: Buffer | null = null
   let renderedVia: 'react-pdf' | 'chromium' = 'react-pdf'
   let avisoFormato: string | null = null
+  // Regla de fotos (2026-10-29): los hoteles cuya ficha sale con menos de 3 fotos. No bloquea.
+  let avisosFotos: string[] = []
   if (motorHtml) {
     // Si el motor nuevo falla (Chromium, tiempo, una foto rota), el cliente no se queda sin
     // cotización: sale la de @react-pdf y quien descarga lo sabe.
     try {
-      buffer = await propuestaConMotorHtml(supabase, {
+      const hecho = await propuestaConMotorHtml(supabase, {
         props: propsPDF,
         servicios: serviciosDoc,
         lugaresDeOpcionales: lugaresOpcionalesDoc,
@@ -1551,6 +1553,8 @@ export async function generateCotizacionPDF(
         marca: ws?.name ?? 'Mi Empresa',
         logoUrl: ws?.logo_url ?? null,
       })
+      buffer = hecho.pdf
+      avisosFotos = hecho.avisosFotos
       renderedVia = 'chromium'
     } catch (e) {
       console.error('[cotizacion-pdf] el motor html falló; sale el formato anterior:', e instanceof Error ? e.message : e)
@@ -1565,7 +1569,8 @@ export async function generateCotizacionPDF(
       : await renderToBuffer(createElement(plantillaPropia ?? CotizacionPDF, propsPDF) as any)
   }
   // La clave solo existe con el motor encendido: apagado, la respuesta es la de siempre.
-  const conMotor = motorHtml ? { avisoFormato } : {}
+  const conFotos = avisosFotos.length > 0 ? { avisosFotos } : {}
+  const conMotor = motorHtml ? { avisoFormato, ...conFotos } : {}
 
   // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {
@@ -1589,7 +1594,7 @@ export async function generateCotizacionPDF(
   const base64 = Buffer.from(buffer).toString('base64')
   const filename = `${cot.consecutivo}.pdf`
   // Vista previa: el documento, sin guardarlo ni registrarlo.
-  if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia }
+  if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia, ...conFotos }
 
   // Este camino nunca guardó el PDF en ningún lado (solo lo devuelve para descargar), y
   // en un workspace en Drive sigue igual. Con almacenamiento externo queda además en el
@@ -1659,7 +1664,7 @@ async function propuestaConMotorHtml(
     marca: string
     logoUrl: string | null
   },
-): Promise<Buffer> {
+): Promise<{ pdf: Buffer; avisosFotos: string[] }> {
   let asesora: { nombre: string | null; whatsapp: string | null } | null = null
   if (e.staffId) {
     const { data } = await supabase
@@ -1675,7 +1680,7 @@ async function propuestaConMotorHtml(
   const { catalogoParaLaPropuesta } = await import('@/lib/fotos/catalogo-propuesta')
   const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props, e.opcionales, e.fichasDeHotel ?? new Map()).catch(() => null)
   const { pdfDePropuestaHtml } = await import('@/lib/pdf/html/propuesta-html')
-  const { pdf, medidas } = await pdfDePropuestaHtml(
+  const { pdf, medidas, avisosFotos } = await pdfDePropuestaHtml(
     {
       props: e.props,
       servicios: e.servicios,
@@ -1692,7 +1697,7 @@ async function propuestaConMotorHtml(
     },
   )
   console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length }))
-  return pdf
+  return { pdf, avisosFotos: (avisosFotos ?? []).map(a => a.texto) }
 }
 
 /**

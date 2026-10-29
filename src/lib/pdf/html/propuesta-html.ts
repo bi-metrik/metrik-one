@@ -21,7 +21,7 @@ import { fotoImprimible, type OrigenFoto } from '@/lib/fotos/clave'
 import { fuentesDelDocumento } from '@/lib/pdf/chromium/fuentes'
 import { cssDeFuentes, inyectarEstilo } from '@/lib/pdf/chromium/recursos'
 import { imprimirHtmlAPdf, type MedidasRender } from '@/lib/pdf/chromium/render-chromium'
-import { COLUMNAS_HOTELES, COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta } from './trappvel/plantilla'
+import { avisosDeFotosDeHoteles, COLUMNAS_HOTELES, COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta, type RecursosPropuesta } from './trappvel/plantilla'
 
 /** Ancho tope por uso, en px (a ~150 ppp sobre el ancho impreso). */
 export const ANCHO_FOTO = { portada: 1400, tarjeta: 700, extra: 400, logo: 600 } as const
@@ -147,13 +147,17 @@ export interface ResultadoPropuestaHtml {
   modelo: ModeloPropuesta
   html: string
   medidas: MedidasRender
+  /** Los hoteles cuya ficha sale con menos de 3 fotos (aviso de «Revisar y enviar», no bloquea). */
+  avisosFotos: AvisoFotosDeHotel[]
 }
+
+export type AvisoFotosDeHotel = ReturnType<typeof avisosDeFotosDeHoteles>[number]
 
 /** Arma el HTML listo para imprimir (con fotos y fuentes dentro) y su pie. Sin Chromium. */
 export async function prepararPropuestaHtml(
   entrada: EntradaModeloPropuesta,
   opts: OpcionesPropuestaHtml,
-): Promise<{ html: string; pie: string; encabezado: string; modelo: ModeloPropuesta }> {
+): Promise<{ html: string; pie: string; encabezado: string; modelo: ModeloPropuesta; avisosFotos: AvisoFotosDeHotel[] }> {
   const modelo = modeloDePropuesta(entrada)
   const catalogo = opts.catalogo ?? null
   const comoFotoPDF = (f: FotoDeCatalogo, rotulo: string | null): FotoPDF => ({
@@ -281,7 +285,7 @@ export async function prepararPropuestaHtml(
     ...[...deActividad.values()].filter((f) => porUrl.has(f.src)).map((f) => f.credito),
   ].filter((c): c is string => !!c)
 
-  const crudo = htmlDePropuesta(modelo, {
+  const recursos: RecursosPropuesta = {
     foto: resolver,
     fotoDeCiudad: (ciudad) => (ciudad ? resolver(deCiudad.get(ciudad)?.url) : null),
     fotoDeOpcional: (nombre) => resolver(deOpcional.get(nombre)?.src),
@@ -291,7 +295,8 @@ export async function prepararPropuestaHtml(
     logo,
     marca: opts.marca,
     creditosExtra,
-  })
+  }
+  const crudo = htmlDePropuesta(modelo, recursos)
   const fuentes = fuentesDelDocumento()
   const inter = fuentes.find((f) => f.familia === 'Inter' && f.peso === 400 && f.estilo === 'normal')
   return {
@@ -303,11 +308,12 @@ export async function prepararPropuestaHtml(
     }),
     encabezado: encabezadoDeHoja(),
     modelo,
+    avisosFotos: avisosDeFotosDeHoteles(modelo, recursos),
   }
 }
 
 export async function pdfDePropuestaHtml(entrada: EntradaModeloPropuesta, opts: OpcionesPropuestaHtml): Promise<ResultadoPropuestaHtml> {
-  const { html, pie, encabezado, modelo } = await prepararPropuestaHtml(entrada, opts)
+  const { html, pie, encabezado, modelo, avisosFotos } = await prepararPropuestaHtml(entrada, opts)
   const { pdf, medidas } = await imprimirHtmlAPdf(html, { pie, encabezado, timeoutMs: opts.timeoutMs ?? 40_000 })
-  return { pdf, modelo, html, medidas }
+  return { pdf, modelo, html, medidas, avisosFotos }
 }

@@ -37,7 +37,7 @@ import { ciudadComparable, mismoLugar } from '@/lib/cotizaciones/bandeja-captura
 import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
 import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
-import { ESPACIO_FOTOS_MM, planDeFichas, type DistribucionFicha } from './fotos-ficha'
+import { formasDeCasillas, fotosQueFaltan, planDeFichas, type CasillasFicha, type PlanDeFichas } from './fotos-ficha'
 import { encuadreDeFoto } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { formaAdmitida } from '@/lib/fotos/forma'
 
@@ -223,25 +223,59 @@ function fondoEnRecuadro(f: FotoResuelta, recuadro: number, extra = ''): string 
 }
 
 /**
- * El recuadro de foto de una ficha de hotel (regla de fotos del 2026-10-29, `fotos-ficha.ts`): una
- * sola a todo lo ancho, dos iguales o una grande y dos apiladas, del alto común del documento.
- * Sin distribución, el degradado del mismo alto. `dentro` = etiquetas y estrellas.
+ * El recuadro de foto de una ficha de hotel (regla de fotos del 2026-10-29, `fotos-ficha.ts`): la
+ * grande a la izquierda y dos pequeñas apiladas, del alto y el reparto comunes del documento. La
+ * casilla sin foto lleva un tono suave de la marca con el ícono de la cama (`.hueco`): no compite
+ * con las fotos ni parece un error; si faltan las dos pequeñas, van juntas en un solo bloque. Sin
+ * ninguna foto, todo el recuadro con el degradado, como antes.
+ * `dentro` = etiquetas y estrellas.
  */
-function imagenDeFichaDeHotel(fotos: FotoResuelta[], d: DistribucionFicha | null, alto: number, dentro: string): string {
-  const ancho = ANCHO_FOTO_FICHA_MM
-  const altura = `height:${alto}mm;`
-  if (!d) return `<div class="img sinfoto" style="${altura}">${dentro}</div>`
-  const [a, b, c] = d.fotos.map((i) => fotos[i])
-  if (d.tipo === 'una') return `<div class="img"${fondoEnRecuadro(a, ancho / alto, altura)}>${dentro}</div>`
-  if (d.tipo === 'dos') {
-    const forma = (ancho - ESPACIO_FOTOS_MM) / 2 / alto
-    return `<div class="img mosaico dos" style="${altura}"><div class="mx"${fondoEnRecuadro(a, forma)}></div><div class="mx"${fondoEnRecuadro(b, forma)}></div>${dentro}</div>`
+function imagenDeFichaDeHotel(fotos: FotoResuelta[], c: CasillasFicha, plan: PlanDeFichas, dentro: string): string {
+  const altura = `height:${plan.altoMm}mm;`
+  if (c.grande === null && c.arriba === null && c.abajo === null) return `<div class="img sinfoto" style="${altura}">${dentro}</div>`
+  const formas = formasDeCasillas(ANCHO_FOTO_FICHA_MM, plan.altoMm, plan.grande)
+  const casilla = (clase: string, i: number | null, forma: number, extra = '') =>
+    i === null ? `<div class="${clase} hueco"${extra ? ` style="${extra}"` : ''}>${icono('bed')}</div>` : `<div class="${clase}"${fondoEnRecuadro(fotos[i], forma, extra)}></div>`
+  const derecha = c.arriba === null && c.abajo === null
+    ? casilla('mx', null, formas.pequena, 'grid-row:1 / -1;')
+    : `${casilla('mx', c.arriba, formas.pequena)}${casilla('mx', c.abajo, formas.pequena)}`
+  const cols = `${plan.grande}fr ${Math.round((1 - plan.grande) * 100) / 100}fr`
+  return `<div class="img mosaico n2" style="${altura}grid-template-columns:${cols}">${casilla('m0', c.grande, formas.grande)}${derecha}${dentro}</div>`
+}
+
+/**
+ * Las fotos de cada ficha de hotel (en el orden de las fichas) y su plan: lo usan el documento y el
+ * aviso de «Revisar y enviar» (cuántas le faltan a cada hotel).
+ */
+export function fotosDeLasFichas(m: ModeloPropuesta, r: RecursosPropuesta): { hoteles: string[]; fotos: FotoResuelta[][]; plan: PlanDeFichas } {
+  const caben = extrasQueCaben('hotel', COLUMNAS_HOTELES)
+  const hoteles: string[] = []
+  const fotos: FotoResuelta[][] = []
+  for (const c of m.hoteles) {
+    for (const o of c.opciones) {
+      const foto = r.foto(o.foto?.url)
+      const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
+      hoteles.push(o.hotel)
+      // Regla de fotos: la que ya es un collage o una vertical no entra.
+      fotos.push((foto ? [foto, ...extras] : []).filter((f) => formaAdmitida(f.proporcion)))
+    }
   }
-  const util = ancho - ESPACIO_FOTOS_MM
-  const grande = (util * d.grande) / alto
-  const chica = (util * (1 - d.grande)) / ((alto - ESPACIO_FOTOS_MM) / 2)
-  const cols = `${d.grande}fr ${Math.round((1 - d.grande) * 100) / 100}fr`
-  return `<div class="img mosaico n2" style="${altura}grid-template-columns:${cols}"><div class="m0"${fondoEnRecuadro(a, grande)}></div><div class="mx"${fondoEnRecuadro(b, chica)}></div><div class="mx"${fondoEnRecuadro(c, chica)}></div>${dentro}</div>`
+  return { hoteles, fotos, plan: planDeFichas(fotos.map((fs) => fs.map((f) => f.proporcion)), ANCHO_FOTO_FICHA_MM) }
+}
+
+/** «Al Kunuku le faltan 2 fotos para la ficha: súbelas en su perfil.» Una vez por hotel. */
+export function avisosDeFotosDeHoteles(m: ModeloPropuesta, r: RecursosPropuesta): { hotel: string; faltan: number; texto: string }[] {
+  const { hoteles, plan } = fotosDeLasFichas(m, r)
+  const faltan = fotosQueFaltan(plan)
+  const vistos = new Set<string>()
+  const salida: { hotel: string; faltan: number; texto: string }[] = []
+  hoteles.forEach((hotel, i) => {
+    if (faltan[i] <= 0 || vistos.has(hotel)) return
+    vistos.add(hotel)
+    const n = faltan[i]
+    salida.push({ hotel, faltan: n, texto: `Al ${hotel} le ${n === 1 ? 'falta 1 foto' : `faltan ${n} fotos`} para la ficha: ${n === 1 ? 'súbela' : 'súbelas'} en su perfil.` })
+  })
+  return salida
 }
 
 /** «Madrid Atocha - Barcelona Sants · AVE 03071 Renfe, Estándar» → «AVE 03071 Renfe». */
@@ -490,18 +524,10 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
   ].filter(Boolean).join(' ')
   // Un hotel solo lleva la foto que subió la asesora (Mauricio, 2026-10-14); sin ella, el
   // degradado. Si ningún hotel tiene foto, las tarjetas van sin imagen.
-  const caben = extrasQueCaben('hotel', COLUMNAS_HOTELES)
-  // Regla de fotos (2026-10-29): por ficha, sus fotos buenas (sin collages ni verticales) en orden;
-  // el plan da el alto común y cómo va cada una.
-  const fotosDeFicha = m.hoteles.flatMap((c) =>
-    c.opciones.map((o) => {
-      const foto = r.foto(o.foto?.url)
-      const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
-      return (foto ? [foto, ...extras] : []).filter((f) => formaAdmitida(f.proporcion))
-    }),
-  )
-  const plan = planDeFichas(fotosDeFicha.map((fs) => fs.map((f) => f.proporcion)), ANCHO_FOTO_FICHA_MM)
-  const conImagen = plan.fichas.some((d) => d !== null)
+  // Regla de fotos (2026-10-29): por ficha, sus fotos buenas en orden; el plan da el alto y el
+  // reparto comunes y qué foto va en cada casilla.
+  const { fotos: fotosDeFicha, plan } = fotosDeLasFichas(m, r)
+  const conImagen = plan.fichas.some((c) => c.grande !== null || c.arriba !== null || c.abajo !== null)
   let n = 0
   const tarjetas = m.hoteles.flatMap((c) =>
     c.opciones.map((o) => {
@@ -510,7 +536,7 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
       const tagsHtml = tags ? `<span class="tags">${tags}</span>` : ''
       const stars = o.estrellas && o.estrellas > 0 ? `<span class="stars">${'★'.repeat(Math.min(5, o.estrellas))}</span>` : ''
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
-      const imagen = conImagen ? imagenDeFichaDeHotel(fotosDeFicha[i], plan.fichas[i], plan.altoMm, `${tagsHtml}${stars}`) : ''
+      const imagen = conImagen ? imagenDeFichaDeHotel(fotosDeFicha[i], plan.fichas[i], plan, `${tagsHtml}${stars}`) : ''
       const estancia = [rangoCorto(c.desde, c.hasta), c.noches ? `(${c.noches} ${c.noches === 1 ? 'noche' : 'noches'})` : null].filter(Boolean).join(' ')
       const filas = [
         ['Estancia', estancia],

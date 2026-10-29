@@ -1,23 +1,27 @@
 /**
- * Regla de fotos de las fichas de hotel (Ren, 2026-10-29): 1 ancha · 2 iguales · 1 grande + 2
- * apiladas; todas del mismo alto; nadie se recorta más del 15 %.
+ * Regla de fotos de las fichas de hotel (Ren y Mauricio, 2026-10-29): siempre la grande y dos
+ * apiladas, armadas por ONE con fotos sueltas; todas del mismo alto; nadie se recorta más del 15 %.
  */
 import { describe, expect, it } from 'vitest'
 
 import { formaAdmitida, MENSAJE_FORMA, ordenarPorCategoria, PROPORCION_MAXIMA, PROPORCION_MINIMA } from '@/lib/fotos/forma'
-import { ALTO_FOTO_FICHA_MM, distribucionDeFicha, ESPACIO_FOTOS_MM, planDeFichas, recorte, RECORTE_MAXIMO, type DistribucionFicha } from './fotos-ficha'
+import { casillasDeFicha, formasDeCasillas, fotosQueFaltan, planDeFichas, recorte, RECORTE_MAXIMO, type CasillasFicha, type PlanDeFichas } from './fotos-ficha'
 import { ANCHO_FOTO_FICHA_MM } from './plantilla'
 
 const ANCHO = ANCHO_FOTO_FICHA_MM
 
-/** Lo que se recorta cada foto de una ficha con esta distribución. */
-function recortes(p: number[], d: DistribucionFicha, alto: number): number[] {
-  const util = ANCHO - ESPACIO_FOTOS_MM
-  if (d.tipo === 'una') return [recorte(p[d.fotos[0]], ANCHO / alto)]
-  if (d.tipo === 'dos') return d.fotos.map((i) => recorte(p[i], util / 2 / alto))
-  const chica = (util * (1 - d.grande)) / ((alto - ESPACIO_FOTOS_MM) / 2)
-  return [recorte(p[d.fotos[0]], (util * d.grande) / alto), recorte(p[d.fotos[1]], chica), recorte(p[d.fotos[2]], chica)]
+/** Lo que se recorta cada foto puesta en una ficha. */
+function recortes(p: number[], c: CasillasFicha, plan: PlanDeFichas): number[] {
+  const f = formasDeCasillas(ANCHO, plan.altoMm, plan.grande)
+  return [
+    c.grande === null ? 0 : recorte(p[c.grande], f.grande),
+    c.arriba === null ? 0 : recorte(p[c.arriba], f.pequena),
+    c.abajo === null ? 0 : recorte(p[c.abajo], f.pequena),
+  ]
 }
+
+const dentroDelTope = (fichas: number[][], plan: PlanDeFichas) =>
+  plan.fichas.every((c, i) => recortes(fichas[i], c, plan).every((r) => r <= RECORTE_MAXIMO + 1e-9))
 
 describe('la forma de una foto de hotel', () => {
   it('frena el tríptico (2,79) y la vertical (0,67) de la biblioteca; deja pasar 1,0 a 2,0', () => {
@@ -42,46 +46,48 @@ describe('la forma de una foto de hotel', () => {
   })
 })
 
-describe('la distribución de una ficha', () => {
-  it('3 fotos de cerca de 1,4: una grande y dos apiladas, la grande es la primera', () => {
+describe('la ficha: una grande y dos apiladas', () => {
+  it('3 fotos de cerca de 1,4 (el Sunscape): las tres, la grande es la primera', () => {
     const p = [1.417, 1.385, 1.389]
     const plan = planDeFichas([p], ANCHO)
-    const d = plan.fichas[0]!
-    expect(d.tipo).toBe('tres')
-    expect(d.fotos).toEqual([0, 1, 2])
-    for (const r of recortes(p, d, plan.altoMm)) expect(r).toBeLessThanOrEqual(RECORTE_MAXIMO + 1e-9)
+    expect(plan.fichas[0]).toEqual({ grande: 0, arriba: 1, abajo: 2 })
+    expect(dentroDelTope([p], plan)).toBe(true)
+    expect(fotosQueFaltan(plan)).toEqual([0])
   })
 
-  it('2 fotos de 3:2: dos iguales, en el recuadro más bajo que las recorta 15 % o menos', () => {
-    const plan = planDeFichas([[1.5, 1.5]], ANCHO)
-    expect(plan.fichas[0]!.tipo).toBe('dos')
-    expect(plan.altoMm).toBeGreaterThan(25)
-    expect(plan.altoMm).toBeLessThan(30)
-    expect(distribucionDeFicha([1.5, 1.5], ANCHO, plan.altoMm - ALTO_FOTO_FICHA_MM.paso)?.tipo).not.toBe('dos')
+  it('la COT-2026-0008: el Sunscape sale con sus 3 aunque el Kunuku y el Dreams tengan una sola; las tres fichas del mismo alto', () => {
+    const fichas = [[1.365], [1.389], [1.417, 1.385, 1.389]]
+    const plan = planDeFichas(fichas, ANCHO)
+    expect(plan.fichas).toEqual([
+      { grande: 0, arriba: null, abajo: null },
+      { grande: 0, arriba: null, abajo: null },
+      { grande: 0, arriba: 1, abajo: 2 },
+    ])
+    expect(fotosQueFaltan(plan)).toEqual([2, 2, 0])
+    expect(dentroDelTope(fichas, plan)).toBe(true)
+    // Más bajo que la ficha de una sola foto ancha (60 mm) que salía antes de la corrección.
+    expect(plan.altoMm).toBeLessThan(45)
   })
 
-  it('1 foto: una sola a todo lo ancho, sin recortarla más del 15 %', () => {
-    const plan = planDeFichas([[1.365]], ANCHO)
-    const d = plan.fichas[0]!
-    expect(d).toEqual({ tipo: 'una', fotos: [0] })
-    expect(recorte(1.365, ANCHO / plan.altoMm)).toBeLessThanOrEqual(RECORTE_MAXIMO + 1e-9)
+  it('el alto es el más bajo que pone todas las fotos posibles sin pasar del 15 %', () => {
+    const fichas = [[1.5, 1.5, 1.5]]
+    const plan = planDeFichas(fichas, ANCHO)
+    expect(plan.fichas[0]).toEqual({ grande: 0, arriba: 1, abajo: 2 })
+    const unoMenos = planDeFichas(fichas, ANCHO)
+    expect(unoMenos.altoMm).toBe(plan.altoMm)
+    // Con medio milímetro menos, con cualquier reparto, alguna no cabe.
+    for (let g = 0.55; g <= 0.75; g += 0.01) {
+      const c = casillasDeFicha(fichas[0], formasDeCasillas(ANCHO, plan.altoMm - 0.5, Math.round(g * 100) / 100))
+      expect([c.grande, c.arriba, c.abajo].includes(null)).toBe(true)
+    }
   })
 
-  it('todas las fichas del documento del mismo alto: una con 1 foto y otra con 3 van las dos a una sola foto ancha', () => {
-    // Como la COT-2026-0008: un hotel con una sola foto buena manda el alto; el de 3 cabe con una.
-    const plan = planDeFichas([[1.365], [1.389], [1.417, 1.385, 1.389]], ANCHO)
-    expect(plan.fichas.map((d) => d?.tipo)).toEqual(['una', 'una', 'una'])
-    expect(plan.altoMm).toBeGreaterThanOrEqual(55)
-    expect(plan.altoMm).toBeLessThanOrEqual(ALTO_FOTO_FICHA_MM.maximo)
-  })
-
-  it('una foto que necesitaría recortarse más no se usa; si es la única, la ficha va sin foto', () => {
-    // Una cuadrada sola pediría un recuadro de más de 70 mm.
-    expect(planDeFichas([[1]], ANCHO).fichas).toEqual([null])
-    // Con otra, se queda la que cabe en la distribución que le sirve.
-    const plan = planDeFichas([[1, 1.5]], ANCHO)
-    expect(plan.fichas[0]?.fotos.length).toBeGreaterThan(0)
-    for (const d of plan.fichas) for (const r of recortes([1, 1.5], d!, plan.altoMm)) expect(r).toBeLessThanOrEqual(RECORTE_MAXIMO + 1e-9)
+  it('una foto que necesitaría recortarse más no se usa (la casilla queda con el degradado)', () => {
+    // Una cuadrada no cabe en la grande con fotos de 3:2 en la ficha.
+    const fichas = [[1.5, 1.5, 1.5], [1]]
+    const plan = planDeFichas(fichas, ANCHO)
+    expect(plan.fichas[0]).toEqual({ grande: 0, arriba: 1, abajo: 2 })
+    expect(dentroDelTope(fichas, plan)).toBe(true)
   })
 
   it('ninguna foto de ningún plan se recorta más del 15 %', () => {
@@ -92,16 +98,12 @@ describe('la distribución de una ficha', () => {
       [[1.877, 1.499, 1.499], [1.798, 1.746, 1]],
       [[0.8, 1.8]],
     ]
-    for (const fichas of casos) {
-      const plan = planDeFichas(fichas, ANCHO)
-      plan.fichas.forEach((d, i) => {
-        if (!d) return
-        for (const r of recortes(fichas[i], d, plan.altoMm)) expect(r).toBeLessThanOrEqual(RECORTE_MAXIMO + 1e-9)
-      })
-    }
+    for (const fichas of casos) expect(dentroDelTope(fichas, planDeFichas(fichas, ANCHO))).toBe(true)
   })
 
-  it('sin fotos: el alto de siempre y ninguna distribución', () => {
-    expect(planDeFichas([[], []], ANCHO)).toEqual({ altoMm: 25, fichas: [null, null] })
+  it('sin fotos: el alto de siempre y todas las casillas vacías', () => {
+    const plan = planDeFichas([[], []], ANCHO)
+    expect(plan.altoMm).toBe(25)
+    expect(fotosQueFaltan(plan)).toEqual([3, 3])
   })
 })
