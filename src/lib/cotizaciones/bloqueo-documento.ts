@@ -16,6 +16,8 @@
 import {
   ETIQUETA_ACOMODACION,
   ACOMODACIONES,
+  CATEGORIAS_INCLUYE,
+  ETIQUETA_INCLUYE,
   fechasDelPaquete,
   incluidoEnPalabras,
   leerPaqueteBloqueo,
@@ -88,6 +90,7 @@ export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: F
     if (!p || !p.hotel.hotel) continue
     const fechas = fechasDelHotelDelPaquete(p, respaldo)
     const incluye = incluidoEnPalabras(p.incluye).filter(x => x !== 'Tiquete aéreo')
+    const noIncluido = CATEGORIAS_INCLUYE.filter(c => c !== 'tiquete_aereo' && p.incluye.casillas[c] === false).map(c => ETIQUETA_INCLUYE[c]).filter(x => !incluye.includes(x))
     const nino = p.hotel.nino
     out.push({
       linea: (item.nombre ?? '').trim(),
@@ -104,6 +107,7 @@ export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: F
       localizador: null,
       adicionales: item.adicionales ?? [],
       ...(incluye.length > 0 ? { incluye: incluye.join(', ') } : {}),
+      ...(noIncluido.length > 0 ? { noIncluidoEnCasillas: noIncluido } : {}),
       ...(nino && p.distribucion.ninos > 0 && nino.edadMin !== null && nino.edadMax !== null ? { edadNino: { desde: nino.edadMin, hasta: nino.edadMax } } : {}),
     })
   }

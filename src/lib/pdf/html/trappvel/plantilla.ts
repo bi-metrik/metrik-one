@@ -448,9 +448,12 @@ function vuelosYTren(m: ModeloPropuesta): string {
 function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
   if (m.hoteles.length === 0) return ''
   const porIndice = tarifaPorIndice(m)
-  const regimenes = [...new Set(m.hoteles.flatMap((c) => c.opciones.map((o) => o.regimen)).filter(Boolean))]
+  // Prueba corta del #1352 · «X en todos los hoteles» solo si TODOS lo dicen: un hotel sin régimen
+  // (un paquete sin alimentación) no cuenta como «el mismo».
+  const todas = m.hoteles.flatMap((c) => c.opciones.map((o) => o.regimen?.trim() || null))
+  const regimenes = [...new Set(todas)]
   const sub = [
-    regimenes.length === 1 ? `${regimenes[0]} en todos los hoteles.` : null,
+    regimenes.length === 1 && regimenes[0] ? `${regimenes[0]} en todos los hoteles.` : null,
     m.tarifas.length > 0 ? 'Un hotel por versión del viaje; la etiqueta de color dice cuál.' : null,
   ].filter(Boolean).join(' ')
   // Un hotel solo lleva la foto que subió la asesora (Mauricio, 2026-10-14); sin ella, el
@@ -473,6 +476,8 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
         ['Régimen', o.regimen],
         // D6 (2026-10-29): lo que marca el paquete del operador (alimentación, traslados, seguro…).
         ['Incluye', o.incluye],
+        // Prueba corta del #1352: lo que esta versión no trae y otra sí.
+        ['No incluye', o.noIncluye ?? null],
       ].filter((x): x is [string, string] => Boolean(x[1]))
       const enTexto = imagen ? '' : `${tagsHtml}`
       return `<div class="hc">${imagen}<div class="b">${enTexto}<div class="n">${esc(o.hotel)}${!imagen && stars ? ` ${estrellas(o.estrellas)}` : ''}</div>${c.ciudad ? `<div class="caps zona">${esc(c.ciudad)}</div>` : ''}${filas.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>${o.cargoEnDestino ? `<div class="pie">${esc(o.cargoEnDestino)}, se paga en el hotel.</div>` : ''}</div>`
@@ -892,10 +897,16 @@ function incluyeYCondiciones(m: ModeloPropuesta, firma: string): string {
   return `<div class="sec"><div class="nobr">${encabezado}${primera}</div>${resto.join('\n')}<div class="nobr">${ultima}${firma}</div></div>`
 }
 
+/**
+ * La firma, y entre ella y la marca los créditos de las fotos (prueba corta del #1352). Abajo de la
+ * firma, en su propio renglón, a veces no cabían y abrían una hoja casi vacía solo con ellos; en la
+ * misma fila de la firma no le suman alto a la última hoja.
+ */
 function firmaDe(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const firma = m.formal.firma
   return `<div class="sign">
     <div>${firma ? `<b class="pop">${esc(firma.nombre)}</b><br><span class="muted small">${esc([firma.cargo, firma.contacto].filter(Boolean).join(' · '))}</span>` : ''}</div>
+    ${creditosDe(m, r)}
     ${marcaDe(r, '9mm')}
   </div>`
 }
@@ -914,7 +925,6 @@ function hojaDePrecios(m: ModeloPropuesta, r: RecursosPropuesta): string {
 ${eligeTuVersion(m)}
 ${cuantoYCuando(m)}
 ${incluyeYCondiciones(m, firmaDe(m, r))}
-${creditosDe(m, r)}
 </section>`
 }
 
