@@ -93,6 +93,8 @@ import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
 import { medirEtapa } from '@/lib/actions/tiempos-de-ruta'
+import { esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { planDePropagacion, tasaDeCotizacionPara, type LineaConTasa } from '@/lib/cotizaciones/tasa-cotizacion'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 
 /**
@@ -169,6 +171,11 @@ export type ResultadoTarifa = {
    * faltante queda en su bloque (R1, reunión del 2026-09-23). `CONTEXTO` y `ERROR` sí frenan.
    */
   codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
+  /**
+   * Solo `confirmarTarifaPorPasajero` con la tasa escrita: a cuántas OTRAS líneas de la misma
+   * moneda llegó esa tasa (H5/H28). Ausente = a ninguna.
+   */
+  propagadas?: number
   /**
    * Solo `ajustarOpcion`: el motivo del descuento al cliente que se quitó porque la opción quedó
    * Pública (se avisa: la tarjeta de la Pública no lo muestra).
@@ -541,6 +548,21 @@ async function contextoDeCotizacion(cotizacionId: string, sesion?: Awaited<Retur
   const { viaje, error: errViaje } = await leerViajeDelNegocio(supabase, cot.negocio_id ?? null)
   if (errViaje) return { error: `No se pudo leer quiénes viajan: ${errViaje}` as const }
   return { supabase, negocioId: (cot.negocio_id ?? null) as string | null, viaje }
+}
+
+/**
+ * Las líneas de la cotización para la tasa (H5/H28). Sin orden y sin romper: si no se pueden leer,
+ * no hay tasa de la cotización y la línea pide la suya, como siempre.
+ */
+async function lineasParaLaTasa(supabase: unknown, cotizacionId: string): Promise<LineaConTasa[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from('items').select('*').eq('cotizacion_id', cotizacionId)
+    if (error || !Array.isArray(data)) return []
+    return data as LineaConTasa[]
+  } catch {
+    return []
+  }
 }
 
 async function lineasDeCotizacion(supabase: unknown, cotizacionId: string): Promise<Record<string, unknown>[] | { error: string }> {
@@ -1963,9 +1985,74 @@ export async function elegirMonedaDeTarifa(
 
 // ── Confirmar el costo por pasajero ──────────────────────────────────────────
 
+/**
+ * Confirma el costo de la línea. Con la tasa ESCRITA (no `null`), la tasa queda como la de la
+ * cotización para esa moneda y llega a las demás líneas en esa moneda (H5/H28 de la QA Trappvel
+ * del 2026-10-29, `tasa-cotizacion.ts`). Sin tasa, una línea en otra moneda toma la que ya tiene
+ * la cotización.
+ */
 export async function confirmarTarifaPorPasajero(
   itemId: string,
   tasaCambio: number | null,
+): Promise<ResultadoTarifa> {
+  const r = await confirmarTarifaDeLinea(itemId, tasaCambio)
+  const conf = r.tarifa?.confirmada
+  if (!r.success || tasaCambio === null || !conf || conf.moneda === 'COP' || conf.tasa === null) return r
+  const propagadas = await propagarTasaEnLaCotizacion(itemId, conf.moneda, conf.tasa)
+  return propagadas > 0 ? { ...r, propagadas } : r
+}
+
+/**
+ * Lleva la tasa escrita en `origenId` a las demás líneas de la cotización en la misma moneda: las
+ * de tarifa leída se vuelven a confirmar con ella y las de costo a mano recalculan sus pesos. Una
+ * línea que no se deja (le falta una captura, la moneda está supuesta) se queda como estaba: su
+ * tarjeta sigue pidiendo lo que le falte. Devuelve cuántas líneas cambiaron.
+ */
+export async function propagarTasaEnLaCotizacion(origenId: string, moneda: string, tasa: number): Promise<number> {
+  // Exportada (la usa el costo a mano): es un endpoint alcanzable, así que valida lo que recibe.
+  const codigo = codigoDeMoneda(moneda)
+  if (!codigo || codigo === 'COP' || typeof tasa !== 'number' || !Number.isFinite(tasa) || tasa <= 0) return 0
+  moneda = codigo
+  const { supabase, error } = await getWorkspace()
+  if (error) return 0
+  const item = await leerItem(supabase, origenId)
+  if (!item || !isEditable(item.estado)) return 0
+  const lineas = await lineasParaLaTasa(supabase, item.cotizacionId)
+  const plan = planDePropagacion(lineas, moneda, tasa, origenId)
+  let n = 0
+  for (const id of plan.reconfirmar) {
+    const r = await confirmarTarifaDeLinea(id, tasa)
+    if (r.success) n++
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  for (const m of plan.costoManual) {
+    // Con rubros confirmados el costo lo mandan ellos (mismo guard que `guardarCostoManualEnMoneda`).
+    const { data: rubros } = await sb.from('rubros').select('*').eq('item_id', m.id)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (((rubros ?? []) as any[]).some(esConfirmado)) continue
+    const fila = lineas.find(l => l.id === m.id)
+    const actual = leerTarifaPax(fila?.tarifa_pax)
+    if (!actual.costoManual) continue
+    const tarifa: TarifaPax = {
+      ...actual,
+      costoManual: { ...actual.costoManual, tasa, en: new Date().toISOString() },
+      actualizadaEn: new Date().toISOString(),
+    }
+    const { error: errUpd } = await sb
+      .from('items')
+      .update({ subtotal: Math.round(m.valor * tasa), tarifa_pax: tarifa })
+      .eq('id', m.id)
+    if (!errUpd) n++
+  }
+  if (plan.costoManual.length > 0) await recalcularTotales(item.cotizacionId)
+  if (n > 0 && item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return n
+}
+
+async function confirmarTarifaDeLinea(
+  itemId: string,
+  tasaEscrita: number | null,
 ): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string, codigo: 'CONTEXTO' }
@@ -1992,6 +2079,12 @@ export async function confirmarTarifaPorPasajero(
   if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }
 
   const moneda = estado.moneda
+  // Sin tasa escrita, la de la cotización para esta moneda (H5/H28): la que ya se escribió en otra
+  // línea. Si nadie la ha escrito, sigue faltando y se pide, como siempre (el sistema no inventa TRM).
+  let tasaCambio = tasaEscrita
+  if (tasaCambio === null && moneda !== 'COP') {
+    tasaCambio = tasaDeCotizacionPara(await lineasParaLaTasa(supabase, item.cotizacionId), moneda, itemId)
+  }
   const costos: TarifaConfirmada['costos'] = []
   for (const c of estado.costos) {
     // Brief del 2026-10-05, punto 11 · se pasa a pesos el TOTAL del tipo y después se divide. Antes

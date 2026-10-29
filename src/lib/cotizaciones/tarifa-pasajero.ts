@@ -1067,6 +1067,15 @@ export function origenDeLaOcupacion(a: {
  */
 export const MONEDAS_FRECUENTES: readonly string[] = ['COP', 'USD', 'EUR', 'MXN']
 
+/**
+ * Las monedas del selector de una línea: las frecuentes y, si la línea está en otra, también esa.
+ * El selector arranca en la moneda de la línea (N9-3, QA Trappvel 2026-10-29).
+ */
+export function opcionesDeMoneda(actual: string | null | undefined): readonly string[] {
+  const m = (actual ?? '').toUpperCase()
+  return m && !MONEDAS_FRECUENTES.includes(m) ? [...MONEDAS_FRECUENTES, m] : MONEDAS_FRECUENTES
+}
+
 /** Lo que se le dice a quien intenta confirmar con la moneda supuesta. */
 export const MENSAJE_MONEDA_ASUMIDA =
   'La captura no muestra la moneda: se asumió COP. Acéptala o cámbiala antes de confirmar el costo.'

@@ -58,6 +58,7 @@ import type { Correcciones } from '@/lib/cotizaciones/correcciones'
 import { casillasConEstadia } from '@/lib/cotizaciones/estadia'
 import { cifrasPorRevisar } from '@/lib/cotizaciones/ficha-linea'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { tasaComoTexto, textoAyudaTasa, textoTasaPropagada, type TasaDeCotizacion } from '@/lib/cotizaciones/tasa-cotizacion'
 import { formatBogotaFechaCorta } from '@/lib/dates/bogota'
 import { archivoComoDataUrl, leerSinSilencio, MENSAJE_ARCHIVO_ILEGIBLE } from '@/lib/cotizaciones/lectura-sin-silencio'
 
@@ -112,6 +113,7 @@ export default function TarifaPasajeroItem({
   composicionViaje,
   tarifaPax,
   costoUnitarioLinea,
+  tasasCotizacion = {},
   sugeridosGuardados,
   onCambio,
 }: {
@@ -123,6 +125,8 @@ export default function TarifaPasajeroItem({
   tarifaPax: unknown
   /** Costo unitario confirmado de la línea, para saber si el reparto guardado sigue vigente. */
   costoUnitarioLinea: number
+  /** La tasa de la cotización por moneda (H5/H28): la casilla de la tasa arranca con ella. */
+  tasasCotizacion?: Record<string, TasaDeCotizacion>
   /** Propuesta pendiente del cargue de pantallazo anterior a la tarifa por pasajero. */
   sugeridosGuardados?: { id: string }[]
   onCambio: () => void
@@ -140,7 +144,8 @@ export default function TarifaPasajeroItem({
   const [ultimoMensaje, setUltimoMensaje] = useState<string | null>(null)
   const [detalleAbierto, setDetalleAbierto] = useState<Partial<Record<ClaveCasilla | 'resultado', boolean>>>({})
   const [editandoComposicion, setEditandoComposicion] = useState(false)
-  const [tasa, setTasa] = useState('')
+  // `null` = nadie la ha tocado: se muestra la tasa de la cotización para la moneda (H5/H28).
+  const [tasaEscrita, setTasa] = useState<string | null>(null)
   const [isPending, startTransition] = useTransitionTolerante()
 
   // R8 · una opción de hotel con varias habitaciones se cotiza por sus habitaciones, contra
@@ -154,6 +159,7 @@ export default function TarifaPasajeroItem({
         composicionViaje={composicionViaje}
         onGuardada={setGuardada}
         onCambio={onCambio}
+        tasasCotizacion={tasasCotizacion}
         monedaSlot={(
           <MonedaDeLaTarifa
             itemId={itemId}
@@ -263,12 +269,12 @@ export default function TarifaPasajeroItem({
     usarArchivo(clave, archivo)
   }
 
-  function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax }>, exito: string) {
+  function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax; propagadas?: number }>, exito: string) {
     startTransition(async () => {
       const r = await fn()
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
       if (r.tarifa) setGuardada(r.tarifa)
-      toast.success(exito)
+      toast.success(r.propagadas ? `${exito} ${textoTasaPropagada(r.tarifa?.confirmada?.moneda ?? '', r.propagadas)}` : exito)
       onCambio()
     })
   }
@@ -286,6 +292,8 @@ export default function TarifaPasajeroItem({
 
   const monedaResuelta = estado?.estado === 'resuelta' ? estado.moneda : 'COP'
   const enCOP = monedaResuelta === 'COP'
+  const tasaDeLaCotizacion = enCOP ? null : tasasCotizacion[monedaResuelta]?.tasa ?? null
+  const tasa = tasaEscrita ?? (tasaDeLaCotizacion !== null ? tasaComoTexto(tasaDeLaCotizacion) : '')
   // ⚠️ Por el normalizador único de montos: la tasa se escribe en formato colombiano. Con
   // `Number()` sobre el texto limpio, «4.150» era 4,15 y el costo en pesos salía mil veces menor.
   const tasaNum = parseMontoCop(tasa) ?? Number.NaN
@@ -529,7 +537,7 @@ export default function TarifaPasajeroItem({
                     className="w-40 rounded border bg-background px-2 py-1 text-sm"
                   />
                   <p className="mt-0.5 text-[10px] text-muted-foreground">
-                    El sistema no consulta la TRM: la escribes tú y queda en el costo.
+                    {textoAyudaTasa(monedaResuelta, tasaDeLaCotizacion !== null && tasaEscrita === null)}
                   </p>
                 </div>
               )}

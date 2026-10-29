@@ -11,7 +11,7 @@ import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, LINK } from '@/components/viaje/estilo'
 import { precioDerivadoDeAdicional, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { precioConMargen, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
-import { MENSAJE_MONEDA_ASUMIDA, origenDeMoneda, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
+import { MENSAJE_MONEDA_ASUMIDA, opcionesDeMoneda, origenDeMoneda, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   filasDeCosto,
   mil,
@@ -552,8 +552,9 @@ export default function TarjetaCosto({
             onBlur={() => setEditandoMoneda(false)}
             className="rounded-[5px] border border-[#CFCAC0] bg-white px-1 py-0.5 text-xs"
           >
-            <option>COP</option>
-            <option>USD</option>
+            {/* N9-3 (QA 2026-10-29): con solo COP y USD, una línea en EUR abría el selector en
+                COP y un clic de más le cambiaba la moneda. Arranca en la de la línea. */}
+            {opcionesDeMoneda(moneda.moneda).map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         ) : (
           <>
