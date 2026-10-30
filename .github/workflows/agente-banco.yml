@@ -39,7 +39,6 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_PRUEBAS }}
       ANTHROPIC_API_KEY_PRUEBAS: ${{ secrets.ANTHROPIC_API_KEY_PRUEBAS }}
       ARNES: supabase/functions/_shared/agente
-      SALIDA: ${{ runner.temp }}/arnes
     steps:
       - uses: actions/checkout@v4
       - name: La llave de pruebas
@@ -55,36 +54,36 @@ jobs:
       # crédito, se para aquí.
       - name: Humo
         id: humo
-        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$SALIDA/humo" --humo
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/humo" --humo
       # `one.ts` no tiene `--k`: tres corridas, y el veredicto exige todos los
       # casos bien en las tres (pass^3 por caso).
       - name: ONE (wa_one), corrida 1
-        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$SALIDA/one-1"
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$RUNNER_TEMP/arnes/one-1"
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       - name: ONE (wa_one), corrida 2
-        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$SALIDA/one-2"
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$RUNNER_TEMP/arnes/one-2"
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       - name: ONE (wa_one), corrida 3
-        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$SALIDA/one-3"
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$RUNNER_TEMP/arnes/one-3"
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       # Los roles con las fichas del código. `--excluir`: los mismos 6 casos que
       # quedaron fuera de los bancos publicados el 29-oct (la bandeja de hoy
       # tampoco los pasa k de k); corren y se reportan, y sus dañinas cuentan.
       - name: Rol mano_derecha (k = 3)
-        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$SALIDA/rol-mano_derecha" --rol mano_derecha --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-mano_derecha" --rol mano_derecha --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       - name: Rol asesor_viajes (k = 3)
-        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$SALIDA/rol-asesor_viajes" --rol asesor_viajes --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-asesor_viajes" --rol asesor_viajes --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       - name: Asistente público (k = 3)
-        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$SALIDA/publico" --k 3
+        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --k 3
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       - name: Veredicto
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
         run: >
           deno run -A --node-modules-dir=none "$ARNES/arnes/veredicto-ci.ts"
-          --one "$SALIDA/one-1,$SALIDA/one-2,$SALIDA/one-3"
-          --banco "$SALIDA/rol-mano_derecha,$SALIDA/rol-asesor_viajes,$SALIDA/publico"
+          --one "$RUNNER_TEMP/arnes/one-1,$RUNNER_TEMP/arnes/one-2,$RUNNER_TEMP/arnes/one-3"
+          --banco "$RUNNER_TEMP/arnes/rol-mano_derecha,$RUNNER_TEMP/arnes/rol-asesor_viajes,$RUNNER_TEMP/arnes/publico"
       - name: Guardar las transcripciones
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
