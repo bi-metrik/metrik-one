@@ -40,15 +40,18 @@ import {
   RF_BIENVENIDA, autorizacionEnEspera, conAviso, estadoAutorizacion, salidaAutorizacion, eventoAutorizacion, huellaTexto, motivoAviso, respuestaA, textoFijo, versionDe,
 } from './autorizacion.ts';
 import type { ConfigPublico } from './config.ts';
+import { PAUSA_ENTRE_MENSAJES_MS, PAUSA_TRAS_FOTO_MS } from './config.ts';
 import { BOT_PUBLICO, PASAR_A_PERSONA, RESPUESTA_FIJA, RF_PERSONA_POR_QUE, dominioPublico, porQueYaSalio, volvioDePersona } from './dominio.ts';
 import { enlacesFueraDeLista } from './enlaces.ts';
 import { preciosSinHerramienta } from './precios.ts';
 import { frasesDeSobreventa } from './sobreventa.ts';
 import { HERRAMIENTAS_VENTAS, sistemaPublico } from './prompt.ts';
-import { CIERRES_DEL_CODIGO_VENTAS, ENLACES_VENTAS, RF_PAGO_CONFIRMADO, bloqueNotaVentas, claveConfirmacionPago, dominioVentas } from './ventas/dominio-ventas.ts';
+import { CIERRES_DEL_CODIGO_VENTAS, CONFIRMAR_COMPRA, ENLACES_VENTAS, RF_PAGO_CONFIRMADO, bloqueNotaVentas, claveConfirmacionPago, dominioVentas } from './ventas/dominio-ventas.ts';
 import type { PuertosVentas } from './ventas/puertos-ventas.ts';
 import { demasiadosProductos, fotosDelTurno } from './ventas/fotos-ventas.ts';
 import type { FotoDelTurno } from './ventas/fotos-ventas.ts';
+import { planDeEnvios } from './ventas/partir-ventas.ts';
+import type { Envio } from './ventas/partir-ventas.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
 import { gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
@@ -229,21 +232,54 @@ async function publicarEn(d: DepsPublico, turnoId: string, ranura: string, s: Sa
   return { ok: false, id: null, motivo: r.motivo };
 }
 
-/** Publica las fotos de un turno de ventas, cada una en su ranura (`foto_1`…). Nunca lanza. */
+/**
+ * Publica los envíos de un turno de ventas en orden estricto (ronda 3): textos en `respuesta`, `parte_2`…; fotos en
+ * `foto_1`… Cada uno espera al anterior; tras una foto, y entre mensajes, una pausa (Chatwoot manda cada mensaje a
+ * Messenger en un trabajo aparte y una foto tarda más que un texto: sin la pausa, el texto siguiente podía adelantarla).
+ * Una foto que falla se anota y se sigue (su texto ya salió); un texto que no sale corta lo que sigue. Nunca lanza.
+ */
+async function publicarEnvios(d: DepsPublico, turnoId: string, envios: Envio[], avisoPegado: string | null, conOpciones: Salida | null = null): Promise<{ salio: boolean; primero: number | null; errores: string[]; fotos: NonNullable<TrazaPublica['fotos']> }> {
+  const errores: string[] = [];
+  const fotos: NonNullable<TrazaPublica['fotos']> = [];
+  let primero: number | null = null;
+  let salio = false;
+  let textos = 0;
+  let nFotos = 0;
+  const ultimoTexto = envios.map((e) => e.tipo).lastIndexOf('texto');
+  for (const [i, e] of envios.entries()) {
+    if (i > 0) await d.dormir(envios[i - 1].tipo === 'foto' && fotos.at(-1)?.ok ? PAUSA_TRAS_FOTO_MS : envios[i - 1].tipo === 'texto' ? PAUSA_ENTRE_MENSAJES_MS : 0);
+    if (e.tipo === 'texto') {
+      textos++;
+      // Los botones del modelo, en el último texto (el de la pregunta).
+      const s: Salida = i === ultimoTexto && conOpciones ? { ...conOpciones, texto: e.texto } : { tipo: 'texto', texto: e.texto };
+      const p = await publicarEn(d, turnoId, textos === 1 ? 'respuesta' : `parte_${textos}`, textos === 1 && avisoPegado ? conAviso(avisoPegado, s) : s);
+      if (!p.ok) { errores.push(`${textos === 1 ? 'respuesta' : `parte_${textos}`}: ${p.motivo}`); break; }
+      if (textos === 1) { salio = true; primero = p.id; }
+      continue;
+    }
+    nFotos++;
+    fotos.push(await publicarUnaFoto(d, turnoId, `foto_${nFotos}`, e.foto, e.pie));
+  }
+  return { salio, primero, errores, fotos };
+}
+
+async function publicarUnaFoto(d: DepsPublico, turnoId: string, ranura: string, f: FotoDelTurno, pie: boolean): Promise<NonNullable<TrazaPublica['fotos']>[number]> {
+  try {
+    // En la conversación queda el pie (el modelo ve en el historial que la foto salió), no la URL.
+    const id = await d.almacen.reservarSalida({ llave: d.llave, canal: d.canal, turnoId, ranura, salida: { tipo: 'texto', texto: `[Foto] ${f.texto}` } });
+    if (!id) return { codigo: f.codigo, ok: false, motivo: 'ranura ya tomada' };
+    const r = await d.mensajero.publicarFoto(d.llave, { url: f.url, texto: pie ? f.texto : '' });
+    await d.almacen.marcarSalida(id, r.ok ? { estado: 'publicado', chatwootMessageId: r.id } : { estado: r.incierto ? 'incierto' : 'fallido' });
+    return r.ok ? { codigo: f.codigo, ok: true } : { codigo: f.codigo, ok: false, motivo: r.motivo.slice(0, 160) };
+  } catch (e) {
+    return { codigo: f.codigo, ok: false, motivo: String(e).slice(0, 160) };
+  }
+}
+
+/** Publica las fotos de un turno de ventas, cada una en su ranura (`foto_1`…), con su pie. Nunca lanza. */
 async function publicarFotos(d: DepsPublico, turnoId: string, fotos: FotoDelTurno[]): Promise<NonNullable<TrazaPublica['fotos']>> {
   const out: NonNullable<TrazaPublica['fotos']> = [];
-  for (const [i, f] of fotos.entries()) {
-    try {
-      // En la conversación queda el pie (el modelo ve en el historial que la foto salió), no la URL.
-      const id = await d.almacen.reservarSalida({ llave: d.llave, canal: d.canal, turnoId, ranura: `foto_${i + 1}`, salida: { tipo: 'texto', texto: `[Foto] ${f.texto}` } });
-      if (!id) { out.push({ codigo: f.codigo, ok: false, motivo: 'ranura ya tomada' }); continue; }
-      const r = await d.mensajero.publicarFoto(d.llave, { url: f.url, texto: f.texto });
-      await d.almacen.marcarSalida(id, r.ok ? { estado: 'publicado', chatwootMessageId: r.id } : { estado: r.incierto ? 'incierto' : 'fallido' });
-      out.push(r.ok ? { codigo: f.codigo, ok: true } : { codigo: f.codigo, ok: false, motivo: r.motivo.slice(0, 160) });
-    } catch (e) {
-      out.push({ codigo: f.codigo, ok: false, motivo: String(e).slice(0, 160) });
-    }
-  }
+  for (const [i, f] of fotos.entries()) out.push(await publicarUnaFoto(d, turnoId, `foto_${i + 1}`, f, true));
   return out;
 }
 
@@ -360,14 +396,16 @@ function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
 }
 
 /** Lo que el turno del modelo dejó para el código (los cierres del dominio con su `privado`). Pura. */
-export function efectosDelTurno(t: TrazaPublica): { persona: { motivo: MotivoPersona; pidio: string } | null; pide: 'general' | 'sensible' | null; enmascarar: boolean; preferencia: string | null } {
+export function efectosDelTurno(t: TrazaPublica): { persona: { motivo: MotivoPersona; pidio: string } | null; pide: 'general' | 'sensible' | null; enmascarar: boolean; preferencia: string | null; confirmar?: string | null } {
   let persona: { motivo: MotivoPersona; pidio: string } | null = null;
+  let confirmar: string | null = null;
   let pide: 'general' | 'sensible' | null = null;
   let enmascarar = false;
   let preferencia: string | null = null;
   for (const h of t.herramientas ?? []) {
     if (!h.ok) continue;
-    const pv = (h.privado ?? {}) as { persona?: { motivo: MotivoPersona; pidio: string }; pide_autorizacion?: 'general' | 'sensible'; enmascarar?: boolean; preferencia_mesa?: string };
+    const pv = (h.privado ?? {}) as { persona?: { motivo: MotivoPersona; pidio: string }; pide_autorizacion?: 'general' | 'sensible'; enmascarar?: boolean; preferencia_mesa?: string; confirmar?: string };
+    if (h.nombre === CONFIRMAR_COMPRA && typeof pv.confirmar === 'string') confirmar = pv.confirmar;
     // `pasar_a_persona` y, en ventas, `verificar_pago` (pago aprobado → despachar) o `generar_link_pago` sin pasarela.
     if (pv.persona) persona = pv.persona;
     if (h.nombre === RESPUESTA_FIJA) {
@@ -376,7 +414,44 @@ export function efectosDelTurno(t: TrazaPublica): { persona: { motivo: MotivoPer
       if (pv.preferencia_mesa) preferencia = pv.preferencia_mesa;
     }
   }
-  return { persona, pide, enmascarar, preferencia };
+  return { persona, pide, enmascarar, preferencia, ...(confirmar ? { confirmar } : {}) };
+}
+
+/**
+ * Lo que la persona necesita saber cuando el turno de ventas se quedó sin llamados: el último pedido que se intentó
+ * armar (con sus datos) y por qué no salió. Pura.
+ */
+export function pidioTrasTope(t: TrazaPublica): string {
+  const ultimo = (t.herramientas ?? []).filter((h) => h.nombre === 'proponer').at(-1);
+  if (!ultimo) return 'el asistente no logró responder en este turno; revisar el chat';
+  const crudo = (ultimo.args as { datos?: unknown } | undefined)?.datos;
+  const datos = typeof crudo === 'string' ? crudo : JSON.stringify(crudo ?? {});
+  return `no logré armar el pedido; lo último que intenté: ${datos.slice(0, 400)} (motivo: ${String(ultimo.error ?? '?').slice(0, 160)})`;
+}
+
+/** El título del botón «sí» de la propuesta, escrito por el cliente (sin tildes, mayúsculas ni puntuación). Pura. */
+export function esTituloDelSi(texto: string | null | undefined, titulo: string): boolean {
+  const n = (x: string) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  const t = n(String(texto ?? ''));
+  return !!t && t === n(titulo);
+}
+
+/**
+ * Confirma una propuesta por su huella (el toque del botón, el «sí» escrito o, en ventas, `confirmar_compra` del modelo):
+ * el núcleo la ejecuta una sola vez y el dominio dice si pasa a persona.
+ */
+async function confirmarPropuesta(d: DepsPublico, turnoId: string, filas: FilaPublica[], nuevos: FilaPublica[], t: { huella: string; si: boolean }, tipo: 'toque_propuesta' | 'si_escrito', extra: Partial<TrazaPublica> = {}): Promise<Resultado> {
+  const dt = depsTurno(d, d.config.corteTotalMs);
+  const rt = await toqueDePropuesta({ ...dt, almacen: d.almacen }, { turnoId, filas, nuevos, ctx: ctxDe(d, filas) }, t, tipo);
+  const traza: TrazaPublica = { ...rt.traza, ...extra, canal: d.canal };
+  const ej = rt.traza.ejecucion;
+  const persona = ej?.resultado === 'ejecutada' && (ej.escrituras ?? []).some((e) => e.tipo === 'persona');
+  const esc = persona ? (ej!.escrituras ?? []).find((e) => e.tipo === 'persona') : undefined;
+  const reserva = esc ? (esc.datos as Record<string, unknown>) : null;
+  // El motivo lo dice la escritura del dominio (Sabor: reserva_lista; ventas: pago_no_disponible).
+  const motivoEsc = (esc?.motivo as MotivoPersona | undefined) ?? 'reserva_lista';
+  const pidio = motivoEsc === 'reserva_lista' ? 'reservar (confirmó el resumen)' : `confirmó la compra; ${String((reserva as { error?: unknown } | null)?.error ?? 'sin link de pago')}`;
+  return { salida: rt.salida, traza, reserva, persona: persona ? { motivo: motivoEsc, pidio } : null };
 }
 
 /** El turno del modelo con el reintento con aviso. */
@@ -398,8 +473,22 @@ async function turnoModelo(d: DepsPublico, turnoId: string, filas: FilaPublica[]
   tramos.intentos = res.intentos;
   const base = { canal: d.canal, demora: res.demora, ...extra };
   const des = res.desenlace;
+  if (des.tipo === 'respuesta' && esVentas(d) && des.r.traza.error === 'tope de llamados sin respuesta') {
+    // Ventas (30-oct): el tope de llamados sin respuesta ya no sale como «¿Me lo escribes de nuevo?» (el cliente sí lo
+    // había escrito; el error era del modelo). Pasa a una persona con lo último que se intentó proponer: la compra no se
+    // pierde.
+    const t: TrazaPublica = { ...(des.r.traza as TrazaPublica), ...base, respuesta_fija: 'rf.persona.falla' };
+    return { salida: fija(d, 'rf.persona.falla'), traza: t, persona: { motivo: 'falla', pidio: pidioTrasTope(t) } };
+  }
   if (des.tipo === 'respuesta') {
     const ef0 = efectosDelTurno(des.r.traza as TrazaPublica);
+    // Ventas: el cliente aceptó con palabras el pedido vigente y el modelo llamó confirmar_compra → como el toque.
+    if (ef0.confirmar) {
+      const t0 = des.r.traza as TrazaPublica;
+      return confirmarPropuesta(d, turnoId, filas, pend, { huella: ef0.confirmar, si: true }, 'si_escrito', {
+        ...base, herramientas: t0.herramientas, uso: t0.uso, llamados: t0.llamados, ms_modelo: t0.ms_modelo, candados: t0.candados,
+      });
+    }
     // La mesa queda en el estado como PREFERENCIA (§8.4.2): en la traza del turno, nunca como asignación.
     const t: TrazaPublica = { ...des.r.traza, ...base, ...(ef0.preferencia ? { preferencia_mesa: ef0.preferencia } : {}) };
     const ef = ef0;
@@ -497,19 +586,11 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
   // 5. Toque o «sí» sobre la propuesta de reserva vigente (el núcleo, sin modelo).
   const toque = solo && solo.clase === 'toque' ? leerToque(solo.toque_id) : null;
   const vig = propuestaVigente(filas);
-  if (solo && ((toque && toque.clase === 'propuesta') || (vig && solo.clase === 'escrito' && esSiSolo(solo.texto)))) {
+  // Ventas (30-oct): el título del botón escrito tal cual («Sí, enviar link») es el mismo toque, sin modelo.
+  const escritoSi = (t: string | null | undefined) => esSiSolo(t) || (esVentas(d) && !!vig && esTituloDelSi(t, vig.si));
+  if (solo && ((toque && toque.clase === 'propuesta') || (vig && solo.clase === 'escrito' && escritoSi(solo.texto)))) {
     const t = toque && toque.clase === 'propuesta' ? toque : { huella: vig!.huella, si: true };
-    const dt = depsTurno(d, c.corteTotalMs);
-    const rt = await toqueDePropuesta({ ...dt, almacen: d.almacen }, { turnoId, filas, nuevos: [solo], ctx: ctxDe(d, filas) }, t, toque ? 'toque_propuesta' : 'si_escrito');
-    const traza: TrazaPublica = { ...rt.traza, canal: d.canal };
-    const ej = rt.traza.ejecucion;
-    const persona = ej?.resultado === 'ejecutada' && (ej.escrituras ?? []).some((e) => e.tipo === 'persona');
-    const esc = persona ? (ej!.escrituras ?? []).find((e) => e.tipo === 'persona') : undefined;
-    const reserva = esc ? (esc.datos as Record<string, unknown>) : null;
-    // El motivo lo dice la escritura del dominio (Sabor: reserva_lista; ventas: pago_no_disponible).
-    const motivoEsc = (esc?.motivo as MotivoPersona | undefined) ?? 'reserva_lista';
-    const pidio = motivoEsc === 'reserva_lista' ? 'reservar (confirmó el resumen)' : `confirmó la compra; ${String((reserva as { error?: unknown } | null)?.error ?? 'sin link de pago')}`;
-    return { salida: rt.salida, traza, reserva, persona: persona ? { motivo: motivoEsc, pidio } : null };
+    return confirmarPropuesta(d, turnoId, filas, [solo], t, toque ? 'toque_propuesta' : 'si_escrito');
   }
 
   // 6. «persona» escrito solo (el aviso de bot lo ofrece): sin modelo. Una pregunta por qué, una sola vez en la
@@ -655,7 +736,12 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
 
   // Ventas: las fotos de los productos que nombró la respuesta del modelo (las decide el código; nunca bloquean).
   let fotos: FotoDelTurno[] = [];
+  // Ronda 3 (30-oct): el texto del modelo se publica partido por producto, con su foto justo después (`partir-ventas.ts`).
+  let textoVentas: string | null = null;
+  let conOpciones: Salida | null = null;
   if (esVentas(d) && d.ventas && salida && salida === r.salida && r.delModelo && !persona && !traza.propuesta) {
+    // Con botones del modelo (p. ej. «Inalámbrico | De cable») también se parte: los botones van en el último texto.
+    if (salida.tipo !== 'enlace') { textoVentas = salida.texto; conOpciones = 'opciones' in salida ? salida : null; }
     try {
       fotos = fotosDelTurno({
         texto: salida.texto, herramientas: traza.herramientas, catalogo: await d.ventas.catalogo(), filas,
@@ -678,17 +764,21 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   // El aviso de bot y términos (§5.1): pegado a la primera respuesta que sale.
   const motivo = salida ? motivoAviso(filas, new Set(pend.map((f) => f.id)), d.ahoraMs(), d.config.pausaLargaHoras) : null;
   let avisoAparte: Salida | null = null;
+  let avisoPegado: string | null = null;
   if (salida && motivo) {
     const textoAviso = textoFijo(d.reglamento, RF_BIENVENIDA, varsDe(d));
     traza.aviso = { clave: RF_BIENVENIDA, version: versionDe(d.reglamento, RF_BIENVENIDA), huella: await huellaTexto(textoAviso), motivo };
     const junto = conAviso(textoAviso, salida);
     // Botones: el cuerpo va hasta 1024 en WhatsApp. Si no cabe, el aviso sale aparte, antes (nunca se corta el resumen).
     if (junto.tipo !== 'texto' && [...junto.texto].length > 1024) avisoAparte = { tipo: 'texto', texto: textoAviso };
-    else salida = junto;
+    else { salida = junto; avisoPegado = textoAviso; }
   }
 
   // 8c. Ventana del canal y que la conversación siga en pending.
-  const cuantos = (salida ? 1 : 0) + extras.length + (avisoAparte ? 1 : 0);
+  // Ventas: los textos del plan sin fotos (si no se parte, uno; con varios productos y sin fotos, también uno).
+  let envios: Envio[] | null = textoVentas !== null ? planDeEnvios(textoVentas, []) : null;
+  const textosDe = (es: Envio[] | null) => (es ? es.filter((e) => e.tipo === 'texto').length : 1);
+  const cuantos = (salida ? textosDe(envios) : 0) + extras.length + (avisoAparte ? 1 : 0);
   if (salida) {
     const v = ventana({ canal: d.canal, anuncio7Dias: d.anuncio7Dias, filas, ahoraMs: d.ahoraMs(), cuantos });
     const estado = v.abierta ? await d.mensajero.estado(d.llave) : null;
@@ -707,11 +797,15 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
       avisoAparte = null;
     }
     // Las fotos solo si caben en la ventana junto con el texto (TikTok cuenta los mensajes seguidos); si no, no salen.
-    if (salida && fotos.length && !ventana({ canal: d.canal, anuncio7Dias: d.anuncio7Dias, filas, ahoraMs: d.ahoraMs(), cuantos: cuantos + fotos.length }).abierta) {
+    // Con las fotos, el texto puede salir partido en más mensajes: cuentan todos.
+    const conFotos = textoVentas !== null && fotos.length ? planDeEnvios(textoVentas, fotos) : null;
+    const masTextos = conFotos ? textosDe(conFotos) - textosDe(envios) : 0;
+    if (salida && fotos.length && !ventana({ canal: d.canal, anuncio7Dias: d.anuncio7Dias, filas, ahoraMs: d.ahoraMs(), cuantos: cuantos + fotos.length + masTextos }).abierta) {
       traza.fotos = fotos.map((f) => ({ codigo: f.codigo, ok: false, motivo: 'no caben en la ventana del canal' }));
       fotos = [];
-    }
+    } else if (conFotos) envios = conFotos;
   }
+  if (!salida) envios = null;
 
   // 9. Publicar.
   const tp = d.reloj();
@@ -721,7 +815,22 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     const a = await publicarEn(d, turnoId, 'aviso', avisoAparte);
     if (a.ok) publicadoAviso = a.id; else errores.push(`aviso: ${a.motivo}`);
   }
-  if (salida) {
+  if (salida && envios && (envios.length > 1 || envios[0]?.tipo !== 'texto' || envios[0].texto !== textoVentas)) {
+    // Ventas, en orden estricto: cada envío espera al anterior (y a la pausa tras una foto). El aviso de bot va pegado
+    // al primer texto. Si un texto no sale, lo que sigue tampoco (no queda una foto sin su texto ni un hueco).
+    const r9 = await publicarEnvios(d, turnoId, envios, avisoPegado, conOpciones);
+    if (r9.salio) { if (!avisoAparte) publicadoAviso = r9.primero; }
+    errores.push(...r9.errores);
+    if (r9.fotos.length) traza.fotos = r9.fotos;
+    for (const [i, x] of extras.entries()) {
+      const e = await publicarEn(d, turnoId, `extra_${i + 1}`, x);
+      if (!e.ok) errores.push(`extra: ${e.motivo}`);
+    }
+    if (r9.salio) {
+      tramos.publicacion_ms = Math.round(d.reloj() - tp);
+      tramos.interno_ms = Math.max(0, Math.round(d.ahoraMs() - Date.parse(ultima.created_at) - (tramos.rafaga_ms ?? 0)));
+    }
+  } else if (salida) {
     const p = await publicarEn(d, turnoId, 'respuesta', salida);
     if (p.ok) { if (!avisoAparte) publicadoAviso = p.id; } else errores.push(`respuesta: ${p.motivo}`);
     for (const [i, x] of extras.entries()) {

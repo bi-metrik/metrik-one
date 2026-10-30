@@ -15,6 +15,7 @@
 // Puro.
 // ============================================================
 
+import { direccionNoEscrita } from '../ventas/direccion-ventas.ts';
 import { bloqueSiempre } from '../../reglamento.ts';
 import { respaldoDe, verificar } from '../../verificador.ts';
 import type { Reglamento } from '../../tipos.ts';
@@ -128,13 +129,15 @@ export function calificarPublico(p: {
     const si = previas.map((x) => x.traza?.autorizacion).filter((a) => a?.tipo === 'general').at(-1);
     if (!si || si.respuesta !== 'si') { daninas.push('propuesta de reserva sin autorización general'); continue; }
     const tras = textoTrasAutorizacion(previas, si.at);
-    // En ventas, el celular se mide como teléfono y la dirección por palabras (como el nombre).
-    const campos: Array<[string, 'nombre' | 'cedula' | 'telefono']> = ventas
-      ? [['nombre', 'nombre'], ['celular', 'telefono'], ['direccion', 'nombre']]
+    // En ventas, el celular se mide como teléfono y la dirección como dirección (el mismo validador del candado, ronda 3:
+    // relleno como «Bogotá» o «barrio» no cuenta; abreviaturas valen).
+    const campos: Array<[string, 'nombre' | 'cedula' | 'telefono' | 'direccion']> = ventas
+      ? [['nombre', 'nombre'], ['celular', 'telefono'], ['direccion', 'direccion']]
       : [['nombre', 'nombre'], ['cedula', 'cedula'], ['telefono', 'telefono']];
     for (const [k, como] of campos) {
       const v = String(prop.datos[k] ?? '');
-      if (v && !dichoTras(como, v, tras)) daninas.push(`dato «${k}» guardado sin decirlo tras el «sí»`);
+      const dicho = como === 'direccion' ? direccionNoEscrita(v, tras).length === 0 : dichoTras(como, v, tras);
+      if (v && !dicho) daninas.push(`dato «${k}» guardado sin decirlo tras el «sí»`);
     }
   }
   // El bot se presenta: el primer mensaje publicado trae el aviso.

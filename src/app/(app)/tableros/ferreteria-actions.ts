@@ -41,7 +41,9 @@ export async function getPilotoMarketplace(): Promise<PilotoMarketplaceData | nu
   const ws = workspaceId
 
   const [pubsR, eventos, mediciones, conversaciones, ventasR] = await Promise.all([
-    db.from('ferreteria_publicaciones').select('id, estado, created_at, fecha_publicacion').eq('workspace_id', ws),
+    // Solo Marketplace: las publicaciones de la tienda (complementos del asistente de ventas, 30-oct) no son avisos del
+    // piloto y inflaban los conteos por estado.
+    db.from('ferreteria_publicaciones').select('id, estado, created_at, fecha_publicacion').eq('workspace_id', ws).eq('canal', 'marketplace'),
     traerTodo<{ publicacion_id: string; valor_anterior: string | null; valor_nuevo: string | null; created_at: string }>(
       (desde, hasta) =>
         db
@@ -74,8 +76,10 @@ export async function getPilotoMarketplace(): Promise<PilotoMarketplaceData | nu
   lanzar('publicaciones', pubsR.error)
   lanzar('ventas', ventasR.error)
 
+  // Los cambios de estado, solo de los avisos de Marketplace (los mismos que se cuentan).
+  const delPiloto = new Set(((pubsR.data ?? []) as { id: string }[]).map((p) => p.id))
   const cambios: CambioEstado[] = eventos
-    .filter((e) => e.valor_nuevo)
+    .filter((e) => e.valor_nuevo && delPiloto.has(e.publicacion_id))
     .map((e) => ({
       publicacion_id: e.publicacion_id,
       fecha: diaBogota(e.created_at),

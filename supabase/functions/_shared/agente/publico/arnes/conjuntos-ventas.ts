@@ -12,10 +12,12 @@ import { avisarPagoAprobado } from '../cola.ts';
 import { CORTES_VENTAS } from '../config.ts';
 import type { EscenarioPublico } from '../escenario.ts';
 import type { ProductoVenta } from '../ventas/catalogo-ventas.ts';
+import { codigosEnTexto } from '../ventas/catalogo-ventas.ts';
+import { CLAVE_COMPLEMENTOS, fichaComplementos } from '../ventas/complementos-ventas.ts';
 import type { Veredicto } from './calificar.ts';
 import type { CasoPublico, PasoCaso } from './conjuntos.ts';
 import type { Paso } from '../../modelo-guionado.ts';
-import type { Modelo } from '../../tipos.ts';
+import type { Ficha, Modelo } from '../../tipos.ts';
 
 const ok = (motivo = 'ok'): Veredicto => ({ ok: true, motivo });
 const no = (motivo: string): Veredicto => ({ ok: false, motivo });
@@ -76,6 +78,42 @@ const sinPromesaDeFoto = (e: EscenarioPublico): Veredicto => noContiene(e, /el s
 /** El modelo tarda `ms` en cada llamado (un turno normal de ventas, 7-13 s en Messenger). */
 const lento = (m: Modelo, ms: number): Modelo => ({ async llamar(p) { await new Promise((r) => setTimeout(r, ms)); return m.llamar(p); } });
 
+/** Lo que salió al cliente en orden (textos y fotos por su id de Chatwoot): `T:<texto>` o `F:<código>`. */
+const envios = (e: EscenarioPublico, catalogo: ProductoVenta[]) => [
+  ...e.chatwoot.publicados.map((x) => ({ id: x.id, s: `T:${x.salida.texto}` })),
+  ...e.chatwoot.fotos.map((x) => ({ id: x.id, s: `F:${catalogo.find((p) => p.fotos?.includes(x.url))?.codigo ?? x.url}` })),
+].sort((a, b) => a.id - b.id).map((x) => x.s).filter((x) => !/tomando un poco más/.test(x));
+/**
+ * Cada foto sale JUSTO después de un texto que nombra su código, sin pie, y ningún texto nombra dos productos cuando hubo
+ * fotos (el cliente sabe cuál es cuál). Ronda 3 (Mauricio, 30-oct).
+ */
+const intercalado = (e: EscenarioPublico, catalogo: ProductoVenta[]): Veredicto => {
+  const xs = envios(e, catalogo);
+  for (const [i, x] of xs.entries()) {
+    if (!x.startsWith('F:')) continue;
+    const antes = xs[i - 1] ?? '';
+    if (!antes.startsWith('T:') || !antes.includes(x.slice(2))) return no(`la foto de ${x.slice(2)} no va justo después de su texto: ${xs.map((y) => y.slice(0, 40)).join(' → ')}`);
+  }
+  if (e.chatwoot.fotos.some((f) => f.texto)) return no('una foto salió con pie aunque su texto iba justo antes');
+  return ok(`intercalado: ${xs.map((y) => (y.startsWith('F:') ? y : y.slice(0, 18))).join(' → ')}`);
+};
+const llamadas = (e: EscenarioPublico, nombre: string) => e.almacen.trazas().flatMap((t) => t.herramientas ?? []).filter((h) => h.nombre === nombre);
+const propuestas = (e: EscenarioPublico) => e.almacen.trazas().map((t) => t.propuesta).filter((p): p is NonNullable<typeof p> => !!p);
+/** Ningún mensaje del bot vuelve a pedir un dato que ya le dieron, ni pide «confirmar la dirección» (el resumen lo es). */
+const sinPedirConfirmar = (e: EscenarioPublico): Veredicto => noContiene(e, /confirmas? (la|tu) direcci[oó]n|direcci[oó]n (exacta|tal como)/i);
+
+/** Catálogo de la venta cruzada: el de la consultiva + una caja de herramientas (complemento publicado). */
+export const PRODUCTOS_CRUZADA: ProductoVenta[] = [
+  ...PRODUCTOS_CONSULTIVA,
+  prod(18, 'Caja de herramientas MarcaEjemplo de 19 pulgadas', 89000, { categoria: 'Almacenamiento' }),
+];
+/** Mapa mínimo de ejemplo: MP-12 → MP-18 (publicado) y MP-99 (no está publicado: se ignora). */
+const conMapa = (mapa: Record<string, Array<{ codigo: string; razon: string }>>) => (fs: Ficha[]) =>
+  fs.filter((f) => f.clave !== CLAVE_COMPLEMENTOS).concat(fichaComplementos(mapa, 'mapa de ejemplo del arnés'));
+const MAPA_EJEMPLO = { 'MP-12': [{ codigo: 'MP-99', razon: 'no publicado' }, { codigo: 'MP-18', razon: 'para guardar el taladro, las brocas y el cargador' }] };
+/** Veces que el bot ofreció algo más (el complemento por su código o la pregunta abierta). */
+const ofertas = (e: EscenarioPublico, codigo: string) => respuestas(e).filter((t) => t.includes(codigo) || /algo m[aá]s/i.test(t)).length;
+
 const R = (texto: string, tema = 'compra') => ({ name: 'responder', args: { tema, texto } });
 const VC = (args: Record<string, unknown>) => ({ name: 'ver_catalogo', args });
 const FIJA = (clave: string) => ({ name: 'respuesta_fija', args: { clave } });
@@ -89,7 +127,8 @@ const REENVIAR = { name: 'generar_link_pago', args: {} };
 const HASTA_RESUMEN: { pasos: PasoCaso[]; guion: Paso[] } = {
   pasos: [
     { escribe: 'Hola, ¿tienen taladro percutor?' },
-    { escribe: 'Sí, uno, con despacho en Bogotá' },
+    // Con Haiku real, antes de la autorización puede venir la venta cruzada (ronda 3): «No, nada más» la cierra.
+    { hastaAutorizacion: ['Sí, uno, con despacho en Bogotá', 'No, nada más, solo el taladro', 'Sí, lo quiero, uno, con despacho en Bogotá'] },
     { toca: 'Sí' },
     { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' },
   ],
@@ -343,7 +382,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
     pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: 'Tienes foto?' }],
     guion: [VC({ codigo: 'MP-13' }), R('El MP-13 Taladro magnético de 28 mm vale $1.900.000. ¿Te sirve?', 'precio'), R('Claro, aquí está el MP-13.', 'producto')],
     esperado: (e) => todos(
-      fotos(e).length === 2 && fotos(e).every((f) => f.texto.startsWith('MP-13')) ? ok('2 fotos del MP-13: la primera y la pedida') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
+      fotos(e).length === 2 && fotos(e).every((f) => f.url === FOTO('EJ-13')) ? ok('2 fotos del MP-13: la primera y la pedida') : no(`fotos: ${fotos(e).map((f) => f.url).join(' | ')}`),
       sinPromesaDeFoto(e),
     ),
   },
@@ -439,6 +478,255 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const copias = e.chatwoot.publicados.flatMap((x) => ('opciones' in x.salida ? x.salida.opciones : []))
         .filter((o) => o.id.startsWith('ag|c|') && /^(s[ií], enviar link|corregir)$/i.test(o.titulo.trim()));
       return copias.length ? no(`botones del modelo: ${copias.map((o) => o.titulo).join(' | ')}`) : ok('sin botones del modelo que copian la propuesta');
+    },
+  },
+  // ── Ronda 3 (Mauricio, 30-oct): cada producto con su foto, la dirección, el «sí» escrito, el tope y la venta cruzada ──
+  {
+    id: 'v-r3-intercalado', conjunto: 'ventas', titulo: '«Algo para la casa»: cada producto en su mensaje y su foto justo después; el que no tiene foto, solo texto; la pregunta al final',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: 'Vi que tienen publicado un taladro. Estoy buscando algo para la casa.' }],
+    guion: [
+      { varias: [VC({ codigo: 'MP-11' }), VC({ codigo: 'MP-12' }), VC({ codigo: 'MP-16' })] },
+      // El texto real del 30-oct: un solo párrafo, sin saltos de línea.
+      R('Para la casa te sugiero estos: MP-12 Taladro de 13 mm, 550 W, $125.000. Es de mano y sirve para uso general. MP-11 Taladro percutor inalámbrico 20V, $320.000. Es inalámbrico, con batería. MP-16 Rotomartillo SDS-Plus 26 mm, $345.000. Es para perforar concreto. ¿Cuál te sirve más?', 'producto'),
+    ],
+    esperado: (e) => {
+      const xs = envios(e, PRODUCTOS_CONSULTIVA);
+      const nombrados = codigosPublicados(e);
+      return todos(
+        intercalado(e, PRODUCTOS_CONSULTIVA),
+        // Con más de un producto y alguna foto, cada producto en su propio mensaje.
+        nombrados.length < 2 || !e.chatwoot.fotos.length || respuestas(e).every((t) => codigosEnTexto(t).length <= 1) ? ok('un producto por mensaje') : no(`un mensaje nombra varios: ${respuestas(e).find((t) => codigosEnTexto(t).length > 1)?.slice(0, 120)}`),
+        // La pregunta de cierre, si salió aparte, va de última.
+        !xs.length || xs.at(-1)!.startsWith('T:') ? ok('cierra con texto') : no('lo último fue una foto'),
+        unaPregunta(e),
+      );
+    },
+  },
+  {
+    // SOLO SECO: el guion fuerza el texto mezclado; con Haiku real el texto es otro y el caso no aplica.
+    id: 'v-r3-formato-roto', conjunto: 'ventas', titulo: 'El texto mezcla productos («el MP-11 es mejor que el MP-13»): sale entero y las fotos con su pie, sin perder nada',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuál es mejor, el MP-11 o el MP-13?' }],
+    guion: [{ varias: [VC({ codigo: 'MP-11' }), VC({ codigo: 'MP-13' })] }, R('El MP-11 es mejor que el MP-13 para la casa: el MP-13 es magnético, para estructura. ¿Te sirve el MP-11?', 'producto')],
+    // Solo seco: el guion fuerza el formato roto (con Haiku real el texto es otro).
+    esperado: (e) => {
+      const xs = envios(e, PRODUCTOS_CONSULTIVA);
+      return todos(
+        e.chatwoot.publicados.filter((x) => !/tomando/.test(x.salida.texto)).length === 1 ? ok('un solo texto') : no(`${e.chatwoot.publicados.length} textos`),
+        e.chatwoot.fotos.length === 2 && e.chatwoot.fotos.every((f) => /^MP-1[13] · /.test(f.texto)) ? ok('2 fotos con su pie') : no(`fotos: ${e.chatwoot.fotos.map((f) => f.texto).join(' | ')}`),
+        xs[0]?.startsWith('T:') ? ok('el texto primero') : no('una foto antes del texto'),
+      );
+    },
+  },
+  {
+    id: 'v-r3-foto-falla-en-medio', conjunto: 'ventas', titulo: 'Tres productos, la foto del segundo falla al subir: los textos salen todos y en orden, la traza la anota',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ hacer: (e) => { e.chatwoot.fotosQueFallan.add(FOTO('EJ-14')); } }, { escribe: 'taladro para estructura metálica' }],
+    guion: [
+      VC({ buscar: 'taladro', uso: 'estructura metálica' }),
+      R('Te sirven estos:\nMP-13 Taladro magnético 28 mm, $1.900.000: se fija a la estructura.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\nMP-15 Taladro magnético 32 mm, $2.100.000: intermedio.\n¿Cuál te sirve más?', 'producto'),
+    ],
+    esperado: (e) => {
+      const xs = envios(e, PRODUCTOS_CONSULTIVA);
+      const f = e.almacen.trazas().flatMap((t) => t.fotos ?? []);
+      const ranuras = e.almacen.filas.filter((x) => x.direccion === 'saliente' && x.turno_id).map((x) => `${x.turno_id}|${x.ranura}`);
+      return todos(
+        // Cada texto de producto va seguido de su foto, menos el del MP-14 (la que falló); los tres textos salen; cierra
+        // con texto. El orden de los productos lo escoge el modelo (con Haiku real cambia).
+        ['MP-13', 'MP-14', 'MP-15'].every((c) => xs.some((x) => x.startsWith(`T:${c}`)))
+          && xs.every((x, i) => !/^T:MP-1[35]/.test(x) || xs[i + 1] === `F:${x.slice(2, 7)}`)
+          && !xs.includes('F:MP-14') && xs.at(-1)!.startsWith('T:') ? ok('orden: cada texto con su foto; el MP-14 sin foto') : no(`orden: ${xs.map((x) => x.slice(0, 9)).join(' → ')}`),
+        f.find((x) => x.codigo === 'MP-14' && !x.ok) ? ok('traza: la foto del MP-14 falló') : no(`traza: ${JSON.stringify(f)}`),
+        new Set(ranuras).size === ranuras.length ? ok('una ranura por envío') : no('ranuras repetidas'),
+      );
+    },
+  },
+  {
+    id: 'v-r3-un-producto', conjunto: 'ventas', titulo: 'Un solo producto con foto: su texto, su foto y la pregunta (aparte, después de la foto)',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-13?' }],
+    guion: [VC({ codigo: 'MP-13' }), R('El MP-13 Taladro magnético de 28 mm vale $1.900.000: se fija a la estructura. ¿Te sirve?', 'precio')],
+    esperado: (e) => {
+      const xs = envios(e, PRODUCTOS_CONSULTIVA);
+      return todos(intercalado(e, PRODUCTOS_CONSULTIVA), xs.some((x) => x === 'F:MP-13') ? ok('salió la foto') : no('sin foto'), xs.at(-1)?.startsWith('T:') ? ok('la pregunta al final') : no(`orden: ${xs.join(' → ')}`));
+    },
+  },
+  {
+    id: 'v-r3-no-repite', conjunto: 'ventas', titulo: '«Repite todo el tiempo la referencia»: tras presentarlo, el código y el nombre no vuelven; dato llano; lo que no está, a una persona (sin «lo dejamos anotado»)',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: '¿Cuáles son las especificaciones de ese taladro?' }, { escribe: '¿Viene con accesorios?' }],
+    guion: [
+      VC({ codigo: 'MP-12' }), R('El MP-12 Taladro MarcaEjemplo de 13 mm vale $125.000. ¿Te sirve?', 'precio'),
+      R('Tiene 550 W y mandril de 13 mm.', 'especificaciones'),
+      R('Eso no lo tengo en la ficha. ¿Quieres que te pase con alguien del equipo para que te lo confirme?', 'especificaciones'),
+    ],
+    esperado: (e) => {
+      const rs = respuestas(e);
+      const despues = rs.slice(1);
+      return todos(
+        despues.every((t) => !/MP-12/.test(t)) ? ok('el código no vuelve') : no(`repite el código: ${despues.find((t) => /MP-12/.test(t))}`),
+        despues.every((t) => !/Taladro MarcaEjemplo de 13 mm/i.test(t)) ? ok('el nombre completo no vuelve') : no('repite el nombre completo'),
+        noContiene(e, /tengo verificado/i), noContiene(e, /(dejamos|dejo) anotado|lo anoto/i),
+        // Si hablan de 550 W en el tercer mensaje, repitió las specs que ya dio.
+        !/550/.test(rs[2] ?? '') ? ok('no repite las specs al hablar de accesorios') : no(`repite specs: ${rs[2]}`),
+      );
+    },
+  },
+  {
+    id: 'v-r3-direccion-dos-mensajes', conjunto: 'ventas', titulo: 'La dirección en dos mensajes, con abreviaturas («Cl», «#», «bis») y el barrio aparte: proponer sale válido y se muestra el resumen',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [
+      { escribe: 'Hola, ¿tienen taladro percutor?' },
+      { hastaAutorizacion: ['Sí, ese, uno, con despacho en Bogotá', 'No, nada más, solo el taladro', 'Sí, lo quiero con despacho en Bogotá'] },
+      { toca: 'Sí', oEscribe: 'Sí' },
+      { escribe: 'Ana Pérez' }, { escribe: '3001234567' },
+      { escribe: 'Cl 31 B bis # 98 12' },
+      { escribe: 'Santa Lucía, Kennedy.\nCerca a la iglesia Santa Lucía.' },
+    ],
+    guion: [
+      VC({ buscar: 'taladro percutor' }), R('Sí: MP-01 Taladro percutor 650 W, a $250.000. ¿Lo quieres?', 'producto'),
+      FIJA('rf.autorizacion'),
+      R('Perfecto. ¿Me das tu nombre completo?'), R('¿Y tu celular?'), R('¿Cuál es la dirección de entrega en Bogotá, con el barrio?'),
+      // El modelo agrega «Bogotá» y «barrio» (como en vivo): ahora pasa.
+      R('¿En qué barrio queda?'),
+      PROPONER({ ...COMPRA, direccion: 'Cl 31 B bis # 98 12, barrio Santa Lucía, Kennedy, cerca a la iglesia Santa Lucía, Bogotá' }),
+    ],
+    esperado: (e) => {
+      const ps = propuestas(e);
+      const malos = llamadas(e, 'proponer').filter((h) => !h.ok).map((h) => String(h.error ?? ''));
+      return todos(
+        ps.length >= 1 && /98\s*-?\s*12/.test(String(ps.at(-1)!.datos.direccion ?? '')) ? ok(`propuesta con «${ps.at(-1)!.datos.direccion}»`) : no(`sin propuesta válida; errores: ${malos.join(' | ').slice(0, 300)}`),
+        contiene(e, 'Revisa tu pedido:'), sinPedirConfirmar(e),
+        // Después de la dirección no le vuelve a pedir la dirección.
+        respuestas(e).filter((t) => /direcci[oó]n/i.test(t) && /\?/.test(t) && !/Autorizas/.test(t)).length <= 1 ? ok('la dirección se pidió una vez') : no('volvió a pedir la dirección'),
+      );
+    },
+  },
+  {
+    id: 'v-r3-direccion-sin-barrio', conjunto: 'ventas', titulo: 'La dirección sola, sin barrio (y el modelo agrega «Bogotá»): proponer sale válido',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [
+      { escribe: 'Hola, ¿tienen taladro percutor?' },
+      { hastaAutorizacion: ['Sí, ese, uno, con despacho en Bogotá', 'No, nada más, solo el taladro', 'Sí, lo quiero con despacho en Bogotá'] },
+      { toca: 'Sí', oEscribe: 'Sí' },
+      { escribe: 'Ana Pérez, 3001234567, Cra 7 # 45-10 apto 301' },
+    ],
+    guion: [
+      VC({ buscar: 'taladro percutor' }), R('Sí: MP-01 Taladro percutor 650 W, a $250.000. ¿Lo quieres?', 'producto'),
+      FIJA('rf.autorizacion'),
+      R('Perfecto. ¿Me das tu nombre, celular y la dirección de entrega?'),
+      PROPONER({ ...COMPRA, direccion: 'Carrera 7 # 45-10 apartamento 301, Bogotá' }),
+    ],
+    esperado: (e) => todos(propuestas(e).length >= 1 ? ok('propuesta') : no(`sin propuesta: ${llamadas(e, 'proponer').map((h) => h.error).join(' | ').slice(0, 300)}`), sinPedirConfirmar(e)),
+  },
+  {
+    // SOLO SECO: el guion fuerza los `datos` rotos; con Haiku real el caso no aplica.
+    id: 'v-r3-datos-texto-roto', conjunto: 'ventas', titulo: '`datos` como texto con JSON roto: el error dice eso (no «el producto no es un código»); el tope pasa a persona sin pedir repetir',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos.slice(0, 3), { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' }],
+    guion: [
+      ...HASTA_RESUMEN.guion.slice(0, 3),
+      { name: 'proponer', args: { accion: 'compra', datos: "{\"producto\":\"MP-01\",'entrega':'bogota'}" } },
+      { name: 'proponer', args: { accion: 'compra', datos: { celular: '3001234567', cantidad: 1 } } },
+      { name: 'proponer', args: { accion: 'compra', datos: { celular: '3001234567', cantidad: 1 } } },
+    ],
+    // Solo seco: el guion fuerza los errores.
+    esperado: (e) => {
+      const errs = llamadas(e, 'proponer').map((h) => String(h.error ?? ''));
+      return todos(
+        /no es un objeto JSON/.test(errs[0] ?? '') ? ok('error de datos mal formados') : no(`error: ${errs[0]}`),
+        /Faltan campos en `datos`: producto/.test(errs[1] ?? '') && /entrega/.test(errs[1] ?? '') && /nombre/.test(errs[1] ?? '') ? ok('dice qué falta') : no(`error: ${errs[1]}`),
+        noContiene(e, /escribes de nuevo/i), persona(e, 'falla'), nota(e, 'no logré armar el pedido'),
+      );
+    },
+  },
+  {
+    id: 'v-r3-si-escrito', conjunto: 'ventas', titulo: 'El cliente acepta el resumen con palabras («dale, mándalo»): confirmar_compra y sale el link; nunca «sigue esperando tu toque»',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos, { escribe: 'Dale, mándame el link' }],
+    guion: [...HASTA_RESUMEN.guion, { name: 'confirmar_compra', args: {} }],
+    esperado: (e) => todos(links(e, 1), contiene(e, 'https://checkout.bold.co/LNK_PRUEBA1'), noContiene(e, 'sigue esperando tu toque')),
+  },
+  {
+    id: 'v-r3-si-escrito-sin-pedido', conjunto: 'ventas', titulo: 'confirmar_compra sin pedido esperando: el candado lo ataja y no hay link',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [{ escribe: 'listo, mándame el link' }],
+    guion: [{ name: 'confirmar_compra', args: {} }, R('Primero armamos tu pedido. ¿Qué producto quieres?', 'compra')],
+    esperado: (e) => todos(links(e, 0), noContiene(e, /LNK_/)),
+  },
+  // Venta cruzada (Mauricio, 30-oct): una vez, del mapa, solo lo publicado.
+  {
+    id: 'v-r3-cruzada-aceptada', conjunto: 'ventas', titulo: 'Escoge el MP-12: ofrece el MP-18 del mapa (el MP-99 no está publicado) con su foto; acepta; una sola oferta',
+    ventas: { productos: PRODUCTOS_CRUZADA }, fichas: conMapa(MAPA_EJEMPLO),
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: 'Listo, me lo llevo' }, { escribe: 'Sí, agrégala' }],
+    guion: [
+      VC({ codigo: 'MP-12' }), R('El MP-12 Taladro de 13 mm vale $125.000. ¿Te sirve?', 'precio'),
+      { name: 'ver_complementos', args: { codigo: 'MP-12' } },
+      R('¿Te sirve también esta?\nMP-18 Caja de herramientas de 19 pulgadas, $89.000: para guardar el taladro, las brocas y el cargador.\n¿La agrego?', 'compra'),
+      R('Listo. Van en dos pedidos: primero el taladro. ¿Lo quieres con despacho en Bogotá o lo recoges?', 'compra'),
+    ],
+    esperado: (e) => {
+      const vc = llamadas(e, 'ver_complementos').filter((h) => h.ok);
+      const d = vc[0]?.datos as { complementos?: Array<{ codigo: string }> } | undefined;
+      return todos(
+        vc.length === 1 ? ok('ver_complementos una vez') : no(`ver_complementos ×${vc.length}`),
+        d?.complementos?.map((c) => c.codigo).join(',') === 'MP-18' ? ok('solo el publicado (MP-18)') : no(`complementos: ${JSON.stringify(d?.complementos)}`),
+        contiene(e, 'MP-18'), e.chatwoot.fotos.some((f) => f.url === FOTO('EJ-18')) ? ok('foto del complemento') : no('sin foto del MP-18'),
+        intercalado(e, PRODUCTOS_CRUZADA), ofertas(e, 'MP-18') <= 2 ? ok('una oferta') : no(`ofertas: ${ofertas(e, 'MP-18')}`), noContiene(e, /aprovecha|últimas unidades|solo hoy/i),
+      );
+    },
+  },
+  {
+    id: 'v-r3-cruzada-rechazada', conjunto: 'ventas', titulo: 'Rechaza el complemento: sigue con la compra sin insistir (no vuelve a ofrecer)',
+    ventas: { productos: PRODUCTOS_CRUZADA }, fichas: conMapa(MAPA_EJEMPLO),
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: 'Listo, me lo llevo' }, { escribe: 'No, gracias' }, { escribe: 'Con despacho en Bogotá, uno' }],
+    guion: [
+      VC({ codigo: 'MP-12' }), R('El MP-12 Taladro de 13 mm vale $125.000. ¿Te sirve?', 'precio'),
+      { name: 'ver_complementos', args: { codigo: 'MP-12' } },
+      R('¿Te sirve también esta?\nMP-18 Caja de herramientas de 19 pulgadas, $89.000: para guardar el taladro.\n¿La agrego?', 'compra'),
+      R('Listo. ¿Lo quieres con despacho en Bogotá o lo recoges?', 'compra'),
+      FIJA('rf.autorizacion'),
+    ],
+    esperado: (e) => {
+      const tras = respuestas(e).slice(respuestas(e).findIndex((t) => t.includes('MP-18')) + 1);
+      return todos(
+        tras.every((t) => !t.includes('MP-18') && !/algo m[aá]s/i.test(t)) ? ok('no insiste') : no(`insiste: ${tras.find((t) => t.includes('MP-18') || /algo m[aá]s/i.test(t))}`),
+        llamadas(e, 'ver_complementos').filter((h) => h.ok && !(h.datos as { ya_ofrecido?: boolean }).ya_ofrecido).length <= 1 ? ok('una oferta') : no('dos ofertas'),
+      );
+    },
+  },
+  {
+    id: 'v-r3-cruzada-ignorada', conjunto: 'ventas', titulo: 'Ignora la oferta y pregunta otra cosa: le contesta y no vuelve a ofrecer',
+    ventas: { productos: PRODUCTOS_CRUZADA }, fichas: conMapa(MAPA_EJEMPLO),
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: 'Listo, me lo llevo' }, { escribe: '¿Y hacen envíos en Bogotá?' }, { escribe: 'Perfecto, uno con despacho' }],
+    guion: [
+      VC({ codigo: 'MP-12' }), R('El MP-12 Taladro de 13 mm vale $125.000. ¿Te sirve?', 'precio'),
+      { name: 'ver_complementos', args: { codigo: 'MP-12' } },
+      R('¿Te sirve también esta?\nMP-18 Caja de herramientas de 19 pulgadas, $89.000: para guardar el taladro.\n¿La agrego?', 'compra'),
+      { name: 'consultar_reglas', args: { clave: 'despacho_bogota' } }, R('Sí, hacemos despachos en Bogotá urbana. ¿Lo quieres con despacho?', 'politicas'),
+      FIJA('rf.autorizacion'),
+    ],
+    esperado: (e) => {
+      const tras = respuestas(e).slice(respuestas(e).findIndex((t) => t.includes('MP-18')) + 1);
+      return tras.every((t) => !t.includes('MP-18') && !/algo m[aá]s/i.test(t)) ? ok('no vuelve a ofrecer') : no(`vuelve a ofrecer: ${tras.find((t) => t.includes('MP-18'))}`);
+    },
+  },
+  {
+    id: 'v-r3-cruzada-sin-mapa', conjunto: 'ventas', titulo: 'Sin complemento en el mapa: pregunta abierta «¿Necesitas algo más…?», una sola vez',
+    ventas: { productos: PRODUCTOS_CRUZADA },
+    pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: 'Listo, me lo llevo' }, { escribe: 'No, solo eso' }],
+    guion: [
+      VC({ codigo: 'MP-13' }), R('El MP-13 Taladro magnético de 28 mm vale $1.900.000. ¿Te sirve?', 'precio'),
+      { name: 'ver_complementos', args: { codigo: 'MP-13' } }, R('¿Necesitas algo más para ese trabajo?', 'compra'),
+      R('Listo. ¿Lo quieres con despacho en Bogotá o lo recoges?', 'compra'),
+    ],
+    esperado: (e) => {
+      const d = llamadas(e, 'ver_complementos')[0]?.datos as { complementos?: unknown[] } | undefined;
+      return todos(
+        d && d.complementos?.length === 0 ? ok('sin complementos') : no(`ver_complementos: ${JSON.stringify(d)}`),
+        contiene(e, /algo m[aá]s/i), respuestas(e).filter((t) => /algo m[aá]s/i.test(t)).length === 1 ? ok('una vez') : no('pregunta más de una vez'),
+      );
     },
   },
   {

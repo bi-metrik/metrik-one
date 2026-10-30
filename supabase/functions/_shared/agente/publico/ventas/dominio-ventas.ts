@@ -33,15 +33,45 @@ import {
 import { respuestaFija } from '../../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Hechos, Propuesta, Reglamento, ResultadoHerramienta } from '../../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
-import { MAX_SUGERENCIAS, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
+import { MAX_SUGERENCIAS, codigosEnTexto, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
 import { fotosConsultadas } from './fotos-ventas.ts';
+import { direccionNoEscrita } from './direccion-ventas.ts';
+import { complementosDe, mapaComplementos } from './complementos-ventas.ts';
+import { propuestaVigente } from '../../nucleo.ts';
 
 export const GENERAR_LINK_PAGO = 'generar_link_pago';
 export const VERIFICAR_PAGO = 'verificar_pago';
+/**
+ * Cierre (30-oct): el cliente acepta CON PALABRAS el pedido que espera confirmación («sí, enviar link», «dale», «listo,
+ * mándalo»). El modelo interpreta; el código valida que haya una propuesta vigente y la confirma por su huella como un
+ * toque del botón (la cola corre `toqueDePropuesta`). Medido en vivo: «Sí, enviar link» escrito no confirmaba, el modelo
+ * volvía a llamar proponer y salía «Esto sigue esperando tu toque».
+ */
+export const CONFIRMAR_COMPRA = 'confirmar_compra';
+export const VER_COMPLEMENTOS = 'ver_complementos';
 /** Los cierres de ventas cuya salida escribe el código (no el modelo): no pasan por la lista blanca ni la guarda de plata. */
-export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO];
+export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO, CONFIRMAR_COMPRA];
+
+/**
+ * El producto del que se viene hablando: el único código que nombró el último mensaje del bot que nombró alguno (sin las
+ * filas de fotos). Null si nombró varios o ninguno. Mauricio, 30-oct: «repite todo el tiempo la referencia y el nombre». Pura.
+ */
+export function productoEnCurso(filas: FilaPublica[]): string | null {
+  // Por turno: la respuesta partida por producto (ronda 3) deja un mensaje por producto en el mismo turno.
+  const textos = filas.filter((f) => f.direccion === 'saliente' && !(f.ranura ?? '').startsWith('foto') && !(f.ranura ?? '').startsWith('nota'));
+  const ultimo = textos.filter((f) => codigosEnTexto(f.texto ?? '').length).at(-1);
+  if (!ultimo) return null;
+  const delTurno = ultimo.turno_id ? textos.filter((f) => f.turno_id === ultimo.turno_id) : [ultimo];
+  const cs = [...new Set(delTurno.flatMap((f) => codigosEnTexto(f.texto ?? '')))];
+  return cs.length === 1 ? cs[0] : null;
+}
+
+/** ¿Ya se ofreció la venta cruzada en la conversación? (una llamada buena a ver_complementos en un turno anterior). Pura. */
+export function ventaCruzadaOfrecida(filas: FilaPublica[]): boolean {
+  return filas.some((f) => ((f.traza as TrazaPublica | null)?.herramientas ?? []).some((h) => h.ok && h.nombre === VER_COMPLEMENTOS));
+}
 export const MAX_UNIDADES = 3;
 export const TOPE_VER_CATALOGO_VENTAS = 1500;
 /** El dominio del link de Bold: entra a la lista blanca cuando el modelo repite el link (SIN VERIFICAR en el sandbox). */
@@ -172,6 +202,11 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       },
     },
     {
+      name: VER_COMPLEMENTOS,
+      description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos: pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
+      parameters: { type: 'object', properties: { codigo: { type: 'string', description: 'El código MP-xx del producto que escogió.' } }, required: ['codigo'] },
+    },
+    {
       name: 'consultar_reglas',
       description: `Las políticas publicadas, por clave: ${claves.join(', ')}. Si devuelve \`sin_dato\`, no adivines: pasa a persona con duda_abierta.`,
       parameters: { type: 'object', properties: { clave: { type: 'string', enum: claves } }, required: ['clave'] },
@@ -195,6 +230,11 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       name: RESPUESTA_FIJA,
       description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, celular o dirección (pide la autorización con Sí / No; es la ÚNICA forma de pedirla). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PERSONA_POR_QUE}: si pide una persona sin decir para qué (una sola vez por conversación). ${RF_PRECIO_AUTORIZADO}: si pregunta por qué ese precio, dice que está caro o pide un descuento o una rebaja (no negocies).`,
       parameters: { type: 'object', properties: { clave: { type: 'string', enum: [...FIJAS_VENTAS] } }, required: ['clave'] },
+    },
+    {
+      name: CONFIRMAR_COMPRA,
+      description: 'Cuando hay un pedido esperando confirmación (el resumen con los botones) y el cliente lo acepta con palabras («sí», «sí, enviar link», «dale», «listo, mándalo», «ok, ese»): confirma ESE pedido y el sistema manda el link de pago. No vuelvas a llamar proponer con los mismos datos. Si el cliente quiere cambiar algo, no la llames: corrige con proponer.',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
     {
       name: GENERAR_LINK_PAGO,
@@ -225,7 +265,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     },
     cierres,
 
-    async leer(nombre, args): Promise<ResultadoHerramienta> {
+    async leer(nombre, args, ctx): Promise<ResultadoHerramienta> {
       caida();
       if (nombre === 'ver_catalogo') {
         const ps = await o.puertos.catalogo();
@@ -258,6 +298,23 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           },
         };
       }
+      if (nombre === VER_COMPLEMENTOS) {
+        if (ventaCruzadaOfrecida(filasDe(ctx))) {
+          return { ok: true, datos: { complementos: [], ya_ofrecido: true, que_hacer: 'Ya le ofreciste algo más en esta conversación: no lo vuelvas a ofrecer ni preguntes otra vez; sigue con la compra.' } };
+        }
+        const ps = await o.puertos.catalogo();
+        const cs = complementosDe(mapaComplementos(r), String(args.codigo ?? ''), ps);
+        if (!cs.length) {
+          return { ok: true, datos: { complementos: [], que_hacer: 'No hay un complemento para ofrecer: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Si dice que no, sigue con la compra.' } };
+        }
+        return {
+          ok: true,
+          datos: {
+            complementos: cs.map((c) => ({ ...productoParaModelo(c.producto), razon: c.razon })),
+            que_hacer: 'Ofrécele el primero (si hay dos, a lo sumo los dos) en un mensaje corto: una línea por complemento que empieza por su código, con nombre corto, precio y la razón; cierra preguntando si lo quiere agregar. Una sola vez: si dice que no, sigue con la compra sin insistir.',
+          },
+        };
+      }
       if (nombre === 'consultar_reglas') {
         const clave = String(args.clave ?? '');
         if (!claves.includes(clave)) return { ok: false, datos: null, error: `Clave desconocida. Usa una de: ${claves.join(', ')}.` };
@@ -275,6 +332,19 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       if (aut.estado !== 'si') {
         return { ok: false, error: `Falta la autorización de datos (${aut.estado === 'no' ? 'dijo que no: no tomes datos y ofrece una persona' : 'pídela con respuesta_fija rf.autorizacion antes de tomar nombre, celular o dirección'}).`, candado: 'sin_autorizacion' };
       }
+      // Lo que falta, dicho campo por campo (30-oct: sin `producto`, el error era «no es un código de ver_catalogo» y el
+      // modelo volvía a buscar el producto en vez de completar los datos).
+      const vacio = (k: string) => datos[k] === undefined || datos[k] === null || String(datos[k]).trim() === '';
+      const sinCampo = [
+        ...(vacio('producto') ? ['producto (el código MP-xx que escogió)'] : []),
+        ...(vacio('cantidad') ? ['cantidad (unidades, de 1 a 3)'] : []),
+        ...(vacio('entrega') ? ['entrega (bogota o recoge)'] : []),
+        ...(vacio('nombre') ? ['nombre'] : []),
+        ...(vacio('celular') ? ['celular'] : []),
+      ];
+      if (sinCampo.length) {
+        return { ok: false, error: `Faltan campos en \`datos\`: ${sinCampo.join(', ')}. Si el cliente ya los dijo en la conversación, vuelve a llamar proponer con TODOS los campos (producto, cantidad, entrega, nombre, celular y, si es despacho, direccion); pídele al cliente solo lo que de verdad no ha dicho.`, candado: 'datos_incompletos' };
+      }
       const ps = await o.puertos.catalogo();
       const prod: ProductoVenta | null = productoPorCodigo(ps, String(datos.producto ?? ''));
       if (!prod) return { ok: false, error: 'El producto no es un código de ver_catalogo. Búscalo primero; si no está, pasar_a_persona con no_en_catalogo.', candado: 'producto_invalido' };
@@ -286,11 +356,23 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       if (!zona) return { ok: false, error: `Esa entrega no está en la tabla de flete (${tabla.zonas.map((z) => z.id).join(', ') || 'vacía'}): no cotices el flete; pasar_a_persona con motivo fuera_de_zona.`, candado: 'zona_fuera_de_tabla' };
       const tras = textoTrasAutorizacion(filas, aut.at);
       const campos = { nombre: String(datos.nombre ?? '').trim(), celular: String(datos.celular ?? '').trim(), direccion: String(datos.direccion ?? '').trim() };
-      const faltan: string[] = [];
-      if (!campos.nombre || !dichoTras('nombre', campos.nombre, tras)) faltan.push('nombre');
-      if (!campos.celular || !dichoTras('telefono', campos.celular, tras)) faltan.push('celular');
-      if (zona.ruta === 'despacho' && (!campos.direccion || !dichoTras('nombre', campos.direccion, tras))) faltan.push('dirección');
-      if (faltan.length) return { ok: false, error: `Falta ${faltan.join(', ')} escrito por el cliente después de autorizar (lo que dijo antes no cuenta). Pídelo.`, candado: 'dato_sin_autorizacion' };
+      // Cada dato tiene que salir de lo que el cliente escribió DESPUÉS de autorizar (lo de antes no cuenta). El error dice
+      // qué corregir: si el cliente ya lo escribió, el error es del modelo y no se le vuelve a pedir (30-oct: la dirección
+      // con «Bogotá» y «barrio» agregados se rechazaba con «Pídelo» y el bot la pidió tres veces).
+      const malos: string[] = [];
+      if (!dichoTras('nombre', campos.nombre, tras)) malos.push('nombre: no coincide con lo que escribió el cliente; pásalo tal como lo escribió');
+      if (!dichoTras('telefono', campos.celular, tras)) malos.push('celular: no está en lo que escribió el cliente; pásalo con sus dígitos');
+      if (zona.ruta === 'despacho') {
+        const fuera = campos.direccion ? direccionNoEscrita(campos.direccion, tras) : ['(vacía)'];
+        if (fuera.length) malos.push(`direccion: el cliente no escribió «${fuera.join('», «')}»; pásala SOLO con sus palabras, como la escribió (aunque venga en varios mensajes), sin agregar nada`);
+      }
+      if (malos.length) {
+        return {
+          ok: false,
+          error: `No cuadra con lo que escribió el cliente después de autorizar: ${malos.join('; ')}. Si ya lo escribió después de autorizar, corrige \`datos\` y vuelve a llamar proponer: NO se lo vuelvas a pedir. Solo si lo dijo antes de autorizar (o no lo ha dicho), pídeselo.`,
+          candado: 'dato_sin_autorizacion',
+        };
+      }
       const total = totalPedido(prod.precio, cantidad, zona.flete);
       const producto = prod.titulo || prod.nombre;
       const resumen = [
@@ -344,11 +426,14 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const u = compras.at(-1);
       const pausa = horasDePausa(filas);
       const fotos = fotosConsultadas(filas);
+      const enCurso = productoEnCurso(filas);
       return [
         ...(pausa !== null && pausa >= HORAS_CONVERSACION_NUEVA ? [`El cliente vuelve después de ${Math.floor(pausa)} h sin escribir: si solo saluda o no dice qué quiere, tómalo como una conversación nueva: salúdalo y pregúntale qué está buscando, sin decir «de nuevo» y sin suponer el producto de antes. Si su mensaje sigue claramente lo de antes, retómalo.`] : []),
         ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
         `Autorización de datos para la compra: ${lineaG}.`,
         ...(u ? [`Compra confirmada: ${u.datos.codigo} × ${u.datos.cantidad}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
+        ...(enCurso ? [`Ya presentaste el ${enCurso}: si siguen hablando de ese, no repitas su código ni su nombre completo; dile «ese», el tipo («ese taladro») o la marca, o nada. El código vuelve solo para mandar su foto o si hay varios en juego.`] : []),
+        ...(compras.length ? [] : [ventaCruzadaOfrecida(filas) ? 'Venta cruzada: ya se ofreció; no ofrezcas nada más.' : 'Venta cruzada: todavía no. Cuando escoja el producto, antes de la autorización, llama ver_complementos una vez.']),
         ...(pasados.includes('despachar') ? ['El pago ya está confirmado y el despacho lo tiene el equipo: no vuelvas a verificar ni a pedir el pago.'] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')}.`] : []),
         ...(!pasados.length && porQueYaSalio(filas) ? [ultimoFuePorQue(filas)
@@ -385,6 +470,12 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           return { ok: true, salidas: [{ tipo: 'texto', texto }] };
         }
         return { ok: false, error: `Usa una de: ${FIJAS_VENTAS.join(', ')}.`, candado: 'fija_desconocida' };
+      }
+      if (nombre === CONFIRMAR_COMPRA) {
+        // Solo valida: la confirmación la hace la cola con la huella (como el toque del botón). La salida de aquí no sale.
+        const vig = propuestaVigente(filas, { venceConRespuesta: true });
+        if (!vig || vig.accion !== 'compra') return { ok: false, error: 'No hay un pedido esperando confirmación: si quiere comprar, arma el pedido con proponer.', candado: 'sin_propuesta_vigente' };
+        return { ok: true, salidas: [{ tipo: 'texto', texto: vig.resumen }], datos: { huella: vig.huella }, privado: { confirmar: vig.huella } };
       }
       if (nombre === GENERAR_LINK_PAGO) {
         const u = comprasConfirmadas(filas).at(-1);

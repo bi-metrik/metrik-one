@@ -12,6 +12,8 @@ import { BOT_PUBLICO } from '../dominio.ts';
 import { filasFichas, lit } from '../semilla-sql.ts';
 import type { Ficha } from '../../tipos.ts';
 import { REGLAMENTO_DIMPRO } from './reglamento-dimpro.ts';
+import { CLAVE_COMPLEMENTOS, fichaComplementos, mapaComplementos } from './complementos-ventas.ts';
+import type { MapaComplementos } from './complementos-ventas.ts';
 
 export const WORKSPACE_DIMPRO = '67f7af44-b5ac-4d5c-aa9e-44954368447c';
 
@@ -75,6 +77,41 @@ export const TEXTOS_RONDA_2: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: ronda 2 (saludo, una pregunta, relevancia, fotos) (29-oct)',
 };
 
+/**
+ * Ronda 3 (30-oct, Messenger): cada producto en su línea con su foto después; el código y el nombre solo al presentar;
+ * el dato llano, sin «tengo verificado»; lo que no está en la ficha se ofrece a una persona (no «lo dejamos anotado»);
+ * la dirección como la escribió el cliente; la aceptación escrita del pedido; la venta cruzada una vez.
+ * `ventas.complementos` NO va aquí: tiene su propio SQL (`--complementos`) y esta ronda no debe pisar el mapa cargado.
+ */
+export const CLAVES_RONDA_3 = ['alc.producto', 'alc.foto', 'alc.complemento', 'alc.especificacion', 'inv.ficha', 'est.breve', 'proc.compra'];
+export const TEXTOS_RONDA_3: TextosActualizacion = {
+  titulo: 'Ronda 3 del asistente de VENTAS de Dimpro (30-oct, prueba de Mauricio en Messenger): cada producto en su línea\n-- (el código lo publica con su foto justo después), sin repetir código, nombre ni datos, el dato llano, lo que no\n-- está en la ficha ofrecido a una persona, la dirección como la escribió el cliente, el «sí» escrito al pedido y la\n-- venta cruzada una vez.',
+  uso: 'semilla-sql-dimpro.ts --ronda3',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con el código de este cambio (respuesta partida, ver_complementos,\n-- confirmar_compra).',
+  nota: 'asistente de ventas Dimpro: ronda 3 (producto y su foto, sin repetir, dirección, sí escrito, venta cruzada) (30-oct)',
+};
+
+/**
+ * El SQL que carga (o reemplaza) el mapa de venta cruzada sin redesplegar: la ficha `ventas.complementos` con el mapa de
+ * un JSON `{ "MP-38": [{ "codigo": "MP-30", "razon": "…" }] }`. Lo que no tenga código y razón se rechaza (no se carga
+ * un mapa a medias). Idempotente como las demás. Los complementos que no estén publicados y activos se ignoran al
+ * ofrecer, no al cargar.
+ * Uso: deno run --allow-read …/semilla-sql-dimpro.ts --complementos <mapa.json> > sql/dimpro/<fecha>_venta-cruzada.sql
+ */
+export function complementosSqlDimpro(mapa: MapaComplementos, fuente: string): string {
+  if (!mapa || typeof mapa !== 'object' || Array.isArray(mapa)) throw new Error('el mapa tiene que ser un objeto { "MP-xx": [...] }');
+  const leido = mapaComplementos({ fichas: [fichaComplementos(mapa, fuente)] });
+  const entradas = Object.values(mapa).reduce((n, l) => n + (Array.isArray(l) ? l.length : 0), 0);
+  const validas = [...leido.values()].reduce((n, l) => n + l.length, 0);
+  if (validas !== entradas || leido.size !== Object.keys(mapa).length) throw new Error(`el mapa trae ${entradas - validas} complementos sin código o sin razón (o un código de producto inválido)`);
+  return actualizacionSqlDimpro([CLAVE_COMPLEMENTOS], [fichaComplementos(mapa, fuente)], {
+    titulo: `Mapa de venta cruzada del asistente de VENTAS de Dimpro: ${leido.size} productos, ${validas} complementos.`,
+    uso: 'semilla-sql-dimpro.ts --complementos <mapa.json>',
+    despues: 'DESPUÉS del deploy de chatwoot-agente con ver_complementos (ronda 3).',
+    nota: `asistente de ventas Dimpro: mapa de venta cruzada (${leido.size} productos)`,
+  });
+}
+
 export function actualizacionSqlDimpro(claves: string[] = CLAVES_VENTA_CONSULTIVA, fichas: Ficha[] = REGLAMENTO_DIMPRO, t: TextosActualizacion = TEXTOS_CONSULTIVA): string {
   const elegidas = claves.map((c) => {
     const f = fichas.find((x) => x.clave === c);
@@ -133,7 +170,10 @@ $$;
 }
 
 if (import.meta.main) {
-  const sql = Deno.args.includes('--ronda2') ? actualizacionSqlDimpro(CLAVES_RONDA_2, REGLAMENTO_DIMPRO, TEXTOS_RONDA_2)
+  const iMapa = Deno.args.indexOf('--complementos');
+  const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
+    : Deno.args.includes('--ronda3') ? actualizacionSqlDimpro(CLAVES_RONDA_3, REGLAMENTO_DIMPRO, TEXTOS_RONDA_3)
+    : Deno.args.includes('--ronda2') ? actualizacionSqlDimpro(CLAVES_RONDA_2, REGLAMENTO_DIMPRO, TEXTOS_RONDA_2)
     : Deno.args.includes('--consultiva') ? actualizacionSqlDimpro() : semillaSqlDimpro();
   console.log(sql.trimEnd());
 }

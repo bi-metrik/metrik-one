@@ -15,6 +15,7 @@
 - ⚠️⚠️ [Decisiones D1–D6 de la cotización (29-oct)](project_decisiones_1029_cotizacion.md) — batería #1338; sin exención de Públicas; comisión obligatoria; 0 = sin dato; tarifa por paquete
 - ⚠️⚠️ [Regla de fotos de la propuesta (29-oct)](project_regla_fotos_propuesta.md) — #1357 paneles+alto común, #1358 portada, #1365 Rec=medio; foto Curazao sin cargar
 - ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337 (#1339 cerrado); reparto por precio en #1348
+- ⚠️⚠️ [Dimpro ventas ronda 3 (30-oct)](project_dimpro_ventas_ronda3.md) — Messenger manda el botón como TEXTO; partido por producto; SQL ronda3 SIN correr
 - ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — orden publicado = por clave (cambia a Haiku); --fichas-base v3; SQL SIN aplicar
 - ⚠️ [Bloqueo: prueba real 29-oct (INF, barra, edad, marca PDF)](project_bloqueo_prueba_real_1029.md) — #1326; PDF recibe porPasos del llamador (N4); edad de la Solicitud cuenta en el freno
 - ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy

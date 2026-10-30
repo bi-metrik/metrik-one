@@ -55,7 +55,7 @@ export interface MensajeroChatwoot {
   estado(l: LlaveConversacion): Promise<string | null>;
   publicar(l: LlaveConversacion, s: Salida): Promise<ResultadoPublicar>;
   /**
-   * Una foto como adjunto (multipart `attachments[]`), con `texto` de pie. La URL la pone el código desde el catálogo,
+   * Una foto como adjunto (multipart `attachments[]`), con `texto` de pie (vacío = sin pie). La URL la pone el código desde el catálogo,
    * nunca el modelo; producción además la baja solo del bucket propio, con tope de tamaño y de tiempo.
    */
   publicarFoto(l: LlaveConversacion, foto: { url: string; texto: string }): Promise<ResultadoPublicar>;
