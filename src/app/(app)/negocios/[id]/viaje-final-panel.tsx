@@ -83,6 +83,9 @@ export default function ViajeFinalPanel({
 
   // Cierre
   const [motivoReabrir, setMotivoReabrir] = useState('')
+  const [motivoRetener, setMotivoRetener] = useState('')
+  // La decisión vale si nada de lo que pide decidir el saldo sigue en la lista de lo que falta.
+  const saldoDecidido = !!vista.guardado.saldo_a_favor && !vista.faltaCierre.some(f => f.includes('saldo a favor'))
   function correr(fn: () => Promise<{ ok: true } | { ok: false; error: string }>, ok: string) {
     startTransition(async () => {
       const r = await fn()
@@ -219,18 +222,46 @@ export default function ViajeFinalPanel({
             )}
           </div>
         ))}
-        {c.saldoAFavor > 0 && !vista.guardado.saldo_a_favor && (
-          <div className="space-y-1.5">
-            <p className="font-medium text-red-700">{nombre} tiene un saldo a favor de {pesosCierre(c.saldoAFavor)}. Decide antes de cerrar.</p>
-            {esDireccion && (
-              <div className="flex gap-2">
-                <button type="button" disabled={isPending} className={SECUNDARIO} onClick={() => correr(() => decidirSaldoAFavor(vista.negocioId, 'devolver', null), 'Anotado: se devuelve.')}>Devolver</button>
-                <button type="button" disabled={isPending} className={SECUNDARIO} onClick={() => correr(() => decidirSaldoAFavor(vista.negocioId, 'proximo_viaje', null), 'Anotado: queda para su próximo viaje.')}>Dejar para su próximo viaje</button>
-              </div>
+        {/* H-28: la plata de un servicio sacado es del cliente hasta que la dirección decida. */}
+        {c.saldoAFavor > 0 && (
+          <div className="space-y-1.5 rounded-md border border-amber-300 p-2" data-saldo-a-favor>
+            <p className="font-medium">
+              Saldo a favor de {nombre}: {pesosCierre(c.saldoAFavor)}
+              {c.saldoPorSacados > 0 && (
+                <span className="font-normal text-muted-foreground"> · {c.sacados.map(x => `${x.nombre} (${pesosCierre(x.cotizado)})`).join(', ')} {c.sacados.length === 1 ? 'salió' : 'salieron'} del viaje</span>
+              )}
+            </p>
+            {saldoDecidido ? (
+              <p data-saldo-decision>
+                {vista.guardado.saldo_a_favor?.decision === 'devolver'
+                  ? 'Se devuelve al cliente.'
+                  : vista.guardado.saldo_a_favor?.decision === 'proximo_viaje'
+                    ? 'Queda abonado a su próximo viaje.'
+                    : `Se retiene como margen. Motivo: ${vista.guardado.saldo_a_favor?.nota ?? '—'}`}
+                {vista.avisoSaldo && (
+                  <> <a href={vista.avisoSaldo.waUrl} target="_blank" rel="noreferrer" className="underline">Avisar a {nombre} por WhatsApp</a></>
+                )}
+              </p>
+            ) : (
+              <>
+                <p className="text-red-700">No es margen: decide antes de cerrar.</p>
+                {esDireccion && (
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" disabled={isPending} className={SECUNDARIO} onClick={() => correr(() => decidirSaldoAFavor(vista.negocioId, 'devolver', null), 'Anotado: se devuelve.')}>Devolver</button>
+                      <button type="button" disabled={isPending} className={SECUNDARIO} onClick={() => correr(() => decidirSaldoAFavor(vista.negocioId, 'proximo_viaje', null), 'Anotado: queda abonado a su próximo viaje.')}>Dejar abonado a su próximo viaje</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <input value={motivoRetener} onChange={e => setMotivoRetener(e.target.value)} placeholder="¿Por qué se retiene?" className="h-11 min-w-0 flex-1 rounded-md border px-2" />
+                      <button type="button" disabled={isPending || !motivoRetener.trim()} className={SECUNDARIO} onClick={() => correr(() => decidirSaldoAFavor(vista.negocioId, 'retener', motivoRetener), 'Anotado: se retiene.')}>Retener</button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
-        {vista.faltaCierre.filter(f => !f.startsWith('Falta que Edgar')).map(f => <p key={f} className="text-red-700">{f}</p>)}
+        {vista.faltaCierre.filter(f => !f.startsWith('Falta que Edgar') && !f.includes('saldo a favor')).map(f => <p key={f} className="text-red-700">{f}</p>)}
         {confirmado ? (
           <div className="space-y-1.5">
             <p className="font-medium text-emerald-700">Cerrado por Edgar · margen real {vista.guardado.confirmado?.margen_real_pct ?? '—'} %.</p>

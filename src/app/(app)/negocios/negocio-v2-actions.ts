@@ -97,6 +97,7 @@ import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from 
 import { anticipoEsperado, estadoAnticipo, notaAnticipoCubierto, type EstadoAnticipo } from '@/lib/negocios/anticipo-cubierto'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
+import { fechaDeCierreDeVenta } from '@/lib/negocios/fecha-cierre-venta'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
   sumarRecaudoConfirmado,
@@ -432,7 +433,8 @@ export type NegocioDetalle = {
    */
   campanas_contacto?: ResumenCampanas | null
   /**
-   * Día en que el negocio se volvió VENTA = el del primer cobro imputado.
+   * Día en que el negocio se volvió VENTA = el del primer cobro imputado (en viajes, el de la
+   * confirmación del cliente: `lib/negocios/fecha-cierre-venta.ts`, QA G11).
    * Sale tal cual de `v_venta_mes_comercial.fecha_venta`, la definición canónica
    * que ya fecha la venta en `/numeros`, `/equipo`, `lib/negocios/cartera` y
    * `lib/epayco/fecha-transaccion`. Columna `date`, no instante.
@@ -1402,7 +1404,8 @@ async function getNegocioDetalle(id: string): Promise<{
     ...negocioRaw,
     responsables: responsablesConAsignacion,
     campanas_contacto: campanasContacto,
-    fecha_venta: fechaVenta,
+    // En viajes, la de la confirmación del cliente (QA G11): ver `fecha-cierre-venta.ts`.
+    fecha_venta: fechaDeCierreDeVenta(fechaVenta, negocioMetadata),
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
@@ -3553,8 +3556,9 @@ async function cambiarEtapaNegocioConGateSinClave(
 
     // Gate del Cierre económico (F6-4/F6-5): margen calculado y confirmado por la dirección con
     // la huella vigente, saldo a favor decidido. Opt-in por etapa; con `cierre_viaje` apagado no frena.
+    // No cede al override (H-35): la pantalla no ofrece «Omitir» sobre algo que se va a negar.
     const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: etapaGates })
-    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true })))
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true, omitible: false })))
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
     // operaciones (handoff comercial → operaciones, ej. salida de Documentación).
@@ -3941,6 +3945,16 @@ async function cambiarEtapaNegocioConGateSinClave(
         }
       }
     }
+  }
+
+  // Gate del Cierre económico con override (QA Trappvel 2026-10-29, H-35): «Omitir gate» con motivo
+  // tampoco salta la confirmación del margen. Sin ella `cierre_viaje` queda en null y nadie sabe
+  // cuánto dejó el viaje, que es justo lo que la etapa existe para fijar. Sin override ya lo evaluó
+  // el bloque de arriba; aquí solo el camino que ese bloque no recorre, y no cede (`omitible: false`).
+  if (motivoOverride && negocio.etapa_actual_id) {
+    const gatesCierre = (etapaActualConfigExtra.gates ?? []) as string[]
+    const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: gatesCierre })
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true, omitible: false })))
   }
 
   // Todas las familias juntas, en el orden de siempre (ver `pendientesGate` arriba).
