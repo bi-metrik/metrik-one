@@ -2,6 +2,7 @@
 
 import { diferenciaDeCambio, diferenciaDeCambioDelServicio, montoEnMoneda, tasaPagoValida, textoDiferenciaDeCambio, textoPagoEnMoneda } from '@/lib/viaje/moneda-servicio'
 import { tasaComoTexto } from '@/lib/cotizaciones/tasa-cotizacion'
+import { avisosDeLectura, type LecturaPagoProveedor } from '@/lib/viaje/lectura-pago-proveedor'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
@@ -591,6 +592,9 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   const [medioId, setMedioId] = useState(medios.length === 1 ? medios[0].id : '')
   const [fecha, setFecha] = useState(todayBogotaISO())
   const [soporte, setSoporte] = useState<string | null>(null)
+  // M-12 · lo leído del soporte y el número de comprobante (prellenado, editable).
+  const [lectura, setLectura] = useState<LecturaPagoProveedor | null>(null)
+  const [referencia, setReferencia] = useState('')
   const [isPending, startTransition] = useTransitionTolerante()
   const intencion = useIntencion()
   const archivoRef = useRef<HTMLInputElement>(null)
@@ -614,6 +618,10 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   const d = desviacion(total, Math.max(0, base + cambioTotal))
   const sobreViaje = desviacionDelViaje(total, { costoCotizado: v.servicio.costo_cotizado, valorPorPagar: v.servicio.valor_por_pagar }, viajeParaReglas(datos.filas, v.servicio.id))
   const listo = monto > 0 && !!medio && !!soporte
+  // M-12 · lo leído contra lo que faltaba pagar, ANTES de guardar. Pagado en la moneda del
+  // servicio, lo esperado en pesos es a la TRM del pago: lo que movió la TRM no es diferencia aquí.
+  const esperadoLeido = enMoneda && lectura?.tasa ? Math.round((falta / enMoneda.tasa) * lectura.tasa) : falta
+  const avisosLectura = lectura ? avisosDeLectura(lectura, esperadoLeido, v.servicio.proveedor_nombre ?? null) : []
 
   function subir(file: File | null | undefined) {
     if (!file) return
@@ -627,7 +635,19 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
         return
       }
       setSoporte(r.referencia)
-      toast.success('Soporte listo. Revisa el valor y toca «Registrar pago».')
+      const l = r.lectura
+      setLectura(l)
+      if (!l) {
+        toast.success('Soporte listo. No se pudo leer: escribe los datos y toca «Registrar pago».')
+        return
+      }
+      // Propone; la asesora revisa y confirma con «Registrar pago».
+      if (l.monto) setMontoTexto(String(l.monto))
+      if (l.fecha && l.fecha <= todayBogotaISO()) setFecha(l.fecha)
+      if (l.medioId && medios.some(m => m.id === l.medioId)) setMedioId(l.medioId)
+      if (l.referencia) setReferencia(l.referencia)
+      if (enMoneda && l.moneda === enMoneda.moneda && l.tasa) setTrmTexto(tasaComoTexto(l.tasa))
+      toast.success('Soporte leído. Revisa los datos y toca «Registrar pago».')
     })
   }
 
@@ -640,10 +660,11 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
       costoCotizado: v.servicio.costo_cotizado,
       pagadoProveedores: totalesDelTablero(filasVista(datos.filas)).pagado,
       cobradoCliente: datos.cobradoCliente ?? 0,
+      diferenciaCambio: cambioTotal,
     })
     if (fuera && !window.confirm(fuera)) return
     startTransition(async () => {
-      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte, tasaPago: tasaPagoOk ? tasaPago : null }, intencion.clave())
+      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte, tasaPago: tasaPagoOk ? tasaPago : null, referencia: referencia.trim() || null }, intencion.clave())
       intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
@@ -652,6 +673,7 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
       if (r.esperando.length > 0) toast.success(`Pago registrado. Quedó esperando a Edgar: ${r.esperando.join(' ')}`)
       else toast.success('Pago registrado.')
       setSoporte(null)
+      setLectura(null)
       alGuardar()
     })
   }
@@ -723,6 +745,19 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
         </select>
       </label>
       {medio && <p className="text-xs text-muted-foreground">Titular: {medio.titular === 'personal' ? 'Personal' : 'Empresa'}</p>}
+      <label className="block space-y-1">
+        <span className="text-xs font-medium">Número de comprobante</span>
+        <input type="text" value={referencia} onChange={e => setReferencia(e.target.value)} disabled={isPending} maxLength={120}
+          className="h-11 w-full rounded-md border px-2 text-sm" />
+      </label>
+      {lectura && (
+        <div className="space-y-0.5 rounded-md border border-sky-200 bg-sky-50 p-2 text-xs" data-lectura-soporte>
+          <p className="text-sky-900">
+            Leído del soporte{lectura.monto ? `: ${formatCOP(lectura.monto)}` : ''}{lectura.moneda && lectura.montoMoneda ? ` (${montoEnMoneda(lectura.montoMoneda, lectura.moneda)}${lectura.tasa ? ` a TRM ${tasaComoTexto(lectura.tasa)}` : ''})` : ''}{lectura.destinatario ? ` a ${lectura.destinatario}` : ''}. Revisa antes de registrar.
+          </p>
+          {avisosLectura.map(a => <p key={a} className="font-medium text-amber-700" data-aviso-lectura>{a}</p>)}
+        </div>
+      )}
       {enMoneda && cambioTotal !== 0 && monto > 0 && (
         <p className="text-xs text-muted-foreground">
           {cambioTotal > 0 ? '+' : '−'}{formatCOP(Math.abs(cambioTotal))} de diferencia de cambio: no es sobrecosto del proveedor.

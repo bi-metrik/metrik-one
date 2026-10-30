@@ -195,6 +195,13 @@ export default function ViajeFinalPanel({
               <span className="min-w-0 flex-1">{f.nombre}{f.sacado ? <span className="text-amber-800"> · sacado del viaje</span> : null}</span>
               <span className="tabular-nums text-muted-foreground">cotizado {pesosCierre(f.cotizado)}</span>
               <span className={`tabular-nums ${f.sinCosto ? 'text-red-700' : ''}`}>{f.sinCosto ? 'falta el costo real' : `real ${pesosCierre(f.real)}`}</span>
+              {/* H-25 · lo que movió la TRM se ve aparte de lo que el proveedor cobró de más. */}
+              {!f.sinCosto && f.cambio !== 0 && (
+                <span className="w-full text-xs text-muted-foreground" data-diferencia-cambio>
+                  {f.cambio > 0 ? '+' : '−'}{pesosCierre(Math.abs(f.cambio))} de diferencia de cambio
+                  {f.sobrecosto !== 0 ? ` · ${f.sobrecosto > 0 ? '+' : '−'}${pesosCierre(Math.abs(f.sobrecosto))} de ${f.sobrecosto > 0 ? 'sobrecosto' : 'ahorro'} del proveedor` : ' · sin sobrecosto del proveedor'}
+                </span>
+              )}
             </li>
           ))}
         </ul>

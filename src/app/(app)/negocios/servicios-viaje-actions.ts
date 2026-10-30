@@ -13,6 +13,8 @@
  * `lib/viaje/reglas-pago.ts` (las mismas del bot de WhatsApp).
  */
 
+import { extractFieldsFromDocument } from '@/lib/ai/extract-fields'
+import { CAMPOS_PAGO_PROVEEDOR, propuestaPagoProveedor, type LecturaPagoProveedor } from '@/lib/viaje/lectura-pago-proveedor'
 import { columnasMonedaGasto, diferenciaDeCambio, diferenciaDeCambioDelServicio, esColumnaFaltante, marcaTrm, tasaPagoValida } from '@/lib/viaje/moneda-servicio'
 import { tasaComoTexto } from '@/lib/cotizaciones/tasa-cotizacion'
 import { revalidatePath } from 'next/cache'
@@ -407,13 +409,49 @@ export async function adjuntarArchivoServicio(formData: FormData): Promise<Resul
 const MENSAJE_EN_CURSO_PAGO = 'Tu acción anterior todavía se está guardando. Espera un momento.'
 const SOLO_DIRECCION = 'Solo la dirección aprueba o rechaza un pago a proveedor.'
 
+export type ResultadoSoporteServicio =
+  | {
+    ok: true
+    referencia: string
+    /**
+     * M-12 (QA Trappvel 2026-10-29) · lo que se leyó del soporte (valor, fecha, medio, número de
+     * comprobante y, si aplica, moneda y TRM). Propone; la asesora confirma. `null`: no se pudo
+     * leer y se escribe a mano (el soporte ya quedó guardado).
+     */
+    lectura: LecturaPagoProveedor | null
+  }
+  | { ok: false; error: string }
+
 /**
- * Sube el soporte del pago (pegado, foto o archivo) y devuelve su referencia `one://`. Pegar el
- * soporte NO registra el pago (Noor §3.3): el pago cuenta cuando se toca «Registrar pago».
+ * Lee el soporte con el MISMO lector del comprobante del viajero (`extractFieldsFromDocument`,
+ * Gemini; `leerComprobantePago`). Nunca falla: si no puede, devuelve `null`.
+ */
+async function leerSoporteProveedor(ctx: Contexto, servicioId: string, negocioId: string, buffer: Buffer, mime: string): Promise<LecturaPagoProveedor | null> {
+  const apiKey = process.env.GEMINI_API_KEY ?? ''
+  if (!apiKey) return null
+  try {
+    const r = await extractFieldsFromDocument(buffer, mime, CAMPOS_PAGO_PROVEEDOR, apiKey)
+    if (!r.data) return null
+    const [medios, filas] = await Promise.all([
+      mediosDelEspacio(ctx.workspaceId),
+      leerServiciosDelNegocio(ctx.supabase, { workspaceId: ctx.workspaceId, negocioId }),
+    ])
+    const moneda = filas?.find(f => f.id === servicioId)?.moneda ?? null
+    return propuestaPagoProveedor(r.data, { medios, moneda })
+  } catch (e) {
+    console.error('[subirSoporteServicio] lectura:', e instanceof Error ? e.message : e)
+    return null
+  }
+}
+
+/**
+ * Sube el soporte del pago (pegado, foto o archivo), lo LEE (M-12) y devuelve su referencia
+ * `one://` con la propuesta. Pegar el soporte NO registra el pago (Noor §3.3): el pago cuenta
+ * cuando se toca «Registrar pago».
  *
  * FormData: `servicioId` y `file`.
  */
-export async function subirSoporteServicio(formData: FormData): Promise<{ ok: true; referencia: string } | { ok: false; error: string }> {
+export async function subirSoporteServicio(formData: FormData): Promise<ResultadoSoporteServicio> {
   const servicioId = String(formData.get('servicioId') ?? '')
   const file = formData.get('file') as File | null
   if (!file || file.size === 0) return { ok: false, error: 'Sin archivo' }
@@ -438,7 +476,9 @@ export async function subirSoporteServicio(formData: FormData): Promise<{ ok: tr
       mime: file.type,
       upsert: false,
     })
-    return { ok: true, referencia: subido.referencia }
+    const buffer = Buffer.from(await file.arrayBuffer())
+    const lectura = await leerSoporteProveedor(ctx, servicioId, fila.negocio_id, buffer, file.type)
+    return { ok: true, referencia: subido.referencia, lectura }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
@@ -453,12 +493,14 @@ interface ServicioParaPago {
   estado: string
   costo_cotizado: number
   valor_por_pagar: number | null
+  /** M-12 · la empresa del proveedor en el directorio: queda en el gasto. */
+  proveedor_empresa_id?: string | null
 }
 
 async function servicioParaPago(supabase: unknown, workspaceId: string, servicioId: string): Promise<ServicioParaPago | null> {
   const { data } = await db(supabase)
     .from('negocio_servicios')
-    .select('id, negocio_id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar')
+    .select('id, negocio_id, nombre, proveedor_nombre, proveedor_empresa_id, estado, costo_cotizado, valor_por_pagar')
     .eq('id', servicioId)
     .eq('workspace_id', workspaceId)
     .maybeSingle()
@@ -684,6 +726,8 @@ export interface EntradaPagoServicio {
    * (`marcaTrm`) y separa la diferencia de cambio del sobrecosto. Opcional.
    */
   tasaPago?: number | null
+  /** M-12 · número de comprobante del soporte (leído o escrito). Queda en `gastos.external_ref`. */
+  referencia?: string | null
 }
 
 export type ResultadoPagoServicio =
@@ -717,6 +761,7 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
   if ('error' in cm) return { ok: false, error: cm.error }
 
   const proveedor = servicio.proveedor_nombre?.trim() || null
+  const referencia = typeof input.referencia === 'string' && input.referencia.trim() ? input.referencia.trim().slice(0, 120) : null
   const tp = await tasaDelPago(ctx, servicio, input.tasaPago)
   if ('error' in tp) return { ok: false, error: tp.error }
   const marca = tp.moneda && tp.tasa !== null ? ` ${marcaTrm(tp.moneda, tp.tasa)}` : ''
@@ -739,6 +784,9 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
     soporte_pendiente: false,
     medio_pago: cm.medio.id,
     titular_medio: cm.medio.titular,
+    // M-12 · el número de comprobante y la empresa del proveedor (si está en el directorio).
+    external_ref: referencia,
+    empresa_id: servicio.proveedor_empresa_id ?? null,
     canal_registro: 'app',
     created_by: userId ?? null,
     centro_costos: 'directa_negocio',
@@ -768,7 +816,7 @@ async function registrarPagoServicioSinClave(input: EntradaPagoServicio): Promis
     entidad_id: servicio.negocio_id,
     tipo: 'cambio',
     autor_id: ctx.staffId,
-    contenido: `Pagó ${pesosCOP(monto)} a ${proveedor ?? 'el proveedor'} (${servicio.nombre}) con ${cm.medio.label}${marca ? ` (${tp.moneda} a TRM ${tasaComoTexto(tp.tasa as number)})` : ''}${esperando.length > 0 ? ', esperando a Edgar' : ''}.`.slice(0, 280),
+    contenido: `Pagó ${pesosCOP(monto)} a ${proveedor ?? 'el proveedor'} (${servicio.nombre}) con ${cm.medio.label}${referencia ? ` (comprobante ${referencia})` : ''}${marca ? ` (${tp.moneda} a TRM ${tasaComoTexto(tp.tasa as number)})` : ''}${esperando.length > 0 ? ', esperando a Edgar' : ''}.`.slice(0, 280),
   }, 'registrarPagoServicio')
   revalidatePath(`/negocios/${servicio.negocio_id}`)
   return { ok: true, gastoId, esperando: esperando.map(r => r.texto) }

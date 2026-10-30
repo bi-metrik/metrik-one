@@ -334,12 +334,12 @@ export const CASOS_VENTAS: CasoPublico[] = [
     },
   },
   {
-    id: 'v-consultiva-sugiere-con-fotos', conjunto: 'ventas', titulo: '«Taladro para estructura metálica»: los magnéticos, máximo 3, con una foto por producto y la razón sin muletilla',
+    id: 'v-consultiva-sugiere-con-fotos', conjunto: 'ventas', titulo: '«Taladro para estructura metálica»: los magnéticos, uno o dos, con una foto por producto y la razón sin muletilla',
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: 'Necesito un taladro para perforar estructura metálica' }],
     guion: [
       VC({ buscar: 'taladro', uso: 'estructura metálica' }),
-      R('Te sirven estos:\nMP-13 Taladro magnético 28 mm, $1.900.000: magnético, se fija a la estructura.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\nMP-15 Taladro magnético 32 mm, $2.100.000: intermedio.\n¿Cuál te sirve más?', 'producto'),
+      R('Para estructura te recomiendo:\nMP-13 Taladro magnético 28 mm, $1.900.000: magnético, se fija a la estructura.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\n¿Cuál te sirve más?', 'producto'),
     ],
     esperado: (e) => {
       const h = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((x) => x.nombre === 'ver_catalogo');
@@ -347,11 +347,35 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const muletilla = (publico(e).match(/según el catálogo del fabricante/gi) ?? []).length;
       return todos(
         cods.length > 0 && cods.every((c) => ['MP-13', 'MP-14', 'MP-15'].includes(c)) ? ok(`catálogo: ${cods.join(', ')}`) : no(`catálogo devolvió ${cods.join(', ')}`),
-        codigosPublicados(e).length <= 3 ? ok('≤ 3 productos en la respuesta') : no(`${codigosPublicados(e).length} productos en la respuesta`),
+        cods.length <= 2 ? ok('el catálogo recomienda uno o dos') : no(`el catálogo devolvió ${cods.length}`),
+        codigosPublicados(e).length <= 2 ? ok('≤ 2 productos en la respuesta') : no(`${codigosPublicados(e).length} productos en la respuesta`),
         fotos(e).length > 0 && fotos(e).length === codigosPublicados(e).length ? ok('una foto por producto nombrado') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
         fotos(e).every((f) => f.url.includes('/ferreteria-fotos/')) ? ok('URLs del catálogo') : no('una foto fuera del catálogo'),
         muletilla <= 1 ? ok('«según el catálogo del fabricante» a lo sumo una vez') : no(`«según el catálogo del fabricante» ×${muletilla}`),
         unaPregunta(e),
+      );
+    },
+  },
+  {
+    id: 'v-preguntas-primero', conjunto: 'ventas', titulo: '«Taladro para la casa, económico» (Messenger 30-oct): primero cable o inalámbrico, sin productos; la pregunta hecha no se repite',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: 'Busco un taladro para la casa, algo económico' }, { escribe: 'me da igual' }, { escribe: 'hasta 200 mil' }],
+    guion: [
+      VC({ buscar: 'taladro', uso: 'hogar, económico' }),
+      R('¿Lo prefieres con cable o inalámbrico?', 'producto'),
+      // El modelo no pasa `energia`: el código no repite la pregunta y sigue con el presupuesto.
+      VC({ buscar: 'taladro', uso: 'hogar, económico' }),
+      R('¿Tienes un tope de presupuesto para esto?', 'producto'),
+      VC({ buscar: 'taladro', uso: 'hogar, económico', energia: 'cualquiera', presupuesto: 200000 }),
+      R('Para la casa te recomiendo:\nMP-12 Taladro 13 mm, $125.000: 550 W, para tareas sencillas.\n¿Te sirve?', 'producto'),
+    ],
+    esperado: (e) => {
+      const vc = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).filter((x) => x.nombre === 'ver_catalogo').map((x) => x.datos as { falta?: string; productos?: Array<{ codigo: string }> });
+      return todos(
+        vc[0]?.falta === 'energia' && !vc[0].productos?.length ? ok('1.ª: cable o inalámbrico, sin productos') : no(`1.ª: ${JSON.stringify(vc[0]).slice(0, 120)}`),
+        vc[1]?.falta === 'presupuesto' ? ok('2.ª: el presupuesto (no repite la de cable)') : no(`2.ª: ${JSON.stringify(vc[1]).slice(0, 120)}`),
+        vc[2]?.productos?.map((p) => p.codigo).join() === 'MP-12' ? ok('3.ª: el que cabe en 200 mil') : no(`3.ª: ${JSON.stringify(vc[2]).slice(0, 160)}`),
+        respuestas(e).slice(0, 2).every((t) => !/MP-\d+/.test(t)) ? ok('las preguntas sin productos') : no(`respuestas: ${respuestas(e).join(' | ')}`),
       );
     },
   },
@@ -418,12 +442,13 @@ export const CASOS_VENTAS: CasoPublico[] = [
   },
   {
     id: 'v-consultiva-mas-de-3', conjunto: 'ventas', titulo: 'La respuesta nombra 4 productos: la guarda la devuelve y sale la de 3',
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: 'taladro magnético para estructura' }],
     guion: [
       // Lee 4 productos en dos búsquedas del mismo llamado (el verificador ya ataja un código que no leyó; el tope es de
       // 3 llamados por turno): lo que ataja aquí es la guarda de las 3.
-      { varias: [VC({ buscar: 'taladro magnético', uso: 'estructura' }), VC({ codigo: 'MP-16' })] },
+      { varias: [VC({ buscar: 'taladro magnético', uso: 'estructura' }), VC({ codigo: 'MP-15' }), VC({ codigo: 'MP-16' })] },
       R('Tengo MP-13, MP-14, MP-15 y MP-16. ¿Cuál te sirve más?', 'producto'),
       R('Te sirven MP-13 (28 mm), MP-14 (40 mm) y MP-15 (32 mm). ¿Cuál te sirve más?', 'producto'),
     ],
@@ -506,6 +531,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
   {
     // SOLO SECO: el guion fuerza el texto mezclado; con Haiku real el texto es otro y el caso no aplica.
     id: 'v-r3-formato-roto', conjunto: 'ventas', titulo: 'El texto mezcla productos («el MP-11 es mejor que el MP-13»): sale entero y las fotos con su pie, sin perder nada',
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: '¿cuál es mejor, el MP-11 o el MP-13?' }],
     guion: [{ varias: [VC({ codigo: 'MP-11' }), VC({ codigo: 'MP-13' })] }, R('El MP-11 es mejor que el MP-13 para la casa: el MP-13 es magnético, para estructura. ¿Te sirve el MP-11?', 'producto')],
@@ -524,7 +550,8 @@ export const CASOS_VENTAS: CasoPublico[] = [
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ hacer: (e) => { e.chatwoot.fotosQueFallan.add(FOTO('EJ-14')); } }, { escribe: 'taladro para estructura metálica' }],
     guion: [
-      VC({ buscar: 'taladro', uso: 'estructura metálica' }),
+      // Tres leídos por código (la recomendación da dos como mucho; aquí se mide el envío de tres).
+      { varias: [VC({ codigo: 'MP-13' }), VC({ codigo: 'MP-14' }), VC({ codigo: 'MP-15' })] },
       R('Te sirven estos:\nMP-13 Taladro magnético 28 mm, $1.900.000: se fija a la estructura.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\nMP-15 Taladro magnético 32 mm, $2.100.000: intermedio.\n¿Cuál te sirve más?', 'producto'),
     ],
     esperado: (e) => {
@@ -534,7 +561,8 @@ export const CASOS_VENTAS: CasoPublico[] = [
       return todos(
         // Cada texto de producto va seguido de su foto, menos el del MP-14 (la que falló); los tres textos salen; cierra
         // con texto. El orden de los productos lo escoge el modelo (con Haiku real cambia).
-        ['MP-13', 'MP-14', 'MP-15'].every((c) => xs.some((x) => x.startsWith(`T:${c}`)))
+        // Con el modelo real nombra uno o dos (MAX_RECOMENDADOS); con el guion, los tres.
+        xs.some((x) => x.startsWith('T:MP-14')) && xs.filter((x) => /^T:MP-1[345]/.test(x)).length >= 2
           && xs.every((x, i) => !/^T:MP-1[35]/.test(x) || xs[i + 1] === `F:${x.slice(2, 7)}`)
           && !xs.includes('F:MP-14') && xs.at(-1)!.startsWith('T:') ? ok('orden: cada texto con su foto; el MP-14 sin foto') : no(`orden: ${xs.map((x) => x.slice(0, 9)).join(' → ')}`),
         f.find((x) => x.codigo === 'MP-14' && !x.ok) ? ok('traza: la foto del MP-14 falló') : no(`traza: ${JSON.stringify(f)}`),
@@ -623,6 +651,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
   {
     // SOLO SECO: el guion fuerza los `datos` rotos; con Haiku real el caso no aplica.
     id: 'v-r3-datos-texto-roto', conjunto: 'ventas', titulo: '`datos` como texto con JSON roto: el error dice eso (no «el producto no es un código»); el tope pasa a persona sin pedir repetir',
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [...HASTA_RESUMEN.pasos.slice(0, 3), { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' }],
     guion: [

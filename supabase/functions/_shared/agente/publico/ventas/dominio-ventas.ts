@@ -33,8 +33,9 @@ import {
 import { respuestaFija } from '../../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Hechos, Propuesta, Reglamento, ResultadoHerramienta } from '../../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
-import { MAX_SUGERENCIAS, codigosEnTexto, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
-import type { ProductoVenta } from './catalogo-ventas.ts';
+import { MAX_RECOMENDADOS, MAX_SUGERENCIAS, codigosEnTexto, productoParaModelo, siguientePaso, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
+import type { Falta, Preferencias, ProductoVenta } from './catalogo-ventas.ts';
+import { filasDelTramo } from '../topes.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
 import { fotosConsultadas } from './fotos-ventas.ts';
 import { direccionNoEscrita } from './direccion-ventas.ts';
@@ -71,6 +72,17 @@ export function productoEnCurso(filas: FilaPublica[]): string | null {
 /** ¿Ya se ofreció la venta cruzada en la conversación? (una llamada buena a ver_complementos en un turno anterior). Pura. */
 export function ventaCruzadaOfrecida(filas: FilaPublica[]): boolean {
   return filas.some((f) => ((f.traza as TrazaPublica | null)?.herramientas ?? []).some((h) => h.ok && h.nombre === VER_COMPLEMENTOS));
+}
+/** Las preguntas de «preguntas primero» que ver_catalogo ya pidió en este tramo (de la traza): no se repiten. */
+export function preguntasHechas(filas: FilaPublica[]): Falta[] {
+  const out = new Set<Falta>();
+  for (const f of filasDelTramo(filas)) {
+    for (const h of (f.traza as TrazaPublica | null)?.herramientas ?? []) {
+      const falta = h.ok && h.nombre === 'ver_catalogo' ? (h.datos as { falta?: unknown } | null)?.falta : null;
+      if (falta === 'energia' || falta === 'presupuesto') out.add(falta);
+    }
+  }
+  return [...out];
 }
 export const MAX_UNIDADES = 3;
 export const TOPE_VER_CATALOGO_VENTAS = 1500;
@@ -190,13 +202,15 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const lecturas: DeclaracionHerramienta[] = [
     {
       name: 'ver_catalogo',
-      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Puede devolver menos de ${MAX_SUGERENCIAS}: sugiere solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
+      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Con el uso dicho, antes de recomendar puede devolver \`falta\` (energia o presupuesto) con la \`pregunta\` que toca: hazla sola, y con la respuesta vuelve a llamarla pasando \`energia\` o \`presupuesto\`. Al final devuelve ${MAX_RECOMENDADOS} productos como mucho (uno preciso o dos para escoger): recomienda solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
       parameters: {
         type: 'object',
         properties: {
           buscar: { type: 'string', description: 'Lo que busca el cliente, con sus palabras (el tipo de producto).' },
           codigo: { type: 'string', description: 'El código MP-xx, si lo dio.' },
-          uso: { type: 'string', description: 'Para qué lo va a usar, si ya lo dijo (material, lugar, inalámbrico o de cable…). Vacío si no lo ha dicho.' },
+          uso: { type: 'string', description: 'Para qué lo va a usar, si ya lo dijo (material, lugar, inalámbrico o de cable…), con sus palabras de precio si las dijo («económico»). Vacío si no lo ha dicho.' },
+          energia: { type: 'string', enum: ['cable', 'inalambrico', 'cualquiera'], description: 'Lo que contestó a «¿con cable o inalámbrico?» (cualquiera = le da igual). Sin pasar si no lo ha dicho.' },
+          presupuesto: { type: 'integer', description: 'El tope que dijo, en pesos (300 mil = 300000). 0 si dijo que no tiene tope o no lo quiere decir. Sin pasar si no lo ha dicho.' },
         },
         required: [],
       },
@@ -290,11 +304,39 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         }
         if (!sug.productos.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. No ofrezcas otro como si fuera el mismo: si lo quiere, pasar_a_persona con motivo no_en_catalogo.' } };
         if (sug.tipo === 'codigo') return { ok: true, datos: { productos: sug.productos.map(productoParaModelo) } };
+        const pref: Preferencias = {
+          energia: ['cable', 'inalambrico', 'cualquiera'].includes(String(args.energia)) ? args.energia as Preferencias['energia'] : null,
+          presupuesto: typeof args.presupuesto === 'number' && Number.isFinite(args.presupuesto) && args.presupuesto >= 0 ? Math.round(args.presupuesto) : null,
+        };
+        const paso = siguientePaso(sug.candidatos ?? sug.productos, `${args.buscar ?? ''} ${args.uso ?? ''}`, pref, preguntasHechas(filasDe(ctx)));
+        if (paso.tipo === 'preguntar') {
+          return {
+            ok: true,
+            datos: paso.falta === 'energia'
+              ? {
+                productos: [], falta: 'energia', pregunta: paso.pregunta, desde: { cable: pesos(paso.desde.cable), inalambrico: pesos(paso.desde.inalambrico) },
+                que_hacer: `Todavía no recomiendes ni nombres productos. Hazle esta pregunta, sola en el mensaje: «${paso.pregunta}». Si ayuda, puedes decirle desde cuánto arranca cada uno (desde). Con su respuesta, vuelve a llamar ver_catalogo con buscar, uso y energia (cualquiera si le da igual).`,
+              }
+              : {
+                productos: [], falta: 'presupuesto', pregunta: paso.pregunta, desde: pesos(paso.desde), hasta: pesos(paso.hasta),
+                que_hacer: `Todavía no recomiendes ni nombres productos. Pregúntale por su presupuesto, solo eso en el mensaje, natural, como «${paso.pregunta}» (lo que sirve va de ${pesos(paso.desde)} a ${pesos(paso.hasta)}; puedes decírselo). Con su respuesta, vuelve a llamar ver_catalogo con buscar, uso, energia si la dijo y presupuesto en pesos (0 si no tiene tope).`,
+              },
+          };
+        }
+        if (paso.fueraDePresupuesto) {
+          return {
+            ok: true,
+            datos: {
+              productos: paso.productos.map(productoParaModelo), fuera_de_presupuesto: true, tope: pesos(paso.fueraDePresupuesto.tope), diferencia: pesos(paso.fueraDePresupuesto.diferencia),
+              nota: `Nada de lo que le sirve cabe en ${pesos(paso.fueraDePresupuesto.tope)}. Díselo con franqueza («por ese valor no tengo uno que cumpla con lo que necesitas») y recomiéndale este, el más cercano, en su propia línea con código, nombre corto y precio: explica por qué vale la diferencia de ${pesos(paso.fueraDePresupuesto.diferencia)} con lo que te contó (lo que trae según su nombre o sus especificaciones) y, si sirve, que tiene la garantía legal y DIMPRO tramita el reclamo (consultar_reglas garantia; no inventes plazos). Sin presionar ni fabricar urgencia. Cierra con «¿Te sirve?».`,
+            },
+          };
+        }
         return {
           ok: true,
           datos: {
-            productos: sug.productos.map(productoParaModelo), coincidencias: sug.coincidencias,
-            nota: `${sug.productos.length === 1 ? 'Solo este le sirve: sugiérelo a él solo' : `Solo estos ${sug.productos.length} le sirven: sugiere estos, ni uno más`}, cada uno con su código, nombre corto, precio y una razón de una línea que salga del nombre (de mano, magnético, la potencia o la medida del título) o de las especificaciones verificadas. «Según el catálogo del fabricante» solo si afirmas un dato que NO está en el nombre, y nunca en cada línea. No nombres otros productos.`,
+            productos: paso.productos.map(productoParaModelo), coincidencias: sug.coincidencias,
+            nota: `${paso.productos.length === 1 ? 'Este es el que le sirve: recomiéndaselo a él solo' : `Estos ${paso.productos.length} son los que le sirven: el primero es tu recomendación y el otro, la opción para escoger; ni uno más`}. Cada uno en su línea con su código, nombre corto, precio y por qué le sirve, atado a lo que te contó (para qué, con cable o inalámbrico, su presupuesto), sacado del nombre o de las especificaciones verificadas. «Según el catálogo del fabricante» solo si afirmas un dato que NO está en el nombre, y nunca en cada línea. No nombres otros productos.`,
           },
         };
       }

@@ -100,6 +100,24 @@ export const TEXTOS_NOMBRE: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: se llama Dimi (30-oct)',
 };
 
+/** El saludo doble (Mauricio, 30-oct): el aviso ya presenta a Dimi; el modelo solo pregunta qué busca. */
+export const CLAVES_SALUDO = ['alc.saludo'];
+export const TEXTOS_SALUDO: TextosActualizacion = {
+  titulo: 'Saludo del asistente de VENTAS de Dimpro (30-oct, «está saludando doble vez»): el modelo no se presenta ni saluda otra vez.',
+  uso: 'semilla-sql-dimpro.ts --saludo',
+  despues: 'en cualquier momento: no depende de un deploy.',
+  nota: 'asistente de ventas Dimpro: sin saludo doble (30-oct)',
+};
+
+/** Preguntas primero (Mauricio, 30-oct): una a una hasta recomendar uno o dos, y el presupuesto que no alcanza. */
+export const CLAVES_PREGUNTAS = ['alc.producto', 'proc.compra', 'est.breve'];
+export const TEXTOS_PREGUNTAS: TextosActualizacion = {
+  titulo: 'Preguntas primero del asistente de VENTAS de Dimpro (30-oct): cable o inalámbrico y presupuesto, una a una, antes de\n-- recomendar uno o dos; si nada cabe en el presupuesto, el más cercano y por qué vale la diferencia.',
+  uso: 'semilla-sql-dimpro.ts --preguntas',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con ver_catalogo de preguntas primero (energia, presupuesto, falta).',
+  nota: 'asistente de ventas Dimpro: preguntas primero, uno o dos (30-oct)',
+};
+
 /**
  * El SQL que carga (o reemplaza) el mapa de venta cruzada sin redesplegar: la ficha `ventas.complementos` con el mapa de
  * un JSON `{ "MP-38": [{ "codigo": "MP-30", "razon": "…" }] }`. Lo que no tenga código y razón se rechaza (no se carga
@@ -181,6 +199,8 @@ $$;
 if (import.meta.main) {
   const iMapa = Deno.args.indexOf('--complementos');
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
+    : Deno.args.includes('--saludo') ? actualizacionSqlDimpro(CLAVES_SALUDO, REGLAMENTO_DIMPRO, TEXTOS_SALUDO)
+    : Deno.args.includes('--preguntas') ? actualizacionSqlDimpro(CLAVES_PREGUNTAS, REGLAMENTO_DIMPRO, TEXTOS_PREGUNTAS)
     : Deno.args.includes('--nombre') ? actualizacionSqlDimpro(CLAVES_NOMBRE, REGLAMENTO_DIMPRO, TEXTOS_NOMBRE)
     : Deno.args.includes('--ronda3') ? actualizacionSqlDimpro(CLAVES_RONDA_3, REGLAMENTO_DIMPRO, TEXTOS_RONDA_3)
     : Deno.args.includes('--ronda2') ? actualizacionSqlDimpro(CLAVES_RONDA_2, REGLAMENTO_DIMPRO, TEXTOS_RONDA_2)

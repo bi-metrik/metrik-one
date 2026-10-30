@@ -210,6 +210,11 @@ export const ESPECIALIZADOS: ReadonlyArray<{ marca: string; nombre: string; para
     marca: 'magnetico', nombre: 'magnético', para: 'estructura metálica (vigas, perfiles, broca anular)',
     piden: ['magnetico', 'iman', 'estructura', 'estructural', 'viga', 'perfil', 'anular', 'grueso', 'base magnetica'],
     pregunta: '¿Lo buscas de mano o magnético, para perforar estructura metálica?',
+  },  // Mauricio 30-oct: para la casa sugería el rotomartillo «para concreto». Solo entra si habla de concreto o de obra.
+  {
+    marca: 'rotomartillo', nombre: 'rotomartillo', para: 'concreto y obra (SDS-Plus, cincelado)',
+    piden: ['rotomartillo', 'concreto', 'cemento', 'sds', 'demolicion', 'cincelar', 'cincel', 'losa', 'columna', 'obra', 'placa'],
+    pregunta: '¿Es para perforar concreto u obra, o para trabajos generales?',
   },
 ];
 
@@ -252,7 +257,7 @@ export type Sugerencia =
    */
   | { tipo: 'preguntar'; coincidencias: number; tipos: string[]; pregunta: string | null; especializados: Array<{ tipo: string; para: string }>; accesorios: string[] }
   /** `ninguno`: hay del tipo que busca, pero ninguno sirve para el uso que dijo (otro material). */
-  | { tipo: 'sugerir'; productos: ProductoVenta[]; coincidencias: number; ninguno?: boolean };
+  | { tipo: 'sugerir'; productos: ProductoVenta[]; coincidencias: number; ninguno?: boolean; candidatos?: ProductoVenta[] };
 
 /**
  * La búsqueda de la venta consultiva. Con código (MP-xx) o SKU: ese producto. Con texto: los que traen las palabras de
@@ -283,7 +288,8 @@ export function sugerirProductos(ps: ProductoVenta[], q: { buscar?: string | nul
     const especiales = todos.filter((p) => especialDe(p) && !pidioEspecial(especialDe(p)!, dicho));
     const accesorios = todos.filter((p) => esAccesorio(p, buscar));
     const comunes = todos.filter((p) => !especiales.includes(p) && !accesorios.includes(p));
-    const fam = especiales.length && comunes.length ? especialDe(especiales[0]) : null;
+    // Con varias familias especializadas, la pregunta es la de la primera de la lista (la de más diferencia de precio).
+    const fam = especiales.length && comunes.length ? ESPECIALIZADOS.find((e) => especiales.some((p) => especialDe(p) === e)) ?? null : null;
     return {
       tipo: 'preguntar', coincidencias: todos.length, tipos: [...new Set(todos.map(tipoDe))].slice(0, 8),
       pregunta: fam?.pregunta ?? null,
@@ -339,7 +345,75 @@ export function sugerirProductos(ps: ProductoVenta[], q: { buscar?: string | nul
     if (elegidos.length === MAX_SUGERENCIAS) break;
   }
   // Sin rellenar: si solo 1 o 2 le sirven, se sugieren 1 o 2.
-  return { tipo: 'sugerir', productos: elegidos.map((x) => x.p), coincidencias: base.length };
+  return { tipo: 'sugerir', productos: elegidos.map((x) => x.p), coincidencias: base.length, candidatos: orden.map((x) => x.p) };
+}
+
+// ── Preguntas primero (Mauricio, 30-oct) ─────────────────────────────────────
+// «Lo primero que debería hacer siempre el bot es hacer las preguntas inteligentes [...] dos, tres preguntas, una a una
+// [...] para darle un producto muy preciso, o dos para que escoja.» Con el uso ya dicho, antes de recomendar se pregunta
+// lo que de verdad separa a los que quedan: con cable o inalámbrico, y el presupuesto si habló de precio o si los precios
+// están muy separados. Cada pregunta, una vez por tramo: si ya se hizo y el modelo no trae la respuesta, se sigue sin ella.
+
+/** Cuántos productos se recomiendan al final: uno preciso o dos para escoger. */
+export const MAX_RECOMENDADOS = 2;
+
+export type Falta = 'energia' | 'presupuesto';
+
+export interface Preferencias {
+  /** Lo que contestó a «¿con cable o inalámbrico?»; `cualquiera` si le da igual. */
+  energia?: 'cable' | 'inalambrico' | 'cualquiera' | null;
+  /** El tope que dijo, en pesos; 0 = no tiene tope o no lo quiere decir. */
+  presupuesto?: number | null;
+}
+
+export type Paso =
+  | { tipo: 'preguntar'; falta: 'energia'; pregunta: string; desde: { cable: number; inalambrico: number } }
+  | { tipo: 'preguntar'; falta: 'presupuesto'; pregunta: string; desde: number; hasta: number }
+  /** `fueraDePresupuesto`: nada cabe en el tope; `productos` trae el más cercano que sí le sirve. */
+  | { tipo: 'recomendar'; productos: ProductoVenta[]; fueraDePresupuesto?: { tope: number; diferencia: number } };
+
+const PRECIO = new Set(['economico', 'economica', 'barato', 'barata', 'presupuesto', 'precio', 'ahorrar', 'plata', 'costo', 'bajo', 'gama']);
+
+export const esInalambrico = (p: ProductoVenta) => [...INALAMBRICO].some((w) => palabrasDe(p, true).has(w));
+
+/** ¿Habló de precio («económico», «barato», «presupuesto»)? Pura. */
+export function hablaDePrecio(texto: string): boolean {
+  return normal(texto).split(' ').map(raiz).some((w) => PRECIO.has(w));
+}
+
+/**
+ * Lo que sigue con los candidatos de una sugerencia (en su orden): la pregunta que falta o la recomendación (1 o 2).
+ * `yaPreguntado`: las preguntas que ya se hicieron en el tramo; no se repiten. Pura.
+ */
+export function siguientePaso(candidatos: ProductoVenta[], uso: string, pref: Preferencias, yaPreguntado: Falta[] = []): Paso {
+  let cs = candidatos;
+  const dichas = palabrasDeBusqueda(uso);
+  const energia = pref.energia ?? (dichas.some((w) => DE_CABLE.has(w)) ? 'cable' : dichas.some((w) => INALAMBRICO.has(w)) ? 'inalambrico' : null);
+  const inal = cs.filter(esInalambrico);
+  const cable = cs.filter((p) => !esInalambrico(p));
+  if (!energia && inal.length && cable.length && !yaPreguntado.includes('energia')) {
+    const min = (xs: ProductoVenta[]) => Math.min(...xs.map((p) => p.precio));
+    return { tipo: 'preguntar', falta: 'energia', pregunta: '¿Lo prefieres con cable o inalámbrico?', desde: { cable: min(cable), inalambrico: min(inal) } };
+  }
+  if (energia === 'cable' && cable.length) cs = cable;
+  if (energia === 'inalambrico' && inal.length) cs = inal;
+  const precios = cs.map((p) => p.precio);
+  const [lo, hi] = [Math.min(...precios), Math.max(...precios)];
+  const tope = pref.presupuesto ?? null;
+  if (tope === null && cs.length > 1 && (hablaDePrecio(uso) || hi >= lo * 1.5) && !yaPreguntado.includes('presupuesto')) {
+    return { tipo: 'preguntar', falta: 'presupuesto', pregunta: '¿Tienes un tope de presupuesto para esto?', desde: lo, hasta: hi };
+  }
+  if (tope && tope > 0) {
+    const caben = cs.filter((p) => p.precio <= tope);
+    if (!caben.length) {
+      const cercano = [...cs].sort((a, b) => a.precio - b.precio)[0];
+      return { tipo: 'recomendar', productos: [cercano], fueraDePresupuesto: { tope, diferencia: cercano.precio - tope } };
+    }
+    cs = caben;
+  } else if (hablaDePrecio(uso)) {
+    cs = [...cs].sort((a, b) => a.precio - b.precio);
+  }
+  return { tipo: 'recomendar', productos: cs.slice(0, MAX_RECOMENDADOS) };
 }
 
 /** Los códigos MP-xx que nombra un texto, sin repetir y en orden (como «MP-17», normalizados). Pura. */

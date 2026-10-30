@@ -144,6 +144,13 @@ export interface FilaCierre {
   cotizado: number
   real: number
   diferencia: number
+  /**
+   * H-25 (QA G12) · de `diferencia`, lo que movió la TRM de los pagos (`tasa_cambio` frente a
+   * `tasa_cotizada`). No es sobrecosto del proveedor. 0 si el servicio va en pesos.
+   */
+  cambio: number
+  /** H-25 · `diferencia` sin la diferencia de cambio: lo que de verdad cobró de más (o de menos) el proveedor. */
+  sobrecosto: number
   /** El servicio va y no tiene ningún pago: su costo real no se conoce. */
   sinCosto: boolean
   /**
@@ -206,12 +213,17 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   const filas: FilaCierre[] = van.map(s => {
     const real = pagadoDe.get(s.id) ?? 0
     const aPagar = typeof s.valor_por_pagar === 'number' && Number.isFinite(s.valor_por_pagar) ? s.valor_por_pagar : s.costo_cotizado
+    const diferencia = real - r0(s.costo_cotizado)
+    const cambio = s.estado === 'cancelado' ? 0 : diferenciaDeCambioDelServicio(s.moneda, e.gastos.filter(g => g.servicio_id === s.id)).pesos
     return {
       id: s.id,
       nombre: s.nombre,
       cotizado: r0(s.costo_cotizado),
       real,
-      diferencia: real - r0(s.costo_cotizado),
+      diferencia,
+      cambio,
+      // ±1 peso es redondeo de la conversión, no sobrecosto.
+      sobrecosto: Math.abs(diferencia - cambio) <= 1 ? 0 : diferencia - cambio,
       sinCosto: s.estado !== 'cancelado' && real === 0 && r0(aPagar) > 0,
       sacado: s.estado === 'cancelado',
     }
@@ -225,8 +237,7 @@ export function calcularCierre(e: EntradaCierre): Cierre {
     const cifra = `${f.diferencia > 0 ? '+' : '-'}${pesosCierre(Math.abs(f.diferencia))}`
     if (f.sacado) { razones.push(`${f.nombre} sacado del viaje (${cifra})`); continue }
     // H6-3 · lo que movió la TRM se nombra como tal: no es que el proveedor cobrara más.
-    const s = van.find(x => x.id === f.id)
-    const cambio = diferenciaDeCambioDelServicio(s?.moneda, e.gastos.filter(g => g.servicio_id === f.id)).pesos
+    const cambio = f.cambio
     if (cambio !== 0 && Math.abs(cambio - f.diferencia) <= 1) razones.push(`${f.nombre} (${cifra}, diferencia de cambio)`)
     else if (cambio !== 0) razones.push(`${f.nombre} (${cifra}, de ellos ${pesosCierre(cambio)} de diferencia de cambio)`)
     else razones.push(`${f.nombre} (${cifra})`)
