@@ -12,7 +12,8 @@ import { textoDelPDF } from './texto-del-pdf'
  * sino las afirmaciones que el texto hace o deja de hacer según los datos que
  * existan en el expediente. Se afirma sobre el TEXTO DEL PDF, no sobre las props.
  *
- * Plantilla vigente: la del 2026-10-28 (SOE-033).
+ * Plantilla vigente: la del 2026-10-28 (SOE-033) con el CUARTO de la v2 de Deisy
+ * (2026-10-29): sin «valor aproximado».
  */
 
 const DATOS_BASE = {
@@ -89,8 +90,17 @@ describe('un titular con el certificado UPME completo', () => {
   it('CUARTO y PRIMERO llevan el IVA exacto de la factura, sin redondear', async () => {
     const t = await texto(DATOS_BASE)
     expect(t).toContain(plano(`más IVA de ${fmtCurrency('4319048')}.`))
-    expect(t).toContain(plano(`por valor de ${fmtCurrency('4319048')}, (valor aproximado`))
+    expect(t).toContain(plano(`por valor de ${fmtCurrency('4319048')}, correspondiente a la factura No. FEMM12345`))
     expect(t).not.toContain(plano(fmtCurrency('4319000')))
+  }, 30_000)
+
+  // Plantilla v2 de Deisy (2026-10-29): la DIAN rechaza el trámite si el valor sale aproximado.
+  it('CUARTO no dice que el valor es aproximado ni cita el artículo 577', async () => {
+    for (const datos of [DATOS_BASE, { ...DATOS_BASE, ...COPROPIEDAD }]) {
+      const t = await texto(datos)
+      expect(t.toLowerCase()).not.toContain('aproximado')
+      expect(t).not.toContain('577')
+    }
   }, 30_000)
 
   it('cierra con ciudad y fecha de generación (en Bogotá) y la firma de la plantilla', async () => {

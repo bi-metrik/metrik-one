@@ -32,10 +32,11 @@ import { fmtCurrency, fechaLarga, fechaDeGeneracion } from './formato'
  *    salen `valor_unitario_sin_iva` y `valor_iva`.
  *
  * 1b. El «IVA solicitado» de CUARTO es el IVA EXACTO de la factura, sin redondear:
- *    decisión de Mauricio del 2026-10-29 (hasta ese día salía aproximado al mil). El
- *    texto «(valor aproximado como lo establece el artículo 577 del Estatuto
- *    Tributario)» de CUARTO es de la plantilla del cliente y NO se toca aquí: lo
- *    decide Mauricio.
+ *    decisión de Mauricio del 2026-10-29 (hasta ese día salía aproximado al mil). La
+ *    frase «(valor aproximado como lo establece el artículo 577 del Estatuto
+ *    Tributario)» que traía CUARTO se QUITÓ el 2026-10-29 a pedido de SOENA (plantilla
+ *    v2 de Deisy Ramírez): la DIAN rechaza el trámite si el valor aparece como
+ *    aproximado. No volver a ponerla.
  *
  * 2. La identificación va SIN dígito de verificación. La plantilla identifica al
  *    firmante con CÉDULA DE CIUDADANÍA, no con NIT.
@@ -270,7 +271,7 @@ export default function DeclaracionJuramentadaPDF({ datos, fechaGeneracion }: De
 
         <Text style={s.clause} hyphenationCallback={sinCortes}>
           <B>CUARTO. </B>
-          {`Que el IVA cuya devolución se solicita por valor de ${ivaSolicitado}, (valor aproximado como lo establece el artículo 577 del Estatuto Tributario), correspondiente a la factura `}
+          {`Que el IVA cuya devolución se solicita por valor de ${ivaSolicitado}, correspondiente a la factura `}
           {upme
             ? <><B>{`No. ${factura}`}</B> y al Certificado UPME <B>{`No. ${upme.radicado},`}</B></>
             : <B>{`No. ${factura},`}</B>}

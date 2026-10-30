@@ -1,15 +1,17 @@
 /**
- * Las dos migraciones de las plantillas editables corridas en Postgres en memoria (PGlite):
+ * Las migraciones de las plantillas editables corridas en Postgres en memoria (PGlite):
  *   · 20261029203000_plantillas_documento.sql (tablas, RLS, grants)
  *   · 20261029203100_plantillas_documento_soena_v1.sql (editores y versión 1 de SOENA)
+ *   · 20261030120000_plantillas_documento_soena_dj_v2.sql (DJ v2 de Deisy: sin «valor aproximado»)
  *
  * Lo que la BASE garantiza aunque alguien se salte la server action y llame a PostgREST:
  *   · solo una persona de la lista inserta versiones o activa;
  *   · una versión no se edita ni se borra;
  *   · la versión activa es del mismo workspace y del mismo tipo;
  *   · nadie lee las plantillas de otro workspace.
- * Y de la siembra: los cuatro editores (sin Leidy), la versión 1 idéntica a `v1.ts`, nada
- * activo, idempotente, y aborta si un nombre no aparece exactamente una vez.
+ * Y de la siembra: los cuatro editores (sin Leidy), la versión 1 idéntica a `v1.ts` salvo la
+ * frase del CUARTO que la v2 quitó, la versión 2 de la DJ idéntica a `v1.ts`, nada activo,
+ * idempotente, y aborta si un nombre no aparece exactamente una vez.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -20,6 +22,14 @@ import { DJ_V1, RELACION_V1 } from './v1'
 const leer = (f: string) => readFileSync(join(process.cwd(), 'supabase/migrations', f), 'utf8')
 const DDL = leer('20261029203000_plantillas_documento.sql')
 const SIEMBRA = leer('20261029203100_plantillas_documento_soena_v1.sql')
+const DJ_V2 = leer('20261030120000_plantillas_documento_soena_dj_v2.sql')
+
+/** La frase que la plantilla v2 de Deisy (2026-10-29) quitó del CUARTO. */
+const FRASE_QUITADA = ', (valor aproximado como lo establece el artículo 577 del Estatuto Tributario)'
+const DJ_SEMBRADA_EN_V1 = DJ_V1.replace(
+  'por valor de {{iva_solicitado}}, correspondiente',
+  `por valor de {{iva_solicitado}}${FRASE_QUITADA}, correspondiente`,
+)
 
 const SOENA = '7dea141d-d4da-483d-a78d-b14ef35500c5'
 const OTRO = '00000000-0000-4000-8000-0000000000aa'
@@ -85,6 +95,7 @@ beforeAll(async () => {
   await db.exec(ESQUEMA)
   await db.exec(DDL)
   await db.exec(SIEMBRA)
+  await db.exec(DJ_V2)
 })
 afterAll(async () => { await db.close() })
 
@@ -95,23 +106,45 @@ describe('siembra de SOENA', () => {
     expect(r.rows.map((x) => x.user_id)).toEqual([P.deisy, P.daniela, P.diana, P.juan])
   })
 
-  it('la versión 1 es byte a byte la de v1.ts, y no queda nada activo', async () => {
-    const r = await db.query<{ tipo: string; version_n: number; contenido: string }>(
-      `select tipo, version_n, contenido from public.plantillas_documento_versiones where workspace_id = $1 order by tipo`, [SOENA])
-    expect(r.rows.map((x) => [x.tipo, x.version_n])).toEqual([['declaracion-juramentada', 1], ['relacion-facturas', 1]])
-    expect(r.rows[0].contenido).toBe(DJ_V1)
-    expect(r.rows[1].contenido).toBe(RELACION_V1)
+  it('v1 = la plantilla del 28-oct, v2 de la DJ = v1.ts byte a byte, y no queda nada activo', async () => {
+    const r = await db.query<{ tipo: string; version_n: number; contenido: string; nota: string }>(
+      `select tipo, version_n, contenido, nota from public.plantillas_documento_versiones
+       where workspace_id = $1 order by tipo, version_n`, [SOENA])
+    expect(r.rows.map((x) => [x.tipo, x.version_n])).toEqual([
+      ['declaracion-juramentada', 1], ['declaracion-juramentada', 2], ['relacion-facturas', 1],
+    ])
+    expect(DJ_SEMBRADA_EN_V1).not.toBe(DJ_V1)
+    expect(r.rows[0].contenido).toBe(DJ_SEMBRADA_EN_V1)
+    expect(r.rows[1].contenido).toBe(DJ_V1)
+    expect(r.rows[1].contenido).not.toMatch(/aproximado|577/)
+    expect(r.rows[1].nota).toMatch(/^Plantilla v2 de Deisy 2026-10-29: sin "valor aproximado"/)
+    expect(r.rows[2].contenido).toBe(RELACION_V1)
+    expect(RELACION_V1).not.toMatch(/aproximado|577/)
     const activas = await db.query(`select 1 from public.plantillas_documento_activas`)
     expect(activas.rows).toHaveLength(0)
   })
 
   it('es idempotente', async () => {
     await db.exec(SIEMBRA)
+    await db.exec(DJ_V2)
     const v = await db.query(`select 1 from public.plantillas_documento_versiones where workspace_id = $1`, [SOENA])
     const e = await db.query(`select 1 from public.plantillas_documento_editores where workspace_id = $1`, [SOENA])
-    expect(v.rows).toHaveLength(2)
+    expect(v.rows).toHaveLength(3)
     expect(e.rows).toHaveLength(4)
   })
+
+  it('la v2 de la DJ aborta si SOENA no tiene la versión 1', async () => {
+    const otra = new PGlite()
+    try {
+      await otra.exec(ESQUEMA)
+      await otra.exec(DDL)
+      await expect(otra.exec(DJ_V2)).rejects.toThrow(/aplicar antes 20261029203100/)
+      const v = await otra.query(`select 1 from public.plantillas_documento_versiones`)
+      expect(v.rows).toHaveLength(0)
+    } finally {
+      await otra.close()
+    }
+   }, 30_000)
 
   it('aborta si un nombre no aparece exactamente una vez', async () => {
     const otra = new PGlite()
@@ -129,7 +162,7 @@ describe('siembra de SOENA', () => {
 })
 
 describe('RLS: solo la lista escribe', () => {
-  const insertarVersion = (uid: string, ws = SOENA, n = 2) =>
+  const insertarVersion = (uid: string, ws = SOENA, n = 3) =>
     comoUsuario(uid,
       `insert into public.plantillas_documento_versiones (workspace_id, tipo, version_n, contenido, creada_por)
        values ($1, 'declaracion-juramentada', $2, 'texto', $3) returning id`, [ws, n, uid])
@@ -140,13 +173,13 @@ describe('RLS: solo la lista escribe', () => {
   })
 
   it('Leidy (supervisor, fuera de la lista) no puede crear versiones', async () => {
-    await expect(insertarVersion(P.leidy, SOENA, 3)).rejects.toThrow(/row-level security/)
+    await expect(insertarVersion(P.leidy, SOENA, 4)).rejects.toThrow(/row-level security/)
   })
 
   it('nadie crea versiones a nombre de otra persona', async () => {
     await expect(comoUsuario(P.deisy,
       `insert into public.plantillas_documento_versiones (workspace_id, tipo, version_n, contenido, creada_por)
-       values ($1, 'declaracion-juramentada', 4, 'x', $2)`, [SOENA, P.juan])).rejects.toThrow(/row-level security/)
+       values ($1, 'declaracion-juramentada', 5, 'x', $2)`, [SOENA, P.juan])).rejects.toThrow(/row-level security/)
   })
 
   it('una versión no se edita ni se borra, ni siquiera desde la lista', async () => {
