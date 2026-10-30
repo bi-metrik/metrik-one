@@ -434,12 +434,11 @@ export const CASOS_VENTAS: CasoPublico[] = [
     pasos: [...HASTA_RESUMEN.pasos.slice(0, 2), { escribe: 'Sí' }, HASTA_RESUMEN.pasos[3], { escribe: '¿y el flete cuánto es?' }],
     guion: [...HASTA_RESUMEN.guion, { name: 'responder', args: { tema: 'compra', texto: 'El flete ya va incluido en el total del resumen.', opciones: ['Sí, enviar link', 'Corregir'] } }],
     esperado: (e) => {
-      const ultimo = e.chatwoot.publicados.at(-1)?.salida;
-      const ops = ultimo && 'opciones' in ultimo ? ultimo.opciones : [];
-      return todos(
-        ops.every((o) => !o.id.startsWith('ag|c|')) ? ok('sin botones del modelo que copian la propuesta') : no(`botones del modelo: ${ops.map((o) => o.titulo).join(' | ')}`),
-        e.almacen.trazas().some((t) => t.candados?.some((c) => c.candado === 'botones_de_la_propuesta')) ? ok('candado anotado') : no('sin candado'),
-      );
+      // Ningún mensaje del bot trae botones de conversación con los títulos de la propuesta. En seco el guion los manda y
+      // el candado los quita; Haiku real casi nunca los manda (entonces no hay candado y está bien).
+      const copias = e.chatwoot.publicados.flatMap((x) => ('opciones' in x.salida ? x.salida.opciones : []))
+        .filter((o) => o.id.startsWith('ag|c|') && /^(s[ií], enviar link|corregir)$/i.test(o.titulo.trim()));
+      return copias.length ? no(`botones del modelo: ${copias.map((o) => o.titulo).join(' | ')}`) : ok('sin botones del modelo que copian la propuesta');
     },
   },
   {
