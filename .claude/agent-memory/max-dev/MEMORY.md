@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [Atajo al bot anterior cerrado con roles (30-oct)](project_atajo_bot_anterior_roles.md) — bot anterior atiende por cargo; con rol, gasto/bot los toma Agus; dominio ONE en falla sigue abierto
 - ⚠️ [Dimpro ventas ronda 2 (29-oct)](project_dimpro_ventas_ronda2.md) — SQL ronda2 SIN correr tras deploy; cortes 20/45 s solo ventas; verificador «2.800» toca a todos
 
 - ⚠️⚠️ [Dimpro: venta consultiva y fotos (29-oct)](project_dimpro_venta_consultiva_fotos.md) — tope 3 en 3 capas; fotos por código; SQL SIN correr, después del deploy

@@ -6,7 +6,8 @@
 // Interruptor: `config_extra.bot_conversacional.agente === true` (llega en la misma lectura que identifica al
 // remitente). Apagado, `atenderConAgente` devuelve false sin una sola consulta y todo sigue como en `main`.
 // Prendido, atiende todo lo del equipo en ese workspace salvo «gasto …» (el bot de gastos) y los botones que no son
-// suyos (términos, aviso de datos, resúmenes de la bandeja de antes). El mensaje ya está en `wa_conversacion`: lo
+// suyos (términos, aviso de datos, resúmenes de la bandeja de antes). Con un rol activo del asistente, «gasto …» y
+// «bot …» también son del agente: quien tiene rol nunca cae al bot anterior por esos prefijos (2026-10-30). El mensaje ya está en `wa_conversacion`: lo
 // escribió `registrarEntrante` justo antes.
 // ============================================================
 
@@ -32,7 +33,9 @@ import { alertarCaidaWa, almacenSupabase, cargarReglamento, cupoSupabase, mensaj
 import { leerToque } from './agente/render.ts';
 import { revisarCupo } from './agente/uso.ts';
 import { completarTexto } from './wa-conversacion.ts';
-import { staffIdDelRemitente } from './wa-bandeja.ts';
+import { configDelWorkspace, staffIdDelRemitente } from './wa-bandeja.ts';
+import { empiezaConPrefijoBot } from './wa-bandeja-reglas.ts';
+import { RF_ROL_NO_LEIDO } from './agente/one/turno-con-rol.ts';
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import { fuentesDeComposicion, leerConfigTranscripcion, pistasDeFunciones, pistasSiEncendidas } from './agente/pistas.ts';
 import type { Composicion } from './agente/componer.ts';
@@ -64,7 +67,7 @@ export function fueraDelAgente(message: Pick<IncomingMessage, 'type' | 'text' | 
 export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, message: IncomingMessage): Promise<boolean> {
   const bot = user.modulos?.bot_conversacional;
   if (dominioDelAgente(bot, message.phone) !== 'bandeja') return false;
-  // «gasto …» va al bot de gastos de siempre, salvo que el rol de quien escribe registre gastos con el agente (abajo).
+  // «gasto …» va al bot de gastos de siempre, salvo que quien escribe tenga un rol del asistente (abajo).
   const gastoDeSiempre = esGastoDeSiempre(message);
   if (fueraDelAgente(message) && !gastoDeSiempre) return false;
   const config = leerConfigAgente(bot);
@@ -90,7 +93,7 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
     },
   });
   if (turnoRol.tipo !== 'hoy') {
-    return await atenderConRolDeViajes(supabase, user, message, turnoRol, { config, llave, phone, gastoDeSiempre, workspaceNombre: String(ws.slug ?? user.workspace_id) });
+    return await atenderConRolDeViajes(supabase, user, message, turnoRol, { config, llave, phone, workspaceNombre: String(ws.slug ?? user.workspace_id) });
   }
   if (gastoDeSiempre) return false;
 
@@ -145,7 +148,16 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
   return true;
 }
 
-/** «gasto …» escrito (no reenviado): hoy va al bot de gastos de siempre. Pura. */
+/**
+ * ¿La bandeja mandaría este mensaje al bot anterior por su prefijo («gasto …», «bot …» o los de
+ * `config_extra.bandeja_solicitudes.prefijos_bot`)? Solo lo escrito, no lo reenviado (como `rutaDelMensaje`).
+ */
+async function vaAlBotAnterior(supabase: SupabaseClient, workspaceId: string, message: IncomingMessage): Promise<boolean> {
+  if (message.type !== 'text' || message.reenviado === true) return false;
+  return empiezaConPrefijoBot(message.text, (await configDelWorkspace(supabase, workspaceId)).prefijosBot);
+}
+
+/** «gasto …» escrito (no reenviado): sin rol del asistente va al bot de gastos de siempre. Pura. */
 export function esGastoDeSiempre(message: Pick<IncomingMessage, 'type' | 'text' | 'reenviado'>): boolean {
   return message.type === 'text' && message.reenviado !== true && /^\s*gasto\b/i.test(message.text ?? '');
 }
@@ -172,7 +184,7 @@ function motorViajesDe(supabase: SupabaseClient, workspaceId: string, staffId: s
  */
 async function atenderConRolDeViajes(
   supabase: SupabaseClient, user: WaUser, message: IncomingMessage, turno: Exclude<TurnoViajes, { tipo: 'hoy' }>,
-  o: { config: ReturnType<typeof leerConfigAgente>; llave: string; phone: string; gastoDeSiempre: boolean; workspaceNombre: string },
+  o: { config: ReturnType<typeof leerConfigAgente>; llave: string; phone: string; workspaceNombre: string },
 ): Promise<boolean> {
   const { config, llave, phone, workspaceNombre } = o;
   if (turno.tipo === 'parar') {
@@ -182,9 +194,18 @@ async function atenderConRolDeViajes(
     await soltarDelAgente(supabase, message);
     return true;
   }
-  // «gasto …» con un rol que no registra gastos: el bot de gastos de siempre, como hoy.
-  if (o.gastoDeSiempre && !turno.composicion.declaradas.acciones.includes('gasto')) return false;
+  // Con un rol, «gasto …» y «bot …» los atiende el agente con ESE rol, aunque el rol no registre gastos (Mauricio,
+  // 2026-10-30, «cierra el atajo»): el bot anterior entra con el cargo del remitente (`operator` registra gastos y
+  // actividades), no con su rol, así que soltarlos ahí le daba plata a quien el rol se la quita. Si el rol no tiene la
+  // función, el agente contesta con su alcance (la ficha `alc.plata` de la asesora).
   if (!llave && !haikuActivo()) {
+    // Sin modelo, lo demás sigue el camino de hoy (la bandeja lo guarda); un prefijo del bot anterior, no.
+    if (await vaAlBotAnterior(supabase, user.workspace_id, message)) {
+      console.error('[agente] sin GEMINI_API_KEY ni Haiku activo: prefijo del bot con rol, respuesta fija');
+      await mensajeroWa().enviar(phone, { tipo: 'texto', texto: RF_ROL_NO_LEIDO }, { workspaceId: user.workspace_id, intent: 'agente.sin_modelo' });
+      await soltarDelAgente(supabase, message);
+      return true;
+    }
     console.error('[agente] sin GEMINI_API_KEY ni Haiku activo: sigue el bot de siempre');
     return false;
   }
