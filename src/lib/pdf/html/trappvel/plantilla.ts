@@ -84,6 +84,8 @@ export interface RecursosPropuesta {
  */
 export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
   diaLibre: string
+  /** Varios días libres seguidos, en un solo bloque (QA del #1359). */
+  diasLibres: string
   sumarPlan: string
   subItinerario: string
   subOpcionales: string
@@ -100,6 +102,7 @@ export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
 }> = {
   plural: {
     diaLibre: 'Día abierto para ustedes.',
+    diasLibres: 'Días abiertos para ustedes.',
     sumarPlan: ' Pueden sumar uno de los planes del final.',
     subItinerario: 'Lo que dice «Incluida» ya está en el precio. Los días libres los pueden llenar con los planes opcionales.',
     subOpcionales: 'Escojan los que quieran y los sumamos a la reserva. Precio total de cada plan.',
@@ -116,6 +119,7 @@ export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
   },
   singular: {
     diaLibre: 'Día abierto para usted.',
+    diasLibres: 'Días abiertos para usted.',
     sumarPlan: ' Puede sumar uno de los planes del final.',
     subItinerario: 'Lo que dice «Incluida» ya está en el precio. Los días libres los puede llenar con los planes opcionales.',
     subOpcionales: 'Escoja los que quiera y los sumamos a la reserva. Precio total de cada plan.',
@@ -813,7 +817,7 @@ function chipsDeVuelo(e: EventoDoc, porIndice: Map<number, TarifaDoc>): string[]
  * incluida o, el primer día en una ciudad, la de la ciudad) y un renglón por hecho. Las versiones
  * de los vuelos y los planes opcionales van en chips. Un día no se parte entre hojas.
  */
-function itinerario(m: ModeloPropuesta, r: RecursosPropuesta): string {
+function itinerario(m: ModeloPropuesta, r: RecursosPropuesta, compacto = false): string {
   if (m.dias.length === 0) return ''
   const porIndice = tarifaPorIndice(m)
   const hayOpcionales = m.opcionales.length > 0
@@ -821,38 +825,78 @@ function itinerario(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const sueltos = m.opcionales.some((o) => !ubicados.has(o.nombre))
   const ciudadesConFoto = new Set<string>()
   let ciudadPrevia: string | null = null
-  const bloques = m.dias.map((d, i) => {
+  // La foto: la de la actividad incluida; si no, la de la ciudad el primer día que se está en ella.
+  const fotoDelDia = (d: DiaDoc): FotoResuelta | null => {
+    const actividad = d.eventos.find((e) => e.tipo === 'actividad')
+    let foto = actividad ? (r.fotoDeActividad?.(cabeza(actividad.texto)) ?? null) : null
+    if (!foto && d.ciudad && !ciudadesConFoto.has(d.ciudad)) foto = r.fotoDeCiudad(d.ciudad)
+    if (d.ciudad && foto) ciudadesConFoto.add(d.ciudad)
+    return foto
+  }
+  const resto = hayOpcionales && sueltos ? vozDe(m).sumarPlan : ''
+  // La píldora con la ciudad cada vez que cambia; no queda sola al pie: va pegada a su día.
+  const conPildora = (ciudad: string | null, dia: string) => {
+    const pildora = ciudad && ciudad !== ciudadPrevia ? `<div class="pill"><span>${icono('pin')}${esc(ciudad)}</span></div>\n` : ''
+    if (ciudad) ciudadPrevia = ciudad
+    return pildora ? `<div class="nobr">${pildora}${dia}</div>` : dia
+  }
+  const unDia = (d: DiaDoc, i: number, foto: FotoResuelta | null) => {
     const f = fecha(d.fecha)
     const titulo = tituloDelDia(d, i, m.dias, m)
     const renglones = d.eventos.map((e) => renglonDeEvento(e, d, vozDe(m)))
     const chips = d.eventos.flatMap((e) => chipsDeVuelo(e, porIndice))
     if (d.libre) {
-      const resto = d.opcionales.length > 0 ? '' : hayOpcionales && sueltos ? vozDe(m).sumarPlan : ''
-      renglones.push(`<div class="ev"><span class="h">Libre</span><span>${esc(vozDe(m).diaLibre)}${resto}</span></div>`)
+      renglones.push(`<div class="ev"><span class="h">Libre</span><span>${esc(vozDe(m).diaLibre)}${d.opcionales.length > 0 ? '' : resto}</span></div>`)
     }
     if (d.opcionales.length > 0) chips.push(`<span class="chip">Opcional: ${esc(oLista(d.opcionales))} (ver «Planes para los días libres»)</span>`)
     if (d.sugerencia) renglones.push(`<div class="ev"><span class="h">Idea</span><span>${esc(d.sugerencia)}</span></div>`)
-    // La foto: la de la actividad incluida; si no, la de la ciudad el primer día que se está en ella.
-    const actividad = d.eventos.find((e) => e.tipo === 'actividad')
-    let foto = actividad ? (r.fotoDeActividad?.(cabeza(actividad.texto)) ?? null) : null
-    if (!foto && d.ciudad && !ciudadesConFoto.has(d.ciudad)) foto = r.fotoDeCiudad(d.ciudad)
-    if (d.ciudad && foto) ciudadesConFoto.add(d.ciudad)
     const contenido = `<div>${renglones.join('\n')}${chips.length > 0 ? `<div class="chips">${chips.join('')}</div>` : ''}</div>`
-    const pildora = d.ciudad && d.ciudad !== ciudadPrevia ? `<div class="pill"><span>${icono('pin')}${esc(d.ciudad)}</span></div>\n` : ''
-    if (d.ciudad) ciudadPrevia = d.ciudad
-    const dia = `<div class="day"><div class="dn"><small>DÍA</small>${d.numero}</div><div>
+    return conPildora(d.ciudad, `<div class="day"><div class="dn"><small>DÍA</small>${d.numero}</div><div>
     ${f ? `<div class="df">${esc(diaLargo(d.fecha))}</div>` : ''}
     <div class="t">${esc(titulo)}</div>
     <div class="cuerpo${foto ? ' foto' : ''}">${foto ? `<div class="ph"${fondo(foto)}></div>` : ''}${contenido}</div>
-  </div></div>`
-    // La píldora no queda sola al pie: va pegada a su día.
-    return pildora ? `<div class="nobr">${pildora}${dia}</div>` : dia
+  </div></div>`)
+  }
+  // QA del #1359 · en la versión COMPACTA (`htmlDePropuesta(…, { compacto })`), los días libres
+  // SEGUIDOS en la misma ciudad (sin plan, idea, título ni foto) van en un solo bloque «Días 2–4»:
+  // cinco noches de playa eran un renglón «Día libre» por día y una hoja más casi vacía.
+  const variosLibres = (ds: DiaDoc[]) => {
+    const [a, z] = [ds[0], ds[ds.length - 1]]
+    const fa = fecha(a.fecha)
+    const fz = fecha(z.fecha)
+    const rango = fa && fz
+      ? fa.getUTCMonth() === fz.getUTCMonth()
+        ? `${DIAS_LARGOS[fa.getUTCDay()]} ${fa.getUTCDate()} al ${diaLargo(z.fecha)}`
+        : `${diaLargo(a.fecha)} al ${diaLargo(z.fecha)}`
+      : null
+    const titulo = a.ciudad ? `Días libres en ${a.ciudad}` : 'Días libres'
+    return conPildora(a.ciudad, `<div class="day"><div class="dn rango"><small>DÍAS</small>${a.numero}–${z.numero}</div><div>
+    ${rango ? `<div class="df">${esc(rango)}</div>` : ''}
+    <div class="t">${esc(titulo)}</div>
+    <div class="cuerpo"><div><div class="ev"><span class="h">Libres</span><span>${esc(vozDe(m).diasLibres)}${resto}</span></div></div></div>
+  </div></div>`)
+  }
+  const bloques: string[] = []
+  let corrida: { d: DiaDoc; i: number }[] = []
+  const cerrarCorrida = () => {
+    if (corrida.length === 1) bloques.push(unDia(corrida[0].d, corrida[0].i, null))
+    else if (corrida.length > 1) bloques.push(variosLibres(corrida.map((x) => x.d)))
+    corrida = []
+  }
+  m.dias.forEach((d, i) => {
+    const foto = fotoDelDia(d)
+    const juntable = compacto && d.libre && d.eventos.length === 0 && d.opcionales.length === 0 && !d.sugerencia && !d.titulo && !foto
+    if (juntable && (corrida.length === 0 || corrida[0].d.ciudad === d.ciudad)) { corrida.push({ d, i }); return }
+    cerrarCorrida()
+    if (juntable) { corrida.push({ d, i }); return }
+    bloques.push(unDia(d, i, foto))
   })
+  cerrarCorrida()
   const sub = hayOpcionales ? vozDe(m).subItinerario : 'Lo que dice «Incluida» ya está en el precio.'
   // El encabezado va pegado al primer día en un bloque que no se parte: `break-after: avoid` del
   // `.sh` Chromium no lo respeta y el título quedaba solo al pie de la hoja.
-  const [primero, ...resto] = bloques
-  return `<section class="sec dias">\n<div class="nobr">${encabezadoDeSeccion('cal', 'Itinerario día a día', sub)}\n${primero}</div>\n${resto.join('\n')}\n</section>`
+  const [primero, ...demas] = bloques
+  return `<section class="sec dias">\n<div class="nobr">${encabezadoDeSeccion('cal', 'Itinerario día a día', sub)}\n${primero}</div>\n${demas.join('\n')}\n</section>`
 }
 
 // ── Planes opcionales ─────────────────────────────────────────────────────────
@@ -1058,14 +1102,16 @@ export function bloquesDeTerminos(texto: string | null): { titulo: string | null
  * Lo que incluye y los términos en una sola fila de tarjetas (hasta tres por fila), como las de
  * «Información útil» del formato de Edgar: así la hoja de precios cabe en una hoja.
  */
-function incluyeYCondiciones(m: ModeloPropuesta, firma: string): string {
+function incluyeYCondiciones(m: ModeloPropuesta, firma: string, compacto = false): string {
   const xs = m.precio.incluye.length > 0
     ? m.precio.incluye
     : m.tarifas.length > 0
       ? m.igualEnTodas
       : m.precio.lineas.map((l) => l.nombre)
+  // Compacto: una sola tarjeta de «Incluido» con varios renglones va a dos columnas.
+  const dosColumnas = compacto && xs.length >= 4 && m.precio.noIncluye.length === 0 && bloquesDeTerminos(m.formal.terminos).length === 0
   const tarjetasIncluye = [
-    xs.length > 0 ? `<div class="card"><span class="caps">${m.tarifas.length > 0 ? 'Incluido en todas' : 'Incluido'}</span>${lista(xs)}</div>` : '',
+    xs.length > 0 ? `<div class="card${dosColumnas ? ' dos' : ''}"><span class="caps">${m.tarifas.length > 0 ? 'Incluido en todas' : 'Incluido'}</span>${lista(xs)}</div>` : '',
     m.precio.noIncluye.length > 0 ? `<div class="card"><span class="caps">No incluido</span>${lista(m.precio.noIncluye)}</div>` : '',
   ].filter(Boolean)
   const tarjetasTerminos = bloquesDeTerminos(m.formal.terminos).map(
@@ -1111,18 +1157,24 @@ function creditosDe(m: ModeloPropuesta, r: RecursosPropuesta): string {
  * Los precios al final. Ya no arrancan en hoja nueva (pedido de Edgar del 2026-10-28: menos blanco y
  * menos hojas): siguen a lo anterior y solo saltan si su primer bloque no cabe.
  */
-function hojaDePrecios(m: ModeloPropuesta, r: RecursosPropuesta): string {
+function hojaDePrecios(m: ModeloPropuesta, r: RecursosPropuesta, compacto = false): string {
   return `<section class="sec precios">
 ${eligeTuVersion(m)}
 ${cuantoYCuando(m)}
-${incluyeYCondiciones(m, firmaDe(m, r))}
+${incluyeYCondiciones(m, firmaDe(m, r), compacto)}
 </section>`
 }
 
-export function htmlDePropuesta(m: ModeloPropuesta, r: RecursosPropuesta): string {
+/**
+ * El documento entero. `compacto` (QA del #1359): la versión que el motor imprime SOLO si ahorra una
+ * hoja (`imprimirHtmlAPdf`, opción `alternativa`): días libres seguidos en un bloque, «Incluido» a dos
+ * columnas y un poco menos de aire entre secciones. Sin la opción, el documento de siempre.
+ */
+export function htmlDePropuesta(m: ModeloPropuesta, r: RecursosPropuesta, opciones: { compacto?: boolean } = {}): string {
+  const compacto = opciones.compacto === true
   return `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><title>${esc(m.portada.consecutivo)} · ${esc(m.portada.titulo)}</title>
-<style>${CSS_PROPUESTA}</style></head><body>
+<style>${CSS_PROPUESTA}</style></head><body${compacto ? ' class="compacto"' : ''}>
 ${ICONOS_PROPUESTA}
 <section>
 ${portada(m, r)}
@@ -1130,10 +1182,10 @@ ${portada(m, r)}
 ${vuelosYTren(m)}
 ${hospedaje(m, r)}
 ${traslados(m)}
-${itinerario(m, r)}
+${itinerario(m, r, compacto)}
 ${opcionales(m, r)}
 ${informacionUtil(m)}
-${hojaDePrecios(m, r)}
+${hojaDePrecios(m, r, compacto)}
 </body></html>`
 }
 

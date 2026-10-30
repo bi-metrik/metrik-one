@@ -37,6 +37,9 @@ const estado = vi.hoisted(() => ({
   caso: null as null | { viaje: CasoBateria['viaje']; bloqueo: boolean },
   motor: [] as unknown[],
   motivos: null as null | string[],
+  /** Con Chromium (prueba real del #1359): el motor html imprime de verdad y se guarda lo impreso. */
+  chromium: false,
+  impreso: null as null | { pdf: Buffer; html: string; hojas: unknown },
 }))
 
 vi.mock('server-only', () => ({}))
@@ -80,9 +83,15 @@ vi.mock('@/lib/cotizaciones/viaje-negocio', async importOriginal => ({
   },
 }))
 // El motor html de la propuesta: Chromium no corre aquí. Se guarda lo que recibe (la entrada del modelo).
-vi.mock('@/lib/pdf/html/propuesta-html', () => ({
-  pdfDePropuestaHtml: async (entrada: unknown) => {
+vi.mock('@/lib/pdf/html/propuesta-html', async importOriginal => ({
+  pdfDePropuestaHtml: async (entrada: unknown, opts: unknown) => {
     estado.motor.push(entrada)
+    if (estado.chromium) {
+      const real = await importOriginal<typeof import('@/lib/pdf/html/propuesta-html')>()
+      const r = await real.pdfDePropuestaHtml(entrada as Parameters<typeof real.pdfDePropuestaHtml>[0], opts as Parameters<typeof real.pdfDePropuestaHtml>[1])
+      estado.impreso = { pdf: r.pdf, html: r.html, hojas: r.medidas.hojas ?? null }
+      return r
+    }
     const { PDFDocument } = await import('pdf-lib')
     const doc = await PDFDocument.create()
     doc.addPage()
@@ -715,7 +724,23 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
     expect(opciones.find(o => o.hotel === SOL)!.estancia).toEqual({ desde: '2026-12-18', hasta: '2026-12-22', noches: 4 })
   }, 60_000)
 
-  it('defecto 3 · se reproduce: sacar la Recomendada y escoger otra Recomendada deja cada marca con su paquete', async () => {
+  // Defecto 2 · Chromium no corre en CI: con `CHROMIUM_EJECUTABLE` (la torre) se mide el PDF impreso.
+  it.skipIf(!process.env.CHROMIUM_EJECUTABLE)('defecto 2 · con Chromium, dos versiones caben en dos hojas (sin la tercera casi vacía)', async () => {
+    expect(await paqueteEnPropuesta(idDe(DECAMAR), false)).toEqual({ success: true })
+    estado.chromium = true
+    try {
+      await medir(caso)
+    } finally {
+      estado.chromium = false
+    }
+    const { hojasDelPdf } = await import('@/lib/pdf/chromium/render-chromium')
+    expect(await hojasDelPdf(estado.impreso!.pdf)).toBe(2)
+    // Normal salía en 3; la compacta (días libres juntos) cabe en 2 y es la que sale.
+    expect(estado.impreso!.hojas).toEqual({ primera: 3, alternativa: 2, gano: 'alternativa' })
+    expect(estado.impreso!.html).toContain('<small>DÍAS</small>2–4')
+  }, 60_000)
+
+  it('defecto 3 · sacar la Recomendada y escoger una tercera como Recomendada deja cada marca con su paquete', async () => {
     expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'va', [DECAMAR]: 'va' })
     // 1. Sacar Gaviota (la Recomendada): la Recomendada pasa al siguiente que va.
     expect(await paqueteEnPropuesta(idDe(GAVIOTA), false)).toEqual({ success: true })
@@ -729,7 +754,7 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
     expect((m.props.itinerarios ?? []).map(b => clave((b.items as LineaPdf[])[0].nombre)).sort()).toEqual([clave(DECAMAR), clave(SOL)].sort())
   }, 60_000)
 
-  it('defecto 3 · escoger como Recomendada el paquete que estaba fuera lo mete; el que deja la Recomendada sigue yendo', async () => {
+  it('defecto 3 · se reproduce (prueba real): escoger como Recomendada el paquete que se sacó lo mete; el que deja la Recomendada sigue yendo', async () => {
     expect(await paqueteEnPropuesta(idDe(GAVIOTA), false)).toEqual({ success: true })
     expect((await elegirOpcionEnTarifa((await recomendada()).id, grupo(), idDe(GAVIOTA))).success).toBe(true)
     expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'va', [DECAMAR]: 'va' })

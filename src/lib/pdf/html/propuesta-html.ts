@@ -161,7 +161,7 @@ export type AvisoFotosDeHotel = ReturnType<typeof avisosDeFotosDeHoteles>[number
 export async function prepararPropuestaHtml(
   entrada: EntradaModeloPropuesta,
   opts: OpcionesPropuestaHtml,
-): Promise<{ html: string; pie: string; encabezado: string; modelo: ModeloPropuesta; avisosFotos: AvisoFotosDeHotel[] }> {
+): Promise<{ html: string; htmlCompacto: string | null; pie: string; encabezado: string; modelo: ModeloPropuesta; avisosFotos: AvisoFotosDeHotel[] }> {
   const modelo = modeloDePropuesta(entrada)
   const catalogo = opts.catalogo ?? null
   const comoFotoPDF = (f: FotoDeCatalogo, rotulo: string | null): FotoPDF => ({
@@ -305,10 +305,13 @@ export async function prepararPropuestaHtml(
     creditosExtra,
   }
   const crudo = htmlDePropuesta(modelo, recursos)
+  // QA del #1359 · la versión compacta, que el motor imprime solo si ahorra una hoja.
+  const compacto = htmlDePropuesta(modelo, recursos, { compacto: true })
   const fuentes = fuentesDelDocumento()
   const inter = fuentes.find((f) => f.familia === 'Inter' && f.peso === 400 && f.estilo === 'normal')
   return {
     html: inyectarEstilo(crudo, cssDeFuentes(fuentes)),
+    htmlCompacto: inyectarEstilo(compacto, cssDeFuentes(fuentes)),
     pie: pieDeHoja({
       texto: modelo.formal.pie,
       codigo: modelo.portada.consecutivo,
@@ -321,7 +324,8 @@ export async function prepararPropuestaHtml(
 }
 
 export async function pdfDePropuestaHtml(entrada: EntradaModeloPropuesta, opts: OpcionesPropuestaHtml): Promise<ResultadoPropuestaHtml> {
-  const { html, pie, encabezado, modelo, avisosFotos } = await prepararPropuestaHtml(entrada, opts)
-  const { pdf, medidas } = await imprimirHtmlAPdf(html, { pie, encabezado, timeoutMs: opts.timeoutMs ?? 40_000 })
-  return { pdf, modelo, html, medidas, avisosFotos }
+  const { html, htmlCompacto, pie, encabezado, modelo, avisosFotos } = await prepararPropuestaHtml(entrada, opts)
+  // QA del #1359 · una última hoja casi vacía: si la versión compacta cabe en menos hojas, sale esa.
+  const { pdf, medidas, html: impreso } = await imprimirHtmlAPdf(html, { pie, encabezado, timeoutMs: opts.timeoutMs ?? 40_000, alternativa: htmlCompacto })
+  return { pdf, modelo, html: impreso ?? html, medidas, avisosFotos }
 }

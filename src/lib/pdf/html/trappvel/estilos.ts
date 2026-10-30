@@ -131,6 +131,7 @@ thead { display: table-header-group; }
 .day::before { content:""; position:absolute; left: 6.9mm; top: 17.4mm; bottom: 2mm; width: .7mm; border-radius: .35mm; background: linear-gradient(#a879d6, rgba(190,153,223,.15)); }
 .day .dn { width: 15.2mm; height: 15.2mm; border-radius: 50%; background: linear-gradient(150deg,#e6197a 0%,#8a2cb5 48%,#3f7fbd 100%); box-shadow: 0 1.3mm 3.4mm rgba(230,25,122,.3); color:#fff; font: 700 15pt/1 Poppins, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; }
 .day .dn small { font: 800 5.4pt Inter, sans-serif; letter-spacing: 1px; margin-bottom: .6mm; opacity: .95; }
+.day .dn.rango { font-size: 10.5pt; letter-spacing: -.2px; }
 .day .df { font: 700 7.85pt Inter, sans-serif; letter-spacing: 1.6px; text-transform: uppercase; color: var(--rosa); margin-top: .4mm; }
 .day .t { font: 600 12.8pt/1.3 Poppins, sans-serif; color: var(--ink); margin: .5mm 0 2mm; }
 .day .cuerpo.foto { display:grid; grid-template-columns: 39.7mm 1fr; gap: 4.4mm; align-items: start; }
@@ -194,6 +195,25 @@ thead { display: table-header-group; }
 .img.mosaico .mx { background-size: cover; background-position: center; }
 .img.fila { display:grid; grid-template-rows: 1fr; gap: .6mm; background: #fff; }
 .img.fila .mx { background-size: cover; background-position: center; }
+
+/*
+ * La versión compacta (QA del #1359): solo se imprime si ahorra una hoja (\`imprimirHtmlAPdf\`,
+ * \`alternativa\`). Los días libres seguidos ya vienen juntos; aquí, un poco menos de aire.
+ */
+.compacto .sec { margin-top: 2.6mm; }
+.compacto .day { padding-bottom: 1.4mm; }
+.compacto .day .t { margin: .3mm 0 1.2mm; }
+.compacto .day .cuerpo.foto { grid-template-columns: 30mm 1fr; }
+.compacto .day .ph { height: 18mm; }
+.compacto .cta { padding: 2.6mm 6mm; }
+.compacto .btns { gap: 1.4mm; }
+.compacto .card { padding: 2.6mm 4.4mm 2mm; }
+.compacto .sh { margin-bottom: 1.8mm; }
+.compacto .sh .sq { width: 8.6mm; height: 8.6mm; }
+.compacto .tf { padding: 3.2mm 4.6mm 2mm; }
+.compacto .tf .row { padding: .9mm 0; }
+.compacto .btn { padding: 1.7mm 4mm; }
+.compacto .sign { margin-top: 2mm; }
 `
 
 /** Los símbolos SVG que usa el documento (`<use href="#plane"/>`). */
