@@ -23,6 +23,11 @@ export interface EntradaFueraDeLoPactado {
   pagadoProveedores: number
   /** Cobrado confirmado al cliente en el negocio. */
   cobradoCliente: number
+  /**
+   * H-25 (QA G12) · lo que la TRM movió los pagos del servicio, este incluido (pesos; positiva si
+   * subió). Sigue estando por fuera de lo pactado, pero no es que el proveedor cobrara más: se nombra.
+   */
+  diferenciaCambio?: number | null
 }
 
 const pesos = (n: number) => '$' + Math.round(n).toLocaleString('es-CO').replace(/,/g, '.')
@@ -38,7 +43,10 @@ export function confirmacionFueraDeLoPactado(e: EntradaFueraDeLoPactado): string
   if (cotizado <= 0) {
     partes.push(`este servicio no tiene valor cotizado y le vas a pagar ${pesos(monto)}`)
   } else if (totalServicio > cotizado) {
-    partes.push(`con este pago el servicio queda en ${pesos(totalServicio)} y se cotizó en ${pesos(cotizado)} (${pesos(totalServicio - cotizado)} más)`)
+    const mas = totalServicio - cotizado
+    const cambio = Math.max(0, Math.round(Number(e.diferenciaCambio) || 0))
+    const deCambio = cambio >= mas ? ', todo por diferencia de cambio' : cambio > 0 ? `, de ellos ${pesos(cambio)} de diferencia de cambio` : ''
+    partes.push(`con este pago el servicio queda en ${pesos(totalServicio)} y se cotizó en ${pesos(cotizado)} (${pesos(mas)} más${deCambio})`)
   }
 
   const cobrado = Math.round(Number(e.cobradoCliente) || 0)

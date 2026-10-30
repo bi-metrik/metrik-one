@@ -89,6 +89,31 @@ describe('cierre económico (F6-4, C8)', () => {
   })
 })
 
+describe('H-25 (QA G12) · la fila del Cierre separa la diferencia de cambio del sobrecosto', () => {
+  // Viaje 06: Renaissance cotizado USD 2.084,40 a 4.150 = $8.650.260, pagado a TRM 4.230.
+  const ren = { id: 'ren', nombre: 'Renaissance', proveedor_nombre: 'Renaissance', estado: 'reservado', costo_cotizado: 8_650_260, valor_por_pagar: null, comision_esperada: null, comision_estado: null, moneda: { moneda: 'USD', monto: 2084.4, tasa: 4150 } }
+  const base = { precioAprobado: 9_611_400, cobrado: 9_611_400, iva: 0, recargo: 0, servicios: [ren] }
+
+  it('solo cambio: +$166.752 de diferencia de cambio y cero sobrecosto', () => {
+    const c = calcularCierre({ ...base, gastos: [{ monto: 8_817_012, servicio_id: 'ren', categoria: 'proveedor_viaje', descripcion: null, moneda: 'USD', tasa_cambio: 4230 }] })
+    expect(c.filas[0]).toMatchObject({ diferencia: 166_752, cambio: 166_752, sobrecosto: 0 })
+  })
+
+  it('cambio y además el hotel subió: cada cosa en su lugar', () => {
+    // USD 2.184,40 a 4.230 = $9.240.012: USD 100 de más (sobrecosto) y la TRM.
+    const c = calcularCierre({ ...base, gastos: [{ monto: 9_240_012, servicio_id: 'ren', categoria: 'proveedor_viaje', descripcion: null, moneda: 'USD', tasa_cambio: 4230 }] })
+    const f = c.filas[0]
+    expect(f.diferencia).toBe(589_752)
+    expect(f.cambio).toBe(174_752)
+    expect(f.sobrecosto).toBe(415_000)
+  })
+
+  it('un servicio en pesos no tiene diferencia de cambio: todo es sobrecosto', () => {
+    const c = calcularCierre(A)
+    expect(c.filas.find(f => f.id === 'hotel')).toMatchObject({ diferencia: 90_000, cambio: 0, sobrecosto: 90_000 })
+  })
+})
+
 describe('En viaje por fechas (F6-1)', () => {
   const config = configEtapasPorFecha({ etapas_por_fecha: { entrar: { etapa_numero: 7 }, salir: { etapa_numero: 8, offset: 1 } } })!
   it('entra el día de salida desde la 6 y sale el día después del regreso', () => {
