@@ -1,6 +1,6 @@
 ---
 name: project-trappvel-agus-roles
-description: Roles de Trappvel sobre la bandeja de viajes (mano_derecha viajes+ONE, asesor_viajes), 29-oct; datos de personas FUERA del repo (asignaciones.json); arnés con Haiku sin Gemini; SQL SIN aplicar; trampas de dos motores
+description: Roles de Trappvel sobre la bandeja de viajes (mano_derecha viajes+ONE, asesor_viajes), 29-oct; cambio de textos con roles ya publicados = --antes (30-oct); datos de personas FUERA del repo (asignaciones.json); arnés con Haiku sin Gemini; SQL SIN aplicar; trampas de dos motores
 metadata:
   type: project
 ---
@@ -44,6 +44,15 @@ Lo no obvio:
 - Quitar el nombre `cargar_tanda` de una frase de `g.viaje_o_gasto` tumbó md-yo a 0/3. Cada cambio de ficha = corrida.
 - Las fichas de archivos de ONE (`g.soporte`…) dan por hecho que todo archivo es un gasto: en la mano derecha van con
   `cuando` acotado a recibos/comprobantes, o la solicitud en PDF se trata como soporte.
+
+**30-oct (fix/agus-sin-plata): «plata» vetada y el asistente se llama Trappi.** Los roles del 29-oct YA están en prod
+(bot_parametros rol:*). Cambiar un texto con roles publicados = `roles-trappvel-sql.ts --antes <bandeja publicada>
+--prefijo <p>` (el PENDIENTE normal choca con las asignaciones vigentes y `bot_reglamentos` es inmutable: se cambia el
+borrador y se publica versión nueva). La reversa busca la versión del rol por la huella de su BANCO anterior, no
+recalculada con el código (el código de hoy arma otras fichas del rol sobre la misma bandeja). SQL `2026-10-30_sin-plata-*`
+SIN aplicar; bancos md 25/25 (c56abf95…), av 24/24 (9fe5bedc…). Haiku: «no consulta dinero ni cifras» tumbó av-yo 0/3;
+«o un gasto o ingreso» md-yo 2/9 vs «o de un gasto» 9/9. Método que sirvió: variantes en copias de `supabase/functions`
+en el scratchpad, `--solo <casos>` en paralelo y réplicas (un 3/3 o un 1/3 sueltos engañan: md es ruidoso).
 
 **Why:** Mauricio aprobó los dos roles el 29-oct; publicar exige un banco que pase con k=3.
 **How to apply:** correr línea base y roles con Haiku (comandos en `docs/asistentes/roles-trappvel.md`), regenerar en la

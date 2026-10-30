@@ -15,7 +15,10 @@ import { lectorMixto, unirLecturas } from './lectura-mixta'
 import { textoLectura } from '../contexto'
 import { propuestaVigente } from '../nucleo'
 import type { RolResuelto } from '../roles'
-import type { LecturaAdjunto } from '../tipos'
+import type { Ficha, LecturaAdjunto } from '../tipos'
+import { RESPUESTAS_FIJAS_NUCLEO } from '../reglamento'
+import { fichasOne } from '../one/reglamento'
+import { BOTON_POR_DEFECTO, MOTIVO_LLANO, PLANTILLA_POR_DEFECTO } from '../persona'
 
 /**
  * Los dos roles de Trappvel sobre la bandeja de viajes (2026-10-29): el turno por el rol (hoy / rol / parar), lo que ve
@@ -42,6 +45,47 @@ function puertos(r: Awaited<ReturnType<PuertosTurnoViajes['resolver']>>, o: { re
   }
 }
 
+/** Lo que el modelo lee como instrucción o el usuario recibe: `hacer`, `cuando` y los textos de `valores` (no las claves). */
+function textosVisibles(f: Ficha): string[] {
+  const out: string[] = [f.hacer, f.cuando ?? '']
+  const recorrer = (v: unknown): void => {
+    if (typeof v === 'string') out.push(v)
+    else if (Array.isArray(v)) v.forEach(recorrer)
+    else if (v && typeof v === 'object') Object.values(v).forEach(recorrer)
+  }
+  recorrer(f.valores)
+  return out
+}
+
+const PLATA = /\bplata\b/i
+
+describe('«plata» está vetada en lo que dice el asistente (decisión de Mauricio, 2026-10-30)', () => {
+  it.each(['mano_derecha', 'asesor_viajes'] as const)('%s: ninguna ficha del rol ni del turno compuesto la trae (las claves sí pueden)', async (clave) => {
+    const fichas = fichasDelRol(clave)
+    expect(fichas.flatMap((f) => textosVisibles(f).filter((t) => PLATA.test(t)).map((t) => `${f.clave}: ${t}`))).toEqual([])
+    // El reglamento del turno, con la ayuda y el «fuera de tema» que escribe el código para el rol.
+    const t = await turnoViajes(puertos({ tipo: 'rol', rol: rolResuelto(clave) }))
+    if (t.tipo !== 'atender') throw new Error(t.tipo)
+    expect(t.reglamento.fichas.flatMap((f) => textosVisibles(f).filter((x) => PLATA.test(x)).map((x) => `${f.clave}: ${x}`))).toEqual([])
+  })
+
+  it('el asistente se llama Trappi en la bandeja y en los dos roles (decisión de Mauricio, 2026-10-30)', () => {
+    const nombre = (fs: Ficha[]) => fs.find((f) => f.clave === 'perfil')?.valores?.nombre
+    expect(nombre(fichasBaseBandeja())).toBe('Trappi')
+    expect(nombre(fichasDelRol('mano_derecha'))).toBe('Trappi')
+    expect(nombre(fichasDelRol('asesor_viajes'))).toBe('Trappi')
+  })
+
+  it('las respuestas fijas y los textos del código tampoco', () => {
+    const fijas = [
+      ...Object.values(RESPUESTAS_FIJAS_NUCLEO), RF_SIN_ROL, RF_ROL_NO_LEIDO, ...Object.values(MOTIVO_LLANO), PLANTILLA_POR_DEFECTO, BOTON_POR_DEFECTO,
+      ...fichasOne('Agencia de Prueba').filter((f) => f.tipo === 'respuesta_fija').flatMap(textosVisibles),
+      ...fichasBaseBandeja().filter((f) => f.tipo === 'respuesta_fija').flatMap(textosVisibles),
+    ]
+    expect(fijas.filter((t) => PLATA.test(t))).toEqual([])
+  })
+})
+
 describe('el turno de la bandeja por el rol', () => {
   it('sin roles en el workspace: el camino de hoy (nada se compone)', async () => {
     const llamadasOne: string[][] = []
@@ -67,10 +111,10 @@ describe('el turno de la bandeja por el rol', () => {
     })
     expect(t.rol).toMatchObject({ clave: 'asesor_viajes', version: 1, reglamento_id: 'reg-asesor_viajes' })
     expect(t.bloques).toBeNull()
-    // Lo que ve el modelo: ninguna herramienta de plata.
+    // Lo que ve el modelo: ninguna herramienta de dinero.
     const nombres = declaraciones(t.dominio, t.reglamento).map((d) => d.name)
     expect(nombres).toEqual(['buscar', 'ver_viaje', 'link_autorizacion', 'pasar_a_persona', 'proponer', 'responder'])
-    // Su reglamento no habla de gastos: no trae fichas de ONE y conserva «esta bandeja no consulta plata».
+    // Su reglamento no habla de gastos: no trae fichas de ONE y conserva «esta bandeja no consulta cartera, gastos…».
     const claves = t.reglamento.fichas.map((f) => f.clave)
     expect(claves).toContain('alc.plata')
     expect(claves.filter((k) => ['p.gasto', 'g.ingreso', 'g.soporte', 'glo.gasto_empresa'].includes(k))).toEqual([])
@@ -105,7 +149,7 @@ describe('el turno de la bandeja por el rol', () => {
     expect(t.dominio.reenvios).toBeUndefined()
     expect(t.dominio.venceConRespuesta?.('gasto')).toBe(true)
     expect(t.dominio.venceConRespuesta?.('viaje_nuevo')).toBe(false)
-    // Su reglamento: sin «no consulta plata», con las reglas del gasto de ONE y sin crear contactos.
+    // Su reglamento: sin «no consulta cartera, gastos…», con las reglas del gasto de ONE y sin crear contactos.
     const claves = t.reglamento.fichas.map((f) => f.clave)
     expect(claves).not.toContain('alc.plata')
     expect(claves).toEqual(expect.arrayContaining(['p.gasto', 'g.ingreso', 'g.soporte', 'g.viaje_o_gasto', 'g.rol_dueno']))
