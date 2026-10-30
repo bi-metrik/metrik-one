@@ -22,8 +22,11 @@ Rama fix/defectos-qa-1359, un PR sin migración. Lo no obvio:
 - La prueba con Chromium real vive en la batería con `it.skipIf(!CHROMIUM_EJECUTABLE)` y `estado.chromium`.
 - Pestañas de Tarifas: `top: calc(var(--alto-barra-pasos, 118px) + 8px)`; la barra escribe la variable en su padre
   con ResizeObserver. happy-dom no interpreta `calc(var())`: la prueba lee el atributo `style`.
-- Visto y NO arreglado: en el día a día de 2 versiones, el vuelo de regreso de la Opción 2 (otro día) sale como
-  evento general, sin etiqueta de versión (`diaADia`, `conCajas` exige >1 texto).
+- Arreglado el 30-oct (fix/itinerario-vuelo-por-version): `EventoDoc.tarifas` (solo si NO es de todas; `[]` en
+  cualquier fuente = de todas) + `regreso`. La plantilla antepone «Opción 2: regreso, vuelo …» solo si no hay
+  chips (las cajas ya nombran versiones) y titula «Regreso a casa (Opción 2)». También aplica a servicios y carro
+  con `tarifas` parciales. El día de la Recomendada sin evento NO dice «día libre» (se omitió para no crecer).
+  Medido: sigue 3→2 hojas. `PROPUESTA_PDF_SALIDA` en el «defecto 2» de la batería deja el PDF.
 
 **How to apply:** si otra acción mueve paquetes entre tarifas, pasarle `antes` a `cerrarAccionPorPasos`. Si alguien
 sube un espaciado del PDF, medir también la versión compacta. Relacionado: [[qa-corta-1352]], [[defectos-qa-1342]],

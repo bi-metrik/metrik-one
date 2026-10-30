@@ -736,6 +736,14 @@ function tituloDelDia(d: DiaDoc, i: number, dias: DiaDoc[], m: ModeloPropuesta):
     const origen = ciudadSola(m.ruta.origen)
     return origen ? `Salida desde ${origen}` : 'Salida'
   }
+  // QA del #1369 · con versiones de fechas distintas, cada una regresa su día: «Regreso a casa
+  // (Opción 2)» el 22 y «Regreso a casa (Recomendada)» el 23, no un regreso de todas.
+  const regresos = d.eventos.filter((e) => e.tipo === 'vuelo' && e.momento === 'salida' && e.regreso)
+  if (regresos.length > 0 && regresos.every((e) => e.tarifas)) {
+    const indices = [...new Set(regresos.flatMap((e) => e.tarifas ?? []))]
+    const nombres = m.tarifas.filter((t) => indices.includes(t.indice)).map((t) => t.nombre)
+    if (nombres.length > 0) return `Regreso a casa (${nombres.join(' y ')})`
+  }
   if (i === dias.length - 1 && sale) return 'Regreso a casa'
   if (tipos.has('tren') && d.ciudad && anterior && d.ciudad !== anterior) return `${anterior} → ${d.ciudad} en tren`
   if (d.ciudad && d.ciudad !== anterior) return `Llegada a ${d.ciudad}`
@@ -757,14 +765,27 @@ const PALABRA_EVENTO: Record<EventoDoc['tipo'], string> = { vuelo: 'Vuelo', tren
  * Un renglón del día: la hora en morado a la izquierda (o, sin hora, la palabra del hecho, como
  * «Llegada» o «Libre» en el formato de Edgar) y el texto en frase. Nada que no esté en los datos.
  */
-function renglonDeEvento(e: EventoDoc, d: DiaDoc, voz: (typeof TEXTOS_DE_VOZ)[VozDelDocumento] = TEXTOS_DE_VOZ.plural): string {
+function renglonDeEvento(
+  e: EventoDoc,
+  d: DiaDoc,
+  voz: (typeof TEXTOS_DE_VOZ)[VozDelDocumento] = TEXTOS_DE_VOZ.plural,
+  porIndice: Map<number, TarifaDoc> = new Map(),
+): string {
   let etiquetaIzq = e.hora ?? ''
   let texto: string
+  // QA del #1369 · lo que no es de todas las versiones dice de cuáles es: «Opción 2: regreso,
+  // vuelo San Andrés → Bogotá». Con cajas por versión (chips) ya lo dicen las cajas.
+  const versiones = e.tarifas && e.porTarifa.length === 0
+    ? e.tarifas.map((i) => porIndice.get(i)).filter((t): t is TarifaDoc => t !== undefined)
+    : []
+  const prefijo = versiones.length > 0 ? `${versiones.map((t) => `<b class="c${LETRA[t.clave]}">${esc(t.nombre)}</b>`).join(' y ')}: ` : ''
   switch (e.tipo) {
     case 'vuelo':
       if (e.momento === 'llegada') {
         texto = esc(e.texto.replace(/^Llegada a /, voz.llegan))
         etiquetaIzq ||= 'Llegada'
+      } else if (prefijo) {
+        return `<div class="ev"><span class="h">${esc(etiquetaIzq || PALABRA_EVENTO.vuelo)}</span><span>${prefijo}${e.regreso ? 'regreso, ' : ''}${etiquetaIzq ? 'vuelo ' : ''}${esc(e.texto)}</span></div>`
       } else {
         texto = `${etiquetaIzq ? 'Vuelo ' : ''}${esc(e.texto)}`
       }
@@ -795,7 +816,7 @@ function renglonDeEvento(e: EventoDoc, d: DiaDoc, voz: (typeof TEXTOS_DE_VOZ)[Vo
   }
   // Sin hora, la palabra del hecho va a la izquierda y el texto no la repite.
   etiquetaIzq ||= PALABRA_EVENTO[e.tipo]
-  return `<div class="ev"><span class="h">${esc(etiquetaIzq)}</span><span>${texto}</span></div>`
+  return `<div class="ev"><span class="h">${esc(etiquetaIzq)}</span><span>${prefijo}${texto}</span></div>`
 }
 
 /** Las versiones del día de un vuelo, en chips: «Recomendada · AV Avianca 19:20, directo». */
@@ -843,7 +864,7 @@ function itinerario(m: ModeloPropuesta, r: RecursosPropuesta, compacto = false):
   const unDia = (d: DiaDoc, i: number, foto: FotoResuelta | null) => {
     const f = fecha(d.fecha)
     const titulo = tituloDelDia(d, i, m.dias, m)
-    const renglones = d.eventos.map((e) => renglonDeEvento(e, d, vozDe(m)))
+    const renglones = d.eventos.map((e) => renglonDeEvento(e, d, vozDe(m), porIndice))
     const chips = d.eventos.flatMap((e) => chipsDeVuelo(e, porIndice))
     if (d.libre) {
       renglones.push(`<div class="ev"><span class="h">Libre</span><span>${esc(vozDe(m).diaLibre)}${d.opcionales.length > 0 ? '' : resto}</span></div>`)

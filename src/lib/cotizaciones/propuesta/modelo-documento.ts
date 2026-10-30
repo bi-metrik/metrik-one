@@ -189,6 +189,14 @@ export interface EventoDoc {
   porTarifa: { tarifas: number[]; texto: string; siglas?: string[] }[]
   /** Solo vuelos: `salida` el día que sale, `llegada` el día que llega (si llega al día siguiente). */
   momento?: 'salida' | 'llegada'
+  /**
+   * Con varias versiones, las ÚNICAS a las que pertenece el hecho (índices de tarifa). Ausente = es
+   * de todas. QA del #1369: el regreso de la Opción 2 (22 dic, 4 noches) salía en el día 5 como si
+   * fuera de todas, y la Recomendada regresaba el 23.
+   */
+  tarifas?: number[]
+  /** Solo vuelos: el tramo de regreso (el segundo de su vuelo). */
+  regreso?: boolean
 }
 
 export interface DiaDoc {
@@ -846,7 +854,7 @@ export function modeloDePropuesta({
   ]
 
   // ── Día a día ──
-  const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios: serviciosConFecha, porTarifas, principal })
+  const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios: serviciosConFecha, porTarifas, principal, versiones: bloques.length })
   repartirOpcionales(dias, opcionales)
 
   // ── Portada y lo formal ──
@@ -1165,9 +1173,19 @@ function diaADia(p: {
   servicios: ServicioDelDocumento[]
   porTarifas: boolean
   principal: number | null
+  /** Cuántas versiones tiene el documento. */
+  versiones: number
 }): DiaDoc[] {
   const inicio = iso(leerFecha(p.inicio))
   if (!inicio) return []
+  // Las versiones de un hecho, si no es de todas: el día a día dice de cuál es.
+  const soloDe = (xs: (number[] | undefined)[]): { tarifas?: number[] } => {
+    if (!p.porTarifas) return {}
+    const todas = [...new Set(xs.flatMap((x) => x ?? []))].sort((a, b) => a - b)
+    // Un hecho sin versiones leídas (`[]`) es de todas, como en el resto del documento.
+    if (xs.some((x) => !x || x.length === 0) || todas.length === 0 || todas.length >= p.versiones) return {}
+    return { tarifas: todas }
+  }
   const eventos = new Map<string, EventoDoc[]>()
   const poner = (fecha: string | null, e: EventoDoc) => {
     if (!fecha) return
@@ -1189,7 +1207,10 @@ function diaADia(p: {
       return { ...pt, siglas: t ? siglasDeTramos(t.vu.aerolinea ?? t.vu.linea, t.f.numero) : [] }
     })
     const conCajas = porTarifa.length > 1
+    const deVersiones = soloDe(grupo.map((t) => t.tarifas))
     poner(primero.fecha, {
+      ...deVersiones,
+      ...(primero.sentido === 1 ? { regreso: true } : {}),
       tipo: 'vuelo',
       // Con una caja por versión, la hora va en cada caja: cada versión sale a una hora distinta.
       hora: conCajas ? null : primero.f.salida,
@@ -1202,6 +1223,7 @@ function diaADia(p: {
       const alLlegar = p.porTarifas ? agruparPorTexto(llegan, (t) => `llega ${t.f.llegada}`) : []
       const cajas = alLlegar.length > 1
       poner(sumarDias(primero.fecha, 1), {
+        ...soloDe(llegan.map((t) => t.tarifas)),
         tipo: 'vuelo',
         hora: cajas ? null : (llegan[0].f.llegada ?? null),
         texto: `Llegada a ${primero.f.hasta ?? '?'}`,
@@ -1230,17 +1252,18 @@ function diaADia(p: {
   for (const s of p.servicios) {
     if (s.itemId && fechaIso(s.fecha, p.inicio)) yaEnServicios.add(s.itemId)
     // N7-4 / V7-3 · el carro de alquiler: el día que se recoge y el día que se devuelve.
+    const deVersiones = soloDe([s.tarifas])
     if (s.alquiler) {
       const vehiculo = s.alquiler.vehiculo ? ` · ${s.alquiler.vehiculo}` : ''
-      poner(fechaIso(s.fecha, p.inicio), { tipo: 'carro', hora: s.hora ?? null, texto: `Recogida del carro de alquiler${s.alquiler.recogida ? ` en ${s.alquiler.recogida}` : ''}${vehiculo}`, porTarifa: [] })
+      poner(fechaIso(s.fecha, p.inicio), { ...deVersiones, tipo: 'carro', hora: s.hora ?? null, texto: `Recogida del carro de alquiler${s.alquiler.recogida ? ` en ${s.alquiler.recogida}` : ''}${vehiculo}`, porTarifa: [] })
       if (s.alquiler.fechaDevolucion) {
-        poner(s.alquiler.fechaDevolucion, { tipo: 'carro', hora: null, texto: `Devolución del carro${s.alquiler.devolucion ? ` en ${s.alquiler.devolucion}` : ''}`, porTarifa: [] })
+        poner(s.alquiler.fechaDevolucion, { ...deVersiones, tipo: 'carro', hora: null, texto: `Devolución del carro${s.alquiler.devolucion ? ` en ${s.alquiler.devolucion}` : ''}`, porTarifa: [] })
       }
       continue
     }
     const tipo = s.tipo === 'actividad' ? 'actividad' : s.tipo === 'tren' || esTren(s.descripcion) ? 'tren' : 'traslado'
     const fecha = fechaIso(s.fecha, p.inicio)
-    poner(fecha, { tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
+    poner(fecha, { ...deVersiones, tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
     // V7-5 (QA del 2026-10-29) · una actividad de varios días (Disney, 4 días) ocupa los días que
     // siguen: antes solo salía el primero y los demás decían «Día libre», aunque estaban pagados.
     const dias = tipo === 'actividad' && fecha ? diasDeLaActividad(s.descripcion) : null
@@ -1249,7 +1272,7 @@ function diaADia(p: {
       for (let k = 2; k <= dias; k++) {
         const otro = sumarDias(fecha, k - 1)
         if (ultimoDia && otro >= ultimoDia) break
-        poner(otro, { tipo: 'actividad', hora: null, texto: `${nombre} (día ${k} de ${dias})`, porTarifa: [] })
+        poner(otro, { ...deVersiones, tipo: 'actividad', hora: null, texto: `${nombre} (día ${k} de ${dias})`, porTarifa: [] })
       }
     }
   }

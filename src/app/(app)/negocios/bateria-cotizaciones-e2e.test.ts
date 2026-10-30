@@ -724,6 +724,36 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
     expect(opciones.find(o => o.hotel === SOL)!.estancia).toEqual({ desde: '2026-12-18', hasta: '2026-12-22', noches: 4 })
   }, 60_000)
 
+  it('defecto 4 · en el día a día cada regreso cae en su día y dice de qué versión es; la ida común sale una vez', async () => {
+    // Recomendada (Gaviota) regresa el 23; la Opción 2 (Sol), el 22. Antes el del 22 salía como de todas.
+    expect(await paqueteEnPropuesta(idDe(DECAMAR), false)).toEqual({ success: true })
+    const r = await medir(caso)
+    const indice = (nombre: string) => r.modelo.tarifas.find(t => t.nombre === nombre)!.indice
+    const vuelosDe = (fecha: string) => r.modelo.dias.find(d => d.fecha === fecha)!.eventos.filter(e => e.tipo === 'vuelo')
+    // La ida es la misma en las dos: una vez y sin versión.
+    expect(vuelosDe('2026-12-18')).toHaveLength(1)
+    expect(vuelosDe('2026-12-18')[0].tarifas).toBeUndefined()
+    // Cada regreso, en su día y con su versión.
+    expect(vuelosDe('2026-12-22').map(e => e.tarifas)).toEqual([[indice('Opción 2')]])
+    expect(vuelosDe('2026-12-23').map(e => e.tarifas)).toEqual([[indice('Recomendada')]])
+    // El documento lo dice en el renglón y en el título del día.
+    for (const compacto of [false, true]) {
+      const texto = htmlDePropuesta(r.modelo, RECURSOS, { compacto }).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+      // Un día: desde su «DÍA n» hasta el siguiente día (o bloque «DÍAS») o el fin del itinerario.
+      const dia = (n: number) => {
+        const desde = texto.indexOf(`DÍA ${n} `)
+        const fin = [texto.indexOf(' DÍA', desde + 4), texto.indexOf('Elijan su versión', desde)].filter(x => x > 0)
+        return texto.slice(desde, Math.min(...fin))
+      }
+      expect(dia(5)).toContain('Regreso a casa (Opción 2)')
+      expect(dia(5)).toMatch(/Opción 2 : regreso/)
+      expect(dia(5)).not.toContain('Recomendada')
+      expect(dia(6)).toContain('Regreso a casa (Recomendada)')
+      expect(dia(6)).toMatch(/Recomendada : regreso/)
+      expect(dia(1)).not.toMatch(/Opción 2|Recomendada/)
+    }
+  }, 60_000)
+
   // Defecto 2 · Chromium no corre en CI: con `CHROMIUM_EJECUTABLE` (la torre) se mide el PDF impreso.
   it.skipIf(!process.env.CHROMIUM_EJECUTABLE)('defecto 2 · con Chromium, dos versiones caben en dos hojas (sin la tercera casi vacía)', async () => {
     expect(await paqueteEnPropuesta(idDe(DECAMAR), false)).toEqual({ success: true })
@@ -738,6 +768,10 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
     // Normal salía en 3; la compacta (días libres juntos) cabe en 2 y es la que sale.
     expect(estado.impreso!.hojas).toEqual({ primera: 3, alternativa: 2, gano: 'alternativa' })
     expect(estado.impreso!.html).toContain('<small>DÍAS</small>2–4')
+    // QA del #1369 · con la versión de cada regreso, sigue en dos hojas.
+    expect(estado.impreso!.html).toContain('Regreso a casa (Opción 2)')
+    // Para mirarlo: `PROPUESTA_PDF_SALIDA=<ruta.pdf>` deja el PDF impreso ahí.
+    if (process.env.PROPUESTA_PDF_SALIDA) (await import('node:fs')).writeFileSync(process.env.PROPUESTA_PDF_SALIDA, estado.impreso!.pdf)
   }, 60_000)
 
   it('defecto 3 · sacar la Recomendada y escoger una tercera como Recomendada deja cada marca con su paquete', async () => {
