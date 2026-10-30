@@ -372,7 +372,8 @@ export const CASOS_VENTAS: CasoPublico[] = [
     guion: [VC({ codigo: 'MP-13' }), R('Este es el MP-13 Taladro magnético 28 mm, a $1.900.000. ¿Te sirve?', 'producto')],
     esperado: (e) => {
       const f = e.almacen.trazas().flatMap((t) => t.fotos ?? []);
-      return todos(contiene(e, 'Este es el MP-13'), fotos(e).length === 0 ? ok('ninguna foto publicada') : no('publicó la foto'),
+      // El texto con el código (la redacción la escoge el modelo: «Este es…», «Claro, aquí está…»).
+      return todos(contiene(e, 'MP-13'), fotos(e).length === 0 ? ok('ninguna foto publicada') : no('publicó la foto'),
         f.length === 1 && !f[0].ok && f[0].codigo === 'MP-13' ? ok('traza: foto fallida') : no(`traza: ${JSON.stringify(f)}`), sinPersona(e));
     },
   },
@@ -395,10 +396,12 @@ export const CASOS_VENTAS: CasoPublico[] = [
   {
     id: 'v-consultiva-foto-no-se-repite', conjunto: 'ventas', titulo: 'La foto de un producto no se repite en la conversación, salvo que pida verla',
     ventas: { productos: PRODUCTOS_CONSULTIVA },
-    pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: '¿y el MP-13 qué capacidad tiene?' }, { escribe: 'mándame la foto del MP-13 otra vez' }],
+    // La segunda pregunta se contesta con el nombre (con Haiku real, «¿qué capacidad tiene?» a veces pasa a persona por
+    // duda_abierta y la conversación queda con el equipo: el caso no medía eso).
+    pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: '¿y el MP-13 es magnético?' }, { escribe: 'mándame la foto del MP-13 otra vez' }],
     guion: [
       VC({ codigo: 'MP-13' }), R('El MP-13 vale $1.900.000.', 'precio'),
-      VC({ codigo: 'MP-13' }), R('El MP-13 perfora hasta 28 mm.', 'especificaciones'),
+      VC({ codigo: 'MP-13' }), R('Sí, el MP-13 es un taladro magnético de 28 mm.', 'especificaciones'),
       VC({ codigo: 'MP-13' }), R('Claro, este es el MP-13.', 'producto'),
     ],
     esperado: (e) => (fotos(e).length === 2 ? ok('2 fotos: la primera y la pedida') : no(`${fotos(e).length} fotos`)),
