@@ -503,3 +503,36 @@ describe('Postventa (F6-7)', () => {
     expect((await registrarPostventa({ negocioId: NEG, calificacion: 5, comentario: null, referido: 'no_quiso', referidoNombre: null, referidoCelular: null, proximoMes: null, proximoDestino: null })).ok).toBe(false)
   })
 })
+
+// ── QA G11 (2026-10-30): ningún avance se salta el Cierre económico ──────────
+
+import { cambiarEtapaNegocioConGate } from './negocio-v2-actions'
+
+/**
+ * H-35: el viaje 03 pasó de En viaje a Postventa con el saldo en cero: el salto por saldo atravesaba
+ * el Cierre económico (`stage = 'cobro'`) y `cierre_viaje` quedaba en null. VISTO FALLAR sobre main:
+ * el negocio aterrizaba en e9.
+ */
+describe('el Cierre económico no se salta (H-35)', () => {
+  it('con el saldo en cero, avanzar desde En viaje aterriza en el Cierre, no en Postventa', async () => {
+    await enCierre()
+    neg().etapa_actual_id = 'e7'
+    comoEdgar()
+    const r = await cambiarEtapaNegocioConGate(NEG, 'e8', undefined, true)
+    expect(r.error).toBeNull()
+    expect(neg().etapa_actual_id).toBe('e8')
+    expect(meta().cierre_viaje).toBeUndefined()
+  })
+
+  it('«Omitir gate» con motivo tampoco pasa a Postventa sin el margen confirmado', async () => {
+    await enCierre()
+    comoEdgar()
+    const r = await cambiarEtapaNegocioConGate(NEG, 'e9', 'el cliente ya viajó', true)
+    expect(r.error).toBe('gate_bloqueado')
+    expect(r.bloquesPendientes).toEqual([{ nombre: 'Falta que Edgar confirme el cierre.', es_gate: true, omitible: false }])
+    expect(neg().etapa_actual_id).toBe('e8')
+    expect((await confirmarCierre(NEG)).ok).toBe(true)
+    expect((await cambiarEtapaNegocioConGate(NEG, 'e9', undefined, true)).error).toBeNull()
+    expect(neg().etapa_actual_id).toBe('e9')
+  })
+})
