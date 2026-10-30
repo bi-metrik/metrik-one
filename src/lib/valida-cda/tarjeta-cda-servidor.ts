@@ -259,6 +259,7 @@ export async function registrarTarjetaCda(
     servicio_contratado_id: ctx.contrato.id,
     negocio_id: ctx.contrato.negocioId,
     plan_cobro_id: plan.id,
+    estado: 'activa',
     metodo_pago_ref: cliente.ref,
     ultimos4,
     titular: pagador.titular,

@@ -272,6 +272,41 @@ describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
     expect(m.html).toContain('la tarjeta rechazó el cobro')
   })
 
+  describe('un CDA con el pago automático (Términos v1.5, 2.4)', () => {
+    // q1: período del 23-ago (atrasado); q2: período del 23-sep, después del registro del 22-sep.
+    const cda = (extra: Partial<Tablas> = {}) => {
+      const t = conTarjeta(extra)
+      const cuotas = t.plan_cobro_cuotas as Fila[]
+      cuotas[0].concepto_detalle = 'Licencia VALIDA · Starter — periodo del 23/08/2026 al 22/09/2026'
+      cuotas[1].concepto_detalle = 'Licencia VALIDA · Starter — periodo del 23/09/2026 al 22/10/2026'
+      t.tarjetas_pago_cda = [
+        {
+          id: 't1', workspace_id: 'wsM', workspace_cliente_id: 'wsC', servicio_contratado_id: 'sc1', negocio_id: 'n1', plan_cobro_id: 'plan1',
+          estado: 'activa', metodo_pago_ref: 'epayco:Cust1234:Tok12345', ultimos4: '1234', titular: {}, celular: '3001234567', correo: 'ana@cda.test',
+          cobro_desde: '2026-09-22', dia_renovacion: 23, terminos_vigente_desde: '2026-12-01', ip: null,
+        },
+      ]
+      return t
+    }
+
+    it('lo atrasado sigue recibiendo su enlace (la tarjeta nunca lo cobra sola); lo de la tarjeta, no', async () => {
+      const r = await correr(cda({ cobro_intentos_tarjeta: [] }))
+      expect(r.resumen.generados.map((g) => g.numero)).toEqual([1])
+      expect(r.resumen.conTarjetaSinRechazo).toBe(1)
+      expect(r.enviar.mock.calls[0][0].text).not.toContain('tarjeta')
+    })
+
+    it('rechazada la del período de la tarjeta: enlace y correo con la tarjeta, el reintento y la pausa', async () => {
+      const r = await correr(cda({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 2, intento: 0, resultado: 'rechazado' }] }))
+      expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
+      const m = r.enviar.mock.calls.map((c) => c[0]).find((x) => x.subject.startsWith('No pudimos'))!
+      expect(m.subject).toBe('No pudimos cobrar tu cuota a la tarjeta terminada en 1234: puedes pagarla en línea')
+      expect(m.text).toContain('No pudimos cobrar la cuota 2 de CDA Pruebas a tu tarjeta terminada en 1234. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.')
+      expect(m.text).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026. Si no se paga, las consultas nuevas se pausan desde el 6 de diciembre de 2026.')
+      expect(m.html).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026.')
+    })
+  })
+
   it('el primer cobro rechazado (el plan volvió al enlace, Condiciones 7.5) también lo dice; la otra cuota, no', async () => {
     const r = await correr(tablasBase({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 1, intento: 0, resultado: 'rechazado' }] }))
     expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
