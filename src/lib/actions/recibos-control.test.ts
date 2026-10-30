@@ -569,9 +569,45 @@ describe('getControlRecibos — el RC-3 sale del comprobante UPME, uno por negoc
     const b = data!.pagos.find(p => p.cobro_id === 'b')!
     expect(b.estado).toBe('pendiente')
     expect(b.valor_upme).toBeNull()
-    expect(b.faltantes).toEqual(['el valor del comprobante de pago UPME (revisa el bloque del comprobante en el negocio)'])
+    // SOE-035: no es un dato roto, es que todavía no se le pagó a la UPME.
+    expect(b.faltantes).toEqual([])
+    expect(b.espera_upme).toMatch(/^Aún no se ha pagado a la UPME/)
     expect(data!.totales.emitibles).toBe(0)
     expect(data!.totales.valor_pendiente).toBe(0)
+  })
+
+  it('SOE-035: la fila frenada trae la porción UPME del negocio, no el pago entero', async () => {
+    comprobantes = [{ negocio_id: 'neg-1', data: { campos: {} } }]
+    const { data } = await getControlRecibos()
+
+    const b = data!.pagos.find(p => p.cobro_id === 'b')!
+    const a = data!.pagos.find(p => p.cobro_id === 'a')!
+    // a ($45) y b ($701.767) van en el mismo RC-3: la porción es la suma, no los $701.767
+    // de b ni ningún monto consignado.
+    expect(b.porcion_upme).toBe(701_812)
+    expect(a.estado).toBe('no_aplica')
+    expect(a.no_aplica_motivo).toContain('cuando se cargue el comprobante')
+  })
+
+  it('SOE-035 V0660: $45 de sobrepago en la franja de la tarifa no aparece ni frena', async () => {
+    cobros = [cobros[0]]
+    reparto = [reparto[0]]
+    comprobantes = []
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos.find(p => p.cobro_id === 'a')).toBeUndefined()
+    expect(data!.totales.pendientes).toBe(0)
+  })
+
+  it('SOE-035 solo_iva: con techo_tarifa en 0 el sobrepago cae fuera de la tarifa y no aparece', async () => {
+    // Lo que deja la vista corregida (20261030163500): techo 0, el sobrepago va a excedente.
+    cobros = [cobros[1]]
+    reparto = [{ cobro_id: 'b', a_tramo1: 459_000, a_tramo2: 0, a_tarifa: 0, excedente: 87 }]
+    techos = [{ negocio_id: 'neg-1', techo_tarifa: 0 }]
+    comprobantes = []
+    const { data } = await getControlRecibos()
+
+    expect(data!.pagos).toEqual([])
   })
 })
 

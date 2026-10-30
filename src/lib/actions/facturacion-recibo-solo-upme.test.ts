@@ -155,7 +155,7 @@ describe('emitirReciboDeNegocio — el RC-3 sale del comprobante UPME, uno por n
     const r = await emitirReciboDeNegocio('neg-1', { cobroId: 'c-mixto' })
 
     expect(r.ok).toBe(false)
-    expect(!r.ok && r.error).toBe('Falta el valor del comprobante de pago UPME: revisa el bloque del comprobante en el negocio.')
+    expect(!r.ok && r.error).toBe('Aún no se ha pagado a la UPME: el recibo sale cuando se cargue el comprobante de pago UPME en el negocio.')
     expect(llamadas).toEqual([])
   })
 
