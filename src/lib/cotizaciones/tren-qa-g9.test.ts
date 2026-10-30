@@ -4,6 +4,7 @@ import { normalizarDeteccion, rescatarCortada } from '@/lib/ai/detectar-tipo-cap
 import { filasDeServicioDeTarifa, tipoDeServicio } from '@/lib/viaje/servicios-desde-tarifa'
 
 import { ranuraDelItem, serviciosDeItems } from './detalle-viaje'
+import { estadosPermitidos } from './estado-servicio'
 import { fichaDeOpcion, resumenDeOpcion } from './opcion-viaje'
 import { serviciosDelDocumento } from './propuesta/servicios-del-documento'
 import { nombreAutomaticoDeRanura } from './ranuras-cotizacion'
@@ -63,6 +64,10 @@ describe('el tipo «Tren» en el catálogo y en la detección', () => {
     expect(normalizarDeteccion({ tipo: 'tren', origen: 'Paris Gare de Lyon', destino: 'Roma Termini', lugar: 'X' }))
       .toEqual({ tipo: 'tren', lugar: null, origen: 'Paris Gare de Lyon', destino: 'Roma Termini' })
     expect(rescatarCortada('{"tipo": "tren", "origen": "Madrid')?.tipo).toBe('tren')
+  })
+
+  it('un tren va o no va (para dejar en «No va» el que no va)', () => {
+    expect(estadosPermitidos('tren: Tren París–Roma')).toEqual(['incluido', 'no'])
   })
 
   it('el bloque nuevo se nombra por su ruta: «Tren París–Roma»', () => {
