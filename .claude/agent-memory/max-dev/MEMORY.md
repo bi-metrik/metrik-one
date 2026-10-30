@@ -2,6 +2,8 @@
 
 ## Project memories
 
+- ⚠️ [Dimpro ventas ronda 2 (29-oct)](project_dimpro_ventas_ronda2.md) — SQL ronda2 SIN correr tras deploy; cortes 20/45 s solo ventas; verificador «2.800» toca a todos
+
 - ⚠️⚠️ [Dimpro: venta consultiva y fotos (29-oct)](project_dimpro_venta_consultiva_fotos.md) — tope 3 en 3 capas; fotos por código; SQL SIN correr, después del deploy
 - ⚠️⚠️ [Plantillas editables DJ/Relación (29-oct)](project_plantillas_editables.md) — 203000/203100 APLICADAS (29-oct); siembra SOENA sin activar; Chromium sin respaldo; IVA exacto
 - [Prueba corta del #1352 (29-oct)](project_qa_corta_1352.md) — «Ir» con 3 causas; noches salen de paradas (sin zona = 0); créditos en .sign
