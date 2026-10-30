@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { PRODUCTOS_CONSULTIVA } from '../arnes/conjuntos-ventas'
 import { bajarFoto, mensajeroChatwootApi } from '../produccion'
 import type { FilaPublica, LlaveConversacion } from '../tipos'
-import { MAX_SUGERENCIAS, codigosEnTexto, fotosDe, productoParaModelo, sugerirProductos, tipoDe, urlFotoPermitida } from './catalogo-ventas'
+import { MAX_SUGERENCIAS, codigosEnTexto, fotosDe, hablaDePrecio, productoParaModelo, siguientePaso, sugerirProductos, tipoDe, urlFotoPermitida } from './catalogo-ventas'
 import type { ProductoVenta } from './catalogo-ventas'
 import { demasiadosProductos, fotosConsultadas, fotosDelTurno, pideVerFoto } from './fotos-ventas'
 import { horasDePausa } from './dominio-ventas'
@@ -21,8 +21,8 @@ import { CLAVES_RONDA_2, CLAVES_VENTA_CONSULTIVA, TEXTOS_RONDA_2, WORKSPACE_DIMP
 const HOST = 'ejemplo.supabase.co'
 const URL_OK = `https://${HOST}/storage/v1/object/public/ferreteria-fotos/dimpro/X1/MP-01-X1-1.jpg`
 const codigos = (r: ReturnType<typeof sugerirProductos>) => ('productos' in r ? r.productos.map((p) => p.codigo) : [])
-const prod = (codigo: string, titulo: string, marca: string, etiquetas: string[]): ProductoVenta => ({
-  publicacionId: codigo, codigo, sku: codigo, titulo, nombre: titulo, marca, categoria: 'Herramientas', etiquetas, precio: 100000, ficha: [], fotos: [],
+const prod = (codigo: string, titulo: string, marca: string, etiquetas: string[], precio = 100000): ProductoVenta => ({
+  publicacionId: codigo, codigo, sku: codigo, titulo, nombre: titulo, marca, categoria: 'Herramientas', etiquetas, precio, ficha: [], fotos: [],
 })
 
 describe('sugerencias: una pregunta de uso y máximo 3', () => {
@@ -39,9 +39,9 @@ describe('sugerencias: una pregunta de uso y máximo 3', () => {
     if (r.tipo !== 'preguntar') throw new Error(r.tipo)
     expect(r.pregunta).toBe('¿Lo buscas de mano o magnético, para perforar estructura metálica?')
     expect((r.pregunta!.match(/\?/g) ?? []).length).toBe(1)
-    expect(r.especializados).toEqual([{ tipo: 'Taladro magnético', para: expect.stringContaining('estructura metálica') }])
-    // Sin magnéticos en lo que coincide, no hay pregunta hecha: el modelo pregunta el material.
-    const sinMagneticos = PRODUCTOS_CONSULTIVA.filter((p) => !/magnético/.test(p.titulo))
+    expect(r.especializados).toEqual(expect.arrayContaining([{ tipo: 'Taladro magnético', para: expect.stringContaining('estructura metálica') }, { tipo: 'Rotomartillo', para: expect.stringContaining('concreto') }]))
+    // Sin especializados en lo que coincide, no hay pregunta hecha: el modelo pregunta el material.
+    const sinMagneticos = PRODUCTOS_CONSULTIVA.filter((p) => !/magnético|Rotomartillo/.test(p.titulo))
     const r2 = sugerirProductos([...sinMagneticos, { ...sinMagneticos[0], codigo: 'MP-21', titulo: 'Taladro percutor MarcaEjemplo 18V' }, { ...sinMagneticos[0], codigo: 'MP-22', titulo: 'Taladro de cable MarcaEjemplo 600 W' }], { buscar: 'taladro' })
     expect(r2).toMatchObject({ tipo: 'preguntar', pregunta: null })
   })
@@ -72,9 +72,10 @@ describe('sugerencias: una pregunta de uso y máximo 3', () => {
       prod('MP-51', 'Taladro magnético Ferton TLM925 110V 300 rpm con mandril', 'Ferton', ['taladro magnético', 'metalmecánica']),
     ]
     expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'metal, de cable' }))).toEqual(['MP-38'])
-    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'de mano' }))).toEqual(['MP-17', 'MP-38', 'MP-15'])
-    // MP-17 no nombra material en este fixture (en el real su ficha dice ladrillo): uso general, entra después.
-    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'concreto' }))).toEqual(['MP-15', 'MP-18', 'MP-17'])
+    // Mauricio 30-oct: el rotomartillo solo si habla de concreto u obra (para la casa lo sugería).
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'de mano' }))).toEqual(['MP-17', 'MP-38'])
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'hogar' }))).toEqual(['MP-17', 'MP-38'])
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'concreto' }))).toEqual(['MP-15', 'MP-18'])
     expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'estructura metálica' }))[0]).toBe('MP-44')
     const p = sugerirProductos(real, { buscar: 'taladro' })
     expect(p).toMatchObject({ tipo: 'preguntar', pregunta: '¿Lo buscas de mano o magnético, para perforar estructura metálica?', accesorios: ['Soporte para taladro'] })
@@ -112,6 +113,55 @@ describe('sugerencias: una pregunta de uso y máximo 3', () => {
     expect(m.tiene_foto).toBe(true)
     expect(JSON.stringify(m)).not.toContain('http')
     expect(productoParaModelo(PRODUCTOS_CONSULTIVA[1]).tiene_foto).toBe(false)
+  })
+})
+
+describe('preguntas primero (Mauricio, 30-oct): cable o inalámbrico, presupuesto, y uno o dos', () => {
+  const real = [
+    prod('MP-15', 'Rotomartillo Dongcheng DZC05-26B SDS-Plus 26 mm reversible', 'Dongcheng', ['rotomartillo', 'concreto'], 344900),
+    prod('MP-17', 'Taladro percutor inalámbrico Dongcheng DCJZ2050i 20V 50 Nm con batería 2.0Ah', 'Dongcheng', [], 324900),
+    prod('MP-38', 'Taladro Ferton TLJ513 de 13 mm 550 W, 0 a 2.800 rpm', 'Ferton', [], 124900),
+  ]
+  const candidatos = (uso: string) => {
+    const r = sugerirProductos(real, { buscar: 'taladro', uso })
+    if (r.tipo !== 'sugerir') throw new Error(r.tipo)
+    return r.candidatos ?? []
+  }
+  const cods = (p: ReturnType<typeof siguientePaso>) => (p.tipo === 'recomendar' ? p.productos.map((x) => x.codigo) : [])
+
+  it('«para la casa, económico»: primero cable o inalámbrico, con desde cuánto arranca cada uno; nada de productos', () => {
+    const p = siguientePaso(candidatos('hogar, económico'), 'taladro hogar, económico', {})
+    expect(p).toMatchObject({ tipo: 'preguntar', falta: 'energia', desde: { cable: 124900, inalambrico: 324900 } })
+  })
+
+  it('después, si habló de precio, el presupuesto; con el tope, el que cabe', () => {
+    const c = candidatos('hogar, económico')
+    // Con cable solo queda el MP-38: no hay nada que separar, se recomienda.
+    expect(cods(siguientePaso(c, 'hogar, económico', { energia: 'cable' }))).toEqual(['MP-38'])
+    // Le da igual: el presupuesto, que es lo que separa.
+    expect(siguientePaso(c, 'hogar, económico', { energia: 'cualquiera' })).toMatchObject({ tipo: 'preguntar', falta: 'presupuesto' })
+    expect(cods(siguientePaso(c, 'hogar, económico', { energia: 'cualquiera', presupuesto: 200000 }))).toEqual(['MP-38'])
+    // Sin tope y económico: el más barato primero, dos como mucho.
+    expect(cods(siguientePaso(c, 'hogar, económico', { energia: 'cualquiera', presupuesto: 0 }))).toEqual(['MP-38', 'MP-17'])
+  })
+
+  it('nada cabe en el tope: el más cercano, con la diferencia (para explicar por qué vale la pena)', () => {
+    const p = siguientePaso(candidatos('hogar'), 'hogar', { energia: 'inalambrico', presupuesto: 200000 })
+    expect(p).toMatchObject({ tipo: 'recomendar', fueraDePresupuesto: { tope: 200000, diferencia: 124900 } })
+    expect(cods(p)).toEqual(['MP-17'])
+  })
+
+  it('una pregunta ya hecha en el tramo no se repite: se sigue sin la respuesta', () => {
+    const c = candidatos('hogar, económico')
+    expect(siguientePaso(c, 'hogar, económico', {}, ['energia'])).toMatchObject({ tipo: 'preguntar', falta: 'presupuesto' })
+    expect(siguientePaso(c, 'hogar, económico', {}, ['energia', 'presupuesto']).tipo).toBe('recomendar')
+  })
+
+  it('el uso con «inalámbrico» ya contesta la primera; para la casa el rotomartillo no sale', () => {
+    expect(candidatos('hogar').map((p) => p.codigo)).not.toContain('MP-15')
+    expect(cods(siguientePaso(candidatos('hogar, inalámbrico'), 'hogar, inalámbrico', {}))).toEqual(['MP-17'])
+    expect(hablaDePrecio('algo barato')).toBe(true)
+    expect(hablaDePrecio('para metal')).toBe(false)
   })
 })
 

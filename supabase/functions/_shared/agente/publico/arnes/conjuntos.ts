@@ -48,6 +48,11 @@ export interface CasoPublico {
   pasos?: PasoCaso[];
   /** Lo que haría el modelo (solo `--seco`). */
   guion?: Paso[];
+  /**
+   * El caso solo mide algo si el guion hace de modelo (fuerza un formato roto, 4 productos, `datos` mal formado): con el
+   * modelo real no pasa por ahí. La corrida en vivo lo deja fuera y el banco lo dice (`omitidos_solo_seco`).
+   */
+  soloSeco?: boolean;
   envolver?: (m: Modelo, e: () => EscenarioPublico) => Modelo;
   esperado?: (e: EscenarioPublico) => Veredicto;
   /**
