@@ -51,6 +51,12 @@ function objetivosDeHoteles(hoteles: readonly HotelDelDocumento[], fichas: Ficha
   })
 }
 
+/** Las ciudades del viaje además de la llave de cada hotel: cada parte de «A / B» y el destino. */
+function ciudadesDelViaje(props: CotizacionPDFProps): (ObjetivoFoto | null)[] {
+  const textos = [...(props.viaje?.hoteles ?? []).flatMap((h) => (h.ciudad ?? '').split('/')), props.viaje?.destino ?? '']
+  return textos.map((t) => t.trim()).filter(Boolean).map((t) => objetivo('ciudad', t))
+}
+
 /** Un plan opcional del documento con la ciudad de su línea (la misma llave que su tarjeta). */
 export interface OpcionalDelDocumento {
   nombre: string
@@ -79,6 +85,9 @@ export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string
   const deOpcionales = clavesDeOpcionales(opcionales)
   const objetivos = sinRepetir([
     ...hoteles.map((h) => objetivo('ciudad', h.ciudad)),
+    // La imagen del destino para la portada (regla de fotos, 2026-10-29): la parada puede ser la otra
+    // parte de «Willemstad / Curacao» o el destino del viaje (QA G7), no solo la llave del hotel.
+    ...ciudadesDelViaje(props),
     ...objetivosDeHoteles(hoteles, fichas),
     ...deOpcionales.values(),
   ])
