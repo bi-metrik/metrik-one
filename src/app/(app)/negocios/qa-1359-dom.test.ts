@@ -110,7 +110,7 @@ async function montar(bloqueo: boolean) {
   await act(async () => { root!.render(React.createElement(VistaPorPasos, props(bloqueo) as never)) })
 }
 
-const pestanas = () => [...contenedor.querySelectorAll('[data-pestanas-tarifas] [data-tab-tarifa]')] as HTMLElement[]
+const pestanas = () => [...contenedor.querySelectorAll('[role="tablist"][aria-label="Tarifas"] [data-tab-tarifa]')] as HTMLElement[]
 const precioDe = (tab: HTMLElement) => tab.querySelector('b')?.textContent ?? ''
 
 describe('QA del #1359 · Tarifas en un bloqueo de tres paquetes', () => {
