@@ -16,7 +16,7 @@ import { ranuraPorSlug } from '../src/lib/cotizaciones/ranuras-pantallazo'
 import type { TipoRanura } from '../src/lib/cotizaciones/ranuras-cotizacion'
 import type { LecturaCasilla } from '../src/lib/cotizaciones/tarifa-pasajero'
 
-const SLUG: Record<TipoRanura, string> = { vuelo: 'vuelo_detalle', hotel: 'hotel_detalle', traslado: 'traslado_detalle', actividad: 'actividad_detalle', otro: 'otro_detalle', paquete: 'paquete_detalle' }
+const SLUG: Record<TipoRanura, string> = { vuelo: 'vuelo_detalle', hotel: 'hotel_detalle', traslado: 'traslado_detalle', tren: 'tren_detalle', actividad: 'actividad_detalle', otro: 'otro_detalle', paquete: 'paquete_detalle' }
 
 export interface Pantallazo {
   /** El id de la fila en la bandeja (y la llave de «Aceptar»). */

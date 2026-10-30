@@ -73,7 +73,7 @@ export function incluyeDeOne(items: readonly ItemConLectura[], nivel: NivelDetal
   for (const s of serviciosDeItems([...items])) {
     const fecha = detallado && s.fecha ? ` · ${s.fecha}` : ''
     const que = comoNombrePropio(s.descripcion)
-    out.push(s.tipo === 'traslado' ? `Traslado ${que}${fecha}` : `${que}${fecha}`)
+    out.push(s.tipo === 'traslado' ? `Traslado ${que}${fecha}` : s.tipo === 'tren' ? `Tren ${que}${fecha}` : `${que}${fecha}`)
   }
   // El paquete de bloqueo (D6 de Mauricio, 2026-10-29): su hotel, sus vuelos y lo que marcan las
   // casillas de «incluye» del operador (alimentación, traslados, seguro…). Antes salía solo su nombre.
@@ -85,7 +85,7 @@ export function incluyeDeOne(items: readonly ItemConLectura[], nivel: NivelDetal
   // Lo que no es vuelo, hotel, traslado ni actividad (un seguro, una asistencia médica).
   for (const i of items) {
     const slug = ranuraDeGrupo(i.grupo ?? null)?.slug
-    if (slug === 'vuelo_detalle' || slug === 'hotel_detalle' || slug === 'traslado_detalle' || slug === 'actividad_detalle' || slug === 'paquete_detalle') continue
+    if (slug === 'vuelo_detalle' || slug === 'hotel_detalle' || slug === 'traslado_detalle' || slug === 'tren_detalle' || slug === 'actividad_detalle' || slug === 'paquete_detalle') continue
     // «Otro servicio» escrito o leído (por pasos): lo que es y, salvo en «general», quién lo presta
     // («Asistencia médica (Assist Card, plan Básico)», como el prototipo de Noor).
     const otro = otroServicioDeItem(i)

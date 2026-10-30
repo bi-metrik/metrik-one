@@ -41,6 +41,7 @@ import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { mismoTrayectoEntre } from '@/lib/cotizaciones/trayecto-repetido'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { leerReglasDeCotizacion, motivoReglasInvalidas, reglasAJsonb } from '@/lib/cotizaciones/reglas-margen'
 import { motivoMargenDeCotizacionInvalido } from '@/lib/cotizaciones/margen-de-cotizacion'
@@ -212,7 +213,8 @@ export async function separarOpcionPorPasos(itemId: string) {
 
 /**
  * «Juntar como opción de…»: TODAS las opciones de un servicio pasan a competir dentro de otro
- * del mismo tipo. Devuelve el grupo que tenía, para el «Deshacer».
+ * del mismo tipo, o un tren dentro del vuelo del mismo trayecto (QA G9, M9-1). Devuelve el grupo
+ * que tenía, para el «Deshacer».
  */
 export async function juntarServicioPorPasos(
   cotizacionId: string,
@@ -226,11 +228,27 @@ export async function juntarServicioPorPasos(
   const origen = normalizarGrupo(grupoOrigen)
   const destino = normalizarGrupo(grupoDestino)
   if (!origen || !destino || origen === destino) return { success: false, error: 'Escoge otro servicio para juntarlo.' }
-  if (resolverRanura(origen)?.definicion.slug !== resolverRanura(destino)?.definicion.slug) {
-    return { success: false, error: 'Solo se juntan servicios del mismo tipo.' }
+  const slugOrigen = resolverRanura(origen)?.definicion.slug
+  const slugDestino = resolverRanura(destino)?.definicion.slug
+  // M9-1 (QA G9 · decisión 5 de Mauricio): un tren se junta como opción del vuelo del mismo
+  // trayecto. Solo en ese sentido: el vuelo es el bloque que la tarifa cruza.
+  const trenEnVuelo = slugOrigen === 'tren_detalle' && slugDestino === 'vuelo_detalle'
+  if (slugOrigen !== slugDestino && !trenEnVuelo) {
+    return {
+      success: false,
+      error: slugOrigen === 'vuelo_detalle' && slugDestino === 'tren_detalle'
+        ? 'El tren se junta como opción del vuelo: abre el ⋯ del tren.'
+        : 'Solo se juntan servicios del mismo tipo, o un tren con el vuelo del mismo trayecto.',
+    }
   }
   const antes = await fotoDeTarifas(supabase, cotizacionId)
   if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  if (trenEnVuelo) {
+    const delGrupo = (g: string) => antes.ctx.items.filter(i => normalizarGrupo(i.grupo) === g && i.es_ajuste !== true).map(i => i.id)
+    const porId = new Map(antes.ctx.items.map(i => [i.id, i]))
+    const mismo = mismoTrayectoEntre({ tipo: 'tren', opciones: delGrupo(origen) }, { tipo: 'vuelo', opciones: delGrupo(destino) }, id => porId.get(id))
+    if (!mismo) return { success: false, error: 'El tren y el vuelo no son del mismo trayecto el mismo día: no se juntan.' }
+  }
   if (!antes.ctx.items.some(i => normalizarGrupo(i.grupo) === destino)) {
     return { success: false, error: 'Ese servicio ya no está en la cotización. Recarga la página.' }
   }

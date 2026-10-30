@@ -25,6 +25,7 @@ import { etiquetaDeRanura, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pant
 import { esTipoRanura, tipoDeDefinicion } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lineaConAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { lecturaDeOpcion } from '@/lib/cotizaciones/habitaciones'
+import { ranuraDelItem } from '@/lib/cotizaciones/detalle-viaje'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
 import { leerTramos as leerTramosDelItem, regresoEsLaLlegadaDeLaIda } from '@/lib/cotizaciones/tramos-vuelo'
@@ -40,7 +41,7 @@ import {
   type TramoServicio,
 } from './fechas-servicio'
 
-export const TIPOS_SERVICIO = ['vuelo', 'hotel', 'traslado', 'actividad', 'asistencia', 'otro'] as const
+export const TIPOS_SERVICIO = ['vuelo', 'hotel', 'traslado', 'actividad', 'asistencia', 'otro', 'tren'] as const
 export type TipoServicio = (typeof TIPOS_SERVICIO)[number]
 
 /** Lo que se inserta en `negocio_servicios` (sin las llaves del negocio). */
@@ -99,7 +100,12 @@ export function tipoDeServicio(
   tipoRanura?: string | null,
 ): TipoServicio {
   const porGrupo = tipoDeDefinicion(ranuraDeGrupo(item.grupo))
-  const tipo = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
+  const delBloque = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
+  // M9-1 (QA G9) · tren y vuelo del mismo trayecto juntados como opciones: cada opción es lo que se
+  // leyó (Reservas compra un tiquete de tren, no un vuelo). Solo entre vuelo y tren.
+  const tipo = delBloque === 'vuelo' || delBloque === 'tren'
+    ? tipoDeDefinicion(ranuraDelItem({ ...item, grupo: delBloque }) ?? null) ?? delBloque
+    : delBloque
   if (tipo === 'otro') return lineaConAsistenciaMedica(item) ? 'asistencia' : 'otro'
   // Un paquete de bloqueo (hotel + vuelo del operador, un valor) se opera como un servicio del operador.
   if (tipo === 'paquete') return 'otro'
@@ -203,7 +209,8 @@ export function lecturaDelServicio(item: FuenteDeFechas, tipo: TipoServicio): {
   const proveedor =
     tipo === 'hotel' ? texto(id.hotel)
       : tipo === 'vuelo' ? aerolineaLeida(lectura)
-        : campoLeido(lectura, 'proveedor')
+        : tipo === 'tren' ? campoLeido(lectura, 'Operador del tren')
+          : campoLeido(lectura, 'proveedor')
   return { proveedor: proveedor ? proveedor.slice(0, MAX_NOMBRE) : null, fecha }
 }
 
@@ -336,6 +343,16 @@ function fechasLeidas(lectura: Lectura | null, tipo: TipoServicio, tramosDelItem
       const fecha = fechaIso(id.fecha_hora)
       return { ...SIN_FECHAS, fecha_servicio: fecha, hora_inicio: fecha ? horaDeFechaHora(id.fecha_hora) : null }
     }
+    case 'tren': {
+      // V9-3 (QA G9) · el tren con sus horas: la de salida y la de llegada leídas.
+      const fecha = fechaIso(id.fecha_hora)
+      return {
+        ...SIN_FECHAS,
+        fecha_servicio: fecha,
+        hora_inicio: fecha ? horaHHMM(campoLeido(lectura, 'Hora de salida')) ?? horaDeFechaHora(id.fecha_hora) : null,
+        hora_fin: fecha ? horaHHMM(campoLeido(lectura, 'Hora de llegada')) : null,
+      }
+    }
     default:
       return SIN_FECHAS
   }
@@ -354,7 +371,7 @@ export function fechasDelServicio(
   const paquete = paqueteDelItem(item)
   if (paquete) return fechasDePaquete(paquete, salidaViaje)
   const leidas = fechasLeidas(leer(item), tipo, item.tramos)
-  if (leidas.fecha_servicio || (tipo !== 'actividad' && tipo !== 'traslado')) return leidas
+  if (leidas.fecha_servicio || (tipo !== 'actividad' && tipo !== 'traslado' && tipo !== 'tren')) return leidas
   const porDia = fechaPorDiaDelViaje(esFechaIso(salidaViaje) ? salidaViaje : null, item.dia_relativo)
   return porDia ? { ...leidas, fecha_servicio: porDia } : leidas
 }

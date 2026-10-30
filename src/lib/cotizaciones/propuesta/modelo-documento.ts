@@ -596,9 +596,9 @@ export function modeloDePropuesta({
 
   // ── Trenes y traslados ──
   const filasTrayecto: TrayectoDoc[] = serviciosConFecha
-    .filter((s) => s.tipo === 'traslado')
+    .filter((s) => s.tipo === 'traslado' || s.tipo === 'tren')
     .map((s) => ({
-      tipo: esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
+      tipo: s.tipo === 'tren' || esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
       fecha: fechaIso(s.fecha, inicio) ?? s.fecha,
       hora: s.hora ?? null,
       descripcion: s.descripcion,
@@ -1040,7 +1040,7 @@ function diaADia(p: {
   const yaEnServicios = new Set<string>()
   for (const s of p.servicios) {
     if (s.itemId && fechaIso(s.fecha, p.inicio)) yaEnServicios.add(s.itemId)
-    const tipo = s.tipo === 'actividad' ? 'actividad' : esTren(s.descripcion) ? 'tren' : 'traslado'
+    const tipo = s.tipo === 'actividad' ? 'actividad' : s.tipo === 'tren' || esTren(s.descripcion) ? 'tren' : 'traslado'
     poner(fechaIso(s.fecha, p.inicio), { tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
   }
 

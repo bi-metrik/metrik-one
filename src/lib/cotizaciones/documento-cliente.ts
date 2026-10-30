@@ -453,7 +453,7 @@ export function viajeParaRedactar(e: EntradaRedactor): ViajeParaRedactar {
     viajeros: c ? { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes } : null,
     vuelos,
     hoteles,
-    traslados: servicios.filter(s => s.tipo === 'traslado').map(conFecha).filter((x): x is string => x !== null),
+    traslados: servicios.filter(s => s.tipo === 'traslado' || s.tipo === 'tren').map(s => (s.tipo === 'tren' ? { ...s, descripcion: `Tren ${s.descripcion}` } : s)).map(conFecha).filter((x): x is string => x !== null),
     actividades: servicios.filter(s => s.tipo === 'actividad').map(conFecha).filter((x): x is string => x !== null),
     otrosServicios,
     cargosEnDestino: cargosEnDestinoDeItems(items).map(g => ({ concepto: g.concepto, ciudad: limpio(g.ciudad) })),

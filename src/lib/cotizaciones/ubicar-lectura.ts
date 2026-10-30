@@ -35,7 +35,7 @@ import {
   sobraLaCaptura,
 } from './habitaciones'
 import { normalizarGrupo } from './itinerarios'
-import { lugarDeOpcion, rutaDeVueloDeOpcion } from './opcion-viaje'
+import { lugarDeOpcion, puntasDelTrayecto, rutaDeVueloDeOpcion } from './opcion-viaje'
 import { ranurasDelTipo, type TipoRanura } from './ranuras-cotizacion'
 import { ranuraDeGrupo, resolverRanura } from './ranuras-pantallazo'
 import { leerTarifaPax, type Composicion, type LecturaCasilla } from './tarifa-pasajero'
@@ -208,7 +208,37 @@ export function ubicarLectura(args: {
     destino: r.destino,
   }))
   const u = ubicarCaptura(captura, candidatas)
-  return u.como === 'hermana' ? { como: 'hermana', grupo: u.grupo } : { como: 'nueva' }
+  if (u.como === 'hermana') return { como: 'hermana', grupo: u.grupo }
+  // M9-1 (QA G9 · decisión 5 de Mauricio) · un tren del mismo trayecto y el mismo día que un vuelo
+  // ya cotizado es su alternativa: va como opción de ese vuelo y la tarifa cobra solo una.
+  if (tipo === 'tren') {
+    const vuelo = vueloDelMismoTrayecto(lectura, vivas)
+    if (vuelo) return { como: 'hermana', grupo: vuelo }
+  }
+  return { como: 'nueva' }
+}
+
+/**
+ * El bloque de vuelo del que este tren es alternativa: mismas ciudades de salida y de llegada
+ * (`mismoLugar`: «Paris Gare de Lyon» y «París CDG» son París) y el mismo día. Sin trayecto o sin
+ * fecha en el tren, ninguno: no se junta a ciegas.
+ */
+export function vueloDelMismoTrayecto(lectura: LecturaCasilla, vivas: readonly LineaParaUbicar[]): string | null {
+  const identidad = lectura.identidad ?? {}
+  const puntas = puntasDelTrayecto(identidad.trayecto ?? null)
+  const fecha = identidad.fecha_hora ?? null
+  if (!puntas || !fechaComparable(fecha)) return null
+  for (const r of ranurasDelTipo(vivas as { id: string; grupo?: string | null; es_ajuste?: boolean | null }[], 'vuelo')) {
+    const clave = normalizarGrupo(r.grupo)
+    const coincide = vivas
+      .filter(l => normalizarGrupo(l.grupo ?? null) === clave)
+      .map(l => rutaDeVueloDeOpcion({ nombre: l.nombre ?? null, grupo: l.grupo ?? null, tarifa_pax: l.tarifa_pax, tramos: l.tramos }))
+      .some(ruta => mismoLugar(puntas[0], ruta.origen) === true
+        && mismoLugar(puntas[1], ruta.destino) === true
+        && mismaFecha(fecha, ruta.fecha) === true)
+    if (coincide) return r.grupo
+  }
+  return null
 }
 
 /** La fecha comparable de un vuelo: «AAAA-MM-DD» o «--MM-DD», sin el día de la semana. */

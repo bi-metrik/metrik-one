@@ -435,13 +435,25 @@ export function ranuraDeLectura(campos: { label: string; valor: string }[] | und
   return candidatas.length === 1 ? candidatas[0] : null
 }
 
+/** Vuelo y tren: los transportes que pueden ser opciones del mismo trayecto (M9-1, QA G9). */
+const TRANSPORTES: ReadonlySet<string> = new Set(['vuelo_detalle', 'tren_detalle'])
+
 /**
  * La ranura de la línea: la de su grupo y, si el grupo no es una, la de su lectura.
  *
- * El grupo manda cuando resuelve: es la decisión explícita de quien cotiza.
+ * El grupo manda cuando resuelve: es la decisión explícita de quien cotiza. Con UNA excepción
+ * (QA Trappvel 2026-10-29, M9-1 · decisión 5 de Mauricio): un tren y un vuelo del mismo trayecto
+ * juntados como opciones del mismo bloque. El bloque es de un tipo, pero cada opción sigue siendo
+ * lo que se leyó: el tren se imprime como tren y el vuelo como vuelo. Solo entre vuelo y tren, y
+ * solo cuando la lectura lo dice sin empate (`ranuraDeLectura`).
  */
 export function ranuraDelItem(item: ItemConLectura): DefinicionRanura | null {
-  return ranuraDeGrupo(item.grupo) ?? ranuraDeLectura(casillaDelItem(item)?.campos)
+  const porGrupo = ranuraDeGrupo(item.grupo)
+  if (porGrupo && TRANSPORTES.has(porGrupo.slug)) {
+    const leida = ranuraDeLectura(casillaDelItem(item)?.campos)
+    return leida && TRANSPORTES.has(leida.slug) ? leida : porGrupo
+  }
+  return porGrupo ?? ranuraDeLectura(casillaDelItem(item)?.campos)
 }
 
 /**
@@ -720,7 +732,7 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
  * que recibe eso rellena el hueco inventando.
  */
 export interface ServicioPDF {
-  tipo: 'traslado' | 'actividad'
+  tipo: 'traslado' | 'actividad' | 'tren'
   /** «Aeropuerto - hotel · Privado», «Tour Johnny Cay · Día completo · San Andrés». */
   descripcion: string
   fecha: string | null
@@ -730,6 +742,15 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
   const out: ServicioPDF[] = []
   for (const item of items) {
     const slug = ranuraDelItem(item)?.slug
+    if (slug === 'tren_detalle') {
+      // M9-1 / V9-3 (QA G9) · el tren con su operador y su número: «Paris Gare de Lyon - Roma Termini · Trenitalia Frecciarossa · 9241».
+      const d = detalleDelItem(item)
+      const descripcion = [texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null), texto(d, 'proveedor'), texto(d, 'numero_tren')]
+        .filter((p): p is string => Boolean(p))
+        .join(' · ')
+      if (descripcion) out.push({ tipo: 'tren', descripcion, fecha: fechaCorta(texto(d, 'fecha_hora')) })
+      continue
+    }
     if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') continue
     const d = detalleDelItem(item)
     const esTraslado = slug === 'traslado_detalle'
@@ -766,17 +787,45 @@ export function lecturaDeTraslado(item: ItemConLectura): { trayecto: string | nu
 }
 
 /**
+ * La lectura de un TREN (QA G9, M9-1 / V9-3): el trayecto, el operador, el número, la fecha y las
+ * horas, con lo corregido encima. `null` si la línea no es un tren.
+ */
+export function lecturaDeTren(item: ItemConLectura): {
+  trayecto: string | null
+  operador: string | null
+  numero: string | null
+  fecha: string | null
+  horaSalida: string | null
+  horaLlegada: string | null
+  cambio: string | null
+  clase: string | null
+} | null {
+  if (ranuraDelItem(item)?.slug !== 'tren_detalle') return null
+  const d = detalleDelItem(item)
+  return {
+    trayecto: texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null),
+    operador: texto(d, 'proveedor'),
+    numero: texto(d, 'numero_tren'),
+    fecha: texto(d, 'fecha_hora'),
+    horaSalida: texto(d, 'hora_salida'),
+    horaLlegada: texto(d, 'hora_llegada'),
+    cambio: texto(d, 'cambio'),
+    clase: texto(d, 'clase'),
+  }
+}
+
+/**
  * Dónde y cuándo es una actividad o un traslado, según su lectura (con lo corregido encima):
  * la ciudad (solo la actividad la lee) y la fecha corta («14 dic»). Lo usa la propuesta para
  * poner cada plan opcional en los días libres de su ciudad.
  */
 export function lugarDelServicio(item: ItemConLectura): { ciudad: string | null; fecha: string | null } {
   const slug = ranuraDelItem(item)?.slug
-  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') return { ciudad: null, fecha: null }
+  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle' && slug !== 'tren_detalle') return { ciudad: null, fecha: null }
   const d = detalleDelItem(item)
   return {
     ciudad: slug === 'actividad_detalle' ? texto(d, 'ciudad') : null,
-    fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+    fecha: fechaCorta(texto(d, slug === 'actividad_detalle' ? 'fecha' : 'fecha_hora')),
   }
 }
 

@@ -14,10 +14,10 @@
  *
  * Puro.
  */
-import { fechaCorta, lecturaDeTraslado, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { fechaCorta, lecturaDeTraslado, lecturaDeTren, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import { esFechaCivil, sumarDiasCivil } from '@/lib/viaje/plan-pagos'
 import type { ServicioDelDocumento } from './modelo-documento'
-import { trayectosDeTraslado } from './trayectos'
+import { trayectoDeTren, trayectosDeTraslado } from './trayectos'
 
 export interface ItemDeServicio extends ItemConLectura {
   /** La línea (`items.id`): el día a día no la pinta dos veces (ver `ServicioDelDocumento.itemId`). */
@@ -37,6 +37,13 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
     const tarifas = {
       ...(item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}),
       ...(item.id ? { itemId: item.id } : {}),
+    }
+    // QA G9 (M9-1 / V9-3) · el tren con su operador, su número y su hora de salida.
+    const tren = lecturaDeTren(item)
+    if (tren) {
+      const t = trayectoDeTren(tren)
+      if (t) salida.push({ tipo: 'tren', descripcion: t.descripcion, fecha: fechaDelDia ?? t.fecha, hora: t.hora, ...tarifas })
+      continue
     }
     const lectura = lecturaDeTraslado(item)
     if (lectura) {

@@ -132,3 +132,30 @@ export function trayectosDeTraslado(lectura: { trayecto: string | null; vehiculo
     return { descripcion, fecha: null, hora: null, fechaIda: fechas[0] ?? null }
   })
 }
+
+/**
+ * El tren leído con la ranura «Tren» (QA G9, M9-1 / V9-3), en la forma que el documento ya pinta
+ * para los trenes: «Paris Gare de Lyon - Roma Termini · Trenitalia Frecciarossa 9241 (cambio en
+ * Milano Centrale), Business», con la hora de salida. Sin trayecto, nada.
+ */
+export function trayectoDeTren(l: {
+  trayecto: string | null
+  operador: string | null
+  numero: string | null
+  fecha: string | null
+  horaSalida: string | null
+  cambio?: string | null
+  clase?: string | null
+}): TrayectoLeido | null {
+  const trayecto = (l.trayecto ?? '').replace(/\s*\n\s*/g, ' ').trim()
+  if (!trayecto) return null
+  const puntas = trayecto.split(FLECHA).map((p) => p.trim()).filter(Boolean)
+  const ruta = puntas.length === 2 ? `${extremo(puntas[0])} - ${extremo(puntas[1])}` : trayecto
+  const operador = [l.operador?.trim(), l.numero?.trim()].filter(Boolean).join(' ')
+  const servicio = [
+    [operador || null, l.cambio?.trim() ? `(cambio en ${l.cambio.trim()})` : null].filter(Boolean).join(' ') || null,
+    l.clase?.trim() || null,
+  ].filter(Boolean).join(', ')
+  const hora = horaDe(l.horaSalida) ?? horaDe(l.fecha)
+  return { descripcion: [ruta, servicio || null].filter(Boolean).join(' · '), fecha: fechasDe(l.fecha)[0] ?? null, hora }
+}

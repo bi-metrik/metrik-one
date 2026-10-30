@@ -28,7 +28,7 @@ import {
   agregarOpcionPorPasos,
 } from '@/app/(app)/negocios/por-pasos-actions'
 import { borrarOpcionesPorPasos, reponerOpcionesPorPasos, soltarImagenesPorPasos } from '@/app/(app)/negocios/por-pasos-borrar-actions'
-import { avisosDeTrayectoRepetido } from '@/lib/cotizaciones/trayecto-repetido'
+import { avisosDeTrayectoRepetido, vuelosParaJuntarElTren } from '@/lib/cotizaciones/trayecto-repetido'
 import { autorizarBajoElMinimo } from '@/app/(app)/negocios/margen-salida-actions'
 import { eliminarItinerario, guardarMotivoDeTarifa, renombrarItinerario } from '@/app/(app)/negocios/itinerario-actions'
 import type { LecturaDevuelta } from '@/app/(app)/negocios/tarifa-pax-actions'
@@ -542,7 +542,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                     editable={p.editable}
                     ocupado={ocupado}
                     estados={estadosPermitidos(s.grupo)}
-                    juntables={servicios.filter(x => x.tipo === s.tipo && x.grupo !== s.grupo).map(x => ({ grupo: x.grupo, nombre: x.nombre }))}
+                    juntables={[
+                      ...servicios.filter(x => x.tipo === s.tipo && x.grupo !== s.grupo),
+                      // M9-1 (QA G9) · el tren se junta como opción del vuelo del mismo trayecto.
+                      ...vuelosParaJuntarElTren(s, servicios, id => porId.get(id)),
+                    ].map(x => ({ grupo: x.grupo, nombre: x.nombre }))}
                     aviso={avisoServicio}
                     onAlternar={() => alternar(s.grupo)}
                     onEstado={e => cambiarEstado(s.grupo, e)}

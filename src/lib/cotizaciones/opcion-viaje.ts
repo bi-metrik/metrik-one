@@ -20,7 +20,9 @@
 import {
   cargoDeItem,
   equipajeDeTramo,
+  fechaCorta,
   hotelesDeItems,
+  lecturaDeTren,
   ranuraDelItem,
   tramosDelItem,
   vuelosDeItems,
@@ -31,6 +33,23 @@ import type { EquipajeTramo, TramoVuelo } from './tramos-vuelo'
 import { esNombreDeOpcion, type TipoRanura } from './ranuras-cotizacion'
 import { nombreVisibleDeLinea } from './nombre-visible'
 import { diaDeLaSemana, leerFecha, lugarConCodigo } from '@/lib/pdf/cotizacion-trappvel-formato'
+
+// ── El tren (QA G9, M9-1 / V9-3) ─────────────────────────────────────────────
+
+/** «Paris Gare de Lyon -> Roma Termini» → [«Paris Gare de Lyon», «Roma Termini»]. Sin dos puntas, `null`. */
+export function puntasDelTrayecto(texto: string | null | undefined): [string, string] | null {
+  const partes = (texto ?? '').split(/\s*(?:->|→|➝|=>)\s*|\s+[-–—]\s+/).map(p => p.trim()).filter(Boolean)
+  return partes.length === 2 ? [partes[0], partes[1]] : null
+}
+
+/** «Trenitalia Frecciarossa 9241 · Paris Gare de Lyon 06:28 → Roma Termini 13:40». */
+function trenEnTexto(t: NonNullable<ReturnType<typeof lecturaDeTren>>): { cabecera: string | null; recorrido: string | null } {
+  const puntas = puntasDelTrayecto(t.trayecto)
+  const desde = [puntas?.[0] ?? t.trayecto, t.horaSalida].filter(Boolean).join(' ')
+  const hasta = puntas ? [puntas[1], t.horaLlegada].filter(Boolean).join(' ') : t.horaLlegada
+  const recorrido = desde || hasta ? [desde || null, hasta || null].filter(Boolean).join(' → ') : null
+  return { cabecera: [t.operador, t.numero].filter(Boolean).join(' ') || null, recorrido }
+}
 
 // ── La nota para el cliente ──────────────────────────────────────────────────
 
@@ -112,6 +131,18 @@ function tramoEnTexto(t: TramoVuelo, directoPorDefecto: boolean): string | null 
 export function fichaDeOpcion(item: ItemConLectura, composicion: Composicion | null): string[] {
   const ranura = ranuraDelItem(item)
   const pax = composicion ? describirOcupacion(composicion) : null
+  const tren = ranura?.slug === 'tren_detalle' ? lecturaDeTren(item) : null
+  if (tren) {
+    const { cabecera, recorrido } = trenEnTexto(tren)
+    const fecha = fechaCorta(tren.fecha)
+    const leido = [
+      `Tren${cabecera ? ` · ${cabecera}` : ''}`,
+      [fecha, recorrido].filter(Boolean).join(' · ') || null,
+      tren.cambio ? `Cambio en ${tren.cambio}` : null,
+      tren.clase ? `Clase: ${tren.clase}` : null,
+    ].filter((r): r is string => !!r)
+    return leido.length > 1 ? [...leido, ...(pax ? [pax] : [])] : []
+  }
   if (ranura?.slug === 'vuelo_detalle') {
     const [v] = vuelosDeItems([item])
     if (!v) return []
@@ -163,6 +194,12 @@ export function fichaDeOpcion(item: ItemConLectura, composicion: Composicion | n
  */
 export function resumenDeOpcion(item: ItemConLectura): string | null {
   const ranura = ranuraDelItem(item)
+  const tren = ranura?.slug === 'tren_detalle' ? lecturaDeTren(item) : null
+  if (tren) {
+    const { cabecera } = trenEnTexto(tren)
+    const horas = tren.horaSalida ? `${tren.horaSalida}${tren.horaLlegada ? ` → ${tren.horaLlegada}` : ''}` : null
+    return ['Tren', cabecera, horas, tren.cambio ? `cambio en ${tren.cambio}` : null].filter(Boolean).join(' · ')
+  }
   if (ranura?.slug === 'vuelo_detalle') {
     const [v] = vuelosDeItems([item])
     if (!v) return null
@@ -218,7 +255,7 @@ function comoLectura(l: unknown): ItemConLectura {
 
 // «Otro servicio» (asistencia médica, seguro) va al final del viaje, antes de las líneas sueltas.
 // El paquete de bloqueo (hotel + vuelo del operador) va primero: es el viaje entero.
-const RANGO_TIPO: Record<TipoRanura, number> = { paquete: -1, vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
+const RANGO_TIPO: Record<TipoRanura, number> = { paquete: -1, vuelo: 0, hotel: 1, traslado: 2, tren: 2, actividad: 3, otro: 4 }
 
 /** «2026-11-09 06:05» del primer tramo de ida, para ordenar. `--MM-DD` va después de lo fechado. */
 function claveDeSalida(item: ItemConLectura): string | null {
@@ -281,6 +318,7 @@ export const NOMBRE_TIPO_BLOQUE: Record<TipoRanura | 'otro', string> = {
   vuelo: 'Vuelo',
   hotel: 'Hotel',
   traslado: 'Traslado',
+  tren: 'Tren',
   actividad: 'Actividad',
   otro: 'Otro',
   paquete: 'Paquete',
@@ -312,6 +350,10 @@ export function lugarDeOpcion(item: ItemConLectura): { lugar: string | null; ori
   if (ranura?.slug === 'hotel_detalle') {
     const [h] = hotelesDeItems([item])
     return { lugar: h?.ciudad ?? null, origen: null, destino: null }
+  }
+  if (ranura?.slug === 'tren_detalle') {
+    const puntas = puntasDelTrayecto(lecturaDeTren(item)?.trayecto)
+    return { lugar: null, origen: puntas?.[0] ?? null, destino: puntas?.[1] ?? null }
   }
   return { lugar: null, origen: null, destino: null }
 }
