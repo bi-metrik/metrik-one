@@ -39,7 +39,7 @@ const MIMES: Record<string, string> = {
 }
 
 export type LecturaBloqueo =
-  | { ok: true; cual: 'hotel'; hotel: HotelBloqueo; incluye: IncluyeBloqueo; huella: string | null }
+  | { ok: true; cual: 'hotel'; hotel: HotelBloqueo; incluye: IncluyeBloqueo; operador?: string | null; huella: string | null }
   | { ok: true; cual: 'vuelo'; vuelo: VueloBloqueo; huella: string | null }
   /** `elegir`: la detección no supo si es el hotel o el vuelo; la tarjeta pregunta. */
   | { ok: false; mensaje: string; detalle?: string; elegir?: true }
@@ -115,7 +115,7 @@ export async function leerPantallazoDeBloqueo(pedido: 'hotel' | 'vuelo' | 'detec
 
   if (cual === 'hotel') {
     const h = hotelDesdeLectura(lectura.data)
-    return h.ok ? { ok: true, cual, hotel: h.hotel, incluye: h.incluye, huella } : { ok: false, mensaje: h.motivo }
+    return h.ok ? { ok: true, cual, hotel: h.hotel, incluye: h.incluye, operador: h.operador, huella } : { ok: false, mensaje: h.motivo }
   }
   const v = vueloDesdeLectura(lectura.data)
   return v.ok ? { ok: true, cual, vuelo: v.vuelo, huella } : { ok: false, mensaje: v.motivo }

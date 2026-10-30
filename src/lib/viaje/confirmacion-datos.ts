@@ -14,7 +14,8 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
 import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
-import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type ReglaPlan } from './plan-pagos'
+import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type HitoProveedor, type ReglaPlan } from './plan-pagos'
+import { hitosDeTarifa, hitosPorTarifa } from './hitos-proveedor'
 import {
   esAnticipoConSoporte,
   GATES_CONFIRMACION,
@@ -46,6 +47,11 @@ export interface TarifaConfirmable {
   esRecomendada: boolean
   precio: number | null
   motivo: string | null
+  /**
+   * H-17 · los pagos al proveedor con fecha límite de esta tarifa (la «Compra antes del» de un
+   * paquete de bloqueo). El plan sugerido y la validación los miran. Ausente o vacío = ninguno.
+   */
+  hitosProveedor?: HitoProveedor[]
 }
 
 export interface PlanGuardado {
@@ -379,6 +385,10 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
       tarifas = precios.tarifas.map((t) => ({ itinerarioId: t.itinerarioId, nombre: t.nombre ?? 'Tarifa', esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }))
     } else {
       errorTarifas = precios.error
+    }
+    if (tarifas.length > 0) {
+      const hitos = await hitosPorTarifa(db, String(cot.id))
+      if (hitos.size > 0) tarifas = tarifas.map((t) => ({ ...t, hitosProveedor: hitosDeTarifa(hitos, t.itinerarioId) }))
     }
   }
 

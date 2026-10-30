@@ -42,6 +42,61 @@ export interface CuotaPlan {
   concepto: string | null
 }
 
+/**
+ * Un pago al proveedor con fecha límite (H-17 del QA de Trappvel del 2026-10-29): la «Compra antes
+ * del 15/12» de un paquete de bloqueo con tarifa promo. A esa fecha el cliente tiene que llevar, por
+ * lo menos, lo que se le paga al operador; si no, la agencia pone la plata.
+ */
+export interface HitoProveedor {
+  /** `YYYY-MM-DD`: la última fecha para pagarle al proveedor. */
+  fecha: string
+  /** Lo que se le paga (el costo del paquete), en pesos. */
+  monto: number
+  /** Quién cobra («TU RESERVA»), para el texto. */
+  operador: string | null
+}
+
+/** Lo que el plan debe llevar a la fecha de un hito: la suma de los hitos hasta esa fecha, a $1.000 hacia arriba, sin pasar del total. */
+function requeridoAl(hitos: readonly HitoProveedor[], fecha: string, total: number): number {
+  const suma = hitos.filter((h) => h.fecha <= fecha).reduce((s, h) => s + Math.max(0, Number(h.monto) || 0), 0)
+  return Math.min(total, Math.ceil(suma / 1000) * 1000)
+}
+
+/** Los hitos que cuentan: con fecha válida, monto positivo y que no hayan pasado (uno vencido ya no sostiene la tarifa: lo avisa el paquete). */
+function hitosVigentes(hitos: readonly HitoProveedor[] | null | undefined, hoy: string): HitoProveedor[] {
+  return (hitos ?? [])
+    .filter((h) => esFechaCivil(h.fecha) && h.fecha >= hoy && Number(h.monto) > 0)
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))
+}
+
+const acumuladoAl = (cuotas: readonly CuotaPlan[], fecha: string) =>
+  cuotas.filter((c) => esFechaCivil(c.fecha) && c.fecha <= fecha).reduce((s, c) => s + Math.round(Number(c.monto) || 0), 0)
+
+/**
+ * Adelanta plata del plan para que a la fecha de cada hito el cliente lleve lo que se le paga al
+ * proveedor. Pone una cuota en la fecha del hito y la saca de las cuotas que vienen después (la
+ * primera primero), así que el total no cambia y lo acumulado a T-15 y al día del saldo tampoco.
+ */
+function cubrirHitos(cuotas: CuotaPlan[], hitos: readonly HitoProveedor[], total: number): CuotaPlan[] {
+  let out = cuotas.map((c) => ({ ...c }))
+  for (const h of hitos) {
+    const falta = requeridoAl(hitos, h.fecha, total) - acumuladoAl(out, h.fecha)
+    if (falta <= 0) continue
+    let porQuitar = falta
+    for (const c of [...out].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))) {
+      if (porQuitar <= 0) break
+      if (c.fecha <= h.fecha) continue
+      const quita = Math.min(c.monto, porQuitar)
+      c.monto -= quita
+      porQuitar -= quita
+    }
+    const concepto = `Compra del paquete${h.operador ? ` con ${h.operador}` : ''}`
+    out = [...out.filter((c) => c.monto > 0), { numero: 0, monto: falta - porQuitar, fecha: h.fecha, concepto }]
+    out.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.numero - b.numero))
+  }
+  return juntarMismoDia(out.map((c, i) => ({ ...c, numero: i })))
+}
+
 export interface ConfigPlanPagos {
   activo: boolean
   regla: ReglaPlan
@@ -119,6 +174,20 @@ export function planSugerido(args: {
   fechaSalida: string | null
   hoy: string
   regla?: ReglaPlan
+  /** Los pagos al proveedor con fecha límite (H-17). Sin ellos, el sugerido de siempre. */
+  hitos?: readonly HitoProveedor[] | null
+}): CuotaPlan[] | null {
+  const base = planSugeridoSinHitos(args)
+  const hitos = hitosVigentes(args.hitos, args.hoy)
+  if (!base || hitos.length === 0) return base
+  return cubrirHitos(base, hitos, Math.round(args.total))
+}
+
+function planSugeridoSinHitos(args: {
+  total: number
+  fechaSalida: string | null
+  hoy: string
+  regla?: ReglaPlan
 }): CuotaPlan[] | null {
   const regla = args.regla ?? REGLA_POR_DEFECTO
   const total = Math.round(args.total)
@@ -175,6 +244,11 @@ export interface ValidacionPlan {
   saldoTarde: boolean
   /** Alguna cuota con monto ≤ 0 o fecha inválida. */
   cuotaInvalida: boolean
+  /**
+   * H-17 · el pago al proveedor con fecha límite que el plan mira: el primero que NO queda cubierto
+   * o, si todos lo quedan, el último. `null` sin hitos vigentes.
+   */
+  proveedor: { fecha: string; requerido: number; acumulado: number; operador: string | null; cubierto: boolean } | null
   /** Suma = total y todas las cuotas válidas: se puede guardar. */
   cuadra: boolean
   /** Cuadra, todo pagado el día anterior a la salida, y cumple el mínimo: no pide aprobación. */
@@ -183,7 +257,7 @@ export interface ValidacionPlan {
 
 export function validarPlan(
   cuotas: readonly CuotaPlan[],
-  ctx: { total: number; fechaSalida: string | null; hoy: string; regla?: ReglaPlan },
+  ctx: { total: number; fechaSalida: string | null; hoy: string; regla?: ReglaPlan; hitos?: readonly HitoProveedor[] | null },
 ): ValidacionPlan {
   const regla = ctx.regla ?? REGLA_POR_DEFECTO
   const total = Math.round(ctx.total)
@@ -202,6 +276,14 @@ export function validarPlan(
   const limiteSaldo = conFecha ? fechaLimiteSaldo(ctx.fechaSalida as string, ctx.hoy) : null
   const saldoTarde = !!limiteSaldo && cuotas.some((c) => esFechaCivil(c.fecha) && c.fecha > limiteSaldo)
   const cuadra = !cuotaInvalida && diferencia === 0 && total > 0
+  let proveedor: ValidacionPlan['proveedor'] = null
+  const hitos = hitosVigentes(ctx.hitos, ctx.hoy)
+  for (const h of hitos) {
+    const requerido = requeridoAl(hitos, h.fecha, total)
+    const acumulado = acumuladoAl(cuotas, h.fecha)
+    proveedor = { fecha: h.fecha, requerido, acumulado, operador: h.operador, cubierto: acumulado >= requerido }
+    if (!proveedor.cubierto) break
+  }
   return {
     suma,
     diferencia,
@@ -212,8 +294,10 @@ export function validarPlan(
     despuesDelViaje,
     saldoTarde,
     cuotaInvalida,
+    proveedor,
     cuadra,
-    dentroDeRegla: cuadra && !despuesDelViaje && !saldoTarde && cumpleMinimo,
+    // Un plan que deja a la agencia pagándole al operador antes de recibir la plata no está en regla.
+    dentroDeRegla: cuadra && !despuesDelViaje && !saldoTarde && cumpleMinimo && (proveedor?.cubierto ?? true),
   }
 }
 
@@ -282,6 +366,13 @@ export function lineasDeValidacion(v: ValidacionPlan, ctx: { total: number; regl
       : v.saldoTarde
         ? { ok: false, texto: `El viaje debe quedar pagado el ${fechaConDia(fechaLimiteSaldo(ctx.fechaSalida, ctx.hoy ?? ''))}, el día antes de salir.` }
         : { ok: true, texto: 'Todo pagado el día antes del viaje' })
+  }
+  const pv = v.proveedor
+  if (pv) {
+    const quien = pv.operador ?? 'el operador'
+    out.push(pv.cubierto
+      ? { ok: true, texto: `Al ${fechaCorta(pv.fecha)}: cubierto lo que se le paga a ${quien} (${pesos(pv.requerido)}, compra antes del ${fechaCorta(pv.fecha)})` }
+      : { ok: false, texto: `${quien} cobra el paquete antes del ${fechaCorta(pv.fecha)} (${pesos(pv.requerido)}) y a esa fecha el cliente llevaría ${pesos(pv.acumulado)}: la agencia pondría ${pesos(pv.requerido - pv.acumulado)}.` })
   }
   return out
 }
