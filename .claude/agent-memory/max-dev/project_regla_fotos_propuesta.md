@@ -1,6 +1,6 @@
 ---
 name: regla-fotos-propuesta
-description: Regla de fotos de la propuesta Trappvel (29-oct): #1357 fichas grande+2 apiladas con alto por documento y 15 % de recorte; #1358 portada de una sola imagen; biblioteca por destino pide migración
+description: Regla de fotos Trappvel (29-oct): #1357 casillas iguales + paneles (díptico) + alto común 17 %; #1358 portada con crédito, respaldo = collage de main; #1365 Recomendada = precio medio; foto Curazao SIN cargar
 metadata:
   type: project
 ---
@@ -31,3 +31,17 @@ Brief `proyectos/trappvel/clarity/docs/diseno/brief-max-2026-10-29-regla-fotos-p
 (`img fila n2|n3`, `class="img" style="height:`). En la receta de solo lectura, la RPC `autorizacion_datos_estado` (STABLE) se
 puede dejar pasar por POST para que la marca refleje prod. Ver [[reproducir-pdf-real-solo-lectura]],
 [[cot0008-ajustes-alejandra]], [[fotos-perfiles]].
+
+**Estado final (29-oct noche, PDF aprobado por Mauricio):**
+- #1357: casillas iguales lado a lado; una foto de PANELES iguales (`src/lib/fotos/paneles.ts`, por píxeles:
+  franja o corte de lado a lado en 1/2 o 1/3) ocupa tantas casillas como paneles. El «tríptico» del Kunuku es
+  un DÍPTICO (2×1,39). Alto común del documento si lo hay (el que menos recorta), si no por filas; tope 17 %.
+- #1358: crédito «Foto: autor · licencia» en la portada; sin imagen aprobada vuelve el collage de main (la
+  banda de colores es «grave»). El catálogo pide también las partes de «Willemstad / Curacao» y el destino
+  (`ciudadesDelViaje`): desde #1363 la parada es «Curacao».
+- #1365 (`feat/trappvel-recomendada-precio-medio`): `repartoPorPrecio` cruza Rec (caro) ⇄ tercera (medio);
+  «Intermedia» vuelve a «Premium» (el PDF dice «Superior», léxico vetado). COT-0008 se acomoda en la
+  siguiente acción de Tarifas.
+- Foto de Curazao SIN cargar: archivo + INSERT (clave `curacao`) en
+  `proyectos/trappvel/clarity/qa/2026-10-29_regla-fotos/carga-foto-curazao/`.
+

@@ -7,7 +7,7 @@
 - ⚠️⚠️ [Asistente de ventas Dimpro + Bold (29-oct)](project_dimpro_asistente_ventas_bold.md) — 20261029150000 y sql/dimpro APLICADOS en prod (29-oct, bot activo:false); solo Messenger 151556; forma_pago sigue anticipado
 - ⚠️ [SOE-033: plantillas DJ y Relación (29-oct)](project_soe033_plantillas_dj_relacion.md) — #1329; 20261029114700 APLICADA (29-oct); copia campos de la DJ viva; DJ coprop. 2 págs
 - ⚠️⚠️ [Decisiones D1–D6 de la cotización (29-oct)](project_decisiones_1029_cotizacion.md) — batería #1338; sin exención de Públicas; comisión obligatoria; 0 = sin dato; tarifa por paquete
-- ⚠️⚠️ [Regla de fotos de la propuesta (29-oct)](project_regla_fotos_propuesta.md) — #1357 fichas grande+2, #1358 portada; destino pide migración; hoja 1 abierta
+- ⚠️⚠️ [Regla de fotos de la propuesta (29-oct)](project_regla_fotos_propuesta.md) — #1357 paneles+alto común, #1358 portada, #1365 Rec=medio; foto Curazao sin cargar
 - ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337 (#1339 cerrado); reparto por precio en #1348
 - ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — orden publicado = por clave (cambia a Haiku); --fichas-base v3; SQL SIN aplicar
 - ⚠️ [Bloqueo: prueba real 29-oct (INF, barra, edad, marca PDF)](project_bloqueo_prueba_real_1029.md) — #1326; PDF recibe porPasos del llamador (N4); edad de la Solicitud cuenta en el freno
