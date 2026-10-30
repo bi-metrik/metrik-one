@@ -6,7 +6,7 @@ metadata:
 ---
 
 Prueba de Mauricio en Messenger (conv 3, 30-oct). Dos PR: #1368 (`fix/dimpro-toque-como-texto-messenger`, chico, va
-primero) y el grande `feat/dimpro-ventas-intercalado`, apilado sobre él.
+primero) y el grande #1370 (`feat/dimpro-ventas-intercalado`), apilado sobre él: retarget a main antes del merge. Carrito NO hecho (dos links). Mapa real: `sql/dimpro/2026-10-30_venta-cruzada-piloto.sql`.
 
 - **Messenger por Chatwoot no trae el id del botón**: el `input_select` sale como respuesta rápida y el toque llega como
   texto con el título (clase escrito, toque_id null). `toquesPorTitulo` (cola.ts, solo canal `otro`) lo vuelve toque
