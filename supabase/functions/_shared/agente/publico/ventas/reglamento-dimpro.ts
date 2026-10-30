@@ -42,8 +42,8 @@ export const REGLAMENTO_DIMPRO: Ficha[] = [
   alc(
     'alc.saludo',
     'el cliente solo saluda («hola», «buenas») o escribe sin decir qué busca',
-    'Saluda corto y pregúntale qué está buscando. No supongas un producto ni retomes lo que se habló en otra ocasión, y no digas «de nuevo». No llames ver_catalogo hasta que diga qué busca.',
-    'Mauricio 29-oct (prueba en Messenger): «¡Hola de nuevo!» y supuso un taladro ante un «Hola»',
+    'Pregúntale qué está buscando («¿Qué estás buscando hoy?»), sin saludar otra vez ni presentarte: no digas «Hola», tu nombre ni que eres el asistente, porque el sistema ya te presenta con los términos cuando hace falta. No supongas un producto ni retomes lo que se habló en otra ocasión, y no digas «de nuevo». No llames ver_catalogo hasta que diga qué busca.',
+    'Mauricio 29-oct (prueba en Messenger): «¡Hola de nuevo!» y supuso un taladro ante un «Hola»; 30-oct: «está saludando doble vez» (el aviso y el modelo se presentaban los dos)',
   ),
   alc(
     'alc.producto',
