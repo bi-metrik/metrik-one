@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { claseEntrante, claveDeduplicacion, filtrar, firmaChatwoot, leerPayload, verificarFirmaChatwoot } from './chatwoot-webhook'
-import { CONFIG_PUBLICO_POR_DEFECTO, TERMINOS_EJEMPLO, leerConfigPublico, variableSecreta } from './config'
+import { CONFIG_PUBLICO_POR_DEFECTO, CORTES_VENTAS, TERMINOS_EJEMPLO, leerConfigPublico, variableSecreta } from './config'
 import { enlacesFueraDeLista } from './enlaces'
 import { preciosSinHerramienta } from './precios'
 import { ventana, TOPE_SEGUIDOS_TIKTOK } from './ventana'
@@ -84,6 +84,14 @@ describe('configuración (`bot_conversacional.chatwoot`)', () => {
     expect(c.modelo).toMatchObject({ proveedor: 'anthropic', modelo: 'claude-haiku-5-5', esfuerzo: 'medium', pensamiento: true })
     expect(CONFIG_PUBLICO_POR_DEFECTO.rafagaMs).toBe(2500)
     expect(variableSecreta('CHATWOOT_API_TOKEN', 'sabor-experiencias')).toBe('CHATWOOT_API_TOKEN_SABOR_EXPERIENCIAS')
+  })
+  it('ventas (Dimpro) usa 20 s / 45 s por defecto: el aviso de demora no sale en un turno normal; Sabor sigue en 5 s / 20 s', () => {
+    // Messenger, 29-oct: los turnos de ventas tardan 7-13 s y con 5 s el aviso salía en casi todos.
+    expect(leerConfigPublico({ chatwoot: { activo: true, dominio: 'ventas' } })).toMatchObject({ corte1Ms: CORTES_VENTAS.corte1Ms, corteTotalMs: CORTES_VENTAS.corteTotalMs })
+    expect(CORTES_VENTAS.corte1Ms).toBeGreaterThanOrEqual(20_000)
+    expect(leerConfigPublico({ chatwoot: { activo: true } })).toMatchObject({ corte1Ms: 5000, corteTotalMs: 20000 })
+    // Lo que fije config_extra manda, en los dos dominios.
+    expect(leerConfigPublico({ chatwoot: { activo: true, dominio: 'ventas', corte_1_ms: 9000, corte_total_ms: 30000 } })).toMatchObject({ corte1Ms: 9000, corteTotalMs: 30000 })
   })
 })
 

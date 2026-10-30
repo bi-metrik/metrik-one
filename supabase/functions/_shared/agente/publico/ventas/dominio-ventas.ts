@@ -36,6 +36,7 @@ import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
 import { MAX_SUGERENCIAS, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
+import { fotosConsultadas } from './fotos-ventas.ts';
 
 export const GENERAR_LINK_PAGO = 'generar_link_pago';
 export const VERIFICAR_PAGO = 'verificar_pago';
@@ -159,7 +160,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const lecturas: DeclaracionHerramienta[] = [
     {
       name: 'ver_catalogo',
-      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay: haz UNA pregunta de uso y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Las fotos de los productos que nombres con su código las manda el sistema: no pegues links de fotos.`,
+      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Puede devolver menos de ${MAX_SUGERENCIAS}: sugiere solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
       parameters: {
         type: 'object',
         properties: {
@@ -235,9 +236,17 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
             ok: true,
             datos: {
               productos: [], coincidencias: sug.coincidencias, preguntar_uso: true, tipos: sug.tipos,
-              que_hacer: `Hay ${sug.coincidencias} productos que coinciden. No los listes: hazle UNA pregunta de uso para saber cuál le sirve (para qué material o trabajo, en casa u obra, inalámbrico o de cable; según los tipos que hay). Con su respuesta, vuelve a llamar ver_catalogo con buscar y uso, y sugiere como máximo ${MAX_SUGERENCIAS}.`,
+              ...(sug.especializados.length ? { especializados: sug.especializados } : {}),
+              ...(sug.accesorios.length ? { accesorios: sug.accesorios } : {}),
+              ...(sug.pregunta ? { pregunta: sug.pregunta } : {}),
+              que_hacer: sug.pregunta
+                ? `Hay ${sug.coincidencias} productos que coinciden. No los listes. Hazle UNA sola pregunta, esta: «${sug.pregunta}» (lo que más separa lo que hay). Nada más en ese mensaje: ni otra pregunta (inalámbrico o de cable, el material) ni productos. Con su respuesta, vuelve a llamar ver_catalogo con buscar y uso.`
+                : `Hay ${sug.coincidencias} productos que coinciden. No los listes. Hazle UNA sola pregunta (un solo signo de pregunta en el mensaje), la que más separa los tipos que hay: para qué material o trabajo lo quiere. No preguntes dos cosas a la vez. Con su respuesta, vuelve a llamar ver_catalogo con buscar y uso, y sugiere como máximo ${MAX_SUGERENCIAS}.`,
             },
           };
+        }
+        if (sug.tipo === 'sugerir' && sug.ninguno) {
+          return { ok: true, datos: { productos: [], ninguno_para_ese_uso: true, nota: 'Hay de lo que busca, pero ninguno es para ese uso según el catálogo. Díselo así, sin ofrecer otro como si sirviera, y pregúntale si quiere que lo atienda una persona del equipo (si dice que sí: pasar_a_persona motivo no_en_catalogo).' } };
         }
         if (!sug.productos.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. No ofrezcas otro como si fuera el mismo: si lo quiere, pasar_a_persona con motivo no_en_catalogo.' } };
         if (sug.tipo === 'codigo') return { ok: true, datos: { productos: sug.productos.map(productoParaModelo) } };
@@ -245,7 +254,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           ok: true,
           datos: {
             productos: sug.productos.map(productoParaModelo), coincidencias: sug.coincidencias,
-            nota: `Sugiere como máximo estos ${sug.productos.length}, cada uno con su código, nombre corto, precio y una razón de una línea que salga del nombre o de las especificaciones verificadas. No nombres otros productos.`,
+            nota: `${sug.productos.length === 1 ? 'Solo este le sirve: sugiérelo a él solo' : `Solo estos ${sug.productos.length} le sirven: sugiere estos, ni uno más`}, cada uno con su código, nombre corto, precio y una razón de una línea que salga del nombre (de mano, magnético, la potencia o la medida del título) o de las especificaciones verificadas. «Según el catálogo del fabricante» solo si afirmas un dato que NO está en el nombre, y nunca en cada línea. No nombres otros productos.`,
           },
         };
       }
@@ -333,7 +342,11 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           : g.estado === 'pedida' ? 'pedida, sin respuesta: no pidas datos personales'
             : 'no pedida: antes de pedir nombre, celular o dirección, llama respuesta_fija rf.autorizacion';
       const u = compras.at(-1);
+      const pausa = horasDePausa(filas);
+      const fotos = fotosConsultadas(filas);
       return [
+        ...(pausa !== null && pausa >= HORAS_CONVERSACION_NUEVA ? [`El cliente vuelve después de ${Math.floor(pausa)} h sin escribir: si solo saluda o no dice qué quiere, tómalo como una conversación nueva: salúdalo y pregúntale qué está buscando, sin decir «de nuevo» y sin suponer el producto de antes. Si su mensaje sigue claramente lo de antes, retómalo.`] : []),
+        ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
         `Autorización de datos para la compra: ${lineaG}.`,
         ...(u ? [`Compra confirmada: ${u.datos.codigo} × ${u.datos.cantidad}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
         ...(pasados.includes('despachar') ? ['El pago ya está confirmado y el despacho lo tiene el equipo: no vuelvas a verificar ni a pedir el pago.'] : []),
@@ -416,6 +429,23 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       return { ok: false, error: `No existe «${nombre}».`, candado: 'cierre_desconocido' };
     },
   };
+}
+
+/** Desde cuántas horas sin mensajes un «Hola» es una conversación nueva (no se retoma el producto de antes). */
+export const HORAS_CONVERSACION_NUEVA = 1;
+
+/**
+ * Las horas entre el último mensaje anterior y el primero que espera respuesta (en Messenger la conversación de Chatwoot
+ * es la misma por semanas: el modelo ve lo de hace horas como si fuera de ahora). Null sin mensajes anteriores. Pura.
+ */
+export function horasDePausa(filas: FilaPublica[]): number | null {
+  const pend = filas.filter((f) => f.direccion === 'entrante' && !f.turno_id);
+  if (!pend.length) return null;
+  const primera = pend.reduce((a, f) => (f.created_at < a ? f.created_at : a), pend[0].created_at);
+  const antes = filas.filter((f) => f.created_at < primera && !pend.includes(f));
+  if (!antes.length) return null;
+  const ultima = antes.reduce((a, f) => (f.created_at > a ? f.created_at : a), antes[0].created_at);
+  return (Date.parse(primera) - Date.parse(ultima)) / 3_600_000;
 }
 
 /** La clave de «una sola vez» de la confirmación de un pago (la comparten `verificar_pago` y el aviso del webhook). */

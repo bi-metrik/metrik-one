@@ -26,7 +26,9 @@ const MESES = 'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|seti
 const RE_FECHA = new RegExp(`\\b(\\d{1,2})\\s*(?:de\\s+)?(${MESES})\\b|\\b(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?\\b`, 'giu');
 const RE_PORCENTAJE = /(\d+(?:[.,]\d+)?)\s?%/gu;
 const RE_PLATA = /(?:\$|US\$|USD\s?)\s?(\d[\d.,]*)|(\d[\d.,]*)\s?(?:pesos|millones|mil|usd|dólares|dolares)\b/giu;
-const RE_NUMERO = /\b\d{2,}(?:[.,]\d+)*\b/gu;
+// Dos o más dígitos, o uno solo con miles («2.800», «1.200»): sin eso, de «2.800 rpm» se leía «800» y se rechazaba una
+// cifra que sí estaba en el respaldo (Dimpro, 29-oct: dos vueltas extra del modelo en una conversación de 4 turnos).
+const RE_NUMERO = /\b(?:\d{2,}|\d(?=[.,]\d{3}\b))(?:[.,]\d+)*\b/gu;
 
 export function normal(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');

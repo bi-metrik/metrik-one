@@ -2,10 +2,12 @@
 // Asistente de ventas — qué fotos salen en un turno (Dimpro, venta consultiva, 29-oct)
 // ------------------------------------------------------------
 // Las fotos NO las pide el modelo ni lleva URLs: las decide el código después de la respuesta. Sale la primera foto
-// de cada producto que la respuesta nombra con su código MP-xx y que ver_catalogo devolvió EN ESTE TURNO (lo que el
-// modelo leyó, no lo que se inventó), en el orden en que los nombra, hasta MAX_SUGERENCIAS. La URL sale del catálogo
-// (ya filtrada a la lista blanca del bucket). Un producto cuya foto ya salió en la conversación no se repite, salvo que
-// el cliente pida verla en este turno. Pura.
+// de cada producto que la respuesta nombra con su código MP-xx y que ver_catalogo devolvió en este turno o antes en la
+// conversación (lo que el modelo leyó, no lo que se inventó), en el orden en que los nombra, hasta MAX_SUGERENCIAS. La
+// URL sale del catálogo (ya filtrada a la lista blanca del bucket). Un producto cuya foto ya salió en la conversación no
+// se repite, salvo que el cliente pida verla en este turno: «¿tienes foto?» sobre uno que ya se nombró la reenvía aunque
+// el modelo no vuelva a llamar ver_catalogo (Messenger, 29-oct: el bot dijo «el sistema te envía la foto» y no salió
+// nada). Pura.
 // ============================================================
 
 import type { Traza } from '../../tipos.ts';
@@ -43,6 +45,34 @@ export function codigosLeidos(herramientas: HerramientaTraza[] | undefined): Set
   return out;
 }
 
+/** Los códigos que devolvió ver_catalogo en cualquier turno anterior de la conversación. Pura. */
+export function codigosLeidosEnConversacion(filas: FilaPublica[]): Set<number> {
+  const out = new Set<number>();
+  for (const f of filas) for (const n of codigosLeidos((f.traza as TrazaPublica | null)?.herramientas)) out.add(n);
+  return out;
+}
+
+/**
+ * Lo que el modelo tiene que saber de las fotos de los productos que ya se consultaron en la conversación: cuáles tienen
+ * foto y cuáles ya salieron. En el orden en que se leyeron, los últimos `max`. Pura.
+ */
+export function fotosConsultadas(filas: FilaPublica[], max = 6): Array<{ codigo: string; tieneFoto: boolean; enviada: boolean }> {
+  const vistos = new Map<number, { codigo: string; tieneFoto: boolean }>();
+  for (const f of filas) {
+    for (const h of (f.traza as TrazaPublica | null)?.herramientas ?? []) {
+      if (!h.ok || h.nombre !== 'ver_catalogo') continue;
+      for (const p of (h.datos as { productos?: Array<{ codigo?: unknown; tiene_foto?: unknown }> } | null)?.productos ?? []) {
+        const n = numeroDeCodigo(String(p?.codigo ?? ''));
+        if (n === null) continue;
+        vistos.delete(n);
+        vistos.set(n, { codigo: String(p.codigo), tieneFoto: p.tiene_foto === true });
+      }
+    }
+  }
+  const ya = fotosYaEnviadas(filas);
+  return [...vistos.entries()].slice(-max).map(([n, v]) => ({ ...v, enviada: ya.has(n) }));
+}
+
 /** Los códigos cuya foto ya salió (publicada) en la conversación. Pura. */
 export function fotosYaEnviadas(filas: FilaPublica[]): Set<number> {
   const out = new Set<number>();
@@ -66,6 +96,7 @@ export function fotosDelTurno(p: {
   pedido: string;
 }): FotoDelTurno[] {
   const leidos = codigosLeidos(p.herramientas);
+  for (const n of codigosLeidosEnConversacion(p.filas)) leidos.add(n);
   if (!leidos.size) return [];
   const ya = pideVerFoto(p.pedido) ? new Set<number>() : fotosYaEnviadas(p.filas);
   const out: FotoDelTurno[] = [];

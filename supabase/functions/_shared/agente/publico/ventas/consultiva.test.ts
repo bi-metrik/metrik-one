@@ -6,10 +6,12 @@ import { PRODUCTOS_CONSULTIVA } from '../arnes/conjuntos-ventas'
 import { bajarFoto, mensajeroChatwootApi } from '../produccion'
 import type { FilaPublica, LlaveConversacion } from '../tipos'
 import { MAX_SUGERENCIAS, codigosEnTexto, fotosDe, productoParaModelo, sugerirProductos, tipoDe, urlFotoPermitida } from './catalogo-ventas'
-import { demasiadosProductos, fotosDelTurno, pideVerFoto } from './fotos-ventas'
+import type { ProductoVenta } from './catalogo-ventas'
+import { demasiadosProductos, fotosConsultadas, fotosDelTurno, pideVerFoto } from './fotos-ventas'
+import { horasDePausa } from './dominio-ventas'
 import { productosDeFilas } from './produccion-ventas'
 import { REGLAMENTO_DIMPRO } from './reglamento-dimpro'
-import { CLAVES_VENTA_CONSULTIVA, WORKSPACE_DIMPRO, actualizacionSqlDimpro, semillaSqlDimpro } from './semilla-sql-dimpro'
+import { CLAVES_RONDA_2, CLAVES_VENTA_CONSULTIVA, TEXTOS_RONDA_2, WORKSPACE_DIMPRO, actualizacionSqlDimpro, semillaSqlDimpro } from './semilla-sql-dimpro'
 
 /**
  * Venta consultiva de Dimpro (Mauricio, 29-oct): «no vende; fotos y no tantas opciones; preguntar el tipo y sugerir 3».
@@ -19,6 +21,9 @@ import { CLAVES_VENTA_CONSULTIVA, WORKSPACE_DIMPRO, actualizacionSqlDimpro, semi
 const HOST = 'ejemplo.supabase.co'
 const URL_OK = `https://${HOST}/storage/v1/object/public/ferreteria-fotos/dimpro/X1/MP-01-X1-1.jpg`
 const codigos = (r: ReturnType<typeof sugerirProductos>) => ('productos' in r ? r.productos.map((p) => p.codigo) : [])
+const prod = (codigo: string, titulo: string, marca: string, etiquetas: string[]): ProductoVenta => ({
+  publicacionId: codigo, codigo, sku: codigo, titulo, nombre: titulo, marca, categoria: 'Herramientas', etiquetas, precio: 100000, ficha: [], fotos: [],
+})
 
 describe('sugerencias: una pregunta de uso y máximo 3', () => {
   it('categoría amplia sin uso: no devuelve productos, pide preguntar con los tipos que hay', () => {
@@ -29,8 +34,53 @@ describe('sugerencias: una pregunta de uso y máximo 3', () => {
     expect(r.tipos).toEqual(expect.arrayContaining(['Taladro percutor inalámbrico', 'Taladro', 'Taladro magnético', 'Rotomartillo']))
   })
 
-  it('con uso: los 3 que mejor encajan; «de cable» saca lo inalámbrico; dos por tipo salvo el tipo que nombró entero', () => {
-    expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso: 'metal, de cable' }))).toEqual(['MP-13', 'MP-14', 'MP-12'])
+  it('categoría con de mano y magnéticos: la pregunta parte por el tipo (una sola), y dice cuáles son especializados', () => {
+    const r = sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro' })
+    if (r.tipo !== 'preguntar') throw new Error(r.tipo)
+    expect(r.pregunta).toBe('¿Lo buscas de mano o magnético, para perforar estructura metálica?')
+    expect((r.pregunta!.match(/\?/g) ?? []).length).toBe(1)
+    expect(r.especializados).toEqual([{ tipo: 'Taladro magnético', para: expect.stringContaining('estructura metálica') }])
+    // Sin magnéticos en lo que coincide, no hay pregunta hecha: el modelo pregunta el material.
+    const sinMagneticos = PRODUCTOS_CONSULTIVA.filter((p) => !/magnético/.test(p.titulo))
+    const r2 = sugerirProductos([...sinMagneticos, { ...sinMagneticos[0], codigo: 'MP-21', titulo: 'Taladro percutor MarcaEjemplo 18V' }, { ...sinMagneticos[0], codigo: 'MP-22', titulo: 'Taladro de cable MarcaEjemplo 600 W' }], { buscar: 'taladro' })
+    expect(r2).toMatchObject({ tipo: 'preguntar', pregunta: null })
+  })
+
+  it('«metal, de cable»: ni magnéticos (no pidió estructura) ni rotomartillos (son para concreto) ni relleno', () => {
+    // Messenger 29-oct: sugirió el de mano y dos magnéticos de $2,3 M. Ahora solo el de mano.
+    expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso: 'metal, de cable' }))).toEqual(['MP-12'])
+    expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso: 'metal, de cable, de mano' }))).toEqual(['MP-12'])
+    // Si habla de estructura, vigas o broca anular, los magnéticos sí.
+    for (const uso of ['estructura metálica', 'perforar vigas', 'con broca anular', 'acero grueso']) {
+      expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso })).every((c) => ['MP-13', 'MP-14', 'MP-15'].includes(c))).toBe(true)
+    }
+    expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro magnético', uso: 'metal' }))).toEqual(['MP-13', 'MP-14', 'MP-15'])
+    // Para madera: el de mano y el inalámbrico (no nombran otro material); el rotomartillo no.
+    expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso: 'madera' }))).not.toContain('MP-16')
+  })
+
+  it('el catálogo real de Dimpro (fixture de títulos y etiquetas): «metal, de cable» = solo el MP-38; el soporte nunca de relleno', () => {
+    const real = [
+      prod('MP-15', 'Rotomartillo Dongcheng DZC05-26B SDS-Plus 26 mm reversible', 'Dongcheng', ['rotomartillo', 'taladro percutor', 'concreto', 'demolición']),
+      prod('MP-17', 'Taladro percutor inalámbrico Dongcheng DCJZ2050i 20V 50 Nm con batería 2.0Ah', 'Dongcheng', []),
+      prod('MP-18', 'Rotomartillo SDS-Plus Uyustools 26 mm 1050W 4,5 J', 'Uyustools', ['rotomartillo', 'taladro percutor', 'perforar concreto', 'obra']),
+      prod('MP-30', 'Soporte para taladro Ferton ST6109 de 510 mm con base de hierro fundido', 'Ferton', ['soporte para taladro', 'carpintería', 'taller']),
+      prod('MP-38', 'Taladro Ferton TLJ513 de 13 mm 550 W, 0 a 2.800 rpm', 'Ferton', []),
+      prod('MP-44', 'Taladro magnético Ferton de 40 mm 1200W con mandril y broca anular', 'Ferton', ['taladro magnético', 'broca anular', 'metalmecánica', 'estructuras metálicas']),
+      prod('MP-45', 'Taladro magnético Ferton TLM828 de 28 mm velocidad variable 110V', 'Ferton', ['taladro magnético', 'metalmecánica', 'estructuras metálicas']),
+      prod('MP-46', 'Taladro magnético Ferton TLM930 de 28 mm 110 V con mandril', 'Ferton', ['taladro magnético', 'metalmecánica']),
+      prod('MP-51', 'Taladro magnético Ferton TLM925 110V 300 rpm con mandril', 'Ferton', ['taladro magnético', 'metalmecánica']),
+    ]
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'metal, de cable' }))).toEqual(['MP-38'])
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'de mano' }))).toEqual(['MP-17', 'MP-38', 'MP-15'])
+    // MP-17 no nombra material en este fixture (en el real su ficha dice ladrillo): uso general, entra después.
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'concreto' }))).toEqual(['MP-15', 'MP-18', 'MP-17'])
+    expect(codigos(sugerirProductos(real, { buscar: 'taladro', uso: 'estructura metálica' }))[0]).toBe('MP-44')
+    const p = sugerirProductos(real, { buscar: 'taladro' })
+    expect(p).toMatchObject({ tipo: 'preguntar', pregunta: '¿Lo buscas de mano o magnético, para perforar estructura metálica?', accesorios: ['Soporte para taladro'] })
+  })
+
+  it('con uso: «de cable» saca lo inalámbrico; dos por tipo salvo el tipo que nombró entero', () => {
     expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso: 'inalámbrico' }))).toEqual(['MP-11'])
     expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro', uso: 'concreto' }))[0]).toBe('MP-16')
     expect(codigos(sugerirProductos(PRODUCTOS_CONSULTIVA, { buscar: 'taladro magnético', uso: 'estructura' }))).toEqual(['MP-13', 'MP-14', 'MP-15'])
@@ -100,7 +150,36 @@ describe('fotos: lista blanca y cuáles salen', () => {
     expect(fotosDelTurno({ ...base, pedido: '¿y qué capacidad tiene?' }).map((x) => x.codigo)).toEqual(['MP-14'])
     expect(fotosDelTurno({ ...base, pedido: 'muéstrame la foto' }).map((x) => x.codigo)).toEqual(['MP-13', 'MP-14'])
     expect(pideVerFoto('¿cómo se ve?')).toBe(true)
+    expect(pideVerFoto('Tienes foto?')).toBe(true)
     expect(pideVerFoto('¿cuánto vale?')).toBe(false)
+  })
+})
+
+describe('fotos ya consultadas y la pausa larga (lo que el estado le dice al modelo)', () => {
+  const t = (iso: string, x: Partial<FilaPublica>) => ({ created_at: iso, direccion: 'saliente', turno_id: 't', traza: null, ...x }) as unknown as FilaPublica
+  const leyo = (productos: Array<{ codigo: string; tiene_foto: boolean }>) => ({ tipo: 'modelo', herramientas: [{ nombre: 'ver_catalogo', ok: true, args: {}, datos: { productos }, ms: 1 }] })
+
+  it('«¿tienes foto?» sin volver a llamar ver_catalogo: la del producto leído antes sale; la que no hay, no', () => {
+    const filas = [
+      t('2026-10-29T23:54:24Z', { direccion: 'entrante', traza: leyo([{ codigo: 'MP-13', tiene_foto: true }, { codigo: 'MP-12', tiene_foto: false }]) as never }),
+      t('2026-10-29T23:54:40Z', { traza: { tipo: 'modelo', fotos: [{ codigo: 'MP-13', ok: true }] } as never }),
+    ]
+    const base = { herramientas: [], catalogo: PRODUCTOS_CONSULTIVA, filas, pedido: 'Tienes foto?' }
+    expect(fotosDelTurno({ ...base, texto: 'Claro, aquí está el MP-13.' }).map((x) => x.codigo)).toEqual(['MP-13'])
+    expect(fotosDelTurno({ ...base, texto: 'Del MP-12 no tengo foto por ahora.' })).toEqual([])
+    // Un código que nadie leyó en la conversación sigue sin foto.
+    expect(fotosDelTurno({ ...base, texto: 'Mira el MP-14.' })).toEqual([])
+    expect(fotosConsultadas(filas)).toEqual([{ codigo: 'MP-13', tieneFoto: true, enviada: true }, { codigo: 'MP-12', tieneFoto: false, enviada: false }])
+  })
+
+  it('las horas entre lo anterior y el mensaje que espera respuesta', () => {
+    const filas = [
+      t('2026-10-29T22:04:39Z', { direccion: 'entrante' }), t('2026-10-29T22:04:45Z', {}),
+      t('2026-10-29T23:53:52Z', { direccion: 'entrante', turno_id: null }),
+    ]
+    expect(horasDePausa(filas)).toBeCloseTo(1.82, 1)
+    expect(horasDePausa(filas.slice(2))).toBeNull()
+    expect(horasDePausa(filas.slice(0, 2))).toBeNull()
   })
 })
 
@@ -227,5 +306,47 @@ describe('SQL de la venta consultiva (PGlite)', () => {
   it('se niega a correr en otro workspace', async () => {
     const sql = leer('sql/dimpro/2026-10-29_reglamento-ventas-consultiva.sql').replace(`'${WORKSPACE_DIMPRO}'`, `'00000000-0000-4000-8000-0000000000c1'`)
     await expect(db.exec(sql)).rejects.toThrow(/solo del workspace dimpro/)
+  })
+})
+
+describe('SQL de la ronda 2 (PGlite): solo las fichas que cambiaron, publica una vez', () => {
+  let db: PGlite
+  const ARCHIVO = 'sql/dimpro/2026-10-29_reglamento-ventas-ronda2.sql'
+  const leer = (a: string) => readFileSync(join(process.cwd(), a), 'utf8')
+  const versiones = async () => (await db.query<{ n: number }>(`select count(*)::int as n from public.bot_reglamentos where workspace_id = '${WORKSPACE_DIMPRO}'`)).rows[0].n
+
+  beforeAll(async () => {
+    db = new PGlite()
+    await db.exec(`
+      create role anon nologin; create role authenticated nologin; create role service_role nologin;
+      create table public.workspaces (id uuid primary key, slug text, config_extra jsonb);
+      insert into public.workspaces values ('${WORKSPACE_DIMPRO}', 'dimpro', '{}');
+    `)
+    await db.exec(leer('supabase/migrations/20261006213100_wa_conversacion.sql'))
+    await db.exec(leer('supabase/migrations/20261006213200_bot_reglamento_y_uso.sql'))
+    // Producción hoy (v2 publicada): sin alc.saludo ni alc.foto, y alc.producto con el texto de la venta consultiva.
+    const antes = REGLAMENTO_DIMPRO.filter((f) => !['alc.saludo', 'alc.foto'].includes(f.clave))
+      .map((f) => (f.clave === 'alc.producto' ? { ...f, hacer: 'texto de la venta consultiva (v2)' } : f))
+    await db.exec(semillaSqlDimpro(antes))
+  }, 30_000)
+  afterAll(async () => { await db.close() })
+
+  it('el archivo es la salida del generador', () => {
+    expect(leer(ARCHIVO).trimEnd()).toBe(actualizacionSqlDimpro(CLAVES_RONDA_2, REGLAMENTO_DIMPRO, TEXTOS_RONDA_2).trimEnd())
+  })
+
+  it('inserta alc.saludo y alc.foto, reescribe las cambiadas, publica una versión; la segunda corrida no publica', async () => {
+    const otra = (await db.query<{ hacer: string }>(`select hacer from public.bot_parametros where workspace_id = '${WORKSPACE_DIMPRO}' and clave = 'pol.garantia'`)).rows[0].hacer
+    expect(await versiones()).toBe(1)
+    await db.exec(leer(ARCHIVO))
+    expect(await versiones()).toBe(2)
+    const r = await db.query<{ fichas: Array<{ clave: string; hacer: string }> }>(`select fichas from public.bot_reglamentos where workspace_id = '${WORKSPACE_DIMPRO}' order by version desc limit 1`)
+    const pub = new Map(r.rows[0].fichas.map((f) => [f.clave, f.hacer]))
+    for (const c of CLAVES_RONDA_2) expect(pub.get(c)).toBe(REGLAMENTO_DIMPRO.find((f) => f.clave === c)!.hacer)
+    expect(pub.size).toBe(REGLAMENTO_DIMPRO.length)
+    // Lo que no es de la ronda (los textos legales) no se toca.
+    expect(pub.get('pol.garantia')).toBe(otra)
+    await db.exec(leer(ARCHIVO))
+    expect(await versiones()).toBe(2)
   })
 })
