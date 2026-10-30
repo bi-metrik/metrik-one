@@ -75,8 +75,10 @@ describe('el aviso en «Revisar y enviar»', () => {
     const despues = { items: conCosto, tarifas: antes.tarifas.map(t => (t.id === 't-prem' ? { ...t, seleccion: ['h-medio'] } : t)) }
     const plan = planDeTarifas({ antes, despues, costoDe: id => conCosto.find(i => i.id === id)?.costo ?? null })
     const final = aplicarPlan(despues.tarifas, plan, () => 'nueva')
-    // Segunda vuelta (opción 2 de Mauricio): más barata que la Recomendada, se llama Intermedia.
-    expect(final.find(t => t.id === 't-prem')).toMatchObject({ nombre: 'Intermedia', vaEnPropuesta: true, seleccion: ['h-medio'] })
+    // La Recomendada es la del precio intermedio (Mauricio, 2026-10-29): el del medio pasa a la
+    // Recomendada y la Premium se queda con el caro.
+    expect(final.find(t => t.id === 't-rec')).toMatchObject({ seleccion: ['h-medio'] })
+    expect(final.find(t => t.id === 't-prem')).toMatchObject({ nombre: 'Premium', vaEnPropuesta: true, seleccion: ['h-caro'] })
     expect(opcionesFueraDeLaPropuesta(items, final)).toEqual([])
   })
 

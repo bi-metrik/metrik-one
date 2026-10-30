@@ -297,9 +297,9 @@ export function planDeTarifas(args: {
     recomendada: recPreviaTrabajo,
     costoDe,
   })
-  if (reparto) {
-    seleccionFinal.set(reparto.tarifa, reparto.seleccion)
-    nombreFinal.set(reparto.tarifa, reparto.nombre)
+  for (const cambio of reparto ?? []) {
+    seleccionFinal.set(cambio.tarifa, cambio.seleccion)
+    if (cambio.nombre !== null) nombreFinal.set(cambio.tarifa, cambio.nombre)
   }
   const nombreDe = (t: Trabajo) => (nombreFinal.has(t) ? nombreFinal.get(t)! : t.nombre)
 
@@ -348,31 +348,34 @@ export function planDeTarifas(args: {
 const esRanuraDePaquete = (grupo: string) => ranuraDeGrupo(grupo)?.slug === 'paquete_detalle'
 
 /**
- * EL HOTEL QUE SOBRA VA EN MEDIO (segunda vuelta de la COT-2026-0008, opción 2 de Mauricio,
- * 2026-10-29).
+ * LA RECOMENDADA ES LA DEL PRECIO INTERMEDIO (decisión de Mauricio del 2026-10-29, al revisar el PDF
+ * de la COT-2026-0008: «siempre la que escogemos es la intermedia»). Reemplaza la «Intermedia» de
+ * #1348 (la Recomendada la más cara y la del medio en el lugar de la Premium).
  *
- * COT-0008: tres hoteles; la Recomendada (la que eligió la asesora) era el más caro, la Premium lo
- * repetía (idéntica, no se mandaba) y el del medio no salía en la propuesta. Mandarlo en la Premium
- * dejaba una «Superior» más barata que la Recomendada.
+ * Con tres hoteles queda: Económica = el más barato, Recomendada = el del medio y la tercera tarifa =
+ * el más caro, con el nombre de la Premium (el documento la dice «Superior»). El orden del PDF, los
+ * botones y el plan de pagos ya siguen el `orden` de las tarifas: Económica, Recomendada, Superior.
  *
- * La regla, para UN solo servicio con opciones que se cruza y que es un hotel, con el costo de
- * todas sus opciones:
- *  · **La Recomendada es la más cara** (estrictamente) → la tarifa del lugar de la Premium se llama
- *    «Intermedia» y lleva un hotel más barato que el de la Recomendada: el que ya tenía si no la
- *    repetía, o el primero que se pegó de los que no están en ninguna otra tarifa (y no son más
- *    baratos que el de la Económica). Sin ninguno así, nada cambia (la Premium idéntica no se manda).
+ * Para UN solo servicio con opciones que se cruza y que es un hotel, con el costo de todas:
+ *  · **La Recomendada es la más cara** (estrictamente) → se le pasa un hotel del medio (el que tenía
+ *    la tarifa del lugar de la Premium si es más barato que el suyo, o el primero que se pegó de los
+ *    que no están en ninguna otra tarifa), siempre que no sea más barato que el de la Económica; la
+ *    tarifa del lugar de la Premium se queda con el más caro (el de la Recomendada) y, si se llamaba
+ *    «Intermedia», vuelve a llamarse «Premium». Sin hotel del medio, nada cambia.
  *  · **La Recomendada no es la más cara** y la tarifa se llama «Intermedia» → vuelve a «Premium»
  *    con el hotel más caro (el reparto normal por precio).
  *  · En cualquier otro caso, nada: el aviso de «Revisar y enviar» (#1333) lo dice con su botón.
  *
- * Devuelve la tarifa, su selección y su nombre nuevos, o `null` si no cambia nada.
+ * Las cotizaciones guardadas no se reescriben solas: el reparto corre en la siguiente acción de
+ * Tarifas (`sincronizarTarifas`). Devuelve los cambios (tarifa, selección y nombre nuevo o `null`),
+ * o `null` si no cambia nada.
  */
 function repartoPorPrecio<T>(args: {
   ranuras: { grupo: string; candidatos: string[]; combinable: boolean }[]
   tarifas: { t: T; nombre: string | null; seleccion: string[] }[]
   recomendada: T | null
   costoDe: (id: string) => number | null
-}): { tarifa: T; seleccion: string[]; nombre: string } | null {
+}): { tarifa: T; seleccion: string[]; nombre: string | null }[] | null {
   const combinables = args.ranuras.filter(r => r.combinable)
   if (combinables.length !== 1) return null
   const r = combinables[0]
@@ -381,39 +384,38 @@ function repartoPorPrecio<T>(args: {
   if ([...costo.values()].some(c => c === null || !(c > 0))) return null
   const c = (id: string) => costo.get(id) as number
   const hotelDe = (sel: readonly string[]) => r.candidatos.find(id => sel.includes(id)) ?? null
+  const conHotel = (x: { seleccion: string[] }, viejo: string, nuevo: string) => [...x.seleccion.filter(id => id !== viejo), nuevo]
 
   const rec = args.tarifas.find(x => x.t === args.recomendada)
   const recHotel = rec ? hotelDe(rec.seleccion) : null
   if (!rec || !recHotel) return null
-  // La del lugar de la Premium: la Premium o la que ya es Intermedia (la primera).
+  // La del lugar de la Premium: la Premium o la que quedó «Intermedia» (la primera).
   const p = args.tarifas.find(x => x !== rec && (esIntermedia(x.nombre) || nombreCanonico(x.nombre) === 'Premium'))
   if (!p) return null
   const pHotel = hotelDe(p.seleccion)
   if (!pHotel) return null
-  const cambiar = (nuevo: string, nombre: string) => ({
-    tarifa: p.t,
-    seleccion: [...p.seleccion.filter(id => id !== pHotel), nuevo],
-    nombre,
-  })
+  const nombreDeP = esIntermedia(p.nombre) ? 'Premium' : null
 
   const recEsLaMasCara = r.candidatos.every(id => id === recHotel || c(id) < c(recHotel))
   if (!recEsLaMasCara) {
     if (!esIntermedia(p.nombre)) return null
-    return cambiar(propuestaDeOne('Premium', r.candidatos, args.costoDe), 'Premium')
+    const caro = propuestaDeOne('Premium', r.candidatos, args.costoDe)
+    return [{ tarifa: p.t, seleccion: conHotel(p, pHotel, caro), nombre: 'Premium' }]
   }
 
   const eco = args.tarifas.find(x => x !== rec && x !== p && nombreCanonico(x.nombre) === 'Económica')
   const ecoHotel = eco ? hotelDe(eco.seleccion) : null
   const piso = ecoHotel ? c(ecoHotel) : 0
-  if (pHotel !== recHotel) {
-    // Ya lleva un hotel más barato que la Recomendada: es la Intermedia, no una «Superior».
-    if (esIntermedia(p.nombre) || c(pHotel) < piso) return null
-    return { tarifa: p.t, seleccion: p.seleccion, nombre: TARIFA_INTERMEDIA }
-  }
+  const delMedio = (id: string) => c(id) < c(recHotel) && c(id) >= piso && id !== ecoHotel
   const usados = new Set(args.tarifas.filter(x => x !== p).map(x => hotelDe(x.seleccion)).filter((id): id is string => id !== null))
-  const sobra = r.candidatos.find(id => !usados.has(id) && c(id) < c(recHotel) && c(id) >= piso)
-  if (!sobra) return null
-  return cambiar(sobra, TARIFA_INTERMEDIA)
+  const medio = pHotel !== recHotel && delMedio(pHotel)
+    ? pHotel
+    : r.candidatos.find(id => !usados.has(id) && delMedio(id)) ?? null
+  if (!medio) return null
+  return [
+    { tarifa: rec.t, seleccion: conHotel(rec, recHotel, medio), nombre: null },
+    { tarifa: p.t, seleccion: conHotel(p, pHotel, recHotel), nombre: nombreDeP },
+  ]
 }
 
 /**
