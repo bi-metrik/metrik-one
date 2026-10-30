@@ -110,7 +110,7 @@ export const TEXTOS_SALUDO: TextosActualizacion = {
 };
 
 /** Preguntas primero (Mauricio, 30-oct): una a una hasta recomendar uno o dos, y el presupuesto que no alcanza. */
-export const CLAVES_PREGUNTAS = ['alc.producto', 'proc.compra'];
+export const CLAVES_PREGUNTAS = ['alc.producto', 'proc.compra', 'est.breve'];
 export const TEXTOS_PREGUNTAS: TextosActualizacion = {
   titulo: 'Preguntas primero del asistente de VENTAS de Dimpro (30-oct): cable o inalámbrico y presupuesto, una a una, antes de\n-- recomendar uno o dos; si nada cabe en el presupuesto, el más cercano y por qué vale la diferencia.',
   uso: 'semilla-sql-dimpro.ts --preguntas',
