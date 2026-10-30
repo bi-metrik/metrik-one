@@ -504,6 +504,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
     },
   },
   {
+    // SOLO SECO: el guion fuerza el texto mezclado; con Haiku real el texto es otro y el caso no aplica.
     id: 'v-r3-formato-roto', conjunto: 'ventas', titulo: 'El texto mezcla productos («el MP-11 es mejor que el MP-13»): sale entero y las fotos con su pie, sin perder nada',
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: '¿cuál es mejor, el MP-11 o el MP-13?' }],
@@ -531,8 +532,11 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const f = e.almacen.trazas().flatMap((t) => t.fotos ?? []);
       const ranuras = e.almacen.filas.filter((x) => x.direccion === 'saliente' && x.turno_id).map((x) => `${x.turno_id}|${x.ranura}`);
       return todos(
-        // El primero es la entrada (con el aviso de bot pegado, si es el primer mensaje).
-        xs[0]?.includes('Te sirven estos:') && xs.slice(1).map((x) => x.slice(0, 7)).join(' ') === 'T:MP-13 F:MP-13 T:MP-14 T:MP-15 F:MP-15 T:¿Cuál' ? ok('orden exacto') : no(`orden: ${xs.map((x) => x.slice(0, 9)).join(' → ')}`),
+        // Cada texto de producto va seguido de su foto, menos el del MP-14 (la que falló); los tres textos salen; cierra
+        // con texto. El orden de los productos lo escoge el modelo (con Haiku real cambia).
+        ['MP-13', 'MP-14', 'MP-15'].every((c) => xs.some((x) => x.startsWith(`T:${c}`)))
+          && xs.every((x, i) => !/^T:MP-1[35]/.test(x) || xs[i + 1] === `F:${x.slice(2, 7)}`)
+          && !xs.includes('F:MP-14') && xs.at(-1)!.startsWith('T:') ? ok('orden: cada texto con su foto; el MP-14 sin foto') : no(`orden: ${xs.map((x) => x.slice(0, 9)).join(' → ')}`),
         f.find((x) => x.codigo === 'MP-14' && !x.ok) ? ok('traza: la foto del MP-14 falló') : no(`traza: ${JSON.stringify(f)}`),
         new Set(ranuras).size === ranuras.length ? ok('una ranura por envío') : no('ranuras repetidas'),
       );
@@ -617,6 +621,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
     esperado: (e) => todos(propuestas(e).length >= 1 ? ok('propuesta') : no(`sin propuesta: ${llamadas(e, 'proponer').map((h) => h.error).join(' | ').slice(0, 300)}`), sinPedirConfirmar(e)),
   },
   {
+    // SOLO SECO: el guion fuerza los `datos` rotos; con Haiku real el caso no aplica.
     id: 'v-r3-datos-texto-roto', conjunto: 'ventas', titulo: '`datos` como texto con JSON roto: el error dice eso (no «el producto no es un código»); el tope pasa a persona sin pedir repetir',
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [...HASTA_RESUMEN.pasos.slice(0, 3), { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' }],
