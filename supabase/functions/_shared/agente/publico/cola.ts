@@ -54,7 +54,7 @@ import { planDeEnvios } from './ventas/partir-ventas.ts';
 import type { Envio } from './ventas/partir-ventas.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
-import { gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
+import { filasDelTramo, gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
 import type { Canal, EventoAutorizacion, FilaPublica, LlaveConversacion, MotivoPersona, PasoAPersona, Tramos, TrazaPublica } from './tipos.ts';
 import { ETIQUETA_MOTIVO, llaveTexto } from './tipos.ts';
 import { ventana } from './ventana.ts';
@@ -514,7 +514,9 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
   if (mensajesUltimaHora(filas, d.ahoraMs()) > c.topes.mensajesPorHora) {
     return { salida: null, traza: sinTurno(d, { topes: ['anti_spam'], sin_publicar: 'anti-spam: más de lo permitido por hora' }) };
   }
-  if (turnosConIA(filas) >= c.topes.turnosPorConversacion) {
+  // Por tramo: si este turno abre uno nuevo (primero, pausa larga o vuelve de persona), no hereda los turnos de antes.
+  const tramoNuevo = motivoAviso(filas, new Set(pend.map((f) => f.id)), d.ahoraMs(), c.pausaLargaHoras) !== null;
+  if (!tramoNuevo && turnosConIA(filasDelTramo(filas)) >= c.topes.turnosPorConversacion) {
     return { salida: fija(d, 'rf.persona.falla'), traza: sinTurno(d, { topes: ['turnos_por_conversacion'], respuesta_fija: 'rf.persona.falla' }), persona: { motivo: 'falla', pidio: `la conversación llegó a ${c.topes.turnosPorConversacion} turnos con IA` } };
   }
   if (c.presupuestoDiarioUsd !== null) {
@@ -743,8 +745,10 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     // Con botones del modelo (p. ej. «Inalámbrico | De cable») también se parte: los botones van en el último texto.
     if (salida.tipo !== 'enlace') { textoVentas = salida.texto; conOpciones = 'opciones' in salida ? salida : null; }
     try {
+      // Un tramo nuevo (pausa larga o vuelve de persona) vuelve a mandar las fotos aunque ya hubieran salido antes.
+      const tramoNuevo = motivoAviso(filas, new Set(pend.map((f) => f.id)), d.ahoraMs(), d.config.pausaLargaHoras) !== null;
       fotos = fotosDelTurno({
-        texto: salida.texto, herramientas: traza.herramientas, catalogo: await d.ventas.catalogo(), filas,
+        texto: salida.texto, herramientas: traza.herramientas, catalogo: await d.ventas.catalogo(), filas, tramoNuevo,
         pedido: pend.map((f) => f.texto ?? '').join(' '),
       });
     } catch (e) {

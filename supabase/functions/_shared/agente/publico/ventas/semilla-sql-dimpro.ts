@@ -91,6 +91,15 @@ export const TEXTOS_RONDA_3: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: ronda 3 (producto y su foto, sin repetir, dirección, sí escrito, venta cruzada) (30-oct)',
 };
 
+/** El nombre del bot (Mauricio, 30-oct: «soy Dimi, asistente virtual de Dimpro»): el perfil y el saludo fijo. */
+export const CLAVES_NOMBRE = ['perfil', 'rf.bienvenida'];
+export const TEXTOS_NOMBRE: TextosActualizacion = {
+  titulo: 'Nombre del asistente de VENTAS de Dimpro (30-oct): «Hola, soy Dimi, asistente virtual de Dimpro».',
+  uso: 'semilla-sql-dimpro.ts --nombre',
+  despues: 'en cualquier momento: no depende de un deploy (el saludo ya usa {nombre}).',
+  nota: 'asistente de ventas Dimpro: se llama Dimi (30-oct)',
+};
+
 /**
  * El SQL que carga (o reemplaza) el mapa de venta cruzada sin redesplegar: la ficha `ventas.complementos` con el mapa de
  * un JSON `{ "MP-38": [{ "codigo": "MP-30", "razon": "…" }] }`. Lo que no tenga código y razón se rechaza (no se carga
@@ -172,6 +181,7 @@ $$;
 if (import.meta.main) {
   const iMapa = Deno.args.indexOf('--complementos');
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
+    : Deno.args.includes('--nombre') ? actualizacionSqlDimpro(CLAVES_NOMBRE, REGLAMENTO_DIMPRO, TEXTOS_NOMBRE)
     : Deno.args.includes('--ronda3') ? actualizacionSqlDimpro(CLAVES_RONDA_3, REGLAMENTO_DIMPRO, TEXTOS_RONDA_3)
     : Deno.args.includes('--ronda2') ? actualizacionSqlDimpro(CLAVES_RONDA_2, REGLAMENTO_DIMPRO, TEXTOS_RONDA_2)
     : Deno.args.includes('--consultiva') ? actualizacionSqlDimpro() : semillaSqlDimpro();
