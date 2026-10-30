@@ -259,6 +259,22 @@ async function prepararAdjuntos(d: Dominio, ctx: ContextoDominio, topeMs: number
 }
 
 /** La respuesta fija de «no pude» con las opciones vigentes (la propuesta pendiente, si la hay). */
+/**
+ * Los `datos` de `proponer` como objeto: un objeto pasa; un texto que es un objeto JSON se lee; cualquier otra cosa
+ * devuelve el error que le dice al modelo qué corregir. Pura.
+ */
+export function datosDePropuesta(crudo: unknown): { ok: true; datos: Record<string, unknown> } | { ok: false; error: string } {
+  if (crudo && typeof crudo === 'object' && !Array.isArray(crudo)) return { ok: true, datos: crudo as Record<string, unknown> };
+  if (typeof crudo === 'string' && crudo.trim()) {
+    try {
+      const o = JSON.parse(crudo);
+      if (o && typeof o === 'object' && !Array.isArray(o)) return { ok: true, datos: o as Record<string, unknown> };
+    } catch { /* abajo */ }
+    return { ok: false, error: '`datos` llegó como texto y no es un objeto JSON válido (comillas mezcladas o sin cerrar). Vuelve a llamar `proponer` con `datos` como OBJETO, campo por campo, no como texto.' };
+  }
+  return { ok: false, error: 'Falta `datos`: vuelve a llamar `proponer` con `datos` como objeto, con todos los campos de la acción.' };
+}
+
 function caido(deps: DepsTurno, e: EntradaTurno): Salida {
   const t = respuestaFija(deps.reglamento, 'rf.modelo_caido');
   const vig = vigenteDe(e.filas, deps.dominio);
@@ -420,10 +436,15 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
 
     if (nombre === 'proponer') {
       const accion = String(args.accion ?? '');
-      const datos = (args.datos && typeof args.datos === 'object' ? args.datos : {}) as Record<string, unknown>;
+      // `datos` tiene que ser un objeto. Medido en vivo (Dimpro, 30-oct): llegó como texto con un JSON roto y el dominio,
+      // al leer `{}`, contestaba «el producto no es un código» (engañoso: el modelo buscó el producto otra vez).
+      const leidos = datosDePropuesta(args.datos);
+      const datos = leidos.ok ? leidos.datos : {};
       const th = deps.reloj();
-      const borrado = propuestaSobreBorrado(datos, regs);
-      const p = borrado
+      const borrado = leidos.ok ? propuestaSobreBorrado(datos, regs) : null;
+      const p = !leidos.ok
+        ? { ok: false as const, error: leidos.error, candado: 'datos_mal_formados' }
+        : borrado
         ? { ok: false as const, error: `${borrado.alias} ya no existe en la base (lo borraron): no se puede tocar. No digas que está registrado; si lo quieren otra vez, propónlo como uno nuevo.`, candado: 'registro_borrado' }
         : d.acciones.includes(accion)
         ? await d.proponer(accion, datos, e.ctx)

@@ -254,7 +254,9 @@ export function mensajeroChatwootApi(o: {
       const b = await bajarFoto(foto.url, { hostPermitido: o.hostFotos ?? null, fetch: f });
       if (!b.ok) return { ok: false, incierto: false, motivo: `foto: ${b.motivo}` };
       const fd = new FormData();
-      fd.append('content', foto.texto);
+      // Sin pie (ronda 3: la foto va justo después del texto de su producto) no se manda `content`: Messenger muestra
+      // solo la imagen. Con pie, Chatwoot lo manda a Messenger como un texto antes de la imagen.
+      if (foto.texto) fd.append('content', foto.texto);
       fd.append('message_type', 'outgoing');
       fd.append('private', 'false');
       fd.append('attachments[]', b.archivo, b.nombre);

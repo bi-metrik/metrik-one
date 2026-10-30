@@ -24,6 +24,9 @@ export interface FotoDelTurno {
   texto: string;
 }
 
+/** Las lecturas que traen productos del catálogo (las fotos solo salen de lo que el modelo leyó en ellas). */
+const LECTURAS_DE_PRODUCTOS = ['ver_catalogo', 'ver_complementos'];
+
 const normal = (t: string) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 /** ¿El cliente pide ver el producto en este turno? («foto», «imagen», «muéstrame», «cómo es», «quiero verlo»). Pura. */
@@ -31,12 +34,13 @@ export function pideVerFoto(texto: string): boolean {
   return /\b(foto|fotos|imagen|imagenes|muestr\w*|mostr\w*|ensen\w*|como es|como se ve|verl[oa]s?|ver el|ver la)\b/.test(normal(texto));
 }
 
-/** Los códigos que devolvió ver_catalogo en las herramientas de este turno. Pura. */
+/** Los códigos que devolvieron ver_catalogo y ver_complementos en las herramientas de este turno. Pura. */
 export function codigosLeidos(herramientas: HerramientaTraza[] | undefined): Set<number> {
   const out = new Set<number>();
   for (const h of herramientas ?? []) {
-    if (!h.ok || h.nombre !== 'ver_catalogo') continue;
-    const ps = (h.datos as { productos?: Array<{ codigo?: unknown }> } | null)?.productos ?? [];
+    if (!h.ok || !LECTURAS_DE_PRODUCTOS.includes(h.nombre)) continue;
+    const d = h.datos as { productos?: Array<{ codigo?: unknown }>; complementos?: Array<{ codigo?: unknown }> } | null;
+    const ps = [...(d?.productos ?? []), ...(d?.complementos ?? [])];
     for (const p of ps) {
       const n = numeroDeCodigo(String(p?.codigo ?? ''));
       if (n !== null) out.add(n);
@@ -60,8 +64,9 @@ export function fotosConsultadas(filas: FilaPublica[], max = 6): Array<{ codigo:
   const vistos = new Map<number, { codigo: string; tieneFoto: boolean }>();
   for (const f of filas) {
     for (const h of (f.traza as TrazaPublica | null)?.herramientas ?? []) {
-      if (!h.ok || h.nombre !== 'ver_catalogo') continue;
-      for (const p of (h.datos as { productos?: Array<{ codigo?: unknown; tiene_foto?: unknown }> } | null)?.productos ?? []) {
+      if (!h.ok || !LECTURAS_DE_PRODUCTOS.includes(h.nombre)) continue;
+      const d = h.datos as { productos?: Array<{ codigo?: unknown; tiene_foto?: unknown }>; complementos?: Array<{ codigo?: unknown; tiene_foto?: unknown }> } | null;
+      for (const p of [...(d?.productos ?? []), ...(d?.complementos ?? [])]) {
         const n = numeroDeCodigo(String(p?.codigo ?? ''));
         if (n === null) continue;
         vistos.delete(n);

@@ -116,6 +116,14 @@ export const CONFIG_PUBLICO_POR_DEFECTO: ConfigPublico = {
  */
 export const CORTES_VENTAS = { corte1Ms: 20_000, corteTotalMs: 45_000 } as const;
 
+/**
+ * Ventas, ronda 3 (30-oct): las pausas entre los envíos de un turno partido por producto. Chatwoot manda cada mensaje a
+ * Messenger en un trabajo aparte y la foto tarda más (Messenger la baja): sin pausa, el texto del producto siguiente
+ * podía llegar antes que la foto del anterior. SIN VERIFICAR contra Messenger: si aun así se cruzan, se suben.
+ */
+export const PAUSA_TRAS_FOTO_MS = 2500;
+export const PAUSA_ENTRE_MENSAJES_MS = 800;
+
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Obj : null);
 const texto = (v: unknown, d: string): string => (typeof v === 'string' && v.trim() ? v.trim() : d);
