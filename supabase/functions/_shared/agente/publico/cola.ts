@@ -527,10 +527,34 @@ async function decidir(d: DepsPublico, turnoId: string, filas: FilaPublica[], pe
   return await turnoModelo(d, turnoId, filas, pend, tramos, {});
 }
 
+const tituloNormal = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
+
+/**
+ * Messenger por Chatwoot (30-oct, medido en vivo): el botón (`input_select`) sale como respuesta rápida y, al tocarlo,
+ * llega como TEXTO con el título de la opción, sin `submitted_values` ni el id (toque_id null). Mauricio tocó «Sí, enviar
+ * link» dos veces y el pedido nunca se confirmó. Invariante del código, no del modelo: en ese canal, un mensaje pendiente
+ * cuyo texto es igual (sin mayúsculas, tildes, espacios ni signos) al título de una opción de la ÚLTIMA salida del bot con
+ * opciones es el toque de esa opción (su id). Si el toque trae su id (`submitted_values`), manda el id. Lo que pase con
+ * un botón viejo lo decide la lógica del toque, como con uno tocado. Solo en memoria (la fila guardada no cambia). Pura.
+ */
+export function toquesPorTitulo(filas: FilaPublica[], canal: Canal): FilaPublica[] {
+  if (canal !== 'otro') return filas;
+  let ultima: FilaPublica | null = null;
+  const out = filas.map((f) => {
+    if (f.direccion === 'saliente' && !(f.ranura ?? '').startsWith('nota') && (f.opciones ?? []).length) { ultima = f; return f; }
+    if (f.direccion !== 'entrante' || f.turno_id || f.clase !== 'escrito' || f.toque_id || !f.texto || !ultima) return f;
+    const t = tituloNormal(f.texto);
+    const op = t ? (ultima as FilaPublica).opciones!.find((o) => tituloNormal(o.titulo) === t) : undefined;
+    return op ? { ...f, clase: 'toque' as const, toque_id: op.id } : f;
+  });
+  return out;
+}
+
 /** Un turno: atiende lo pendiente. Devuelve false si no había nada. */
 export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   const desde = () => new Date(d.ahoraMs() - DIAS_DE_CONVERSACION * 24 * 3600 * 1000).toISOString();
-  let filas = await d.almacen.leer(d.llave, desde());
+  const leer = async () => toquesPorTitulo(await d.almacen.leer(d.llave, desde()), d.canal);
+  let filas = await leer();
   let pend = pendientesPublico(filas);
   if (!pend.length) return false;
   const turnoId = d.nuevoId();
@@ -549,7 +573,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     if (falta <= 0) break;
     await d.dormir(falta);
     rafaga += falta;
-    filas = await d.almacen.leer(d.llave, desde());
+    filas = await leer();
     pend = pendientesPublico(filas);
   }
   tramos.rafaga_ms = Math.round(rafaga);
@@ -561,7 +585,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   while (d.canal !== 'tiktok' && sinUrl() && esperaAudio < 8000) {
     await d.dormir(1000);
     esperaAudio += 1000;
-    filas = await d.almacen.leer(d.llave, desde());
+    filas = await leer();
     pend = pendientesPublico(filas);
   }
   if (esperaAudio) tramos.transcripcion_ms = esperaAudio;
@@ -572,7 +596,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     r = await decidir(d, turnoId, filas, pend, tramos);
     // 8a. ¿Entró otro mensaje mientras generaba? Se descarta el borrador y se regenera con todo (§3.4), hasta 2 veces.
     if (!r.salida || regenerado >= 2 || r.persona) break;
-    const ahora = await d.almacen.leer(d.llave, desde());
+    const ahora = await leer();
     const nuevos = pendientesPublico(ahora).filter((f) => !pend.some((p) => p.id === f.id));
     if (!nuevos.length) break;
     regenerado++;
@@ -616,6 +640,18 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
     pide = 'general';
   }
   const extras = salida === r.salida ? (r.extras ?? []) : [];
+
+  // Los botones que el modelo arma no pueden repetir los del pedido vigente (30-oct, Dimpro: el modelo sacó su propio
+  // «Sí, enviar link / Corregir» con ids de conversación; tocados, no confirmaban nada). Esos títulos se quitan.
+  if (salida && salida === r.salida && r.delModelo && 'opciones' in salida) {
+    const vigP = propuestaVigente(filas);
+    const choque = new Set(vigP ? [vigP.si, vigP.no].map(tituloNormal) : []);
+    const quedan = salida.opciones.filter((o) => !choque.has(tituloNormal(o.titulo)));
+    if (quedan.length !== salida.opciones.length) {
+      traza.candados = [...(traza.candados ?? []), { candado: 'botones_de_la_propuesta', detalle: salida.opciones.map((o) => o.titulo).join(' | ') }];
+      salida = quedan.length ? { ...salida, opciones: quedan } : { tipo: 'texto', texto: salida.texto };
+    }
+  }
 
   // Ventas: las fotos de los productos que nombró la respuesta del modelo (las decide el código; nunca bloquean).
   let fotos: FotoDelTurno[] = [];
