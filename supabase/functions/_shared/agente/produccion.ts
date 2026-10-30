@@ -42,6 +42,7 @@ import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { EstadoPerfil } from '../perfil-contacto.ts';
 import type { PuertosCupo } from './uso.ts';
+import { conDespliegue } from './despliegue.ts';
 import type { Almacen, FilaConversacion, MediaFila, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
 type Fila = Record<string, unknown>;
@@ -61,7 +62,7 @@ export function almacenSupabase(supabase: SupabaseClient): Almacen {
     async cerrarTurno(p) {
       const r = await Promise.all([
         supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas),
-        supabase.from('wa_conversacion').update({ traza: p.traza }).eq('id', p.filaTraza),
+        supabase.from('wa_conversacion').update({ traza: conDespliegue(p.traza) }).eq('id', p.filaTraza),
         p.salientes.length ? supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('wa_message_id', p.salientes) : Promise.resolve({ error: null }),
       ]);
       for (const x of r) if (x.error) console.error('[agente] no se pudo cerrar el turno:', x.error.message);
@@ -101,12 +102,15 @@ export function mensajeroWa(): Mensajero {
 
 const cacheReglamento = new Map<string, { r: Reglamento; vence: number }>();
 
-/** La versión del puntero o la última publicada. `null` si no hay ninguna (el agente no corre). Caché de 60 s. */
-export async function cargarReglamento(supabase: SupabaseClient, workspaceId: string, bot: string, id: string | null): Promise<Reglamento | null> {
-  const k = `${workspaceId}|${bot}|${id ?? ''}`;
+/**
+ * La versión del puntero o la última publicada. `null` si no hay ninguna (el agente no corre). Caché de 60 s.
+ * `conBanco`: trae también `bancoValido` (columna calculada `banco_valido`, migración 20261030190000).
+ */
+export async function cargarReglamento(supabase: SupabaseClient, workspaceId: string, bot: string, id: string | null, o: { conBanco?: boolean } = {}): Promise<Reglamento | null> {
+  const k = `${workspaceId}|${bot}|${id ?? ''}|${o.conBanco ? 'b' : ''}`;
   const c = cacheReglamento.get(k);
   if (c && c.vence > Date.now()) return c.r;
-  let q = supabase.from('bot_reglamentos').select('id, version, huella, fichas').eq('workspace_id', workspaceId).eq('bot', bot);
+  let q = supabase.from('bot_reglamentos').select(o.conBanco ? 'id, version, huella, fichas, banco_valido' : 'id, version, huella, fichas').eq('workspace_id', workspaceId).eq('bot', bot);
   q = id ? q.eq('id', id) : q.order('version', { ascending: false }).limit(1);
   const { data, error } = await q.maybeSingle();
   if (error || !data) {
@@ -114,7 +118,10 @@ export async function cargarReglamento(supabase: SupabaseClient, workspaceId: st
     return null;
   }
   const fichas = ((Array.isArray(data.fichas) ? data.fichas : []) as unknown[]).map(fichaValida).filter((f): f is NonNullable<ReturnType<typeof fichaValida>> => !!f);
-  const r: Reglamento = { id: data.id as string, version: Number(data.version), huella: String(data.huella || await huellaDe(fichas)), fichas };
+  const r: Reglamento = {
+    id: data.id as string, version: Number(data.version), huella: String(data.huella || await huellaDe(fichas)), fichas,
+    ...(o.conBanco ? { bancoValido: (data as { banco_valido?: unknown }).banco_valido === true } : {}),
+  };
   cacheReglamento.set(k, { r, vence: Date.now() + 60_000 });
   return r;
 }

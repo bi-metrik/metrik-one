@@ -206,3 +206,48 @@ export async function alertarSiCaido(p: PuertosCaida, traza: (Pick<Traza, 'error
     return 'error';
   }
 }
+
+// ── Versión sin banco (encargo 2026-10-30) ──────────────────────────────────
+// El canal está prendido pero la versión vigente no pasó su banco del arnés (`turno-con-rol.ts`, `version_sin_banco`):
+// cada turno pasa a una persona. No es una caída del modelo, pero sí deja al asistente sin atender: un correo por
+// workspace al día, con el mismo envío.
+
+export const VENTANA_SIN_BANCO_S = 24 * 60 * 60;
+
+/** El correo de la versión sin banco. Pura. */
+export function correoSinBanco(p: { datos: DatosCaida; destino?: string }): { to: string; subject: string; text: string; html: string } {
+  const d = p.datos;
+  const text = [
+    'El asistente está prendido, pero la versión publicada no pasó su banco de pruebas (pass^k).',
+    'Mientras tanto, cada conversación pasa a una persona en Chatwoot (motivo «version_sin_banco»).',
+    '',
+    `Hora (Bogotá): ${horaBogota(d.ahoraMs)}`,
+    `Workspace: ${d.workspaceNombre}`,
+    `Canal: ${NOMBRE_CANAL[d.canal]}`,
+    `Conversación: ${d.conversacion}`,
+    '',
+    'Para que vuelva a atender: correr el arnés del público con --k 3 y publicar con su banco,',
+    'o mover el puntero reglamento_id a una versión que sí lo tenga.',
+  ].join('\n');
+  return { to: p.destino ?? CORREO_MAURICIO, subject: `Asistente sin banco: ${d.workspaceNombre}`, text, html: htmlDeTexto(text) };
+}
+
+/** El aviso de la versión sin banco: uno por workspace al día. Nunca lanza. */
+export async function alertarSinBanco(p: PuertosCaida, d: DatosCaida): Promise<'enviado' | 'ya_avisado' | 'fallo_envio' | 'error'> {
+  try {
+    const dia = Math.floor(d.ahoraMs / (VENTANA_SIN_BANCO_S * 1000));
+    const clave = `agente:sin_banco:${d.workspaceId}:${dia}`;
+    if (!(await p.tomarCandado(clave, VENTANA_SIN_BANCO_S))) return 'ya_avisado';
+    const r: ResultadoCorreo = await p.enviarCorreo({ ...correoSinBanco({ datos: d, destino: p.destino }), idempotencyKey: `agente-sin-banco/${d.workspaceId}/${dia}` })
+      .catch((e) => ({ ok: false as const, error: String(e) }));
+    if (!r.ok && r.status !== 409) {
+      console.error(`[agente] no salió el correo de versión sin banco de ${d.workspaceNombre}:`, r.error);
+      await p.soltarCandado?.(clave);
+      return 'fallo_envio';
+    }
+    return 'enviado';
+  } catch (err) {
+    console.error('[agente] el aviso de versión sin banco falló:', err);
+    return 'error';
+  }
+}
