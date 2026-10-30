@@ -37,4 +37,11 @@ describe('confirmacionFueraDeLoPactado', () => {
     expect(t).toContain('se cotizó en $1.000.000 ($200.000 más)')
     expect(t).toContain('a proveedores se les habrá pagado $4.200.000 y el cliente ha pagado $2.000.000 ($2.200.000 más)')
   })
+
+  it('H-25 (QA G12): lo que movió la TRM se nombra como diferencia de cambio, no como que el proveedor cobró más', () => {
+    const solo = confirmacionFueraDeLoPactado({ monto: 8_817_012, pagadoAntesServicio: 0, costoCotizado: 8_650_260, pagadoProveedores: 0, cobradoCliente: 20_000_000, diferenciaCambio: 166_752 })
+    expect(solo).toBe('¿Estás seguro? Esto está por fuera de lo pactado: con este pago el servicio queda en $8.817.012 y se cotizó en $8.650.260 ($166.752 más, todo por diferencia de cambio).')
+    const mixto = confirmacionFueraDeLoPactado({ monto: 9_240_012, pagadoAntesServicio: 0, costoCotizado: 8_650_260, pagadoProveedores: 0, cobradoCliente: 20_000_000, diferenciaCambio: 174_752 })
+    expect(mixto).toContain('($589.752 más, de ellos $174.752 de diferencia de cambio)')
+  })
 })

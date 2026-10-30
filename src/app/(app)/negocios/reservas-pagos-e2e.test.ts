@@ -7,7 +7,7 @@
  * F3-7 (gate servicios_listos), C15/§7.4 (el servidor rechaza a quien no puede).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Fila = Record<string, unknown>
 
@@ -41,6 +41,12 @@ vi.mock('@/lib/actions/get-workspace', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => clienteFalso(),
   createClient: async () => clienteFalso(),
+}))
+// M-12 · el lector de soportes (Gemini) y Storage son dobles: la prueba no llama a nadie.
+const lectorFalso = vi.fn()
+vi.mock('@/lib/ai/extract-fields', () => ({ extractFieldsFromDocument: (...a: unknown[]) => lectorFalso(...a) }))
+vi.mock('@/lib/almacenamiento/one', () => ({
+  subirAOne: async (e: { path: string }) => ({ referencia: `one://ve-documentos/${e.path}` }),
 }))
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../../test/exigir-modulo-doble')).dobleExigirModulo())
@@ -178,6 +184,7 @@ import {
   decidirAprobacionServicio,
   pedirAprobacionServicio,
   registrarPagoServicio,
+  subirSoporteServicio,
   type EntradaPagoServicio,
 } from './servicios-viaje-actions'
 import { evaluarGateServicios, leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
@@ -492,5 +499,82 @@ describe('QA Trappvel 2026-10-29: el proveedor cobra menos y la desviación del 
   it('M3-5: el pago a proveedor deja la fecha del pago', async () => {
     await registrarPagoServicio(pagoVuelo())
     expect(tablas.gastos[0]).toMatchObject({ fecha: HOY, fecha_pago: HOY })
+  })
+})
+
+describe('QA Trappvel 2026-10-29 · G12: leer el soporte del pago a proveedor (M-12)', () => {
+  const campos = (o: Record<string, string | null>) => ({ data: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v, confidence: 0.95, manual: false }])) })
+  const subir = async (servicioId: string) => {
+    const fd = new FormData()
+    fd.set('servicioId', servicioId)
+    fd.set('file', new File([new Uint8Array([1, 2, 3])], 'pagoprov.png', { type: 'image/png' }))
+    return subirSoporteServicio(fd)
+  }
+  const keyAntes = process.env.GEMINI_API_KEY
+  beforeEach(() => { lectorFalso.mockReset(); process.env.GEMINI_API_KEY = 'llave-de-prueba' })
+  afterEach(() => { process.env.GEMINI_API_KEY = keyAntes })
+
+  it('subir el soporte lo LEE con el lector de comprobantes y propone valor, fecha, medio y comprobante; no registra nada', async () => {
+    lectorFalso.mockResolvedValue(campos({
+      monto: '1.000.000', fecha: '2026-10-29', banco_origen: 'Bancolombia', cuenta_origen: '****4417',
+      referencia: '0000PRUEBA03P1', destinatario: 'SATENA', moneda: null, monto_moneda: null, tasa_cambio: null,
+    }))
+    const r = await subir('sv-vuelo')
+    expect(r).toMatchObject({
+      ok: true,
+      referencia: expect.stringMatching(/^one:\/\//),
+      lectura: { monto: 1_000_000, fecha: '2026-10-29', medioId: 'tc-empresa', referencia: '0000PRUEBA03P1', moneda: null },
+    })
+    // El mismo lector del comprobante del viajero, con los campos del pago a proveedor.
+    expect(lectorFalso).toHaveBeenCalledTimes(1)
+    const [, mime, camposPedidos, llave] = lectorFalso.mock.calls[0]
+    expect(mime).toBe('image/png')
+    expect(llave).toBe('llave-de-prueba')
+    expect((camposPedidos as Array<{ slug: string }>).map(c => c.slug)).toEqual(expect.arrayContaining(['monto', 'referencia', 'moneda', 'tasa_cambio']))
+    expect(tablas.gastos).toHaveLength(0)
+  })
+
+  it('si no se puede leer, el soporte queda y la lectura viene vacía para escribir a mano', async () => {
+    lectorFalso.mockResolvedValue({ data: null, error: 'x' })
+    expect(await subir('sv-vuelo')).toMatchObject({ ok: true, lectura: null })
+    lectorFalso.mockRejectedValue(new Error('caído'))
+    expect(await subir('sv-vuelo')).toMatchObject({ ok: true, lectura: null })
+    delete process.env.GEMINI_API_KEY
+    expect(await subir('sv-vuelo')).toMatchObject({ ok: true, lectura: null })
+  })
+
+  it('servicio cotizado en USD: propone la moneda, el monto en USD y la TRM del soporte', async () => {
+    Object.assign(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!, { moneda: 'USD', costo_moneda: 580.72, tasa_cotizada: 4150 })
+    lectorFalso.mockResolvedValue(campos({ monto: '2.456.446', moneda: 'USD', monto_moneda: '580.72', tasa_cambio: '4.230' }))
+    expect(await subir('sv-hotel')).toMatchObject({ ok: true, lectura: { monto: 2_456_446, moneda: 'USD', montoMoneda: 580.72, tasa: 4230 } })
+  })
+
+  it('el pago guarda el número de comprobante y la empresa del proveedor', async () => {
+    tablas.negocio_servicios.find(s => s.id === 'sv-vuelo')!.proveedor_empresa_id = 'emp-satena'
+    await registrarPagoServicio(pagoVuelo({ referencia: ' 0000PRUEBA03P1 ' }))
+    expect(tablas.gastos[0]).toMatchObject({ external_ref: '0000PRUEBA03P1', empresa_id: 'emp-satena' })
+    expect(tablas.activity_log.some(a => String(a.contenido).includes('comprobante 0000PRUEBA03P1'))).toBe(true)
+  })
+})
+
+describe('QA Trappvel 2026-10-29 · G12: la diferencia de cambio no es sobrecosto (H-25)', () => {
+  // Hotel cotizado en USD 580,72 a 4.150 = $2.410.000. Se paga a TRM 4.360 (+5,06 %, por encima
+  // del umbral del 5 %): toda la diferencia es de cambio.
+  const enUsd = () => Object.assign(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!, { moneda: 'USD', costo_moneda: 580.72, tasa_cotizada: 4150 })
+  const SOPORTE_HOTEL = `one://ve-documentos/${WS}/negocios/${NEG}/servicios/sv-hotel/soporte-1.jpg`
+
+  it('un pago solo con diferencia de cambio no pide la aprobación de Edgar y deja la TRM en el gasto', async () => {
+    enUsd()
+    const pesos = Math.round(580.72 * 4360)
+    const r = await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: pesos, soporteRef: SOPORTE_HOTEL, tasaPago: 4360 }))
+    expect(r).toEqual({ ok: true, gastoId: expect.any(String), esperando: [] })
+    expect(aprobacionesDe('sv-hotel')).toHaveLength(0)
+    expect(tablas.gastos[0]).toMatchObject({ moneda: 'USD', tasa_cambio: 4360 })
+  })
+
+  it('el mismo valor sin TRM sí es sobrecosto y pide a Edgar', async () => {
+    enUsd()
+    const r = await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: Math.round(580.72 * 4360), soporteRef: SOPORTE_HOTEL }))
+    expect(r).toMatchObject({ ok: true, esperando: [expect.stringContaining('más de lo cotizado')] })
   })
 })
