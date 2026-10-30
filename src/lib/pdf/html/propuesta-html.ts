@@ -171,11 +171,13 @@ export async function prepararPropuestaHtml(
     ...(f.foco ? { foco: { x: f.foco.x, y: f.foco.y } } : {}),
   })
 
-  // Sin foto de portada en el banco (Barcelona, Ámsterdam), la del catálogo de la primera parada que la tenga.
+  // Sin foto de portada en el banco (Barcelona, Ámsterdam), la del catálogo de la primera parada que la
+  // tenga, si una persona la eligió o la subió (regla de fotos del 2026-10-29: en la portada solo una
+  // imagen aprobada; una de Commons sin revisar no).
   if (!modelo.portada.foto && catalogo) {
     for (const p of modelo.ruta.paradas) {
       const f = catalogo.ciudad(p.ciudad)
-      if (f) {
+      if (f && (f.origen === 'asesora' || f.revisada === true)) {
         modelo.portada.foto = comoFotoPDF(f, p.ciudad.toUpperCase())
         modelo.formal.creditos = [...new Set([...modelo.formal.creditos, ...(f.credito ? [f.credito] : [])])]
         break

@@ -416,6 +416,30 @@ function resumenIncluye(m: ModeloPropuesta): string | null {
   return mayuscula(yLista(partes))
 }
 
+/**
+ * La imagen de la portada (regla de fotos del 2026-10-29, punto 2): UNA sola imagen del DESTINO, a
+ * todo lo ancho, nunca fotos de hotel ni el collage. Es la foto de portada del documento: la del
+ * banco de ciudades (curado por MeTRIK) o la que una persona eligió para la ciudad en la biblioteca
+ * (`prepararPropuestaHtml` no toma una de Commons sin revisar). Sin ella, `null`: la banda queda
+ * con el color de Trappvel y el título.
+ */
+export function fotoDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoResuelta | null {
+  return r.foto(m.portada.foto?.url)
+}
+
+/** El rótulo que lleva siempre la imagen de la portada (condición de Emilio, 2026-10-29). */
+export const ROTULO_IMAGEN_PORTADA = 'Imagen ilustrativa'
+
+/**
+ * «Foto: Charles Hoffman · CC BY-SA 2.0» de un crédito como lo arma ONE
+ * («Handelskade, Charles Hoffman (Wikimedia Commons, CC BY-SA 2.0)» o «Autor (Wikimedia Commons,
+ * CC0)»). `null` sin crédito (una foto propia) o si no se entiende.
+ */
+export function creditoCortoDePortada(credito: string | null | undefined): string | null {
+  const m = credito?.trim().match(/(?:^|,\s*)([^,(]+?)\s*\((?:Wikimedia Commons,\s*)?([^)]+)\)\s*$/)
+  return m ? `Foto: ${m[1].trim()} · ${m[2].trim()}` : null
+}
+
 /** El hotel que el documento nombra en una ciudad: el de la tarifa recomendada, o el primero. */
 function opcionDeReferencia(c: CiudadDoc, m: ModeloPropuesta) {
   const principal = m.tarifas.find((t) => t.esPrincipal)?.indice
@@ -423,9 +447,10 @@ function opcionDeReferencia(c: CiudadDoc, m: ModeloPropuesta) {
 }
 
 /**
- * Las fotos del collage de la portada (hasta 4, como el de Edgar): la de la portada, las de cada
- * ciudad y, si faltan, las de los hoteles de la versión recomendada. Sin repetir; sin ninguna,
- * la banda queda con el degradado oscuro.
+ * RESPALDO sin imagen aprobada del destino: la portada de siempre (Mauricio, 2026-10-29: la banda de
+ * colores no puede salir; mergear no debe empeorar ningún destino sin foto). El collage de hasta 4
+ * fotos, como el de Edgar: las de cada ciudad y, si faltan, las de los hoteles de la versión
+ * recomendada. Sin repetir; sin ninguna, la banda queda con el degradado oscuro.
  */
 export function fotosDePortada(m: ModeloPropuesta, r: RecursosPropuesta): FotoResuelta[] {
   const fotos: FotoResuelta[] = []
@@ -475,10 +500,16 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
     ['Viajeros', p.viajeros],
     para ? ['Cotizada para', para] : ['Incluye', resumenIncluye(m)],
   ].filter((d): d is [string, string] => Boolean(d[1]))
-  const fotos = fotosDePortada(m, r)
-  const collage = fotos.length > 0
-    ? `<div class="fotos" style="grid-template-columns:repeat(${fotos.length},1fr)">${fotos.map((f) => `<div${fondo(f)}></div>`).join('')}</div>`
-    : ''
+  // Con imagen aprobada del destino: esa sola, con el rótulo y su crédito. Sin ella, la portada de
+  // siempre (el collage), nunca una banda de colores.
+  const foto = fotoDePortada(m, r)
+  const credito = foto ? creditoCortoDePortada(p.foto?.credito) : null
+  const collage = foto ? [] : fotosDePortada(m, r)
+  const imagen = foto
+    ? `<div class="foto"${fondo(foto)}></div><span class="ilustrativa">${ROTULO_IMAGEN_PORTADA}</span>${credito ? `<span class="ilustrativa credito">${esc(credito)}</span>` : ''}`
+    : collage.length > 0
+      ? `<div class="fotos" style="grid-template-columns:repeat(${collage.length},1fr)">${collage.map((f) => `<div${fondo(f)}></div>`).join('')}</div>`
+      : ''
   // El aviso blanco va donde Edgar pone la caja verde de «servicios confirmados»: aquí, el texto
   // revisado del cliente. Sin texto, no hay aviso.
   const aviso = p.intro
@@ -487,7 +518,7 @@ function portada(m: ModeloPropuesta, r: RecursosPropuesta): string {
   const largo = p.titulo.length > 46
   return [
     `<div class="top"><span class="k"><i></i>Propuesta de viaje · ${esc(p.consecutivo)}</span>${marcaDe(r)}</div>`,
-    `<div class="hero${aviso ? ' conaviso' : ''}">${collage}<div class="in">`,
+    `<div class="hero${foto ? ' confoto' : ''}${aviso ? ' conaviso' : ''}">${imagen}<div class="in">`,
     p.fechas ? `<div class="dt">${esc(p.fechas)}</div>` : '',
     `<h1${largo ? ' class="largo"' : ''}>${esc(p.titulo)}</h1>`,
     sub ? `<div class="sub">${esc(sub)}</div>` : '',

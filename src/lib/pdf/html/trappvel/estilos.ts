@@ -37,11 +37,17 @@ h3 { font: 700 10.5pt/1.25 Poppins, sans-serif; margin: 0 0 1.5mm; color: var(--
 .top img { height: 8.8mm; display:block; }
 .top b.pop { font-size: 15pt; color: var(--ink); }
 
-/* Portada: collage de fotos con banda oscura */
+/* Portada: con imagen aprobada del destino, ESA sola a todo lo ancho, con sombra para el título, el
+   rótulo «Imagen ilustrativa» y el crédito siempre a la vista (regla de fotos del 2026-10-29). Sin
+   ella, la de siempre: el collage con la banda oscura. Nunca la banda de colores. */
 .hero { position:relative; height: 57mm; border-radius: 3.7mm; overflow:hidden; background: linear-gradient(120deg,#1b1f3b,#3b2a6b 60%,#1e2e5c); }
 .hero .fotos { position:absolute; inset:0; display:grid; gap: .5mm; }
 .hero .fotos div { background-size: cover; background-position: center; }
 .hero::after { content:""; position:absolute; inset:0; background: linear-gradient(90deg, rgba(27,31,59,.6) 0%, rgba(27,31,59,.3) 55%, rgba(27,31,59,.08) 100%), linear-gradient(rgba(27,31,59,0) 45%, rgba(27,31,59,.3)); }
+.hero .foto { position:absolute; inset:0; background-size: cover; background-position: center; }
+.hero.confoto::after { background: linear-gradient(rgba(27,31,59,0) 30%, rgba(27,31,59,.72) 100%), linear-gradient(90deg, rgba(27,31,59,.62) 0%, rgba(27,31,59,.3) 60%, rgba(27,31,59,.15) 100%); }
+.hero .ilustrativa { position:absolute; top: 2.8mm; right: 3.4mm; z-index:2; font: 600 6.2pt/1.2 Inter, sans-serif; letter-spacing: .4px; color:#fff; background: rgba(27,31,59,.5); padding: .6mm 2mm; border-radius: 1mm; }
+.hero .ilustrativa.credito { top: 7.4mm; font-size: 5.4pt; background: rgba(27,31,59,.35); }
 .hero .in { position:absolute; left: 7.8mm; right: 10mm; bottom: 7mm; z-index:1; color:#fff; }
 .hero.conaviso .in { bottom: 14.5mm; }
 .hero .dt { font: 700 8.6pt Inter, sans-serif; letter-spacing: 2.6px; text-transform: uppercase; color: #fff; opacity: .92; }
