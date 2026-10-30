@@ -586,23 +586,44 @@ export function lugarDelHotel(texto: string | null | undefined, destino?: string
  * hotel): 35 USD por noche (210 USD por 6 noches)». Una lectura anterior no sabe qué cargo es ni si
  * es por noche: dice «Impuestos o cargos del hotel» y el valor tal cual, sin afirmar que es un
  * impuesto.
+ *
+ * V-17 (ronda 3): el destination fee se llama por su nombre (antes salía «Resort fee»), y la unidad
+ * puede ser también por persona o por persona y noche, con el total estimado cuando se conocen las
+ * noches y los huéspedes.
  */
 export function cargoParaElCliente(c: CargoEnDestinoPDF): { concepto: string; monto: string } {
   const leido = (c.conceptoLeido ?? '').replace(/\s+/g, ' ').trim()
   const k = llano(leido)
-  const concepto = /resort|destination|facility|amenit|urban fee/.test(k)
-    ? 'Resort fee (cargo del hotel)'
-    : /city tax|tourist tax|tasa turistica|impuesto turistico|taxe de sejour|tassa di soggiorno|ecotasa/.test(k)
-      ? 'Tasa turística'
-      : /impuesto|tasa|tax/.test(k)
-        ? 'Impuestos y tasas de hospedaje'
-        : c.concepto && c.concepto !== 'Impuestos y tasas de hospedaje'
-          ? c.concepto
-          : 'Impuestos o cargos del hotel'
-  if (!c.porNoche || typeof c.valor !== 'number') return { concepto, monto: c.monto }
+  const concepto = /destination/.test(k)
+    ? 'Destination fee (cargo del hotel)'
+    : /resort|facility|amenit|urban fee/.test(k)
+      ? 'Resort fee (cargo del hotel)'
+      : /city tax|tourist tax|tasa turistica|impuesto turistico|taxe de sejour|tassa di soggiorno|ecotasa/.test(k)
+        ? 'Tasa turística'
+        : /impuesto|tasa|tax/.test(k)
+          ? 'Impuestos y tasas de hospedaje'
+          : c.concepto && c.concepto !== 'Impuestos y tasas de hospedaje'
+            ? c.concepto
+            : 'Impuestos o cargos del hotel'
+  if ((!c.porNoche && !c.porPersona) || typeof c.valor !== 'number') return { concepto, monto: c.monto }
   const cifra = (v: number) => `${v.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${c.moneda ? ` ${c.moneda}` : ''}`
-  const total = c.noches && c.noches > 1 ? ` (${cifra(Math.round(c.valor * c.noches * 100) / 100)} por ${c.noches} noches)` : ''
-  return { concepto, monto: `${cifra(c.valor)} por noche${total}` }
+  const unidad = c.porNoche && c.porPersona ? 'por persona por noche' : c.porNoche ? 'por noche' : 'por persona'
+  // El total solo si se conoce todo lo que lo multiplica: sin las noches o sin los huéspedes, la
+  // cifra por unidad y nada más (mejor eso que un total que no es).
+  const noches = c.porNoche ? (c.noches && c.noches > 0 ? c.noches : null) : 1
+  const personas = c.porPersona ? (c.personas && c.personas > 0 ? c.personas : null) : 1
+  const veces = noches !== null && personas !== null ? noches * personas : null
+  const cuenta = [
+    c.porPersona && personas ? `${personas} ${personas === 1 ? 'persona' : 'personas'}` : null,
+    c.porNoche && noches ? `${noches} ${noches === 1 ? 'noche' : 'noches'}` : null,
+  ].filter(Boolean).join(' y ')
+  const total = veces !== null && veces > 1 ? ` (${cifra(Math.round(c.valor * veces * 100) / 100)} por ${cuenta})` : ''
+  return { concepto, monto: `${cifra(c.valor)} ${unidad}${total}` }
+}
+
+/** «Ingreso al PNN Tayrona…» → «ingreso al PNN Tayrona…», sin tocar una sigla («PNN …»). */
+function minusculaInicialPago(t: string): string {
+  return /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t
 }
 
 // ── El modelo ─────────────────────────────────────────────────────────────────
@@ -850,6 +871,9 @@ export function modeloDePropuesta({
       const { concepto } = cargoParaElCliente(c)
       return `${concepto}${ciudad ? ` en ${ciudad}` : ''}: se paga en el hotel${versionesDe(c.tarifas)}`
     })),
+    // V-13 (QA del 2026-10-29, ronda 3): lo que se paga allá y no es del hotel (el ingreso al PNN
+    // Tayrona). Tal cual lo leyó la captura, con su monto si lo traía.
+    ...new Set((v?.pagosEnDestino ?? []).map((p) => `Se paga en destino: ${minusculaInicialPago(p.texto)}${versionesDe(p.tarifas)}`)),
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]
 

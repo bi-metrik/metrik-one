@@ -24,6 +24,7 @@ import type { Composicion } from './tarifa-pasajero'
 import type { LineaParaUbicar } from './ubicar-lectura'
 import { resolverRanura } from './ranuras-pantallazo'
 import { lugarDeBloqueNuevo } from './actividad-pantallazo'
+import { pedidoCondicional } from './pedido-condicional'
 
 export type EstadoAlAceptar = 'incluido' | 'opcional'
 
@@ -201,10 +202,23 @@ export function menuDeFila(captura: CapturaLista, lineas: readonly LineaParaUbic
  * opcional. Solo un servicio NUEVO de traslado o actividad lo tiene; lo que se suma a otro toma el
  * del servicio. `null` = el desplegable no aplica.
  */
-export function estadoInicial(b: Borrador, destino: DestinoPorPasos): { estado: EstadoAlAceptar; motivo: string | null } | null {
+export function estadoInicial(
+  b: Borrador,
+  destino: DestinoPorPasos,
+  /**
+   * S-07 (QA del 2026-10-29, ronda 3): los requisitos de la Solicitud. Lo que el cliente pidió con
+   * condición («Universal un día si alcanza la plata») llega Opcional. Ausente = solo el pantallazo.
+   */
+  requisitos?: string | null,
+): { estado: EstadoAlAceptar; motivo: string | null; delCliente?: true } | null {
   if (destino.como !== 'nueva' || (b.tipo !== 'traslado' && b.tipo !== 'actividad')) return null
   const motivo = opcionalSegunLectura(b.tipo, b.lectura)
-  return { estado: motivo ? 'opcional' : 'incluido', motivo }
+  if (motivo) return { estado: 'opcional', motivo }
+  const nombre = [b.lectura.nombre, ...(b.lectura.campos ?? []).filter(c => /^(actividad|nombre)$/i.test(c.label)).map(c => c.valor)]
+    .filter((v): v is string => typeof v === 'string' && v.trim() !== '').join(' ')
+  const pedido = pedidoCondicional(requisitos, nombre)
+  if (pedido) return { estado: 'opcional', motivo: pedido, delCliente: true }
+  return { estado: 'incluido', motivo: null }
 }
 
 /** El cuerpo de «Aceptar» de una fila, con lo que dice su frase. */

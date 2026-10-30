@@ -156,8 +156,10 @@ describe('con el interruptor apagado el lector es el de siempre, byte a byte', (
     vuelo_detalle: '18cbfb1f8bf8d0a817f01bd37924f72567a6a8469683bbb74645080f9096e810',
     // QA Trappvel G7 (2026-10-29, V7-2): el hotel lee además el concepto del cargo en destino y si
     // es por noche (`impuestos_destino_concepto`, `impuestos_destino_base`). Cambio buscado del lector.
-    hotel_detalle: '961bcc13cc71166a17dc930d75da63720ebcfa847a11a2d22db760fee9c1abaa',
-    actividad_detalle: '226ce269035055eae7085e9ddfd2d57b3d6ac44e8029eba5d026309d4be9ef8b',
+    // QA Trappvel G13 (ronda 3, V-17 y V-13): la unidad del cargo admite por persona, y el hotel y la
+    // actividad leen el pago en destino que no es del hotel (`pago_destino_otro`). Cambio buscado.
+    hotel_detalle: '07a8094f1d1a4a1a0af622027fc7942a1261bea4747888fd0653199d8b93b3e9',
+    actividad_detalle: 'aa882bb90712e395a7c9c38e3edee45ee0ad09c15d99dd6c206e304371e57085',
     traslado_detalle: 'c6166410ec33220ba1d1c0ba1185815325cab98f9529907e8a9571321e009927',
     otro_detalle: 'b2450381b66f3ec58e7cd98923a6c042e122625ed9fe01b4f2c2f92bd34088d6',
   }

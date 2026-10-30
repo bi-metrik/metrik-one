@@ -247,6 +247,7 @@ export default async function CotizacionNegocioPage({
   let composicionViaje: Composicion | null = null
   // El destino nombra las ranuras que todavía no tienen nombre («Hotel en Cancún»).
   let destinoViaje: string | null = null
+  let requisitosViaje: string | null = null
   // Las fechas del viaje, para el renglón del paso «Viaje» (brief del 2026-09-23).
   let fechasViaje: { inicio: string | null; fin: string | null } | null = null
   // El nivel de detalle del documento: la hoja del cliente de cada opción lo respeta.
@@ -255,10 +256,11 @@ export default async function CotizacionNegocioPage({
   let edadesMenoresViaje: string | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
-    const { viaje, error: errViaje, modalidad, edadesMenores } = await leerViajeDelNegocio(sbViaje, id)
+    const { viaje, error: errViaje, modalidad, edadesMenores, requisitos } = await leerViajeDelNegocio(sbViaje, id)
     if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
     composicionViaje = viaje.composicion
     destinoViaje = viaje.destino
+    requisitosViaje = requisitos ?? null
     fechasViaje = viaje.fechas
     nivelDetalle = viaje.nivelDetalle
     modalidadViaje = modalidad ?? null
@@ -382,6 +384,7 @@ export default async function CotizacionNegocioPage({
       configIva={configIva}
       mostrarResumenFiscal={mostrarResumenFiscal}
       destinoViaje={destinoViaje}
+      requisitosViaje={requisitosViaje}
       fechasViaje={fechasViaje}
       leidaEn={leidaEn}
       seguimiento={seguimientoActivo}

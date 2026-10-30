@@ -550,7 +550,7 @@ export function eleccionOptimista(args: {
   const t = args.tarifas.find(x => x.id === args.tarifaId)
   if (!t) return {}
   const seleccion = [...t.seleccion.filter(id => !args.candidatas.includes(id)), args.itemId]
-  if (!args.esPaquete) return { [t.id]: { seleccion, va: t.vaEnPropuesta } }
+  if (!args.esPaquete) return { [t.id]: { seleccion, va: vaTrasElegir(args.items, args.tarifas, t, seleccion) } }
   const antes: EstadoDeTarifas = { items: args.items, tarifas: args.tarifas }
   const despues: EstadoDeTarifas = { items: args.items, tarifas: args.tarifas.map(x => (x.id === t.id ? { ...x, seleccion } : x)) }
   const final = aplicarPlan(despues.tarifas, planDeTarifasDeBloqueo(despues, args.candidatas, antes), () => '')
@@ -562,6 +562,21 @@ export function eleccionOptimista(args: {
     if (!misma) salida[x.id] = { seleccion: x.seleccion, va: x.vaEnPropuesta }
   }
   return salida
+}
+
+/**
+ * N-17 (QA del 2026-10-29, ronda 3): la marca «Mandarla al cliente» que la pantalla pinta al escoger
+ * una opción, la MISMA que dejará el servidor (`planDeTarifas`, «Qué va al cliente»): una tarifa que
+ * repetía la Recomendada y deja de repetirla vuelve a mandarse. Antes la pantalla seguía mostrando «no se manda» hasta que llegaba el servidor, y quien
+ * tocaba «Mandarla al cliente» en ese momento la DESMARCABA sin saberlo: la Mendihuaca no salió.
+ */
+function vaTrasElegir(items: EstadoDeTarifas['items'], tarifas: readonly TarifaDelPlan[], t: TarifaDelPlan, seleccion: readonly string[]): boolean {
+  const rec = recomendadaDe([...tarifas]).fila
+  if (!rec || rec.id === t.id) return t.vaEnPropuesta
+  const firmaRec = firmaDeTarifa(items, rec.seleccion)
+  // La que queda idéntica la pinta «no se manda» la pantalla por su cuenta (`igualA`): su marca no se toca.
+  if (firmaDeTarifa(items, seleccion) === firmaRec) return t.vaEnPropuesta
+  return firmaDeTarifa(items, t.seleccion) === firmaRec ? true : t.vaEnPropuesta
 }
 
 /** Aplica el plan en memoria (para la prueba de propiedad y para la pantalla). */

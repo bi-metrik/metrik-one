@@ -30,6 +30,7 @@ import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   cargosEnDestinoDeItems,
+  pagosEnDestinoDeItems,
   ciudadDeActividad,
   destinoDeItinerario,
   duracionDelViaje,
@@ -1320,6 +1321,8 @@ export async function generateCotizacionPDF(
     let vuelosDelDocumento = vuelos
     let hotelesDelDocumento = hoteles
     let cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
+    // V-13 (ronda 3): lo que se paga en destino y no es del hotel (el ingreso a un parque).
+    let pagosEnDestino = pagosEnDestinoDeItems(paraLectura)
     if (bloques && bloques.length > 1) {
       const tarifasDe = new Map<string, number[]>()
       bloques.forEach((b, idx) => {
@@ -1332,6 +1335,7 @@ export async function generateCotizacionPDF(
       vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDoc([paraLecturaDe(i)]), i))
       hotelesDelDocumento = hotelesConFechasDelViaje(itemsDeLaPropuesta.flatMap(i => marcar(hotelesDoc([paraLecturaDe(i)]), i)), rango)
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
+      pagosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(pagosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
     // La ficha fijada en cada línea de hotel: sus fotos son las que la tarjeta muestra y guarda.
     for (const i of itemPorId.values()) {
@@ -1446,6 +1450,7 @@ export async function generateCotizacionPDF(
       vuelos: vuelosDelDocumento,
       hoteles: hotelesDelDocumento,
       cargosEnDestino,
+      ...(pagosEnDestino.length > 0 ? { pagosEnDestino } : {}),
       // V5 (QA del 2026-10-29): lo que el paquete de bloqueo no incluye, si se leyó o se escribió.
       ...(() => { const n = noIncluyeDePaquetes(paraLectura); return n.length > 0 ? { noIncluye: n } : {} })(),
       nivelDetalle: delNegocio.nivelDetalle,
@@ -1462,6 +1467,7 @@ export async function generateCotizacionPDF(
       || vuelos.length > 0
       || hoteles.length > 0
       || cargosEnDestino.length > 0
+      || pagosEnDestino.length > 0
       || Object.keys(textoCliente).length > 0
     viajePDF = hayAlgoQueDescribir ? viaje : null
   }

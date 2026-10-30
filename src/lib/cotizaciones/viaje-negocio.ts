@@ -104,7 +104,7 @@ export function edadesMenoresDesdeFilas(filas: readonly Record<string, unknown>[
 export async function leerViajeDelNegocio(
   supabase: unknown,
   negocioId: string | null,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje; edadesMenores?: string | null; visaEnTramite?: boolean }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje; edadesMenores?: string | null; visaEnTramite?: boolean; requisitos?: string | null }> {
   if (!negocioId) return { viaje: VIAJE_VACIO, error: null, modalidad: A_MEDIDA }
   // Dentro de una aceptación de la forma por pasos (una o un lote) el viaje no cambia: se lee una
   // vez (`memo-de-aceptacion.ts`). Fuera, como siempre.
@@ -114,7 +114,7 @@ export async function leerViajeDelNegocio(
 async function leerViajeSinMemo(
   supabase: unknown,
   negocioId: string,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje; edadesMenores: string | null; visaEnTramite: boolean }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje; edadesMenores: string | null; visaEnTramite: boolean; requisitos: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')
@@ -132,7 +132,7 @@ async function leerViajeSinMemo(
       + 'requisitos_especiales:data->>requisitos_especiales',
     )
     .eq('negocio_id', negocioId)
-  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA, edadesMenores: null, visaEnTramite: false }
+  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA, edadesMenores: null, visaEnTramite: false, requisitos: null }
   const filas = (data ?? []) as Record<string, unknown>[]
   return {
     viaje: viajeDesdeFilas(filas),
@@ -140,5 +140,7 @@ async function leerViajeSinMemo(
     modalidad: modalidadDesdeFilas(filas),
     edadesMenores: edadesMenoresDesdeFilas(filas),
     visaEnTramite: filas.some(f => visaEnTramite(typeof f.requisitos_especiales === 'string' ? f.requisitos_especiales : null)),
+    // S-07 (QA del 2026-10-29, ronda 3): lo pedido con condición llega Opcional en la bandeja.
+    requisitos: filas.map(f => (typeof f.requisitos_especiales === 'string' ? f.requisitos_especiales.trim() : '')).filter(Boolean).join('\n') || null,
   }
 }
