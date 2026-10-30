@@ -406,6 +406,41 @@ export const CASOS_VENTAS: CasoPublico[] = [
     ],
     esperado: (e) => (fotos(e).length === 2 ? ok('2 fotos: la primera y la pedida') : no(`${fotos(e).length} fotos`)),
   },
+  // ── Messenger por Chatwoot (30-oct, en vivo): el botón tocado llega como TEXTO con su título, sin el id ──
+  {
+    id: 'v-messenger-toque-como-texto', conjunto: 'ventas', titulo: 'Messenger: «Sí, enviar link» llega como texto (respuesta rápida): confirma el pedido y sale el link',
+    canal: 'otro', ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos.slice(0, 2), { escribe: 'Sí' }, HASTA_RESUMEN.pasos[3], { escribe: 'Sí, enviar link' }],
+    guion: HASTA_RESUMEN.guion,
+    esperado: (e) => todos(links(e, 1), contiene(e, 'https://checkout.bold.co/LNK_PRUEBA1'), contiene(e, 'Total: $265.000'), noContiene(e, 'sigue esperando tu toque')),
+  },
+  {
+    id: 'v-messenger-toque-variantes', conjunto: 'ventas', titulo: 'Messenger: el título con otras mayúsculas, sin tilde y con signos también es el toque; un solo link aunque lo escriba dos veces',
+    canal: 'otro', ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos.slice(0, 2), { escribe: 'Sí' }, HASTA_RESUMEN.pasos[3], { escribe: '  si,  ENVIAR link!! ' }, { escribe: 'Sí, enviar link' }],
+    guion: HASTA_RESUMEN.guion,
+    esperado: (e) => todos(links(e, 1), contiene(e, 'https://checkout.bold.co/LNK_PRUEBA1'), noContiene(e, 'LNK_PRUEBA2')),
+  },
+  {
+    id: 'v-messenger-corregir-como-texto', conjunto: 'ventas', titulo: 'Messenger: «Corregir» como texto es el «no» de la propuesta: no hay link y pregunta qué corrige',
+    canal: 'otro', ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos.slice(0, 2), { escribe: 'Sí' }, HASTA_RESUMEN.pasos[3], { escribe: 'Corregir' }],
+    guion: HASTA_RESUMEN.guion,
+    esperado: (e) => todos(links(e, 0), contiene(e, 'Dale, dime qué corrijo.')),
+  },
+  {
+    id: 'v-botones-del-modelo-chocan', conjunto: 'ventas', titulo: 'El modelo no puede sacar sus propios «Sí, enviar link / Corregir» con el pedido vigente: esos botones se quitan',
+    canal: 'otro', ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos.slice(0, 2), { escribe: 'Sí' }, HASTA_RESUMEN.pasos[3], { escribe: '¿y el flete cuánto es?' }],
+    guion: [...HASTA_RESUMEN.guion, { name: 'responder', args: { tema: 'compra', texto: 'El flete ya va incluido en el total del resumen.', opciones: ['Sí, enviar link', 'Corregir'] } }],
+    esperado: (e) => {
+      // Ningún mensaje del bot trae botones de conversación con los títulos de la propuesta. En seco el guion los manda y
+      // el candado los quita; Haiku real casi nunca los manda (entonces no hay candado y está bien).
+      const copias = e.chatwoot.publicados.flatMap((x) => ('opciones' in x.salida ? x.salida.opciones : []))
+        .filter((o) => o.id.startsWith('ag|c|') && /^(s[ií], enviar link|corregir)$/i.test(o.titulo.trim()));
+      return copias.length ? no(`botones del modelo: ${copias.map((o) => o.titulo).join(' | ')}`) : ok('sin botones del modelo que copian la propuesta');
+    },
+  },
   {
     id: 'v-link-sin-compra', conjunto: 'ventas', titulo: 'Pide el link sin compra confirmada: no hay link',
     ventas: { productos: PRODUCTOS_PRUEBA },
