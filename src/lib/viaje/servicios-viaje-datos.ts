@@ -163,6 +163,8 @@ function aFila(
     ...columnasDeFechas(f),
     fechas_leidas_at: new Date().toISOString(),
     costo_cotizado: f.costo_cotizado,
+    // H-26 · la comisión que el proveedor girará: el Cierre económico la espera aparte (C13).
+    ...(f.comision_esperada ? { comision_esperada: f.comision_esperada } : {}),
     ...columnasMonedaServicio(f.moneda ?? null),
     orden: f.orden,
     origen: 'cotizacion',

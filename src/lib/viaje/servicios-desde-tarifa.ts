@@ -20,6 +20,7 @@
 
 import { calcularCascada, type ParametrosCascada } from '@/lib/cotizaciones/totales'
 import { monedaDelServicio, type MonedaDelServicio } from './moneda-servicio'
+import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { esTipoRanura, tipoDeDefinicion } from '@/lib/cotizaciones/ranuras-cotizacion'
@@ -63,6 +64,14 @@ export interface FilaServicioNueva {
    * la liga. Ausente = no se busca.
    */
   buscarEmpresa?: boolean
+  /**
+   * H-26 (QA Trappvel 2026-10-29) · la comisión que el proveedor le debe a la agencia DESPUÉS de
+   * cobrarle el precio guardado: la de una línea Pública con su comisión escrita, sobre un costo que
+   * es el precio público (`LineaCalculada.comisionPesos`, la misma cifra con que la cotización midió
+   * el margen). `null` cuando no hay nada que esperar: línea Neta, Pública sin comisión, o una cuyo
+   * costo ya es el neto (el pantallazo trajo los dos precios: la comisión ya se descontó al pagar).
+   */
+  comision_esperada: number | null
   /**
    * H6-1 / H9-1 (QA G9) · la moneda en que se cotizó (del ítem: `monedaDelServicio`), con lo
    * cotizado ya cuadrado al peso. `null` = en pesos. Va a `negocio_servicios.moneda/costo_moneda/tasa_cotizada`.
@@ -419,6 +428,7 @@ export function filasDeServicioDeTarifa(args: {
       proveedor_nombre: proveedor,
       ...fechas,
       costo_cotizado: Math.max(0, calcularCascada([item], params).costoDirecto),
+      comision_esperada: comisionEsperadaDelItem(item, params),
       orden,
       ...(proveedor && paqueteDelItem(item) ? { buscarEmpresa: true } : {}),
     }
@@ -439,6 +449,21 @@ export function filasDeServicioDeTarifa(args: {
     f.moneda = item ? monedaDelServicio(item.tarifa_pax, f.costo_cotizado, item.subtotal) : null
   }
   return filas
+}
+
+/**
+ * Bajo este monto la «comisión» es el residuo del redondeo entre el precio público y el neto, no
+ * plata que el proveedor vaya a girar: la misma cifra de materialidad del resto del sistema.
+ */
+const COMISION_MINIMA_COP = TOLERANCIA_SALDO_COP
+
+/** H-26 · la comisión que el proveedor girará por esta línea, con la cascada de la cotización. */
+export function comisionEsperadaDelItem(item: ItemParaServicio, params: ParametrosCascada): number | null {
+  const linea = calcularCascada([item], params).lineas.find(l => l.id === item.id)
+  const c = linea?.comisionPesos
+  if (c === null || c === undefined || !Number.isFinite(c)) return null
+  const pesos = Math.round(c)
+  return pesos >= COMISION_MINIMA_COP ? pesos : null
 }
 
 /** «Aliados Travel S.A.S.» → «aliadostravel»: para comparar el operador con el Directorio. */

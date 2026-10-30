@@ -228,3 +228,41 @@ describe('número de vuelo por tramo', () => {
   })
 })
 
+
+/**
+ * H-26 (QA Trappvel 2026-10-29): un servicio comisionable quedaba con `comision_esperada` null y el
+ * Cierre económico no tenía qué esperar. VISTO FALLAR sobre main: la fila no traía la comisión.
+ */
+describe('la comisión que el proveedor girará viaja a la fila (H-26)', () => {
+  const publica = (tipoTarifa: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({ tipoTarifa: { tipo: 'publica', origen: 'persona', por: 'Asesora', en: '2026-10-29T10:00:00Z', ...tipoTarifa }, ...extra })
+
+  it('Pública al 10 % sobre el precio público: la comisión esperada es el 10 % del costo', () => {
+    const items = [item('hotel', 2_000_000, { grupo: 'hotel', tarifa_pax: publica({ comisionPct: 10 }) as never })]
+    const [fila] = filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })
+    expect(fila.costo_cotizado).toBe(2_000_000)
+    expect(fila.comision_esperada).toBe(200_000)
+  })
+
+  it('Pública con la comisión en pesos', () => {
+    const items = [item('tour', 800_000, { grupo: 'actividad', tarifa_pax: publica({ comisionMonto: 96_000 }) as never })]
+    expect(filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })[0].comision_esperada).toBe(96_000)
+  })
+
+  it('Neta, o Pública sin comisión escrita: no hay comisión que esperar', () => {
+    const items = [
+      item('neta', 1_000_000, { grupo: 'hotel' }),
+      item('sin', 1_000_000, { grupo: 'actividad', orden: 2, tarifa_pax: publica({}) as never }),
+    ]
+    expect(filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS }).map(f => f.comision_esperada)).toEqual([null, null])
+  })
+
+  it('el pantallazo trajo los dos precios: el costo ya es el neto y la comisión ya se descontó al pagar', () => {
+    // Renaissance (viaje 06): público 2.316 USD, a pagar agencia 2.084,4 USD. El proveedor cobra el
+    // neto: no va a girar nada después, y esperarlo dejaría a Edgar marcando «se perdió» una plata
+    // que ya está en el margen.
+    const tarifa = publica({ comisionPct: 10, origen: 'pantallazo' }, { confirmada: { margenProveedor: { precioCliente: 9_611_400, costoAgencia: 8_650_260, margenPct: 10 } } })
+    const items = [item('renaissance', 8_650_260, { grupo: 'hotel', tarifa_pax: tarifa as never })]
+    expect(filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })[0].comision_esperada).toBeNull()
+  })
+})
