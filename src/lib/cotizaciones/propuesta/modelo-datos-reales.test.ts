@@ -79,8 +79,10 @@ describe('la ciudad sin la zona del hotel', () => {
     expect(m.dias.map((d) => d.ciudad).filter(Boolean)).not.toContain('Madrid - Sol')
     const html = htmlDePropuesta(m, recursos)
     expect(html).not.toContain('Madrid - Sol')
-    expect(html).not.toContain('Herengracht')
-    expect(m.precio.noIncluye[0]).toBe('Tasa turística (Barcelona), que se pagan en destino')
+    // V6 (QA del 2026-10-29): la zona sale SOLO en la tarjeta de su hotel, nunca como destino.
+    expect(html.match(/Herengracht/g) ?? []).toHaveLength(1)
+    expect(html).toContain('<div class="caps zona">Herengracht</div>')
+    expect(m.precio.noIncluye[0]).toBe('Tasa turística en Barcelona: se paga en el hotel')
   })
 })
 

@@ -73,7 +73,7 @@ export function incluyeDeOne(items: readonly ItemConLectura[], nivel: NivelDetal
   for (const s of serviciosDeItems([...items])) {
     const fecha = detallado && s.fecha ? ` · ${s.fecha}` : ''
     const que = comoNombrePropio(s.descripcion)
-    out.push(s.tipo === 'traslado' ? `Traslado ${que}${fecha}` : s.tipo === 'tren' ? `Tren ${que}${fecha}` : `${que}${fecha}`)
+    out.push(s.esAlquiler ? `Alquiler de carro · ${que}${fecha}` : s.tipo === 'traslado' ? `Traslado ${que}${fecha}` : s.tipo === 'tren' ? `Tren ${que}${fecha}` : `${que}${fecha}`)
   }
   // El paquete de bloqueo (D6 de Mauricio, 2026-10-29): su hotel, sus vuelos y lo que marcan las
   // casillas de «incluye» del operador (alimentación, traslados, seguro…). Antes salía solo su nombre.

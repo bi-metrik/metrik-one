@@ -14,10 +14,10 @@
  *
  * Puro.
  */
-import { fechaCorta, lecturaDeTraslado, lecturaDeTren, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { esAlquilerDeCarro, fechaCorta, lecturaDeTraslado, lecturaDeTren, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import { esFechaCivil, sumarDiasCivil } from '@/lib/viaje/plan-pagos'
 import type { ServicioDelDocumento } from './modelo-documento'
-import { trayectoDeTren, trayectosDeTraslado } from './trayectos'
+import { trayectoDeTren, trayectosDeTraslado, vehiculoLegible } from './trayectos'
 
 export interface ItemDeServicio extends ItemConLectura {
   /** La línea (`items.id`): el día a día no la pinta dos veces (ver `ServicioDelDocumento.itemId`). */
@@ -46,6 +46,22 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
       continue
     }
     const lectura = lecturaDeTraslado(item)
+    // N7-4 / V7-3 (QA del 2026-10-29): el carro de alquiler no es un traslado. Un solo servicio con
+    // dónde se recoge y dónde se devuelve; el modelo lo rotula «Alquiler de carro».
+    if (lectura && esAlquilerDeCarro(item)) {
+      const [recogida, devolucion] = (lectura.trayecto ?? '').replace(/\s*\n\s*/g, ' - ').split(/\s*(?:->|→|=>)\s*|\s+[-–]\s+/).map((x) => x.trim()).filter(Boolean)
+      const fechaLeida = fechaCorta(/(\d{4}-\d{2}-\d{2})/.exec(lectura.fecha ?? '')?.[1] ?? null)
+      const vehiculo = vehiculoLegible(lectura.vehiculo)
+      salida.push({
+        tipo: 'traslado',
+        descripcion: ['Alquiler de carro', vehiculo].filter(Boolean).join(' · '),
+        fecha: fechaDelDia ?? fechaLeida,
+        hora: null,
+        alquiler: { recogida: recogida ?? null, devolucion: devolucion ?? recogida ?? null, vehiculo },
+        ...tarifas,
+      })
+      continue
+    }
     if (lectura) {
       trayectosDeTraslado(lectura).forEach((t, i) => {
         // El día asignado es el del primer trayecto; el de vuelta sin fecha propia se deduce de él.
@@ -62,7 +78,7 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
       })
       continue
     }
-    for (const s of serviciosDeItems([item])) {
+    for (const { esAlquiler: _alquiler, ...s } of serviciosDeItems([item])) {
       salida.push({ ...s, fecha: fechaDelDia ?? s.fecha, hora: null, ...tarifas })
     }
   }

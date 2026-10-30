@@ -1248,6 +1248,9 @@ export async function generateCotizacionPDF(
   const fichasDeHotel = new Map<string, string>()
   // Motor `html`: la ciudad y el día de cada plan opcional, para ponerlo en los días libres.
   let lugaresOpcionalesDoc: LugarDeOpcional[] = []
+  // S3 (QA del 2026-10-29): cuántos viajan, para que la propuesta le hable a uno (usted) o a varios
+  // (ustedes). Va aparte de las props a propósito: las de @react-pdf no cambian.
+  let numeroDeViajerosDoc: number | null = null
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
   let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
@@ -1422,6 +1425,9 @@ export async function generateCotizacionPDF(
       const ctxTexto = await leerContextoTextoCliente(supabase, cotizacionId)
       avisoTexto = avisoDelTextoViejoEnPdf(documentoCliente, ctxTexto?.huella ?? null)
     }
+    if (delNegocio.composicion) {
+      numeroDeViajerosDoc = delNegocio.composicion.adultos + delNegocio.composicion.ninos + delNegocio.composicion.infantes
+    }
     const viaje = {
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
@@ -1547,6 +1553,7 @@ export async function generateCotizacionPDF(
         fichasDeHotel,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         cliente: clienteDelNegocio,
+        numeroDeViajeros: numeroDeViajerosDoc,
         // El botón de apartar abre el WhatsApp de la MISMA asesora que firma (punto 5).
         staffId: staffDeLaAsesora,
         workspaceId,
@@ -1656,6 +1663,8 @@ async function propuestaConMotorHtml(
     documentoCliente: unknown
     /** El contacto y la empresa del negocio: a quién va dirigida la propuesta. */
     cliente: ClienteDelNegocio
+    /** S3 · cuántos viajan; `null` = no se sabe (ustedes). */
+    numeroDeViajeros?: number | null
     staffId: string | null
     workspaceId: string
     marca: string
@@ -1685,6 +1694,7 @@ async function propuestaConMotorHtml(
       anticipo: leerAnticipo(e.documentoCliente),
       asesora,
       cliente: e.cliente,
+      numeroDeViajeros: e.numeroDeViajeros ?? null,
     },
     {
       marca: e.marca,
