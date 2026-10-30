@@ -33,7 +33,7 @@ import {
 import { respuestaFija } from '../../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Hechos, Propuesta, Reglamento, ResultadoHerramienta } from '../../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
-import { MAX_SUGERENCIAS, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
+import { MAX_SUGERENCIAS, codigosEnTexto, productoParaModelo, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
 import { fotosConsultadas } from './fotos-ventas.ts';
@@ -53,6 +53,20 @@ export const CONFIRMAR_COMPRA = 'confirmar_compra';
 export const VER_COMPLEMENTOS = 'ver_complementos';
 /** Los cierres de ventas cuya salida escribe el código (no el modelo): no pasan por la lista blanca ni la guarda de plata. */
 export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO, CONFIRMAR_COMPRA];
+
+/**
+ * El producto del que se viene hablando: el único código que nombró el último mensaje del bot que nombró alguno (sin las
+ * filas de fotos). Null si nombró varios o ninguno. Mauricio, 30-oct: «repite todo el tiempo la referencia y el nombre». Pura.
+ */
+export function productoEnCurso(filas: FilaPublica[]): string | null {
+  // Por turno: la respuesta partida por producto (ronda 3) deja un mensaje por producto en el mismo turno.
+  const textos = filas.filter((f) => f.direccion === 'saliente' && !(f.ranura ?? '').startsWith('foto') && !(f.ranura ?? '').startsWith('nota'));
+  const ultimo = textos.filter((f) => codigosEnTexto(f.texto ?? '').length).at(-1);
+  if (!ultimo) return null;
+  const delTurno = ultimo.turno_id ? textos.filter((f) => f.turno_id === ultimo.turno_id) : [ultimo];
+  const cs = [...new Set(delTurno.flatMap((f) => codigosEnTexto(f.texto ?? '')))];
+  return cs.length === 1 ? cs[0] : null;
+}
 
 /** ¿Ya se ofreció la venta cruzada en la conversación? (una llamada buena a ver_complementos en un turno anterior). Pura. */
 export function ventaCruzadaOfrecida(filas: FilaPublica[]): boolean {
@@ -412,11 +426,13 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const u = compras.at(-1);
       const pausa = horasDePausa(filas);
       const fotos = fotosConsultadas(filas);
+      const enCurso = productoEnCurso(filas);
       return [
         ...(pausa !== null && pausa >= HORAS_CONVERSACION_NUEVA ? [`El cliente vuelve después de ${Math.floor(pausa)} h sin escribir: si solo saluda o no dice qué quiere, tómalo como una conversación nueva: salúdalo y pregúntale qué está buscando, sin decir «de nuevo» y sin suponer el producto de antes. Si su mensaje sigue claramente lo de antes, retómalo.`] : []),
         ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
         `Autorización de datos para la compra: ${lineaG}.`,
         ...(u ? [`Compra confirmada: ${u.datos.codigo} × ${u.datos.cantidad}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
+        ...(enCurso ? [`Ya presentaste el ${enCurso}: si siguen hablando de ese, no repitas su código ni su nombre completo; dile «ese», el tipo («ese taladro») o la marca, o nada. El código vuelve solo para mandar su foto o si hay varios en juego.`] : []),
         ...(compras.length ? [] : [ventaCruzadaOfrecida(filas) ? 'Venta cruzada: ya se ofreció; no ofrezcas nada más.' : 'Venta cruzada: todavía no. Cuando escoja el producto, antes de la autorización, llama ver_complementos una vez.']),
         ...(pasados.includes('despachar') ? ['El pago ya está confirmado y el despacho lo tiene el equipo: no vuelvas a verificar ni a pedir el pago.'] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')}.`] : []),

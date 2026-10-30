@@ -238,18 +238,20 @@ async function publicarEn(d: DepsPublico, turnoId: string, ranura: string, s: Sa
  * Messenger en un trabajo aparte y una foto tarda más que un texto: sin la pausa, el texto siguiente podía adelantarla).
  * Una foto que falla se anota y se sigue (su texto ya salió); un texto que no sale corta lo que sigue. Nunca lanza.
  */
-async function publicarEnvios(d: DepsPublico, turnoId: string, envios: Envio[], avisoPegado: string | null): Promise<{ salio: boolean; primero: number | null; errores: string[]; fotos: NonNullable<TrazaPublica['fotos']> }> {
+async function publicarEnvios(d: DepsPublico, turnoId: string, envios: Envio[], avisoPegado: string | null, conOpciones: Salida | null = null): Promise<{ salio: boolean; primero: number | null; errores: string[]; fotos: NonNullable<TrazaPublica['fotos']> }> {
   const errores: string[] = [];
   const fotos: NonNullable<TrazaPublica['fotos']> = [];
   let primero: number | null = null;
   let salio = false;
   let textos = 0;
   let nFotos = 0;
+  const ultimoTexto = envios.map((e) => e.tipo).lastIndexOf('texto');
   for (const [i, e] of envios.entries()) {
     if (i > 0) await d.dormir(envios[i - 1].tipo === 'foto' && fotos.at(-1)?.ok ? PAUSA_TRAS_FOTO_MS : envios[i - 1].tipo === 'texto' ? PAUSA_ENTRE_MENSAJES_MS : 0);
     if (e.tipo === 'texto') {
       textos++;
-      const s: Salida = { tipo: 'texto', texto: e.texto };
+      // Los botones del modelo, en el último texto (el de la pregunta).
+      const s: Salida = i === ultimoTexto && conOpciones ? { ...conOpciones, texto: e.texto } : { tipo: 'texto', texto: e.texto };
       const p = await publicarEn(d, turnoId, textos === 1 ? 'respuesta' : `parte_${textos}`, textos === 1 && avisoPegado ? conAviso(avisoPegado, s) : s);
       if (!p.ok) { errores.push(`${textos === 1 ? 'respuesta' : `parte_${textos}`}: ${p.motivo}`); break; }
       if (textos === 1) { salio = true; primero = p.id; }
@@ -736,8 +738,10 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   let fotos: FotoDelTurno[] = [];
   // Ronda 3 (30-oct): el texto del modelo se publica partido por producto, con su foto justo después (`partir-ventas.ts`).
   let textoVentas: string | null = null;
+  let conOpciones: Salida | null = null;
   if (esVentas(d) && d.ventas && salida && salida === r.salida && r.delModelo && !persona && !traza.propuesta) {
-    if (salida.tipo === 'texto') textoVentas = salida.texto;
+    // Con botones del modelo (p. ej. «Inalámbrico | De cable») también se parte: los botones van en el último texto.
+    if (salida.tipo !== 'enlace') { textoVentas = salida.texto; conOpciones = 'opciones' in salida ? salida : null; }
     try {
       fotos = fotosDelTurno({
         texto: salida.texto, herramientas: traza.herramientas, catalogo: await d.ventas.catalogo(), filas,
@@ -814,7 +818,7 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   if (salida && envios && (envios.length > 1 || envios[0]?.tipo !== 'texto' || envios[0].texto !== textoVentas)) {
     // Ventas, en orden estricto: cada envío espera al anterior (y a la pausa tras una foto). El aviso de bot va pegado
     // al primer texto. Si un texto no sale, lo que sigue tampoco (no queda una foto sin su texto ni un hueco).
-    const r9 = await publicarEnvios(d, turnoId, envios, avisoPegado);
+    const r9 = await publicarEnvios(d, turnoId, envios, avisoPegado, conOpciones);
     if (r9.salio) { if (!avisoAparte) publicadoAviso = r9.primero; }
     errores.push(...r9.errores);
     if (r9.fotos.length) traza.fotos = r9.fotos;

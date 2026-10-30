@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
 import { datosDePropuesta } from '../../nucleo'
 import { pidioTrasTope, esTituloDelSi } from '../cola'
-import type { TrazaPublica } from '../tipos'
+import type { FilaPublica, TrazaPublica } from '../tipos'
+import { productoEnCurso } from './dominio-ventas'
 import { partirSugerencias, planDeEnvios, separarCierre } from './partir-ventas'
 import type { FotoDelTurno } from './fotos-ventas'
 import { direccionNoEscrita, piezasDireccion } from './direccion-ventas'
@@ -74,6 +75,12 @@ describe('el plan de envíos', () => {
     expect(planDeEnvios('El MP-12 vale $125.000. ¿Te sirve?', [])).toEqual([{ tipo: 'texto', texto: 'El MP-12 vale $125.000. ¿Te sirve?' }])
   })
 
+  it('otro código sin foto en la entrada (Haiku, venta cruzada): parte solo por los que llevan foto', () => {
+    const t = 'Buenísimo, el taladro MP-12 queda listo. ¿Te sirve una caja para guardarlo?\nMP-18 Caja de herramientas de 19 pulgadas, $89.000, para guardar el taladro.\n¿Lo quieres agregar?'
+    expect(forma(planDeEnvios(t, [foto('MP-18')]))).toEqual(['T:Buenísimo, e', 'F:MP-18', 'T:¿Lo quieres '])
+    expect((planDeEnvios(t, [foto('MP-18')])[0] as { texto: string }).texto).toContain('MP-18 Caja')
+  })
+
   it('varios sin fotos: un solo mensaje, un producto por línea', () => {
     expect(planDeEnvios(REAL, [])).toEqual([{ tipo: 'texto', texto: [
       'Para la casa te sugiero estos:',
@@ -125,6 +132,15 @@ describe('los datos de proponer', () => {
   it('el título del botón escrito', () => {
     expect(esTituloDelSi('  sí, ENVIAR link!', 'Sí, enviar link')).toBe(true)
     expect(esTituloDelSi('sí, enviar link ya', 'Sí, enviar link')).toBe(false)
+  })
+})
+
+describe('el producto en curso (para no repetir código y nombre)', () => {
+  const sal = (texto: string, turno: string, ranura = 'respuesta') => ({ direccion: 'saliente', texto, turno_id: turno, ranura }) as unknown as FilaPublica
+  it('uno solo en el último turno que nombró códigos; varios (aunque vayan partidos) = ninguno', () => {
+    expect(productoEnCurso([sal('El MP-12 vale $125.000.', 't1'), sal('Tiene 550 W.', 't2')])).toBe('MP-12')
+    expect(productoEnCurso([sal('Te sirven:', 't1'), sal('MP-13 …', 't1', 'parte_2'), sal('[Foto] MP-13 · x', 't1', 'foto_1'), sal('MP-14 …', 't1', 'parte_3')])).toBeNull()
+    expect(productoEnCurso([sal('Hola', 't1')])).toBeNull()
   })
 })
 

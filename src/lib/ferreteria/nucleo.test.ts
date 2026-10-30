@@ -115,6 +115,14 @@ describe('pendiente_en_canal', () => {
     expect(repo.estado.eventos).toHaveLength(n)
   })
 
+  it('una publicación de la tienda (sin aviso en Marketplace) no se le pide al cron aunque quede pendiente', async () => {
+    await cambiarPublicacion(repo, WS, await pub(), { precio: 110_000 }, { origen: 'one', autor: DIETMAR, ahora: reloj })
+    const p = await pub()
+    expect(await listarPendientes(repo, WS)).toHaveLength(1)
+    repo.estado.publicaciones = repo.estado.publicaciones.map((x) => (x.id === p.id ? { ...x, canal: 'tienda' as const } : x))
+    expect(await listarPendientes(repo, WS)).toEqual([])
+  })
+
   it('el ciclo completo: pendiente → el cron lo pide → lo confirma aplicado', async () => {
     await cambiarPublicacion(repo, WS, await pub(), { precio: 110_000, estado: 'pausada' }, { origen: 'one', autor: DIETMAR, ahora: reloj })
 

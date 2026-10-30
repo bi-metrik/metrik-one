@@ -73,9 +73,10 @@ export function separarCierre(texto: string): { cuerpo: string; cierre: string |
  * Parte la respuesta del modelo por producto. `null` = no nombra productos o no se deja partir sin riesgo (entonces sale
  * como antes). Con un solo producto, todo el texto es suyo (menos la pregunta del final).
  */
-export function partirSugerencias(texto: string): Partes | null {
+export function partirSugerencias(texto: string, anclas?: Set<string>): Partes | null {
   const t = String(texto ?? '').trim();
-  const menciones = [...t.matchAll(RE_CODIGO)].map((m) => ({ codigo: normalCodigo(Number(m[1])), i: m.index! }));
+  // Con `anclas`, solo esos códigos parten el texto; los demás son texto libre («el taladro MP-12 queda listo»).
+  const menciones = [...t.matchAll(RE_CODIGO)].map((m) => ({ codigo: normalCodigo(Number(m[1])), i: m.index! })).filter((m) => !anclas || anclas.has(m.codigo));
   if (!menciones.length) return null;
   const distintos = [...new Set(menciones.map((m) => m.codigo))];
   if (distintos.length === 1) {
@@ -108,12 +109,20 @@ export function partirSugerencias(texto: string): Partes | null {
 export function planDeEnvios(texto: string, fotos: FotoDelTurno[]): Envio[] {
   const partes = partirSugerencias(texto);
   const comoAntes = (t: string): Envio[] => [{ tipo: 'texto', texto: t }, ...fotos.map((foto): Envio => ({ tipo: 'foto', foto, pie: true }))];
-  if (!partes) return comoAntes(texto);
-  if (!fotos.length) {
+  if (!partes && !fotos.length) return comoAntes(texto);
+  if (partes && !fotos.length) {
     if (partes.productos.length < 2) return comoAntes(texto);
     return comoAntes([partes.entrada, ...partes.productos.map((p) => p.texto), partes.cierre].filter(Boolean).join('\n'));
   }
-  if (fotos.some((f) => !partes.productos.some((p) => p.codigo === f.codigo))) return comoAntes(texto);
+  // Si no se deja partir por todos los códigos, se intenta solo por los que llevan foto (los otros quedan como texto
+  // libre del bloque en que caen: «el taladro MP-12 queda listo. ¿Te sirve una caja? MP-18 …»).
+  const conFoto = (x: Partes | null) => !!x && fotos.every((f) => x.productos.some((p) => p.codigo === f.codigo));
+  const usar = conFoto(partes) ? partes : partirSugerencias(texto, new Set(fotos.map((f) => f.codigo)));
+  if (!usar || !conFoto(usar)) return comoAntes(texto);
+  return intercalar(usar, fotos);
+}
+
+function intercalar(partes: Partes, fotos: FotoDelTurno[]): Envio[] {
   const out: Envio[] = [];
   if (partes.entrada) out.push({ tipo: 'texto', texto: partes.entrada });
   for (const p of partes.productos) {

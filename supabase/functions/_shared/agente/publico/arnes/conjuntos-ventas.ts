@@ -127,7 +127,8 @@ const REENVIAR = { name: 'generar_link_pago', args: {} };
 const HASTA_RESUMEN: { pasos: PasoCaso[]; guion: Paso[] } = {
   pasos: [
     { escribe: 'Hola, ¿tienen taladro percutor?' },
-    { escribe: 'Sí, uno, con despacho en Bogotá' },
+    // Con Haiku real, antes de la autorización puede venir la venta cruzada (ronda 3): «No, nada más» la cierra.
+    { hastaAutorizacion: ['Sí, uno, con despacho en Bogotá', 'No, nada más, solo el taladro', 'Sí, lo quiero, uno, con despacho en Bogotá'] },
     { toca: 'Sí' },
     { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' },
   ],
