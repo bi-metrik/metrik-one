@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { AlertTriangle, ImageIcon, Loader2, Package, Plane, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
+import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, operadoresDelDirectorio, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
+import { claveDeNombre, esOperadorMezclado, operadorDeLaLectura, operadorInicialDelPaquete, operadoresDeLaSolicitud } from '@/lib/cotizaciones/bloqueo-operador'
 import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
 import { comisionEscrita, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 import { EVENTO_ENFOCAR_COMISION, type DetalleEnfocarComision } from '@/lib/cotizaciones/enfocar-comision'
@@ -103,6 +104,10 @@ export interface PropsTarjetaPaquete {
   /** Precio al cliente de la línea (lo que guardó el servidor). */
   precioVenta: number | null
   editable: boolean
+  /**
+   * El operador de la SOLICITUD (`operador_bloqueo`), tal cual. Puede nombrar a varios («ALIADOS
+   * TRAVEL / TU RESERVA»): cada paquete guarda el suyo (H-13 del QA del 2026-10-29).
+   */
   operador: string | null
   /** Los pasajeros de la solicitud, para el aviso de personas. */
   pasajeros: { adultos: number; ninos: number; infantes: number } | null
@@ -180,7 +185,11 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   // La edad de cada niño abre con la de la Solicitud si el paquete no tiene la suya (prueba real del
   // 2026-10-29). Solo entra a la cuenta con niños en el paquete: sin ellos no frena por rango CHD.
   const edadesDeInicio = edadesIniciales(guardado?.distribucion.edadesNinos, p.edadesNinosSolicitud)
-  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => conEdadesDeLaSolicitud(guardado ?? paqueteVacio(p.operador), p.edadesNinosSolicitud))
+  // H-13: con un operador en la solicitud el paquete nace con él; con varios, sin operador (se elige).
+  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => conEdadesDeLaSolicitud(guardado ?? paqueteVacio(operadorInicialDelPaquete(p.operador)), p.edadesNinosSolicitud))
+  const candidatos = useMemo(() => operadoresDeLaSolicitud(p.operador), [p.operador])
+  const [delDirectorio, setDelDirectorio] = useState<string[]>([])
+  const [fichaOperador, setFichaOperador] = useState<string | null | undefined>(undefined)
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
   // La comisión de la agencia (D3): visible desde el inicio con «Pública», y se guarda con el paquete.
   const [comisionAgencia, setComisionAgencia] = useState<ComisionEscrita | null>(comisionGuardadaEscrita)
@@ -216,7 +225,25 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
 
   const costo = costoDelPaquete(paquete)
   const fechas = fechasDelPaquete(paquete)
-  const avisos = avisosDelPaquete(paquete, { hoy: todayBogotaISO(), pasajeros: p.pasajeros })
+  const avisos = avisosDelPaquete(paquete, { hoy: todayBogotaISO(), pasajeros: p.pasajeros, operadorSolicitud: p.operador })
+  const operadorMezclado = esOperadorMezclado(paquete.operador)
+
+  // Los operadores del Directorio, para elegir el del paquete (una vez, al abrir la tarjeta editable).
+  useEffect(() => {
+    if (!abierto || !p.editable || delDirectorio.length > 0) return
+    let vivo = true
+    operadoresDelDirectorio().then(l => { if (vivo) setDelDirectorio(l) }).catch(() => {})
+    return () => { vivo = false }
+  }, [abierto, p.editable, delDirectorio.length])
+  const opcionesOperador = useMemo(() => {
+    const vistos = new Set<string>()
+    return [...candidatos, ...delDirectorio].filter(o => {
+      const k = claveDeNombre(o)
+      if (!k || vistos.has(k)) return false
+      vistos.add(k)
+      return true
+    })
+  }, [candidatos, delDirectorio])
   const h = paquete.hotel
 
   function cambiar(f: (x: PaqueteBloqueo) => PaqueteBloqueo) {
@@ -240,7 +267,13 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
 
   function ponerLectura(r: Extract<Awaited<ReturnType<typeof leerPantallazoBloqueo>>, { ok: true }>, dataUrl: string) {
     setImagenes(i => ({ ...i, [r.cual]: { dataUrl, huella: r.huella, vista: dataUrl } }))
-    if (r.cual === 'hotel') cambiar(x => ({ ...x, hotel: { ...r.hotel, infante: r.hotel.infante ?? x.hotel.infante ?? null }, incluye: r.incluye }))
+    if (r.cual === 'hotel') {
+      cambiar(x => {
+        // H-13: si el pantallazo deja ver el operador (logo o nombre) y el paquete no tiene uno propio.
+        const leido = !x.operador || esOperadorMezclado(x.operador) ? operadorDeLaLectura(r.operador ?? null, candidatos) : null
+        return { ...x, ...(leido ? { operador: leido } : {}), hotel: { ...r.hotel, infante: r.hotel.infante ?? x.hotel.infante ?? null }, incluye: r.incluye }
+      })
+    }
     else cambiar(x => ({ ...x, vuelo: r.vuelo }))
   }
 
@@ -309,6 +342,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
       })
       if (!r.success) { toast.error(r.error); return }
       setPaquete(r.paquete)
+      setFichaOperador(r.fichaOperador ?? null)
       setImagenes({})
       if (r.descuentoQuitado) toast.warning(`Se quitó el descuento para el cliente («${r.descuentoQuitado}»): la tarifa con la comisión incluida es el precio público.`)
       toast.success(r.costo === null ? 'Paquete guardado, todavía sin costo.' : 'Paquete guardado.')
@@ -344,7 +378,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         <div>
           <p className="m-0 text-sm font-semibold">{h.hotel ?? 'Paquete sin hotel'}</p>
           <p className="m-0 text-[11px] text-[#6E6A62]">
-            {[h.zona, h.noches ? `${h.noches} noches` : null, fechas.salida && fechas.regreso ? `${fechas.salida} → ${fechas.regreso}` : fechas.salida, costo.personas > 0 ? `${costo.personas} personas` : null]
+            {[paquete.operador && !operadorMezclado ? paquete.operador : null, h.zona, h.noches ? `${h.noches} noches` : null, fechas.salida && fechas.regreso ? `${fechas.salida} → ${fechas.regreso}` : fechas.salida, costo.personas > 0 ? `${costo.personas} personas` : null]
               .filter(Boolean).join(' · ') || 'Pega el hotel y el vuelo de este paquete.'}
           </p>
         </div>
@@ -424,6 +458,39 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
               <button type="button" data-es-casilla="descartar" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => setPorElegir(null)}>Descartar</button>
             </div>
           )}
+
+          {/* ── Operador del paquete (H-13 del QA del 2026-10-29) ── */}
+          <fieldset disabled={!p.editable} className="space-y-1" data-operador-paquete>
+            <legend className="text-[11px] font-semibold uppercase tracking-wide text-[#6E6A62]">Operador del paquete</legend>
+            {candidatos.length > 1 && (
+              <div className="flex flex-wrap gap-1.5">
+                {candidatos.map(c => {
+                  const elegido = claveDeNombre(paquete.operador) === claveDeNombre(c)
+                  return (
+                    <button key={c} type="button" data-operador-opcion={c} aria-pressed={elegido}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${elegido ? 'border-[#0E5C43] bg-[#0E5C43] text-white' : 'border-[#D9E7E0] bg-white text-[#0E5C43]'}`}
+                      onClick={() => { setFichaOperador(undefined); cambiar(x => { x.operador = c; return x }) }}>
+                      {c}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <label className={ETIQUETA}>
+              {candidatos.length > 1 ? 'O escríbelo' : 'Operador'}
+              <input className={`${CAJA} sm:w-72`} list={`operadores-${p.itemId}`} aria-label="Operador del paquete"
+                value={operadorMezclado ? '' : paquete.operador ?? ''}
+                onChange={e => { setFichaOperador(undefined); const v = e.target.value; cambiar(x => { x.operador = vacioANulo(v); return x }) }} />
+              <datalist id={`operadores-${p.itemId}`}>
+                {opcionesOperador.map(o => <option key={o} value={o} />)}
+              </datalist>
+            </label>
+            {fichaOperador !== undefined && paquete.operador && !operadorMezclado && (
+              <p className="m-0 text-[11px] text-[#6E6A62]" data-ficha-operador={fichaOperador ? 'si' : 'no'}>
+                {fichaOperador ? `Ligado a la ficha «${fichaOperador}» del Directorio.` : 'No está en el Directorio de proveedores: el servicio queda con el nombre escrito.'}
+              </p>
+            )}
+          </fieldset>
 
           {/* ── Hotel ── */}
           <fieldset disabled={!p.editable} className="space-y-2">

@@ -61,6 +61,7 @@ import {
   type CambiosServicio,
 } from '../../servicios-viaje-actions'
 import FechasServicio, { LineaDeFechas } from './FechasServicio'
+import { claseDeServicio, etiquetaTipoServicio } from '@/lib/viaje/etiqueta-servicio'
 
 /**
  * Bloque «Servicios del viaje»: el tablero de Reservas y pagos (F0 + F3). Una fila por servicio
@@ -84,16 +85,7 @@ const COLOR_TIPO: Record<string, string> = {
   actividad: 'border-l-emerald-500',
   asistencia: 'border-l-rose-500',
   otro: 'border-l-gray-400',
-}
-
-const ETIQUETA_TIPO: Record<string, string> = {
-  vuelo: 'Vuelo',
-  hotel: 'Hotel',
-  traslado: 'Traslado',
-  tren: 'Tren',
-  actividad: 'Actividad',
-  asistencia: 'Asistencia',
-  otro: 'Otro',
+  paquete: 'border-l-teal-500',
 }
 
 const PILDORA: Record<EstadoServicio, string> = {
@@ -297,7 +289,7 @@ function FilaServicio({
   // M3-4: lo que el proveedor cobró de menos queda a la vista (no se «pierde» en lo cotizado).
   const aFavor = s.valor_por_pagar !== null && s.valor_por_pagar < s.costo_cotizado ? s.costo_cotizado - s.valor_por_pagar : 0
   return (
-    <li className={`rounded-md border border-l-4 ${COLOR_TIPO[s.tipo] ?? COLOR_TIPO.otro} bg-card`}>
+    <li className={`rounded-md border border-l-4 ${COLOR_TIPO[claseDeServicio(s)] ?? COLOR_TIPO.otro} bg-card`}>
       <button
         type="button"
         onClick={alternar}
@@ -305,7 +297,7 @@ function FilaServicio({
         className="flex w-full min-h-11 items-start gap-2 p-2.5 text-left"
       >
         <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{ETIQUETA_TIPO[s.tipo] ?? 'Otro'}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{etiquetaTipoServicio(s)}</p>
           <p className={`break-words text-sm font-medium ${v.estado === 'cancelado' ? 'line-through text-muted-foreground' : ''}`}>{s.nombre}</p>
           <p className="break-words text-xs text-muted-foreground">{detalle}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">

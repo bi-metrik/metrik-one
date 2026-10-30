@@ -122,3 +122,14 @@ export function fichaDelOperador<F extends FichaDeOperador>(operador: string | n
     return kf.length >= 5 && (kf.startsWith(k) || k.startsWith(kf))
   }))
 }
+
+/**
+ * La ficha que queda en la línea del paquete (`items.proveedor_id`). La del operador, si está en el
+ * Directorio. Si no, la que tenía se suelta solo si era la de OTRO proveedor (el operador anterior):
+ * una de hotel se conserva, es la llave de sus fotos en el PDF.
+ */
+export function proveedorDelPaquete(a: { ficha: FichaDeOperador | null; previa: string | null; fichas: readonly FichaDeOperador[] }): string | null {
+  if (a.ficha) return a.ficha.id
+  if (a.previa && a.fichas.some(f => f.id === a.previa)) return null
+  return a.previa
+}
