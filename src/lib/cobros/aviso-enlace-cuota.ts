@@ -78,7 +78,7 @@ function fechaBogota(iso: string): string | null {
 export function asuntoAvisoEnlace(d: DatosAvisoEnlace): string {
   const fecha = formatFechaLetras(d.fechaVencimiento)
   if (d.tarjetaRechazada && d.tarjetaCda?.ultimos4) {
-    return `No pudimos cobrar tu cuota a la tarjeta terminada en ${d.tarjetaCda.ultimos4}: puedes pagarla en línea`
+    return `No pudimos cobrar tu período a la tarjeta terminada en ${d.tarjetaCda.ultimos4}: puedes pagarlo en línea`
   }
   if (d.tarjetaRechazada) return `No pudimos cobrar tu cuota con MéTRIK a la tarjeta: puedes pagarla en línea`
   return d.fechaVencimiento < d.hoy
@@ -122,7 +122,7 @@ function parrafos(d: DatosAvisoEnlace): { saludo: string; intro: string; siguien
   return {
     saludo: nombre ? `Hola, ${nombre}.` : 'Hola.',
     intro: d.tarjetaRechazada && d.tarjetaCda
-      ? `No pudimos cobrar la cuota ${d.numeroCuota} de ${d.espacioNombre} a ${d.tarjetaCda.ultimos4 ? `tu tarjeta terminada en ${d.tarjetaCda.ultimos4}` : 'la tarjeta que registraste'}. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
+      ? `No pudimos cobrar ${periodoEnLetras(d.concepto, d.fechaVencimiento) ? `el período ${periodoEnLetras(d.concepto, d.fechaVencimiento)}` : `la cuota ${d.numeroCuota}`} de ${d.espacioNombre} a ${d.tarjetaCda.ultimos4 ? `tu tarjeta terminada en ${d.tarjetaCda.ultimos4}` : 'la tarjeta que registraste'}. Puedes pagarlo en línea desde la sección Suscripción de MéTRIK ONE.`
       : d.tarjetaRechazada
       ? `No pudimos cobrar la cuota ${d.numeroCuota} de ${d.espacioNombre} a la tarjeta que registraste en ePayco: la tarjeta rechazó el cobro. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
       : vencida

@@ -300,8 +300,8 @@ describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
       const r = await correr(cda({ cobro_intentos_tarjeta: [{ plan_cobro_id: 'plan1', numero_cuota: 2, intento: 0, resultado: 'rechazado' }] }))
       expect(r.resumen.generados.map((g) => g.numero)).toEqual([1, 2])
       const m = r.enviar.mock.calls.map((c) => c[0]).find((x) => x.subject.startsWith('No pudimos'))!
-      expect(m.subject).toBe('No pudimos cobrar tu cuota a la tarjeta terminada en 1234: puedes pagarla en línea')
-      expect(m.text).toContain('No pudimos cobrar la cuota 2 de CDA Pruebas a tu tarjeta terminada en 1234. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.')
+      expect(m.subject).toBe('No pudimos cobrar tu período a la tarjeta terminada en 1234: puedes pagarlo en línea')
+      expect(m.text).toMatch(/No pudimos cobrar el período del \d+ de \p{L}+ al \d+ de \p{L}+ de \d{4} de CDA Pruebas a tu tarjeta terminada en 1234\. Puedes pagarlo en línea desde la sección Suscripción de MéTRIK ONE\./u)
       expect(m.text).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026. Si no se paga, las consultas nuevas se pausan desde el 6 de diciembre de 2026.')
       expect(m.html).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026.')
     })
