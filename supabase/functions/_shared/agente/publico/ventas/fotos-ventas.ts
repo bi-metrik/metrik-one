@@ -12,6 +12,7 @@
 
 import type { Traza } from '../../tipos.ts';
 import type { FilaPublica, TrazaPublica } from '../tipos.ts';
+import { filasDelTramo } from '../topes.ts';
 import { MAX_SUGERENCIAS, codigosEnTexto, numeroDeCodigo } from './catalogo-ventas.ts';
 import type { ProductoVenta } from './catalogo-ventas.ts';
 
@@ -78,10 +79,10 @@ export function fotosConsultadas(filas: FilaPublica[], max = 6): Array<{ codigo:
   return [...vistos.entries()].slice(-max).map(([n, v]) => ({ ...v, enviada: ya.has(n) }));
 }
 
-/** Los códigos cuya foto ya salió (publicada) en la conversación. Pura. */
+/** Los códigos cuya foto ya salió (publicada) en el tramo en curso de la conversación (`filasDelTramo`). Pura. */
 export function fotosYaEnviadas(filas: FilaPublica[]): Set<number> {
   const out = new Set<number>();
-  for (const f of filas) {
+  for (const f of filasDelTramo(filas)) {
     for (const x of (f.traza as TrazaPublica | null)?.fotos ?? []) {
       const n = x.ok ? numeroDeCodigo(x.codigo) : null;
       if (n !== null) out.add(n);
@@ -99,11 +100,13 @@ export function fotosDelTurno(p: {
   filas: FilaPublica[];
   /** Lo que escribió el cliente en este turno. */
   pedido: string;
+  /** Este turno abre un tramo nuevo (pausa larga o vuelve de persona): las fotos de antes no cuentan como enviadas. */
+  tramoNuevo?: boolean;
 }): FotoDelTurno[] {
   const leidos = codigosLeidos(p.herramientas);
   for (const n of codigosLeidosEnConversacion(p.filas)) leidos.add(n);
   if (!leidos.size) return [];
-  const ya = pideVerFoto(p.pedido) ? new Set<number>() : fotosYaEnviadas(p.filas);
+  const ya = pideVerFoto(p.pedido) || p.tramoNuevo ? new Set<number>() : fotosYaEnviadas(p.filas);
   const out: FotoDelTurno[] = [];
   for (const c of codigosEnTexto(p.texto)) {
     if (out.length >= MAX_SUGERENCIAS) break;

@@ -42,6 +42,17 @@ export function umbralesAlcanzados(gasto: number, presupuesto: number): number[]
 }
 
 /** Turnos del modelo que ya tuvo la conversación. Pura. */
+/**
+ * Las filas del tramo en curso: desde el último aviso de bienvenida (que vuelve a salir tras una pausa larga o cuando
+ * una persona devuelve la conversación). Messenger reusa la misma conversación para siempre: sin esto, el cliente que
+ * vuelve otro día hereda los turnos y las fotos de antes (30-oct, Dimpro: tope de 30 turnos y fotos que no salían). Pura.
+ */
+export function filasDelTramo(filas: FilaPublica[]): FilaPublica[] {
+  let i = -1;
+  filas.forEach((f, j) => { if ((f.traza as TrazaPublica | null)?.aviso) i = j; });
+  return i < 0 ? filas : filas.slice(i);
+}
+
 export function turnosConIA(filas: FilaPublica[]): number {
   return filas.filter((f) => f.traza?.tipo === 'modelo').length;
 }
