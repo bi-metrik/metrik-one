@@ -1,5 +1,6 @@
 'use client'
 
+import { avisosDeOrdenDeTarifas } from '@/lib/cotizaciones/tarifas-al-cliente'
 import { useState, type ReactNode } from 'react'
 
 import { BTN, BTN_PRIM, INPUT, LINK } from '@/components/viaje/estilo'
@@ -157,6 +158,14 @@ export function TarifasPorPasos({
   const [renombrando, setRenombrando] = useState<string | null>(null)
   const [verCalculo, setVerCalculo] = useState(false)
   const vanAlCliente = (t: TarifaCalculada) => t.esPrincipal || (t.vaEnPropuesta && !t.igualA)
+  // N-17 (QA del 2026-10-29, ronda 3): la Premium por debajo de la Recomendada (o la Económica por
+  // encima) se dice aquí, junto al total de esa tarifa, y otra vez en «Revisar y enviar».
+  const ordenFuera = new Map(avisosDeOrdenDeTarifas(tarifas.map(x => ({
+    nombre: x.nombre,
+    precio: x.precio,
+    vaEnPropuesta: vanAlCliente(x),
+    firma: JSON.stringify(Object.entries(x.opcionPorServicio).sort()),
+  }))).map(a => [a.nombre, a.texto]))
   /** Los hoteles de una tarifa que, con su descuento, quedaron bajo el piso de hotel (reglas). */
   const hotelesBajos = (t: TarifaCalculada) => t.cascada?.reglas?.hotelesBajoPiso ?? []
   /**
@@ -583,6 +592,9 @@ export function TarifasPorPasos({
                 Mandarla al cliente
               </label>
               {t.igualA && <span className="text-[11.5px] font-semibold text-[#9A5F0C]">Quedó igual a la {t.igualA}: no se manda. Cambia una opción para mandarla.</span>}
+              {t.nombre && ordenFuera.has(t.nombre) && (
+                <span className="text-[11.5px] font-semibold text-[#9A5F0C]" data-orden-tarifa>{ordenFuera.get(t.nombre)}</span>
+              )}
             </span>
           )}
         </span>

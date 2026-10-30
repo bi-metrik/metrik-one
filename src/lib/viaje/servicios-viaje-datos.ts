@@ -160,6 +160,8 @@ function aFila(
     nombre: f.nombre,
     proveedor_nombre: f.proveedor_nombre,
     proveedor_empresa_id: f.buscarEmpresa ? empresaDelOperador(f.proveedor_nombre, empresas) : null,
+    // H-17: la «Compra antes del» del paquete. Solo si la trae: sin ella, la columna queda como antes.
+    ...(f.fecha_limite_pago ? { fecha_limite_pago: f.fecha_limite_pago } : {}),
     ...columnasDeFechas(f),
     fechas_leidas_at: new Date().toISOString(),
     costo_cotizado: f.costo_cotizado,

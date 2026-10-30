@@ -7,6 +7,16 @@
 // Qué hace: mínimo y deseable de una solicitud a partir de `nivel`, `pedir_si` y `pregunta`
 // de los campos de un bloque `datos`. El formato y las reglas están documentados en la fuente.
 
+// ── Copiado de `src/lib/cotizaciones/bloqueo-modalidad.ts` (N-13) ─────────────────
+const SLUG_MODALIDAD = 'modalidad_viaje'
+const CAMPOS_QUE_DEFINE_EL_PAQUETE: readonly string[] = ['categoria_hotel']
+function esValorBloqueo(v: unknown): boolean {
+  return typeof v === 'string' && v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase() === 'bloqueo'
+}
+function campoLoDefineElPaquete(slug: string, valores: Record<string, unknown>): boolean {
+  return CAMPOS_QUE_DEFINE_EL_PAQUETE.includes(slug) && esValorBloqueo(valores[SLUG_MODALIDAD])
+}
+
 // ── Copiado de `campo-completo.ts` ──────────────────────────────────────────────
 export interface CampoConfig {
   slug: string
@@ -259,6 +269,8 @@ export function calcularNiveles(
       continue
     }
     if (!campoVisible(f, efectivos)) continue
+    // N-13: en Bloqueo la categoría del hotel la define el paquete; no se pide para cotizar.
+    if (campoLoDefineElPaquete(f.slug, efectivos)) continue
 
     const pedir = leerPedirSi(f.pedir_si)
     if ('error' in pedir) {

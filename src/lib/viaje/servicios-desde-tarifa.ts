@@ -31,6 +31,7 @@ import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
 import { leerTramos as leerTramosDelItem, regresoEsLaLlegadaDeLaIda } from '@/lib/cotizaciones/tramos-vuelo'
 import { fechasDelPaquete, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
+import { claveDeNombre, esOperadorMezclado } from '@/lib/cotizaciones/bloqueo-operador'
 import {
   SIN_FECHAS,
   esFechaIso,
@@ -64,6 +65,11 @@ export interface FilaServicioNueva {
    * la liga. Ausente = no se busca.
    */
   buscarEmpresa?: boolean
+  /**
+   * H-17 (QA del 2026-10-29) · hasta cuándo hay que pagarle al proveedor: la «Compra antes del» del
+   * paquete de bloqueo (tarifa promo). Ausente = no se sabe (la fila nace sin fecha límite, como antes).
+   */
+  fecha_limite_pago?: string | null
   /**
    * H-26 (QA Trappvel 2026-10-29) · la comisión que el proveedor le debe a la agencia DESPUÉS de
    * cobrarle el precio guardado: la de una línea Pública con su comisión escrita, sobre un costo que
@@ -210,7 +216,12 @@ export function lecturaDelServicio(item: FuenteDeFechas, tipo: TipoServicio): {
 } {
   // El paquete de bloqueo: el proveedor es su operador, y la fecha la de su vuelo (H10, 2026-10-29).
   const paquete = paqueteDelItem(item)
-  if (paquete) return { proveedor: paquete.operador ? paquete.operador.slice(0, MAX_NOMBRE) : null, fecha: fechasDePaquete(paquete).fecha_servicio }
+  // H-13: un texto que junta a varios operadores no es el proveedor de nadie: la fila queda sin él
+  // («Falta el proveedor») en vez de esconder la falta con la mezcla.
+  if (paquete) {
+    const op = paquete.operador && !esOperadorMezclado(paquete.operador) ? paquete.operador.slice(0, MAX_NOMBRE) : null
+    return { proveedor: op, fecha: fechasDePaquete(paquete).fecha_servicio }
+  }
   const lectura = leer(item)
   const fecha = fechasLeidas(lectura, tipo, item.tramos).fecha_servicio
   if (!lectura) return { proveedor: null, fecha }
@@ -431,6 +442,7 @@ export function filasDeServicioDeTarifa(args: {
       comision_esperada: comisionEsperadaDelItem(item, params),
       orden,
       ...(proveedor && paqueteDelItem(item) ? { buscarEmpresa: true } : {}),
+      ...limiteDePagoDelItem(item),
     }
   })
 
@@ -467,14 +479,15 @@ export function comisionEsperadaDelItem(item: ItemParaServicio, params: Parametr
 }
 
 /** «Aliados Travel S.A.S.» → «aliadostravel»: para comparar el operador con el Directorio. */
-function claveDeEmpresa(v: unknown): string {
-  if (typeof v !== 'string') return ''
-  return v
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\b(s\.?\s?a\.?\s?s\.?|s\.?\s?a\.?|ltda\.?|sas|e\.?u\.?)\s*$/g, '')
-    .replace(/[^a-z0-9]/g, '')
+const claveDeEmpresa = claveDeNombre
+
+/**
+ * H-17 (QA del 2026-10-29) · la fecha límite de pago al proveedor que trae el ítem: la «Compra antes
+ * del» de un paquete de bloqueo. `{}` si no la trae (la fila no la nombra y queda como antes).
+ */
+export function limiteDePagoDelItem(item: { tarifa_pax?: unknown }): { fecha_limite_pago?: string } {
+  const f = paqueteDelItem(item)?.hotel.compraAntesDe
+  return esFechaIso(f) ? { fecha_limite_pago: f } : {}
 }
 
 /**

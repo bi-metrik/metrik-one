@@ -379,6 +379,7 @@ export default function BandejaCapturas({
   onPendientes,
   fechasViaje = null,
   destinoViaje = null,
+  requisitosViaje = null,
   onCambio,
   porPasos = false,
   onConteo,
@@ -405,6 +406,11 @@ export default function BandejaCapturas({
   fechasViaje?: { inicio: string | null; fin: string | null } | null
   /** El destino del negocio: con él se nombra el bloque nuevo de una actividad sin ciudad. */
   destinoViaje?: string | null
+  /**
+   * S-07 (QA del 2026-10-29, ronda 3): los requisitos de la Solicitud. Lo que el cliente pidió con
+   * condición («si alcanza la plata») llega Opcional en el desplegable.
+   */
+  requisitosViaje?: string | null
   /**
    * Cómo se pone al día la página después de aceptar o deshacer. El editor del viaje pasa el
    * suyo, que además relee la cotización (`vista-fresca.ts`); sin él, el refresco de siempre.
@@ -984,7 +990,7 @@ export default function BandejaCapturas({
 
   function estadoDe(c: Captura, f: FraseDeFila | undefined): EstadoAlAceptar | null {
     if (!c.borrador || !f) return null
-    const ini = estadoInicial(c.borrador, f.destino)
+    const ini = estadoInicial(c.borrador, f.destino, requisitosViaje)
     return ini ? (estadosElegidos[c.id] ?? ini.estado) : null
   }
 
@@ -1178,7 +1184,7 @@ export default function BandejaCapturas({
           {visibles.map(c => {
             const p = pronostico.get(c.id)
             const f = frases.get(c.id)
-            const ini = f && c.borrador ? estadoInicial(c.borrador, f.destino) : null
+            const ini = f && c.borrador ? estadoInicial(c.borrador, f.destino, requisitosViaje) : null
             const pasos: PasosDeFila | undefined = f && c.borrador ? {
               frase: f.frase,
               razon: f.destino.razon,
@@ -1195,6 +1201,7 @@ export default function BandejaCapturas({
               estado: ini ? {
                 valor: estadosElegidos[c.id] ?? ini.estado,
                 motivo: ini.motivo,
+                ...(ini.delCliente ? { delCliente: true as const } : {}),
                 onCambiar: (e: EstadoAlAceptar) => setEstadosElegidos(prev => ({ ...prev, [c.id]: e })),
               } : null,
               aMano: esManual(c.borrador.lectura),
@@ -1273,7 +1280,7 @@ export interface PasosDeFila {
   completa: boolean
   menu: { etiqueta: string; onElegir: () => void }[]
   /** Incluido · Opcional de un servicio nuevo de traslado o actividad. `null` = no aplica. */
-  estado: { valor: EstadoAlAceptar; motivo: string | null; onCambiar: (e: EstadoAlAceptar) => void } | null
+  estado: { valor: EstadoAlAceptar; motivo: string | null; delCliente?: true; onCambiar: (e: EstadoAlAceptar) => void } | null
   aMano: boolean
   onAceptar: (correcciones: CorreccionDeBandeja[]) => void
 }
@@ -1572,7 +1579,11 @@ export function FilaCaptura({
       </div>
       {pasos.razon && <span className={`text-xs ${pasos.duda ? 'font-medium text-[#9A5F0C]' : 'text-[#6E6A62]'}`} data-razon-destino>{pasos.razon}</span>}
       {pasos.estado?.valor === 'opcional' && pasos.estado.motivo && (
-        <span className="text-xs text-[#6E6A62]" data-motivo-opcional>Llega Opcional: el pantallazo dice «{pasos.estado.motivo}».</span>
+        <span className="text-xs text-[#6E6A62]" data-motivo-opcional>
+          {pasos.estado.delCliente
+            ? <>Llega Opcional: el cliente lo pidió con condición («{pasos.estado.motivo}»). No suma al total; se ofrece aparte.</>
+            : <>Llega Opcional: el pantallazo dice «{pasos.estado.motivo}».</>}
+        </span>
       )}
     </div>
   ) : null

@@ -167,6 +167,25 @@ const NO_ES_OCUPACION =
   'que sigue al nombre de la habitación (SA, AD, MP, PC, TI) tampoco: «Standard Room AD» es alojamiento y ' +
   'desayuno, no un adulto. No los uses como número de personas.'
 
+/**
+ * Un cobro que el viajero paga EN DESTINO y que no es un cargo del hotel (V-13 del QA del
+ * 2026-10-29, ronda 3): el ingreso a un parque nacional, la tasa de entrada a una isla. No suma al
+ * precio; el documento lo dice como «Se paga en destino», con su monto si la pantalla lo trae.
+ */
+const PAGO_EN_DESTINO: CampoRanura = {
+  slug: 'pago_destino_otro',
+  label: 'Otro pago en destino',
+  tipo: 'texto',
+  min: false,
+  alerta_revision: true,
+  descripcion_ai:
+    'Un cobro que la pantalla dice que el viajero paga APARTE en destino y que NO es un cargo ni un impuesto del ' +
+    'hotel o del proveedor: el ingreso a un parque nacional, la tasa de entrada a una isla, un impuesto de salida. ' +
+    'Escríbelo corto, con quién lo cobra, su monto y su moneda si la pantalla los trae, y si es por persona ' +
+    '(ej. «Ingreso al PNN Tayrona, en taquilla, por persona» o «Tarjeta de turismo de San Andrés: 146.000 COP por persona»). ' +
+    'No repitas aquí el resort fee, el destination fee ni los impuestos del hotel. null si no aparece.',
+}
+
 const OCUPACION: CampoRanura[] = [
   {
     slug: 'ocupacion_adultos',
@@ -643,11 +662,18 @@ const HOTEL: DefinicionRanura = {
       label: 'El cargo en destino es',
       tipo: 'enum',
       min: false,
-      opciones: ['total', 'por_noche'],
+      // V-17 (QA del 2026-10-29, ronda 3): también por persona. «35 USD» a secas se leía como de
+      // toda la estadía y el cliente calculaba seis veces menos.
+      opciones: ['total', 'por_noche', 'por_persona', 'por_persona_noche'],
       descripcion_ai:
-        'Si el valor del cargo en destino es por toda la estadía (total) o por cada noche (por_noche: «per night», ' +
-        '«por noche», «/noche»). Responde exactamente uno de: total, por_noche. null si no hay cargo o la pantalla no lo dice.',
+        'La unidad del valor del cargo en destino: total (por toda la estadía), por_noche (por cada noche: «per night», ' +
+        '«por noche», «/noche»), por_persona (por cada huésped, una vez: «per person», «por persona», «pp») o ' +
+        'por_persona_noche (por huésped y por noche: «per person per night», «por persona por noche»). Responde ' +
+        'exactamente uno de: total, por_noche, por_persona, por_persona_noche. null si no hay cargo o la pantalla no lo dice.',
     },
+    // V-13 (QA del 2026-10-29, ronda 3): el ingreso al PNN Tayrona no es un cargo del hotel, pero el
+    // viajero lo paga allá; no se capturaba y el cliente no se enteraba.
+    PAGO_EN_DESTINO,
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
@@ -671,6 +697,8 @@ const ACTIVIDAD: DefinicionRanura = {
     { slug: 'duracion', label: 'Duración', tipo: 'texto', min: false, descripcion_ai: 'Duración tal como aparece (3 horas, día completo...).' },
     { slug: 'idioma', label: 'Idioma', tipo: 'texto', min: false, descripcion_ai: 'Idioma en que se presta el servicio.' },
     { slug: 'pax', label: 'Personas', tipo: 'numero', min: true, descripcion_ai: 'Número de personas de la reserva. Si no se ve, null: no supongas 1.' },
+    // V-13: la caminata al Cabo San Juan no incluye el ingreso al parque.
+    PAGO_EN_DESTINO,
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,

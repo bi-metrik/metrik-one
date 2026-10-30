@@ -92,6 +92,16 @@ describe('niveles con la config provisional', () => {
     expect(slugs(r.deseable.faltan)).toEqual(['tipo_viaje', 'flexibilidad_fecha', 'presupuesto', 'plan_alimentacion', 'equipaje'])
   })
 
+  it('N-13 (QA G10): en Bloqueo la categoría del hotel no entra al mínimo (la define el paquete); en A medida sí', () => {
+    const base = { destino: 'San Andrés', adultos: 2, ninos: 2, infantes: 0, numero_pasajeros: 4, edades_menores: '10, 6', ciudad_origen: 'Bogotá', fecha_salida: '2027-06-18', fecha_regreso: '2027-06-23' }
+    const bloqueo = calcularNiveles(fields, { ...base, modalidad_viaje: 'bloqueo' })
+    expect(slugs(bloqueo.minimo.faltan)).toEqual([])
+    expect(bloqueo.minimo).toMatchObject({ completos: 8, total: 8 })
+    const aMedida = calcularNiveles(fields, { ...base, modalidad_viaje: 'a_medida' })
+    expect(slugs(aMedida.minimo.faltan)).toEqual(['categoria_hotel'])
+    expect(slugs(calcularNiveles(fields, base).minimo.faltan)).toEqual(['categoria_hotel'])
+  })
+
   it('la flexibilidad de fechas solo cuenta mientras no hay fecha de salida', () => {
     const sin = calcularNiveles(fields, { adultos: 2, ninos: 0, infantes: 0 })
     const con = calcularNiveles(fields, { adultos: 2, ninos: 0, infantes: 0, fecha_salida: '2026-11-15' })

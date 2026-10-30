@@ -49,6 +49,7 @@ import {
   type ConfirmacionGuardada,
 } from '@/lib/viaje/confirmacion-datos'
 import { enviarCorreoAlViajero, trazarWhatsAppManual } from '@/lib/viaje/correo-viajero'
+import { hitosDeTarifa, hitosPorTarifa } from '@/lib/viaje/hitos-proveedor'
 import { contextoViaje, nombreYCorreo, type ContextoViaje } from '@/lib/viaje/contexto-viaje'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
@@ -88,8 +89,10 @@ async function prepararPlan(ctx: Contexto, input: EntradaPlan) {
   const { viaje, visaEnTramite } = await leerViajeDelNegocio(ctx.supabase, ctx.negocio.id)
   const regla = configPlanPagos(ctx.configLinea).regla
   const hoy = todayBogotaISO()
-  const v = validarPlan(cuotas, { total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla })
-  const sugerido = planSugerido({ total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla })
+  // H-17: la «Compra antes del» del paquete de la tarifa escogida (lo que se le paga al operador).
+  const hitos = hitosDeTarifa(await hitosPorTarifa(ctx.supabase, cot.id), input.itinerarioId)
+  const v = validarPlan(cuotas, { total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla, hitos })
+  const sugerido = planSugerido({ total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla, hitos })
   const esSugerido = !!sugerido && huellaPlan(sugerido, total.total) === huellaPlan(cuotas, total.total)
   return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre: total.nombre, viaje, visaEnTramite: visaEnTramite ?? false, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
 }
@@ -182,6 +185,7 @@ async function pedirAprobacionPlanSinClave(input: EntradaPlan) {
         fecha_minimo: p.v.fechaMinimo,
         pct_al_minimo: pct,
         despues_del_viaje: p.v.despuesDelViaje,
+        ...(p.v.proveedor && !p.v.proveedor.cubierto ? { proveedor_sin_cubrir: p.v.proveedor } : {}),
         cuotas: p.cuotas,
         razon: input.motivo?.trim().slice(0, 500) || null,
       },
@@ -193,7 +197,9 @@ async function pedirAprobacionPlanSinClave(input: EntradaPlan) {
   await svc.from('negocio_planes_pago').update({ aprobacion_id: (ap as { id: string }).id }).eq('id', guardado.planId)
 
   const cliente = c.ctx.negocio.nombre ?? 'el negocio'
-  const porque = p.v.fechaMinimo
+  const porque = p.v.proveedor && !p.v.proveedor.cubierto && p.v.cumpleMinimo
+    ? `${p.v.proveedor.operador ?? 'el operador'} cobra antes del ${fechaCorta(p.v.proveedor.fecha)} ${pesos(p.v.proveedor.requerido)} y a esa fecha el cliente llevaría ${pesos(p.v.proveedor.acumulado)}`
+    : p.v.fechaMinimo
     ? `al ${fechaCorta(p.v.fechaMinimo)} llevaría el ${pct} % (la regla pide el ${p.regla.pct_minimo} %)`
     : 'el plan no se puede medir contra la fecha del viaje'
   await avisarAprobadores(svc, {

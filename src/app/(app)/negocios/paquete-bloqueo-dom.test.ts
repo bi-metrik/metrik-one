@@ -24,6 +24,7 @@ vi.mock('@/app/(app)/negocios/bloqueo-actions', () => ({
   crearPaqueteBloqueo: async () => ({ success: true, itemId: 'x' }),
   guardarPaqueteBloqueo: guardar,
   ajustarReglasDelPaquete: async () => ({ success: true }),
+  operadoresDelDirectorio: async () => ['Aliados Travel', 'Viajes Éxito'],
 }))
 vi.mock('@/app/(app)/negocios/tarifa-pax-actions', () => ({}))
 
@@ -220,5 +221,44 @@ describe('D5 · «Va en la propuesta» en la tarjeta del paquete', () => {
     expect(check.checked).toBe(true)
     await clic(check)
     expect(onEnPropuesta).toHaveBeenCalledWith(false)
+  })
+})
+
+describe('H-13 (QA G10) · el operador de cada paquete en la tarjeta', () => {
+  it('con dos operadores en la solicitud, el paquete nuevo nace sin operador, lo pide y guarda el elegido', async () => {
+    guardar.mockClear()
+    await montar(null, null, null, null, { operador: 'ALIADOS TRAVEL / TU RESERVA' })
+    expect(contenedor.querySelector('[data-aviso="sin_operador"]')).not.toBeNull()
+    const opciones = [...contenedor.querySelectorAll('[data-operador-opcion]')].map(b => b.getAttribute('data-operador-opcion'))
+    expect(opciones).toEqual(['ALIADOS TRAVEL', 'TU RESERVA'])
+    await clic(contenedor.querySelector('[data-operador-opcion="TU RESERVA"]')!)
+    expect(contenedor.querySelector('[data-aviso="sin_operador"]')).toBeNull()
+    expect((contenedor.querySelector('input[aria-label="Operador del paquete"]') as HTMLInputElement).value).toBe('TU RESERVA')
+    const boton = [...contenedor.querySelectorAll('button')].find(b => /Guardar paquete/.test(b.textContent ?? ''))!
+    await clic(boton)
+    expect((guardar.mock.calls[0][1] as { paquete: { operador: string | null } }).paquete.operador).toBe('TU RESERVA')
+  })
+
+  it('la lista para escribir trae los de la solicitud y los del Directorio, sin repetir', async () => {
+    await montar(null, null, null, null, { operador: 'ALIADOS TRAVEL / TU RESERVA' })
+    await act(async () => { await Promise.resolve() })
+    const lista = [...contenedor.querySelectorAll('datalist option')].map(o => o.getAttribute('value'))
+    expect(lista).toEqual(['ALIADOS TRAVEL', 'TU RESERVA', 'Viajes Éxito'])
+  })
+
+  it('con un solo operador, todo como antes: nace con él, sin aviso ni botones de elección', async () => {
+    await montar(null)
+    expect(contenedor.querySelector('[data-aviso="sin_operador"]')).toBeNull()
+    expect(contenedor.querySelectorAll('[data-operador-opcion]').length).toBe(0)
+    expect((contenedor.querySelector('input[aria-label="Operador del paquete"]') as HTMLInputElement).value).toBe('Aliados Travel')
+  })
+
+  it('el operador que se ve en el pantallazo del hotel llena el del paquete (si es uno de la solicitud)', async () => {
+    leer.mockImplementationOnce(async () => ({ ok: true, cual: 'hotel', hotel: { ...paqueteVacio().hotel, hotel: 'GHL Relax' }, incluye: paqueteVacio().incluye, operador: 'Tu Reserva', huella: null }))
+    const registro = new Registro()
+    await montar(registro, null, null, null, { operador: 'ALIADOS TRAVEL / TU RESERVA' })
+    await act(async () => { registro.entregar('pq-1', DATA, 'hotel') })
+    await act(async () => { await Promise.resolve() })
+    expect((contenedor.querySelector('input[aria-label="Operador del paquete"]') as HTMLInputElement).value).toBe('TU RESERVA')
   })
 })
