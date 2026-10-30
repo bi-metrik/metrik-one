@@ -105,7 +105,8 @@ La generación vuelve a validar. Una plantilla activa con errores no imprime (no
 `src/lib/plantillas-documento/v1.ts` traduce lo que imprimen hoy `declaracion-juramentada-pdf.tsx` y `relacion-facturas-pdf.tsx`. La migración `20261029203100_*` la siembra en SOENA **sin activarla**. Lo que se probó:
 
 - `v1.test.ts` compara el texto del PDF de @react-pdf con el del HTML (siempre) y con el del PDF de Chromium (con `CHROMIUM_EJECUTABLE`) en cuatro casos: completo, sin fecha de certificado, sin radicado y dos titulares.
-- `plantillas-sql.test.ts` (PGlite) comprueba que el texto sembrado es byte a byte el de `v1.ts`.
+- `plantillas-sql.test.ts` (PGlite) comprueba que el texto sembrado es byte a byte el de `v1.ts` (desde el 2026-10-30, la versión 2 de la DJ; la 1 conserva la frase quitada).
+- **2026-10-29, plantilla v2 de Deisy:** el CUARTO de la DJ quita «, (valor aproximado como lo establece el artículo 577 del Estatuto Tributario)» porque la DIAN rechaza el trámite si el valor aparece aproximado. Cambia el componente @react-pdf y `v1.ts`; como las versiones son inmutables, la migración `20261030120000_plantillas_documento_soena_dj_v2.sql` agrega la versión 2 de la DJ de SOENA (sin activar). La Relación de facturas nunca tuvo la frase.
 - Letra: Liberation Sans 2.1 embebida (SIL OFL 1.1), que tiene la métrica de Helvetica.
 
 ## Cómo agregar un documento nuevo

@@ -1,6 +1,6 @@
 ---
 name: project-plantillas-editables
-description: Plantillas editables de documentos (DJ y Relación) por workspace — 29-oct; migraciones 20261029203000/203100 APLICADAS (29-oct); siembra SOENA sin activar; Chromium sin respaldo
+description: Plantillas editables de documentos (DJ y Relación) por workspace — 203000/203100 APLICADAS (29-oct); DJ v2 sin «aproximado» en 20261030120000 SIN aplicar; nada activo; Chromium sin respaldo
 metadata:
   type: project
 ---
@@ -19,5 +19,12 @@ PR #1356. El IVA exacto (#1355) ya está en main.
 - `resolverCamposFuente` salió de `formulario-actions.ts` a `src/lib/formularios/` (un 'use server' no puede exportarla).
 
 **Why:** SOENA quiere cambiar sus textos sin pedir deploy; son documentos bajo juramento ante la DIAN.
-**How to apply:** el texto de v1 vive en `v1.ts` Y en la migración; `plantillas-sql.test.ts` exige que coincidan.
+- 30-oct: plantilla v2 de Deisy quita «(valor aproximado… art. 577 ET)» del CUARTO (la DIAN rechaza valores
+  aproximados). `DJ_V1` en `v1.ts` lleva ya el texto corregido; la v1 sembrada (inmutable) conserva la frase y
+  `20261030120000_plantillas_documento_soena_dj_v2.sql` (SIN aplicar al abrir el PR) agrega la v2 con
+  version_n = max+1 y dedupe por contenido exacto. No poner la frase de nuevo.
+
+**How to apply:** el texto vigente vive en `v1.ts` Y en la ÚLTIMA migración de siembra; `plantillas-sql.test.ts`
+exige que coincidan (la v1 se compara con `DJ_V1` + la frase quitada). Un cambio de texto = migración nueva, nunca
+editar la vieja. Una PGlite nueva tarda >5 s: las pruebas que la crean llevan timeout 30 s.
 Para un documento nuevo, seguir `docs/specs/2026-10-29_plantillas-editables.md`.
