@@ -575,12 +575,17 @@ export function sigue(e: EntradaDePasos & { pasoActual: NumeroDePaso }): { texto
   if (e.leyendo > 0) return { texto: 'ONE está leyendo los pantallazos. Puedes seguir pegando.', accion: { tipo: 'ninguna' }, boton: null }
   if (e.pantallazosPorAceptar > 0) return { texto: 'Mira a dónde va cada pantallazo y acéptalos.', accion: { tipo: 'aceptar' }, boton: `Aceptar ${e.pantallazosPorAceptar}` }
   if (e.sinCosto.length > 0) return { texto: `${e.sinCosto[0].motivo}: ${e.sinCosto[0].servicio}.`, accion: { tipo: 'paso', paso: 1 }, boton: 'Ir' }
-  if (e.conOpciones > 0 && !e.tarifasVistas) return { texto: 'Escoge qué opción va en cada tarifa. ONE ya propuso una.', accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
-  if (e.bajoMinimo.length > 0) return { texto: `${e.bajoMinimo[0]} queda bajo el margen mínimo: pide la autorización o sube el margen.`, accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
   // Lo demás que impide enviar (paquete incompleto, capturas, Recomendada, margen): la misma revisión
   // que la lista y que `enviarPorPasos`. Nunca «Todo listo» con un rojo. La autorización de datos
   // depende del cliente: va después de leer el texto, para no taparlo.
   const freno = (texto: string) => ({ texto, accion: { tipo: 'paso', paso: 3 } as AccionSigue, boton: e.pasoActual === 3 ? null : 'Ver qué falta' })
+  // QA del #1359 (punto 6) · la comisión de una Pública es un dato del paquete, no una elección de
+  // Tarifas: agregar otro paquete (que crea opciones) la tapaba con «Escoge qué opción va…». Sin ella
+  // el margen no se puede medir: va antes que las tarifas y que el margen.
+  const comision = e.impide?.find(r => r.clave === 'comision-publica')
+  if (comision) return freno(comision.texto)
+  if (e.conOpciones > 0 && !e.tarifasVistas) return { texto: 'Escoge qué opción va en cada tarifa. ONE ya propuso una.', accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
+  if (e.bajoMinimo.length > 0) return { texto: `${e.bajoMinimo[0]} queda bajo el margen mínimo: pide la autorización o sube el margen.`, accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
   const porArreglar = e.impide ? e.impide.filter(r => r.clave !== CLAVE_AUTORIZACION_DATOS) : null
   if (porArreglar) {
     if (porArreglar.length > 0) return freno(porArreglar[0].texto)

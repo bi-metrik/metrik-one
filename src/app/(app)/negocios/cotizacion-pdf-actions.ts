@@ -1708,7 +1708,7 @@ async function propuestaConMotorHtml(
       catalogo,
     },
   )
-  console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length }))
+  console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length, hojas: medidas.hojas ?? null }))
   return { pdf, avisosFotos: (avisosFotos ?? []).map(a => a.texto) }
 }
 
