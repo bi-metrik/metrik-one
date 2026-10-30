@@ -43,6 +43,8 @@ interface CasoConducta {
   final: Record<string, unknown>;
   /** Solo dieron una ventana de fechas («entre el 21 de junio y el 4 de julio, lo proponemos»): ni salida ni regreso. */
   sinFechas?: boolean;
+  /** Si al final del guion queda este botón (el modelo pidió una confirmación de más y el guion se corrió), se toca. */
+  cierre?: string;
 }
 
 const PASOS_BONAIRE: PasoGuion[] = [
@@ -154,6 +156,7 @@ export const CASOS_CONDUCTA: CasoConducta[] = [
     contactos: [], pasos: PASOS_PEDIDO_PRIMERO,
     prohibidas: [{ desde: 0, que: 'adultos', re: /cu[aá]ntos adultos|n[uú]mero de adultos|cu[aá]ntas personas/i }],
     final: { adultos: 2 },
+    cierre: 'Anotar',
   },
 ];
 
@@ -195,6 +198,12 @@ async function correrCaso(c: CasoConducta, corrida: number): Promise<Medida> {
       }
       for (const cg of e.puerto.cargas.slice(cargasVistas)) diagnostico.push(`paso ${salidasPorPaso.length}: lectura ${JSON.stringify(cg)}`);
       cargasVistas = e.puerto.cargas.length;
+    }
+    for (let n = 0; c.cierre && n < 2; n++) {
+      const antes = e.mensajero.enviados.length;
+      try { await e.toca(c.cierre); } catch { break; }
+      transcripcion.push(`> [toque de cierre: ${c.cierre}]`);
+      for (const s of e.mensajero.enviados.slice(antes).map((x) => x.salida)) transcripcion.push(`< ${s.texto.replace(/\n/g, '\n  ')}`);
     }
   } catch (err) { error = String(err).slice(0, 300); }
 
