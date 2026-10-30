@@ -294,3 +294,50 @@ describe('pasar a Pública con un descuento guardado (Vera, 2026-10-29)', () => 
     expect(leerTarifaPax(item().tarifa_pax).descuentoCliente?.motivo).toBe('Reserva esta semana')
   })
 })
+
+describe('H-13 (QA G10 del 2026-10-30) · el operador es de cada paquete', () => {
+  // La reprueba de hoy: la solicitud dice «ALIADOS TRAVEL / TU RESERVA» y los dos paquetes guardaban
+  // ese mismo texto, con `items.proveedor_id` null. Aliados Travel SÍ está en el Directorio.
+  beforeEach(() => {
+    tablas.negocio_bloques = [{ negocio_id: 'neg-1', modalidad_viaje: 'bloqueo', operador_bloqueo: 'ALIADOS TRAVEL / TU RESERVA' }]
+    tablas.items[0].proveedor_id = null
+    tablas.fotos_perfiles = [
+      { id: 'ficha-aliados', workspace_id: 'ws-1', tipo: 'proveedor', tipo_proveedor: 'operador', nombre: 'Aliados Travel' },
+      { id: 'ficha-hotel', workspace_id: 'ws-1', tipo: 'hotel', tipo_proveedor: 'hotel', nombre: 'Tu Reserva' },
+    ]
+  })
+
+  it('con dos operadores en la solicitud, un paquete sin operador NO hereda el texto mezclado', async () => {
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido() })
+    expect(r.success).toBe(true)
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBeNull()
+    expect(item().proveedor_id).toBeNull()
+  })
+
+  it('el operador elegido en el paquete queda en él y, si está en el Directorio, ligado a su ficha', async () => {
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'ALIADOS TRAVEL' } })
+    expect(r.success && r.fichaOperador).toBe('Aliados Travel')
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBe('ALIADOS TRAVEL')
+    expect(item().proveedor_id).toBe('ficha-aliados')
+  })
+
+  it('cambiar a un operador que no está en el Directorio suelta la ficha del anterior (y no toma la de un hotel)', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'ALIADOS TRAVEL' } })
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'TU RESERVA' } })
+    expect(r.success && r.fichaOperador).toBeNull()
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBe('TU RESERVA')
+    expect(item().proveedor_id).toBeNull()
+  })
+
+  it('el texto mezclado escrito en el paquete tampoco se guarda como operador', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'ALIADOS TRAVEL / TU RESERVA' } })
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBeNull()
+  })
+
+  it('con UN operador en la solicitud todo sigue igual: el paquete lo hereda (y se liga si está)', async () => {
+    tablas.negocio_bloques = [{ negocio_id: 'neg-1', modalidad_viaje: 'bloqueo', operador_bloqueo: 'Aliados Travel' }]
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido() })
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBe('Aliados Travel')
+    expect(item().proveedor_id).toBe('ficha-aliados')
+  })
+})

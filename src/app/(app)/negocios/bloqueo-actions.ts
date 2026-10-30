@@ -309,7 +309,6 @@ async function fichasDeProveedores(sb: Supabase, workspaceId: string): Promise<F
     .select('id, nombre, tipo_proveedor')
     .eq('workspace_id', workspaceId)
     .eq('tipo', 'proveedor')
-    .limit(500)
   if (error) return []
   return (data ?? []) as FichaDeOperador[]
 }

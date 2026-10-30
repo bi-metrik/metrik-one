@@ -232,7 +232,8 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   useEffect(() => {
     if (!abierto || !p.editable || delDirectorio.length > 0) return
     let vivo = true
-    operadoresDelDirectorio().then(l => { if (vivo) setDelDirectorio(l) }).catch(() => {})
+    // Si no se puede leer, la lista queda con los de la solicitud: escribir a mano sigue sirviendo.
+    Promise.resolve().then(() => operadoresDelDirectorio()).then(l => { if (vivo && Array.isArray(l)) setDelDirectorio(l) }).catch(() => {})
     return () => { vivo = false }
   }, [abierto, p.editable, delDirectorio.length])
   const opcionesOperador = useMemo(() => {
