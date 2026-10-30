@@ -442,6 +442,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
   },
   {
     id: 'v-consultiva-mas-de-3', conjunto: 'ventas', titulo: 'La respuesta nombra 4 productos: la guarda la devuelve y sale la de 3',
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: 'taladro magnético para estructura' }],
     guion: [
@@ -530,6 +531,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
   {
     // SOLO SECO: el guion fuerza el texto mezclado; con Haiku real el texto es otro y el caso no aplica.
     id: 'v-r3-formato-roto', conjunto: 'ventas', titulo: 'El texto mezcla productos («el MP-11 es mejor que el MP-13»): sale entero y las fotos con su pie, sin perder nada',
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: '¿cuál es mejor, el MP-11 o el MP-13?' }],
     guion: [{ varias: [VC({ codigo: 'MP-11' }), VC({ codigo: 'MP-13' })] }, R('El MP-11 es mejor que el MP-13 para la casa: el MP-13 es magnético, para estructura. ¿Te sirve el MP-11?', 'producto')],
@@ -559,7 +561,8 @@ export const CASOS_VENTAS: CasoPublico[] = [
       return todos(
         // Cada texto de producto va seguido de su foto, menos el del MP-14 (la que falló); los tres textos salen; cierra
         // con texto. El orden de los productos lo escoge el modelo (con Haiku real cambia).
-        ['MP-13', 'MP-14', 'MP-15'].every((c) => xs.some((x) => x.startsWith(`T:${c}`)))
+        // Con el modelo real nombra uno o dos (MAX_RECOMENDADOS); con el guion, los tres.
+        xs.some((x) => x.startsWith('T:MP-14')) && xs.filter((x) => /^T:MP-1[345]/.test(x)).length >= 2
           && xs.every((x, i) => !/^T:MP-1[35]/.test(x) || xs[i + 1] === `F:${x.slice(2, 7)}`)
           && !xs.includes('F:MP-14') && xs.at(-1)!.startsWith('T:') ? ok('orden: cada texto con su foto; el MP-14 sin foto') : no(`orden: ${xs.map((x) => x.slice(0, 9)).join(' → ')}`),
         f.find((x) => x.codigo === 'MP-14' && !x.ok) ? ok('traza: la foto del MP-14 falló') : no(`traza: ${JSON.stringify(f)}`),
@@ -648,6 +651,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
   {
     // SOLO SECO: el guion fuerza los `datos` rotos; con Haiku real el caso no aplica.
     id: 'v-r3-datos-texto-roto', conjunto: 'ventas', titulo: '`datos` como texto con JSON roto: el error dice eso (no «el producto no es un código»); el tope pasa a persona sin pedir repetir',
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [...HASTA_RESUMEN.pasos.slice(0, 3), { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' }],
     guion: [
