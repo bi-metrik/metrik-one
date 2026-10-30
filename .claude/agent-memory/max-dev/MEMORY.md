@@ -17,7 +17,7 @@
 - ⚠️⚠️ [Regla de fotos de la propuesta (29-oct)](project_regla_fotos_propuesta.md) — #1357 paneles+alto común, #1358 portada, #1365 Rec=medio; foto Curazao sin cargar
 - ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337 (#1339 cerrado); reparto por precio en #1348
 - ⚠️⚠️ [Dimpro ventas ronda 3 (30-oct)](project_dimpro_ventas_ronda3.md) — Messenger manda el botón como TEXTO; partido por producto; SQL ronda3 SIN correr
-- ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — orden publicado = por clave (cambia a Haiku); --fichas-base v3; SQL SIN aplicar
+- ⚠️⚠️ [Agus con roles en Trappvel (29-oct)](project_trappvel_agus_roles.md) — roles en prod; cambio de texto = --antes; SQL sin-plata/Trappi SIN aplicar
 - ⚠️ [Bloqueo: prueba real 29-oct (INF, barra, edad, marca PDF)](project_bloqueo_prueba_real_1029.md) — #1326; PDF recibe porPasos del llamador (N4); edad de la Solicitud cuenta en el freno
 - ⚠️⚠️ [SOE-031: acuse marca la confirmación de entrega](project_soe031_confirmacion_entrega.md) — 163000/163100 APLICADAS (28-oct); trigger, no webhook; sin deploy
 - ⚠️⚠️ [Factura de cuota sale siempre (#1317)](project_factura_cuota_correo_siempre.md) — 20261028120000 SIN aplicar; edge enviar-factura-cuota; webhook después de la migración
@@ -89,6 +89,7 @@
 
 - [Build en worktree sin una dependencia](reference_build_en_worktree.md) — copiar el paquete, no symlink (raíz de Turbopack)
 - [Comandos en worktree aislado](reference_worktree_aislado_comandos.md) — editar y mutar con python; git siempre simple
+- ⚠️ [Worktree compartido con otra instancia](reference_worktree_compartido.md) — mismo worktree a dos Max; la otra lo borra al cerrar
 - [Capturas de un componente sin servidor](reference_capturas_componente_sin_servidor.md) — vitest temporal + postcss + Playwright de npx
 - [Reproducir el PDF real solo lectura](reference_reproducir_pdf_real_solo_lectura.md) — supabase-js con fetch solo GET; sin MCP
 - [Frentes secundarios](indice_frentes_secundarios.md) — ~145 entradas viejas: cobros, Valida, SOENA, recibos, Siigo, recetas; buscar ahí antes de crear

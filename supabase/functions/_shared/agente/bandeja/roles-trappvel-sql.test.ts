@@ -7,7 +7,7 @@ import type { Ficha } from '../tipos'
 import { BOT_BANDEJA } from './dominio'
 import { FUNCIONES_ROL, WS_TRAPPVEL, fichasBaseBandeja, fichasDelRol } from './roles-trappvel'
 import type { ClaveRolTrappvel } from './roles-trappvel'
-import { archivoBanco, carpetaDe, leerAsignaciones, leerBancos, sqlEnsayo, sqlPendiente, sqlReversa } from './roles-trappvel-sql'
+import { archivoBanco, cambiosDeFichas, carpetaDe, leerAsignaciones, leerBancos, sqlEnsayo, sqlPendiente, sqlReversa, sqlReversaCambio } from './roles-trappvel-sql'
 import type { Asignaciones } from './roles-trappvel-sql'
 
 /**
@@ -78,7 +78,7 @@ async function base(fichasBandeja: Ficha[] = fichasBaseBandeja()) {
   }
   await db.query(`select public.bot_publicar_reglamento($1, $2, 'prueba')`, [WS_TRAPPVEL, BOT_BANDEJA])
 }
-afterEach(async () => { await db?.close() })
+afterEach(async () => { if (db && !db.closed) await db.close() })
 
 const resolver = async (p: { staff?: string; colaborador?: string }) =>
   (await db.query<{ r: { usa_roles: boolean; rol: { clave: string; activo: boolean; funciones: Array<{ funcion: string }> } | null } }>(
@@ -126,6 +126,9 @@ describe('el JSON de asignaciones (fuera del repo)', () => {
     const leidas: string[] = []
     await leerBancos('/carpeta', async (r) => { leidas.push(r); return '{}' })
     expect(leidas).toEqual([`/carpeta/${archivoBanco('mano_derecha')}`, `/carpeta/${archivoBanco('asesor_viajes')}`])
+    const conPrefijo: string[] = []
+    await leerBancos('/carpeta', async (r) => { conPrefijo.push(r); return '{}' }, '2026-10-30_x-')
+    expect(conPrefijo).toEqual(['/carpeta/2026-10-30_x-banco-mano_derecha.json', '/carpeta/2026-10-30_x-banco-asesor_viajes.json'])
   })
 })
 
@@ -193,5 +196,110 @@ describe('si la bandeja publicada no es la base del arnés, no se publica', { ti
     const bancos = { mano_derecha: await bancoDe('mano_derecha', o), asesor_viajes: await bancoDe('asesor_viajes', o) }
     await db.exec(await sqlPendiente({ base: o, bancos, asignaciones: ASIG }))
     expect((await resolver(DUENO)).rol?.clave).toBe('mano_derecha')
+  })
+})
+
+/**
+ * Un cambio de fichas sobre los roles ya publicados (2026-10-30: «plata» fuera del texto de `alc.plata`). La bandeja
+ * publicada no se edita (es inmutable): se cambia su borrador y se publica una versión nueva; los dos roles se vuelven a
+ * publicar sobre ella sin tocar asignaciones, teléfonos ni si el rol está prendido. La reversa vuelve a lo de antes.
+ */
+describe('un cambio de fichas sobre los roles ya publicados (--antes)', { timeout: 60_000 }, () => {
+  const TEXTO_ANTES = 'esta bandeja no consulta plata: dilo en una línea'
+  // La bandeja publicada antes del 30-oct: «plata» en alc.plata y el nombre de antes en el perfil (hoy se llama Trappi).
+  const antes = () => fichasBaseBandeja().map((f) => (f.clave === 'alc.plata' ? { ...f, hacer: TEXTO_ANTES }
+    : f.clave === 'perfil' ? { ...f, valores: { ...f.valores, nombre: 'el asistente de solicitudes' } } : f))
+  const bancos = async (b: Ficha[]) => ({ mano_derecha: await bancoDe('mano_derecha', b), asesor_viajes: await bancoDe('asesor_viajes', b) })
+  const cambio = async () => ({ base: fichasBaseBandeja(), antes: antes(), bancos: await bancos(fichasBaseBandeja()), asignaciones: ASIG })
+  const publicarAntes = async () => {
+    await base(antes())
+    await db.exec(await sqlPendiente({ base: antes(), bancos: await bancos(antes()), asignaciones: ASIG }))
+  }
+  const huellaBandeja = async () => (await db.query<{ h: string }>(
+    `select public.asistente_huella_fichas(fichas) as h from public.bot_reglamentos where bot = '${BOT_BANDEJA}' order by version desc limit 1`)).rows[0].h
+  const huellaRol = async (r: ClaveRolTrappvel) => (await db.query<{ h: string }>(
+    `select public.asistente_huella_fichas(g.fichas) as h from public.asistente_roles r join public.bot_reglamentos g on g.id = r.reglamento_id where r.clave = '${r}'`)).rows[0].h
+  const asignaciones = () => contar('select count(*)::int as n from public.asistente_asignaciones')
+
+  it('solo cambian alc.plata (su texto) y perfil (el nombre)', () => {
+    expect(cambiosDeFichas(antes(), fichasBaseBandeja()).map((c) => c.clave)).toEqual(['perfil', 'alc.plata'])
+    expect(() => cambiosDeFichas(antes(), fichasBaseBandeja().slice(1))).toThrow('entran o salen claves')
+    expect(() => cambiosDeFichas(antes(), fichasBaseBandeja().map((f) => (f.clave === 'alc.plata' ? { ...f, carga: 'indice' as const } : f)))).toThrow('cambia carga')
+  })
+
+  it('aplicado: la bandeja y los dos roles quedan con el texto nuevo; asignaciones, teléfonos y lo apagado no cambian', async () => {
+    await publicarAntes()
+    await db.exec(`update public.asistente_roles set activo = false`)
+    const n = await asignaciones()
+    const tels = await telefonos()
+    await db.exec(await sqlPendiente(await cambio()))
+    expect(await huellaBandeja()).toBe(await huellaPublicable(fichasBaseBandeja()))
+    for (const r of ['mano_derecha', 'asesor_viajes'] as const) expect(await huellaRol(r)).toBe(await huellaPublicable(fichasDelRol(r)))
+    const textos = (await db.query<{ t: string }>(`select string_agg(coalesce(hacer, '') || ' ' || coalesce(cuando, ''), ' ') as t from public.bot_parametros`)).rows[0].t
+    expect(textos).not.toMatch(/\bplata\b/i)
+    const nombres = (await db.query<{ n: string }>(`select distinct g.fichas_nombre as n from (select f->'valores'->>'nombre' as fichas_nombre
+      from public.asistente_roles r join public.bot_reglamentos b on b.id = r.reglamento_id, jsonb_array_elements(b.fichas) f where f->>'clave' = 'perfil') g`)).rows
+    expect(nombres).toEqual([{ n: 'Trappi' }])
+    expect(await asignaciones()).toBe(n)
+    expect(await telefonos()).toEqual(tels)
+    expect((await resolver(DUENO)).rol).toMatchObject({ clave: 'mano_derecha', activo: false })
+    expect((await resolver({ staff: ASIG.asignaciones[1].staff })).rol).toMatchObject({ clave: 'asesor_viajes', activo: false })
+    // Aplicarlo otra vez no falla (la bandeja ya está; los roles se vuelven a publicar igual).
+    await db.exec(await sqlPendiente(await cambio()))
+    expect(await asignaciones()).toBe(n)
+  })
+
+  it('el ensayo corre todo y no deja nada', async () => {
+    await publicarAntes()
+    const versiones = await contar('select count(*)::int as n from public.bot_reglamentos')
+    await expect(db.exec(await sqlEnsayo(await cambio()))).rejects.toThrow('dry-run ok')
+    expect(await contar('select count(*)::int as n from public.bot_reglamentos')).toBe(versiones)
+    expect(await huellaBandeja()).toBe(await huellaPublicable(antes()))
+  })
+
+  it('la reversa vuelve la bandeja y los roles a lo de antes', async () => {
+    await publicarAntes()
+    await db.exec(await sqlPendiente(await cambio()))
+    const huellas = { mano_derecha: await huellaPublicable(fichasDelRol('mano_derecha', antes())), asesor_viajes: await huellaPublicable(fichasDelRol('asesor_viajes', antes())) }
+    await db.exec(await sqlReversaCambio(await cambio(), 'prueba', huellas))
+    expect(await huellaBandeja()).toBe(await huellaPublicable(antes()))
+    for (const r of ['mano_derecha', 'asesor_viajes'] as const) expect(await huellaRol(r)).toBe(huellas[r])
+    expect((await resolver(DUENO)).rol?.clave).toBe('mano_derecha')
+    // El borrador de cada rol queda igual a su versión de antes: publicarlo da la misma huella.
+    for (const r of ['mano_derecha', 'asesor_viajes'] as const) {
+      const id = (await db.query<{ id: string }>(`select public.bot_publicar_reglamento($1, $2, 'prueba') as id`, [WS_TRAPPVEL, `rol:${r}`])).rows[0].id
+      expect((await db.query<{ h: string }>(`select public.asistente_huella_fichas(fichas) as h from public.bot_reglamentos where id = $1`, [id])).rows[0].h).toBe(huellas[r])
+    }
+    // Con una huella que no está publicada, la reversa no toca nada.
+    await expect(db.exec(await sqlReversaCambio(await cambio(), 'prueba', { ...huellas, asesor_viajes: '0'.repeat(64) }))).rejects.toThrow('con la huella de su banco de antes')
+  })
+
+  it('con el puntero fijo en la bandeja, lo mueve a la versión nueva', async () => {
+    await publicarAntes()
+    await db.exec(`update public.workspaces set config_extra = jsonb_set(config_extra, '{bot_conversacional,agente_config}',
+      jsonb_build_object('reglamento_id', (select id::text from public.bot_reglamentos where bot = '${BOT_BANDEJA}')))`)
+    await db.exec(await sqlPendiente(await cambio()))
+    const pin = (await db.query<{ h: string }>(`select public.asistente_huella_fichas(g.fichas) as h from public.workspaces w
+      join public.bot_reglamentos g on g.id::text = w.config_extra->'bot_conversacional'->'agente_config'->>'reglamento_id'`)).rows[0].h
+    expect(pin).toBe(await huellaPublicable(fichasBaseBandeja()))
+  })
+
+  it('frena sin tocar nada: sin roles publicados, o con la bandeja publicada distinta de la de antes', async () => {
+    await base(antes())
+    await expect(db.exec(await sqlPendiente(await cambio()))).rejects.toThrow('no están publicados')
+    await db.close()
+    await publicarAntes()
+    await db.exec(`update public.bot_parametros set hacer = 'otro' where bot = '${BOT_BANDEJA}' and clave = 'g.fechas'`)
+    await db.query(`select public.bot_publicar_reglamento($1, $2, 'prueba')`, [WS_TRAPPVEL, BOT_BANDEJA])
+    const versiones = await contar('select count(*)::int as n from public.bot_reglamentos')
+    await expect(db.exec(await sqlPendiente(await cambio()))).rejects.toThrow('no son las de antes del cambio')
+    expect(await contar('select count(*)::int as n from public.bot_reglamentos')).toBe(versiones)
+  })
+
+  it('si el borrador de la bandeja no era lo publicado, no publica', async () => {
+    await publicarAntes()
+    await db.exec(`update public.bot_parametros set hacer = 'borrador sin publicar' where bot = '${BOT_BANDEJA}' and clave = 'g.fechas'`)
+    await expect(db.exec(await sqlPendiente(await cambio()))).rejects.toThrow('no era lo publicado')
+    expect(await huellaBandeja()).toBe(await huellaPublicable(antes()))
   })
 })
