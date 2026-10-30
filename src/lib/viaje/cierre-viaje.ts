@@ -10,6 +10,9 @@
  *     asumió la agencia), cada uno una vez (§7.2.2).
  *   · Saldo a favor bloquea el cierre hasta que la dirección elige (N2). Una comisión pendiente
  *     NO bloquea y no entra al margen: se muestra aparte (C13).
+ *   · H-28 (QA 2026-10-29): la plata de un servicio sacado del viaje que el cliente ya pagó es saldo
+ *     a favor del cliente, no margen, hasta que la dirección decida: devolverla, dejarla abonada a
+ *     su próximo viaje o retenerla con motivo. Solo «retener» la vuelve margen.
  *   · La confirmación de la dirección lleva una huella de (ingreso, costo): si después cambia un
  *     gasto o un pago, la confirmación deja de valer y el gate la vuelve a pedir (F6-5).
  *
@@ -125,6 +128,10 @@ export interface GastoCierre {
   tasa_cambio?: number | string | null
 }
 
+/** Lo que la dirección decide sobre el saldo a favor (N2, H-28). */
+export type DecisionSaldoAFavor = 'devolver' | 'proximo_viaje' | 'retener'
+export const DECISIONES_SALDO: readonly DecisionSaldoAFavor[] = ['devolver', 'proximo_viaje', 'retener']
+
 export interface EntradaCierre {
   /** `precio_aprobado`: lo que el cliente compró (incluye el IVA). */
   precioAprobado: number
@@ -136,6 +143,11 @@ export interface EntradaCierre {
   recargo: number
   servicios: readonly ServicioCierre[]
   gastos: readonly GastoCierre[]
+  /**
+   * H-28 · la decisión vigente sobre el saldo a favor. Solo `retener` deja la plata de los servicios
+   * sacados como margen; sin decisión (o con otra) es del cliente y no entra al ingreso real.
+   */
+  decisionSaldo?: DecisionSaldoAFavor | null
 }
 
 export interface FilaCierre {
@@ -167,8 +179,17 @@ export interface Cierre {
   margenCotizadoPct: number | null
   filas: FilaCierre[]
   cortesias: Array<{ descripcion: string; monto: number }>
-  /** Lo que cobró de más el cliente (bloquea hasta decidir, N2). 0 si no hay. */
+  /**
+   * Lo que el cliente pagó y no le corresponde a la agencia (bloquea hasta decidir, N2): lo cobrado de
+   * más sobre el precio, más lo pagado por servicios que se sacaron del viaje (H-28). 0 si no hay.
+   */
   saldoAFavor: number
+  /** La parte del saldo a favor que viene de servicios sacados del viaje (H-28). */
+  saldoPorSacados: number
+  /** Los servicios sacados del viaje, con lo que costaban en el precio que aceptó el cliente. */
+  sacados: Array<{ id: string; nombre: string; cotizado: number }>
+  /** ¿La plata de los servicios sacados quedó como margen por decisión de la dirección? */
+  sacadosRetenidos: boolean
   /** Lo que falta por cobrar (gate `saldo_cero`, aparte). */
   porCobrar: number
   comisiones: Array<{ servicioId: string; proveedor: string; esperada: number; estado: string }>
@@ -193,7 +214,16 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   const cobrado = r0(e.cobrado)
   const precio = r0(e.precioAprobado)
   // El ingreso real no pasa del precio: lo que sobra es saldo a favor, no margen.
-  const ingresoReal = Math.min(cobrado, precio + recargo)
+  // H-28 · lo que el cliente pagó por un servicio que ya no va es suyo hasta que la dirección decida.
+  const sacados = e.servicios.filter(s => s.estado === 'cancelado' && r0(s.costo_cotizado) > 0)
+  const costoSacados = sacados.reduce((a, s) => a + r0(s.costo_cotizado), 0)
+  const sacadosRetenidos = costoSacados > 0 && e.decisionSaldo === 'retener'
+  const precioQueQueda = Math.max(0, precio - costoSacados)
+  const saldoAFavor = Math.max(0, cobrado - recargo - precioQueQueda)
+  const saldoPorSacados = Math.min(costoSacados, saldoAFavor)
+  // El ingreso real no pasa del precio: lo que sobra es saldo a favor, no margen. Sin «retener», el
+  // precio que cuenta es el que queda sin los servicios sacados.
+  const ingresoReal = Math.min(cobrado, (sacadosRetenidos ? precio : precioQueQueda) + recargo)
   const ingresoNeto = ingresoReal - iva - recargo
   const costoReal = e.gastos.reduce((a, g) => a + r0(g.monto), 0)
   const margenReal = ingresoNeto - costoReal
@@ -223,7 +253,12 @@ export function calcularCierre(e: EntradaCierre): Cierre {
   for (const f of filas) {
     if (f.diferencia === 0 || f.sinCosto) continue
     const cifra = `${f.diferencia > 0 ? '+' : '-'}${pesosCierre(Math.abs(f.diferencia))}`
-    if (f.sacado) { razones.push(`${f.nombre} sacado del viaje (${cifra})`); continue }
+    if (f.sacado) {
+      // Sin «retener», su plata no entra al ingreso ni su costo al real: no mueve el margen y se
+      // explica en el saldo a favor. Retenida, es margen que el cliente pagó por algo que no recibió.
+      if (sacadosRetenidos) razones.push(`${f.nombre} sacado del viaje: se retienen ${pesosCierre(f.cotizado - f.real)}`)
+      continue
+    }
     // H6-3 · lo que movió la TRM se nombra como tal: no es que el proveedor cobrara más.
     const s = van.find(x => x.id === f.id)
     const cambio = diferenciaDeCambioDelServicio(s?.moneda, e.gastos.filter(g => g.servicio_id === f.id)).pesos
@@ -252,7 +287,10 @@ export function calcularCierre(e: EntradaCierre): Cierre {
     margenCotizadoPct: pct(margenCotizado, precio - iva),
     filas,
     cortesias,
-    saldoAFavor: Math.max(0, cobrado - precio - recargo),
+    saldoAFavor,
+    saldoPorSacados,
+    sacados: sacados.map(s => ({ id: s.id, nombre: s.nombre, cotizado: r0(s.costo_cotizado) })),
+    sacadosRetenidos,
     porCobrar: Math.max(0, precio + recargo - cobrado),
     comisiones: e.servicios
       .filter(s => s.comision_esperada !== null && Number(s.comision_esperada) > 0)
@@ -287,7 +325,11 @@ export function huellaCierre(c: Pick<Cierre, 'ingresoReal' | 'costoReal' | 'iva'
 
 export interface CierreGuardado {
   confirmado: { huella: string; por: string | null; at: string; margen_real: number; margen_real_pct: number | null; margen_cotizado: number; margen_cotizado_pct: number | null; ingreso_neto: number; costo_real: number } | null
-  saldo_a_favor: { decision: 'devolver' | 'proximo_viaje'; por: string | null; at: string; nota: string | null } | null
+  /**
+   * `monto` es el saldo sobre el que se decidió: si después cambia (otro pago, otro servicio sacado),
+   * la decisión deja de valer y se pide otra. Ausente en las decisiones de antes de H-28.
+   */
+  saldo_a_favor: { decision: DecisionSaldoAFavor; por: string | null; at: string; nota: string | null; monto?: number } | null
   reaperturas: Array<{ por: string | null; at: string; motivo: string }>
 }
 
@@ -297,17 +339,54 @@ export function leerCierreGuardado(metadata: unknown): CierreGuardado {
   const saf = c.saldo_a_favor as CierreGuardado['saldo_a_favor'] | undefined
   return {
     confirmado: conf && typeof conf.huella === 'string' ? conf : null,
-    saldo_a_favor: saf && (saf.decision === 'devolver' || saf.decision === 'proximo_viaje') ? saf : null,
+    saldo_a_favor: saf && DECISIONES_SALDO.includes(saf.decision) ? saf : null,
     reaperturas: Array.isArray(c.reaperturas) ? (c.reaperturas as CierreGuardado['reaperturas']) : [],
   }
+}
+
+/**
+ * ¿La decisión guardada sobre el saldo a favor sigue valiendo? Vale para el monto sobre el que se
+ * tomó; una decisión de antes de H-28 (sin monto) vale mientras no haya plata de servicios sacados,
+ * que esa decisión no veía.
+ */
+export function decisionSaldoVigente(c: Pick<Cierre, 'saldoAFavor' | 'saldoPorSacados'>, g: Pick<CierreGuardado, 'saldo_a_favor'>): boolean {
+  const d = g.saldo_a_favor
+  if (!d) return false
+  if (typeof d.monto === 'number') return Math.round(d.monto) === Math.round(c.saldoAFavor)
+  return c.saldoPorSacados === 0
+}
+
+/**
+ * El aviso al cliente sobre su saldo a favor (H-28): lo arma ONE, lo manda la persona por WhatsApp
+ * (como la confirmación). `null` si la decisión fue retenerlo: eso lo explica la agencia, no un texto.
+ */
+export function mensajeSaldoAFavor(p: {
+  nombreCliente: string
+  monto: number
+  decision: DecisionSaldoAFavor
+  sacados: ReadonlyArray<{ nombre: string }>
+}): string | null {
+  if (p.decision === 'retener' || !(p.monto > 0)) return null
+  const nombre = p.nombreCliente.trim().split(/\s+/)[0] || 'Hola'
+  const por = p.sacados.length === 1
+    ? ` por ${p.sacados[0].nombre}, que salió del viaje`
+    : p.sacados.length > 1 ? ' por los servicios que salieron del viaje' : ''
+  const que = p.decision === 'devolver'
+    ? 'Te lo vamos a devolver: confírmanos la cuenta donde quieres recibirlo.'
+    : 'Queda abonado para tu próximo viaje con nosotros.'
+  return `${nombre}, tienes un saldo a favor de ${pesosCierre(p.monto)}${por}. ${que}`
 }
 
 /** Lo que falta para salir del Cierre económico, en palabras (Noor etapa 8). Vacío = pasa. */
 export function faltaParaCerrar(c: Cierre, g: CierreGuardado, nombreCliente: string): string[] {
   const falta: string[] = []
   for (const f of c.filas) if (f.sinCosto) falta.push(`Falta el costo real de ${f.nombre}.`)
-  if (c.saldoAFavor > 0 && !g.saldo_a_favor) {
-    falta.push(`${nombreCliente || 'El cliente'} tiene un saldo a favor de ${pesosCierre(c.saldoAFavor)}. Decide antes de cerrar: devolver o dejar para su próximo viaje.`)
+  if (c.saldoAFavor > 0 && !decisionSaldoVigente(c, g)) {
+    const deSacados = c.saldoPorSacados > 0
+      ? ` (${c.saldoPorSacados === c.saldoAFavor ? 'todo' : `${pesosCierre(c.saldoPorSacados)}`} por ${c.sacados.length === 1 ? `${c.sacados[0].nombre}, que se sacó del viaje` : 'servicios que se sacaron del viaje'})`
+      : ''
+    const otra = g.saldo_a_favor ? ' El saldo cambió después de decidir: decide otra vez.' : ''
+    falta.push(`${nombreCliente || 'El cliente'} tiene un saldo a favor de ${pesosCierre(c.saldoAFavor)}${deSacados}. Decide antes de cerrar: devolverlo, dejarlo abonado a su próximo viaje o retenerlo con motivo.${otra}`)
   }
   if (!g.confirmado) falta.push('Falta que Edgar confirme el cierre.')
   else if (g.confirmado.huella !== huellaCierre(c)) falta.push('Cambió un pago o un gasto después de confirmar: falta que Edgar confirme el cierre otra vez.')

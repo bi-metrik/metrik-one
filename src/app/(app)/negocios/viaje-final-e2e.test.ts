@@ -536,3 +536,60 @@ describe('el Cierre económico no se salta (H-35)', () => {
     expect(neg().etapa_actual_id).toBe('e9')
   })
 })
+
+/**
+ * H-28 (viaje 09, R-11): al sacar un servicio que el cliente ya pagó, su plata pasaba a margen y el
+ * cierre se confirmaba sin decidir nada. VISTO FALLAR sobre main: «Confirmar cierre» pasaba con el
+ * servicio sacado como margen.
+ */
+describe('la plata de un servicio sacado es del cliente hasta decidir (H-28)', () => {
+  /** El cliente pagó todo; el hotel se sacó del viaje y nunca se le pagó al proveedor. */
+  async function conServicioSacado() {
+    await enCierre()
+    const hotel = tablas.negocio_servicios.find(s => String(s.nombre).toUpperCase().includes('HOTEL')) ?? tablas.negocio_servicios[0]
+    hotel.estado = 'cancelado'
+    tablas.gastos = tablas.gastos.filter(g => g.servicio_id !== hotel.id)
+    return { hotel, cotizado: Number(hotel.costo_cotizado) }
+  }
+
+  it('el cierre muestra el saldo a favor y no se confirma sin decidir', async () => {
+    const { cotizado } = await conServicioSacado()
+    const v = await leerVistaViajeFinal(clienteFalso(), WS, NEG)
+    expect(v?.cierre.saldoAFavor).toBe(cotizado)
+    expect(v?.cierre.saldoPorSacados).toBe(cotizado)
+    // No es margen mientras nadie decida: el margen real no sube por el servicio sacado.
+    expect(v?.cierre.margenReal).toBe(v!.cierre.margenCotizado)
+    comoEdgar()
+    const r = await confirmarCierre(NEG)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/saldo a favor de .*Decide antes de cerrar: devolverlo, dejarlo abonado a su próximo viaje o retenerlo con motivo/)
+    expect((await gate()).some(f => f.includes('saldo a favor'))).toBe(true)
+  })
+
+  it('retener exige motivo y es lo único que lo vuelve margen', async () => {
+    const { cotizado } = await conServicioSacado()
+    comoEdgar()
+    expect(await decidirSaldoAFavor(NEG, 'retener', '  ')).toMatchObject({ ok: false, error: 'Escribe por qué se retiene el saldo a favor del cliente.' })
+    expect((await decidirSaldoAFavor(NEG, 'retener', 'penalidad de cancelación pactada')).ok).toBe(true)
+    const v = await leerVistaViajeFinal(clienteFalso(), WS, NEG)
+    expect(v?.cierre.margenReal).toBe(v!.cierre.margenCotizado + cotizado)
+    expect(v?.avisoSaldo).toBeNull()
+    expect((await confirmarCierre(NEG)).ok).toBe(true)
+    expect(await gate()).toEqual([])
+  })
+
+  it('devolver: el margen no cambia, el cierre pasa y queda el aviso al cliente listo', async () => {
+    const { cotizado } = await conServicioSacado()
+    comoEdgar()
+    expect((await decidirSaldoAFavor(NEG, 'devolver', null)).ok).toBe(true)
+    const v = await leerVistaViajeFinal(clienteFalso(), WS, NEG)
+    expect(v?.cierre.margenReal).toBe(v!.cierre.margenCotizado)
+    expect(v?.avisoSaldo?.texto).toMatch(/^Carolina, tienes un saldo a favor de \$[\d.]+ por .*que salió del viaje\. Te lo vamos a devolver/)
+    expect(v?.avisoSaldo?.waUrl).toMatch(/^https:\/\/wa\.me\/573001234567\?text=/)
+    expect((await confirmarCierre(NEG)).ok).toBe(true)
+    // Si el saldo cambia después (otro pago), la decisión deja de valer.
+    tablas.cobros.push({ id: 'cb-3', workspace_id: WS, negocio_id: NEG, monto: 10_000, fecha: HOY, retencion_iva: 0, anulado_at: null })
+    expect((await gate()).some(f => f.includes('El saldo cambió después de decidir'))).toBe(true)
+    expect(cotizado).toBeGreaterThan(0)
+  })
+})

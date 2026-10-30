@@ -11,12 +11,14 @@ import {
   calcularCierre,
   celularReferido,
   configEtapasPorFecha,
+  decisionSaldoVigente,
   faltaParaCerrar,
   faltaPostventa,
   huellaCierre,
   leerCierreGuardado,
   leerPostventa,
   mensajeEncuesta,
+  mensajeSaldoAFavor,
   movimientoPorFecha,
   textoEnViaje,
   validarValorCortesia,
@@ -52,11 +54,39 @@ describe('cierre económico (F6-4, C8)', () => {
     // El margen cotizado es el del precio que aceptó el cliente, con el avión dentro.
     expect(c.costoCotizado).toBe(3_400_000)
     expect(c.margenCotizado).toBe(800_000)
-    expect(c.margenReal).toBe(960_000)
     const avion = c.filas.find(f => f.id === 'avion')!
     expect(avion).toMatchObject({ sacado: true, sinCosto: false, real: 0, diferencia: -300_000 })
-    expect(c.explicacion).toBe('Dejó $160.000 más de lo cotizado: Hotel (+$90.000), Air France sacado del viaje (-$300.000), una cortesía ($50.000).')
     expect(faltaParaCerrar(c, leerCierreGuardado({}), 'Valeria')).not.toContain('Falta el costo real de Air France.')
+  })
+
+  // H-28 (QA 2026-10-29, R-11): hasta aquí los $300.000 del avión subían el margen real a $960.000
+  // sin que nadie decidiera nada. Son del cliente hasta que la dirección decida.
+  it('la plata del servicio sacado es saldo a favor, no margen, hasta que se decida (H-28)', () => {
+    const conAvion = [...servicios, { id: 'avion', nombre: 'Air France', proveedor_nombre: 'AF', estado: 'cancelado', costo_cotizado: 300_000, valor_por_pagar: null, comision_esperada: null, comision_estado: null }]
+    const entrada = { ...A, precioAprobado: 4_052_000 + 300_000, cobrado: 4_076_300 + 300_000, servicios: conAvion }
+    const c = calcularCierre(entrada)
+    expect(c.saldoAFavor).toBe(300_000)
+    expect(c.saldoPorSacados).toBe(300_000)
+    expect(c.sacados).toEqual([{ id: 'avion', nombre: 'Air France', cotizado: 300_000 }])
+    expect(c.margenReal).toBe(660_000)
+    expect(c.explicacion).toBe('Dejó $140.000 menos de lo cotizado: Hotel (+$90.000), una cortesía ($50.000).')
+    expect(faltaParaCerrar(c, leerCierreGuardado({}), 'Valeria')[0]).toBe(
+      'Valeria tiene un saldo a favor de $300.000 (todo por Air France, que se sacó del viaje). Decide antes de cerrar: devolverlo, dejarlo abonado a su próximo viaje o retenerlo con motivo.',
+    )
+    // Retenerlo, y solo eso, lo vuelve margen; la explicación lo dice con su nombre.
+    const r = calcularCierre({ ...entrada, decisionSaldo: 'retener' })
+    expect(r.margenReal).toBe(960_000)
+    expect(r.explicacion).toBe('Dejó $160.000 más de lo cotizado: Hotel (+$90.000), Air France sacado del viaje: se retienen $300.000, una cortesía ($50.000).')
+    expect(calcularCierre({ ...entrada, decisionSaldo: 'devolver' }).margenReal).toBe(660_000)
+    // La decisión vale para el saldo sobre el que se tomó; una de antes de H-28 (sin monto) no lo veía.
+    const g = (monto?: number) => leerCierreGuardado({ cierre_viaje: { saldo_a_favor: { decision: 'devolver', por: 's', at: 'x', nota: null, ...(monto !== undefined ? { monto } : {}) } } })
+    expect(decisionSaldoVigente(c, g(300_000))).toBe(true)
+    expect(decisionSaldoVigente(c, g(250_000))).toBe(false)
+    expect(decisionSaldoVigente(c, g())).toBe(false)
+    expect(mensajeSaldoAFavor({ nombreCliente: 'Valeria Gómez', monto: 300_000, decision: 'proximo_viaje', sacados: c.sacados })).toBe(
+      'Valeria, tienes un saldo a favor de $300.000 por Air France, que salió del viaje. Queda abonado para tu próximo viaje con nosotros.',
+    )
+    expect(mensajeSaldoAFavor({ nombreCliente: 'Valeria', monto: 300_000, decision: 'retener', sacados: c.sacados })).toBeNull()
   })
 
   it('sin IVA en la línea: todo se recalcula con la misma fórmula', () => {
@@ -74,7 +104,7 @@ describe('cierre económico (F6-4, C8)', () => {
     const c = calcularCierre({ ...A, cobrado: 4_126_300 })
     expect(c.saldoAFavor).toBe(50_000)
     const sin = faltaParaCerrar(c, leerCierreGuardado({}), 'Valeria')
-    expect(sin[0]).toBe('Valeria tiene un saldo a favor de $50.000. Decide antes de cerrar: devolver o dejar para su próximo viaje.')
+    expect(sin[0]).toBe('Valeria tiene un saldo a favor de $50.000. Decide antes de cerrar: devolverlo, dejarlo abonado a su próximo viaje o retenerlo con motivo.')
     const conf = { huella: huellaCierre(c), por: 's-edgar', at: 'x', margen_real: 0, margen_real_pct: null, margen_cotizado: 0, margen_cotizado_pct: null, ingreso_neto: 0, costo_real: 0 }
     const decidido = leerCierreGuardado({ cierre_viaje: { confirmado: conf, saldo_a_favor: { decision: 'devolver', por: 's-edgar', at: 'x', nota: null } } })
     expect(faltaParaCerrar(c, decidido, 'Valeria')).toEqual([])

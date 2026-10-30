@@ -27,6 +27,8 @@ import {
   leerPostventa,
   pesosCierre,
   validarValorCortesia,
+  DECISIONES_SALDO,
+  type DecisionSaldoAFavor,
   type RespuestaReferido,
 } from '@/lib/viaje/cierre-viaje'
 import { calcularCierreDelNegocio } from '@/lib/viaje/cierre-viaje-datos'
@@ -239,27 +241,36 @@ export async function reabrirCierre(negocioId: string, motivo: string): Promise<
   return { ok: true }
 }
 
-/** Saldo a favor (N2): la dirección elige devolver o dejarlo para el próximo viaje. */
-export async function decidirSaldoAFavor(negocioId: string, decision: 'devolver' | 'proximo_viaje', nota: string | null): Promise<R> {
+/**
+ * Saldo a favor (N2, H-28): la dirección elige devolverlo, dejarlo abonado a su próximo viaje o
+ * retenerlo. Retener exige el motivo escrito: es quedarse con plata que el cliente pagó por algo
+ * que no recibió. La decisión guarda el monto: si el saldo cambia después, hay que decidir otra vez.
+ */
+export async function decidirSaldoAFavor(negocioId: string, decision: DecisionSaldoAFavor, nota: string | null): Promise<R> {
   const c = await contexto(negocioId)
   if (!c.ok) return c
   const ctx = c.ctx
   if (!ctx.esDireccion) return { ok: false, error: SOLO_DIRECCION }
-  if (decision !== 'devolver' && decision !== 'proximo_viaje') return { ok: false, error: 'Elige devolver o dejar para su próximo viaje.' }
+  if (!DECISIONES_SALDO.includes(decision)) return { ok: false, error: 'Elige devolver, dejar abonado a su próximo viaje o retener con motivo.' }
+  const motivo = nota?.trim() || null
+  if (decision === 'retener' && !motivo) return { ok: false, error: 'Escribe por qué se retiene el saldo a favor del cliente.' }
   const cierre = await calcularCierreDelNegocio(ctx.supabase, ctx.workspaceId, { negocio: ctx.negocio, configLinea: ctx.configLinea })
   if (cierre.saldoAFavor <= 0) return { ok: false, error: 'El cliente no tiene saldo a favor.' }
   const meta = await metadataDe(ctx)
   const anterior = (meta.cierre_viaje ?? {}) as Record<string, unknown>
   const err = await guardarMetadata(ctx, 'cierre_viaje', {
     ...anterior,
-    saldo_a_favor: { decision, por: ctx.staffId, at: new Date().toISOString(), nota: nota?.trim() || null, monto: cierre.saldoAFavor },
+    saldo_a_favor: { decision, por: ctx.staffId, at: new Date().toISOString(), nota: motivo?.slice(0, 500) ?? null, monto: cierre.saldoAFavor },
   })
   if (err) return { ok: false, error: err }
+  const monto = pesosCierre(cierre.saldoAFavor)
   await actividad(
     ctx,
     decision === 'devolver'
-      ? `Saldo a favor de ${pesosCierre(cierre.saldoAFavor)}: se devuelve. Registra la devolución con su soporte.`
-      : `Saldo a favor de ${pesosCierre(cierre.saldoAFavor)}: queda para su próximo viaje.`,
+      ? `Saldo a favor de ${monto}: se devuelve. Registra la devolución con su soporte y avísale al cliente.`
+      : decision === 'proximo_viaje'
+        ? `Saldo a favor de ${monto}: queda abonado a su próximo viaje. Avísale al cliente.`
+        : `Saldo a favor de ${monto}: se retiene como margen. Motivo: ${motivo}`,
     'decidirSaldoAFavor',
   )
   revalidatePath(`/negocios/${negocioId}`)
