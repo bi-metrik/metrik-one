@@ -332,7 +332,8 @@ export function puertoBandejaSupabase(
       const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
     },
-    async prepararCarga(viajeId, textos, previo, pedido = []) {
+    async prepararCarga(viajeId, textos, previo, oc) {
+      const pedido = oc?.pedido ?? [];
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
@@ -342,9 +343,10 @@ export function puertoBandejaSupabase(
       const lectura = await leerConModelo(
         // `perfil`: lo de la persona sale aparte y va a su perfil como sugerido con el toque de la carga.
         // `documentos`: algún texto trae lo leído de una foto o un PDF (sin archivos, el prompt de siempre).
+        // `preguntas`: lo ya preguntado del viaje no se vuelve a preguntar; `reenviados`: quién dijo cada texto.
         // `pedido`: lo que el comercial escribió al pedir la tanda va después, «escrito por el comercial», y manda si choca.
-        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true, documentos: textos.some(traeArchivo), ...(pedido.length ? { pedido: true } : {}) }),
-        `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido))}`,
+        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true, documentos: textos.some(traeArchivo), preguntas: (oc?.preguntas ?? []).map((q) => q.texto), ...(pedido.length ? { pedido: true } : {}) }),
+        `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido, oc?.reenviados))}`,
         compacta ? esquemaCargaCompacta(campos, { perfil: true }) : esquemaCarga(campos, { perfil: true }),
       );
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
@@ -355,7 +357,7 @@ export function puertoBandejaSupabase(
       }
       return planDeCarga({
         bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos: [...textos, ...pedido], raw: lectura.json,
-        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,
+        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo, preguntas: oc?.preguntas,
       });
     },
     async cargar(viajeId, plan) {

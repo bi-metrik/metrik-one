@@ -46,20 +46,19 @@ async function mundo(duda: string | null) {
 }
 
 describe('anotar sin datos con una tanda pendiente: el candado lleva a cargar la tanda', () => {
+  // Desde 2026-10-29 (conducta común, falla 1) `anotar_en_viaje` lee también la tanda del viaje (los reenvíos de antes de
+  // nombrarlo): la propuesta sale de una vez con lo reenviado, sin pasar por el candado.
   for (const duda of [null, '¿Qué significa «G1 26 7»?']) {
-    it(duda ? 'con una duda de la extracción, no la pasa: dice la tanda' : 'sin datos nuevos, no dice «ya está en el viaje»: dice la tanda', async () => {
+    it(duda ? 'con una duda de la extracción: anotar trae la tanda y no pasa la duda' : 'sin datos escritos: anotar trae la tanda, no dice «ya está en el viaje»', async () => {
       const e = await mundo(duda)
       await e.reenvia('Hola, somos 2 adultos para San Andrés del 3 al 7 de febrero')
       const r = await e.escribe('cárgalo en el G1 26 7')
-      const candado = e.trazas().flatMap((t) => t.candados ?? [])[0]
-      expect(candado.candado).toBe(duda ? 'solo_duda' : 'sin_datos_nuevos')
-      expect(candado.detalle).toContain('cargar_tanda')
-      expect(candado.detalle).toContain('nada quedó escrito')
-      expect(candado.detalle).not.toContain('ya está en el viaje')
-      if (duda) expect(candado.detalle).not.toContain(duda)
-      // Con la tanda, la propuesta sale y el toque carga los adultos.
+      expect(e.trazas().flatMap((t) => t.candados ?? [])).toEqual([])
       expect(r[0].tipo).toBe('botones')
-      await e.toca('Cargar')
+      expect(r[0].texto).toContain('Adultos: 2')
+      expect(r[0].texto).not.toContain('ya está en el viaje')
+      if (duda) expect(r[0].texto).not.toContain(duda)
+      await e.toca('Anotar')
       expect(e.puerto.viajes[0].datos).toMatchObject({ adultos: 2 })
     })
   }

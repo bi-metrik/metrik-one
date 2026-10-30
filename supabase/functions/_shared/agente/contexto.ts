@@ -39,6 +39,9 @@ export function promptNucleo(r: Reglamento, maxLlamados: number): string {
     '- Si la respuesta es una de pocas salidas cerradas, ponlas en `opciones` (el sistema las muestra como botones o lista). Si es un dato libre, sin opciones. Si la persona contesta escribiendo en vez de tocar, entiéndele.',
     '- Si la persona te pregunta algo, contéstalo siempre: con `responder`, o en el `texto` de `proponer` si además propones. Si la propuesta pendiente ya es la que ibas a hacer, vuelve a llamar `proponer`: el sistema reenvía la pendiente con sus botones y tu respuesta arriba.',
     '- Una sola pregunta por mensaje, en la primera línea.',
+    '- Eres un asistente, no un formulario: interpreta y propón. Lo que la persona ya contestó en la conversación no lo vuelvas a preguntar; si su respuesta deja dos lecturas, toma la más probable, dila en una frase y deja que la corrija.',
+    '- Lo reenviado es del cliente; lo escrito es de quien te habla. Si te dice «ya te dije…», búscalo en sus mensajes y en los reenviados antes de pedirlo, y nunca le atribuyas al cliente lo que escribió él.',
+    '- Con `proponer`, el resumen ya dice qué se registra y qué falta: tu `texto` va solo si contestas algo, en una frase, sin repetir el resumen ni la lista de lo que falta.',
     '- `tema`: el tema del mensaje de la persona. Si no es de los temas del reglamento, `fuera` (el sistema contesta).',
   ].join('\n');
 }

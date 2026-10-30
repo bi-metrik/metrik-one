@@ -30,14 +30,14 @@ export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; en
 export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean; fetch?: typeof fetch; modelo?: string } = {}): ExtractorMemoria {
   // `o.fetch`: el del arnés con Haiku (`proveedor-haiku.ts`), sin Gemini; `o.modelo`, el nombre que va en la URL.
   const f = o.fetch ?? fetchModelo;
-  return async ({ textos, campos, instrucciones, perfil, pedido }) => {
+  return async ({ textos, reenviados, campos, instrucciones, perfil, pedido }) => {
     const t0 = performance.now();
     const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${o.modelo ?? MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(llave ? { 'x-goog-api-key': llave } : {}) },
       body: JSON.stringify({
         system_instruction: { parts: [{ text: instrucciones }] },
-        contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido))}` }] }],
+        contents: [{ role: 'user', parts: [{ text: `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido, reenviados))}` }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 8192, responseMimeType: 'application/json', responseSchema: o.compacta ? esquemaCargaCompacta(campos, { perfil }) : esquemaCarga(campos, { perfil }) },
       }),
     });
