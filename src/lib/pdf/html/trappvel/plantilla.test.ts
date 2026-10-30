@@ -501,3 +501,46 @@ describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
     expect(planes).toContain('<div class="n">Palacio Real de Madrid</div><div class="caps">Madrid · dom 13</div>')
   })
 })
+
+describe('QA del #1359 · la versión compacta (solo se imprime si ahorra una hoja)', () => {
+  const m = modeloDePropuesta(ENTRADA_CURAZAO)
+  const normal = htmlDePropuesta(m, RECURSOS)
+  const compacta = htmlDePropuesta(m, RECURSOS, { compacto: true })
+  const dias = (h: string) => seccionDe(h, 'Itinerario día a día')
+
+  it('sin la opción, el documento de siempre: un bloque por día', () => {
+    expect(htmlDePropuesta(m, RECURSOS, {})).toBe(normal)
+    expect(normal).toContain('<body>')
+    expect((dias(normal).match(/<div class="day">/g) ?? []).length).toBe(m.dias.length)
+    expect(normal).not.toContain('DÍAS</small>')
+  })
+
+  it('los días libres seguidos van en un bloque «Días 2–5», con el rango de fechas', () => {
+    const d = dias(compacta)
+    expect(compacta).toContain('<body class="compacto">')
+    expect(d).toContain('<div class="dn rango"><small>DÍAS</small>2–5</div>')
+    expect(texto(d)).toContain('viernes 27 al lunes 30 de noviembre Días libres en Willemstad Libres Días abiertos para ustedes.')
+    // Los días con algo (la salida y el regreso) siguen solos, igual que en la normal.
+    expect(d).toContain('<div class="dn"><small>DÍA</small>1</div>')
+    expect(d).toContain('<div class="dn"><small>DÍA</small>6</div>')
+    expect((d.match(/<div class="day">/g) ?? []).length).toBe(3)
+  })
+
+  it('lo demás dice lo mismo: solo cambian los días libres', () => {
+    const sinDias = (h: string) => texto(h.replace(/<section class="sec dias">[\s\S]*?<\/section>/, ''))
+    expect(sinDias(compacta)).toBe(sinDias(normal))
+  })
+
+  it('un día libre con plan opcional o con foto no se junta', () => {
+    const conFoto: RecursosPropuesta = { ...RECURSOS, fotoDeCiudad: () => ({ src: 'data:image/jpeg;base64,CIUDAD', foco: null }) }
+    const d = dias(htmlDePropuesta(modeloDePropuesta(ENTRADA_CURAZAO), conFoto, { compacto: true }))
+    // La foto de la ciudad va el primer día en ella: ese día sigue solo, y los libres que siguen se juntan.
+    expect(d).toContain('<div class="dn"><small>DÍA</small>1</div>')
+    expect(d).toContain('<small>DÍAS</small>2–5')
+    const europa = modeloDePropuesta(ENTRADA_EUROPA)
+    const conPlan = europa.dias.filter((x) => x.opcionales.length > 0).map((x) => x.numero)
+    expect(conPlan.length).toBeGreaterThan(0)
+    const de = dias(htmlDePropuesta(europa, RECURSOS, { compacto: true }))
+    for (const n of conPlan) expect(de).toContain(`<div class="dn"><small>DÍA</small>${n}</div>`)
+  })
+})
