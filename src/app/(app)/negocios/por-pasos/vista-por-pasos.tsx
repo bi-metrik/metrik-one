@@ -1,5 +1,6 @@
 'use client'
 
+import { textoDeMandar } from '@/lib/cotizaciones/tarifas-al-cliente'
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { eleccionOptimista } from '@/lib/cotizaciones/tarifas-por-pasos'
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -380,7 +381,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         setOverrides(o => { const n = { ...o }; if (n[tarifaId]) delete n[tarifaId].va; return n })
         return
       }
-      ofrecer('Cambiaste qué tarifas van en la propuesta.', deshacerCon({ tipo: 'mandar', cotizacionId: p.cotizacionId, itinerarioId: tarifaId, escrita: va, anterior: r.anterior }))
+      // N-17 (ronda 3): el aviso dice qué pasó con esa tarifa; antes era igual para marcar y desmarcar.
+      ofrecer(textoDeMandar(p.tarifasDelServidor.find(x => x.id === tarifaId)?.nombre ?? null, va), deshacerCon({ tipo: 'mandar', cotizacionId: p.cotizacionId, itinerarioId: tarifaId, escrita: va, anterior: r.anterior }))
       p.refrescar()
     })
   }

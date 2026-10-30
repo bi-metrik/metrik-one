@@ -187,6 +187,8 @@ import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
 import { listaUnica, opcionesFueraDeLaPropuesta } from '@/lib/cotizaciones/lista-unica'
+import { firmaDeTarifa } from '@/lib/cotizaciones/tarifas-por-pasos'
+import { avisosDeOrdenDeTarifas, tarifasSinMandar } from '@/lib/cotizaciones/tarifas-al-cliente'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
 import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { motivoPublicasSinComision, publicasSinComisionQueSalen } from '@/lib/cotizaciones/comision-publica'
@@ -387,6 +389,8 @@ interface Props {
    * tiene uno («Hotel en Cancún»). Ausente = la ranura se sugiere con su tipo a secas.
    */
   destinoViaje?: string | null
+  /** S-07 (QA del 2026-10-29, ronda 3): los requisitos de la Solicitud, para la bandeja. */
+  requisitosViaje?: string | null
   /**
    * Las fechas del viaje (etapa 1 del negocio), para el renglón del paso «Viaje» del flujo de
    * Trappvel. Ausente = el renglón no las dice.
@@ -443,7 +447,7 @@ type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null, otraEnviada = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, requisitosViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null, otraEnviada = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -3057,6 +3061,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onPendientes={setPendientesEnBandeja}
               fechasViaje={fechasViaje}
               destinoViaje={destinoViaje}
+              requisitosViaje={requisitosViaje}
               onCambio={refrescar}
               conTarifasDeProveedor
             />
@@ -3838,6 +3843,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         const i = itemPorIdVista.get(o.itemId)
         return { ...o, nombre: (i ? nombreVisibleDeLinea(i as never) : '') || i?.nombre || 'Una opción' }
       }),
+      // N-17 (QA del 2026-10-29, ronda 3) · la tarifa con nombre que no se manda, y el orden de precios.
+      ...(() => {
+        const alCliente = (itinerarios?.itinerarios ?? []).map(t => ({
+          nombre: t.nombre,
+          precio: t.precio,
+          vaEnPropuesta: t.vaEnPropuesta,
+          firma: firmaDeTarifa(lineasConLectura as never[], t.seleccion),
+        }))
+        return { tarifasSinMandar: tarifasSinMandar(alCliente), ordenDeTarifas: avisosDeOrdenDeTarifas(alCliente) }
+      })(),
       // Decisión del 2026-10-14 · la reserva de varias habitaciones que no cuadra con el viaje.
       reservasQueNoCuadran: lineasConLectura.flatMap(i => {
         if (!idsQueSalen.has(i.id) || ranuraDeGrupo(i.grupo ?? null)?.slug !== 'hotel_detalle') return []
@@ -3889,6 +3904,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
           destinoViaje={destinoViaje}
+          requisitosViaje={requisitosViaje}
           onCambio={refrescar}
           conTarifasDeProveedor
           bloqueo={bloqueo ? {
@@ -4031,6 +4047,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
           destinoViaje={destinoViaje}
+          requisitosViaje={requisitosViaje}
           onCambio={refrescar}
           conTarifasDeProveedor
         />

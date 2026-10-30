@@ -38,7 +38,7 @@ import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-a
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, pagosEnDestinoDeItems, textoUnidadDelCargo, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -816,9 +816,12 @@ function Ficha({ item, esHotel, composicion }: { item: ItemConLectura; esHotel: 
     if (cargo) {
       filas.push({
         dt: 'Se paga en el destino',
-        dd: <>{`${cargo.valor.toLocaleString('es-CO')}${cargo.moneda ? ` ${cargo.moneda}` : ''}`}<small className="text-xs font-normal text-[#6E6A62]"> · lo paga el viajero allá</small></>,
+        // V-17 (ronda 3): con su unidad; «35 USD» a secas se leía como de toda la estadía.
+        dd: <>{`${cargo.valor.toLocaleString('es-CO')}${cargo.moneda ? ` ${cargo.moneda}` : ''}${textoUnidadDelCargo(item)}`}<small className="text-xs font-normal text-[#6E6A62]"> · lo paga el viajero allá</small></>,
       })
     }
+    // V-13 (ronda 3): lo que se paga allá y no es del hotel (el ingreso a un parque).
+    for (const p of pagosEnDestinoDeItems([item])) filas.push({ dt: 'Aparte, en destino', dd: p.texto })
     if (filas.length === 0) return null
     return (
       <dl className="m-0 grid grid-cols-3 gap-x-4 gap-y-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] p-3 max-sm:grid-cols-2" data-ficha>

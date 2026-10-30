@@ -236,6 +236,9 @@ export interface CargoEnDestinoPDF {
   conceptoLeido?: string
   /** El valor es POR NOCHE (V7-2). Con `noches`, el documento dice también el total. */
   porNoche?: true
+  /** El valor es POR PERSONA (V-17, ronda 3). Con `personas`, el documento dice también el total. */
+  porPersona?: true
+  personas?: number
   valor?: number
   moneda?: string | null
   noches?: number
@@ -935,14 +938,66 @@ export function cargosEnDestinoDeItems(items: ItemConLectura[]): CargoEnDestinoP
       // nuevas; sin ellas las llaves no aparecen y el redactor ve lo de siempre.
       ...(() => {
         const leido = texto(d, 'impuestos_destino_concepto')
-        const base = texto(d, 'impuestos_destino_base')
+        const unidad = unidadDelCargo(texto(d, 'impuestos_destino_base'))
         const noches = nochesDe(d, leerTarifaPax(item.tarifa_pax).correcciones)
+        // V-17 (ronda 3): por persona multiplica por los huéspedes de la captura.
+        const personas = personasDe(d)
+        const porNoche = unidad === 'por_noche' || unidad === 'por_persona_noche'
+        const porPersona = unidad === 'por_persona' || unidad === 'por_persona_noche'
         return {
           ...(leido ? { conceptoLeido: leido } : {}),
-          ...(base === 'por_noche' ? { porNoche: true as const, valor: cargo.valor, moneda: cargo.moneda, ...(noches ? { noches } : {}) } : {}),
+          ...(porNoche || porPersona ? { valor: cargo.valor, moneda: cargo.moneda } : {}),
+          ...(porNoche ? { porNoche: true as const, ...(noches ? { noches } : {}) } : {}),
+          ...(porPersona ? { porPersona: true as const, ...(personas ? { personas } : {}) } : {}),
         }
       })(),
     })
+  }
+  return out
+}
+
+/** La unidad del cargo en destino que dijo la lectura (V-17). `null` = no lo dijo (es el total). */
+export type UnidadDelCargo = 'total' | 'por_noche' | 'por_persona' | 'por_persona_noche'
+
+export function unidadDelCargo(valor: string | null | undefined): UnidadDelCargo | null {
+  const v = (valor ?? '').trim().toLowerCase()
+  return v === 'total' || v === 'por_noche' || v === 'por_persona' || v === 'por_persona_noche' ? v : null
+}
+
+/** Cuántos huéspedes muestra la captura (adultos + niños + infantes). `null` si no se ve. */
+function personasDe(d: Record<string, string>): number | null {
+  const partes = ['ocupacion_adultos', 'ocupacion_ninos', 'ocupacion_infantes'].map(s => numero(d, s))
+  if (partes.every(x => x === null)) return null
+  const n = partes.reduce<number>((a, x) => a + (x ?? 0), 0)
+  return n > 0 ? n : null
+}
+
+/**
+ * La unidad del cargo como la lee la asesora en la tarjeta de la opción (V-17): « por noche»,
+ * « por persona», « por persona por noche» o vacío (es el total).
+ */
+export function textoUnidadDelCargo(item: ItemConLectura): string {
+  const u = unidadDelCargo(texto(detalleDelItem(item), 'impuestos_destino_base'))
+  return u === 'por_noche' ? ' por noche' : u === 'por_persona' ? ' por persona' : u === 'por_persona_noche' ? ' por persona por noche' : ''
+}
+
+/**
+ * Lo que el viajero paga EN DESTINO y no es un cargo del hotel (V-13 del QA del 2026-10-29, ronda
+ * 3): el ingreso a un parque nacional, la tasa de entrada a una isla. Tal cual lo leyó la captura,
+ * con su monto si lo traía. Uno por opción que lo tenga; no suma a ningún precio.
+ */
+export interface PagoEnDestinoPDF {
+  texto: string
+  /** Ver `VueloPDF.tarifas`: las tarifas de la propuesta que llevan esa opción. */
+  tarifas?: number[]
+}
+
+export function pagosEnDestinoDeItems(items: ItemConLectura[]): PagoEnDestinoPDF[] {
+  const out: PagoEnDestinoPDF[] = []
+  for (const item of items) {
+    const t = texto(detalleDelItem(item), 'pago_destino_otro')
+    const limpio = (t ?? '').replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '')
+    if (limpio) out.push({ texto: limpio })
   }
   return out
 }
