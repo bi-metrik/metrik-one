@@ -16,6 +16,7 @@ import { generateCotizacionPDF } from '@/app/(app)/negocios/cotizacion-pdf-actio
 import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { estadoPorPasosDeCotizacion } from '@/lib/cotizaciones/por-pasos-datos'
+import { CABECERA_AVISOS_FOTOS } from '@/lib/fotos/forma'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -38,6 +39,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     pdf?: string
     filename?: string
     error?: string
+    avisosFotos?: string[]
   }
   if (!r.success || !r.pdf) {
     const status = r.error === 'No autenticado' ? 401 : r.error === 'Cotización no encontrada' ? 404 : 422
@@ -49,6 +51,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       ...SIN_CACHE,
       'content-type': 'application/pdf',
       'content-disposition': `inline; filename="${nombre}"`,
+      // Regla de fotos (2026-10-29): «Al <hotel> le faltan N fotos para la ficha…». La lee
+      // `DocumentoEnRevisar`; no bloquea nada.
+      ...(r.avisosFotos && r.avisosFotos.length > 0 ? { [CABECERA_AVISOS_FOTOS]: encodeURIComponent(JSON.stringify(r.avisosFotos)) } : {}),
     },
   })
 }

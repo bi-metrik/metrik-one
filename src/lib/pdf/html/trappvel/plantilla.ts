@@ -37,12 +37,19 @@ import { ciudadComparable, mismoLugar } from '@/lib/cotizaciones/bandeja-captura
 import { textoDelDestinatario } from '@/lib/cotizaciones/propuesta/destinatario'
 import { CSS_PROPUESTA, ICONOS_PROPUESTA } from './estilos'
 import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
+import { anchoDeFoto, filasDeFichas, fotosDeFicha, fotosQueFaltan, type FilaDeFichas, type FotosDeFicha } from './fotos-ficha'
+import { encuadreDeFoto } from '@/lib/pdf/cotizacion-trappvel-formato'
+import { formaAdmitida } from '@/lib/fotos/forma'
 
 export interface FotoResuelta {
   /** data URL ya reducida. */
   src: string
   /** Encuadre: fracciones del ancho y del alto. */
   foco?: { x: number; y: number } | null
+  /** Ancho entre alto de la foto (medido al reducirla). `null`/ausente = no se sabe. */
+  proporcion?: number | null
+  /** Paneles iguales en que está partida (díptico 2, tríptico 3; `paneles.ts`). Ausente = 1. */
+  paneles?: number | null
 }
 
 export interface RecursosPropuesta {
@@ -268,6 +275,79 @@ function imagenDeTarjeta(principal: FotoResuelta | null, extras: FotoResuelta[],
   if (!principal) return `<div class="img sinfoto">${dentro}</div>`
   if (extras.length === 0) return `<div class="img"${fondo(principal)}>${dentro}</div>`
   return `<div class="img mosaico n${extras.length}"><div class="m0"${fondo(principal)}></div>${extras.map((e) => `<div class="mx"${fondo(e)}></div>`).join('')}${dentro}</div>`
+}
+
+/** El ancho del recuadro de foto de una ficha de hotel: la tarjeta menos su borde de 1 px por lado. */
+export const ANCHO_FOTO_FICHA_MM = (ANCHO_UTIL_MM - SEPARACION_MM.hotel * (COLUMNAS_HOTELES - 1)) / COLUMNAS_HOTELES - 0.53
+
+/** La foto en un recuadro de forma `recuadro` (ancho / alto), con su foco en el centro de lo que se ve. */
+function fondoEnRecuadro(f: FotoResuelta, recuadro: number, extra = ''): string {
+  return ` style="${extra}background-image:url(${f.src});background-position:${encuadreDeFoto(f.foco, f.proporcion, recuadro)}"`
+}
+
+/**
+ * El recuadro de foto de una ficha de hotel (regla de fotos del 2026-10-29, `fotos-ficha.ts`): sus
+ * fotos buenas, hasta 3, del mismo tamaño y lado a lado, con el alto de su fila. `dentro` =
+ * etiquetas y estrellas.
+ */
+function imagenDeFichaDeHotel(fotos: FotoResuelta[], alto: number, dentro: string): string {
+  const altura = `height:${alto}mm;`
+  const paneles = (f: FotoResuelta) => Math.max(1, Math.round(f.paneles ?? 1))
+  const n = fotos.reduce((s, f) => s + paneles(f), 0)
+  const forma = (f: FotoResuelta) => anchoDeFoto(ANCHO_FOTO_FICHA_MM, n, paneles(f)) / alto
+  if (fotos.length === 1 && n === 1) return `<div class="img"${fondoEnRecuadro(fotos[0], forma(fotos[0]), altura)}>${dentro}</div>`
+  // Una foto de paneles ocupa tantas casillas como paneles tiene.
+  const casilla = (f: FotoResuelta) => `<div class="mx"${fondoEnRecuadro(f, forma(f), paneles(f) > 1 ? `grid-column:span ${paneles(f)};` : '')}></div>`
+  return `<div class="img fila n${n}" style="${altura}grid-template-columns:repeat(${n},1fr)">${fotos.map(casilla).join('')}${dentro}</div>`
+}
+
+/**
+ * Las fichas de hotel en el orden del documento, con sus fotos buenas (sin collages ni verticales,
+ * las que caben juntas) y las filas en que van: lo usan el documento y el aviso de «Revisar y
+ * enviar» (cuántas le faltan a cada hotel).
+ */
+export function fotosDeLasFichas(m: ModeloPropuesta, r: RecursosPropuesta): {
+  hoteles: string[]
+  fotos: FotoResuelta[][]
+  fichas: FotosDeFicha[]
+  filas: FilaDeFichas[]
+} {
+  const caben = extrasQueCaben('hotel', COLUMNAS_HOTELES)
+  const hoteles: string[] = []
+  const ciudades: (string | null)[] = []
+  const buenas: FotoResuelta[][] = []
+  for (const c of m.hoteles) {
+    for (const o of c.opciones) {
+      const foto = r.foto(o.foto?.url)
+      const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
+      hoteles.push(o.hotel)
+      ciudades.push(c.ciudad ?? null)
+      // Regla de fotos: un collage irregular o una vertical no entra; una de paneles iguales, sí.
+      buenas.push((foto ? [foto, ...extras] : []).filter((f) => formaAdmitida(f.proporcion) || ((f.paneles ?? 1) > 1 && formaAdmitida((f.proporcion ?? 0) / (f.paneles ?? 1)))))
+    }
+  }
+  const fichas = buenas.map((fs) => fotosDeFicha(fs, ANCHO_FOTO_FICHA_MM))
+  const elegidas = buenas.map((fs, i) => fichas[i].fotos.map((j) => fs[j]))
+  return {
+    hoteles,
+    fotos: elegidas,
+    fichas,
+    filas: filasDeFichas(fichas, elegidas, ciudades, COLUMNAS_HOTELES, ANCHO_FOTO_FICHA_MM),
+  }
+}
+
+/** «Al Kunuku le faltan 2 fotos para la ficha: súbelas en su perfil.» Una vez por hotel. */
+export function avisosDeFotosDeHoteles(m: ModeloPropuesta, r: RecursosPropuesta): { hotel: string; faltan: number; texto: string }[] {
+  const { hoteles, fichas } = fotosDeLasFichas(m, r)
+  const vistos = new Set<string>()
+  const salida: { hotel: string; faltan: number; texto: string }[] = []
+  hoteles.forEach((hotel, i) => {
+    const n = fotosQueFaltan(fichas[i])
+    if (n <= 0 || vistos.has(hotel)) return
+    vistos.add(hotel)
+    salida.push({ hotel, faltan: n, texto: `Al ${hotel} le ${n === 1 ? 'falta 1 foto' : `faltan ${n} fotos`} para la ficha: ${n === 1 ? 'súbela' : 'súbelas'} en su perfil.` })
+  })
+  return salida
 }
 
 /** «Madrid Atocha - Barcelona Sants · AVE 03071 Renfe, Estándar» → «AVE 03071 Renfe». */
@@ -518,19 +598,22 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
     regimenes.length === 1 && regimenes[0] ? `${regimenes[0]} en todos los hoteles.` : null,
     m.tarifas.length > 0 ? 'Un hotel por versión del viaje; la etiqueta de color dice cuál.' : null,
   ].filter(Boolean).join(' ')
-  // Un hotel solo lleva la foto que subió la asesora (Mauricio, 2026-10-14); sin ella, el
-  // degradado. Si ningún hotel tiene foto, las tarjetas van sin imagen.
-  const conImagen = m.hoteles.some((c) => c.opciones.some((o) => r.foto(o.foto?.url)))
-  const caben = extrasQueCaben('hotel', COLUMNAS_HOTELES)
+  // Un hotel solo lleva la foto que subió la asesora (Mauricio, 2026-10-14).
+  // Regla de fotos (2026-10-29): por ficha, sus fotos buenas lado a lado; las filas emparejan las
+  // fichas que admiten el mismo alto. Una ficha sin fotos va sin recuadro (nunca un relleno).
+  const { fotos: fotosDeFicha, filas: filasDeFotos } = fotosDeLasFichas(m, r)
+  const altoDe = new Map<number, number | null>()
+  for (const f of filasDeFotos) f.fichas.forEach((i, k) => altoDe.set(i, f.altos[k]))
+  let n = 0
   const tarjetas = m.hoteles.flatMap((c) =>
     c.opciones.map((o) => {
-      const foto = r.foto(o.foto?.url)
+      const i = n++
       const tags = etiquetasDe(o.tarifas, porIndice)
       const tagsHtml = tags ? `<span class="tags">${tags}</span>` : ''
       const stars = o.estrellas && o.estrellas > 0 ? `<span class="stars">${'★'.repeat(Math.min(5, o.estrellas))}</span>` : ''
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
-      const extras = foto ? (r.extrasDeHotel?.(c.ciudad, o.hotel) ?? []).slice(0, caben) : []
-      const imagen = foto || conImagen ? imagenDeTarjeta(foto, extras, `${tagsHtml}${stars}`) : ''
+      const alto = altoDe.get(i) ?? null
+      const imagen = alto !== null && fotosDeFicha[i].length > 0 ? imagenDeFichaDeHotel(fotosDeFicha[i], alto, `${tagsHtml}${stars}`) : ''
       const estancia = [rangoCorto(c.desde, c.hasta), c.noches ? `(${c.noches} ${c.noches === 1 ? 'noche' : 'noches'})` : null].filter(Boolean).join(' ')
       const filas = [
         ['Estancia', estancia],
@@ -545,8 +628,8 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
       return `<div class="hc">${imagen}<div class="b">${enTexto}<div class="n">${esc(o.hotel)}${!imagen && stars ? ` ${estrellas(o.estrellas)}` : ''}</div>${o.zona || c.ciudad ? `<div class="caps zona">${esc(o.zona || c.ciudad)}</div>` : ''}${filas.map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join('')}</div>${o.cargoEnDestino ? `<div class="pie">${esc(o.cargoEnDestino)}, se paga en el hotel.</div>` : ''}</div>`
     }),
   )
-  const filas: string[] = []
-  for (let i = 0; i < tarjetas.length; i += COLUMNAS_HOTELES) filas.push(`<div class="hg">${tarjetas.slice(i, i + COLUMNAS_HOTELES).join('\n')}</div>`)
+  // Una fila sin alto común: cada ficha con su alto, arriba alineadas (sin estirar la más corta).
+  const filas = filasDeFotos.map((f) => `<div class="hg"${f.alineada ? '' : ' style="align-items:start"'}>${f.fichas.map((i) => tarjetas[i]).join('\n')}</div>`)
   const [primera, ...resto] = filas
   return `<section class="sec hospedaje">\n<div class="nobr">${encabezadoDeSeccion('bed', 'Hospedaje', sub || null)}\n${primera}</div>\n${resto.join('\n')}\n</section>`
 }

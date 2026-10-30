@@ -18,10 +18,12 @@ import sharp from 'sharp'
 import { modeloDePropuesta, type EntradaModeloPropuesta, type ModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { FotoPDF } from '@/lib/pdf/cotizacion-props'
 import { fotoImprimible, type OrigenFoto } from '@/lib/fotos/clave'
+import { formaAdmitida } from '@/lib/fotos/forma'
+import { panelesDeFoto } from '@/lib/fotos/paneles'
 import { fuentesDelDocumento } from '@/lib/pdf/chromium/fuentes'
 import { cssDeFuentes, inyectarEstilo } from '@/lib/pdf/chromium/recursos'
 import { imprimirHtmlAPdf, type MedidasRender } from '@/lib/pdf/chromium/render-chromium'
-import { COLUMNAS_HOTELES, COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta } from './trappvel/plantilla'
+import { avisosDeFotosDeHoteles, COLUMNAS_HOTELES, COLUMNAS_OPCIONALES, encabezadoDeHoja, extrasQueCaben, htmlDePropuesta, pieDeHoja, type FotoResuelta, type RecursosPropuesta } from './trappvel/plantilla'
 
 /** Ancho tope por uso, en px (a ~150 ppp sobre el ancho impreso). */
 export const ANCHO_FOTO = { portada: 1400, tarjeta: 700, extra: 400, logo: 600 } as const
@@ -52,16 +54,34 @@ async function bytesDe(src: string, timeoutMs: number): Promise<Buffer | null> {
  * una imagen: el documento sale sin esa foto, nunca con un hueco roto.
  */
 export async function reducirFoto(src: string | null | undefined, ancho: number, calidad = 72, timeoutMs = 6000): Promise<string | null> {
+  return (await reducirFotoConProporcion(src, ancho, calidad, timeoutMs))?.src ?? null
+}
+
+/**
+ * Lo mismo que `reducirFoto`, con el ancho entre el alto de la foto ya girada: la plantilla lo usa
+ * para no imprimir collages ni verticales y para escoger cómo van las fotos de cada ficha de hotel
+ * (regla de fotos del 2026-10-29). Medida aquí, sirve también para las fotos sin `proporcion` en la
+ * base y para la foto propia de una opción.
+ */
+export async function reducirFotoConProporcion(
+  src: string | null | undefined,
+  ancho: number,
+  calidad = 72,
+  timeoutMs = 6000,
+): Promise<{ src: string; proporcion: number | null; paneles?: number } | null> {
   if (!src) return null
   const datos = await bytesDe(src, timeoutMs)
   if (!datos) return null
   try {
-    const salida = await sharp(datos)
+    const { data, info } = await sharp(datos)
       .rotate()
       .resize({ width: ancho, withoutEnlargement: true })
       .jpeg({ quality: calidad, mozjpeg: true })
-      .toBuffer()
-    return `data:image/jpeg;base64,${salida.toString('base64')}`
+      .toBuffer({ resolveWithObject: true })
+    const proporcion = info.width > 0 && info.height > 0 ? info.width / info.height : null
+    // Demasiado ancha para una sola: ¿es un díptico o un tríptico? (lo dicen los píxeles).
+    const paneles = proporcion !== null && !formaAdmitida(proporcion) ? await panelesDeFoto(datos, proporcion) : 1
+    return { src: `data:image/jpeg;base64,${data.toString('base64')}`, proporcion, ...(paneles > 1 ? { paneles } : {}) }
   } catch {
     return null
   }
@@ -97,6 +117,10 @@ export interface FotoDeCatalogo {
   /** La línea de crédito («Park Güell, Autora (Wikimedia Commons, CC BY-SA 3.0)»); `null` = propia. */
   credito: string | null
   foco?: { x: number; y: number } | null
+  /** Ancho entre alto guardado en la biblioteca (`null` = sin dato: se mide al reducirla). */
+  proporcion?: number | null
+  /** Hotel: qué muestra (fachada, habitación, zonas comunes, otra). Ordena las fotos de la ficha. */
+  categoria?: string | null
 }
 
 /** Lo que el documento le pide al catálogo. Cada uno `null` = no hay foto. */
@@ -127,13 +151,17 @@ export interface ResultadoPropuestaHtml {
   modelo: ModeloPropuesta
   html: string
   medidas: MedidasRender
+  /** Los hoteles cuya ficha sale con menos de 3 fotos (aviso de «Revisar y enviar», no bloquea). */
+  avisosFotos: AvisoFotosDeHotel[]
 }
+
+export type AvisoFotosDeHotel = ReturnType<typeof avisosDeFotosDeHoteles>[number]
 
 /** Arma el HTML listo para imprimir (con fotos y fuentes dentro) y su pie. Sin Chromium. */
 export async function prepararPropuestaHtml(
   entrada: EntradaModeloPropuesta,
   opts: OpcionesPropuestaHtml,
-): Promise<{ html: string; pie: string; encabezado: string; modelo: ModeloPropuesta }> {
+): Promise<{ html: string; pie: string; encabezado: string; modelo: ModeloPropuesta; avisosFotos: AvisoFotosDeHotel[] }> {
   const modelo = modeloDePropuesta(entrada)
   const catalogo = opts.catalogo ?? null
   const comoFotoPDF = (f: FotoDeCatalogo, rotulo: string | null): FotoPDF => ({
@@ -230,10 +258,13 @@ export async function prepararPropuestaHtml(
   for (const f of deOpcional.values()) for (const x of f.extras ?? []) pedir(x.src, ANCHO_FOTO.extra)
 
   const [resueltas, logo] = await Promise.all([
-    Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFoto(url, ancho)] as const)),
+    Promise.all([...pedidos].map(async ([url, ancho]) => [url, await reducirFotoConProporcion(url, ancho)] as const)),
     reducirLogo(opts.logoUrl),
   ])
-  const porUrl = new Map(resueltas.filter((x): x is readonly [string, string] => x[1] !== null))
+  const conMedida = resueltas.filter((x): x is readonly [string, { src: string; proporcion: number | null; paneles?: number }] => x[1] !== null)
+  const porUrl = new Map(conMedida.map(([url, f]) => [url, f.src] as const))
+  const proporcionDe = new Map(conMedida.map(([url, f]) => [url, f.proporcion] as const))
+  const panelesDe = new Map(conMedida.map(([url, f]) => [url, f.paneles ?? 1] as const))
   const focoDe = new Map<string, FotoPDF['foco']>()
   if (modelo.portada.foto) focoDe.set(modelo.portada.foto.url, modelo.portada.foto.foco)
   for (const f of deCiudad.values()) focoDe.set(f.url, f.foco)
@@ -245,7 +276,8 @@ export async function prepararPropuestaHtml(
   const resolver = (url: string | null | undefined): FotoResuelta | null => {
     if (!url) return null
     const src = porUrl.get(url)
-    return src ? { src, foco: focoDe.get(url) ?? null } : null
+    const paneles = panelesDe.get(url) ?? 1
+    return src ? { src, foco: focoDe.get(url) ?? null, proporcion: proporcionDe.get(url) ?? null, ...(paneles > 1 ? { paneles } : {}) } : null
   }
 
   // Las extras solo salen junto a su principal: sin ella, ni foto ni crédito.
@@ -259,7 +291,7 @@ export async function prepararPropuestaHtml(
     ...[...deActividad.values()].filter((f) => porUrl.has(f.src)).map((f) => f.credito),
   ].filter((c): c is string => !!c)
 
-  const crudo = htmlDePropuesta(modelo, {
+  const recursos: RecursosPropuesta = {
     foto: resolver,
     fotoDeCiudad: (ciudad) => (ciudad ? resolver(deCiudad.get(ciudad)?.url) : null),
     fotoDeOpcional: (nombre) => resolver(deOpcional.get(nombre)?.src),
@@ -269,7 +301,8 @@ export async function prepararPropuestaHtml(
     logo,
     marca: opts.marca,
     creditosExtra,
-  })
+  }
+  const crudo = htmlDePropuesta(modelo, recursos)
   const fuentes = fuentesDelDocumento()
   const inter = fuentes.find((f) => f.familia === 'Inter' && f.peso === 400 && f.estilo === 'normal')
   return {
@@ -281,11 +314,12 @@ export async function prepararPropuestaHtml(
     }),
     encabezado: encabezadoDeHoja(),
     modelo,
+    avisosFotos: avisosDeFotosDeHoteles(modelo, recursos),
   }
 }
 
 export async function pdfDePropuestaHtml(entrada: EntradaModeloPropuesta, opts: OpcionesPropuestaHtml): Promise<ResultadoPropuestaHtml> {
-  const { html, pie, encabezado, modelo } = await prepararPropuestaHtml(entrada, opts)
+  const { html, pie, encabezado, modelo, avisosFotos } = await prepararPropuestaHtml(entrada, opts)
   const { pdf, medidas } = await imprimirHtmlAPdf(html, { pie, encabezado, timeoutMs: opts.timeoutMs ?? 40_000 })
-  return { pdf, modelo, html, medidas }
+  return { pdf, modelo, html, medidas, avisosFotos }
 }

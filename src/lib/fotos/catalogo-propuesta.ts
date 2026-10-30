@@ -9,8 +9,19 @@ import 'server-only'
  */
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
 import type { CatalogoPropuesta, FotoDeCatalogo } from '@/lib/pdf/html/propuesta-html'
-import { creditoDeFila, dataUrlDeFila, filaDe, fotosDe, leerCatalogo, type FilaCatalogo } from './catalogo'
+import { creditoDeFila, dataUrlDeFila, fotosDe, leerCatalogo, type FilaCatalogo } from './catalogo'
 import { claveDeFoto, fotoImprimible, MAX_FOTOS_EXTRA, nombreLlano, objetivo, sinRepetir, type ObjetivoFoto } from './clave'
+import { formaPosible, ordenarPorCategoria } from './forma'
+
+/**
+ * Las fotos de una llave que pueden salir en el documento, en su orden. Las de un hotel, además,
+ * sin collages irregulares ni verticales (`formaPosible`: quedan en la biblioteca, marcadas, pero no
+ * se imprimen; una de paneles iguales la confirma el PDF con los píxeles) y por categoría: fachada → habitación → zonas comunes (regla de fotos, 2026-10-29).
+ */
+export function fotosParaElDocumento(filas: FilaCatalogo[], o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): FilaCatalogo[] {
+  const todas = fotosDe(filas, o)
+  return o.tipo === 'hotel' ? ordenarPorCategoria(todas.filter((f) => formaPosible(f.proporcion))) : todas
+}
 
 /**
  * La ficha FIJADA en la línea de cada hotel (`items.proveedor_id`): llave del hotel en el documento
@@ -95,13 +106,15 @@ export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string
           revisada: f.revisada,
           credito: creditoDeFila(f),
           foco: f.foco_x !== null && f.foco_y !== null ? { x: Number(f.foco_x), y: Number(f.foco_y) } : null,
+          proporcion: f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion),
+          categoria: f.categoria ?? null,
         })
       }
     }),
   )
   /** La principal de la llave con sus extras, todas ya leídas. */
   const de = (o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): FotoDeCatalogo | null => {
-    const todas = fotosDe(filas, o).map((f) => leidas.get(f.id)).filter((x): x is FotoDeCatalogo => !!x)
+    const todas = fotosParaElDocumento(filas, o).map((f) => leidas.get(f.id)).filter((x): x is FotoDeCatalogo => !!x)
     if (todas.length === 0) return null
     const [primera, ...resto] = todas
     return resto.length > 0 ? { ...primera, extras: resto.slice(0, MAX_FOTOS_EXTRA) } : primera
@@ -148,7 +161,8 @@ export async function fotosDeBibliotecaDelDocumento(
     // de su ficha fijada si la tiene y, si no, la de su nombre.
     for (const o of [...propios, ...deOpcionales.values()]) {
       const ficha = o.tipo === 'hotel' ? fichas.get(o.clave) : undefined
-      const f = (ficha ? filaDe(filas, { tipo: 'hotel', clave: ficha }) : null) ?? filaDe(filas, o)
+      const primera = (x: Pick<ObjetivoFoto, 'tipo' | 'clave'>) => fotosParaElDocumento(filas, x)[0] ?? null
+      const f = (ficha ? primera({ tipo: 'hotel', clave: ficha }) : null) ?? primera(o)
       if (!f) continue
       porClave.set(`${o.tipo}:${o.clave}`, f)
       mapa.set(`${o.tipo}:${o.clave}`, {

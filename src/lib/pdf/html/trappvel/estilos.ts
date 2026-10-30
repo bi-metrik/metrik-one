@@ -186,6 +186,8 @@ thead { display: table-header-group; }
 .img.mosaico.n2 { grid-template-rows: 1fr 1fr; }
 .img.mosaico .m0 { grid-row: 1 / -1; background-size: cover; background-position: center; }
 .img.mosaico .mx { background-size: cover; background-position: center; }
+.img.fila { display:grid; grid-template-rows: 1fr; gap: .6mm; background: #fff; }
+.img.fila .mx { background-size: cover; background-position: center; }
 `
 
 /** Los símbolos SVG que usa el documento (`<use href="#plane"/>`). */
