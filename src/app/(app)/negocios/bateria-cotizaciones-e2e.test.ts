@@ -768,6 +768,10 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
     // Normal salía en 3; la compacta (días libres juntos) cabe en 2 y es la que sale.
     expect(estado.impreso!.hojas).toEqual({ primera: 3, alternativa: 2, gano: 'alternativa' })
     expect(estado.impreso!.html).toContain('<small>DÍAS</small>2–4')
+    // QA del #1369 · con la versión de cada regreso, sigue en dos hojas.
+    expect(estado.impreso!.html).toContain('Regreso a casa (Opción 2)')
+    // Para mirarlo: `PROPUESTA_PDF_SALIDA=<ruta.pdf>` deja el PDF impreso ahí.
+    if (process.env.PROPUESTA_PDF_SALIDA) (await import('node:fs')).writeFileSync(process.env.PROPUESTA_PDF_SALIDA, estado.impreso!.pdf)
   }, 60_000)
 
   it('defecto 3 · sacar la Recomendada y escoger una tercera como Recomendada deja cada marca con su paquete', async () => {
