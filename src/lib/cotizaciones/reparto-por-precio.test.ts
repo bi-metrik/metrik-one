@@ -1,6 +1,8 @@
 /**
- * Segunda vuelta de la COT-2026-0008 (Trappvel), punto 1 · el hotel que sobra se reparte solo y el
- * orden sigue al precio (opción 2, decidida por Mauricio el 2026-10-29).
+ * La Recomendada es la tarifa de precio intermedio (decisión de Mauricio del 2026-10-29, al revisar
+ * el PDF de la COT-2026-0008: «siempre la que escogemos es la intermedia»). Reemplaza la «Intermedia»
+ * de la segunda vuelta (#1348): el más caro va en la tercera tarifa (la Premium, «Superior» en el
+ * documento) y la Recomendada lleva el del medio.
  *
  * Datos inventados con la forma del caso: tres hoteles, el caro se pegó primero (Recomendada), la
  * Económica es el barato y la Premium repetía el caro (idéntica, no se mandaba). El del medio
@@ -8,12 +10,12 @@
  *
  * | # | Caso                                                         | Resultado                                         |
  * |---|--------------------------------------------------------------|---------------------------------------------------|
- * | 1 | Rec = la más cara, Premium la repite, sobra uno más barato   | Premium → «Intermedia» con el que sobra, se manda |
+ * | 1 | Rec = la más cara, Premium la repite, sobra uno más barato   | Rec = el que sobra; Premium = la cara, se manda   |
  * | 2 | Rec = la del medio (Econ barata, Premium cara)               | nada cambia                                       |
  * | 3 | Rec = la más barata, Econ la repite, sobra el del medio      | nada cambia; queda el aviso de #1333              |
- * | 4 | Rec = la más cara, Premium escogida a mano más barata        | se llama «Intermedia» (no hay Superior más barata) |
+ * | 4 | Rec = la más cara, Premium escogida a mano más barata        | se cruzan: Rec la del medio, Premium la cara      |
  * | 5 | Rec = la más cara, Premium la repite, no sobra ninguno       | nada cambia (Premium idéntica, no se manda)       |
- * | 6 | Rec = la más cara, sobran dos                                | Intermedia con el primero que se pegó; el otro, aviso |
+ * | 6 | Rec = la más cara, sobran dos                                | Rec con el primero que se pegó; el otro, aviso    |
  * | 7 | Intermedia y la Rec deja de ser la más cara                  | vuelve a «Premium» con la más cara                |
  * | 8 | Sin costo en algún hotel                                     | nada cambia                                       |
  * | 9 | Además un vuelo con opciones                                 | nada cambia; queda el aviso                       |
@@ -45,16 +47,18 @@ function correr(items: ReturnType<typeof linea>[], tarifas: TarifaDelPlan[], cos
 const TRES = [linea('v-vuelo', V, 1), linea('h-caro', H, 2), linea('h-medio', H, 3), linea('h-barato', H, 4)]
 
 describe('reparto del hotel que sobra, por precio', () => {
-  it('1 · COT-0008: Económica = barato, Intermedia = el del medio, Recomendada = el caro', () => {
+  it('1 · COT-0008: Económica = barato, Recomendada = el del medio, Premium (Superior) = el caro', () => {
     const { final, de } = correr(TRES, [
       tarifa('t-rec', 'Recomendada', 2, true, 'h-caro'),
       tarifa('t-eco', 'Económica', 1, true, 'h-barato'),
       tarifa('t-prem', 'Premium', 3, false, 'h-caro'),
     ])
-    expect(de('t-prem')).toMatchObject({ nombre: 'Intermedia', vaEnPropuesta: true, seleccion: ['h-medio'] })
-    expect(de('t-rec')).toMatchObject({ nombre: 'Recomendada', seleccion: ['h-caro'] })
+    expect(de('t-rec')).toMatchObject({ nombre: 'Recomendada', vaEnPropuesta: true, seleccion: ['h-medio'] })
+    expect(de('t-prem')).toMatchObject({ nombre: 'Premium', vaEnPropuesta: true, seleccion: ['h-caro'] })
     expect(de('t-eco')).toMatchObject({ nombre: 'Económica', seleccion: ['h-barato'] })
-    expect(final.some(t => t.nombre === 'Premium')).toBe(false)
+    expect(final.some(t => t.nombre === 'Intermedia')).toBe(false)
+    // El orden de las tarifas: Económica, Recomendada, Premium.
+    expect([...final].sort((a, b) => a.orden - b.orden).map(t => t.nombre)).toEqual(['Económica', 'Recomendada', 'Premium'])
     expect(opcionesFueraDeLaPropuesta(TRES, final)).toEqual([])
   })
 
@@ -79,13 +83,14 @@ describe('reparto del hotel que sobra, por precio', () => {
     expect(opcionesFueraDeLaPropuesta(TRES, final).map(o => o.itemId)).toEqual(['h-medio'])
   })
 
-  it('4 · una Premium más barata que la Recomendada no puede llamarse Superior: es la Intermedia', () => {
+  it('4 · una Premium más barata que la Recomendada: se cruzan (Recomendada el medio, Premium el caro)', () => {
     const { de } = correr(TRES, [
       tarifa('t-rec', 'Recomendada', 2, true, 'h-caro'),
       tarifa('t-eco', 'Económica', 1, true, 'h-barato'),
       tarifa('t-prem', 'Premium', 3, true, 'h-medio'),
     ])
-    expect(de('t-prem')).toMatchObject({ nombre: 'Intermedia', vaEnPropuesta: true, seleccion: ['h-medio'] })
+    expect(de('t-rec')).toMatchObject({ seleccion: ['h-medio'] })
+    expect(de('t-prem')).toMatchObject({ nombre: 'Premium', vaEnPropuesta: true, seleccion: ['h-caro'] })
   })
 
   it('5 · sin hotel sobrante, la Premium idéntica se queda como está y no se manda', () => {
@@ -106,7 +111,8 @@ describe('reparto del hotel que sobra, por precio', () => {
       tarifa('t-eco', 'Económica', 1, true, 'h-barato'),
       tarifa('t-prem', 'Premium', 3, false, 'h-caro'),
     ])
-    expect(de('t-prem')).toMatchObject({ nombre: 'Intermedia', seleccion: ['h-medio'] })
+    expect(de('t-rec')).toMatchObject({ seleccion: ['h-medio'] })
+    expect(de('t-prem')).toMatchObject({ nombre: 'Premium', seleccion: ['h-caro'] })
     expect(opcionesFueraDeLaPropuesta(CUATRO, final).map(o => o.itemId)).toEqual(['h-medio2'])
   })
 
@@ -147,11 +153,21 @@ describe('reparto del hotel que sobra, por precio', () => {
     expect(plan.nombres ?? []).toEqual([])
   })
 
-  it('la Intermedia ya repartida no se vuelve a tocar (el plan queda vacío)', () => {
-    const { plan } = correr(TRES, [
+  it('la COT-0008 como quedó con #1348 (Intermedia = el del medio, Recomendada = el caro) se acomoda en la siguiente acción', () => {
+    const { de } = correr(TRES, [
       tarifa('t-rec', 'Recomendada', 2, true, 'h-caro'),
       tarifa('t-eco', 'Económica', 1, true, 'h-barato'),
       tarifa('t-prem', 'Intermedia', 3, true, 'h-medio'),
+    ])
+    expect(de('t-rec')).toMatchObject({ nombre: 'Recomendada', vaEnPropuesta: true, seleccion: ['h-medio'] })
+    expect(de('t-prem')).toMatchObject({ nombre: 'Premium', vaEnPropuesta: true, seleccion: ['h-caro'] })
+  })
+
+  it('ya repartida (Recomendada el medio, Premium el caro): el plan queda vacío', () => {
+    const { plan } = correr(TRES, [
+      tarifa('t-rec', 'Recomendada', 2, true, 'h-medio'),
+      tarifa('t-eco', 'Económica', 1, true, 'h-barato'),
+      tarifa('t-prem', 'Premium', 3, true, 'h-caro'),
     ])
     expect(plan).toEqual({ crear: [], seleccion: [], marcas: [] })
   })
