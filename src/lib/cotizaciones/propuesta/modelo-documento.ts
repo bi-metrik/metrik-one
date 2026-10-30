@@ -720,9 +720,9 @@ export function modeloDePropuesta({
 
   // ── Trenes y traslados ──
   const filasTrayecto: TrayectoDoc[] = serviciosConFecha
-    .filter((s) => s.tipo === 'traslado')
+    .filter((s) => s.tipo === 'traslado' || s.tipo === 'tren')
     .map((s) => ({
-      tipo: s.alquiler ? ('alquiler' as const) : esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
+      tipo: s.alquiler ? ('alquiler' as const) : s.tipo === 'tren' || esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
       fecha: fechaIso(s.fecha, inicio) ?? s.fecha,
       hora: s.hora ?? null,
       descripcion: s.descripcion,
@@ -1221,7 +1221,7 @@ function diaADia(p: {
       }
       continue
     }
-    const tipo = s.tipo === 'actividad' ? 'actividad' : esTren(s.descripcion) ? 'tren' : 'traslado'
+    const tipo = s.tipo === 'actividad' ? 'actividad' : s.tipo === 'tren' || esTren(s.descripcion) ? 'tren' : 'traslado'
     const fecha = fechaIso(s.fecha, p.inicio)
     poner(fecha, { tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
     // V7-5 (QA del 2026-10-29) · una actividad de varios días (Disney, 4 días) ocupa los días que

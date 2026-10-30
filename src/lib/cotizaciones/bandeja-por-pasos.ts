@@ -56,7 +56,11 @@ export function nombreNuevo(b: Borrador, destinoViaje: string | null): string {
     ? lugarDeBloqueNuevo(b.tipo, b.lectura, b.pistas.lugar) ?? (destinoViaje?.trim() || null)
     : b.tipo === 'traslado'
       ? lugarDeBloqueNuevo(b.tipo, b.lectura, b.pistas.lugar)
-      : b.pistas.destino || b.pistas.lugar
+      : b.tipo === 'tren'
+        ? (b.pistas.origen && b.pistas.destino ? `${b.pistas.origen}–${b.pistas.destino}` : lugarDeBloqueNuevo(b.tipo, b.lectura, b.pistas.lugar))
+        : b.pistas.destino || b.pistas.lugar
+  // «Tren París–Roma»: un trayecto entre dos ciudades no queda «en» ninguna.
+  if (b.tipo === 'tren' && lugar?.includes('–')) return `${label} ${lugar}`
   return `${label}${lugar ? ` en ${lugar}` : ''}`
 }
 

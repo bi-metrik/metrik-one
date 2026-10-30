@@ -80,7 +80,7 @@ export function lugarDeBloqueNuevo(
   // Un tren o un traslado entre ciudades se nombra con SU trayecto («París–Ámsterdam»): sin lugar
   // del detector caía al destino del viaje, y el Eurostar quedó «Traslado en Madrid» (prueba
   // Europa, 2026-10-14).
-  if (tipo === 'traslado') return pistaLugar ?? rutaDeTraslado(campoLeido(lectura, 'Trayecto'))
+  if (tipo === 'traslado' || tipo === 'tren') return pistaLugar ?? rutaDeTraslado(campoLeido(lectura, 'Trayecto'))
   if (tipo !== 'actividad') return pistaLugar
   return ciudadDeActividad(lectura, correcciones)
 }

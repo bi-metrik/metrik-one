@@ -47,6 +47,7 @@ export const HITO_IDS = [
   'checkin_vuelo',
   'preregistro_migratorio',
   'detalles_tour',
+  'tiquetes_tren',
 ] as const
 export type HitoId = (typeof HITO_IDS)[number]
 
@@ -82,6 +83,8 @@ export const DEFINICIONES: Record<HitoId, DefinicionHito> = {
   confirmar_traslado: { id: 'confirmar_traslado', clase: 'movil', evidencia: 'nota', offsetDias: -2, titulo: 'Confirmar el traslado con el proveedor y mandarle al viajero la hora de recogida', corto: 'traslado', pideNota: 'Hora de recogida y contacto del conductor' },
   checkin_vuelo: { id: 'checkin_vuelo', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Check-in y pasabordo', corto: 'check-in', adjuntoObligatorio: true },
   preregistro_migratorio: { id: 'preregistro_migratorio', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Pre-registro migratorio', corto: 'pre-registro' },
+  // QA G9 (M9-1) · el tren: el viajero se sube con su tiquete en la estación, sin check-in de aerolínea.
+  tiquetes_tren: { id: 'tiquetes_tren', clase: 'movil', evidencia: 'nota', offsetDias: -2, titulo: 'Mandarle al viajero los tiquetes del tren con la estación y la hora de salida', corto: 'tren', pideNota: 'Estación, hora de salida y coche o asiento' },
   detalles_tour: { id: 'detalles_tour', clase: 'fijo', evidencia: 'nota', offsetDias: -1, titulo: 'Confirmar con el proveedor del tour los detalles (hora, punto de encuentro) y mandárselos al viajero', corto: 'tour', pideNota: 'Hora y punto de encuentro' },
 }
 
@@ -606,6 +609,10 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
       // fecha (el de llegada, con el primer tramo); con varios, «Falta la fecha».
       const fecha = s.fecha_servicio ?? (trasladosSinFecha === 1 ? primerTramo : null)
       agregar({ id: 'confirmar_traslado', servicio: s, fechaAncla: fecha, horaAncla: horaHHMM(s.hora_inicio), verboAncla: 'es', responsable: resp })
+      continue
+    }
+    if (s.tipo === 'tren') {
+      agregar({ id: 'tiquetes_tren', servicio: s, fechaAncla: s.fecha_servicio, horaAncla: horaHHMM(s.hora_inicio), verboAncla: 'sale', responsable: resp })
       continue
     }
     if (s.tipo === 'actividad') {

@@ -16,7 +16,12 @@ import { completadoDeFila, fechasDeFila, leerTramos, type FechasServicio, type T
 import { serviciosViajeActivo, type EstadoEscrito } from './estado-servicio'
 import { GATE_SERVICIOS_LISTOS, faltaParaServiciosListos, type FaltaServicio } from './gate-servicios'
 import { configReglasPago } from './reglas-pago'
-import { monedaDelServicio, type MonedaDelServicio } from './moneda-servicio'
+import { columnasMonedaServicio, esColumnaFaltante, monedaDelServicioConRespaldo, type MonedaDelServicio } from './moneda-servicio'
+
+/** QA G9 · las columnas de moneda (migración `20261029221700`). */
+const COLUMNAS_MONEDA_SERVICIO = 'moneda, costo_moneda, tasa_cotizada'
+const COLUMNAS_MONEDA_GASTO = 'moneda, monto_moneda, tasa_cambio'
+type ColumnasMonedaServicio = { moneda?: unknown; costo_moneda?: unknown; tasa_cotizada?: unknown }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -108,8 +113,14 @@ export async function generarServiciosDesdeTarifa(
     if (faltan.length === 0) return { ok: true, creadas: 0, existentes, completadas: await completar() }
 
     const empresas = await empresasDeOperadores(db, args.workspaceId, faltan)
-    const filas = faltan.map(f => aFila(f, args, itinerarioId, empresas))
-    const { error: insErr } = await db.from('negocio_servicios').insert(filas)
+    let filas: Array<Record<string, unknown>> = faltan.map(f => aFila(f, args, itinerarioId, empresas))
+    let { error: insErr } = await db.from('negocio_servicios').insert(filas)
+    // Sin la migración de moneda (QA G9), la base no tiene las columnas: se inserta como antes y
+    // la moneda se sigue leyendo del ítem.
+    if (esColumnaFaltante(insErr)) {
+      filas = filas.map(({ moneda: _m, costo_moneda: _c, tasa_cotizada: _t, ...resto }) => resto)
+      ;({ error: insErr } = await db.from('negocio_servicios').insert(filas))
+    }
     if (!insErr) return { ok: true, creadas: filas.length, existentes, completadas: await completar() }
     if (!esChoqueDeUnico(insErr)) return { ok: false, error: insErr.message }
 
@@ -152,6 +163,7 @@ function aFila(
     ...columnasDeFechas(f),
     fechas_leidas_at: new Date().toISOString(),
     costo_cotizado: f.costo_cotizado,
+    ...columnasMonedaServicio(f.moneda ?? null),
     orden: f.orden,
     origen: 'cotizacion',
     estado: 'por_reservar',
@@ -381,6 +393,10 @@ export interface GastoDeServicio {
   titular_medio: string | null
   /** El texto del gasto: trae la TRM del pago en otra moneda (`marcaTrm`). */
   descripcion?: string | null
+  /** QA G9 · moneda, monto en la moneda y TRM del pago (`gastos`). Null = en pesos o pago de antes. */
+  moneda?: string | null
+  monto_moneda?: number | null
+  tasa_cambio?: number | null
 }
 
 export interface AprobacionDeServicio {
@@ -399,21 +415,32 @@ export async function leerServiciosDelNegocio(
   db: Db,
   args: { workspaceId: string; negocioId: string },
 ): Promise<ServicioDelNegocio[] | null> {
-  const { data, error } = await db
+  const COLUMNAS = 'id, tipo, nombre, proveedor_nombre, localizador, estado, fecha_servicio, fecha_fin, hora_inicio, hora_fin, tramos, item_id, fechas_leidas_at, fechas_corregidas_at, fechas_corregidas_por, responsable_staff_id, fecha_limite_pago, costo_cotizado, valor_por_pagar, voucher_ref, confirmacion_ref, orden, origen'
+  const leerFilas = (columnas: string) => db
     .from('negocio_servicios')
-    .select('id, tipo, nombre, proveedor_nombre, localizador, estado, fecha_servicio, fecha_fin, hora_inicio, hora_fin, tramos, item_id, fechas_leidas_at, fechas_corregidas_at, fechas_corregidas_por, responsable_staff_id, fecha_limite_pago, costo_cotizado, valor_por_pagar, voucher_ref, confirmacion_ref, orden, origen')
+    .select(columnas)
     .eq('workspace_id', args.workspaceId)
     .eq('negocio_id', args.negocioId)
     .order('orden', { ascending: true })
+  // QA G9 · la moneda del servicio en sus columnas; sin la migración, la base no las tiene y la
+  // fila se lee como antes (la moneda sale del ítem).
+  let { data, error } = await leerFilas(`${COLUMNAS}, ${COLUMNAS_MONEDA_SERVICIO}`)
+  if (esColumnaFaltante(error)) ({ data, error } = await leerFilas(COLUMNAS))
   if (error) {
     console.error('[servicios-viaje] no se pudieron leer:', error.message)
     return null
   }
-  const filas = (data ?? []) as Array<Omit<ServicioDelNegocio, 'gastos' | 'aprobaciones'>>
+  const filas = (data ?? []) as Array<Omit<ServicioDelNegocio, 'gastos' | 'aprobaciones'> & ColumnasMonedaServicio>
   if (filas.length === 0) return []
   const ids = filas.map(f => f.id)
+  const COLUMNAS_GASTO = 'id, fecha, servicio_id, monto, soporte_url, medio_pago, titular_medio, descripcion'
+  const leerGastos = async () => {
+    const leer = (columnas: string) => db.from('gastos').select(columnas).in('servicio_id', ids).order('fecha', { ascending: true })
+    const r = await leer(`${COLUMNAS_GASTO}, ${COLUMNAS_MONEDA_GASTO}`)
+    return esColumnaFaltante(r.error) ? leer(COLUMNAS_GASTO) : r
+  }
   const [gastosRes, aprobRes] = await Promise.all([
-    db.from('gastos').select('id, fecha, servicio_id, monto, soporte_url, medio_pago, titular_medio, descripcion').in('servicio_id', ids).order('fecha', { ascending: true }),
+    leerGastos(),
     // Las caducadas no pintan nada: la vigente o la última decisión son las que cuentan.
     db.from('aprobaciones_excepcion')
       .select('id, entidad_id, tipo, estado, huella, motivo, detalle, solicitada_por, decidida_at')
@@ -444,10 +471,12 @@ export async function leerServiciosDelNegocio(
       medio_pago: g.medio_pago,
       titular_medio: g.titular_medio,
       descripcion: g.descripcion ?? null,
+      moneda: g.moneda ?? null,
+      monto_moneda: g.monto_moneda === null || g.monto_moneda === undefined ? null : Number(g.monto_moneda),
+      tasa_cambio: g.tasa_cambio === null || g.tasa_cambio === undefined ? null : Number(g.tasa_cambio),
     })),
-    moneda: f.item_id && itemDe.has(f.item_id)
-      ? monedaDelServicio(itemDe.get(f.item_id)!.tarifa_pax, Number(f.costo_cotizado) || 0, itemDe.get(f.item_id)!.subtotal)
-      : null,
+    // Manda la columna (QA G9); las filas de antes, el ítem de la cotización (#1364).
+    moneda: monedaDelServicioConRespaldo(f, f.item_id ? itemDe.get(f.item_id) : null, Number(f.costo_cotizado) || 0),
     aprobaciones: vigentesPorTipo(aprob.filter(a => a.entidad_id === f.id)).map(a => ({
       id: a.id,
       tipo: a.tipo,

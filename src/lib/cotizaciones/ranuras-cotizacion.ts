@@ -42,11 +42,11 @@ import { NOMBRES_TARIFA } from './tarifas'
  * (migración `20261013140000_cotizacion_ranuras_tipo_otro.sql`). Lo que se ofrece en la pantalla
  * de siempre y en la detección del pantallazo son los cuatro de `TIPOS_CON_PANTALLAZO`.
  */
-export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro', 'paquete'] as const
+export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro', 'paquete', 'tren'] as const
 export type TipoRanura = (typeof TIPOS_RANURA)[number]
 
 /** Los cuatro tipos de siempre: los que reconoce la detección y ofrece la pantalla de siempre. */
-export const TIPOS_CON_PANTALLAZO = ['vuelo', 'hotel', 'actividad', 'traslado'] as const satisfies readonly TipoRanura[]
+export const TIPOS_CON_PANTALLAZO = ['vuelo', 'hotel', 'actividad', 'traslado', 'tren'] as const satisfies readonly TipoRanura[]
 export type TipoConPantallazo = (typeof TIPOS_CON_PANTALLAZO)[number]
 
 /** ¿Es uno de los cuatro tipos de siempre (no «otro»)? */
@@ -61,6 +61,7 @@ const SLUG_POR_TIPO: Record<TipoRanura, string> = {
   traslado: 'traslado_detalle',
   otro: 'otro_detalle',
   paquete: 'paquete_detalle',
+  tren: 'tren_detalle',
 }
 
 export function esTipoRanura(v: unknown): v is TipoRanura {
@@ -230,7 +231,8 @@ export function nombreAutomaticoDeRanura(args: {
   }
 
   const armar = (cabeza: string): string => {
-    if (args.tipo === 'vuelo') {
+    // QA G9 · el tren se nombra por su ruta como el vuelo («Tren París–Roma»), si la trae.
+    if (args.tipo === 'vuelo' || (args.tipo === 'tren' && args.origen && args.destino)) {
       const origen = ciudadCorta(args.origen)
       const destino = ciudadCorta(args.destino ?? args.lugar)
       if (origen && destino) return `${cabeza} ${origen}–${destino}`
@@ -239,7 +241,7 @@ export function nombreAutomaticoDeRanura(args: {
     }
     const lugar = ciudadCorta(args.lugar)
     // «Traslado París–Ámsterdam»: un trayecto entre dos ciudades no queda «en» ninguna.
-    if (lugar && args.tipo === 'traslado' && lugar.includes('–')) return `${cabeza} ${lugar}`
+    if (lugar && (args.tipo === 'traslado' || args.tipo === 'tren') && lugar.includes('–')) return `${cabeza} ${lugar}`
     return lugar ? `${cabeza} en ${lugar}` : cabeza
   }
 

@@ -120,6 +120,9 @@ export interface GastoCierre {
   categoria: string | null
   descripcion: string | null
   titular_medio?: string | null
+  /** QA G9 · moneda y TRM del pago a proveedor (`gastos`). Null = en pesos o pago de antes. */
+  moneda?: string | null
+  tasa_cambio?: number | string | null
 }
 
 export interface EntradaCierre {

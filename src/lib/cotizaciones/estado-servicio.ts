@@ -33,7 +33,8 @@ export const ETIQUETA_ESTADO: Record<EstadoServicio, string> = {
 /** Qué estados admite un grupo. Vuelo y hotel no tienen «Opcional». Sin tipo reconocido, ninguno. */
 export function estadosPermitidos(grupo: string | null | undefined): EstadoServicio[] {
   const slug = ranuraDeGrupo(grupo ?? null)?.slug
-  if (slug === 'vuelo_detalle' || slug === 'hotel_detalle') return ['incluido', 'no']
+  // El tren (QA G9) va o no va, como el vuelo del que puede ser alternativa.
+  if (slug === 'vuelo_detalle' || slug === 'hotel_detalle' || slug === 'tren_detalle') return ['incluido', 'no']
   // «Otro servicio» (asistencia médica, seguro) también puede ir Opcional: el cliente decide.
   if (slug === 'traslado_detalle' || slug === 'actividad_detalle' || slug === 'otro_detalle') return ['incluido', 'opcional', 'no']
   return []

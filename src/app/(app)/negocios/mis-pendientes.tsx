@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { BedDouble, Car, HeartPulse, Package, Plane, Ticket } from 'lucide-react'
+import { BedDouble, Car, HeartPulse, Package, Plane, Ticket, TrainFront } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
@@ -23,9 +23,9 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
 const fechaCorta = (f: string) => { const [, m, d] = f.split('-').map(Number); return `${d} ${MESES[m - 1].slice(0, 3)}` }
 
 /** Ícono y color de la cotización (`--tipo-*` de globals.css): el color nunca va solo. */
-const ICONO_TIPO: Record<string, typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, asistencia: HeartPulse, otro: Package }
-const ETIQUETA_TIPO: Record<string, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', asistencia: 'Asistencia', otro: 'Otro' }
-export const COLOR_TIPO = (tipo: string) => `var(--tipo-${['vuelo', 'hotel', 'traslado', 'actividad'].includes(tipo) ? tipo : 'otro'})`
+const ICONO_TIPO: Record<string, typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, tren: TrainFront, actividad: Ticket, asistencia: HeartPulse, otro: Package }
+const ETIQUETA_TIPO: Record<string, string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', tren: 'Tren', actividad: 'Actividad', asistencia: 'Asistencia', otro: 'Otro' }
+export const COLOR_TIPO = (tipo: string) => `var(--tipo-${['vuelo', 'hotel', 'traslado', 'actividad'].includes(tipo) ? tipo : tipo === 'tren' ? 'traslado' : 'otro'})`
 
 /** «Tus servicios próximos»: por fecha y hora, con el ícono del tipo; sin fecha, «Falta la fecha». */
 export function ServiciosProximos({ servicios, hoy }: { servicios: ServicioProximo[]; hoy?: string }) {

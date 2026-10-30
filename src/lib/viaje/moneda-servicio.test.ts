@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  columnasMonedaGasto,
+  columnasMonedaServicio,
   diferenciaDeCambio,
+  esColumnaFaltante,
+  monedaDeColumnas,
+  monedaDelServicioConRespaldo,
   diferenciaDeCambioDelServicio,
   marcaTrm,
   monedaDelServicio,
@@ -86,5 +91,45 @@ describe('moneda del servicio (H6-1, H9-1, H6-3 · QA Trappvel 2026-10-29)', () 
       gastos: [{ monto: 8_817_012, servicio_id: 's1', categoria: 'proveedor_viaje', descripcion: `Pago ${marcaTrm('USD', 4230)}` }],
     })
     expect(c.explicacion).toBe('Dejó $166.752 menos de lo cotizado: Renaissance (+$166.752, diferencia de cambio).')
+  })
+})
+
+describe('moneda en columnas (QA G9 · migración 20261029221700)', () => {
+  it('el servicio guarda moneda, monto y tasa; manda la columna sobre el ítem', () => {
+    const m = monedaDelServicio(tarifaUSD, 8_650_260)!
+    expect(columnasMonedaServicio(m)).toEqual({ moneda: 'USD', costo_moneda: 2084.4, tasa_cotizada: 4150 })
+    expect(columnasMonedaServicio(null)).toEqual({ moneda: null, costo_moneda: null, tasa_cotizada: null })
+    expect(monedaDeColumnas({ moneda: 'EUR', costo_moneda: '474.75', tasa_cotizada: '4500.0000' })).toEqual({ moneda: 'EUR', monto: 474.75, tasa: 4500 })
+    expect(monedaDeColumnas({ moneda: null, costo_moneda: null, tasa_cotizada: null })).toBeNull()
+    expect(monedaDeColumnas({ moneda: 'COP', costo_moneda: 1, tasa_cotizada: 1 })).toBeNull()
+    // Columna llena: manda aunque el ítem diga otra cosa.
+    expect(monedaDelServicioConRespaldo({ moneda: 'EUR', costo_moneda: 100, tasa_cotizada: 4500 }, { tarifa_pax: tarifaUSD, subtotal: null }, 450_000))
+      .toEqual({ moneda: 'EUR', monto: 100, tasa: 4500 })
+    // Fila de antes (columnas en null): el ítem, como en #1364.
+    expect(monedaDelServicioConRespaldo({ moneda: null }, { tarifa_pax: tarifaUSD, subtotal: null }, 8_650_260))
+      .toEqual({ moneda: 'USD', tasa: 4150, monto: 2084.4 })
+    expect(monedaDelServicioConRespaldo(null, null, 100)).toBeNull()
+  })
+
+  it('el pago guarda moneda, lo pagado en ella y la TRM', () => {
+    expect(columnasMonedaGasto('usd', 4230, 8_817_012)).toEqual({ moneda: 'USD', monto_moneda: 2084.4, tasa_cambio: 4230 })
+    expect(columnasMonedaGasto(null, null, 100)).toEqual({ moneda: null, monto_moneda: null, tasa_cambio: null })
+    expect(columnasMonedaGasto('COP', 1, 100)).toEqual({ moneda: null, monto_moneda: null, tasa_cambio: null })
+  })
+
+  it('la diferencia de cambio lee la TRM de la columna y, si no está, del texto', () => {
+    const m = monedaDelServicio(tarifaUSD, 8_650_260)!
+    expect(diferenciaDeCambioDelServicio(m, [{ monto: 8_817_012, descripcion: 'Pago a Renaissance · Hotel', moneda: 'USD', tasa_cambio: 4230 }]))
+      .toEqual({ pesos: 166_752, tasas: [4230] })
+    // La columna manda sobre el texto.
+    expect(diferenciaDeCambioDelServicio(m, [{ monto: 8_817_012, descripcion: `Pago ${marcaTrm('USD', 4100)}`, moneda: 'USD', tasa_cambio: '4230' }]).tasas).toEqual([4230])
+    expect(diferenciaDeCambioDelServicio(m, [{ monto: 8_817_012, descripcion: `Pago ${marcaTrm('USD', 4230)}`, moneda: null, tasa_cambio: null }]).pesos).toBe(166_752)
+  })
+
+  it('sin la migración aplicada, la columna faltante se reconoce para reintentar sin ella', () => {
+    expect(esColumnaFaltante({ code: 'PGRST204' })).toBe(true)
+    expect(esColumnaFaltante({ code: '42703' })).toBe(true)
+    expect(esColumnaFaltante({ code: '23505' })).toBe(false)
+    expect(esColumnaFaltante(null)).toBe(false)
   })
 })

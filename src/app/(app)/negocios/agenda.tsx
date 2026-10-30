@@ -18,7 +18,7 @@ import { useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { BedDouble, Car, FileText, HeartPulse, MoreHorizontal, Package, Plane, Stamp, Ticket, Upload } from 'lucide-react'
+import { BedDouble, Car, FileText, HeartPulse, MoreHorizontal, Package, Plane, Stamp, Ticket, TrainFront, Upload } from 'lucide-react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { armarAgenda, opcionesDeDias, type Alcance, type SeleccionDia } from '@/lib/viaje/agenda'
 import { cuandoEnPalabras, DEFINICIONES, mensajeAlViajero, textoFaltaFecha, type Hito } from '@/lib/viaje/hitos'
@@ -38,6 +38,7 @@ function IconoHito({ h }: { h: Hito }) {
     case 'vuelo': return <Plane className={c} />
     case 'hotel': return <BedDouble className={c} />
     case 'traslado': return <Car className={c} />
+    case 'tren': return <TrainFront className={c} />
     case 'actividad': return <Ticket className={c} />
     case 'asistencia': return <HeartPulse className={c} />
     default: return <Package className={c} />

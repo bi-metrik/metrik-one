@@ -596,6 +596,12 @@ const IDENTIDAD_POR_RANURA: Record<string, { campo: string; nombre: string; otro
     { campo: 'trayecto', nombre: 'trayecto', otro: 'otro trayecto', mismo: 'el mismo trayecto', queSeVe: 'el trayecto' },
     { campo: 'fecha_hora', nombre: 'fecha', otro: 'otra fecha', mismo: 'la misma fecha' },
   ],
+  tren_detalle: [
+    { campo: 'proveedor', nombre: 'tren', otro: 'otro tren', mismo: 'el mismo tren', queSeVe: 'el operador del tren' },
+    { campo: 'trayecto', nombre: 'trayecto', otro: 'otro trayecto', mismo: 'el mismo trayecto', queSeVe: 'el trayecto' },
+    { campo: 'fecha_hora', nombre: 'fecha', otro: 'otra fecha', mismo: 'la misma fecha' },
+    { campo: 'hora_salida', nombre: 'horario', otro: 'otro horario', mismo: 'el mismo horario' },
+  ],
 }
 
 /** Campos de identidad que una ranura declara. Los usa quien arma la lectura. */

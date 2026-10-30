@@ -701,6 +701,44 @@ const TRASLADO: DefinicionRanura = {
 }
 
 /**
+ * «Tren» (QA Trappvel 2026-10-29, M9-1 · decisión 5 de Mauricio): el tiquete de tren (Renfe,
+ * Trenitalia, SNCF, Eurostar, Italo…). Hasta aquí se leía como traslado «tren»: sin horas, sin el
+ * operador en el documento y sin poder ser opción del vuelo del mismo trayecto.
+ *
+ * Se lee como un traslado (trayecto + fecha, mismos slugs: la identidad, la bandeja y el aviso de
+ * trayecto repetido lo comparan igual) con lo propio del tren: operador, número y horas.
+ *
+ * ⚠️ Las etiquetas «Operador del tren» y «Nº de tren» son SOLO suyas a propósito: `ranuraDeLectura`
+ * reconoce una lectura por las etiquetas que una sola ranura declara, y así una opción de tren
+ * dentro de un bloque de vuelo (juntadas como opciones del mismo trayecto) sigue siendo tren en el
+ * documento y en Reservas.
+ */
+const TREN: DefinicionRanura = {
+  slug: 'tren_detalle',
+  label: 'Tren',
+  grupos: ['tren', 'trenes'],
+  queSePide: 'El detalle del tiquete o de la reserva del tren ya escogido, con su horario y precio.',
+  queNoSirve: 'La lista de horarios con varios trenes: se sube el que ya se eligió.',
+  unidadPorDefecto: 'pax',
+  campos: [
+    { slug: 'proveedor', label: 'Operador del tren', tipo: 'texto', min: true, descripcion_ai: 'Quién opera el tren tal como aparece, con el tipo de tren si se ve: Renfe AVE, Trenitalia Frecciarossa, SNCF TGV INOUI, Eurostar, Italo, Ouigo, Deutsche Bahn ICE.' },
+    { slug: 'trayecto', label: 'Trayecto', tipo: 'texto', min: true, descripcion_ai: 'Estación de salida y de llegada, en ese orden, separadas por « -> » (ej. «Paris Gare de Lyon -> Roma Termini»). Con un cambio de tren, la salida del primero y la llegada del último.' },
+    { slug: 'fecha_hora', label: 'Fecha', tipo: 'fecha', min: true, descripcion_ai: 'Fecha del viaje en tren en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año. Si también muestra el día de la semana, agrégalo tras una barra: --10-23/vie.' },
+    { slug: 'hora_salida', label: 'Hora de salida', tipo: 'texto', min: false, descripcion_ai: 'Hora de salida del tren en formato HH:MM de 24 horas. null si no se ve.' },
+    { slug: 'hora_llegada', label: 'Hora de llegada', tipo: 'texto', min: false, descripcion_ai: 'Hora de llegada del tren (del último si hay cambio) en formato HH:MM de 24 horas. null si no se ve.' },
+    { slug: 'numero_tren', label: 'Nº de tren', tipo: 'texto', min: false, descripcion_ai: 'Número o números de tren tal como aparecen (ej. 9241, FR 9535). null si no se ve.' },
+    { slug: 'cambio', label: 'Cambio de tren', tipo: 'texto', min: false, descripcion_ai: 'Estación donde se cambia de tren, si la hay (ej. «Milano Centrale»). null si es directo o no se ve.' },
+    { slug: 'clase', label: 'Clase', tipo: 'texto', min: false, descripcion_ai: 'Clase o tarifa del tiquete (Turista, Business, Standard Premier, 1ª, 2ª…). null si no se ve.' },
+    { slug: 'pax', label: 'Personas', tipo: 'numero', min: true, descripcion_ai: 'Número de viajeros del tiquete. Si no se ve, null: no supongas 1.' },
+    ...OCUPACION,
+    MONEDA,
+    PRECIO_TOTAL,
+    basePrecio(['total', 'por_pax'], 'total = es el precio de todos los viajeros; por_pax = es el precio de uno solo.'),
+    ...COSTO_AGENCIA,
+  ],
+}
+
+/**
  * «Otro servicio» (cotización por pasos, 2026-10-13): lo que no es vuelo, hotel, traslado ni
  * actividad —asistencia médica, seguro de viaje, tarjeta de turismo, equipaje adicional—. Diseño
  * de Noor, Paso 1, «Escribirlo a mano». Cada uno es su propio servicio y SUMA aparte.
@@ -763,6 +801,7 @@ const RANURAS: Record<string, DefinicionRanura> = {
   [HOTEL.slug]: HOTEL,
   [ACTIVIDAD.slug]: ACTIVIDAD,
   [TRASLADO.slug]: TRASLADO,
+  [TREN.slug]: TREN,
   [OTRO.slug]: OTRO,
   [PAQUETE.slug]: PAQUETE,
 }

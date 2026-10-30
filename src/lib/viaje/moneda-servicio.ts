@@ -15,8 +15,13 @@
  *    .item_id` → `items.tarifa_pax`: `confirmada.moneda/tasa` o `costoManual`). Una cotización
  *    aceptada ya no se edita, así que el ítem dice lo mismo que dijo al generar la fila.
  *  · La TRM del PAGO la escribe quien paga y queda en el texto del gasto con una marca fija
- *    (`· USD a TRM 4.230`), que esta misma función vuelve a leer. Guardarla en columnas propias
- *    (moneda, monto en la moneda, tasa) pide migración: va propuesta aparte.
+ *    (`· USD a TRM 4.230`), que esta misma función vuelve a leer.
+ *
+ * ## Desde la migración `20261029221700_viaje_moneda_servicios_y_tren.sql` (QA G9)
+ *
+ *  · El servicio guarda su moneda al generarse (`negocio_servicios.moneda`, `costo_moneda`,
+ *    `tasa_cotizada`) y el pago la suya (`gastos.moneda`, `monto_moneda`, `tasa_cambio`).
+ *  · Las columnas MANDAN; lo de arriba queda de respaldo para las filas de antes (en null).
  *
  * Puro: sin red, sin base.
  */
@@ -63,6 +68,59 @@ export function monedaDelServicio(tarifaPax: unknown, costoCotizado: number, sub
   return { moneda, tasa, monto: Math.round((cot / tasa) * 100) / 100 }
 }
 
+/**
+ * La moneda de las columnas del servicio (`negocio_servicios.moneda/costo_moneda/tasa_cotizada`),
+ * o `null` si están vacías (fila en pesos o anterior a la migración: se cae al ítem).
+ */
+export function monedaDeColumnas(f: { moneda?: unknown; costo_moneda?: unknown; tasa_cotizada?: unknown } | null | undefined): MonedaDelServicio | null {
+  if (!f || typeof f.moneda !== 'string') return null
+  const moneda = f.moneda.trim().toUpperCase()
+  const monto = Number(f.costo_moneda)
+  const tasa = Number(f.tasa_cotizada)
+  if (!/^[A-Z]{3}$/.test(moneda) || moneda === 'COP' || !tasaValida(tasa) || !(monto > 0)) return null
+  return { moneda, monto, tasa }
+}
+
+/** Manda la columna; si está vacía, lo que diga el ítem de la cotización (filas de antes). */
+export function monedaDelServicioConRespaldo(
+  columnas: { moneda?: unknown; costo_moneda?: unknown; tasa_cotizada?: unknown } | null | undefined,
+  item: { tarifa_pax: unknown; subtotal: number | null } | null | undefined,
+  costoCotizado: number,
+): MonedaDelServicio | null {
+  return monedaDeColumnas(columnas) ?? (item ? monedaDelServicio(item.tarifa_pax, costoCotizado, item.subtotal) : null)
+}
+
+/** Las columnas que se escriben en `negocio_servicios` al generarlo (todas null = en pesos). */
+export function columnasMonedaServicio(m: MonedaDelServicio | null): { moneda: string | null; costo_moneda: number | null; tasa_cotizada: number | null } {
+  if (!m || !(m.monto > 0) || !tasaValida(m.tasa)) return { moneda: null, costo_moneda: null, tasa_cotizada: null }
+  return { moneda: m.moneda, costo_moneda: Math.round(m.monto * 100) / 100, tasa_cotizada: Math.round(m.tasa * 10000) / 10000 }
+}
+
+/**
+ * Las columnas que se escriben en `gastos` para un pago en otra moneda: lo pagado en la moneda es
+ * los pesos ÷ la TRM del pago. Sin moneda o sin TRM, todas null (pago en pesos).
+ */
+export function columnasMonedaGasto(
+  moneda: string | null | undefined,
+  tasaPago: number | null | undefined,
+  pesos: number,
+): { moneda: string | null; monto_moneda: number | null; tasa_cambio: number | null } {
+  const m = typeof moneda === 'string' ? moneda.trim().toUpperCase() : ''
+  const monto = Math.round(((Number(pesos) || 0) / (tasaPago || 1)) * 100) / 100
+  if (!/^[A-Z]{3}$/.test(m) || m === 'COP' || !tasaValida(tasaPago) || !(monto > 0)) {
+    return { moneda: null, monto_moneda: null, tasa_cambio: null }
+  }
+  return { moneda: m, monto_moneda: monto, tasa_cambio: Math.round(tasaPago * 10000) / 10000 }
+}
+
+/**
+ * ¿El error es de una columna que la base todavía no tiene? (migración sin aplicar: PostgREST
+ * responde `PGRST204` en la escritura y `42703` en la lectura). Quien escribe reintenta sin ellas.
+ */
+export function esColumnaFaltante(error: { code?: string | null } | null | undefined): boolean {
+  return ['PGRST204', '42703'].includes(error?.code ?? '')
+}
+
 /** Un monto en otra moneda, como se lee en la fila: «USD 2.084,40». */
 export function montoEnMoneda(monto: number, moneda: string): string {
   const [entero, dec = ''] = (Math.round(monto * 100) / 100).toFixed(2).split('.')
@@ -107,16 +165,18 @@ export function diferenciaDeCambio(pesos: number, tasaCotizada: number, tasaPago
   return Math.round((Number(pesos) || 0) * (1 - tasaCotizada / tasaPago))
 }
 
-/** La diferencia de cambio de los pagos del servicio que dicen su TRM (los demás no suman). */
+/** La diferencia de cambio de los pagos del servicio que dicen su TRM (columna o texto; los demás no suman). */
 export function diferenciaDeCambioDelServicio(
   m: MonedaDelServicio | null | undefined,
-  gastos: ReadonlyArray<{ monto: number; descripcion?: string | null }>,
+  gastos: ReadonlyArray<{ monto: number; descripcion?: string | null; moneda?: string | null; tasa_cambio?: number | string | null }>,
 ): { pesos: number; tasas: number[] } {
   if (!m) return { pesos: 0, tasas: [] }
   let pesos = 0
   const tasas: number[] = []
   for (const g of gastos) {
-    const t = trmDeDescripcion(g.descripcion, m.moneda)
+    // Manda la columna del pago (desde la migración G9); si está vacía, la marca del texto.
+    const col = typeof g.moneda === 'string' && g.moneda.toUpperCase() === m.moneda && tasaValida(Number(g.tasa_cambio)) ? Number(g.tasa_cambio) : null
+    const t = col ?? trmDeDescripcion(g.descripcion, m.moneda)
     if (t === null) continue
     pesos += diferenciaDeCambio(g.monto, m.tasa, t)
     if (!tasas.includes(t)) tasas.push(t)
