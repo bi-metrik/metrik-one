@@ -103,6 +103,17 @@ const PASOS_GUZMAN: PasoGuion[] = [
   { toca: 'Anotar' },
 ];
 
+// 30-oct (Edgar, Trappvel): el pedido se escribe ANTES de crear al cliente; tras «Crear» el modelo abría el viaje sin
+// `desde` y el pedido se perdía (2 de 3 corridas, igual en main).
+const PASOS_PEDIDO_PRIMERO: PasoGuion[] = [
+  { escribe: 'Hola, necesito cotizar un viaje para dos adultos a Curazao, salen el 21 de junio de 2027 y regresan el 28 de junio' },
+  { escribe: 'Es Marta Rincón con celular 3155550142' },
+  { toca: 'Crear' },
+  { toca: 'Carla Comercial', oEscribe: 'Lo lleva Carla Comercial' },
+  { toca: 'Sí, ábrelo' },
+  { toca: 'Anotar' },
+];
+
 export const CASOS_CONDUCTA: CasoConducta[] = [
   {
     id: 'k-bonaire', titulo: 'Reenvíos antes de abrir, rango del regreso y «3, 4 y 5 estrellas» (28-oct)',
@@ -137,6 +148,12 @@ export const CASOS_CONDUCTA: CasoConducta[] = [
     ],
     final: { adultos: 2, categoria_hotel: '3' },
     sinFechas: true,
+  },
+  {
+    id: 'k-pedido-primero', titulo: 'Pedido escrito antes de crear al cliente → abrir el viaje (30-oct)',
+    contactos: [], pasos: PASOS_PEDIDO_PRIMERO,
+    prohibidas: [{ desde: 0, que: 'adultos', re: /cu[aá]ntos adultos|n[uú]mero de adultos|cu[aá]ntas personas/i }],
+    final: { adultos: 2 },
   },
 ];
 
