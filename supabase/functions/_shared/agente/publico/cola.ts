@@ -54,7 +54,7 @@ import { planDeEnvios } from './ventas/partir-ventas.ts';
 import type { Envio } from './ventas/partir-ventas.ts';
 import type { AlmacenPublico, AvisosInternos, MensajeroChatwoot, Transcriptor } from './puertos.ts';
 import { turnoConReintento } from './reintento.ts';
-import { filasDelTramo, gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
+import { desdeCierre, filasDelTramo, gastoDelDia, inicioDiaBogota, mensajesUltimaHora, textoAvisoPresupuesto, turnosConIA, umbralesAlcanzados } from './topes.ts';
 import type { Canal, EventoAutorizacion, FilaPublica, LlaveConversacion, MotivoPersona, PasoAPersona, Tramos, TrazaPublica } from './tipos.ts';
 import { ETIQUETA_MOTIVO, llaveTexto } from './tipos.ts';
 import { ventana } from './ventana.ts';
@@ -636,7 +636,7 @@ export function toquesPorTitulo(filas: FilaPublica[], canal: Canal): FilaPublica
 /** Un turno: atiende lo pendiente. Devuelve false si no había nada. */
 export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   const desde = () => new Date(d.ahoraMs() - DIAS_DE_CONVERSACION * 24 * 3600 * 1000).toISOString();
-  const leer = async () => toquesPorTitulo(await d.almacen.leer(d.llave, desde()), d.canal);
+  const leer = async () => toquesPorTitulo(desdeCierre(await d.almacen.leer(d.llave, desde())), d.canal);
   let filas = await leer();
   let pend = pendientesPublico(filas);
   if (!pend.length) return false;
@@ -921,7 +921,7 @@ export async function atenderConversacion(d: DepsPublico): Promise<number> {
       await d.almacen.soltarCandado(cola);
     }
     const desde = new Date(d.ahoraMs() - DIAS_DE_CONVERSACION * 24 * 3600 * 1000).toISOString();
-    if (!pendientesPublico(await d.almacen.leer(d.llave, desde)).length) return turnos;
+    if (!pendientesPublico(desdeCierre(await d.almacen.leer(d.llave, desde))).length) return turnos;
   }
   return turnos;
 }

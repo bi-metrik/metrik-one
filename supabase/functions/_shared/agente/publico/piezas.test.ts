@@ -236,6 +236,7 @@ describe('la petición del webhook (§3.1)', () => {
       primeraVez: async (k) => { if (claves.has(k)) return false; claves.add(k); return true },
       olvidar: async (k) => { claves.delete(k) },
       guardarEntrante: async () => 'ok',
+      registrarCierre: async () => true,
       completarAudio: async () => true,
       ahoraS: () => 1792000000,
       reloj: () => 0,
@@ -264,6 +265,14 @@ describe('la petición del webhook (§3.1)', () => {
     const r = await pedir(PAYLOAD_DOC_MESSAGE_CREATED, p)
     expect(r.status).toBe(200)
     expect(r.atender).toBeUndefined()
+  })
+  it('Chatwoot resuelve la conversación: deja la marca de cierre (no es un mensaje que atender)', async () => {
+    const cierres: unknown[] = []
+    const p = puertos({ registrarCierre: async (c) => { cierres.push(c); return true } })
+    expect(await pedir({ event: 'conversation_status_changed', status: 'resolved', id: 9001, inbox_id: 5 }, p)).toMatchObject({ status: 200, motivo: 'cierre registrado' })
+    expect(cierres).toEqual([{ llave: { workspaceId: 'ws', cuentaId: 77, conversacionId: 9001 }, inboxId: 5, canal: 'instagram' }])
+    expect(await pedir({ event: 'conversation_status_changed', status: 'resolved', id: 9001, inbox_id: 6 }, p)).toMatchObject({ motivo: 'cierre de otro inbox' })
+    expect(cierres).toHaveLength(1)
   })
   it('message_updated con audio completa la URL sin deduplicar', async () => {
     const p = puertos()

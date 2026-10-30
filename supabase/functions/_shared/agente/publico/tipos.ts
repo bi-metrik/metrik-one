@@ -115,6 +115,8 @@ export type TrazaPublica = Traza & {
   pide_autorizacion?: TipoAutorizacion | null;
   /** El paso a persona que hizo este turno. */
   persona?: PasoAPersona | null;
+  /** La fila es la marca de que Chatwoot resolvió la conversación: lo de antes ya no cuenta (`desdeCierre`). */
+  cierre?: boolean;
   /** El aviso de demora salió en este turno (`rf.demora`). */
   demora?: boolean;
   /** Mensajes de este turno que se guardaron enmascarados (dato de salud). */

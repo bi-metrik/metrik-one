@@ -53,6 +53,17 @@ export function filasDelTramo(filas: FilaPublica[]): FilaPublica[] {
   return i < 0 ? filas : filas.slice(i);
 }
 
+/**
+ * Lo que va después de la última vez que una persona resolvió la conversación en Chatwoot (la fila con `cierre`). Al
+ * resolverla, el cliente que vuelve a escribir empieza de nuevo: aviso de bienvenida, sin historial, sin pedido ni fotos
+ * de antes (Mauricio, 30-oct: «no está reiniciando la conversación»; Messenger reusa la misma). Pura.
+ */
+export function desdeCierre(filas: FilaPublica[]): FilaPublica[] {
+  let i = -1;
+  filas.forEach((f, j) => { if ((f.traza as TrazaPublica | null)?.cierre) i = j; });
+  return i < 0 ? filas : filas.slice(i + 1);
+}
+
 export function turnosConIA(filas: FilaPublica[]): number {
   return filas.filter((f) => f.traza?.tipo === 'modelo').length;
 }
