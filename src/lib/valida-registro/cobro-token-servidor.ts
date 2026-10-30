@@ -9,6 +9,8 @@ import { repoPagoEnLinea } from '@/lib/cobros/pago-en-linea-servidor'
 import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { epaycoHabilitado, leerRefMedioPagoEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
+import { CALENDARIO_TARJETA_CDA, cuotasACobrarCda, entraAlCobroAutomatico } from '@/lib/valida-cda/tarjeta-cda'
+import { tarjetaCdaDelNegocio, tarjetaCdaDelPlan } from '@/lib/valida-cda/tarjeta-cda-lectura'
 import { CALENDARIO_MORA, corteVigente, esEspacioAutogestion, intentoDelDia } from './plan'
 import { titularDelCobro } from './metodo-pago'
 
@@ -31,6 +33,11 @@ import { titularDelCobro } from './metodo-pago'
  *   - `cobrarCuotasConTarjeta`: el paso 7b del cron, sobre las cuotas vencidas de los planes `epayco`,
  *     con el intento que toca según los días de mora. Desde el día de la suspensión no se intenta
  *     nada, y tampoco se cobran las cuotas siguientes de ese plan.
+ *
+ * Los CDA de Valida con tarjeta (`tarjetas_pago_cda`, Términos v1.5 2.4, diseño del 2026-10-30) usan el
+ * MISMO motor con su propia regla (`src/lib/valida-cda/tarjeta-cda.ts`): solo los períodos que empiezan
+ * después del registro de la tarjeta (lo atrasado nunca se cobra solo), intentos el día 0 (la fecha de
+ * renovación) y el día 3, ninguno después, y sin la regla del primer cobro del autoservicio.
  *
  * Con ePayco apagado (`EPAYCO_HABILITADO`) el adaptador no existe y nada de esto cobra.
  */
@@ -85,6 +92,8 @@ interface Pagador {
   titular: { tipoDocumento: string; documento: string; nombre: string; apellido: string }
   /** La IP con que la persona dio la orden: la de la confirmación, o la del registro (Condiciones 7.1). */
   ip: string | null
+  /** Un CDA con la tarjeta del pago automático: desde qué día cobra solo. `null` = autoservicio. */
+  cda: { cobroDesde: string } | null
 }
 
 /**
@@ -143,6 +152,7 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Prom
   if (ws.error) throw new Error(`espacio ${pagadores[0]}: ${ws.error.message}`)
   if (reg.error) throw new Error(`registro de ${pagadores[0]}: ${reg.error.message}`)
   const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
+  if (!esEspacioAutogestion(config)) return pagadorCda(db, { cobradorId, negocioId: ancla.id, pagadorId: pagadores[0] })
   const r = reg.data as {
     metodo_pago_estado: string
     metodo_pago_ref: string | null
@@ -163,6 +173,29 @@ async function pagadorConTarjeta(db: Db, cobradorId: string, ancla: Ancla): Prom
     celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
     titular: titularDelCobro(pagadorCfg, { nit: r.identificacion, razonSocial: r.razon_social }),
     ip: ipDeLaOrden(r),
+    cda: null,
+  }
+}
+
+/**
+ * Un CDA (negocio de un espacio que no es autogestionado) con la tarjeta del pago automático activa: el
+ * titular y el celular los registró la persona designada con la tarjeta; la IP es la de su autorización.
+ */
+async function pagadorCda(db: Db, p: { cobradorId: string; negocioId: string; pagadorId: string }): Promise<Pagador | null> {
+  const t = await tarjetaCdaDelNegocio(db, p)
+  if (!t || !leerRefMedioPagoEpayco(t.ref)) return null
+  const nombre = typeof t.titular.nombre === 'string' ? t.titular.nombre : ''
+  const documento = typeof t.titular.documento === 'string' ? t.titular.documento : ''
+  return {
+    workspaceId: p.pagadorId,
+    ref: t.ref,
+    correo: t.correo,
+    nit: documento,
+    razonSocial: nombre,
+    celular: t.celular,
+    titular: titularDelCobro({ titular: t.titular }, { nit: documento, razonSocial: nombre }),
+    ip: t.ip,
+    cda: { cobroDesde: t.cobroDesde },
   }
 }
 
@@ -209,6 +242,7 @@ async function pagadorDeSuscripcion(db: Db, cobradorId: string, suscripcionId: s
     celular: typeof pagadorCfg?.celular === 'string' ? pagadorCfg.celular : null,
     titular: titularDelCobro(pagadorCfg, { nit: fila.numero_documento, razonSocial: fila.razon_social }),
     ip: ipDeLaOrden(registro),
+    cda: null,
   }
 }
 
@@ -238,11 +272,16 @@ export async function pasarElPlanATarjeta(deps: DepsCobroToken, p: { cobradorId:
 
 /**
  * `intento`: el índice de `CALENDARIO_MORA.intentos` (0 = el día del vencimiento, 1 = día 3, 2 = día 7).
- * La cuota 1 solo tiene el 0.
+ * La cuota 1 solo tiene el 0. En un CDA, el de `CALENDARIO_TARJETA_CDA` (0 = la fecha de renovación,
+ * 1 = día 3), y solo para un período que entra al cobro automático.
+ *
+ * `manual`: lo pidió la persona designada de un CDA con su clic y su confirmación («¿Pagarlo ahora con
+ * esta tarjeta?», D3): es la ÚNICA forma de cobrar con la tarjeta un período atrasado. `intento` es
+ * entonces el primero libre de esa cuota (lo elige quien llama).
  */
 export async function cobrarCuotaConTarjeta(
   deps: DepsCobroToken,
-  p: { cobradorId: string; cuotaId: string; intento?: number; reintentoTrasConfirmacion?: boolean },
+  p: { cobradorId: string; cuotaId: string; intento?: number; reintentoTrasConfirmacion?: boolean; manual?: boolean },
 ): Promise<ResultadoCobroToken> {
   const intento = p.intento ?? 0
   const db = deps.db as Db
@@ -266,6 +305,12 @@ export async function cobrarCuotaConTarjeta(
   if (await planCortadoPorReverso(db, p.cobradorId, ancla)) return { tipo: 'no_aplica', motivo: 'plan_cortado_por_reverso' }
   const pagador = await pagadorConTarjeta(db, p.cobradorId, ancla)
   if (!pagador) return { tipo: 'no_aplica', motivo: 'sin_tarjeta' }
+  // Un CDA: solo lo autorizado (2.4). Lo atrasado nunca se cobra solo (D3) y no hay intento después del día 3 (D4).
+  if (pagador.cda && p.manual !== true) {
+    const periodo = { concepto: cuota.data.concepto_detalle ?? null, fechaVencimiento: cuota.data.fecha_vencimiento }
+    if (!entraAlCobroAutomatico(periodo, pagador.cda.cobroDesde)) return { tipo: 'no_aplica', motivo: 'periodo_atrasado_sin_orden' }
+    if (intento >= CALENDARIO_TARJETA_CDA.intentos.length) return { tipo: 'no_aplica', motivo: 'fuera_del_calendario_cda' }
+  }
 
   // El cobro programado de la cuota (lo mismo que hace el enlace).
   const previo = await db
@@ -312,7 +357,7 @@ export async function cobrarCuotaConTarjeta(
   // 20261014153000 sin aplicar) no se cobra: es el lado seguro.
   // La cuota 1 tiene un solo intento (Términos 3.6 → Condiciones 7.5), salvo uno: si el intento 0 fue
   // el cobro al confirmar (7.1 literal a) y se rechazó, el del día 7 (literal b) es el intento 1.
-  if (cuota.data.numero === 1 && intento !== 0 && !(intento === 1 && p.reintentoTrasConfirmacion)) {
+  if (!pagador.cda && cuota.data.numero === 1 && intento !== 0 && !(intento === 1 && p.reintentoTrasConfirmacion)) {
     return { tipo: 'no_aplica', motivo: 'primer_cobro_sin_reintento' }
   }
   const yaHecho = await db
@@ -415,7 +460,17 @@ export async function cobrarCuotaConTarjeta(
   }
   if (r.estado === 'rechazado') {
     await anotar('rechazado', r.externalRef, `${r.codigo}: ${r.mensaje}`)
-    await ramaDeRechazo(db, { cobradorId: p.cobradorId, planCobroId: plan.data.id, ancla, cobroId: cobroId as string, numeroCuota: cuota.data.numero, intento, mensaje: r.mensaje })
+    await ramaDeRechazo(db, {
+      cobradorId: p.cobradorId,
+      planCobroId: plan.data.id,
+      ancla,
+      cobroId: cobroId as string,
+      numeroCuota: cuota.data.numero,
+      intento,
+      mensaje: r.mensaje,
+      cda: pagador.cda !== null,
+      manual: p.manual === true,
+    })
     return { tipo: 'rechazado', cobroId: cobroId as string, mensaje: r.mensaje }
   }
   if (r.estado === 'error' && r.sinTransaccion) {
@@ -445,12 +500,48 @@ export async function cobrarCuotaConTarjeta(
  * (`cuotasConTarjetaRechazada`).
  *   - Cuota 1: Condiciones 7.5, el plan vuelve a Bold, sin reintento.
  *   - Las demás: el plan sigue en la tarjeta (los reintentos de los días 3 y 7).
+ *   - Un CDA (`cda`, o el plan tiene la tarjeta del pago automático): el plan sigue en la tarjeta, sin la
+ *     regla del primer cobro; el reintento es el del día 3 (Términos v1.5, 2.4). Un cobro pedido por la
+ *     persona designada (`manual`) no tiene reintento automático.
  */
 export async function ramaDeRechazo(
   dbCliente: SupabaseClient,
-  p: { cobradorId: string; planCobroId: string; ancla: Ancla; cobroId: string; numeroCuota: number; intento: number; mensaje: string; tardio?: boolean },
+  p: {
+    cobradorId: string
+    planCobroId: string
+    ancla: Ancla
+    cobroId: string
+    numeroCuota: number
+    intento: number
+    mensaje: string
+    tardio?: boolean
+    cda?: boolean
+    manual?: boolean
+  },
 ): Promise<void> {
   const db = dbCliente as Db
+  const cda = p.cda ?? (await tarjetaCdaDelPlan(db, p.planCobroId).catch(() => null)) !== null
+  if (cda) {
+    const dias = CALENDARIO_TARJETA_CDA.intentos
+    const sigue = p.manual
+      ? 'Cobro pedido por la persona designada; sin reintento automático. Queda el enlace de pago.'
+      : p.intento >= dias.length - 1
+        ? 'Último intento con la tarjeta (Términos v1.5, 2.4); queda el enlace de pago.'
+        : `Se manda el enlace de pago y se reintenta con la tarjeta el día ${dias[p.intento + 1]}.`
+    const dia = (dias as readonly number[])[p.intento]
+    await anotarEnAncla(
+      db,
+      {
+        ancla: p.ancla,
+        workspaceId: p.cobradorId,
+        tipo: 'cobro_tarjeta_rechazado',
+        texto: `Cobro con tarjeta (ePayco) rechazado${p.tardio ? ' después de quedar pendiente' : ''} en la cuota ${p.numeroCuota}${p.manual || dia === undefined ? '' : `, intento del día ${dia}`}: ${p.mensaje}. ${sigue}`,
+        datos: { cobro_id: p.cobroId, numero_cuota: p.numeroCuota, intento: p.intento, cda: true, ...(p.manual ? { manual: true } : {}), ...(p.tardio ? { tardio: true } : {}) },
+      },
+      'cobro-token-epayco',
+    )
+    return
+  }
   const primerCobro = p.numeroCuota === 1
   const ultimo = p.intento >= CALENDARIO_MORA.intentos.length - 1
   if (primerCobro) await db.from('planes_cobro').update({ pasarela: 'bold' }).eq('id', p.planCobroId).eq('pasarela', 'epayco')
@@ -531,6 +622,8 @@ export interface ResumenCobroToken {
   suspendidos: number
   /** Planes con el corte por reverso vigente: la tarjeta no se toca (ni la cuota reversada ni las siguientes). */
   cortadosPorReverso: number
+  /** Planes de un CDA con un período de la tarjeta sin pagar después del día 5: no se intenta nada más. */
+  fueraDeGraciaCda: number
   errores: { cuotaId: string; error: string }[]
 }
 
@@ -546,7 +639,17 @@ function diasEntre(desde: string, hasta: string): number {
  */
 export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: string; soloPlan?: string }): Promise<ResumenCobroToken> {
   const db = deps.db as Db
-  const resumen: ResumenCobroToken = { revisadas: 0, aprobadas: 0, pendientes: 0, rechazadas: 0, yaIntentadas: 0, suspendidos: 0, cortadosPorReverso: 0, errores: [] }
+  const resumen: ResumenCobroToken = {
+    revisadas: 0,
+    aprobadas: 0,
+    pendientes: 0,
+    rechazadas: 0,
+    yaIntentadas: 0,
+    suspendidos: 0,
+    cortadosPorReverso: 0,
+    fueraDeGraciaCda: 0,
+    errores: [],
+  }
   if (!(deps.adapterPara ?? adapterTarjeta)('epayco')) return resumen
   let q = db.from('planes_cobro').select('id, workspace_id, negocio_id, suscripcion_id').eq('pasarela', 'epayco')
   if (deps.soloPlan) q = q.eq('id', deps.soloPlan)
@@ -562,6 +665,18 @@ export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: strin
     } catch (e) {
       // Sin poder leerlo no se cobra: el lado seguro.
       resumen.errores.push({ cuotaId: `plan:${plan.id}`, error: e instanceof Error ? e.message : String(e) })
+      continue
+    }
+    // El plan de un CDA con la tarjeta del pago automático: su propia selección (D3, D4).
+    let tarjetaCda: Awaited<ReturnType<typeof tarjetaCdaDelPlan>> = null
+    try {
+      tarjetaCda = await tarjetaCdaDelPlan(db, plan.id)
+    } catch (e) {
+      resumen.errores.push({ cuotaId: `plan:${plan.id}`, error: e instanceof Error ? e.message : String(e) })
+      continue
+    }
+    if (tarjetaCda) {
+      await cobrarPlanCda(deps, resumen, { planId: plan.id, cobradorId: plan.workspace_id, cobroDesde: tarjetaCda.cobroDesde })
       continue
     }
     const [cuotas, cobros] = await Promise.all([
@@ -609,6 +724,58 @@ export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: strin
     }
   }
   return resumen
+}
+
+/**
+ * El paso 7b para el plan de un CDA: las cuotas que `cuotasACobrarCda` elige hoy (solo períodos que
+ * empiezan después del registro de la tarjeta, día 0 o día 3 desde su renovación), en orden. Un rechazo
+ * frena las siguientes, como en el autoservicio.
+ */
+async function cobrarPlanCda(
+  deps: DepsCobroToken & { hoy: string },
+  resumen: ResumenCobroToken,
+  p: { planId: string; cobradorId: string; cobroDesde: string },
+): Promise<void> {
+  const db = deps.db as Db
+  const [cuotas, cobros] = await Promise.all([
+    db.from('plan_cobro_cuotas').select('id, numero, monto, fecha_vencimiento, concepto_detalle').eq('plan_cobro_id', p.planId).order('numero'),
+    db.from('cobros').select('numero_cuota, fecha').eq('plan_cobro_id', p.planId).eq('tipo_cobro', 'programado'),
+  ])
+  if (cuotas.error || cobros.error) {
+    resumen.errores.push({ cuotaId: `plan:${p.planId}`, error: (cuotas.error ?? cobros.error).message })
+    return
+  }
+  const pagadas = new Set(
+    ((cobros.data ?? []) as { numero_cuota: number | null; fecha: string | null }[]).filter((c) => c.fecha).map((c) => c.numero_cuota as number),
+  )
+  const sel = cuotasACobrarCda({
+    cuotas: ((cuotas.data ?? []) as { id: string; numero: number; monto: number | string; fecha_vencimiento: string; concepto_detalle: string | null }[]).map((c) => ({
+      id: c.id,
+      numero: c.numero,
+      monto: Number(c.monto),
+      fechaVencimiento: c.fecha_vencimiento,
+      concepto: c.concepto_detalle,
+    })),
+    pagadas,
+    cobroDesde: p.cobroDesde,
+    hoy: deps.hoy,
+  })
+  if (sel.frenado) resumen.fueraDeGraciaCda += 1
+  for (const c of sel.cobrar) {
+    resumen.revisadas += 1
+    try {
+      const r = await cobrarCuotaConTarjeta(deps, { cobradorId: p.cobradorId, cuotaId: c.cuotaId, intento: c.intento })
+      if (r.tipo === 'aprobado') resumen.aprobadas += 1
+      else if (r.tipo === 'pendiente') resumen.pendientes += 1
+      else if (r.tipo === 'ya_intentado') resumen.yaIntentadas += 1
+      else if (r.tipo === 'rechazado') {
+        resumen.rechazadas += 1
+        break
+      } else if (r.tipo === 'error' || r.tipo === 'no_procesado') resumen.errores.push({ cuotaId: c.cuotaId, error: r.mensaje })
+    } catch (e) {
+      resumen.errores.push({ cuotaId: c.cuotaId, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
 }
 
 /**

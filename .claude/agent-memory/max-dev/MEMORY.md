@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️⚠️ [Pago automático tarjeta CDA (30-oct)](project_valida_cda_tarjeta_epayco.md) — 20261030220000 SIN aplicar; día 0 = inicio del período; quien debe no renueva
 - ⚠️⚠️ [SOE-035: RC-3 en solo_iva y sobrepagos (30-oct)](project_soe035_rc3_solo_iva.md) — 20261030163500 SIN aplicar; comparar viewdef de prod; <= $1.000 en a_tarifa = sin_tarifa
 - ⚠️ [Atajo al bot anterior cerrado con roles (30-oct)](project_atajo_bot_anterior_roles.md) — bot anterior atiende por cargo; con rol, gasto/bot los toma Agus; dominio ONE en falla sigue abierto
 - ⚠️ [Dimpro ventas ronda 2 (29-oct)](project_dimpro_ventas_ronda2.md) — SQL ronda2 SIN correr tras deploy; cortes 20/45 s solo ventas; verificador «2.800» toca a todos
