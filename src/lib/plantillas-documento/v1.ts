@@ -3,9 +3,13 @@
  * lo que imprimen hoy `declaracion-juramentada-pdf.tsx` y `relacion-facturas-pdf.tsx`
  * (plantillas de Deisy Ramírez del 2026-10-28, SOE-033, aprobadas tal cual).
  *
- * La migración que siembra SOENA (`*_plantillas_documento_soena_v1.sql`) lleva ESTE MISMO
- * texto; `v1.test.ts` lo compara byte a byte y además compara el texto del PDF de cada
- * caso contra el del componente @react-pdf.
+ * 2026-10-29, plantilla v2 de Deisy: el CUARTO de la DJ ya no dice «(valor aproximado como
+ * lo establece el artículo 577 del Estatuto Tributario)»; la DIAN rechaza el trámite si el
+ * valor aparece aproximado. `DJ_V1` lleva el texto CORREGIDO: la versión 1 sembrada en
+ * SOENA (`20261029203100_*`, inmutable) conserva la frase y la versión 2
+ * (`20261030120000_plantillas_documento_soena_dj_v2.sql`) lleva ESTE texto byte a byte.
+ * La Relación no cambió. `plantillas-sql.test.ts` compara las dos semillas y `v1.test.ts`
+ * compara el texto del PDF de cada caso contra el del componente @react-pdf.
  *
  * Diferencias deliberadas con el componente, ninguna de texto:
  * - «Firma» bajo la raya sale en el tamaño del cuerpo (el componente lo ponía en 8 pt gris).
@@ -28,7 +32,7 @@ Concepto DIAN No. 000673-int-0063 del 16 de enero de 2026
 
 **TERCERO.** Que no se ha efectuado devolución ni compensación, parcial ni total, del IVA pagado en la adquisición del vehículo descrito, ante ninguna entidad pública ni privada{{#si dos_titulares}}, a ninguno de los dos propietarios{{/si}}, respecto de la factura {{#si hay_radicado_upme}}**No. {{numero_factura}}** y del Certificado UPME **No. {{numero_caso_upme}}.**{{sino}}**No. {{numero_factura}}.**{{/si}}
 
-**CUARTO.** Que el IVA cuya devolución se solicita por valor de {{iva_solicitado}}, (valor aproximado como lo establece el artículo 577 del Estatuto Tributario), correspondiente a la factura {{#si hay_radicado_upme}}**No. {{numero_factura}}** y al Certificado UPME **No. {{numero_caso_upme}},**{{sino}}**No. {{numero_factura}},**{{/si}} no ha sido tratado{{#si dos_titulares}} por ninguno de los propietarios{{/si}} como mayor valor del costo del bien, ni como deducción en renta, ni como impuesto descontable en IVA, en ninguna declaración tributaria.
+**CUARTO.** Que el IVA cuya devolución se solicita por valor de {{iva_solicitado}}, correspondiente a la factura {{#si hay_radicado_upme}}**No. {{numero_factura}}** y al Certificado UPME **No. {{numero_caso_upme}},**{{sino}}**No. {{numero_factura}},**{{/si}} no ha sido tratado{{#si dos_titulares}} por ninguno de los propietarios{{/si}} como mayor valor del costo del bien, ni como deducción en renta, ni como impuesto descontable en IVA, en ninguna declaración tributaria.
 
 {{#si dos_titulares}}
 **QUINTO.** Que **{{nombre_solicitante_2}},** {{frase_identificado}} con cédula de ciudadanía No. **{{numero_identificacion_2}},** autoriza expresamente a **{{nombre_solicitante}},** {{frase_identificado}} con cédula de ciudadanía No. **{{numero_identificacion}},** para presentar y adelantar ante la DIAN la solicitud de devolución del IVA pagado en la adquisición del vehículo descrito en la presente declaración, de conformidad con la autorización suscrita por ambos propietarios que se adjunta a la solicitud.

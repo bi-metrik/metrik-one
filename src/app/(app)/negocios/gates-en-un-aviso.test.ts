@@ -148,11 +148,21 @@ describe('los gates de la etapa salen en un solo aviso', () => {
     expect(nombres(r)).toEqual(['No se pudo leer el saldo', FALTA_CIERRE])
   })
 
-  it('el override con motivo sigue saltando todas esas familias', async () => {
+  it('el override con motivo sigue saltando las familias de plata', async () => {
+    sembrar(['saldo_cero'])
     const r = await cambiarEtapaNegocioConGate(NEG, E9, 'el cliente pagó en efectivo, ya lo confirmé')
     expect(r.error).toBeNull()
     expect(r.bloquesPendientes).toBeUndefined()
     expect(moverEtapa).toHaveBeenCalled()
+  })
+
+  // H-35 (QA G11, 2026-10-30): ningún avance, tampoco el que omite con motivo, se salta la
+  // confirmación del margen. La línea viaja con `omitible: false` y la pantalla no ofrece «Omitir».
+  it('el override no salta la confirmación del cierre', async () => {
+    const r = await cambiarEtapaNegocioConGate(NEG, E9, 'el cliente pagó en efectivo, ya lo confirmé')
+    expect(r.error).toBe('gate_bloqueado')
+    expect(r.bloquesPendientes).toEqual([{ nombre: FALTA_CIERRE, es_gate: true, omitible: false }])
+    expect(moverEtapa).not.toHaveBeenCalled()
   })
 
   it('cotizacion_requerida se suma a las demás líneas cuando la etapa lo declara', async () => {

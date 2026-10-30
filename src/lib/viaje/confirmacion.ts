@@ -12,6 +12,7 @@
 import { describirOcupacion, type Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { fechaCorta, pesos, type CuotaPlan } from './plan-pagos'
 import { CONDICION_VISA_EN_TRAMITE_TU, TITULO_CONDICION_VISA } from './condicion-visa'
+import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 
 // ── Titular de facturación (Vera C4, P3; Max §3.3) ───────────────────────────
 
@@ -323,6 +324,29 @@ export function gatesConfirmacionPendientes(
   if (pide('plan_pagos_acordado') && !estado.planVigente) out.push(mensajes.plan_pagos_acordado ?? MENSAJES_GATE_CONFIRMACION.plan_pagos_acordado)
   if (pide('anticipo_con_soporte') && !estado.anticipoConSoporte) out.push(mensajes.anticipo_con_soporte ?? MENSAJES_GATE_CONFIRMACION.anticipo_con_soporte)
   return out
+}
+
+/**
+ * ¿Lo pagado con soporte ya cubre la cuota del anticipo del plan acordado? (QA G11, 2026-10-30)
+ *
+ * El gate `anticipo_con_soporte` se cumple con cualquier pago con comprobante (la regla de Edgar:
+ * «sin dinero, así sea 1.000 pesos, no me muevo»), y eso sigue igual para quien avanza A MANO. Pero
+ * el avance AUTOMÁTICO tras registrar el pago no puede anunciar «pagó el anticipo» con la pantalla
+ * diciendo «Cuota 1 · anticipo: queda faltando $1.700.000»: con $1,5 M de $3,2 M el negocio pasó
+ * solo a Reservas y pagos y operaciones recibió el aviso de reservar. Pasa solo con la cuota del
+ * anticipo cubierta (dentro del piso de materialidad); sin plan acordado, como antes.
+ */
+export function anticipoDelPlanCubierto(
+  cuotas: ReadonlyArray<{ numero: number; monto: number }> | null | undefined,
+  cobros: ReadonlyArray<{ fecha: string | null; soporte: unknown; cuenta_recaudo?: string | null; monto?: number | null }>,
+  tolerancia = TOLERANCIA_SALDO_COP,
+): { cubierto: boolean; falta: number } {
+  const lista = [...(cuotas ?? [])].sort((a, b) => a.numero - b.numero)
+  const anticipo = Math.round(Number(lista[0]?.monto ?? 0))
+  if (!(anticipo > 0)) return { cubierto: true, falta: 0 }
+  const pagado = cobros.filter(esAnticipoConSoporte).reduce((a, c) => a + Math.round(Number(c.monto ?? 0)), 0)
+  const falta = Math.max(0, anticipo - pagado)
+  return { cubierto: falta <= tolerancia, falta }
 }
 
 /** ¿El cobro sirve como anticipo con soporte? Pago confirmado (con fecha), comprobante y cuenta. */

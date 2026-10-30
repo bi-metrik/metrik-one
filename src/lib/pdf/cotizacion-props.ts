@@ -12,6 +12,7 @@
 
 import type {
   CargoEnDestinoPDF,
+  PagoEnDestinoPDF,
   HotelPDF,
   NivelDetalle,
   VueloPDF,
@@ -150,6 +151,11 @@ export interface ViajePDF {
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]
+  /**
+   * V-13 (QA del 2026-10-29, ronda 3): lo que el viajero paga en destino y no es un cargo del
+   * hotel (el ingreso a un parque). Sale en «No incluido» como «Se paga en destino». Ausente = nada.
+   */
+  pagosEnDestino?: PagoEnDestinoPDF[]
   nivelDetalle: NivelDetalle
   /**
    * El pie de marca que va en todas las páginas y la firma del documento.

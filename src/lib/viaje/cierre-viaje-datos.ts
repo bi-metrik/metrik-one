@@ -14,16 +14,19 @@ import { todayBogotaISO } from '@/lib/dates/bogota'
 import { ivaSobreIngresoPropio, leerConfigIvaCotizacion } from '@/lib/fiscal/iva-cotizacion'
 import { ivaDeLaCotizacion } from '@/lib/fiscal/iva-cotizacion-datos'
 import { cobrosDelNegocio, leerNegocioConLinea } from './confirmacion-datos'
+import { enlaceWhatsApp } from './confirmacion'
 import {
   GATE_MARGEN_CONFIRMADO,
   GATE_POSTVENTA,
   calcularCierre,
   configCierreViaje,
   configEtapasPorFecha,
+  decisionSaldoVigente,
   faltaParaCerrar,
   faltaPostventa,
   leerCierreGuardado,
   leerPostventa,
+  mensajeSaldoAFavor,
   textoEnViaje,
   type Cierre,
   type CierreGuardado,
@@ -124,7 +127,7 @@ export async function calcularCierreDelNegocio(db: Db, workspaceId: string, base
     cobrosDelNegocio(db, workspaceId, negocioId),
     ivaDeLaVenta(db, workspaceId, negocioId),
   ])
-  return calcularCierre({
+  const entrada = {
     precioAprobado: Number(base.negocio.precio_aprobado ?? 0),
     cobrado: cobradoConfirmado(cobros),
     iva,
@@ -132,7 +135,15 @@ export async function calcularCierreDelNegocio(db: Db, workspaceId: string, base
     recargo: 0,
     servicios,
     gastos,
-  })
+  }
+  const cierre = calcularCierre(entrada)
+  // H-28 · solo una decisión VIGENTE (tomada sobre este mismo saldo) cambia el margen, y solo
+  // «retener» lo cambia: el saldo a favor no depende de la decisión, así que se mide primero.
+  const guardado = leerCierreGuardado(base.negocio.metadata)
+  if (guardado.saldo_a_favor?.decision === 'retener' && decisionSaldoVigente(cierre, guardado)) {
+    return calcularCierre({ ...entrada, decisionSaldo: 'retener' })
+  }
+  return cierre
 }
 
 async function etapaActual(db: Db, etapaId: string | null): Promise<{ numero: number | null; gates: string[] }> {
@@ -163,6 +174,12 @@ export interface VistaViajeFinal {
    * (`lib/cobros/saldo-cero.ts`): «Saldo pendiente: $X». `null` si está cubierto. Solo en Cierre.
    */
   saldoPendiente: string | null
+  /**
+   * H-28 · el aviso al cliente de su saldo a favor, con la decisión ya tomada (devolver o abonar):
+   * el texto y el enlace de WhatsApp con el número del cliente. `null` sin saldo, sin decisión
+   * vigente o si se retuvo.
+   */
+  avisoSaldo: { texto: string; waUrl: string } | null
 }
 
 /** `null` con el interruptor apagado o fuera de las etapas 7-9 de la línea. */
@@ -207,7 +224,15 @@ export async function leerVistaViajeFinal(db: Db, workspaceId: string, negocioId
     faltaPostventa: faltaPostventa(postventa),
     servicios: cierre.filas.map(f => ({ id: f.id, nombre: f.nombre })),
     saldoPendiente,
+    avisoSaldo: avisoDelSaldo(cierre, guardado, nombre, contacto?.telefono ?? null),
   }
+}
+
+function avisoDelSaldo(cierre: Cierre, guardado: CierreGuardado, nombre: string, telefono: string | null): VistaViajeFinal['avisoSaldo'] {
+  const d = guardado.saldo_a_favor
+  if (!d || cierre.saldoAFavor <= 0 || !decisionSaldoVigente(cierre, guardado)) return null
+  const texto = mensajeSaldoAFavor({ nombreCliente: nombre, monto: cierre.saldoAFavor, decision: d.decision, sacados: cierre.sacados })
+  return texto ? { texto, waUrl: enlaceWhatsApp(telefono, texto) } : null
 }
 
 /** Gate `margen_confirmado` (etapa de Cierre económico). Opt-in por etapa; apagado no frena. */

@@ -764,6 +764,34 @@ describe('riel de cobro: registrar el pago del viajero (F2-5, F2-8)', () => {
   })
 })
 
+/**
+ * QA G11 (2026-10-30, bitácora del bloqueo): con un anticipo de $1,5 M sobre $3,2 M el negocio pasó
+ * solo de Seguimiento a Reservas y pagos; en la actividad Confirmación no aparecía. VISTO FALLAR
+ * sobre main: el pago parcial movía a e5 y la confirmación no dejaba rastro de su paso de etapa.
+ */
+describe('el avance solo no se salta Confirmación (QA G11)', () => {
+  beforeEach(confirmado)
+
+  it('el paso a Confirmación queda en la actividad', () => {
+    expect(tablas.activity_log.some((a) => a.tipo === 'cambio_etapa' && a.valor_anterior === 'Seguimiento' && a.valor_nuevo === 'Confirmación')).toBe(true)
+  })
+
+  it('con el anticipo a medias el negocio sigue en Confirmación y operaciones no recibe «ya puedes reservar»', async () => {
+    const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
+    const r = await registrarPagoViajero(pagoEntrada({ monto: anticipo - 500_000 }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avanzo).toBeNull()
+    expect(r.textoAvance).toBe(`Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`)
+    expect(neg().etapa_actual_id).toBe('e4')
+    expect(tablas.notificaciones.some((n) => n.tipo === 'handoff')).toBe(false)
+    // Con el resto del anticipo, pasa solo.
+    const r2 = await registrarPagoViajero(pagoEntrada({ monto: 500_000, referencia: 'M4471099' }))
+    expect(r2.ok && r2.avanzo).toBe('Reservas y pagos')
+    expect(neg().etapa_actual_id).toBe('e5')
+  })
+})
+
 describe('riel de cobro: recibo de caja (F2-6, C7)', () => {
   beforeEach(confirmado)
 

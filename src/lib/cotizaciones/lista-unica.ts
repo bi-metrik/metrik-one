@@ -20,6 +20,7 @@ import { esRecomendada, motivoSinRecomendada, type TarifaParaRegla } from './tar
 import { ranurasConAlternativas, type ItemConGrupo } from './itinerarios'
 import { motivoPaquetesIncompletos, type PaqueteIncompleto } from './bloqueo-incompleto'
 import { motivoPublicasSinComision, type PublicaSinComision } from './comision-publica'
+import { textoSinMandar } from './tarifas-al-cliente'
 
 export type DestinoDeIr =
   /** `campo`: además de abrir la opción, pone el foco en esa casilla (QA del #1342: la comisión). */
@@ -95,6 +96,13 @@ export interface EntradaDeLista {
    * se manda (`opcionesFueraDeLaPropuesta`), con su nombre. Ausente = ninguna.
    */
   fueraDeLaPropuesta?: readonly (OpcionFuera & { nombre: string })[]
+  /**
+   * N-17 (QA del 2026-10-29, ronda 3) · las tarifas con nombre que no se mandan al cliente
+   * (`tarifasSinMandar`), y las que van fuera del orden de precios (`avisosDeOrdenDeTarifas`).
+   * Ausente = ninguna.
+   */
+  tarifasSinMandar?: readonly string[]
+  ordenDeTarifas?: readonly { nombre: string; texto: string }[]
 }
 
 /** Una opción de vuelo u hotel que no sale en la propuesta, y dónde ponerla de un toque. */
@@ -212,5 +220,7 @@ export function listaUnica(e: EntradaDeLista): ListaUnica {
         : { a: 'tarifas' },
     })
   }
+  for (const n of e.tarifasSinMandar ?? []) revisar.push({ clave: `sin-mandar:${n}`, texto: textoSinMandar(n), ir: { a: 'tarifas' } })
+  for (const o of e.ordenDeTarifas ?? []) revisar.push({ clave: `orden:${o.nombre}`, texto: o.texto, ir: { a: 'tarifas' } })
   return { impide, revisar }
 }
