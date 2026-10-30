@@ -1,6 +1,16 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
+
 import type { EstadoDePaso, NumeroDePaso } from '@/lib/cotizaciones/por-pasos-vista'
+
+/**
+ * El alto de la barra, en una variable CSS de la vista (QA del #1359, punto 4): lo que se pega arriba
+ * debajo de ella (las pestañas de Tarifas) usa `top: var(--alto-barra-pasos)`. Con un «Sigue:» largo o
+ * en celular la barra crece; con el alto fijo de antes (118 px) tapaba las pestañas y un clic caía en
+ * la tarifa equivocada.
+ */
+export const VARIABLE_ALTO_BARRA = '--alto-barra-pasos'
 
 /**
  * La barra de los tres pasos (diseño, sección 1): siempre a la vista, dice dónde estoy (el paso
@@ -34,8 +44,21 @@ export function BarraPasos({
   onPaso: (n: NumeroDePaso) => void
   onSigue: () => void
 }) {
+  const barra = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const el = barra.current
+    const vista = el?.parentElement
+    if (!el || !vista) return
+    const medir = () => vista.style.setProperty(VARIABLE_ALTO_BARRA, `${Math.ceil(el.getBoundingClientRect().height)}px`)
+    medir()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(medir)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   return (
     <nav
+      ref={barra}
       aria-label="Pasos de la cotización"
       data-barra-pasos
       className="sticky top-0 z-20 rounded-[14px] border border-[#E2DED5] bg-white p-2 shadow-[0_1px_2px_rgba(25,23,19,.06),0_4px_14px_rgba(25,23,19,.05)]"

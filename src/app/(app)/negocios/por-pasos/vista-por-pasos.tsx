@@ -1,6 +1,7 @@
 'use client'
 
 import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { eleccionOptimista } from '@/lib/cotizaciones/tarifas-por-pasos'
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
@@ -334,13 +335,34 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const elegir = (tarifaId: string, grupo: string, itemId: string) => {
     const t = p.tarifasDelServidor.find(x => x.id === tarifaId)
     const candidatas = candidatasPorServicio.get(grupo) ?? []
-    const base = overrides[tarifaId]?.seleccion ?? t?.seleccion ?? []
-    setOverrides(o => ({ ...o, [tarifaId]: { ...o[tarifaId], seleccion: [...base.filter(id => !candidatas.includes(id)), itemId] } }))
+    // QA del #1359 (defecto 7) · en un bloqueo, la tarifa que pierde el paquete también cambia en el
+    // acto (toma el que quedó libre): antes mostraba un momento el precio del paquete que ya no era suyo.
+    const cambios = eleccionOptimista({
+      items: lineas,
+      tarifas: tarifasPantalla,
+      tarifaId,
+      candidatas,
+      itemId,
+      esPaquete: ranuraDeGrupo(grupo)?.slug === 'paquete_detalle',
+    })
+    const previos = Object.fromEntries(Object.keys(cambios).map(id => [id, overrides[id]]))
+    setOverrides(o => {
+      const n = { ...o }
+      for (const [id, c] of Object.entries(cambios)) {
+        const pintada = tarifasPantalla.find(x => x.id === id)
+        n[id] = { ...o[id], seleccion: c.seleccion, ...(pintada && pintada.vaEnPropuesta !== c.va ? { va: c.va } : {}) }
+      }
+      return n
+    })
     void correr(async () => {
       const r = await elegirOpcionEnTarifa(tarifaId, grupo, itemId)
       if (!r.success) {
         toast.error(r.error)
-        setOverrides(o => { const n = { ...o }; delete n[tarifaId]; return n })
+        setOverrides(o => {
+          const n = { ...o }
+          for (const [id, antes] of Object.entries(previos)) { if (antes) n[id] = antes; else delete n[id] }
+          return n
+        })
         return
       }
       const servicio = servicios.find(s => s.grupo === grupo)?.nombre ?? 'El servicio'

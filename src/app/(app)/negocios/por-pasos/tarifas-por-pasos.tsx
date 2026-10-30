@@ -51,6 +51,10 @@ export interface AutorizacionVista {
   disponible: boolean
 }
 
+/** «Recomendada, Opción 2 y Opción 3». */
+const listaDeNombres = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`)
+const cuantas = (n: number) => ['cero', 'una', 'dos', 'tres', 'cuatro', 'cinco'][n] ?? String(n)
+
 const pct = (v: number | null) => (v === null ? '—' : `${String(Math.round(v * 10) / 10).replace('.', ',')} %`)
 
 export function TarifasPorPasos({
@@ -643,13 +647,24 @@ export function TarifasPorPasos({
           <p className="m-0 text-lg font-bold">{pregunta}</p>
           <p className="m-0 text-[13px] text-[#6E6A62]">
             {visibles.length > 1
-              ? 'El cliente recibe hasta tres maneras de hacer el mismo viaje: Económica, Recomendada y Premium. Escoge, para cada una, cuál opción va. La Recomendada es el total de la cotización.'
+              // QA del #1359 · los mismos nombres que las pestañas: en un bloqueo, «Opción 2», «Opción 3».
+              ? conPaquete
+                ? `El cliente recibe una manera de hacer el viaje por cada paquete que va: ${listaDeNombres(visibles.map(t => t.nombre ?? 'Tarifa'))}. Escoge, para cada una, qué paquete va. La Recomendada es el total de la cotización.`
+                : `El cliente recibe hasta ${cuantas(visibles.length)} maneras de hacer el mismo viaje: ${listaDeNombres(visibles.map(t => t.nombre ?? 'Tarifa'))}. Escoge, para cada una, cuál opción va. La Recomendada es el total de la cotización.`
               : `Una sola tarifa: la Recomendada. Vuelos y hoteles tienen una sola manera; las opciones son solo de ${servicios.map(s => s.nombre).join(' y ')}. Escoge aquí cuál va: no se crean Económica ni Premium, y el PDF conserva el «Día a día».`}
           </p>
         </>
       )}
       {visibles.length > 0 && (
-        <div role="tablist" aria-label="Tarifas" className="sticky top-[118px] z-10 flex gap-1.5 overflow-x-auto bg-[#F3F1EC] pb-0.5">
+        <div
+          role="tablist"
+          aria-label="Tarifas"
+          // QA del #1359 · debajo de la barra «Sigue», con su alto real (`barra-pasos.tsx`), y con un
+          // margen: antes un alto fijo la dejaba encima de las pestañas.
+          style={{ top: 'calc(var(--alto-barra-pasos, 118px) + 8px)', scrollMarginTop: 'calc(var(--alto-barra-pasos, 118px) + 8px)' }}
+          className="sticky z-10 flex gap-1.5 overflow-x-auto bg-[#F3F1EC] py-0.5"
+          data-pestanas-tarifas
+        >
           {visibles.map(t => (
             <button
               key={t.id}

@@ -532,6 +532,38 @@ export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: reado
   return plan
 }
 
+/**
+ * Lo que la PANTALLA pinta en el acto al escoger una opción en una tarifa (QA del #1359, defecto 7):
+ * la tarifa con su opción nueva y, en un viaje en bloqueo, también la tarifa que pierde ese paquete
+ * (toma el que quedó libre, con su marca), igual que hará el servidor con `planDeTarifasDeBloqueo`.
+ * Sin esto, la otra pestaña mostraba un momento el paquete (y el precio) que ya era de la Recomendada.
+ * Devuelve la selección y la marca de cada tarifa que cambia.
+ */
+export function eleccionOptimista(args: {
+  items: EstadoDeTarifas['items']
+  tarifas: TarifaDelPlan[]
+  tarifaId: string
+  candidatas: readonly string[]
+  itemId: string
+  esPaquete: boolean
+}): Record<string, { seleccion: string[]; va: boolean }> {
+  const t = args.tarifas.find(x => x.id === args.tarifaId)
+  if (!t) return {}
+  const seleccion = [...t.seleccion.filter(id => !args.candidatas.includes(id)), args.itemId]
+  if (!args.esPaquete) return { [t.id]: { seleccion, va: t.vaEnPropuesta } }
+  const antes: EstadoDeTarifas = { items: args.items, tarifas: args.tarifas }
+  const despues: EstadoDeTarifas = { items: args.items, tarifas: args.tarifas.map(x => (x.id === t.id ? { ...x, seleccion } : x)) }
+  const final = aplicarPlan(despues.tarifas, planDeTarifasDeBloqueo(despues, args.candidatas, antes), () => '')
+  const salida: Record<string, { seleccion: string[]; va: boolean }> = {}
+  for (const x of final) {
+    const previa = args.tarifas.find(y => y.id === x.id)
+    if (!previa) continue
+    const misma = previa.vaEnPropuesta === x.vaEnPropuesta && previa.seleccion.length === x.seleccion.length && previa.seleccion.every(id => x.seleccion.includes(id))
+    if (!misma) salida[x.id] = { seleccion: x.seleccion, va: x.vaEnPropuesta }
+  }
+  return salida
+}
+
 /** Aplica el plan en memoria (para la prueba de propiedad y para la pantalla). */
 export function aplicarPlan(tarifas: TarifaDelPlan[], plan: PlanDeTarifas, nuevoId: (n: TarifaNueva) => string): TarifaDelPlan[] {
   const salida = tarifas.map(t => ({ ...t, seleccion: [...t.seleccion] }))
