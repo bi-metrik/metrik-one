@@ -35,6 +35,12 @@ export interface DatosAvisoEnlace {
    * correo lo dice: sin eso, quien tiene cobro automático lee un «ya puedes pagar» y cree que ya pagó.
    */
   tarjetaRechazada?: boolean
+  /**
+   * Un CDA con el pago automático (Términos v1.5, 2.4): la tarjeta (sus 4 últimos), el reintento del día 3
+   * si todavía no llegó y desde cuándo se pausan las consultas nuevas (`fechasDelFallo`). Solo con
+   * `tarjetaRechazada`.
+   */
+  tarjetaCda?: { ultimos4: string | null; reintento: string | null; pausaDesde: string } | null
 }
 
 /** «Suscripción VALIDA · Plan CDA — … · periodo del ...» → «Suscripción VALIDA · Plan CDA — …». */
@@ -71,6 +77,9 @@ function fechaBogota(iso: string): string | null {
 
 export function asuntoAvisoEnlace(d: DatosAvisoEnlace): string {
   const fecha = formatFechaLetras(d.fechaVencimiento)
+  if (d.tarjetaRechazada && d.tarjetaCda?.ultimos4) {
+    return `No pudimos cobrar tu cuota a la tarjeta terminada en ${d.tarjetaCda.ultimos4}: puedes pagarla en línea`
+  }
   if (d.tarjetaRechazada) return `No pudimos cobrar tu cuota con MéTRIK a la tarjeta: puedes pagarla en línea`
   return d.fechaVencimiento < d.hoy
     ? `Tu cuota con MéTRIK está pendiente: ya puedes pagarla en línea`
@@ -92,7 +101,16 @@ function renglones(d: DatosAvisoEnlace): Renglon[] {
   return filas
 }
 
-function parrafos(d: DatosAvisoEnlace): { saludo: string; intro: string; cierre: string[] } {
+/** El párrafo de un CDA tras el rechazo: el reintento (si queda) y la fecha de la pausa de las consultas nuevas. */
+function siguientesPasosCda(d: DatosAvisoEnlace): string | null {
+  if (!d.tarjetaRechazada || !d.tarjetaCda) return null
+  const partes: string[] = []
+  if (d.tarjetaCda.reintento) partes.push(`Reintentamos el cobro a tu tarjeta el ${formatFechaLetras(d.tarjetaCda.reintento)}.`)
+  partes.push(`Si no se paga, las consultas nuevas se pausan desde el ${formatFechaLetras(d.tarjetaCda.pausaDesde)}.`)
+  return partes.join(' ')
+}
+
+function parrafos(d: DatosAvisoEnlace): { saludo: string; intro: string; siguientes: string | null; cierre: string[] } {
   const nombre = primerNombre(d.nombre)
   const vencida = d.fechaVencimiento < d.hoy
   const expira = d.enlaceExpira ? fechaBogota(d.enlaceExpira) : null
@@ -103,11 +121,14 @@ function parrafos(d: DatosAvisoEnlace): { saludo: string; intro: string; cierre:
   cierre.push('Si ya hiciste este pago, no tienes que hacer nada.')
   return {
     saludo: nombre ? `Hola, ${nombre}.` : 'Hola.',
-    intro: d.tarjetaRechazada
+    intro: d.tarjetaRechazada && d.tarjetaCda
+      ? `No pudimos cobrar la cuota ${d.numeroCuota} de ${d.espacioNombre} a ${d.tarjetaCda.ultimos4 ? `tu tarjeta terminada en ${d.tarjetaCda.ultimos4}` : 'la tarjeta que registraste'}. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
+      : d.tarjetaRechazada
       ? `No pudimos cobrar la cuota ${d.numeroCuota} de ${d.espacioNombre} a la tarjeta que registraste en ePayco: la tarjeta rechazó el cobro. Puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
       : vencida
       ? `La cuota ${d.numeroCuota} de ${d.espacioNombre} sigue pendiente. Ya puedes pagarla en línea desde la sección Suscripción de MéTRIK ONE.`
       : `Ya puedes pagar en línea la cuota ${d.numeroCuota} de ${d.espacioNombre} desde la sección Suscripción de MéTRIK ONE.`,
+    siguientes: siguientesPasosCda(d),
     cierre,
   }
 }
@@ -121,6 +142,7 @@ export function textoAvisoEnlace(d: DatosAvisoEnlace): string {
     '',
     ...renglones(d).map((r) => `${r.etiqueta}: ${r.valor}`),
     '',
+    ...(p.siguientes ? [p.siguientes, ''] : []),
     `Ver y pagar: ${d.urlSuscripcion}`,
     '',
     ...p.cierre,
@@ -154,6 +176,7 @@ export function htmlAvisoEnlace(d: DatosAvisoEnlace): string {
           <p style="margin:0 0 10px 0;">${escaparHtml(p.saludo)}</p>
           <p style="margin:0 0 14px 0;">${escaparHtml(p.intro)}</p>
           <table role="presentation" cellspacing="0" cellpadding="0" style="font-size:14px;margin:0 0 6px 0;">${filas}</table>
+          ${p.siguientes ? `<p style="margin:14px 0 0 0;">${escaparHtml(p.siguientes)}</p>` : ''}
           <p style="margin:18px 0 0 0;">
             <a href="${url}" style="display:inline-block;padding:11px 22px;background:${PALETA.acento};color:#FFFFFF;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;">Ver y pagar</a>
           </p>

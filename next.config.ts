@@ -1,5 +1,5 @@
 import type { NextConfig } from 'next'
-import { RUTA_REGISTRO_VALIDA, politicaRegistroValida } from './src/lib/valida-registro/csp'
+import { RUTA_REGISTRO_VALIDA, RUTA_TARJETA_CDA, politicaRegistroValida } from './src/lib/valida-registro/csp'
 
 const nextConfig: NextConfig = {
   // Skew Protection: sella cada peticion con el id del deployment que la
@@ -45,6 +45,20 @@ const nextConfig: NextConfig = {
             value: politicaRegistroValida(
               process.env.NEXT_PUBLIC_SUPABASE_URL,
               process.env.NODE_ENV === 'development',
+            ),
+          },
+        ],
+      },
+      {
+        // El pago automático de un CDA (Términos v1.5, 2.4): la misma política, dentro del espacio.
+        source: RUTA_TARJETA_CDA,
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: politicaRegistroValida(
+              process.env.NEXT_PUBLIC_SUPABASE_URL,
+              process.env.NODE_ENV === 'development',
+              true,
             ),
           },
         ],
