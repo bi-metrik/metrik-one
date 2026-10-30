@@ -18,7 +18,7 @@ const normal = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/
 
 /** Lo que el modelo suele agregar al armar la dirección y no cambia a dónde se entrega. */
 const RELLENO = new Set([
-  'barrio', 'bogota', 'colombia', 'cundinamarca', 'ciudad', 'localidad', 'urbana', 'dc', 'direccion', 'entrega', 'referencia',
+  'barrio', 'numero', 'bogota', 'colombia', 'cundinamarca', 'ciudad', 'localidad', 'urbana', 'dc', 'direccion', 'entrega', 'referencia',
   'cerca', 'frente', 'junto', 'al', 'la', 'el', 'los', 'las', 'de', 'del', 'en', 'y', 'con', 'por',
 ]);
 
