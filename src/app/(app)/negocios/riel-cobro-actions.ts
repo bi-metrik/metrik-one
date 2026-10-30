@@ -32,8 +32,8 @@ import {
   type LecturaComprobante,
 } from '@/lib/viaje/riel-cobro'
 import { cuentasDelNegocio, emitirReciboViaje, leerVistaRiel } from '@/lib/viaje/riel-cobro-datos'
-import { etapaDeConfirmacion, evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
-import { enlaceWhatsApp } from '@/lib/viaje/confirmacion'
+import { cobrosDelNegocio, etapaDeConfirmacion, evaluarGatesConfirmacion, planAcordado } from '@/lib/viaje/confirmacion-datos'
+import { anticipoDelPlanCubierto, enlaceWhatsApp } from '@/lib/viaje/confirmacion'
 import { enviarCorreoAlViajero } from '@/lib/viaje/correo-viajero'
 import { cambiarEtapaNegocioConGate, recalcularNegocioPorCambioDeRecaudo } from './negocio-v2-actions'
 
@@ -177,7 +177,7 @@ export async function registrarPagoViajero(input: EntradaPagoViajero, intencion?
 
 type Ctx = Extract<Awaited<ReturnType<typeof contextoViaje>>, { ok: true }>['ctx']
 
-async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa: string; texto: string } | null> {
+async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa: string | null; texto: string } | null> {
   if (!ctx.negocio.linea_id) return null
   const { data: etapasRaw } = await ctx.supabase
     .from('etapas_negocio')
@@ -198,6 +198,19 @@ async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa:
   if (pendientes.length > 0) return null
   const siguiente = etapas.find((e) => e.orden > conf.orden)
   if (!siguiente) return null
+  // QA G11: el avance SOLO pasa con la cuota del anticipo cubierta; a mano, la etapa sigue dejando
+  // pasar con cualquier pago con soporte (el gate no cambia).
+  const [acordado, cobros] = await Promise.all([
+    planAcordado(ctx.supabase, ctx.negocio.id),
+    cobrosDelNegocio(ctx.supabase, ctx.workspaceId, ctx.negocio.id),
+  ])
+  const anticipo = anticipoDelPlanCubierto(acordado?.cuotas, cobros)
+  if (!anticipo.cubierto) {
+    return {
+      etapa: null,
+      texto: `Faltan ${pesos(anticipo.falta)} del anticipo: el negocio sigue en ${conf.nombre}. Pasa solo a ${siguiente.nombre} con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`,
+    }
+  }
   const mov = await cambiarEtapaNegocioConGate(ctx.negocio.id, siguiente.id)
   if (mov.error) {
     console.warn('[registrarPagoViajero] el anticipo entró pero la etapa no pasó:', mov.error)

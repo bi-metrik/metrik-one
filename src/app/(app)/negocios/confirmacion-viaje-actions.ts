@@ -477,6 +477,21 @@ async function confirmarClienteViajeSinClave(input: EntradaConfirmacion): Promis
     if (destino && actual && actual.orden < destino.orden) {
       const mov = await cambiarEtapaNegocio(input.negocioId, destino.id)
       if (mov.error) console.error('[confirmarClienteViaje] la confirmación quedó, pero el negocio no pasó de etapa:', mov.error)
+      // QA G11 (2026-10-30): este paso no dejaba rastro, y con el anticipo registrado enseguida la
+      // actividad leía «avanzó a Seguimiento» → «avanzó a Reservas y pagos»: Confirmación no se veía.
+      else {
+        await registrarActividad(ctx.supabase, {
+          workspace_id: ctx.workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: input.negocioId,
+          tipo: 'cambio_etapa',
+          autor_id: ctx.staffId,
+          campo_modificado: 'etapa',
+          valor_anterior: actual.nombre,
+          valor_nuevo: destino.nombre,
+          contenido: 'El cliente confirmó',
+        }, 'confirmarClienteViaje')
+      }
     }
   }
 

@@ -97,6 +97,7 @@ import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from 
 import { anticipoEsperado, estadoAnticipo, notaAnticipoCubierto, type EstadoAnticipo } from '@/lib/negocios/anticipo-cubierto'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
+import { fechaDeCierreDeVenta } from '@/lib/negocios/fecha-cierre-venta'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
   sumarRecaudoConfirmado,
@@ -432,7 +433,8 @@ export type NegocioDetalle = {
    */
   campanas_contacto?: ResumenCampanas | null
   /**
-   * Día en que el negocio se volvió VENTA = el del primer cobro imputado.
+   * Día en que el negocio se volvió VENTA = el del primer cobro imputado (en viajes, el de la
+   * confirmación del cliente: `lib/negocios/fecha-cierre-venta.ts`, QA G11).
    * Sale tal cual de `v_venta_mes_comercial.fecha_venta`, la definición canónica
    * que ya fecha la venta en `/numeros`, `/equipo`, `lib/negocios/cartera` y
    * `lib/epayco/fecha-transaccion`. Columna `date`, no instante.
@@ -1402,7 +1404,8 @@ async function getNegocioDetalle(id: string): Promise<{
     ...negocioRaw,
     responsables: responsablesConAsignacion,
     campanas_contacto: campanasContacto,
-    fecha_venta: fechaVenta,
+    // En viajes, la de la confirmación del cliente (QA G11): ver `fecha-cierre-venta.ts`.
+    fecha_venta: fechaDeCierreDeVenta(fechaVenta, negocioMetadata),
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
