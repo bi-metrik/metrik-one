@@ -57,19 +57,36 @@ export const CLAVES_VENTA_CONSULTIVA = ['alc.producto', 'inv.urgencia', 'inv.tre
  * Idempotente: correrlo dos veces no publica dos veces. Archivo: `sql/dimpro/2026-10-29_reglamento-ventas-consultiva.sql`.
  * Uso: deno run supabase/functions/_shared/agente/publico/ventas/semilla-sql-dimpro.ts --consultiva > sql/dimpro/2026-10-29_reglamento-ventas-consultiva.sql
  */
-export function actualizacionSqlDimpro(claves: string[] = CLAVES_VENTA_CONSULTIVA, fichas: Ficha[] = REGLAMENTO_DIMPRO): string {
+/** Ronda 2 (Mauricio probó en Messenger el 29-oct: «tiene muchos errores»): saludo, una pregunta, relevancia, fotos y redacción. */
+export const CLAVES_RONDA_2 = ['alc.saludo', 'alc.producto', 'alc.foto', 'inv.ficha', 'est.breve'];
+
+/** El encabezado y la nota de publicación de cada actualización. */
+interface TextosActualizacion { titulo: string; uso: string; despues: string; nota: string }
+const TEXTOS_CONSULTIVA: TextosActualizacion = {
+  titulo: 'Venta consultiva del asistente de VENTAS de Dimpro (29-oct): una pregunta de uso, máximo 3 sugerencias con su razón y\n-- las fotos que manda el código.',
+  uso: 'semilla-sql-dimpro.ts --consultiva',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con el código de este cambio (ver_catalogo con `uso` y las fotos).',
+  nota: 'asistente de ventas Dimpro: venta consultiva y fotos (29-oct)',
+};
+export const TEXTOS_RONDA_2: TextosActualizacion = {
+  titulo: 'Ronda 2 del asistente de VENTAS de Dimpro (29-oct, prueba de Mauricio en Messenger): saludo sin suponer producto,\n-- una sola pregunta (de mano o magnético), solo lo que sirve para el uso, la foto que no hay y la razón sin muletilla.',
+  uso: 'semilla-sql-dimpro.ts --ronda2',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con el código de este cambio (ver_catalogo con la `pregunta`, el estado con las fotos).',
+  nota: 'asistente de ventas Dimpro: ronda 2 (saludo, una pregunta, relevancia, fotos) (29-oct)',
+};
+
+export function actualizacionSqlDimpro(claves: string[] = CLAVES_VENTA_CONSULTIVA, fichas: Ficha[] = REGLAMENTO_DIMPRO, t: TextosActualizacion = TEXTOS_CONSULTIVA): string {
   const elegidas = claves.map((c) => {
     const f = fichas.find((x) => x.clave === c);
     if (!f) throw new Error(`la ficha ${c} no está en el reglamento`);
     return f;
   });
-  return `-- Venta consultiva del asistente de VENTAS de Dimpro (29-oct): una pregunta de uso, máximo 3 sugerencias con su razón y
--- las fotos que manda el código. Pone al día en bot_parametros las fichas ${claves.join(', ')}
+  return `-- ${t.titulo} Pone al día en bot_parametros las fichas ${claves.join(', ')}
 -- y publica una versión nueva del reglamento SOLO si alguna cambió (idempotente).
 --
--- GENERADO desde supabase/functions/_shared/agente/publico/ventas/reglamento-dimpro.ts (semilla-sql-dimpro.ts --consultiva).
+-- GENERADO desde supabase/functions/_shared/agente/publico/ventas/reglamento-dimpro.ts (${t.uso}).
 -- No se edita a mano. NO es una migración: escribe DATOS del workspace dimpro. La corre la sesión principal con
--- service_role, DESPUÉS del deploy de chatwoot-agente con el código de este cambio (ver_catalogo con \`uso\` y las fotos).
+-- service_role, ${t.despues}
 
 do $$
 declare
@@ -105,7 +122,7 @@ ${filasFichas(elegidas).join(',\n')};
   v_cambios := v_cambios + v_n;
 
   if v_cambios > 0 then
-    perform public.bot_publicar_reglamento(v_ws, v_bot, 'asistente de ventas Dimpro: venta consultiva y fotos (29-oct)');
+    perform public.bot_publicar_reglamento(v_ws, v_bot, ${lit(t.nota)});
     raise notice 'fichas cambiadas: %; reglamento publicado', v_cambios;
   else
     raise notice 'sin cambios: no se publica';
@@ -115,4 +132,8 @@ $$;
 `;
 }
 
-if (import.meta.main) console.log((Deno.args.includes('--consultiva') ? actualizacionSqlDimpro() : semillaSqlDimpro()).trimEnd());
+if (import.meta.main) {
+  const sql = Deno.args.includes('--ronda2') ? actualizacionSqlDimpro(CLAVES_RONDA_2, REGLAMENTO_DIMPRO, TEXTOS_RONDA_2)
+    : Deno.args.includes('--consultiva') ? actualizacionSqlDimpro() : semillaSqlDimpro();
+  console.log(sql.trimEnd());
+}

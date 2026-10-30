@@ -9,11 +9,13 @@
 // ============================================================
 
 import { avisarPagoAprobado } from '../cola.ts';
+import { CORTES_VENTAS } from '../config.ts';
 import type { EscenarioPublico } from '../escenario.ts';
 import type { ProductoVenta } from '../ventas/catalogo-ventas.ts';
 import type { Veredicto } from './calificar.ts';
 import type { CasoPublico, PasoCaso } from './conjuntos.ts';
 import type { Paso } from '../../modelo-guionado.ts';
+import type { Modelo } from '../../tipos.ts';
 
 const ok = (motivo = 'ok'): Veredicto => ({ ok: true, motivo });
 const no = (motivo: string): Veredicto => ({ ok: false, motivo });
@@ -62,6 +64,17 @@ export const PRODUCTOS_CONSULTIVA: ProductoVenta[] = [
 ];
 const fotos = (e: EscenarioPublico) => e.chatwoot.fotos;
 const codigosPublicados = (e: EscenarioPublico) => [...new Set([...publico(e).matchAll(/MP-\d+/g)].map((m) => m[0]))];
+/** Los textos que publicó el bot (sin el aviso de demora), en orden. */
+const respuestas = (e: EscenarioPublico) => e.chatwoot.publicados.map((x) => x.salida.texto).filter((t) => !/tomando un poco más/.test(t));
+/** Ningún mensaje del bot trae dos preguntas. */
+const unaPregunta = (e: EscenarioPublico): Veredicto => {
+  const dos = respuestas(e).find((t) => (t.match(/\?/g) ?? []).length > 1);
+  return dos ? no(`dos preguntas en un mensaje: «${dos.slice(0, 120)}»`) : ok('una pregunta por mensaje');
+};
+const sinAvisoDemora = (e: EscenarioPublico): Veredicto => (publico(e).includes('tomando un poco más') ? no('salió el aviso de demora') : ok('sin aviso de demora'));
+const sinPromesaDeFoto = (e: EscenarioPublico): Veredicto => noContiene(e, /el sistema te (env[ií]a|manda)|si ya la recibiste/i);
+/** El modelo tarda `ms` en cada llamado (un turno normal de ventas, 7-13 s en Messenger). */
+const lento = (m: Modelo, ms: number): Modelo => ({ async llamar(p) { await new Promise((r) => setTimeout(r, ms)); return m.llamar(p); } });
 
 const R = (texto: string, tema = 'compra') => ({ name: 'responder', args: { tema, texto } });
 const VC = (args: Record<string, unknown>) => ({ name: 'ver_catalogo', args });
@@ -246,41 +259,104 @@ export const CASOS_VENTAS: CasoPublico[] = [
   },
   // ── Venta consultiva (Mauricio, 29-oct): pregunta de uso, máximo 3 sugerencias y fotos ──
   {
-    id: 'v-consultiva-pregunta-uso', conjunto: 'ventas', titulo: '«Quiero un taladro»: el catálogo no devuelve lista; pregunta el uso, sin productos ni fotos',
+    id: 'v-consultiva-pregunta-uso', conjunto: 'ventas', titulo: '«Quiero un taladro»: el catálogo no devuelve lista; UNA pregunta, por el tipo (de mano o magnético), sin productos ni fotos',
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: 'Hola, quiero un taladro' }],
-    guion: [VC({ buscar: 'taladro' }), R('¡Claro! ¿Para qué lo vas a usar: concreto, metal o madera? ¿Lo prefieres inalámbrico o de cable?', 'producto')],
+    guion: [VC({ buscar: 'taladro' }), R('¡Claro! ¿Lo buscas de mano o magnético, para perforar estructura metálica?', 'producto')],
     esperado: (e) => {
       const h = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((x) => x.nombre === 'ver_catalogo');
-      const d = h?.datos as { productos?: unknown[]; preguntar_uso?: boolean; tipos?: string[] } | undefined;
+      const d = h?.datos as { productos?: unknown[]; preguntar_uso?: boolean; tipos?: string[]; pregunta?: string } | undefined;
       return todos(
         d?.preguntar_uso === true && d.productos?.length === 0 ? ok('ver_catalogo pide preguntar el uso, sin productos') : no(`ver_catalogo devolvió ${JSON.stringify(d).slice(0, 120)}`),
         d?.tipos?.includes('Taladro magnético') ? ok('trae los tipos') : no('sin los tipos'),
+        /de mano o magnético/.test(d?.pregunta ?? '') ? ok('trae la pregunta por el tipo') : no(`pregunta: ${d?.pregunta}`),
         codigosPublicados(e).length === 0 ? ok('no listó productos') : no(`listó ${codigosPublicados(e).join(', ')}`),
-        fotos(e).length === 0 ? ok('sin fotos') : no('mandó fotos'), contiene(e, /para qué lo vas a usar/i), sinPersona(e),
+        fotos(e).length === 0 ? ok('sin fotos') : no('mandó fotos'), contiene(e, /de mano/i), unaPregunta(e), sinPersona(e),
       );
     },
   },
   {
-    id: 'v-consultiva-sugiere-con-fotos', conjunto: 'ventas', titulo: '«Taladro para metal, de cable»: máximo 3 sugerencias, sin el inalámbrico, con una foto por producto',
+    id: 'v-consultiva-metal-de-cable', conjunto: 'ventas', titulo: '«Para metal y de cable» (Messenger 29-oct): solo el de mano; ni magnéticos de $2 M ni relleno hasta 3',
     ventas: { productos: PRODUCTOS_CONSULTIVA },
-    pasos: [{ escribe: 'Necesito un taladro para metal, de cable' }],
+    pasos: [{ escribe: 'Hola, quiero un taladro' }, { escribe: 'Es para metal y prefiero cable' }],
     guion: [
-      VC({ buscar: 'taladro', uso: 'metal, de cable' }),
-      R('Te sirven estos:\nMP-13 Taladro magnético 28 mm, $1.900.000: se fija a la estructura metálica.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\nMP-12 Taladro 13 mm, $125.000: para trabajos livianos.\n¿Cuál te sirve más?', 'producto'),
+      VC({ buscar: 'taladro' }), R('¡Claro! ¿Lo buscas de mano o magnético, para perforar estructura metálica?', 'producto'),
+      VC({ buscar: 'taladro', uso: 'metal, de cable' }), R('Para metal y de cable te sirve este:\nMP-12 Taladro de 13 mm, $125.000: de mano, 550 W, para uso general.\n¿Te sirve?', 'producto'),
+    ],
+    esperado: (e) => {
+      const hs = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).filter((x) => x.nombre === 'ver_catalogo');
+      const cods = hs.flatMap((h) => ((h.datos as { productos?: Array<{ codigo: string }> } | undefined)?.productos ?? []).map((p) => p.codigo));
+      return todos(
+        !cods.some((c) => ['MP-13', 'MP-14', 'MP-15', 'MP-16'].includes(c)) ? ok(`catálogo: ${cods.join(', ') || '—'}`) : no(`el catálogo devolvió ${cods.join(', ')}`),
+        noContiene(e, /MP-1[3-6]/), contiene(e, 'MP-12'), unaPregunta(e),
+        // MP-12 no tiene foto: ninguna sale.
+        fotos(e).length === 0 ? ok('sin fotos') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
+      );
+    },
+  },
+  {
+    id: 'v-consultiva-sugiere-con-fotos', conjunto: 'ventas', titulo: '«Taladro para estructura metálica»: los magnéticos, máximo 3, con una foto por producto y la razón sin muletilla',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: 'Necesito un taladro para perforar estructura metálica' }],
+    guion: [
+      VC({ buscar: 'taladro', uso: 'estructura metálica' }),
+      R('Te sirven estos:\nMP-13 Taladro magnético 28 mm, $1.900.000: magnético, se fija a la estructura.\nMP-14 Taladro magnético 40 mm, $2.300.000: perfora más grueso.\nMP-15 Taladro magnético 32 mm, $2.100.000: intermedio.\n¿Cuál te sirve más?', 'producto'),
     ],
     esperado: (e) => {
       const h = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((x) => x.nombre === 'ver_catalogo');
       const cods = ((h?.datos as { productos?: Array<{ codigo: string }> } | undefined)?.productos ?? []).map((p) => p.codigo);
+      const muletilla = (publico(e).match(/según el catálogo del fabricante/gi) ?? []).length;
       return todos(
-        cods.length <= 3 && cods.length > 0 && !cods.includes('MP-11') ? ok(`catálogo: ${cods.join(', ')}`) : no(`catálogo devolvió ${cods.join(', ')}`),
+        cods.length > 0 && cods.every((c) => ['MP-13', 'MP-14', 'MP-15'].includes(c)) ? ok(`catálogo: ${cods.join(', ')}`) : no(`catálogo devolvió ${cods.join(', ')}`),
         codigosPublicados(e).length <= 3 ? ok('≤ 3 productos en la respuesta') : no(`${codigosPublicados(e).length} productos en la respuesta`),
-        // MP-12 no tiene foto: salen las de los otros dos, con su pie.
-        JSON.stringify(fotos(e).map((f) => f.texto.split(' ·')[0])) === '["MP-13","MP-14"]' ? ok('fotos de MP-13 y MP-14') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
+        fotos(e).length > 0 && fotos(e).length === codigosPublicados(e).length ? ok('una foto por producto nombrado') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
         fotos(e).every((f) => f.url.includes('/ferreteria-fotos/')) ? ok('URLs del catálogo') : no('una foto fuera del catálogo'),
-        contiene(e, '¿Cuál te sirve más?'),
+        muletilla <= 1 ? ok('«según el catálogo del fabricante» a lo sumo una vez') : no(`«según el catálogo del fabricante» ×${muletilla}`),
+        unaPregunta(e),
       );
     },
+  },
+  {
+    id: 'v-saludo-tras-pausa', conjunto: 'ventas', titulo: '«Hola» dos horas después de hablar de taladros (Messenger 29-oct): saluda y pregunta qué busca, sin suponer el producto',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: 'Hola', despuesMs: 2 * 3600 * 1000 }],
+    guion: [VC({ codigo: 'MP-12' }), R('El MP-12 Taladro de 13 mm vale $125.000. ¿Te sirve?', 'precio'), R('¡Hola! ¿Qué estás buscando hoy?', 'saludo')],
+    esperado: (e) => {
+      const ultimo = respuestas(e).at(-1) ?? '';
+      return todos(
+        !/de nuevo/i.test(ultimo) ? ok('no dice «de nuevo»') : no(`dijo: ${ultimo}`),
+        !/taladro|rotomartillo|MP-\d+|concreto|inal[aá]mbrico/i.test(ultimo) ? ok('no supone el producto') : no(`supuso el producto: ${ultimo}`),
+        (ultimo.match(/\?/g) ?? []).length === 1 ? ok('una pregunta') : no(`preguntas en «${ultimo}»`),
+      );
+    },
+  },
+  {
+    id: 'v-foto-no-hay', conjunto: 'ventas', titulo: '«¿Tienes foto?» de un producto sin foto: dice que no tiene; nunca «el sistema te envía»',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: 'Tienes foto?' }],
+    guion: [VC({ codigo: 'MP-12' }), R('El MP-12 Taladro de 13 mm vale $125.000. ¿Te sirve?', 'precio'), R('Del MP-12 no tengo foto por ahora. Es de mano, 550 W. ¿Te sirve?', 'producto')],
+    esperado: (e) => todos(fotos(e).length === 0 ? ok('sin fotos') : no('mandó foto'), contiene(e, /no tengo foto/i), sinPromesaDeFoto(e), sinPersona(e)),
+  },
+  {
+    id: 'v-foto-reenvia', conjunto: 'ventas', titulo: '«¿Tienes foto?» de un producto con foto ya enviada: la reenvía, aunque no vuelva a leer el catálogo',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: 'Tienes foto?' }],
+    guion: [VC({ codigo: 'MP-13' }), R('El MP-13 Taladro magnético de 28 mm vale $1.900.000. ¿Te sirve?', 'precio'), R('Claro, aquí está el MP-13.', 'producto')],
+    esperado: (e) => todos(
+      fotos(e).length === 2 && fotos(e).every((f) => f.texto.startsWith('MP-13')) ? ok('2 fotos del MP-13: la primera y la pedida') : no(`fotos: ${fotos(e).map((f) => f.texto).join(' | ')}`),
+      sinPromesaDeFoto(e),
+    ),
+  },
+  {
+    id: 'v-sin-aviso-turno-normal', conjunto: 'ventas', titulo: 'Un turno normal de ventas (el modelo tarda) no saca el aviso de demora con los cortes de ventas',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    // Los cortes de ventas a escala 1:50 (20 s → 400 ms) y un modelo de «12 s» (240 ms por llamado). Con los de Sabor
+    // (5 s → 100 ms) el aviso saldría.
+    config: { corte1Ms: CORTES_VENTAS.corte1Ms / 50, corteTotalMs: CORTES_VENTAS.corteTotalMs / 50 },
+    pasos: [{ escribe: '¿cuánto vale el MP-12?' }],
+    guion: [VC({ codigo: 'MP-12' }), R('El MP-12 Taladro de 13 mm vale $125.000. ¿Te sirve?', 'precio')],
+    envolver: (m) => lento(m, 120),
+    esperado: (e) => todos(sinAvisoDemora(e), contiene(e, 'MP-12'), e.almacen.trazas().some((t) => t.demora) ? no('marcado con demora') : ok('sin demora')),
   },
   {
     id: 'v-consultiva-sin-foto', conjunto: 'ventas', titulo: 'Producto sin foto: solo el texto',

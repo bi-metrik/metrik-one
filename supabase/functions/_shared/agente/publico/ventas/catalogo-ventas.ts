@@ -199,19 +199,72 @@ const palabrasDe = (p: ProductoVenta, conFicha: boolean) => new Set(normal([
   p.titulo, p.nombre, p.marca ?? '', p.categoria ?? '', ...p.etiquetas, ...(conFicha ? p.ficha.map((d) => `${d.etiqueta} ${d.valor}`) : []),
 ].join(' ')).split(' ').map(raiz));
 
+/**
+ * Las familias ESPECIALIZADAS: un producto cuyo título trae `marca` («Taladro magnético») solo entra a una sugerencia si
+ * el cliente lo pide o habla de su trabajo (`piden`, en lo que busca o en el uso). «Metal» no basta: un taladro de mano
+ * también perfora metal, y el magnético de $2 M es para estructura (Mauricio, 29-oct). `pregunta` es la que el
+ * asistente hace cuando la búsqueda trae los de mano Y los especializados.
+ */
+export const ESPECIALIZADOS: ReadonlyArray<{ marca: string; nombre: string; para: string; piden: string[]; pregunta: string }> = [
+  {
+    marca: 'magnetico', nombre: 'magnético', para: 'estructura metálica (vigas, perfiles, broca anular)',
+    piden: ['magnetico', 'iman', 'estructura', 'estructural', 'viga', 'perfil', 'anular', 'grueso', 'base magnetica'],
+    pregunta: '¿Lo buscas de mano o magnético, para perforar estructura metálica?',
+  },
+];
+
+/**
+ * Los materiales que separan un producto de otro. Si el cliente nombra uno y el producto nombra OTRO (y no el suyo), no
+ * le sirve: el rotomartillo «concreto, SDS» no se sugiere para metal. Un producto que no nombra material es de uso
+ * general y sí entra.
+ */
+const MATERIALES: Record<string, string[]> = {
+  metal: ['metal', 'acero', 'hierro', 'metalmecanica', 'metalica', 'metalico', 'lamina'],
+  concreto: ['concreto', 'ladrillo', 'muro', 'pared', 'sds', 'demolicion', 'cincelar', 'cemento'],
+  madera: ['madera', 'carpinteria', 'ebanisteria'],
+};
+
+const palabrasTitulo = (p: ProductoVenta) => normal(p.titulo || p.nombre).split(' ').map(raiz);
+
+/** La familia especializada del producto (por su título), o null. Pura. */
+export function especialDe(p: ProductoVenta): (typeof ESPECIALIZADOS)[number] | null {
+  const t = palabrasTitulo(p);
+  return ESPECIALIZADOS.find((e) => t.includes(e.marca)) ?? null;
+}
+
+/** ¿El cliente pidió esa familia especializada (con lo que busca o el uso)? Pura. */
+function pidioEspecial(e: (typeof ESPECIALIZADOS)[number], dicho: string): boolean {
+  const n = ` ${normal(dicho).split(' ').map(raiz).join(' ')} `;
+  return e.piden.some((w) => n.includes(` ${w.split(' ').map(raiz).join(' ')} `));
+}
+
+/** «Soporte para taladro» cuando busca un taladro: un accesorio de lo que busca, no lo que busca. Pura. */
+function esAccesorio(p: ProductoVenta, buscar: string[]): boolean {
+  const titulo = palabrasTitulo(p);
+  return !buscar.includes(titulo[0]) && buscar.some((w) => titulo.some((x, i) => x === w && titulo[i - 1] === 'para'));
+}
+
 export type Sugerencia =
   | { tipo: 'codigo'; productos: ProductoVenta[] }
-  /** Más de `MAX_SUGERENCIAS` y sin uso: el asistente pregunta el uso. `tipos` le da con qué preguntar. */
-  | { tipo: 'preguntar'; coincidencias: number; tipos: string[] }
-  | { tipo: 'sugerir'; productos: ProductoVenta[]; coincidencias: number };
+  /**
+   * Más de `MAX_SUGERENCIAS` y sin uso: el asistente pregunta el uso. `tipos` le da con qué preguntar; `pregunta`, la
+   * pregunta hecha cuando hay de mano y especializados; `especializados` y `accesorios`, los tipos que no son de uso común.
+   */
+  | { tipo: 'preguntar'; coincidencias: number; tipos: string[]; pregunta: string | null; especializados: Array<{ tipo: string; para: string }>; accesorios: string[] }
+  /** `ninguno`: hay del tipo que busca, pero ninguno sirve para el uso que dijo (otro material). */
+  | { tipo: 'sugerir'; productos: ProductoVenta[]; coincidencias: number; ninguno?: boolean };
 
 /**
  * La búsqueda de la venta consultiva. Con código (MP-xx) o SKU: ese producto. Con texto: los que traen las palabras de
  * `buscar` (como `buscarProductos`, sin tope). Si son más de `MAX_SUGERENCIAS` y el cliente no dijo para qué lo quiere
- * (`uso` vacío), no devuelve productos: pide preguntar el uso. Con uso (o con pocos), los `MAX_SUGERENCIAS` que mejor
- * encajan: más palabras de uso en el título, las etiquetas o la ficha; «de cable» deja fuera lo inalámbrico (y al
- * revés); el título que empieza por lo que busca gana al accesorio («Soporte para taladro»); y a lo sumo dos del mismo
- * tipo (salvo el tipo que pidió con todas sus palabras), para que haya de dónde escoger. Pura.
+ * (`uso` vacío), no devuelve productos: pide preguntar el uso, partiendo por lo que de verdad separa el catálogo (de
+ * mano o especializado). Con uso (o con pocos), solo los que le sirven, hasta `MAX_SUGERENCIAS`, sin rellenar:
+ *   · «de cable» deja fuera lo inalámbrico (y al revés);
+ *   · lo especializado (magnético) solo si lo pidió o habló de su trabajo, y entonces solo eso;
+ *   · el accesorio («Soporte para taladro») solo si no queda otra cosa;
+ *   · si nombró un material, fuera lo que nombra otro material y no el suyo;
+ *   · primero lo que más palabras de uso trae; a igualdad, lo que empieza por lo que busca;
+ *   · a lo sumo dos del mismo tipo (salvo el tipo que pidió con todas sus palabras). Pura.
  */
 export function sugerirProductos(ps: ProductoVenta[], q: { buscar?: string | null; codigo?: string | null; uso?: string | null }): Sugerencia {
   const cod = numeroDeCodigo(`${q.codigo ?? ''} ${q.buscar ?? ''}`);
@@ -224,47 +277,68 @@ export function sugerirProductos(ps: ProductoVenta[], q: { buscar?: string | nul
   }
   const todos = buscarProductos(ps, { buscar: q.buscar ?? null, codigo: null }, Number.MAX_SAFE_INTEGER);
   const uso = palabrasDeBusqueda(q.uso ?? '');
-  if (!uso.length && todos.length > MAX_SUGERENCIAS) {
-    return { tipo: 'preguntar', coincidencias: todos.length, tipos: [...new Set(todos.map(tipoDe))].slice(0, 8) };
-  }
   const buscar = palabrasDeBusqueda(q.buscar ?? '');
+  const dicho = `${q.buscar ?? ''} ${q.uso ?? ''}`;
+  if (!uso.length && todos.length > MAX_SUGERENCIAS) {
+    const especiales = todos.filter((p) => especialDe(p) && !pidioEspecial(especialDe(p)!, dicho));
+    const accesorios = todos.filter((p) => esAccesorio(p, buscar));
+    const comunes = todos.filter((p) => !especiales.includes(p) && !accesorios.includes(p));
+    const fam = especiales.length && comunes.length ? especialDe(especiales[0]) : null;
+    return {
+      tipo: 'preguntar', coincidencias: todos.length, tipos: [...new Set(todos.map(tipoDe))].slice(0, 8),
+      pregunta: fam?.pregunta ?? null,
+      especializados: [...new Map(especiales.map((p) => [tipoDe(p), { tipo: tipoDe(p), para: especialDe(p)!.para }])).values()],
+      accesorios: [...new Set(accesorios.map(tipoDe))],
+    };
+  }
   const cable = uso.some((w) => DE_CABLE.has(w));
   const quiereInal = uso.some((w) => INALAMBRICO.has(w));
   const objetivo = uso.filter((w) => !DE_CABLE.has(w)).map((w) => SINONIMOS_USO[w] ?? [w]);
+  const materiales = Object.entries(MATERIALES).filter(([, ws]) => uso.some((u) => ws.includes(u))).map(([m]) => m);
   const puntuados = todos.map((p, orden) => {
     const hay = palabrasDe(p, true);
-    const inal = [...INALAMBRICO].some((w) => hay.has(w));
-    const titulo = normal(p.titulo || p.nombre).split(' ').map(raiz);
+    const titulo = palabrasTitulo(p);
+    const nombra = Object.entries(MATERIALES).filter(([, ws]) => ws.some((w) => hay.has(raiz(w)))).map(([m]) => m);
+    const esp = especialDe(p);
     return {
-      p, orden, inal,
+      p, orden,
+      inal: [...INALAMBRICO].some((w) => hay.has(w)),
       uso: objetivo.filter((grupo) => grupo.some((w) => hay.has(raiz(w)))).length,
       // Desempate: cuántas palabras de uso trae (el rotomartillo «concreto, SDS, demolición» gana al que solo dice «ladrillo»).
       aciertos: objetivo.flat().filter((w) => hay.has(raiz(w))).length,
       principal: buscar.length > 0 && buscar.includes(titulo[0]) ? 1 : 0,
-      // «Soporte para taladro» cuando busca un taladro: accesorio, va al final.
-      accesorio: !buscar.includes(titulo[0]) && buscar.some((w) => titulo.some((x, i) => x === w && titulo[i - 1] === 'para')) ? 1 : 0,
+      accesorio: esAccesorio(p, buscar),
+      especial: !!esp && !pidioEspecial(esp, dicho),
+      pedido: !!esp && pidioEspecial(esp, dicho),
+      otroMaterial: materiales.length > 0 && nombra.length > 0 && !nombra.some((m) => materiales.includes(m)),
     };
   });
-  // «De cable» saca lo inalámbrico, e «inalámbrico» lo de cable, salvo que no quede nada.
-  const filtrados = cable || quiereInal ? puntuados.filter((x) => (cable ? !x.inal : x.inal)) : puntuados;
-  const base = filtrados.length ? filtrados : puntuados;
-  const orden = [...base].sort((a, b) => a.accesorio - b.accesorio || b.uso - a.uso || b.aciertos - a.aciertos || b.principal - a.principal || a.orden - b.orden);
+  // Cada filtro solo si deja algo (salvo el del material: lo que es para otro material no se ofrece como si sirviera).
+  const si = <T,>(xs: T[], f: (x: T) => boolean) => { const ys = xs.filter(f); return ys.length ? ys : xs; };
+  let base = cable || quiereInal ? si(puntuados, (x) => (cable ? !x.inal : x.inal)) : puntuados;
+  base = si(base, (x) => !x.especial);
+  // Habló de estructura, vigas o broca anular: lo que busca es el especializado, no el de mano.
+  base = si(base, (x) => x.pedido);
+  base = si(base, (x) => !x.accesorio);
+  if (materiales.length) {
+    const sirven = base.filter((x) => !x.otroMaterial);
+    if (!sirven.length) return { tipo: 'sugerir', productos: [], coincidencias: base.length, ninguno: true };
+    base = sirven;
+  }
+  const orden = [...base].sort((a, b) => b.uso - a.uso || b.aciertos - a.aciertos || b.principal - a.principal || a.orden - b.orden);
   const elegidos: typeof orden = [];
   const porTipo = new Map<string, number>();
   for (const x of orden) {
     const t = normal(tipoDe(x.p));
-    // El tope de dos por tipo no vale para el tipo que el cliente nombró entero («taladro magnético»).
-    const pidioEseTipo = t.split(' ').filter((w) => w && !VACIAS.has(w)).map(raiz).every((w) => buscar.includes(w));
+    // El tope de dos por tipo no vale para el tipo que el cliente nombró entero («taladro magnético») ni para el
+    // especializado que pidió por su trabajo («para estructura»).
+    const pidioEseTipo = x.pedido || t.split(' ').filter((w) => w && !VACIAS.has(w)).map(raiz).every((w) => buscar.includes(w));
     if (!pidioEseTipo && (porTipo.get(t) ?? 0) >= 2) continue;
     porTipo.set(t, (porTipo.get(t) ?? 0) + 1);
     elegidos.push(x);
     if (elegidos.length === MAX_SUGERENCIAS) break;
   }
-  // Si la regla de dos por tipo dejó cupo libre, se llena con los siguientes.
-  for (const x of orden) {
-    if (elegidos.length >= MAX_SUGERENCIAS) break;
-    if (!elegidos.includes(x)) elegidos.push(x);
-  }
+  // Sin rellenar: si solo 1 o 2 le sirven, se sugieren 1 o 2.
   return { tipo: 'sugerir', productos: elegidos.map((x) => x.p), coincidencias: base.length };
 }
 
