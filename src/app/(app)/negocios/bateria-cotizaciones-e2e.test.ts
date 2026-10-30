@@ -24,10 +24,10 @@
  * (`FALLA_HOY`): CI queda verde, y el PR que arregle una decisión tiene que pasar su caso a `it`
  * (si lo arregla y no lo pasa, `it.fails` se pone rojo solo).
  */
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
-import { CASO_QA_1352, CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
+import { CASO_QA_1352, CASO_QA_1359, CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
 import { algunoBajoElPiso, clave, lineaEsperada, margenEsperado, soloDesayuno } from '@/lib/cotizaciones/__fixtures__/bateria/oraculo'
 import { modeloDePropuesta, type EntradaModeloPropuesta, type ModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
@@ -104,6 +104,7 @@ vi.mock('@/lib/pdf/marca-borrador', async importOriginal => {
 import { generateCotizacionPDF } from './cotizacion-pdf-actions'
 import { recalcularTotales } from './cotizacion-actions'
 import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, paqueteEnPropuesta } from './bloqueo-actions'
+import { deshacerPorPasos, elegirOpcionEnTarifa } from './por-pasos-actions'
 import { cascadaVigente, contextoDeCotizacion, leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
 import { itemsDelItinerario } from '@/lib/cotizaciones/itinerarios'
 import { medirSalida } from '@/lib/cotizaciones/piso-salida'
@@ -665,5 +666,99 @@ describe('Prueba corta del #1352 · bloqueo de tres paquetes, uno sin alimentaci
     // créditos solos en una 3.ª hoja sale en 2.
     expect((h.match(/class="credits"/g) ?? []).length).toBe(1)
     expect(h).toMatch(/<div class="sign">\s*<div>(?:(?!<\/div>)[\s\S])*<\/div>\s*<div class="credits"><b>Fotografías:<\/b>/)
+  }, 60_000)
+})
+
+// ── Prueba real del #1359 (2026-10-29): tres paquetes, uno de 4 noches, y la Recomendada que cambia ──
+
+describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', () => {
+  const caso = CASO_QA_1359 as unknown as CasoBateria
+  const idDe = (nombre: string) => (base.tablas.items as Fila[]).find(i => clave(i.nombre as string) === clave(nombre))!.id as string
+  const RECURSOS: RecursosPropuesta = { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'Agencia de prueba' }
+  const GAVIOTA = 'Hotel Gaviota Ficticio'
+  const SOL = 'Hotel Sol Ficticio'
+  const DECAMAR = 'Hotel Decamar Ficticio'
+  const PAQUETES = [GAVIOTA, SOL, DECAMAR]
+  /** Cada paquete: si va, y si es el de la Recomendada. */
+  const estadoDeLosPaquetes = async () => {
+    const filas = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
+    const out: Record<string, 'recomendada' | 'va' | 'no va'> = {}
+    for (const n of PAQUETES) {
+      const t = filas.filter(f => f.seleccion.includes(idDe(n)))
+      expect(t, `«${n}» está en ${t.length} tarifas`).toHaveLength(1)
+      out[n] = t[0].nombre === 'Recomendada' ? 'recomendada' : t[0].vaEnPropuesta ? 'va' : 'no va'
+    }
+    return out
+  }
+  const tarifaDe = async (n: string) => (await leerItinerarios(clienteFalso(), caso.cotizacionId))!.find(f => f.seleccion.includes(idDe(n)))!
+  const recomendada = async () => (await leerItinerarios(clienteFalso(), caso.cotizacionId))!.find(f => f.nombre === 'Recomendada')!
+  const grupo = () => (base.tablas.items as Fila[]).find(i => i.id === idDe(GAVIOTA))!.grupo as string
+  beforeEach(async () => { await correr(caso) }, 60_000)
+
+  it('defecto 1 · cada versión con sus fechas y sus noches en «Hospedaje» (4 y 5 noches)', async () => {
+    // Dos versiones, como la prueba real: la Recomendada es de 5 noches y la Opción 2, de 4.
+    expect(await paqueteEnPropuesta(idDe(DECAMAR), false)).toEqual({ success: true })
+    const r = await medir(caso)
+    const h = htmlDePropuesta(r.modelo, RECURSOS)
+    const tarjeta = (hotel: string) => {
+      const i = h.indexOf(`>${hotel}<`)
+      expect(i, `no está la tarjeta de ${hotel}`).toBeGreaterThan(0)
+      const desde = h.lastIndexOf('<div class="hc">', i)
+      return h.slice(desde, h.indexOf('<div class="hc">', i) < 0 ? undefined : h.indexOf('<div class="hc">', i)).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+    }
+    expect(r.modelo.tarifas).toHaveLength(2)
+    expect(tarjeta(SOL)).toContain('Estancia 18 – 22 dic (4 noches)')
+    expect(tarjeta(GAVIOTA)).toContain('Estancia 18 – 23 dic (5 noches)')
+    // La de la Recomendada no lleva estancia propia (es la del capítulo); la de 4 noches sí.
+    const opciones = r.modelo.hoteles.flatMap(c => c.opciones)
+    expect(opciones.find(o => o.hotel === GAVIOTA)!.estancia).toBeUndefined()
+    expect(opciones.find(o => o.hotel === SOL)!.estancia).toEqual({ desde: '2026-12-18', hasta: '2026-12-22', noches: 4 })
+  }, 60_000)
+
+  it('defecto 3 · se reproduce: sacar la Recomendada y escoger otra Recomendada deja cada marca con su paquete', async () => {
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'va', [DECAMAR]: 'va' })
+    // 1. Sacar Gaviota (la Recomendada): la Recomendada pasa al siguiente que va.
+    expect(await paqueteEnPropuesta(idDe(GAVIOTA), false)).toEqual({ success: true })
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'no va', [SOL]: 'recomendada', [DECAMAR]: 'va' })
+    // 2. Escoger Decamar como Recomendada (en su pestaña): Sol, que iba, sigue yendo; Gaviota sigue fuera.
+    const r = await elegirOpcionEnTarifa((await recomendada()).id, grupo(), idDe(DECAMAR))
+    expect(r.success).toBe(true)
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'no va', [SOL]: 'va', [DECAMAR]: 'recomendada' })
+    // El PDF manda los dos que van.
+    const m = await medir(caso)
+    expect((m.props.itinerarios ?? []).map(b => clave((b.items as LineaPdf[])[0].nombre)).sort()).toEqual([clave(DECAMAR), clave(SOL)].sort())
+  }, 60_000)
+
+  it('defecto 3 · escoger como Recomendada el paquete que estaba fuera lo mete; el que deja la Recomendada sigue yendo', async () => {
+    expect(await paqueteEnPropuesta(idDe(GAVIOTA), false)).toEqual({ success: true })
+    expect((await elegirOpcionEnTarifa((await recomendada()).id, grupo(), idDe(GAVIOTA))).success).toBe(true)
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'va', [DECAMAR]: 'va' })
+  }, 60_000)
+
+  it('defecto 3 · entre dos opciones (sin la Recomendada) la marca también sigue al paquete, y «Deshacer» la devuelve', async () => {
+    expect(await paqueteEnPropuesta(idDe(SOL), false)).toEqual({ success: true })
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'no va', [DECAMAR]: 'va' })
+    // En la tarifa de Decamar (la de mayor orden) se escoge Sol: antes se deshacía sola (ganaba la de menor orden).
+    const deDecamar = await tarifaDe(DECAMAR)
+    const r = await elegirOpcionEnTarifa(deDecamar.id, grupo(), idDe(SOL))
+    expect(r.success).toBe(true)
+    expect((await tarifaDe(SOL)).id).toBe(deDecamar.id)
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'no va', [DECAMAR]: 'va' })
+    // Deshacer: cada paquete vuelve a su tarifa, con su marca.
+    if (!r.success) return
+    const d = await deshacerPorPasos({ tipo: 'eleccion', cotizacionId: caso.cotizacionId, itinerarioId: deDecamar.id, grupo: grupo(), escrita: idDe(SOL), anterior: r.anterior })
+    expect(d.success).toBe(true)
+    expect((await tarifaDe(DECAMAR)).id).toBe(deDecamar.id)
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'no va', [DECAMAR]: 'va' })
+  }, 60_000)
+
+  it('defecto 3 · un paquete nuevo va en la propuesta aunque su tarifa viniera de un paquete fuera', async () => {
+    expect(await paqueteEnPropuesta(idDe(SOL), false)).toEqual({ success: true })
+    const creado = await crearPaqueteBloqueo(caso.cotizacionId)
+    expect(creado.success).toBe(true)
+    if (!creado.success) return
+    const filas = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
+    expect(filas.find(f => f.seleccion.includes(creado.itemId))!.vaEnPropuesta).toBe(true)
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'no va', [DECAMAR]: 'va' })
   }, 60_000)
 })

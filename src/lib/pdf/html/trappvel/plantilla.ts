@@ -645,7 +645,9 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
       // Decisión 2 (2026-10-14): la cancelación del hotel NO se imprime.
       const alto = altoDe.get(i) ?? null
       const imagen = alto !== null && fotosDeFicha[i].length > 0 ? imagenDeFichaDeHotel(fotosDeFicha[i], alto, `${tagsHtml}${stars}`) : ''
-      const estancia = [rangoCorto(c.desde, c.hasta), c.noches ? `(${c.noches} ${c.noches === 1 ? 'noche' : 'noches'})` : null].filter(Boolean).join(' ')
+      // QA del #1359: la opción con su propia estancia (otras noches u otras fechas) la dice; si no, la del capítulo.
+      const e = o.estancia ?? c
+      const estancia = [rangoCorto(e.desde, e.hasta), e.noches ? `(${e.noches} ${e.noches === 1 ? 'noche' : 'noches'})` : null].filter(Boolean).join(' ')
       const filas = [
         ['Estancia', estancia],
         ['Habitación', o.habitacion],

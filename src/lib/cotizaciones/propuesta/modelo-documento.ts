@@ -232,6 +232,12 @@ export interface OpcionHotelDoc {
    * («Alimentación, Traslados»). Ausente = nada que decir (prueba corta del #1352).
    */
   noIncluye?: string
+  /**
+   * La estancia de ESTA opción cuando no es la del capítulo (QA del #1359): con paquetes de 4 y de 5
+   * noches, la tarjeta de la de 4 copiaba las fechas y las noches de la Recomendada. Ausente = la del
+   * capítulo (`CiudadDoc.desde/hasta/noches`).
+   */
+  estancia?: { desde: string | null; hasta: string | null; noches: number | null }
   /** Ver la cabecera: viaja en el modelo, imprimirla es decisión aparte. */
   cancelacion: string | null
   /** Lo que se paga en el hotel («Tasa turística: 41,28 EUR»). */
@@ -680,12 +686,23 @@ export function modeloDePropuesta({
     o.tarifas.length === 0 ? -1 : Math.min(...o.tarifas.map((t) => ORDEN_CLAVE[bloques[t]?.clave ?? 'otra'] * 100 + t))
   const hoteles: CiudadDoc[] = capitulos.map((c) => {
     const ancla = c.hotel ?? c.alternativas[0]
+    const desde = fechaIso(ancla?.checkIn, inicio)
+    const hasta = fechaIso(ancla?.checkOut, inicio)
+    const noches = ancla?.noches ?? null
+    // QA del #1359 · cada versión con su estancia: una alternativa con otras fechas u otras noches
+    // (un paquete de 4 noches junto a la Recomendada de 5) las lleva en su tarjeta.
+    const conEstancia = (h: HotelPDF): OpcionHotelDoc => {
+      const o = opcion(h)
+      const e = { desde: fechaIso(h.checkIn, inicio), hasta: fechaIso(h.checkOut, inicio), noches: h.noches ?? null }
+      if (h !== ancla && (e.desde !== desde || e.hasta !== hasta || e.noches !== noches)) o.estancia = e
+      return o
+    }
     return {
       ciudad: c.ciudad,
-      desde: fechaIso(ancla?.checkIn, inicio),
-      hasta: fechaIso(ancla?.checkOut, inicio),
-      noches: ancla?.noches ?? null,
-      opciones: [c.hotel, ...c.alternativas].filter((h): h is HotelPDF => h !== null).map(opcion).sort((a, b) => ordenDeOpcion(a) - ordenDeOpcion(b)),
+      desde,
+      hasta,
+      noches,
+      opciones: [c.hotel, ...c.alternativas].filter((h): h is HotelPDF => h !== null).map(conEstancia).sort((a, b) => ordenDeOpcion(a) - ordenDeOpcion(b)),
     }
   })
   // Un hotel sin ciudad (el paquete de bloqueo solo dice la zona) duerme en el destino del viaje,

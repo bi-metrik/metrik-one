@@ -179,7 +179,7 @@ export function planDeTarifas(args: {
   const ranuras = ranurasConAlternativas(despues.items)
   // Viaje en bloqueo con varios paquetes (D5 de Mauricio, 2026-10-29): una tarifa por paquete.
   const paquetes = ranuras.find(r => esRanuraDePaquete(r.grupo))
-  if (paquetes) return planDeTarifasDeBloqueo(despues, paquetes.candidatos)
+  if (paquetes) return planDeTarifasDeBloqueo(despues, paquetes.candidatos, args.antes)
   const ranurasAntes = new Map(ranurasConAlternativas(antes.items).map(r => [r.grupo, r]))
   const hayCombinables = ranuras.some(r => r.combinable)
 
@@ -437,19 +437,49 @@ function repartoPorPrecio<T>(args: {
  *  · una tarifa sin paquete (lo borraron) toma uno que no tenga tarifa; si no queda ninguno, lleva el
  *    de la Recomendada y sale de la propuesta (es idéntica a ella);
  *  · los demás servicios con opciones (un traslado, una actividad) toman en cada tarifa la opción que
- *    ya nombran o, si no nombran ninguna, la de la Recomendada (o la primera).
+ *    ya nombran o, si no nombran ninguna, la de la Recomendada (o la primera);
+ *  · **la marca «va en la propuesta» sigue al PAQUETE** (QA del #1359, decisión de Mauricio del
+ *    2026-10-29): cuando un paquete cambia de tarifa (la asesora escogió otro en una pestaña, o cambió
+ *    la Recomendada), la tarifa que lo recibe toma la marca que el paquete tenía antes (`antes`). El que
+ *    sale de la Recomendada iba (la Recomendada siempre va). Un paquete sin tarifa previa (recién
+ *    creado) va. Sin `antes`, ningún paquete cambió de tarifa por la acción: las marcas se quedan;
+ *  · si dos tarifas nombran el mismo paquete, se lo queda la que lo ACABA de escoger (la que no lo
+ *    nombraba en `antes`); la otra toma el que quedó libre. Sin eso, escoger en la Opción 3 el paquete
+ *    de la Opción 2 se deshacía solo (ganaba la de menor `orden`).
  */
-export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: readonly string[]): PlanDeTarifas {
+export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: readonly string[], antes: EstadoDeTarifas | null = null): PlanDeTarifas {
   const plan = vacio()
   const otras = ranurasConAlternativas(despues.items).filter(r => !esRanuraDePaquete(r.grupo))
   const tarifas = [...despues.tarifas].sort((a, b) => a.orden - b.orden)
   const rec = recomendadaDe(tarifas).fila
 
-  // Qué paquete lleva cada tarifa (la primera que lo nombra se lo queda).
+  // El paquete de cada tarifa y su marca, ANTES de la acción.
+  const paqueteAntes = new Map<string, string | null>()
+  const marcaAntes = new Map<string, boolean>()
+  if (antes) {
+    const recAntes = recomendadaDe(antes.tarifas).fila
+    for (const t of [...antes.tarifas].sort((a, b) => a.orden - b.orden)) {
+      const p = paquetes.find(id => t.seleccion.includes(id)) ?? null
+      paqueteAntes.set(t.id, p)
+      // La Recomendada manda sobre una tarifa que solo repetía su paquete (`sinLugar`).
+      if (p && (t.id === recAntes?.id || !marcaAntes.has(p))) marcaAntes.set(p, t.id === recAntes?.id ? true : t.vaEnPropuesta)
+    }
+  }
+  const loAcabaDeEscoger = (t: TarifaDelPlan, p: string) => antes !== null && paqueteAntes.has(t.id) && paqueteAntes.get(t.id) !== p
+
+  // Qué paquete lleva cada tarifa: la que lo acaba de escoger y, si no, la primera que lo nombra.
   const duena = new Map<string, TarifaDelPlan>()
   const paqueteDe = new Map<TarifaDelPlan, string | null>()
-  for (const t of tarifas) {
-    const p = paquetes.find(id => t.seleccion.includes(id)) ?? null
+  const nombrado = (t: TarifaDelPlan) => paquetes.find(id => t.seleccion.includes(id)) ?? null
+  const porPrioridad = [...tarifas].sort((a, b) => {
+    const pa = nombrado(a)
+    const pb = nombrado(b)
+    const xa = pa !== null && loAcabaDeEscoger(a, pa) ? 0 : 1
+    const xb = pb !== null && loAcabaDeEscoger(b, pb) ? 0 : 1
+    return xa - xb || a.orden - b.orden
+  })
+  for (const t of porPrioridad) {
+    const p = nombrado(t)
     if (p && !duena.has(p)) { duena.set(p, t); paqueteDe.set(t, p) } else paqueteDe.set(t, null)
   }
   const libres = paquetes.filter(id => !duena.has(id))
@@ -483,7 +513,11 @@ export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: reado
     const quitar = [...actual].filter(id => !nueva.has(id))
     const poner = [...nueva].filter(id => !actual.has(id))
     if (quitar.length > 0 || poner.length > 0) plan.seleccion.push({ itinerarioId: t.id, quitar, poner })
-    const va = t === rec ? true : sinLugar.has(t) ? false : t.vaEnPropuesta
+    // La marca sigue al paquete: la tarifa que recibe otro paquete toma la marca que ese tenía.
+    const suyo = paqueteDe.get(t) as string
+    const previo = antes && paqueteAntes.has(t.id) ? paqueteAntes.get(t.id) ?? null : nombrado(t)
+    const cambio = !sinLugar.has(t) && suyo !== previo
+    const va = t === rec ? true : sinLugar.has(t) ? false : cambio ? (marcaAntes.get(suyo) ?? true) : t.vaEnPropuesta
     if (va !== t.vaEnPropuesta) plan.marcas.push({ itinerarioId: t.id, vaEnPropuesta: va })
   }
 
