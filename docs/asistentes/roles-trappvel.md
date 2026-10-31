@@ -104,6 +104,25 @@ Lo que hace `PENDIENTE.sql`, en orden:
 
 Así el rol nunca le cambia a la bandeja un texto ya aprobado.
 
+## Cambiar textos con los roles ya publicados (`--antes`)
+
+Si cambia el texto de una ficha de la bandeja con los roles ya prendidos, como pasó el 2026-10-30 al quitar «plata», el SQL de arriba no sirve: chocaría con las asignaciones vigentes. Una versión publicada tampoco se edita, porque `bot_reglamentos` es inmutable. Para esos casos el generador tiene un modo de cambio:
+
+```bash
+# antes.json = la bandeja publicada hoy; nueva.json = la misma con el texto cambiado (solo cuando, hacer o valores)
+# Arnés de cada rol con --fichas-base nueva.json; los bancos van a "$R/<prefijo>banco-<rol>.json"
+deno run -A --node-modules-dir=none supabase/functions/_shared/agente/bandeja/roles-trappvel-sql.ts \
+  --asignaciones "$R/asignaciones.json" --fichas-base nueva.json --antes antes.json --prefijo 2026-10-30_sin-plata-
+```
+
+Escribe `<prefijo>PENDIENTE.sql`, `<prefijo>ENSAYO.sql` y `<prefijo>REVERSA.sql`. El PENDIENTE hace esto:
+
+1. Exige que los dos roles ya estén publicados.
+2. Si la bandeja publicada es la de antes, cambia esas fichas en el borrador (`bot_parametros`) y publica una versión nueva. Frena si la publicada es otra, y también si el borrador tenía algo más que no estaba publicado. Si ya está con el cambio, no la vuelve a publicar. Si hay un puntero fijo (`agente_config.reglamento_id`), lo mueve a la versión nueva.
+3. Vuelve a publicar los dos roles con su banco y mueve el puntero. No toca asignaciones ni teléfonos, y no prende ni apaga ningún rol.
+
+La REVERSA devuelve la bandeja a sus textos de antes, publicando otra versión con ellos. Cada rol vuelve a su última versión publicada con las fichas de antes. No pide deploy, porque wa-webhook lee las fichas de la base.
+
 ## Estado (29-oct)
 
 - Línea base con el orden publicado (Haiku, k = 3): pasan 19 de 25, sin dañinas. No pasan 3 de 3: `c1-1140, r-fuera, r-ignora, r-cliente-nuevo, r-ambiguo, a-foto-anotar`. Ese es el `--excluir` de los roles. `r-lista` pasa con este orden y entra al banco. `r-cliente-nuevo` es la falla heredada: después de crear al cliente, el modelo propone el viaje con quien escribe sin que nadie lo dijera.

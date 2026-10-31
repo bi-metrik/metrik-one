@@ -28,6 +28,13 @@ export const API_EPAYCO = 'https://api.secure.payco.co'
 /** La ruta que lleva la política. */
 export const RUTA_REGISTRO_VALIDA = '/valida/empezar'
 
+/**
+ * La página del espacio donde un CDA registra la tarjeta del pago automático (Términos v1.5, 2.4). Lleva
+ * la MISMA política, con lo que pinta el armazón del espacio: el logo del espacio (Supabase Storage) y la
+ * sesión en vivo de Supabase (websocket).
+ */
+export const RUTA_TARJETA_CDA = '/suscripcion/tarjeta'
+
 function origen(url: string | undefined): string | null {
   if (!url) return null
   try {
@@ -42,19 +49,22 @@ function origen(url: string | undefined): string | null {
  * código del correo desde el navegador). En desarrollo, Next necesita `eval` y el websocket de la
  * recarga en caliente.
  */
-export function politicaRegistroValida(supabaseUrl: string | undefined, desarrollo = false): string {
+export function politicaRegistroValida(supabaseUrl: string | undefined, desarrollo = false, espacio = false): string {
   const supabase = origen(supabaseUrl)
   const script = ["'self'", "'unsafe-inline'", SCRIPT_JQUERY, SCRIPT_EPAYCO]
   if (desarrollo) script.push("'unsafe-eval'")
   const conexion = ["'self'", API_EPAYCO]
   if (supabase) conexion.push(supabase)
+  if (espacio && supabase) conexion.push(supabase.replace(/^https:/, 'wss:'))
   if (desarrollo) conexion.push('ws:')
+  const imagenes = ["'self'", 'data:', 'blob:']
+  if (espacio && supabase) imagenes.push(supabase)
   return [
     "default-src 'self'",
     `script-src ${script.join(' ')}`,
     `connect-src ${conexion.join(' ')}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src ${imagenes.join(' ')}`,
     "font-src 'self'",
     "worker-src 'self'",
     "manifest-src 'self'",

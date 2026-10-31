@@ -18,6 +18,7 @@ import { leerModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
 import { leerPantallazoDeBloqueo, type LecturaBloqueo } from '@/lib/cotizaciones/bloqueo-leer'
 import { costoDelPaquete, descripcionDelPaquete, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { guardarImagenDeCaptura } from '@/lib/cotizaciones/imagen-captura'
+import { fichaDelOperador, operadorAlGuardar, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
@@ -192,7 +193,8 @@ export interface EntradaPaqueteBloqueo {
 
 export type ResultadoPaquete =
   /** `descuentoQuitado`: el motivo del descuento que se quitó al pasar a Pública (se avisa). */
-  | { success: true; paquete: PaqueteBloqueo; costo: number | null; falta: string[]; descuentoQuitado?: string }
+  /** `fichaOperador`: el nombre de la ficha del Directorio a la que quedó ligado el operador (H-13), o `null`. */
+  | { success: true; paquete: PaqueteBloqueo; costo: number | null; falta: string[]; descuentoQuitado?: string; fichaOperador?: string | null }
   | { success: false; error: string }
 
 /**
@@ -246,7 +248,12 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
     })
     if (ref) paquete.imagenes[cual] = ref
   }
-  if (!paquete.operador) paquete.operador = b.operador
+  // H-13 (QA del 2026-10-29): el operador es de ESTE paquete. El elegido en la tarjeta manda; si no
+  // hay, el único de la solicitud. Nunca el texto que junta a varios («ALIADOS TRAVEL / TU RESERVA»).
+  paquete.operador = operadorAlGuardar(paquete.operador, b.operador)
+  // Y, si está en el Directorio, la línea queda ligada a su ficha (`items.proveedor_id`).
+  const fichas = await fichasDeProveedores(sb, workspaceId)
+  const ficha = fichaDelOperador(paquete.operador, fichas)
 
   const costo = costoDelPaquete(paquete)
   const en = new Date().toISOString()
@@ -282,6 +289,9 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
     }
   }
   patch.tarifa_pax = siguiente
+  const previa = typeof item.proveedor_id === 'string' ? item.proveedor_id : null
+  const proveedorId = proveedorDelPaquete({ ficha, previa, fichas })
+  if ('proveedor_id' in item && proveedorId !== previa) patch.proveedor_id = proveedorId
 
   const { error: errUpd } = await sb.from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message as string }
@@ -289,7 +299,33 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   const c = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId: item.cotizacion_id as string, antes: null })
   if (!c.success) return { success: false, error: c.error }
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
-  return { success: true, paquete, costo: costo.total, falta: costo.falta, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
+  return { success: true, paquete, costo: costo.total, falta: costo.falta, fichaOperador: ficha?.nombre ?? null, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
+}
+
+/** Las fichas de proveedor (no hoteles ni actividades) del Directorio del espacio. Si falla, ninguna. */
+async function fichasDeProveedores(sb: Supabase, workspaceId: string): Promise<FichaDeOperador[]> {
+  const { data, error } = await sb
+    .from('fotos_perfiles')
+    .select('id, nombre, tipo_proveedor')
+    .eq('workspace_id', workspaceId)
+    .eq('tipo', 'proveedor')
+  if (error) return []
+  return (data ?? []) as FichaDeOperador[]
+}
+
+/**
+ * Los operadores del Directorio (fichas de operador o mayorista), para elegir el de cada paquete en
+ * la tarjeta (H-13). Solo nombres: la tarjeta no necesita más.
+ */
+export async function operadoresDelDirectorio(): Promise<string[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+  const fichas = await fichasDeProveedores(supabase as Supabase, workspaceId)
+  return fichas
+    .filter(f => f.tipo_proveedor === 'operador' || f.tipo_proveedor === 'mayorista')
+    .map(f => (f.nombre ?? '').trim())
+    .filter(Boolean)
+    .sort((x, y) => x.localeCompare(y, 'es'))
 }
 
 export interface ReglasDelPaquete {

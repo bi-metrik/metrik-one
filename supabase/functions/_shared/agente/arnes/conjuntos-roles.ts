@@ -120,7 +120,7 @@ export const CASOS_ASESORA: CasoArnes[] = [
   },
   {
     ...comoAsesora, id: 'av-cifras-no', conjunto: 1, sinClienteNuevo: true, viajesPermitidos: [],
-    titulo: 'la asesora pregunta cifras: no hay consulta de gastos ni de plata',
+    titulo: 'la asesora pregunta cifras: no hay consulta de gastos ni de dinero',
     pasos: [{ escribe: 'cuánto llevamos gastado en el viaje M1 26 1 y cuánto vale' }],
     esperado: (p, t) => {
       if (p.escrituras.length) return mal('escribió algo');
@@ -142,7 +142,29 @@ export const CASOS_ASESORA: CasoArnes[] = [
   },
 ];
 
+/** El nombre del asistente de Trappvel (decisión de Mauricio, 2026-10-30): va en `perfil.valores.nombre`. */
+export const NOMBRE_ASISTENTE_TRAPPVEL = 'Trappi';
+
+/** Lo que el asistente dijo en cada turno (el texto de lo que salió). */
+const dichos = (t: Traza[]) => t.filter((x) => x.salida).map((x) => x.salida?.texto ?? '');
+
+/** El saludo: la primera vez se presenta como Trappi; en el siguiente mensaje no se vuelve a presentar. */
+const saludo = (base: typeof comoDueno, id: string): CasoArnes => ({
+  ...base, id, conjunto: 1, sinClienteNuevo: true, viajesPermitidos: [],
+  titulo: `saludo: la primera vez se presenta como ${NOMBRE_ASISTENTE_TRAPPVEL}, y no se vuelve a presentar`,
+  pasos: [{ escribe: 'hola, buenos días' }, { escribe: 'qué viajes tiene abiertos Martín Mora?' }],
+  esperado: (p, t) => {
+    if (p.escrituras.length) return mal('escribió algo en un saludo');
+    const [primero, ...resto] = dichos(t);
+    const nombre = new RegExp(`\\b${NOMBRE_ASISTENTE_TRAPPVEL}\\b`, 'i');
+    if (!primero || !nombre.test(primero)) return mal(`no se presentó como ${NOMBRE_ASISTENTE_TRAPPVEL}: «${(primero ?? '').slice(0, 80)}»`);
+    if (resto.some((x) => nombre.test(x))) return mal('se volvió a presentar');
+    return ok(`se presentó como ${NOMBRE_ASISTENTE_TRAPPVEL} una vez`);
+  },
+});
+
 /** Los casos de un rol: los de la bandeja de hoy (no pueden empeorar) más los suyos. */
 export function casosDelRol(clave: ClaveRolTrappvel): CasoArnes[] {
-  return [...CONJUNTO_1, ...CONJUNTO_RESPONSABLE, ...CONJUNTO_PERFIL, ...CONJUNTO_ADJUNTOS, ...(clave === 'mano_derecha' ? CASOS_MANO_DERECHA : CASOS_ASESORA)];
+  const propios = clave === 'mano_derecha' ? [...CASOS_MANO_DERECHA, saludo(comoDueno, 'md-saludo')] : [...CASOS_ASESORA, saludo(comoAsesora, 'av-saludo')];
+  return [...CONJUNTO_1, ...CONJUNTO_RESPONSABLE, ...CONJUNTO_PERFIL, ...CONJUNTO_ADJUNTOS, ...propios];
 }

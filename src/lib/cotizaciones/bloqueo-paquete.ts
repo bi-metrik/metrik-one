@@ -24,6 +24,7 @@
  */
 
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { esOperadorMezclado, operadoresDeLaSolicitud } from './bloqueo-operador'
 
 // ── Acomodaciones ─────────────────────────────────────────────────────────────
 
@@ -583,7 +584,7 @@ export function fechasDelPaquete(p: Pick<PaqueteBloqueo, 'vuelo' | 'salidaManual
 // ── Los avisos ────────────────────────────────────────────────────────────────
 
 export interface AvisoBloqueo {
-  clave: 'falta_costo' | 'fechas_noches' | 'compra_vencida' | 'sin_tiquete' | 'personas' | 'infantes' | 'nino_fuera_de_rango' | 'nino_sin_edad' | 'acomodacion_sin_precio' | 'sin_fechas' | 'moneda' | 'iconos_sin_clasificar'
+  clave: 'falta_costo' | 'fechas_noches' | 'compra_vencida' | 'sin_tiquete' | 'personas' | 'infantes' | 'nino_fuera_de_rango' | 'nino_sin_edad' | 'acomodacion_sin_precio' | 'sin_fechas' | 'moneda' | 'iconos_sin_clasificar' | 'sin_operador'
   /** `rojo` = no se puede guardar el costo; `ambar` = se guarda, pero hay que mirarlo. */
   nivel: 'rojo' | 'ambar'
   texto: string
@@ -594,6 +595,11 @@ export interface ContextoAvisos {
   hoy: string
   /** Los pasajeros de la solicitud. `null` = la solicitud no los dice. */
   pasajeros: { adultos: number; ninos: number; infantes: number } | null
+  /**
+   * El operador de la solicitud (`operador_bloqueo`), tal cual. Con VARIOS («ALIADOS TRAVEL / TU
+   * RESERVA»), un paquete sin operador propio pide elegirlo (H-13 del QA del 2026-10-29).
+   */
+  operadorSolicitud?: string | null
 }
 
 function fechaCorta(iso: string): string {
@@ -626,6 +632,16 @@ export function avisosDelPaquete(p: PaqueteBloqueo, ctx: ContextoAvisos): AvisoB
         texto: `El vuelo va del ${fechaCorta(fechas.salida)} al ${fechaCorta(fechas.regreso)} (${plural(dias, 'noche', 'noches')}) y el hotel dice ${plural(p.hotel.noches, 'noche', 'noches')}.`,
       })
     }
+  }
+
+  // H-13 (QA del 2026-10-29): con dos operadores en la solicitud, cada paquete dice el suyo.
+  const operadores = operadoresDeLaSolicitud(ctx.operadorSolicitud)
+  if (operadores.length > 1 && (!p.operador || esOperadorMezclado(p.operador))) {
+    avisos.push({
+      clave: 'sin_operador',
+      nivel: 'ambar',
+      texto: `¿De qué operador es este paquete? La solicitud nombra ${operadores.length}: ${operadores.join(', ')}. Elígelo arriba para que el servicio quede con su operador.`,
+    })
   }
 
   if (p.hotel.compraAntesDe && ctx.hoy > p.hotel.compraAntesDe) {

@@ -58,7 +58,9 @@ const ESCALAMIENTO: Ficha = {
 
 const SALUDO: Ficha = {
   clave: 'rol.saludo', tipo: 'estilo', carga: 'siempre',
-  hacer: 'Saluda corto y por su nombre solo al empezar la conversación; después ve directo a lo que pide. No te presentes en cada mensaje ni cierres con fórmulas.',
+  // «Y preséntate con tu nombre» (Trappi, Mauricio 2026-10-30): sin eso no se presentaba (md-saludo 0/3). Reescrita entera
+  // («Al empezar la conversación, saluda… No te vuelvas a presentar…») tumbaba cp-mixto (1/3): se agrega, no se reescribe.
+  hacer: 'Saluda corto y por su nombre solo al empezar la conversación, y preséntate con tu nombre; después ve directo a lo que pide. No te presentes en cada mensaje ni cierres con fórmulas.',
   valores: { presentarse: 'primer_contacto' },
   fuente: FUENTE,
 };
@@ -120,7 +122,9 @@ const MANO_DERECHA_PROPIAS: Ficha[] = [
   // viaje antes de crear al cliente nuevo y no lo creaba con «sí, créala» (arnés del 2026-10-29, r-cliente-nuevo).
   g('g.rol_dueno', 'siempre', null,
     'Quien te escribe es el dueño de la agencia: trato directo, sin rodeos. Puede abrir un viaje para cualquiera del equipo comercial: si dice «yo» o «lo llevo yo», lo lleva él (si está en el equipo comercial); si nombra a alguien, esa persona.'),
-  g('g.viaje_o_gasto', 'siempre', 'llega algo que puede ser de un viaje o de la plata (una foto, un PDF, un audio, un reenvío)',
+  // «de la plata» salió del texto el 2026-10-30 (léxico vetado). Medido con Haiku, md-yo: «o un gasto o ingreso» 2/9,
+  // «o de un gasto o un pago» 8/9, «o de un gasto» 9/9 (md-gasto-viaje 9/9). Cada palabra de esta ficha mueve casos.
+  g('g.viaje_o_gasto', 'siempre', 'llega algo que puede ser de un viaje o de un gasto (una foto, un PDF, un audio, un reenvío)',
     'decide por el contexto, no preguntes por costumbre: un pedido o datos de un cliente (destino, fechas, pasajeros, lo que quiere) van al viaje (`anotar_en_viaje`, `cargar_tanda`, `viaje_nuevo`); un recibo o una factura de algo que se pagó es un gasto (`proponer(gasto)`); un comprobante de dinero que entró es un ingreso. Una llamada, una reunión o una nota de gestión va como actividad del negocio, no como dato del viaje. Si piden cargar una tanda en un viaje y entre lo reenviado viene un recibo que no es del viaje, no frenes la carga por eso: propón `cargar_tanda` con lo del viaje y di en una línea que ese recibo no parece del viaje y que, si quiere, lo registras como gasto después. Si de verdad no se sabe, pregunta en una línea si es para el viaje o un gasto.'),
 ];
 
@@ -145,7 +149,7 @@ function cabezaManoDerecha(base: Ficha[]): Ficha[] {
 
 /**
  * Las fichas del rol: la base (la bandeja de hoy) con lo del rol. La mano derecha además lleva lo de ONE (sin lo que
- * choca) y no lleva `alc.plata` («esta bandeja no consulta plata»: él sí). Pura; mismas fichas para la misma base.
+ * choca) y no lleva `alc.plata` («esta bandeja no consulta cartera, gastos…»: él sí). Pura; mismas fichas para la misma base.
  */
 export function fichasDelRol(clave: ClaveRolTrappvel, base: Ficha[] = fichasBaseBandeja()): Ficha[] {
   const propias = [funcionesFicha(clave), ESCALAMIENTO, SALUDO, NATURAL];

@@ -36,6 +36,8 @@ function pagoFalso(p: Partial<PagoConRecibo> = {}): PagoConRecibo {
     recibos: [{ numero: 'RC-1-65', url: URL_DRIVE, componente: null }],
     valor_upme: null,
     rc3: null,
+    porcion_upme: null,
+    espera_upme: null,
     componentes_pendientes: [],
     no_aplica_motivo: null,
     facturado: false,

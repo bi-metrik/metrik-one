@@ -41,6 +41,8 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '- es_oferta_de_hotel: false si la imagen no es la oferta de un hotel (por ejemplo, es un vuelo).',
   '- hotel, zona (el barrio o zona que muestre, sin la palabra «Zona»), noches (número), habitacion (la habitación',
   '  elegida, tal cual), plan_alimentacion (el plan elegido, tal cual; si está cortado, lo que se lea).',
+  '- operador: el operador mayorista que vende el paquete, si su nombre o su logo se ve en la pantalla (ej. «Tu Reserva»,',
+  '  «Aliados Travel»); null si no se ve. NO es el hotel ni la cadena hotelera ni la aerolínea.',
   '- temporada: tal cual (ej. «Baja | Regular»). tarifa_promo: true si la pantalla marca la tarifa como promoción.',
   '- compra_antes_de: si dice «Compra antes del <fecha>», esa fecha en AAAA-MM-DD; si no, null.',
   '- moneda: código ISO (COP si muestra pesos con $ sin otra marca).',
@@ -100,6 +102,7 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
   properties: {
     es_oferta_de_hotel: { type: 'boolean' },
     hotel: { type: 'string', ...NULO },
+    operador: { type: 'string', ...NULO },
     zona: { type: 'string', ...NULO },
     noches: { type: 'integer', ...NULO },
     habitacion: { type: 'string', ...NULO },
@@ -282,7 +285,8 @@ export const ETIQUETA_COLUMNA: Record<TipoColumna, string> = {
 }
 
 export type LecturaHotelBloqueo =
-  | { ok: true; hotel: HotelBloqueo; incluye: IncluyeBloqueo }
+  /** `operador`: el que se ve en la pantalla (H-13), sin validar; lo valida `operadorDeLaLectura`. */
+  | { ok: true; hotel: HotelBloqueo; incluye: IncluyeBloqueo; operador: string | null }
   | { ok: false; motivo: string }
 
 /** Lo que devolvió el modelo para el pantallazo del hotel, saneado. */
@@ -328,7 +332,7 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
     infante: precioInfante !== null ? { precio: precioInfante } : null,
     columnaCosto,
   }
-  return { ok: true, hotel, incluye: incluyeDesdeLectura(raw) }
+  return { ok: true, hotel, incluye: incluyeDesdeLectura(raw), operador: textoCorto(raw.operador, 120) }
 }
 
 // ── Vuelo ─────────────────────────────────────────────────────────────────────

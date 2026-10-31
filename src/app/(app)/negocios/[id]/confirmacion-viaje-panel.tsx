@@ -35,6 +35,7 @@ import {
   fechaLimiteSaldo,
   validarPlan,
   type CuotaPlan,
+  type HitoProveedor,
 } from '@/lib/viaje/plan-pagos'
 import {
   gatesConfirmacionPendientes,
@@ -279,10 +280,10 @@ function AprobacionPendiente({ vista }: { vista: VistaConfirmacion }) {
 
 // ── La hoja «El cliente confirmó» ────────────────────────────────────────────
 
-function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string): CuotaPlan[] {
+function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string, hitos: HitoProveedor[]): CuotaPlan[] {
   const guardado = vista.plan && vista.plan.estado === 'propuesta' && vista.plan.total === total ? vista.plan.cuotas : null
   if (guardado && guardado.length > 0) return guardado
-  return planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla })
+  return planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos })
     ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }]
 }
 
@@ -308,6 +309,8 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
   const [tarifaId, setTarifaId] = useState<string | null>(inicial ? claveTarifa(inicial) : null)
   const tarifa = tarifasConPrecio.find((t) => claveTarifa(t) === tarifaId) ?? null
   const total = tarifa?.precio ?? 0
+  // H-17: la «Compra antes del» del paquete de esta tarifa (lo que se le paga al operador).
+  const hitos = useMemo(() => tarifa?.hitosProveedor ?? [], [tarifa])
 
   const [fecha, setFecha] = useState(hoy)
   const [pantallazo, setPantallazo] = useState<{ storage_path: string; file_name: string; mime_type: string } | null>(null)
@@ -318,7 +321,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
   const [titNombre, setTitNombre] = useState('')
   const [titCorreo, setTitCorreo] = useState('')
   const [correoCliente, setCorreoCliente] = useState('')
-  const [cuotas, setCuotas] = useState<CuotaPlan[]>(() => cuotasIniciales(vista, total, hoy))
+  const [cuotas, setCuotas] = useState<CuotaPlan[]>(() => cuotasIniciales(vista, total, hoy, hitos))
   const [motivoPlan, setMotivoPlan] = useState('')
   const [conPrerreserva, setConPrerreserva] = useState(false)
   const [venceA, setVenceA] = useState('')
@@ -330,10 +333,10 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
   useEffect(() => {
     if (totalPrevio.current === total) return
     totalPrevio.current = total
-    setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])
-  }, [total, hoy, vista.viaje.fechaSalida, vista.regla])
+    setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])
+  }, [total, hoy, vista.viaje.fechaSalida, vista.regla, hitos])
 
-  const ctxPlan = { total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }
+  const ctxPlan = { total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }
   const v = validarPlan(cuotas, ctxPlan)
   const lineas = lineasDeValidacion(v, ctxPlan)
   const huella = huellaPlan(cuotas, total)
@@ -554,7 +557,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
               <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ? fechaLimiteSaldo(vista.viaje.fechaSalida, hoy) : hoy, concepto: null }])}>
                 <Plus className="h-4 w-4" /> Cuota
               </button>
-              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>
+              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>
                 Volver al plan sugerido
               </button>
             </div>
