@@ -200,6 +200,11 @@ export interface Reglamento {
   version: number;
   huella: string;
   fichas: Ficha[];
+  /**
+   * Si la versión pasó su banco del arnés (`banco_valido` de la base, migración 20261030190000). Solo lo pide quien lo
+   * exige para atender en vivo (`chatwoot-agente`); ausente, nadie lo pidió.
+   */
+  bancoValido?: boolean;
 }
 
 // ── El dominio (por bot) ─────────────────────────────────────────────────────
@@ -383,6 +388,8 @@ export interface Traza {
   tipo: 'modelo' | 'toque_propuesta' | 'si_escrito' | 'reenvio' | 'sin_turno';
   bot: string;
   reglamento?: { id: string; version: number; huella: string } | null;
+  /** El despliegue de la función que atendió (`DENO_DEPLOYMENT_ID`, `despliegue.ts`); lo pone el almacén al guardar. */
+  despliegue?: string;
   /** El rol del turno (§2.9). Ausente en los dominios que no se componen (la bandeja). */
   rol?: RolTraza | null;
   /** Desde que llegó el webhook del último mensaje del turno hasta que salió la respuesta. */

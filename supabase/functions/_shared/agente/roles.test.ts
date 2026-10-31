@@ -6,7 +6,7 @@ import type { PuertosTurnoOne } from './one/turno-con-rol'
 import { dominioOne } from './one/dominio'
 import { PuertoOneMemoria } from './one/puerto-memoria'
 import { reglamentoOne } from './one/reglamento'
-import { turnoPublico } from './publico/turno-con-rol'
+import { MOTIVO_SIN_BANCO, turnoPublico } from './publico/turno-con-rol'
 import { reglamentoSabor } from './publico/escenario'
 import type { Reglamento, RolTraza } from './tipos'
 
@@ -146,5 +146,16 @@ describe('chatwoot: qué atiende el turno (por inbox)', () => {
     expect(await turnoPublico({ resolver: async () => ({ tipo: 'parar', motivo: 'rol_apagado' }), reglamentoDelRol: async () => null, reglamentoDeHoy: async () => null }))
       .toEqual({ tipo: 'persona', motivo: 'rol_apagado' })
     expect((await turnoPublico({ resolver: async () => ({ tipo: 'hoy', motivo: 'x' }), reglamentoDelRol: async () => null, reglamentoDeHoy: async () => null })).tipo).toBe('nada')
+  })
+  it('la versión vigente sin banco (encargo 2026-10-30): pasa a una persona, con rol o sin él; con banco atiende', async () => {
+    const r = await sabor
+    const sinBanco: Reglamento = { ...r, bancoValido: false }
+    expect(await turnoPublico({ resolver: async () => ({ tipo: 'hoy', motivo: 'x' }), reglamentoDelRol: async () => null, reglamentoDeHoy: async () => sinBanco }))
+      .toEqual({ tipo: 'persona', motivo: MOTIVO_SIN_BANCO })
+    const rol: RolResuelto = { ...ROL, clave: 'asesor_vendedor', familia: 'clientes', canal: 'chatwoot', por: 'inbox' }
+    expect(await turnoPublico({ resolver: async () => ({ tipo: 'rol', rol }), reglamentoDelRol: async () => sinBanco, reglamentoDeHoy: async () => null }))
+      .toEqual({ tipo: 'persona', motivo: MOTIVO_SIN_BANCO })
+    expect((await turnoPublico({ resolver: async () => ({ tipo: 'hoy', motivo: 'x' }), reglamentoDelRol: async () => null, reglamentoDeHoy: async () => ({ ...r, bancoValido: true }) })).tipo)
+      .toBe('atender')
   })
 })

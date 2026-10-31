@@ -34,10 +34,11 @@ import { BOT_PUBLICO } from '../_shared/agente/publico/dominio.ts';
 import { recibir } from '../_shared/agente/publico/entrada.ts';
 import type { Atender } from '../_shared/agente/publico/entrada.ts';
 import {
-  alertaCaidaChatwoot, almacenChatwootSupabase, avisosPorCorreo, mensajeroChatwootApi, preciosSupabase, puertosEntradaSupabase,
+  alertaCaidaChatwoot, almacenChatwootSupabase, caidaChatwootSupabase, avisosPorCorreo, mensajeroChatwootApi, preciosSupabase, puertosEntradaSupabase,
 } from '../_shared/agente/publico/produccion.ts';
 import { transcribirAudio } from '../_shared/agente/publico/transcribir.ts';
-import { NOTA_SIN_ROL, turnoPublico } from '../_shared/agente/publico/turno-con-rol.ts';
+import { MOTIVO_SIN_BANCO, NOTA_SIN_BANCO, NOTA_SIN_ROL, turnoPublico } from '../_shared/agente/publico/turno-con-rol.ts';
+import { alertarSinBanco } from '../_shared/agente/caida.ts';
 import { resolverRol } from '../_shared/agente/roles.ts';
 import { registrarEscalamiento } from '../_shared/agente/persona.ts';
 import { escalamientosSupabase } from '../_shared/agente/persona-produccion.ts';
@@ -89,24 +90,33 @@ async function atender(supabase: SupabaseClient, a: Atender): Promise<void> {
     resolver: () => resolverRol(supabase, {
       workspaceId: a.workspace.id, canal: 'chatwoot', inbox: a.inboxId === null ? null : `cw:${a.llave.cuentaId}:${a.inboxId}`,
     }),
-    reglamentoDelRol: (clave, id) => cargarReglamento(supabase, a.workspace.id, `rol:${clave}`, id),
-    reglamentoDeHoy: () => cargarReglamento(supabase, a.workspace.id, BOT_PUBLICO, c.reglamentoId),
+    // Con el banco: una versión que no pasó su banco del arnés no atiende en vivo (migración 20261030190000).
+    reglamentoDelRol: (clave, id) => cargarReglamento(supabase, a.workspace.id, `rol:${clave}`, id, { conBanco: true }),
+    reglamentoDeHoy: () => cargarReglamento(supabase, a.workspace.id, BOT_PUBLICO, c.reglamentoId, { conBanco: true }),
   });
   if (turno.tipo === 'nada') {
     console.warn(`[chatwoot-agente] ${a.workspace.slug} sin reglamento publicado de ${BOT_PUBLICO}: no contesta`);
     return;
   }
   if (turno.tipo === 'persona') {
-    // El inbox usa roles y no tiene uno activo: el respaldo de Sabor es una persona en Chatwoot (decisión del 26-oct).
-    console.warn(`[chatwoot-agente] ${a.workspace.slug}: sin rol activo para el inbox (${turno.motivo}), pasa a una persona`);
+    // El inbox usa roles y no tiene uno activo, o la versión vigente no pasó su banco: el respaldo de Sabor es una
+    // persona en Chatwoot (decisión del 26-oct).
+    const sinBanco = turno.motivo === MOTIVO_SIN_BANCO;
+    console.warn(`[chatwoot-agente] ${a.workspace.slug}: ${sinBanco ? 'la versión vigente no pasó su banco' : 'sin rol activo para el inbox'} (${turno.motivo}), pasa a una persona`);
     const m = mensajeroChatwootApi({ apiUrl: c.apiUrl, token });
-    await m.nota(a.llave, NOTA_SIN_ROL);
+    await m.nota(a.llave, sinBanco ? NOTA_SIN_BANCO : NOTA_SIN_ROL);
     await m.abrir(a.llave);
+    const conversacion = `cw:${a.llave.cuentaId}:${a.llave.conversacionId}`;
     // Cada traspaso deja su fila (spec 2026-10-26, §4.2), a mejor esfuerzo.
     await registrarEscalamiento(escalamientosSupabase(supabase), {
-      workspace_id: a.workspace.id, rol_clave: 'sin_rol', canal: 'chatwoot', conversacion: `cw:${a.llave.cuentaId}:${a.llave.conversacionId}`,
-      motivo: turno.motivo, resumen: 'el inbox no tiene un rol activo (o no se pudo leer)', modo: 'pasado',
+      workspace_id: a.workspace.id, rol_clave: sinBanco ? 'sin_banco' : 'sin_rol', canal: 'chatwoot', conversacion,
+      motivo: turno.motivo, resumen: sinBanco ? 'la versión vigente no pasó su banco del arnés' : 'el inbox no tiene un rol activo (o no se pudo leer)', modo: 'pasado',
     });
+    if (sinBanco) {
+      await alertarSinBanco(caidaChatwootSupabase(supabase, almacenChatwootSupabase(supabase), a.workspace.id, Deno.env.get('RESEND_API_KEY') ?? ''), {
+        workspaceId: a.workspace.id, workspaceNombre: a.workspace.slug, canal: 'chatwoot', conversacion, turnoId: null, ahoraMs: Date.now(),
+      });
+    }
     return;
   }
   const reglamento = turno.reglamento;

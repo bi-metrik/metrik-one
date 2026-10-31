@@ -27,6 +27,7 @@ import type { PrecioModelo } from '../uso.ts';
 import { leerConfigPublico } from './config.ts';
 import type { EntranteNuevo, PuertosEntrada, WorkspacePublico } from './entrada.ts';
 import type { AlmacenPublico, AvisosInternos, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
+import { conDespliegue } from '../despliegue.ts';
 import type { FilaPublica, LlaveConversacion, TrazaPublica } from './tipos.ts';
 import { llaveTexto } from './tipos.ts';
 import { urlFotoPermitida } from './ventas/catalogo-ventas.ts';
@@ -79,7 +80,7 @@ export function almacenChatwootSupabase(supabase: SupabaseClient): AlmacenPublic
       const r = await Promise.all([
         // Sin entrantes (el aviso de un pago aprobado): solo la traza.
         p.filas.length ? supabase.from('chatwoot_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas) : Promise.resolve({ error: null }),
-        supabase.from('chatwoot_conversacion').update({ traza: p.traza }).eq('id', p.filaTraza),
+        supabase.from('chatwoot_conversacion').update({ traza: conDespliegue(p.traza) }).eq('id', p.filaTraza),
       ]);
       for (const x of r) if (x.error) console.error('[asistente] no se pudo cerrar el turno:', x.error.message);
     },
