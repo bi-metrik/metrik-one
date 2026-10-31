@@ -322,6 +322,20 @@ export function puertosEntradaSupabase(supabase: SupabaseClient, secreto: (slug:
       }
       return 'ok';
     },
+    async registrarCierre(p) {
+      const base = supabase.from('chatwoot_conversacion');
+      const { data: ult, error: e1 } = await base.select('traza').eq('workspace_id', p.llave.workspaceId).eq('cuenta_id', p.llave.cuentaId)
+        .eq('conversacion_id', p.llave.conversacionId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (e1) return false;
+      if ((ult?.traza as Fila | null)?.cierre === true) return true;
+      const { error } = await supabase.from('chatwoot_conversacion').insert({
+        workspace_id: p.llave.workspaceId, cuenta_id: p.llave.cuentaId, conversacion_id: p.llave.conversacionId, inbox_id: p.inboxId, canal: p.canal,
+        direccion: 'saliente', clase: 'nota', estado: 'publicado', ranura: 'cierre', texto: '[Asistente] Conversación resuelta en Chatwoot: el próximo mensaje empieza de nuevo.',
+        traza: { tipo: 'cierre', cierre: true },
+      });
+      if (error) console.error('[asistente] no se pudo registrar el cierre:', error.message);
+      return !error;
+    },
     async completarAudio(p) {
       const { data, error } = await supabase.from('chatwoot_conversacion').select('id, adjunto, turno_id')
         .eq('workspace_id', p.workspaceId).eq('cuenta_id', p.cuentaId).eq('chatwoot_message_id', p.mensajeId).eq('direccion', 'entrante').maybeSingle();

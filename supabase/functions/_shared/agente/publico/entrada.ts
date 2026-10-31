@@ -12,7 +12,7 @@
 // Con puertos: la función `chatwoot-agente` les pone Supabase y `Deno.env`; las pruebas, memoria.
 // ============================================================
 
-import { canalDeChatwoot, claseEntrante, claveDeduplicacion, filtrar, leerPayload, tieneAudio, verificarFirmaChatwoot } from './chatwoot-webhook.ts';
+import { canalDeChatwoot, cierreDeChatwoot, claseEntrante, claveDeduplicacion, filtrar, leerPayload, tieneAudio, verificarFirmaChatwoot } from './chatwoot-webhook.ts';
 import type { MensajeChatwoot } from './chatwoot-webhook.ts';
 import type { ConfigPublico } from './config.ts';
 import { inboxRegistrado } from './config.ts';
@@ -41,6 +41,8 @@ export interface PuertosEntrada {
   primeraVez(clave: string): Promise<boolean>;
   olvidar(clave: string): Promise<void>;
   guardarEntrante(e: EntranteNuevo): Promise<'ok' | 'duplicado' | 'error'>;
+  /** Deja la marca de que Chatwoot resolvió la conversación (una sola seguida). true = la dejó o ya estaba. */
+  registrarCierre(p: { llave: LlaveConversacion; inboxId: number | null; canal: Canal }): Promise<boolean>;
   /** Completa la URL del audio de un mensaje ya guardado y sin atender. true = cambió algo. */
   completarAudio(p: { workspaceId: string; cuentaId: number; mensajeId: number; adjunto: NonNullable<FilaPublica['adjunto']> }): Promise<boolean>;
   ahoraS(): number;
@@ -79,6 +81,15 @@ export async function recibir(req: { slug: string | null; cuerpo: string; firma:
   const m = leerPayload(cuerpo);
   const ws = await p.workspace(req.slug);
   if (!ws || !ws.config.activo) return { status: 200, motivo: 'asistente apagado o workspace sin configurar' };
+  const cierre = cierreDeChatwoot(cuerpo);
+  if (cierre) {
+    if (ws.config.cuentaId === null || (cierre.cuentaId !== null && cierre.cuentaId !== ws.config.cuentaId)) return { status: 200, motivo: 'cierre de otra cuenta' };
+    const ib = cierre.inboxId === null ? null : inboxRegistrado(ws.config, cierre.inboxId);
+    if (cierre.inboxId !== null && !ib) return { status: 200, motivo: 'cierre de otro inbox' };
+    const llave: LlaveConversacion = { workspaceId: ws.id, cuentaId: ws.config.cuentaId, conversacionId: cierre.conversacionId };
+    const ok = await p.registrarCierre({ llave, inboxId: cierre.inboxId, canal: ib && ib.canal !== 'otro' ? ib.canal : 'otro' });
+    return { status: ok ? 200 : 500, motivo: ok ? 'cierre registrado' : 'no se pudo registrar el cierre' };
+  }
   const f = filtrar(m, { inboxes: ws.config.inboxes.map((i) => i.id), cuentaId: ws.config.cuentaId });
   if (!f.pasa) return { status: 200, motivo: `filtrado: ${f.motivo}` };
   const inbox = inboxRegistrado(ws.config, m.inboxId)!;

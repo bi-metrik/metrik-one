@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { FilaPublica, TrazaPublica } from './tipos'
-import { filasDelTramo, turnosConIA } from './topes'
+import { desdeCierre, filasDelTramo, turnosConIA } from './topes'
+import { motivoAviso } from './autorizacion'
+import { cierreDeChatwoot } from './chatwoot-webhook'
 import { fotosDelTurno, fotosYaEnviadas } from './ventas/fotos-ventas'
 import type { ProductoVenta } from './ventas/catalogo-ventas'
 
@@ -29,5 +31,29 @@ describe('el tramo de la conversación', () => {
     const p = { texto: 'MP-17 Taladro 20V, $324.900.', herramientas: undefined, catalogo, filas, pedido: 'quiero un taladro' }
     expect(fotosDelTurno(p)).toHaveLength(0)
     expect(fotosDelTurno({ ...p, tramoNuevo: true }).map((f) => f.codigo)).toEqual(['MP-17'])
+  })
+})
+
+// 30-oct, Dimpro: Mauricio resolvió la conversación en Chatwoot y el «Hola» siguiente siguió con «¡Hola de nuevo!
+// ¿Sigues buscando el taladro inalámbrico?». Resolver = empezar de nuevo.
+describe('resolver en Chatwoot reinicia la conversación', () => {
+  const fila = (id: string, created_at: string, traza: Partial<TrazaPublica> | null, direccion = 'entrante') => ({ id, direccion, texto: 'x', created_at, traza }) as unknown as FilaPublica
+  it('lee el cierre de los dos eventos de Chatwoot, y nada más', () => {
+    expect(cierreDeChatwoot({ event: 'conversation_status_changed', status: 'resolved', id: 4, inbox_id: 5 })).toEqual({ conversacionId: 4, inboxId: 5, cuentaId: null })
+    expect(cierreDeChatwoot({ event: 'message_created', message_type: 'activity', account: { id: 77 }, inbox: { id: 5 }, conversation: { id: 4, status: 'resolved' } })).toEqual({ conversacionId: 4, inboxId: 5, cuentaId: 77 })
+    expect(cierreDeChatwoot({ event: 'conversation_status_changed', status: 'open', id: 4 })).toBeNull()
+    expect(cierreDeChatwoot({ event: 'message_created', message_type: 'incoming', conversation: { id: 4, status: 'resolved' } })).toBeNull()
+  })
+  it('después de la marca, el próximo mensaje es «el primero»: con aviso y sin lo de antes', () => {
+    const filas = [
+      fila('a', '2026-10-30T20:00:00Z', { tipo: 'modelo', aviso: { clave: 'rf.bienvenida' } as TrazaPublica['aviso'] }),
+      fila('b', '2026-10-30T20:01:00Z', { tipo: 'modelo' }),
+      fila('c', '2026-10-30T21:05:00Z', { cierre: true } as Partial<TrazaPublica>, 'saliente'),
+      fila('d', '2026-10-30T21:06:00Z', null),
+    ]
+    expect(motivoAviso(filas, new Set(['d']), 0, 24)).toBeNull()
+    expect(desdeCierre(filas).map((f) => f.id)).toEqual(['d'])
+    expect(motivoAviso(desdeCierre(filas), new Set(['d']), 0, 24)).toBe('primero')
+    expect(desdeCierre(filas.slice(0, 2))).toHaveLength(2)
   })
 })

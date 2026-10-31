@@ -924,6 +924,7 @@ async function webhookDosVeces(): Promise<Veredicto> {
     primeraVez: async (k) => { if (claves.has(k)) return false; claves.add(k); return true; },
     olvidar: async (k) => { claves.delete(k); },
     guardarEntrante: async (e) => { guardados.push(e); return 'ok'; },
+    registrarCierre: async () => true,
     completarAudio: async () => false,
     ahoraS: () => 1_792_000_000,
     reloj: () => performance.now(),
