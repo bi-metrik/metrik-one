@@ -108,7 +108,7 @@ export function nombramientos(
       // El pedido empieza donde empezó el turno que lo propuso, o antes si el modelo señaló el mensaje (`desde`).
       const inicio = f.turno_id ? inicioDeTurno.get(f.turno_id) ?? i : i;
       const desde = typeof p.datos?.desdeFila === 'string' ? filas.findIndex((x) => x.id === p.datos.desdeFila) : -1;
-      out.push({ i: desde >= 0 && desde < inicio ? desde : inicio, clave: `nuevo:${p.huella}` });
+      out.push({ i: desde >= 0 && desde < inicio ? desde : Math.min(inicio, inicioDelClienteNuevo(filas, i, p.datos?.contactoId, out)), clave: `nuevo:${p.huella}` });
     }
     const e = f.traza?.ejecucion;
     if (e?.resultado === 'ejecutada') {
@@ -119,6 +119,22 @@ export function nombramientos(
     }
   });
   return out.map((x) => ({ ...x, clave: alias2[x.clave] ?? x.clave })).sort((a, b) => a.i - b.i);
+}
+
+/**
+ * Sin `desde`: si el cliente del viaje se creó en esta conversación (con su toque) después del último viaje nombrado, el
+ * pedido de ese viaje empieza justo después de ese último viaje (o al principio). Falla medida el 2026-10-30: el
+ * comercial escribió «dos adultos», destino y fechas ANTES de crear al cliente, el modelo propuso el viaje sin `desde`
+ * tras el toque «Crear» y el pedido quedaba fuera (2 de 3 corridas). Sin cliente creado aquí, nada cambia. Pura.
+ */
+function inicioDelClienteNuevo(filas: FilaConversacion[], i: number, contactoId: unknown, previos: ReadonlyArray<{ i: number }>): number {
+  if (typeof contactoId !== 'string' || !contactoId) return i;
+  const ultimo = Math.max(-1, ...previos.map((x) => x.i));
+  for (let k = i; k > ultimo; k--) {
+    const e = filas[k].traza?.ejecucion;
+    if (e?.accion === 'crear_cliente' && e.resultado === 'ejecutada' && (e.escrituras ?? []).some((w) => w.tipo === 'cliente' && w.id === contactoId)) return ultimo + 1;
+  }
+  return i;
 }
 
 /**
