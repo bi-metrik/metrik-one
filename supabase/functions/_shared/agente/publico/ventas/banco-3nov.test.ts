@@ -34,6 +34,7 @@ describe('fichas del banco con Haiku real (3-nov)', () => {
     expect(ficha('alc.producto').hacer).toMatch(/«¿Te sirve\?» sola en la última línea\./)
     expect(ficha('alc.producto').hacer).toMatch(/no preguntes «¿con qué te ayudo\?»/)
     expect(ficha('alc.pago').cuando).toMatch(/pedir el link de pago NO es esto/)
+    expect(ficha('alc.especificacion').hacer).toMatch(/no la repitas ni le ofrezcas pasarlo: pasar_a_persona motivo duda_abierta de una vez/)
     expect(ficha('alc.foto').hacer).toMatch(/nunca «ya te la mandé arriba»/)
     expect(ficha('alc.complemento').hacer).toMatch(/tu mensaje es SOLO «¿Necesitas algo más para ese trabajo\?»/)
     expect(ficha('proc.compra').hacer).toMatch(/si después del resumen manda más de la dirección/)
