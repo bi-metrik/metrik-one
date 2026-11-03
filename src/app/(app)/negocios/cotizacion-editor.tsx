@@ -184,6 +184,7 @@ import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-
 import { tarjetaDeOpcionEn } from '@/lib/cotizaciones/enfocar-comision'
 import { crearPaqueteBloqueo, paqueteEnPropuesta } from '@/app/(app)/negocios/bloqueo-actions'
 import { cambiarModalidadDelViaje } from '@/app/(app)/negocios/modalidad-actions'
+import { SelectorModalidad } from '@/app/(app)/negocios/por-pasos/selector-modalidad'
 import { ofreceMarcarBloqueo, type ValorModalidad } from '@/lib/cotizaciones/modalidad-campo'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
@@ -3896,6 +3897,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         ambar: (avisoFaltaDia ? 1 : 0) + (avisoNoVan ? 1 : 0) + (viaje.motivo ? 1 : 0) + (estadoTexto === 'sinrevisar' || estadoTexto === 'viejo' ? 1 : 0) + costosPendientes.length,
       }}
       bandeja={(
+        <>
+        {campoModalidad && (
+          <SelectorModalidad cotizacionId={cotizacion.id} valor={campoModalidad.valor} editable={editable} onCambio={refrescar} />
+        )}
         <BandejaCapturas
           enMarco={conMarco}
           porPasos
@@ -3933,6 +3938,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             return r.success ? { ok: true as const } : { ok: false as const, error: r.error }
           } : null}
         />
+        </>
       )}
       agregarSinPantallazo={jsxAgregar}
       bloqueo={bloqueo ? (
