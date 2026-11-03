@@ -677,7 +677,15 @@ const HOTEL: DefinicionRanura = {
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
-    basePrecio(['total', 'por_noche'], 'total = es el precio de toda la estadía; por_noche = es el precio de una sola noche.'),
+    // Trappvel (2026-11-03, SAN ANDRÉS): los operadores nacionales publican el hotel POR PERSONA
+    // («$3.110.717 por persona» en triple). Sin estas dos opciones el lector igual escribía
+    // `por_persona` y el precio se costeaba como el de toda la reserva.
+    basePrecio(
+      ['total', 'por_noche', 'por_persona', 'por_persona_noche'],
+      'total = es el precio de toda la estadía para todas las personas; por_noche = es el precio de una sola noche ' +
+        'para todas; por_persona = es el precio de UNA persona por toda la estadía («por persona», «p/p», «pp», ' +
+        '«valor por persona en acomodación doble/triple»); por_persona_noche = es el de una persona por una noche.',
+    ),
     ...COSTO_AGENCIA,
   ],
 }
@@ -821,6 +829,9 @@ const PAQUETE: DefinicionRanura = {
     { slug: 'nombre', label: 'Hotel', tipo: 'texto', min: true, descripcion_ai: 'Nombre del hotel del paquete.' },
     MONEDA,
     PRECIO_TOTAL,
+    // El paquete se vende POR PERSONA (2026-11-03): sin `total` dicho por la pantalla, el precio es
+    // el de una persona y el costo lo multiplica por las del viaje (`precioEsPorPersona`).
+    { ...basePrecio(['por_persona', 'total'], 'por_persona = es el precio de UNA persona (lo normal en un paquete de bloqueo); total = es el precio de todo el grupo.'), min: false },
   ],
 }
 

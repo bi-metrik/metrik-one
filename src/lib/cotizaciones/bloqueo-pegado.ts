@@ -20,6 +20,18 @@
 
 export type CasillaPaquete = 'hotel' | 'vuelo'
 
+/**
+ * «Es paquete de bloqueo» en un viaje que la solicitud NO marca como Bloqueo (SAN ANDRÉS, 2026-11-03).
+ *
+ * El paquete (tabla de precios por persona + vuelo sin precio + «Usar el mismo vuelo del primer
+ * paquete») solo existe con «Modalidad: Bloqueo» en Condiciones del viaje (`bloqueo-modalidad.ts`).
+ * Sin ella la bandeja leía el pantallazo con la ranura genérica, que le exige hotel y precio: el
+ * vuelo del paquete se rechazaba y volvía a preguntar qué era, ya sin la opción del paquete.
+ */
+export const MENSAJE_PAQUETE_SIN_BLOQUEO =
+  'Este viaje no está marcado como Bloqueo. En «Condiciones del viaje» pon Modalidad: Bloqueo y vuelve a pegar: ' +
+  'el paquete se arma con su tabla de precios por persona y su vuelo, que no necesita precio.'
+
 export interface EstadoDePaquete {
   itemId: string
   /** La tarjeta está desplegada («Ver y editar el paquete»). */
