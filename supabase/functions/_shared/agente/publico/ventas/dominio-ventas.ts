@@ -461,7 +461,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const g = estadoAutorizacion(filas, 'general');
       const pasados = motivosYaPasados(filas);
       const compras = comprasConfirmadas(filas);
-      const lineaG = g.estado === 'si' ? 'sí (puedes pedir nombre, celular y dirección)'
+      const lineaG = g.estado === 'si' ? 'sí: pide el nombre, el celular y la dirección que falten (un «sí» a la autorización no es una duda ni motivo para pasar a persona)'
         : g.estado === 'no' ? 'dijo que no: no tomes datos personales; sigue informando y ofrece una persona'
           : g.estado === 'pedida' ? 'pedida, sin respuesta: no pidas datos personales'
             : 'no pedida: antes de pedir nombre, celular o dirección, llama respuesta_fija rf.autorizacion';
@@ -491,6 +491,12 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         if (!MOTIVOS_VENTAS.includes(motivo)) return { ok: false, error: `Motivo desconocido. Usa uno de: ${MOTIVOS_VENTAS.join(', ')}.`, candado: 'motivo_desconocido' };
         if (!REPETIBLES.includes(motivo) && motivosYaPasados(filas).includes(motivo)) {
           return { ok: false, error: `Esta conversación ya pasó a persona por «${motivo}»: atiéndela tú.`, candado: 'motivo_repetido' };
+        }
+        // Un «sí» solo a la autorización no es una duda ni algo que no se entiende (arnés con Haiku real 3-nov: lo pasaba
+        // a persona en 1 de cada 3 compras). La cola deja la autorización de ESTE turno en la traza de su fila.
+        const ultimaEntrante = [...filas].reverse().find((f) => f.direccion === 'entrante');
+        if ((motivo === 'duda_abierta' || motivo === 'no_entiende') && ultimaEntrante?.traza?.autorizacion?.respuesta === 'si') {
+          return { ok: false, error: 'El cliente acaba de autorizar sus datos con «sí»: no es una duda. Sigue la compra pidiendo el dato que falte (el nombre, si no lo ha dado).', candado: 'si_de_autorizacion' };
         }
         const texto = (motivo === 'duda_abierta' ? respuestaFija(r, 'rf.duda_abierta') : '') || respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
         return { ok: true, salidas: [{ tipo: 'texto', texto }], datos: { motivo }, privado: { persona: { motivo, pidio: String(args.pidio ?? '').slice(0, 200) } } };
