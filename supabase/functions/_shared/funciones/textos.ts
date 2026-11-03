@@ -172,9 +172,10 @@ function partesComunes(ficha: FichaTextos, negocio: NegocioTextos, f: ReturnType
 const regularDe = (t: TarifaPublica) => (t.tarifa === 'preventa' ? t.precio_completo_persona : t.precio_persona);
 const unicos = <T,>(xs: T[]) => [...new Set(xs)];
 
-/** El plazo del saldo de la campaña: entero ≥ 1. Si no llega (no debería: la base lo llena con 1), se pide. */
-function plazoSaldo(campana: CampanaTextos, f: ReturnType<typeof faltas>): string {
+/** El plazo del saldo de la campaña: entero de 0 a 30 (0 = hasta que empieza). Si no llega (no debería: la base lo llena con 1), se pide. */
+function plazoSaldo(campana: CampanaTextos, f: ReturnType<typeof faltas>): string | 0 {
   const d = campana.dias_saldo_antes;
+  if (d === 0) return 0;
   return Number.isInteger(d) && d >= 1 ? TEXTO_OFERTA.plazoSaldo(d) : f.valor(null, 'días antes para el saldo');
 }
 
@@ -183,6 +184,10 @@ function lineaAbono(vendibles: FuncionTextos[], campana: CampanaTextos, f: Retur
   const abonos = unicos(vendibles.map((x) => x.tarifa.abono_persona));
   if (abonos.every((a) => a === null)) return null;
   const plazo = plazoSaldo(campana, f);
+  if (plazo === 0) {
+    // Plazo 0 (28-oct): link hasta que empieza; ya en la experiencia, con el equipo.
+    return abonos.length === 1 ? TEXTO_OFERTA.abonoHastaInicio(pesosTexto(abonos[0]!)) : TEXTO_OFERTA.abonoVariosHastaInicio;
+  }
   return abonos.length === 1 ? TEXTO_OFERTA.abono(pesosTexto(abonos[0]!), plazo) : TEXTO_OFERTA.abonoVarios(plazo);
 }
 

@@ -192,6 +192,8 @@ beforeAll(async () => {
   await pg.exec(leer('src/lib/funciones/__fixtures__/esquema-base.sql'))
   await pg.exec(leer('supabase/migrations/20261021090000_asistente_chatwoot.sql'))
   await pg.exec(leer('supabase/migrations/20261022170000_modulo_funciones.sql'))
+  await pg.exec(leer('supabase/migrations/20261026220000_funciones_puerta_cerrada.sql'))
+  await pg.exec(leer('supabase/migrations/20261026210000_funciones_saldo_plazo_cero.sql'))
 })
 
 afterAll(async () => {
@@ -453,6 +455,24 @@ describe.each([
     const sv = await saldoReserva(b.puerto, r.reservaId)
     expect(sv.ok && [sv.dato.saldo, sv.dato.estado]).toEqual([80_000, 'vencido'])
     expect(await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'x')).toEqual({ ok: false, error: 'saldo_vencido' })
+  })
+
+  it('el saldo con plazo 0 (26-oct): el plazo y el link valen hasta que empieza la función', async () => {
+    const l = await autorizada()
+    const iniciaAt = manana(9)
+    const r = await apartar(b.puerto, propuesta(l, await funcion(await campana(), { iniciaAt }), 1))
+    if (!r.ok) throw new Error(r.error)
+    const doble = pasarelaEnMemoria()
+    const pr = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'abono', 'x')
+    if (!pr.ok) throw new Error(pr.error)
+    await b.aprobar(pr.dato.pagoId, pr.dato.referencia)
+    await b.cambiarPlazo(r.reservaId, 0)
+    expect(plazoSaldo(iniciaAt, 0)).toBe(new Date(iniciaAt).toISOString())
+    const s = await saldoReserva(b.puerto, r.reservaId)
+    expect(s.ok && [s.dato.saldo, s.dato.estado, Date.parse(s.dato.plazo_at)]).toEqual([80_000, 'pendiente', Date.parse(iniciaAt)])
+    const ls = await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'Saldo')
+    if (!ls.ok) throw new Error(ls.error)
+    expect([ls.dato.monto, Date.parse(ls.dato.venceAt)]).toEqual([80_000, Date.parse(iniciaAt)])
   })
 
   it('P10: la campaña de la conversación, por anuncio o por código; sin publicar o sin dato, null', async () => {

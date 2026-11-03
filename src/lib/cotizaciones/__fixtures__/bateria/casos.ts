@@ -465,3 +465,41 @@ export const CASO_QA_1359 = {
     { paquete: paqueteConVuelo('Hotel Decamar Ficticio', 2_200_000, 'Todo incluido', { alimentacion: true, traslados: true, seguro_medico: true }, { ida: '2026-12-18', regreso: '2026-12-23', noches: 5 }), comision: 'por_incluir' as const },
   ],
 }
+
+// ── Reprueba del bloqueo (2026-10-30): dos paquetes, dos habitaciones de 1 adulto + 1 niño ─────
+
+const REPRUEBA_BLOQUEO_COT = 'cot-bateria-reprueba-bloqueo'
+/** Dos habitaciones de 1 adulto + 1 niño (10 y 6 años), con el precio del niño. */
+function conDosAdultoConNino(p: Fila, noIncluye: string | null): Fila {
+  const x = structuredClone(p) as { hotel: { nino: unknown; precios: { precioPorPersona: number }[] }; distribucion: unknown; incluye: { noIncluye?: string | null } }
+  x.hotel.nino = { precio: Math.round(x.hotel.precios[0].precioPorPersona * 0.6), edadMin: 2, edadMax: 11 }
+  x.distribucion = { habitaciones: {}, ninos: 2, infantes: 0, adultoConNino: 2, edadesNinos: [10, 6] }
+  x.incluye.noIncluye = noIncluye
+  return x as unknown as Fila
+}
+/**
+ * La forma de la reprueba del viaje a San Andrés (2026-10-30): la Recomendada trae los tours y dice
+ * «No incluye: tarjeta de turismo, propinas»; la Opción 2 no trae tours. El PDF no decía la
+ * acomodación y «Incluido en todas» se comía lo de una sola versión. Nombres y cifras ficticios.
+ */
+export const CASO_REPRUEBA_BLOQUEO = {
+  cotizacionId: REPRUEBA_BLOQUEO_COT,
+  viaje: { composicion: { adultos: 2, ninos: 2, infantes: 0 }, fechas: { inicio: '2027-06-18', fin: '2027-06-23' }, destino: 'San Andrés', edadesMenores: '10 y 6' } as ViajeDelCaso,
+  tablas: () => tablasBase({ cot: REPRUEBA_BLOQUEO_COT, neg: 'neg-bateria-reprueba-bloqueo', consecutivo: 'COT-2026-9160', destino: 'San Andrés', margen: null, reglas: REGLAS(), items: [] }),
+  paquetes: [
+    {
+      paquete: conDosAdultoConNino(
+        paqueteConVuelo('Hotel Isleño Ficticio', 2_812_900, 'Todo incluido', { alimentacion: true, planes_tours: true, traslados: true, seguro_medico: true }, { ida: '2027-06-18', regreso: '2027-06-23', noches: 5 }),
+        'Tarjeta de turismo, propinas',
+      ),
+      comision: 'por_incluir' as const,
+    },
+    {
+      paquete: conDosAdultoConNino(
+        paqueteConVuelo('Hotel Spratt Ficticio', 2_520_000, 'Todo incluido', { alimentacion: true, traslados: true, seguro_medico: true }, { ida: '2027-06-18', regreso: '2027-06-23', noches: 5 }),
+        null,
+      ),
+      comision: 'por_incluir' as const,
+    },
+  ],
+}

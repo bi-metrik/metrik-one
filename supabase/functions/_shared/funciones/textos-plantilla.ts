@@ -19,6 +19,10 @@
 //     películas… En los talleres no aplica»). La llegada 10 minutos antes sigue fija en todas.
 //   · El mensaje directo va sin la intro (23-oct): gancho, qué incluye, precio y los horarios aparte.
 //   · «paga el saldo 1 día antes» sale del plazo del saldo de la campaña («N días antes»).
+//   · Con plazo 0 la línea del abono cambia entera (28-oct, Mauricio, P16): «El saldo lo pagas con el link hasta que
+//     empiece la experiencia, o durante la experiencia, con nuestro equipo.» (un abono y varios).
+//   · Pagos pendientes de la bienvenida, en todos los plazos (28-oct): «…por el chat de su reserva, o durante la
+//     experiencia, con nuestro equipo.»
 // Pura: sin red, sin reloj.
 // ============================================================
 
@@ -49,10 +53,15 @@ export const TEXTO_OFERTA = {
   preventaVarias: '🎟️ Preventa en algunos horarios: te contamos el precio con cada horario.',
   regular: (precio: string) => `🎫 Boletería regular: ${precio}`,
   regularVarios: '🎫 Boletería regular: te contamos el precio con cada horario.',
-  /** «1 día antes» o «N días antes»: el plazo del saldo de la campaña. */
+  /** «1 día antes» o «N días antes»: el plazo del saldo de la campaña (1 o más días). */
   plazoSaldo: (dias: number) => (dias === 1 ? '1 día antes' : `${dias} días antes`),
   abono: (abono: string, plazo: string) => `✨ Reserva con ${abono} por cupo y paga el saldo ${plazo}.`,
   abonoVarios: (plazo: string) => `✨ Reserva con un abono por cupo y paga el saldo ${plazo}.`,
+  /** Con plazo 0 (P16, Mauricio 28-oct): link hasta que empieza; ya en la experiencia, con el equipo (QR de Bold). */
+  abonoHastaInicio: (abono: string) =>
+    `✨ Reserva con ${abono} por cupo. El saldo lo pagas con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.`,
+  abonoVariosHastaInicio:
+    '✨ Reserva con un abono por cupo. El saldo lo pagas con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.',
   /** El mensaje directo no lista funciones (pesa 1.000 bytes como máximo): nombra la campaña y ofrece los horarios. */
   agendaDirecto: (campana: string) => `📅 ${campana}: te compartimos por este chat los horarios disponibles.`,
   direccion: (direccion: string) => `📍 ${direccion}`,
@@ -115,7 +124,7 @@ export const TEXTO_BIENVENIDA = {
     'Si por alguna razón tienen dificultad para encontrar el lugar, pueden comunicarse al número con el que realizaron ' +
       'su reserva o al número de este grupo.',
   ].join('\n\n'),
-  pagos: ['💰 PAGOS PENDIENTES', 'Recuerden pagar el saldo con el link de pago que les enviamos por el chat de su reserva.'].join('\n\n'),
+  pagos: ['💰 PAGOS PENDIENTES', 'Recuerden pagar el saldo con el link de pago que les enviamos por el chat de su reserva, o durante la experiencia, con nuestro equipo.'].join('\n\n'),
   importante: [
     '🚫 IMPORTANTE',
     'Desde hoy este grupo quedará habilitado únicamente para anuncios de los administradores, para que ninguna ' +

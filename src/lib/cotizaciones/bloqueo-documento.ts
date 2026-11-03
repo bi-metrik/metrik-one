@@ -111,6 +111,7 @@ export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: F
       adicionales: item.adicionales ?? [],
       ...(incluye.length > 0 ? { incluye: incluye.join(', ') } : {}),
       ...(noIncluido.length > 0 ? { noIncluidoEnCasillas: noIncluido } : {}),
+      paquete: { noIncluye: p.incluye.noIncluye?.trim() || null },
       ...(nino && p.distribucion.ninos > 0 && nino.edadMin !== null && nino.edadMax !== null ? { edadNino: { desde: nino.edadMin, hasta: nino.edadMax } } : {}),
     })
   }
