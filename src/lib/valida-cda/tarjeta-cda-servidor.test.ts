@@ -256,3 +256,149 @@ describe('lo atrasado, con el clic (D3)', () => {
     expect(await vistaPagoAutomatico(ctx({ designado: false }), deps(d).deps)).toBeNull()
   })
 })
+
+// ── Un solo bloque «Pagar», sin doble cobro (brief del 2026-11-03) ───────────────────────
+
+const { enlaceSoloEsteMes, vistaBloquePagar } = await import('./tarjeta-cda-servidor')
+
+const LNK_ATRASADA = 'https://checkout.bold.co/LNK_ATR222'
+const LNK_TARJETA = 'https://checkout.bold.co/LNK_TAR333'
+const VIGENTE = '2026-11-09T05:00:00Z'
+
+/** La cuenta con un enlace vigente en lo atrasado (23-oct) y otro en el período que cobrará la tarjeta (23-nov). */
+const cuentaConEnlaces = async () => ({
+  estado: 'ok' as const,
+  cuotas: [
+    { cuotaId: 'q2', numero: 2, tipo: 'cuota', monto: 150000, fechaVencimiento: '2026-10-27', concepto: `${PLAN} · periodo del 23-oct al 22-nov`, enlacePagoUrl: LNK_ATRASADA, enlacePagoExpira: VIGENTE },
+    { cuotaId: 'q3', numero: 3, tipo: 'cuota', monto: 150000, fechaVencimiento: '2026-11-27', concepto: `${PLAN} · periodo del 23-nov al 22-dic`, enlacePagoUrl: LNK_TARJETA, enlacePagoExpira: VIGENTE },
+  ],
+  cobros: [],
+  pagos: [],
+})
+
+function cobroConEnlace(numero: number, url: string) {
+  return {
+    id: `c${numero}`,
+    workspace_id: METRIK,
+    negocio_id: 'n1',
+    plan_cobro_id: 'p1',
+    numero_cuota: numero,
+    tipo_cobro: 'programado',
+    fecha: null,
+    anulado_at: null,
+    enlace_pago_url: url,
+    enlace_pago_expira: VIGENTE,
+  }
+}
+
+function tablasConEnlaces(conTarjeta = false): Tablas {
+  return { ...tablas(conTarjeta), cobros: [cobroConEnlace(2, LNK_ATRASADA), cobroConEnlace(3, LNK_TARJETA)] }
+}
+
+describe('registrar la tarjeta con un enlace vigente', () => {
+  it('retira el enlace del período que cobrará la tarjeta (sin borrar la URL) y deja el de lo atrasado', async () => {
+    const d = crearDoble(tablasConEnlaces())
+    const x = deps(d)
+    const r = await registrarTarjetaCda(ctx(), { tarjeta: TARJETA, autorizacionMostrada: AUTORIZACION, acepta: true }, { correo: 'ana@cda.co' }, { ...x.deps, cuenta: cuentaConEnlaces })
+    expect(r.ok).toBe(true)
+    const [atrasada, deLaTarjeta] = d.tablas.cobros
+    // Retirado: vence ahora; la URL se queda para el webhook y para consultar a Bold antes del cargo.
+    expect(deLaTarjeta).toMatchObject({ enlace_pago_url: LNK_TARJETA, enlace_pago_expira: '2026-11-02T15:00:00.000Z' })
+    expect(atrasada).toMatchObject({ enlace_pago_url: LNK_ATRASADA, enlace_pago_expira: VIGENTE })
+    expect(actividad.some((a) => a.startsWith('Se retiró el enlace de pago de la cuota 3 (la cobra la tarjeta registrada en su fecha de renovación). Bold no permite anular el enlace LNK_TAR333'))).toBe(true)
+  })
+})
+
+describe('cobrar lo pendiente con un pago por el enlace en curso', () => {
+  it('PROCESSING en lo atrasado: no se cobra ningún período, se le dice al cliente y queda en el rastro', async () => {
+    const d = crearDoble(tablasConEnlaces(true))
+    const x = deps(d)
+    const cobros: unknown[] = []
+    const cobrar = async (p: unknown) => {
+      cobros.push(p)
+      return { tipo: 'aprobado' as const, cobroId: 'c', detalle: 'ok' }
+    }
+    const consultarEnlace = async (id: string) => ({ ok: true as const, estado: id === 'LNK_ATR222' ? 'PROCESSING' : 'ACTIVE' })
+    const dx = { ...x.deps, cuenta: cuentaConEnlaces, consultarEnlace, cobrar }
+    const vista = await vistaPagoAutomatico(ctx(), dx)
+    if (vista?.tipo !== 'activa' || !vista.pendiente?.cobrable) throw new Error('sin pendiente cobrable')
+    const r = await cobrarPendienteConTarjeta(ctx(), vista.pendiente.huella, dx)
+    expect(r).toEqual({
+      ok: false,
+      error: 'Tu pago del período 23-oct al 22-nov de 2026 por PSE u otro medio está en curso: no cobramos la tarjeta. Si el banco lo rechaza, puedes volver a intentarlo.',
+    })
+    expect(cobros).toHaveLength(0)
+    // El enlace en curso NO se retira: el pago va por ahí.
+    expect(d.tablas.cobros[0]).toMatchObject({ enlace_pago_expira: VIGENTE })
+    expect(actividad.at(-1)).toMatch(/^El cobro con tarjeta que pidió la persona designada de la cuota 2 no se hizo: el enlace de Bold LNK_ATR222 está en PROCESSING/)
+  })
+
+  it('sin pago en curso: retira el enlace de lo atrasado y cobra con la tarjeta', async () => {
+    const d = crearDoble(tablasConEnlaces(true))
+    const x = deps(d)
+    const cobros: string[] = []
+    const cobrar = async (p: { cuotaId: string }) => {
+      cobros.push(p.cuotaId)
+      return { tipo: 'aprobado' as const, cobroId: 'c', detalle: 'ok' }
+    }
+    const dx = { ...x.deps, cuenta: cuentaConEnlaces, consultarEnlace: async () => ({ ok: true as const, estado: 'ACTIVE' }), cobrar }
+    const vista = await vistaPagoAutomatico(ctx(), dx)
+    if (vista?.tipo !== 'activa' || !vista.pendiente?.cobrable) throw new Error('sin pendiente cobrable')
+    const r = await cobrarPendienteConTarjeta(ctx(), vista.pendiente.huella, dx)
+    expect(r).toEqual({ ok: true, texto: 'Listo: se cobraron $150.000 a tu tarjeta terminada en 1111.' })
+    expect(cobros).toEqual(['q2'])
+    expect(d.tablas.cobros[0]).toMatchObject({ enlace_pago_url: LNK_ATRASADA, enlace_pago_expira: '2026-11-02T15:00:00.000Z' })
+  })
+})
+
+describe('el bloque «Pagar»: la tarjeta principal y «Pagar solo este mes»', () => {
+  it('sin tarjeta: ofrece registrarla y pagar la cuota más vieja por el enlace', async () => {
+    const d = crearDoble(tablasConEnlaces())
+    const v = await vistaBloquePagar(ctx(), { ...deps(d).deps, cuenta: cuentaConEnlaces })
+    expect(v).toEqual({ automatico: { tipo: 'sin_tarjeta' }, mes: { cuotaId: 'q2', numero: 2, saldo: 150000, enlace: LNK_ATRASADA } })
+  })
+
+  it('con tarjeta y todo lo atrasado pagado: no hay enlace del período que cobra la tarjeta, ni se genera', async () => {
+    const d = crearDoble(tablasConEnlaces(true))
+    const generados: string[] = []
+    const generarEnlace = async (p: { cuotaId: string }) => {
+      generados.push(p.cuotaId)
+      return { ok: true as const, url: 'https://checkout.bold.co/LNK_NUEVO' }
+    }
+    const soloLaDeLaTarjeta = async () => {
+      const c = await cuentaConEnlaces()
+      return { ...c, cuotas: c.cuotas.slice(1) }
+    }
+    const dx = { ...deps(d).deps, cuenta: soloLaDeLaTarjeta, generarEnlace }
+    expect((await vistaBloquePagar(ctx(), dx))?.mes).toBeNull()
+    expect(await enlaceSoloEsteMes(ctx(), dx)).toEqual({
+      ok: false,
+      error: 'Este período se cobra a tu tarjeta en su fecha de renovación. Si el cobro no pasa, aquí aparece el pago por PSE u otro medio.',
+    })
+    // Tampoco por «Pagar el mes» de quien no es la persona designada.
+    expect((await enlaceSoloEsteMes(ctx({ designado: false }), dx))?.ok).toBe(false)
+    expect(generados).toHaveLength(0)
+  })
+
+  it('con tarjeta que rechazó el período: «Pagar solo este mes» lo pide en el momento', async () => {
+    const t = tablasConEnlaces(true)
+    t.cobros = []
+    t.cobro_intentos_tarjeta = [{ id: 'i1', plan_cobro_id: 'p1', numero_cuota: 3, intento: 0, resultado: 'rechazado' }]
+    const d = crearDoble(t)
+    const generados: string[] = []
+    const sinEnlaces = async () => {
+      const c = await cuentaConEnlaces()
+      return { ...c, cuotas: c.cuotas.slice(1).map((q) => ({ ...q, enlacePagoUrl: null, enlacePagoExpira: null })) }
+    }
+    const dx = {
+      ...deps(d).deps,
+      cuenta: sinEnlaces,
+      generarEnlace: async (p: { cuotaId: string }) => {
+        generados.push(p.cuotaId)
+        return { ok: true as const, url: 'https://checkout.bold.co/LNK_NUEVO' }
+      },
+    }
+    expect(await enlaceSoloEsteMes(ctx(), dx)).toEqual({ ok: true, url: 'https://checkout.bold.co/LNK_NUEVO' })
+    expect(generados).toEqual(['q3'])
+  })
+})

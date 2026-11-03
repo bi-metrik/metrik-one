@@ -28,6 +28,7 @@ import { cambiarRolUsuario, invitarUsuario, reenviarInvitacion, retirarUsuario }
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import {
   cobrarPendienteConTarjeta,
+  enlaceSoloEsteMes,
   quitarTarjetaCda,
   registrarTarjetaCda,
   type EntradaTarjetaCda,
@@ -313,11 +314,14 @@ export async function pagarCuotaPendiente(): Promise<Resultado<{ url: string }>>
   return res
 }
 
-/** «Pagar el mes»: el enlace de la cuota pendiente (el vigente o uno nuevo). */
+/**
+ * «Pagar el mes»: el enlace de la cuota pendiente (el vigente o uno nuevo). En un CDA con el bloque «Pagar»
+ * manda la exclusión con la tarjeta (`enlaceSoloEsteMes`): no da enlace de una cuota que cobra la tarjeta.
+ */
 export async function pagarElMes(): Promise<Resultado<{ url: string }>> {
   const r = await ctxEscritura()
   if (!r.ok) return r
-  const res = await enlaceDelMes(r.ctx)
+  const res = (await enlaceSoloEsteMes(r.ctx)) ?? (await enlaceDelMes(r.ctx))
   if (res.ok) refrescar()
   return res
 }
@@ -368,6 +372,15 @@ export async function quitarTarjetaPagoAutomatico(): Promise<Resultado<{ borrada
   const r = await ctxEscritura()
   if (!r.ok) return r
   const res = await quitarTarjetaCda(r.ctx)
+  if (res.ok) refrescar()
+  return res
+}
+
+/** «Pagar solo este mes (PSE u otro medio)» del bloque «Pagar»: el enlace de la cuota, si la tarjeta no la cobra. */
+export async function pagarSoloEsteMes(): Promise<Resultado<{ url: string }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = (await enlaceSoloEsteMes(r.ctx)) ?? { ok: false as const, error: 'El pago de este mes lo maneja la persona designada por tu empresa.' }
   if (res.ok) refrescar()
   return res
 }

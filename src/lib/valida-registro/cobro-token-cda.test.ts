@@ -187,3 +187,115 @@ describe('una cuota sola (cobrarCuotaConTarjeta)', () => {
     expect(e.cargos).toHaveLength(0)
   })
 })
+
+// ── Exclusión con el enlace de Bold (brief del 2026-11-03) ───────────────────────────────
+
+/** El cobro programado de la cuota 3 con su enlace de Bold (el que el CDA pudo abrir antes de la tarjeta). */
+function conEnlace(t: Tablas, extra: Record<string, unknown> = {}): Tablas {
+  t.cobros.push({
+    id: 'c3',
+    workspace_id: METRIK,
+    negocio_id: 'n1',
+    plan_cobro_id: 'p1',
+    numero_cuota: 3,
+    tipo_cobro: 'programado',
+    monto: 150000,
+    fecha: null,
+    anulado_at: null,
+    external_ref: null,
+    enlace_pago_url: 'https://checkout.bold.co/LNK_DEF456',
+    enlace_pago_expira: '2026-11-30T05:00:00Z',
+    ...extra,
+  })
+  return t
+}
+
+/** La consulta del enlace: un doble con el estado que se le pida. Nunca Bold real. */
+function bold(estado: string | null) {
+  const consultas: string[] = []
+  return {
+    consultas,
+    consultarEnlace: async (id: string) => {
+      consultas.push(id)
+      return estado === null ? { ok: false as const, error: 'HTTP 503' } : { ok: true as const, estado }
+    },
+  }
+}
+
+describe('el paso 7b con un pago por el enlace de Bold', () => {
+  it('enlace en PROCESSING el día 0: no se cobra la tarjeta, no se gasta el intento y queda en el rastro', async () => {
+    const d = crearDoble(conEnlace(base()))
+    const e = epayco([APROBADO])
+    const b = bold('PROCESSING')
+    const r = await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: b.consultarEnlace, hoy: '2026-11-23' })
+    expect(e.cargos).toHaveLength(0)
+    expect(b.consultas).toEqual(['LNK_DEF456'])
+    expect(r.pagoPorEnlace).toBe(1)
+    expect(r.revisadas).toBe(1)
+    expect(d.tablas.cobro_intentos_tarjeta).toHaveLength(0)
+    expect(actividad[0]).toBe(
+      'El cobro con tarjeta del día de la cuota 3 no se hizo: el enlace de Bold LNK_DEF456 está en PROCESSING. Se evita el doble cobro; la tarjeta no se toca mientras ese pago siga.',
+    )
+  })
+
+  it('el PSE falló (REJECTED): el día 3 la tarjeta cobra con su intento', async () => {
+    const d = crearDoble(conEnlace(base()))
+    const e = epayco([APROBADO])
+    await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: bold('PROCESSING').consultarEnlace, hoy: '2026-11-23' })
+    const r = await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: bold('REJECTED').consultarEnlace, hoy: '2026-11-26' })
+    expect(r.aprobadas).toBe(1)
+    expect(e.cargos.map((c) => c.numeroCuota)).toEqual([3])
+    expect(d.tablas.cobro_intentos_tarjeta.map((f) => [f.numero_cuota, f.intento, f.resultado])).toEqual([[3, 1, 'aprobado']])
+  })
+
+  it('PAID todavía sin registrar, o un enlace que no se pudo consultar: tampoco se cobra', async () => {
+    for (const estado of ['PAID', null]) {
+      const d = crearDoble(conEnlace(base()))
+      const e = epayco([APROBADO])
+      const r = await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: bold(estado).consultarEnlace, hoy: '2026-11-23' })
+      expect(e.cargos).toHaveLength(0)
+      expect(r.pagoPorEnlace).toBe(1)
+    }
+  })
+
+  it('un enlace ya retirado (vencido en ONE) se consulta igual: Bold no lo anula', async () => {
+    const d = crearDoble(conEnlace(base(), { enlace_pago_expira: '2026-11-02T15:00:00Z' }))
+    const e = epayco([APROBADO])
+    const b = bold('PROCESSING')
+    await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: b.consultarEnlace, hoy: '2026-11-23' })
+    expect(b.consultas).toEqual(['LNK_DEF456'])
+    expect(e.cargos).toHaveLength(0)
+  })
+
+  it('el cobro pedido con el clic (lo atrasado) tampoco pasa con el enlace en curso', async () => {
+    const t = base()
+    t.cobros.push({ ...conEnlace(base()).cobros[0], id: 'c2', numero_cuota: 2 })
+    const d = crearDoble(t)
+    const e = epayco([APROBADO])
+    const r = await cobrarCuotaConTarjeta(
+      { db: d.db, adapterPara: e.adapterPara, consultarEnlace: bold('PROCESSING').consultarEnlace },
+      { cobradorId: METRIK, cuotaId: 'q2', intento: 0, manual: true },
+    )
+    expect(r).toEqual({ tipo: 'pago_por_enlace', estado: { tipo: 'en_curso', estado: 'PROCESSING', idEnlace: 'LNK_DEF456' } })
+    expect(e.cargos).toHaveLength(0)
+    expect(actividad[0]).toMatch(/^El cobro con tarjeta que pidió la persona designada de la cuota 2 no se hizo/)
+  })
+
+  it('pagada por Bold después del rechazo de la tarjeta: la cuota ya no entra al 7b', async () => {
+    const d = crearDoble(base())
+    const e = epayco([RECHAZO])
+    // Día 0: la tarjeta la rechaza (y el paso 6 le manda el enlace).
+    await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: bold(null).consultarEnlace, hoy: '2026-11-23' })
+    expect(e.cargos).toHaveLength(1)
+    // El CDA paga por el enlace de Bold el día 24: el webhook deja el cobro con su fecha.
+    const c3 = d.tablas.cobros.find((c) => c.numero_cuota === 3)
+    if (!c3) throw new Error('sin cobro de la cuota 3')
+    Object.assign(c3, { fecha: '2026-11-24', external_ref: 'bold-TXBOLD1', enlace_pago_url: 'https://checkout.bold.co/LNK_DEF456' })
+    // Día 3: no hay segundo intento con la tarjeta ni consulta del enlace.
+    const b = bold('PAID')
+    const r = await cobrarCuotasConTarjeta({ db: d.db, adapterPara: e.adapterPara, consultarEnlace: b.consultarEnlace, hoy: '2026-11-26' })
+    expect(e.cargos).toHaveLength(1)
+    expect(r.revisadas).toBe(0)
+    expect(b.consultas).toHaveLength(0)
+  })
+})

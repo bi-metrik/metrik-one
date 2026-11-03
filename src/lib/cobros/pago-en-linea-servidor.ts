@@ -10,7 +10,8 @@ import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activ
 import { abrirCicloSiCorresponde, detalleCiclo } from '@/lib/valida-registro/ciclo-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
-import { anularCobroPorReverso } from './reverso-pasarela-servidor'
+import { anularCobroPorReverso, enviarCorreoInternoPorResend, type EnvioCorreoInterno } from './reverso-pasarela-servidor'
+import { AVISO_DOBLE_PAGO_PARA, correoAvisoDoblePago, fraseDevolucion, idempotenciaAvisoDoblePago } from './aviso-doble-pago'
 
 /**
  * El lado de Supabase del pago en línea, y `atenderWebhookPasarela`: todo lo que una ruta de webhook
@@ -65,7 +66,12 @@ function patronLike(idEnlace: string): string {
   return `%${idEnlace.replace(/[\\%_]/g, (c) => `\\${c}`)}`
 }
 
-export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, adapter: PasarelaAdapter): RepoPagoEnLinea {
+export function repoPagoEnLinea(
+  dbCliente: SupabaseClient,
+  pasarela: string,
+  adapter: PasarelaAdapter,
+  deps: { enviarCorreo?: EnvioCorreoInterno } = {},
+): RepoPagoEnLinea {
   const db = dbCliente as Db
   return {
     pasarela,
@@ -158,6 +164,28 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
 
     confirmarPago(c) {
       return confirmarPagoCobroProgramado(dbCliente, c)
+    },
+
+    async avisarDoblePago(cobro, e) {
+      const correo = correoAvisoDoblePago({
+        pasarela,
+        referenciaPago: e.referenciaPago,
+        monto: e.monto,
+        cobroId: cobro.id,
+        pagoPrevio: { fecha: cobro.fecha, referencia: cobro.externalRef },
+      })
+      let envio: { ok: true } | { ok: false; error: string }
+      try {
+        envio = await (deps.enviarCorreo ?? enviarCorreoInternoPorResend)({
+          to: AVISO_DOBLE_PAGO_PARA,
+          ...correo,
+          idempotencyKey: idempotenciaAvisoDoblePago(pasarela, e.transaccionId),
+        })
+      } catch (err) {
+        envio = { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+      if (!envio.ok) console.error(`[doble-pago-${pasarela}] no salió el aviso del cobro ${cobro.id}: ${envio.error}`)
+      return fraseDevolucion(envio)
     },
 
     async trasPagoRegistrado(cobro) {
