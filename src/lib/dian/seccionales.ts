@@ -82,7 +82,9 @@ export const SECCIONALES_DIAN: SeccionalDIAN[] = [
     email: 'dsia_leticia_devoluciones@dian.gov.co', cita: false, ciudad: 'leticia' },
   { slug: 'manizales', label: 'Manizales', codigo: '10',
     nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Manizales',
-    email: 'dsia_manizales_devoluciones@dian.gov.co', cita: false, ciudad: 'manizales' },
+    email: 'dsia_manizales_devoluciones@dian.gov.co', cita: true, ciudad: 'manizales' },
+    // cita: true desde el 2026-11-03 (SOE-037): SOENA reporta que Manizales ya exige
+    // cita previa para radicar la devolucion.
   { slug: 'monteria', label: 'Montería', codigo: '12',
     nombre_oficial: 'Dirección Seccional de Impuestos y Aduanas de Montería',
     email: 'dsia_monteria_devoluciones@dian.gov.co', cita: false, ciudad: 'monteria' },
