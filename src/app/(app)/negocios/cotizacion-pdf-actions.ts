@@ -102,6 +102,7 @@ import { autorizacionDelNegocioLeido, MENSAJE_ENVIO, type NegocioParaEnvio } fro
 import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { claveDeHotel, fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
 import type { OpcionalDelDocumento } from '@/lib/fotos/catalogo-propuesta'
+import { nombrePdfCotizacion, tituloPdfCotizacion, type DatosNombrePdf } from '@/lib/cotizaciones/nombre-pdf-cotizacion'
 
 // Campos agregados por migration 20260515000001 — pendiente regenerar database.ts
 // post-apply. Hasta entonces, accedemos via cast tipado a este shape.
@@ -396,6 +397,14 @@ export async function generateCotizacionPDF(
   // A quién va dirigida la propuesta de viaje: el contacto del negocio y su empresa real (la de
   // relleno de abajo no cuenta).
   const clienteDelNegocio = { contacto: contactoDelNegocio, empresa: empresa?.nombre ?? null, tipoPersona: empresa?.tipo_persona ?? null }
+  // El nombre del PDF (pedido del 2026-11-03): «Cotización COT-… - <cliente> - <destino>.pdf». El
+  // cliente es la empresa real o, sin ella, el contacto (la de relleno de abajo no cuenta). El
+  // destino solo existe en las cotizaciones de viaje: lo llena ese camino más abajo.
+  const datosDelNombre: DatosNombrePdf = {
+    codigo: cot.codigo ?? (cot.consecutivo != null ? String(cot.consecutivo) : null),
+    cliente: clienteDelNegocio.empresa ?? clienteDelNegocio.contacto,
+    destino: null,
+  }
 
   // Fallback: empresa genérica para renderizar el PDF
   if (!empresa) {
@@ -843,7 +852,7 @@ export async function generateCotizacionPDF(
         return {
           success: true,
           pdf: conMarca.toString('base64'),
-          filename: `${cot.codigo ?? cot.consecutivo}-BORRADOR.pdf`,
+          filename: nombrePdfCotizacion({ ...datosDelNombre, borrador: true }),
           fiscal,
           borrador: true as const,
           aviso: avisoBorrador,
@@ -856,7 +865,7 @@ export async function generateCotizacionPDF(
       }
 
       const buffer = renderizado
-      const filename = `${cot.codigo ?? cot.consecutivo}.pdf`
+      const filename = nombrePdfCotizacion(datosDelNombre)
       // Vista previa: el documento, sin guardarlo ni registrarlo.
       if (vistaPrevia) return { success: true, pdf: buffer.toString('base64'), filename, fiscal, vistaPrevia: true as const, renderedVia: 'weasyprint' as const }
 
@@ -1398,6 +1407,7 @@ export async function generateCotizacionPDF(
     }
     const config = leerConfigDocumentoViaje(ws?.config_extra)
     const destino = delNegocio.destino ?? destinoDeItinerario(vuelos, hoteles)
+    datosDelNombre.destino = destino
     const fotos = plantillaUsaFotosDeCiudad(templateSlug)
       ? fotosDelViaje({ destino, vuelos, hoteles }, fotosDeCiudad)
       : null
@@ -1564,6 +1574,8 @@ export async function generateCotizacionPDF(
         numeroDeViajeros: numeroDeViajerosDoc,
         // El botón de apartar abre el WhatsApp de la MISMA asesora que firma (punto 5).
         staffId: staffDeLaAsesora,
+        // El `<title>` del documento: el mismo nombre del archivo, sin la extensión.
+        tituloDocumento: tituloPdfCotizacion({ ...datosDelNombre, borrador: esBorrador }),
         workspaceId,
         marca: ws?.name ?? 'Mi Empresa',
         logoUrl: ws?.logo_url ?? null,
@@ -1593,7 +1605,7 @@ export async function generateCotizacionPDF(
     return {
       success: true,
       pdf: conMarca.toString('base64'),
-      filename: `${cot.consecutivo}-BORRADOR.pdf`,
+      filename: nombrePdfCotizacion({ ...datosDelNombre, borrador: true }),
       fiscal,
       borrador: true as const,
       aviso: avisoBorrador,
@@ -1607,7 +1619,7 @@ export async function generateCotizacionPDF(
   }
 
   const base64 = Buffer.from(buffer).toString('base64')
-  const filename = `${cot.consecutivo}.pdf`
+  const filename = nombrePdfCotizacion(datosDelNombre)
   // Vista previa: el documento, sin guardarlo ni registrarlo.
   if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia, ...conFotos }
 
@@ -1677,6 +1689,8 @@ async function propuestaConMotorHtml(
     /** S3 · cuántos viajan; `null` = no se sabe (ustedes). */
     numeroDeViajeros?: number | null
     staffId: string | null
+    /** El `<title>` del documento (`tituloPdfCotizacion`). */
+    tituloDocumento?: string
     workspaceId: string
     marca: string
     logoUrl: string | null
@@ -1710,6 +1724,7 @@ async function propuestaConMotorHtml(
     {
       marca: e.marca,
       logoUrl: e.logoUrl,
+      tituloDocumento: e.tituloDocumento,
       fotoDeCiudad: ciudad => fotosDeCiudad(ciudad).map(f => ({ url: f.ruta, rotulo: f.rotulo, credito: f.credito, foco: f.foco, proporcion: f.proporcion })),
       catalogo,
     },

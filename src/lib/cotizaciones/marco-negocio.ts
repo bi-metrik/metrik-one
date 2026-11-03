@@ -27,6 +27,7 @@ import { coberturaDeLinea, type LineaParaCobertura } from './cobertura-opciones'
 import { encabezadoDelViaje, rangoDelViaje, resumenDelViaje } from './estado-pasos'
 import { describirOcupacion, type Composicion } from './tarifa-pasajero'
 import { esValorBloqueo } from './bloqueo-modalidad'
+import { etiquetaDeOpcion } from '@/lib/contactos/campos-contacto'
 
 /** Los estados que cuentan como cotización abierta del negocio. */
 export const ESTADOS_ABIERTOS = ['borrador', 'enviada', 'aceptada'] as const
@@ -65,6 +66,8 @@ export interface CampoConOpciones {
   options?: ReadonlyArray<string | { value: string; label?: string }>
   /** Forma de la config de Trappvel: pares valor → etiqueta. */
   opciones?: ReadonlyArray<{ value: string; label?: string }>
+  /** Etiquetas aparte para los valores de `options` (`{ leisure: 'Vacacional' }`). Ver `etiquetaDeOpcion`. */
+  option_labels?: Record<string, string>
 }
 
 export interface PerfilDelCliente {
@@ -115,7 +118,9 @@ function texto(v: unknown): string | null {
   return t === '' ? null : t
 }
 
-const TIPO_CLIENTE: Record<string, string> = { leisure: 'Leisure', corporativo: 'Corporativo' }
+// Decisión de Mauricio (26-oct y 3-nov): «leisure» se lee «Vacacional» y «corporativo», «Negocios».
+// El valor guardado no cambia: de él cuelga el fee de vuelo.
+const TIPO_CLIENTE: Record<string, string> = { leisure: 'Vacacional', corporativo: 'Negocios' }
 const BOLSILLO: Record<string, string> = { economico: 'Económico', medio: 'Medio', alto: 'Alto' }
 
 /** Los slugs de `negocio_bloques.data` que lee la tarjeta (la lectura los pide uno por uno). */
@@ -149,6 +154,8 @@ export function etiquetaDeValor(valor: string, campo: CampoConOpciones | undefin
   ]
   const hit = pares.find(o => String(o.value) === valor)
   if (hit?.label) return hit.label
+  const conEtiqueta = etiquetaDeOpcion(campo, valor)
+  if (conEtiqueta !== valor) return conEtiqueta
   const esLista = pares.length > 0 || campo?.tipo === 'select' || campo?.tipo === 'radio'
   // Campo desconocido: solo un valor con cara de slug («todo_incluido») se humaniza; el texto libre va tal cual.
   if (esLista || (!campo && /^[a-z0-9]+(_[a-z0-9]+)+$/.test(valor))) return humanizar(valor)

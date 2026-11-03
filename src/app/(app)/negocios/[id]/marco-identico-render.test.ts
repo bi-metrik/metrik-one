@@ -54,7 +54,7 @@ const viaje = {
     ],
     tienePresupuesto: false,
   },
-  perfil: { tipo: 'Leisure', conQuienViaja: 'ESPOSA E HIJO', bolsillo: 'Medio', preferencias: null, notas: null },
+  perfil: { tipo: 'Vacacional', conQuienViaja: 'ESPOSA E HIJO', bolsillo: 'Medio', preferencias: null, notas: null },
   cotizaciones: [
     { id: 'cot-1', codigo: 'COT-2026-0012', estado: 'borrador', valorTotal: 4180118, editadaEl: '2026-09-23T14:00:00Z' },
     { id: 'cot-2', codigo: 'COT-2026-0010', estado: 'enviada', valorTotal: 0, editadaEl: '2026-09-20T14:00:00Z' },

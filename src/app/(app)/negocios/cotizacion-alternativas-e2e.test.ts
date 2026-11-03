@@ -584,11 +584,11 @@ describe('dónde queda el PDF de la cotización', () => {
     const res = (await generateCotizacionPDF(COT)) as { success: boolean; pdf: string; aviso?: string | null; archivoReferencia?: string | null }
     expect(res.success).toBe(true)
     expect(subidas).toHaveLength(1)
-    expect(subidas[0]).toMatchObject({ negocioId: 'neg-1', subcarpeta: 'cotizaciones', nombre: 'COT-2026-0003.pdf', mime: 'application/pdf' })
+    expect(subidas[0]).toMatchObject({ negocioId: 'neg-1', subcarpeta: 'cotizaciones', nombre: 'Cotización COT-2026-0003.pdf', mime: 'application/pdf' })
     // Lo que se guarda es el MISMO documento que se descarga.
     expect(subidas[0].buffer.subarray(0, 4).toString('latin1')).toBe('%PDF')
     expect(subidas[0].buffer.toString('base64')).toBe(res.pdf)
-    expect(res.archivoReferencia).toBe('sbext://one-documentos/negocios/neg-1/cotizaciones/COT-2026-0003.pdf')
+    expect(res.archivoReferencia).toBe('sbext://one-documentos/negocios/neg-1/cotizaciones/Cotización COT-2026-0003.pdf')
     expect(llamadasDrive).toHaveLength(0)
   }, 30_000)
 

@@ -1,10 +1,11 @@
 import { textoConflicto, type MarcaConflicto as Marca } from '@/lib/negocios/sugeridos'
+import { etiquetaDeOpcion } from '@/lib/contactos/campos-contacto'
 
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 
 /** Lo que dijo el mensaje, como se le dice a una persona: fechas «20 nov», opciones por su etiqueta. */
 export function valorLegibleCampo(
-  campo: { tipo: string; opciones?: Array<{ value: string; label?: string }> },
+  campo: { tipo: string; opciones?: Array<{ value: string; label?: string }>; option_labels?: Record<string, string> },
   valor: unknown,
 ): string {
   if (campo.tipo === 'fecha') {
@@ -12,7 +13,7 @@ export function valorLegibleCampo(
     if (m) return `${Number(m[3])} ${MESES[Number(m[2]) - 1]}`
   }
   const op = campo.opciones?.find(o => String(o.value) === String(valor))
-  return op?.label ?? String(valor ?? '')
+  return op?.label ?? etiquetaDeOpcion(campo, String(valor ?? ''))
 }
 
 /**

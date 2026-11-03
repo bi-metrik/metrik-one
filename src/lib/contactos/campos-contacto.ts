@@ -49,7 +49,28 @@ export interface CampoContacto {
   tipo: 'texto' | 'email' | 'telefono' | 'numero' | 'fecha' | 'toggle' | 'select' | 'textarea'
   required?: boolean
   options?: string[]
+  /**
+   * Cómo se LEE cada valor de `options` en pantalla: `{ leisure: 'Vacacional' }`. Lo que se guarda
+   * sigue siendo el valor (de él cuelgan reglas, como el fee de vuelo de Trappvel); esto es solo
+   * lo que se ve. Opcional y aditivo: sin la llave, o sin ese valor en ella, se pinta el valor tal
+   * cual, como siempre. Ver `etiquetaDeOpcion`.
+   */
+  option_labels?: Record<string, string>
   ayuda?: string
+}
+
+/**
+ * La etiqueta visible de una opción de un select configurable (`option_labels`). Sin etiqueta
+ * para ese valor, el valor tal cual: una config sin la llave se ve igual que antes. Pura.
+ * Acepta la llave mal formada (viene de un JSON de la base) sin romper: la ignora.
+ */
+export function etiquetaDeOpcion(campo: { option_labels?: unknown } | null | undefined, valor: string): string {
+  const mapa = campo?.option_labels
+  if (mapa && typeof mapa === 'object' && !Array.isArray(mapa) && Object.hasOwn(mapa, valor)) {
+    const etiqueta = (mapa as Record<string, unknown>)[valor]
+    if (typeof etiqueta === 'string' && etiqueta.trim() !== '') return etiqueta.trim()
+  }
+  return valor
 }
 
 /** Estado de la ficha del contacto tal como lo ve el bloque. */
