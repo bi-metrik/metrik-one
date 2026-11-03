@@ -122,7 +122,7 @@ export const TEXTOS_PREGUNTAS: TextosActualizacion = {
  * Banco con Haiku real (3-nov): el «ya pagué» sin link pasa a persona sin preguntar detalles, el link sin pedido sigue
  * la compra, el complemento rechazado no trae «¿Necesitas algo más?» y la pregunta de ver_catalogo va sola.
  */
-export const CLAVES_BANCO_3NOV = ['alc.pago', 'alc.link_sin_pedido', 'alc.complemento', 'alc.producto', 'alc.duda_abierta', 'proc.compra', 'persona.pide', 'alc.saludo'];
+export const CLAVES_BANCO_3NOV = ['alc.pago', 'alc.link_sin_pedido', 'alc.complemento', 'alc.producto', 'alc.duda_abierta', 'proc.compra', 'persona.pide', 'alc.saludo', 'alc.foto'];
 export const TEXTOS_BANCO_3NOV: TextosActualizacion = {
   titulo: 'Asistente de VENTAS de Dimpro tras el banco con Haiku real (3-nov): pago sin link, link sin pedido, complemento\n-- rechazado, una sola pregunta, la compra que no es duda, la dirección fuera de Bogotá y «ya pagué» sin persona_por_que.',
   uso: 'semilla-sql-dimpro.ts --banco-3nov',

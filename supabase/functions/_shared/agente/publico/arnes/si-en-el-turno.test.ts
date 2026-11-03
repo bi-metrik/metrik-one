@@ -19,15 +19,17 @@ describe('el «sí» de este turno cuenta para el candado de autorización', () 
     expect(r.pasa).toBe(true)
   })
 
-  it('un «Sí» a la autorización no se pasa a persona como duda: el candado lo devuelve y la compra sigue', async () => {
-    const base = CASOS_VENTAS.find((c) => c.id === 'v-compra-completa')!
-    const i = base.guion!.findIndex((p) => JSON.stringify(p).includes('Perfecto. ¿Me das'))
-    const persona = { name: 'pasar_a_persona', args: { motivo: 'duda_abierta', pidio: 'autorizó' } }
-    const guion = [...base.guion!.slice(0, i), persona, ...base.guion!.slice(i)]
-    const r = await correrCaso({ ...base, guion }, { modelo: null, k: 1 })
-    const c = r.corridas[0]
-    expect(c.transcripcion.join('\n')).toContain('duda_tras_autorizar')
-    expect(c.personas).not.toContain('duda_abierta')
-    expect(r.pasa).toBe(true)
-  })
+  for (const motivo of ['duda_abierta', 'falla', 'no_entiende']) {
+    it(`un «Sí» a la autorización no se pasa a persona por ${motivo}: el candado lo devuelve y la compra sigue`, async () => {
+      const base = CASOS_VENTAS.find((c) => c.id === 'v-compra-completa')!
+      const i = base.guion!.findIndex((p) => JSON.stringify(p).includes('Perfecto. ¿Me das'))
+      const persona = { name: 'pasar_a_persona', args: { motivo, pidio: 'autorizó' } }
+      const guion = [...base.guion!.slice(0, i), persona, ...base.guion!.slice(i)]
+      const r = await correrCaso({ ...base, guion }, { modelo: null, k: 1 })
+      const c = r.corridas[0]
+      expect(c.transcripcion.join('\n')).toContain(`${motivo}_tras_autorizar`)
+      expect(c.personas).not.toContain(motivo)
+      expect(r.pasa).toBe(true)
+    })
+  }
 })

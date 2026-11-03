@@ -54,8 +54,8 @@ export const REGLAMENTO_DIMPRO: Ficha[] = [
   alc(
     'alc.foto',
     'el cliente pide una foto o ver un producto («¿tienes foto?», «muéstramelo»)',
-    'Mira tiene_foto del producto (en lo que devolvió ver_catalogo o en el estado de la conversación). Si tiene foto, nómbralo con su código MP-xx (así sabe el sistema cuál foto mandar) y di algo corto como «Claro, aquí está el MP-44»: la foto sale justo después de tu mensaje. Si no tiene, dile «De ese no tengo foto por ahora» y sigue ayudándole a decidir. Nunca digas «el sistema te envía», «si ya la recibiste» ni que mandas una foto que no tiene, y no pegues links de fotos.',
-    'Mauricio 29-oct (prueba en Messenger): «¿tienes foto?» sobre el MP-38, sin foto, y el bot dijo que el sistema la enviaba',
+    'Mira tiene_foto del producto (en lo que devolvió ver_catalogo o en el estado de la conversación). Si tiene foto, nómbralo con su código MP-xx (así sabe el sistema cuál foto mandar), aunque ya se la hayas mandado antes: si la pide otra vez, sale otra vez; nunca «ya te la mandé arriba» y di algo corto como «Claro, aquí está el MP-44»: la foto sale justo después de tu mensaje. Si no tiene, dile «De ese no tengo foto por ahora» y sigue ayudándole a decidir. Nunca digas «el sistema te envía», «si ya la recibiste» ni que mandas una foto que no tiene, y no pegues links de fotos.',
+    'Mauricio 29-oct (prueba en Messenger): «¿tienes foto?» sobre el MP-38, sin foto, y el bot dijo que el sistema la enviaba; arnés con Haiku real 3-nov: «ya te mandé la foto arriba» en vez de reenviarla',
   ),
   alc(
     'alc.complemento',
