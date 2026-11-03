@@ -241,8 +241,9 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   const previo = leerPaqueteBloqueo(tarifa.bloqueo)
   const previas = previo?.imagenes ?? { hotel: null, vuelo: null }
   // «Pública o Neta» sin responder (2026-11-03): la pregunta sigue abierta hasta que llegue la
-  // respuesta; el navegador no la cierra con solo omitirla.
-  const porElegir = !entrada.comision && (paquete.tarifaPorElegir === true || previo?.tarifaPorElegir === true)
+  // respuesta; el navegador no la cierra con solo omitirla. Se abre solo donde nadie decidió: una
+  // tarjeta abierta desde antes de responder no la reabre.
+  const porElegir = !entrada.comision && (previo?.tarifaPorElegir === true || (paquete.tarifaPorElegir === true && !tarifa.tipoTarifa))
   delete paquete.tarifaPorElegir
   if (porElegir) paquete.tarifaPorElegir = true
   paquete.imagenes = { ...previas }

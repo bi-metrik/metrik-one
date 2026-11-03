@@ -77,7 +77,7 @@ function consulta(tabla: string) {
   return api
 }
 
-const { pegarEnBloqueo } = await import('./bloqueo-actions')
+const { elegirTarifaDelPaquete, guardarPaqueteBloqueo, pegarEnBloqueo } = await import('./bloqueo-actions')
 const ranuras = (await import('@/app/(app)/negocios/ranura-actions')) as unknown as { __reiniciar: () => void }
 const { leerTarifaPax } = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { leerPaqueteBloqueo } = await import('@/lib/cotizaciones/bloqueo-paquete')
@@ -88,6 +88,8 @@ const hotel = (h: typeof KORAY, huella: string): LecturaBloqueo => ({ ok: true, 
 
 beforeEach(() => {
   ranuras.__reiniciar()
+  // Una lectura que quedó sin usar (el pegado se rechazó antes de leer) no puede caer en la prueba siguiente.
+  cola.length = 0
   tablas = {
     cotizaciones: [{ id: 'cot-1', negocio_id: 'neg-1' }],
     negocio_bloques: [{ negocio_id: 'neg-1', modalidad_viaje: 'bloqueo', operador_bloqueo: 'ATN' }],
@@ -112,6 +114,7 @@ const paquetes = () => tablas.items.map(i => ({
   margen: i.margen_porcentaje,
   paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo),
   tipo: leerTarifaPax(i.tarifa_pax).tipoTarifa?.tipo ?? null,
+  pregunta: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)?.tarifaPorElegir === true,
 }))
 
 describe('pegarEnBloqueo · SAN ANDRÉS, 3 adultos', () => {
@@ -129,8 +132,11 @@ describe('pegarEnBloqueo · SAN ANDRÉS, 3 adultos', () => {
     }
     // El vuelo guardó su imagen en la opción 1; cada hotel la suya.
     expect(ps.map(p => p.paquete!.imagenes.hotel)).toEqual(['sbext://ws-1/capturas/h1.png', 'sbext://ws-1/capturas/h2.png', 'sbext://ws-1/capturas/h3.png'])
-    // Sin decidir Pública / Neta: el default de siempre (no se toca).
+    // Sin default (Mauricio, 2026-11-03): ninguna decidida, las tres con la pregunta abierta y SIN
+    // margen encima (no sale inflado como si fuera Neta).
     expect(ps.map(p => p.tipo)).toEqual([null, null, null])
+    expect(ps.map(p => p.pregunta)).toEqual([true, true, true])
+    expect(ps.map(p => p.margen)).toEqual([0, 0, 0])
   })
 
   it('con el paquete en Pública (el precio ya trae la comisión), las opciones nuevas también: precio al cliente = total, sin margen encima', async () => {
@@ -169,5 +175,43 @@ describe('pegarEnBloqueo · SAN ANDRÉS, 3 adultos', () => {
     const [r] = await pegar(hotel(KORAY, 'h1'))
     expect(r.success).toBe(false)
     expect(tablas.items).toHaveLength(0)
+  })
+})
+
+describe('«¿Pública o Neta?» una vez por paquete (Mauricio, 2026-11-03)', () => {
+  it('la respuesta vale para todas las opciones del paquete; las que entran después la heredan sin preguntar', async () => {
+    await pegar(vuelo(VUELO_AV, 'v1'), hotel(KORAY, 'h1'), hotel(ISLA_BONITA, 'h2'))
+    const r = await elegirTarifaDelPaquete(tablas.items[0].id as string, 'publica', { tipo: 'pct', valor: 15 })
+    expect(r).toEqual({ success: true, opciones: 2 })
+    await pegar(hotel(SOL_CARIBE, 'h3'))
+    const ps = paquetes()
+    expect(ps.map(p => [p.tipo, p.pregunta, p.margen])).toEqual([['publica', false, 0], ['publica', false, 0], ['publica', false, 0]])
+    expect(leerTarifaPax(tablas.items[2].tarifa_pax).tipoTarifa).toMatchObject({ comisionPct: 15 })
+  })
+
+  it('otro vuelo abre otro paquete y vuelve a preguntar; la respuesta de uno no toca al otro', async () => {
+    await pegar(vuelo(VUELO_AV, 'v1'), hotel(KORAY, 'h1'))
+    await elegirTarifaDelPaquete(tablas.items[0].id as string, 'publica')
+    await pegar(vuelo(VUELO_OTRO, 'v2'), hotel(SOL_CARIBE, 'h3'))
+    expect(paquetes().map(p => [p.numero, p.tipo, p.pregunta])).toEqual([[1, 'publica', false], [2, null, true]])
+    await elegirTarifaDelPaquete(tablas.items[1].id as string, 'neta')
+    const ps = paquetes()
+    expect(ps.map(p => [p.numero, p.tipo, p.pregunta])).toEqual([[1, 'publica', false], [2, 'neta', false]])
+    // Neta: hereda el margen de la cotización (null), ya no el 0 de la espera.
+    expect(ps[1].margen).toBeNull()
+  })
+
+  it('«Guardar paquete» sin responder no cierra la pregunta; una tarjeta abierta desde antes no la reabre', async () => {
+    await pegar(vuelo(VUELO_AV, 'v1'), hotel(KORAY, 'h1'))
+    const id = tablas.items[0].id as string
+    const viejo = paquetes()[0].paquete!
+    const { tarifaPorElegir: _t, ...sinMarca } = viejo
+    void _t
+    expect((await guardarPaqueteBloqueo(id, { paquete: sinMarca })).success).toBe(true)
+    expect(paquetes()[0]).toMatchObject({ pregunta: true, margen: 0, tipo: null })
+    await elegirTarifaDelPaquete(id, 'neta')
+    // La tarjeta abierta antes de responder todavía trae la marca: no reabre la pregunta.
+    expect((await guardarPaqueteBloqueo(id, { paquete: viejo })).success).toBe(true)
+    expect(paquetes()[0]).toMatchObject({ pregunta: false, tipo: 'neta' })
   })
 })

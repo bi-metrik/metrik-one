@@ -170,6 +170,28 @@ export function grupoDelPaqueteVigente(filas: readonly { grupo: string | null; e
   return mejor?.grupo ?? null
 }
 
+/**
+ * Los paquetes con «¿Pública o Neta?» sin responder: UNO por paquete (la ranura), con la primera opción
+ * que tiene la pregunta abierta y un título para la bandeja («Paquete 2 · AV 9370»). En orden de número.
+ */
+export function paquetesConTarifaPorElegir(
+  lineas: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; paquete: PaqueteBloqueo | null }[],
+): { itemId: string; titulo: string }[] {
+  const porGrupo = new Map<string, { itemId: string; numero: number; vuelo: VueloBloqueo | null }>()
+  for (const l of lineas) {
+    if (l.es_ajuste === true || !l.grupo || ranuraDeGrupo(l.grupo)?.slug !== 'paquete_detalle') continue
+    if (!l.paquete?.tarifaPorElegir || porGrupo.has(l.grupo)) continue
+    porGrupo.set(l.grupo, { itemId: l.id, numero: formaDesdeGrupo(l.grupo)?.numero ?? 1, vuelo: l.paquete.vuelo })
+  }
+  return [...porGrupo.values()]
+    .sort((a, b) => a.numero - b.numero)
+    .map(x => {
+      const t = x.vuelo?.tramos[0]
+      const vuelo = t ? [t.aerolinea, t.numeroVuelo].filter(Boolean).join(' ') : ''
+      return { itemId: x.itemId, titulo: `Paquete ${x.numero}${vuelo ? ` · ${vuelo}` : ''}` }
+    })
+}
+
 // ── El plan ───────────────────────────────────────────────────────────────────
 
 /** La tarifa decidida de la primera opción que la tenga. */

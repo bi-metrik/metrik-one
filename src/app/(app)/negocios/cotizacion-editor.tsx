@@ -182,7 +182,8 @@ import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { AvisoVersionNueva } from '@/app/(app)/negocios/aviso-version-nueva'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
 import { tarjetaDeOpcionEn } from '@/lib/cotizaciones/enfocar-comision'
-import { crearPaqueteBloqueo, paqueteEnPropuesta, pegarEnBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
+import { crearPaqueteBloqueo, elegirTarifaDelPaquete, paqueteEnPropuesta, pegarEnBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
+import { paquetesConTarifaPorElegir } from '@/lib/cotizaciones/bloqueo-armado'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
@@ -3927,6 +3928,16 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               if (r.accion !== 'repetido') refrescar()
               return { ok: true as const, mensaje: r.mensaje }
             },
+            // «¿Pública o Neta?» una vez por paquete armado (2026-11-03), sin respuesta preseleccionada.
+            tarifasPorElegir: editable
+              ? paquetesConTarifaPorElegir(initialItems.map(i => ({ id: i.id, grupo: i.grupo, es_ajuste: i.es_ajuste, paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo) })))
+              : [],
+            elegirTarifa: async (itemId, tipo) => {
+              const r = await elegirTarifaDelPaquete(itemId, tipo)
+              if (!r.success) return { ok: false as const, error: r.error }
+              refrescar()
+              return { ok: true as const }
+            },
           } : null}
         />
       )}
@@ -3949,7 +3960,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               operador={bloqueo?.operador ?? null}
               pasajeros={composicionViaje ? { adultos: composicionViaje.adultos, ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null}
               edadesNinosSolicitud={edadesNinosDeLaSolicitud(bloqueo?.edadesMenores ?? null, composicionViaje ? { ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null)}
-              vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
+              // El vuelo de SU paquete primero (mismo grupo); si no tiene, el de otro paquete.
+              vueloSugerido={vueloParaReutilizar(initialItems
+                .filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle')
+                .sort((a, b) => Number(b.grupo === item.grupo) - Number(a.grupo === item.grupo))
+                .map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
               onCambio={() => refrescar()}
               onEliminar={pp.onEliminar}
               registro={registroPaquetes}
