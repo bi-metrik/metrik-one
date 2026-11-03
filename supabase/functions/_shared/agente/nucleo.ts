@@ -189,13 +189,29 @@ export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<P
 
 // ── El estado y el respaldo ──────────────────────────────────────────────────
 
+/** Las propuestas desde el último hecho (o rechazo) que quedaron sin toque, sin la recién hecha ni la vigente. Pura. */
+export function sinToque(filas: FilaConversacion[], hecha?: PropuestaGuardada, vigente?: string): PropuestaGuardada[] {
+  let out: PropuestaGuardada[] = [];
+  for (const x of propuestas(filas)) {
+    // La recién hecha (o la misma, reenviada con otra huella) no es una sin hacer.
+    if (hecha && (x.p.huella === hecha.huella || mismaPropuesta(x.p, hecha))) continue;
+    if (x.resultado) { out = []; continue; }
+    if (x.p.huella !== vigente && !out.some((o) => mismaPropuesta(o, x.p))) out.push(x.p);
+  }
+  return out;
+}
+
 async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversacion[] | 'error' | null = null): Promise<string[]> {
   const vig = vigenteDe(e.filas, deps.dominio);
   const delDominio = [...((await deps.dominio.estado?.(e.ctx)) ?? []), ...lineasRegistros(regs)];
   // Lo que el toque escribió, con sus datos (arnés 2026-11-03, b-borrados-dos-pdf: con «✅ Gasto de $6.880 registrado» a
   // secas y un G2 borrado de $6.880 en el Estado, Haiku volvía a proponer la ida en vez de seguir con la vuelta).
   const hecha = e.tras?.huella ? propuestas(e.filas).find((x) => x.p.huella === e.tras!.huella)?.p : undefined;
-  const queSeHizo = hecha ? ` Lo que se registró: ${hecha.resumen.split('\n').filter((l) => !/^¿.*\?$/.test(l.trim())).join(' · ')}.` : '';
+  const sinPregunta = (r: string) => r.split('\n').filter((l) => !/^¿.*\?$/.test(l.trim())).join(' · ');
+  const queSeHizo = hecha ? ` Lo que se registró: ${sinPregunta(hecha.resumen)}.` : '';
+  // Lo propuesto desde el último hecho que otra propuesta reemplazó sin toque (arnés ONE 2026-11-03, PR #1397,
+  // b-borrados-dos-pdf: la vuelta reemplazó a la ida, el «sí» registró la vuelta y Haiku dio la ida por hecha).
+  const reemplazadas = e.tras ? sinToque(e.filas, hecha, vig?.huella) : [];
   return [
     `Ahora: ${fechaBogota(deps.ahoraMs())} (Bogotá).`,
     `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
@@ -203,6 +219,7 @@ async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversaci
     ...delDominio,
     ...(e.tras ? [
       `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')}${queSeHizo} La confirmación ya la escribe el sistema: no la repitas, y no vuelvas a proponer eso.`,
+      ...reemplazadas.map((r) => `Se propuso y NO quedó hecho (otra propuesta la reemplazó antes del toque; si fue para corregirla, ya no va): ${sinPregunta(r.resumen)}.`),
       ...(e.tras.nota ? [e.tras.nota] : []),
       // «que este paso destrabó» dejaba fuera lo que venía en el mismo mensaje (arnés de Trappvel 2026-11-03, cp-mixto en
       // la asesora: guardó el perfil con el «sí», terminó y la fecha de salida del viaje, dicha junto, no se propuso nunca).
