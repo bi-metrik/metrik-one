@@ -19,7 +19,8 @@
  * segundo camino de escritura a `cobros`.
  *
  * Lo que ONE no decide solo, y deja marcado para una persona (`requiere_revision`):
- *   · un pago sobre una cuota que ya estaba pagada por otra vía (posible doble pago);
+ *   · un pago sobre una cuota que ya estaba pagada por otra vía (posible doble pago): además queda
+ *     marcado PARA DEVOLUCIÓN y se avisa a MéTRIK (`avisarDoblePago`, brief del 2026-11-03);
  *   · un pago por MENOS de lo esperado (el enlace es de monto cerrado: no debería pasar);
  *   · una anulación aprobada en la pasarela, si el repositorio no sabe anularla (`anularPorReverso`).
  *   · una moneda distinta de COP o un monto ilegible.
@@ -124,6 +125,12 @@ export interface RepoPagoEnLinea {
    * Si lanza, el webhook responde 500 y la pasarela (o la conciliación siguiente) lo reintenta.
    */
   anularPorReverso?(cobro: CobroParaPago, e: EventoPasarela): Promise<{ anulado: boolean; detalle: string }>
+  /**
+   * Un pago aprobado que entró sobre una cuota ya pagada (`FRASE_DOBLE_PAGO`): lo marca para devolución y
+   * avisa a MéTRIK (`aviso-doble-pago.ts`). Devuelve la frase que se agrega al detalle. No lanza y no
+   * devuelve plata: eso lo decide una persona. Idempotente por la transacción.
+   */
+  avisarDoblePago?(cobro: CobroParaPago, e: EventoPasarela): Promise<string>
 }
 
 export interface SalidaPagoEnLinea {
@@ -330,6 +337,9 @@ async function procesar(e: EventoPasarela, repo: RepoPagoEnLinea, hoy: string): 
 
   if (e.tipo === 'anulado') return reversoDePago(e, cobro, repo)
   const salida = await registrarPagoAprobado(e, cobro, repo, hoy)
+  if (salida.resultado === 'requiere_revision' && salida.detalle.includes(FRASE_DOBLE_PAGO) && repo.avisarDoblePago) {
+    return { ...salida, detalle: `${salida.detalle} ${await repo.avisarDoblePago(cobro, e)}` }
+  }
   if ((salida.resultado === 'registrado' || salida.resultado === 'ya_pagado') && repo.trasPagoRegistrado) {
     const despues = await repo.trasPagoRegistrado(cobro)
     if (despues) {
