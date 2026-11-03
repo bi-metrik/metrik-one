@@ -59,8 +59,9 @@ export type MotivoPersona =
   | 'menor' | 'crisis' | 'abuso' | 'duda_abierta' | 'datos' | 'falla'
   // Dominio de ventas (Dimpro, 29-oct): el pago no se pudo cobrar, el pago quedó aprobado y hay que despachar, y los
   // casos que el bot no resuelve (fuera de la tabla de flete, más de 3 unidades, factura especial, garantía o cambio,
-  // producto fuera del catálogo).
-  | 'pago_no_disponible' | 'despachar' | 'fuera_de_zona' | 'cantidad' | 'factura' | 'garantia' | 'no_en_catalogo';
+  // producto fuera del catálogo). `producto_no_disponible` (3-nov): el producto existe en Ferretería pero su publicación
+  // no está activa (agotada o borrador), o no hay nada publicado, y no hay otro parecido para ofrecer. No es una falla.
+  | 'pago_no_disponible' | 'despachar' | 'fuera_de_zona' | 'cantidad' | 'factura' | 'garantia' | 'no_en_catalogo' | 'producto_no_disponible';
 
 /** Los motivos del asistente de experiencias (Sabor). El dominio de ventas tiene los suyos (`ventas/dominio-ventas.ts`). */
 export const MOTIVOS_EXPERIENCIAS: MotivoPersona[] = [
@@ -71,7 +72,7 @@ export const MOTIVOS_EXPERIENCIAS: MotivoPersona[] = [
 /** Todos los motivos (la configuración de equipos y las etiquetas los aceptan todos). */
 export const MOTIVOS_PERSONA: MotivoPersona[] = [
   ...MOTIVOS_EXPERIENCIAS,
-  'pago_no_disponible', 'despachar', 'fuera_de_zona', 'cantidad', 'factura', 'garantia', 'no_en_catalogo',
+  'pago_no_disponible', 'despachar', 'fuera_de_zona', 'cantidad', 'factura', 'garantia', 'no_en_catalogo', 'producto_no_disponible',
 ];
 
 /** La etiqueta de Chatwoot de cada motivo (§6.1). */
@@ -79,7 +80,7 @@ export const ETIQUETA_MOTIVO: Record<MotivoPersona, string> = {
   reserva_lista: 'reserva', restriccion: 'restriccion', celebracion: 'celebracion', grupo: 'grupo', pide_persona: 'persona',
   queja: 'queja', pago: 'pago', no_entiende: 'no_entiende', menor: 'menor', crisis: 'crisis', abuso: 'abuso', duda_abierta: 'duda', datos: 'datos', falla: 'falla',
   pago_no_disponible: 'pago', despachar: 'despachar', fuera_de_zona: 'flete', cantidad: 'cantidad', factura: 'factura',
-  garantia: 'garantia', no_en_catalogo: 'catalogo',
+  garantia: 'garantia', no_en_catalogo: 'catalogo', producto_no_disponible: 'no_disponible',
 };
 
 export type TipoAutorizacion = 'general' | 'sensible';
