@@ -26,7 +26,7 @@ describe('el «sí» de este turno cuenta para el candado de autorización', () 
     const guion = [...base.guion!.slice(0, i), persona, ...base.guion!.slice(i)]
     const r = await correrCaso({ ...base, guion }, { modelo: null, k: 1 })
     const c = r.corridas[0]
-    expect(c.transcripcion.join('\n')).toContain('si_de_autorizacion')
+    expect(c.transcripcion.join('\n')).toContain('duda_tras_autorizar')
     expect(c.personas).not.toContain('duda_abierta')
     expect(r.pasa).toBe(true)
   })

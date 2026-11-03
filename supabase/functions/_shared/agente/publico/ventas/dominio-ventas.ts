@@ -59,6 +59,15 @@ export const VER_COMPLEMENTOS = 'ver_complementos';
 export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO, CONFIRMAR_COMPRA];
 
 /**
+ * ¿El último mensaje del cliente fue el «sí» a la autorización de datos? Ese «sí» es una respuesta entendida, nunca
+ * motivo de `no_entiende` (Dimpro, 3-nov: autorizó y el modelo lo pasó a persona por no entender). Pura.
+ */
+export function acabaDeAutorizar(filas: FilaPublica[]): boolean {
+  const u = filas.filter((f) => f.direccion === 'entrante').at(-1);
+  return u?.traza?.autorizacion?.tipo === 'general' && u.traza.autorizacion.respuesta === 'si';
+}
+
+/**
  * El producto del que se viene hablando: el único código que nombró el último mensaje del bot que nombró alguno (sin las
  * filas de fotos). Null si nombró varios o ninguno. Mauricio, 30-oct: «repite todo el tiempo la referencia y el nombre». Pura.
  */
@@ -519,7 +528,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const g = estadoAutorizacion(filas, 'general');
       const pasados = motivosYaPasados(filas);
       const compras = comprasConfirmadas(filas);
-      const lineaG = g.estado === 'si' ? 'sí: pide el nombre, el celular y la dirección que falten (un «sí» a la autorización no es una duda ni motivo para pasar a persona)'
+      const lineaG = g.estado === 'si' ? 'sí (sigue con lo que falte del pedido: cantidad y entrega si no las ha dicho, luego nombre, celular y dirección si es despacho; un «sí» a la autorización no es una duda ni motivo para pasar a persona)'
         : g.estado === 'no' ? 'dijo que no: no tomes datos personales; sigue informando y ofrece una persona'
           : g.estado === 'pedida' ? 'pedida, sin respuesta: no pidas datos personales'
             : 'no pedida: antes de pedir nombre, celular o dirección, llama respuesta_fija rf.autorizacion';
@@ -550,11 +559,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         if (!REPETIBLES.includes(motivo) && motivosYaPasados(filas).includes(motivo)) {
           return { ok: false, error: `Esta conversación ya pasó a persona por «${motivo}»: atiéndela tú.`, candado: 'motivo_repetido' };
         }
-        // Un «sí» solo a la autorización no es una duda ni algo que no se entiende (arnés con Haiku real 3-nov: lo pasaba
-        // a persona en 1 de cada 3 compras). La cola deja la autorización de ESTE turno en la traza de su fila.
-        const ultimaEntrante = [...filas].reverse().find((f) => f.direccion === 'entrante');
-        if ((motivo === 'duda_abierta' || motivo === 'no_entiende') && ultimaEntrante?.traza?.autorizacion?.respuesta === 'si') {
-          return { ok: false, error: 'El cliente acaba de autorizar sus datos con «sí»: no es una duda. Sigue la compra pidiendo el dato que falte (el nombre, si no lo ha dado).', candado: 'si_de_autorizacion' };
+        // Un «sí» solo a la autorización no es algo que no se entienda (#1398) ni una duda (arnés con Haiku real 3-nov: la
+        // pasaba a persona como duda_abierta en 1 de cada 3 compras).
+        if ((motivo === 'no_entiende' || motivo === 'duda_abierta') && acabaDeAutorizar(filas)) {
+          return { ok: false, error: 'Su «sí» responde la autorización de datos: sí lo entendiste y no es una duda. Sigue con lo que falte del pedido (cantidad y entrega si no las ha dicho; luego nombre, celular y dirección si es despacho).', candado: motivo === 'no_entiende' ? 'no_entiende_tras_autorizar' : 'duda_tras_autorizar' };
         }
         const texto = (motivo === 'duda_abierta' ? respuestaFija(r, 'rf.duda_abierta') : '') || respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
         if (motivo === 'producto_no_disponible') {
