@@ -110,7 +110,7 @@ export function entradaDePropuesta(
       fecha_envio: null, fecha_validez: null, condiciones_pago: null, notas: null,
       descuento_porcentaje: 0, descuento_valor: 0, terminos_condiciones: casa.terminos.join('\n'),
     },
-    empresa: { nombre: s.cliente, nit: null, contacto_nombre: s.cliente, contacto_email: null, telefono: null, direccion: null, ciudad: null },
+    empresa: { nombre: b.clienteParaDocumento || s.cliente, nit: null, contacto_nombre: b.clienteParaDocumento || s.cliente, contacto_email: null, telefono: null, direccion: null, ciudad: null },
     vendedor: { ...casa.vendedor, logo_url: null, telefono: null, email: null, direccion: null, ciudad: null },
     items: principal.items, itinerarios,
     dias: null, itemsSinDia: null, sugeridos: [], preciosPorPasajero: null,
@@ -122,7 +122,7 @@ export function entradaDePropuesta(
   return {
     props, servicios: [], menoresAutorizados: false, anticipo: null,
     asesora: { nombre: casa.asesora.nombre, whatsapp: casa.asesora.whatsapp },
-    cliente: { contacto: s.cliente, empresa: s.cliente, tipoPersona: 'natural' },
+    cliente: { contacto: b.clienteParaDocumento || s.cliente, empresa: b.clienteParaDocumento || s.cliente, tipoPersona: 'natural' },
     numeroDeViajeros: s.viajeros.adultos + s.viajeros.ninos.length,
   }
 }

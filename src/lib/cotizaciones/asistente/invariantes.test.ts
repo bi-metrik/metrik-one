@@ -15,7 +15,7 @@ const hotel = (over: Partial<HotelBorrador>): HotelBorrador => ({
 })
 
 const borrador = (hoteles: HotelBorrador[], over: Partial<BorradorCotizacion> = {}): BorradorCotizacion => ({
-  titular: 'Isla Ficticia', intro: '', destino: 'Isla Ficticia',
+  clienteParaDocumento: 'Ana Prueba', titular: 'Isla Ficticia', intro: '', destino: 'Isla Ficticia',
   vuelos: [
     { aerolinea: 'Ficticia', numero: 'FF101', origenIata: 'AAA', origenCiudad: 'A', destinoIata: 'BBB', destinoCiudad: 'B', fecha: '2027-02-01', salida: '08:00', llegada: '10:00', escalas: 0 },
     { aerolinea: 'Ficticia', numero: 'FF102', origenIata: 'BBB', origenCiudad: 'B', destinoIata: 'AAA', destinoCiudad: 'A', fecha: '2027-02-04', salida: '18:00', llegada: '20:00', escalas: 0 },

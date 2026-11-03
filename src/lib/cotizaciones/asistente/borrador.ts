@@ -77,6 +77,8 @@ export interface Duda {
 }
 
 export interface BorradorCotizacion {
+  /** El nombre como se escribe una persona (la base lo guarda en mayúsculas). */
+  clienteParaDocumento: string
   titular: string
   intro: string
   destino: string
@@ -98,6 +100,7 @@ const obj = (properties: Record<string, unknown>, required = Object.keys(propert
 const arr = (items: unknown) => S('ARRAY', { items })
 
 export const ESQUEMA_BORRADOR = obj({
+  clienteParaDocumento: str,
   titular: str,
   intro: str,
   destino: str,

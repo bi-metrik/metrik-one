@@ -69,7 +69,7 @@ async function main() {
         if (foto) fotos.set(h.pantallazo, foto)
       }
       const entrada = entradaDePropuesta(r.borrador, validado, solicitud, casa, fotos)
-      const datos = { codigo: solicitud.consecutivo, cliente: solicitud.cliente, destino: solicitud.destino, borrador: false }
+      const datos = { codigo: solicitud.consecutivo, cliente: r.borrador.clienteParaDocumento || solicitud.cliente, destino: solicitud.destino, borrador: false }
       const nombre = nombrePdfCotizacion(datos as never)
       const { pdf, medidas } = await pdfDePropuestaHtml(entrada, {
         marca: casa.marca, logoUrl: process.env.LOGO ?? null, tituloDocumento: tituloPdfCotizacion(datos as never),
