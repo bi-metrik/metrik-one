@@ -161,6 +161,16 @@ async function tocarOEscribir(e: Escenario, titulo: string, oEscribe = 'sí'): P
   }
 }
 
+/** Toca solo si el bot mostró esa opción; si no, la persona no hace nada (y queda dicho). */
+async function tocarSiHay(e: Escenario, titulo: string): Promise<string> {
+  try {
+    await e.toca(titulo);
+    return `[toque: ${titulo}]`;
+  } catch {
+    return `(no había botón «${titulo}»: no hace nada)`;
+  }
+}
+
 /** Los archivos sintéticos de la bandeja (sin datos de clientes). */
 async function archivoBandeja(a: NonNullable<PasoGuion['adjunta']>['archivo']): Promise<{ tipo: 'foto' | 'pdf'; nombre?: string; archivo: ArchivoAdjunto }> {
   if (a === 'solicitud') return { tipo: 'pdf', nombre: 'solicitud-viaje.pdf', archivo: { bytes: solicitudViajeSintetica(), mime: 'application/pdf', nombre: 'solicitud-viaje.pdf' } };
@@ -213,6 +223,7 @@ async function correrCaso(caso: CasoArnes): Promise<{ r: ResultadoCaso; usoSimul
         if (p.escribe !== undefined) { await e.escribe(p.escribe); comercial.push(p.escribe); }
         else if (p.reenvia !== undefined) { await e.reenvia(p.reenvia); comercial.push(`(reenvío) ${p.reenvia}`); }
         else if (p.dicta !== undefined) { await e.dicta(p.dicta); comercial.push(`(audio) ${p.dicta}`); }
+        else if (p.toca !== undefined && p.siHay) comercial.push(await tocarSiHay(e, p.toca));
         else if (p.toca !== undefined) comercial.push(await tocarOEscribir(e, p.toca, p.oEscribe));
         else if (p.adjunta) {
           const a = await archivoBandeja(p.adjunta.archivo);
