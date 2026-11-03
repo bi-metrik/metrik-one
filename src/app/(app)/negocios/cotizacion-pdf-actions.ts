@@ -42,6 +42,7 @@ import {
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from '@/lib/cotizaciones/fechas-del-viaje'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { hitosDeTarifa, hitosPorTarifa } from '@/lib/viaje/hitos-proveedor'
 import { terminosConCondicionVisa } from '@/lib/viaje/condicion-visa'
 import { terminosConTasaDeCambio } from '@/lib/cotizaciones/nota-tasa-pdf'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -1299,6 +1300,21 @@ export async function generateCotizacionPDF(
         negocioInfo.configLinea,
         { fechaSalida: rango.inicio, hoy: todayBogotaISO() },
       )
+    }
+
+    // QA G14 (2026-11-03): la «Compra antes del» de cada paquete entra al plan del documento con
+    // la MISMA lectura que el plan de «El cliente confirmó» (`hitosPorTarifa` + `hitosDeTarifa`).
+    // Sin esto la propuesta decía 3 jun / 17 jun y al confirmar el cliente recibía 30 nov.
+    if (entradaPlan) {
+      const mapa = await hitosPorTarifa(supabase, cotizacionId)
+      if (mapa.size > 0) {
+        const tarifaDelTotal = bloques?.find(b => b.esPrincipal)?.id ?? (unaSolaManera ? bloquesLeidos![0].id : null)
+        entradaPlan = {
+          ...entradaPlan,
+          hitos: hitosDeTarifa(mapa, tarifaDelTotal),
+          ...(bloques ? { hitosPorTarifa: bloques.map(b => hitosDeTarifa(mapa, b.id)) } : {}),
+        }
+      }
     }
 
     /**

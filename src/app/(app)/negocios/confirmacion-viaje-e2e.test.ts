@@ -615,11 +615,22 @@ describe('gates de la etapa Confirmación', () => {
     const despues = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })
     expect(despues).toEqual(['Para pasar a Reservas y pagos falta: el anticipo con su comprobante y la cuenta donde entró.'])
 
-    // Un cobro sin cuenta receptora no basta; con cuenta y soporte, sí.
-    tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: 1_215_000, fecha: HOY, soporte: { url: 'one://x' }, cuenta_recaudo: null })
+    // Un cobro sin cuenta receptora no basta; con cuenta y soporte, sí, si cubre la cuota del anticipo.
+    const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
+    tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: anticipo, fecha: HOY, soporte: { url: 'one://x' }, cuenta_recaudo: null })
     expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })).toHaveLength(1)
     tablas.cobros[0].cuenta_recaudo = 'bancolombia'
     expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })).toEqual([])
+  })
+
+  it('QA G14 · con el anticipo a medias el gate dice cuánto falta y el panel no lo da por cumplido', async () => {
+    await confirmarClienteViaje(entrada())
+    const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
+    tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: anticipo - 500_000, fecha: HOY, soporte: { url: 'one://x' }, cuenta_recaudo: 'bancolombia' })
+    expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} }))
+      .toEqual(['Faltan $500.000 del anticipo.'])
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.estado).toMatchObject({ anticipoConSoporte: true, anticipoFalta: 500_000 })
   })
 
   it('una etapa sin estos gates no consulta nada', async () => {
@@ -670,6 +681,7 @@ describe('prerreserva vencida (C9, F2-9)', () => {
 
 // ── Riel de cobro (PR 9) ─────────────────────────────────────────────────────
 
+import { cambiarEtapaNegocioConGate } from './negocio-v2-actions'
 import {
   consolidarPagoViajero,
   deshacerPagoViajero,
@@ -782,12 +794,28 @@ describe('el avance solo no se salta Confirmación (QA G11)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.avanzo).toBeNull()
-    expect(r.textoAvance).toBe(`Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`)
+    expect(r.textoAvance).toBe(`Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo con «Omitir gate» y el motivo.`)
     expect(neg().etapa_actual_id).toBe('e4')
     expect(tablas.notificaciones.some((n) => n.tipo === 'handoff')).toBe(false)
     // Con el resto del anticipo, pasa solo.
     const r2 = await registrarPagoViajero(pagoEntrada({ monto: 500_000, referencia: 'M4471099' }))
     expect(r2.ok && r2.avanzo).toBe('Reservas y pagos')
+    expect(neg().etapa_actual_id).toBe('e5')
+  })
+
+  it('QA G14 · a mano tampoco pasa a Reservas y pagos con el anticipo a medias; «Omitir gate» con motivo sí', async () => {
+    const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
+    const r = await registrarPagoViajero(pagoEntrada({ monto: anticipo - 500_000 }))
+    expect(r.ok && r.textoAvance).toBe('Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo con «Omitir gate» y el motivo.')
+    const aMano = await cambiarEtapaNegocioConGate(NEG, 'e5')
+    expect(aMano.error).toBe('gate_bloqueado')
+    expect((aMano as { bloquesPendientes?: { nombre: string }[] }).bloquesPendientes?.map((b) => b.nombre)).toContain('Faltan $500.000 del anticipo.')
+    expect(neg().etapa_actual_id).toBe('e4')
+    // El mecanismo de excepción de siempre: la dirección omite el gate con su motivo.
+    staffId = 's-edgar'
+    rol = 'admin'
+    const conMotivo = await cambiarEtapaNegocioConGate(NEG, 'e5', 'El cliente paga el resto del anticipo el viernes, acordado con Edgar')
+    expect(conMotivo.error).toBeFalsy()
     expect(neg().etapa_actual_id).toBe('e5')
   })
 })

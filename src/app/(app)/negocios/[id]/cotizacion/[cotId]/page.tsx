@@ -20,6 +20,7 @@ import { leerLineasPorTipo } from '@/lib/cotizaciones/por-pasos-datos'
 import { estadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import { configSeguimiento } from '@/lib/negocios/seguimiento'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { hitosDeProveedor, type ItemConLimite } from '@/lib/viaje/hitos-proveedor'
 import { inicioDelViajeDeLaCotizacion } from '@/lib/cotizaciones/fechas-del-viaje'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
@@ -276,6 +277,13 @@ export default async function CotizacionNegocioPage({
     ? inicioDelViajeDeLaCotizacion(items, principalEnPropuesta, fechasViaje)
     : null
 
+  // QA G14 (2026-11-03): la «Compra antes del» del paquete de la Recomendada entra al plan de
+  // «Revisar y enviar», igual que en el PDF y en «El cliente confirmó» (`hitosDeProveedor`).
+  const entradaPlanBase = entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: inicioDelViajeCotizado, hoy: todayBogotaISO() })
+  const entradaPlanRevisar = entradaPlanBase
+    ? { ...entradaPlanBase, hitos: hitosDeProveedor(items as ItemConLimite[], principalEnPropuesta?.seleccion ?? null) }
+    : null
+
   // ¿Líneas por tipo («+ Vuelo», «+ Hotel»…) en vez de nombre libre? Solo si la línea del
   // negocio declara quiénes viajan (`lineas-por-tipo.ts`). Si no se puede leer, la pantalla
   // queda como siempre: preferible a ofrecer tipos de viaje a quien no cotiza viajes.
@@ -388,7 +396,7 @@ export default async function CotizacionNegocioPage({
       fechasViaje={fechasViaje}
       leidaEn={leidaEn}
       seguimiento={seguimientoActivo}
-      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: inicioDelViajeCotizado, hoy: todayBogotaISO() })}
+      asiPuedesPagar={entradaPlanRevisar}
     />
   )
 

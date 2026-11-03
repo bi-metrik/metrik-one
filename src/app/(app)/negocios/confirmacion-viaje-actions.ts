@@ -50,6 +50,8 @@ import {
 } from '@/lib/viaje/confirmacion-datos'
 import { enviarCorreoAlViajero, trazarWhatsAppManual } from '@/lib/viaje/correo-viajero'
 import { hitosDeTarifa, hitosPorTarifa } from '@/lib/viaje/hitos-proveedor'
+import { esNombreGenerico } from '@/lib/viaje/nombre-tarifa'
+import { nombresUtilesDeTarifas } from '@/lib/viaje/nombre-tarifa-datos'
 import { contextoViaje, nombreYCorreo, type ContextoViaje } from '@/lib/viaje/contexto-viaje'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
@@ -94,7 +96,11 @@ async function prepararPlan(ctx: Contexto, input: EntradaPlan) {
   const v = validarPlan(cuotas, { total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla, hitos })
   const sugerido = planSugerido({ total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla, hitos })
   const esSugerido = !!sugerido && huellaPlan(sugerido, total.total) === huellaPlan(cuotas, total.total)
-  return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre: total.nombre, viaje, visaEnTramite: visaEnTramite ?? false, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
+  // QA G14: el nombre que dice algo (el propio o el hotel del paquete), nunca «Tarifa» de relleno.
+  const tarifaNombre = input.itinerarioId
+    ? ((await nombresUtilesDeTarifas(ctx.supabase, cot.id)).get(input.itinerarioId) ?? (esNombreGenerico(total.nombre) ? null : total.nombre))
+    : (esNombreGenerico(total.nombre) ? null : total.nombre)
+  return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre, viaje, visaEnTramite: visaEnTramite ?? false, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
 }
 
 async function guardarPlanPropuestoSinClave(input: EntradaPlan) {

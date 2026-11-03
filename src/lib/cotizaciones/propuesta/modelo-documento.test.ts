@@ -216,6 +216,25 @@ describe('las cifras del modelo son las del PDF de hoy', () => {
     expect(m.avisos).toEqual([])
   })
 
+  it('QA G14 · cada alternativa con SU «Compra antes del»; el PDF de hoy imprime la de la Recomendada', { timeout: 30_000 }, async () => {
+    const hitoR = { fecha: '2026-11-05', monto: Math.round(PRECIO_R * 0.6), operador: 'TU RESERVA' }
+    const hitoE = { fecha: '2026-11-10', monto: Math.round(suma(ECONOMICA) * 0.6), operador: 'ALIADOS TRAVEL' }
+    const entrada = { ...ENTRADA_PLAN, hitos: [hitoR], hitosPorTarifa: [[hitoR], [hitoE], []] }
+    const p = props({ asiPuedesPagar: entrada })
+    const m = modeloDePropuesta({ props: p })
+    const plan = (i: number) => m.precio.planes.find((x) => x.tarifa === i)!.plan
+    expect(plan(R).filas!.map((f) => f.cuando)).toContain('hasta el 5 de noviembre')
+    expect(plan(E).filas!.map((f) => f.cuando)).toContain('hasta el 10 de noviembre')
+    expect(plan(E).filas!.map((f) => f.cuando)).not.toContain('hasta el 5 de noviembre')
+    expect(plan(2).filas!.map((f) => f.cuando)).toEqual(asiPuedesPagar(suma(PREMIUM), ENTRADA_PLAN).filas!.map((f) => f.cuando))
+    // Cada una sigue sumando su precio.
+    expect(plan(E).suma).toBe(suma(ECONOMICA))
+    // El PDF de @react-pdf (plan sobre el TOTAL, la Recomendada) dice lo mismo que el modelo.
+    expect(plan(R)).toEqual(asiPuedesPagar(PRECIO_R, entrada))
+    const t = await textoDelPdfDeHoy(p)
+    expect(t).toContain('hasta el 5 de noviembre')
+  })
+
   it('con el IVA dentro de los precios: la misma nota de IVA por tarifa que hoy', { timeout: 30_000 }, async () => {
     const p = props({ ivaEnPrecios: { iva: 1_234_567, nota: true, porBloque: [1_234_567, 987_654, 2_345_678] } })
     const m = modeloDePropuesta({ props: p })

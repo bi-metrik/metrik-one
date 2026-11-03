@@ -13,6 +13,7 @@ import { describirOcupacion, type Composicion } from '@/lib/cotizaciones/tarifa-
 import { fechaCorta, pesos, type CuotaPlan } from './plan-pagos'
 import { CONDICION_VISA_EN_TRAMITE_TU, TITULO_CONDICION_VISA } from './condicion-visa'
 import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { esNombreGenerico } from './nombre-tarifa'
 
 // ── Titular de facturación (Vera C4, P3; Max §3.3) ───────────────────────────
 
@@ -185,7 +186,8 @@ export function mensajeConfirmacion(d: DatosMensajeConfirmacion): string {
   const viaje = [d.destino, rangoFechas(d.fechaSalida, d.fechaRegreso)].filter(Boolean).join(', ')
   const quienes = d.composicion ? describirOcupacion(d.composicion, 'y') : null
   if (viaje || quienes) lineas.push(`*Tu viaje:* ${[viaje, quienes].filter(Boolean).join(' · ')}.`)
-  if (d.tarifaNombre) lineas.push(`*Tarifa:* ${d.tarifaNombre}`)
+  // QA G14: un relleno («Tarifa», «Opción 2») no se le dice al cliente; sin nombre útil, sin la línea.
+  if (d.tarifaNombre && !esNombreGenerico(d.tarifaNombre)) lineas.push(`*Tarifa:* ${d.tarifaNombre.trim()}`)
   lineas.push(`*Total:* ${pesos(d.total)}`)
   lineas.push('')
   lineas.push('*Tu plan de pagos:*')
@@ -310,6 +312,18 @@ export interface EstadoConfirmacion {
   planVigente: boolean
   /** Algún pago confirmado con comprobante y cuenta receptora. */
   anticipoConSoporte: boolean
+  /**
+   * QA G14 (2026-11-03) · lo que falta para cubrir la cuota del anticipo del plan acordado (0 si
+   * está cubierta dentro del piso de materialidad, o sin plan acordado). Con un pago a medias el
+   * chequeo no queda ✓ y el gate `anticipo_con_soporte` frena el avance, también a mano. Es la
+   * regla del avance automático de #1380 (`anticipoDelPlanCubierto`). Ausente = 0.
+   */
+  anticipoFalta?: number
+}
+
+/** «Faltan $1.284.000 del anticipo.» */
+export function textoFaltaAnticipo(falta: number): string {
+  return `Faltan ${pesos(falta)} del anticipo.`
 }
 
 /** Lo que falta para salir de la etapa, en el orden de la etapa, con los textos de la línea si los declara. */
@@ -322,7 +336,11 @@ export function gatesConfirmacionPendientes(
   const pide = (g: GateConfirmacion) => gates.includes(g)
   if (pide('confirmacion_registrada') && !estado.confirmado) out.push(mensajes.confirmacion_registrada ?? MENSAJES_GATE_CONFIRMACION.confirmacion_registrada)
   if (pide('plan_pagos_acordado') && !estado.planVigente) out.push(mensajes.plan_pagos_acordado ?? MENSAJES_GATE_CONFIRMACION.plan_pagos_acordado)
-  if (pide('anticipo_con_soporte') && !estado.anticipoConSoporte) out.push(mensajes.anticipo_con_soporte ?? MENSAJES_GATE_CONFIRMACION.anticipo_con_soporte)
+  if (pide('anticipo_con_soporte')) {
+    if (!estado.anticipoConSoporte) out.push(mensajes.anticipo_con_soporte ?? MENSAJES_GATE_CONFIRMACION.anticipo_con_soporte)
+    // QA G14: con un pago a medias el gate no se da por cumplido (cede a «Omitir gate» como los demás).
+    else if ((estado.anticipoFalta ?? 0) > 0) out.push(textoFaltaAnticipo(estado.anticipoFalta as number))
+  }
   return out
 }
 
@@ -347,6 +365,15 @@ export function anticipoDelPlanCubierto(
   const pagado = cobros.filter(esAnticipoConSoporte).reduce((a, c) => a + Math.round(Number(c.monto ?? 0)), 0)
   const falta = Math.max(0, anticipo - pagado)
   return { cubierto: falta <= tolerancia, falta }
+}
+
+/** Lo que falta del anticipo para el gate y el panel: 0 si está cubierto (`anticipoDelPlanCubierto`). */
+export function faltaDelAnticipo(
+  cuotas: Parameters<typeof anticipoDelPlanCubierto>[0],
+  cobros: Parameters<typeof anticipoDelPlanCubierto>[1],
+): number {
+  const a = anticipoDelPlanCubierto(cuotas, cobros)
+  return a.cubierto ? 0 : a.falta
 }
 
 /** ¿El cobro sirve como anticipo con soporte? Pago confirmado (con fecha), comprobante y cuenta. */

@@ -16,9 +16,12 @@ import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type HitoProveedor, type ReglaPlan } from './plan-pagos'
 import { hitosDeTarifa, hitosPorTarifa } from './hitos-proveedor'
+import { esNombreGenerico } from './nombre-tarifa'
+import { nombresUtilesDeTarifas } from './nombre-tarifa-datos'
 import {
   esAnticipoConSoporte,
   GATES_CONFIRMACION,
+  faltaDelAnticipo,
   gatesConfirmacionPendientes,
   leerPrerreserva,
   MOTIVO_PRERRESERVA_VENCIDA,
@@ -43,7 +46,13 @@ export interface TarifaConfirmable {
    * cotización (`totalSinTarifas`) y se confirma con `itinerarioId: null`.
    */
   itinerarioId: string | null
+  /** Cómo la ve el equipo en la hoja (nunca vacío): el nombre útil, o «Opción N». */
   nombre: string
+  /**
+   * QA G14 · lo que va en el mensaje al cliente y en el panel: el nombre propio que dice algo, o el
+   * hotel del paquete de la tarifa; `null` = la línea no sale (nunca «Tarifa»). `nombre-tarifa.ts`.
+   */
+  nombreCliente?: string | null
   esRecomendada: boolean
   precio: number | null
   motivo: string | null
@@ -302,9 +311,10 @@ export async function estadoConfirmacion(
   args: { workspaceId: string; negocioId: string; metadata: Record<string, unknown> | null },
 ): Promise<EstadoConfirmacion> {
   const confirmado = !!(args.metadata?.confirmacion_cliente as Record<string, unknown> | undefined)?.registrada_at
-  const planVigente = await planVigenteDe(db, args.negocioId, await planAcordado(db, args.negocioId))
+  const acordado = await planAcordado(db, args.negocioId)
+  const planVigente = await planVigenteDe(db, args.negocioId, acordado)
   const cobros = await cobrosDelNegocio(db, args.workspaceId, args.negocioId)
-  return { confirmado, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte) }
+  return { confirmado, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte), anticipoFalta: faltaDelAnticipo(acordado?.cuotas, cobros) }
 }
 
 interface EtapaLinea { id: string; nombre: string; numero: number; orden: number; config_extra: Record<string, unknown> | null }
@@ -382,7 +392,12 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
       if (unica.ok) tarifas = [{ itinerarioId: null, nombre: TARIFA_UNICA, esRecomendada: false, precio: unica.total, motivo: null }]
       else if (!unica.sinTotal) errorTarifas = unica.error
     } else if (precios.ok) {
-      tarifas = precios.tarifas.map((t) => ({ itinerarioId: t.itinerarioId, nombre: t.nombre ?? 'Tarifa', esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }))
+      // QA G14: la opción sin nombre propio salía como «Tarifa» y el cliente leía «*Tarifa:* Tarifa».
+      const utiles = await nombresUtilesDeTarifas(db, String(cot.id))
+      tarifas = precios.tarifas.map((t, i) => {
+        const util = utiles.has(t.itinerarioId) ? utiles.get(t.itinerarioId)! : esNombreGenerico(t.nombre) ? null : (t.nombre as string).trim()
+        return { itinerarioId: t.itinerarioId, nombre: util ?? `Opción ${i + 1}`, nombreCliente: util, esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }
+      })
     } else {
       errorTarifas = precios.error
     }
@@ -433,7 +448,12 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     confirmacion,
     titular,
     prerreserva,
-    estado: { confirmado: !!confirmacion?.registrada_at, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte) },
+    estado: {
+      confirmado: !!confirmacion?.registrada_at,
+      planVigente,
+      anticipoConSoporte: cobros.some(esAnticipoConSoporte),
+      anticipoFalta: faltaDelAnticipo((planes.find((p) => p.estado === 'acordado') ?? null)?.cuotas, cobros),
+    },
     gates: gatesDe(etapaConf ?? undefined),
     gateMensajes: ((etapaConf?.config_extra as { gate_messages?: Record<string, string> } | null)?.gate_messages ?? {}) as Record<string, string>,
     etapaConfirmacion: etapaConf ? { id: etapaConf.id, nombre: etapaConf.nombre, numero: etapaConf.numero } : null,

@@ -834,7 +834,8 @@ export function modeloDePropuesta({
           tarifa: t.indice,
           nombre: t.nombre,
           // La principal paga sobre el TOTAL impreso, como el plan de hoy; las demás sobre su precio.
-          plan: asiPuedesPagar(t.esPrincipal ? total : t.precio, entrada),
+          // QA G14: cada alternativa con SU «Compra antes del» (la de su paquete y su operador).
+          plan: asiPuedesPagar(t.esPrincipal ? total : t.precio, entrada, entrada.hitosPorTarifa?.[t.indice] ?? null),
         }))
       : [{ tarifa: null, nombre: null, plan: asiPuedesPagar(total, entrada) }]
 

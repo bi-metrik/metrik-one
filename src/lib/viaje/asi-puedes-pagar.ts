@@ -12,7 +12,7 @@
  * nadie arma esto y el PDF no cambia.
  */
 
-import { configPlanPagos, planSugerido, REGLA_POR_DEFECTO, sumarDiasCivil, type ReglaPlan } from './plan-pagos'
+import { configPlanPagos, planSugerido, REGLA_POR_DEFECTO, sumarDiasCivil, type HitoProveedor, type ReglaPlan } from './plan-pagos'
 
 /** Lo que el PDF y la pantalla necesitan para armar la sección, además del total. */
 export interface EntradaAsiPuedesPagar {
@@ -21,6 +21,18 @@ export interface EntradaAsiPuedesPagar {
   /** Hoy en Bogotá, `YYYY-MM-DD`. */
   hoy: string
   regla: ReglaPlan
+  /**
+   * QA G14 (2026-11-03): los pagos al proveedor con fecha límite (la «Compra antes del» del
+   * paquete) de la tarifa cuyo total se imprime (la Recomendada, o la cotización sin tarifas). Los
+   * MISMOS que mira el plan de «El cliente confirmó» (`hitosPorTarifa`/`hitosDeTarifa`): sin ellos
+   * la propuesta decía otras fechas que las que el cliente recibe al confirmar.
+   */
+  hitos?: HitoProveedor[] | null
+  /**
+   * Los hitos de cada tarifa de la propuesta, en el orden de `itinerarios` del PDF. Cada alternativa
+   * (paquete A con un operador, B con otro) arma su plan con SU fecha.
+   */
+  hitosPorTarifa?: HitoProveedor[][] | null
 }
 
 export interface FilaAsiPuedesPagar {
@@ -65,10 +77,14 @@ export function reglaEnPalabras(regla: ReglaPlan = REGLA_POR_DEFECTO): string {
   return `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir y el resto un día antes del viaje.`
 }
 
-export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar): AsiPuedesPagar {
+/**
+ * @param hitos Los de una alternativa en particular; sin ellos, los de la entrada (la tarifa cuyo
+ *   total se imprime).
+ */
+export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar, hitos?: readonly HitoProveedor[] | null): AsiPuedesPagar {
   const regla = entrada.regla ?? REGLA_POR_DEFECTO
   const base = { regla: reglaEnPalabras(regla), pctMinimo: regla.pct_minimo, pie: PIE_ASI_PUEDES_PAGAR }
-  const cuotas = planSugerido({ total, fechaSalida: entrada.fechaSalida, hoy: entrada.hoy, regla })
+  const cuotas = planSugerido({ total, fechaSalida: entrada.fechaSalida, hoy: entrada.hoy, regla, hitos: hitos ?? entrada.hitos ?? null })
   if (!cuotas || cuotas.length === 0 || !entrada.fechaSalida) return { ...base, filas: null, suma: 0 }
 
   // El saldo vence el día anterior a la salida (decisión 2026-10-29).
