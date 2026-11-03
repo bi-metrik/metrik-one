@@ -70,6 +70,9 @@ export const MODULOS = {
       // html (`tienePropuestaHtml`).
       '/fotos',
       '/proveedores',
+      // Obras (2026-10-21): cierre por obra, retenido por cliente y descargas CSV. La página exige
+      // además la llave de función `obras`.
+      '/obras',
     ],
     funciones: [
       'comercial_negocios', 'conciliacion', 'cobros_recurrentes', 'aliados', 'causacion',
@@ -79,6 +82,9 @@ export const MODULOS = {
       // Bot de WhatsApp: lo que el comercial reenvía va a la bandeja de solicitudes y no al
       // flujo de gastos. La lee `supabase/functions/_shared/wa-bandeja-reglas.ts` (LLAVE_BANDEJA).
       'bandeja_solicitudes_wa',
+      // Obras: cierre por obra, facturas por obra, llegadas de los operarios, rubros de obra y
+      // valor de la jornada (`src/lib/obras/modulo.ts`). La lee también el asistente de WhatsApp.
+      'obras',
     ],
   },
   valida: {

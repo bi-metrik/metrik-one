@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { MoreVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CampanaPanel, FuncionAgenda, Negocio } from '@/lib/funciones/datos'
-import { DIAS_SALDO, diaBogota, diasSaldoValido, ETIQUETA_ESTADO_CAMPANA, insigniaFuncion, pesos, preventaPasaLaFuncion } from '@/lib/funciones/reglas'
+import { AYUDA_DIAS_SALDO, DIAS_SALDO, diaBogota, diasSaldoValido, ETIQUETA_ESTADO_CAMPANA, insigniaFuncion, pesos, preventaPasaLaFuncion, resumenPlazoSaldo } from '@/lib/funciones/reglas'
 import { fechaCortaTexto } from '../../../../../../supabase/functions/_shared/funciones/fecha-texto.ts'
 import { generarBienvenida, generarMensajeDirecto, generarOferta } from '../../../../../../supabase/functions/_shared/funciones/textos.ts'
 import {
@@ -150,7 +150,7 @@ export function CampanaCliente({ campana: c, negocio, puedeEditar, ahoraMs }: { 
             {c.precio_preventa_persona ? ` · prev ${pesos(c.precio_preventa_persona)}` : ''}
             {c.abono_persona ? ` · abono ${pesos(c.abono_persona)}` : ''}
             {c.permite_pago_total ? '' : ' · sin pago total'}
-            {` · saldo ${c.dias_saldo_antes === 1 ? '1 día' : `${c.dias_saldo_antes} días`} antes`}
+            {` · ${resumenPlazoSaldo(c.dias_saldo_antes)}`}
           </span>
           {puedeEditar && <button type="button" onClick={() => setHoja({ tipo: 'precios' })} className="text-[#059669] underline">Cambiar</button>}
         </div>
@@ -486,8 +486,8 @@ function HojaPrecios(p: { c: CampanaPanel; onCerrar: () => void; onGuardar: (f: 
         <label className="flex items-end gap-2 pb-3"><input type="checkbox" checked={total} onChange={(e) => setTotal(e.target.checked)} className="size-5" /> Pago total</label>
         <label>Minutos de apartado<input inputMode="numeric" value={minutos} onChange={(e) => setMinutos(e.target.value)} className={campo} /></label>
         <label>Tope de sobreventa<input inputMode="numeric" value={tope} onChange={(e) => setTope(e.target.value)} className={campo} placeholder="Sin sobreventa" /></label>
-        <label className="col-span-2">Paga el saldo (días antes de la función)<input inputMode="numeric" value={dias} onChange={(e) => setDias(e.target.value)} className={campo} /></label>
-        {!diasSaldoValido(n(dias)) && <p className="col-span-2 text-xs text-red-600">Los días antes para pagar el saldo van de 1 a 30.</p>}
+        <label className="col-span-2">Paga el saldo (días antes de la función)<input inputMode="numeric" value={dias} onChange={(e) => setDias(e.target.value)} className={campo} /><span className="mt-1 block text-xs text-[#6B7280]">{AYUDA_DIAS_SALDO}</span></label>
+        {!diasSaldoValido(n(dias)) && <p className="col-span-2 text-xs text-red-600">Los días antes para pagar el saldo van de 0 a 30.</p>}
       </div>
     </Hoja>
   )

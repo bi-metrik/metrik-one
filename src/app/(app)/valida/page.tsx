@@ -10,7 +10,7 @@ import { armarEstadoEntradaPagina } from '@/lib/valida-api/entrada-aprobacion';
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica';
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor';
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
-import { entradaValidaCda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
+import { entradaValidaCda, exigenciaV15Cda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
 import ValidaClient from './valida-client';
 import { leerSaldoValida } from '@/lib/valida/credencial-servidor';
 import { registrarVistaAvisoModificacion } from '@/lib/valida-cda/aviso-modificacion-servidor';
@@ -34,7 +34,7 @@ import { frasesSuspension } from '@/lib/valida-registro/corte-reverso';
 import { PlanSuspendidoPorReverso } from './plan-suspendido-reverso';
 import { COOKIE_POSPONER_V15, esTerminosV15, pospuestaHoy, textosPantallaV15 } from '@/lib/valida-cda/terminos-v1-5';
 import { datosPantallaV15 } from '@/lib/valida-cda/terminos-v1-5-servidor';
-import { TerminosV15Cda } from './terminos-v15-cda';
+import { ConsultasExigenTerminosV15, TerminosV15Cda } from './terminos-v15-cda';
 
 export const dynamic = 'force-dynamic';
 // El cargue masivo despierta su trabajador con `after()` desde las acciones de esta página
@@ -42,7 +42,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 interface Props {
-  searchParams: Promise<{ negocio_id?: string; terminos?: string; modificacion?: string; lote?: string }>;
+  searchParams: Promise<{ negocio_id?: string; terminos?: string; modificacion?: string; lote?: string; historial?: string }>;
 }
 
 export default async function ValidaPage({ searchParams }: Props) {
@@ -80,7 +80,13 @@ export default async function ValidaPage({ searchParams }: Props) {
       />
     );
   }
-  const { negocio_id: negocioId, terminos: verTerminos, modificacion: verModificacion, lote: loteParam } = await searchParams;
+  const {
+    negocio_id: negocioId,
+    terminos: verTerminos,
+    modificacion: verModificacion,
+    lote: loteParam,
+    historial: verHistorial,
+  } = await searchParams;
   const loteInicialId = loteParam && /^[0-9a-f-]{36}$/i.test(loteParam) ? loteParam : null;
 
   // Términos pendientes: sin plazo (o vencido) se muestran los términos y Valida no opera; dentro
@@ -122,6 +128,9 @@ export default async function ValidaPage({ searchParams }: Props) {
   // nada: Valida opera igual con o sin la aceptación. `?modificacion=1` abre el documento completo (y, a la
   // persona designada, la aceptación con la misma entrada de los términos).
   let avisoModificacion: React.ReactNode = null;
+  // Desde la fecha de la 16.4, la v1.5 sin aceptar niega las consultas nuevas; el historial sigue abierto.
+  const exigencia = await exigenciaV15Cda();
+  const v15Exigida = exigencia.estado === 'exigida' ? exigencia.mensaje : null;
   if (entrada.tipo === 'ok' && entrada.modificaciones.length > 0) {
     const firmaModificacion =
       entrada.modificacion?.estado === 'pendiente' && entrada.modificacion.aceptante?.puede === true;
@@ -142,14 +151,19 @@ export default async function ValidaPage({ searchParams }: Props) {
           aviso={textoAvisoPolitica('valida_cda')}
           politicaUrl={POLITICA_DATOS_VALIDA.url}
           politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+          exigida={v15Exigida}
         />
       );
     }
     // La v1.5 (anexo A de Emilio, 2026-10-29): desde su publicación, la pantalla de aceptación al entrar a
     // Valida, para TODOS. «Ahora no, recordármelo» la cierra por esta sesión y este día (cookie): queda el
-    // aviso de arriba y Valida opera igual. No bloquea nada.
+    // aviso de arriba y Valida opera igual. Desde la fecha de la 16.4 ya no hay «Ahora no»: la pantalla
+    // vuelve siempre, y `?historial=1` abre el historial y los reportes sin las consultas.
     const v15 = entrada.modificaciones.find(esTerminosV15);
-    if (v15 && !pospuestaHoy((await cookies()).get(COOKIE_POSPONER_V15)?.value, v15.documentoId, entrada.hoy)) {
+    const mostrarV15 = v15Exigida
+      ? verHistorial !== '1'
+      : !pospuestaHoy((await cookies()).get(COOKIE_POSPONER_V15)?.value, v15?.documentoId ?? '', entrada.hoy);
+    if (v15 && mostrarV15) {
       const [datos, pagina] = await Promise.all([
         datosPantallaV15({ doc: v15, servicioContratadoId: entrada.servicioContratadoId, hoy: entrada.hoy }),
         firmaModificacion && entrada.modificacion
@@ -165,18 +179,23 @@ export default async function ValidaPage({ searchParams }: Props) {
           aviso={textoAvisoPolitica('valida_cda')}
           politicaUrl={POLITICA_DATOS_VALIDA.url}
           politicaTitulo={`${POLITICA_DATOS_VALIDA.titulo} v${POLITICA_DATOS_VALIDA.version}`}
+          exigida={v15Exigida}
         />
       );
     }
-    avisoModificacion = entrada.modificaciones.map((doc) => (
-      <AvisoModificacionTerminos
-        key={doc.documentoId}
-        doc={doc}
-        hoy={entrada.hoy}
-        puedeAceptar={firmaModificacion}
-        designadoNombre={designadoNombre}
-      />
-    ));
+    // Con la v1.5 exigida, su aviso («Mientras tanto Valida sigue funcionando») ya no es cierto: en el
+    // historial lo reemplaza `ConsultasExigenTerminosV15`.
+    avisoModificacion = entrada.modificaciones
+      .filter((doc) => !(v15Exigida && esTerminosV15(doc)))
+      .map((doc) => (
+        <AvisoModificacionTerminos
+          key={doc.documentoId}
+          doc={doc}
+          hoy={entrada.hoy}
+          puedeAceptar={firmaModificacion}
+          designadoNombre={designadoNombre}
+        />
+      ));
   }
 
   // La mora (cláusula 11) y quién ve la plata. Una sola lectura de cuotas y pagos por request, sin
@@ -279,12 +298,18 @@ export default async function ValidaPage({ searchParams }: Props) {
     <ValidaClient
       historialInicial={historial?.ok ? historial.consultas : []}
       errorHistorial={historial && !historial.ok ? historial.error : null}
-      tutorialNuncaVisto={!enPausa && !restringido && !suspension && tutorialProgress === null}
+      tutorialNuncaVisto={!enPausa && !restringido && !suspension && !v15Exigida && tutorialProgress === null}
       negocioInicial={modoVitrina ? null : negocioInicial}
       modoVitrina={modoVitrina}
       encabezado={encabezado}
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
-      consultasRestringidas={restringido || suspension ? <ConsultasRestringidas /> : null}
+      consultasRestringidas={
+        restringido || suspension ? (
+          <ConsultasRestringidas />
+        ) : v15Exigida ? (
+          <ConsultasExigenTerminosV15 mensaje={v15Exigida} />
+        ) : null
+      }
       saldo={saldo}
       prueba={prueba}
       loteInicialId={loteInicialId}

@@ -227,13 +227,14 @@ export function numeroDeFila(v: unknown): number | null {
  * Ids de las filas de foto o PDF que ya son soporte de un gasto escrito en esta conversación. `borrados`: gastos que ya no
  * están en la base: su soporte vuelve a quedar libre (para registrarlo de nuevo). Pura.
  */
-function fotosUsadas(filas: FilaConversacion[], borrados: ReadonlySet<string> = new Set()): Set<string> {
-  const s = new Set<string>();
+function fotosUsadas(filas: FilaConversacion[], borrados: ReadonlySet<string> = new Set()): Map<string, number | null> {
+  // Cada soporte usado, con el monto del gasto del que ya es soporte (para decírselo al modelo).
+  const s = new Map<string, number | null>();
   for (const f of filas) {
     if (f.traza?.ejecucion?.resultado !== 'ejecutada') continue;
     for (const e of f.traza.ejecucion.escrituras ?? []) {
       const gasto = e.tipo === 'gasto' ? e.id : e.gasto;
-      if (typeof e.foto === 'string' && !(typeof gasto === 'string' && borrados.has(gasto))) s.add(e.foto);
+      if (typeof e.foto === 'string' && !(typeof gasto === 'string' && borrados.has(gasto))) s.set(e.foto, typeof e.monto === 'number' ? e.monto : null);
     }
   }
   return s;
@@ -264,7 +265,13 @@ export function soporteDe(filas: FilaConversacion[], v: unknown, borrados: Reado
   if (!esSoporte(f)) {
     return { error: `«${String(v)}» no es una foto ni un PDF de esta conversación. El soporte es el #n de una línea «[foto de …]» o «[documento de …]».` };
   }
-  if (fotosUsadas(filas, borrados).has(f.id)) return { error: `El #${n} ya es el soporte de otro gasto. Pregunta si hay otro soporte.` };
+  const usadas = fotosUsadas(filas, borrados);
+  if (usadas.has(f.id)) {
+    // Arnés 2026-11-03 (b-borrados-dos-pdf): tras registrar la ida, el modelo la volvió a proponer con otra descripción y
+    // «pregunta si hay otro soporte» lo llevó a preguntar por un recibo que ya estaba usado, en vez de seguir con la vuelta.
+    const monto = usadas.get(f.id);
+    return { error: `El #${n} ya es el soporte de otro gasto${monto ? ` (el de ${formatCOP(monto)}, ya registrado)` : ''}. Si es ese mismo gasto, ya quedó: no lo propongas otra vez y sigue con lo que falta. Si es un gasto distinto, pregunta si hay otro soporte.` };
+  }
   return {
     fila: f.id, mediaId: f.media.id, ref: f.media.ref ?? null, tipo: f.media.tipo as 'imagen' | 'documento',
     nombre: f.media.nombre ?? null, lectura: f.media.lectura ?? null, n: n!,
@@ -691,7 +698,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
   const ahora = o.ahora ?? (() => Date.now());
   // Baja, sube y lee los soportes recientes que todavía no se prepararon (`../adjuntos.ts`, común con la bandeja).
   const prepararTurno = preparadorDeAdjuntos(puerto, {
-    lector: o.lector ?? null, ahora, desdeMs: PREPARAR_DESDE_MS, max: PREPARAR_MAX, omitir: (ctx) => fotosUsadas(ctx.conversacion),
+    lector: o.lector ?? null, ahora, desdeMs: PREPARAR_DESDE_MS, max: PREPARAR_MAX, omitir: (ctx) => new Set(fotosUsadas(ctx.conversacion).keys()),
   });
 
   // Los gastos de la conversación contra la base: una consulta por turno (el Estado y la propuesta la piden en el mismo).
@@ -1217,6 +1224,11 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       }
       return null;
     },
+    // Un gasto es el mismo si coincide en monto, negocio y fecha y no trae un soporte distinto (la descripción y el aviso
+    // `parecido` no cuentan: en el arnés volvió con otra descripción y sin el recibo). Otro recibo del mismo monto sí sale.
+    mismoHecho: (a, b) => a.accion === b.accion && (a.accion === 'gasto'
+      ? a.datos.monto === b.datos.monto && a.datos.negocio_id === b.datos.negocio_id && a.datos.fecha === b.datos.fecha && (b.datos.foto == null || b.datos.foto === a.datos.foto)
+      : JSON.stringify({ ...a.datos, parecido: null }) === JSON.stringify({ ...b.datos, parecido: null })),
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',

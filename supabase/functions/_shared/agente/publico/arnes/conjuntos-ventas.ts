@@ -14,6 +14,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { ProductoVenta } from '../ventas/catalogo-ventas.ts';
 import { codigosEnTexto } from '../ventas/catalogo-ventas.ts';
 import { CLAVE_COMPLEMENTOS, fichaComplementos } from '../ventas/complementos-ventas.ts';
+import { comoNoDisponible } from '../ventas/puertos-ventas.ts';
 import type { Veredicto } from './calificar.ts';
 import type { CasoPublico, PasoCaso } from './conjuntos.ts';
 import type { Paso } from '../../modelo-guionado.ts';
@@ -141,6 +142,88 @@ const HASTA_RESUMEN: { pasos: PasoCaso[]; guion: Paso[] } = {
 };
 /** Hasta el link de pago (el cliente confirma el resumen). */
 const HASTA_LINK = { pasos: [...HASTA_RESUMEN.pasos, { toca: 'Sí, enviar link', oEscribe: 'sí' }] as PasoCaso[], guion: HASTA_RESUMEN.guion };
+
+// ── Producto que ya no está disponible (3-nov: fin de la campaña de octubre, «Cuéntame más sobre el mp17») ──────────
+
+/** El catálogo de la consultiva con el MP-11 (el inalámbrico de $320.000) agotado. */
+const SIN_MP11 = PRODUCTOS_CONSULTIVA.filter((p) => p.codigo !== 'MP-11');
+const MP11_AGOTADO = [comoNoDisponible(PRODUCTOS_CONSULTIVA.find((p) => p.codigo === 'MP-11')!)];
+/** Solo la pulidora sigue activa: los taladros, agotados (nada parecido para ofrecer). */
+const SOLO_PULIDORA = PRODUCTOS_CONSULTIVA.filter((p) => p.codigo === 'MP-17');
+const TALADROS_AGOTADOS = PRODUCTOS_CONSULTIVA.filter((p) => p.codigo !== 'MP-17').map((p) => comoNoDisponible(p));
+/** Lo que nunca sale ante un producto no activo: su precio, el «no pude» ni el paso a persona por falla. */
+const nuncaFalla = (e: EscenarioPublico, precio = '320.000'): Veredicto => todos(
+  noContiene(e, precio), noContiene(e, /No pude revisarlo/i), noContiene(e, /Tuve un problema/i),
+  personas(e).includes('falla') ? no('pasó a persona por falla') : ok('sin falla'),
+  e.almacen.trazas().some((t) => t.respuesta_fija === 'rf.modelo_caido') ? no('salió rf.modelo_caido') : ok('sin rf.modelo_caido'),
+);
+const verCatalogoDijo = (e: EscenarioPublico, clave: string): Veredicto =>
+  (llamadas(e, 'ver_catalogo').some((h) => h.ok && (h.datos as Record<string, unknown> | null)?.[clave]) ? ok(`ver_catalogo: ${clave}`) : no(`ver_catalogo no devolvió ${clave}: ${JSON.stringify(llamadas(e, 'ver_catalogo').map((h) => h.datos ?? h.error)).slice(0, 300)}`));
+
+const CASOS_NO_DISPONIBLE: CasoPublico[] = [
+  {
+    id: 'v-nd-codigo-agotado', conjunto: 'ventas', titulo: 'Código de un producto agotado: «no está disponible» con su nombre, sin precio, y la alternativa activa',
+    ventas: { productos: SIN_MP11, noDisponibles: MP11_AGOTADO },
+    pasos: [{ escribe: 'Cuéntame más sobre el mp11' }],
+    guion: [VC({ codigo: 'MP-11' }), R('El MP-11, taladro percutor inalámbrico, no está disponible por ahora. Como alternativa:\nMP-16 Rotomartillo MarcaEjemplo SDS-Plus 26 mm, $345.000.\n¿Te sirve?', 'producto')],
+    esperado: (e) => todos(nuncaFalla(e), verCatalogoDijo(e, 'no_disponible'), verCatalogoDijo(e, 'alternativas'), contiene(e, /no (est[aá]|lo tengo|tenemos)[^.]{0,30}disponible|agotad/i), contiene(e, 'MP-11'), sinPersona(e)),
+  },
+  {
+    id: 'v-nd-codigo-sin-alternativa', conjunto: 'ventas', titulo: 'Código agotado sin nada parecido activo: el código dice «no está disponible» y pasa a persona (producto_no_disponible)',
+    ventas: { productos: SOLO_PULIDORA, noDisponibles: TALADROS_AGOTADOS },
+    pasos: [{ escribe: 'Cuéntame más sobre el mp11' }],
+    guion: [VC({ codigo: 'MP-11' }), { name: 'pasar_a_persona', args: { motivo: 'producto_no_disponible', codigo: 'MP-11', pidio: 'más información del MP-11' } }],
+    esperado: (e) => todos(
+      nuncaFalla(e), verCatalogoDijo(e, 'sin_alternativas'), persona(e, 'producto_no_disponible'),
+      contiene(e, 'El MP-11, taladro percutor inalámbrico MarcaEjemplo, no está disponible por ahora.'), nota(e, 'motivo: producto_no_disponible'), nota(e, 'MP-11: agotada'),
+    ),
+  },
+  {
+    id: 'v-nd-nombre-agotado', conjunto: 'ventas', titulo: 'Nombre de un producto agotado (sin código): lo reconoce como no disponible, no como «no está en el catálogo»',
+    ventas: { productos: SOLO_PULIDORA, noDisponibles: TALADROS_AGOTADOS },
+    pasos: [{ escribe: '¿Tienen el taladro percutor inalámbrico de 20V?' }],
+    guion: [VC({ buscar: 'taladro percutor inalámbrico 20V' }), { name: 'pasar_a_persona', args: { motivo: 'producto_no_disponible', codigo: 'MP-11', pidio: 'taladro percutor inalámbrico 20V' } }],
+    esperado: (e) => todos(nuncaFalla(e), verCatalogoDijo(e, 'no_disponible'), persona(e, 'producto_no_disponible'), contiene(e, /no est[aá] disponible/i), personas(e).includes('no_en_catalogo') ? no('lo pasó como no_en_catalogo') : ok('no es no_en_catalogo')),
+  },
+  {
+    id: 'v-nd-catalogo-vacio', conjunto: 'ventas', titulo: 'Catálogo activo vacío: «por ahora no hay productos disponibles» y persona (producto_no_disponible), nunca falla',
+    ventas: { productos: [], noDisponibles: TALADROS_AGOTADOS },
+    pasos: [{ escribe: 'Hola, ¿qué tienen para vender?' }],
+    guion: [VC({ buscar: 'vender' }), { name: 'pasar_a_persona', args: { motivo: 'producto_no_disponible', pidio: 'qué productos hay a la venta' } }],
+    esperado: (e) => todos(nuncaFalla(e), verCatalogoDijo(e, 'catalogo_vacio'), persona(e, 'producto_no_disponible'), contiene(e, /no (tengo|hay) productos disponibles/i)),
+  },
+  {
+    id: 'v-nd-precio-del-historial', conjunto: 'ventas', titulo: 'El precio estaba en la conversación y el producto se agotó después: no lo repite (la base manda)',
+    ventas: { productos: PRODUCTOS_CONSULTIVA },
+    pasos: [{ escribe: '¿cuánto vale el MP-11?' }, { hacer: (e) => { e.ventas!.agotar('MP-11'); } }, { escribe: 'Cuéntame más sobre el mp11' }],
+    guion: [
+      VC({ codigo: 'MP-11' }), R('El MP-11 Taladro percutor inalámbrico MarcaEjemplo 20V vale $320.000. ¿Te sirve?', 'precio'),
+      // Segundo turno: el modelo repite el precio del historial; la guarda lo devuelve y vuelve a buscar.
+      R('El MP-11 vale $320.000 y trae batería de 20V.', 'producto'),
+      VC({ codigo: 'MP-11' }), R('El MP-11, taladro percutor inalámbrico, ya no está disponible. Como alternativa:\nMP-16 Rotomartillo MarcaEjemplo SDS-Plus 26 mm, $345.000.\n¿Te sirve?', 'producto'),
+    ],
+    esperado: (e) => {
+      const tras = respuestas(e).slice(respuestas(e).findIndex((t) => t.includes('320.000')) + 1).join('\n');
+      return todos(
+        tras.includes('320.000') ? no(`repitió el precio del agotado: ${tras.slice(0, 160)}`) : ok('no repite el precio del agotado'),
+        /No pude revisarlo|Tuve un problema/i.test(tras) ? no('salió el «no pude» o la falla') : ok('sin «no pude»'),
+        personas(e).includes('falla') ? no('pasó a persona por falla') : ok('sin falla'),
+        /no est[aá] disponible|agotad/i.test(tras) ? ok('dice que no está disponible') : no(`no dice que no está disponible: ${tras.slice(0, 160)}`),
+      );
+    },
+  },
+  {
+    id: 'v-nd-codigo-inexistente', conjunto: 'ventas', titulo: 'Código que no existe en Ferretería: sigue siendo «no está en el catálogo», no «no disponible»',
+    ventas: { productos: SIN_MP11, noDisponibles: MP11_AGOTADO },
+    pasos: [{ escribe: 'Cuéntame más sobre el MP-99' }],
+    guion: [VC({ codigo: 'MP-99' }), PERSONA('no_en_catalogo', 'el MP-99')],
+    esperado: (e) => todos(
+      nuncaFalla(e),
+      llamadas(e, 'ver_catalogo').some((h) => (h.datos as Record<string, unknown> | null)?.no_disponible) ? no('lo dio como no disponible') : ok('no lo confunde con uno agotado'),
+      personas(e).includes('producto_no_disponible') ? no('pasó como producto_no_disponible') : ok('sin producto_no_disponible'),
+    ),
+  },
+];
 
 export const CASOS_VENTAS: CasoPublico[] = [
   {
@@ -765,4 +848,5 @@ export const CASOS_VENTAS: CasoPublico[] = [
     guion: [REENVIAR, R('Primero armamos tu pedido. ¿Lo quieres con despacho en Bogotá o lo recoges?', 'compra')],
     esperado: (e) => todos(links(e, 0), noContiene(e, /LNK_/), sinPersona(e)),
   },
+  ...CASOS_NO_DISPONIBLE,
 ];

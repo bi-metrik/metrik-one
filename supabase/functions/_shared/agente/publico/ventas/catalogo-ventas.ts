@@ -39,6 +39,18 @@ export interface ProductoVenta {
   fotos?: string[];
 }
 
+/** Lo que sirve para buscar un producto: su código, SKU y palabras (sin precio ni ficha). */
+export type Buscable = Pick<ProductoVenta, 'codigo' | 'sku' | 'titulo' | 'nombre' | 'marca' | 'categoria' | 'etiquetas'>;
+
+/**
+ * Un producto que existe en Ferretería pero cuya publicación no está `activa` (agotada o borrador). Sin precio ni ficha a
+ * propósito: lo único que el asistente puede decir de él es que no está disponible (3-nov, fin de la campaña de octubre).
+ */
+export interface ProductoNoDisponible extends Buscable {
+  publicacionId: string;
+  estado: string;
+}
+
 /** El bucket de las fotos del catálogo de Ferretería: solo de ahí sale una foto al cliente. */
 export const BUCKET_FOTOS = 'ferreteria-fotos';
 
@@ -99,7 +111,7 @@ export function numeroDeCodigo(texto: string): number | null {
  * Busca en el catálogo. Con código (MP-xx) o SKU exacto, ese producto. Con texto, los que más palabras comparten con
  * el nombre, título, marca, categoría y etiquetas (hasta `max`). Sin nada, los primeros `max`. Pura.
  */
-export function buscarProductos(ps: ProductoVenta[], q: { buscar?: string | null; codigo?: string | null }, max = 5): ProductoVenta[] {
+export function buscarProductos<T extends Buscable>(ps: T[], q: { buscar?: string | null; codigo?: string | null }, max = 5): T[] {
   const cod = numeroDeCodigo(`${q.codigo ?? ''} ${q.buscar ?? ''}`);
   if (cod !== null) {
     const p = ps.find((x) => numeroDeCodigo(x.codigo) === cod);
@@ -124,7 +136,7 @@ export function buscarProductos(ps: ProductoVenta[], q: { buscar?: string | null
 }
 
 /** El producto con ese código MP-xx o ese SKU exacto, o nada (nunca una búsqueda aproximada). Pura. */
-export function productoPorCodigo(ps: ProductoVenta[], codigo: string): ProductoVenta | null {
+export function productoPorCodigo<T extends Buscable>(ps: T[], codigo: string): T | null {
   const n = numeroDeCodigo(codigo);
   if (n !== null) return ps.find((x) => numeroDeCodigo(x.codigo) === n) ?? null;
   const sku = normal(codigo).replace(/ /g, '');
@@ -158,7 +170,7 @@ export const MAX_SUGERENCIAS = 3;
  * El tipo de un producto, para la pregunta de uso: el título hasta la marca («Taladro magnético Ferton de 40 mm» →
  * «Taladro magnético»); sin marca en el título, sus tres primeras palabras. Pura.
  */
-export function tipoDe(p: ProductoVenta): string {
+export function tipoDe(p: Pick<ProductoVenta, 'titulo' | 'nombre' | 'marca'>): string {
   const t = (p.titulo || p.nombre).trim();
   const marca = p.marca?.trim();
   const i = marca ? t.toLowerCase().indexOf(marca.toLowerCase()) : -1;
@@ -471,4 +483,62 @@ export function zonaFlete(t: TablaFlete, texto: string | null | undefined): Zona
 /** El total del pedido: precio × cantidad + flete. Lo arma el código, nunca el modelo. Pura. */
 export function totalPedido(precio: number, cantidad: number, flete: number): number {
   return Math.round(precio) * cantidad + Math.round(flete);
+}
+
+// ── El producto que ya no está disponible (3-nov) ───────────────────────────
+
+/**
+ * Los productos no activos que el cliente pidió: por código (MP-xx o SKU) el que tiene ese código, si no hay uno activo
+ * con él; por texto, los que más palabras comparten (hasta 2). Sin palabras ni código, ninguno: «¿qué tienen?» no nombra
+ * un producto. Pura.
+ */
+export function noDisponiblesPedidos(nd: ProductoNoDisponible[], activos: Buscable[], q: { buscar?: string | null; codigo?: string | null }): ProductoNoDisponible[] {
+  const codigo = String(q.codigo ?? '').trim();
+  if (codigo || numeroDeCodigo(q.buscar ?? '') !== null) {
+    const c = codigo || String(q.buscar);
+    if (productoPorCodigo(activos, c)) return [];
+    const p = productoPorCodigo(nd, c);
+    if (p) return [p];
+  }
+  const sinCodigo = String(q.buscar ?? '').replace(/\bmp\s*-?\s*\d+\b/gi, '');
+  if (!palabrasDeBusqueda(sinCodigo).length) return [];
+  return buscarProductos(nd, { buscar: sinCodigo, codigo: null }, 2);
+}
+
+/** Las alternativas activas a un producto no disponible: hasta 2 del mismo tipo («Taladro percutor inalámbrico»). Pura. */
+export function alternativasA(p: ProductoNoDisponible, activos: ProductoVenta[], max = 2): ProductoVenta[] {
+  return buscarProductos(activos, { buscar: tipoDe(p), codigo: null }, max);
+}
+
+/** «MP-17, taladro percutor inalámbrico Dongcheng»: cómo se nombra al cliente un producto no disponible. Pura. */
+export function nombreCorto(p: Pick<ProductoVenta, 'codigo' | 'titulo' | 'nombre' | 'marca'>): string {
+  const tipo = tipoDe(p);
+  const t = tipo.charAt(0).toLowerCase() + tipo.slice(1);
+  return `${p.codigo}, ${t}${p.marca && !normal(t).includes(normal(p.marca)) ? ` ${p.marca}` : ''}`;
+}
+
+/**
+ * Los precios que la respuesta toma de un producto que ya no está activo: la cifra salió de un resultado de herramienta
+ * de antes (`fuentes`, los JSON de la conversación) para un código que hoy no está en `activos`, y no es el precio de
+ * ningún activo. «La base manda sobre la conversación»: el 3-nov el modelo repitió el precio del MP-17 del historial con
+ * la publicación ya agotada. Devuelve `[código, cifra]`. Pura.
+ */
+export function preciosDeNoDisponibles(montos: string[], fuentes: ReadonlyArray<string>, activos: ProductoVenta[]): Array<[string, string]> {
+  if (!montos.length) return [];
+  const vivos = new Set(activos.map((p) => numeroDeCodigo(p.codigo)).filter((n) => n !== null));
+  const preciosVivos = new Set(activos.map((p) => String(Math.round(p.precio))));
+  const viejos = new Map<string, string>();
+  const recorrer = (x: unknown): void => {
+    if (Array.isArray(x)) { x.forEach(recorrer); return; }
+    if (!x || typeof x !== 'object') return;
+    const o = x as Record<string, unknown>;
+    const n = typeof o.codigo === 'string' ? numeroDeCodigo(o.codigo) : null;
+    if (n !== null && !vivos.has(n) && typeof o.precio === 'string') {
+      const d = o.precio.replace(/\D/g, '');
+      if (d && !preciosVivos.has(d)) viejos.set(d, String(o.codigo));
+    }
+    Object.values(o).forEach(recorrer);
+  };
+  for (const f of fuentes) { try { recorrer(JSON.parse(f)); } catch { /* no es JSON */ } }
+  return [...new Set(montos)].filter((m) => viejos.has(m)).map((m) => [viejos.get(m)!, m]);
 }

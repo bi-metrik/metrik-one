@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DIAS_SALDO, diaBogota, diasSaldoValido, inicioBogota, insigniaFuncion, mensajeDeError, pesos, preventaPasaLaFuncion, rangoDiaBogota, reservaActiva, textoSaldo } from './reglas'
+import { AYUDA_DIAS_SALDO, DIAS_SALDO, diaBogota, diasSaldoValido, inicioBogota, insigniaFuncion, mensajeDeError, pesos, preventaPasaLaFuncion, rangoDiaBogota, reservaActiva, resumenPlazoSaldo, textoSaldo } from './reglas'
 
 describe('reglas del módulo funciones', () => {
   it('reservaActiva usa la misma definición que la base', () => {
@@ -44,10 +44,12 @@ describe('reglas del módulo funciones', () => {
     expect(preventaPasaLaFuncion('', '2026-10-24')).toBe(false)
   })
 
-  it('el plazo del saldo: entero de 1 a 30, por defecto 1', () => {
+  it('el plazo del saldo: entero de 0 a 30 (0 = hasta que empieza la función), por defecto 1', () => {
     expect(DIAS_SALDO.porDefecto).toBe(1)
-    expect([1, 2, 30].map(diasSaldoValido)).toEqual([true, true, true])
-    expect([0, -1, 31, 1.5, null, undefined, Number.NaN].map(diasSaldoValido)).toEqual([false, false, false, false, false, false, false])
+    expect([0, 1, 2, 30].map(diasSaldoValido)).toEqual([true, true, true, true])
+    expect([-1, 31, 1.5, null, undefined, Number.NaN].map(diasSaldoValido)).toEqual([false, false, false, false, false, false])
+    expect(AYUDA_DIAS_SALDO).toBe('0 = hasta que empieza la función')
+    expect([0, 1, 3].map(resumenPlazoSaldo)).toEqual(['saldo hasta que empieza', 'saldo 1 día antes', 'saldo 3 días antes'])
   })
 
   it('el saldo en palabras (P14): solo de las confirmadas; el plazo es el último día que vale el link', () => {
@@ -62,6 +64,9 @@ describe('reglas del módulo funciones', () => {
     expect(textoSaldo({ ...base, saldo: 0, estado: 'pagado' }, 'confirmada')).toEqual({ texto: 'Saldo pagado', cobrar: false })
     expect(textoSaldo(null, 'confirmada')).toEqual({ texto: 'Saldo sin leer', cobrar: false })
     expect(textoSaldo({ ...base, estado: 'pendiente' }, 'apartada')).toBeNull()
+    // Con 0 el plazo es la hora de la función (sábado 31, 8:00 p. m.): se dice el día y la hora, no el día anterior.
+    const hastaQueEmpieza = textoSaldo({ saldo: 120_000, plazo_at: '2026-11-01T01:00:00.000Z', estado: 'pendiente' }, 'confirmada')
+    expect(hastaQueEmpieza?.texto).toMatch(/^Saldo \$120\.000 · paga hasta el sáb.*31.*, 8:00/)
     expect(mensajeDeError({ message: 'monto_invalido', details: 'El saldo es 120000.' })).toBe('El monto va de $1 hasta el saldo. El saldo es 120000.')
   })
 })

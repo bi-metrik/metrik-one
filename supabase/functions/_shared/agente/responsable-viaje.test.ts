@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { escenario } from './escenario'
 import { modeloGuionado } from './modelo-guionado'
 import { propuestaVigente } from './nucleo'
-import { resolverResponsable, responsablePendiente } from './bandeja/dominio'
+import { resolverResponsable, responsableDicho, responsablePendiente } from './bandeja/dominio'
 import { equipoDesdeFilas, staffDePrueba } from './bandeja/equipo'
 import type { MiembroEquipo } from './bandeja/dominio'
 import type { PedidoModelo } from './tipos'
@@ -99,6 +99,61 @@ describe('viaje nuevo: el bot pregunta quién lo lleva', () => {
     // #1 es el saludo del bot: no respalda nada.
     expect(e.almacen.trazas().at(-1)!.candados?.map((c) => c.candado)).toEqual(['falta_responsable', 'falta_responsable'])
     expect(modelo.restantes()).toBe(0)
+  })
+
+  it('el mensaje que señala tiene que nombrar a esa persona: el pedido solo no elige a quien escribe', async () => {
+    // Arnés con Haiku, 2026-11-03 (r-cliente-nuevo, 16 de 45 en la asesora): tras crear a la clienta, propuso «Lo llevas tú
+    // (Tatiana Ríos)» con `dicho_en: 1`, el pedido, que no dice quién lo lleva.
+    const modelo = modeloGuionado([
+      { name: 'buscar', args: { texto: 'Martín Mora' } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, destino: 'Punta Cana', responsable: 'Tatiana Ríos', dicho_en: 1 } } },
+      (p) => {
+        expect(ultimaRespuesta(p)).toContain('En el #1 el comercial no dice que el viaje lo lleve Tatiana Ríos')
+        return { name: 'responder', args: { tema: 'solicitud', texto: '¿Quién lleva este viaje?', opciones: OPCIONES } }
+      },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, destino: 'Punta Cana', responsable: 'Alejandra Pinto', dicho_en: 3 } } },
+    ])
+    const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: EQUIPO })
+    await e.escribe('Necesito cotizar Punta Cana para Martín Mora, 2 adultos del 3 al 8 de diciembre')
+    expect(propuestaVigente(e.almacen.filas)).toBeNull()
+    expect(e.almacen.trazas().at(-1)!.candados?.map((c) => c.candado)).toEqual(['falta_responsable'])
+    expect(responsablePendiente(e.almacen.filas, EQUIPO)).toBe(true)
+    const t = await e.toca('Alejandra Pinto')
+    expect(t[0].texto).toContain('Lo lleva: Alejandra Pinto')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('un nombre que es de dos personas no elige a ninguna; el toque con el nombre entero sí', async () => {
+    // Arnés con Haiku, 2026-11-03 (r-ambiguo): «lo lleva Daniela» con dos Danielas, y propuso a Daniela Suárez.
+    const dos = [...EQUIPO, { id: 'st-danim', nombre: 'Daniela Mora', esQuienEscribe: false }]
+    const modelo = modeloGuionado([
+      { name: 'buscar', args: { texto: 'Martín Mora' } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Daniela Suárez', dicho_en: 1 } } },
+      (p) => {
+        expect(ultimaRespuesta(p)).toContain('ese nombre puede ser más de una persona')
+        return { name: 'responder', args: { tema: 'solicitud', texto: '¿Cuál Daniela?', opciones: dos.map((m) => ({ titulo: m.nombre })) } }
+      },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Daniela Mora', dicho_en: 3 } } },
+    ])
+    const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: dos })
+    await e.escribe('Viaje nuevo para Martín Mora a Cancún, lo lleva Daniela')
+    expect(propuestaVigente(e.almacen.filas)).toBeNull()
+    const t = await e.toca('Daniela Mora')
+    expect(t[0].texto).toContain('Lo lleva: Daniela Mora')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('un reenvío del cliente no elige quién lleva el viaje', async () => {
+    const modelo = modeloGuionado([
+      { name: 'buscar', args: { texto: 'Martín Mora' } },
+      { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { cliente: REF, responsable: 'Edgar Alba', dicho_en: 1 } } },
+      { name: 'responder', args: { tema: 'solicitud', texto: '¿Quién lleva este viaje?', opciones: OPCIONES } },
+    ])
+    const e = await escenario({ modelo, contactos: [MARTIN], viajes: [], equipo: EQUIPO })
+    await e.reenvia('Hola, soy Martín Mora, quiero que me atienda Edgar')
+    await e.escribe('viaje nuevo para él')
+    expect(propuestaVigente(e.almacen.filas)).toBeNull()
+    expect(e.almacen.trazas().at(-1)!.candados?.map((c) => c.candado)).toEqual(['falta_responsable'])
   })
 
   it('alguien que no está en el equipo: candado, sin propuesta, y el modelo vuelve a preguntar', async () => {
@@ -216,6 +271,38 @@ describe('resolverResponsable: solo comprueba a quién nombró el modelo', () =>
     const dobles = [...EQUIPO, { id: 'st-dani2', nombre: 'Daniela Suárez', esQuienEscribe: false }]
     expect(resolverResponsable(dobles, 'Daniela Suárez')).toBe('varias')
     expect(resolverResponsable(dobles, 'st-dani2')).toMatchObject({ id: 'st-dani2' })
+  })
+})
+
+describe('responsableDicho: el mensaje señalado nombra a la persona elegida', () => {
+  const [ale, dani, edgar, tati] = EQUIPO
+  it('su nombre, su apellido, el comienzo de uno o el toque con su nombre entero', () => {
+    expect(responsableDicho('que lo lleve Edgar', edgar, EQUIPO)).toBe(true)
+    expect(responsableDicho('lo lleva Alba', edgar, EQUIPO)).toBe(true)
+    expect(responsableDicho('Ale', ale, EQUIPO)).toBe(true)
+    expect(responsableDicho('eh sí, ese viaje lo va a llevar la Dani', dani, EQUIPO)).toBe(true)
+    expect(responsableDicho('Daniela Suárez', dani, EQUIPO)).toBe(true)
+  })
+
+  it('«yo» solo elige a quien escribe', () => {
+    expect(responsableDicho('Ábreme un viaje nuevo de Diana Duarte a Santa Marta, la llevo yo', tati, EQUIPO)).toBe(true)
+    expect(responsableDicho('es mío', tati, EQUIPO)).toBe(true)
+    expect(responsableDicho('la llevo yo', edgar, EQUIPO)).toBe(false)
+  })
+
+  it('un mensaje que no nombra a nadie, o que nombra a otra persona, no elige', () => {
+    expect(responsableDicho('Necesito cotizar Punta Cana para Camila Prieto, cel 3004441122', tati, EQUIPO)).toBe(false)
+    expect(responsableDicho('que lo lleve Edgar', dani, EQUIPO)).toBe(false)
+    expect(responsableDicho('Crear', tati, EQUIPO)).toBe(false)
+  })
+
+  it('con dos personas del mismo nombre, el nombre solo no alcanza; con el apellido sí', () => {
+    const mora = { id: 'st-danim', nombre: 'Daniela Mora', esQuienEscribe: false }
+    const dos = [...EQUIPO, mora]
+    expect(responsableDicho('lo lleva Daniela', dani, dos)).toBe(false)
+    expect(responsableDicho('lo lleva Daniela', mora, dos)).toBe(false)
+    expect(responsableDicho('Daniela Mora', mora, dos)).toBe(true)
+    expect(responsableDicho('la de apellido Suárez', dani, dos)).toBe(true)
   })
 })
 

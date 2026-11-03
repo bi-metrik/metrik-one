@@ -7,8 +7,16 @@ import type { SupabaseClient } from './types.ts';
 
 const INBOUND_LIMIT = 30;  // per user per hour
 
+/**
+ * Tope por hora de un usuario de gestión en modo obras (C20, 2026-10-21): una tanda de pantallazos al final del día
+ * pasa de 30. Se sube y, si igual se toca, el texto no regaña (`TEXTO_TOPE_GESTION`): lo que llegó ya quedó guardado en
+ * la conversación y lo atiende el turno siguiente.
+ */
+export const INBOUND_LIMIT_GESTION_OBRAS = 120;
+export const TEXTO_TOPE_GESTION = 'Recibí todo, ya los reviso uno por uno.';
+
 /** Check if inbound message is within rate limit. Returns true if allowed. */
-export async function checkInboundLimit(supabase: SupabaseClient, phone: string): Promise<boolean> {
+export async function checkInboundLimit(supabase: SupabaseClient, phone: string, limite: number = INBOUND_LIMIT): Promise<boolean> {
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
   const { count } = await supabase
@@ -21,7 +29,7 @@ export async function checkInboundLimit(supabase: SupabaseClient, phone: string)
     .or('interprete_accion.is.null,interprete_accion.not.like.bandeja.*')
     .gte('created_at', oneHourAgo);
 
-  return (count ?? 0) < INBOUND_LIMIT;
+  return (count ?? 0) < limite;
 }
 
 // ⚠️ `checkOutboundAlertLimit` vivia aqui y contaba `wa_message_log.direction='outbound'`.

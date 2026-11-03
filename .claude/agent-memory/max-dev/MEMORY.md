@@ -10,6 +10,7 @@
 - ⚠️⚠️ [Dimpro: venta consultiva y fotos (29-oct)](project_dimpro_venta_consultiva_fotos.md) — tope 3 en 3 capas; fotos por código; SQL SIN correr, después del deploy
 - ⚠️⚠️ [Plantillas editables DJ/Relación (29-oct)](project_plantillas_editables.md) — 203000/203100 APLICADAS; DJ v2 sin «aproximado» (20261030120000) SIN aplicar; nada activo
 - ⚠️ [Defectos QA del #1359 (30-oct)](project_defectos_qa_1359.md) — marca por paquete vía `antes`; PDF compacto solo si ahorra hoja; regreso por versión en día a día (EventoDoc.tarifas)
+- ⚠️ [Reprueba del bloqueo (3-nov)](project_reprueba_bloqueo_1030.md) — paquete $0 frena Armar/Sigue; PDF 2+ paquetes: acomodación y «Solo en <versión>»
 - [Prueba corta del #1352 (29-oct)](project_qa_corta_1352.md) — «Ir» con 3 causas; noches salen de paradas (sin zona = 0); créditos en .sign
 - ⚠️ [Defectos QA del #1342 (29-oct)](project_defectos_qa_1342.md) — costoDeAgencia; «Opción N» como el PDF; «Incluye» de ONE sin revisar; swap insert→delete
 - ⚠️⚠️ [Términos CDA v1.5 por aviso (1-nov)](project_valida_terminos_v15.md) — transición 11.7 en plazos.ts; 16.4 SIN construir (22-dic); 20261029190000 opcional
@@ -26,7 +27,7 @@
 - ⚠️⚠️ [Reglas de margen de la cotización (Trappvel)](project_reglas_margen_cotizacion.md) — migración aplicada; puntos fuera de precio_venta; `–` no `−` en PDF; causas en causas-margen.ts; descuento por tarifa vía tarifaId
 - ⚠️⚠️ [Viajes en bloqueo Trappvel (paquete hotel + vuelo)](project_bloqueo_trappvel.md) — 20261027174500 APLICADA; config modalidad SIN aplicar; modalidad ≠ tipo_viaje; pegado vía RegistroDePaquetes; paquete en 0 no cae en faltantes
 - ⚠️⚠️ [Resend Pro: avisos.metrikone.co, suprimidos y alarma de volumen](project_resend_pro_alarma_volumen.md) — 20261026221500 APLICADA; no mergear sin DNS
-- ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 SIN aplicar; migrar antes del merge (datos.ts lee la columna)
+- ⚠️⚠️ [Puerta cerrada opcional por experiencia](project_funciones_puerta_cerrada.md) — 20261026220000 APLICADA (dicho 28-oct); datos.ts lee la columna
 - ⚠️⚠️ [Remitente propio por workspace (SOE-010)](project_remitente_correo_workspace.md) — DNS de Resend bajo <slug> tumba el espacio: CNAME del slug en el mismo paso; logo solo con clave
 - ⚠️ [Hotel 2A / 2A+1N sin fechas (COT-2026-0004)](project_hotel_sin_fechas_por_pax.md) — fechas del viaje no entran a identidad; par único; re-pegar
 - ⚠️⚠️ [Asistentes: roles y funciones (26-oct)](project_spec_asistentes_roles.md) — 20261026183000 APLICADA; componedor por cargo; huella ≠ bot_reglamentos.huella; staff.id
@@ -36,8 +37,8 @@
 - ⚠️ [Transcripción con pistas (§4.6)](project_transcripcion_pistas.md) — interruptor apagado; gancho conectado en #1285 (fuentesDeComposicion); arnés lo corre Mauricio
 - ⚠️ [Correo si caen los modelos (§4.1)](project_correo_caida_modelos.md) — refusal no es caída; candado por ventana + recordatorio 1 h; cupo/presupuesto por correo
 - ⚠️⚠️ [Remitente del bot y asignado_origen](project_asignado_origen_y_remitente_bot.md) — bot nunca supo quién escribe; 20261026090000 APLICADA (26-oct)
-- ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
-- ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — la exención de Públicas la quitó D2 (29-oct); SQL gate E1→E2 SIN aplicar
+- ⚠️⚠️ [Módulo funciones de Sabor (#1234)](project_funciones_mapa_salon.md) — 20261022170000 APLICADA; 56 RPC; plazo 0 en 20261026210000 APLICADA (3-nov); no solo cine (cata); saldo P14 (modalidad al pagar, pago manual); pasarela null
+- ⚠️⚠️ [Tarifa pública/neta y fallas de la reunión Trappvel](project_tarifa_publica_neta.md) — la exención de Públicas la quitó D2 (29-oct); SQL gate E1→E2 SIN aplicar; traslado va con hotel
 - ⚠️⚠️ [Tipo de documento del lote y barrido AFI](project_valida_lote_tipo_documento.md) — 753 filas AFI se barren con la cuenta MéTRIK; AFI no se toca; lo corre Mauricio
 - ⚠️⚠️ [Reportes con la llave vencida (28-oct)](project_valida_reportes_llave_vencida.md) — Valida#83 primero; llave y luego firma en 401; id UUID en ruta firmada
 - ⚠️ [Términos autoservicio v2.2 (11.3 reverso)](project_valida_terminos_v2_2_reverso.md) — solo registros nuevos; re-aceptación v2.1 sin construir; 13.1 ≠ CDA
@@ -58,6 +59,8 @@
 - [Errores de Valida en llano (21-oct)](project_valida_mensajes_error.md) — mensajes-error.ts; busqueda_incompleta no entra a valida_consultas
 - ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — #1225 mergeado, sin deploy; §6.4 pregunta una vez; §8.8 precio autorizado; «80.000» suelto ya es plata
 - [Aviso de autorización en Cotización](project_aviso_autorizacion_cotizacion.md) — bandera por la regla de envio.ts, no por bloques pintados; confirmar la exige
+- ⚠️⚠️ [Obras parte web (#1237)](project_obras_web_fase1.md) — modules.obras; migración 20261021183000 APLICADA (prod); merge con main 3-nov
+- ⚠️⚠️ [Asistente de Sabor sobre Chatwoot (etapa 1)](project_asistente_chatwoot_sabor.md) — #1225 mergeado, migración aplicada, sin deploy; sobreventa en PR aparte; tope 400 tokens por ficha
 - ⚠️ [Bot ONE: soporte en foto/PDF leído](project_wa_soporte_pdf_agente.md) — documento = clase 'otro' + media; lectura aparte; ventana 5 s; arnés s-* sin correr
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
 - ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 mergeado (ea16c7d2); respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto

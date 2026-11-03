@@ -46,10 +46,19 @@
  *
  * El período sale del concepto de la cuota («periodo del 23-oct al 22-nov», `leerPeriodoEnConcepto`);
  * sin él, del vencimiento (las cuotas de los CDA vencen dentro del período que pagan, así que un
- * vencimiento anterior a la vigencia es de un período que empezó antes). Los períodos que empiezan desde
- * la vigencia siguen, por ahora, la regla de la v1.4 sobre su vencimiento (D+6 / D+31), que es más
- * tarde que la de la 11.2/11.3 de la v1.5 (renovación + 6 / + 31): los estados Suspendido por pago y
- * Cancelado de la v1.5 no son de este cambio.
+ * vencimiento anterior a la vigencia es de un período que empezó antes).
+ *
+ * ## 4. Los períodos que empiezan desde la vigencia de la v1.5 (cláusulas 11.1 a 11.3, 2026-11-03)
+ *
+ * D es la fecha de renovación, o sea el INICIO del período (del concepto de la cuota), no su vencimiento:
+ * gracia hasta D+5, Suspendida por pago (`restringido`: sin consultas nuevas, historial abierto) desde
+ * D+6 y Cancelada (`suspendido`: sin consultas ni historial) desde D+31. El primero es el del 23-dic-2026:
+ * aviso desde el 24-dic, Suspendida desde el 29-dic, Cancelada desde el 23-ene-2027. Una cuota sin período
+ * en el concepto sigue midiéndose por su vencimiento (no hay de dónde sacar la renovación).
+ *
+ * Pendiente con fecha (antes del 23-ene-2027, la primera Cancelada posible): los textos todavía dicen
+ * «restringidas» y «pausada», no «Suspendida por pago» y «Cancelada», y la reactivación de la 11.4 (la
+ * nueva fecha de renovación es el día del pago) no está construida en el cobro.
  */
 
 import type { ProximoPago } from './pago-pendiente'
@@ -163,9 +172,10 @@ export function vigenciaTransicion(
 }
 
 /**
- * La fecha que hace de vencimiento (D) de la cuota impaga más vieja: la suya, o, si es de un período
- * que empezó antes de la vigencia de la transición, el día anterior a esa vigencia (cláusula 11.7: «esa
- * es su fecha de renovación»), si es posterior. Ver el encabezado, sección 3.
+ * La fecha que hace de vencimiento (D) de la cuota impaga más vieja: la suya; si es de un período que
+ * empezó antes de la vigencia de la transición, el día anterior a esa vigencia (cláusula 11.7: «esa es su
+ * fecha de renovación»), si es posterior; y si es de un período que empieza desde esa vigencia, el inicio
+ * del período (su fecha de renovación, 11.1 a 11.3 de la v1.5). Ver el encabezado, secciones 3 y 4.
  */
 export function vencimientoConTransicion(
   pago: { concepto: string | null; fechaVencimiento: string },
@@ -173,8 +183,9 @@ export function vencimientoConTransicion(
 ): string {
   if (!transicion || !FECHA.test(transicion)) return pago.fechaVencimiento
   const periodo = leerPeriodoEnConcepto(pago.concepto, pago.fechaVencimiento)
-  const inicio = periodo?.desde && FECHA.test(periodo.desde) ? periodo.desde : pago.fechaVencimiento
-  if (!(inicio < transicion)) return pago.fechaVencimiento
+  const desde = periodo?.desde && FECHA.test(periodo.desde) ? periodo.desde : null
+  const inicio = desde ?? pago.fechaVencimiento
+  if (!(inicio < transicion)) return desde ?? pago.fechaVencimiento
   const alDia = sumarDias(transicion, -1)
   return pago.fechaVencimiento > alDia ? pago.fechaVencimiento : alDia
 }

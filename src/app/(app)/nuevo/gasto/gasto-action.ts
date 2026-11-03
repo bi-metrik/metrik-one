@@ -12,6 +12,7 @@ import {
   type OrigenAsignacion,
 } from '@/lib/actions/centro-costos-asignar'
 import { negocioCerrado, MENSAJE_NEGOCIO_CERRADO } from '@/lib/negocios/motivo-cierre'
+import { obrasActivas } from '@/lib/obras/modulo'
 import { clasificarGastoConIA } from '@/lib/gastos/clasificar-gasto-ia'
 import type { PropuestaGasto } from '@/lib/gastos/clasificar-gasto'
 import { subirAOne } from '@/lib/almacenamiento/one'
@@ -72,6 +73,8 @@ export async function createGasto(input: {
   centro_costos?: CentroCostos | null
   split_json?: Record<string, number> | null
   origen_asignacion?: OrigenAsignacion | null
+  /** Rubro de obra (C3): solo con destino negocio. La categoría fiscal sale del rubro. */
+  obra_rubro_id?: string | null
 }) {
   const { supabase, workspaceId, userId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -151,6 +154,21 @@ export async function createGasto(input: {
     }
   }
 
+  // Rubro de obra (C3). Solo cuando se eligió uno: sin rubro la fila no lleva la columna, así un
+  // workspace sin la migración de obras sigue guardando igual que antes.
+  let rubroObra: { id: string; categoria: string } | null = null
+  if (input.obra_rubro_id) {
+    if (!negocioId) return { success: false, error: 'El rubro de obra es para gastos de un negocio.' }
+    const { data: r } = await supabase
+      .from('obra_rubros')
+      .select('id, categoria, activo')
+      .eq('workspace_id', workspaceId)
+      .eq('id', input.obra_rubro_id)
+      .maybeSingle()
+    if (!r || !r.activo) return { success: false, error: 'Ese rubro de obra ya no está activo. Elige otro.' }
+    rubroObra = { id: r.id, categoria: r.categoria }
+  }
+
   const insertData: Database['public']['Tables']['gastos']['Insert'] = {
     workspace_id: workspaceId,
     fecha: input.fecha || todayBogotaISO(),
@@ -171,6 +189,7 @@ export async function createGasto(input: {
     centro_costos: centroCostosFinal,
     split_json: splitJsonFinal,
     origen_asignacion: origenFinal,
+    ...(rubroObra ? { obra_rubro_id: rubroObra.id, categoria: rubroObra.categoria } : {}),
   }
 
   const { data: gastoInserted, error: dbError } = await supabase
@@ -257,6 +276,26 @@ export async function getDestinosParaGasto() {
       codigo: p.codigo ?? '',
     })),
   }
+}
+
+/**
+ * Rubros de obra activos del workspace para el formulario de gasto (C3). Vacío si el workspace no
+ * tiene `modules.obras`, no tiene rubros o la migración todavía no está: el formulario sigue igual.
+ */
+export async function getRubrosObraParaGasto(): Promise<{ id: string; nombre: string; categoria: string; descripcion: string | null }[]> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return []
+  const { data: ws } = await supabase.from('workspaces').select('modules').eq('id', workspaceId).maybeSingle()
+  if (!obrasActivas(ws?.modules)) return []
+  const { data, error: e } = await supabase
+    .from('obra_rubros')
+    .select('id, nombre, categoria, descripcion')
+    .eq('workspace_id', workspaceId)
+    .eq('activo', true)
+    .order('orden')
+    .order('nombre')
+  if (e) return []
+  return (data ?? []) as { id: string; nombre: string; categoria: string; descripcion: string | null }[]
 }
 
 /** @deprecated Use getDestinosParaGasto instead */

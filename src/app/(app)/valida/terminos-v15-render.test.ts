@@ -6,7 +6,9 @@
  *     y «Ahora no, recordármelo»;
  *   - la persona designada acepta con la MISMA entrada de siempre (texto, nombre, cédula, casilla sin marcar
  *     y apagada hasta leer, «Acepto»);
- *   - los demás ven «Esta aceptación la hace …» y ninguna casilla.
+ *   - los demás ven «Esta aceptación la hace …» y ninguna casilla;
+ *   - desde la fecha de la 16.4: sin «Ahora no» ni «Si no la aceptas ahora», con el texto del final del
+ *     anexo A y el enlace al historial (que sigue abierto).
  *
  * Se queda en `.ts`: `vitest.config.ts` solo recoge `*.test.ts`.
  */
@@ -22,8 +24,8 @@ vi.mock('@/lib/valida-cda/acciones', () => ({ aprobarEntradaValidaCda: async () 
 vi.mock('@/lib/radar/acciones', () => ({ aprobarEntradaRadar: async () => ({ ok: true, yaEstaba: false }) }))
 vi.mock('./terminos-v15-acciones', () => ({ posponerTerminosV15: async () => {} }))
 
-const { TerminosV15Cda } = await import('./terminos-v15-cda')
-const { datosDelTextoV15, textosPantallaV15 } = await import('@/lib/valida-cda/terminos-v1-5')
+const { ConsultasExigenTerminosV15, TerminosV15Cda } = await import('./terminos-v15-cda')
+const { datosDelTextoV15, textoExigidaV15, textosPantallaV15 } = await import('@/lib/valida-cda/terminos-v1-5')
 
 function texto(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
@@ -132,5 +134,27 @@ describe('la pantalla de la v1.5', () => {
     expect(t).toContain('Acepto')
     expect(t).not.toContain('Esta aceptación la hace')
     expect(t).toContain('Ahora no, recordármelo')
+  })
+
+  it('desde la fecha de la 16.4: el texto del anexo A, el historial abierto, y sin «Ahora no»', () => {
+    const exigida = textoExigidaV15('CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA')
+    const html = renderToStaticMarkup(React.createElement(TerminosV15Cda, { ...base, entrada: null, exigida }))
+    const t = texto(html)
+    expect(t).toContain(
+      'Para seguir consultando en Valida, CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA necesita aceptar la versión 1.5 de los Términos. Tu información está guardada.',
+    )
+    expect(html).toContain('href="/valida?historial=1"')
+    expect(t).not.toContain('Ahora no, recordármelo')
+    expect(html).not.toContain('name="documento_id"')
+    expect(t).not.toContain('puedes seguir usando Valida')
+    expect(t).toContain('Esta aceptación la hace Alba Yurany Rosas Escandón')
+    expect(t).toContain('Ver los Términos completos')
+  })
+
+  it('en el historial con la v1.5 exigida: el mensaje en lugar de las consultas y el camino para aceptar', () => {
+    const t = texto(renderToStaticMarkup(React.createElement(ConsultasExigenTerminosV15, { mensaje: textoExigidaV15(null) })))
+    expect(t).toContain('Para seguir consultando en Valida, tu empresa necesita aceptar')
+    expect(t).toContain('ver y descargar los reportes ya generados')
+    expect(t).toContain('Ver los Términos para aceptarlos')
   })
 })

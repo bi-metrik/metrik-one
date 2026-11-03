@@ -8,7 +8,7 @@
 -- POR LA PLATAFORMA: desde `publicada_at`, todos los usuarios del CDA ven al entrar a /valida la pantalla de
 -- aceptación (anexo A de la fuente), y la persona designada puede aceptarla con el mismo mecanismo y la
 -- misma constancia de la v1.3/v1.4. No aceptarla no pausa ni restringe nada (la exigencia de la 16.4,
--- desde el 22-dic Maxitec y el 16-ene los otros tres, NO está construida).
+-- desde el 22-dic Maxitec y el 16-ene los otros tres, se construyó después: `exigenciaV15Cda` en puerta.ts).
 --
 -- Por cada CDA, en UNA transacción: la v1.4 queda vigente hasta el 2026-11-30 (`vigente_hasta`, lo único
 -- que la inmutabilidad deja mover) y se registra la v1.5 con `rige_por_aviso = true`,

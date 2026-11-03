@@ -22,7 +22,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
 
-    const t1 = await e.escribe('Quiero cotizar un nuevo viaje para Martín Mora')
+    const t1 = await e.escribe('Quiero cotizar un nuevo viaje para Martín Mora, la llevo yo')
     expect(t1).toEqual([{ tipo: 'texto', texto: 'Listo, viaje nuevo para Martin Mora, el que ya tenemos (cel. …7311). ¿A dónde quiere ir?' }])
     // La regla llegó con la herramienta, justo cuando hacía falta.
     const respuestaBuscar = modelo.pedidos[1].mensajes.at(-1)!.parts[0].functionResponse!.response as { reglas: string[] }
@@ -50,7 +50,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
       { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
+    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés, la llevo yo')
     await e.toca('Sí, ábrelo')
     const otra = await e.toca('Sí, ábrelo')
     expect(otra[0].texto).toBe('Eso ya quedó hecho.')
@@ -63,7 +63,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
       { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
+    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés, la llevo yo')
     const filas = await e.almacen.leer(e.deps.workspaceId, TEL_PRUEBA, '2000-01-01')
     const vig = propuestaVigente(filas)!
     const ctx = { workspaceId: e.deps.workspaceId, phone: TEL_PRUEBA, remitente: e.deps.remitente, conversacion: filas, resultadosPrevios: [] }
@@ -82,7 +82,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
       { name: 'responder', args: { tema: 'solicitud', texto: '¿Qué hago con la condición?' } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
+    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés, la llevo yo')
     await e.escribe('sí, pero espérate')
     expect(e.puerto.escrituras).toEqual([])
     await e.escribe('Sí.')
@@ -140,6 +140,27 @@ describe('candados (§3.5)', () => {
     expect([...b, ...c]).toEqual([])
     expect(modelo.pedidos).toHaveLength(0)
     expect(e.mensajero.escribiendos).toHaveLength(0)
+  })
+
+  it('si el dominio lanza al preparar la propuesta, vuelve al modelo como candado y el turno no se cae', async () => {
+    // Arnés con Haiku, 2026-11-03 (a-choque, a-pdf-tanda, c1-1009): la extracción de la carga devolvió un JSON roto,
+    // `prepararCarga` lanzó y se cayó el turno entero («el arnés falló: SyntaxError…»). En producción lanza igual
+    // (GEMINI_JSON_INVALIDO).
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'cargar_tanda', datos: { viaje: 'M1 26 2' } } },
+      (p) => {
+        expect(JSON.stringify(p.mensajes.at(-1))).toContain('No pude prepararlo ahora')
+        return { name: 'responder', args: { tema: 'solicitud', texto: 'No pude leer la tanda ahora; inténtalo en un momento.' } }
+      },
+    ])
+    const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
+    e.puerto.prepararCarga = () => Promise.reject(new SyntaxError("Expected ':' after property name in JSON at position 1791"))
+    await e.reenvia('vamos a Cartagena')
+    const r = await e.escribe('cárgalo en M1 26 2')
+    expect(r).toEqual([{ tipo: 'texto', texto: 'No pude leer la tanda ahora; inténtalo en un momento.' }])
+    expect(e.almacen.trazas().at(-1)!.candados?.map((c) => c.candado)).toEqual(['proponer_fallo'])
+    expect(e.puerto.escrituras).toEqual([])
+    expect(modelo.restantes()).toBe(0)
   })
 
   it('una propuesta que cambió (llegó otro reenvío) se rearma: el toque viejo no carga lo de antes', async () => {
@@ -211,7 +232,7 @@ describe('candados (§3.5)', () => {
       { falla: 'http 503' },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('viaje nuevo para Martín Mora')
+    await e.escribe('viaje nuevo para Martín Mora, la llevo yo')
     const r = await e.escribe('mmm espera, ¿cuántos viajes tiene?')
     expect(r[0].tipo).toBe('botones')
     expect(r[0].texto).toMatch(/^No pude revisarlo ahora/)

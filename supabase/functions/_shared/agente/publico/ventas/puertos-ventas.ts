@@ -8,7 +8,7 @@
 
 import type { CuerpoLinkBold, PasarelaPagos, PedidoLink } from '../../../funciones/pasarela.ts';
 import { cuerpoLinkBold } from '../../../funciones/pasarela.ts';
-import type { ProductoVenta } from './catalogo-ventas.ts';
+import type { ProductoNoDisponible, ProductoVenta } from './catalogo-ventas.ts';
 
 /** Lo que se guarda de un link creado (tabla `ferreteria_links_bold`). */
 export interface NuevoLink {
@@ -44,6 +44,8 @@ export type EstadoLink = { estado: string; total: number | null; sandbox: boolea
 export interface PuertosVentas {
   /** Las publicaciones activas con precio, con su producto. Lanza si la base falla. */
   catalogo(): Promise<ProductoVenta[]>;
+  /** Los productos con publicación NO activa (agotada, borrador), sin precio ni ficha. Lanza si la base falla. */
+  noDisponibles(): Promise<ProductoNoDisponible[]>;
   /** La pasarela con las llaves DEL WORKSPACE, o null si no tiene. */
   pasarela(): Promise<PasarelaPagos | null>;
   /** `GET /online/link/v1/{LNK}` con la llave del workspace. `sin_llaves` si no tiene; null si Bold no respondió. */
@@ -54,15 +56,25 @@ export interface PuertosVentas {
   guardarLink(l: NuevoLink): Promise<LinkGuardado>;
 }
 
+/** Un producto del catálogo como queda al salir de la venta (agotado): sin precio, ficha ni fotos. Pura. */
+export function comoNoDisponible(p: ProductoVenta, estado = 'agotada'): ProductoNoDisponible {
+  return { publicacionId: p.publicacionId, codigo: p.codigo, sku: p.sku, titulo: p.titulo, nombre: p.nombre, marca: p.marca, categoria: p.categoria, etiquetas: p.etiquetas, estado };
+}
+
 /** El doble: catálogo fijo, pasarela en memoria (o ninguna), estados de link que el caso fija a mano. */
 export function ventasEnMemoria(o: {
   productos: ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean;
+  /** Lo que existe en Ferretería pero no está publicado hoy (agotado o borrador). */
+  noDisponibles?: ProductoNoDisponible[];
   /** Lo que Bold responde al consultar (por defecto: el total del link, de producción). */
   consulta?: { total?: number | null; sandbox?: boolean; espacioDePruebas?: boolean };
 }) {
   // Como Bold: arma el cuerpo real del pedido (valida monto y vencimiento) y devuelve un `LNK_…` con su checkout.
   const pedidos: Array<{ pedido: PedidoLink; cuerpo: CuerpoLinkBold }> = [];
   let n = 0;
+  // Copias: `agotar` las cambia sin tocar el catálogo del caso (que comparten las k corridas).
+  let productos = [...o.productos];
+  const noDisponibles = [...(o.noDisponibles ?? [])];
   const pasarela: PasarelaPagos = {
     async crearLink(p) {
       if (o.pasarelaCaida) return { ok: false, error: 'pasarela caída (doble)' };
@@ -75,7 +87,8 @@ export function ventasEnMemoria(o: {
   const estados = new Map<string, string>();
   const consultas: string[] = [];
   const puertos: PuertosVentas = {
-    catalogo: async () => structuredClone(o.productos),
+    catalogo: async () => structuredClone(productos),
+    noDisponibles: async () => structuredClone(noDisponibles),
     pasarela: async () => (o.sinLlaves ? null : pasarela),
     async consultarLink(referencia) {
       consultas.push(referencia);
@@ -101,5 +114,12 @@ export function ventasEnMemoria(o: {
     pagar: (referencia: string) => estados.set(referencia, 'PAID'),
     /** Lo que haría el webhook al registrar la venta en ONE. */
     registrar: (referencia: string) => { const l = links.find((x) => x.referencia === referencia); if (l) l.registro = 'registrada'; },
+    /** Lo que hace Ferretería al cerrar una campaña: la publicación pasa a `agotada` (sale del catálogo, sigue existiendo). */
+    agotar: (codigo: string) => {
+      const p = productos.find((x) => x.codigo === codigo);
+      if (!p) return;
+      productos = productos.filter((x) => x !== p);
+      noDisponibles.push(comoNoDisponible(p));
+    },
   };
 }

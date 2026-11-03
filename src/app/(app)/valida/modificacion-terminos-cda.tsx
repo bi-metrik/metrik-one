@@ -8,6 +8,7 @@ import {
   textoQuienAceptaModificacion,
   textosAvisoModificacion,
 } from '@/lib/valida-cda/modificacion-terminos'
+import { esTerminosV15, textoQuienAceptaV15 } from '@/lib/valida-cda/terminos-v1-5'
 
 type EntradaPendiente = Extract<EstadoEntradaPagina, { estado: 'pendiente' }>
 
@@ -19,7 +20,9 @@ type EntradaPendiente = Extract<EstadoEntradaPagina, { estado: 'pendiente' }>
  *   - Los demás lo leen, con su PDF, y ven a quién le toca. No se les muestra casilla ni aviso de la
  *     Política, porque no aceptan nada.
  *
- * Aceptar es voluntario y el módulo sigue abierto: siempre hay cómo volver a Valida.
+ * Aceptar es voluntario y el módulo sigue abierto: siempre hay cómo volver a Valida. La excepción es la v1.5
+ * desde la fecha de la 16.4 (`exigida`): sin aceptarla no hay consultas nuevas, y aquí ya no se dice que
+ * Valida sigue funcionando.
  *
  * Sin estado ni efectos: la decisión viene del servidor (`entradaValidaCda().modificacion`).
  */
@@ -31,6 +34,7 @@ export function ModificacionTerminosCda({
   aviso,
   politicaUrl,
   politicaTitulo,
+  exigida = null,
 }: {
   documentos: DocumentoContractual[]
   /** La entrada armada para firmar; `null` si quien entra no puede firmar o no se pudo armar. */
@@ -40,6 +44,8 @@ export function ModificacionTerminosCda({
   aviso: string
   politicaUrl: string
   politicaTitulo: string
+  /** La v1.5 ya se exige (16.4): el texto que lo dice. `null` antes de esa fecha. */
+  exigida?: string | null
 }) {
   const firma = entrada !== null && entrada.contrato.estado === 'pendiente' && entrada.contrato.puede
   const versiones = documentos.map((d) => nombreVersion(d.version)).join(' y ')
@@ -50,6 +56,15 @@ export function ModificacionTerminosCda({
         <ArrowLeft className="h-4 w-4" />
         Volver a Valida
       </Link>
+
+      {exigida && (
+        <p
+          data-modificacion-exigida
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-950 sm:p-5"
+        >
+          {exigida}
+        </p>
+      )}
 
       {documentos.map((d) => {
         const t = textosAvisoModificacion(d, hoy)
@@ -80,8 +95,10 @@ export function ModificacionTerminosCda({
           producto="valida_cda"
           titulo={`Aceptar la ${versiones} de los Términos`}
           descripcion={
-            'Lee los términos hasta el final. Aceptarlos es voluntario: el cambio rige igual desde su fecha, y ' +
-            'Valida sigue funcionando con o sin tu aceptación. Si aceptas, el aviso deja de mostrarse a tu equipo.'
+            exigida
+              ? 'Lee los términos hasta el final. Al aceptarlos, vuelven las consultas para todo tu equipo.'
+              : 'Lee los términos hasta el final. Aceptarlos es voluntario: el cambio rige igual desde su fecha, y ' +
+                'Valida sigue funcionando con o sin tu aceptación. Si aceptas, el aviso deja de mostrarse a tu equipo.'
           }
         />
       ) : (
@@ -91,7 +108,9 @@ export function ModificacionTerminosCda({
             <div className="min-w-0 flex-1 space-y-4">
               {documentos.map((d) => (
                 <p key={d.documentoId} className="text-sm text-tinta">
-                  {textoQuienAceptaModificacion(designadoNombre, d)}
+                  {exigida && esTerminosV15(d)
+                    ? textoQuienAceptaV15(designadoNombre)
+                    : textoQuienAceptaModificacion(designadoNombre, d)}
                 </p>
               ))}
               <div className="max-h-[60vh] overflow-y-auto rounded-md border border-border bg-papel p-4 text-sm leading-relaxed text-tinta [overflow-wrap:anywhere] sm:max-h-[28rem]">

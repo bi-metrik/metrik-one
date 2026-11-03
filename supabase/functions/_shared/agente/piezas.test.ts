@@ -114,6 +114,12 @@ describe('verificador', () => {
     expect(verificar('Llega a 3.500 rpm.', taladro).join()).toContain('3.500')
     expect(verificar('Llega a 800 rpm.', taladro).join()).toContain('800')
   })
+  it('un decimal de un solo dígito se lee entero («1,28», no «28»): Dimpro, 3-nov', () => {
+    const ficha = respaldoDe(['ver_catalogo → MP-17 Peso: 1,28 kg; batería de 2.0Ah'])
+    expect(verificar('Pesa 1,28 kg y trae batería de 2.0Ah.', ficha)).toEqual([])
+    // Lo inventado sigue sin salir.
+    expect(verificar('Pesa 1,35 kg.', ficha).join()).toContain('1,35')
+  })
   it('no lee palabras: ni mayúsculas como nombres ni verbos como hechos (los falsos rechazos del 2026-10-07 y 10-09)', () => {
     const viaje = respaldoDe(['ver_viaje → M1 26 1 MIAMI 7N, falta destino, ciudad de salida, fechas, pasajeros, categoría de hotel'])
     expect(verificar('Para cotizar M1 26 1 (MIAMI 7N) falta:\n• Destino\n• Pasajeros (adultos, niños, infantes)\n\nEnvíame los datos y los anotamos.', viaje)).toEqual([])

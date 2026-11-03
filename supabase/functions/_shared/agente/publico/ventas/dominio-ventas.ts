@@ -33,13 +33,16 @@ import {
 import { respuestaFija } from '../../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Hechos, Propuesta, Reglamento, ResultadoHerramienta } from '../../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
-import { MAX_RECOMENDADOS, MAX_SUGERENCIAS, codigosEnTexto, productoParaModelo, siguientePaso, sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete } from './catalogo-ventas.ts';
-import type { Falta, Preferencias, ProductoVenta } from './catalogo-ventas.ts';
+import {
+  MAX_RECOMENDADOS, MAX_SUGERENCIAS, alternativasA, buscarProductos, codigosEnTexto, noDisponiblesPedidos, nombreCorto, productoParaModelo, siguientePaso,
+  sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete,
+} from './catalogo-ventas.ts';
+import type { Falta, Preferencias, ProductoNoDisponible, ProductoVenta } from './catalogo-ventas.ts';
 import { filasDelTramo } from '../topes.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
 import { fotosConsultadas } from './fotos-ventas.ts';
 import { direccionNoEscrita } from './direccion-ventas.ts';
-import { complementosDe, mapaComplementos } from './complementos-ventas.ts';
+import { complementosDe, mapaComplementos, opcionesSinMapa } from './complementos-ventas.ts';
 import { propuestaVigente } from '../../nucleo.ts';
 
 export const GENERAR_LINK_PAGO = 'generar_link_pago';
@@ -97,7 +100,7 @@ export const RF_PAGO_PENDIENTE = 'rf.pago_pendiente';
 /** Los motivos que el modelo puede usar. `pago_no_disponible` y `despachar` los pone el código. */
 export const MOTIVOS_VENTAS: MotivoPersona[] = [
   'pide_persona', 'queja', 'pago', 'no_entiende', 'menor', 'crisis', 'abuso', 'duda_abierta', 'datos', 'falla',
-  'fuera_de_zona', 'cantidad', 'factura', 'garantia', 'no_en_catalogo',
+  'fuera_de_zona', 'cantidad', 'factura', 'garantia', 'no_en_catalogo', 'producto_no_disponible',
 ];
 const REPETIBLES: MotivoPersona[] = ['pide_persona', 'datos', 'crisis', 'duda_abierta', 'pago'];
 export const FIJAS_VENTAS = [RF_AUTORIZACION, RF_TARJETA, RF_PERSONA_POR_QUE, RF_PRECIO_AUTORIZADO] as const;
@@ -166,6 +169,33 @@ export function bloqueNotaVentas(p: { filas: FilaPublica[]; compra: Record<strin
 
 const digitos = (s: string) => s.replace(/\D/g, '');
 
+/**
+ * Lo que ve el modelo cuando lo que pidió existe pero no está publicado hoy (3-nov: con la campaña de octubre cerrada,
+ * «Cuéntame más sobre el mp17» terminaba en «No pude revisarlo» o en persona por `falla`). Nunca precio ni ficha del no
+ * disponible. Con alternativas activas del mismo tipo, las ofrece; sin ellas, pasa a persona con `producto_no_disponible`
+ * (el texto al cliente lo arma el código). Sin producto (`nd` vacío, catálogo activo vacío): no hay nada publicado. Pura.
+ */
+export function respuestaNoDisponible(nd: ProductoNoDisponible[], alternativas: ProductoVenta[]): Record<string, unknown> {
+  const nombres = nd.map(nombreCorto).join('; ');
+  const sinPrecio = 'Sin precio ni especificaciones: lo que se dijo antes en la conversación de ese producto ya no vale.';
+  if (!nd.length) {
+    return {
+      productos: [], catalogo_vacio: true,
+      que_hacer: `Hoy no hay productos publicados para la venta. No es una falla: pasar_a_persona con motivo producto_no_disponible y en \`pidio\` lo que pidió; el sistema le dice que por ahora no hay productos disponibles. ${sinPrecio}`,
+    };
+  }
+  if (alternativas.length) {
+    return {
+      productos: [], no_disponible: nd.map((p) => ({ codigo: p.codigo, producto: p.titulo || p.nombre })), alternativas: alternativas.map(productoParaModelo),
+      que_hacer: `${nombres}: no está disponible por ahora. Díselo así, con su nombre. ${sinPrecio} Ofrécele como alternativa ${alternativas.length === 1 ? 'este' : 'estos'}, cada uno en su línea con su código, nombre corto y precio, y pregúntale si le sirve. No pases a persona si no lo pide.`,
+    };
+  }
+  return {
+    productos: [], no_disponible: nd.map((p) => ({ codigo: p.codigo, producto: p.titulo || p.nombre })), sin_alternativas: true,
+    que_hacer: `${nombres}: no está disponible por ahora y no hay otro parecido publicado. No escribas tú la respuesta: pasar_a_persona con motivo producto_no_disponible, codigo = ${nd[0].codigo} y en \`pidio\` lo que pidió; el sistema le dice que no está disponible y lo pasa al equipo. ${sinPrecio}`,
+  };
+}
+
 export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const r = o.reglamento;
   const claves: string[] = [...CLAVES_REGLAS_VENTAS];
@@ -199,10 +229,19 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     }
   }
 
+  /** «El MP-17, taladro percutor inalámbrico Dongcheng, no está disponible por ahora.» (o sin catálogo, que no hay nada). */
+  async function lineaNoDisponible(codigo: string, pidio: string): Promise<{ texto: string; codigo: string | null; estado: string | null }> {
+    const [activos, nd] = await Promise.all([o.puertos.catalogo(), o.puertos.noDisponibles()]);
+    const p = (codigo.trim() ? productoPorCodigo(nd, codigo) : null) ?? (codigo.trim() ? null : buscarProductos(nd, { buscar: pidio, codigo: null }, 1)[0] ?? null);
+    if (p && !productoPorCodigo(activos, p.codigo)) return { texto: `El ${nombreCorto(p)}, no está disponible por ahora.`, codigo: p.codigo, estado: p.estado };
+    if (!activos.length) return { texto: 'Por ahora no tengo productos disponibles para la venta.', codigo: null, estado: null };
+    return { texto: 'Ese producto no está disponible por ahora.', codigo: null, estado: null };
+  }
+
   const lecturas: DeclaracionHerramienta[] = [
     {
       name: 'ver_catalogo',
-      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Con el uso dicho, antes de recomendar puede devolver \`falta\` (energia o presupuesto) con la \`pregunta\` que toca: hazla sola, y con la respuesta vuelve a llamarla pasando \`energia\` o \`presupuesto\`. Al final devuelve ${MAX_RECOMENDADOS} productos como mucho (uno preciso o dos para escoger): recomienda solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
+      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Con el uso dicho, antes de recomendar puede devolver \`falta\` (energia o presupuesto) con la \`pregunta\` que toca: hazla sola, y con la respuesta vuelve a llamarla pasando \`energia\` o \`presupuesto\`. Al final devuelve ${MAX_RECOMENDADOS} productos como mucho (uno preciso o dos para escoger): recomienda solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si devuelve \`no_disponible\` o \`catalogo_vacio\` (el producto existe pero no está publicado hoy, o no hay nada publicado), haz lo que dice su \`que_hacer\`: nunca su precio ni su ficha, aunque estén en la conversación. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
       parameters: {
         type: 'object',
         properties: {
@@ -217,7 +256,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     },
     {
       name: VER_COMPLEMENTOS,
-      description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos: pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
+      description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos fijos puede traer `opciones` (otros productos publicados): ofrece una o dos que sirvan para su trabajo («Tengo X o Y que podrían interesarte»), o si ninguna sirve, pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
       parameters: { type: 'object', properties: { codigo: { type: 'string', description: 'El código MP-xx del producto que escogió.' } }, required: ['codigo'] },
     },
     {
@@ -230,12 +269,13 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const cierres: DeclaracionHerramienta[] = [
     {
       name: PASAR_A_PERSONA,
-      description: 'Pasa la conversación a una persona del equipo. El sistema arma la nota, pone la etiqueta y le dice al cliente qué sigue. Motivos: fuera_de_zona (entrega fuera de la tabla de flete: la persona cotiza el flete), cantidad (más de 3 unidades), factura (factura a nombre de empresa o con datos especiales), garantia (garantía, cambio o devolución), no_en_catalogo (producto que no está en el catálogo), pago (soporte de pago, doble cobro, un link vencido), pide_persona, queja, no_entiende, menor, crisis, abuso, duda_abierta (pregunta que el catálogo y las reglas no contestan), datos (borrar datos o revocar la autorización), falla.',
+      description: 'Pasa la conversación a una persona del equipo. El sistema arma la nota, pone la etiqueta y le dice al cliente qué sigue. Motivos: fuera_de_zona (entrega fuera de la tabla de flete: la persona cotiza el flete), cantidad (más de 3 unidades), factura (factura a nombre de empresa o con datos especiales), garantia (garantía, cambio o devolución), no_en_catalogo (producto que no está en el catálogo), producto_no_disponible (ver_catalogo lo devolvió como no_disponible sin alternativas, o catalogo_vacio; pasa también `codigo`), pago (soporte de pago, doble cobro, un link vencido), pide_persona, queja, no_entiende, menor, crisis, abuso, duda_abierta (pregunta que el catálogo y las reglas no contestan), datos (borrar datos o revocar la autorización), falla.',
       parameters: {
         type: 'object',
         properties: {
           motivo: { type: 'string', enum: MOTIVOS_VENTAS },
           pidio: { type: 'string', description: 'En una línea, qué pidió el cliente (sin datos de tarjeta).' },
+          codigo: { type: 'string', description: 'Con producto_no_disponible: el código MP-xx que devolvió ver_catalogo en no_disponible (vacío si fue catalogo_vacio).' },
         },
         required: ['motivo', 'pidio'],
       },
@@ -283,7 +323,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       caida();
       if (nombre === 'ver_catalogo') {
         const ps = await o.puertos.catalogo();
-        if (!ps.length) return { ok: false, datos: null, error: 'No hay productos publicados. No inventes: pasar_a_persona con motivo falla.' };
+        const pedido = { buscar: args.buscar ? String(args.buscar) : null, codigo: args.codigo ? String(args.codigo) : null };
+        // Lo que pidió y existe, pero no está publicado hoy: «no está disponible», nunca «falla» (3-nov).
+        const noDisponible = async () => noDisponiblesPedidos(await o.puertos.noDisponibles(), ps, pedido);
+        if (!ps.length) return { ok: true, datos: respuestaNoDisponible(await noDisponible(), []) };
         const sug = sugerirProductos(ps, { buscar: args.buscar ? String(args.buscar) : null, codigo: args.codigo ? String(args.codigo) : null, uso: args.uso ? String(args.uso) : null });
         if (sug.tipo === 'preguntar') {
           return {
@@ -301,6 +344,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         }
         if (sug.tipo === 'sugerir' && sug.ninguno) {
           return { ok: true, datos: { productos: [], ninguno_para_ese_uso: true, nota: 'Hay de lo que busca, pero ninguno es para ese uso según el catálogo. Díselo así, sin ofrecer otro como si sirviera, y pregúntale si quiere que lo atienda una persona del equipo (si dice que sí: pasar_a_persona motivo no_en_catalogo).' } };
+        }
+        if (!sug.productos.length) {
+          const nd = await noDisponible();
+          if (nd.length) return { ok: true, datos: respuestaNoDisponible(nd, alternativasA(nd[0], ps)) };
         }
         if (!sug.productos.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. No ofrezcas otro como si fuera el mismo: si lo quiere, pasar_a_persona con motivo no_en_catalogo.' } };
         if (sug.tipo === 'codigo') return { ok: true, datos: { productos: sug.productos.map(productoParaModelo) } };
@@ -347,7 +394,18 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         const ps = await o.puertos.catalogo();
         const cs = complementosDe(mapaComplementos(r), String(args.codigo ?? ''), ps);
         if (!cs.length) {
-          return { ok: true, datos: { complementos: [], que_hacer: 'No hay un complemento para ofrecer: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Si dice que no, sigue con la compra.' } };
+          const ops = opcionesSinMapa(mapaComplementos(r), String(args.codigo ?? ''), ps);
+          if (!ops.length) {
+            return { ok: true, datos: { complementos: [], que_hacer: 'No hay un complemento para ofrecer: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Si dice que no, sigue con la compra.' } };
+          }
+          return {
+            ok: true,
+            datos: {
+              complementos: [],
+              opciones: ops.map((p) => { const m = productoParaModelo(p); return { codigo: m.codigo, producto: m.producto, precio: m.precio }; }),
+              que_hacer: 'No hay un complemento fijo para este producto. De estas opciones, escoge una o dos que sirvan para el mismo trabajo que te contó el cliente y ofrécelas en un mensaje corto: «Tengo X o Y que podrían interesarte», una línea por opción que empieza por su código, con nombre corto y precio; cierra preguntando si quiere agregar alguna. No digas que es compatible o que sirve para su herramienta si no lo sabes por ver_catalogo. Si ninguna tiene que ver con su trabajo, no ofrezcas nada: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Una sola vez: si dice que no, sigue con la compra sin insistir.',
+            },
+          };
         }
         return {
           ok: true,
@@ -389,7 +447,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       }
       const ps = await o.puertos.catalogo();
       const prod: ProductoVenta | null = productoPorCodigo(ps, String(datos.producto ?? ''));
-      if (!prod) return { ok: false, error: 'El producto no es un código de ver_catalogo. Búscalo primero; si no está, pasar_a_persona con no_en_catalogo.', candado: 'producto_invalido' };
+      if (!prod) return { ok: false, error: 'El producto no está publicado hoy. Búscalo con ver_catalogo por su código y haz lo que diga (no_disponible: no lo vendas); si no está, pasar_a_persona con no_en_catalogo.', candado: 'producto_invalido' };
       const cantidad = Number(datos.cantidad);
       if (!Number.isInteger(cantidad) || cantidad < 1) return { ok: false, error: 'La cantidad tiene que ser un número entero de unidades.', candado: 'cantidad_invalida' };
       if (cantidad > MAX_UNIDADES) return { ok: false, error: `Más de ${MAX_UNIDADES} unidades no las vendo por aquí: pasar_a_persona con motivo cantidad.`, candado: 'cantidad_mayor' };
@@ -499,6 +557,12 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           return { ok: false, error: 'El cliente acaba de autorizar sus datos con «sí»: no es una duda. Sigue la compra pidiendo el dato que falte (el nombre, si no lo ha dado).', candado: 'si_de_autorizacion' };
         }
         const texto = (motivo === 'duda_abierta' ? respuestaFija(r, 'rf.duda_abierta') : '') || respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
+        if (motivo === 'producto_no_disponible') {
+          // El código dice qué no está disponible, con el nombre de la base (nunca el precio); después, el paso a persona.
+          const linea = await lineaNoDisponible(String(args.codigo ?? ''), String(args.pidio ?? ''));
+          const pidio = `${String(args.pidio ?? '').slice(0, 160)}${linea.codigo ? ` (${linea.codigo}: ${linea.estado})` : ''}`;
+          return { ok: true, salidas: [{ tipo: 'texto', texto: [linea.texto, respuestaFija(r, 'rf.persona.producto_no_disponible') || respuestaFija(r, 'rf.persona')].filter(Boolean).join(' ') }], datos: { motivo }, privado: { persona: { motivo, pidio } } };
+        }
         return { ok: true, salidas: [{ tipo: 'texto', texto }], datos: { motivo }, privado: { persona: { motivo, pidio: String(args.pidio ?? '').slice(0, 200) } } };
       }
       if (nombre === RESPUESTA_FIJA) {

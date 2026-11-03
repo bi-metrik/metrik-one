@@ -33,3 +33,8 @@ export function preciosSinHerramienta(texto: string, fuentes: ReadonlyArray<stri
   }
   return [...new Set(fuera)];
 }
+
+/** Las cifras de plata del texto, en dígitos («$324.900» → 324900; «95 mil» → 95000). Pura. */
+export function montosDelTexto(texto: string): string[] {
+  return [...texto.matchAll(RE_PLATA)].map((m) => (m[1] !== undefined ? valor(m[1], m[2]) : m[3] !== undefined ? valor(m[3], m[4]) : digitos(m[5]))).filter(Boolean);
+}

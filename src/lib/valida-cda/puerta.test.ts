@@ -145,6 +145,7 @@ vi.mock('react', async (original) => ({ ...(await original<typeof import('react'
 
 const {
   entradaValidaCda,
+  exigenciaV15Cda,
   moraValidaCda,
   puedeVerPagosCda,
   terminosValidaPermitenOperar,
@@ -577,5 +578,86 @@ describe('la v1.5 publicada: transición de la cláusula 11.7 (bloqueante de Ver
     expect((await validaCdaPermiteConsultar()).ok).toBe(false)
     escenario.hoy = '2026-11-27'
     expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+})
+
+describe('la exigencia de la v1.5 desde la fecha de la 16.4 (Maxitec: 22-dic-2026)', () => {
+  const CONCEPTO = 'Suscripción VALIDA · Plan CDA — servicio de computación en la nube (SaaS) · periodo del'
+  const cuota = (numero: number, vence: string, periodo: string) => ({
+    ...CUOTA_1,
+    cuota_id: `66666666-6666-4666-8666-66666666670${numero}`,
+    numero,
+    fecha_vencimiento: vence,
+    concepto: `${CONCEPTO} ${periodo}`,
+  })
+  const OCT = cuota(2, '2026-10-27', '23-oct al 22-nov')
+  const NOV = cuota(3, '2026-11-27', '23-nov al 22-dic')
+  /** Las formas exactas que exige el generador (`datosDelTextoV15`), con las fechas de Maxitec. */
+  const TEXTO_V15 = [
+    '**EL CLIENTE**: MAXITEC S.A.S., NIT 900.000.000-1',
+    'La fecha de renovación del Cliente es el día 23 de cada mes.',
+    'Hasta el **21 de diciembre de 2026**, fecha en que vencía el plazo.',
+    'Desde el **22 de diciembre de 2026**, o desde el día siguiente al fin del último período pagado si es posterior, sin esa aceptación no se pueden hacer consultas.',
+  ].join('\n\n')
+  const V15: DocumentoContractual = {
+    ...DOC_V14,
+    documentoId: '99999999-9999-4999-8999-999999999999',
+    version: 'v1.5',
+    textoMd: TEXTO_V15,
+    pdfSha256: 'c'.repeat(64),
+    vigenteDesde: '2026-12-01',
+    vigenteHasta: null,
+    reemplazaId: DOC_V14.documentoId,
+    publicadaAt: '2026-11-01T05:00:00Z',
+  }
+  const pagos = (monto: number) => ({ data: [{ monto: String(monto), estado: 'pagado' }], error: null })
+
+  beforeEach(() => {
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, { ...DOC_V14, vigenteHasta: '2026-11-30' }, V15]
+    // Sin período pagado posterior: pagó hasta el 22-nov y no hay cuota impaga (sin mora de por medio).
+    escenario.cuotas = { data: [CUOTA_1, OCT], error: null }
+    escenario.cobros = pagos(300000)
+  })
+
+  it('sin período pagado posterior: consulta el 21-dic; desde el 22-dic no consulta, pero opera (historial y reportes)', async () => {
+    escenario.hoy = '2026-12-21'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-22'
+    const r = await validaCdaPermiteConsultar()
+    expect(r).toEqual({
+      ok: false,
+      error:
+        'Para seguir consultando en Valida, MAXITEC S.A.S. necesita aceptar la versión 1.5 de los Términos. Tu ' +
+        'información está guardada. Puedes pedir la copia de tu bitácora y tus reportes a mauricio.moreno@metrik.com.co.',
+    })
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2026-12-22' })
+  })
+
+  it('con el período del 23-nov al 22-dic pagado: no se bloquea el 22-dic, sí desde el 23-dic', async () => {
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV], error: null }
+    escenario.cobros = pagos(450000)
+    escenario.hoy = '2026-12-22'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-23'
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
+    expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2026-12-23' })
+  })
+
+  it('aceptada la v1.5, consulta igual pasada la fecha', async () => {
+    escenario.documentos = [
+      DOC_ACEPTADO_HASTA_V14,
+      { ...DOC_V14, vigenteHasta: '2026-11-30' },
+      { ...V15, aceptadoAt: '2026-12-10T15:00:00Z', aceptadoPor: 'Alba', aceptadoCanal: 'modulo' },
+    ]
+    escenario.hoy = '2027-01-20'
+    expect(await exigenciaV15Cda()).toEqual({ estado: 'no_exigida' })
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+  })
+
+  it('sin poder leer las cuotas no se exige: no hay prueba de que no haya un período pagado', async () => {
+    escenario.cuotas = { data: null, error: { message: 'caída' } }
+    escenario.hoy = '2026-12-22'
+    expect(await exigenciaV15Cda()).toEqual({ estado: 'no_exigida' })
   })
 })

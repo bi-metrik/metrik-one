@@ -5,7 +5,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import type { CampanaPanel, CampanaResumen, Experiencia, Negocio } from '@/lib/funciones/datos'
-import { DIAS_SALDO, diasSaldoValido, pesos } from '@/lib/funciones/reglas'
+import { AYUDA_DIAS_SALDO, DIAS_SALDO, diasSaldoValido, pesos, resumenPlazoSaldo } from '@/lib/funciones/reglas'
 import { generarOferta } from '../../../../../../supabase/functions/_shared/funciones/textos.ts'
 import { crearCampanaAction, guardarExperienciaAction, leerTextosCampanaAction, publicarCampanaAction, type LineaAgenda } from '../../actions'
 import { AgendaEditor } from '../../agenda-editor'
@@ -67,7 +67,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
     preventaUsada && !numero(preventa) && 'Hay funciones de preventa: escribe el precio de preventa.',
     numero(abono) !== null && numero(precio) !== null && numero(abono)! > numero(precio)! && 'El abono no puede pasar el precio por persona.',
     numero(abono) === null && !pagoTotal && 'Sin abono, permite el pago total.',
-    !diasSaldoValido(numero(diasSaldo)) && 'Los días antes para pagar el saldo van de 1 a 30.',
+    !diasSaldoValido(numero(diasSaldo)) && 'Los días antes para pagar el saldo van de 0 a 30.',
   ].filter(Boolean) as string[]
 
   const seguirPaso1 = () =>
@@ -193,7 +193,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
                   Precios como la campaña anterior: {pesos(numero(precio))}
                   {numero(preventa) ? ` · prev ${pesos(numero(preventa))}` : ''}
                   {numero(abono) ? ` · abono ${pesos(numero(abono))}` : ''}
-                  {` · saldo ${numero(diasSaldo) === 1 ? '1 día' : `${numero(diasSaldo)} días`} antes`}
+                  {` · ${resumenPlazoSaldo(numero(diasSaldo))}`}
                 </span>
                 <button type="button" onClick={() => setCambiarPrecios(true)} className="text-[#059669] underline">Cambiar</button>
               </div>
@@ -203,7 +203,7 @@ export function NuevaCampanaCliente({ experiencias, anterior, ahoraMs }: { exper
                 <label>Preventa por persona<input inputMode="numeric" value={preventa} onChange={(e) => setPreventa(e.target.value)} className={campo} placeholder="Opcional" /></label>
                 <label>Abono por persona<input inputMode="numeric" value={abono} onChange={(e) => setAbono(e.target.value)} className={campo} placeholder="Opcional" /></label>
                 <label className="flex items-end gap-2 pb-3"><input type="checkbox" checked={pagoTotal} onChange={(e) => setPagoTotal(e.target.checked)} className="size-5" /> Permite pago total</label>
-                <label className="col-span-2">Paga el saldo (días antes de la función)<input inputMode="numeric" value={diasSaldo} onChange={(e) => setDiasSaldo(e.target.value)} className={campo} /></label>
+                <label className="col-span-2">Paga el saldo (días antes de la función)<input inputMode="numeric" value={diasSaldo} onChange={(e) => setDiasSaldo(e.target.value)} className={campo} /><span className="mt-1 block text-xs text-[#6B7280]">{AYUDA_DIAS_SALDO}</span></label>
                 <label className="col-span-2">Minutos que aguanta un apartado sin pago<input inputMode="numeric" value={minutos} onChange={(e) => setMinutos(e.target.value)} className={campo} placeholder="Si aún no se sabe, vacío: no se podrá apartar" /></label>
               </div>
             )}

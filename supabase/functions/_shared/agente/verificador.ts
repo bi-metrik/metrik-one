@@ -28,7 +28,9 @@ const RE_PORCENTAJE = /(\d+(?:[.,]\d+)?)\s?%/gu;
 const RE_PLATA = /(?:\$|US\$|USD\s?)\s?(\d[\d.,]*)|(\d[\d.,]*)\s?(?:pesos|millones|mil|usd|dólares|dolares)\b/giu;
 // Dos o más dígitos, o uno solo con miles («2.800», «1.200»): sin eso, de «2.800 rpm» se leía «800» y se rechazaba una
 // cifra que sí estaba en el respaldo (Dimpro, 29-oct: dos vueltas extra del modelo en una conversación de 4 turnos).
-const RE_NUMERO = /\b(?:\d{2,}|\d(?=[.,]\d{3}\b))(?:[.,]\d+)*\b/gu;
+// Lo mismo con decimales: de «1,28 kg» se leía «28» suelto y se rechazaba (Dimpro, 3-nov: el fallback «No pude
+// revisarlo» dos veces seguidas). Un dígito con decimales se lee entero, «1,28», y se cruza como «128».
+const RE_NUMERO = /\b(?:\d{2,}|\d(?=[.,]\d+\b))(?:[.,]\d+)*\b/gu;
 
 export function normal(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
