@@ -330,8 +330,9 @@ export interface Dominio {
    * núcleo deja el hecho como estaba.
    * `seguir`: el modelo tiene un turno después del hecho (crear un cliente → ¿quedó una solicitud suya sin atender?). Él
    * decide si propone lo que sigue, pregunta lo que falta o termina; el código no lee el texto. El hecho sale igual.
+   * `nota`: con `seguir`, una línea del dominio para el Estado de ese turno (no sale en la confirmación).
    */
-  trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta; seguir?: boolean } | null>;
+  trasEjecutar?(propuesta: Propuesta, hechos: Hechos, huella: string, ctx: ContextoDominio): Promise<{ lineas: string[]; propuesta?: Propuesta; seguir?: boolean; nota?: string } | null>;
   /** ¿La propuesta sigue sirviendo? (la tanda no cambió desde que se armó). Ausente = sí. */
   sigueVigente?(propuesta: Propuesta, ctx: ContextoDominio): boolean;
   /**

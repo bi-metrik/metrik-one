@@ -88,13 +88,20 @@ describe('perfilDesdeCustomData', () => {
       autorizacion_datos: true,
     })
     expect(p).toEqual({
-      tipo: 'Leisure',
+      tipo: 'Vacacional',
       conQuienViaja: 'ESPOSA E HIJO',
       bolsillo: 'Medio',
       preferencias: 'TODO INCLUIDO',
       notas: 'Viajes tranquilos',
     })
     expect(JSON.stringify(p)).not.toContain('1016044186')
+  })
+
+  it('«corporativo» se lee «Negocios» (el valor guardado no cambia)', () => {
+    expect(perfilDesdeCustomData({ tipo_cliente: 'corporativo' })?.tipo).toBe('Negocios')
+    expect(perfilDesdeCustomData({ tipo_cliente: 'leisure' })?.tipo).toBe('Vacacional')
+    // Un valor que no está en el mapa sale tal cual.
+    expect(perfilDesdeCustomData({ tipo_cliente: 'otro' })?.tipo).toBe('otro')
   })
 
   it('«sin declarar» no es un bolsillo', () => {
@@ -205,6 +212,15 @@ describe('etiquetaDeValor', () => {
     expect(etiquetaDeValor('nacional', { slug: 'x', options: ['nacional'] })).toBe('Nacional')
     expect(etiquetaDeValor('todo_incluido', { slug: 'x', opciones: [{ value: 'todo_incluido' }] })).toBe('Todo incluido')
     expect(etiquetaDeValor('texto libre', { slug: 'x', tipo: 'texto' })).toBe('texto libre')
+  })
+
+  it('option_labels nombra los valores de options; los pares mandan si hay los dos', () => {
+    const campo = { slug: 'tipo_cliente', tipo: 'select', options: ['leisure', 'corporativo'], option_labels: { leisure: 'Vacacional', corporativo: 'Negocios' } }
+    expect(etiquetaDeValor('leisure', campo)).toBe('Vacacional')
+    expect(etiquetaDeValor('corporativo', campo)).toBe('Negocios')
+    expect(etiquetaDeValor('a', { slug: 'x', opciones: [{ value: 'a', label: 'Uno' }], option_labels: { a: 'Otro' } })).toBe('Uno')
+    // Sin la llave, lo de siempre.
+    expect(etiquetaDeValor('leisure', { slug: 'tipo_cliente', options: ['leisure'] })).toBe('Leisure')
   })
 })
 

@@ -17,6 +17,18 @@ const RECURSOS: RecursosPropuesta = {
 }
 
 const html = (e: EntradaModeloPropuesta = ENTRADA_EUROPA, r: RecursosPropuesta = RECURSOS) => htmlDePropuesta(modeloDePropuesta(e), r)
+
+describe('el <title> del documento (nombre del PDF, 2026-11-03)', () => {
+  it('con `tituloDocumento`, el título es el nombre del archivo sin .pdf (y escapado)', () => {
+    const h = html(ENTRADA_EUROPA, { ...RECURSOS, tituloDocumento: 'Cotización COT-2026-0026 - Ana & Luis - Madrid' })
+    expect(h).toContain('<title>Cotización COT-2026-0026 - Ana &amp; Luis - Madrid</title>')
+  })
+
+  it('sin él, el de siempre: «consecutivo · titular»', () => {
+    const m = modeloDePropuesta(ENTRADA_EUROPA)
+    expect(htmlDePropuesta(m, RECURSOS)).toContain(`<title>${esc(m.portada.consecutivo)} · ${esc(m.portada.titulo)}</title>`)
+  })
+})
 /** Sin etiquetas, para buscar frases como las lee el cliente. */
 const texto = (h: string) => h.replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ')
 /** El HTML de una sección, por su título. */

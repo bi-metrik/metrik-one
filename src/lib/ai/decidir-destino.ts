@@ -60,6 +60,8 @@ export const PROMPT_DESTINO =
   'traer el precio del niño o del infante que le faltaba a una opción.\n\n' +
   'Reglas:\n' +
   '- Ante la duda, nueva, y duda = true: es peor perder un servicio que tener uno de más.\n' +
+  '- La ZONA o el barrio de un hotel («Zona San Luis», «Zona La Rocosa») no es otro destino: un hotel en ' +
+  'otra zona del mismo destino es hermana del hotel de ese destino.\n' +
   '- servicio: el id del servicio con el que compite o al que completa (de la lista). null si es nueva.\n' +
   '- razon: una línea en español llano que diga por qué («Otra isla y otra fecha que el traslado de ' +
   'Providencia»). Siempre que no sea nueva.\n' +

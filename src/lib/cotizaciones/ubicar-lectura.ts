@@ -118,6 +118,37 @@ export function lugaresDeHotelCompatibles(a: string | null | undefined, b: strin
   return pa.some(x => pb.some(y => contiene(x, y) || contiene(y, x)))
 }
 
+/** Lo que la pantalla escribe para decir que el lugar es un sector DENTRO del destino. */
+const MARCA_DE_ZONA = /^(?:zona|sector|barrio|area|localidad|vereda)\b/
+
+/** «Zona SAN LUIS», «Zona LA ROCOSA - KORAY», «Sector El Rodadero»: un sector, no un destino. */
+export function esZonaDelDestino(lugar: string | null | undefined): boolean {
+  const n = lugarComparable(lugar)?.nombre
+  return !!n && MARCA_DE_ZONA.test(n)
+}
+
+/** El destino del viaje si es UNO solo; con varios («Cartagena y San Andrés») no se usa. */
+function destinoUnico(destino: string | null | undefined): string | null {
+  const t = (destino ?? '').trim()
+  if (!t) return null
+  const partes = t.split(/[/,|·&+]| y | e | - /i).map(p => p.trim()).filter(Boolean)
+  return partes.length === 1 ? partes[0] : null
+}
+
+/**
+ * ¿Este lugar de hotel queda en el destino del viaje? (SAN ANDRÉS, 2026-11-03.) El lector escribe
+ * la «ciudad» del hotel como la pantalla la da, y los operadores dan la ZONA: «Zona SAN LUIS»,
+ * «Zona LA ROCOSA - KORAY». Eso abría «Hotel 2» y «Hotel 3» para tres alternativas de San Andrés.
+ * La zona es un detalle del hotel, no un destino nuevo: con UN destino en el viaje, un lugar que es
+ * ese destino o que se declara zona queda en él. Sin destino (o con varios), `false`: se decide
+ * como siempre.
+ */
+export function enElDestinoDelViaje(lugar: string | null | undefined, destinoViaje: string | null | undefined): boolean {
+  const d = destinoUnico(destinoViaje)
+  if (!d || !lugar) return false
+  return lugaresDeHotelCompatibles(lugar, d) === true || esZonaDelDestino(lugar)
+}
+
 const RANURA_HOTEL = 'hotel_detalle'
 
 export function ubicarLectura(args: {
@@ -130,6 +161,8 @@ export function ubicarLectura(args: {
   grupoViaje: Composicion | null
   /** «Agregar como otra opción»: nunca se une como habitación. */
   sinHabitacion?: boolean
+  /** El destino del viaje (Condiciones del viaje): una zona dentro de él no abre otro hotel. */
+  destinoViaje?: string | null
 }): DestinoDeLectura {
   const { tipo, lectura, pistas, lineas, grupoViaje } = args
   const vivas = lineas.filter(l => l.es_ajuste !== true)
@@ -180,6 +213,11 @@ export function ubicarLectura(args: {
     // Sin fechas que comparar, el lugar, por partes: un barrio y su ciudad son el mismo destino.
     const mismoDestino = lugarLeido ? sinFechaLeida.find(r => lugaresDeHotelCompatibles(r.lugar, lugarLeido) === true) : null
     if (mismoDestino) return { como: 'hermana', grupo: mismoDestino.grupo }
+    // Una zona del destino del viaje es otra opción del hotel de ese destino (2026-11-03).
+    if (enElDestinoDelViaje(lugarLeido, args.destinoViaje)) {
+      const delDestino = sinFechaLeida.find(r => enElDestinoDelViaje(r.lugar, args.destinoViaje))
+      if (delDestino) return { como: 'hermana', grupo: delDestino.grupo }
+    }
     const captura: CapturaDetectada = { tipo, lugar: lugarLeido, origen: pistas.origen, destino: pistas.destino }
     const u = ubicarCaptura(captura, sinFechaLeida
       .map(r => ({ grupo: r.grupo, tipo, lugar: r.lugar, origen: r.origen, destino: r.destino })))

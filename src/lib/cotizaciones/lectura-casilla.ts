@@ -10,13 +10,17 @@
 
 import type { DefinicionRanura } from './ranuras-pantallazo'
 import {
+  nochesDeEstadia,
   numeroLeido,
+  precioEsPorPersona,
   resumenDeLinea,
   rubrosPropuestos,
   type Aceptacion,
 } from './lectura-pantallazo'
 import {
   camposDeIdentidad,
+  totalPasajeros,
+  type Composicion,
   type FilaTipo,
   type LecturaCasilla,
   type OcupacionLeida,
@@ -72,6 +76,11 @@ export function construirLecturaCasilla(
   ranura: DefinicionRanura,
   aceptacion: Aceptacion,
   leidaEn: string,
+  /**
+   * A cuántos se cotiza cuando la captura no lo dice (la del viaje). Solo la usa un precio POR
+   * PERSONA sin ocupación en la imagen: sin ella, ese precio se multiplicaría por 1.
+   */
+  composicionSiFalta: Composicion | null = null,
 ): LecturaCasilla {
   const valor = (slug: string) => aceptacion.campos.find(c => c.slug === slug)?.valor ?? null
   const moneda = (valor('moneda') ?? 'COP').toUpperCase()
@@ -79,16 +88,6 @@ export function construirLecturaCasilla(
   // la lectura: es lo que impide confirmar el costo hasta que una persona la acepte.
   const monedaAsumida = aceptacion.campos.find(c => c.slug === 'moneda')?.supuesto === true
   const porTipo = agruparPorTipo(aceptacion)
-
-  let total: number
-  if (porTipo.length > 0) {
-    total = aceptacion.totalGeneral ?? numeroLeido(valor('precio_total')) ?? porTipo.reduce((a, f) => a + f.subtotal, 0)
-  } else {
-    // Sin desglose por tipo, el `desglose` de conceptos (tarifa + tasas) no reparte nada
-    // entre pasajeros: se usa el precio resuelto, igual que el cargue de siempre.
-    const propuestos = rubrosPropuestos(ranura, aceptacion.campos, [])
-    total = propuestos.reduce((a, r) => a + r.cantidad * r.valorUnitario, 0)
-  }
 
   const ocupacion: OcupacionLeida = {
     adultos: entero(valor('ocupacion_adultos')),
@@ -123,6 +122,46 @@ export function construirLecturaCasilla(
   const sinOcupacion = porTipo.length === 0
     && ocupacion.adultos === null && ocupacion.ninos === null && ocupacion.infantes === null && ocupacion.total === null
 
+  // El total de la ocupación de la captura (va después de la ocupación: un precio por persona
+  // la necesita, ya sin los conteos que no hablan de personas).
+  const avisosDelPrecio: string[] = []
+  let total: number
+  if (porTipo.length > 0) {
+    total = aceptacion.totalGeneral ?? numeroLeido(valor('precio_total')) ?? porTipo.reduce((a, f) => a + f.subtotal, 0)
+  } else if (precioEsPorPersona(ranura, valor('base_precio'))) {
+    // Precio POR PERSONA (Trappvel, 2026-11-03): el costo es ese precio por cada persona, nunca el
+    // de la reserva. Las personas son las de la captura; si no las muestra, las de la línea.
+    const precio = numeroLeido(valor('precio_total')) ?? 0
+    const leidas = sinOcupacion
+      ? null
+      : (ocupacion.adultos !== null || ocupacion.ninos !== null || ocupacion.infantes !== null)
+        ? (ocupacion.adultos ?? 0) + (ocupacion.ninos ?? 0) + (ocupacion.infantes ?? 0)
+        : ocupacion.total
+    const delViaje = composicionSiFalta ? totalPasajeros(composicionSiFalta) : 0
+    const deLaCaptura = !!leidas && leidas > 0
+    const personas = deLaCaptura ? leidas! : delViaje > 0 ? delViaje : 1
+    const porNoche = valor('base_precio') === 'por_persona_noche'
+    const noches = porNoche ? Math.max(1, nochesDeEstadia(new Map(aceptacion.campos.map(c => [c.slug, c.valor])))) : 1
+    total = Math.round(precio * personas * noches * 100) / 100
+    if (precio > 0) {
+      const fmt = (n: number) => n.toLocaleString('es-CO', { maximumFractionDigits: 2 })
+      const menores = deLaCaptura
+        ? (ocupacion.ninos ?? 0) + (ocupacion.infantes ?? 0)
+        : composicionSiFalta ? composicionSiFalta.ninos + composicionSiFalta.infantes : 0
+      avisosDelPrecio.push(
+        `El precio de la captura es por persona${porNoche ? ' y por noche' : ''} (${fmt(precio)}): el costo es ` +
+        `${personas} ${personas === 1 ? 'persona' : 'personas'}${porNoche ? ` × ${noches} ${noches === 1 ? 'noche' : 'noches'}` : ''} ` +
+        `× ese precio = ${fmt(total)}.` +
+        (menores > 0 ? ' Los menores van al mismo precio: si el proveedor les cobra otra tarifa, corrígela.' : ''),
+      )
+    }
+  } else {
+    // Sin desglose por tipo, el `desglose` de conceptos (tarifa + tasas) no reparte nada
+    // entre pasajeros: se usa el precio resuelto, igual que el cargue de siempre.
+    const propuestos = rubrosPropuestos(ranura, aceptacion.campos, [])
+    total = propuestos.reduce((a, r) => a + r.cantidad * r.valorUnitario, 0)
+  }
+
   // CC1 · solo cuenta como identidad lo que está EN la imagen. Una fecha tomada del viaje
   // compararía el viaje contra sí mismo y daría por buena cualquier captura.
   const identidad: Record<string, string | null> = {}
@@ -154,7 +193,7 @@ export function construirLecturaCasilla(
     comisionValor: numeroLeido(valor('comision_agencia_valor')),
     comisionPct: numeroLeido(valor('comision_agencia_pct')),
   })
-  const alertas = [...aceptacion.avisos]
+  const alertas = [...aceptacion.avisos, ...avisosDelPrecio]
   if (costoAgencia && costoAgencia.costoAgencia === null) alertas.push(costoAgencia.motivo)
 
   return {

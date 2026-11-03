@@ -10,7 +10,7 @@ import { TEXTO_NO_PUDE } from './nucleo'
 import { REGLAMENTO_ANEXO_A } from './bandeja/reglamento-anexo-a'
 import { conPerfil, FICHAS_PERFIL } from './bandeja/reglamento-perfil'
 import { perfilSql } from './bandeja/perfil-sql'
-import { filaDeLaFrase, lineasFuera } from './bandeja/dominio'
+import { filaDeLaFrase, lineasFuera, NOTA_TRAS_PERFIL } from './bandeja/dominio'
 import { esquemaCarga, instruccionesCarga, validarCarga } from './bandeja/extraccion'
 import { planGuardado, separarHechos, textoComparable } from '../perfil-contacto'
 import { CONJUNTO_PERFIL } from './arnes/conjuntos'
@@ -378,6 +378,43 @@ describe('mixto: una solicitud que trae datos de la persona', () => {
     expect(r[0].texto).toContain('¿Lo anoto en M1 26 1')
     expect(perfilDe(e).map((h) => h.estado)).toEqual(['confirmado', 'confirmado'])
     expect(e.puerto.viajes[0].datos).toEqual({})
+    await e.toca('Anotar')
+    expect(e.puerto.viajes[0].datos).toMatchObject({ fecha_salida: '2026-12-03' })
+  })
+
+  it('el turno de seguir pide lo que traía el mismo mensaje aunque el perfil no lo haya destrabado', async () => {
+    // Arnés con Haiku, 2026-11-03 (corrida 41677961849, cp-mixto en la asesora, 2 de 3): el bot dijo «lo de la fecha de
+    // salida lo anoto en el M1 26 2», propuso el perfil, el «sí» lo guardó y en el turno de seguir llamó `terminar`: el
+    // Estado le pedía solo lo que «este paso destrabó», y la fecha no la destrabó el perfil, venía en el mismo mensaje.
+    const e = await mundo({
+      viajes: [VIAJE], campos: CAMPOS, extraer: extraerMixto,
+      guion: [
+        { name: 'buscar', args: { texto: 'Mauricio Moreno' } },
+        { name: 'proponer', args: { accion: 'perfil_contacto', texto: 'Lo de la salida del 3 de diciembre va al viaje M1 26 1.', datos: { cliente: REF, hechos: [hecho('viaja siempre con la esposa', 'viaja siempre con la esposa', 'nucleo_viaje'), hecho('le gusta el buen vino', 'les gusta el buen vino')] } } },
+        (p) => {
+          const estado = String(p.mensajes[0].parts[0].text)
+          expect(estado).toContain('Acaba de quedar hecho, con el toque de el comercial: Guardé en el perfil de MAURICIO MORENO')
+          expect(estado).toContain('todavía no quedó hecho, aunque este paso no lo haya destrabado')
+          expect(estado).toContain('lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría')
+          expect(estado).not.toContain('que este paso destrabó')
+          // La nota de la bandeja: el perfil no anotó nada en el viaje (corrida 41691210744: con la línea general sola,
+          // Haiku seguía terminando 2 de 3).
+          expect(estado).toContain(NOTA_TRAS_PERFIL)
+          expect(p.herramientas.map((h) => h.name)).toContain('terminar')
+          // El modelo ve el pedido entero y el «sí» marcado como gastado.
+          const conversacion = p.mensajes.map((m) => m.parts.map((x) => x.text ?? '').join(' ')).join('\n')
+          expect(conversacion).toContain(MIXTO)
+          expect(conversacion).toContain('con este «sí» confirmó la propuesta de arriba')
+          return { name: 'proponer', args: { accion: 'anotar_en_viaje', datos: { viaje: 'M1 26 1' } } }
+        },
+      ],
+    })
+    await e.escribe(MIXTO)
+    const r = await e.escribe('sí')
+    expect(r).toHaveLength(1)
+    expect(r[0].texto).toContain('Guardé en el perfil de MAURICIO MORENO')
+    expect(r[0].texto).toContain('¿Lo anoto en M1 26 1')
+    expect(e.trazas().at(-1)!.tras_toque).toEqual({ origen: 'si_escrito', resultado: 'propuesta' })
     await e.toca('Anotar')
     expect(e.puerto.viajes[0].datos).toMatchObject({ fecha_salida: '2026-12-03' })
   })

@@ -2,6 +2,9 @@
 
 ## Project memories
 
+- ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408 paquete=ranura+vuelo, hotel=opción; #1407 botón sin actualizarBloqueData; selector en pausa
+
+- ⚠️ [Vacacional/Negocios y nombre del PDF (3-nov)](project_vacacional_nombre_pdf.md) — option_labels aditivo; SQL de config SIN aplicar; nombre para todos
 - ⚠️⚠️ [Pago automático tarjeta CDA (30-oct)](project_valida_cda_tarjeta_epayco.md) — 20261030220000 SIN aplicar; día 0 = inicio del período; quien debe no renueva
 - ⚠️⚠️ [SOE-035: RC-3 en solo_iva y sobrepagos (30-oct)](project_soe035_rc3_solo_iva.md) — 20261030163500 SIN aplicar; comparar viewdef de prod; <= $1.000 en a_tarifa = sin_tarifa
 - ⚠️ [Atajo al bot anterior cerrado con roles (30-oct)](project_atajo_bot_anterior_roles.md) — bot anterior atiende por cargo; con rol, gasto/bot los toma Agus; dominio ONE en falla sigue abierto
@@ -10,6 +13,7 @@
 - ⚠️⚠️ [Dimpro: venta consultiva y fotos (29-oct)](project_dimpro_venta_consultiva_fotos.md) — tope 3 en 3 capas; fotos por código; SQL SIN correr, después del deploy
 - ⚠️⚠️ [Plantillas editables DJ/Relación (29-oct)](project_plantillas_editables.md) — 203000/203100 APLICADAS; DJ v2 sin «aproximado» (20261030120000) SIN aplicar; nada activo
 - ⚠️ [Defectos QA del #1359 (30-oct)](project_defectos_qa_1359.md) — marca por paquete vía `antes`; PDF compacto solo si ahorra hoja; regreso por versión en día a día (EventoDoc.tarifas)
+- ⚠️ [SAN ANDRÉS: precio por persona, paquete sin Bloqueo, zonas (3-nov)](project_san_andres_precio_persona_zonas.md) — modalidad vacía = lector genérico; zona del destino = opción
 - ⚠️ [Reprueba del bloqueo (3-nov)](project_reprueba_bloqueo_1030.md) — paquete $0 frena Armar/Sigue; PDF 2+ paquetes: acomodación y «Solo en <versión>»
 - [Prueba corta del #1352 (29-oct)](project_qa_corta_1352.md) — «Ir» con 3 causas; noches salen de paradas (sin zona = 0); créditos en .sign
 - ⚠️ [Defectos QA del #1342 (29-oct)](project_defectos_qa_1342.md) — costoDeAgencia; «Opción N» como el PDF; «Incluye» de ONE sin revisar; swap insert→delete

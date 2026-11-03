@@ -80,7 +80,7 @@ export function fraseDeFila(args: {
 }): FraseDeFila {
   const { captura, lineas } = args
   const b = captura.borrador
-  const reglas = destinoDeReglas({ tipo: b.tipo, lectura: b.lectura, pistas: b.pistas, lineas, grupoViaje: args.composicion })
+  const reglas = destinoDeReglas({ tipo: b.tipo, lectura: b.lectura, pistas: b.pistas, lineas, grupoViaje: args.composicion, destinoViaje: args.destinoViaje })
   const deOne = conDecisionDelModelo({ tipo: b.tipo, reglas, lineas, modelo: args.modelo })
   const nuevo = nombreNuevo(b, args.destinoViaje)
   const e = args.eleccion
@@ -137,7 +137,7 @@ export function frasesDeLaBandeja(args: {
       modelo: args.modelo(c.id), eleccion: args.eleccion(c.id),
     })
     if (f.destino.fuente === 'reglas' && !f.capturaDestino) {
-      const sim = destinoDeReglas({ tipo: b.tipo, lectura: b.lectura, pistas: b.pistas, lineas: simuladas, grupoViaje: args.composicion })
+      const sim = destinoDeReglas({ tipo: b.tipo, lectura: b.lectura, pistas: b.pistas, lineas: simuladas, grupoViaje: args.composicion, destinoViaje: args.destinoViaje })
       const grupo = sim.grupo ? normalizarGrupo(sim.grupo) : null
       const otra = grupo ? deFila.get(grupo) : undefined
       if (otra && (sim.como === 'hermana' || sim.como === 'habitacion')) {

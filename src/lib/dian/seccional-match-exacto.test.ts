@@ -89,7 +89,7 @@ describe('el motor sigue leyendo la seccional del RUT', () => {
     expect(requiereCitaDian('Impuestos de Cali').requiere_cita).toBe(true)
     expect(requiereCitaDian('Impuestos y Aduanas de Bucaramanga').requiere_cita).toBe(true)
     expect(requiereCitaDian('Impuestos de Barranquilla').requiere_cita).toBe(false)
-    expect(requiereCitaDian('Impuestos y Aduanas de Manizales').requiere_cita).toBe(false)
+    expect(requiereCitaDian('Impuestos y Aduanas de Manizales').requiere_cita).toBe(true)
   })
 
   it('sigue eligiendo el buzón de Bogotá por tipo de persona', () => {

@@ -17,6 +17,7 @@ import { enPeticionDeRuta } from '@/lib/actions/memo-de-ruta'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { estadoPorPasosDeCotizacion } from '@/lib/cotizaciones/por-pasos-datos'
 import { CABECERA_AVISOS_FOTOS } from '@/lib/fotos/forma'
+import { contentDispositionPdf } from '@/lib/cotizaciones/nombre-pdf-cotizacion'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -45,12 +46,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const status = r.error === 'No autenticado' ? 401 : r.error === 'Cotización no encontrada' ? 404 : 422
     return NextResponse.json({ ok: false, mensaje: r.error ?? 'No se pudo armar el documento.' }, { status, headers: SIN_CACHE })
   }
-  const nombre = (r.filename ?? 'cotizacion.pdf').replace(/[^\w.\- ]/g, '_')
+  // El nombre con tildes («Cotización COT-… - <cliente> - <destino>.pdf») va entero en `filename*`;
+  // el `filename` llano, en ASCII. Antes se pasaba por `\w` y «ó» salía como «_».
+  const nombre = r.filename ?? 'Cotización.pdf'
   return new NextResponse(Buffer.from(r.pdf, 'base64'), {
     headers: {
       ...SIN_CACHE,
       'content-type': 'application/pdf',
-      'content-disposition': `inline; filename="${nombre}"`,
+      'content-disposition': contentDispositionPdf(nombre),
       // Regla de fotos (2026-10-29): «Al <hotel> le faltan N fotos para la ficha…». La lee
       // `DocumentoEnRevisar`; no bloquea nada.
       ...(r.avisosFotos && r.avisosFotos.length > 0 ? { [CABECERA_AVISOS_FOTOS]: encodeURIComponent(JSON.stringify(r.avisosFotos)) } : {}),

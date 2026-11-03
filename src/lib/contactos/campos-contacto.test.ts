@@ -4,9 +4,11 @@ import {
   leerCampo,
   separarCampos,
   estadoAutorizacion,
+  etiquetaDeOpcion,
   AUTORIZACION_SLUG,
   AUTORIZACION_FECHA_SLUG,
   type ValoresContacto,
+  type CampoContacto,
 } from './campos-contacto'
 
 const base: ValoresContacto = {
@@ -17,6 +19,42 @@ const base: ValoresContacto = {
   segmento: null,
   custom_data: { destinos_preferidos: 'Europa', autorizacion_datos: true },
 }
+
+describe('etiquetaDeOpcion', () => {
+  // La config de Trappvel tras el SQL del PR: el valor guardado sigue siendo 'leisure'.
+  const tipoCliente = {
+    slug: 'tipo_cliente',
+    tipo: 'select' as const,
+    label: 'Vacacional o negocios',
+    options: ['leisure', 'corporativo'],
+    option_labels: { leisure: 'Vacacional', corporativo: 'Negocios' },
+  }
+
+  it('pinta la etiqueta de la config, no el valor', () => {
+    expect(etiquetaDeOpcion(tipoCliente, 'leisure')).toBe('Vacacional')
+    expect(etiquetaDeOpcion(tipoCliente, 'corporativo')).toBe('Negocios')
+  })
+
+  it('sin option_labels (la config de hoy) el valor tal cual, como siempre', () => {
+    const deHoy: CampoContacto = { slug: 'tipo_cliente', label: 'Leisure o corporativo', tipo: 'select', options: ['leisure', 'corporativo'] }
+    expect(etiquetaDeOpcion(deHoy, 'leisure')).toBe('leisure')
+    expect(etiquetaDeOpcion(null, 'leisure')).toBe('leisure')
+  })
+
+  it('un valor sin etiqueta, o una etiqueta vacía, cae al valor', () => {
+    expect(etiquetaDeOpcion(tipoCliente, 'otro')).toBe('otro')
+    expect(etiquetaDeOpcion({ option_labels: { leisure: '  ' } }, 'leisure')).toBe('leisure')
+  })
+
+  it('una llave mal formada en la base no rompe ni se cuela', () => {
+    expect(etiquetaDeOpcion({ option_labels: ['Vacacional'] }, '0')).toBe('0')
+    expect(etiquetaDeOpcion({ option_labels: 'Vacacional' }, 'leisure')).toBe('leisure')
+    expect(etiquetaDeOpcion({ option_labels: { leisure: 7 } }, 'leisure')).toBe('leisure')
+    // Lo heredado del prototipo no es una etiqueta.
+    expect(etiquetaDeOpcion({ option_labels: {} }, 'constructor')).toBe('constructor')
+    expect(etiquetaDeOpcion({ option_labels: {} }, 'toString')).toBe('toString')
+  })
+})
 
 describe('esCampoNativo', () => {
   it('reconoce las columnas de contactos y nada mas', () => {
