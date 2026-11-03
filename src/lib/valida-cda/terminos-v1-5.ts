@@ -17,10 +17,13 @@
  *   - {periodos_pendientes_al_30_nov}: los períodos que empiezan antes de la vigencia y no están pagados,
  *     con el mismo reparto de pagos de la pestaña Pagos (`cuotasConEstado`), y su total.
  *
- * ## Qué NO hace
+ * ## La exigencia de la 16.4 (desde el 22-dic-2026 Maxitec, el 16-ene-2027 los otros tres)
  *
- * No bloquea nada. La exigencia de la aceptación desde {fecha_exige_aceptacion} (16.4) no está construida:
- * la primera es la de Maxitec, el 22-dic-2026.
+ * Desde {fecha_exige_aceptacion}, sin la v1.5 aceptada no hay consultas nuevas (`exigenciaV15`); el
+ * historial, los reportes y la exportación de la 9.3 siguen abiertos, y la pantalla pierde «Ahora no» y
+ * dice el texto del final del anexo A (`textoExigidaV15`). La puerta (`puerta.ts`, `exigenciaV15Cda`) la
+ * cobra en cada consulta nueva, individual o masiva. Sin poder leer las cuotas no se exige: «no sé si hay
+ * un período pagado posterior» no es «no lo hay» (16.4: no se bloquea un período pagado).
  */
 
 import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
@@ -147,6 +150,33 @@ export function fechaExigeAceptacion(base: string | null, finPagado: string | nu
   if (!base) return null
   const despuesDelPagado = finPagado ? sumarDias(finPagado, 1) : null
   return despuesDelPagado && despuesDelPagado > base ? despuesDelPagado : base
+}
+
+export type ExigenciaV15 =
+  /** Todavía no se exige (o no se puede saber desde cuándo): Valida consulta igual. */
+  | { estado: 'no_exigida' }
+  /** Desde `desde` (inclusive), sin la v1.5 aceptada no hay consultas nuevas (16.4). */
+  | { estado: 'exigida'; desde: string }
+
+/**
+ * ¿Hoy se exige la aceptación de la v1.5 (16.4)? `base` es la fecha del texto registrado del CDA
+ * (`exigeDesde`); `finPagado`, el fin del último período pagado (`finUltimoPeriodoPagado`), `null` si no
+ * hay ninguno, o 'sin_dato' si no se pudieron leer las cuotas. Antes de la base no hace falta leerlas: la
+ * fecha que exige nunca es anterior a ella.
+ */
+export function exigenciaV15(p: { base: string | null; finPagado: string | null | 'sin_dato'; hoy: string }): ExigenciaV15 {
+  if (!p.base || !FECHA.test(p.base) || p.hoy < p.base) return { estado: 'no_exigida' }
+  if (p.finPagado === 'sin_dato') return { estado: 'no_exigida' }
+  const desde = fechaExigeAceptacion(p.base, p.finPagado) ?? p.base
+  return p.hoy >= desde ? { estado: 'exigida', desde } : { estado: 'no_exigida' }
+}
+
+/** Lo que dice la pantalla desde {fecha_exige_aceptacion} (final del anexo A), y lo que responde una consulta. */
+export function textoExigidaV15(razonSocial: string | null): string {
+  return (
+    `Para seguir consultando en Valida, ${razonSocial ?? 'tu empresa'} necesita aceptar la versión 1.5 de los ` +
+    `Términos. Tu información está guardada. Puedes pedir la copia de tu bitácora y tus reportes a ${CORREO_TERMINACION}.`
+  )
 }
 
 /** 300000 → '$300.000'. */

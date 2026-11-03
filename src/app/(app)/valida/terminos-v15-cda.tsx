@@ -37,7 +37,9 @@ function Linea({ texto }: { texto: string }) {
  *   - Los demás: el resumen y «Esta aceptación la hace {nombre}».
  *   - Todos: «Ahora no, recordármelo», que cierra la pantalla sin bloquear nada (vuelve en otro ingreso).
  *
- * No bloquea: Valida opera igual con o sin la aceptación. Sin estado ni efectos: se pinta en el servidor.
+ * Desde {fecha_exige_aceptacion} (16.4, `exigida`): «Ahora no» desaparece, arriba va el texto del final del
+ * anexo A, sale «Si no la aceptas ahora» (ya no es cierto que se pueda seguir consultando) y queda el
+ * enlace al historial y los reportes, que siguen abiertos. Sin estado ni efectos: se pinta en el servidor.
  */
 export function TerminosV15Cda({
   documentoId,
@@ -47,6 +49,7 @@ export function TerminosV15Cda({
   aviso,
   politicaUrl,
   politicaTitulo,
+  exigida = null,
 }: {
   documentoId: string
   textos: TextosPantallaV15
@@ -56,10 +59,23 @@ export function TerminosV15Cda({
   aviso: string
   politicaUrl: string
   politicaTitulo: string
+  /** Desde la fecha de la 16.4: el texto que lo dice. `null` antes de esa fecha. */
+  exigida?: string | null
 }) {
   const firma = entrada !== null && entrada.contrato.estado === 'pendiente' && entrada.contrato.puede
   return (
     <div className="space-y-6" data-terminos-v15>
+      {exigida && (
+        <section
+          data-terminos-v15-exigida
+          className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950 sm:p-5"
+        >
+          <p className="font-semibold">{exigida}</p>
+          <Link href="/valida?historial=1" className="font-semibold underline underline-offset-2">
+            Ver tu historial y descargar tus reportes
+          </Link>
+        </section>
+      )}
       <section className="space-y-3 rounded-lg border border-sky-300 bg-sky-50 p-4 text-sm text-sky-950 sm:p-5">
         <div className="flex items-start gap-3">
           <FileText className="mt-0.5 hidden h-5 w-5 shrink-0 sm:block" />
@@ -76,9 +92,11 @@ export function TerminosV15Cda({
                 </li>
               ))}
             </ol>
-            <p>
-              <Linea texto={textos.siNoAceptas} />
-            </p>
+            {!exigida && (
+              <p>
+                <Linea texto={textos.siNoAceptas} />
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <Link href="/valida?modificacion=1" className="font-semibold underline underline-offset-2">
                 Ver los Términos completos
@@ -101,7 +119,11 @@ export function TerminosV15Cda({
           politicaTitulo={politicaTitulo}
           producto="valida_cda"
           titulo="Aceptar la versión 1.5 de los Términos"
-          descripcion="Lee los Términos hasta el final, escribe tu nombre y tu cédula, marca la casilla y acepta. Mientras no la aceptes, Valida sigue funcionando."
+          descripcion={
+            exigida
+              ? 'Lee los Términos hasta el final, escribe tu nombre y tu cédula, marca la casilla y acepta. Al aceptarla, vuelven las consultas.'
+              : 'Lee los Términos hasta el final, escribe tu nombre y tu cédula, marca la casilla y acepta. Mientras no la aceptes, Valida sigue funcionando.'
+          }
         />
       ) : (
         <p data-terminos-v15-quien className="rounded-lg border border-border bg-white p-4 text-sm text-tinta">
@@ -109,16 +131,36 @@ export function TerminosV15Cda({
         </p>
       )}
 
-      <form action={posponerTerminosV15}>
-        <input type="hidden" name="documento_id" value={documentoId} />
-        <button
-          type="submit"
-          data-terminos-v15-luego
-          className="w-full rounded-md border border-border bg-white px-4 py-2.5 text-sm font-semibold text-tinta sm:w-auto"
-        >
-          Ahora no, recordármelo
-        </button>
-      </form>
+      {!exigida && (
+        <form action={posponerTerminosV15}>
+          <input type="hidden" name="documento_id" value={documentoId} />
+          <button
+            type="submit"
+            data-terminos-v15-luego
+            className="w-full rounded-md border border-border bg-white px-4 py-2.5 text-sm font-semibold text-tinta sm:w-auto"
+          >
+            Ahora no, recordármelo
+          </button>
+        </form>
+      )}
     </div>
+  )
+}
+
+/** En el historial, con la v1.5 exigida y sin aceptar: en lugar de la consulta individual y la masiva. */
+export function ConsultasExigenTerminosV15({ mensaje }: { mensaje: string }) {
+  return (
+    <section
+      data-consultas-exigen-v15
+      className="rounded-lg border border-border bg-white p-4 text-sm text-tinta sm:p-5"
+    >
+      <p className="font-semibold">{mensaje}</p>
+      <p className="mt-1 text-tinta-suave">
+        En la pestaña Historial puedes ver y descargar los reportes ya generados.{' '}
+        <Link href="/valida" className="font-semibold underline underline-offset-2">
+          Ver los Términos para aceptarlos
+        </Link>
+      </p>
+    </section>
   )
 }
