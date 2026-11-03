@@ -40,6 +40,7 @@ import { declaraNiveles } from '@/lib/negocios/niveles-solicitud'
 import MarcaSugerido from './marca-sugerido'
 import { sugeridosDe, conflictosDe } from '@/lib/negocios/sugeridos'
 import MarcaConflicto, { valorLegibleCampo } from './marca-conflicto'
+import { etiquetaDeOpcion } from '@/lib/contactos/campos-contacto'
 
 export interface DatosField {
   slug: string
@@ -50,6 +51,9 @@ export interface DatosField {
   tipo: 'texto' | 'numero' | 'fecha' | 'fecha_hora' | 'toggle' | 'checkbox' | 'select' | 'radio' | 'imagen_clipboard' | 'documentos_preview' | 'doc_link' | 'plantilla'
   required?: boolean
   options?: string[]
+  // Etiqueta visible de cada valor de `options` (`{ leisure: 'Vacacional' }`); el valor guardado no
+  // cambia. Opcional: sin ella se pinta el valor, como siempre. Ver `etiquetaDeOpcion`.
+  option_labels?: Record<string, string>
   // `solo_si` (opt-in) restringe una opción a los casos donde aplica. Ver `opcion-condicional.ts`.
   opciones?: Array<{ value: string; label: string; solo_si?: OpcionSoloSi }>
   default?: unknown
@@ -1264,7 +1268,7 @@ export default function BloqueDatos({
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))
                 : f.options?.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
+                    <option key={opt} value={opt}>{etiquetaDeOpcion(f, opt)}</option>
                   ))
               }
             </select>
@@ -1305,7 +1309,7 @@ export default function BloqueDatos({
             // Hay opciones que no aplican a todos los casos (un vehículo en leasing no
             // tiene proceso de devolución de IVA). No se ofrecen, en vez de ofrecerlas y
             // corregir la respuesta después: el formulario tiene que decir la verdad.
-            const todas = f.opciones ?? f.options?.map(o => ({ value: o, label: o })) ?? []
+            const todas = f.opciones ?? f.options?.map(o => ({ value: o, label: etiquetaDeOpcion(f, o) })) ?? []
             const { visibles, seleccionadaYaNoAplica, motivo } = resolverOpciones(
               todas,
               values[f.slug],

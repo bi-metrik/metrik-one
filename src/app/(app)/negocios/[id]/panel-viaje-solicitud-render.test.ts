@@ -14,7 +14,7 @@ import PanelViaje from './panel-viaje'
 import { solicitudDesdeFilas, type MarcoDelNegocio } from '@/lib/cotizaciones/marco-negocio'
 
 const VIAJE: MarcoDelNegocio['viaje'] = { destino: 'Isla Ficticia', fechas: { inicio: '2026-12-01', fin: '2026-12-08' }, composicion: { adultos: 2, ninos: 1, infantes: 0 } }
-const PERFIL = { tipo: 'Leisure', conQuienViaja: null, bolsillo: 'Medio', preferencias: null, notas: null }
+const PERFIL = { tipo: 'Vacacional', conQuienViaja: null, bolsillo: 'Medio', preferencias: null, notas: null }
 
 function marco(filas: Record<string, unknown>[], viaje = VIAJE): MarcoDelNegocio {
   return {

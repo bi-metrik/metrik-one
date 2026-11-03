@@ -72,6 +72,8 @@ export interface RecursosPropuesta {
   marca: string
   /** Créditos de fotos que el documento usó además de las del modelo (las de ciudad por parada). */
   creditosExtra?: string[]
+  /** El `<title>` del documento (el nombre del archivo sin `.pdf`). Sin él, «COT-… · <titular>». */
+  tituloDocumento?: string
 }
 
 // ── La voz (S3 del QA del 2026-10-29) ───────────────────────────────────────────
@@ -1208,7 +1210,7 @@ ${incluyeYCondiciones(m, firmaDe(m, r), compacto)}
 export function htmlDePropuesta(m: ModeloPropuesta, r: RecursosPropuesta, opciones: { compacto?: boolean } = {}): string {
   const compacto = opciones.compacto === true
   return `<!doctype html>
-<html lang="es"><head><meta charset="utf-8"><title>${esc(m.portada.consecutivo)} · ${esc(m.portada.titulo)}</title>
+<html lang="es"><head><meta charset="utf-8"><title>${esc(r.tituloDocumento ?? `${m.portada.consecutivo} · ${m.portada.titulo}`)}</title>
 <style>${CSS_PROPUESTA}</style></head><body${compacto ? ' class="compacto"' : ''}>
 ${ICONOS_PROPUESTA}
 <section>

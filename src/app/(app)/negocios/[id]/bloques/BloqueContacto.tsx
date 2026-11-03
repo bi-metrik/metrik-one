@@ -14,6 +14,7 @@ import {
 import {
   leerCampo,
   esCampoNativo,
+  etiquetaDeOpcion,
   type CampoContacto,
 } from '@/lib/contactos/campos-contacto'
 import AutorizacionDelContacto from './AutorizacionDelContacto'
@@ -175,7 +176,7 @@ export default function BloqueContacto({
               <option value="">Sin definir</option>
               {(f.options ?? []).map(o => (
                 <option key={o} value={o}>
-                  {o}
+                  {etiquetaDeOpcion(f, o)}
                 </option>
               ))}
             </select>

@@ -136,6 +136,11 @@ export interface OpcionesPropuestaHtml {
   /** Nombre del workspace: va escrito si no hay logo. */
   marca: string
   logoUrl: string | null
+  /**
+   * El `<title>` del documento: el nombre del archivo sin `.pdf` (`tituloPdfCotizacion`). Es lo que
+   * muestra el visor del navegador. Sin él, el de siempre («COT-… · <titular>»).
+   */
+  tituloDocumento?: string
   /** El banco de fotos de ciudad (`fotosDeCiudad` → FotoPDF). Sin él, la portada y los días van sin fotos de ciudad. */
   fotoDeCiudad?: (ciudad: string) => FotoPDF[]
   /**
@@ -303,6 +308,7 @@ export async function prepararPropuestaHtml(
     logo,
     marca: opts.marca,
     creditosExtra,
+    ...(opts.tituloDocumento ? { tituloDocumento: opts.tituloDocumento } : {}),
   }
   const crudo = htmlDePropuesta(modelo, recursos)
   // QA del #1359 · la versión compacta, que el motor imprime solo si ahorra una hoja.

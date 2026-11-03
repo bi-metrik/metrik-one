@@ -199,7 +199,7 @@
     },
     "resultado": {
      "success": true,
-     "filename": "COT-2026-0100.pdf",
+     "filename": "Cotización COT-2026-0100.pdf",
      "fiscal": {
       "subtotal": 9146464,
       "iva": 0,
@@ -220,7 +220,7 @@
        "reteIVA": false
       }
      },
-     "archivoReferencia": "sbext://one-documentos/COT-2026-0100.pdf",
+     "archivoReferencia": "sbext://one-documentos/Cotización COT-2026-0100.pdf",
      "aviso": null,
      "avisosCobertura": [],
      "avisosCaptura": [],
@@ -230,7 +230,7 @@
     },
     "escrituras": [],
     "subidas": [
-     "COT-2026-0100.pdf"
+     "Cotización COT-2026-0100.pdf"
     ]
    },
    "tarifas": {
@@ -488,7 +488,7 @@
     },
     "resultado": {
      "success": true,
-     "filename": "COT-2026-0100.pdf",
+     "filename": "Cotización COT-2026-0100.pdf",
      "fiscal": {
       "subtotal": 9800000,
       "iva": 0,
@@ -509,7 +509,7 @@
        "reteIVA": false
       }
      },
-     "archivoReferencia": "sbext://one-documentos/COT-2026-0100.pdf",
+     "archivoReferencia": "sbext://one-documentos/Cotización COT-2026-0100.pdf",
      "aviso": null,
      "avisosCobertura": [],
      "avisosCaptura": [],
@@ -519,7 +519,7 @@
     },
     "escrituras": [],
     "subidas": [
-     "COT-2026-0100.pdf"
+     "Cotización COT-2026-0100.pdf"
     ]
    },
    "tarifas": {
@@ -1654,7 +1654,7 @@
     },
     "resultado": {
      "success": true,
-     "filename": "COT-2026-0901.pdf",
+     "filename": "Cotización COT-2026-0901 - San Andrés y Providencia.pdf",
      "fiscal": {
       "subtotal": 22448922,
       "iva": 0,
@@ -1675,7 +1675,7 @@
        "reteIVA": false
       }
      },
-     "archivoReferencia": "sbext://one-documentos/COT-2026-0901.pdf",
+     "archivoReferencia": "sbext://one-documentos/Cotización COT-2026-0901 - San Andrés y Providencia.pdf",
      "aviso": null,
      "avisosCobertura": [],
      "avisosCaptura": [],
@@ -1857,7 +1857,7 @@
      }
     ],
     "subidas": [
-     "COT-2026-0901.pdf"
+     "Cotización COT-2026-0901 - San Andrés y Providencia.pdf"
     ]
    },
    "tarifas": {
@@ -3085,7 +3085,7 @@
     },
     "resultado": {
      "success": true,
-     "filename": "COT-2026-0901.pdf",
+     "filename": "Cotización COT-2026-0901 - San Andrés y Providencia.pdf",
      "fiscal": {
       "subtotal": 21954806,
       "iva": 625711,
@@ -3106,7 +3106,7 @@
        "reteIVA": false
       }
      },
-     "archivoReferencia": "sbext://one-documentos/COT-2026-0901.pdf",
+     "archivoReferencia": "sbext://one-documentos/Cotización COT-2026-0901 - San Andrés y Providencia.pdf",
      "aviso": null,
      "avisosCobertura": [],
      "avisosCaptura": [],
@@ -3320,7 +3320,7 @@
      }
     ],
     "subidas": [
-     "COT-2026-0901.pdf"
+     "Cotización COT-2026-0901 - San Andrés y Providencia.pdf"
     ]
    },
    "tarifas": {
@@ -4590,7 +4590,7 @@
     },
     "resultado": {
      "success": true,
-     "filename": "COT-2026-0901.pdf",
+     "filename": "Cotización COT-2026-0901 - San Andrés y Providencia.pdf",
      "fiscal": {
       "subtotal": 23281866,
       "iva": 0,
@@ -4611,7 +4611,7 @@
        "reteIVA": false
       }
      },
-     "archivoReferencia": "sbext://one-documentos/COT-2026-0901.pdf",
+     "archivoReferencia": "sbext://one-documentos/Cotización COT-2026-0901 - San Andrés y Providencia.pdf",
      "aviso": null,
      "avisosCobertura": [],
      "avisosCaptura": [],
@@ -4793,7 +4793,7 @@
      }
     ],
     "subidas": [
-     "COT-2026-0901.pdf"
+     "Cotización COT-2026-0901 - San Andrés y Providencia.pdf"
     ]
    },
    "tarifas": {
@@ -5837,7 +5837,7 @@
     },
     "resultado": {
      "success": true,
-     "filename": "COT-2026-0901-BORRADOR.pdf",
+     "filename": "Cotización COT-2026-0901 - San Andrés y Providencia - BORRADOR.pdf",
      "fiscal": {
       "subtotal": 30001866,
       "iva": 0,
