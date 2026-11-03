@@ -258,20 +258,6 @@ export default function MiNegocioClient({
         </div>
       )}
 
-      {/* ── Plantillas de documentos: solo para la lista de editores del espacio ── */}
-      {editaPlantillas && (
-        <Link
-          href="/mi-negocio/plantillas"
-          className="flex items-center gap-3 rounded-xl border bg-card p-3 hover:bg-muted/50"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-primary" />
-          <div className="min-w-0">
-            <p className="text-sm font-medium">Plantillas de documentos</p>
-            <p className="text-xs text-muted-foreground">Declaración juramentada y Relación de facturas</p>
-          </div>
-        </Link>
-      )}
-
       {/* ── Onboarding Welcome ── */}
       {progressPct === 0 && (
         <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
@@ -330,6 +316,7 @@ export default function MiNegocioClient({
             </div>
           )
         })}
+        {editaPlantillas && <FilaPlantillas />}
       </div>
 
       {/* ── Desktop: sidebar + content panel ── */}
@@ -371,6 +358,7 @@ export default function MiNegocioClient({
               </button>
             )
           })}
+          {editaPlantillas && <FilaPlantillas />}
         </div>
 
         {/* ── Content panel ── */}
@@ -400,6 +388,26 @@ export default function MiNegocioClient({
         </div>
       </div>
     </div>
+  )
+}
+
+// ── Plantillas de documentos ──────────────────────────
+// Fila con el mismo estilo de las secciones, pero navega a su pantalla: el editor necesita
+// el ancho completo (texto, vista previa del PDF e historial). Solo para la lista de editores.
+
+function FilaPlantillas() {
+  return (
+    <Link
+      href="/mi-negocio/plantillas"
+      className="flex w-full items-center gap-3 rounded-lg border-l-3 px-3 py-2.5 text-left transition-colors hover:bg-accent/40"
+      style={{ borderLeftColor: 'var(--acento)' }}
+    >
+      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">Plantillas de documentos</p>
+        <p className="text-[11px] text-muted-foreground truncate">Declaración juramentada y Relación de facturas</p>
+      </div>
+    </Link>
   )
 }
 

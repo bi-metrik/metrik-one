@@ -187,6 +187,12 @@ export interface HotelPDF {
    */
   noIncluidoEnCasillas?: string[]
   /**
+   * Solo el hotel de un paquete de bloqueo (reprueba del 2026-10-30): lo que la pantalla del operador
+   * dice que el paquete NO incluye («Tarjeta de turismo, propinas»), tal cual. Con varias versiones la
+   * propuesta lo dice en la de ese paquete; `ocupacion` es su acomodación. Ausente = no es un paquete.
+   */
+  paquete?: { noIncluye: string | null }
+  /**
    * El rango de edad del niño que da el hotel, del ingreso manual. Con él el documento dice
    * «Tarifa niño de X a Y años cumplidos a la fecha del viaje»; ausente, no dice nada.
    */

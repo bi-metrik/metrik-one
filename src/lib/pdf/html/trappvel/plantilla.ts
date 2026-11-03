@@ -655,6 +655,8 @@ function hospedaje(m: ModeloPropuesta, r: RecursosPropuesta): string {
       const filas = [
         ['Estancia', estancia],
         ['Habitación', o.habitacion],
+        // Reprueba del bloqueo (2026-10-30): con varias versiones, cómo se reparte el grupo en ESTE paquete.
+        ['Acomodación', o.acomodacion ?? null],
         ['Régimen', o.regimen],
         // D6 (2026-10-29): lo que marca el paquete del operador (alimentación, traslados, seguro…).
         ['Incluye', o.incluye],
@@ -1130,9 +1132,21 @@ function incluyeYCondiciones(m: ModeloPropuesta, firma: string, compacto = false
       ? m.igualEnTodas
       : m.precio.lineas.map((l) => l.nombre)
   // Compacto: una sola tarjeta de «Incluido» con varios renglones va a dos columnas.
-  const dosColumnas = compacto && xs.length >= 4 && m.precio.noIncluye.length === 0 && bloquesDeTerminos(m.formal.terminos).length === 0
+  const porVersion = m.precio.porVersion ?? []
+  const dosColumnas = compacto && xs.length >= 4 && m.precio.noIncluye.length === 0 && porVersion.length === 0 && bloquesDeTerminos(m.formal.terminos).length === 0
+  // Reprueba del bloqueo (2026-10-30): «Incluido en todas» es la intersección; lo que trae solo una
+  // versión, y lo que su paquete no incluye, va en su tarjeta con la etiqueta y el color de la versión.
+  const porIndice = tarifaPorIndice(m)
+  const tarjetasDeVersion = porVersion.flatMap((v) => {
+    const t = porIndice.get(v.tarifa)
+    if (!t) return []
+    const incluye = v.incluye.length > 0 ? lista(v.incluye) : ''
+    const noIncluye = v.noIncluye.length > 0 ? `<span class="caps">No incluye</span>${lista(v.noIncluye)}` : ''
+    return [`<div class="card"><span class="caps">Solo en ${etiqueta(t)}</span>${incluye}${noIncluye}</div>`]
+  })
   const tarjetasIncluye = [
     xs.length > 0 ? `<div class="card${dosColumnas ? ' dos' : ''}"><span class="caps">${m.tarifas.length > 0 ? 'Incluido en todas' : 'Incluido'}</span>${lista(xs)}</div>` : '',
+    ...tarjetasDeVersion,
     m.precio.noIncluye.length > 0 ? `<div class="card"><span class="caps">No incluido</span>${lista(m.precio.noIncluye)}</div>` : '',
   ].filter(Boolean)
   const tarjetasTerminos = bloquesDeTerminos(m.formal.terminos).map(

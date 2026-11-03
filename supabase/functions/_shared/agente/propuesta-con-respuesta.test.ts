@@ -22,7 +22,7 @@ const ROSA = { id: 'c-rosa', nombre: 'ROSA QUINTERO', celular: '3104564821' }
 const NOMBRES = ['EUROPA 2 DIAS', 'CANCUN', 'CARTAGENA', 'MADRID', 'PANAMA']
 const VIAJES = NOMBRES.map((nombre, i) => ({ id: `v-${i + 1}`, codigo: `Q1 26 ${i + 1}`, contactoId: 'c-rosa', nombre, destino: null, abierto: true, datos: {} }))
 const ref = 'Rosa Quintero (cel. …4821)'
-const TURNO_1 = 'Vamos a registrar un nuevo viaje. Es a San Andrés y es para Rosa Quintero. Ya tenemos algo abierto para Rosa Quintero?'
+const TURNO_1 = 'Vamos a registrar un nuevo viaje. Es a San Andrés y es para Rosa Quintero. Ya tenemos algo abierto para Rosa Quintero?, la llevo yo'
 const TURNO_2 = 'antes dime que tenemos abierto de Rosa Quintero'
 const RESPUESTA_1 = 'Rosa Quintero tiene 5 viajes abiertos: Q1 26 1 Europa 2 Dias, Q1 26 2 Cancun, Q1 26 3 Cartagena, Q1 26 4 Madrid y Q1 26 5 Panama. ¿Abro uno nuevo a San Andrés?'
 const RESPUESTA_2 = 'Tiene abiertos Q1 26 1 Europa 2 Dias, Q1 26 2 Cancun, Q1 26 3 Cartagena, Q1 26 4 Madrid y Q1 26 5 Panama. El viaje nuevo a San Andrés sigue esperando tu toque.'

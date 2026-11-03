@@ -192,6 +192,8 @@ beforeAll(async () => {
   await pg.exec(leer('src/lib/funciones/__fixtures__/esquema-base.sql'))
   await pg.exec(leer('supabase/migrations/20261021090000_asistente_chatwoot.sql'))
   await pg.exec(leer('supabase/migrations/20261022170000_modulo_funciones.sql'))
+  await pg.exec(leer('supabase/migrations/20261026220000_funciones_puerta_cerrada.sql'))
+  await pg.exec(leer('supabase/migrations/20261026210000_funciones_saldo_plazo_cero.sql'))
 })
 
 afterAll(async () => {
@@ -387,8 +389,8 @@ describe.each([
     expect(link.dato.monto).toBe(200_000 + 100_000)
     const [pedido] = doble.pedidos()
     expect(pedido.cuerpo).toEqual({
-      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 300_000 }, description: 'Sabor: 2 funciones',
-      expiration_date: Date.parse(link.dato.venceAt),
+      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 300_000, tip_amount: 0 }, description: 'Sabor: 2 funciones',
+      expiration_date: Date.parse(link.dato.venceAt) * 1_000_000,
     })
     expect(Date.parse(link.dato.venceAt) - Date.now()).toBeGreaterThan(25 * 60_000)
     // Las dos ya están en un pago pendiente.
@@ -453,6 +455,24 @@ describe.each([
     const sv = await saldoReserva(b.puerto, r.reservaId)
     expect(sv.ok && [sv.dato.saldo, sv.dato.estado]).toEqual([80_000, 'vencido'])
     expect(await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'x')).toEqual({ ok: false, error: 'saldo_vencido' })
+  })
+
+  it('el saldo con plazo 0 (26-oct): el plazo y el link valen hasta que empieza la función', async () => {
+    const l = await autorizada()
+    const iniciaAt = manana(9)
+    const r = await apartar(b.puerto, propuesta(l, await funcion(await campana(), { iniciaAt }), 1))
+    if (!r.ok) throw new Error(r.error)
+    const doble = pasarelaEnMemoria()
+    const pr = await generarLinkPago(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'abono', 'x')
+    if (!pr.ok) throw new Error(pr.error)
+    await b.aprobar(pr.dato.pagoId, pr.dato.referencia)
+    await b.cambiarPlazo(r.reservaId, 0)
+    expect(plazoSaldo(iniciaAt, 0)).toBe(new Date(iniciaAt).toISOString())
+    const s = await saldoReserva(b.puerto, r.reservaId)
+    expect(s.ok && [s.dato.saldo, s.dato.estado, Date.parse(s.dato.plazo_at)]).toEqual([80_000, 'pendiente', Date.parse(iniciaAt)])
+    const ls = await generarLinkSaldo(b.puerto, doble.pasarela, b.ws, [r.reservaId], 'Saldo')
+    if (!ls.ok) throw new Error(ls.error)
+    expect([ls.dato.monto, Date.parse(ls.dato.venceAt)]).toEqual([80_000, Date.parse(iniciaAt)])
   })
 
   it('P10: la campaña de la conversación, por anuncio o por código; sin publicar o sin dato, null', async () => {
@@ -579,10 +599,10 @@ describe('ningún servicio del asistente devuelve un número de cupo', () => {
 })
 
 describe('pasarela', () => {
-  it('expiration_date en milisegundos (SIN VERIFICAR en el sandbox): 13 dígitos, como los ejemplos de Bold', () => {
+  it('expiration_date en nanosegundos, como las cuotas que Bold acepta (en milisegundos rechazó el link: PL_000, 3-nov)', () => {
     const v = expiracionBold('2026-10-24T18:30:00.000Z')
-    expect(v).toBe(Date.parse('2026-10-24T18:30:00.000Z'))
-    expect(String(v)).toHaveLength(13)
+    expect(v).toBe(Date.parse('2026-10-24T18:30:00.000Z') * 1_000_000)
+    expect(String(v)).toHaveLength(19)
     expect(() => expiracionBold('mañana')).toThrow()
   })
 

@@ -17,18 +17,27 @@ export const MODELO_ENTENDIMIENTO_POR_DEFECTO = 'gemini-3.5-flash-lite';
 
 export interface Lectura { json: unknown | null; finishReason: string | null; error: string | null }
 
-/**
- * Llama al modelo con el esquema dado. Verifica el MOTIVO DE TERMINACIÓN, no solo que haya texto: media respuesta
- * aceptada en silencio es un falso verde (§3 del diseño). Nunca lanza.
- */
-export async function leerConGemini(p: {
+interface PedidoLectura {
   apiKey: string | null | undefined;
   modelo: string;
   instrucciones: string;
   texto: string;
   esquema: unknown;
   fetch?: typeof fetch;
-}): Promise<Lectura> {
+}
+
+/**
+ * Llama al modelo con el esquema dado. Verifica el MOTIVO DE TERMINACIÓN, no solo que haya texto: media respuesta
+ * aceptada en silencio es un falso verde (§3 del diseño). Nunca lanza. Un JSON que no se deja leer se pide UNA vez más:
+ * con Haiku, un esquema grande va en el sistema y no en la salida estructurada, y a veces sale roto (arnés 2026-11-03,
+ * 5 de ~1.300 cargas: «Expected ':' after property name»); a la segunda sale bien.
+ */
+export async function leerConGemini(p: PedidoLectura): Promise<Lectura> {
+  const r = await leerUnaVez(p);
+  return r.error === 'GEMINI_JSON_INVALIDO' ? leerUnaVez(p) : r;
+}
+
+async function leerUnaVez(p: PedidoLectura): Promise<Lectura> {
   if (!p.apiKey) return { json: null, finishReason: null, error: 'GEMINI_NO_KEY' };
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${p.modelo}:generateContent?key=${p.apiKey}`;
   const f = p.fetch ?? fetchModelo;

@@ -61,6 +61,41 @@ export function complementosDe(mapa: Map<number, Complemento[]>, codigo: string,
   return out;
 }
 
+/** Cuántas opciones van al modelo cuando el producto no tiene complementos en el mapa (él escoge una o dos). */
+export const MAX_OPCIONES_SIN_MAPA = 8;
+
+/**
+ * Cuando el producto no tiene complementos en el mapa (Mauricio, 3-nov: «cuando dice que si necesita algo más, debería
+ * dar la opción, tengo x o y que podría interesarte»): otros productos publicados para que el modelo ofrezca uno o
+ * dos que sirvan para el mismo trabajo. Primero los que el mapa ya relaciona con este (los productos que lo llevan
+ * como complemento y sus otros complementos), luego los de la misma marca, luego el resto; sin el producto mismo, hasta
+ * `max`. Cuál sirve lo decide el modelo con la conversación; aquí solo el orden. Pura.
+ */
+export function opcionesSinMapa(mapa: Map<number, Complemento[]>, codigo: string, catalogo: ProductoVenta[], max = MAX_OPCIONES_SIN_MAPA): ProductoVenta[] {
+  const n = numeroDeCodigo(codigo);
+  if (n === null) return [];
+  const propio = catalogo.find((p) => numeroDeCodigo(p.codigo) === n);
+  const relacionados = new Set<number>();
+  for (const [padre, lista] of mapa) {
+    const nums = lista.map((c) => numeroDeCodigo(c.codigo));
+    if (!nums.includes(n)) continue;
+    relacionados.add(padre);
+    for (const m of nums) if (m !== null) relacionados.add(m);
+  }
+  const marca = propio?.marca?.toLowerCase() ?? null;
+  const rango = (p: ProductoVenta) => {
+    const m = numeroDeCodigo(p.codigo);
+    if (m !== null && relacionados.has(m)) return 0;
+    return marca && p.marca?.toLowerCase() === marca ? 1 : 2;
+  };
+  return catalogo
+    .filter((p) => numeroDeCodigo(p.codigo) !== n)
+    .map((p, i) => ({ p, r: rango(p), i }))
+    .sort((a, b) => a.r - b.r || a.i - b.i)
+    .slice(0, max)
+    .map((x) => x.p);
+}
+
 /** La ficha del mapa (para la semilla y para cargar uno nuevo por SQL). */
 export function fichaComplementos(mapa: MapaComplementos, fuente: string): Ficha {
   return {
