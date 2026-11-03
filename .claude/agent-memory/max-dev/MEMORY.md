@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408 paquete=ranura+vuelo, hotel=opción; #1407 botón sin actualizarBloqueData; selector en pausa
+- ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408/#1407; ronda 2: pregunta Pública/Neta por paquete (sin default), CHD por edad; foto sin hacer
 
 - ⚠️ [Vacacional/Negocios y nombre del PDF (3-nov)](project_vacacional_nombre_pdf.md) — option_labels aditivo; SQL de config SIN aplicar; nombre para todos
 - ⚠️⚠️ [Pago automático tarjeta CDA (30-oct)](project_valida_cda_tarjeta_epayco.md) — 20261030220000 SIN aplicar; día 0 = inicio del período; quien debe no renueva
