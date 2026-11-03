@@ -5,19 +5,21 @@
  *    decía 3 jun / 17 jun mientras el plan de confirmar daba 2.784.000 hoy / 5.104.000 30 nov /
  *    1.392.000 17 jun. Ahora es el MISMO `planSugerido` con los MISMOS hitos.
  *  · M-2: con la opción 2 (sin nombre propio) el mensaje decía «*Tarifa:* Tarifa» y el panel
- *    «Tarifa Tarifa · $9.280.000». Ahora va el hotel del paquete, o nada.
- *  · M-3: con el anticipo a medias el chequeo quedaba ✓, no había aviso y el avance a mano pasaba a
- *    Reservas y pagos. Ahora el gate dice «Faltan $1.284.000 del anticipo.» y frena (Omitir gate sigue).
+ *    «Tarifa Tarifa · $9.280.000». Ahora «*Opción elegida:*» con el hotel del paquete, o nada.
+ *  · M-3: con el anticipo a medias el chequeo quedaba ✓ y no había aviso. Ahora el panel no pone ✓ y
+ *    dice «Faltan $1.284.000 del anticipo.»; el avance a mano PASA (regla de Edgar, #1380, ratificada
+ *    por Mauricio el 2026-11-03) pero lo avisa en el toast.
  */
 import { describe, expect, it } from 'vitest'
 
 import { paqueteVacio, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
-import { asiPuedesPagar } from './asi-puedes-pagar'
-import { gatesConfirmacionPendientes, mensajeConfirmacion, seccionesDeTerminos, MENSAJES_GATE_CONFIRMACION } from './confirmacion'
+import { asiPuedesPagar, notaDeFila } from './asi-puedes-pagar'
+import { gatesConfirmacionPendientes, mensajeConfirmacion, seccionesDeTerminos, MENSAJES_GATE_CONFIRMACION, textoAvanceConAviso, textoFaltaAnticipo } from './confirmacion'
 import { hitosDeProveedor } from './hitos-proveedor'
-import { lineaDeTarifaEnPanel, nombreUtilDeTarifa } from './nombre-tarifa'
-import { planSugerido, REGLA_POR_DEFECTO, type HitoProveedor } from './plan-pagos'
+import { etiquetasDelSelector, lineaDeTarifaEnPanel, nombreUtilDeTarifa } from './nombre-tarifa'
+import { nombreDeTarifaParaCliente } from '@/lib/cotizaciones/propuesta/modelo-documento'
+import { pesos, planSugerido, REGLA_POR_DEFECTO, type HitoProveedor } from './plan-pagos'
 
 const HOY = '2026-11-03'
 const SALIDA = '2027-06-18'
@@ -59,6 +61,11 @@ describe('M-1 · «Así puedes pagar» usa la «Compra antes del» como el plan 
     expect(r.filas?.map((f) => f.monto)).toEqual(plan.map((c) => c.monto))
   })
 
+  it('la nota de la fila no miente con la compra antes del: «con esto cubres el 80 % (llevas $7.888.000)»', () => {
+    const r = asiPuedesPagar(TOTAL, { ...entrada, hitos: [HITO] })
+    expect(r.filas!.map((f) => notaDeFila(f, r.pctMinimo, pesos))).toEqual([null, 'con esto cubres el 80 % (llevas $7.888.000)', null])
+  })
+
   it('sin hitos, lo de siempre (30 % hoy, completar el 80 % a T-15, el resto el día antes)', () => {
     const r = asiPuedesPagar(TOTAL, entrada)
     expect(r.filas?.map((f) => f.cuando)).toEqual(['al confirmar (anticipo)', 'hasta el 3 de junio', 'hasta el 17 de junio, un día antes del viaje'])
@@ -97,6 +104,17 @@ describe('M-2 · la opción sin nombre propio no se llama «Tarifa»', () => {
     expect(nombreUtilDeTarifa('tarifa', items, ['vuelo'])).toBeNull()
   })
 
+  it('el nombre propio lleva el léxico de marca, igual que la propuesta («Premium» → «Superior»)', () => {
+    expect(nombreUtilDeTarifa('Premium', items, ['pa'])).toBe('Superior')
+    expect(nombreUtilDeTarifa('PREMIUM', items, ['pa'])).toBe('SUPERIOR')
+    expect(nombreDeTarifaParaCliente('Premium', false, 3)).toBe('Superior')
+  })
+
+  it('el selector del equipo distingue dos opciones con el mismo nombre; el del cliente no cambia', () => {
+    expect(etiquetasDelSelector(['GHL Relax', 'GHL Relax', null])).toEqual(['GHL Relax · Opción 1', 'GHL Relax · Opción 2', 'Opción 3'])
+    expect(etiquetasDelSelector(['Recomendada', 'GHL Relax'])).toEqual(['Recomendada', 'GHL Relax'])
+  })
+
   it('el mensaje al cliente nunca dice «*Tarifa:* Tarifa»: sin nombre útil, sin la línea', () => {
     const base = {
       nombreCliente: 'Carolina Duarte', destino: 'San Andrés', fechaSalida: SALIDA, fechaRegreso: null, composicion: null,
@@ -105,7 +123,8 @@ describe('M-2 · la opción sin nombre propio no se llama «Tarifa»', () => {
     }
     const generico = mensajeConfirmacion({ ...base, tarifaNombre: 'Tarifa' })
     expect(generico).not.toContain('*Tarifa:*')
-    expect(mensajeConfirmacion({ ...base, tarifaNombre: 'GHL Relax' })).toContain('*Tarifa:* GHL Relax')
+    expect(generico).not.toContain('*Opción elegida:*')
+    expect(mensajeConfirmacion({ ...base, tarifaNombre: 'GHL Relax' })).toContain('*Opción elegida:* GHL Relax')
   })
 
   it('el panel: «Tarifa GHL Relax», nunca «Tarifa Tarifa»; sin nombre útil, nada', () => {
@@ -116,21 +135,21 @@ describe('M-2 · la opción sin nombre propio no se llama «Tarifa»', () => {
   })
 })
 
-describe('M-3 · el anticipo a medias no deja Confirmación en verde', () => {
+describe('M-3 · el anticipo a medias no deja Confirmación en verde, pero no frena (regla de Edgar)', () => {
   const gates = ['confirmacion_registrada', 'plan_pagos_acordado', 'anticipo_con_soporte']
 
-  it('con pago parcial con soporte: «Faltan $1.284.000 del anticipo.»', () => {
-    const p = gatesConfirmacionPendientes(gates, { confirmado: true, planVigente: true, anticipoConSoporte: true, anticipoFalta: 1_284_000 })
-    expect(p).toEqual(['Faltan $1.284.000 del anticipo.'])
+  it('con pago parcial con soporte el gate se cumple (el avance a mano pasa) y lo que falta se avisa aparte', () => {
+    expect(gatesConfirmacionPendientes(gates, { confirmado: true, planVigente: true, anticipoConSoporte: true, anticipoFalta: 1_284_000 })).toEqual([])
+    expect(textoFaltaAnticipo(1_284_000)).toBe('Faltan $1.284.000 del anticipo.')
   })
 
-  it('completo: nada pendiente; sin ningún pago: el mensaje de siempre', () => {
-    expect(gatesConfirmacionPendientes(gates, { confirmado: true, planVigente: true, anticipoConSoporte: true, anticipoFalta: 0 })).toEqual([])
+  it('sin ningún pago: el mensaje de siempre', () => {
     expect(gatesConfirmacionPendientes(gates, { confirmado: true, planVigente: true, anticipoConSoporte: false, anticipoFalta: 2_784_000 }))
       .toEqual([MENSAJES_GATE_CONFIRMACION.anticipo_con_soporte])
   })
 
-  it('una etapa que no pide el anticipo no frena por él', () => {
-    expect(gatesConfirmacionPendientes(['confirmacion_registrada'], { confirmado: true, planVigente: true, anticipoConSoporte: true, anticipoFalta: 1_284_000 })).toEqual([])
+  it('el toast del avance a mano: «Avanzado a: Reservas y pagos. Faltan $1.284.000 del anticipo.»; sin aviso, el de siempre', () => {
+    expect(textoAvanceConAviso('Avanzado a: Reservas y pagos', 'Faltan $1.284.000 del anticipo.')).toBe('Avanzado a: Reservas y pagos. Faltan $1.284.000 del anticipo.')
+    expect(textoAvanceConAviso('Avanzado a: Reservas y pagos', null)).toBe('Avanzado a: Reservas y pagos')
   })
 })

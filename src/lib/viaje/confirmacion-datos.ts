@@ -16,13 +16,14 @@ import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type HitoProveedor, type ReglaPlan } from './plan-pagos'
 import { hitosDeTarifa, hitosPorTarifa } from './hitos-proveedor'
-import { esNombreGenerico } from './nombre-tarifa'
+import { etiquetasDelSelector, nombreUtilDeTarifa } from './nombre-tarifa'
 import { nombresUtilesDeTarifas } from './nombre-tarifa-datos'
 import {
   esAnticipoConSoporte,
   GATES_CONFIRMACION,
   faltaDelAnticipo,
   gatesConfirmacionPendientes,
+  textoFaltaAnticipo,
   leerPrerreserva,
   MOTIVO_PRERRESERVA_VENCIDA,
   prerreservaVencida,
@@ -394,10 +395,17 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     } else if (precios.ok) {
       // QA G14: la opción sin nombre propio salía como «Tarifa» y el cliente leía «*Tarifa:* Tarifa».
       const utiles = await nombresUtilesDeTarifas(db, String(cot.id))
-      tarifas = precios.tarifas.map((t, i) => {
-        const util = utiles.has(t.itinerarioId) ? utiles.get(t.itinerarioId)! : esNombreGenerico(t.nombre) ? null : (t.nombre as string).trim()
-        return { itinerarioId: t.itinerarioId, nombre: util ?? `Opción ${i + 1}`, nombreCliente: util, esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }
-      })
+      const nombresCliente = precios.tarifas.map((t) =>
+        utiles.has(t.itinerarioId) ? utiles.get(t.itinerarioId)! : nombreUtilDeTarifa(t.nombre, [], null))
+      const etiquetas = etiquetasDelSelector(nombresCliente)
+      tarifas = precios.tarifas.map((t, i) => ({
+        itinerarioId: t.itinerarioId,
+        nombre: etiquetas[i],
+        nombreCliente: nombresCliente[i],
+        esRecomendada: t.esRecomendada,
+        precio: t.precio,
+        motivo: t.motivo,
+      }))
     } else {
       errorTarifas = precios.error
     }
@@ -734,6 +742,26 @@ export async function prerreservasVencidas(svc: Db, ahoraMs: number): Promise<Ar
       return !!p && Date.parse(p.vence_at) <= ahoraMs
     })
     .map((n) => ({ workspaceId: n.workspace_id, negocioId: n.id }))
+}
+
+/**
+ * QA G14 (2026-11-03) · el aviso al avanzar A MANO desde una etapa que pide `anticipo_con_soporte`
+ * con el anticipo a medias: «Faltan $1.284.000 del anticipo.». No frena (regla de Edgar, #1380);
+ * `null` si la etapa no pide el anticipo, si no hay ningún pago con soporte (eso lo dice el gate)
+ * o si la cuota del anticipo está cubierta.
+ */
+export async function avisoAnticipoIncompleto(
+  db: Db,
+  args: { workspaceId: string; negocioId: string; gates: readonly string[] },
+): Promise<string | null> {
+  if (!args.gates.includes('anticipo_con_soporte')) return null
+  const [acordado, cobros] = await Promise.all([
+    planAcordado(db, args.negocioId),
+    cobrosDelNegocio(db, args.workspaceId, args.negocioId),
+  ])
+  if (!cobros.some(esAnticipoConSoporte)) return null
+  const falta = faltaDelAnticipo(acordado?.cuotas, cobros)
+  return falta > 0 ? textoFaltaAnticipo(falta) : null
 }
 
 /**

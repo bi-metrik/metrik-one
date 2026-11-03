@@ -187,7 +187,8 @@ export function mensajeConfirmacion(d: DatosMensajeConfirmacion): string {
   const quienes = d.composicion ? describirOcupacion(d.composicion, 'y') : null
   if (viaje || quienes) lineas.push(`*Tu viaje:* ${[viaje, quienes].filter(Boolean).join(' · ')}.`)
   // QA G14: un relleno («Tarifa», «Opción 2») no se le dice al cliente; sin nombre útil, sin la línea.
-  if (d.tarifaNombre && !esNombreGenerico(d.tarifaNombre)) lineas.push(`*Tarifa:* ${d.tarifaNombre.trim()}`)
+  // El rótulo es «Opción elegida» (Vera): «Tarifa» confundía con la tarifa del proveedor.
+  if (d.tarifaNombre && !esNombreGenerico(d.tarifaNombre)) lineas.push(`*Opción elegida:* ${d.tarifaNombre.trim()}`)
   lineas.push(`*Total:* ${pesos(d.total)}`)
   lineas.push('')
   lineas.push('*Tu plan de pagos:*')
@@ -314,9 +315,10 @@ export interface EstadoConfirmacion {
   anticipoConSoporte: boolean
   /**
    * QA G14 (2026-11-03) · lo que falta para cubrir la cuota del anticipo del plan acordado (0 si
-   * está cubierta dentro del piso de materialidad, o sin plan acordado). Con un pago a medias el
-   * chequeo no queda ✓ y el gate `anticipo_con_soporte` frena el avance, también a mano. Es la
-   * regla del avance automático de #1380 (`anticipoDelPlanCubierto`). Ausente = 0.
+   * está cubierta dentro del piso de materialidad, o sin plan acordado). Es la regla del avance
+   * automático de #1380 (`anticipoDelPlanCubierto`). Con un pago a medias el chequeo del panel no
+   * queda ✓ y dice cuánto falta, y el avance A MANO pasa pero avisa; NO frena el gate (decisión de
+   * Mauricio 2026-11-03: se mantiene la regla de Edgar). Ausente = 0.
    */
   anticipoFalta?: number
 }
@@ -324,6 +326,14 @@ export interface EstadoConfirmacion {
 /** «Faltan $1.284.000 del anticipo.» */
 export function textoFaltaAnticipo(falta: number): string {
   return `Faltan ${pesos(falta)} del anticipo.`
+}
+
+/**
+ * El toast del avance a mano (QA G14): «Avanzado a: Reservas y pagos. Faltan $1.284.000 del
+ * anticipo.» con aviso; sin él, el texto de siempre.
+ */
+export function textoAvanceConAviso(base: string, aviso: string | null | undefined): string {
+  return aviso ? `${base}. ${aviso}` : base
 }
 
 /** Lo que falta para salir de la etapa, en el orden de la etapa, con los textos de la línea si los declara. */
@@ -336,11 +346,9 @@ export function gatesConfirmacionPendientes(
   const pide = (g: GateConfirmacion) => gates.includes(g)
   if (pide('confirmacion_registrada') && !estado.confirmado) out.push(mensajes.confirmacion_registrada ?? MENSAJES_GATE_CONFIRMACION.confirmacion_registrada)
   if (pide('plan_pagos_acordado') && !estado.planVigente) out.push(mensajes.plan_pagos_acordado ?? MENSAJES_GATE_CONFIRMACION.plan_pagos_acordado)
-  if (pide('anticipo_con_soporte')) {
-    if (!estado.anticipoConSoporte) out.push(mensajes.anticipo_con_soporte ?? MENSAJES_GATE_CONFIRMACION.anticipo_con_soporte)
-    // QA G14: con un pago a medias el gate no se da por cumplido (cede a «Omitir gate» como los demás).
-    else if ((estado.anticipoFalta ?? 0) > 0) out.push(textoFaltaAnticipo(estado.anticipoFalta as number))
-  }
+  // La regla de Edgar (#1380, ratificada por Mauricio el 2026-11-03 en el QA G14): el gate se cumple
+  // con CUALQUIER pago con soporte. Lo que falte del anticipo se avisa (`anticipoFalta`), no frena.
+  if (pide('anticipo_con_soporte') && !estado.anticipoConSoporte) out.push(mensajes.anticipo_con_soporte ?? MENSAJES_GATE_CONFIRMACION.anticipo_con_soporte)
   return out
 }
 
@@ -348,8 +356,10 @@ export function gatesConfirmacionPendientes(
  * ¿Lo pagado con soporte ya cubre la cuota del anticipo del plan acordado? (QA G11, 2026-10-30)
  *
  * El gate `anticipo_con_soporte` se cumple con cualquier pago con comprobante (la regla de Edgar:
- * «sin dinero, así sea 1.000 pesos, no me muevo»), y eso sigue igual para quien avanza A MANO. Pero
- * el avance AUTOMÁTICO tras registrar el pago no puede anunciar «pagó el anticipo» con la pantalla
+ * «sin dinero, así sea 1.000 pesos, no me muevo»), y eso sigue igual para quien avanza A MANO
+ * (ratificado por Mauricio en el QA G14, 2026-11-03): pasa, pero con aviso de lo que falta
+ * (`avisoAnticipoIncompleto`), y el panel de Confirmación no pone ✓ mientras falte (`anticipoFalta`).
+ * El avance AUTOMÁTICO tras registrar el pago no puede anunciar «pagó el anticipo» con la pantalla
  * diciendo «Cuota 1 · anticipo: queda faltando $1.700.000»: con $1,5 M de $3,2 M el negocio pasó
  * solo a Reservas y pagos y operaciones recibió el aviso de reservar. Pasa solo con la cuota del
  * anticipo cubierta (dentro del piso de materialidad); sin plan acordado, como antes.

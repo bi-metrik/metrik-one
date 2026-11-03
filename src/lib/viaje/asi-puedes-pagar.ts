@@ -106,9 +106,13 @@ export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar, hi
   return { ...base, filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
 }
 
-/** «con esto llevas el 80 % ($3.242.000)», o `null`. El formato de pesos lo pone quien pinta. */
+/**
+ * «con esto cubres el 80 % (llevas $3.242.000)», o `null`. El formato de pesos lo pone quien pinta.
+ * QA G14 (Vera): con la «Compra antes del» lo acumulado puede pasar del mínimo (7.888.000 de
+ * 9.280.000 = 85 %), así que la nota dice que cubre la regla y cuánto lleva, no que lleva justo el 80 %.
+ */
 export function notaDeFila(f: FilaAsiPuedesPagar, pctMinimo: number, pesos: (v: number) => string): string | null {
-  return f.llevas === null ? null : `con esto llevas el ${pctMinimo} % (${pesos(f.llevas)})`
+  return f.llevas === null ? null : `con esto cubres el ${pctMinimo} % (llevas ${pesos(f.llevas)})`
 }
 
 /** Lee `plan_pagos` de la línea para esta sección: `null` = apagado (el PDF queda como hoy). */

@@ -205,7 +205,7 @@ import {
   pedirAprobacionPlan,
   type EntradaConfirmacion,
 } from './confirmacion-viaje-actions'
-import { evaluarGatesConfirmacion, leerVistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import { avisoAnticipoIncompleto, evaluarGatesConfirmacion, leerVistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import { planSugerido, sumarDiasCivil, type CuotaPlan } from '@/lib/viaje/plan-pagos'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { reiniciarModulo } from '../../../../test/exigir-modulo-doble'
@@ -483,7 +483,7 @@ describe('cotización sin tarifas: una sola opción por componente (2026-10-22)'
     expect(planes()[0]).toMatchObject({ estado: 'acordado', total: TOTAL_UNICO })
     const conf = meta().confirmacion_cliente as Fila
     expect(conf).toMatchObject({ itinerario_id: null, tarifa_nombre: null, total: TOTAL_UNICO })
-    expect((conf.mensaje as Fila).texto).not.toContain('*Tarifa:*')
+    expect((conf.mensaje as Fila).texto).not.toContain('*Opción elegida:*')
 
     const gates = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })
     expect(gates).toEqual(['Para pasar a Reservas y pagos falta: el anticipo con su comprobante y la cuenta donde entró.'])
@@ -615,22 +615,25 @@ describe('gates de la etapa Confirmación', () => {
     const despues = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })
     expect(despues).toEqual(['Para pasar a Reservas y pagos falta: el anticipo con su comprobante y la cuenta donde entró.'])
 
-    // Un cobro sin cuenta receptora no basta; con cuenta y soporte, sí, si cubre la cuota del anticipo.
-    const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
-    tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: anticipo, fecha: HOY, soporte: { url: 'one://x' }, cuenta_recaudo: null })
+    // Un cobro sin cuenta receptora no basta; con cuenta y soporte, sí.
+    tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: 1_215_000, fecha: HOY, soporte: { url: 'one://x' }, cuenta_recaudo: null })
     expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })).toHaveLength(1)
     tablas.cobros[0].cuenta_recaudo = 'bancolombia'
     expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })).toEqual([])
   })
 
-  it('QA G14 · con el anticipo a medias el gate dice cuánto falta y el panel no lo da por cumplido', async () => {
+  it('QA G14 · con el anticipo a medias el gate se cumple (regla de Edgar) pero el panel no lo da por cumplido', async () => {
     await confirmarClienteViaje(entrada())
     const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
     tablas.cobros.push({ id: 'cb-1', workspace_id: WS, negocio_id: NEG, monto: anticipo - 500_000, fecha: HOY, soporte: { url: 'one://x' }, cuenta_recaudo: 'bancolombia' })
-    expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} }))
-      .toEqual(['Faltan $500.000 del anticipo.'])
+    expect(await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })).toEqual([])
     const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
     expect(vista?.estado).toMatchObject({ anticipoConSoporte: true, anticipoFalta: 500_000 })
+    expect(await avisoAnticipoIncompleto(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4 })).toBe('Faltan $500.000 del anticipo.')
+    // Completo: sin falta ni aviso.
+    tablas.cobros[0].monto = anticipo
+    expect((await leerVistaConfirmacion(clienteFalso(), WS, NEG))?.estado.anticipoFalta).toBe(0)
+    expect(await avisoAnticipoIncompleto(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4 })).toBeNull()
   })
 
   it('una etapa sin estos gates no consulta nada', async () => {
@@ -794,7 +797,7 @@ describe('el avance solo no se salta Confirmación (QA G11)', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.avanzo).toBeNull()
-    expect(r.textoAvance).toBe(`Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo con «Omitir gate» y el motivo.`)
+    expect(r.textoAvance).toBe(`Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`)
     expect(neg().etapa_actual_id).toBe('e4')
     expect(tablas.notificaciones.some((n) => n.tipo === 'handoff')).toBe(false)
     // Con el resto del anticipo, pasa solo.
@@ -803,19 +806,13 @@ describe('el avance solo no se salta Confirmación (QA G11)', () => {
     expect(neg().etapa_actual_id).toBe('e5')
   })
 
-  it('QA G14 · a mano tampoco pasa a Reservas y pagos con el anticipo a medias; «Omitir gate» con motivo sí', async () => {
+  it('QA G14 · a mano pasa a Reservas y pagos con el anticipo a medias, pero avisa cuánto falta', async () => {
     const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
     const r = await registrarPagoViajero(pagoEntrada({ monto: anticipo - 500_000 }))
-    expect(r.ok && r.textoAvance).toBe('Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo con «Omitir gate» y el motivo.')
+    expect(r.ok && r.avanzo).toBeNull()
     const aMano = await cambiarEtapaNegocioConGate(NEG, 'e5')
-    expect(aMano.error).toBe('gate_bloqueado')
-    expect((aMano as { bloquesPendientes?: { nombre: string }[] }).bloquesPendientes?.map((b) => b.nombre)).toContain('Faltan $500.000 del anticipo.')
-    expect(neg().etapa_actual_id).toBe('e4')
-    // El mecanismo de excepción de siempre: la dirección omite el gate con su motivo.
-    staffId = 's-edgar'
-    rol = 'admin'
-    const conMotivo = await cambiarEtapaNegocioConGate(NEG, 'e5', 'El cliente paga el resto del anticipo el viernes, acordado con Edgar')
-    expect(conMotivo.error).toBeFalsy()
+    expect(aMano.error).toBeFalsy()
+    expect(aMano.aviso).toBe('Faltan $500.000 del anticipo.')
     expect(neg().etapa_actual_id).toBe('e5')
   })
 })

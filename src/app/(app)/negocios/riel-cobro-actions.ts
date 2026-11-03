@@ -189,11 +189,17 @@ async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa:
   const { data: neg } = await ctx.supabase.from('negocios').select('etapa_actual_id, metadata, nombre').eq('id', ctx.negocio.id).maybeSingle()
   const actual = (neg as { etapa_actual_id?: string } | null)?.etapa_actual_id
   if (!conf || actual !== conf.id) return null
+  const pendientes = await evaluarGatesConfirmacion(ctx.supabase, {
+    workspaceId: ctx.workspaceId,
+    negocioId: ctx.negocio.id,
+    gates: ((conf.config_extra?.gates ?? []) as string[]),
+    mensajes: ((conf.config_extra?.gate_messages ?? {}) as Record<string, string>),
+  })
+  if (pendientes.length > 0) return null
   const siguiente = etapas.find((e) => e.orden > conf.orden)
   if (!siguiente) return null
-  // QA G11: el avance SOLO pasa con la cuota del anticipo cubierta. QA G14: a mano tampoco (el gate
-  // `anticipo_con_soporte` mira la misma regla), salvo «Omitir gate» con su motivo. Se mira ANTES
-  // que los gates: con el anticipo a medias el gate ya lo cuenta como pendiente.
+  // QA G11: el avance SOLO pasa con la cuota del anticipo cubierta; a mano, la etapa sigue dejando
+  // pasar con cualquier pago con soporte (el gate no cambia).
   const [acordado, cobros] = await Promise.all([
     planAcordado(ctx.supabase, ctx.negocio.id),
     cobrosDelNegocio(ctx.supabase, ctx.workspaceId, ctx.negocio.id),
@@ -202,16 +208,9 @@ async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa:
   if (!anticipo.cubierto) {
     return {
       etapa: null,
-      texto: `Faltan ${pesos(anticipo.falta)} del anticipo: el negocio sigue en ${conf.nombre}. Pasa solo a ${siguiente.nombre} con el anticipo completo; si ya se acordó otra cosa, avánzalo con «Omitir gate» y el motivo.`,
+      texto: `Faltan ${pesos(anticipo.falta)} del anticipo: el negocio sigue en ${conf.nombre}. Pasa solo a ${siguiente.nombre} con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`,
     }
   }
-  const pendientes = await evaluarGatesConfirmacion(ctx.supabase, {
-    workspaceId: ctx.workspaceId,
-    negocioId: ctx.negocio.id,
-    gates: ((conf.config_extra?.gates ?? []) as string[]),
-    mensajes: ((conf.config_extra?.gate_messages ?? {}) as Record<string, string>),
-  })
-  if (pendientes.length > 0) return null
   const mov = await cambiarEtapaNegocioConGate(ctx.negocio.id, siguiente.id)
   if (mov.error) {
     console.warn('[registrarPagoViajero] el anticipo entró pero la etapa no pasó:', mov.error)

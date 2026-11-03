@@ -13,6 +13,7 @@
 
 import { leerPaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { conLexicoDeMarca } from '@/lib/cotizaciones/nombre-tarifa-marca'
 
 function hotelDelPaquete(item: { tarifa_pax?: unknown }): string | null {
   if (item.tarifa_pax === null || item.tarifa_pax === undefined) return null
@@ -45,7 +46,8 @@ export function nombreUtilDeTarifa(
   items: readonly ItemParaNombre[],
   seleccion: readonly string[] | null,
 ): string | null {
-  if (!esNombreGenerico(nombre)) return (nombre as string).trim()
+  // El nombre propio con el léxico de marca, como la propuesta («Premium» → «Superior»).
+  if (!esNombreGenerico(nombre)) return conLexicoDeMarca((nombre as string).trim())
   const dentro = seleccion ? new Set(seleccion) : null
   const hoteles: string[] = []
   for (const i of items) {
@@ -64,4 +66,14 @@ export function lineaDeTarifaEnPanel(nombre: string | null | undefined): string 
   if (esNombreGenerico(nombre)) return null
   const n = (nombre as string).trim()
   return /^tarifa\b/i.test(n) ? n : `Tarifa ${n}`
+}
+
+/**
+ * Cómo ve el equipo cada opción en la hoja «El cliente confirmó» (solo equipo, QA G14): el nombre
+ * útil, o «Opción N» sin él; si dos quedan con el mismo nombre (dos paquetes del mismo hotel), se les
+ * agrega « · Opción N» para distinguirlas. N es la posición en la lista (1-based).
+ */
+export function etiquetasDelSelector(nombresCliente: readonly (string | null)[]): string[] {
+  const base = nombresCliente.map((n, i) => n ?? `Opción ${i + 1}`)
+  return base.map((n, i) => (base.filter((x) => x === n).length > 1 ? `${n} · Opción ${i + 1}` : n))
 }

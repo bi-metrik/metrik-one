@@ -23,7 +23,7 @@ import { evaluarGateEntrega } from '@/lib/viaje/entrega-datos'
 import { evaluarGateCierre, evaluarGatePostventa } from '@/lib/viaje/cierre-viaje-datos'
 import { aprobadoresDeLinea, serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
-import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import { avisoAnticipoIncompleto, evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import { MOTIVOS_CANCELACION, MOTIVOS_PAUSA, MAX_PAUSAS, SAFETY_NET_HORAS, leerMarcasDeMetadata, origenDesdeFuenteInteraccion, type MarcaCondicion } from '@/lib/negocios/constants'
 import {
   computeFieldDefaults,
@@ -3145,6 +3145,8 @@ async function cambiarEtapaNegocioConGateSinClave(
   bloquesPendientes?: BloquePendienteGate[]
   /** Nombre de la etapa destino REAL (tras resolver el routing), para el feedback. */
   etapaDestinoNombre?: string
+  /** QA G14 · el avance pasó, pero hay algo que el equipo debe ver («Faltan $X del anticipo.»). */
+  aviso?: string
   /** Presente solo con `error === 'requiere_confirmacion'`. */
   confirmacion?: ConfirmacionAvance
 }> {
@@ -4427,7 +4429,19 @@ async function cambiarEtapaNegocioConGateSinClave(
     })
   }
 
-  return { ...resultCambio, etapaDestinoNombre: nuevaEtapaNombre }
+  // QA G14 (2026-11-03): con el anticipo a medias el avance A MANO pasa (regla de Edgar, #1380),
+  // pero quien avanza ve cuánto falta. Solo al salir hacia adelante de una etapa que pide
+  // `anticipo_con_soporte`; no frena ni escribe nada.
+  let aviso: string | null = null
+  if (negocio.etapa_actual_id && typeof nuevaEtapaInfo?.orden === 'number' && etapaActualOrden !== null && nuevaEtapaInfo.orden > etapaActualOrden) {
+    aviso = await avisoAnticipoIncompleto(db(supabase), {
+      workspaceId,
+      negocioId,
+      gates: ((etapaActualConfigExtra.gates ?? []) as string[]),
+    })
+  }
+
+  return { ...resultCambio, etapaDestinoNombre: nuevaEtapaNombre, ...(aviso ? { aviso } : {}) }
 }
 
 // ── Marcar bloque completo ─────────────────────────────────────────────────────

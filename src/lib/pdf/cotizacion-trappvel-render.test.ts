@@ -1471,7 +1471,7 @@ describe('«Así puedes pagar» (F2-1, PR 7)', () => {
       expect(t).toContain(f.cuando)
     }
     expect(plan.filas!.reduce((a, f) => a + f.monto, 0)).toBe(total)
-    expect(t).toContain('con esto llevas el 80 %')
+    expect(t).toContain('con esto cubres el 80 % (llevas ')
     expect(t).toContain('Puedes repartirlo en más cuotas: lo acordamos contigo.')
   })
 
