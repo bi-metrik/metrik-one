@@ -43,7 +43,10 @@ import type { ConfigPublico } from './config.ts';
 import { PAUSA_ENTRE_MENSAJES_MS, PAUSA_TRAS_FOTO_MS } from './config.ts';
 import { BOT_PUBLICO, PASAR_A_PERSONA, RESPUESTA_FIJA, RF_PERSONA_POR_QUE, dominioPublico, porQueYaSalio, volvioDePersona } from './dominio.ts';
 import { enlacesFueraDeLista } from './enlaces.ts';
-import { preciosSinHerramienta } from './precios.ts';
+import { montosDelTexto, preciosSinHerramienta } from './precios.ts';
+import { preciosDeNoDisponibles } from './ventas/catalogo-ventas.ts';
+import type { ProductoVenta } from './ventas/catalogo-ventas.ts';
+import { pesos } from './catalogo.ts';
 import { frasesDeSobreventa } from './sobreventa.ts';
 import { HERRAMIENTAS_VENTAS, sistemaPublico } from './prompt.ts';
 import { CIERRES_DEL_CODIGO_VENTAS, CONFIRMAR_COMPRA, ENLACES_VENTAS, RF_PAGO_CONFIRMADO, bloqueNotaVentas, claveConfirmacionPago, dominioVentas } from './ventas/dominio-ventas.ts';
@@ -170,6 +173,7 @@ export const SIGUIENTE_PASO: Record<MotivoPersona, string> = {
   pago_no_disponible: 'enviar el link de pago a mano: el asistente no pudo crearlo', despachar: 'despachar el pedido (el pago está aprobado en Bold)',
   fuera_de_zona: 'cotizar el flete y enviar el link de pago', cantidad: 'atender el pedido de más de 3 unidades', factura: 'revisar los datos de la factura',
   garantia: 'atender la garantía o el cambio', no_en_catalogo: 'contestar por el producto (no está en el catálogo)',
+  producto_no_disponible: 'contestar por el producto: está agotado o sin publicar en Ferretería (no es una falla del asistente)',
 };
 
 /**
@@ -371,7 +375,7 @@ function personaDelRol(d: DepsPublico): { escalamiento: EscalamientoChatwoot; bl
   };
 }
 
-function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
+function depsTurno(d: DepsPublico, turnoMs: number, activos: ProductoVenta[] | null = null): DepsTurno {
   const dr = dominioYReglamento(d);
   return {
     modelo: d.modelo,
@@ -391,6 +395,9 @@ function depsTurno(d: DepsPublico, turnoMs: number): DepsTurno {
       ...frasesDeSobreventa(texto, herramientas),
       // Ventas: nunca más de 3 productos en una respuesta (venta consultiva, Mauricio 29-oct).
       ...(esVentas(d) ? demasiadosProductos(texto) : []),
+      // Ventas (3-nov): el precio de un producto que ya no está activo no sale aunque esté en la conversación.
+      ...(activos ? preciosDeNoDisponibles(montosDelTexto(texto), herramientas, activos)
+        .map(([c, m]) => `el ${c} ya no está disponible: no des su precio (${pesos(Number(m))}) ni su ficha aunque estén en la conversación; llama ver_catalogo con su código y haz lo que diga`) : []),
     ],
   };
 }
@@ -456,13 +463,15 @@ async function confirmarPropuesta(d: DepsPublico, turnoId: string, filas: FilaPu
 
 /** El turno del modelo con el reintento con aviso. */
 async function turnoModelo(d: DepsPublico, turnoId: string, filas: FilaPublica[], pend: FilaPublica[], tramos: Tramos, extra: Partial<TrazaPublica>): Promise<Resultado> {
+  // Ventas: lo publicado hoy, para que la guarda ataje un precio de la conversación que ya no está activo (caché de 60 s).
+  const activos = esVentas(d) && d.ventas ? await d.ventas.catalogo().catch(() => null) : null;
   const res = await turnoConReintento({
     corte1Ms: d.config.corte1Ms,
     corteTotalMs: d.config.corteTotalMs,
     reloj: d.reloj,
     intentar: (_n, presupuesto) => {
       const copia = structuredClone(filas);
-      return turnoDelModelo(depsTurno(d, presupuesto), { turnoId, filas: copia, nuevos: copia.filter((f) => pend.some((p) => p.id === f.id)), ctx: ctxDe(d, copia) });
+      return turnoDelModelo(depsTurno(d, presupuesto, activos), { turnoId, filas: copia, nuevos: copia.filter((f) => pend.some((p) => p.id === f.id)), ctx: ctxDe(d, copia) });
     },
     avisar: async () => {
       const v = ventana({ canal: d.canal, anuncio7Dias: d.anuncio7Dias, filas, ahoraMs: d.ahoraMs(), cuantos: 2 });
