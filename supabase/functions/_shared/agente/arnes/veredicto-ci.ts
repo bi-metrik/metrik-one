@@ -74,7 +74,8 @@ if (import.meta.main) {
       const r = resumenBanco(b);
       if (!r.pasa) falla = true;
       lineas.push(`| ${dir.split('/').pop()} | ${r.pasa ? 'sí' : 'NO'} | ${r.k ?? '?'} | ${r.casos ?? '?'} | ${r.fallan.join(', ') || '—'} | ${r.excluidos.join(', ') || '—'} | ${r.daninas} |`);
-      // El costo de estas corridas queda en su `resultados.json` (roles) o en el reporte (público).
+      // El costo de estas corridas queda en `tabla.uso` de su `resultados.json` (roles y público) y, en los roles, en
+      // `simulador` (la persona simulada).
       const res = await leer(`${dir}/resultados.json`);
       if (res) {
         const t = (res.tabla ?? {}) as Json;

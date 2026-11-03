@@ -4,7 +4,7 @@ name: Arnés de Agus
 # producción con cada merge a `main`, y hasta hoy solo lo medían las pruebas
 # unitarias. Este job corre el arnés con Haiku real, k = 3, en cada PR que toque
 # el agente: ONE (`wa_one`, el canal que ya atiende gente), los dos roles de
-# Trappvel y el asistente público. Falla si un caso no pasa k de k o si hay una
+# Trappvel y el asistente público (Dimi, el de ventas de Dimpro). Falla si un caso no pasa k de k o si hay una
 # sola escritura dañina.
 #
 # La llave: el secreto `ANTHROPIC_API_KEY_PRUEBAS` (la de PRUEBAS, nunca la de
@@ -75,8 +75,12 @@ jobs:
       - name: Rol asesor_viajes (k = 3)
         run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-asesor_viajes" --rol asesor_viajes --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      # El asistente público en vivo es Dimi (Dimpro, dominio ventas): `--conjunto ventas` corre con
+      # `REGLAMENTO_DIMPRO` del código, que es la versión publicada (v8 del 30-oct) en todo lo que lee el modelo; solo
+      # le falta el mapa real de venta cruzada, que se queda en la base (Mauricio, 3-nov) y que los casos reemplazan
+      # por uno inventado. Las fichas de Sabor (`REGLAMENTO_SABOR`) no atienden a nadie y no entran a este paso.
       - name: Asistente público (k = 3)
-        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --k 3
+        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --conjunto ventas --k 3
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       - name: Veredicto
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}

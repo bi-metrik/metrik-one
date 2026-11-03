@@ -7,7 +7,8 @@
 //   ANTHROPIC_API_KEY_PRUEBAS=… deno run -A --node-modules-dir=none …/correr.ts --salida <dir> [--k 3]
 //   Comunes: [--conjunto escenarios|adversario|lenguaje|operacion|real|ventas|todo] [--solo id1,id2]
 //            [--fichas-rol <fichas.json>]   las fichas del ROL que se va a publicar (un arreglo de fichas en JSON); sin
-//                                            él, REGLAMENTO_SABOR. Deja `banco.json`: lo que pide asistente_publicar_rol
+//                                            él, REGLAMENTO_DIMPRO con `--conjunto ventas` y REGLAMENTO_SABOR con los
+//                                            demás. Deja `banco.json`: lo que pide asistente_publicar_rol
 //                                            (`pasa`, `k`, `fecha`, `huella_fichas` = huellaPublicable de esas fichas).
 // --seco   sin red: el guion de cada caso hace de modelo (prueba el código, no mide al modelo).
 // --cli    Haiku por el CLI de Claude Code con la SUSCRIPCIÓN (Mauricio, 2026-10-21): `modelo-cli.ts`. Los cortes se
@@ -26,6 +27,8 @@ import type { OpcionesCorrida, ResultadoPassK } from './correr-caso.ts';
 import { modeloCli } from './modelo-cli.ts';
 import { bancoDelArnes } from '../../arnes/banco.ts';
 import { REGLAMENTO_SABOR } from '../reglamento-sabor.ts';
+import { REGLAMENTO_DIMPRO } from '../ventas/reglamento-dimpro.ts';
+import { PRECIOS_HAIKU } from '../../arnes/proveedor-haiku.ts';
 import type { Ficha } from '../../tipos.ts';
 
 const args = Deno.args;
@@ -64,9 +67,11 @@ if (import.meta.main) {
     : cli ? () => modeloCli({ modelo: nombreModelo, concurrencia: paralelo })
       : () => modeloAnthropic({ llave: LLAVE, modelo: nombreModelo, esfuerzo, pensamiento, maxSalida: 2048, estricto: true });
   const rutaFichas = arg('--fichas-rol');
-  const fichasBase: Ficha[] = rutaFichas ? JSON.parse(await Deno.readTextFile(rutaFichas)) : REGLAMENTO_SABOR;
+  // Sin `--fichas-rol`, las de cada caso (`correr-caso.ts`: Dimpro en ventas, Sabor en el resto); la base que se declara
+  // en `banco.json` es la de ese conjunto, para que su huella diga con qué fichas se midió.
+  const fichasBase: Ficha[] = rutaFichas ? JSON.parse(await Deno.readTextFile(rutaFichas)) : conjunto === 'ventas' ? REGLAMENTO_DIMPRO : REGLAMENTO_SABOR;
   const o: OpcionesCorrida = {
-    modelo, k, vivo: !seco, ...(rutaFichas ? { fichasBase } : {}),
+    modelo, k, vivo: !seco, ...(rutaFichas ? { fichasBase } : {}), precios: PRECIOS_HAIKU,
     ...(cli ? { configBase: { corte1Ms: 60_000, corteTotalMs: 180_000 }, escala: ESCALA_CLI } : {}),
   };
   const t0 = Date.now();
@@ -76,21 +81,22 @@ if (import.meta.main) {
     console.log(JSON.stringify({ caso: c.id, pasa: r.pasa, motivo: (mala ?? r.corridas[0]).exito.motivo, daninas: mala?.daninas ?? [] }));
     return r;
   });
-  const rep = reporte(rs, k);
+  const rep = reporte(rs, k, PRECIOS_HAIKU);
   const etiqueta = seco ? 'seco (guion de cada caso)'
     : cli ? `${nombreModelo} por el CLI de Claude Code (suscripción) · k=${k}`
       : `${nombreModelo} por la API (llave de pruebas) · esfuerzo ${esfuerzo} · ${pensamiento ? 'con' : 'sin'} pensamiento · k=${k}`;
   await Deno.mkdir(salida, { recursive: true });
-  await Deno.writeTextFile(`${salida}/resultados.json`, JSON.stringify({ etiqueta, reporte: rep, casos: rs }, null, 2));
+  // `tabla.uso` con la misma forma que `arnes/correr.ts`: de ahí lee el costo `veredicto-ci.ts`.
+  await Deno.writeTextFile(`${salida}/resultados.json`, JSON.stringify({ etiqueta, tabla: { uso: rep.uso }, reporte: rep, casos: rs }, null, 2));
   const md = [
-    `# Arnés del asistente público (Sabor) — ${etiqueta}`,
+    `# Arnés del asistente público (${conjunto === 'ventas' ? 'Dimpro' : 'Sabor'}) — ${etiqueta}`,
     '',
     `Corrida: ${new Date().toISOString()} · ${Math.round((Date.now() - t0) / 60000)} min · ${rep.casos} casos · conjunto ${conjunto}. Base y Chatwoot en memoria; datos inventados.`,
     '',
     '| Conjunto | pass^' + k + ' | Dañinas |',
     '|---|---|---|',
     ...Object.entries(rep.porConjunto).map(([c, v]) => `| ${c} | ${v.passK} de ${v.casos} | ${v.daninas} |`),
-    `| real | VACÍO (HUECO: las 20 conversaciones) | — |`,
+    ...(conjunto === 'ventas' ? [] : ['| real | VACÍO (HUECO: las 20 conversaciones) | — |']),
     `| **Total** | **${rep.passK} de ${rep.casos}** | **${rep.daninas}** |`,
     '',
     '| Métrica | Valor |',
@@ -99,6 +105,7 @@ if (import.meta.main) {
     `| Tiempo interno (n=${rep.internos.n}) | p50 ${rep.internos.p50 ?? '—'} ms · p90 ${rep.internos.p90 ?? '—'} ms · p95 ${rep.internos.p95 ?? '—'} ms${cli ? ' — **NO apto para fijar corte_1** (incluye el arranque del CLI por llamado)' : ''} |`,
     cli ? '| corte_1 | se queda en 5 s; se recalibra con las trazas de producción |' : `| corte_1 propuesto | ${rep.corte1.corte1Ms} ms${rep.corte1.pasaTecho ? ' (el p95 pasa de 8 s)' : ''} |`,
     `| Turnos con aviso rf.demora | ${rep.demoras} de ${rep.turnosModelo} turnos con modelo |`,
+    `| Tokens y costo | entrada ${rep.uso.entrada} · salida ${rep.uso.salida} · caché ${rep.uso.cache} · ${rep.uso.llamados} llamados · ${rep.uso.costo_usd === null ? `sin precio (${rep.uso.sin_precio.join(', ')})` : `${rep.uso.costo_usd.toFixed(4)} USD`}${cli ? ' (por el CLI: no es lo que cobra la API)' : ''} |`,
     `| Pasos a persona | ${Object.entries(rep.personasPorMotivo).map(([m, n]) => `${m} ${n}`).join(' · ') || '—'} |`,
     '',
     ...(cli ? [
@@ -128,5 +135,5 @@ if (import.meta.main) {
     modelo: seco ? 'seco' : nombreModelo, seco, resultados: rs.map((r) => ({ id: r.id, pasa: r.pasa, daninas: r.corridas.reduce((n, x) => n + x.daninas.length, 0) })),
   });
   await Deno.writeTextFile(`${salida}/banco.json`, JSON.stringify(omitidos.length ? { ...banco, omitidos_solo_seco: omitidos } : banco, null, 2));
-  console.log(JSON.stringify({ etiqueta, passK: rep.passK, casos: rep.casos, daninas: rep.daninas, internos: rep.internos, porConjunto: rep.porConjunto }));
+  console.log(JSON.stringify({ etiqueta, passK: rep.passK, casos: rep.casos, daninas: rep.daninas, costo_usd: rep.uso.costo_usd, internos: rep.internos, porConjunto: rep.porConjunto }));
 }

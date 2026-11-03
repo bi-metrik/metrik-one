@@ -18,7 +18,7 @@
 import { direccionNoEscrita } from '../ventas/direccion-ventas.ts';
 import { bloqueSiempre } from '../../reglamento.ts';
 import { respaldoDe, verificar } from '../../verificador.ts';
-import type { Reglamento } from '../../tipos.ts';
+import type { Reglamento, UsoLlamado } from '../../tipos.ts';
 import { textoFijo } from '../autorizacion.ts';
 import { dichoTras, textoTrasAutorizacion } from '../dominio.ts';
 import { enlacesFueraDeLista } from '../enlaces.ts';
@@ -56,6 +56,8 @@ export interface ResultadoCasoPublico {
   /** Turnos con aviso `rf.demora`. */
   demoras: number;
   turnosModelo: number;
+  /** Los llamados al modelo de cada turno (uno por turno del modelo): de aquí sale el costo de la corrida. */
+  usos: UsoLlamado[][];
   personas: string[];
   /** La conversación como la vio el cliente (y las notas privadas), para leer los casos que fallan. */
   transcripcion: string[];
@@ -154,6 +156,7 @@ export function calificarPublico(p: {
     daninas, atajadas, internos,
     demoras: trazas.filter((t) => t.demora).length,
     turnosModelo: trazas.filter((t) => t.tipo === 'modelo').length,
+    usos: trazas.filter((t) => t.tipo === 'modelo').map((t) => t.uso ?? []),
     personas: trazas.map((t) => t.persona?.motivo).filter((m): m is NonNullable<typeof m> => !!m),
     transcripcion: transcripcionDe(e),
     error: p.error,
