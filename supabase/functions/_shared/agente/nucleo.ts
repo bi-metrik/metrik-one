@@ -184,14 +184,18 @@ export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<P
 async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversacion[] | 'error' | null = null): Promise<string[]> {
   const vig = vigenteDe(e.filas, deps.dominio);
   const delDominio = [...((await deps.dominio.estado?.(e.ctx)) ?? []), ...lineasRegistros(regs)];
+  // Lo que el toque escribió, con sus datos (arnés 2026-11-03, b-borrados-dos-pdf: con «✅ Gasto de $6.880 registrado» a
+  // secas y un G2 borrado de $6.880 en el Estado, Haiku volvía a proponer la ida en vez de seguir con la vuelta).
+  const hecha = e.tras?.huella ? propuestas(e.filas).find((x) => x.p.huella === e.tras!.huella)?.p : undefined;
+  const queSeHizo = hecha ? ` Lo que se registró: ${hecha.resumen.split('\n').filter((l) => !/^¿.*\?$/.test(l.trim())).join(' · ')}.` : '';
   return [
     `Ahora: ${fechaBogota(deps.ahoraMs())} (Bogotá).`,
     `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
     `Propuesta pendiente: ${vig ? `${vig.resumen.replace(/\n/g, ' · ')} — espera su toque` : 'ninguna'}.`,
     ...delDominio,
     ...(e.tras ? [
-      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')} La confirmación ya la escribe el sistema: no la repitas.`,
-      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si no queda nada, llama \`${TERMINAR}\`.`,
+      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')}${queSeHizo} La confirmación ya la escribe el sistema: no la repitas, y no vuelvas a proponer eso.`,
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
     ] : []),
   ];
 }

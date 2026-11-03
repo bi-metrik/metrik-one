@@ -64,6 +64,9 @@ describe('dos PDF y gastos borrados en el historial (b-borrados-dos-pdf)', () =>
     expect(tras[0].texto).toContain('💰 Gasto de $6.880')
     expect(tras[0].texto).not.toContain('💰 Gasto de $27.000')
     expect(rechazo).toContain('eso es justo lo que se acaba de registrar')
+    // El turno de seguir dice QUÉ se registró (con su soporte), no solo el monto.
+    expect(textoDelTurno(modelo.pedidos.at(-1)!)).toContain('Lo que se registró: 💰 Gasto de $27.000 · Transporte y movilidad · 📁 V1 26 5')
+    expect(textoDelTurno(modelo.pedidos.at(-1)!)).toContain('no vuelvas a proponer eso')
     expect(e.trazas().at(-1)!.candados).toEqual([expect.objectContaining({ candado: 'repite_lo_hecho' })])
 
     await e.toca('Registrar')
