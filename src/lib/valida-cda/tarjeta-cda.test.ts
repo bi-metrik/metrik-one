@@ -213,11 +213,11 @@ describe('un cobro que no pasó: el reintento y la fecha de la pausa', () => {
     )
   })
 
-  it('rechazado el día 3: ya no hay reintento; un período desde la vigencia se pausa a los 6 días del vencimiento', () => {
+  it('rechazado el día 3: ya no hay reintento; un período desde la vigencia se pausa a los 6 días de su renovación', () => {
     const f = fechasDelFallo({ cuota: CUOTAS[3], transicion: '2026-12-01', hoy: '2026-12-26' })
-    expect(f).toEqual({ reintento: null, pausaDesde: '2027-01-02' })
+    expect(f).toEqual({ reintento: null, pausaDesde: '2026-12-29' })
     expect(textoFalloTarjeta({ ultimos4: null, fechas: f })).toBe(
-      'No pudimos cobrar a la tarjeta que registraste. Puedes pagar con el enlace de pago. Si no se paga, las consultas nuevas se pausan desde el 2 de enero.',
+      'No pudimos cobrar a la tarjeta que registraste. Puedes pagar con el enlace de pago. Si no se paga, las consultas nuevas se pausan desde el 29 de diciembre.',
     )
   })
 })
