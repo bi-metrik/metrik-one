@@ -2,6 +2,8 @@
 
 ## Project memories
 
+- ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408 paquete=ranura+vuelo, hotel=opción; #1407 botón sin actualizarBloqueData; selector en pausa
+
 - ⚠️ [Vacacional/Negocios y nombre del PDF (3-nov)](project_vacacional_nombre_pdf.md) — option_labels aditivo; SQL de config SIN aplicar; nombre para todos
 - ⚠️⚠️ [Pago automático tarjeta CDA (30-oct)](project_valida_cda_tarjeta_epayco.md) — 20261030220000 SIN aplicar; día 0 = inicio del período; quien debe no renueva
 - ⚠️⚠️ [SOE-035: RC-3 en solo_iva y sobrepagos (30-oct)](project_soe035_rc3_solo_iva.md) — 20261030163500 SIN aplicar; comparar viewdef de prod; <= $1.000 en a_tarifa = sin_tarifa

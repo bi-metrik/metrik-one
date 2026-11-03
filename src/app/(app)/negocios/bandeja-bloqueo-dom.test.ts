@@ -264,5 +264,66 @@ describe('«Marcar el viaje como Bloqueo» desde la tarjeta (2026-11-03)', () =>
     await tarjetaSinBloqueo(null)
     expect(textoDe(contenedor)).toContain('En «Condiciones del viaje» pon Modalidad: Bloqueo')
     expect(contenedor.querySelector('[data-marcar-bloqueo]')).toBeNull()
+    })
+
+  it('con el armado del servidor, la captura marcada va por `armar` (pegarEnBloqueo), aun sin paquetes', async () => {
+    await tarjetaSinBloqueo(async () => ({ ok: true }))
+    await clic(contenedor.querySelector('[data-marcar-bloqueo]')!)
+    await esperar()
+    const armadas: string[] = []
+    let creados = 0
+    await render({
+      bloqueo: {
+        registro: new Registro(), paquetes: [], abrir: () => {},
+        crearPaquete: async () => { creados += 1; return { ok: true as const, itemId: 'x' } },
+        armar: async d => { armadas.push(d); return { ok: true as const, mensaje: 'listo' } },
+      },
+      marcarBloqueo: null,
+    })
+    await esperar(120)
+    expect(armadas).toHaveLength(1)
+    expect(armadas[0]).toMatch(/^data:image/)
+    expect(creados).toBe(0)
+  })
+})
+
+describe('el pegado arma los paquetes en el servidor (SAN ANDRÉS, 2026-11-03)', () => {
+  async function montarConArmar(armar: (d: string) => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>) {
+    const registro = new Registro()
+    await act(async () => {
+      root!.render(React.createElement(Bandeja, {
+        cotizacionId: 'cot-7', items: [], composicion: { adultos: 3, ninos: 0, infantes: 0 }, porPasos: true,
+        bloqueo: { registro, paquetes: [], abrir: () => {}, crearPaquete: async () => ({ ok: true as const, itemId: 'x' }), armar },
+      }))
+    })
+  }
+
+  it('cada Ctrl+V va al servidor, uno a la vez y en orden; no pregunta a qué paquete va ni usa la lectura genérica', async () => {
+    const orden: string[] = []
+    let enCurso = 0
+    let maximo = 0
+    await montarConArmar(async () => {
+      enCurso += 1
+      maximo = Math.max(maximo, enCurso)
+      await new Promise(r => setTimeout(r, 80))
+      orden.push(`p${orden.length + 1}`)
+      enCurso -= 1
+      return { ok: true, mensaje: 'listo' }
+    })
+    await pegar()
+    await pegar()
+    await pegar()
+    await esperar(400)
+    expect(orden).toEqual(['p1', 'p2', 'p3'])
+    expect(maximo).toBe(1)
+    expect(contenedor.querySelector('[data-por-ubicar-bloqueo]')).toBeNull()
+    expect(envios.some(u => u.includes('detectar-captura') || u.includes('leer-captura'))).toBe(false)
+  })
+
+  it('lo que no es hotel ni vuelo vuelve a la lectura de siempre', async () => {
+    await montarConArmar(async () => ({ ok: false, error: 'No se reconoce', otroServicio: true }))
+    await pegar()
+    await esperar(80)
+    expect(envios.some(u => u.includes('detectar-captura'))).toBe(true)
   })
 })
