@@ -30,7 +30,7 @@ export function lineasRegistros(regs: RegistroConversacion[] | 'error' | null): 
   return [
     `Registros hechos en esta conversación, revisados en la base en este turno (el historial NO prueba que algo exista; esto sí): ${vigentes.length ? vigentes.map((r) => `${r.alias} · ${r.que}`).join(' | ') : 'ninguno sigue en la base'}.`,
     ...(borrados.length ? [
-      `YA NO EXISTEN en la base (los borraron después): ${borrados.map((r) => `${r.alias} (${r.que})`).join(', ')}. Aunque la conversación diga que quedaron registrados, no existen: no digas que están registrados, no los corrijas ni les adjuntes nada. Si te piden registrarlos otra vez, propónlos como registros NUEVOS (con lo que traigan sus soportes).`,
+      `YA NO EXISTEN en la base (los borraron después): ${borrados.map((r) => `${r.alias} (${r.que})`).join(', ')}. Aunque la conversación diga que quedaron registrados, no existen: no digas que están registrados, no los corrijas ni les adjuntes nada. Registrar otra vez SOLO los que la persona señale: si mandó soportes (fotos o PDF) y dice «estos», son los de esos soportes, no los de esta lista; uno de esta lista sin soporte nuevo, solo si lo nombra (su alias, su monto o lo que fue). Si no queda claro cuáles, pregunta antes de proponer. Los que sí, como registros NUEVOS (con lo que traigan sus soportes).`,
     ] : []),
   ];
 }

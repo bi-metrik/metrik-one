@@ -1217,6 +1217,8 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       }
       return null;
     },
+    // El aviso `parecido` no cuenta: tras registrar un gasto, la misma propuesta vuelve con el aviso apuntando a él.
+    mismoHecho: (a, b) => a.accion === b.accion && JSON.stringify({ ...a.datos, parecido: null }) === JSON.stringify({ ...b.datos, parecido: null }),
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',

@@ -56,7 +56,7 @@ export interface EntradaTurno {
   nuevos: FilaConversacion[];
   ctx: ContextoDominio;
   /** El turno sigue a un hecho que la persona acaba de confirmar con un toque (`seguirTrasToque`). */
-  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito' };
+  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito'; huella?: string };
 }
 
 export interface SalidaTurno {
@@ -460,6 +460,15 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(p.error);
         continue;
       }
+      // Tras un hecho, la persona no dijo nada nuevo: proponer otra vez lo que su toque acaba de escribir es un eco, no una
+      // intención (arnés con Haiku, 2026-10-31, b-borrados-dos-pdf: «Sí» registró el gasto de $27.000 y en el mismo mensaje
+      // salió la misma propuesta; el toque siguiente lo registró dos veces). Si de verdad eran dos iguales, lo dice en su turno.
+      const hecha = e.tras?.huella ? propuestas(e.filas).find((x) => x.p.huella === e.tras!.huella)?.p : undefined;
+      if (hecha && (d.mismoHecho ? d.mismoHecho(hecha, p.propuesta) : mismaPropuesta(hecha, p.propuesta))) {
+        traza.candados!.push({ candado: 'repite_lo_hecho', detalle: `${accion}: igual a la recién ejecutada ${hecha.huella}` });
+        devolver('No se envió: eso es justo lo que se acaba de registrar con el toque (la confirmación va arriba). No lo propongas otra vez: sigue con lo que falta (p. ej. el siguiente soporte) o llama `terminar`.');
+        continue;
+      }
       // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
       let arriba: string | null = null;
       let texto = String(args.texto ?? '').trim();
@@ -691,7 +700,7 @@ export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: S
   const conHecho = e.nuevos.at(-1)?.id;
   const filas = e.filas.map((f) => (f.id === conHecho ? { ...f, traza: toque.traza } : f));
   const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
-  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen } });
+  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen, huella: ej.huella } });
   return {
     salida: m.salida,
     traza: {
