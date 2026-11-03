@@ -360,6 +360,12 @@ export interface BloqueoDeBandeja {
   /** Despliega la opción del paquete (la tarjeta se monta y recibe lo que espera en su buzón). */
   abrir: (itemId: string) => void
   crearPaquete: () => Promise<{ ok: true; itemId: string } | { ok: false; error: string }>
+  /**
+   * El pegado ARMA los paquetes (2026-11-03, `bloqueo-armado.ts`): el servidor lee el pantallazo y lo
+   * pone en el paquete que toca (vuelo → paquete; hotel → opción del paquete vigente). Con él, el pegado
+   * no pregunta a qué paquete va. `otroServicio`: no es hotel ni vuelo, va a la lectura de siempre.
+   */
+  armar?: (dataUrl: string) => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>
 }
 
 let contador = 0
@@ -572,9 +578,34 @@ export default function BandejaCapturas({
   const bloqueoVivo = useRef(bloqueo)
   useEffect(() => { bloqueoVivo.current = bloqueo }, [bloqueo])
   const [porUbicar, setPorUbicar] = useState<{ id: string; dataUrl: string }[]>([])
+  const agregarDesdeDataUrlVivo = useRef(agregarDesdeDataUrl)
+  useEffect(() => { agregarDesdeDataUrlVivo.current = agregarDesdeDataUrl }, [agregarDesdeDataUrl])
+  // Los pegados que el servidor arma, UNO A LA VEZ: dos a la vez verían el mismo paquete vigente.
+  const colaArmado = useRef<Promise<void>>(Promise.resolve())
+  const [armando, setArmando] = useState(0)
+  const armarEnCola = useCallback((armar: NonNullable<BloqueoDeBandeja['armar']>, dataUrl: string) => {
+    setArmando(n => n + 1)
+    colaArmado.current = colaArmado.current.then(async () => {
+      try {
+        const r = await armar(dataUrl)
+        if (r.ok) toast.success(r.mensaje)
+        else if (r.otroServicio) agregarDesdeDataUrlVivo.current(dataUrl)
+        else toast.error(r.error)
+      } catch {
+        toast.error('No se pudo poner el pantallazo en el paquete. Vuelve a pegarlo.')
+      } finally {
+        setArmando(n => n - 1)
+      }
+    })
+  }, [])
   const alPaquete = useCallback((dataUrl: string): boolean => {
     const b = bloqueoVivo.current
     if (!b) return false
+    if (b.armar) {
+      armarEnCola(b.armar, dataUrl)
+      raiz.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+      return true
+    }
     const d = b.registro.destino()
     if (d.a === 'paquete') {
       b.registro.entregar(d.itemId, dataUrl, d.casilla)
@@ -583,7 +614,7 @@ export default function BandejaCapturas({
     setPorUbicar(xs => [{ id: nuevoId(), dataUrl }, ...xs])
     raiz.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
     return true
-  }, [])
+  }, [armarEnCola])
 
   /**
    * `alPaqueteSiBloqueo`: solo el Ctrl+V de la ventana va al paquete (Vera, 2026-10-29). Lo que
@@ -1246,6 +1277,12 @@ export default function BandejaCapturas({
             )
           })}
         </ul>
+      )}
+      {armando > 0 && (
+        <p className="m-0 flex items-center gap-2 rounded-lg border border-[#D9E7E0] bg-[#F3F8F5] p-2 text-[13px]" data-armando-paquete>
+          <span className={SPIN} aria-hidden />
+          {armando === 1 ? 'Poniendo el pantallazo en el paquete…' : `Poniendo ${armando} pantallazos en los paquetes…`}
+        </p>
       )}
       {porUbicar.length > 0 && bloqueo && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-por-ubicar-bloqueo>
