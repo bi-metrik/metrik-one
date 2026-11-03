@@ -70,6 +70,9 @@ describe('dos PDF y gastos borrados en el historial (b-borrados-dos-pdf)', () =>
     expect(e.trazas().at(-1)!.candados).toEqual([expect.objectContaining({ candado: 'repite_lo_hecho' })])
 
     await e.toca('Registrar')
+    // Con la ida ya registrada otra vez, el Estado lo dice junto a su borrado (G2), para que no la vuelva a proponer.
+    expect(textoDelTurno(modelo.pedidos.at(-1)!)).toMatch(/G2 \(gasto de \$6\.880 · V1 26 5[^)]*; ya se volvió a registrar: G\d+\)/)
+    expect(textoDelTurno(modelo.pedidos.at(-1)!)).not.toMatch(/G3 \([^)]*ya se volvió a registrar/)
     await e.toca('Registrar')
     expect(e.puerto.gastos.map((g) => [g.monto, g.soporte])).toEqual([[27000, false], [6880, true], [20389, true]])
     expect(modelo.restantes()).toBe(0)
