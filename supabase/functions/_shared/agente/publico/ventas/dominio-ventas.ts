@@ -59,6 +59,15 @@ export const VER_COMPLEMENTOS = 'ver_complementos';
 export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO, CONFIRMAR_COMPRA];
 
 /**
+ * ¿El último mensaje del cliente fue el «sí» a la autorización de datos? Ese «sí» es una respuesta entendida, nunca
+ * motivo de `no_entiende` (Dimpro, 3-nov: autorizó y el modelo lo pasó a persona por no entender). Pura.
+ */
+export function acabaDeAutorizar(filas: FilaPublica[]): boolean {
+  const u = filas.filter((f) => f.direccion === 'entrante').at(-1);
+  return u?.traza?.autorizacion?.tipo === 'general' && u.traza.autorizacion.respuesta === 'si';
+}
+
+/**
  * El producto del que se viene hablando: el único código que nombró el último mensaje del bot que nombró alguno (sin las
  * filas de fotos). Null si nombró varios o ninguno. Mauricio, 30-oct: «repite todo el tiempo la referencia y el nombre». Pura.
  */
@@ -519,7 +528,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const g = estadoAutorizacion(filas, 'general');
       const pasados = motivosYaPasados(filas);
       const compras = comprasConfirmadas(filas);
-      const lineaG = g.estado === 'si' ? 'sí (puedes pedir nombre, celular y dirección)'
+      const lineaG = g.estado === 'si' ? 'sí (sigue con lo que falte del pedido: cantidad y entrega si no las ha dicho, luego nombre, celular y dirección si es despacho)'
         : g.estado === 'no' ? 'dijo que no: no tomes datos personales; sigue informando y ofrece una persona'
           : g.estado === 'pedida' ? 'pedida, sin respuesta: no pidas datos personales'
             : 'no pedida: antes de pedir nombre, celular o dirección, llama respuesta_fija rf.autorizacion';
@@ -549,6 +558,9 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         if (!MOTIVOS_VENTAS.includes(motivo)) return { ok: false, error: `Motivo desconocido. Usa uno de: ${MOTIVOS_VENTAS.join(', ')}.`, candado: 'motivo_desconocido' };
         if (!REPETIBLES.includes(motivo) && motivosYaPasados(filas).includes(motivo)) {
           return { ok: false, error: `Esta conversación ya pasó a persona por «${motivo}»: atiéndela tú.`, candado: 'motivo_repetido' };
+        }
+        if (motivo === 'no_entiende' && acabaDeAutorizar(filas)) {
+          return { ok: false, error: 'Su «sí» responde la autorización de datos: sí lo entendiste. Sigue con lo que falte del pedido (cantidad y entrega si no las ha dicho; luego nombre, celular y dirección si es despacho).', candado: 'no_entiende_tras_autorizar' };
         }
         const texto = (motivo === 'duda_abierta' ? respuestaFija(r, 'rf.duda_abierta') : '') || respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
         if (motivo === 'producto_no_disponible') {
