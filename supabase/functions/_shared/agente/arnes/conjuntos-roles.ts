@@ -101,7 +101,10 @@ export const CASOS_MANO_DERECHA: CasoArnes[] = [
   {
     ...comoDueno, id: 'md-yo', conjunto: 1, sinClienteNuevo: true, viajesPermitidos: [],
     titulo: '«lo llevo yo» del dueño: el viaje es suyo',
-    pasos: [{ escribe: 'ábreme un viaje nuevo para Martín Mora a Madrid, lo llevo yo' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    // A un destino que Martín no tiene abierto. Con «a Madrid» (tiene M1 26 5 · MADRID) el caso medía otra cosa: si abre
+    // otro viaje al mismo destino sin preguntar. Desde #1383 Haiku pregunta «¿es ese mismo o uno nuevo?» (25 de 45 en
+    // las corridas del 3-nov) y el caso fallaba sin que el responsable tuviera que ver.
+    pasos: [{ escribe: 'ábreme un viaje nuevo para Martín Mora a Lisboa, lo llevo yo' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
     esperado: (p, t) => viajeCon(p, 'c-martin', 'st-dueno', t),
   },
 ];
@@ -137,7 +140,8 @@ export const CASOS_ASESORA: CasoArnes[] = [
   {
     ...comoAsesora, id: 'av-yo', conjunto: 1, sinClienteNuevo: true, viajesPermitidos: [],
     titulo: '«la llevo yo» de la asesora: el viaje es suyo',
-    pasos: [{ escribe: 'viaje nuevo para Martín Mora a Madrid, la llevo yo' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
+    // A un destino que Martín no tiene abierto (ver md-yo).
+    pasos: [{ escribe: 'viaje nuevo para Martín Mora a Lisboa, la llevo yo' }, { toca: 'Sí, ábrelo', oEscribe: 'sí' }],
     esperado: (p, t) => viajeCon(p, 'c-martin', 'st-paula', t),
   },
 ];
