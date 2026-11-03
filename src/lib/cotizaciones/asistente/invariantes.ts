@@ -93,6 +93,10 @@ export function validarBorrador(b: BorradorCotizacion, viajeros: Viajeros): Vali
     for (const p of h.precios) {
       if (!Number.isInteger(p.precioPorPersona) || p.precioPorPersona <= 0) error(c, `Precio por persona inválido en ${p.acomodacion}: ${p.precioPorPersona}.`)
     }
+    // Lo que lee el cliente no lleva códigos del operador («(FULL)», «(P.A.M.)», «ATN 1988-P»).
+    for (const [k, t] of [['habitacion', h.habitacion], ['regimen', h.regimen], ['zona', h.zona ?? '']] as const) {
+      if (/\([A-Z.]{2,}\)|\bATN\b/.test(t)) error(`${c}.${k}`, `Lleva un código del operador: «${t}».`)
+    }
     const total = totalDelHotel(h)
     if (total === null || total <= 0) {
       error(c, 'No se pudo calcular el total: falta un precio.')

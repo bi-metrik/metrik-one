@@ -67,6 +67,10 @@ describe('invariantes del borrador', () => {
     expect(errores(conDuda)).toEqual([])
   })
 
+  it('un código del operador en lo que lee el cliente es error', () => {
+    expect(errores(borrador([hotel({ regimen: '(FULL)' })])).join()).toMatch(/código del operador/)
+  })
+
   it('dos hoteles en la misma versión, o sin Recomendada, es error', () => {
     expect(errores(borrador([hotel({}), hotel({ pantallazo: 3 })])).join()).toMatch(/Dos hoteles/)
     expect(errores(borrador([hotel({ version: 'Económica' })])).join()).toMatch(/No hay versión Recomendada/)
