@@ -9,7 +9,7 @@ import { productoEnCurso } from './dominio-ventas'
 import { partirSugerencias, planDeEnvios, separarCierre } from './partir-ventas'
 import type { FotoDelTurno } from './fotos-ventas'
 import { direccionNoEscrita, piezasDireccion } from './direccion-ventas'
-import { complementosDe, fichaComplementos, mapaComplementos } from './complementos-ventas'
+import { complementosDe, fichaComplementos, mapaComplementos, opcionesSinMapa } from './complementos-ventas'
 import type { ProductoVenta } from './catalogo-ventas'
 import { REGLAMENTO_DIMPRO } from './reglamento-dimpro'
 import { CLAVES_RONDA_3, TEXTOS_RONDA_3, WORKSPACE_DIMPRO, actualizacionSqlDimpro, complementosSqlDimpro, semillaSqlDimpro } from './semilla-sql-dimpro'
@@ -153,6 +153,16 @@ describe('venta cruzada: el mapa', () => {
     expect(complementosDe(mapa, 'MP-38', catalogo, 1).length).toBe(1)
     expect(complementosDe(mapa, 'MP-17', catalogo)).toEqual([])
     expect(mapaComplementos({ fichas: [] }).size).toBe(0)
+  })
+  it('sin complementos en el mapa: opciones para el modelo, primero las relacionadas, luego la marca (Mauricio, 3-nov)', () => {
+    const m = (codigo: string, marca: string | null): ProductoVenta => ({ ...p(codigo), marca })
+    // MP-62 (batería) es complemento de MP-04, que también lleva MP-63; MP-73 es de su marca; MP-80 no tiene relación.
+    const cat = [m('MP-80', null), m('MP-73', 'Dongcheng'), m('MP-62', 'Dongcheng'), m('MP-63', null), m('MP-04', 'Dongcheng')]
+    const mp = mapaComplementos({ fichas: [fichaComplementos({ 'MP-04': [{ codigo: 'MP-62', razon: 'batería' }, { codigo: 'MP-63', razon: 'respirador' }] }, 'prueba')] })
+    expect(opcionesSinMapa(mp, 'MP-62', cat).map((x) => x.codigo)).toEqual(['MP-63', 'MP-04', 'MP-73', 'MP-80'])
+    expect(opcionesSinMapa(mp, 'MP-62', cat, 2).map((x) => x.codigo)).toEqual(['MP-63', 'MP-04'])
+    expect(opcionesSinMapa(mp, 'MP-62', [m('MP-62', 'Dongcheng')])).toEqual([])
+    expect(opcionesSinMapa(mp, 'sin código', cat)).toEqual([])
   })
   it('el generador rechaza un mapa con entradas sin razón', () => {
     expect(() => complementosSqlDimpro({ 'MP-38': [{ codigo: 'MP-30', razon: '' }] }, 'x')).toThrow(/sin código o sin razón/)
