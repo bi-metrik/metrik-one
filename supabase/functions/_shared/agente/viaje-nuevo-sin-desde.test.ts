@@ -13,7 +13,7 @@ import { modeloGuionado } from './modelo-guionado'
  * Datos INVENTADOS. Los modelos son guiones: ninguna llamada a un modelo real.
  */
 
-const PEDIDO = 'Nueva solicitud, dos adultos a Curazao entre el 21 de junio y el 4 de julio de 2027, hoteles de 3 o 4 estrellas'
+const PEDIDO = 'Nueva solicitud, dos adultos a Curazao entre el 21 de junio y el 4 de julio de 2027, hoteles de 3 o 4 estrellas, la llevo yo'
 const DATOS_CLIENTE = 'Es Marta Rincón con celular 3155550142'
 const REF = 'Marta Rincón (cel. …0142)'
 

@@ -36,7 +36,7 @@ describe('calificar', () => {
       ]),
       contactos: caso.contactos, viajes: caso.viajes,
     })
-    await e.escribe('Quiero cotizar un nuevo viaje para Martín Mora')
+    await e.escribe('Quiero cotizar un nuevo viaje para Martín Mora, la llevo yo')
     await e.escribe('No, pero abramos uno nuevo a San Andrés')
     await e.toca('Sí')
     const r = calificar(caso, e.pasos, e.puerto, e.almacen.trazas(), [])
@@ -67,7 +67,7 @@ describe('calificar', () => {
       ]),
       contactos: caso.contactos, viajes: caso.viajes,
     })
-    await e.escribe('Clienta nueva: Sofia Rincon 3105558812, quiere ir a Medellin')
+    await e.escribe('Clienta nueva: Sofia Rincon 3105558812, quiere ir a Medellin, la llevo yo')
     await e.toca('Crear')
     await e.toca('Sí, ábrelo')
     expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['cliente', 'viaje'])

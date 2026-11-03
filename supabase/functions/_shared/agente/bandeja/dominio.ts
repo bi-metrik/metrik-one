@@ -293,6 +293,33 @@ export function resolverResponsable(equipo: ReadonlyArray<MiembroEquipo>, ref: s
   return iguales.length > 1 ? 'varias' : null;
 }
 
+/** Palabras con las que quien escribe se asigna el viaje («la llevo yo», «es mío»). */
+const RE_YO = /(?<![\p{L}\d])(yo|llevo|mio|mia)(?![\p{L}\d])/u;
+
+/** Las palabras de un texto (sin tildes ni mayúsculas) de 3 letras o más. */
+const palabras = (s: string): string[] => normal(s).split(/[^\p{L}\d]+/u).filter((w) => w.length >= 3);
+
+/** Las palabras del texto que nombran a la persona: su nombre o apellido, o el comienzo de uno («Dani», «Ale»). */
+function nombrada(texto: string, m: MiembroEquipo): Set<string> {
+  const suyas = palabras(m.nombre);
+  return new Set(palabras(texto).filter((w) => suyas.some((s) => s.startsWith(w))));
+}
+
+/**
+ * ¿El mensaje que el modelo citó en `dicho_en` dice que el viaje lo lleva `m`? Sí, si la nombra (nombre, apellido o el
+ * comienzo de uno; un toque trae su nombre entero) y ninguna otra persona del equipo queda nombrada con las mismas
+ * palabras, o si `m` es quien escribe y el mensaje dice «yo». No interpreta qué quiso decir el comercial (eso lo hizo el
+ * modelo al elegir): solo exige que la elección tenga dónde apoyarse. Arnés del 2026-11-03: Haiku citaba el pedido
+ * («Necesito cotizar Punta Cana para Camila Prieto…», r-cliente-nuevo) para proponer a quien escribe, y «lo lleva
+ * Daniela» para proponer a una de las dos Danielas (r-ambiguo). Pura.
+ */
+export function responsableDicho(texto: string, m: MiembroEquipo, equipo: ReadonlyArray<MiembroEquipo>): boolean {
+  if (m.esQuienEscribe && RE_YO.test(normal(texto))) return true;
+  const suyas = nombrada(texto, m);
+  if (!suyas.size) return false;
+  return !equipo.some((o) => o.id !== m.id && [...suyas].every((w) => nombrada(texto, o).has(w)));
+}
+
 /** El equipo como lo ven el modelo y el comercial: los nombres, en una línea. Pura. */
 export function nombresDelEquipo(equipo: ReadonlyArray<MiembroEquipo>): string {
   return equipo.map((m) => m.nombre).join(' · ');
@@ -594,6 +621,12 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
     const dicho = filaDesde(ctx.conversacion, dichoEn);
     if (!dicho || dicho === 'invalida') {
       return { ok: false, error: `\`dicho_en\` tiene que ser el número (#n) del mensaje, audio o toque del comercial donde dijo quién lleva este viaje. Si no lo ha dicho, no propongas: pregúntale con \`responder\`, «¿Quién lleva este viaje?», con estas opciones: ${lista}.`, candado: 'falta_responsable' };
+    }
+    // Ese mensaje tiene que nombrar a la persona (o decir «yo»), y de una sola forma: el código no lee a quién quiso
+    // decir, solo que lo dijo (arnés 2026-11-03: el pedido citado como si eligiera a quien escribe; «Daniela» con dos).
+    const fila = ctx.conversacion.find((f) => f.id === dicho.id)!;
+    if (!delEquipo(fila) || !responsableDicho(fila.texto ?? '', m, eq)) {
+      return { ok: false, error: `En el #${String(dichoEn).replace(/^#/, '')} el comercial no dice que el viaje lo lleve ${m.nombre}${delEquipo(fila) && nombrada(fila.texto ?? '', m).size ? ' (ese nombre puede ser más de una persona)' : ''}. Pedir el viaje no es elegir quién lo lleva. No propongas todavía: pregúntale con \`responder\`, «¿Quién lleva este viaje?», con estas opciones: ${lista}. No lo elijas tú.`, candado: 'falta_responsable' };
     }
     return { ok: true, m };
   };

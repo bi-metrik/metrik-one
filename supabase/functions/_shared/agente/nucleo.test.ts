@@ -22,7 +22,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
 
-    const t1 = await e.escribe('Quiero cotizar un nuevo viaje para Martín Mora')
+    const t1 = await e.escribe('Quiero cotizar un nuevo viaje para Martín Mora, la llevo yo')
     expect(t1).toEqual([{ tipo: 'texto', texto: 'Listo, viaje nuevo para Martin Mora, el que ya tenemos (cel. …7311). ¿A dónde quiere ir?' }])
     // La regla llegó con la herramienta, justo cuando hacía falta.
     const respuestaBuscar = modelo.pedidos[1].mensajes.at(-1)!.parts[0].functionResponse!.response as { reglas: string[] }
@@ -50,7 +50,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
       { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
+    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés, la llevo yo')
     await e.toca('Sí, ábrelo')
     const otra = await e.toca('Sí, ábrelo')
     expect(otra[0].texto).toBe('Eso ya quedó hecho.')
@@ -63,7 +63,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
       { name: 'proponer', args: { accion: 'viaje_nuevo', datos: { responsable: 'Carla Comercial', dicho_en: 1, cliente: ref, destino: 'San Andrés' } } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
+    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés, la llevo yo')
     const filas = await e.almacen.leer(e.deps.workspaceId, TEL_PRUEBA, '2000-01-01')
     const vig = propuestaVigente(filas)!
     const ctx = { workspaceId: e.deps.workspaceId, phone: TEL_PRUEBA, remitente: e.deps.remitente, conversacion: filas, resultadosPrevios: [] }
@@ -82,7 +82,7 @@ describe('Anexo B: viaje nuevo de un cliente que ya existe, con 2 mensajes y 1 t
       { name: 'responder', args: { tema: 'solicitud', texto: '¿Qué hago con la condición?' } },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés')
+    await e.escribe('abre un viaje nuevo de Martín Mora a San Andrés, la llevo yo')
     await e.escribe('sí, pero espérate')
     expect(e.puerto.escrituras).toEqual([])
     await e.escribe('Sí.')
@@ -211,7 +211,7 @@ describe('candados (§3.5)', () => {
       { falla: 'http 503' },
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
-    await e.escribe('viaje nuevo para Martín Mora')
+    await e.escribe('viaje nuevo para Martín Mora, la llevo yo')
     const r = await e.escribe('mmm espera, ¿cuántos viajes tiene?')
     expect(r[0].tipo).toBe('botones')
     expect(r[0].texto).toMatch(/^No pude revisarlo ahora/)

@@ -53,7 +53,7 @@ const CAMPOS: CampoEntendible[] = [
   { slug: 'requisitos_especiales', tipo: 'texto', label: 'Requisitos especiales', nivel: 'deseable', pregunta: '¿Algo especial?' },
 ] as CampoEntendible[]
 
-const M0 = 'Abre un viaje nuevo a Santa Marta para Lucía Barrera'
+const M0 = 'Abre un viaje nuevo a Santa Marta para Lucía Barrera, la llevo yo'
 const M1 = 'dime antes si tenemos algo abierto con Lucía Barrera'
 const M2 = 'No, pero este es nuevo a Santa Marta, entonces sí ábrelo.'
 const M3 = 'Son 4 noches, desde el 3 de diciembre para que viaje ella con su esposo y su hija de 1 año.'
