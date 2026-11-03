@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 
-import { escribirPrecioQueFalta } from '@/app/(app)/negocios/tarifa-pax-actions'
+import { escribirPrecioQueFalta, usarTotalDeHabitacion } from '@/app/(app)/negocios/tarifa-pax-actions'
 import { listaDeTipos } from '@/lib/cotizaciones/precio-que-falta'
 import type { TipoPasajero } from '@/lib/cotizaciones/tarifa-pasajero'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
@@ -22,12 +22,15 @@ export function PrecioQueFaltaPorPasos({
   nombre,
   tipos,
   moneda,
+  esHotel = false,
   onGuardado,
 }: {
   itemId: string
   nombre: string
   tipos: readonly TipoPasajero[]
   moneda: string
+  /** M7-1 / M9-2 · un hotel puede decir que el total es el de la habitación. */
+  esHotel?: boolean
   onGuardado: () => void
 }) {
   const [valores, setValores] = useState<Partial<Record<TipoPasajero, string>>>({})
@@ -44,6 +47,19 @@ export function PrecioQueFaltaPorPasos({
       }
       if (r.error) toast.warning(r.error)
       setValores(v => ({ ...v, [tipo]: '' }))
+      onGuardado()
+    } catch {
+      toast.error('No se pudo guardar: revisa la conexión y vuelve a intentarlo.')
+    } finally {
+      setGuardando(null)
+    }
+  }
+
+  const totalDeHabitacion = async () => {
+    setGuardando(tipos[0])
+    try {
+      const r = await usarTotalDeHabitacion(itemId, true)
+      if (!r.success) { toast.error(r.error ?? 'No se pudo guardar.'); return }
       onGuardado()
     } catch {
       toast.error('No se pudo guardar: revisa la conexión y vuelve a intentarlo.')
@@ -95,6 +111,19 @@ export function PrecioQueFaltaPorPasos({
             </div>
           )
         })}
+        {esHotel && (
+          <div className="flex flex-wrap items-center gap-2 text-[13px]" data-total-de-habitacion>
+            <span className="text-[#191713]">¿Es una sola habitación para todo el grupo, con precio por habitación?</span>
+            <button
+              type="button"
+              className="rounded-md border border-[#CFCAC0] bg-white px-2 py-0.5 text-[#191713] disabled:opacity-50"
+              disabled={guardando !== null}
+              onClick={() => void totalDeHabitacion()}
+            >
+              El total es de la habitación
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

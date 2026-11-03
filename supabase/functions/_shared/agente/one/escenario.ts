@@ -10,11 +10,17 @@ import type { ConfigAgente } from '../config.ts';
 import { atenderPendientes } from '../cola.ts';
 import type { DepsCola } from '../cola.ts';
 import { AlmacenMemoria, MensajeroMemoria, Reloj, nuevoId } from '../memoria.ts';
-import type { Dominio, FilaConversacion, Modelo, Reglamento, Salida, Traza } from '../tipos.ts';
+import type { Dominio, FilaConversacion, Modelo, Reglamento, RolTraza, Salida, Traza } from '../tipos.ts';
 import { dominioOne } from './dominio.ts';
+import { componerOne, funcionesDelCargo, reglamentoOneDelTurno } from './cargos.ts';
+import type { Composicion } from '../componer.ts';
+import type { FuncionPrendida } from '../funciones/tipos.ts';
+import { rolDeCargo } from '../roles.ts';
 import { PuertoOneMemoria } from './puerto-memoria.ts';
 import type { GastoMem, NegocioMem } from './puerto-memoria.ts';
 import { reglamentoOne } from './reglamento.ts';
+import { ESCALAMIENTO_METRIK, dominioPersona, escalamientoDe } from '../persona.ts';
+import type { FilaEscalamiento, PuertoEscalamientos } from '../persona.ts';
 import type { ArchivoAdjunto, Lector } from './lectura-adjunto.ts';
 
 export const WS_ONE_PRUEBA = '00000000-0000-4000-8000-0000000000e1';
@@ -35,6 +41,10 @@ export interface EscenarioOne {
   mensajero: MensajeroMemoria;
   puerto: PuertoOneMemoria;
   deps: DepsCola;
+  /** Lo que armó el componedor (las herramientas del cargo o del rol). Sin componer, null. */
+  composicion: Composicion | null;
+  /** Las filas de `asistente_escalamientos` que dejó la conversación (§4.2). */
+  escalamientos: FilaEscalamiento[];
   semilla(filas: Array<Partial<FilaConversacion> & Pick<FilaConversacion, 'direccion' | 'clase'>>): void;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Una foto (el recibo), con o sin pie de foto. `archivo`: los bytes que «están en Meta» (para el lector). */
@@ -66,12 +76,26 @@ export async function escenarioOne(p: {
   reloj?: () => number;
   /** El lector de soportes (en pruebas, uno guionado; en el arnés, el real). Sin él, los soportes no se leen. */
   lector?: Lector | null;
-  /** Otro puerto en memoria (el del modo obras) y el dominio armado sobre él. Sin esto, el dominio ONE de siempre. */
+  /** Otro puerto en memoria (el del modo obras) y el dominio armado sobre él. Sin esto, el dominio ONE de siempre.
+   * Con `dominio`, como el modo obras en producción (`wa-agente.ts`, `armarObras`): sin componedor ni paso a persona. */
   puerto?: PuertoOneMemoria;
   dominio?: (puerto: PuertoOneMemoria, ahora: () => number) => Dominio;
   guardaTexto?: (texto: string, herramientas: string[]) => string[];
   /** El teléfono del remitente (dos remitentes en el mismo workspace son dos escenarios). */
   phone?: string;
+  /**
+   * Las funciones del turno (un rol de la base, ya intersecadas con las prendidas). Sin ellas, las del cargo (`rol`,
+   * `cargos.ts`), como en producción sin roles.
+   */
+  funciones?: Array<string | FuncionPrendida>;
+  /** El rol para la traza (con `funciones`). */
+  rolTraza?: RolTraza;
+  /** El dominio ONE entero, sin componer (para probar el motor y sus candados de permiso). */
+  sinComponer?: boolean;
+  /** Sin el paso a una persona (`comun.persona`), como antes de §4.2. Por defecto va, como en producción. */
+  sinPersona?: boolean;
+  /** Dónde se escriben las filas de `asistente_escalamientos` (en pruebas, uno que falla). Por defecto, en memoria. */
+  escalamientos?: PuertoEscalamientos;
 }): Promise<EscenarioOne> {
   const reloj = new Reloj(Date.parse('2026-10-21T15:00:00Z'));
   const almacen = new AlmacenMemoria(reloj);
@@ -84,11 +108,24 @@ export async function escenarioOne(p: {
     if (f) f.media = structuredClone(media);
   };
   const rol = p.rol ?? 'owner';
+  const funciones = p.funciones ?? funcionesDelCargo(rol);
+  const claves = funciones.map((f) => (typeof f === 'string' ? f : f.funcion));
+  const base = p.reglamento ?? await reglamentoOne('Empresa de Prueba');
+  // Como en producción (`wa-agente.ts`): el motor ONE con los permisos de las funciones, recortado por el componedor.
+  const motor = dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null, empresa: 'Empresa de Prueba', ...(p.sinComponer ? {} : { funciones: claves }) });
+  // El paso a una persona (§4.2): la ficha `rol.escalamiento` del reglamento, o el WhatsApp de MeTRIK.
+  const escalamiento = escalamientoDe(base, ESCALAMIENTO_METRIK, () => {});
+  const propio = p.dominio ? p.dominio(puerto, reloj.ahora) : null;
+  const persona = propio || p.sinComponer || p.sinPersona ? null : dominioPersona({ config: escalamiento, empresa: 'Empresa de Prueba', base: motor });
+  const composicion = propio || p.sinComponer ? null : componerOne(motor, funciones, () => {}, persona);
+  const escalamientos: FilaEscalamiento[] = [];
+  const puertoEsc: PuertoEscalamientos = p.escalamientos ?? { registrar: async (f) => { escalamientos.push(f); } };
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: p.dominio ? p.dominio(puerto, reloj.ahora) : dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null }),
+    dominio: propio ?? (composicion ? composicion.dominio : motor),
     ...(p.guardaTexto ? { guardaTexto: p.guardaTexto } : {}),
-    reglamento: p.reglamento ?? await reglamentoOne('Empresa de Prueba'),
+    reglamento: composicion ? await reglamentoOneDelTurno(base, composicion) : base,
+    ...(composicion ? { rol: p.rolTraza ?? rolDeCargo(rol, claves) } : propio && p.rolTraza ? { rol: p.rolTraza } : {}),
     config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
     ahoraMs: reloj.ahora,
     reloj: p.reloj ?? (() => reloj.ahora()),
@@ -98,6 +135,9 @@ export async function escenarioOne(p: {
     nuevoId,
     // La ventana de los adjuntos espera en el reloj de la prueba, no en el de verdad.
     dormir: async (ms: number) => { reloj.avanzar(ms); },
+    ...(persona ? {
+      persona: { config: escalamiento, empresa: 'Empresa de Prueba', rolClave: (p.rolTraza ?? rolDeCargo(rol, claves)).clave, canal: 'wa_one' as const, escalamientos: puertoEsc },
+    } : {}),
   };
   const pasos: PasoOne[] = [];
   let fotos = 0;
@@ -117,7 +157,7 @@ export async function escenarioOne(p: {
     return ops.find((x) => x.titulo.toLowerCase() === t) ?? ops.find((x) => x.titulo.toLowerCase().startsWith(t)) ?? ops.find((x) => x.titulo.toLowerCase().includes(t));
   };
   return {
-    pasos, reloj, almacen, mensajero, puerto, deps,
+    pasos, reloj, almacen, mensajero, puerto, deps, composicion, escalamientos,
     semilla(filas) {
       for (const f of filas) {
         reloj.avanzar(10_000);

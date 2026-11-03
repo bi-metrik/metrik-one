@@ -20,7 +20,7 @@
  */
 
 import { useMemo, useState, useTransition } from 'react'
-import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban, Mail } from 'lucide-react'
+import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban, Mail, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import BusquedaInput from '@/components/busqueda-input'
 import { emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
@@ -181,8 +181,8 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
 
   function emitir() {
     startTransition(async () => {
-      // Sin valor: el recibo acusa la porción UPME que sale del reparto del pago. El
-      // servidor no acepta otra cifra (ver `emitirReciboDeNegocio`).
+      // Sin valor: el RC-3 acusa el comprobante UPME del negocio menos lo ya emitido, y el
+      // servidor lo recalcula con la misma cuenta (`planRc3DelNegocio`). No acepta otra cifra.
       const r = await emitirReciboDeNegocio(pago.negocio_id, {
         cobroId: pago.cobro_id,
         justificacionDuplicado: justificacion.trim() || undefined,
@@ -226,15 +226,39 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
         </div>
       </div>
 
+      {/* SOE-029: la cifra grande es la del RECIBO (el comprobante UPME del negocio menos lo
+          ya emitido, la misma cuenta del servidor), no lo que consignó el cliente. Con el total en grande, Tesorería creyó que el recibo salía por el
+          pago entero y dejó de emitirlos. Lo consignado queda en chico, solo si difiere. */}
       <span className="shrink-0 text-right">
-        <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
-          {fmtCOP(pago.monto)}
-        </span>
-        {/* En un pago mixto el recibo acusa solo la tarifa: se dice cuánto es, para que
-            nadie espere un recibo por el pago entero. */}
-        {pago.valor_upme != null && pago.valor_upme > 0 && Math.round(pago.valor_upme) !== Math.round(pago.monto) && (
-          <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
-            tarifa UPME {fmtCOP(pago.valor_upme)}
+        {pago.valor_upme != null && pago.valor_upme > 0 ? (
+          <>
+            <span className="block text-[10px]" style={{ color: 'var(--tinta-suave)' }}>Recibo por</span>
+            <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+              {fmtCOP(pago.valor_upme)}
+            </span>
+            {Math.round(pago.valor_upme) !== Math.round(pago.monto) && (
+              <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
+                consignó {fmtCOP(pago.monto)}
+              </span>
+            )}
+          </>
+        ) : pago.porcion_upme != null && pago.porcion_upme > 0 ? (
+          // SOE-035: el RC-3 está frenado. La cifra es la porción UPME que va a acusar, no el
+          // pago entero: con el pago en grande, Tesorería leyó que los valores no cuadraban.
+          <>
+            <span className="block text-[10px]" style={{ color: 'var(--tinta-suave)' }}>Tarifa UPME</span>
+            <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+              {fmtCOP(pago.porcion_upme)}
+            </span>
+            {Math.round(pago.porcion_upme) !== Math.round(pago.monto) && (
+              <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
+                consignó {fmtCOP(pago.monto)}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+            {fmtCOP(pago.monto)}
           </span>
         )}
       </span>
@@ -282,11 +306,22 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
         )}
 
         {pago.estado === 'pendiente' && (
-          pago.faltantes.length > 0 ? (
-            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
-              <AlertTriangle className="h-3.5 w-3.5" />
-              Falta {pago.faltantes.join(', ')}
-            </span>
+          pago.faltantes.length > 0 || pago.espera_upme ? (
+            <div className="flex flex-col items-start gap-0.5">
+              {/* SOE-035: no es un dato roto, es un pago a la UPME que todavía no se hace. */}
+              {pago.espera_upme && (
+                <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
+                  <Clock className="h-3.5 w-3.5" />
+                  {pago.espera_upme}
+                </span>
+              )}
+              {pago.faltantes.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Falta {pago.faltantes.join(', ')}
+                </span>
+              )}
+            </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -381,15 +416,18 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
 /**
  * Qué emite el botón, antes de emitirlo.
  *
- * Regla 3 del brief del 2026-09-22: el formulario muestra y emite SOLO la porción UPME del
- * pago, no su monto. No hay campo para escribir otra cifra: la porción sale del reparto del
- * pago, y si el soporte dice otra cosa lo que está mal es el monto del pago.
+ * SOE-029 (Mauricio, 2026-10-26: «que salga del comprobante UPME»): el RC-3 es UNO por
+ * negocio y acusa `valor_pagado` del comprobante de pago UPME menos lo ya emitido. Es la
+ * cifra de `pago.valor_upme`, que sale de `planRc3DelNegocio`, la misma cuenta que hace el
+ * servidor al emitir. No hay campo para escribir otra: si el comprobante está mal leído, se
+ * corrige en su bloque del negocio.
  *
  * Exportado para pintarlo solo en una prueba de render: el formulario vive detrás de un
  * estado (`abierto`) que sin DOM no se puede cambiar.
  */
 export function ResumenReciboUpme({ pago }: { pago: PagoConRecibo }) {
   const valor = pago.valor_upme
+  const rc3 = pago.rc3
   const mixto = valor != null && Math.round(valor) !== Math.round(pago.monto)
   return (
     <div>
@@ -403,10 +441,14 @@ export function ResumenReciboUpme({ pago }: { pago: PagoConRecibo }) {
         {valor != null ? fmtCOP(valor) : '—'}
       </div>
       <p className="mt-1 text-[10px]" style={{ color: 'var(--tinta-suave)' }}>
-        {mixto
-          ? `Es la porción UPME de este pago de ${fmtCOP(pago.monto)}. El honorario no lleva recibo: se abona solo a la factura del negocio.`
-          : 'Es la porción UPME de este pago.'}
-        {' '}Si el soporte dice otra cosa, corrige el monto del pago.
+        {rc3
+          ? rc3.ya_acusado > 0
+            ? `Es el comprobante de pago UPME del negocio (${fmtCOP(rc3.comprobante)}) menos ${fmtCOP(rc3.ya_acusado)} ya acusados en recibos anteriores.`
+            : `Es el comprobante de pago UPME del negocio (${fmtCOP(rc3.comprobante)}).`
+          : 'Sale del comprobante de pago UPME del negocio.'}
+        {' '}Es un solo recibo por negocio: los demás pagos del negocio van en este.
+        {mixto && ` Este pago fue de ${fmtCOP(pago.monto)}: el honorario no lleva recibo, se abona solo a la factura del negocio.`}
+        {' '}Si el valor no es el del comprobante, corrígelo en el bloque del comprobante del negocio.
       </p>
     </div>
   )

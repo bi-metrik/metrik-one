@@ -5,11 +5,12 @@
 //   · `AlmacenPublico`     la conversación (`chatwoot_conversacion`), los candados, la prueba de consentimientos.
 //                          Lo que sale nace `generado` en una ranura única por turno y pasa a `publicado`: el mismo turno
 //                          no publica dos veces la misma cosa (la API de Chatwoot no tiene clave de idempotencia).
-//   · `MensajeroChatwoot`  mensaje, nota privada, etiquetas, asignación y `toggle_status`, y el estado de la conversación.
+//   · `MensajeroChatwoot`  mensaje, foto adjunta (ventas), nota privada, etiquetas, asignación y `toggle_status`, y el estado de la conversación.
 //   · `Transcriptor`       la nota de voz desde la URL de Chatwoot (Gemini, `transcribir.ts`).
 // Producción: `produccion.ts`. Pruebas y arnés: `memoria.ts`.
 // ============================================================
 
+import type { FuentePistaDelTurno } from '../pistas.ts';
 import type { Salida } from '../tipos.ts';
 import type { Canal, FilaPublica, LlaveConversacion, TipoAutorizacion, TrazaPublica } from './tipos.ts';
 
@@ -53,6 +54,11 @@ export interface MensajeroChatwoot {
   /** `pending`, `open`, `resolved`, `snoozed`, o `null` si no se pudo leer. */
   estado(l: LlaveConversacion): Promise<string | null>;
   publicar(l: LlaveConversacion, s: Salida): Promise<ResultadoPublicar>;
+  /**
+   * Una foto como adjunto (multipart `attachments[]`), con `texto` de pie (vacío = sin pie). La URL la pone el código desde el catálogo,
+   * nunca el modelo; producción además la baja solo del bucket propio, con tope de tamaño y de tiempo.
+   */
+  publicarFoto(l: LlaveConversacion, foto: { url: string; texto: string }): Promise<ResultadoPublicar>;
   nota(l: LlaveConversacion, texto: string): Promise<ResultadoPublicar>;
   /** Agrega etiquetas sin quitar las que ya tiene. */
   etiquetar(l: LlaveConversacion, etiquetas: string[]): Promise<boolean>;
@@ -62,7 +68,11 @@ export interface MensajeroChatwoot {
 }
 
 export interface Transcriptor {
-  transcribir(a: { url: string; extension?: string | null }): Promise<{ texto: string | null; error?: string }>;
+  /**
+   * `fuentesDePistas`: las funciones del rol del turno con su gancho `pistas` (spec 2026-10-26, §4.6). Solo llega con
+   * `transcripcion.pistas = true` y un rol; el transcriptor las junta con `pistasDeFunciones` (`../pistas.ts`).
+   */
+  transcribir(a: { url: string; extension?: string | null; fuentesDePistas?: FuentePistaDelTurno[] }): Promise<{ texto: string | null; error?: string }>;
 }
 
 export interface AvisosInternos {

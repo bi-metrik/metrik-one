@@ -169,3 +169,33 @@ describe('piezas', () => {
     expect(clienteAbono(1, 1000, { abonoMinimoPct: 0 })).toBe(true)
   })
 })
+
+describe('desviación contra el viaje (QA Trappvel 2026-10-29, H3-4)', () => {
+  // Viaje 03: vuelo cotizado 689.400 pagado 1.000.000; hotel cotizado 1.452.000 que cobró 1.141.400.
+  const VUELO = { monto: 1_000_000, costoCotizado: 689_400 }
+  it('el +45 % del vuelo NO pide a Edgar si el hotel ya registró que cobró 310.600 menos', () => {
+    expect(tipos(entrada({ ...VUELO, viaje: { cotizado: 2_141_400, comprometidoOtros: 1_141_400 } }))).toEqual([])
+  })
+  it('sin el ahorro registrado (el hotel cuenta por lo cotizado) sí pide, y dice cuánto se pasa el viaje', () => {
+    const r = reglasQueRompe(entrada({ ...VUELO, viaje: { cotizado: 2_141_400, comprometidoOtros: 1_452_000 } }))
+    expect(r.map(x => x.tipo)).toEqual(['desviacion_costo'])
+    expect(r[0].texto).toBe('Costó $310.600 más de lo cotizado (+45,1 %).')
+    expect(r[0].detalle).toMatchObject({ viaje_cotizado: 2_141_400, viaje_sobrecosto: 310_600 })
+  })
+  it('compensado a medias: pide, y el texto dice lo que se pasa el viaje entero', () => {
+    const r = reglasQueRompe(entrada({ ...VUELO, viaje: { cotizado: 2_141_400, comprometidoOtros: 1_300_000 } }))
+    expect(r[0].texto).toBe('Costó $310.600 más de lo cotizado (+45,1 %). El viaje entero se pasa $158.600.')
+  })
+  it('el piso en pesos también vale para el viaje', () => {
+    const config = configReglasPago({ servicios_viaje: { piso_desviacion_pesos: 50_000 } })
+    expect(tipos(entrada({ ...VUELO, config, viaje: { cotizado: 2_141_400, comprometidoOtros: 1_190_000 } }))).toEqual([])
+    expect(tipos(entrada({ ...VUELO, config, viaje: { cotizado: 2_141_400, comprometidoOtros: 1_200_000 } }))).toEqual(['desviacion_costo'])
+  })
+  it('sin viaje (el bot de WhatsApp), la regla de siempre: por servicio', () => {
+    expect(tipos(entrada(VUELO))).toEqual(['desviacion_costo'])
+  })
+  it('si el proveedor dijo que cobra menos, pagarle más de eso se mide contra lo que dijo', () => {
+    const r = reglasQueRompe(entrada({ monto: 1_452_000, costoCotizado: 1_452_000, valorPorPagar: 1_141_400 }))
+    expect(r[0].texto).toBe('Costó $310.600 más de lo que dijo que cobraba el proveedor ($1.141.400).')
+  })
+})

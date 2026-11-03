@@ -12,17 +12,24 @@ import { REGLAMENTO_SABOR } from './reglamento-sabor.ts';
 import { BOT_PUBLICO } from './dominio.ts';
 import type { Ficha } from '../tipos.ts';
 
-const lit = (v: string | null | undefined) => (v === null || v === undefined ? 'null' : `'${v.replace(/'/g, "''")}'`);
-const arr = (v: string[] | null | undefined) => (v === null || v === undefined ? 'null' : v.length ? `array[${v.map(lit).join(', ')}]::text[]` : `'{}'::text[]`);
-const json = (v: unknown) => (v ? `${lit(JSON.stringify(v))}::jsonb` : 'null');
+export const lit = (v: string | null | undefined) => (v === null || v === undefined ? 'null' : `'${v.replace(/'/g, "''")}'`);
+export const arr = (v: string[] | null | undefined) => (v === null || v === undefined ? 'null' : v.length ? `array[${v.map(lit).join(', ')}]::text[]` : `'{}'::text[]`);
+export const json = (v: unknown) => (v ? `${lit(JSON.stringify(v))}::jsonb` : 'null');
+
+/** Las filas `values` de `bot_parametros` de unas fichas (con `v_ws` del bloque). */
+export function filasFichas(fichas: Ficha[]): string[] {
+  return fichas.map((f) => `    (v_ws, ${lit(BOT_PUBLICO)}, ${lit(f.clave)}, ${lit(f.tipo)}, ${lit(f.carga)}, ${lit(f.cuando)}, ${lit(f.hacer)}, ${arr(f.herramientas)}, ${f.prioridad ?? 'null'}, ${lit(f.fuente || null)}, ${json(f.valores)})`);
+}
 
 export function semillaSqlSabor(fichas: Ficha[] = REGLAMENTO_SABOR): string {
-  const filas = fichas.map((f) => `    (v_ws, ${lit(BOT_PUBLICO)}, ${lit(f.clave)}, ${lit(f.tipo)}, ${lit(f.carga)}, ${lit(f.cuando)}, ${lit(f.hacer)}, ${arr(f.herramientas)}, ${f.prioridad ?? 'null'}, ${lit(f.fuente || null)}, ${json(f.valores)})`);
+  const filas = filasFichas(fichas);
   return `-- Reglamento del asistente público de Sabor & Experiencias, borrador etapa 1 — SOLO PARA UN WORKSPACE DE PRUEBA.
 --
 -- GENERADO desde supabase/functions/_shared/agente/publico/reglamento-sabor.ts (semilla-sql.ts). No se edita a mano.
--- NO es una migración y NO se aplica en producción sobre Sabor: el catálogo es [EJEMPLO] inventado, los textos de
--- aviso y autorización son borrador (falta el visto de Emilio) y hay HUECOS de Sabor (nombre, tono, horario, políticas).
+-- NO es una migración y NO se aplica en producción sobre Sabor: las experiencias, los precios y las fechas son [EJEMPLO]
+-- inventado (la forma de la ficha y las reglas marcadas [KICKOFF 22-oct] sí vienen de Sabor, sin el visto de Paula),
+-- los textos de aviso y autorización son borrador (falta el visto de Emilio) y hay HUECOS de Sabor (nombre, tono,
+-- horario, políticas).
 -- El bloque se niega a correr si el workspace no está marcado config_extra.espacio_de_pruebas = true.
 --
 -- Uso: reemplazar <WORKSPACE_DE_PRUEBA> por el id del workspace de prueba y correrlo con service_role. Deja las fichas

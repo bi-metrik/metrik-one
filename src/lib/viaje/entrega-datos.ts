@@ -27,7 +27,6 @@ import {
   cobroMinimo,
   configEntrega,
   esInternacional,
-  faltaDocumentos,
   huellaVouchers,
   leerPaqueteEnviado,
   mensajeCobroMinimo,
@@ -41,6 +40,13 @@ import {
   type PaqueteEnviado,
   type Vouchers,
 } from './entrega'
+import {
+  documentosPorViajero,
+  leerDocumentosViajero,
+  mensajeDocumentosViaje,
+  viajerosDelViaje,
+  type EstadoDocumentosViaje,
+} from './documentos-por-viajero'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any
@@ -60,6 +66,11 @@ export interface VistaEntrega {
   cuentaRegresiva: string
   internacional: boolean | null
   documentos: Array<DocumentoViajero & { aviso: string | null }>
+  /**
+   * Los documentos de CADA viajero (QA 2026-10-29, H9-5/H6-4): pasaporte por viajero y, de los
+   * menores, registro civil y permiso de salida si no viajan con sus dos padres.
+   */
+  porViajero: EstadoDocumentosViaje
   faltaDocumento: string | null
   /** La asistencia médica que va en el viaje (Noor §11). Vacío si la cotización no la incluye. */
   asistencias: AsistenciaDelViaje[]
@@ -67,6 +78,11 @@ export interface VistaEntrega {
   cambioVoucher: boolean
   /** Los gates de la etapa actual que son de esta etapa. */
   gates: string[]
+  /**
+   * Lo que no se pudo leer, por gate (`cobro_minimo` → «el plan de pagos»…). El panel se pinta igual
+   * con lo que haya; el gate retiene (falla cerrado). Vacío o ausente = se leyó todo.
+   */
+  noSePudoLeer?: Partial<Record<(typeof GATES_ENTREGA)[number], string[]>>
 }
 
 export interface Base {
@@ -82,7 +98,8 @@ async function gatesDeEtapa(db: Db, etapaId: string | null): Promise<string[]> {
 }
 
 async function destinoTipo(db: Db, negocioId: string): Promise<unknown> {
-  const { data } = await db.from('negocio_bloques').select('destino_tipo:data->destino_tipo').eq('negocio_id', negocioId)
+  const { data, error } = await db.from('negocio_bloques').select('destino_tipo:data->destino_tipo').eq('negocio_id', negocioId)
+  if (error) throw new Error(`No se pudo leer el tipo de destino: ${error.message}`)
   return ((data ?? []) as Array<{ destino_tipo?: unknown }>).map(f => f.destino_tipo).find(v => typeof v === 'string' && v.trim()) ?? null
 }
 
@@ -116,13 +133,16 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
   const negocioId = base.negocio.id
   const hoy = todayBogotaISO()
   const regla = configPlanPagos(base.configLinea).regla
+  // El panel se pinta con lo que haya; lo que no se pudo leer queda anotado para que el gate retenga.
+  const fallas: NonNullable<VistaEntrega['noSePudoLeer']> = {}
+  const anotar = (gate: (typeof GATES_ENTREGA)[number], que: string) => { (fallas[gate] ??= []).push(que) }
   const [gates, servicios, plan, cobros, { viaje }, tipoDestino, contactoRes, wsRes] = await Promise.all([
     gatesDeEtapa(db, base.negocio.etapa_actual_id),
     leerServiciosDelNegocio(db, { workspaceId, negocioId }),
-    planAcordado(db, negocioId).catch(() => null),
-    cobrosDelNegocio(db, workspaceId, negocioId).catch(() => []),
+    planAcordado(db, negocioId).catch(() => { anotar(GATE_COBRO_MINIMO, 'el plan de pagos'); return null }),
+    cobrosDelNegocio(db, workspaceId, negocioId).catch(() => { anotar(GATE_COBRO_MINIMO, 'los pagos'); return [] }),
     leerViajeDelNegocio(db, negocioId),
-    destinoTipo(db, negocioId),
+    destinoTipo(db, negocioId).catch(() => { anotar(GATE_DOCUMENTOS, 'si el viaje es nacional o internacional'); return null }),
     base.negocio.contacto_id
       ? db.from('contactos').select('id, nombre, email, telefono').eq('id', base.negocio.contacto_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -130,6 +150,7 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
   ])
   const contacto = (contactoRes.data ?? null) as { id: string; nombre: string | null; email: string | null; telefono: string | null } | null
   const nombre = (contacto?.nombre ?? '').trim()
+  if (servicios === null) anotar(GATE_VOUCHERS, 'los servicios del viaje')
   const filas = (servicios ?? []) as ServicioDelNegocio[]
   const vouchers = vouchersDelViaje(filas)
   const cuotas = (plan?.cuotas ?? []).map(c => ({ monto: c.monto, fecha: c.fecha }))
@@ -137,6 +158,13 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
   const cobro = cobroMinimo({ total, pagado: cobradoConfirmado(cobros), cuotas, fechaSalida: viaje.fechas.inicio, hoy, regla })
   const internacional = esInternacional(tipoDestino)
   const docs = await documentosDelContacto(db, workspaceId, contacto?.id ?? null)
+  const porViajero = documentosPorViajero({
+    internacional,
+    documentos: docs,
+    guardados: leerDocumentosViajero(base.negocio.metadata),
+    viajeros: viajerosDelViaje(viaje.composicion, nombre),
+    fechaRegreso: viaje.fechas.fin,
+  })
   const paquete = leerPaqueteEnviado(base.negocio.metadata)
   return {
     negocioId,
@@ -153,13 +181,17 @@ async function armarVista(db: Db, workspaceId: string, base: Base): Promise<Vist
     cuentaRegresiva: textoCuentaRegresiva(cobro, cuotas),
     internacional,
     documentos: docs.map(d => ({ ...d, aviso: avisoVencimiento(d, viaje.fechas.fin, nombre) })),
-    faltaDocumento: faltaDocumentos({ internacional, documentos: docs, fechaRegreso: viaje.fechas.fin, nombreContacto: nombre }),
+    porViajero,
+    faltaDocumento: mensajeDocumentosViaje(porViajero),
     asistencias: asistenciasDelViaje(filas),
     paquete,
     cambioVoucher: !!paquete && paquete.huella_vouchers !== huellaVouchers(filas),
     gates: gates.filter(g => (GATES_ENTREGA as readonly string[]).includes(g)),
+    ...(Object.keys(fallas).length > 0 ? { noSePudoLeer: fallas } : {}),
   }
 }
+
+export const TEXTO_FALTA_TIPO_DESTINO = 'Falta saber si el viaje es nacional o internacional (Condiciones del viaje).'
 
 /**
  * Lo que falta para salir de «Documentos y entrega», en palabras (los literales de Noor). Opt-in
@@ -172,15 +204,23 @@ export async function evaluarGateEntrega(
 ): Promise<string[]> {
   const propios = args.gates.filter(g => (GATES_ENTREGA as readonly string[]).includes(g))
   if (propios.length === 0) return []
+  // Falla CERRADO (barrido 2026-10-22): sin poder leer el negocio, la duda frena.
   const base = (await leerNegocioConLinea(db, args.workspaceId, args.negocioId)) as Base | null
-  if (!base || !configEntrega(base.configLinea).activo) return []
+  if (!base) return ['No se pudo leer el negocio para revisar la entrega. Intenta de nuevo.']
+  if (!configEntrega(base.configLinea).activo) return []
   const v = await armarVista(db, args.workspaceId, base)
+  // El cobro mínimo no se pide si el paquete ya salió: su falta de lectura tampoco frena.
+  const aRevisar = propios.filter(g => !(g === GATE_COBRO_MINIMO && v.paquete))
+  const noLeido = [...new Set(aRevisar.flatMap(g => v.noSePudoLeer?.[g as (typeof GATES_ENTREGA)[number]] ?? []))]
+  if (noLeido.length > 0) return [`No se pudo revisar ${noLeido.join(', ')}. Intenta de nuevo.`]
   const falta: string[] = []
   if (propios.includes(GATE_VOUCHERS)) {
     const m = mensajeVouchers(v.vouchers)
     if (m) falta.push(m)
   }
-  if (propios.includes(GATE_DOCUMENTOS) && v.faltaDocumento) falta.push(v.faltaDocumento)
+  // Sin el tipo de destino no se sabe si pide pasaporte: se pregunta, no se supone nacional.
+  if (propios.includes(GATE_DOCUMENTOS) && v.internacional === null) falta.push(TEXTO_FALTA_TIPO_DESTINO)
+  else if (propios.includes(GATE_DOCUMENTOS) && v.faltaDocumento) falta.push(v.faltaDocumento)
   // El paquete enviado ya pasó el cobro mínimo (o la dirección lo envió igual): no se pide dos veces.
   if (propios.includes(GATE_COBRO_MINIMO) && !v.paquete && v.mensajeCobro) falta.push(v.mensajeCobro)
   if (propios.includes(GATE_PAQUETE) && !v.paquete) falta.push('Falta enviar el paquete de viaje.')

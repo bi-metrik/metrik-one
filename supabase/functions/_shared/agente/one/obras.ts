@@ -217,7 +217,7 @@ export interface OpcionesObras {
 }
 
 export function dominioObras(puerto: PuertoObras, o: OpcionesObras): Dominio {
-  const base = dominioOne(puerto, { rol: o.rol, ahora: o.ahora, lector: o.lector });
+  const base = dominioOne(puerto, { rol: o.rol, ahora: o.ahora, lector: o.lector, empresa: o.empresa });
   const ahora = o.ahora ?? (() => Date.now());
   const hoy = () => diaBogota(ahora());
   const noEsDe = botonNoEsDe(o.empresa);

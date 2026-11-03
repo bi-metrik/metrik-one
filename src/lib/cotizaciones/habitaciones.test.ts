@@ -326,9 +326,14 @@ describe('R8 · la bandeja une las seis capturas de COT-2026-0013 en dos opcione
     expect(opcionDelMismoHotel(l, [{ id: 'x', tarifa: { casillas: { grupo_completo: l, sin_infantes: l } } }])).toBeNull()
   })
 
-  it('sin hotel o sin fechas en la captura no se une a nada', () => {
+  it('sin hotel en la captura no se une a nada', () => {
+    const sinHotel = { ...porItem('2164b941'), identidad: { ...porItem('2164b941').identidad, hotel: null } }
+    expect(opcionDelMismoHotel(sinHotel as LecturaCasilla, [{ id: 'x', tarifa: { casillas: { grupo_completo: porItem('68d431db') } } }])).toBeNull()
+  })
+
+  it('sin fechas leídas, decide el hotel (COT-2026-0004): una fecha que falta no contradice', () => {
     const sinFechas = { ...porItem('2164b941'), identidad: { ...porItem('2164b941').identidad, check_in: null } }
-    expect(opcionDelMismoHotel(sinFechas as LecturaCasilla, [{ id: 'x', tarifa: { casillas: { grupo_completo: porItem('68d431db') } } }])).toBeNull()
+    expect(opcionDelMismoHotel(sinFechas as LecturaCasilla, [{ id: 'x', tarifa: { casillas: { grupo_completo: porItem('68d431db') } } }])?.id).toBe('x')
   })
 })
 

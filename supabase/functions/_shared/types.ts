@@ -88,6 +88,7 @@ export interface SessionContext {
   last_project_name?: string;
   // ACTIVIDAD
   activity_text?: string;
+  activity_tal_cual?: boolean; // activity_text es una nota de voz tal cual
   // Timeout tracking: ISO timestamp when awaiting_selection started
   awaiting_since?: string;
   // Conversational memory (loaded from last completed session of same phone)
@@ -169,7 +170,10 @@ export type UserRole = 'owner' | 'admin' | 'operator' | 'supervisor' | 'contador
 
 export interface WaUser {
   workspace_id: string;
+  /** `profiles.id` (= auth) del staff que escribe. Ausente en colaboradores y en staff sin perfil. */
   user_id?: string;
+  /** `staff.id` de quien escribe, resuelto por teléfono en `wa-identificar.ts`. Ausente en colaboradores. */
+  staff_id?: string;
   phone: string;
   name: string;
   role: UserRole;

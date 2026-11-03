@@ -188,6 +188,14 @@ vi.mock('@/lib/suscripciones/pasarela/epayco', async (original) => ({
   },
 }))
 const clientesEpayco: Record<string, unknown>[] = []
+// La bienvenida: se registra lo que se habría enviado, corriendo en línea (sin `after()`).
+const bienvenidas: { correo: string; razonSocial: string; slug: string; registroId: string }[] = []
+vi.mock('@/lib/acceso-espacio/servidor', () => ({
+  enSegundoPlano: async (_e: string, t: () => Promise<void>) => t(),
+  enviarBienvenidaValida: async (p: { correo: string; razonSocial: string; slug: string; registroId: string }) => {
+    bienvenidas.push(p)
+  },
+}))
 // La prueba la emite Valida; aquí, lo que deja en el registro (con el cobro programado de verdad).
 vi.mock('./prueba-servidor', async () => {
   const { momentoDelCobro, entornoDeCobro } = await import('./cobro-prueba')
@@ -275,12 +283,14 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
+    // La bienvenida con la dirección del espacio sale una vez, al correo de la sesión.
+    expect(bienvenidas).toEqual([{ correo: PERSONA.email, razonSocial: 'ACME S.A.S.', slug: 'acme', registroId: reg.id }])
     expect(reg).toMatchObject({
       estado: 'creado',
       // «ACME S.A.S.» → `acme`: el slug sale sin la forma societaria (2026-10-20).
       slug_creado: 'acme',
-      condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.1',
-      terminos_version: 'v2.1',
+      condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.2',
+      terminos_version: 'v2.2',
       metodo_pago_ref: REF_TARJETA,
       cobro_estado: 'programado',
       cobro_entorno: 'preview',
@@ -326,7 +336,7 @@ describe('registro → 14 minutos → cobro de la tarjeta con el plan activado',
 
     // El documento del contrato es EXACTAMENTE el texto aceptado en el registro.
     const doc = tablas.documentos_contractuales_versiones[0]
-    expect(doc).toMatchObject({ slug: 'terminos-uso-valida-autogestion', version: 'v2.1', texto_md: reg.terminos_texto, texto_sha256: reg.terminos_sha256 })
+    expect(doc).toMatchObject({ slug: 'terminos-uso-valida-autogestion', version: 'v2.2', texto_md: reg.terminos_texto, texto_sha256: reg.terminos_sha256 })
     // La aceptación del registro, colgada del contrato, con la hora en que se marcó la casilla.
     expect(tablas.aceptaciones_terminos).toHaveLength(1)
     expect(tablas.aceptaciones_terminos[0]).toMatchObject({
@@ -422,7 +432,7 @@ describe('registro → consulta 11 → confirma → cobro YA; el cron del día 7
     })
     expect(alta).toMatchObject({ tipo: 'ok' })
     const reg = tablas.valida_registros[0]
-    expect(reg).toMatchObject({ condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.1', cobro_estado: 'programado' })
+    expect(reg).toMatchObject({ condiciones_version: 'condiciones-2.1+aviso-1.5+terminos-auto-2.2', cobro_estado: 'programado' })
 
     const ePayco = epaycoDePrueba({ estado: 'aprobado', externalRef: 'epayco-888', fecha: '2026-10-15', monto: 150_000 })
     const deps = {

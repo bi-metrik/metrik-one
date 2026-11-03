@@ -23,9 +23,9 @@ import { fotoDeTarifas, type FotoDeTarifas } from '@/lib/cotizaciones/tarifas-po
 import { cerrarAccionPorPasos as cerrarAccion, type ResultadoPorPasos } from '@/lib/cotizaciones/por-pasos-cierre'
 import { firmaDeTarifa } from '@/lib/cotizaciones/tarifas-por-pasos'
 import { leerCabecera } from '@/lib/cotizaciones/itinerarios-datos'
-import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { itemsDelItinerario, normalizarGrupo, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
-import { motivoSinPrecioPorPasajero, opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { frenosDePaqueteYPasajero } from '@/lib/cotizaciones/frenos-de-paquete-y-pasajero'
 import { enviarCotizacion } from '@/app/(app)/negocios/cotizacion-actions'
 import { esRecomendada, recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { etiquetaDeRanura, grupoDeInstancia, resolverRanura, siguienteGrupoDeTipo } from '@/lib/cotizaciones/ranuras-pantallazo'
@@ -35,9 +35,16 @@ import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
 import { createServiceClient } from '@/lib/supabase/server'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { evaluarSalida, leerUltimaExcepcion, recortarParaLog, TABLA_EXCEPCIONES } from '@/lib/cotizaciones/piso-salida-datos'
-import { pctTexto } from '@/lib/cotizaciones/piso-salida'
+import { detalleDeCausas } from '@/lib/cotizaciones/causas-margen'
 import { CAUSA_RETIRADA } from '@/lib/cotizaciones/autorizacion-vista'
 import { esDuenoDelWorkspace, leerPlatformAdmin } from '@/lib/permissions/dueno-workspace'
+import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
+import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
+import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { mismoTrayectoEntre } from '@/lib/cotizaciones/trayecto-repetido'
+import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
+import { leerReglasDeCotizacion, motivoReglasInvalidas, reglasAJsonb } from '@/lib/cotizaciones/reglas-margen'
+import { motivoMargenDeCotizacionInvalido } from '@/lib/cotizaciones/margen-de-cotizacion'
 
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,6 +85,12 @@ export async function elegirOpcionEnTarifa(
   if (!ranura) return { success: false, error: 'Ese servicio no tiene opciones entre qué escoger.' }
   if (!ranura.candidatos.includes(itemId)) return { success: false, error: 'Esa opción no es de este servicio.' }
   const anterior = ranura.candidatos.find(id => cab.seleccion.includes(id)) ?? null
+  // El traslado que va con OTRA opción de hotel no cabe en esta tarifa (`va-con-hotel.ts`): el plan
+  // lo cambiaría solo por el de su hotel y la elección se perdería sin aviso.
+  const hotelDelTraslado = hotelesAsociados(antes.ctx.items).get(itemId)
+  if (hotelDelTraslado && !itemsDelItinerario(antes.ctx.items, cab.seleccion).includes(hotelDelTraslado)) {
+    return { success: false, error: 'Esa opción va con otro hotel, y en esta tarifa va otro. Cambia el hotel de la tarifa, o deja la opción como general en su tarjeta.' }
+  }
 
   if (anterior !== itemId) {
     const { error: errDel } = await supabase
@@ -200,7 +213,8 @@ export async function separarOpcionPorPasos(itemId: string) {
 
 /**
  * «Juntar como opción de…»: TODAS las opciones de un servicio pasan a competir dentro de otro
- * del mismo tipo. Devuelve el grupo que tenía, para el «Deshacer».
+ * del mismo tipo, o un tren dentro del vuelo del mismo trayecto (QA G9, M9-1). Devuelve el grupo
+ * que tenía, para el «Deshacer».
  */
 export async function juntarServicioPorPasos(
   cotizacionId: string,
@@ -214,11 +228,27 @@ export async function juntarServicioPorPasos(
   const origen = normalizarGrupo(grupoOrigen)
   const destino = normalizarGrupo(grupoDestino)
   if (!origen || !destino || origen === destino) return { success: false, error: 'Escoge otro servicio para juntarlo.' }
-  if (resolverRanura(origen)?.definicion.slug !== resolverRanura(destino)?.definicion.slug) {
-    return { success: false, error: 'Solo se juntan servicios del mismo tipo.' }
+  const slugOrigen = resolverRanura(origen)?.definicion.slug
+  const slugDestino = resolverRanura(destino)?.definicion.slug
+  // M9-1 (QA G9 · decisión 5 de Mauricio): un tren se junta como opción del vuelo del mismo
+  // trayecto. Solo en ese sentido: el vuelo es el bloque que la tarifa cruza.
+  const trenEnVuelo = slugOrigen === 'tren_detalle' && slugDestino === 'vuelo_detalle'
+  if (slugOrigen !== slugDestino && !trenEnVuelo) {
+    return {
+      success: false,
+      error: slugOrigen === 'vuelo_detalle' && slugDestino === 'tren_detalle'
+        ? 'El tren se junta como opción del vuelo: abre el ⋯ del tren.'
+        : 'Solo se juntan servicios del mismo tipo, o un tren con el vuelo del mismo trayecto.',
+    }
   }
   const antes = await fotoDeTarifas(supabase, cotizacionId)
   if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  if (trenEnVuelo) {
+    const delGrupo = (g: string) => antes.ctx.items.filter(i => normalizarGrupo(i.grupo) === g && i.es_ajuste !== true).map(i => i.id)
+    const porId = new Map(antes.ctx.items.map(i => [i.id, i]))
+    const mismo = mismoTrayectoEntre({ tipo: 'tren', opciones: delGrupo(origen) }, { tipo: 'vuelo', opciones: delGrupo(destino) }, id => porId.get(id))
+    if (!mismo) return { success: false, error: 'El tren y el vuelo no son del mismo trayecto el mismo día: no se juntan.' }
+  }
   if (!antes.ctx.items.some(i => normalizarGrupo(i.grupo) === destino)) {
     return { success: false, error: 'Ese servicio ya no está en la cotización. Recarga la página.' }
   }
@@ -349,13 +379,132 @@ export async function margenPorPasos(
   if (!Number.isFinite(pct) || pct < 0 || pct >= 100) return { success: false, error: 'El margen tiene que estar entre 0 % y 99 %.' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
-  const { data: cot } = await supabase.from('cotizaciones').select('margen_porcentaje').eq('id', cotizacionId).maybeSingle()
+  const { data: cot } = await supabase.from('cotizaciones').select('margen_porcentaje, margen_default_pct').eq('id', cotizacionId).maybeSingle()
+  // D4 (2026-10-29): un 0 en el margen general dejaría todas las Netas a costo; se rechaza diciendo
+  // cómo dejar UNA opción a costo (`margen-de-cotizacion.ts`).
+  const invalido = motivoMargenDeCotizacionInvalido(pct, (cot as { margen_default_pct?: number | null } | null)?.margen_default_pct ?? null)
+  if (invalido) return { success: false, error: invalido }
   const anterior = (cot?.margen_porcentaje ?? null) as number | null
   const { error: errUpd } = await supabase.from('cotizaciones').update({ margen_porcentaje: pct }).eq('id', cotizacionId)
   if (errUpd) return { success: false, error: errUpd.message }
   const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
   if (!c.success) return c
   return { success: true, anterior, valorTotal: c.valorTotal }
+}
+
+/**
+ * Los puntos extra y los descuentos sobre el total de una cotización con reglas de margen
+ * (`reglas-margen.ts`, brief del 2026-10-27). Solo en una cotización que nació con reglas: la
+ * política (colchón, piso de hotel, tope de puntos) no se toca aquí, es la que se copió de la línea.
+ *
+ * `descuentos` reemplaza la lista entera (la pantalla la manda como queda). Devuelve lo anterior.
+ */
+export async function reglasPorPasos(
+  cotizacionId: string,
+  cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[] },
+): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  // `*`: la columna la agrega una migración; sin ella llega `undefined` y se dice, sin escribir.
+  const { data: cot } = await supabase.from('cotizaciones').select('*').eq('id', cotizacionId).maybeSingle()
+  const actuales = leerReglasDeCotizacion((cot as { reglas_margen?: unknown } | null)?.reglas_margen)
+  if (!actuales) return { success: false, error: 'Esta cotización no tiene reglas de margen.' }
+  if ((cot as { estado?: string | null } | null)?.estado !== 'borrador') return { success: false, error: 'Solo se cambia en una cotización en borrador.' }
+  const descuentos = cambio.descuentos?.map((d, i) => {
+    const aplicaA = typeof d.aplicaA === 'string' && d.aplicaA.trim() ? d.aplicaA.trim() : null
+    return { id: (d.id ?? '').trim() || `d${Date.now().toString(36)}${i}`, descripcion: (d.descripcion ?? '').trim(), pct: Number(d.pct), ...(aplicaA ? { aplicaA } : {}) }
+  })
+  // Un descuento de UNA tarifa (2026-10-29) nombra una tarifa de ESTA cotización. Uno que ya venía
+  // guardado con una tarifa que se borró se deja pasar tal cual: no se aplica a ninguna.
+  const nuevasTarifas = (descuentos ?? []).filter(d => d.aplicaA && !actuales.descuentos.some(x => x.id === d.id && x.aplicaA === d.aplicaA))
+  if (nuevasTarifas.length > 0) {
+    const { data: its } = await supabase.from('cotizacion_itinerarios').select('id').eq('cotizacion_id', cotizacionId)
+    const existen = new Set(((its ?? []) as { id: string }[]).map(x => x.id))
+    if (nuevasTarifas.some(d => !existen.has(d.aplicaA as string))) return { success: false, error: 'Esa tarifa ya no existe. Vuelve a cargar la cotización.' }
+  }
+  const invalido = motivoReglasInvalidas(actuales.politica, { puntosExtra: cambio.puntosExtra, descuentos })
+  if (invalido) return { success: false, error: invalido }
+  const siguientes = {
+    ...actuales,
+    ...(cambio.puntosExtra !== undefined ? { puntosExtra: Math.round(cambio.puntosExtra * 100) / 100 } : {}),
+    ...(descuentos ? { descuentos } : {}),
+  }
+  const { error: errUpd } = await supabase.from('cotizaciones').update({ reglas_margen: reglasAJsonb(siguientes) } as never).eq('id', cotizacionId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return c
+  return { success: true, valorTotal: c.valorTotal }
+}
+
+/**
+ * «Va con el hotel…» de un traslado (reunión del 2026-10-22, punto 5, `va-con-hotel.ts`): la
+ * opción queda atada a UNA opción de hotel y cuenta solo en las tarifas que la llevan; `null` la
+ * deja general (sirve para cualquier hotel). Después, cada tarifa toma el traslado de su hotel.
+ */
+export async function asociarConHotel(
+  itemId: string,
+  hotelId: string | null,
+): Promise<ResultadoPorPasos<{ valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const de = await cotizacionDeItem(supabase, itemId)
+  if (!de) return { success: false, error: 'Opción no encontrada' }
+  const guard = await exigirPorPasos(supabase, de.cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, de.cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const item = antes.ctx.items.find(i => i.id === itemId)
+  if (!item) return { success: false, error: 'Opción no encontrada' }
+  if (resolverRanura(item.grupo ?? '')?.definicion.slug === 'hotel_detalle') return { success: false, error: 'Un hotel no va con otro hotel.' }
+  if (hotelId !== null) {
+    const hotel = antes.ctx.items.find(i => i.id === hotelId)
+    if (!hotel || resolverRanura(hotel.grupo ?? '')?.definicion.slug !== 'hotel_detalle') return { success: false, error: 'Esa opción de hotel ya no está en la cotización. Recarga.' }
+  }
+  const { data: fila, error: errLeer } = await supabase.from('items').select('tarifa_pax').eq('id', itemId).maybeSingle()
+  if (errLeer || !fila) return { success: false, error: 'No se pudo leer la opción. Vuelve a intentarlo.' }
+  const actual = leerTarifaPax(fila.tarifa_pax)
+  if ((actual.vaConHotel ?? null) === hotelId) return { success: true, valorTotal: null }
+  const siguiente = { ...actual, actualizadaEn: new Date().toISOString() }
+  if (hotelId === null) delete siguiente.vaConHotel
+  else siguiente.vaConHotel = hotelId
+  const { error: errUpd } = await supabase.from('items').update({ tarifa_pax: siguiente as never }).eq('id', itemId)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId: de.cotizacionId, antes, staffId })
+  if (!c.success) return c
+  return { success: true, valorTotal: c.valorTotal }
+}
+
+/**
+ * «Que usen el margen de la cotización» (reunión del 2026-10-22, punto 2, `margen-propio.ts`): las
+ * opciones Netas con un margen propio escrito por una persona vuelven a heredar el de la
+ * cotización. Las Públicas, las de precio a mano y las del margen del proveedor no se tocan, aunque
+ * el navegador las mande: el servidor vuelve a decidir cuáles son.
+ */
+export async function margenDeLaCotizacionEnOpciones(
+  cotizacionId: string,
+  itemIds: string[],
+): Promise<ResultadoPorPasos<{ cambiadas: number; valorTotal: number | null }>> {
+  const { supabase, workspaceId, staffId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  if (!Array.isArray(itemIds) || itemIds.length === 0 || itemIds.length > 200) return { success: false, error: 'No hay opciones que cambiar.' }
+  const guard = await exigirPorPasos(supabase, cotizacionId)
+  if (!guard.ok) return { success: false, error: guard.error }
+  const antes = await fotoDeTarifas(supabase, cotizacionId)
+  if (!antes) return { success: false, error: 'Cotización no encontrada' }
+  const pedidas = new Set(itemIds.filter(id => typeof id === 'string'))
+  const propias = lineasConMargenPropio(
+    antes.ctx.items.filter(i => pedidas.has(i.id)),
+    Number(antes.ctx.params.margenPct) || 0,
+    antes.ctx.params.convencionMargen,
+  ).map(i => i.id)
+  if (propias.length === 0) return { success: false, error: 'Esas opciones ya usan el margen de la cotización.' }
+  const { error: errUpd } = await supabase.from('items').update({ margen_porcentaje: null }).eq('cotizacion_id', cotizacionId).in('id', propias)
+  if (errUpd) return { success: false, error: errUpd.message }
+  const c = await cerrarAccion(supabase, { workspaceId, cotizacionId, antes: null, staffId })
+  if (!c.success) return c
+  return { success: true, cambiadas: propias.length, valorTotal: c.valorTotal }
 }
 
 /**
@@ -493,9 +642,8 @@ export async function pedirAutorizacionPorPasos(cotizacionId: string): Promise<R
   const negocioId = (cot?.negocio_id ?? null) as string | null
   if (!negocioId) return { success: false, error: 'La cotización no tiene negocio.' }
   const codigo = (cot?.codigo || cot?.consecutivo || 'la cotización') as string
-  const detalle = (salida.medicion?.bajoPiso ?? [])
-    .map(s => `${s.tipo === 'tarifa' ? `tarifa ${s.nombre}` : 'cotización'} al ${s.margenRealPct === null ? 'sin margen medible' : pctTexto(s.margenRealPct, salida.medicion!.pisoPct)}`)
-    .join(', ')
+  // Brief del 2026-10-28 · la causa real: un hotel bajo su piso se nombra, no se dice como margen global.
+  const detalle = detalleDeCausas(salida.medicion?.bajoPiso ?? [], salida.medicion?.pisoPct ?? 0)
   const log = await registrarActividad(supabase, {
     workspace_id: workspaceId,
     entidad_tipo: 'negocio',
@@ -615,23 +763,28 @@ export async function getPedidoDeAutorizacion(cotizacionId: string): Promise<{ p
  * interruptor encendido: apagado, el envío de siempre no la conoce.
  *
  * `canal = 'descargado'` es el «Sí, ya se la mandé» tras descargar el PDF (H33).
+ * `reemplazarId`: la enviada que esta versión reemplaza (H10-1, ver `decidirEnvioConOtraEnviada`).
  */
-export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado'): Promise<ResultadoPorPasos> {
-  const { supabase, error } = await getWorkspace()
-  if (error) return { success: false, error: 'No autenticado' }
+export async function enviarPorPasos(cotizacionId: string, canal?: 'enviar' | 'descargado', reemplazarId?: string | null): Promise<ResultadoPorPasos> {
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
   const guard = await exigirPorPasos(supabase, cotizacionId)
   if (!guard.ok) return { success: false, error: guard.error }
   const foto = await fotoDeTarifas(supabase, cotizacionId)
   if (!foto) return { success: false, error: 'Cotización no encontrada' }
-  const vanAlCliente = foto.filas.filter(f => f.vaEnPropuesta)
-  const ids = new Set(
-    vanAlCliente.length > 0
-      ? vanAlCliente.flatMap(f => itemsDelItinerario(foto.ctx.items, f.seleccion))
-      : itemsQueAportanAlTotal(foto.ctx.items),
-  )
-  const { viaje } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
-  const motivo = motivoSinPrecioPorPasajero(opcionesSinPrecio(foto.ctx.items, ids, viaje.composicion))
-  if (motivo) return { success: false, error: motivo }
-  const r = await enviarCotizacion(cotizacionId, canal)
+  // Primero la autorización de datos del cliente: armar sí, enviar no (reunión del 2026-10-22).
+  // Es lo primero que dice la lista única de Revisar.
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: foto.ctx.negocioId })
+  if (motivoDatos) return { success: false, error: motivoDatos }
+  const { viaje, edadesMenores } = await leerViajeDelNegocio(supabase, foto.ctx.negocioId)
+  // P12 y el paquete incompleto (QA del 2026-10-29), la MISMA revisión que la marca de borrador del
+  // PDF (`frenos-de-paquete-y-pasajero.ts`). El paquete va antes que el margen de `enviarCotizacion`:
+  // un paquete en cero frenaba como «bajo el mínimo», que no es lo que pasa.
+  const frenos = frenosDePaqueteYPasajero({ items: foto.ctx.items, tarifas: foto.filas, composicion: viaje.composicion, edadesMenores: edadesMenores ?? null, conPrecioPorPasajero: true })
+  if (frenos.precioPorPasajero) return { success: false, error: frenos.precioPorPasajero }
+  if (frenos.paquete) return { success: false, error: frenos.paquete }
+  // D3 (2026-10-29): sin la comisión de una Pública no se sabe el margen; frena con su causa.
+  if (frenos.comision) return { success: false, error: frenos.comision }
+  const r = await enviarCotizacion(cotizacionId, canal, reemplazarId ?? null)
   return r.success ? { success: true } : { success: false, error: r.error ?? 'No se pudo enviar.' }
 }

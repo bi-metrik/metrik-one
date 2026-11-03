@@ -3,10 +3,12 @@
 // ============================================================
 
 import { getMediaUrl, downloadMediaBinary } from './wa-media.ts';
+import { MODELO_AUDIO_ONE, PROMPT_TRANSCRIPCION_LITERAL, pedidoTranscripcion, promptConPistas } from './transcripcion.ts';
 
-// Sprint 2 (Yuto): default to Flash-Lite (3.3x cheaper audio input, still multimodal).
-// Override with GEMINI_AUDIO_MODEL env var for instant rollback to flash.
-const GEMINI_MODEL = Deno.env.get('GEMINI_AUDIO_MODEL') || 'gemini-2.5-flash-lite';
+export { PROMPT_TRANSCRIPCION_LITERAL };
+
+// El modelo sale de `MODELO_AUDIO_ONE` (transcripcion.ts). El secreto GEMINI_AUDIO_MODEL lo cambia sin desplegar.
+const GEMINI_MODEL = Deno.env.get('GEMINI_AUDIO_MODEL') || MODELO_AUDIO_ONE;
 
 // WhatsApp sends audio/ogg; codecs=opus — normalize to base mime
 function normalizeAudioMimeType(raw: string): string {
@@ -34,22 +36,28 @@ export interface TranscribeResult {
 }
 
 /**
- * Opciones para quien no es el flujo de gastos. Sin ellas, todo queda como siempre.
+ * Opciones de transcripcion. Sin ellas, la salida es amplia y un corte se rechaza.
  *
- * La bandeja de solicitudes las usa porque una nota de voz de un comercial describiendo un
- * viaje es larga: con 512 tokens de salida se cortaba, y un corte con `finishReason` distinto
- * de STOP solo se registraba como aviso. Media transcripcion aceptada en silencio es un falso
- * verde (motor-solicitud-viaje.md, §3): con `exigirFinCompleto` se rechaza.
+ * Antes el valor por defecto era 512 tokens de salida y un corte con `finishReason` distinto de
+ * STOP solo se registraba como aviso: una nota de voz larga llegaba a medias al bot de atencion,
+ * a la ruta de respaldo y a Cardumen sin que nadie lo supiera. Media transcripcion aceptada en
+ * silencio es un falso verde (motor-solicitud-viaje.md, §3), asi que ahora es el comportamiento
+ * por defecto para todas las rutas, no algo que cada una deba acordarse de pedir.
  */
+export const MAX_SALIDA_TRANSCRIPCION = 8192;
+
 export interface OpcionesTranscripcion {
   prompt?: string;
+  /** Por defecto `MAX_SALIDA_TRANSCRIPCION`. */
   maxOutputTokens?: number;
+  /** Por defecto true: un corte devuelve error, no texto. */
   exigirFinCompleto?: boolean;
+  /**
+   * El bloque «Palabras que pueden aparecer» (spec 2026-10-26, §4.6), armado por `textoPistas` (`agente/pistas.ts`)
+   * con la base del workspace. Ausente o vacío = el prompt de siempre, sin un carácter de diferencia.
+   */
+  pistas?: string | null;
 }
-
-/** Prompt neutro: no presupone gastos ni ningun tema. */
-export const PROMPT_TRANSCRIPCION_LITERAL =
-  'Transcribe este audio de WhatsApp en espanol, palabra por palabra. Responde SOLO con la transcripcion textual, sin explicaciones, sin comillas, sin resumir y sin formato adicional. Si el audio es inaudible o vacio, responde INAUDIBLE.';
 
 /**
  * Download WhatsApp audio message and transcribe with Gemini.
@@ -117,32 +125,21 @@ async function geminiTranscribe(
 
   // Se queda en Gemini a propósito (migración a Claude Haiku 5.5, 2026-10-20): Haiku 5.5 no recibe audio, y no hay
   // otro proveedor de voz a texto aprobado. Por eso usa el fetch de siempre y no `fetchModelo` (_shared/llm-anthropic.ts).
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-
-  console.log(`[wa-transcribe] Calling Gemini with mime_type=${mimeType}, base64 length=${base64Audio.length}`);
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: opciones.prompt ?? 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.',
-            },
-            {
-              inline_data: { mime_type: mimeType, data: base64Audio },
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: opciones.maxOutputTokens ?? 512,
-      },
-    }),
+  // La llave va en la cabecera `x-goog-api-key` (2026-10-26), no en la URL: así no queda en ningún log de la URL.
+  const prompt = opciones.prompt ?? 'Transcribe este audio de WhatsApp. Es un profesional independiente colombiano registrando movimientos de sus negocios (gastos, horas, cobros, clientes, etapas de venta y ejecución). Responde SOLO con la transcripción textual del audio, sin explicaciones, sin comillas, sin formato adicional. Si el audio es inaudible o vacío, responde INAUDIBLE.';
+  const { url, init } = pedidoTranscripcion({
+    modelo: GEMINI_MODEL,
+    llave: apiKey,
+    prompt: promptConPistas(prompt, opciones.pistas),
+    mime: mimeType,
+    base64: base64Audio,
+    maxSalida: opciones.maxOutputTokens ?? MAX_SALIDA_TRANSCRIPCION,
+    temperatura: 0.1,
   });
+
+  console.log(`[wa-transcribe] Calling Gemini with mime_type=${mimeType}, base64 length=${base64Audio.length}${opciones.pistas ? ', con pistas' : ''}`);
+
+  const res = await fetch(url, init);
 
   if (!res.ok) {
     const errBody = await res.text();
@@ -160,14 +157,11 @@ async function geminiTranscribe(
   }
 
   const finishReason = data.candidates?.[0]?.finishReason;
-  if (finishReason && finishReason !== 'STOP') {
-    console.warn(`[wa-transcribe] Gemini finishReason: ${finishReason}`);
-    if (opciones.exigirFinCompleto) {
-      return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason}` };
+  if (finishReason !== 'STOP') {
+    console.warn(`[wa-transcribe] Gemini finishReason: ${finishReason ?? '(ausente)'}`);
+    if (opciones.exigirFinCompleto ?? true) {
+      return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
     }
-  }
-  if (opciones.exigirFinCompleto && finishReason !== 'STOP') {
-    return { text: null, error: `GEMINI_INCOMPLETO: finishReason ${finishReason ?? '(ausente)'}` };
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();

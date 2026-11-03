@@ -8,18 +8,29 @@
 //   asignación de equipo y `toggle_status`. SIN VERIFICAR (D7): que el token del Agent Bot pueda crear notas privadas,
 //   etiquetar y cambiar el estado en la cuenta real; plan B: token de un usuario de servicio con el rol más bajo que
 //   alcance (es otro valor de `CHATWOOT_API_TOKEN_<SLUG>`, sin cambiar código).
+//   Fotos (ventas, 29-oct): `publicarFoto` baja la imagen del bucket `ferreteria-fotos` (solo ese host y ruta, sin
+//   redirecciones, ≤ 5 MB, 8 s) y la sube por multipart `attachments[]`. SIN VERIFICAR contra Chatwoot Cloud: que el
+//   token del Agent Bot pueda subir adjuntos y que Messenger muestre la foto con el pie.
 // · `puertosEntradaSupabase`: lo que necesita la petición del webhook (`entrada.ts`).
+// · `alertaCaidaChatwoot` y `avisosPorCorreo` (spec 2026-10-26, §4.1): el correo si se cae el modelo y el aviso del
+//   presupuesto diario, por correo a MéTRIK (Resend) y ya no por WhatsApp.
 // Los secretos los pasa quien llama (la función los lee de `Deno.env`); este archivo no lee el entorno.
 // ============================================================
 
 import type { SupabaseClient } from '../../types.ts';
 import type { Salida } from '../tipos.ts';
+import { CORREO_MAURICIO, enviarCorreoInterno, htmlDeTexto } from '../../correo-interno.ts';
+import { alertarSiCaido, caidaDelTurno } from '../caida.ts';
+import type { PuertosCaida } from '../caida.ts';
+import { inicioDiaBogota } from './topes.ts';
 import type { PrecioModelo } from '../uso.ts';
 import { leerConfigPublico } from './config.ts';
 import type { EntranteNuevo, PuertosEntrada, WorkspacePublico } from './entrada.ts';
-import type { AlmacenPublico, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
+import type { AlmacenPublico, AvisosInternos, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
+import { conDespliegue } from '../despliegue.ts';
 import type { FilaPublica, LlaveConversacion, TrazaPublica } from './tipos.ts';
 import { llaveTexto } from './tipos.ts';
+import { urlFotoPermitida } from './ventas/catalogo-ventas.ts';
 
 type Fila = Record<string, unknown>;
 const COLUMNAS = 'id, workspace_id, cuenta_id, conversacion_id, canal, direccion, clase, texto, enmascarado, adjunto, opciones, toque_id, chatwoot_message_id, turno_id, ranura, estado, traza, ms_webhook, created_at';
@@ -67,8 +78,9 @@ export function almacenChatwootSupabase(supabase: SupabaseClient): AlmacenPublic
     },
     async cerrarTurno(p) {
       const r = await Promise.all([
-        supabase.from('chatwoot_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas),
-        supabase.from('chatwoot_conversacion').update({ traza: p.traza }).eq('id', p.filaTraza),
+        // Sin entrantes (el aviso de un pago aprobado): solo la traza.
+        p.filas.length ? supabase.from('chatwoot_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas) : Promise.resolve({ error: null }),
+        supabase.from('chatwoot_conversacion').update({ traza: conDespliegue(p.traza) }).eq('id', p.filaTraza),
       ]);
       for (const x of r) if (x.error) console.error('[asistente] no se pudo cerrar el turno:', x.error.message);
     },
@@ -133,14 +145,67 @@ export async function preciosSupabase(supabase: SupabaseClient): Promise<PrecioM
 
 // ── Chatwoot ─────────────────────────────────────────────────────────────────
 
-/** El cuerpo de un mensaje de Chatwoot desde la salida del núcleo (`input_select` con los ids del código). Pura. */
+/**
+ * El cuerpo de un mensaje de Chatwoot desde la salida del núcleo (`input_select` con los ids del código). Un `enlace`
+ * (§4.2) sale como texto con el link debajo: Chatwoot no tiene el botón de URL de WhatsApp. Pura.
+ */
 export function cuerpoMensajeChatwoot(s: Salida, privado = false): Record<string, unknown> {
+  if (s.tipo === 'enlace') return { content: `${s.texto}\n${s.url}`, message_type: 'outgoing', private: privado };
   const base = { content: s.texto, message_type: 'outgoing', private: privado };
   if (s.tipo === 'texto' || privado) return base;
   return { ...base, content_type: 'input_select', content_attributes: { items: s.opciones.map((o) => ({ title: o.titulo, value: o.id })) } };
 }
 
-export function mensajeroChatwootApi(o: { apiUrl: string; token: string; fetch?: typeof fetch; timeoutMs?: number }): MensajeroChatwoot {
+/** Tope de una foto del catálogo que se sube a Chatwoot (Messenger acepta hasta 8 MB por imagen). */
+export const FOTO_MAX_BYTES = 5 * 1024 * 1024;
+/** Tiempo máximo para bajar una foto del bucket y, aparte, para subirla a Chatwoot. */
+export const FOTO_TIMEOUT_MS = 8000;
+const TIPOS_FOTO = /^image\/(jpeg|png|webp|gif)\b/i;
+
+export type FotoBajada = { ok: true; archivo: Blob; nombre: string } | { ok: false; motivo: string };
+
+/**
+ * Baja una foto del catálogo para subirla como adjunto: solo del bucket propio (`urlFotoPermitida`), sin seguir
+ * redirecciones, imagen (jpeg, png, webp o gif), hasta `maxBytes` (se corta al leer aunque el servidor no diga el
+ * largo) y con tiempo máximo. Nunca lanza.
+ */
+export async function bajarFoto(url: string, o: { hostPermitido: string | null; fetch: typeof fetch; maxBytes?: number; timeoutMs?: number }): Promise<FotoBajada> {
+  if (!urlFotoPermitida(url, o.hostPermitido)) return { ok: false, motivo: 'la URL no es del bucket de fotos del catálogo' };
+  const max = o.maxBytes ?? FOTO_MAX_BYTES;
+  try {
+    const r = await o.fetch(url, { redirect: 'error', signal: AbortSignal.timeout(o.timeoutMs ?? FOTO_TIMEOUT_MS) });
+    if (!r.ok) return { ok: false, motivo: `descarga http ${r.status}` };
+    const tipo = r.headers.get('content-type') ?? '';
+    if (!TIPOS_FOTO.test(tipo)) return { ok: false, motivo: `no es una imagen (${tipo.slice(0, 40) || 'sin tipo'})` };
+    const largo = Number(r.headers.get('content-length') ?? '');
+    if (Number.isFinite(largo) && largo > max) return { ok: false, motivo: `la foto pesa ${largo} bytes (tope ${max})` };
+    if (!r.body) return { ok: false, motivo: 'descarga sin cuerpo' };
+    const partes: Uint8Array[] = [];
+    let total = 0;
+    const lector = r.body.getReader();
+    for (;;) {
+      const { done, value } = await lector.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) {
+        await lector.cancel().catch(() => {});
+        return { ok: false, motivo: `la foto pasa el tope de ${max} bytes` };
+      }
+      partes.push(value);
+    }
+    if (!total) return { ok: false, motivo: 'foto vacía' };
+    const nombre = (new URL(url).pathname.split('/').pop() || 'foto.jpg').replace(/[^\w.-]+/g, '_').slice(0, 80);
+    return { ok: true, archivo: new Blob(partes as BlobPart[], { type: tipo.split(';')[0].trim() }), nombre };
+  } catch (e) {
+    return { ok: false, motivo: `descarga: ${String(e).slice(0, 80)}` };
+  }
+}
+
+export function mensajeroChatwootApi(o: {
+  apiUrl: string; token: string; fetch?: typeof fetch; timeoutMs?: number;
+  /** El host de Supabase de donde se pueden bajar fotos del catálogo (`ferreteria-fotos`). Sin él, ninguna foto sale. */
+  hostFotos?: string | null;
+}): MensajeroChatwoot {
   const f = o.fetch ?? ((u: RequestInfo | URL, i?: RequestInit) => globalThis.fetch(u, i));
   const base = (l: LlaveConversacion) => `${o.apiUrl}/api/v1/accounts/${l.cuentaId}/conversations/${l.conversacionId}`;
   const pedir = (url: string, metodo: string, cuerpo?: unknown) => f(url, {
@@ -184,6 +249,30 @@ export function mensajeroChatwootApi(o: { apiUrl: string; token: string; fetch?:
       }
     },
     publicar: (l, s) => crear(l, cuerpoMensajeChatwoot(s)),
+    async publicarFoto(l, foto) {
+      // Chatwoot recibe los adjuntos por multipart (`attachments[]`), no por URL: se baja y se sube. Si la descarga
+      // falla no se mandó nada (no es incierto); el texto del turno ya salió antes.
+      const b = await bajarFoto(foto.url, { hostPermitido: o.hostFotos ?? null, fetch: f });
+      if (!b.ok) return { ok: false, incierto: false, motivo: `foto: ${b.motivo}` };
+      const fd = new FormData();
+      // Sin pie (ronda 3: la foto va justo después del texto de su producto) no se manda `content`: Messenger muestra
+      // solo la imagen. Con pie, Chatwoot lo manda a Messenger como un texto antes de la imagen.
+      if (foto.texto) fd.append('content', foto.texto);
+      fd.append('message_type', 'outgoing');
+      fd.append('private', 'false');
+      fd.append('attachments[]', b.archivo, b.nombre);
+      try {
+        // Sin content-type a mano: el runtime pone el multipart con su boundary.
+        const r = await f(`${base(l)}/messages`, { method: 'POST', headers: { api_access_token: o.token }, body: fd, signal: AbortSignal.timeout(FOTO_TIMEOUT_MS) });
+        if (r.ok) {
+          const d = await r.json().catch(() => ({}));
+          return { ok: true, id: typeof d?.id === 'number' ? d.id : null };
+        }
+        return { ok: false, incierto: r.status >= 500, motivo: `foto: http ${r.status}: ${(await r.text()).slice(0, 120)}` };
+      } catch (e) {
+        return { ok: false, incierto: true, motivo: `foto: red o corte: ${String(e).slice(0, 80)}` };
+      }
+    },
     nota: (l, texto) => crear(l, cuerpoMensajeChatwoot({ tipo: 'texto', texto }, true)),
     async etiquetar(l, etiquetas) {
       // La API reemplaza la lista: se leen las de hoy y se suman.
@@ -233,6 +322,20 @@ export function puertosEntradaSupabase(supabase: SupabaseClient, secreto: (slug:
       }
       return 'ok';
     },
+    async registrarCierre(p) {
+      const base = supabase.from('chatwoot_conversacion');
+      const { data: ult, error: e1 } = await base.select('traza').eq('workspace_id', p.llave.workspaceId).eq('cuenta_id', p.llave.cuentaId)
+        .eq('conversacion_id', p.llave.conversacionId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (e1) return false;
+      if ((ult?.traza as Fila | null)?.cierre === true) return true;
+      const { error } = await supabase.from('chatwoot_conversacion').insert({
+        workspace_id: p.llave.workspaceId, cuenta_id: p.llave.cuentaId, conversacion_id: p.llave.conversacionId, inbox_id: p.inboxId, canal: p.canal,
+        direccion: 'saliente', clase: 'nota', estado: 'publicado', ranura: 'cierre', texto: '[Asistente] Conversación resuelta en Chatwoot: el próximo mensaje empieza de nuevo.',
+        traza: { tipo: 'cierre', cierre: true },
+      });
+      if (error) console.error('[asistente] no se pudo registrar el cierre:', error.message);
+      return !error;
+    },
     async completarAudio(p) {
       const { data, error } = await supabase.from('chatwoot_conversacion').select('id, adjunto, turno_id')
         .eq('workspace_id', p.workspaceId).eq('cuenta_id', p.cuentaId).eq('chatwoot_message_id', p.mensajeId).eq('direccion', 'entrante').maybeSingle();
@@ -242,5 +345,65 @@ export function puertosEntradaSupabase(supabase: SupabaseClient, secreto: (slug:
     },
     ahoraS: () => Math.floor(Date.now() / 1000),
     reloj: () => performance.now(),
+  };
+}
+
+// ── Avisos internos por correo (spec 2026-10-26, §4.1) ───────────────────────
+
+/** Un resumen corto de un texto (para la llave de Resend). */
+async function resumen(texto: string): Promise<string> {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto)));
+  return [...h.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * El aviso del presupuesto diario por correo a MéTRIK (antes por WhatsApp a `WA_ADMIN_NOTIFY_PHONE`, que se perdía fuera
+ * de la ventana de 24 h). El candado de la cola ya avisa una vez por umbral y día; la llave de Resend también.
+ */
+export function avisosPorCorreo(p: { workspaceNombre: string; llaveResend: string; ahoraMs?: () => number }): AvisosInternos {
+  return {
+    async avisar(texto) {
+      const dia = inicioDiaBogota((p.ahoraMs ?? Date.now)()).slice(0, 10);
+      const r = await enviarCorreoInterno({
+        to: CORREO_MAURICIO,
+        subject: `Presupuesto del asistente: ${p.workspaceNombre}`,
+        text: texto,
+        html: htmlDeTexto(texto),
+        idempotencyKey: `asistente-presupuesto/${p.workspaceNombre}/${dia}/${await resumen(texto)}`,
+      }, { llave: p.llaveResend });
+      if (!r.ok) console.error('[asistente] no salió el aviso del presupuesto:', r.error);
+    },
+  };
+}
+
+/**
+ * Los puertos del correo de caída en Chatwoot: los candados del almacén, las conversaciones con un turno caído en la
+ * última hora (`chatwoot_conversacion`, índice parcial de las trazas del modelo) y Resend.
+ */
+export function caidaChatwootSupabase(supabase: SupabaseClient, almacen: Pick<AlmacenPublico, 'tomarCandado' | 'soltarCandado'>, workspaceId: string, llaveResend: string): PuertosCaida {
+  return {
+    tomarCandado: (k, s) => almacen.tomarCandado(k, s),
+    soltarCandado: (k) => almacen.soltarCandado(k),
+    async sinRespuesta(desdeIso) {
+      const { data, error } = await supabase.from('chatwoot_conversacion').select('cuenta_id, conversacion_id')
+        .eq('workspace_id', workspaceId).gte('created_at', desdeIso).eq('traza->>tipo', 'modelo').like('traza->>error', 'falla:%').limit(2000);
+      if (error) return null;
+      return new Set(((data ?? []) as Fila[]).map((x) => `${x.cuenta_id}:${x.conversacion_id}`)).size;
+    },
+    enviarCorreo: (m) => enviarCorreoInterno(m, { llave: llaveResend }),
+  };
+}
+
+/** El gancho `alertaCaida` de la cola pública: el correo si se cayó el modelo. Nunca lanza. */
+export function alertaCaidaChatwoot(
+  supabase: SupabaseClient, almacen: Pick<AlmacenPublico, 'tomarCandado' | 'soltarCandado'>,
+  p: { llave: LlaveConversacion; workspaceNombre: string; llaveResend: string },
+): (traza: TrazaPublica, turnoId: string) => Promise<void> {
+  return async (traza, turnoId) => {
+    if (!caidaDelTurno(traza)) return;
+    await alertarSiCaido(caidaChatwootSupabase(supabase, almacen, p.llave.workspaceId, p.llaveResend), traza, {
+      workspaceId: p.llave.workspaceId, workspaceNombre: p.workspaceNombre, canal: 'chatwoot',
+      conversacion: `cw:${llaveTexto(p.llave)}`, turnoId, ahoraMs: Date.now(),
+    });
   };
 }

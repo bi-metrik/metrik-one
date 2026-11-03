@@ -15,6 +15,7 @@ import {
   type CotizacionMedida,
 } from './gate-margen'
 import { cascadaVigente, contextoDeCotizacion, leerItinerarios } from './itinerarios-datos'
+import { margenParaElMinimo } from './itinerarios'
 import { evaluarSalida } from './piso-salida-datos'
 
 // El cliente tipado obliga a arrastrar medio `database.ts` por cada `select`, y las
@@ -96,7 +97,8 @@ export async function evaluarGateMargen(
 
     const filas = await leerItinerarios(supabase, cot.id)
     const cascada = cascadaVigente(ctx, filas)
-    medidas.push({ ...cot, margenRealPct: cascada.margenRealPct, umbrales: ctx.umbrales })
+    // Tarifa pública (2026-10-22): sin sus líneas; sin líneas Públicas, el margen de siempre.
+    medidas.push({ ...cot, margenRealPct: margenParaElMinimo(cascada), umbrales: ctx.umbrales })
   }
 
   const bajoPiso = cotizacionesBajoPiso(medidas)

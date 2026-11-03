@@ -17,7 +17,10 @@ const ceder = () => new Promise<void>((r) => setTimeout(r, 0))
 vi.mock('@/lib/negocios/instanciar-bloques-etapa', () => ({
   instanciarBloquesDeEtapa: async (_db: unknown, a: { negocioId: string; etapaId: string }) => { instanciadas.push(a) },
 }))
-vi.mock('./entrega-datos', () => ({ evaluarGateEntrega: async () => faltaEntrega }))
+let gateRevienta = false
+vi.mock('./entrega-datos', () => ({
+  evaluarGateEntrega: async () => { if (gateRevienta) throw new Error('caída'); return faltaEntrega },
+}))
 
 function leer(f: Fila, col: string): unknown {
   if (!col.includes('->')) return f[col]
@@ -76,12 +79,14 @@ const NEG = 'neg-a'
 function sembrar(opts: { pagado?: number; etapa?: string } = {}) {
   instanciadas = []
   faltaEntrega = []
+  gateRevienta = false
   tablas = {
     lineas_negocio: [
       { id: 'linea', workspace_id: WS, config_extra: { etapas_por_fecha: { entrar: { etapa_numero: 7 }, salir: { etapa_numero: 8, offset: 1 } }, aprobaciones: { staff_ids: ['s-edgar'] } } },
       { id: 'soena', workspace_id: 'ws-s', config_extra: {} },
     ],
     etapas_negocio: [
+      { id: 'e4', linea_id: 'linea', numero: 4, stage: 'venta', nombre: 'Confirmación', is_active: true, config_extra: {} },
       { id: 'e6', linea_id: 'linea', numero: 6, stage: 'ejecucion', nombre: 'Documentos y entrega', is_active: true, config_extra: { gates: ['paquete_enviado'] } },
       { id: 'e7', linea_id: 'linea', numero: 7, stage: 'ejecucion', nombre: 'En viaje', is_active: true, config_extra: {} },
       { id: 'e8', linea_id: 'linea', numero: 8, stage: 'cobro', nombre: 'Cierre económico', is_active: true, config_extra: {} },
@@ -173,5 +178,29 @@ describe('salir de En viaje', () => {
     expect(r.salieron).toBe(1)
     expect(neg().etapa_actual_id).toBe('e8')
     expect(tablas.notificaciones).toHaveLength(0)
+  })
+})
+
+describe('viaje con la salida encima antes de Documentos y entrega (barrido 2026-10-22)', () => {
+  it('en Confirmación el día de salida: no se mueve, la dirección recibe UN aviso por salida', async () => {
+    sembrar({ etapa: 'e4' })
+    await correr('2026-11-20')
+    expect(tablas.notificaciones).toHaveLength(0)
+    const r = await correr('2026-11-21')
+    expect(r.atascados).toBe(1)
+    expect(neg().etapa_actual_id).toBe('e4')
+    const avisos = tablas.notificaciones.filter((n) => (n.metadata as Fila).motivo === 'viaje_atascado')
+    expect(avisos).toEqual([expect.objectContaining({ destinatario_id: 'p-edgar', tipo: 'viaje_sin_listo', contenido: 'Cusco sale hoy de viaje y sigue en Confirmación: no está listo para «En viaje».' })])
+    // Al día siguiente no se repite.
+    expect((await correr('2026-11-22')).atascados).toBe(0)
+    expect(tablas.notificaciones.filter((n) => (n.metadata as Fila).motivo === 'viaje_atascado')).toHaveLength(1)
+  })
+
+  it('si revisar lo que faltaba falla, entra y avisa igual (no se traga el error)', async () => {
+    gateRevienta = true
+    await correr('2026-11-21')
+    expect(neg().etapa_actual_id).toBe('e7')
+    const aviso = tablas.notificaciones.find((n) => (n.metadata as Fila).motivo === 'viaje_sin_listo')
+    expect(aviso?.contenido).toContain('No se pudo revisar si estaba listo (caída).')
   })
 })

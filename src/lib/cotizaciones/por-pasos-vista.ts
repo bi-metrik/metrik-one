@@ -14,8 +14,10 @@
 import { calcularCascada, type Cascada, type ParametrosCascada } from './totales'
 import {
   cascadaDeItinerario,
+  costoDeAgencia,
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  publicasSinComision,
   margenMedible,
   normalizarGrupo,
   ranurasConAlternativas,
@@ -25,15 +27,18 @@ import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre } from './cuadre-pasajero'
 import { adjuntarAdicionales, type Adicional, type FilaAdicional } from './adicionales'
 import { esBaseIvaLinea } from '@/lib/fiscal/iva-cotizacion'
-import { claveTarifa, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, type NombreTarifa } from './tarifas'
+import { claveTarifa, esIntermedia, esRecomendada, idDelPrincipal, NOMBRES_TARIFA, nombresVisiblesDeTarifas, type NombreTarifa } from './tarifas'
 import { firmaDeTarifa } from './tarifas-por-pasos'
 import { estadoDelServicio, type EstadoServicio } from './estado-servicio'
 import { resolverRanura } from './ranuras-pantallazo'
-import { ciudadCorta, tipoDeDefinicion, type TipoRanura } from './ranuras-cotizacion'
+import { ciudadCorta, esNombreDeOpcion, tipoDeDefinicion, type TipoRanura } from './ranuras-cotizacion'
+import { nombreVisibleDeLinea } from './nombre-visible'
+import { capitalizacionNormal } from '@/lib/proveedores/nombre-de-tarifa'
 import { detalleDeLectura, hotelesDeItems, tramosDelItem, type ItemConLectura } from './detalle-viaje'
 import { leerTarifaPax } from './tarifa-pasajero'
 import { leerFecha } from '@/lib/pdf/cotizacion-trappvel-formato'
 import { diaDeItem } from './dia-relativo'
+import { paramsPorOpcion } from './reglas-margen'
 
 // ── Las líneas, como las lee el servidor ─────────────────────────────────────
 
@@ -135,11 +140,28 @@ export interface TarifaDeLaPantalla {
 export interface TarifaCalculada extends TarifaDeLaPantalla {
   /** Económica, Recomendada, Premium, o `null` (una tarifa extra). */
   canon: NombreTarifa | null
+  /**
+   * El nombre GUARDADO (`nombre` es el que se ve: sin nombre, «Opción N» como el documento,
+   * `nombresVisiblesDeTarifas`). Renombrar y lo que se escribe miran este.
+   */
+  nombreGuardado: string | null
   esPrincipal: boolean
   precio: number
   costo: number
-  /** El margen real medible (sin costo o sin precio, `null`). */
+  /**
+   * Lo que paga la agencia (`costoDeAgencia`): el costo menos la comisión de las Públicas. Es el que
+   * va junto a «ganas». `null` con una Pública sin comisión (QA del #1342).
+   */
+  costoAgencia: number | null
+  /**
+   * El margen general (D2, 2026-10-29): el de todas las líneas, las Públicas con su comisión. `null`
+   * sin costo, sin precio o con una Pública sin comisión. Es el que se juzga contra el mínimo.
+   */
   margenReal: number | null
+  /** Cuántas líneas de tarifa pública suma esta tarifa. */
+  publicas: number
+  /** Cuántas de esas no tienen su comisión escrita (D3: la tarifa no puede salir). */
+  sinComision: number
   /** La opción que cobra en cada servicio con opciones. */
   opcionPorServicio: Record<string, string>
   /** «Recomendada» o «Económica» si es idéntica a una que va antes; `null` si no. */
@@ -147,13 +169,41 @@ export interface TarifaCalculada extends TarifaDeLaPantalla {
   cascada: Cascada
 }
 
+/**
+ * La Intermedia se muestra entre la Económica y la Recomendada, como en el documento: solo existe
+ * cuando la Recomendada es la más cara (segunda vuelta de la COT-2026-0008). Conserva su `orden`.
+ */
+function conIntermediaAntesDeLaRecomendada<T extends { nombre: string | null }>(xs: T[]): T[] {
+  const iRec = xs.findIndex(t => esRecomendada(t.nombre))
+  const iInt = xs.findIndex(t => esIntermedia(t.nombre))
+  if (iRec < 0 || iInt < 0 || iInt < iRec) return xs
+  const sin = xs.filter((_, i) => i !== iInt)
+  return [...sin.slice(0, iRec), xs[iInt], ...sin.slice(iRec)]
+}
+
+/**
+ * Las tarifas sin nombre, en el orden de su «Opción N» (prueba corta del #1352). La que no va al
+ * cliente toma el último número (el PDF numera primero las que van), y por `orden` podía quedar
+ * antes: «Opción 3» arriba de «Opción 2». Las que tienen nombre no se mueven: solo se reparten los
+ * lugares que ya ocupaban las sin nombre.
+ */
+function sinNombreEnSuNumero<T extends { id: string; nombre: string | null }>(xs: T[], visibles: ReadonlyMap<string, string>): T[] {
+  const numero = (t: T) => Number(/^Opción (\d+)$/.exec(visibles.get(t.id) ?? '')?.[1] ?? NaN)
+  const sinNombre = xs.filter(t => (t.nombre ?? '').trim() === '' && Number.isFinite(numero(t)))
+  if (sinNombre.length < 2) return xs
+  const enOrden = [...sinNombre].sort((a, b) => numero(a) - numero(b))
+  let i = 0
+  return xs.map(t => (sinNombre.includes(t) ? enOrden[i++] : t))
+}
+
 /** El precio, el costo y el margen de cada tarifa, y si es idéntica a otra (decisión C). */
 export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCascada, tarifas: readonly TarifaDeLaPantalla[]): TarifaCalculada[] {
   const principal = idDelPrincipal(tarifas)
   const ranuras = ranurasConAlternativas(lineas)
-  const ordenadas = [...tarifas].sort((a, b) => a.orden - b.orden)
+  const visibles = nombresVisiblesDeTarifas(tarifas)
+  const ordenadas = sinNombreEnSuNumero(conIntermediaAntesDeLaRecomendada([...tarifas].sort((a, b) => a.orden - b.orden)), visibles)
   const calculadas = ordenadas.map(t => {
-    const cascada = cascadaDeItinerario(lineas, t.seleccion, params)
+    const cascada = cascadaDeItinerario(lineas, t.seleccion, params, t.id)
     const dentro = new Set(itemsDelItinerario(lineas, t.seleccion))
     const opcionPorServicio: Record<string, string> = {}
     for (const r of ranuras) {
@@ -163,11 +213,16 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
     const k = claveTarifa(t.nombre)
     return {
       ...t,
+      nombre: visibles.get(t.id) ?? t.nombre,
+      nombreGuardado: t.nombre,
       canon: NOMBRES_TARIFA.find(n => claveTarifa(n) === k) ?? null,
       esPrincipal: t.id === principal,
       precio: cascada.precioVenta,
       costo: cascada.costoDeVenta,
+      costoAgencia: costoDeAgencia(cascada),
       margenReal: margenMedible(cascada),
+      publicas: cascada.publicas.lineas,
+      sinComision: publicasSinComision(cascada),
       opcionPorServicio,
       igualA: null as string | null,
       cascada,
@@ -188,13 +243,29 @@ export function tarifasCalculadas(lineas: LineaDeCascada[], params: ParametrosCa
 export function cascadaDelTotal(lineas: LineaDeCascada[], params: ParametrosCascada, tarifas: readonly TarifaDeLaPantalla[]): Cascada {
   const principal = tarifas.find(t => t.id === idDelPrincipal(tarifas)) ?? null
   const aportan = new Set(principal ? itemsDelItinerario(lineas, principal.seleccion) : itemsQueAportanAlTotal(lineas))
-  return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), params)
+  // Con principal, la cascada de ESA tarifa: lleva sus descuentos propios (`descuentoAplicaA`).
+  return calcularCascada(lineas.filter(l => aportan.has(l.id) || l.es_ajuste === true), principal ? { ...params, tarifaId: principal.id } : params)
+}
+
+/**
+ * El margen que pinta el encabezado junto al total, y el mismo que dice «Tarifas» cuando no hay
+ * tarifas que vayan al cliente (brief del 2026-10-28, falla 1): UNA cifra para las dos. Con reglas
+ * de margen es el global (el que se juzga contra el mínimo); sin reglas, el de siempre.
+ */
+export function margenDelEncabezado(total: Cascada, params: ParametrosCascada): number | null {
+  // D2 (2026-10-29): con Públicas, también sin reglas, el general (las Públicas con su comisión).
+  // Con una Pública sin comisión el margen no se puede medir: `null`, nunca el «0 %» de tomar el
+  // precio público como costo (QA del #1342). Quien lo pinta dice «falta la comisión».
+  if (publicasSinComision(total) > 0) return null
+  if (params.reglas || total.publicas.lineas > 0) return margenMedible(total) ?? total.margenRealPct
+  return total.margenRealPct
 }
 
 /** El precio de cada opción (con sus adicionales): no depende de la tarifa, el margen es uno. */
 export function preciosDeLasOpciones(lineas: LineaDeCascada[], params: ParametrosCascada): Map<string, { precio: number; costo: number }> {
   return new Map(
-    calcularCascada(lineas, params).lineas
+    // Sin puntos extra ni descuentos sobre el total: son de una tarifa, no de cada opción.
+    calcularCascada(lineas, paramsPorOpcion(params)).lineas
       .filter(l => typeof l.id === 'string')
       .map(l => [l.id as string, { precio: l.precioConAdicionales, costo: l.costoLinea + l.costoAdicionales }]),
   )
@@ -217,12 +288,12 @@ export interface ServicioDelViaje {
 
 export interface TramoDelViaje {
   clave: string
-  /** «Vuelos», «Providencia», «Otros servicios». */
+  /** «Paquete de bloqueo», «Vuelos», «Providencia», «Otros servicios». */
   titulo: string
   servicios: ServicioDelViaje[]
 }
 
-const ORDEN_TIPO: Record<TipoRanura | 'otro', number> = { vuelo: 0, hotel: 1, traslado: 2, actividad: 3, otro: 4 }
+const ORDEN_TIPO: Record<TipoRanura | 'otro', number> = { paquete: -1, vuelo: 0, hotel: 1, traslado: 2, tren: 2, actividad: 3, otro: 4 }
 
 function sinTildes(t: string): string {
   return t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
@@ -253,6 +324,24 @@ function leidoDe(item: FilaDeLinea): Record<string, string> {
     if (typeof valor === 'string') d[k] = valor
   }
   return d
+}
+
+/** «Actividad», «Actividad en Santa Marta», «Actividades»: el nombre que el bloque trae de fábrica. */
+function esNombreGenericoDeActividad(nombre: string): boolean {
+  return /^actividad(es)?(\s+en\s+.+)?$/i.test(nombre.trim())
+}
+
+/**
+ * La tarjeta de una actividad se titula con la actividad («Playa Blanca con almuerzo»), no con el
+ * nombre genérico del bloque («Actividad en Santa Marta»; prueba del #1229, punto d). Es el mismo
+ * criterio del editor (`tituloDeBloque`): el nombre visible de su primera opción, salvo que siga
+ * siendo «Opción N»; si quedó todo en mayúscula, en capitalización normal. Un bloque que alguien
+ * nombró («Buceo de bautismo») se respeta. El lugar del bloque se sigue sacando de su nombre.
+ */
+function nombreDeActividad(item: FilaDeLinea | undefined): string | null {
+  if (!item) return null
+  const n = nombreVisibleDeLinea({ nombre: item.nombre, grupo: item.grupo, tarifa_pax: item.tarifa_pax }).trim()
+  return n && !esNombreDeOpcion(n) ? capitalizacionNormal(n) : null
 }
 
 function sumarDias(iso: string | null, dias: number): string | null {
@@ -308,7 +397,7 @@ export function viajeEnOrden(
     return {
       grupo,
       tipo,
-      nombre,
+      nombre: tipo === 'actividad' && esNombreGenericoDeActividad(nombre) ? nombreDeActividad(ops[0]) ?? nombre : nombre,
       opciones: ops.map(o => o.id),
       estado: estadoDelServicio(ops),
       lugar,
@@ -323,7 +412,10 @@ export function viajeEnOrden(
 
   const vuelos = servicios.filter(s => s.tipo === 'vuelo').sort((a, b) => (a.fecha ?? '9999').localeCompare(b.fecha ?? '9999'))
   const otros = servicios.filter(s => s.tipo === 'otro')
-  const resto = servicios.filter(s => s.tipo !== 'vuelo' && s.tipo !== 'otro')
+  // El paquete de bloqueo (hotel + vuelo del operador) es el viaje entero: va primero y en su
+  // propia sección, no en un destino ni en «Otros servicios».
+  const paquetes = servicios.filter(s => s.tipo === 'paquete')
+  const resto = servicios.filter(s => s.tipo !== 'vuelo' && s.tipo !== 'otro' && s.tipo !== 'paquete')
   const destinoDelNegocio = ciudadCorta(viaje.destino) ?? 'El viaje'
   const tramos = new Map<string, TramoDelViaje & { fecha: string }>()
   for (const s of resto) {
@@ -342,6 +434,7 @@ export function viajeEnOrden(
       servicios: t.servicios.sort((a, b) => ORDEN_TIPO[a.tipo] - ORDEN_TIPO[b.tipo] || (a.fecha ?? '9999').localeCompare(b.fecha ?? '9999')),
     }))
   return [
+    ...(paquetes.length > 0 ? [{ clave: 'paquetes', titulo: paquetes.length > 1 ? 'Paquetes de bloqueo' : 'Paquete de bloqueo', servicios: paquetes }] : []),
     ...(vuelos.length > 0 ? [{ clave: 'vuelos', titulo: 'Vuelos', servicios: vuelos }] : []),
     ...destinos,
     ...(otros.length > 0 ? [{ clave: 'otros', titulo: 'Otros servicios', servicios: otros }] : []),
@@ -413,6 +506,18 @@ export interface EntradaDePasos {
   vanAlCliente: string[]
   /** Lo que «Revisar y enviar» cuenta en rojo y en ámbar. */
   rojos: number
+  /**
+   * El primer renglón rojo de la lista (el mismo motivo con que el servidor rechaza «Enviar»). Con
+   * él, «Sigue:» no dice «Todo listo» mientras la lista frena (prueba real del bloqueo, 2026-10-29:
+   * «Paquete incompleto: Falta la edad de un niño» con la barra en «Todo listo»).
+   */
+  primerImpide?: string | null
+  /**
+   * Los renglones rojos de la lista única, con su clave. Con ellos «Sigue:» deja la autorización de
+   * datos (que depende del cliente) DESPUÉS de leer el texto (Vera sobre el #1326). Ausente = sin
+   * lista única: manda `primerImpide`.
+   */
+  impide?: readonly { clave: string; texto: string }[] | null
   ambar: number
   texto: 'nada' | 'sinrevisar' | 'ok' | 'viejo'
   enviada: boolean
@@ -456,6 +561,9 @@ export function estadoDeLosPasos(e: EntradaDePasos): Record<NumeroDePaso, Estado
   return { 1: armar, 2: tarifas, 3: revisar }
 }
 
+/** La clave del renglón de la autorización de datos en la lista única (`lista-unica.ts`). */
+const CLAVE_AUTORIZACION_DATOS = 'autorizacion-datos'
+
 export type AccionSigue = { tipo: 'pegar' } | { tipo: 'aceptar' } | { tipo: 'paso'; paso: NumeroDePaso } | { tipo: 'ninguna' }
 
 /** «Sigue:» con UNA acción (copys del diseño). */
@@ -467,8 +575,24 @@ export function sigue(e: EntradaDePasos & { pasoActual: NumeroDePaso }): { texto
   if (e.leyendo > 0) return { texto: 'ONE está leyendo los pantallazos. Puedes seguir pegando.', accion: { tipo: 'ninguna' }, boton: null }
   if (e.pantallazosPorAceptar > 0) return { texto: 'Mira a dónde va cada pantallazo y acéptalos.', accion: { tipo: 'aceptar' }, boton: `Aceptar ${e.pantallazosPorAceptar}` }
   if (e.sinCosto.length > 0) return { texto: `${e.sinCosto[0].motivo}: ${e.sinCosto[0].servicio}.`, accion: { tipo: 'paso', paso: 1 }, boton: 'Ir' }
+  // Lo demás que impide enviar (paquete incompleto, capturas, Recomendada, margen): la misma revisión
+  // que la lista y que `enviarPorPasos`. Nunca «Todo listo» con un rojo. La autorización de datos
+  // depende del cliente: va después de leer el texto, para no taparlo.
+  const freno = (texto: string) => ({ texto, accion: { tipo: 'paso', paso: 3 } as AccionSigue, boton: e.pasoActual === 3 ? null : 'Ver qué falta' })
+  // QA del #1359 (punto 6) · la comisión de una Pública es un dato del paquete, no una elección de
+  // Tarifas: agregar otro paquete (que crea opciones) la tapaba con «Escoge qué opción va…». Sin ella
+  // el margen no se puede medir: va antes que las tarifas y que el margen.
+  const comision = e.impide?.find(r => r.clave === 'comision-publica')
+  if (comision) return freno(comision.texto)
   if (e.conOpciones > 0 && !e.tarifasVistas) return { texto: 'Escoge qué opción va en cada tarifa. ONE ya propuso una.', accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
   if (e.bajoMinimo.length > 0) return { texto: `${e.bajoMinimo[0]} queda bajo el margen mínimo: pide la autorización o sube el margen.`, accion: { tipo: 'paso', paso: 2 }, boton: 'Ir a Tarifas' }
+  const porArreglar = e.impide ? e.impide.filter(r => r.clave !== CLAVE_AUTORIZACION_DATOS) : null
+  if (porArreglar) {
+    if (porArreglar.length > 0) return freno(porArreglar[0].texto)
+  } else if (e.rojos > 0 || e.primerImpide) {
+    return freno(e.primerImpide ?? `${e.rojos} ${e.rojos === 1 ? 'cosa impide' : 'cosas impiden'} enviar: míralas en Revisar y enviar.`)
+  }
   if (e.texto === 'sinrevisar' || e.texto === 'viejo') return { texto: 'Lee lo que le llega al cliente y márcalo como revisado.', accion: { tipo: 'paso', paso: 3 }, boton: 'Revisar el texto' }
+  if (e.impide && e.impide.length > 0) return freno(e.impide[0].texto)
   return { texto: 'Todo listo: descarga el PDF o envíalo al cliente.', accion: { tipo: 'paso', paso: 3 }, boton: e.pasoActual === 3 ? null : 'Revisar y enviar' }
 }

@@ -32,8 +32,10 @@ import {
   pesos,
   planSugerido,
   reglaEnPalabras,
+  fechaLimiteSaldo,
   validarPlan,
   type CuotaPlan,
+  type HitoProveedor,
 } from '@/lib/viaje/plan-pagos'
 import {
   gatesConfirmacionPendientes,
@@ -43,7 +45,7 @@ import {
   seccionesDeTerminos,
   type TipoTitular,
 } from '@/lib/viaje/confirmacion'
-import type { VistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import type { TarifaConfirmable, VistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import {
   aplicarPrerreservaSiVencio,
   confirmarClienteViaje,
@@ -56,11 +58,33 @@ interface Props {
   vista: VistaConfirmacion
   puedeConfirmar: boolean
   esDireccion: boolean
+  /**
+   * Falta la autorización de datos del cliente: el mismo motivo con que el servidor rechaza
+   * confirmar (`autorizacion-datos/envio.ts`). Se dice antes de llenar la hoja, no en el último clic.
+   */
+  motivoAutorizacion?: string | null
+}
+
+/** El motivo de la autorización pendiente, arriba de la hoja y en el panel. */
+function AvisoAutorizacion({ motivo }: { motivo: string }) {
+  return (
+    <p role="status" data-confirmacion-sin-autorizacion className="rounded-lg border border-[#F0D9B5] bg-[#FBF1E2] px-3 py-2 text-sm text-[#191713]">
+      {motivo}
+    </p>
+  )
 }
 
 const BOTON = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium disabled:opacity-50'
 const BOTON_PRIMARIO = `${BOTON} bg-[#10B981] text-white hover:bg-[#059669]`
 const BOTON_SECUNDARIO = `${BOTON} border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:bg-gray-50`
+
+/**
+ * ¿El cliente pudo decir que sí a esta cotización? Solo si ya le llegó (enviada) o ya la aceptó. Un
+ * borrador no (QA del #1342: la tarjeta salía en un borrador sin aceptación).
+ */
+export function cotizacionConfirmable(estado: string | null | undefined): boolean {
+  return estado === 'enviada' || estado === 'aceptada'
+}
 
 function Linea({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
@@ -71,7 +95,7 @@ function Linea({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   )
 }
 
-export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDireccion }: Props) {
+export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDireccion, motivoAutorizacion = null }: Props) {
   const router = useRouter()
   const [abierta, setAbierta] = useState(false)
   const [isPending, startTransition] = useTransitionTolerante()
@@ -96,6 +120,12 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
 
   // Antes de confirmar y sin cotización para confirmar, no hay nada que mostrar.
   if (!conf && (!vista.cotizacion || !(vista.antesDeConfirmacion || vista.enConfirmacion))) return null
+  // H10-2 (QA del 2026-10-29): un negocio perdido o desistido no ofrece «El cliente confirmó». La
+  // acción ya lo rechaza en el servidor; la pantalla no debe invitar a un clic que va a fallar.
+  if (!conf && !vista.negocioAbierto) return null
+  // QA del #1342 · un borrador no le ha llegado al cliente: no hay qué confirmar y la tarjeta
+  // «Confirmación · El cliente dijo sí» no sale. Con la confirmación registrada sale siempre.
+  if (!conf && !cotizacionConfirmable(vista.cotizacion?.estado)) return null
 
   function yaLoMande() {
     startTransition(async () => {
@@ -108,6 +138,8 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
   }
 
   const tarifaElegida = conf ? vista.tarifas.find((t) => t.itinerarioId === conf.itinerario_id) : null
+  // La tarifa única implícita (sin tarifas) no tiene nombre propio: se muestra el total a secas.
+  const nombreTarifa = conf?.tarifa_nombre ?? (tarifaElegida?.itinerarioId ? tarifaElegida.nombre : null)
   const plan = vista.plan && vista.plan.estado === 'acordado' ? vista.plan : null
 
   return (
@@ -129,6 +161,7 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
           <p className="text-sm text-[#6B7280]">
             El cliente todavía no ha confirmado. Cuando te diga que sí por WhatsApp, regístralo aquí: ONE arma el plan de pagos y los servicios.
           </p>
+          {puedeConfirmar && motivoAutorizacion && <AvisoAutorizacion motivo={motivoAutorizacion} />}
           {puedeConfirmar && (
             <button type="button" className={BOTON_PRIMARIO} onClick={() => setAbierta(true)}>
               El cliente confirmó
@@ -142,7 +175,7 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
         <div className="mt-3 space-y-3">
           <ul className="space-y-1.5">
             <Linea ok>El cliente confirmó el {fechaCorta(conf.fecha)}{conf.pantallazo ? ' (pantallazo)' : ''}</Linea>
-            <Linea ok>Tarifa {conf.tarifa_nombre ?? tarifaElegida?.nombre ?? ''} · {pesos(conf.total)}</Linea>
+            <Linea ok>{nombreTarifa ? `Tarifa ${nombreTarifa}` : 'Total'} · {pesos(conf.total)}</Linea>
             <Linea ok={vista.estado.planVigente}>
               {plan
                 ? `Plan de pagos: ${plan.cuotas.length} cuota${plan.cuotas.length === 1 ? '' : 's'}, ${plan.dentro_de_regla ? 'dentro de la regla' : 'aprobado por dirección'}`
@@ -189,6 +222,7 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
       {abierta && (
         <HojaConfirmacion
           vista={vista}
+          motivoAutorizacion={motivoAutorizacion}
           onCerrar={() => setAbierta(false)}
           onConfirmado={() => { setAbierta(false); router.refresh() }}
         />
@@ -246,28 +280,37 @@ function AprobacionPendiente({ vista }: { vista: VistaConfirmacion }) {
 
 // ── La hoja «El cliente confirmó» ────────────────────────────────────────────
 
-function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string): CuotaPlan[] {
+function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string, hitos: HitoProveedor[]): CuotaPlan[] {
   const guardado = vista.plan && vista.plan.estado === 'propuesta' && vista.plan.total === total ? vista.plan.cuotas : null
   if (guardado && guardado.length > 0) return guardado
-  return planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla })
+  return planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos })
     ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }]
 }
 
-function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfirmacion; onCerrar: () => void; onConfirmado: () => void }) {
+/** La opción del radio: la tarifa única implícita (`itinerarioId: null`) también se escoge. */
+const TARIFA_UNICA_CLAVE = 'tarifa-unica'
+const claveTarifa = (t: TarifaConfirmable) => t.itinerarioId ?? TARIFA_UNICA_CLAVE
+
+/** Exportada para la prueba de render; en la ficha la abre el panel. */
+export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutorizacion = null }: { vista: VistaConfirmacion; onCerrar: () => void; onConfirmado: () => void; motivoAutorizacion?: string | null }) {
   const hoy = todayBogotaISO()
   const nombre = primerNombre(vista.cliente.nombre)
   const [isPending, startTransition] = useTransitionTolerante()
   const intencion = useIntencion()
   const intencionAprob = useIntencion()
 
+  // Sin tarifas (una sola opción por componente) la vista trae una tarifa única con el total de
+  // la cotización y `itinerarioId: null`: queda escogida y se confirma por ese total.
   const tarifasConPrecio = vista.tarifas.filter((t) => t.precio !== null)
   const inicial = tarifasConPrecio.find((t) => t.itinerarioId === vista.cotizacion?.tarifaAceptadaId)
     ?? tarifasConPrecio.find((t) => t.esRecomendada)
     ?? tarifasConPrecio[0]
     ?? null
-  const [tarifaId, setTarifaId] = useState<string | null>(inicial?.itinerarioId ?? null)
-  const tarifa = tarifasConPrecio.find((t) => t.itinerarioId === tarifaId) ?? null
+  const [tarifaId, setTarifaId] = useState<string | null>(inicial ? claveTarifa(inicial) : null)
+  const tarifa = tarifasConPrecio.find((t) => claveTarifa(t) === tarifaId) ?? null
   const total = tarifa?.precio ?? 0
+  // H-17: la «Compra antes del» del paquete de esta tarifa (lo que se le paga al operador).
+  const hitos = useMemo(() => tarifa?.hitosProveedor ?? [], [tarifa])
 
   const [fecha, setFecha] = useState(hoy)
   const [pantallazo, setPantallazo] = useState<{ storage_path: string; file_name: string; mime_type: string } | null>(null)
@@ -278,7 +321,7 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
   const [titNombre, setTitNombre] = useState('')
   const [titCorreo, setTitCorreo] = useState('')
   const [correoCliente, setCorreoCliente] = useState('')
-  const [cuotas, setCuotas] = useState<CuotaPlan[]>(() => cuotasIniciales(vista, total, hoy))
+  const [cuotas, setCuotas] = useState<CuotaPlan[]>(() => cuotasIniciales(vista, total, hoy, hitos))
   const [motivoPlan, setMotivoPlan] = useState('')
   const [conPrerreserva, setConPrerreserva] = useState(false)
   const [venceA, setVenceA] = useState('')
@@ -290,10 +333,10 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
   useEffect(() => {
     if (totalPrevio.current === total) return
     totalPrevio.current = total
-    setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])
-  }, [total, hoy, vista.viaje.fechaSalida, vista.regla])
+    setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])
+  }, [total, hoy, vista.viaje.fechaSalida, vista.regla, hitos])
 
-  const ctxPlan = { total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }
+  const ctxPlan = { total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }
   const v = validarPlan(cuotas, ctxPlan)
   const lineas = lineasDeValidacion(v, ctxPlan)
   const huella = huellaPlan(cuotas, total)
@@ -308,7 +351,8 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
     fechaSalida: vista.viaje.fechaSalida,
     fechaRegreso: vista.viaje.fechaRegreso,
     composicion: vista.viaje.composicion,
-    tarifaNombre: tarifa?.nombre ?? null,
+    // La tarifa única no se nombra en el mensaje: el servidor tampoco la nombra.
+    tarifaNombre: tarifa?.itinerarioId ? tarifa.nombre : null,
     total,
     cuotas: normalizarCuotas(cuotas),
     fechaMinimo: v.fechaMinimo,
@@ -318,10 +362,13 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
     extra,
     comercial: vista.comercial ? primerNombre(vista.comercial) : null,
     agencia: vista.agencia,
+    visaEnTramite: vista.visaEnTramite,
   }), [vista, tarifa, total, cuotas, v.fechaMinimo, hoy, extra])
 
-  const puedeConfirmarYa = !!tarifa && v.cuadra && !v.despuesDelViaje && (v.dentroDeRegla || aprobadaParaEste)
-  const motivoApagado = !tarifa
+  const puedeConfirmarYa = !motivoAutorizacion && !!tarifa && v.cuadra && !v.despuesDelViaje && (v.dentroDeRegla || aprobadaParaEste)
+  const motivoApagado = motivoAutorizacion
+    ? 'Falta la autorización de datos'
+    : !tarifa
     ? 'Escoge la tarifa'
     : v.diferencia > 0
       ? `Faltan ${pesos(v.diferencia)}`
@@ -405,18 +452,19 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4">
+          {motivoAutorizacion && <AvisoAutorizacion motivo={motivoAutorizacion} />}
           {/* 1. Tarifa */}
           <fieldset>
             <legend className="mb-2 text-sm font-medium text-[#1A1A1A]">¿Qué tarifa escogió?</legend>
             {vista.errorTarifas && <p className="text-sm text-red-600">{vista.errorTarifas}</p>}
             {tarifasConPrecio.length === 0 && !vista.errorTarifas && (
-              <p className="text-sm text-red-600">Esta cotización no tiene tarifas con precio. Ábrela y revísala antes de confirmar.</p>
+              <p className="text-sm text-red-600">Esta cotización no tiene total ni tarifas con precio. Ábrela y revísala antes de confirmar.</p>
             )}
             <div className="space-y-2">
               {vista.tarifas.map((t) => (
-                <label key={t.itinerarioId} className={`flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${tarifaId === t.itinerarioId ? 'border-[#10B981] bg-emerald-50' : 'border-[#E5E7EB]'} ${t.precio === null ? 'opacity-50' : ''}`}>
+                <label key={claveTarifa(t)} className={`flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm ${tarifaId === claveTarifa(t) ? 'border-[#10B981] bg-emerald-50' : 'border-[#E5E7EB]'} ${t.precio === null ? 'opacity-50' : ''}`}>
                   <span className="flex items-center gap-2">
-                    <input type="radio" name="tarifa" checked={tarifaId === t.itinerarioId} disabled={t.precio === null} onChange={() => setTarifaId(t.itinerarioId)} />
+                    <input type="radio" name="tarifa" checked={tarifaId === claveTarifa(t)} disabled={t.precio === null} onChange={() => setTarifaId(claveTarifa(t))} />
                     {t.esRecomendada ? `Recomendada · ${t.nombre}` : t.nombre}
                   </span>
                   <span className="font-medium">{t.precio !== null ? pesos(t.precio) : t.motivo}</span>
@@ -506,10 +554,10 @@ function HojaConfirmacion({ vista, onCerrar, onConfirmado }: { vista: VistaConfi
               ))}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ?? hoy, concepto: null }])}>
+              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ? fechaLimiteSaldo(vista.viaje.fechaSalida, hoy) : hoy, concepto: null }])}>
                 <Plus className="h-4 w-4" /> Cuota
               </button>
-              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>
+              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>
                 Volver al plan sugerido
               </button>
             </div>

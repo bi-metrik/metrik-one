@@ -1,11 +1,14 @@
 'use server'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
+import { decidirEnvioConOtraEnviada } from '@/lib/cotizaciones/state-machine'
 import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { revalidatePath } from 'next/cache'
 import { todayBogotaISO, bogotaYear } from '@/lib/dates/bogota'
 import { type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
+import { leerReglasDeCotizacion, margenHeredado } from '@/lib/cotizaciones/reglas-margen'
+import { margenDeLaCotizacion, motivoMargenDeCotizacionInvalido } from '@/lib/cotizaciones/margen-de-cotizacion'
 import { calcularCascada } from '@/lib/cotizaciones/totales'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { rastroDeCambioDeMargen, type ItemParaRastro } from '@/lib/cotizaciones/rastro-margen'
@@ -32,6 +35,7 @@ import { borrarImagenesDeCaptura, imagenesAlBorrarOpcion } from '@/lib/cotizacio
 import { confirmadaVigente, leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { precioDeLineaConManuales } from '@/lib/cotizaciones/tarjeta-opcion'
 import { diferirRecalculo } from '@/lib/cotizaciones/recalculo-diferido'
+import { EMBED_NEGOCIO_ENVIO, motivoAutorizacionDeCotizacion, motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 
 export async function getCotizaciones(oportunidadId: string) {
   const { supabase, error } = await getWorkspace()
@@ -151,6 +155,13 @@ export async function updateCotizacion(id: string, updates: Record<string, unkno
     const motivo = await motivoParaNoSalir(supabase, {
       servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
     })
+    if (motivo) return { success: false, error: motivo }
+  }
+  // D4 (2026-10-29): el margen general no queda en 0 si la línea declara el suyo (se leería como
+  // «sin dato», `margen-de-cotizacion.ts`). Una opción a costo se escribe en esa opción.
+  if (updates.margen_porcentaje !== undefined && updates.margen_porcentaje !== null) {
+    const { data: actual } = await supabase.from('cotizaciones').select('margen_default_pct').eq('id', id).maybeSingle()
+    const motivo = motivoMargenDeCotizacionInvalido(Number(updates.margen_porcentaje), (actual as { margen_default_pct?: number | null } | null)?.margen_default_pct ?? null)
     if (motivo) return { success: false, error: motivo }
   }
   // Con tarifas, aprobar exige escoger cuál tomó el cliente: por aquí no hay cómo, y
@@ -760,10 +771,32 @@ export async function deleteRubro(id: string) {
  * tras descargar el PDF (H33, 2026-10-14): mismas guardas, mismo UPDATE, solo cambia el canal que
  * queda en la actividad. Cualquier otro valor cuenta como «Enviar»: el canal llega del navegador.
  */
-export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargado') {
+export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargado', reemplazarId?: string | null) {
   const canalEnvio: 'enviar' | 'descargado' = canal === 'descargado' ? 'descargado' : 'enviar'
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // Get cotización to find oportunidad_id y negocio_id, con el negocio y las etapas de su línea
+  // (una ida): la autorización de datos del cliente frena ENVIAR (y aprobar), no armar la
+  // cotización (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea
+  // declara el gate. Si el embebido falla, la lectura de siempre y la autorización aparte.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sinTipos = supabase as any
+  const conNegocio = await sinTipos
+    .from('cotizaciones')
+    .select(`oportunidad_id, negocio_id, valor_total, consecutivo, ${EMBED_NEGOCIO_ENVIO}`)
+    .eq('id', id)
+    .single()
+  const { data: cot } = conNegocio.error
+    ? await sinTipos.from('cotizaciones').select('oportunidad_id, negocio_id, valor_total, consecutivo').eq('id', id).single()
+    : conNegocio
+
+  if (!cot) return { success: false, error: 'Cotización no encontrada' }
+
+  const motivoDatos = conNegocio.error
+    ? await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: cot.negocio_id ?? null })
+    : await motivoAutorizacionDeCotizacion(supabase, { workspaceId, negocioId: cot.negocio_id ?? null, negocio: cot.negocio_envio })
+  if (motivoDatos) return { success: false, error: motivoDatos }
 
   // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
   // 2026-09-22). Va antes del margen: con el precio de otros pasajeros, el margen
@@ -778,32 +811,46 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
   })
   if (motivo) return { success: false, error: motivo }
 
-  // Get cotización to find oportunidad_id y negocio_id
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: cot } = await (supabase as any)
-    .from('cotizaciones')
-    .select('oportunidad_id, negocio_id, valor_total')
-    .eq('id', id)
-    .single()
-
-  if (!cot) return { success: false, error: 'Cotización no encontrada' }
-
   // Check if there's already an "enviada" cotización for this negocio/oportunidad
   const parentField = cot.negocio_id ? 'negocio_id' : 'oportunidad_id'
   const parentId = cot.negocio_id ?? cot.oportunidad_id
 
   const { data: existente } = await supabase
     .from('cotizaciones')
-    .select('consecutivo')
+    .select('id, consecutivo')
     .eq(parentField as never, parentId)
     .eq('estado', 'enviada')
+    .neq('id', id)
     .maybeSingle()
 
-  if (existente) {
-    return {
-      success: false,
-      error: `Ya hay una cotización enviada. Apruébala o recházala antes de enviar otra.`,
+  // H10-1: con otra ya enviada, esta sale solo si la REEMPLAZA (quien envía la nombró).
+  const decision = decidirEnvioConOtraEnviada(
+    (existente as { id: string; consecutivo: string | null } | null) ?? null,
+    reemplazarId ?? null,
+  )
+  if (!decision.ok) return { success: false, error: decision.error }
+  const reemplazada = decision.reemplaza
+  if (reemplazada) {
+    const { data: rechazadas, error: errRechazo } = await supabase
+      .from('cotizaciones')
+      .update({ estado: 'rechazada' } as never)
+      .eq('id', reemplazada.id)
+      .eq(parentField as never, parentId)
+      .eq('estado', 'enviada')
+      .select('id')
+    if (errRechazo) return { success: false, error: errRechazo.message }
+    if (!Array.isArray(rechazadas) || rechazadas.length === 0) {
+      return { success: false, error: 'La cotización enviada cambió mientras tanto. Recarga la página y vuelve a intentarlo.' }
     }
+  }
+  // Si esta no queda enviada, la reemplazada vuelve a como estaba: nunca quedan las dos fuera.
+  const deshacerReemplazo = async () => {
+    if (!reemplazada) return
+    await supabase
+      .from('cotizaciones')
+      .update({ estado: 'enviada' } as never)
+      .eq('id', reemplazada.id)
+      .eq('estado', 'rechazada')
   }
 
   const { data: marcadas, error: dbError } = await supabase
@@ -817,11 +864,26 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
     .eq('estado', 'borrador')
     .select('id')
 
-  if (dbError) return { success: false, error: dbError.message }
+  if (dbError) {
+    await deshacerReemplazo()
+    return { success: false, error: dbError.message }
+  }
   // Sin fila, la cotización ya no estaba en borrador (otra pestaña la envió o la aprobó). Antes
   // esto devolvía éxito sin haber escrito nada; con la pregunta de H33 diría «quedó enviada».
   if (!Array.isArray(marcadas) || marcadas.length === 0) {
+    await deshacerReemplazo()
     return { success: false, error: 'Solo se pueden enviar cotizaciones en borrador' }
+  }
+
+  if (reemplazada && cot.negocio_id) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: cot.negocio_id,
+      tipo: 'cambio',
+      autor_id: staffId ?? null,
+      contenido: `La ${reemplazada.consecutivo ?? 'cotización enviada'} quedó rechazada: la reemplaza la ${(cot as { consecutivo?: string | null }).consecutivo ?? 'versión nueva'}.`,
+    }, 'enviarCotizacion')
   }
 
   if (cot.negocio_id) {
@@ -840,6 +902,12 @@ export async function enviarCotizacion(id: string, canal?: 'enviar' | 'descargad
 export async function aceptarCotizacion(id: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+
+  // La autorización de datos frena aprobar, como enviar (`autorizacion-datos/envio.ts`).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: delNegocio } = await (supabase as any).from('cotizaciones').select('negocio_id').eq('id', id).maybeSingle()
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId: (delNegocio?.negocio_id ?? null) as string | null })
+  if (motivoDatos) return { success: false, error: motivoDatos }
 
   const motivo = await motivoParaNoSalir(supabase, {
     servicio: createServiceClient, workspaceId, cotizacionId: id, staffId,
@@ -1039,7 +1107,9 @@ export async function recalcularTotales(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [{ data: cot }, { data: items }] = await Promise.all([(supabase as any)
     .from('cotizaciones')
-    .select('convencion_margen, aiu_admin_pct, aiu_imprevistos_pct, margen_porcentaje, margen_default_pct, descuento_porcentaje')
+    // `*` y no la lista: `reglas_margen` la agrega una migración, y nombrarla antes devolvería un
+    // 400 sobre toda la fila (el recálculo se quedaría sin parámetros). Ausente = sin reglas.
+    .select('*')
     .eq('id', cotizacionId)
     .maybeSingle(),
 
@@ -1067,7 +1137,8 @@ export async function recalcularTotales(cotizacionId: string) {
   // P4 · los adicionales sin precio a mano siguen al margen global: si cambió el margen (o
   // su costo), su precio se reescribe AQUÍ, antes de la cascada, para que el PDF, la
   // pantalla y la huella lean la misma cifra. Los de precio a mano no se tocan.
-  const margenGlobal = cot?.margen_porcentaje ?? cot?.margen_default_pct ?? null
+  // D4 (2026-10-29): un 0 en la cotización no anula el margen de la línea (`margen-de-cotizacion.ts`).
+  const margenGlobal = margenDeLaCotizacion(cot)
   const resincronizar = preciosPorResincronizar(filasAdicionales, {
     margenPct: margenGlobal === null ? null : Number(margenGlobal),
     convencion: cot?.convencion_margen ?? null,
@@ -1085,9 +1156,11 @@ export async function recalcularTotales(cotizacionId: string) {
   const params = {
     administrativosPct: (Number(cot?.aiu_admin_pct) || 0) + (Number(cot?.aiu_imprevistos_pct) || 0),
     // Con el default de la línea de negocio como respaldo: ver `cotizacion-editor`.
-    margenPct: cot?.margen_porcentaje ?? cot?.margen_default_pct,
+    margenPct: margenGlobal,
     descuentoComercialPct: cot?.descuento_porcentaje,
     convencionMargen: (cot?.convencion_margen ?? null) as ConvencionMargen | null,
+    // Reglas de margen (2026-10-27, `reglas-margen.ts`): las que la cotización copió al nacer.
+    reglas: leerReglasDeCotizacion(cot?.reglas_margen),
   }
   // Tarjeta de la opción (prototipo del 2026-09-24) · una línea con precios de fila escritos
   // a mano lleva el precio que suman esas filas más las demás con su margen
@@ -1104,7 +1177,9 @@ export async function recalcularTotales(cotizacionId: string) {
     const precio = precioDeLineaConManuales({
       confirmada: tarifa.confirmada,
       preciosAMano: tarifa.preciosAMano,
-      margenPct: Number(item.margen_porcentaje ?? params.margenPct) || 0,
+      margenPct: item.margen_porcentaje !== null && item.margen_porcentaje !== undefined
+        ? Number(item.margen_porcentaje) || 0
+        : margenHeredado(item.grupo, params.margenPct, params.reglas),
       convencion: params.convencionMargen ?? undefined,
       administrativosPct: params.administrativosPct,
     })
@@ -1128,6 +1203,11 @@ export async function recalcularTotales(cotizacionId: string) {
       precio_manual: conManuales !== undefined ? true : item.precio_manual,
       // Punto 11 del brief del 2026-10-05: el precio cuadra con lo que paga cada pasajero.
       pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
+      // Reglas de margen (2026-10-27): vuelo, hotel o lo demás, la ruta del vuelo, el descuento
+      // del hotel y si es Pública. Sin reglas solo cuenta lo de siempre.
+      grupo: (item.grupo ?? null) as string | null,
+      nombre: (item.nombre ?? null) as string | null,
+      tarifa_pax: item.tarifa_pax ?? null,
     }
   })
   // El MISMO emparejamiento que usa `contextoDeCotizacion`: por id de variante. Escrito
@@ -1179,6 +1259,8 @@ export async function recalcularTotales(cotizacionId: string) {
         orden: f.orden ?? 0,
         dia_relativo: f.dia_relativo ?? null,
         entra_al_precio: f.entra_al_precio ?? null,
+        // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+        tarifa_pax: f.tarifa_pax,
       })),
     ),
   )

@@ -1,5 +1,11 @@
 import 'server-only'
-import { llamarValidaNucleo, type PeticionValida, type ResultadoValida } from './cliente-nucleo'
+import {
+  llamarValidaNucleo,
+  pedirArchivoValidaNucleo,
+  type PeticionValida,
+  type ResultadoArchivoValida,
+  type ResultadoValida,
+} from './cliente-nucleo'
 
 /**
  * Única capa que lee el entorno para hablar con Valida. Ver `cliente-nucleo.ts`.
@@ -12,13 +18,22 @@ import { llamarValidaNucleo, type PeticionValida, type ResultadoValida } from '.
 
 const BASE_POR_DEFECTO = 'https://valida.metrik.com.co'
 
-export function llamarValida<T>(peticion: PeticionValida): Promise<ResultadoValida<T>> {
-  return llamarValidaNucleo<T>(peticion, {
+function dependencias() {
+  return {
     secreto: process.env.ONE_VALIDA_SECRET,
     base: process.env.VALIDA_API_BASE || BASE_POR_DEFECTO,
     fetch,
     ahora: () => Math.floor(Date.now() / 1000),
     // Solo metadatos: método, ruta, status y código. Nunca cuerpos (la llave en claro).
-    registrar: (linea) => console.warn(linea),
-  })
+    registrar: (linea: string) => console.warn(linea),
+  }
+}
+
+export function llamarValida<T>(peticion: PeticionValida): Promise<ResultadoValida<T>> {
+  return llamarValidaNucleo<T>(peticion, dependencias())
+}
+
+/** Una ruta de Valida que responde un archivo (PDF). Ver `pedirArchivoValidaNucleo`. */
+export function pedirArchivoValida(peticion: PeticionValida): Promise<ResultadoArchivoValida> {
+  return pedirArchivoValidaNucleo(peticion, dependencias())
 }

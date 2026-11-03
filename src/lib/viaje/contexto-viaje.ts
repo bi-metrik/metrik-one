@@ -10,7 +10,7 @@ import 'server-only'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { configPlanPagos } from './plan-pagos'
-import { esAprobador, puedeConfirmarCliente } from './confirmacion'
+import { esAprobador, puedeConfirmarCliente, type QuienConfirma } from './confirmacion'
 import { aprobadoresDeLinea } from './estado-servicio'
 import { leerNegocioConLinea } from './confirmacion-datos'
 
@@ -38,6 +38,8 @@ export interface ContextoViaje {
   puedeConfirmar: boolean
   /** Dirección (owner/admin o `aprobaciones.staff_ids`): aprobar. */
   esDireccion: boolean
+  /** Quién actúa, para los permisos que no son confirmar ni aprobar (p. ej. enviar el paquete). */
+  quien: QuienConfirma
 }
 
 export async function contextoViaje(negocioId: string): Promise<{ ok: true; ctx: ContextoViaje } | { ok: false; error: string }> {
@@ -71,6 +73,7 @@ export async function contextoViaje(negocioId: string): Promise<{ ok: true; ctx:
       negocio: base.negocio,
       puedeConfirmar: puedeConfirmarCliente(quien),
       esDireccion: esAprobador(quien),
+      quien,
     },
   }
 }

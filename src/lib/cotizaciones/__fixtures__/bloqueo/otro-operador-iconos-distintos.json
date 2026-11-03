@@ -1,0 +1,27 @@
+{
+  "_fuente": "Respuesta SIMULADA: un operador con íconos distintos a los de Aliados (avión de lado, copa de cóctel, palmera con sombrilla, camioneta). La palmera no encaja con certeza en ninguna categoría y la camioneta viene sin certeza; el texto sí dice traslados.",
+  "es_oferta_de_hotel": true,
+  "hotel": "Resort Bávaro Playa",
+  "zona": "Bávaro",
+  "noches": 4,
+  "habitacion": "Junior Suite",
+  "plan_alimentacion": "Todo incluido",
+  "temporada": null,
+  "tarifa_promo": false,
+  "compra_antes_de": null,
+  "moneda": "COP",
+  "precios_por_persona": [
+    { "acomodacion": "doble", "precio": 4210000 },
+    { "acomodacion": "triple", "precio": 4050000 },
+    { "acomodacion": "cuadruple", "precio": 3980000 }
+  ],
+  "nino": { "precio": 2100000, "edad_min": 3, "edad_max": 12 },
+  "iconos": [
+    { "descripcion": "avión de lado", "categoria": "tiquete_aereo", "seguro": true },
+    { "descripcion": "copa de cóctel", "categoria": "alimentacion", "seguro": true },
+    { "descripcion": "palmera con sombrilla", "categoria": "sin_identificar", "seguro": false },
+    { "descripcion": "camioneta", "categoria": "traslados", "seguro": false }
+  ],
+  "texto_incluye": "Receptivos aeropuerto - hotel - aeropuerto, traslados in y out",
+  "incluye_por_texto": ["traslados"]
+}

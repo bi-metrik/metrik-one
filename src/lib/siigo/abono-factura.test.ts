@@ -116,6 +116,16 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => servicioFalso(),
 }))
 
+// SOE-029: cuánto acusa el RC-3 lo decide el plan del negocio (`rc3-negocio`, con sus
+// propias pruebas). Aquí cada pago se toma como titular de su porción UPME, que es lo
+// que estas pruebas del abono necesitan.
+vi.mock('./rc3-negocio-servidor', () => ({
+  valorRc3DelCobro: async (_svc: unknown, _ws: string, _neg: string, cobroId: string) => {
+    const fila = (tablas.v_cobro_valor ?? []).find(f => f.cobro_id === cobroId)
+    return { ok: true, valor: Number(fila?.a_tarifa ?? 0) }
+  },
+}))
+
 // ─── Siigo: un simulador con saldo e idempotencia ────────────────────────────
 
 interface FacturaSim {

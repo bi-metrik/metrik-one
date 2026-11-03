@@ -105,8 +105,38 @@ describe('tablero F3', () => {
     expect(colorDeLaEtapa(v, HOY)).toBe('rojo')
     expect(sigueDelTablero(v, HOY)).toEqual({ servicioId: 'Traslado en San Andrés', texto: 'Traslado en San Andrés: venció ayer sin pagar.' })
     const sinUrgencia = filasVista([fila('Kayak a Cayo Cangrejo', { estado: 'por_reservar' })])
-    expect(colorDeLaEtapa(sinUrgencia, HOY)).toBe('verde')
+    // Sin urgencia pero con algo por hacer: gris, no verde (barrido 2026-10-22).
+    expect(colorDeLaEtapa(sinUrgencia, HOY)).toBe('gris')
     expect(sigueDelTablero(sinUrgencia, HOY)?.texto).toBe('Reserva Kayak a Cayo Cangrejo.')
-    expect(sigueDelTablero(filasVista([fila('x', { gastos: [pago(1_000_000)], confirmacion_ref: 'y' })]), HOY)).toBeNull()
+    const lista = filasVista([fila('x', { gastos: [pago(1_000_000)], confirmacion_ref: 'y' })])
+    expect(sigueDelTablero(lista, HOY)).toBeNull()
+    expect(colorDeLaEtapa(lista, HOY)).toBe('verde')
+  })
+
+  it('verde y «Sigue:» vacío solo cuando pasa servicios_listos (barrido 2026-10-22)', () => {
+    // «No aprobado» con el pago y la confirmación: el gate frena; el punto no es verde y el «Sigue:» lo dice.
+    const noAprobada = filasVista([fila('Hotel', { gastos: [pago(1_000_000)], confirmacion_ref: 'y', aprobaciones: [{ estado: 'rechazada' }] })])
+    expect(serviciosQueFaltan(noAprobada.map(v => v.servicio), true)).toHaveLength(1)
+    expect(colorDeLaEtapa(noAprobada, HOY)).toBe('gris')
+    expect(sigueDelTablero(noAprobada, HOY)?.texto).toBe('Hotel: Edgar no aprobó el pago. Pídelo de nuevo o cambia el pago.')
+    // Pagada sin confirmación: con la línea que la exige frena; sin exigirla, pasa y es verde.
+    const pagada = filasVista([fila('Tour', { gastos: [pago(1_000_000)] })])
+    expect(colorDeLaEtapa(pagada, HOY, true)).toBe('gris')
+    expect(colorDeLaEtapa(pagada, HOY, false)).toBe('verde')
+    expect(sigueDelTablero(pagada, HOY, [], false)).toBeNull()
+    // Siempre que el gate frena, el «Sigue:» dice algo.
+    const casos = [
+      [fila('Vuelo', { gastos: [pago(400_000, { soporte_url: null })] })],
+      [fila('Vuelo', { gastos: [pago(1_000_000, { medio_pago: null })] })],
+      [fila('Vuelo', { estado: 'por_reservar', costo_cotizado: 0, valor_por_pagar: 0, gastos: [pago(10_000, { soporte_url: null })] })],
+    ]
+    for (const filas of casos) {
+      const v = filasVista(filas)
+      expect(serviciosQueFaltan(filas, true).length).toBeGreaterThan(0)
+      expect(sigueDelTablero(v, HOY)).not.toBeNull()
+      expect(colorDeLaEtapa(v, HOY)).not.toBe('verde')
+    }
+    // Sin servicios: nada es verde.
+    expect(colorDeLaEtapa([], HOY)).toBe('gris')
   })
 })

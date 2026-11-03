@@ -67,6 +67,14 @@
     {
       "path": "/api/crons/valida-lotes",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/crons/calificar-asistentes",
+      "schedule": "30 11 * * *"
+    },
+    {
+      "path": "/api/crons/resumen-asistentes",
+      "schedule": "0 12 * * *"
     }
   ]
 }

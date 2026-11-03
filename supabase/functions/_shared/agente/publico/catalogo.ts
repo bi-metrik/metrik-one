@@ -2,8 +2,9 @@
 // Asistente público — el catálogo, las funciones y las políticas, leídos del reglamento publicado (§7, §8.1)
 // ------------------------------------------------------------
 // El contenido variable (precios, fechas, funciones, dirección, políticas) nunca va en el prompt: vive en fichas del
-// reglamento y llega por herramienta. Así Sabor cambia la película de la semana publicando una versión nueva del
-// reglamento, sin desplegar. Las fichas:
+// reglamento y llega por herramienta. Así Sabor cambia o agrega experiencias (cenas con película, catas, clases…)
+// publicando una versión nueva del reglamento, sin desplegar. Todas usan la misma ficha: el código no distingue tipos.
+// Las fichas:
 //   · `cat.<id>`  experiencia (valores.tipo = 'experiencia'): nombre, incluye, precio por persona, abono, duración,
 //                 edad sugerida, dirección, vigencia (`vigente_desde`/`vigente_hasta`, fechas de Bogotá), versión.
 //   · `fun.<id>`  función (valores.tipo = 'funcion'): experiencia e inicio (ISO con zona).
@@ -129,7 +130,7 @@ export function zonaDe(e: Pick<Experiencia, 'ubicaciones'>, texto: string | null
   return e.ubicaciones.find((u) => t.includes(` ${u.zona.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')} `)) ?? null;
 }
 
-/** Las vigentes hoy (hora de Bogotá). Una vencida no sale nunca (§8.1: nunca la película anterior). Pura. */
+/** Las vigentes hoy (hora de Bogotá). Una vencida no sale nunca (§8.1: nunca la experiencia anterior). Pura. */
 export function vigentes(r: Reglamento, ahoraMs: number): Experiencia[] {
   const hoy = hoyBogota(ahoraMs);
   return experiencias(r).filter((e) => e.vigenteDesde <= hoy && hoy <= e.vigenteHasta);
@@ -165,10 +166,31 @@ export function pesos(x: number): string {
   return `$${Math.round(x).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
 }
 
+/** «sábado 24 de octubre» en hora de Bogotá. Pura. */
+export function fechaBogota(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' }).replace(/ | /g, ' ');
+}
+
+/** «7:00 p. m.» en hora de Bogotá. Pura. */
+export function horaBogota(iso: string): string {
+  return new Date(iso).toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true }).replace(/ | /g, ' ');
+}
+
 /** «sábado 24 de octubre, 7:00 p. m.» en hora de Bogotá. Pura. */
 export function cuandoBogota(iso: string): string {
-  const d = new Date(iso);
-  const dia = d.toLocaleDateString('es-CO', { timeZone: 'America/Bogota', weekday: 'long', day: 'numeric', month: 'long' });
-  const hora = d.toLocaleTimeString('es-CO', { timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', hour12: true });
-  return `${dia}, ${hora}`.replace(/ | /g, ' ');
+  return `${fechaBogota(iso)}, ${horaBogota(iso)}`;
+}
+
+/**
+ * Las funciones agrupadas por fecha de Bogotá, en orden (Mauricio, 26-oct: primero la fecha y después el horario). Así
+ * el modelo ve cuántos horarios tiene cada fecha sin contar. Pura.
+ */
+export function funcionesPorFecha(fs: Funcion[]): Array<{ fecha: string; horarios: Array<{ id: string; hora: string }> }> {
+  const grupos: Array<{ fecha: string; horarios: Array<{ id: string; hora: string }> }> = [];
+  for (const f of [...fs].sort((a, b) => Date.parse(a.inicio) - Date.parse(b.inicio))) {
+    const fecha = fechaBogota(f.inicio);
+    const g = grupos.find((x) => x.fecha === fecha) ?? (grupos.push({ fecha, horarios: [] }), grupos.at(-1)!);
+    g.horarios.push({ id: f.id, hora: horaBogota(f.inicio) });
+  }
+  return grupos;
 }

@@ -46,3 +46,62 @@ export function fechaLarga(v: string | null | undefined, marcador = '—'): stri
   if (!mes) return raw
   return `${Number(m[3])} de ${mes} de ${Number(m[1])}`
 }
+
+/**
+ * Fecha corta `DD/MM/AAAA`: `2026-03-15` → `15/03/2026`. Es el formato que pide la
+ * ficha de la Relación de facturas (plantilla SOE-033) para la fecha de expedición
+ * de la factura y la del certificado UPME.
+ *
+ * Mismo criterio que `fechaLarga`: se parsea con expresión regular para no correrse un
+ * día por zona horaria, y lo que no viene en ISO se devuelve tal cual.
+ */
+export function fechaCorta(v: string | null | undefined, marcador = '—'): string {
+  const raw = v?.trim()
+  if (!raw) return marcador
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return raw
+  return `${m[3]}/${m[2]}/${m[1]}`
+}
+
+/**
+ * Tarifa de IVA pagada, derivada de la factura: `valor_iva / valor_unitario_sin_iva`
+ * redondeada a un entero porcentual (`5 %`, `19 %`). La extracción no trae la tarifa
+ * como dato propio, y la plantilla de la Relación (SOE-033) la pide.
+ *
+ * Si alguno de los dos valores falta, no es numérico o la base es cero, devuelve el
+ * marcador: una tarifa inventada en un documento que va a la DIAN es peor que una
+ * casilla que el operador ve vacía.
+ */
+export function tarifaIva(
+  valorIva: string | null | undefined,
+  baseSinIva: string | null | undefined,
+  marcador = '—',
+): string {
+  if (!valorIva || !baseSinIva) return marcador
+  const iva = Number(valorIva)
+  const base = Number(baseSinIva)
+  if (!isFinite(iva) || !isFinite(base) || base <= 0 || iva < 0) return marcador
+  return `${Math.round((iva / base) * 100)} %`
+}
+
+/**
+ * Día, mes y año de la generación del documento EN BOGOTÁ.
+ *
+ * `fechaGeneracion` llega como `new Date().toISOString()`, o sea en UTC: leído con
+ * `getUTCDate()` un documento generado después de las 7 p. m. salía fechado al día
+ * siguiente. Colombia no tiene horario de verano, así que basta con restar 5 horas.
+ *
+ * Una fecha sola (`2026-09-07`) se toma tal cual: no lleva hora, y restarle 5 horas
+ * la haría retroceder un día.
+ */
+export function fechaDeGeneracion(iso: string): { dia: number; mes: string; anio: number } {
+  const raw = iso.trim()
+  const d = new Date(raw)
+  const soloFecha = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+  const bogota = soloFecha ? d : new Date(d.getTime() - 5 * 60 * 60 * 1000)
+  return {
+    dia: bogota.getUTCDate(),
+    mes: MESES[bogota.getUTCMonth()] ?? '',
+    anio: bogota.getUTCFullYear(),
+  }
+}

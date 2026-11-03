@@ -54,6 +54,7 @@
  * haya fallado la lectura.
  */
 
+import { mismoLugar } from './bandeja-capturas'
 import { ranurasConAlternativas, type ItemConGrupo } from './itinerarios'
 import { etiquetaDeRanura, ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax, type TarifaPax } from './tarifa-pasajero'
@@ -138,29 +139,45 @@ export function textoDeTramo(t: Tramo): string {
 }
 
 /**
- * La llave con la que se comparan dos tramos: sin tildes, sin mayúsculas, sin signos.
- *
- * ⚠️ La comparación es EXACTA sobre el texto normalizado: «BOG» y «Bogotá» no coinciden
- * aunque sean la misma ciudad, y eso hace saltar el aviso entre dos capturas escritas en
- * formatos distintos. Es deliberado y es el lado seguro: el aviso nombra lo que cubre
- * cada opción, así que quien lo lee ve «BOG» y «Bogotá» y lo resuelve de un vistazo.
- * Emparejarlos con reglas de parecido (prefijos, códigos IATA sin tabla) ahorraría ese
- * aviso y a cambio CALLARÍA el caso en que de verdad cubren cosas distintas — que es el
- * error silencioso que esto existe para matar.
+ * La llave con la que se comparan dos tramos al pie de la letra: sin tildes, sin mayúsculas,
+ * sin signos.
  */
 function claveTramo(t: Tramo): string {
   const k = (s: string) =>
     s
       .toLowerCase()
       .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9]+/g, ' ')
       .trim()
   return `${k(t.desde)}>${k(t.hasta)}`
 }
 
-function claveCobertura(tramos: Tramo[]): string {
-  return [...tramos.map(claveTramo)].sort().join('|')
+/**
+ * ¿Dos tramos son el mismo trayecto? Al pie de la letra, o con `mismoLugar` en las dos puntas:
+ * el mismo comparador con que la bandeja junta las opciones.
+ *
+ * G1 · M2 (QA del 2026-10-29) · hasta aquí la comparación era SOLO exacta, y «Bogotá–Cartagena»
+ * contra «BOG–CTG» avisaba «no cubren lo mismo» sobre la misma ruta, ya enviada la cotización.
+ * `mismoLugar` no adivina: empareja un código con un nombre solo si el código es de un
+ * aeropuerto que conoce y el nombre dice su ciudad. «EWR» contra «Nueva York» sigue avisando,
+ * que es el lado seguro: callar un tramo distinto es el error que esto existe para matar.
+ */
+function mismoTramo(a: Tramo, b: Tramo): boolean {
+  if (claveTramo(a) === claveTramo(b)) return true
+  return mismoLugar(a.desde, b.desde) === true && mismoLugar(a.hasta, b.hasta) === true
+}
+
+/** ¿Cubren lo mismo? Los mismos tramos, en cualquier orden. */
+function mismaCobertura(a: readonly Tramo[], b: readonly Tramo[]): boolean {
+  if (a.length !== b.length) return false
+  const libres = [...b]
+  for (const t of a) {
+    const i = libres.findIndex(x => mismoTramo(t, x))
+    if (i < 0) return false
+    libres.splice(i, 1)
+  }
+  return true
 }
 
 /** Una opción de la ranura, con lo que cubre ya resuelto. */
@@ -260,10 +277,8 @@ export function avisosDeCobertura(lineas: LineaParaCobertura[]): AvisoCobertura[
       continue
     }
 
-    const claves = new Set(
-      participan.map(c => (c.cobertura.estado === 'leida' ? claveCobertura(c.cobertura.tramos) : '')),
-    )
-    if (claves.size <= 1) continue
+    const tramos = participan.map(c => (c.cobertura.estado === 'leida' ? c.cobertura.tramos : []))
+    if (tramos.every(t => mismaCobertura(tramos[0], t))) continue
 
     const detalle = opciones
       .map(o => `«${o.nombre}» cubre ${listaConY(o.cubre)}`)

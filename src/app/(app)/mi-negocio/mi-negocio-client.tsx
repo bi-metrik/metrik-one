@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange } from 'lucide-react'
+import Link from 'next/link'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange, KeyRound } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
 
@@ -23,6 +24,7 @@ import PilaSection from './pila-section'
 import TerminosSection from './terminos-section'
 import MargenSection from './margen-section'
 import TemporadasSection from './temporadas-section'
+import BovedaSection from './boveda-section'
 import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
 // ── Types ──────────────────────────────────────────
@@ -60,6 +62,8 @@ interface MiNegocioClientProps {
   /** Alguna línea del workspace usa margen mínimo o recargo. Sin eso no hay sección. */
   usaPoliticaDePrecio?: boolean
   /** El espacio tiene propuesta de viaje (`tienePropuestaHtml`): ve «Temporadas». */
+  /** La persona está en la lista de editores de plantillas de documentos del espacio. */
+  editaPlantillas?: boolean
   tienePropuestaViaje?: boolean
   sectionScores: {
     fiscal: number
@@ -105,6 +109,8 @@ const SECTIONS: SectionDef[] = [
   // Calendario de temporadas de la agencia (2026-10-19). Sin `wsTipo` por lo mismo que los términos.
   { key: 'temporadas', label: 'Temporadas', icon: CalendarRange, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPropuestaViaje: true },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
+  // Bóveda de llaves (2026-10-26): solo la ve el dueño, y solo el dueño real la cambia (no «Ver como» ni MéTRIK).
+  { key: 'boveda-llaves', label: 'Bóveda de llaves', icon: KeyRound, maxScore: 0, scoreKey: 'marca', roles: ['owner'] },
   { key: 'pila-mensual', label: 'Planilla PILA', icon: FileCheck2, maxScore: 0, scoreKey: 'fiscal', roles: ['owner', 'admin'], modules: ['cobros_recurrentes'] },
 ]
 
@@ -132,6 +138,7 @@ export default function MiNegocioClient({
   lineaActivaId = null,
   usaPoliticaDePrecio = false,
   tienePropuestaViaje = false,
+  editaPlantillas = false,
   sectionScores,
   workspaceTipo,
 }: MiNegocioClientProps) {
@@ -185,6 +192,8 @@ export default function MiNegocioClient({
         return 'Alta, media y baja'
       case 'reglas-validacion':
         return 'Listas cautelares'
+      case 'boveda-llaves':
+        return 'Llaves de integraciones'
       default:
         return ''
     }
@@ -235,6 +244,20 @@ export default function MiNegocioClient({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Plantillas de documentos: solo para la lista de editores del espacio ── */}
+      {editaPlantillas && (
+        <Link
+          href="/mi-negocio/plantillas"
+          className="flex items-center gap-3 rounded-xl border bg-card p-3 hover:bg-muted/50"
+        >
+          <FileText className="h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Plantillas de documentos</p>
+            <p className="text-xs text-muted-foreground">Declaración juramentada y Relación de facturas</p>
+          </div>
+        </Link>
       )}
 
       {/* ── Onboarding Welcome ── */}
@@ -425,6 +448,8 @@ function renderSection(
       return <TerminosSection />
     case 'temporadas':
       return <TemporadasSection />
+    case 'boveda-llaves':
+      return <BovedaSection />
 
     case 'margen':
       return <MargenSection />

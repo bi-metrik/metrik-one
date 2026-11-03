@@ -51,18 +51,41 @@ function fechasDe(texto: string | null | undefined): string[] {
   return [...(texto ?? '').matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => fechaCorta(m[1])).filter((f): f is string => f !== null)
 }
 
+/**
+ * La hora que va pegada a cada fecha («2027-06-26 13:20 y 2027-06-30 05:10»), en el orden de las
+ * fechas; `null` donde la fecha no trae hora. Es la forma del traslado de ida y regreso de un solo
+ * pantallazo (`traslado-ida-y-regreso.ts`).
+ */
+function horasPorFecha(texto: string | null | undefined): (string | null)[] {
+  return [...(texto ?? '').matchAll(/\d{4}-\d{2}-\d{2}(?:[ T]+([01]?\d|2[0-3]):([0-5]\d)\b)?/g)]
+    .map((m) => (m[1] ? `${m[1].padStart(2, '0')}:${m[2]}` : null))
+}
+
 function horaDe(texto: string | null | undefined): string | null {
   const m = HORA.exec(texto ?? '')
   return m ? `${m[1].padStart(2, '0')}:${m[2]}` : null
 }
 
 /** Los pares origen–destino de un trayecto leído. Vacío si no se reconoce. */
+/**
+ * «… y regreso», «… y vuelta» o «(ida y regreso)» al final: el traslado es de ida y vuelta.
+ * QA del 2026-10-29 (V7, S6-1): «aeropuerto Hato \n hotel en Willemstad y regreso» salía como un
+ * solo trayecto y el regreso al aeropuerto no aparecía en ningún día.
+ */
+const Y_REGRESO = /\s*\(?\s*(?:ida\s+)?y\s+(?:regreso|vuelta)\s*\)?\s*$/i
+
 function pares(trayecto: string): [string, string][] {
   const limpio = trayecto.replace(/\r/g, '')
   // «A \n hotel y hotel \n B»: el renglón del medio es el final de uno y el comienzo del otro.
   if (limpio.includes('\n')) {
     const partes = limpio.split(/\s*\n\s*/).map((p) => p.trim()).filter(Boolean)
-    if (partes.length === 2) return [[partes[0], partes[1]]]
+    if (partes.length === 2) {
+      if (Y_REGRESO.test(partes[1])) {
+        const destino = partes[1].replace(Y_REGRESO, '').trim()
+        if (destino) return [[partes[0], destino], [destino, partes[0]]]
+      }
+      return [[partes[0], partes[1]]]
+    }
     if (partes.length === 3) {
       const medio = /^(.+?)\s+y\s+(.+)$/i.exec(partes[1])
       if (medio) return [[partes[0], medio[1]], [medio[2], partes[2]]]
@@ -70,8 +93,8 @@ function pares(trayecto: string): [string, string][] {
     }
     return []
   }
-  const idaYVuelta = /\(?\s*ida\s+y\s+vuelta\s*\)?/i.test(limpio)
-  const sinMarca = limpio.replace(/\(?\s*(ida\s+y\s+vuelta|solo\s+ida)\s*\)?/gi, ' ').trim()
+  const idaYVuelta = /\(?\s*ida\s+y\s+vuelta\s*\)?/i.test(limpio) || Y_REGRESO.test(limpio)
+  const sinMarca = limpio.replace(Y_REGRESO, ' ').replace(/\(?\s*(ida\s+y\s+vuelta|solo\s+ida)\s*\)?/gi, ' ').trim()
   // «A -> B y B -> C»: dos trayectos.
   const tramos = sinMarca.split(/\s+y\s+/i)
   if (tramos.length > 1 && tramos.every((t) => t.split(FLECHA).length === 2)) {
@@ -115,8 +138,37 @@ export function trayectosDeTraslado(lectura: { trayecto: string | null; vehiculo
   }
   return lista.map(([a, b], i) => {
     const descripcion = [`${extremo(a)} - ${extremo(b)}`, vehiculo].filter(Boolean).join(' · ')
-    if (fechas.length >= lista.length) return { descripcion, fecha: fechas[i], hora: lista.length === 1 && unaFecha ? horaDe(lectura.fecha) : null }
+    if (fechas.length >= lista.length) {
+      return { descripcion, fecha: fechas[i], hora: lista.length === 1 && unaFecha ? horaDe(lectura.fecha) : horasPorFecha(lectura.fecha)[i] ?? null }
+    }
     if (i === 0) return { descripcion, fecha: fechas[0] ?? null, hora: unaFecha && lista.length === 1 ? horaDe(lectura.fecha) : null }
     return { descripcion, fecha: null, hora: null, fechaIda: fechas[0] ?? null }
   })
+}
+
+/**
+ * El tren leído con la ranura «Tren» (QA G9, M9-1 / V9-3), en la forma que el documento ya pinta
+ * para los trenes: «Paris Gare de Lyon - Roma Termini · Trenitalia Frecciarossa 9241 (cambio en
+ * Milano Centrale), Business», con la hora de salida. Sin trayecto, nada.
+ */
+export function trayectoDeTren(l: {
+  trayecto: string | null
+  operador: string | null
+  numero: string | null
+  fecha: string | null
+  horaSalida: string | null
+  cambio?: string | null
+  clase?: string | null
+}): TrayectoLeido | null {
+  const trayecto = (l.trayecto ?? '').replace(/\s*\n\s*/g, ' ').trim()
+  if (!trayecto) return null
+  const puntas = trayecto.split(FLECHA).map((p) => p.trim()).filter(Boolean)
+  const ruta = puntas.length === 2 ? `${extremo(puntas[0])} - ${extremo(puntas[1])}` : trayecto
+  const operador = [l.operador?.trim(), l.numero?.trim()].filter(Boolean).join(' ')
+  const servicio = [
+    [operador || null, l.cambio?.trim() ? `(cambio en ${l.cambio.trim()})` : null].filter(Boolean).join(' ') || null,
+    l.clase?.trim() || null,
+  ].filter(Boolean).join(', ')
+  const hora = horaDe(l.horaSalida) ?? horaDe(l.fecha)
+  return { descripcion: [ruta, servicio || null].filter(Boolean).join(' · '), fecha: fechasDe(l.fecha)[0] ?? null, hora }
 }

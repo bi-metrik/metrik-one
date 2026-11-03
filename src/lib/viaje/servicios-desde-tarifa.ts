@@ -19,15 +19,31 @@
  */
 
 import { calcularCascada, type ParametrosCascada } from '@/lib/cotizaciones/totales'
+import { monedaDelServicio, type MonedaDelServicio } from './moneda-servicio'
+import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { itemsDelItinerario, itemsQueAportanAlTotal, normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import { etiquetaDeRanura, ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { esTipoRanura, tipoDeDefinicion } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { lineaConAsistenciaMedica } from '@/lib/cotizaciones/asistencia-medica'
 import { lecturaDeOpcion } from '@/lib/cotizaciones/habitaciones'
+import { ranuraDelItem } from '@/lib/cotizaciones/detalle-viaje'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { ItemDeCotizacion } from '@/lib/cotizaciones/itinerarios-datos'
+import { leerTramos as leerTramosDelItem, regresoEsLaLlegadaDeLaIda } from '@/lib/cotizaciones/tramos-vuelo'
+import { fechasDelPaquete, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
+import { claveDeNombre, esOperadorMezclado } from '@/lib/cotizaciones/bloqueo-operador'
+import {
+  SIN_FECHAS,
+  esFechaIso,
+  fechaPorDiaDelViaje,
+  fechasDeTramos,
+  horaHHMM,
+  sumarDiasIso,
+  type FechasServicio,
+  type TramoServicio,
+} from './fechas-servicio'
 
-export const TIPOS_SERVICIO = ['vuelo', 'hotel', 'traslado', 'actividad', 'asistencia', 'otro'] as const
+export const TIPOS_SERVICIO = ['vuelo', 'hotel', 'traslado', 'actividad', 'asistencia', 'otro', 'tren'] as const
 export type TipoServicio = (typeof TIPOS_SERVICIO)[number]
 
 /** Lo que se inserta en `negocio_servicios` (sin las llaves del negocio). */
@@ -37,17 +53,51 @@ export interface FilaServicioNueva {
   nombre: string
   proveedor_nombre: string | null
   fecha_servicio: string | null
+  fecha_fin: string | null
+  hora_inicio: string | null
+  hora_fin: string | null
+  tramos: TramoServicio[] | null
   costo_cotizado: number
   orden: number
+  /**
+   * El proveedor es el operador de un paquete de bloqueo (H10 del QA del 2026-10-29): quien escribe
+   * la fila lo busca en el Directorio (`empresaDelOperador`) y, si hay UNA empresa con ese nombre,
+   * la liga. Ausente = no se busca.
+   */
+  buscarEmpresa?: boolean
+  /**
+   * H-17 (QA del 2026-10-29) · hasta cuándo hay que pagarle al proveedor: la «Compra antes del» del
+   * paquete de bloqueo (tarifa promo). Ausente = no se sabe (la fila nace sin fecha límite, como antes).
+   */
+  fecha_limite_pago?: string | null
+  /**
+   * H-26 (QA Trappvel 2026-10-29) · la comisión que el proveedor le debe a la agencia DESPUÉS de
+   * cobrarle el precio guardado: la de una línea Pública con su comisión escrita, sobre un costo que
+   * es el precio público (`LineaCalculada.comisionPesos`, la misma cifra con que la cotización midió
+   * el margen). `null` cuando no hay nada que esperar: línea Neta, Pública sin comisión, o una cuyo
+   * costo ya es el neto (el pantallazo trajo los dos precios: la comisión ya se descontó al pagar).
+   */
+  comision_esperada: number | null
+  /**
+   * H6-1 / H9-1 (QA G9) · la moneda en que se cotizó (del ítem: `monedaDelServicio`), con lo
+   * cotizado ya cuadrado al peso. `null` = en pesos. Va a `negocio_servicios.moneda/costo_moneda/tasa_cotizada`.
+   */
+  moneda?: MonedaDelServicio | null
 }
 
-/** Lo mínimo del ítem que hace falta aquí (lo trae `contextoDeCotizacion`). */
+/**
+ * Lo mínimo del ítem que hace falta aquí: lo trae `contextoDeCotizacion`, más `items.tramos`, que
+ * `generarServiciosDesdeTarifa` lee aparte (`null` = sin tramos guardados: manda la lectura).
+ */
 export type ItemParaServicio = Pick<
   ItemDeCotizacion,
   | 'id' | 'nombre' | 'grupo' | 'opcion_de' | 'es_ajuste' | 'orden' | 'dia_relativo' | 'entra_al_precio'
   | 'cantidad' | 'subtotal' | 'numeroDeRubros' | 'costoDeRubros' | 'descuento_porcentaje'
   | 'margen_porcentaje' | 'precio_venta' | 'precio_manual' | 'adicionales' | 'pasajeros' | 'tarifa_pax'
->
+> & { tramos?: unknown }
+
+/** Lo del ítem de lo que salen las fechas: la lectura y, en un vuelo, `items.tramos`. */
+type FuenteDeFechas = Pick<ItemParaServicio, 'tarifa_pax'> & { tramos?: unknown }
 
 const MAX_NOMBRE = 200
 
@@ -65,8 +115,15 @@ export function tipoDeServicio(
   tipoRanura?: string | null,
 ): TipoServicio {
   const porGrupo = tipoDeDefinicion(ranuraDeGrupo(item.grupo))
-  const tipo = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
+  const delBloque = esTipoRanura(tipoRanura) ? tipoRanura : porGrupo
+  // M9-1 (QA G9) · tren y vuelo del mismo trayecto juntados como opciones: cada opción es lo que se
+  // leyó (Reservas compra un tiquete de tren, no un vuelo). Solo entre vuelo y tren.
+  const tipo = delBloque === 'vuelo' || delBloque === 'tren'
+    ? tipoDeDefinicion(ranuraDelItem({ ...item, grupo: delBloque }) ?? null) ?? delBloque
+    : delBloque
   if (tipo === 'otro') return lineaConAsistenciaMedica(item) ? 'asistencia' : 'otro'
+  // Un paquete de bloqueo (hotel + vuelo del operador, un valor) se opera como un servicio del operador.
+  if (tipo === 'paquete') return 'otro'
   if (tipo) return tipo
   const texto = `${normalizarGrupo(item.grupo) ?? ''} ${item.nombre ?? ''}`.toLowerCase()
   if (/\b(asistencia|seguro)\b/.test(texto)) return 'asistencia'
@@ -89,41 +146,261 @@ export function fechaIso(v: unknown): string | null {
   return `${m[1]}-${m[2]}-${m[3]}`
 }
 
+type Lectura = NonNullable<ReturnType<typeof lecturaDeOpcion>>
+
+/** El paquete de bloqueo de la línea (`tarifa_pax.bloqueo`), o `null` si no es un paquete. */
+export function paqueteDelItem(item: { tarifa_pax?: unknown }): PaqueteBloqueo | null {
+  if (item.tarifa_pax === null || item.tarifa_pax === undefined) return null
+  try {
+    return leerPaqueteBloqueo(leerTarifaPax(item.tarifa_pax).bloqueo)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Las fechas de la fila de un PAQUETE DE BLOQUEO (H10 del QA del 2026-10-29): el servicio va del
+ * primer al último tramo del vuelo del paquete (las fechas del viaje), con los tramos del vuelo
+ * para que Reservas lo confirme y la agenda ponga el check-in. Sin vuelo, la salida escrita a mano
+ * + las noches; sin ella, la salida del viaje + las noches. Antes la fila quedaba sin fechas ni vuelo.
+ */
+export function fechasDePaquete(p: PaqueteBloqueo, salidaViaje?: string | null): FechasServicio {
+  const tramos: TramoServicio[] = (p.vuelo?.tramos ?? [])
+    .filter(t => esFechaIso(t.fecha))
+    .map(t => recortar({
+      fecha: t.fecha as string,
+      hora_salida: horaHHMM(t.horaSalida),
+      hora_llegada: horaHHMM(t.horaLlegada),
+      origen: texto(t.origen),
+      destino: texto(t.destino),
+      aerolinea: texto(t.aerolinea),
+      numero_vuelo: texto(t.numeroVuelo),
+    }))
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))
+    .slice(0, 12)
+  const noches = p.hotel.noches
+  if (tramos.length > 0) {
+    const f = fechasDeTramos(tramos)
+    // Un solo tramo (solo la ida): el fin es la salida + las noches del hotel.
+    if (tramos.length === 1) return { ...f, fecha_fin: noches ? sumarDiasIso(tramos[0].fecha, noches) : null, hora_fin: null }
+    return f
+  }
+  const manual = fechasDelPaquete(p)
+  if (manual.salida) return { ...SIN_FECHAS, fecha_servicio: manual.salida, fecha_fin: manual.regreso }
+  if (esFechaIso(salidaViaje)) return { ...SIN_FECHAS, fecha_servicio: salidaViaje, fecha_fin: noches ? sumarDiasIso(salidaViaje, noches) : null }
+  return SIN_FECHAS
+}
+
+function leer(item: { tarifa_pax?: unknown }): Lectura | null {
+  if (item.tarifa_pax === null || item.tarifa_pax === undefined) return null
+  try {
+    return lecturaDeOpcion(leerTarifaPax(item.tarifa_pax))
+  } catch {
+    return null
+  }
+}
+
+/** Un campo leído por su etiqueta. Lo que vino del viaje («… (del viaje)») no es lectura: no cuenta. */
+function campoLeido(lectura: Lectura, etiqueta: string): string | null {
+  const v = texto(lectura.campos?.find(c => c.label.trim().toLowerCase() === etiqueta.toLowerCase())?.valor)
+  return v && !/\(del viaje\)$/.test(v) ? v : null
+}
+
 /**
  * Proveedor y fecha leídos del pantallazo de la línea, si los hay. Lo leído PROPONE: la fila
  * dice «Falta el proveedor» cuando no se leyó, y quien reserva lo escribe.
  */
-export function lecturaDelServicio(item: Pick<ItemParaServicio, 'tarifa_pax'>, tipo: TipoServicio): {
+export function lecturaDelServicio(item: FuenteDeFechas, tipo: TipoServicio): {
   proveedor: string | null
   fecha: string | null
 } {
-  if (item.tarifa_pax === null || item.tarifa_pax === undefined) return { proveedor: null, fecha: null }
-  let lectura: ReturnType<typeof lecturaDeOpcion> = null
-  try {
-    lectura = lecturaDeOpcion(leerTarifaPax(item.tarifa_pax))
-  } catch {
-    return { proveedor: null, fecha: null }
+  // El paquete de bloqueo: el proveedor es su operador, y la fecha la de su vuelo (H10, 2026-10-29).
+  const paquete = paqueteDelItem(item)
+  // H-13: un texto que junta a varios operadores no es el proveedor de nadie: la fila queda sin él
+  // («Falta el proveedor») en vez de esconder la falta con la mezcla.
+  if (paquete) {
+    const op = paquete.operador && !esOperadorMezclado(paquete.operador) ? paquete.operador.slice(0, MAX_NOMBRE) : null
+    return { proveedor: op, fecha: fechasDePaquete(paquete).fecha_servicio }
   }
-  if (!lectura) return { proveedor: null, fecha: null }
+  const lectura = leer(item)
+  const fecha = fechasLeidas(lectura, tipo, item.tramos).fecha_servicio
+  if (!lectura) return { proveedor: null, fecha }
   const id = lectura.identidad ?? {}
-  const campo = (etiqueta: string) =>
-    texto(lectura?.campos?.find(c => c.label.trim().toLowerCase() === etiqueta)?.valor)
   const proveedor =
     tipo === 'hotel' ? texto(id.hotel)
-      : tipo === 'vuelo' ? texto(id.aerolinea) ?? campo('aerolínea')
-        : campo('proveedor')
-  const fecha =
-    tipo === 'hotel' ? fechaIso(id.check_in)
-      : tipo === 'vuelo' ? fechaIso(id.fecha_salida)
-        : tipo === 'actividad' ? fechaIso(id.fecha)
-          : tipo === 'traslado' ? fechaIso(id.fecha_hora)
-            : null
+      : tipo === 'vuelo' ? aerolineaLeida(lectura)
+        : tipo === 'tren' ? campoLeido(lectura, 'Operador del tren')
+          : campoLeido(lectura, 'proveedor')
   return { proveedor: proveedor ? proveedor.slice(0, MAX_NOMBRE) : null, fecha }
 }
 
-function nombreDelServicio(item: Pick<ItemParaServicio, 'nombre' | 'grupo'>): string {
+/** Los textos de un tramo con el tope de la columna. */
+function recortar(t: TramoServicio): TramoServicio {
+  return {
+    ...t,
+    origen: t.origen?.slice(0, 100) ?? null,
+    destino: t.destino?.slice(0, 100) ?? null,
+    aerolinea: t.aerolinea?.slice(0, 100) ?? null,
+    numero_vuelo: t.numero_vuelo?.slice(0, 100) ?? null,
+  }
+}
+
+/**
+ * Los tramos de un vuelo leído: la ida (`fecha_salida`) y, si hay, el regreso (`fecha_regreso`),
+ * con sus horas, la ruta, la aerolínea y el número. Sin fecha de ida no hay tramos (no se arma un
+ * vuelo que empieza en el regreso). Un regreso anterior a la ida es una lectura rota: se queda la ida.
+ *
+ * Es el camino de un ítem SIN `items.tramos` (`tramosDelItemGuardados`): la lectura trae el número
+ * en un solo campo y aquí no se parte.
+ */
+function tramosLeidos(lectura: Lectura): TramoServicio[] {
+  const id = lectura.identidad ?? {}
+  const ida = fechaIso(id.fecha_salida)
+  if (!ida) return []
+  const origen = texto(id.origen)
+  const destino = texto(id.destino)
+  const aerolinea = aerolineaLeida(lectura)
+  const tramos: TramoServicio[] = [{
+    fecha: ida,
+    hora_salida: horaHHMM(campoLeido(lectura, 'Hora de salida (ida)')),
+    hora_llegada: horaHHMM(campoLeido(lectura, 'Hora de llegada (ida)')),
+    origen,
+    destino,
+    aerolinea,
+    // Tal como se lee («AV8520 / AV8521»): repartirlo entre tramos sería adivinar.
+    numero_vuelo: campoLeido(lectura, 'Nº de vuelo'),
+  }]
+  const regreso = fechaIso(id.fecha_regreso)
+  const salidaRegreso = horaHHMM(campoLeido(lectura, 'Hora de salida (regreso)'))
+  const llegadaRegreso = horaHHMM(campoLeido(lectura, 'Hora de llegada (regreso)'))
+  // M9-3: la llegada al día siguiente de un vuelo nocturno no es un regreso.
+  const fantasma = regresoEsLaLlegadaDeLaIda(
+    { fecha: ida, salida: tramos[0].hora_salida, llegada: tramos[0].hora_llegada },
+    { fecha: regreso, salida: salidaRegreso, llegada: llegadaRegreso },
+  )
+  if (regreso && regreso >= ida && !fantasma) {
+    tramos.push({
+      fecha: regreso,
+      hora_salida: salidaRegreso,
+      hora_llegada: llegadaRegreso,
+      origen: destino,
+      destino: origen,
+      aerolinea,
+      numero_vuelo: null,
+    })
+  }
+  return tramos.map(recortar)
+}
+
+function aerolineaLeida(lectura: Lectura | null): string | null {
+  if (!lectura) return null
+  return texto(lectura.identidad?.aerolinea) ?? campoLeido(lectura, 'aerolínea')
+}
+
+/**
+ * Los tramos de un vuelo desde `items.tramos` (brief del 2026-10-22): cada tramo con SU fecha,
+ * sus horas, su ruta y su número. La columna ya trae el número repartido entre ida y regreso con
+ * la regla del documento (`numerosDeVuelo`, `tramos-vuelo.ts`): aquí no se reparte nada, se copia.
+ * La aerolínea sale de la lectura, como en el otro camino.
+ *
+ * `null` = el ítem no tiene `items.tramos` utilizables (o ningún tramo trae fecha ISO): quien llama
+ * cae a la lectura. Las mismas reglas que la lectura: sin fecha de la ida no hay tramos, un tramo
+ * sin fecha se omite y un regreso anterior a la ida se cae. `leerTramos` ya garantiza la ida
+ * primero.
+ *
+ * ⚠️ Si NINGÚN tramo guardado trae su número (la columna no pudo repartirlos), la ida conserva el
+ * número completo de la lectura, como hoy: es lo mismo que hace `tramosDelItem` con
+ * `numerosSinTramo`, y perderlo dejaría al vuelo sin ningún número.
+ */
+function tramosDelItemGuardados(raw: unknown, lectura: Lectura | null): TramoServicio[] | null {
+  const guardados = leerTramosDelItem(raw)
+  if (!guardados) return null
+  const ida = guardados[0]
+  const fechaIda = fechaIso(ida.fecha)
+  if (!fechaIda) return null
+  const aerolinea = aerolineaLeida(lectura)
+  const sinNumeros = guardados.every(t => !texto(t.numero))
+  const tramos: TramoServicio[] = []
+  for (const t of guardados) {
+    const fecha = fechaIso(t.fecha)
+    if (!fecha || fecha < fechaIda) continue
+    tramos.push({
+      fecha,
+      hora_salida: horaHHMM(t.salida),
+      hora_llegada: horaHHMM(t.llegada),
+      origen: texto(t.origen),
+      destino: texto(t.destino),
+      aerolinea,
+      numero_vuelo: texto(t.numero) ?? (t === ida && sinNumeros && lectura ? campoLeido(lectura, 'Nº de vuelo') : null),
+    })
+  }
+  return tramos.map(recortar)
+}
+
+/** La hora de un `fecha_hora` que la trae («2026-11-10T14:30», «2026-11-10 14:30»). */
+function horaDeFechaHora(v: unknown): string | null {
+  const t = texto(v)
+  const m = t ? /^\d{4}-\d{2}-\d{2}[T ](\d{2}:\d{2})/.exec(t) : null
+  return m ? horaHHMM(m[1]) : null
+}
+
+function fechasLeidas(lectura: Lectura | null, tipo: TipoServicio, tramosDelItem?: unknown): FechasServicio {
+  if (tipo === 'vuelo') {
+    const tramos = tramosDelItemGuardados(tramosDelItem, lectura) ?? (lectura ? tramosLeidos(lectura) : [])
+    return tramos.length > 0 ? fechasDeTramos(tramos) : SIN_FECHAS
+  }
+  if (!lectura) return SIN_FECHAS
+  const id = lectura.identidad ?? {}
+  switch (tipo) {
+    case 'hotel': {
+      const entra = fechaIso(id.check_in)
+      const sale = fechaIso(id.check_out)
+      return { ...SIN_FECHAS, fecha_servicio: entra, fecha_fin: entra && sale && sale >= entra ? sale : null }
+    }
+    case 'actividad':
+      return { ...SIN_FECHAS, fecha_servicio: fechaIso(id.fecha) }
+    case 'traslado': {
+      const fecha = fechaIso(id.fecha_hora)
+      return { ...SIN_FECHAS, fecha_servicio: fecha, hora_inicio: fecha ? horaDeFechaHora(id.fecha_hora) : null }
+    }
+    case 'tren': {
+      // V9-3 (QA G9) · el tren con sus horas: la de salida y la de llegada leídas.
+      const fecha = fechaIso(id.fecha_hora)
+      return {
+        ...SIN_FECHAS,
+        fecha_servicio: fecha,
+        hora_inicio: fecha ? horaHHMM(campoLeido(lectura, 'Hora de salida')) ?? horaDeFechaHora(id.fecha_hora) : null,
+        hora_fin: fecha ? horaHHMM(campoLeido(lectura, 'Hora de llegada')) : null,
+      }
+    }
+    default:
+      return SIN_FECHAS
+  }
+}
+
+/**
+ * Las fechas de la fila: las leídas del pantallazo y, en una actividad o un traslado sin fecha
+ * leída, el día del viaje (`items.dia_relativo = N` → salida + (N − 1)). Sin salida o sin día,
+ * vacías: «Falta la fecha».
+ */
+export function fechasDelServicio(
+  item: FuenteDeFechas & Pick<ItemParaServicio, 'dia_relativo'>,
+  tipo: TipoServicio,
+  salidaViaje: string | null | undefined,
+): FechasServicio {
+  const paquete = paqueteDelItem(item)
+  if (paquete) return fechasDePaquete(paquete, salidaViaje)
+  const leidas = fechasLeidas(leer(item), tipo, item.tramos)
+  if (leidas.fecha_servicio || (tipo !== 'actividad' && tipo !== 'traslado' && tipo !== 'tren')) return leidas
+  const porDia = fechaPorDiaDelViaje(esFechaIso(salidaViaje) ? salidaViaje : null, item.dia_relativo)
+  return porDia ? { ...leidas, fecha_servicio: porDia } : leidas
+}
+
+function nombreDelServicio(item: Pick<ItemParaServicio, 'nombre' | 'grupo'> & { tarifa_pax?: unknown }): string {
   const propio = texto(item.nombre)
   const nombre = propio ?? (normalizarGrupo(item.grupo) ? etiquetaDeRanura(item.grupo) : 'Servicio')
+  // El paquete se llama paquete: la línea lleva el nombre del hotel y Reservas leía «un hotel» (H10).
+  if (paqueteDelItem(item) && !/^paquete\b/i.test(nombre)) return `PAQUETE · ${nombre}`.slice(0, MAX_NOMBRE)
   return nombre.slice(0, MAX_NOMBRE)
 }
 
@@ -139,6 +416,8 @@ export function filasDeServicioDeTarifa(args: {
   seleccion: string[] | null
   params: ParametrosCascada
   tipoRanuraPorItem?: Record<string, string | null | undefined>
+  /** Salida del viaje (`negocio_bloques.data.fecha_salida`): el día N de una actividad sin fecha. */
+  salidaViaje?: string | null
 }): FilaServicioNueva[] {
   const { items, seleccion, params } = args
   const ids = seleccion ? itemsDelItinerario(items, seleccion) : itemsQueAportanAlTotal(items)
@@ -151,15 +430,19 @@ export function filasDeServicioDeTarifa(args: {
 
   const filas: FilaServicioNueva[] = incluidos.map((item, orden) => {
     const tipo = tipoDeServicio(item, args.tipoRanuraPorItem?.[item.id])
-    const { proveedor, fecha } = lecturaDelServicio(item, tipo)
+    const { proveedor } = lecturaDelServicio(item, tipo)
+    const fechas = fechasDelServicio(item, tipo, args.salidaViaje)
     return {
       item_id: item.id,
       tipo,
       nombre: nombreDelServicio(item),
       proveedor_nombre: proveedor,
-      fecha_servicio: fecha,
+      ...fechas,
       costo_cotizado: Math.max(0, calcularCascada([item], params).costoDirecto),
+      comision_esperada: comisionEsperadaDelItem(item, params),
       orden,
+      ...(proveedor && paqueteDelItem(item) ? { buscarEmpresa: true } : {}),
+      ...limiteDePagoDelItem(item),
     }
   })
 
@@ -172,5 +455,52 @@ export function filasDeServicioDeTarifa(args: {
     const mayor = filas.reduce((a, f) => (f.costo_cotizado > a.costo_cotizado ? f : a), filas[0])
     mayor.costo_cotizado = Math.max(0, mayor.costo_cotizado + residuo)
   }
+  // H6-1 / H9-1 · la moneda y la tasa del ítem viajan con la fila (sobre lo cotizado ya cuadrado).
+  for (const f of filas) {
+    const item = porId.get(f.item_id)
+    f.moneda = item ? monedaDelServicio(item.tarifa_pax, f.costo_cotizado, item.subtotal) : null
+  }
   return filas
+}
+
+/**
+ * Bajo este monto la «comisión» es el residuo del redondeo entre el precio público y el neto, no
+ * plata que el proveedor vaya a girar: la misma cifra de materialidad del resto del sistema.
+ */
+const COMISION_MINIMA_COP = TOLERANCIA_SALDO_COP
+
+/** H-26 · la comisión que el proveedor girará por esta línea, con la cascada de la cotización. */
+export function comisionEsperadaDelItem(item: ItemParaServicio, params: ParametrosCascada): number | null {
+  const linea = calcularCascada([item], params).lineas.find(l => l.id === item.id)
+  const c = linea?.comisionPesos
+  if (c === null || c === undefined || !Number.isFinite(c)) return null
+  const pesos = Math.round(c)
+  return pesos >= COMISION_MINIMA_COP ? pesos : null
+}
+
+/** «Aliados Travel S.A.S.» → «aliadostravel»: para comparar el operador con el Directorio. */
+const claveDeEmpresa = claveDeNombre
+
+/**
+ * H-17 (QA del 2026-10-29) · la fecha límite de pago al proveedor que trae el ítem: la «Compra antes
+ * del» de un paquete de bloqueo. `{}` si no la trae (la fila no la nombra y queda como antes).
+ */
+export function limiteDePagoDelItem(item: { tarifa_pax?: unknown }): { fecha_limite_pago?: string } {
+  const f = paqueteDelItem(item)?.hotel.compraAntesDe
+  return esFechaIso(f) ? { fecha_limite_pago: f } : {}
+}
+
+/**
+ * La empresa del Directorio que es el operador del paquete (H10, 2026-10-29), por nombre o razón
+ * social, sin tildes, mayúsculas ni «S.A.S.». Solo si hay UNA: con dos que se llaman igual no se
+ * adivina, y la fila queda con el nombre en texto (como sin empresa).
+ */
+export function empresaDelOperador(
+  operador: string | null | undefined,
+  empresas: readonly { id: string; nombre?: string | null; razon_social?: string | null }[],
+): string | null {
+  const clave = claveDeEmpresa(operador)
+  if (!clave) return null
+  const ids = new Set(empresas.filter(e => claveDeEmpresa(e.nombre) === clave || claveDeEmpresa(e.razon_social) === clave).map(e => e.id))
+  return ids.size === 1 ? [...ids][0] : null
 }

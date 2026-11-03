@@ -17,6 +17,16 @@ import type { MiembroEquipo } from './bandeja/dominio.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { huellaDe } from './reglamento.ts';
 import type { Ficha, FilaConversacion, Modelo, Reglamento, Salida, Traza } from './tipos.ts';
+import type { ArchivoAdjunto, Lector } from './one/lectura-adjunto.ts';
+import type { Composicion } from './componer.ts';
+import { reglamentoDelTurno } from './componer.ts';
+import { componerViajes } from './bandeja/turno-con-rol.ts';
+import { dominioOne } from './one/dominio.ts';
+import { PuertoOneMemoria } from './one/puerto-memoria.ts';
+import type { NegocioMem } from './one/puerto-memoria.ts';
+import { ESCALAMIENTO_METRIK, escalamientoDe } from './persona.ts';
+import type { FilaEscalamiento } from './persona.ts';
+import { bloquesDelTurno } from './bandeja/turno-con-rol.ts';
 
 export const WS_PRUEBA = '00000000-0000-4000-8000-00000000a0a0';
 export const TEL_PRUEBA = '573000009444';
@@ -26,7 +36,7 @@ export async function reglamentoDePrueba(fichas: Ficha[] = REGLAMENTO_ANEXO_A): 
 }
 
 export interface PasoRegistrado {
-  clase: 'escrito' | 'reenvio' | 'toque' | 'audio';
+  clase: 'escrito' | 'reenvio' | 'toque' | 'audio' | 'imagen' | 'documento';
   texto: string;
   salidas: Salida[];
   /** Desde que la fila entró (el webhook) hasta el primer envío. Nulo si no salió nada. */
@@ -43,6 +53,12 @@ export interface Escenario {
   almacen: AlmacenMemoria;
   mensajero: MensajeroMemoria;
   puerto: PuertoMemoria;
+  /** Con un rol que trae funciones de ONE: el puerto ONE en memoria (gastos, cobros, actividades). */
+  puertoOne: PuertoOneMemoria | null;
+  /** Con un rol: lo que armó el componedor. */
+  composicion: Composicion | null;
+  /** Con un rol: las filas de `asistente_escalamientos` que dejó la conversación. */
+  escalamientos: FilaEscalamiento[];
   deps: DepsCola;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   reenvia(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
@@ -50,6 +66,11 @@ export interface Escenario {
   dicta(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   /** Toca la opción cuyo título es (o contiene) `titulo` en el mensaje más reciente del bot que la tenga. */
   toca(titulo: string, o?: { despuesMs?: number; atras?: number }): Promise<Salida[]>;
+  /**
+   * Una foto o un PDF (2026-10-21): del comercial (`reenviado: false`, con su pie) o reenviado del cliente. `archivo`: los
+   * bytes que «están en Meta» (para el lector). Solo con `lector` en el escenario se lee.
+   */
+  adjunta(a: { tipo: 'foto' | 'pdf'; nombre?: string; pie?: string; reenviado?: boolean; archivo?: ArchivoAdjunto; despuesMs?: number }): Promise<Salida[]>;
   trazas(): Traza[];
 }
 
@@ -67,30 +88,64 @@ export async function escenario(p: {
   /** El equipo comercial (por defecto `EQUIPO_PRUEBA`) y quien escribe (por defecto «el comercial»). */
   equipo?: MiembroEquipo[];
   remitente?: { nombre: string; rol: string };
+  /** El lector de los documentos del viaje (2026-10-21): en pruebas uno guionado; en el arnés, el real. Sin él, como antes. */
+  lector?: Lector | null;
+  /**
+   * Un rol (2026-10-29, roles de Trappvel): la bandeja compuesta con sus funciones, como en producción
+   * (`bandeja/turno-con-rol.ts`). `reglamento` es el del rol (bot `rol:<clave>`). Con funciones de ONE, el motor ONE va
+   * con `negocios` (los viajes vistos como negocios de ONE) y su puerto en memoria.
+   */
+  rol?: { clave: string; funciones: string[]; negocios?: NegocioMem[] };
+  /** Desde cuándo corre el reloj de la prueba (ms). Por defecto, el de `Reloj` (2026-10-06). */
+  inicio?: number;
 }): Promise<Escenario> {
-  const reloj = new Reloj();
+  const reloj = p.inicio !== undefined ? new Reloj(p.inicio) : new Reloj();
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
-  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora, equipo: p.equipo });
+  const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora, equipo: p.equipo, conAdjuntos: !!p.lector });
+  // Lo que el dominio anota de un adjunto (referencia, lectura) queda en la fila, como en `wa_conversacion`.
+  puerto.alAnotar = (filaId, media) => {
+    const f = almacen.filas.find((x) => x.id === filaId);
+    if (f) f.media = structuredClone(media);
+  };
+  const reglamento = p.reglamento ?? await reglamentoDePrueba();
+  const puertoOne = p.rol ? new PuertoOneMemoria({ negocios: p.rol.negocios ?? [] }) : null;
+  const escalamientos: FilaEscalamiento[] = [];
+  const escalamiento = escalamientoDe(reglamento, ESCALAMIENTO_METRIK, () => {});
+  const composicion = p.rol ? componerViajes({
+    funciones: p.rol.funciones,
+    motorViajes: () => dominioBandeja(puerto, { lector: p.lector ?? null, ahora: reloj.ahora }),
+    motorOne: (claves, empresa) => dominioOne(puertoOne!, { rol: 'owner', ahora: reloj.ahora, lector: null, empresa, funciones: claves }),
+    escalamiento, empresa: 'Agencia de Prueba', log: () => {},
+  }) : null;
+  const bloques = composicion ? bloquesDelTurno(composicion) : null;
+  const config = { ...CONFIG_POR_DEFECTO, activo: true, ...p.config };
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: dominioBandeja(puerto),
-    reglamento: p.reglamento ?? await reglamentoDePrueba(),
-    config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
+    dominio: composicion ? composicion.dominio : dominioBandeja(puerto, { lector: p.lector ?? null, ahora: reloj.ahora }),
+    reglamento: composicion ? await reglamentoDelTurno(reglamento, composicion, { huella: huellaDe }) : reglamento,
+    config: bloques ? { ...config, topes: { ...config.topes, bloques } } : config,
+    ...(p.rol ? {
+      rol: { clave: p.rol.clave, id: `rol-${p.rol.clave}`, version: 1, reglamento_id: reglamento.id, por: 'staff' as const, funciones: p.rol.funciones.map((funcion) => ({ funcion, parametros: {} })) },
+      persona: { config: escalamiento, empresa: 'Agencia de Prueba', rolClave: p.rol.clave, canal: 'wa_one' as const, escalamientos: { registrar: async (f: FilaEscalamiento) => { escalamientos.push(f); } } },
+    } : {}),
     ahoraMs: reloj.ahora,
     reloj: p.reloj ?? (() => reloj.ahora()),
     almacen, mensajero,
     workspaceId: WS_PRUEBA, phone: TEL_PRUEBA,
     remitente: p.remitente ?? { nombre: 'el comercial', rol: 'colaborador' },
     nuevoId,
+    // La ventana de los adjuntos espera en el reloj de la prueba, no en el de verdad.
+    dormir: async (ms: number) => { reloj.avanzar(ms); },
   };
+  let medias = 0;
   const pasos: PasoRegistrado[] = [];
-  const correr = async (clase: 'escrito' | 'reenvio' | 'toque' | 'audio', texto: string, toqueId?: string, despuesMs = 20_000) => {
+  const correr = async (clase: PasoRegistrado['clase'], texto: string, toqueId?: string, despuesMs = 20_000, extra: { media?: FilaConversacion['media']; claseFila?: FilaConversacion['clase'] } = {}) => {
     reloj.avanzar(despuesMs);
     const antes = mensajero.enviados.length;
     const trazasAntes = almacen.trazas().length;
     const t0 = performance.now();
-    almacen.entrante({ workspaceId: WS_PRUEBA, phone: TEL_PRUEBA, clase, texto, toqueId });
+    almacen.entrante({ workspaceId: WS_PRUEBA, phone: TEL_PRUEBA, clase: extra.claseFila ?? (clase === 'imagen' || clase === 'documento' ? 'otro' : clase), texto: texto || (extra.media ? null : texto), toqueId, media: extra.media });
     await atenderPendientes(deps);
     const nuevos = mensajero.enviados.slice(antes);
     pasos.push({ clase, texto, salidas: nuevos.map((e) => e.salida), ms: nuevos.length ? Math.round(nuevos[0].at - t0) : null, trazas: almacen.trazas().slice(trazasAntes) });
@@ -107,7 +162,7 @@ export async function escenario(p: {
         } as FilaConversacion);
       }
     },
-    reloj, almacen, mensajero, puerto, deps,
+    reloj, almacen, mensajero, puerto, puertoOne, composicion, escalamientos, deps,
     escribe: (t, o) => correr('escrito', t, undefined, o?.despuesMs),
     reenvia: (t, o) => correr('reenvio', t, undefined, o?.despuesMs ?? 3_000),
     dicta: (t, o) => correr('audio', t, undefined, o?.despuesMs),
@@ -124,6 +179,15 @@ export async function escenario(p: {
       const op = con[o?.atras ?? 0];
       if (!op) throw new Error(`no hay una opción «${titulo}» en los mensajes del bot`);
       return correr('toque', op.titulo, op.id, o?.despuesMs ?? 5_000);
+    },
+    adjunta: (a) => {
+      const id = `media-${++medias}`;
+      if (a.archivo) puerto.archivos.set(id, a.archivo);
+      const pdf = a.tipo === 'pdf';
+      const media = pdf ? { tipo: 'documento', id, mime: a.archivo?.mime ?? 'application/pdf', nombre: a.nombre ?? 'documento.pdf' } : { tipo: 'imagen', id };
+      // Como `claseDelEntrante`: un reenvío es `reenvio` (foto o PDF); la foto propia, `imagen`; el PDF propio, `otro`.
+      const claseFila: FilaConversacion['clase'] = a.reenviado ? 'reenvio' : pdf ? 'otro' : 'imagen';
+      return correr(pdf ? 'documento' : 'imagen', a.pie ?? '', undefined, a.despuesMs ?? (a.reenviado ? 3_000 : 10_000), { media, claseFila });
     },
     trazas: () => almacen.trazas(),
   };

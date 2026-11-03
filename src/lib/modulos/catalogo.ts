@@ -150,6 +150,16 @@ export const MODULOS = {
     rutas: ['/radar'],
     funciones: [],
   },
+  // Funciones con cupo: experiencias, funciones con su capacidad y reservas (sin mapa del salón desde el 2026-10-22). Sirve a
+  // cualquier negocio que venda funciones con cupo; primer cliente previsto: Sabor & Experiencias (etapa 2, diseño
+  // del 2026-10-21). Migración 20261022170000. Apagado por defecto: ningún workspace lo tiene encendido.
+  funciones: {
+    nombre: 'Funciones',
+    clave: 'funciones',
+    inicio: '/funciones',
+    rutas: ['/funciones'],
+    funciones: [],
+  },
 } as const satisfies Record<string, Modulo>
 
 export type IdModulo = keyof typeof MODULOS

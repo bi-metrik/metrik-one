@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { escenarioOne } from './escenario'
 import { modeloGuionado } from '../modelo-guionado'
-import { fotoDe, gastosDeLaConversacion, nombreNegocio, permisosDe, telefonoEnLaConversacion } from './dominio'
+import { DIAS_ATRAS_GASTO, fechaConDia, fechaDelGasto, fotoDe, gastoParecido, gastosDeLaConversacion, niegaElParecido, nombreNegocio, permisosDe, telefonoEnLaConversacion } from './dominio'
 import { agenteOnePorDefecto, CORTE_ONE_MS, dominioDelAgente, leerConfigOne } from '../config'
 import { declaraciones } from '../herramientas'
 import { dominioOne } from './dominio'
@@ -131,7 +131,7 @@ describe('el soporte del gasto', () => {
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 30000, negocio: 'A1 26 1', categoria: 'otros' } } },
       (p) => {
-        expect(p.mensajes[0].parts[0].text).toContain('G1 · $30.000 · A1 26 1 · Alfa Grupo — Concesión de prueba · sin soporte')
+        expect(p.mensajes[0].parts[0].text).toContain('G1 · gasto de $30.000 · A1 26 1 · Alfa Grupo — Concesión de prueba · sin soporte')
         expect(p.mensajes[0].parts[0].text).toContain('todavía no son soporte de ningún gasto: #5 (foto')
         return { name: 'proponer', args: { accion: 'adjuntar_soporte', datos: { gasto: 'G1', soporte: '#5' } } }
       },
@@ -189,6 +189,65 @@ describe('actividad, contacto y consultas', () => {
     expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'llamada', texto: 'llamé a Alfa para revisar el cobro' }])
   })
 
+  it('un texto largo escrito por el modelo va en varios comentarios, sin prometer que es «completo»', async () => {
+    const largo = Array.from({ length: 40 }, (_, i) => `En el evento, punto ${i + 1}: la cocina trabaja con siete personas de planta.`).join(' ')
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: largo } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.escribe(largo)
+    expect(t[0].texto).toMatch(/Es largo: va en \d+ comentarios seguidos\.\n¿La registro\?$/)
+    expect(t[0].texto).not.toMatch(/complet/i)
+    const fin = await e.toca('Registrar')
+    expect(fin.map((s) => s.texto).join('\n')).toMatch(/✅ 🤝 Actividad registrada en A1 26 1 · Alfa Grupo — Concesión de prueba, en \d+ comentarios seguidos\./)
+    expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'reunion', texto: largo }])
+  })
+
+  it('una nota de voz se guarda tal cual: el resumen del modelo va arriba, nunca en lugar de la nota', async () => {
+    // El caso del 2026-10-26: 4.459 caracteres dictados; el modelo veía solo los primeros 1.200 y guardó su resumen de
+    // unos 650, diciendo «Esta versión tiene el mensaje completo».
+    const dictado = Array.from({ length: 60 }, (_, i) => `En el evento, punto ${i + 1}: la cocina trabaja con siete personas de planta.`).join(' ')
+    const resumen = 'Evento del viernes: cocina con siete personas de planta.'
+    const modelo = modeloGuionado([
+      // Sin `nota`: el código no deja guardar el resumen en lugar de lo dictado.
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: resumen } } },
+      { name: 'proponer', args: { accion: 'actividad', texto: 'Esta versión tiene el mensaje completo.', datos: { negocio: 'A1 26 1', tipo: 'reunion', texto: resumen, nota: '#1' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.dicta(dictado)
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['nota_de_voz_sin_referencia'])
+    expect(t[0].texto).toContain('Esta versión tiene el mensaje completo.')
+    expect(t[0].texto).toMatch(/📝 Tu nota de voz #1 va tal cual, entero, en \d+ comentarios seguidos\.\n¿La registro\?$/)
+    const fin = await e.toca('Registrar')
+    expect(fin.map((s) => s.texto).join('\n')).toMatch(/✅ 🤝 Actividad registrada en A1 26 1 · Alfa Grupo — Concesión de prueba, con tu nota #1 tal cual en \d+ comentarios seguidos\./)
+    expect(e.puerto.escrituras).toEqual([{ tipo: 'actividad', negocio: 'A1 26 1', actividad: 'reunion', texto: `Resumen: ${resumen}\n\nNota tal cual: ${dictado}` }])
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('sin la nota, el bot no dice que guarda el mensaje completo', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'actividad', texto: 'Esta versión tiene el mensaje completo.', datos: { negocio: 'A1 26 1', tipo: 'llamada', texto: 'Llamé a Alfa por el cobro.' } } },
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'llamada', texto: 'Llamé a Alfa por el cobro.' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t = await e.escribe('anota en el A1 26 1 que llamé a Alfa para revisar el cobro, que quedó de pagar el viernes')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['texto_contra_propuesta'])
+    expect(t[0].texto).not.toMatch(/complet/i)
+    expect(t[0].texto).toContain('«Llamé a Alfa por el cobro.»')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('`nota` solo apunta a un audio o un escrito de la persona', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'actividad', datos: { negocio: 'A1 26 1', tipo: 'nota', texto: 'x', nota: '#9' } } },
+      { name: 'responder', args: { tema: 'actividad', texto: '¿Qué nota registro?' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('registra la nota')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['nota_no_es_de_la_persona'])
+    expect(e.puerto.escrituras).toEqual([])
+  })
+
   it('contacto nuevo: el teléfono tiene que estar escrito y no ser de otro', async () => {
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'contacto_nuevo', datos: { nombre: 'Juan Prueba', telefono: '3009998877' } } },
@@ -220,7 +279,20 @@ describe('el rol manda (los permisos del bot de siempre)', () => {
       { name: 'proponer', args: { accion: 'contacto_nuevo', datos: { nombre: 'Juan Prueba' } } },
       { name: 'responder', args: { tema: 'contacto', texto: 'Tu rol no permite crear contactos por aquí.' } },
     ])
+    // Desde el componedor (2026-10-26) el operador ni siquiera ve `contacto_nuevo`: si el modelo lo intenta igual, el
+    // núcleo lo ataja como acción desconocida, antes del motor.
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS, rol: 'operator' })
+    await e.escribe('nuevo contacto Juan Prueba')
+    expect(e.trazas().at(-1)!.candados![0].candado).toBe('accion_desconocida')
+    expect(e.composicion!.declaradas.acciones).toEqual(['gasto', 'adjuntar_soporte', 'corregir_gasto', 'actividad'])
+  })
+
+  it('el motor sin componer sigue frenando por rol (la tercera llave)', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'contacto_nuevo', datos: { nombre: 'Juan Prueba' } } },
+      { name: 'responder', args: { tema: 'contacto', texto: 'Tu rol no permite crear contactos por aquí.' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, rol: 'operator', sinComponer: true })
     await e.escribe('nuevo contacto Juan Prueba')
     expect(e.trazas().at(-1)!.candados![0].candado).toBe('rol')
   })
@@ -309,7 +381,7 @@ describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-2
     const modelo = modeloGuionado([
       { name: 'proponer', args: { accion: 'gasto', datos: { monto: 47600, negocio: 'A1 26 1', categoria: 'otros' } } },
       { name: 'negocios_abiertos', args: {} },
-      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'Gasto de empresa' }] } },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1' }, { titulo: 'V1 26 5' }] } },
     ])
     const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
     await e.escribe('47.600')
@@ -334,9 +406,9 @@ describe('una propuesta vence cuando el bot manda otro mensaje (arnés 2026-10-2
   it('el Estado lleva la última lista con su orden', async () => {
     const modelo = modeloGuionado([
       { name: 'negocios_abiertos', args: {} },
-      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1', descripcion: 'Alfa' }, { titulo: 'Gasto de empresa' }] } },
+      { name: 'responder', args: { tema: 'gasto', texto: '¿A cuál va?', opciones: [{ titulo: 'A1 26 1', descripcion: 'Alfa' }, { titulo: 'V1 26 5' }] } },
       (p) => {
-        expect(p.mensajes[0].parts[0].text).toContain('Última lista que mostraste (#2, 1 mensaje(s) de la persona después): 1) A1 26 1; 2) Gasto de empresa.')
+        expect(p.mensajes[0].parts[0].text).toContain('Última lista que mostraste (#2, 1 mensaje(s) de la persona después): 1) A1 26 1; 2) V1 26 5.')
         return { name: 'responder', args: { tema: 'gasto', texto: 'Listo.' } }
       },
     ])
@@ -411,6 +483,83 @@ describe('gasto de empresa solo si la persona lo dijo o lo eligió', () => {
   })
 })
 
+describe('r-t-gasolina (arnés real 2026-10-22): una lista del destino ya contestada no respalda un gasto de empresa', () => {
+  const pasosHastaElSegundoGasto = [
+    { name: 'responder', args: { tema: 'gasto', texto: '¿De cuánto fue el gasto?' } },
+    { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $90.000 de gasolina?' } },
+    { name: 'proponer', args: { accion: 'gasto', datos: { monto: 90000, negocio: 'V1 26 5', categoria: 'transporte', descripcion: 'gasolina' } } },
+  ] as const
+
+  it('«Gasto de 18900 sin mas…» dos gastos después de la lista no es «Gasto de empresa»: no hay propuesta', async () => {
+    const modelo = modeloGuionado([
+      ...pasosHastaElSegundoGasto,
+      // Lo que hizo el modelo real: gasto de empresa apuntando al escrito del segundo gasto (#9).
+      (p) => {
+        expect(String(p.mensajes[0].parts[0].text)).toContain('#9 [escrito de Ana Dueña] "Gasto de 18900 sin mas, por ahora no tengo la foto del soporte, te la mando despues"')
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 18900, empresa: true, empresa_dicho_en: '9', categoria: 'otros' } } }
+      },
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $18.900?' } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Gasto')
+    await e.escribe('90000 gasolina')
+    await e.elige(1)
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras).toHaveLength(1)
+    const t = await e.escribe('Gasto de 18900 sin mas, por ahora no tengo la foto del soporte, te la mando despues')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    expect(t[0].texto).not.toContain('Gasto de empresa (sin negocio)')
+    expect(t[0].texto).toContain('¿A cuál negocio va el gasto de $18.900?')
+    expect(e.puerto.escrituras).toHaveLength(1)
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('el escrito que SÍ contesta la lista abierta (el primer mensaje después de ella) sigue valiendo', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, empresa_dicho_en: '#3', categoria: 'alimentacion' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Bebidas de 20000')
+    const t = await e.escribe('a ninguno, es de la empresa')
+    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+  })
+})
+
+describe('Resend (caso real 2026-10-26): la respuesta a la lista vale por lo que dice, no por ser la primera', () => {
+  it('«se realizó ayer» no es «Gasto de empresa»; «sería un gasto de empresa» después sí, sin volver a mostrar la lista', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va el gasto de $65.000?' } },
+      // Lo que hizo el modelo real: apuntó `empresa_dicho_en` al mensaje de la fecha.
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 65000, empresa: true, empresa_dicho_en: '#3', categoria: 'software', descripcion: 'suscripción a Resend' } } },
+      { name: 'responder', args: { tema: 'gasto', texto: 'Anoto la fecha de ayer. ¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 65000, empresa: true, empresa_dicho_en: '#5', categoria: 'software', descripcion: 'suscripción a Resend' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('Registra la suscripción a Resend por 65.000')
+    let t = await e.escribe('se realizó el día de ayer')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
+    expect(t[0].texto).not.toContain('Gasto de empresa (sin negocio)')
+    t = await e.escribe('sería un gasto de empresa')
+    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras[0]).toMatchObject({ monto: 65000, negocio: null })
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('el número de la opción «Gasto de empresa» escrito como respuesta también vale', async () => {
+    const modelo = modeloGuionado([
+      { name: 'preguntar_destino', args: { para: 'gasto', texto: '¿A cuál negocio va?' } },
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20000, empresa: true, empresa_dicho_en: '#3', categoria: 'alimentacion' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const l = await e.escribe('Bebidas de 20000')
+    const k = ('opciones' in l[0] ? l[0].opciones : []).findIndex((o) => o.titulo === 'Gasto de empresa')
+    const t = await e.escribe(String(k + 1))
+    expect(t[0].texto).toContain('🏢 Gasto de empresa (sin negocio)')
+  })
+})
+
 describe('«de empresa» dicho antes de la lista del destino', () => {
   it('no basta: primero preguntar_destino y la persona toca la opción', async () => {
     const modelo = modeloGuionado([
@@ -421,5 +570,124 @@ describe('«de empresa» dicho antes de la lista del destino', () => {
     await e.escribe('50 mil en papelería, gasto de empresa')
     expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['empresa_sin_respaldo'])
     expect(e.puerto.escrituras).toEqual([])
+  })
+})
+
+describe('gasto que parece repetido (caso real 2026-10-28: «Resend» de $65.000 quedó el 25 y el 28 de octubre)', () => {
+  // El reloj del escenario: miércoles 21-oct-2026.
+  const yaRegistrado = { id: 'g-1', fecha: '2026-10-18', monto: 65000, categoria: 'software', descripcion: 'suscripción a Resend', negocio: 'V1 26 5', negocioId: 'n-v', soporte: false }
+  const propone = (negocio: string, monto = 65000) => modeloGuionado([
+    { name: 'proponer', args: { accion: 'gasto', datos: { monto, negocio, categoria: 'software', descripcion: 'Resend' } } },
+  ])
+
+  it('mismo monto, mismo negocio y a 3 días: la propuesta lo avisa, sin bloquear', async () => {
+    const e = await escenarioOne({ modelo: propone('V1 26 5'), negocios: NEGOCIOS, gastos: [{ ...yaRegistrado }] })
+    const t = await e.escribe('65 mil de Resend para V1 26 5')
+    expect(t[0].texto).toContain('⚠️ Ya hay uno parecido: $65.000 el domingo 18-oct («suscripción a Resend»). Si es el mismo, toca No.')
+    await e.toca('Registrar')
+    expect(e.puerto.escrituras).toHaveLength(1)
+  })
+
+  it('un gasto de empresa no se cruza con el de un negocio (la consulta de empresa trae todos)', () => {
+    const g = { id: 'g-1', fecha: '2026-10-25', monto: 65000, categoria: 'software', descripcion: 'Resend', negocio: 'V1 26 5', soporte: false }
+    expect(gastoParecido([g], { monto: 65000, negocio: null, fecha: '2026-10-28' })).toBeNull()
+    expect(gastoParecido([{ ...g, negocio: null }], { monto: 65000, negocio: null, fecha: '2026-10-28' })).toMatchObject({ id: 'g-1' })
+    expect(gastoParecido([{ ...g, negocio: null }], { monto: 65000.5, negocio: null, fecha: '2026-11-04' })).toMatchObject({ id: 'g-1' })
+    expect(gastoParecido([{ ...g, negocio: null }], { monto: 65000, negocio: null, fecha: '2026-11-05' })).toBeNull()
+  })
+
+  it('el texto no puede decir que el gasto ya no existe si hay uno parecido (caso real 2026-10-29)', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', texto: 'El gasto de $65.000 en Resend que registramos antes ya no existe en la base, así que lo registro de nuevo.', datos: { monto: 65000, negocio: 'V1 26 5', categoria: 'software', descripcion: 'Resend' } } },
+      (p) => {
+        const r = JSON.stringify(p.mensajes.at(-1)!.parts)
+        expect(r).toContain('en la base hay uno parecido: $65.000 el domingo 18-oct')
+        return { name: 'proponer', args: { accion: 'gasto', texto: 'Ya hay un gasto así del 18-oct; si es el mismo, toca No.', datos: { monto: 65000, negocio: 'V1 26 5', categoria: 'software', descripcion: 'Resend' } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, gastos: [{ ...yaRegistrado }] })
+    const t = await e.escribe('65 mil de Resend para V1 26 5')
+    expect(e.trazas().at(-1)!.candados!.map((c) => c.candado)).toEqual(['texto_contra_propuesta'])
+    expect(t[0].texto).not.toMatch(/no existe/)
+    expect(t[0].texto).toContain('⚠️ Ya hay uno parecido')
+    expect(modelo.restantes()).toBe(0)
+  })
+
+  it('sin gasto parecido, decir que uno anterior ya no existe no se frena (puede ser cierto)', () => {
+    expect(niegaElParecido('ese gasto ya no existe', { accion: 'gasto', datos: { parecido: null } })).toBe(false)
+    expect(niegaElParecido('ese gasto ya no existe', { accion: 'gasto', datos: { parecido: { monto: 1, fecha: '2026-10-18', descripcion: null } } })).toBe(true)
+    expect(niegaElParecido('lo borraron en la app', { accion: 'gasto', datos: { parecido: { monto: 1, fecha: '2026-10-18', descripcion: null } } })).toBe(true)
+    expect(niegaElParecido('Ya hay uno parecido del 18-oct', { accion: 'gasto', datos: { parecido: { monto: 1, fecha: '2026-10-18', descripcion: null } } })).toBe(false)
+  })
+
+  it('otro negocio, otro monto o más de 10 días: sin aviso', async () => {
+    for (const [negocio, monto, fecha] of [['V1 26 6', 65000, '2026-10-18'], ['V1 26 5', 66000, '2026-10-18'], ['V1 26 5', 65000, '2026-10-05']] as const) {
+      const e = await escenarioOne({ modelo: propone(negocio, monto), negocios: NEGOCIOS, gastos: [{ ...yaRegistrado, fecha }] })
+      const t = await e.escribe('gasto de Resend')
+      expect(t[0].texto).toContain('¿Lo registro?')
+      expect(t[0].texto).not.toContain('⚠️ Ya hay uno parecido')
+    }
+  })
+})
+
+describe('la fecha del gasto (caso real 2026-10-26: «el miércoles de la semana pasada» quedó con la fecha de hoy)', () => {
+  // El reloj del escenario: miércoles 21-oct-2026, 10:00 en Bogotá.
+  it('«el miércoles de la semana pasada»: la fecha que deduce el modelo se ve en el resumen y va al gasto', async () => {
+    const modelo = modeloGuionado([
+      (p) => {
+        const props = (p.herramientas.find((d) => d.name === 'proponer')!.parameters as { properties: { datos: { properties: Record<string, unknown> } } }).properties.datos.properties
+        expect(props.fecha).toBeDefined()
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 21000, negocio: 'A1 26 1', categoria: 'otros', fecha: '2026-10-14' } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t1 = await e.escribe('Un gasto de 21.000 al A1 26 1, se ejecutó el miércoles de la semana pasada')
+    expect(t1[0].texto).toContain('📅 miércoles 14-oct')
+    expect(t1[0].texto).not.toContain('Hoy')
+    await e.toca('Registrar')
+    expect(e.puerto.gastos.at(-1)!.fecha).toBe('2026-10-14')
+  })
+
+  it('sin fecha dicha: hoy en Bogotá, y el resumen lo dice', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 5000, negocio: 'A1 26 1', categoria: 'otros' } } },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    const t1 = await e.escribe('5000 al A1 26 1')
+    expect(t1[0].texto).toContain('📅 Hoy, miércoles 21-oct')
+    await e.toca('Registrar')
+    expect(e.puerto.gastos.at(-1)!.fecha).toBe('2026-10-21')
+  })
+
+  it('una fecha futura no se propone: vuelve al modelo con el error', async () => {
+    const modelo = modeloGuionado([
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 5000, negocio: 'A1 26 1', categoria: 'otros', fecha: '2026-10-22' } } },
+      (p) => {
+        const r = p.mensajes.at(-1)!.parts[0].functionResponse!.response as { error: string }
+        expect(r.error).toContain('es futura')
+        return { name: 'responder', args: { tema: 'gasto', texto: '¿Qué día fue el gasto?' } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS })
+    await e.escribe('5000 al A1 26 1, mañana')
+    expect(e.puerto.escrituras).toEqual([])
+    expect(e.trazas().at(-1)!.candados![0].candado).toBe('fecha')
+  })
+
+  it('fechaDelGasto: el caso real con el reloj del 26-oct, los topes y lo que no es fecha', () => {
+    const ahora = Date.parse('2026-10-26T19:42:00Z') // lunes 26-oct-2026, 14:42 en Bogotá
+    expect(fechaDelGasto('2026-10-21', ahora)).toEqual({ fecha: '2026-10-21' })
+    expect(fechaConDia('2026-10-21')).toBe('miércoles 21-oct')
+    expect(fechaDelGasto('', ahora)).toEqual({ fecha: '2026-10-26' })
+    expect(fechaDelGasto(undefined, ahora)).toEqual({ fecha: '2026-10-26' })
+    // A las 9 p. m. de Bogotá ya es mañana en UTC: hoy sigue siendo el de Bogotá.
+    expect(fechaDelGasto(null, Date.parse('2026-10-27T02:00:00Z'))).toEqual({ fecha: '2026-10-26' })
+    expect(fechaDelGasto('2026-10-27', ahora)).toHaveProperty('error')
+    expect(fechaDelGasto(`2026-07-28`, ahora)).toEqual({ fecha: '2026-07-28' }) // justo 90 días
+    expect(fechaDelGasto('2026-07-27', ahora)).toHaveProperty('error')
+    expect(fechaDelGasto('2025-10-21', ahora)).toHaveProperty('error') // el año mal deducido
+    expect(fechaDelGasto('2026-02-30', ahora)).toHaveProperty('error')
+    expect(fechaDelGasto('21/10/2026', ahora)).toHaveProperty('error')
+    expect(DIAS_ATRAS_GASTO).toBe(90)
   })
 })

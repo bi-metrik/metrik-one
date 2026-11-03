@@ -37,6 +37,7 @@ import type { DefinicionRanura } from '@/lib/cotizaciones/ranuras-pantallazo'
 import type {
   FilaTipoPaxCruda,
   HabitacionDeReservaCruda,
+  TrayectoReservaCrudo,
   IconoEquipajeCrudo,
   OpcionVista,
   LecturaCruda,
@@ -166,6 +167,16 @@ export interface OpcionesDeLectura {
    * el esquema son los de siempre, y esa reserva sigue en «¿Cuál de estas?».
    */
   reservaVariasHabitaciones?: boolean
+  /**
+   * Un pantallazo de traslado con la ida y el regreso de UNA reserva es un solo traslado (brief del
+   * 2026-10-29, punto 4). Solo lo pide la cotización por pasos: apagado, prompt y esquema de siempre.
+   */
+  trasladoIdaYRegreso?: boolean
+}
+
+/** ¿Esta lectura lleva el bloque de los trayectos de un traslado? Solo traslado, y solo si se pide. */
+function conTrayectosDeTraslado(ranura: DefinicionRanura, opciones: OpcionesDeLectura | null | undefined): boolean {
+  return opciones?.trasladoIdaYRegreso === true && ranura.slug === 'traslado_detalle'
 }
 
 /** ¿Esta lectura lleva el bloque de la reserva de varias habitaciones? Solo hotel, y solo si se pide. */
@@ -199,6 +210,27 @@ habria que elegir (un boton "Reservar" o "Seleccionar" en cada una, la misma hab
 regimenes distintos, precios para escoger), NO es una reserva: sigue la regla de varias opciones
 y deja "habitaciones_reserva" vacio. Una sola habitacion tampoco es una reserva de varias: deja
 "habitaciones_reserva" vacio.`
+
+/**
+ * Brief del 2026-10-29, punto 4 · el resumen de UNA reserva de traslado con su ida y su regreso
+ * (el carrito de Civitatis: «Trayecto 1 · CUR → Willemstad», «Trayecto 2 · Willemstad → CUR»). Solo
+ * en la ranura de traslado. El modelo NO decide si se juntan: devuelve los trayectos y el servidor
+ * lo juzga (`traslado-ida-y-regreso.ts`). Si no son la ida y el regreso de la misma ruta, la lectura
+ * sigue siendo «varias opciones».
+ */
+const BLOQUE_TRAYECTOS_DE_TRASLADO = `UN TRASLADO CON VARIOS TRAYECTOS DE UNA MISMA RESERVA. Si la pantalla es el resumen o el carrito
+de UNA reserva de traslado y lista sus trayectos uno tras otro ("Trayecto 1", "Trayecto 2", "Ida",
+"Vuelta"), cada uno con su ruta, su fecha y su precio, y NO hay botones para escoger entre ellos:
+- En "trayectos_reserva" devuelve una entrada por trayecto, en el orden de la pantalla:
+  { "desde": de donde sale, tal como se ve; "hasta": a donde llega, tal como se ve; "fecha": en
+  formato AAAA-MM-DD, o --MM-DD/dia si no muestra el ano; "hora": HH:MM; "precio": SU precio tal
+  como se ve }.
+- En "opciones_vistas" devuelve UNA entrada: la reserva entera, con el total si se ve.
+- El veredicto es "detalle_unico" y extraes los campos comunes (proveedor, vehiculo, personas,
+  moneda). En "trayecto" escribe el primer trayecto; en "precio_total", el total si se ve.
+Si la pantalla es una TARJETA de vehiculo sin ruta ni fecha ("Turismo de 4 plazas"), un listado de
+vehiculos o de precios para escoger, o un solo trayecto, deja "trayectos_reserva" vacio y sigue las
+reglas de siempre.`
 
 export function construirPrompt(
   ranura: DefinicionRanura,
@@ -234,7 +266,7 @@ Tarjetas de hotel, filas de vuelos, habitaciones o tarifas entre las que habria 
 - Una tabla que separa el precio de UNA reserva por tipo de pasajero (adultos, ninos,
   infantes) es UNA opcion, no varias.
 
-${enfoque ? bloqueDeEnfoque(enfoque) + '\n\n' : ''}${reserva ? BLOQUE_RESERVA_VARIAS_HABITACIONES + '\n\n' : ''}PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
+${enfoque ? bloqueDeEnfoque(enfoque) + '\n\n' : ''}${reserva ? BLOQUE_RESERVA_VARIAS_HABITACIONES + '\n\n' : ''}${conTrayectosDeTraslado(ranura, opciones) ? BLOQUE_TRAYECTOS_DE_TRASLADO + '\n\n' : ''}PASO 2 — CLASIFICA LA IMAGEN. Devuelve "veredicto" con uno de:
 
 - "varias_opciones": se ven DOS O MAS opciones con precio propio entre las que habria que
   ELEGIR (dos o mas entradas en opciones_vistas): un listado con varios hoteles, un comparador, una
@@ -337,6 +369,19 @@ function construirEsquema(ranura: DefinicionRanura, opciones: OpcionesDeLectura 
         },
       }
     : {}
+  // Punto 4 del 2026-10-29 · los trayectos de una reserva de traslado. Solo esa ranura.
+  const trayectos = conTrayectosDeTraslado(ranura, opciones)
+    ? {
+        trayectos_reserva: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: { desde: { type: 'STRING' }, hasta: { type: 'STRING' }, fecha: { type: 'STRING' }, hora: { type: 'STRING' }, precio: { type: 'STRING' } },
+            required: ['desde', 'hasta'],
+          },
+        },
+      }
+    : {}
   return {
     type: 'OBJECT',
     properties: {
@@ -406,6 +451,7 @@ function construirEsquema(ranura: DefinicionRanura, opciones: OpcionesDeLectura 
       },
       total_general: { type: 'NUMBER', nullable: true },
       ...reserva,
+      ...trayectos,
     },
     required: ['opciones_vistas', 'veredicto', 'campos', 'desglose', 'por_tipo_pax'],
   }
@@ -515,9 +561,21 @@ export function normalizarRespuesta(raw: unknown): LecturaCruda {
       })
     : null
 
+  // Los trayectos de una reserva de traslado (punto 4). Sin la propiedad, la lectura no los lleva.
+  const trayectosReserva: TrayectoReservaCrudo[] | null = Array.isArray(obj.trayectos_reserva)
+    ? obj.trayectos_reserva.flatMap(t => {
+        const o = (t ?? {}) as Record<string, unknown>
+        const desde = recortar(textoOVacio(o.desde), MAX_CONCEPTO)
+        const hasta = recortar(textoOVacio(o.hasta), MAX_CONCEPTO)
+        if (desde === null && hasta === null) return []
+        return [{ desde, hasta, fecha: recortar(textoOVacio(o.fecha), MAX_CONCEPTO), hora: recortar(textoOVacio(o.hora), MAX_CONCEPTO), precio: recortar(textoOVacio(o.precio), MAX_CONCEPTO) }]
+      })
+    : null
+
   return {
     veredicto, observacion, campos, desglose, porTipoPax, totalGeneral, opcionesVisibles, opcionesVistas, iconosEquipaje,
     ...(habitacionesReserva && habitacionesReserva.length > 0 ? { habitacionesReserva } : {}),
+    ...(trayectosReserva && trayectosReserva.length > 0 ? { trayectosReserva } : {}),
   }
 }
 

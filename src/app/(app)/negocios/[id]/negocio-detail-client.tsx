@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic'
 import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
+import { useAvanceDeEtapa } from '@/hooks/use-avance-de-etapa'
 import { useRouter } from 'next/navigation'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
@@ -40,6 +41,7 @@ import {
   crucesQueSeAvanzan,
 } from '@/lib/negocios/cruces-avance'
 import { detalleAsignacion } from '@/lib/negocios/responsable-copy'
+import { lineaAsignador, ordenarResponsables, textoResponsable, type ResponsableConRol } from './responsables-rol'
 import { ReprocesoBoton, ReprocesoBanner, type ReprocesoVista } from './reproceso-control'
 import { ReversaRutaBanner, type ReversaPendienteVista } from './reversa-ruta-banner'
 import { RecaudoCambiadoBanner, type AvisoRecaudoVista } from './recaudo-cambiado-banner'
@@ -54,8 +56,10 @@ import { MarcoCotizacionContexto, VAR_ALTO_ENCABEZADO } from '../marco-cotizacio
 import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
+import type { CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { completoCierraLaEdicion } from '@/lib/negocios/cierre-por-tipo'
 import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
 import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
@@ -115,6 +119,7 @@ const BloqueMovimientos = dynamic(() => import('./bloques/BloqueMovimientos'))
 const BloqueResultado = dynamic(() => import('./bloques/BloqueResultado'))
 const BloqueServicios = dynamic(() => import('./bloques/BloqueServicios'))
 const BloqueHistorial = dynamic(() => import('./bloques/BloqueHistorial'))
+const BloqueAvisosCliente = dynamic(() => import('./bloques/BloqueAvisosCliente'))
 const BloqueFormulario = dynamic(() => import('./bloques/BloqueFormulario'))
 const BloquePagosEpayco = dynamic(() => import('./bloques/BloquePagosEpayco'))
 const BloquePagoExterno = dynamic(() => import('./bloques/BloquePagoExterno'))
@@ -350,6 +355,17 @@ function StageBadge({ stage }: { stage: string | null }) {
 
 // ── Selector de responsable ──────────────────────────────────────────────────
 
+/** Nombre del responsable y, debajo, quién lo asignó («Asignó Edgar Alarcón · 23 oct»), si se sabe. */
+function NombreResponsable({ r }: { r: ResponsableConRol }) {
+  const linea = lineaAsignador(r.asignacion)
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="min-w-0 break-words text-xs text-foreground">{textoResponsable(r)}</span>
+      {linea && <span className="min-w-0 break-words text-[10px] leading-tight text-muted-foreground">{linea.texto}</span>}
+    </span>
+  )
+}
+
 function ResponsableSelector({
   negocioId,
   responsables,
@@ -357,7 +373,7 @@ function ResponsableSelector({
   canEdit,
 }: {
   negocioId: string
-  responsables: Array<{ id: string; full_name: string }>
+  responsables: ResponsableConRol[]
   staffList: Array<{ id: string; full_name: string }>
   canEdit: boolean
 }) {
@@ -424,11 +440,8 @@ function ResponsableSelector({
       .toUpperCase()
   }
 
-  // Truncate name for display
-  function truncName(name: string, max = 12): string {
-    if (name.length <= max) return name
-    return name.slice(0, max).trimEnd() + '...'
-  }
+  // Ficha: «Comercial · Tatiana Cortés» con el nombre completo. Comercial, luego operaciones, luego sin rol.
+  const ordenados = ordenarResponsables(responsables)
 
   // Solo se pueden agregar quienes no son ya responsables
   const asignadosIds = new Set(responsables.map(r => r.id))
@@ -440,13 +453,13 @@ function ResponsableSelector({
     // Read-only: chips de responsables (o nada)
     if (responsables.length === 0) return null
     return (
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
-        {responsables.map(r => (
-          <span key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+      <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+        {ordenados.map(r => (
+          <span key={r.id} title={lineaAsignador(r.asignacion)?.title} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
               {getInitials(r.full_name)}
             </span>
-            <span className="text-xs text-foreground">{truncName(r.full_name)}</span>
+            <NombreResponsable r={r} />
           </span>
         ))}
       </div>
@@ -454,17 +467,17 @@ function ResponsableSelector({
   }
 
   return (
-    <div className="relative flex flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
-      {responsables.map(r => (
-        <div key={r.id} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
+    <div className="relative flex min-w-0 flex-wrap items-center justify-end gap-1.5" ref={popoverRef}>
+      {ordenados.map(r => (
+        <div key={r.id} title={lineaAsignador(r.asignacion)?.title} className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs">
           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-acento/15 text-[9px] font-bold text-acento">
             {getInitials(r.full_name)}
           </span>
-          <span className="text-foreground">{truncName(r.full_name)}</span>
+          <NombreResponsable r={r} />
           <button
             onClick={e => handleRemove(e, r.id)}
             disabled={isPending}
-            className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground transition-colors disabled:opacity-60"
+            className="ml-0.5 shrink-0 rounded-full p-0.5 text-muted-foreground hover:bg-background hover:text-foreground transition-colors disabled:opacity-60"
             title="Quitar responsable"
           >
             <X className="h-3 w-3" />
@@ -853,6 +866,7 @@ function SelectorEtapa({
   puedeAvanzarCruces,
   esResponsable = false,
   seguimiento,
+  cierreViaje = null,
 }: {
   negocioId: string
   etapasLinea: EtapaNegocio[]
@@ -874,13 +888,32 @@ function SelectorEtapa({
   esResponsable?: boolean
   /** Seguimiento de la línea (F1): motivos de pérdida y plazo del aplazamiento. */
   seguimiento?: ConfigSeguimiento
+  /** Cierre del viaje (`cierre_viaje.activo`, etapas 7-9): margen del panel y postventa que falta. */
+  cierreViaje?: CierreParaCerrar | null
 }) {
   const router = useRouter()
   // Una clave por intención: un reintento de la misma acción no la ejecuta dos veces.
   const intencion = useIntencion()
   // Avanzar escribe (mueve la etapa, avisa, cierra): si la respuesta se pierde, el caso pudo
   // moverse igual. Se relee la ficha; reintentar a ciegas lo intentaría mover otra vez.
-  const [isPending, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
+  const [, startTransition] = useTransitionTolerante({ releer: () => router.refresh() })
+  // El botón lo mueve la RESPUESTA de la acción, no el `isPending` de la transición: ese no
+  // termina hasta que la ficha nueva se pinta, y si el repintado no llega el botón se quedaba en
+  // «Cambiando…» hasta recargar (prueba del #1229, punto a). Ver `use-avance-de-etapa.ts`.
+  const avance = useAvanceDeEtapa(etapaActualId ?? null, () => router.refresh())
+  const isPending = avance.ocupado
+  /** Corre una acción de esta barra. `fn` dice si el caso se movió de etapa. */
+  function lanzar(fn: () => Promise<boolean>) {
+    avance.empezar()
+    let movio = false
+    startTransition(async () => {
+      try {
+        movio = await fn()
+      } finally {
+        avance.terminar(movio)
+      }
+    })
+  }
   const [gateModal, setGateModal] = useState<{
     etapaId: string
     bloques: BloqueGateModal[]
@@ -909,7 +942,7 @@ function SelectorEtapa({
       ? window.confirm('Reactivar el negocio? Vuelve al pipeline activo.')
       : true
     if (!ok) return
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await reactivarNegocio(negocioId)
       if (result.error) {
         toast.error('Error: ' + result.error)
@@ -918,6 +951,7 @@ function SelectorEtapa({
       } else {
         toast.success('Negocio reactivado')
       }
+      return false
     })
   }
 
@@ -937,7 +971,7 @@ function SelectorEtapa({
 
   function handleAvanzar(confirmado = false) {
     if (!siguienteEtapa) return
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, siguienteEtapa.id, undefined, confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
@@ -957,13 +991,15 @@ function SelectorEtapa({
         // El destino REAL lo resuelve el routing en el server; el toast lo nombra
         // (siguienteEtapa por orden puede no ser el destino cuando el routing salta).
         toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`)
+        return true
       }
+      return false
     })
   }
 
   function handleOverride(etapaId: string, motivo: string) {
     setGateModal(null)
-    startTransition(async () => {
+    lanzar(async () => {
       const result = await cambiarEtapaNegocioConGate(negocioId, etapaId, motivo, undefined, intencion.clave())
       intencion.cerrar()
 
@@ -973,13 +1009,14 @@ function SelectorEtapa({
       if (result.error === 'gate_bloqueado') {
         setErrorCarpeta(null)
         setGateModal({ etapaId, bloques: result.bloquesPendientes ?? [], motivo })
-        return
+        return false
       }
       if (result.error) {
         toast.error('Error: ' + result.error)
-      } else {
-        toast.success('Etapa actualizada con override')
+        return false
       }
+      toast.success('Etapa actualizada con override')
+      return true
     })
   }
 
@@ -990,17 +1027,17 @@ function SelectorEtapa({
     if (!gateModal) return
     const intento = gateModal
     setErrorCarpeta(null)
-    startTransition(async () => {
+    lanzar(async () => {
       const guardado = await actualizarCarpetaLocalNegocio(negocioId, carpeta)
       if (guardado.error) {
         setErrorCarpeta(guardado.error)
-        return
+        return false
       }
       const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
-        return
+        return false
       }
       setGateModal(null)
       const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
@@ -1011,13 +1048,14 @@ function SelectorEtapa({
           nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
           confirmacion: result.confirmacion,
         })
-        return
+        return false
       }
       if (result.error) {
         toast.error('La carpeta quedó guardada, pero el negocio no avanzó: ' + result.error)
-        return
+        return false
       }
       toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      return true
     })
   }
 
@@ -1028,17 +1066,17 @@ function SelectorEtapa({
     if (!gateModal) return
     const intento = gateModal
     setErrorAvanceCruce(null)
-    startTransition(async () => {
-      const avance = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
-      if (avance.error) {
-        setErrorAvanceCruce(avance.error)
-        return
+    lanzar(async () => {
+      const excepcion = await avanzarCrucesConMotivo(negocioId, slugs, motivo)
+      if (excepcion.error) {
+        setErrorAvanceCruce(excepcion.error)
+        return false
       }
       const result = await cambiarEtapaNegocioConGate(negocioId, intento.etapaId, intento.motivo, intento.confirmado, intencion.clave())
       intencion.cerrar()
       if (result.error === 'gate_bloqueado') {
         setGateModal({ ...intento, bloques: result.bloquesPendientes ?? [] })
-        return
+        return false
       }
       setGateModal(null)
       const nombreEtapa = etapasLinea.find(e => e.id === intento.etapaId)?.nombre ?? 'la siguiente etapa'
@@ -1048,13 +1086,14 @@ function SelectorEtapa({
           nombreFallback: result.etapaDestinoNombre ?? nombreEtapa,
           confirmacion: result.confirmacion,
         })
-        return
+        return false
       }
       if (result.error) {
         toast.error('El motivo quedó guardado, pero el negocio no avanzó: ' + result.error)
-        return
+        return false
       }
       toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      return true
     })
   }
 
@@ -1080,7 +1119,10 @@ function SelectorEtapa({
   // trabaja en la etapa, no si el proceso termina ahi. Ver `lib/negocios/etapa-cierre.ts`.
   const cierreConfig = {
     cerrar: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
-    perder: { label: 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    // N10-2 (QA del 2026-10-29): con el seguimiento encendido, la guía de Seguimiento y el diálogo
+    // hablan de «Se perdió» («¿Por qué se perdió?», toast «Se perdió. Quedó el motivo.»): el botón
+    // se llama igual. Sin seguimiento, «Desistir» de siempre.
+    perder: { label: seguimiento?.activo ? 'Se perdió' : 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
     cancelar: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
   }[accionDeCierre(etapaParaCierre, hayEtapaCierre)]
 
@@ -1113,6 +1155,7 @@ function SelectorEtapa({
             precioAprobado={precioAprobado}
             puedeCierreNoFacturable={puedeCierreNoFacturable}
             motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
+            cierreViaje={cierreViaje}
             onClose={() => setShowCierreDialog(false)}
           />
         )}
@@ -1136,6 +1179,16 @@ function SelectorEtapa({
           </button>
         ) : (
           <>
+            {avance.fase === 'atascado' ? (
+              // El caso avanzó pero la ficha nueva no llegó: se ofrece recargar, no avanzar otra vez.
+              <button
+                onClick={() => window.location.reload()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent"
+                data-recargar-avance
+              >
+                Avanzado · Recargar
+              </button>
+            ) : (
             <button
               // Con `onClick={handleAvanzar}` React pasa el MouseEvent como primer
               // argumento, y ese argumento ahora es `confirmado`: cada clic normal
@@ -1145,8 +1198,10 @@ function SelectorEtapa({
               disabled={isPending}
               className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
             >
-              {isPending ? (
+              {avance.fase === 'enviando' ? (
                 <span className="text-muted-foreground">Cambiando...</span>
+              ) : avance.fase === 'actualizando' ? (
+                <span className="text-muted-foreground">Avanzado, actualizando...</span>
               ) : (
                 <>
                   <ChevronRight className="h-3 w-3 text-muted-foreground" />
@@ -1154,15 +1209,17 @@ function SelectorEtapa({
                 </>
               )}
             </button>
+            )}
             {puedePausar && (
               <button
                 onClick={() => setShowPausaDialog(true)}
                 disabled={isPending}
-                title={`Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
+                title={seguimiento?.activo ? `Aplazar (${vecesPausado}/${MAX_PAUSAS} usados)` : `Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
                 className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
               >
                 <Pause className="h-3 w-3" />
-                <span className="hidden sm:inline">Pausar</span>
+                {/* N10-2: con seguimiento, el diálogo ya se llama «Aplazar»; el botón también. */}
+                <span className="hidden sm:inline">{seguimiento?.activo ? 'Aplazar' : 'Pausar'}</span>
               </button>
             )}
             <ReprocesoBoton
@@ -1221,6 +1278,7 @@ function SelectorEtapa({
           precioAprobado={precioAprobado}
           puedeCierreNoFacturable={puedeCierreNoFacturable}
           motivosPerdida={seguimiento?.activo ? seguimiento.motivosPerdida : undefined}
+          cierreViaje={cierreViaje}
           onClose={() => setShowCierreDialog(false)}
         />
       )}
@@ -1419,6 +1477,19 @@ interface EtapaHistorialProps {
   historialData: HistorialData
   precioTotal: number
   userRole: string
+  /**
+   * El usuario es responsable del negocio. El historial lo necesita igual que la etapa
+   * actual: el ejecutor responsable corrige hacia atrás sus documentos (opt-in
+   * `corregir_campos_gerencial`, causa obligatoria) y `BloqueDocumento` lo lee de
+   * `bloque._esResponsable`. Sin él, una operadora responsable con el área invitada
+   * (`areas_editoras`) no veía cómo corregir un documento que el servidor sí le dejaba
+   * cambiar (SOENA, SOE-028: el RUT de Documentación visto desde Cargue).
+   *
+   * También alcanza a `editable_siempre` en el historial: para el operator responsable,
+   * `getBloqueMode` da el mismo modo que en la etapa actual, y el servidor lo deja con el
+   * mismo criterio (área del stage del bloque + responsable).
+   */
+  esResponsable: boolean
   /** Ver `BloqueRenderer`. Aqui importa por `editable_siempre`, que levanta el
    *  `_forceReadOnly` con el que el historial fuerza solo lectura a todo lo demas. */
   negocioCerrado?: boolean
@@ -1426,7 +1497,7 @@ interface EtapaHistorialProps {
 
 function HistorialEtapasPrevias({
   bloques, negocioId, workspaceId, profiles, cobros, cotizacionesNegocio,
-  resumenFinanciero, ejecucionData, historialData, precioTotal, userRole,
+  resumenFinanciero, ejecucionData, historialData, precioTotal, userRole, esResponsable,
   negocioCerrado = false,
 }: EtapaHistorialProps) {
   const [open, setOpen] = useState(false)
@@ -1487,7 +1558,7 @@ function HistorialEtapasPrevias({
                   <div className="border-t border-border/40 bg-muted/20 px-4 py-3">
                     {b.instancia ? (
                       <BloqueRenderer
-                        bloque={{ ...b, _forceReadOnly: true }}
+                        bloque={{ ...b, _forceReadOnly: true, _esResponsable: esResponsable }}
                         negocioId={negocioId}
                         workspaceId={workspaceId}
                         profiles={profiles}
@@ -1655,6 +1726,11 @@ function BloqueRenderer({
     // operator responsable. Va ANTES de la línea de `visible` por eso. El área, el
     // historial y el negocio cerrado la siguen cerrando más abajo.
     if (generaEnOrigen) return modoDeCopiaGenerable(userRole, bloque._esResponsable ?? false)
+    // Copia de un documento que no escribe en su origen: siempre de solo lectura. En modo
+    // editable ofrecía «Reemplazar» y «Reprocesar IA», y el servidor los rechaza todos
+    // (`documento-actions.destinoDeEscritura`, mismo criterio de `copia-heredada.ts`). El
+    // modo visible dice dónde está el original (`_origenEtapaNombre`).
+    if (tipo === 'documento' && copiaDeSoloLectura(configExtra)) return 'visible'
     // Config-level: bloque marked as read-only (inherited/visible)
     if (bloque.estado === 'visible') return 'visible'
     // Heredado que se comporta según lo que traiga: con el dato ya puesto en la
@@ -1671,7 +1747,9 @@ function BloqueRenderer({
     // factura, la IA extrae un dato mal, el bloque se marca completo en ese instante
     // y ya no puede corregirlo aunque el negocio siga en su etapa. Corregir un campo
     // recién extraído es parte de cargarlo, no una corrección hacia atrás.
-    if (bloque.instancia?.estado === 'completo' && tipo !== 'datos' && tipo !== 'documento') return 'visible'
+    // Servicios del viaje tampoco: su estado lo pone el gate y el voucher, la fecha límite y la
+    // confirmación se siguen cargando con la fila confirmada (QA 2026-10-29, M1-1). Ver `cierre-por-tipo`.
+    if (bloque.instancia?.estado === 'completo' && completoCierraLaEdicion(tipo)) return 'visible'
     switch (tipo) {
       case 'datos':
         // Misma regla que `guardarPagosMulti` en el servidor (`lib/permissions/multi-pago.ts`).
@@ -1715,6 +1793,7 @@ function BloqueRenderer({
       case 'resultado':
       case 'ejecucion':
       case 'historial':
+      case 'avisos_cliente':
         return 'visible'
       default:
         return 'editable'
@@ -2180,6 +2259,10 @@ function BloqueRenderer({
     case 'historial':
       return <BloqueHistorial data={historialData} />
 
+    // Correos al cliente de esta etapa y su acuse (SOE-031). Solo lectura: lee `avisos_cliente`.
+    case 'avisos_cliente':
+      return <BloqueAvisosCliente negocioId={negocioId} bloqueConfigId={bloque.id} />
+
     case 'formulario':
       return (
         <BloqueFormulario
@@ -2470,10 +2553,14 @@ interface Props {
   registrarPagoSimple?: boolean
   /** El usuario puede autorizar un cierre sin factura (administracion o financiera). */
   puedeCierreNoFacturable?: boolean
+  /** Cierre del viaje para el diálogo de «Cerrar negocio» (barrido ámbar). Ausente = como hoy. */
+  cierreViaje?: CierreParaCerrar | null
   /** Owner/admin o persona en `config_extra.omitir_gate.staff_ids`: ve "Omitir gate". */
   puedeOmitirGates?: boolean
   /** Persona en `config_extra.avanzar_cruces.staff_ids`: ve «Avanzar de todas formas» en un cruce. */
   puedeAvanzarCruces?: boolean
+  /** Owner/admin/supervisor o persona en `config_extra.asignar_responsable.staff_ids`: asigna y quita responsables. */
+  puedeAsignarResponsables?: boolean
   /**
    * El usuario pertenece al area financiera y puede cerrar el aviso de recaudo cambiado.
    * Se resuelve en `page.tsx` con el MISMO predicado del guard del servidor.
@@ -2501,6 +2588,13 @@ interface Props {
   banner?: React.ReactNode
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
+  /**
+   * Falta la autorización de datos del cliente y la línea la pide (reunión del 2026-10-22). La
+   * ficha ya lo dice en `banner`; esto lo lee la página de la cotización para su lista de Revisar.
+   */
+  autorizacionPendiente?: boolean
+  /** Con la autorización pendiente, lo mismo que responde «Enviar» (`autorizacion-datos/envio.ts`). */
+  motivoAutorizacion?: string | null
   /**
    * Negocio de viaje (Trappvel): el viaje con su IATA en el encabezado y la solicitud, el
    * perfil y las cotizaciones abiertas en el panel. Ausente en toda otra línea (R6).
@@ -2545,8 +2639,10 @@ export default function NegocioDetailClient({
   registrarPagoEnabled = false,
   registrarPagoSimple = false,
   puedeCierreNoFacturable = false,
+  cierreViaje = null,
   puedeOmitirGates = false,
   puedeAvanzarCruces = false,
+  puedeAsignarResponsables = false,
   puedeResolverAvisoRecaudo = false,
   carpetaLocal,
   almacenamientoExterno = false,
@@ -2776,6 +2872,7 @@ export default function NegocioDetailClient({
             puedeAvanzarCruces={puedeAvanzarCruces}
             esResponsable={currentUserEsResponsable}
             seguimiento={seguimiento}
+            cierreViaje={cierreViaje}
           />
         </div>
         </div>
@@ -2941,7 +3038,7 @@ export default function NegocioDetailClient({
               negocioId={negocio.id}
               responsables={negocio.responsables}
               staffList={staffList}
-              canEdit={['owner', 'admin', 'supervisor'].includes(userRole)}
+              canEdit={puedeAsignarResponsables}
             />
           </div>
 
@@ -2991,6 +3088,7 @@ export default function NegocioDetailClient({
             historialData={historialData}
             precioTotal={negocio.valor_a_recaudar ?? negocio.precio_aprobado ?? negocio.precio_estimado ?? 0}
             userRole={userRole}
+            esResponsable={currentUserEsResponsable}
             negocioCerrado={negocioCerrado}
           />
         )}

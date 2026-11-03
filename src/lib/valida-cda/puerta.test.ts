@@ -498,3 +498,84 @@ describe('quién ve la plata del contrato (franja, avisos de cuota, pagos y arch
     expect(await puedeVerPagosCda(await entradaValidaCda())).toBe(false)
   })
 })
+
+describe('la v1.5 publicada: transición de la cláusula 11.7 (bloqueante de Vera, 2026-10-29)', () => {
+  // Las cuotas reales de Caquetá: la del 23-sep pagada; la del 23-oct (vence el 27-oct) y la del 23-nov
+  // (vence el 27-nov) impagas.
+  const CONCEPTO = 'Suscripción VALIDA · Plan CDA — servicio de computación en la nube (SaaS) · periodo del'
+  const CUOTA_OCT = {
+    ...CUOTA_1,
+    cuota_id: '66666666-6666-4666-8666-666666666601',
+    numero: 2,
+    fecha_vencimiento: '2026-10-27',
+    concepto: `${CONCEPTO} 23-oct al 22-nov`,
+  }
+  const CUOTA_NOV = {
+    ...CUOTA_1,
+    cuota_id: '66666666-6666-4666-8666-666666666602',
+    numero: 3,
+    fecha_vencimiento: '2026-11-27',
+    concepto: `${CONCEPTO} 23-nov al 22-dic`,
+  }
+  const DOC_V14_HASTA: DocumentoContractual = { ...DOC_V14, vigenteHasta: '2026-11-30' }
+  const DOC_V15: DocumentoContractual = {
+    ...DOC_V14,
+    documentoId: '88888888-8888-4888-8888-888888888888',
+    version: 'v1.5',
+    pdfSha256: 'c'.repeat(64),
+    vigenteDesde: '2026-12-01',
+    vigenteHasta: null,
+    reemplazaId: DOC_V14.documentoId,
+    publicadaAt: '2026-11-01T05:00:00Z',
+  }
+  beforeEach(() => {
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, DOC_V14_HASTA, DOC_V15]
+    escenario.cuotas = { data: [CUOTA_1, CUOTA_OCT, CUOTA_NOV], error: null }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }], error: null }
+  })
+
+  it('la vigencia de la transición sale de la v1.5 registrada; solo se ofrece aceptar la v1.5', async () => {
+    escenario.hoy = '2026-11-01'
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.transicionDesde).toBe('2026-12-01')
+    expect(e.tipo === 'ok' && e.modificaciones.map((d) => d.version)).toEqual(['v1.5'])
+  })
+
+  it('6-nov, 27-nov y 30-nov: consulta y opera (la v1.4 ya no restringe ni pausa por esos períodos)', async () => {
+    for (const hoy of ['2026-11-06', '2026-11-27', '2026-11-30']) {
+      escenario.hoy = hoy
+      expect(await validaCdaPermiteConsultar(), hoy).toEqual({ ok: true })
+      const m = await moraValidaCda()
+      expect(m.tipo === 'ok' && m.mora.estado, hoy).toBe('al_dia')
+    }
+  })
+
+  it('1 al 5-dic: aviso con la restricción el 6-dic; 6-dic: no consulta pero opera; 31-dic: pausa', async () => {
+    escenario.hoy = '2026-12-05'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    const m = await moraValidaCda()
+    expect(m.tipo === 'ok' && m.mora).toEqual({
+      estado: 'en_mora',
+      vencio: '2026-11-30',
+      restringeDesde: '2026-12-06',
+      corteDesde: '2026-12-31',
+    })
+    escenario.hoy = '2026-12-06'
+    const r = await validaCdaPermiteConsultar()
+    expect(!r.ok && r.error).toContain('restringidas desde el 6-dic')
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-30'
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-31'
+    const p = await validaCdaPermiteOperar()
+    expect(!p.ok && p.error).toContain('pausada desde el 31-dic')
+  })
+
+  it('CONTROL: sin la v1.5 registrada, la v1.4 restringe el 6-nov y pausa el 27-nov', async () => {
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, DOC_V14]
+    escenario.hoy = '2026-11-06'
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
+    escenario.hoy = '2026-11-27'
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+})

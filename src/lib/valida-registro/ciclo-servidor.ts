@@ -53,6 +53,11 @@ export type ResultadoCiclo =
   | { tipo: 'abierto'; plan: PlanAbierto; yaRegistrado: boolean }
   /** No se pudo abrir: lo reintenta el cron. El detalle va al evento de la pasarela. */
   | { tipo: 'pendiente'; detalle: string }
+  /**
+   * Valida respondió 409 `ciclo_anulado`: ese ciclo se anuló por el reverso de su pago y no se reabre.
+   * Es estado final: ni el webhook ni el paso 8 lo reintentan (metrik-valida#82).
+   */
+  | { tipo: 'ciclo_anulado'; detalle: string }
 
 interface FilaCobro {
   id: string
@@ -113,7 +118,11 @@ export async function abrirCicloSiCorresponde(cobroId: string, deps: DepsCiclo):
   if (!cobro) return { tipo: 'no_aplica', motivo: 'cobro_no_existe' }
   if (!cobro.fecha || cobro.anulado_at) return { tipo: 'no_aplica', motivo: 'cobro_sin_pago' }
   const ancla = anclaDeFila(cobro)
-  if (!ancla || !cobro.plan_cobro_id || cobro.numero_cuota === null) return { tipo: 'no_aplica', motivo: 'no_es_cuota_de_plan' }
+  if (!ancla) return { tipo: 'no_aplica', motivo: 'no_es_cuota_de_plan' }
+  // El pago de REACTIVACIÓN (`reactivacion-servidor.ts`): sin plan ni cuota, vuelve a pagar el período
+  // del ciclo que se cortó por el reverso de su pago.
+  if (!cobro.plan_cobro_id && cobro.numero_cuota === null) return abrirCicloDeReactivacion(db, cobro, ancla, llamar, ahora)
+  if (!cobro.plan_cobro_id || cobro.numero_cuota === null) return { tipo: 'no_aplica', motivo: 'no_es_cuota_de_plan' }
 
   const contrato = await contratoValidaDelAncla(db, cobro, ancla)
   if (!contrato?.workspace_pagador_id) return { tipo: 'no_aplica', motivo: 'sin_contrato_valida' }
@@ -147,52 +156,120 @@ export async function abrirCicloSiCorresponde(cobroId: string, deps: DepsCiclo):
   const vencimiento = (cuotaR.data as { fecha_vencimiento: string } | null)?.fecha_vencimiento
   if (!vencimiento) return { tipo: 'pendiente', detalle: `La cuota ${cobro.numero_cuota} no existe en su plan.` }
   const registro = regR.data as { usuario_id: string | null; correo: string } | null
+  return pedirCiclo(db, llamar, ahora, {
+    workspacePagadorId: contrato.workspace_pagador_id,
+    config,
+    clienteId,
+    registro,
+    cobro,
+    cuotaNumero: cobro.numero_cuota,
+    vencimiento,
+  })
+}
+
+/** Pide el ciclo a Valida y, si lo abre, lo deja en `config_extra.valida_plan`. */
+async function pedirCiclo(
+  db: Db,
+  llamar: LlamarValida,
+  ahora: Date,
+  p: {
+    workspacePagadorId: string
+    config: Record<string, unknown> | null
+    clienteId: string
+    registro: { usuario_id: string | null; correo: string } | null
+    cobro: FilaCobro
+    cuotaNumero: number
+    vencimiento: string
+  },
+): Promise<ResultadoCiclo> {
+  const { registro, cobro } = p
   // El actor de Valida es la persona dueña de la cuenta: el ciclo lo abre su pago, no un humano de MeTRIK.
   if (!registro?.usuario_id) return { tipo: 'pendiente', detalle: 'El espacio no tiene registro autogestionado con persona.' }
   const actor = { usuario_id: registro.usuario_id, correo: registro.correo.toLowerCase() }
 
-  const ciclo = cicloDeCuota(vencimiento, ahora)
+  const ciclo = cicloDeCuota(p.vencimiento, ahora)
   const limite = limiteConsultasMes()
   const referencia = referenciaCiclo(cobro.id)
 
   const r = await llamar<{ ya_registrada?: boolean; vence_en?: string }>({
     metodo: 'POST',
-    ruta: `/autogestion/${clienteId}/ciclos`,
+    ruta: `/autogestion/${p.clienteId}/ciclos`,
     actor,
     cuerpo: {
       actor,
-      workspace_one_id: contrato.workspace_pagador_id,
+      workspace_one_id: p.workspacePagadorId,
       referencia,
       consultas: limite,
       precio_total: Number(cobro.monto ?? 0),
       vence_en: ciclo.venceEn,
     },
   })
+  if (r.tipo === 'rechazada' && r.codigo === 'ciclo_anulado') {
+    return { tipo: 'ciclo_anulado', detalle: `Valida: el ciclo de ${referencia} se anuló por el reverso de su pago y no se reabre.` }
+  }
   if (r.tipo !== 'ok') {
     const por = r.tipo === 'rechazada' ? `${r.status} ${r.codigo}` : r.motivo
-    return { tipo: 'pendiente', detalle: `Valida no abrió el ciclo de la cuota ${cobro.numero_cuota} (${por}). Lo reintenta el cron.` }
+    return { tipo: 'pendiente', detalle: `Valida no abrió el ciclo de la cuota ${p.cuotaNumero} (${por}). Lo reintenta el cron.` }
   }
 
   const plan: PlanAbierto = {
-    cliente_id: clienteId,
+    cliente_id: p.clienteId,
     limite_mes: limite,
     cobro_id: cobro.id,
-    cuota_numero: cobro.numero_cuota,
+    cuota_numero: p.cuotaNumero,
     desde: ciclo.desde,
     hasta: ciclo.hasta,
     vence_en: typeof r.datos.vence_en === 'string' ? r.datos.vence_en : ciclo.venceEn,
     abierto_at: ahora.toISOString(),
   }
-  const upd = await db.from('workspaces').update({ config_extra: configConPlan(config, plan) }).eq('id', contrato.workspace_pagador_id)
+  const upd = await db.from('workspaces').update({ config_extra: configConPlan(p.config, plan) }).eq('id', p.workspacePagadorId)
   // Valida ya abrió: si esto falla, el ciclo existe y la siguiente corrida lo vuelve a pedir (idempotente).
-  if (upd.error) throw new Error(`guardar el plan abierto en el espacio ${contrato.workspace_pagador_id}: ${upd.error.message}`)
+  if (upd.error) throw new Error(`guardar el plan abierto en el espacio ${p.workspacePagadorId}: ${upd.error.message}`)
   return { tipo: 'abierto', plan, yaRegistrado: r.datos.ya_registrada === true }
+}
+
+/**
+ * El pago de reactivación de un plan suspendido por el reverso de su pago: abre en Valida el ciclo del
+ * MISMO período (misma cuota) con su propia referencia (`one-ciclo:<cobro de reactivación>`; la del
+ * pago reversado quedó anulada para siempre). Valida le devuelve la vigencia a la misma llave.
+ */
+async function abrirCicloDeReactivacion(db: Db, cobro: FilaCobro, ancla: Ancla, llamar: LlamarValida, ahora: Date): Promise<ResultadoCiclo> {
+  const r = await filtrarPorAncla(db.from('servicios_contratados').select('workspace_pagador_id').eq('workspace_id', cobro.workspace_id), ancla).in(
+    'estado',
+    ['activo', 'pausado'],
+  )
+  if (r.error) throw new Error(`leer el contrato del cobro ${cobro.id}: ${r.error.message}`)
+  const pagadores = [...new Set(((r.data ?? []) as { workspace_pagador_id: string | null }[]).map((c) => c.workspace_pagador_id).filter(Boolean))] as string[]
+  for (const id of pagadores) {
+    const ws = await db.from('workspaces').select('id, config_extra').eq('id', id).maybeSingle()
+    if (ws.error) throw new Error(`leer el espacio ${id}: ${ws.error.message}`)
+    const config = (ws.data?.config_extra ?? null) as Record<string, unknown> | null
+    if (!esEspacioAutogestion(config)) continue
+    const plan = planDeConfig(config)
+    if (!plan) continue
+    // Ya abierto con este pago (el webhook y el cron, o la confirmación repetida).
+    if (plan.cobro_id === cobro.id && !plan.reversado) return { tipo: 'ya_abierto', plan }
+    if (plan.reversado?.recobro_cobro_id !== cobro.id) continue
+    const reg = await db.from('valida_registros').select('usuario_id, correo').eq('workspace_id', id).eq('estado', 'creado').maybeSingle()
+    if (reg.error) throw new Error(`leer el registro del espacio ${id}: ${reg.error.message}`)
+    return pedirCiclo(db, llamar, ahora, {
+      workspacePagadorId: id,
+      config,
+      clienteId: plan.cliente_id,
+      registro: reg.data as { usuario_id: string | null; correo: string } | null,
+      cobro,
+      cuotaNumero: plan.cuota_numero,
+      vencimiento: plan.desde,
+    })
+  }
+  return { tipo: 'no_aplica', motivo: 'no_es_cuota_de_plan' }
 }
 
 /** El texto corto que deja el webhook en el evento y en la actividad del negocio. */
 export function detalleCiclo(r: ResultadoCiclo): { revisar: boolean; detalle: string } | null {
   if (r.tipo === 'no_aplica') return null
   if (r.tipo === 'pendiente') return { revisar: true, detalle: r.detalle }
+  if (r.tipo === 'ciclo_anulado') return { revisar: true, detalle: r.detalle }
   if (r.tipo === 'ya_abierto') return { revisar: false, detalle: `Valida: el ciclo de la cuota ${r.plan.cuota_numero} ya estaba abierto.` }
   return {
     revisar: false,
@@ -240,10 +317,16 @@ export async function reconciliarCiclosValida(deps: DepsCiclo): Promise<ResumenR
         .limit(1)
       if (cobros.error) throw new Error(cobros.error.message)
       const ultimo = (cobros.data ?? [])[0] as { id: string } | undefined
-      if (!ultimo) continue
-      const r = await abrirCicloSiCorresponde(ultimo.id, deps)
-      if (r.tipo === 'abierto') resumen.abiertos += 1
-      if (r.tipo === 'pendiente') resumen.pendientes.push({ workspaceId: contrato.workspace_pagador_id, detalle: r.detalle })
+      // El pago de reactivación de un plan cortado por reverso (sin plan ni cuota: la consulta de arriba
+      // no lo ve). Va primero: si está pagado, es el que levanta la suspensión.
+      const recobro = planDeConfig(espacios.find((e) => e.id === contrato.workspace_pagador_id)?.config_extra)?.reversado?.recobro_cobro_id
+      for (const id of [recobro, ultimo?.id]) {
+        if (!id) continue
+        const r = await abrirCicloSiCorresponde(id, deps)
+        if (r.tipo === 'abierto') resumen.abiertos += 1
+        if (r.tipo === 'pendiente') resumen.pendientes.push({ workspaceId: contrato.workspace_pagador_id, detalle: r.detalle })
+        if (r.tipo === 'abierto') break
+      }
     } catch (e) {
       resumen.errores.push({ workspaceId: contrato.workspace_pagador_id, error: e instanceof Error ? e.message : String(e) })
     }

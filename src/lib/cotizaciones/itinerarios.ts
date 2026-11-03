@@ -42,6 +42,7 @@ import { calcularCascada, type Cascada, type ItemParaCascada, type ParametrosCas
 import { nivelDeMargen } from './convencion-margen'
 import { etiquetaDeRanura, grupoCombinable } from './ranuras-pantallazo'
 import { fueraDelPrecio } from './dia-relativo'
+import { cabeConLosHoteles, hotelesAsociados, opcionParaLosHoteles } from './va-con-hotel'
 
 /** Lo mínimo que hace falta de un ítem para saber en qué ranura vive. */
 export interface ItemConGrupo {
@@ -64,6 +65,12 @@ export interface ItemConGrupo {
    */
   dia_relativo?: number | null
   entra_al_precio?: boolean | null
+  /**
+   * La lectura de la línea (`items.tarifa_pax`). Aquí solo se mira `vaConHotel`: el traslado que
+   * va con UNA opción de hotel (reunión del 2026-10-22, `va-con-hotel.ts`). Ausente = general,
+   * como todo lo anterior.
+   */
+  tarifa_pax?: unknown
 }
 
 /**
@@ -211,25 +218,48 @@ export function itemsDelItinerario(items: ItemConGrupo[], seleccion: string[]): 
   // si lo nombra (así una combinación ya guardada conserva su traslado y su total no
   // se mueve), y si no, el primero por orden.
   const aporta = new Set<string>()
+  const conAlternativas = new Set(ranuras.map(r => r.grupo))
+  // El traslado que va con UNA opción de hotel (reunión del 2026-10-22, `va-con-hotel.ts`). Sin
+  // ninguna línea asociada esto está vacío y todo es exactamente lo de siempre.
+  const asociados = hotelesAsociados(items)
   for (const ranura of ranuras) {
-    if (ranura.combinable) {
-      for (const id of ranura.candidatos) if (elegidos.has(id)) aporta.add(id)
+    if (!ranura.combinable) continue
+    for (const id of ranura.candidatos) if (elegidos.has(id)) aporta.add(id)
+  }
+  // Lo que ya está en la tarifa sin depender de un hotel: lo elegido de vuelo y hotel y lo fijo
+  // general. Contra esto se decide qué traslado cabe.
+  const incluidos = new Set(aporta)
+  if (asociados.size > 0) {
+    for (const item of items) {
+      const grupo = normalizarGrupo(item.grupo)
+      if (compitePorElTotal(item) && (grupo === null || !conAlternativas.has(grupo)) && !asociados.has(item.id)) incluidos.add(item.id)
+    }
+  }
+  for (const ranura of ranuras) {
+    if (ranura.combinable) continue
+    if (asociados.size === 0) {
+      // ⚠️ `find`, no `filter`: una selección que nombra DOS candidatos del mismo grupo
+      // no combinable cobraría los dos. El orden de `candidatos` ya es estable.
+      const nombrado = ranura.candidatos.find(id => elegidos.has(id))
+      aporta.add(nombrado ?? ranura.candidatos[0])
       continue
     }
-    // ⚠️ `find`, no `filter`: una selección que nombra DOS candidatos del mismo grupo
-    // no combinable cobraría los dos. El orden de `candidatos` ya es estable.
-    const nombrado = ranura.candidatos.find(id => elegidos.has(id))
-    aporta.add(nombrado ?? ranura.candidatos[0])
+    // Con asociaciones: solo compite lo que cabe con los hoteles de esta tarifa (el suyo o el
+    // general). Lo nombrado manda si cabe; si no, el de su hotel y después el general. Si todos
+    // son de otros hoteles, esta tarifa no lleva ninguno.
+    const caben = ranura.candidatos.filter(id => cabeConLosHoteles(id, asociados, incluidos))
+    const elegido = caben.find(id => elegidos.has(id)) ?? opcionParaLosHoteles(caben, asociados, incluidos)
+    if (elegido) aporta.add(elegido)
   }
 
-  const conAlternativas = new Set(ranuras.map(r => r.grupo))
   return ordenados(items)
     // Sin esto, una sugerencia fuera del precio y sin grupo con alternativas pasaría
     // el filtro de abajo como «componente fijo» y sumaría al total.
     .filter(compitePorElTotal)
     .filter(item => {
       const grupo = normalizarGrupo(item.grupo)
-      if (grupo === null || !conAlternativas.has(grupo)) return true
+      // Un traslado fijo que va con un hotel cuenta solo donde va ese hotel.
+      if (grupo === null || !conAlternativas.has(grupo)) return cabeConLosHoteles(item.id, asociados, incluidos)
       return aporta.has(item.id)
     })
     .map(item => item.id)
@@ -352,9 +382,17 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
   items: T[],
   seleccion: string[],
   params: ParametrosCascada,
+  /**
+   * El id del itinerario (la tarifa). Con él entran también los descuentos sobre el total que son
+   * SOLO de esa tarifa (2026-10-29, `descuentoAplicaA`); sin él, solo los de «todas».
+   */
+  tarifaId?: string | null,
 ): Cascada {
   const incluidos = new Set(itemsDelItinerario(items, seleccion))
-  return calcularCascada(items.filter(i => incluidos.has(i.id)), params)
+  return calcularCascada(
+    items.filter(i => incluidos.has(i.id)),
+    tarifaId !== undefined ? { ...params, tarifaId } : params,
+  )
 }
 
 // ── El piso de margen: aquí sí bloquea ───────────────────────────────────────
@@ -369,16 +407,63 @@ export function cascadaDeItinerario<T extends ItemConGrupo & ItemParaCascada>(
  *
  * Es del AGREGADO a propósito: una línea sin costo dentro de un agregado que sí lo tiene
  * (el recargo fijo, un fee) no lo vuelve inmedible.
+ *
+ * ## Tarifa pública (D2 de Mauricio, 2026-10-29, `tarifa-publica.ts`)
+ *
+ * El margen general es el de TODAS las líneas: (lo que paga el cliente − lo que paga la agencia) /
+ * lo que paga el cliente. Por una Pública la agencia paga el precio público menos su comisión.
+ * Con una Pública sin comisión no hay con qué medirlo: `null`, que frena (D3 lo dice con su motivo).
+ * Sin líneas Públicas es exactamente la cuenta de siempre. Hasta el 2026-10-29 las Públicas no
+ * entraban y una tarifa solo de Públicas quedaba exenta del mínimo.
  */
-export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'>): number | null {
+export function margenMedible(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas']; reglas?: Cascada['reglas'] }): number | null {
+  // Reglas de margen (2026-10-27, `reglas-margen.ts`): se juzga el margen GLOBAL, ya con
+  // colchones, puntos extra, descuentos y las Públicas con su comisión.
+  if (cascada.reglas) return cascada.reglas.margenGlobalPct
+  const p = cascada.publicas
   if (!(cascada.precioVenta > 0) || !(cascada.costoDeVenta > 0)) return null
-  return cascada.margenRealPct
+  if (!p || p.lineas === 0) return cascada.margenRealPct
+  if (p.sinComision > 0) return null
+  // Lo que paga la agencia: todo el costo, menos la comisión de las Públicas.
+  const costo = cascada.costoDeVenta - p.comision
+  return ((cascada.precioVenta - costo) / cascada.precioVenta) * 100
+}
+
+/**
+ * Lo que PAGA la agencia (D2, 2026-10-29): todo el costo de venta menos la comisión de las Públicas.
+ * Es el «costo» que la pantalla pone junto a «ganas»: con el precio público como costo, una Pública
+ * de $4.300.000 con $250.000 de comisión decía «ganas $0» con un margen de 5,8 % al lado (QA del
+ * #1342). `null` con una Pública sin comisión: lo que paga la agencia no se sabe (D3).
+ */
+export function costoDeAgencia(cascada: Pick<Cascada, 'costoDeVenta'> & { publicas?: Cascada['publicas'] }): number | null {
+  const p = cascada.publicas
+  if (p && p.sinComision > 0) return null
+  return cascada.costoDeVenta - (p?.comision ?? 0)
+}
+
+/** ¿Alguna Pública de este agregado no tiene su comisión escrita? (D3: no puede salir.) */
+export function publicasSinComision(cascada: { publicas?: Cascada['publicas'] }): number {
+  return cascada.publicas?.sinComision ?? 0
+}
+
+/**
+ * El margen contra el que se juzga el mínimo donde el piso NO se exige en la salida (la regla de
+ * siempre: sin precio, `null`, que no bloquea). Con líneas de tarifa pública, el general de D2.
+ */
+export function margenParaElMinimo(cascada: Pick<Cascada, 'precioVenta' | 'costoDeVenta' | 'margenRealPct'> & { ventaBruta?: number; publicas?: Cascada['publicas']; reglas?: Cascada['reglas'] }): number | null {
+  if (cascada.reglas) return margenMedible(cascada)
+  if (!cascada.publicas || cascada.publicas.lineas === 0) return cascada.margenRealPct
+  return margenMedible(cascada)
 }
 
 /** Por qué un itinerario no puede salir en la propuesta. `null` = sí puede. */
 export type MotivoRechazo =
   | { tipo: 'incompleto'; grupos: string[] }
   | { tipo: 'bajo_piso'; margenRealPct: number | null; pisoPct: number }
+  /** D3 (2026-10-29): una Pública sin su comisión escrita: el margen no se puede medir. */
+  | { tipo: 'sin_comision'; publicas: number }
+  /** Reglas de margen: un hotel, ya con su descuento, quedó bajo el piso de hotel. */
+  | { tipo: 'hotel_bajo_piso'; hoteles: { nombre: string | null; margenPct: number }[]; pisoHotelPct: number }
 
 /**
  * ¿Este itinerario puede marcarse `va_en_propuesta = true`?
@@ -401,13 +486,28 @@ export function motivoDeRechazo(args: {
   ranurasFaltantes: string[]
   margenRealPct: number | null
   pisoPct: number
+  /**
+   * Cuántas Públicas no tienen su comisión (D3, 2026-10-29). Con alguna, el margen no se puede
+   * medir y el motivo es ese, no «bajo el piso». Ausente = ninguna.
+   */
+  sinComision?: number
+  /**
+   * Reglas de margen (2026-10-27): los hoteles que, con su descuento, quedaron bajo el piso de
+   * hotel. Piden la misma autorización que el margen global. Ausente = sin reglas.
+   */
+  hotelesBajoPiso?: { nombre: string | null; margenPct: number }[]
+  pisoHotelPct?: number
 }): MotivoRechazo | null {
   if (args.ranurasFaltantes.length > 0) {
     return { tipo: 'incompleto', grupos: args.ranurasFaltantes }
   }
+  if ((args.sinComision ?? 0) > 0) return { tipo: 'sin_comision', publicas: args.sinComision as number }
   const nivel = nivelDeMargen(args.margenRealPct, { pisoPct: args.pisoPct, avisoPct: args.pisoPct })
   if (nivel === 'bajo_piso' || nivel === 'sin_dato') {
     return { tipo: 'bajo_piso', margenRealPct: args.margenRealPct, pisoPct: args.pisoPct }
+  }
+  if (args.hotelesBajoPiso && args.hotelesBajoPiso.length > 0) {
+    return { tipo: 'hotel_bajo_piso', hoteles: args.hotelesBajoPiso, pisoHotelPct: args.pisoHotelPct ?? 0 }
   }
   return null
 }
@@ -427,11 +527,22 @@ export function textoDeRechazo(motivo: MotivoRechazo): string {
       ? `Falta elegir ${lista}: una tarifa incompleta no puede ir en la propuesta`
       : `Faltan por elegir: ${lista}. Una tarifa incompleta no puede ir en la propuesta`
   }
+  if (motivo.tipo === 'sin_comision') return textoSinComision(motivo.publicas)
+  if (motivo.tipo === 'hotel_bajo_piso') {
+    const lista = motivo.hoteles.map(h => `${h.nombre?.trim() || 'un hotel'} (${formatoPct(h.margenPct)})`).join(', ')
+    return `Con su descuento, ${motivo.hoteles.length === 1 ? 'el hotel' : 'los hoteles'} ${lista} ${motivo.hoteles.length === 1 ? 'queda' : 'quedan'} por debajo del margen mínimo de hotel de ${formatoPct(motivo.pisoHotelPct)}`
+  }
   const piso = formatoPct(motivo.pisoPct)
   if (motivo.margenRealPct === null) {
     return `Este itinerario todavía no tiene margen medible (sin costo o sin precio) y el margen mínimo es ${piso}`
   }
   return `Margen ${formatoPct(motivo.margenRealPct)}, por debajo del margen mínimo de ${piso}`
+}
+
+/** D3: «Falta la comisión de 1 tarifa Pública…», con qué hacer. */
+export function textoSinComision(publicas: number): string {
+  const cuantas = publicas === 1 ? '1 opción de tarifa Pública' : `${publicas} opciones de tarifa Pública`
+  return `Falta la comisión de ${cuantas}: escríbela (en % o en pesos) para poder medir el margen y enviar`
 }
 
 /**

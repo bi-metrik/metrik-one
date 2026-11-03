@@ -45,6 +45,21 @@ export interface ParamsAsignacion {
   rol?: RolResponsable;
   /** Se agrega al texto del timeline (p. ej. «automático al entrar a Cargue»). */
   nota?: string;
+  /**
+   * De dónde salió (`negocio_responsables.asignado_origen`, migración 20261026090000). Sin decirlo: `persona` si hay
+   * `assignedBy`, y null si no (un camino sin persona que no declara su origen queda como las filas viejas).
+   */
+  origen?: OrigenAsignacion;
+  /** Con origen `regla_etapa`: la etapa a la que entró el negocio (`asignado_etapa_id`). */
+  etapaId?: string;
+}
+
+/** `negocio_responsables.asignado_origen`. El trigger del aviso y el correo arman el texto según esto. */
+export type OrigenAsignacion = 'persona' | 'bot_whatsapp' | 'regla_etapa';
+
+/** El origen que se escribe: el declarado o, sin declarar, `persona` si alguien asignó. Pura. */
+export function origenDeAsignacion(p: Pick<ParamsAsignacion, 'assignedBy' | 'origen'>): OrigenAsignacion | null {
+  return p.origen ?? (p.assignedBy ? 'persona' : null);
 }
 
 /** La fila del timeline que deja la asignación (`activity_log`). */
@@ -94,7 +109,11 @@ export async function asignarResponsableCon(supabase: unknown, params: ParamsAsi
 
   // assigned_by es FK → profiles(id): debe ser el profile.id, NO el staff.id.
   const { error } = await db(supabase).from('negocio_responsables').upsert(
-    { negocio_id: negocioId, staff_id: staffId, assigned_by: assignedBy, rol },
+    {
+      negocio_id: negocioId, staff_id: staffId, assigned_by: assignedBy, rol,
+      asignado_origen: origenDeAsignacion(params),
+      asignado_etapa_id: params.origen === 'regla_etapa' ? params.etapaId ?? null : null,
+    },
     { onConflict: 'negocio_id,staff_id', ignoreDuplicates: false },
   );
   const motivo = (error as { message: string } | null)?.message ?? null;

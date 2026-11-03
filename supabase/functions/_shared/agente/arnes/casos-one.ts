@@ -14,7 +14,7 @@
 import type { NegocioMem } from '../one/puerto-memoria.ts';
 
 /** Los soportes sintéticos del arnés (`arnes/soportes/`): el recibo de Uber de $6.880 y la foto de una factura de $84.500. */
-export type SoporteSintetico = 'uber' | 'factura';
+export type SoporteSintetico = 'uber' | 'uber-vuelta' | 'factura' | 'comprobante-400' | 'comprobante-350';
 
 export interface PasoCasoOne {
   escribe?: string;
@@ -37,10 +37,14 @@ export interface EsperadoOne {
   gastos?: Array<{ monto: number; negocio: string | null; soporte?: boolean; categoria?: string }>;
   actividades?: Array<{ negocio: string }>;
   contactos?: Array<{ nombre: string }>;
+  /** Cuotas que tienen que quedar pagadas (`ingreso`), con el monto que entró. */
+  cobros?: Array<{ cuota: number; monto: number }>;
   /** Nada escrito. */
   nada?: boolean;
   /** Cifras o textos que alguna respuesta del bot tiene que decir (el choque de montos se señala, no se elige callado). */
   menciona?: string[];
+  /** Expresiones (regex, sin mayúsculas) que NINGUNA respuesta del bot puede decir («ya están registrados»). */
+  noDice?: string[];
 }
 
 export interface CasoOne {
@@ -53,8 +57,17 @@ export interface CasoOne {
   viejoOk: boolean;
   /** La intención de la persona para la persona simulada; sin ella, se arma de `esperado`. */
   objetivo?: string;
+  /** Los negocios del caso, si no son los del mundo. */
+  negocios?: NegocioMem[];
+  /** Cuotas pendientes (cobros programados sin pagar) de los negocios del caso. */
+  cuotas?: Array<{ negocio: string; numero: number; monto: number; fechaEsperada: string }>;
   /** Gastos de hoy ya registrados (para las consultas). */
   gastosHoy?: Array<{ monto: number; categoria: string; descripcion: string; negocio: string | null }>;
+  /**
+   * Gastos que la conversación registró (con su toque y su «✅ registrado») y que después se BORRARON de la base: están
+   * en el historial, no en la base (2026-10-21, «la conversación da la intención; la verdad la da la base»).
+   */
+  historialBorrado?: Array<{ monto: number; negocio: string; descripcion: string }>;
 }
 
 const n = (codigo: string, empresa: string | null, nombre: string, etapa = 'venta', contacto: string | null = null): NegocioMem =>
@@ -74,6 +87,13 @@ export const MUNDO_INTERNO: NegocioMem[] = [
   n('L2 26 1', 'Estética Lumen', 'Agenda de citas'),
   n('A1 26 5', 'Alfa Grupo Internacional', 'Apoyo de alianza', 'ejecucion'),
   n('A1 26 3', 'Alfa Grupo Internacional', 'Consultas de terceros', 'cobro'),
+];
+
+/** El negocio de los casos de ingresos (inventado, con la forma del caso real del 2026-10-21) y sus cuotas pendientes. */
+export const DIMPRO: NegocioMem = n('D1 26 5', 'Dimpro Pruebas', 'Documentación de gasoducto', 'cobro');
+export const CUOTAS_DIMPRO = [
+  { negocio: 'D1 26 5', numero: 1, monto: 400000, fechaEsperada: '2026-10-26' },
+  { negocio: 'D1 26 5', numero: 2, monto: 800000, fechaEsperada: '2026-11-26' },
 ];
 
 /** El taller (inventado): 5 negocios abiertos, el primero es el de casi todos sus gastos. */
@@ -265,6 +285,75 @@ export const CASOS_ONE: CasoOne[] = [
     pasos: [{ pdf: 'gasto de 27000 de transporte al vértice', archivo: 'uber' }, { toca: 'Registrar' }],
     objetivo: 'Mandaste el recibo de Uber diciendo 27.000, pero te equivocaste: lo que vale es lo que dice el recibo. Quieres registrar el gasto por el monto del recibo al negocio V1 26 5 (Vértice Impermeables), con el recibo de soporte. Cuando te muestren el resumen con un botón para confirmar, tócalo.',
     esperado: { gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true }], menciona: ['6.880'] }, viejoOk: false,
+  },
+  // ── Ingresos (2026-10-21, «dale con los ingresos»): el pago de una cuota, con su comprobante ──────────
+  {
+    id: 'g-ingreso-cuota', titulo: 'el caso real: «registra el siguiente ingreso en el proyecto de Dimpro» + comprobante de 400.000 que cuadra con la cuota 1', mundo: 'interno',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [{ foto: 'registra el siguiente ingreso en el proyecto de Dimpro', archivo: 'comprobante-400' }, { toca: 'Marcar pagada' }],
+    objetivo: 'Dimpro (negocio D1 26 5) te pagó $400.000 y mandaste el comprobante: quieres que quede registrado como el pago (ingreso) de ese negocio, con el comprobante de soporte. No es un gasto. Cuando te muestren el resumen con un botón para confirmar, tócalo.',
+    esperado: { cobros: [{ cuota: 1, monto: 400000 }] }, viejoOk: false,
+  },
+  {
+    id: 'g-ingreso-no-cuadra', titulo: 'comprobante de 350.000 que no cuadra con ninguna cuota y no es abono: no se registra, se dice', mundo: 'interno',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [{ foto: 'ingreso del proyecto de Dimpro', archivo: 'comprobante-350' }, { escribe: 'no es un abono, fue un pago aparte que no estaba programado' }],
+    objetivo: 'Dimpro (D1 26 5) te pagó $350.000 por algo que NO estaba en las cuotas (un pago aparte, no un abono a una cuota). Si el asistente te pregunta, dilo así. No quieres que se marque ninguna cuota.',
+    esperado: { nada: true, menciona: ['400.000'] }, viejoOk: false,
+  },
+  {
+    id: 'g-ingreso-parcial', titulo: 'abono de 350.000 a la cuota 1 de 400.000', mundo: 'interno',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [{ foto: 'abono a la cuota 1 del proyecto de Dimpro', archivo: 'comprobante-350' }, { escribe: 'sí, es un abono parcial a la cuota 1' }, { toca: 'Marcar pagada' }],
+    objetivo: 'Dimpro (D1 26 5) te abonó $350.000 a la cuota 1 (que es de $400.000): es un pago parcial de esa cuota. Quieres registrarlo con el comprobante. Cuando te muestren el resumen con un botón para confirmar, tócalo.',
+    esperado: { cobros: [{ cuota: 1, monto: 350000 }] }, viejoOk: false,
+  },
+  {
+    id: 'g-ingreso-sin-permiso', titulo: 'un operador manda el comprobante: no tiene permiso, nada se escribe', mundo: 'interno', rol: 'operator',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [{ foto: 'registra el siguiente ingreso en el proyecto de Dimpro', archivo: 'comprobante-400' }],
+    esperado: { nada: true }, viejoOk: false,
+  },
+  {
+    id: 'g-no-es-gasto', titulo: '«no es un gasto, es un ingreso» a mitad de una propuesta de gasto', mundo: 'interno',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [
+      { escribe: 'registra 400000 en el proyecto de Dimpro' },
+      { foto: '', archivo: 'comprobante-400' },
+      { escribe: 'no es un gasto, es un ingreso, es el pago del proyecto' },
+      { toca: 'Marcar pagada' },
+    ],
+    objetivo: 'Dimpro (D1 26 5) te pagó $400.000; no es un gasto, es el pago (ingreso) del proyecto, con el comprobante que mandaste. Cuando te muestren el resumen para marcar el pago, tócalo.',
+    esperado: { cobros: [{ cuota: 1, monto: 400000 }] }, viejoOk: false,
+  },
+  {
+    id: 'g-registra-con-comprobante', titulo: 'el caso real de Mauricio: «registra 400000 en el proyecto de Dimpro» con la foto de un depósito a la cuenta de la empresa → ingreso, sin que corrija', mundo: 'interno',
+    negocios: [...MUNDO_INTERNO, DIMPRO], cuotas: CUOTAS_DIMPRO,
+    pasos: [{ foto: 'registra 400000 en el proyecto de Dimpro', archivo: 'comprobante-400' }, { toca: 'Marcar pagada' }],
+    objetivo: 'Mandaste el comprobante de un depósito de $400.000 a la cuenta de tu empresa, con el texto «registra 400000 en el proyecto de Dimpro». No corriges nada: si te muestran el resumen para marcar el pago de la cuota, tócalo; si te proponen un gasto, no lo confirmes.',
+    esperado: { cobros: [{ cuota: 1, monto: 400000 }] }, viejoOk: false,
+  },
+  // ── La base manda (2026-10-21, caso real repetido dos veces el mismo día) ──────────────────────────────
+  {
+    id: 'b-borrados-dos-pdf', titulo: 'G1, G2 y G3 en el historial pero borrados de la base; llegan dos PDF juntos y «vuélvelos a cargar»', mundo: 'interno',
+    historialBorrado: [
+      { monto: 27000, negocio: 'V1 26 5', descripcion: 'transportes' },
+      { monto: 6880, negocio: 'V1 26 5', descripcion: 'Uber de ida' },
+      { monto: 20389, negocio: 'V1 26 5', descripcion: 'Uber de vuelta' },
+    ],
+    pasos: [
+      { juntos: [{ pdf: '', archivo: 'uber' }, { pdf: '', archivo: 'uber-vuelta', despuesMs: 2000 }] },
+      { escribe: 'Estos dos cárgalos como gastos nuevos, vuélvelos a cargar' },
+      { escribe: 'Sí' },
+      { toca: 'Registrar' },
+      { toca: 'Registrar' },
+    ],
+    objetivo: 'Los gastos de Uber del proyecto de Vértice (V1 26 5) que habías registrado antes se borraron. Acabas de mandar los dos recibos de Uber en PDF (la ida y la vuelta) y quieres que queden registrados otra vez como gastos nuevos de transporte al negocio V1 26 5, cada uno con su recibo de soporte. Cuando te muestren un resumen con un botón para confirmar, tócalo.',
+    esperado: {
+      gastos: [{ monto: 6880, negocio: 'V1 26 5', soporte: true }, { monto: 20389, negocio: 'V1 26 5', soporte: true }],
+      noDice: ['ya est[aá]n? registrad', 'no los toco'],
+    },
+    viejoOk: false,
   },
   {
     id: 't-no-confirma', titulo: 'cancela en la confirmación: nada se escribe', mundo: 'taller',

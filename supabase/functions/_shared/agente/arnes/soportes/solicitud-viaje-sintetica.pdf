@@ -1,0 +1,53 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Length 787 >>
+stream
+BT /F2 24 Tf 60 720 Td (Solicitud de viaje) Tj ET
+BT /F1 14 Tf 60 692 Td (Familia Prueba) Tj ET
+BT /F1 11 Tf 60 650 Td (Destino: San Andrés \(Colombia\)) Tj ET
+BT /F1 11 Tf 60 630 Td (Salida: 8 de enero de 2027, desde Medellín) Tj ET
+BT /F1 11 Tf 60 610 Td (Regreso: 13 de enero de 2027) Tj ET
+BT /F2 11 Tf 60 580 Td (Viajeros:) Tj ET
+BT /F1 11 Tf 75 562 Td (- Laura Prueba, 38 años) Tj ET
+BT /F1 11 Tf 75 544 Td (- Andrés Prueba, 40 años) Tj ET
+BT /F1 11 Tf 75 526 Td (- Sofía Prueba, 9 años) Tj ET
+BT /F1 11 Tf 75 508 Td (- Tomás Prueba, 1 año) Tj ET
+BT /F1 11 Tf 60 476 Td (Hotel: 4 estrellas, plan todo incluido, frente al mar) Tj ET
+BT /F1 11 Tf 60 456 Td (Presupuesto: hasta COP 9.000.000 en total) Tj ET
+BT /F1 9 Tf 60 410 Td (Documento generado para pruebas \(sintético\).) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Title (Solicitud de viaje) /Producer (MeTRIK arnes) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000257 00000 n 
+0000000354 00000 n 
+0000000456 00000 n 
+0000001294 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+1368
+%%EOF

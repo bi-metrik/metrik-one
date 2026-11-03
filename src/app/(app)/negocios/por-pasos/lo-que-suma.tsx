@@ -29,8 +29,14 @@ export interface DatosLoQueSuma {
   nombreDeOpcion: (id: string) => string
   faltaPrecio: (id: string) => string | null
   total: number
-  costo: number
+  /** Lo que paga la agencia (`costoDeAgencia`). `null` con una Pública sin comisión. */
+  costo: number | null
   margenPct: number | null
+  /**
+   * Una Pública que suma no tiene su comisión (D3): el margen no se puede medir y se dice así, no
+   * «0 %» (QA del #1342). Ausente = `false`.
+   */
+  sinComision?: boolean
   otrasQueVan: { nombre: string; precio: number }[]
   pantallazosEnBandeja: number
   incompleto: boolean
@@ -139,7 +145,9 @@ function Lista({ d }: { d: DatosLoQueSuma }) {
         <b className="text-lg tabular-nums">{pesos(d.total)}</b>
       </div>
       <p className="m-0 text-xs text-[#6E6A62]">
-        {d.margenPct !== null && `Margen ${margenTexto(d.margenPct)} · `}costo {pesos(d.costo)}
+        {d.sinComision
+          ? <span className="font-semibold text-[#B3382C]" data-falta-comision>Margen y costo: falta la comisión de una tarifa Pública</span>
+          : <>{d.margenPct !== null && `Margen ${margenTexto(d.margenPct)} · `}costo {d.costo === null ? '—' : pesos(d.costo)}</>}
         {d.otrasQueVan.length > 0 && <><br />También van: {d.otrasQueVan.map(o => `${o.nombre} ${pesos(o.precio)}`).join(' · ')}</>}
       </p>
     </>
@@ -461,7 +469,7 @@ function PastillaLoQueSuma({
     datos.pantallazosEnBandeja > 0 ? `${datos.pantallazosEnBandeja} ${datos.pantallazosEnBandeja === 1 ? 'pantallazo' : 'pantallazos'} sin aceptar` : null,
   ].filter(Boolean).join(' · ')
 
-  const margen = datos.margenPct !== null ? margenTexto(datos.margenPct) : null
+  const margen = datos.sinComision ? 'falta la comisión' : datos.margenPct !== null ? margenTexto(datos.margenPct) : null
   // En el encabezado el texto sale de la medida (antes de pintar). Sin hueco, «$X · Y %», como en
   // #1193; sin encabezado (o sin medir, como en el servidor), el largo.
   const texto: TextoPastilla = ubicacion === null ? 'corto' : ubicacion?.texto ?? 'largo'

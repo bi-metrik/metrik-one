@@ -45,9 +45,12 @@
  * `piso-salida-datos.ts`, que solo corre en el servidor.
  */
 
-import { cascadaDeItinerario, margenMedible, motivoDeRechazo, nombreDeItinerario, ranurasSinResolver } from './itinerarios'
+import { cascadaDeItinerario, margenMedible, motivoDeRechazo, nombreDeItinerario, publicasSinComision, ranurasSinResolver } from './itinerarios'
 import { etiquetaDeRanura } from './ranuras-pantallazo'
 import { nombreVisibleDeLinea } from './nombre-visible'
+import { esTarifaPublica, leerTipoTarifa, tipoTarifaDeLinea } from './tarifa-publica'
+import { comisionDePublica, descuentoDeLinea, reglasAJsonb } from './reglas-margen'
+import type { Cascada } from './totales'
 import { cascadaVigente, type ContextoCotizacion, type FilaItinerario } from './itinerarios-datos'
 
 /** Lo que se mide: una tarifa marcada para la propuesta, o la cotización entera. */
@@ -64,6 +67,17 @@ export interface SujetoDeSalida {
   /** Ranuras sin elegir. Solo una tarifa puede tenerlas. */
   ranurasFaltantes: string[]
   bajoPiso: boolean
+  /**
+   * Reglas de margen (2026-10-27): los hoteles que, con su descuento, quedaron bajo el piso de
+   * hotel. También frenan y piden la misma autorización. Ausente sin reglas.
+   */
+  hotelesBajoPiso?: { nombre: string | null; margenPct: number }[]
+  pisoHotelPct?: number
+  /**
+   * D3 (2026-10-29): cuántas Públicas de este sujeto no tienen su comisión. Con alguna, el margen no
+   * se puede medir y la causa es esa. Ausente = ninguna. No entra en la huella.
+   */
+  publicasSinComision?: number
 }
 
 /** Una línea tal como quedó autorizada: solo lo que mueve plata. */
@@ -129,9 +143,10 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
       ? [...marcadas]
           .sort((a, b) => a.orden - b.orden)
           .map((fila, i) => {
-            const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+            const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
             const faltantes = ranurasSinResolver(ctx.items, fila.seleccion)
             const margen = margenMedible(cascada)
+            const hoteles = hotelesBajoPisoDe(ctx, cascada)
             return {
               tipo: 'tarifa' as const,
               id: fila.id,
@@ -139,12 +154,15 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
               total: Math.round(cascada.precioVenta),
               margenRealPct: margen,
               ranurasFaltantes: faltantes,
-              bajoPiso: motivoDeRechazo({ ranurasFaltantes: faltantes, margenRealPct: margen, pisoPct }) !== null,
+              bajoPiso: motivoDeRechazo({ ranurasFaltantes: faltantes, margenRealPct: margen, pisoPct, sinComision: publicasSinComision(cascada), ...hoteles }) !== null,
+              ...(hoteles.hotelesBajoPiso.length > 0 ? hoteles : {}),
+              ...(publicasSinComision(cascada) > 0 ? { publicasSinComision: publicasSinComision(cascada) } : {}),
             }
           })
       : [(() => {
           const cascada = cascadaVigente(ctx, filas)
           const margen = margenMedible(cascada)
+          const hoteles = hotelesBajoPisoDe(ctx, cascada)
           return {
             tipo: 'cotizacion' as const,
             id: null,
@@ -152,7 +170,9 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
             total: Math.round(cascada.precioVenta),
             margenRealPct: margen,
             ranurasFaltantes: [],
-            bajoPiso: motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margen, pisoPct }) !== null,
+            bajoPiso: motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margen, pisoPct, sinComision: publicasSinComision(cascada), ...hoteles }) !== null,
+            ...(hoteles.hotelesBajoPiso.length > 0 ? hoteles : {}),
+            ...(publicasSinComision(cascada) > 0 ? { publicasSinComision: publicasSinComision(cascada) } : {}),
           }
         })()]
 
@@ -164,6 +184,9 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
       ctx.params.margenPct,
       ctx.params.descuentoComercialPct,
       ctx.params.convencionMargen,
+      // Reglas de margen (2026-10-27): solo cuando las hay, para que la huella de toda
+      // autorización anterior siga siendo la misma.
+      ...(ctx.params.reglas ? [JSON.stringify(reglasAJsonb(ctx.params.reglas))] : []),
     ].map(v => (v === undefined ? null : v)),
     sujetos,
     lineas: [...ctx.items]
@@ -182,6 +205,26 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
 }
 
 /**
+ * Los hoteles que, con su descuento, quedaron bajo el piso de hotel (reglas de margen del
+ * 2026-10-27), con su nombre como se lee. Vacío sin reglas.
+ */
+function hotelesBajoPisoDe(
+  ctx: ContextoCotizacion,
+  cascada: Cascada,
+): { hotelesBajoPiso: { nombre: string | null; margenPct: number }[]; pisoHotelPct?: number } {
+  const r = cascada.reglas
+  if (!r || r.hotelesBajoPiso.length === 0) return { hotelesBajoPiso: [] }
+  const porId = new Map(ctx.items.map(i => [i.id, i]))
+  return {
+    hotelesBajoPiso: r.hotelesBajoPiso.map(h => {
+      const item = h.id ? porId.get(h.id) : undefined
+      return { nombre: item ? nombreVisibleDeLinea(item) || item.nombre || null : null, margenPct: h.margenPct }
+    }),
+    pisoHotelPct: r.pisoHotelPct,
+  }
+}
+
+/**
  * Las líneas que se miden, contadas: la unión de las de cada tarifa marcada, o las de la
  * cascada vigente. Sale de la MISMA cascada que mide el margen, así que no puede decir
  * «falta el costo» de una línea que el margen sí está contando.
@@ -193,7 +236,7 @@ function conteoDeLineas(
 ): ConteoDeLineas {
   const ajuste = new Set(ctx.items.filter(i => i.es_ajuste === true).map(i => i.id))
   const cascadas = marcadas
-    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params))
+    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params, f.id))
     : [cascadaVigente(ctx, filas)]
   const vistas = new Map<string, boolean>()
   for (const cascada of cascadas) {
@@ -237,7 +280,27 @@ function cifrasDeLinea(item: ContextoCotizacion['items'][number]): (number | boo
     item.entra_al_precio ?? null,
     item.es_ajuste === true,
     adicionales.join('|'),
+    // Tarifa pública (2026-10-22): cambia lo que se mide. Solo se agrega cuando lo es, para que
+    // la huella de toda autorización anterior siga siendo la misma.
+    ...(esTarifaPublica((item as { tarifa_pax?: unknown }).tarifa_pax) ? ['publica'] : []),
+    // Reglas de margen (2026-10-27): el descuento que ve el cliente y la comisión de una Pública
+    // mueven plata. Solo cuando existen, por la misma razón.
+    ...cifrasDeReglas((item as { tarifa_pax?: unknown }).tarifa_pax),
   ]
+}
+
+function cifrasDeReglas(tarifaPax: unknown): string[] {
+  const out: string[] = []
+  const d = descuentoDeLinea(tarifaPax)
+  if (d) out.push(`descuento:${d.tipo}:${d.valor}`)
+  if (tipoTarifaDeLinea(tarifaPax) === 'publica') {
+    const c = comisionDePublica(tarifaPax)
+    if (c !== null) out.push(`comision:${c}`)
+    // D3 (2026-10-29): la comisión en pesos. Solo cuando existe: las huellas de antes no cambian.
+    const monto = leerTipoTarifa((tarifaPax as { tipoTarifa?: unknown } | null)?.tipoTarifa)?.comisionMonto
+    if (monto !== null && monto !== undefined) out.push(`comision-pesos:${monto}`)
+  }
+  return out
 }
 
 function num(v: number | null | undefined): number | null {
@@ -287,10 +350,18 @@ export function mensajeDeSalida(bajoPiso: SujetoDeSalida[], pisoPct: number, due
       const faltan = s.ranurasFaltantes.map(etiquetaDeRanura).join(', ')
       return `${quien} está incompleta (falta elegir ${faltan}), así que su margen no se puede medir.`
     }
+    if (s.margenRealPct === null && (s.publicasSinComision ?? 0) > 0) {
+      return `${quien} lleva ${s.publicasSinComision === 1 ? 'una tarifa Pública' : `${s.publicasSinComision} tarifas Públicas`} sin su comisión: sin ella el margen no se puede medir.`
+    }
     if (s.margenRealPct === null) {
       return `${quien} no tiene un margen que se pueda medir (le falta el costo o el precio), y el mínimo es ${minimo}.`
     }
-    return `${quien} deja un margen de ${pctTexto(s.margenRealPct, pisoPct)}, por debajo del mínimo de ${minimo}.`
+    const hoteles = s.hotelesBajoPiso ?? []
+    const deHotel = hoteles.length > 0
+      ? `Con su descuento, ${hoteles.map(h => `${h.nombre?.trim() || 'un hotel'} queda al ${pctTexto(h.margenPct, s.pisoHotelPct)}`).join(' y ')}, por debajo del mínimo de hotel de ${pctTexto(s.pisoHotelPct ?? 0)}.`
+      : ''
+    if (s.margenRealPct >= pisoPct) return `${quien}: ${deHotel.charAt(0).toLowerCase()}${deHotel.slice(1)}`
+    return `${quien} deja un margen de ${pctTexto(s.margenRealPct, pisoPct)}, por debajo del mínimo de ${minimo}.${deHotel ? ` ${deHotel}` : ''}`
   })
   const quienAutoriza = dueno ? `Pídele a ${dueno}` : 'Pídele al dueño del workspace'
   const cierre = bajoPiso.length === 1

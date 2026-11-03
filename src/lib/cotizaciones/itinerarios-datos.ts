@@ -29,12 +29,16 @@ import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
   margenMedible,
+  margenParaElMinimo,
+  publicasSinComision,
   motivoDeRechazo,
   ranurasSinResolver,
   textoDeRechazo,
   type ItemConGrupo,
 } from './itinerarios'
 import { faltanLasTablasDeItinerarios } from './tolerar-itinerarios'
+import { leerReglasDeCotizacion, reglasDelDocumento, type ReglasDeCotizacion, type ReglasDelDocumento } from './reglas-margen'
+import { margenDeLaCotizacion } from './margen-de-cotizacion'
 import { idDelPrincipal } from './tarifas'
 import { costosDelItem } from './iva-costo'
 import { pasajerosParaCuadre, type FilaDePasajeros } from './cuadre-pasajero'
@@ -132,6 +136,12 @@ export interface ContextoCotizacion {
     margenPct: number | null
     descuentoComercialPct: number | null
     convencionMargen: ConvencionMargen | null
+    /**
+     * Las reglas de margen que la cotización copió al nacer (`cotizaciones.reglas_margen`,
+     * `reglas-margen.ts`). `null` = sin reglas: la cascada de siempre. Llega `null` también con
+     * la migración sin aplicar, porque la fila se lee con `*`.
+     */
+    reglas?: ReglasDeCotizacion | null
   }
   umbrales: UmbralesMargen
   negocioId: string | null
@@ -283,9 +293,11 @@ export async function contextoDeCotizacion(
     items,
     params: {
       administrativosPct: (Number(cot.aiu_admin_pct) || 0) + (Number(cot.aiu_imprevistos_pct) || 0),
-      margenPct: cot.margen_porcentaje ?? cot.margen_default_pct ?? null,
+      // D4 (2026-10-29): un 0 guardado no anula el margen de la línea (`margen-de-cotizacion.ts`).
+      margenPct: margenDeLaCotizacion(cot),
       descuentoComercialPct: cot.descuento_porcentaje ?? null,
       convencionMargen: (cot.convencion_margen ?? null) as ConvencionMargen | null,
+      reglas: leerReglasDeCotizacion(cot.reglas_margen),
     },
     umbrales: umbralesDeCotizacion(
       { pisoPct: cot.piso_margen_pct, avisoPct: cot.aviso_margen_pct },
@@ -472,20 +484,29 @@ export async function leerCabecera(
  */
 export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario): ItinerarioCalculado {
   const faltantes = ranurasSinResolver(ctx.items, fila.seleccion)
-  const cascada: Cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+  const cascada: Cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
   const motivo = motivoDeRechazo({
     ranurasFaltantes: faltantes,
     // Donde el piso se exige en la salida, el margen es el de `margenMedible` —sin costo
     // tampoco hay margen—, el mismo que usa la salida: la tabla no puede dar por buena
     // una tarifa que el PDF va a marcar como borrador. En las demás líneas, como antes.
-    margenRealPct: ctx.pisoEnLaSalida === true ? margenMedible(cascada) : cascada.margenRealPct,
+    // D2 (2026-10-29): el margen general de TODAS las líneas, las Públicas con su comisión; una
+    // Pública sin comisión no deja medirlo y lo dice con su motivo (D3).
+    margenRealPct: ctx.pisoEnLaSalida === true ? margenMedible(cascada) : margenParaElMinimo(cascada),
     pisoPct: ctx.umbrales.pisoPct,
+    sinComision: publicasSinComision(cascada),
+    // Reglas de margen (2026-10-27): un hotel bajo su piso pide la misma autorización.
+    hotelesBajoPiso: (cascada.reglas?.hotelesBajoPiso ?? []).map(h => {
+      const item = ctx.items.find(i => i.id === h.id)
+      return { nombre: item?.nombre ?? null, margenPct: h.margenPct }
+    }),
+    pisoHotelPct: cascada.reglas?.pisoHotelPct,
   })
   // Donde el piso se exige en la SALIDA, bajo el piso deja de impedir marcar la tarifa:
   // el candado pasa al PDF, a «Enviar» y a «Aprobar», donde el dueño puede autorizarla.
   // Si siguiera impidiendo marcarla, la autorización no tendría nada que autorizar —
   // la Económica al 3 % nunca llegaría a la propuesta—. Incompleta sigue bloqueando.
-  const bajoPisoSinCandado = ctx.pisoEnLaSalida === true && motivo?.tipo === 'bajo_piso'
+  const bajoPisoSinCandado = ctx.pisoEnLaSalida === true && (motivo?.tipo === 'bajo_piso' || motivo?.tipo === 'hotel_bajo_piso' || motivo?.tipo === 'sin_comision')
   // La selección que la pantalla pinta en los desplegables: lo elegido que todavía
   // existe. Un id de un ítem borrado no se devuelve — dejaría una celda apuntando a
   // una opción que no está en su lista.
@@ -503,7 +524,9 @@ export function calcularItinerario(ctx: ContextoCotizacion, fila: FilaItinerario
     margenRealPct: cascada.margenRealPct,
     bloqueo: motivo && !bajoPisoSinCandado ? textoDeRechazo(motivo) : null,
     bajoPiso: bajoPisoSinCandado && motivo
-      ? `${textoDeRechazo(motivo)}. Sale como borrador y no se envía sin la autorización del dueño`
+      ? motivo.tipo === 'sin_comision'
+        ? `${textoDeRechazo(motivo)}. Mientras falte, sale como borrador y no se envía`
+        : `${textoDeRechazo(motivo)}. Sale como borrador y no se envía sin la autorización del dueño`
       : null,
     motivoCodigo: fila.motivoCodigo,
     motivoTexto: fila.motivoTexto,
@@ -535,9 +558,10 @@ export function cascadaVigente(ctx: ContextoCotizacion, filas: FilaItinerario[] 
       ? itemsDelItinerario(ctx.items, principal.seleccion)
       : itemsQueAportanAlTotal(ctx.items),
   )
+  // Con principal, la cascada es la de ESA tarifa: lleva también sus descuentos propios.
   return calcularCascada(
     ctx.items.filter(i => aportan.has(i.id) || i.es_ajuste === true),
-    ctx.params,
+    principal ? { ...ctx.params, tarifaId: principal.id } : ctx.params,
   )
 }
 
@@ -562,7 +586,7 @@ export async function totalDelPrincipal(
   if (filas === null || filas.length === 0) return null
   const principal = filas.find(f => f.esPrincipal)
   if (!principal) return null
-  const cascada = cascadaDeItinerario(ctx.items, principal.seleccion, ctx.params)
+  const cascada = cascadaDeItinerario(ctx.items, principal.seleccion, ctx.params, principal.id)
   return {
     precioVenta: cascada.precioVenta,
     costoDirecto: cascada.costoDirecto,
@@ -647,7 +671,7 @@ function aFila(data: any): FilaItinerario {
 export async function bloquesParaPDF(
   supabase: Supabase,
   cotizacionId: string,
-): Promise<{ nombre: string | null; orden: number; esPrincipal: boolean; itemIds: string[]; precio: number }[] | null> {
+): Promise<{ nombre: string | null; orden: number; esPrincipal: boolean; itemIds: string[]; precio: number; reglas?: ReglasDelDocumento }[] | null> {
   const ctx = await contextoDeCotizacion(supabase, cotizacionId)
   if (!ctx) return null
   const filas = await leerItinerarios(supabase, cotizacionId)
@@ -662,11 +686,28 @@ export async function bloquesParaPDF(
     return a.orden - b.orden
   })
 
-  return ordenadas.map(fila => ({
-    nombre: fila.nombre,
-    orden: fila.orden,
-    esPrincipal: fila.esPrincipal,
-    itemIds: itemsDelItinerario(ctx.items, fila.seleccion),
-    precio: cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).precioVenta,
-  }))
+  return ordenadas.map(fila => {
+    const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
+    // Reglas de margen (2026-10-27): los puntos extra van dentro del precio de cada línea de
+    // ESTA tarifa, y sus descuentos sobre el total salen con su descripción. Sin reglas, nada.
+    const reglas = reglasDelDocumento(cascada)
+    return {
+      nombre: fila.nombre,
+      orden: fila.orden,
+      esPrincipal: fila.esPrincipal,
+      itemIds: itemsDelItinerario(ctx.items, fila.seleccion),
+      precio: cascada.precioVenta,
+      ...(reglas ? { reglas } : {}),
+    }
+  })
+}
+
+/**
+ * Lo que las reglas de margen le cambian al documento SIN tarifas en la propuesta: sale de la
+ * cascada vigente, la misma que fija `valor_total`. `null` sin reglas o sin poder leer.
+ */
+export async function reglasDelDocumentoVigente(supabase: Supabase, cotizacionId: string): Promise<ReglasDelDocumento | null> {
+  const [ctx, filas] = await Promise.all([contextoDeCotizacion(supabase, cotizacionId), leerItinerarios(supabase, cotizacionId)])
+  if (!ctx?.params.reglas) return null
+  return reglasDelDocumento(cascadaVigente(ctx, filas))
 }

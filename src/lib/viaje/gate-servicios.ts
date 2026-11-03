@@ -57,6 +57,23 @@ export function serviciosQueFaltan(filas: readonly FilaGate[], exigeConfirmacion
   return out
 }
 
+export const TEXTO_SIN_SERVICIOS = 'No hay servicios del viaje registrados.'
+
+/**
+ * La regla ÚNICA de `servicios_listos`: la usan el gate, la cabecera del bloque «Servicios del
+ * viaje» (Completo/Pendiente) y el punto de color del tablero. Sin ninguna fila que vaya no hay
+ * nada listo: un viaje sin servicios no sale de Reservas y pagos (barrido 2026-10-22).
+ */
+export function faltaParaServiciosListos(filas: readonly FilaGate[], exigeConfirmacion: boolean): FaltaServicio[] {
+  if (!filas.some(f => f.estado !== 'cancelado')) return [{ servicioId: '', texto: TEXTO_SIN_SERVICIOS }]
+  return serviciosQueFaltan(filas, exigeConfirmacion)
+}
+
+/** ¿Pasa el gate? Lo mismo que `faltaParaServiciosListos(...).length === 0`. */
+export function serviciosListos(filas: readonly FilaGate[], exigeConfirmacion: boolean): boolean {
+  return faltaParaServiciosListos(filas, exigeConfirmacion).length === 0
+}
+
 /** Las líneas del gate: máximo 3 y «y N más». */
 export function lineasDelGate(faltan: readonly FaltaServicio[]): string[] {
   if (faltan.length === 0) return []

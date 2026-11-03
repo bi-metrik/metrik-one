@@ -1,5 +1,5 @@
 import type { NextConfig } from 'next'
-import { RUTA_REGISTRO_VALIDA, politicaRegistroValida } from './src/lib/valida-registro/csp'
+import { RUTA_REGISTRO_VALIDA, RUTA_TARJETA_CDA, politicaRegistroValida } from './src/lib/valida-registro/csp'
 
 const nextConfig: NextConfig = {
   // Skew Protection: sella cada peticion con el id del deployment que la
@@ -49,6 +49,20 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        // El pago automático de un CDA (Términos v1.5, 2.4): la misma política, dentro del espacio.
+        source: RUTA_TARJETA_CDA,
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: politicaRegistroValida(
+              process.env.NEXT_PUBLIC_SUPABASE_URL,
+              process.env.NODE_ENV === 'development',
+              true,
+            ),
+          },
+        ],
+      },
     ]
   },
   // Permit images from Supabase storage
@@ -84,6 +98,18 @@ const nextConfig: NextConfig = {
     // «Extraer con el motor» de la ficha del proveedor.
     '/proveedores/*': ['./src/lib/proveedores/instruccion/**/*'],
     '/negocios/*/cotizacion/*': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+    ],
+    // Plantillas editables de documentos (DJ, Relación de facturas; 2026-10-29). Con una versión
+    // activa, `generarFormulario` imprime con Chromium: la server action corre en la función de
+    // la página del negocio. `/negocios/*` (con «contains») cubre `/negocios/[id]`. La vista
+    // previa en PDF corre en su propia ruta.
+    '/negocios/*': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+    ],
+    '/api/plantillas-documento/*': [
       './node_modules/@sparticuz/chromium/bin/**/*',
       './src/lib/pdf/chromium/fuentes/**/*',
     ],

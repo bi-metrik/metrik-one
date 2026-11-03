@@ -10,6 +10,7 @@ import { activarPlanAnualSiCorresponde } from '@/lib/valida-cda/plan-anual-activ
 import { abrirCicloSiCorresponde, detalleCiclo } from '@/lib/valida-registro/ciclo-servidor'
 import { confirmarPagoCobroProgramado } from './confirmar-cobro-programado'
 import { procesarEventoPasarela, type CobroParaPago, type RepoPagoEnLinea } from './pago-en-linea'
+import { anularCobroPorReverso } from './reverso-pasarela-servidor'
 
 /**
  * El lado de Supabase del pago en línea, y `atenderWebhookPasarela`: todo lo que una ruta de webhook
@@ -134,6 +135,27 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
       return exactos.map(aCobro)
     },
 
+    async cobrosPorReferenciaPago(referenciaPago) {
+      const r = await db
+        .from('cobros')
+        .select(COLUMNAS_COBRO)
+        .eq('tipo_cobro', 'programado')
+        .eq('external_ref', referenciaPago)
+        .limit(5)
+      if (r.error) throw new Error(`buscar cobro por referencia de pago: ${r.error.message}`)
+      return ((r.data ?? []) as FilaCobro[]).map(aCobro)
+    },
+
+    // El reverso se anula solo en ePayco (estado 6, que ePayco puede no avisar y la conciliación
+    // pregunta). Bold (VOID_APPROVED) sigue quedando en revisión para anularlo a mano.
+    ...(pasarela === 'epayco'
+      ? {
+          anularPorReverso(cobro: CobroParaPago, e: EventoPasarela) {
+            return anularCobroPorReverso(dbCliente, pasarela, cobro, e)
+          },
+        }
+      : {}),
+
     confirmarPago(c) {
       return confirmarPagoCobroProgramado(dbCliente, c)
     },
@@ -150,8 +172,19 @@ export function repoPagoEnLinea(dbCliente: SupabaseClient, pasarela: string, ada
       // vencimiento a la llave de la prueba). No aplica a ningún espacio que no venga del registro.
       const ciclo = detalleCiclo(await abrirCicloSiCorresponde(cobro.id, { db: dbCliente }))
       if (ciclo) partes.push(ciclo)
+      // Un cargo con la tarjeta guardada que ePayco dejó pendiente y aprobó después: cierra el intento,
+      // el registro de Valida y manda el C3. Sin un cargo pendiente, no hace nada. Import dinámico: el
+      // módulo del cargo importa este (ciclo de módulos).
+      const { cerrarCargoAprobadoTardio } = await import('@/lib/valida-registro/cargo-tardio-servidor')
+      const tardio = await cerrarCargoAprobadoTardio({ db: dbCliente }, cobro)
+      if (tardio) partes.push(tardio)
       if (partes.length === 0) return null
       return { revisar: partes.some((p) => p.revisar), detalle: partes.map((p) => p.detalle).join(' ') }
+    },
+
+    async trasRechazo(cobro, e) {
+      const { aplicarRechazoTardio } = await import('@/lib/valida-registro/cargo-tardio-servidor')
+      return aplicarRechazoTardio({ db: dbCliente }, cobro, e)
     },
 
     async anotarEnNegocio(cobro, texto) {

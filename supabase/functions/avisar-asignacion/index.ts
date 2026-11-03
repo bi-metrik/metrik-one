@@ -15,7 +15,8 @@
 
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { htmlCorreoInterno, REMITENTE_INTERNO } from '../_shared/correo-interno.ts';
-import { textoAvisoAsignacion } from '../_shared/aviso-asignacion.ts';
+import { textoAvisoAsignacion, type OrigenAsignacion } from '../_shared/aviso-asignacion.ts';
+import { idDeRespuestaResend, registrarAvisoEquipo } from '../_shared/aviso-equipo.ts';
 
 // Sin el `Database` generado (ver `notificar-etapa`): el `any` es el ESQUEMA, no el cliente.
 // deno-lint-ignore no-explicit-any
@@ -72,7 +73,20 @@ Deno.serve(async (req: Request) => {
     quienAsigna = (autor?.full_name as string | null | undefined) ?? null;
   }
 
-  const t = textoAvisoAsignacion({ codigo: negocio.codigo, nombre: negocio.nombre, rol: (fila.rol as string | null) ?? null, quienAsigna });
+  // El origen (bot, regla por etapa) en una lectura aparte: si la columna aún no existe (deploy antes de la migración
+  // 20261026090000), el error deja el texto de siempre en vez de saltarse el correo.
+  let origen: OrigenAsignacion | null = null;
+  let etapa: string | null = null;
+  const { data: extra, error: errExtra } = await supabase.from('negocio_responsables')
+    .select('asignado_origen, etapas_negocio(nombre)').eq('negocio_id', negocio.id).eq('staff_id', staff.id).maybeSingle();
+  if (errExtra) console.warn('[avisar-asignacion] sin origen de la asignación:', errExtra.message);
+  else if (extra) {
+    origen = (extra.asignado_origen as OrigenAsignacion | null) ?? null;
+    const e = extra.etapas_negocio as { nombre?: string | null } | { nombre?: string | null }[] | null;
+    etapa = (Array.isArray(e) ? e[0]?.nombre : e?.nombre) ?? null;
+  }
+
+  const t = textoAvisoAsignacion({ codigo: negocio.codigo, nombre: negocio.nombre, rol: (fila.rol as string | null) ?? null, quienAsigna, origen, etapa });
   const slug = (negocio.workspaces as { slug?: string } | null)?.slug ?? '';
   const link = `https://${slug}.${Deno.env.get('BASE_DOMAIN') ?? 'metrikone.co'}/negocios/${negocio.id}`;
   const html = htmlCorreoInterno({ antetitulo: 'Responsable asignado', titulo: t.titulo, mensaje: t.mensaje, etiqueta: t.etiqueta, link });
@@ -83,9 +97,19 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({ from: REMITENTE_INTERNO, to: [correo], subject: t.titulo, html }),
   });
   if (!res.ok) {
-    console.error('[avisar-asignacion] Resend falló:', res.status, await res.text());
+    const detalle = await res.text();
+    console.error('[avisar-asignacion] Resend falló:', res.status, detalle);
+    await registrarAvisoEquipo(supabase, {
+      origen: 'avisar-asignacion', workspaceId: negocio.workspace_id, negocioId: negocio.id,
+      estado: 'fallido', destino: correo, titulo: t.titulo, motivo: `resend_${res.status}: ${detalle}`.slice(0, 200),
+    });
     return json({ error: 'envio_fallido', status: res.status }, 502);
   }
+  // Traza del aviso interno: con el id de Resend, `resend-webhook` le pone entregado, rebotado o suprimido.
+  await registrarAvisoEquipo(supabase, {
+    origen: 'avisar-asignacion', workspaceId: negocio.workspace_id, negocioId: negocio.id,
+    estado: 'enviado', destino: correo, titulo: t.titulo, proveedorId: await idDeRespuestaResend(res),
+  });
   return json({ ok: true, enviados: 1 });
 });
 

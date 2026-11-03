@@ -11,7 +11,7 @@ import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, BTN_X, INPUT, LINK } from '@/components/viaje/estilo'
 import { precioDerivadoDeAdicional, type FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { precioConMargen, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
-import { MENSAJE_MONEDA_ASUMIDA, origenDeMoneda, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
+import { MENSAJE_MONEDA_ASUMIDA, opcionesDeMoneda, origenDeMoneda, type MonedaDeTarifa, type PreciosAMano, type TarifaConfirmada } from '@/lib/cotizaciones/tarifa-pasajero'
 import {
   filasDeCosto,
   mil,
@@ -22,6 +22,10 @@ import {
   type FilaCosto,
 } from '@/lib/cotizaciones/tarjeta-opcion'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { AYUDA_TIPO_TARIFA, ETIQUETA_TIPO_TARIFA, confirmacionFueraDeLaPublica, factorPublicoDelPantallazo, margenDeOpcionPublica, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
+import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
+import type { DescuentoClienteGuardado } from '@/lib/cotizaciones/tarifa-pasajero'
+import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
 
 /**
  * «Costo y precio» de la tarjeta (prototipo del 2026-09-24): UNA tabla (Pasajero / Cant. /
@@ -54,6 +58,10 @@ export default function TarjetaCosto({
   onCambio,
   autorizador = null,
   apilable = false,
+  tipoTarifa = 'neta',
+  tipoPropuesto = false,
+  reglas = null,
+  comision = null,
 }: {
   itemId: string
   editable: boolean
@@ -83,6 +91,24 @@ export default function TarjetaCosto({
    * siempre (`tarjeta-costo-apilada.test.ts`).
    */
   apilable?: boolean
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Pública: el margen
+   * arranca en 0 y la opción no pide autorización por margen. Ausente = Neta.
+   */
+  tipoTarifa?: TipoTarifa
+  /**
+   * El tipo lo propuso ONE (la persona lo cambia): con lo que dice el tarifario del proveedor
+   * (`true` o `'tarifario'`), o con lo que dice el pantallazo (`'pantallazo'`, QA M6 2026-10-29).
+   */
+  tipoPropuesto?: boolean | 'tarifario' | 'pantallazo'
+  /**
+   * Las reglas de margen de la cotización (brief del 2026-10-27): lo que la cascada dice de esta
+   * línea, el descuento guardado y la comisión. Solo en la cotización por pasos con reglas;
+   * ausente, la tarjeta es la de siempre.
+   */
+  reglas?: { linea: ReglasDeLinea; descuento: DescuentoClienteGuardado | null } | null
+  /** La comisión de una Pública, en % o en pesos (D3, 2026-10-29). Se pide con o sin reglas. */
+  comision?: ComisionEscrita | null
 }) {
   const [ajustando, setAjustando] = useState(false)
   const [conAdicional, setConAdicional] = useState(false)
@@ -95,9 +121,18 @@ export default function TarjetaCosto({
   const [preciosEscritos, setPreciosEscritos] = useState<Record<string, string>>({})
   const [cantidadesEscritas, setCantidadesEscritas] = useState<Record<string, string>>({})
 
-  const margenVivo = margenEscrito !== null && Number.isFinite(Number(margenEscrito.replace(',', '.')))
-    ? Number(margenEscrito.replace(',', '.'))
+  // Con descuento al cliente (reglas de margen), la casilla «Margen de esta opción» es el margen
+  // ANTES del descuento, el que se guarda en `margen_porcentaje`; `margenAplicado` ya es el de
+  // después. Editar el de después y guardarlo como el de antes restaría el descuento dos veces
+  // (Vera, 2026-10-29: ver 9, escribir 10 y terminar en 4 %).
+  const conDescuento = reglas?.linea.descuento ?? null
+  const descuentoGuardado = conDescuento ? reglas?.descuento ?? null : null
+  const margenDeLaCasilla = conDescuento?.margenAntes ?? margenAplicado
+  const escritoValido = margenEscrito !== null && Number.isFinite(Number(margenEscrito.replace(',', '.')))
+  const margenVivo = escritoValido
+    ? Number(margenEscrito!.replace(',', '.')) - (descuentoGuardado?.tipo === 'pct' ? descuentoGuardado.valor : 0)
     : margenAplicado
+  const montoDescontadoVivo = escritoValido && descuentoGuardado?.tipo === 'monto' ? descuentoGuardado.valor : 0
   const preciosVivos: PreciosAMano = { ...(preciosAMano ?? {}) }
   for (const [k, v] of Object.entries(preciosEscritos)) {
     if (k.startsWith('adicional:')) continue
@@ -127,7 +162,7 @@ export default function TarjetaCosto({
     ? precioLinea
     : confirmada && hayManuales
       ? precioDeLineaConManuales({ confirmada, preciosAMano: preciosVivos, margenPct: margenVivo, convencion, administrativosPct }) ?? precioLinea
-      : Math.round(precioConMargen(costoLinea * (1 + administrativosPct / 100), margenVivo, convencion))
+      : Math.max(0, Math.round(precioConMargen(costoLinea * (1 + administrativosPct / 100), margenVivo, convencion)) - montoDescontadoVivo)
 
   const filas = filasDeCosto({ confirmada, precioLinea: precioVivo, preciosAMano: preciosVivos, adicionales: adicionalesVivos })
   const T = totalesDeFilas(filas)
@@ -135,18 +170,35 @@ export default function TarjetaCosto({
   const precioTotal = filas.length > 0 ? T.precio : precioVivo
   // El margen de verdad, también cuando es negativo: `margenParaPrecio` devuelve `null` con el
   // precio por debajo del costo, que es justo cuando más hace falta verlo.
-  const margenReal = costoTotal > 0 && precioTotal > 0
-    ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
-    : null
-  const bajo = margenReal !== null && margenReal < pisoPct
+  // Una Pública no pide autorización por margen: su ganancia es la comisión (`tarifa-publica.ts`).
+  const publica = tipoTarifa === 'publica'
+  // El precio público de la opción: su costo, o (si el pantallazo trajo los dos precios y el costo
+  // guardado es el neto) el precio al cliente de la captura (QA M6, 2026-10-29).
+  const factorPublico = publica ? factorPublicoDelPantallazo(confirmada?.margenProveedor ?? null) : 1
+  const costoBasePublica = costoLinea * (1 + administrativosPct / 100)
+  const precioPublico = costoBasePublica * factorPublico
+  // Una Pública mide su margen con la comisión: lo que la agencia paga es el precio público menos
+  // ella (brief del 2026-10-29, falla 1). Sin comisión, «—»: un 0 se leería como «a costo».
+  const margenReal = publica
+    ? margenDeOpcionPublica({ comision: comision ?? null, precioPublico, costo: costoTotal + (precioPublico - costoBasePublica), precio: precioTotal })
+    : costoTotal > 0 && precioTotal > 0
+      ? (convencion === 'sobre_venta' ? ((precioTotal - costoTotal) / precioTotal) * 100 : (precioTotal / costoTotal - 1) * 100)
+      : null
+  const bajo = !publica && margenReal !== null && margenReal < pisoPct
 
-  function guardar(fn: () => Promise<{ success: boolean; error?: string }>, limpiar: () => void) {
+  function guardar(fn: () => Promise<{ success: boolean; error?: string; descuentoQuitado?: string }>, limpiar: () => void) {
     startTransition(async () => {
       const r = await fn()
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
+      if (r.descuentoQuitado) toast.warning(`Se quitó el descuento para el cliente («${r.descuentoQuitado}»): la tarifa Pública es el precio público.`)
       limpiar()
       onCambio()
     })
+  }
+
+  function elegirTipo(t: TipoTarifa) {
+    if (t === tipoTarifa && !tipoPropuesto) return
+    guardar(() => ajustarOpcion(itemId, { tipoTarifa: t }), () => setMargenEscrito(null))
   }
 
   function guardarMargen() {
@@ -154,7 +206,17 @@ export default function TarjetaCosto({
     const t = margenEscrito.trim()
     const v = t === '' ? null : Number(t.replace(',', '.'))
     if (v !== null && !Number.isFinite(v)) { setMargenEscrito(null); return }
-    if (v === margenAplicado) { setMargenEscrito(null); return }
+    if (v === margenDeLaCasilla) { setMargenEscrito(null); return }
+    // M7 (QA Trappvel, 2026-10-29): en una Pública, un margen que saca el precio del público pide
+    // «¿Estás seguro?» (decisión de Mauricio: valores fuera de lo pactado).
+    if (publica && v !== null && !hayManuales) {
+      const fuera = confirmacionFueraDeLaPublica({
+        precio: precioConMargen(costoBasePublica, v, convencion),
+        publico: precioPublico,
+        que: 'el precio de la opción',
+      })
+      if (fuera && !window.confirm(fuera)) { setMargenEscrito(null); return }
+    }
     guardar(() => ajustarOpcion(itemId, { margenPct: v }), () => setMargenEscrito(null))
   }
 
@@ -167,6 +229,16 @@ export default function TarjetaCosto({
     if (f.adicionalId) {
       guardar(() => actualizarAdicional(f.adicionalId!, { precio: n, confirmarPrecioBajo: true }), limpiar)
       return
+    }
+    // M7 (QA Trappvel, 2026-10-29): «Precio c/u» de una Pública distinto del público (un descuento
+    // sin motivo, o cobrar más que el público) pide «¿Estás seguro?» antes de guardar.
+    if (publica && n !== null) {
+      const fuera = confirmacionFueraDeLaPublica({
+        precio: n,
+        publico: f.costoUnitario * (1 + administrativosPct / 100) * factorPublico,
+        que: `el precio por ${f.nombre.toLocaleLowerCase('es-CO')}`,
+      })
+      if (fuera && !window.confirm(fuera)) { limpiar(); return }
     }
     guardar(() => ajustarOpcion(itemId, { precios: { [f.clave]: n } }), limpiar)
   }
@@ -365,7 +437,33 @@ export default function TarjetaCosto({
             )}
           </span>
         </span>
-        <span className="flex items-center gap-1.5 text-[13px] text-[#6E6A62]">
+        <span className={`flex ${apilable ? 'flex-wrap ' : ''}items-center gap-1.5 text-[13px] text-[#6E6A62]`}>
+          {/* Tarifa pública o neta: un clic, junto al margen (reunión del 2026-10-22). Solo en la
+              cotización por pasos: apagada, la tarjeta es byte a byte la de siempre. */}
+          {apilable && <span className="inline-flex items-center gap-1" data-tipo-tarifa={tipoTarifa}>
+            <span className="text-xs">Tarifa</span>
+            <span role="radiogroup" aria-label="Tipo de tarifa" className="inline-flex overflow-hidden rounded-md border border-[#CFCAC0]">
+              {(['neta', 'publica'] as const).map(t => {
+                const on = t === tipoTarifa
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    title={AYUDA_TIPO_TARIFA[t]}
+                    disabled={!editable || isPending}
+                    onClick={() => elegirTipo(t)}
+                    data-elegir-tipo={t}
+                    className={`border-0 px-2 py-0.5 text-xs font-semibold ${on ? 'bg-[#191713] text-[#F3F1EC]' : 'bg-white text-[#191713] hover:bg-[#F8F7F3]'} ${t === 'publica' ? 'border-l border-[#CFCAC0]' : ''}`}
+                  >
+                    {ETIQUETA_TIPO_TARIFA[t]}
+                  </button>
+                )
+              })}
+            </span>
+            {tipoPropuesto && <span className="text-[11px] text-[#9A5F0C]" data-tipo-propuesto>{tipoPropuesto === 'pantallazo' ? 'según el pantallazo' : 'según el tarifario'}</span>}
+          </span>}
           Margen <b className="tabular-nums text-[#191713]">{margenReal === null ? '—' : porcentaje(margenReal)}</b>
           {bajo && (
             <AlertaDecision tip="Con este margen necesitas autorización para enviar">
@@ -379,6 +477,34 @@ export default function TarjetaCosto({
           )}
         </span>
       </div>
+      {publica && (
+        <p className="m-0 text-xs text-[#6E6A62]" data-aviso-publica>
+          {reglas
+            ? 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión.'
+            : 'Tarifa pública: el cliente paga el precio del proveedor y tu ganancia es la comisión. Escríbela: entra al margen de la cotización.'}
+        </p>
+      )}
+      {reglas && apilable && (
+        <ReglasDeOpcion
+          reglas={reglas.linea}
+          descuento={reglas.descuento}
+          comision={comision ?? null}
+          publica={publica}
+          editable={editable}
+          ocupado={isPending}
+          onDescuento={d => guardar(() => ajustarOpcion(itemId, { descuentoCliente: d }), () => {})}
+          onComision={c => guardar(() => ajustarOpcion(itemId, cambiosDeComision(c)), () => {})}
+        />
+      )}
+      {/* D3 (2026-10-29): la comisión de una Pública se pide también sin reglas de margen. */}
+      {!reglas && apilable && publica && (
+        <CampoComision
+          comision={comision ?? null}
+          editable={editable}
+          ocupado={isPending}
+          onComision={c => guardar(() => ajustarOpcion(itemId, cambiosDeComision(c)), () => {})}
+        />
+      )}
 
       {ajustando && editable && (
         <div className="flex flex-col gap-2.5 rounded-lg border border-[#CFCAC0] bg-[#F8F7F3] p-3" data-panel-ajustar>
@@ -388,7 +514,7 @@ export default function TarjetaCosto({
               type="text"
               inputMode="decimal"
               className={`${INPUT.replace('w-full ', '')} w-[70px] tabular-nums`}
-              value={margenEscrito ?? String(margenAplicado).replace('.', ',')}
+              value={margenEscrito ?? String(Math.round(margenDeLaCasilla * 100) / 100).replace('.', ',')}
               onChange={e => setMargenEscrito(e.target.value)}
               onBlur={guardarMargen}
               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -397,6 +523,11 @@ export default function TarjetaCosto({
             />
             %
           </label>
+          {conDescuento && margenReal !== null && (
+            <p className="m-0 text-xs text-[#6E6A62]" data-margen-con-descuento>
+              Margen real con el descuento: {String(Math.round(margenReal * 10) / 10).replace('.', ',')} %
+            </p>
+          )}
           <div className="flex max-w-[520px] flex-col gap-1.5">
             {filas.map(f => (
               <div key={f.clave} className="grid grid-cols-[minmax(0,1.5fr)_80px_minmax(0,1fr)] items-end gap-2 max-sm:grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)]" data-ajuste-fila={f.clave}>
@@ -449,8 +580,9 @@ export default function TarjetaCosto({
             onBlur={() => setEditandoMoneda(false)}
             className="rounded-[5px] border border-[#CFCAC0] bg-white px-1 py-0.5 text-xs"
           >
-            <option>COP</option>
-            <option>USD</option>
+            {/* N9-3 (QA 2026-10-29): con solo COP y USD, una línea en EUR abría el selector en
+                COP y un clic de más le cambiaba la moneda. Arranca en la de la línea. */}
+            {opcionesDeMoneda(moneda.moneda).map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         ) : (
           <>
@@ -538,4 +670,10 @@ function FormAdicional({
       </div>
     </form>
   )
+}
+
+/** La comisión escrita, como la pide `ajustarOpcion` (D3): en % o en pesos; `null` la quita. */
+function cambiosDeComision(c: ComisionEscrita | null): { comisionPct: number | null } | { comisionMonto: number } {
+  if (!c) return { comisionPct: null }
+  return c.tipo === 'monto' ? { comisionMonto: c.valor } : { comisionPct: c.valor }
 }

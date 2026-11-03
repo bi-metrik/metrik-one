@@ -26,7 +26,9 @@ const MESES = 'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|seti
 const RE_FECHA = new RegExp(`\\b(\\d{1,2})\\s*(?:de\\s+)?(${MESES})\\b|\\b(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?\\b`, 'giu');
 const RE_PORCENTAJE = /(\d+(?:[.,]\d+)?)\s?%/gu;
 const RE_PLATA = /(?:\$|US\$|USD\s?)\s?(\d[\d.,]*)|(\d[\d.,]*)\s?(?:pesos|millones|mil|usd|dólares|dolares)\b/giu;
-const RE_NUMERO = /\b\d{2,}(?:[.,]\d+)*\b/gu;
+// Dos o más dígitos, o uno solo con miles («2.800», «1.200»): sin eso, de «2.800 rpm» se leía «800» y se rechazaba una
+// cifra que sí estaba en el respaldo (Dimpro, 29-oct: dos vueltas extra del modelo en una conversación de 4 turnos).
+const RE_NUMERO = /\b(?:\d{2,}|\d(?=[.,]\d{3}\b))(?:[.,]\d+)*\b/gu;
 
 export function normal(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -34,6 +36,19 @@ export function normal(s: string): string {
 
 function digitos(s: string): string {
   return s.replace(/\D/g, '');
+}
+
+/**
+ * «400 mil» = 400000; «1,5 millones» = 1500000 (para cruzar contra el respaldo, que trae la cifra entera). Sin «mil» ni
+ * «millones», NaN. Pura.
+ */
+function escalado(todo: string, num: string): number {
+  const t = todo.toLowerCase();
+  const factor = /millones\b/.test(t) ? 1_000_000 : /\bmil\b/.test(t) ? 1000 : 0;
+  if (!factor) return NaN;
+  // «1,5» / «1.5» con decimal; «400» entero.
+  const n = /^\d+[.,]\d{1,2}$/.test(num) ? Number(num.replace(',', '.')) : Number(digitos(num));
+  return Math.round(n * factor);
 }
 
 export interface Respaldo {
@@ -78,7 +93,11 @@ function datosSinRespaldo(texto: string, r: Respaldo): string[] {
     const d = digitos(m[0]);
     if (d.length < 7) continue;
     usados.add(m[0].trim());
-    if (!r.digitos.includes(d.slice(-7))) motivos.push(`número «${m[0].trim()}» sin respaldo`);
+    // «400.000 (26 oct)» no es un celular: si cada número del tramo está respaldado por separado, pasa (arnés real del
+    // 2026-10-22, g-ingreso-no-cuadra: la cifra de la cuota y el día de su fecha, tomados juntos como un teléfono).
+    const sueltos = m[0].match(/\d+(?:[.,]\d{3})*/g) ?? [];
+    const cadaUno = sueltos.length > 1 && sueltos.every((x) => r.numeros.has(digitos(x)) || r.numeros.has(String(Number(digitos(x)))));
+    if (!r.digitos.includes(d.slice(-7)) && !cadaUno) motivos.push(`número «${m[0].trim()}» sin respaldo`);
   }
   for (const m of texto.matchAll(RE_FECHA)) {
     const partes = [m[1], m[3], m[4], m[5]].filter(Boolean) as string[];
@@ -95,7 +114,7 @@ function datosSinRespaldo(texto: string, r: Respaldo): string[] {
   for (const m of texto.matchAll(RE_PLATA)) {
     const num = m[1] ?? m[2];
     usados.add(num);
-    if (!r.numeros.has(digitos(num))) motivos.push(`cifra «${m[0].trim()}» sin respaldo`);
+    if (!r.numeros.has(digitos(num)) && !r.numeros.has(String(escalado(m[0], num)))) motivos.push(`cifra «${m[0].trim()}» sin respaldo`);
   }
   for (const m of texto.matchAll(RE_NUMERO)) {
     if ([...usados].some((u) => u.includes(m[0]))) continue;

@@ -26,6 +26,7 @@ import { registrarClienteEpayco } from '@/lib/suscripciones/pasarela/epayco'
 import { emitirPruebaDelEspacio } from './prueba-servidor'
 import { terminosParaElRegistro, type TerminosDelRegistroArmados } from './terminos-registro-servidor'
 import { asegurarSuscripcionEnPrueba } from './suscripcion-prueba-servidor'
+import { enSegundoPlano, enviarBienvenidaValida } from '@/lib/acceso-espacio/servidor'
 
 /**
  * El alta autogestionada de Valida, en el SERVIDOR (`18-recorrido-baja-friccion.md`, PR 3).
@@ -375,6 +376,13 @@ export async function crearEspacioValida(datos: DatosRegistroValida): Promise<Re
     .from('fiscal_profiles')
     .upsert({ workspace_id: workspaceId, nit, email_facturacion: correo }, { onConflict: 'workspace_id' })
   if (eFiscal) console.error('[valida-registro] perfil fiscal:', eFiscal.message)
+
+  // La bienvenida con la dirección del espacio: sin ella, quien sale de esta pantalla no sabe por
+  // dónde volver a entrar. Sale aquí, con el espacio y la persona ya creados, y después de responder:
+  // si el envío falla, el registro no se entera (queda en el log).
+  await enSegundoPlano('bienvenida de Valida', () =>
+    enviarBienvenidaValida({ correo, razonSocial, slug, registroId }),
+  )
 
   // ── 5. La prueba ──────────────────────────────────────────────────────────
   const prueba = await emitirPruebaDelEspacio({

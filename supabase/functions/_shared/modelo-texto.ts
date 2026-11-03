@@ -1,5 +1,5 @@
 // Generación de texto compartida (pedido con forma de Gemini; el modelo lo pone `fetchModelo`: Haiku 5.5 o Gemini).
-// La usan el lector de Navigate de cardumen (`cardumen/model.ts`) y el bot de servicio al cliente (`customer/`).
+// La usa el lector de Navigate de cardumen (`cardumen/model.ts`). El bot de servicio al cliente (`customer/`) se borró el 2026-10-29.
 // Nació en `venezuela/gemini.ts` (bot "Voz de Venezuela"); se movió aquí el 2026-10-20, cuando Mauricio apagó ese
 // bot y dejó cardumen en Haiku: así apagar Venezuela no toca a nadie más. Mismo patrón: fetch nativo, usageMetadata,
 // retry con backoff, thinking OFF.

@@ -47,6 +47,7 @@ import { cascadaDeItinerario } from './itinerarios'
 import { normalizarMotivo } from './motivo-combinacion'
 import type { ContextoCotizacion, FilaItinerario } from './itinerarios-datos'
 import type { Composicion } from './tarifa-pasajero'
+import { paramsPorOpcion } from './reglas-margen'
 
 // ── El contexto del viaje, congelado ─────────────────────────────────────────
 
@@ -210,7 +211,8 @@ export function armarFilasDeRegistro(args: {
   const { ctx, filas } = args
   if (filas.length === 0) return []
 
-  const cascada = calcularCascada(ctx.items, ctx.params)
+  // El precio de CADA opción: sin puntos extra ni descuentos sobre el total (son de una tarifa).
+  const cascada = calcularCascada(ctx.items, paramsPorOpcion(ctx.params))
   // ⚠️ `precioConAdicionales`, no `precioLinea`: lo que se guarda es **el precio que se le
   // mostró al cliente**, y una variante con maleta extra se le mostró con la maleta
   // adentro. Con el base, el precio congelado de Avianca-con-maleta sería idéntico al de
@@ -242,7 +244,7 @@ export function armarFilasDeRegistro(args: {
       }
     }
 
-    const suya = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+    const suya = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
     const motivo = normalizarMotivo(fila.motivoCodigo, fila.motivoTexto)
 
     return {
@@ -328,7 +330,7 @@ export function armarFilaDeAceptacion(args: {
     quien: args.quien,
     salidaAt: args.aceptadaAt,
   })
-  const precioDe = (f: FilaItinerario) => cascadaDeItinerario(args.ctx.items, f.seleccion, args.ctx.params).precioVenta
+  const precioDe = (f: FilaItinerario) => cascadaDeItinerario(args.ctx.items, f.seleccion, args.ctx.params, f.id).precioVenta
   return {
     ...base,
     evento: 'aceptacion',

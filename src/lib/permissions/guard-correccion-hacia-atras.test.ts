@@ -169,3 +169,59 @@ describe('guardEditarBloque — el área no corta una corrección hacia atrás',
     expect(consultas).not.toContain('etapas_negocio')
   })
 })
+
+// SOENA, SOE-028 (2026-10-26): Camila Garzón, operadora de operaciones y responsable del caso,
+// no lograba cambiar el RUT de Documentación (venta, `areas_editoras: ['operaciones']`) con el
+// caso ya en Cargue. El servidor SIEMPRE la dejó: el corte era de pantalla (el historial no le
+// pasaba `_esResponsable` a `BloqueDocumento`). Estas fijan que el servidor la deja y a quién no.
+describe('guardEditarBloque — operator responsable con el área invitada (SOE-028)', () => {
+  beforeEach(() => {
+    areasEditoras = ['operaciones']
+    stageBloque = 'venta'
+    ordenBloque = 6
+    ordenEtapaActual = 7
+  })
+
+  it('operator de operaciones, responsable, sobre el RUT de una etapa pasada: pasa', async () => {
+    sesion = { role: 'operator', areas: ['operaciones'], staffId: 'staff-camila' }
+    responsables = ['staff-camila']
+    const r = await guardEditarBloque('nb-1')
+    expect(r.ok).toBe(true)
+    // Entra por la invitación del bloque, no por la excepción de corrección hacia atrás.
+    expect(consultas).not.toContain('etapas_negocio')
+  })
+
+  it('operator de operaciones NO responsable: no pasa', async () => {
+    sesion = { role: 'operator', areas: ['operaciones'], staffId: 'staff-camila' }
+    responsables = ['staff-otra']
+    const r = await guardEditarBloque('nb-1')
+    expect(r.ok).toBe(false)
+    expect(r.error).toBe('Tu rol o área no permite editar en esta fase del negocio')
+  })
+
+  it('operator de OTRA área, responsable: no pasa', async () => {
+    sesion = { role: 'operator', areas: ['financiera'], staffId: 'staff-fin' }
+    responsables = ['staff-fin']
+    const r = await guardEditarBloque('nb-1')
+    expect(r.ok).toBe(false)
+  })
+
+  it('supervisor de operaciones: sin cambio, pasa con o sin la invitación', async () => {
+    sesion = { role: 'supervisor', areas: ['operaciones'], staffId: 'staff-deisy' }
+    expect((await guardEditarBloque('nb-1')).ok).toBe(true)
+    areasEditoras = []
+    expect((await guardEditarBloque('nb-1')).ok).toBe(true)
+  })
+
+  it('la copia en Pago UPME (cobro, sin `areas_editoras`) sigue cerrada para la operadora', async () => {
+    // Por eso la copia no es el camino: no hereda la invitación del original.
+    sesion = { role: 'operator', areas: ['operaciones'], staffId: 'staff-camila' }
+    responsables = ['staff-camila']
+    areasEditoras = []
+    stageBloque = 'cobro'
+    ordenBloque = 9
+    ordenEtapaActual = 9
+    const r = await guardEditarBloque('nb-1')
+    expect(r.ok).toBe(false)
+  })
+})

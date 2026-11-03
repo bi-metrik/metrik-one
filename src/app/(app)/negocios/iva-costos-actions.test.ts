@@ -157,3 +157,35 @@ describe('casilla «Calcular con IVA»', () => {
     expect(base.tablas.items.map((i) => i.proveedor_id)).toEqual([null, POSADA, null])
   })
 })
+
+describe('una línea costeada con la tarifa del proveedor (prueba del #1229, punto 3)', () => {
+  // La ficha NO dice si cobra IVA: lo dice la tarifa elegida (`tarifaExtraida.iva_pct`).
+  function conTarifa(ivaPct: number | null) {
+    sembrar({ declara: null })
+    const i1 = base.tablas.items.find((i) => i.id === 'i1') as Record<string, unknown>
+    i1.proveedor_id = HOTEL
+    i1.tarifa_pax = {
+      casillas: { grupo_completo: { moneda: 'COP', total: 900000, origen: 'tarifario', leidaEn: 'L1', campos: [{ label: 'Hotel', valor: 'Hotel Ficticio Playa' }] } },
+      tarifaExtraida: { extraccion_id: 'x', proveedor_id: HOTEL, leidaEn: 'L1', filas: [{ indice_fila: 0, cantidad: 1, noches: 3, tipo: null }], canal: 'neta', iva_incluido: false, iva_pct: ivaPct, moneda: 'COP' },
+    }
+  }
+
+  it('un tarifario sin IVA (iva_pct vacío): «Calcular con IVA» no le suma nada', async () => {
+    conTarifa(null)
+    expect(await cambiarIvaDeCostos(COT, { encendida: true })).toMatchObject({ ok: true, encendida: true, proveedoresConIva: [], lineasConIva: 0 })
+    expect(pct('i1')).toBeNull()
+  })
+
+  it('un tarifario con IVA declarado lo conserva: la casilla se lo suma', async () => {
+    conTarifa(19)
+    expect(await sincronizarIvaDeCostos(COT)).toMatchObject({ ok: true, encendida: true, proveedoresConIva: ['Hotel Ficticio Playa'] })
+    expect(pct('i1')).toBe(19)
+  })
+
+  it('lo que la persona anotó en la ficha («no cobra IVA») manda sobre la tarifa', async () => {
+    conTarifa(19)
+    ;(base.tablas.fotos_perfiles[0] as Record<string, unknown>).iva_declarado = false
+    await cambiarIvaDeCostos(COT, { encendida: true })
+    expect(pct('i1')).toBeNull()
+  })
+})

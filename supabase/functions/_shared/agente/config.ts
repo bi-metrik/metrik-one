@@ -42,12 +42,23 @@ export interface ConfigAgente {
    * modelo real (`arnes/extraccion-casos.ts --esquema ambas`).
    */
   extraccionCompacta: boolean;
+  /**
+   * `agente_config.leer_adjuntos` (bandeja, por defecto sí, 2026-10-21): las fotos y los PDF que llegan se guardan, se leen
+   * con el modelo (Haiku; respaldo Gemini) y lo leído entra a la carga del viaje. `false` lo apaga sin desplegar (el
+   * archivo queda solo con su id de Meta en la conversación, como antes).
+   */
+  leerAdjuntos: boolean;
   topes: {
     llamados: number;
     entradaTokens: number;
     texto: number;
     turnoMs: number;
     ventanaHoras: number;
+    /**
+     * Topes de los bloques del prompt (tokens) que reemplazan los de `contexto.ts` (`TOPES_BLOQUE`) en este turno. No
+     * se lee de la base: lo pone el turno de un rol con dos motores (viajes + ONE, `bandeja/turno-con-rol.ts`).
+     */
+    bloques?: { siempre?: number; indice?: number; estado?: number };
   };
   /** Cupo de uso justo: turnos del modelo por mes. Pasarlo NO corta: avisa a MéTRIK. */
   cupoTurnosMes: number;
@@ -65,6 +76,7 @@ export const CONFIG_POR_DEFECTO: ConfigAgente = {
   corteMs: 2500,
   respaldoEstricto: true,
   extraccionCompacta: false,
+  leerAdjuntos: true,
   topes: { llamados: 3, entradaTokens: 12000, texto: 600, turnoMs: 20000, ventanaHoras: 24 },
   cupoTurnosMes: 800,
   reglamentoId: null,
@@ -102,6 +114,7 @@ export function leerConfigAgente(botConversacional: unknown): ConfigAgente {
     corteMs: numero(a.corte_ms, d.corteMs, 100),
     respaldoEstricto: a.respaldo_estricto === false ? false : d.respaldoEstricto,
     extraccionCompacta: a.extraccion_compacta === true,
+    leerAdjuntos: a.leer_adjuntos === false ? false : d.leerAdjuntos,
     topes: {
       llamados: numero(topes.llamados, d.topes.llamados, 1),
       entradaTokens: numero(topes.entrada_tokens, d.topes.entradaTokens, 1000),

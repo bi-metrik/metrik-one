@@ -5,22 +5,28 @@ import 'server-only'
  * cliente y el workspace de quien llama, que ya pasó su guarda.
  */
 
+import { esColumnaFaltante, monedaDelServicioConRespaldo } from './moneda-servicio'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
+import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
+import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { ivaSobreIngresoPropio, leerConfigIvaCotizacion } from '@/lib/fiscal/iva-cotizacion'
 import { ivaDeLaCotizacion } from '@/lib/fiscal/iva-cotizacion-datos'
 import { cobrosDelNegocio, leerNegocioConLinea } from './confirmacion-datos'
+import { enlaceWhatsApp } from './confirmacion'
 import {
   GATE_MARGEN_CONFIRMADO,
   GATE_POSTVENTA,
   calcularCierre,
   configCierreViaje,
   configEtapasPorFecha,
+  decisionSaldoVigente,
   faltaParaCerrar,
   faltaPostventa,
   leerCierreGuardado,
   leerPostventa,
+  mensajeSaldoAFavor,
   textoEnViaje,
   type Cierre,
   type CierreGuardado,
@@ -39,30 +45,55 @@ interface Base {
 
 /** Los gastos del negocio (costo real): cada uno una vez (§7.2.2). */
 export async function gastosDelNegocio(db: Db, workspaceId: string, negocioId: string): Promise<GastoCierre[]> {
-  const { data, error } = await db
+  const leer = (columnas: string) => db
     .from('gastos')
-    .select('monto, servicio_id, categoria, descripcion, titular_medio')
+    .select(columnas)
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
+  const BASE = 'monto, servicio_id, categoria, descripcion, titular_medio'
+  // QA G9 · la moneda y la TRM del pago; sin la migración, como antes (la TRM sale del texto).
+  let { data, error } = await leer(`${BASE}, moneda, tasa_cambio`)
+  if (esColumnaFaltante(error)) ({ data, error } = await leer(BASE))
   if (error) throw new Error(`No se pudieron leer los gastos: ${error.message}`)
   return ((data ?? []) as GastoCierre[]).map(g => ({ ...g, monto: Number(g.monto) || 0, servicio_id: g.servicio_id ?? null }))
 }
 
 async function serviciosDelCierre(db: Db, workspaceId: string, negocioId: string): Promise<ServicioCierre[]> {
-  const { data, error } = await db
+  const leer = (columnas: string) => db
     .from('negocio_servicios')
-    .select('id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, comision_esperada, comision_estado, orden')
+    .select(columnas)
     .eq('workspace_id', workspaceId)
     .eq('negocio_id', negocioId)
     .order('orden', { ascending: true })
+  const BASE = 'id, nombre, proveedor_nombre, estado, costo_cotizado, valor_por_pagar, comision_esperada, comision_estado, orden, item_id'
+  // QA G9 · la moneda en sus columnas; sin la migración, del ítem (#1364).
+  let { data, error } = await leer(`${BASE}, moneda, costo_moneda, tasa_cotizada`)
+  if (esColumnaFaltante(error)) ({ data, error } = await leer(BASE))
   if (error) throw new Error(`No se pudieron leer los servicios: ${error.message}`)
-  return ((data ?? []) as ServicioCierre[]).map(s => ({
+  const filas = (data ?? []) as Array<Omit<ServicioCierre, 'moneda'> & { item_id?: string | null; moneda?: unknown; costo_moneda?: unknown; tasa_cotizada?: unknown }>
+  const itemDe = await itemsDeLosServicios(db, filas)
+  return filas.map(s => ({
     ...s,
+    // H6-3 · la moneda en que se cotizó, para separar la diferencia de cambio en la explicación.
+    moneda: monedaDelServicioConRespaldo(s, s.item_id ? itemDe.get(s.item_id) : null, Number(s.costo_cotizado) || 0),
     costo_cotizado: Number(s.costo_cotizado) || 0,
     valor_por_pagar: s.valor_por_pagar === null || s.valor_por_pagar === undefined ? null : Number(s.valor_por_pagar),
     comision_esperada: s.comision_esperada === null || s.comision_esperada === undefined ? null : Number(s.comision_esperada),
     comision_estado: s.comision_estado ?? null,
   }))
+}
+
+/** `tarifa_pax` y `subtotal` de los ítems de los servicios. Si no se pueden leer, ninguno (todo en pesos). */
+async function itemsDeLosServicios(db: Db, filas: ReadonlyArray<{ item_id?: string | null }>): Promise<Map<string, { tarifa_pax: unknown; subtotal: number | null }>> {
+  const ids = [...new Set(filas.map(f => f.item_id).filter((x): x is string => !!x))]
+  if (ids.length === 0) return new Map()
+  try {
+    const { data, error } = await db.from('items').select('id, tarifa_pax, subtotal').in('id', ids)
+    if (error || !Array.isArray(data)) return new Map()
+    return new Map((data as Array<{ id: string; tarifa_pax: unknown; subtotal: number | null }>).map(i => [i.id, { tarifa_pax: i.tarifa_pax, subtotal: i.subtotal }]))
+  } catch {
+    return new Map()
+  }
 }
 
 /**
@@ -96,7 +127,7 @@ export async function calcularCierreDelNegocio(db: Db, workspaceId: string, base
     cobrosDelNegocio(db, workspaceId, negocioId),
     ivaDeLaVenta(db, workspaceId, negocioId),
   ])
-  return calcularCierre({
+  const entrada = {
     precioAprobado: Number(base.negocio.precio_aprobado ?? 0),
     cobrado: cobradoConfirmado(cobros),
     iva,
@@ -104,7 +135,15 @@ export async function calcularCierreDelNegocio(db: Db, workspaceId: string, base
     recargo: 0,
     servicios,
     gastos,
-  })
+  }
+  const cierre = calcularCierre(entrada)
+  // H-28 · solo una decisión VIGENTE (tomada sobre este mismo saldo) cambia el margen, y solo
+  // «retener» lo cambia: el saldo a favor no depende de la decisión, así que se mide primero.
+  const guardado = leerCierreGuardado(base.negocio.metadata)
+  if (guardado.saldo_a_favor?.decision === 'retener' && decisionSaldoVigente(cierre, guardado)) {
+    return calcularCierre({ ...entrada, decisionSaldo: 'retener' })
+  }
+  return cierre
 }
 
 async function etapaActual(db: Db, etapaId: string | null): Promise<{ numero: number | null; gates: string[] }> {
@@ -130,6 +169,17 @@ export interface VistaViajeFinal {
   postventa: Postventa
   faltaPostventa: string | null
   servicios: Array<{ id: string; nombre: string }>
+  /**
+   * El saldo que frena `saldo_cero`, con la MISMA cuenta y la misma base de precio del gate
+   * (`lib/cobros/saldo-cero.ts`): «Saldo pendiente: $X». `null` si está cubierto. Solo en Cierre.
+   */
+  saldoPendiente: string | null
+  /**
+   * H-28 · el aviso al cliente de su saldo a favor, con la decisión ya tomada (devolver o abonar):
+   * el texto y el enlace de WhatsApp con el número del cliente. `null` sin saldo, sin decisión
+   * vigente o si se retuvo.
+   */
+  avisoSaldo: { texto: string; waUrl: string } | null
 }
 
 /** `null` con el interruptor apagado o fuera de las etapas 7-9 de la línea. */
@@ -147,15 +197,17 @@ export async function leerVistaViajeFinal(db: Db, workspaceId: string, negocioId
         : null
   if (!fase) return null
   const hoy = todayBogotaISO()
-  const [cierre, { viaje }, contactoRes] = await Promise.all([
+  const [cierre, { viaje }, contactoRes, saldo] = await Promise.all([
     calcularCierreDelNegocio(db, workspaceId, base),
     leerViajeDelNegocio(db, negocioId),
     base.negocio.contacto_id
       ? db.from('contactos').select('nombre, telefono').eq('id', base.negocio.contacto_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    fase === 'cierre' ? leerSaldoCero(db, { workspaceId, negocioId }) : Promise.resolve(null),
   ])
   const contacto = (contactoRes.data ?? null) as { nombre?: string | null; telefono?: string | null } | null
   const nombre = (contacto?.nombre ?? '').trim()
+  const saldoPendiente = !saldo ? null : saldo.ok ? mensajeSaldoCero(saldo.saldo) : saldo.error
   const guardado = leerCierreGuardado(base.negocio.metadata)
   const postventa = leerPostventa(base.negocio.metadata)
   return {
@@ -171,7 +223,16 @@ export async function leerVistaViajeFinal(db: Db, workspaceId: string, negocioId
     postventa,
     faltaPostventa: faltaPostventa(postventa),
     servicios: cierre.filas.map(f => ({ id: f.id, nombre: f.nombre })),
+    saldoPendiente,
+    avisoSaldo: avisoDelSaldo(cierre, guardado, nombre, contacto?.telefono ?? null),
   }
+}
+
+function avisoDelSaldo(cierre: Cierre, guardado: CierreGuardado, nombre: string, telefono: string | null): VistaViajeFinal['avisoSaldo'] {
+  const d = guardado.saldo_a_favor
+  if (!d || cierre.saldoAFavor <= 0 || !decisionSaldoVigente(cierre, guardado)) return null
+  const texto = mensajeSaldoAFavor({ nombreCliente: nombre, monto: cierre.saldoAFavor, decision: d.decision, sacados: cierre.sacados })
+  return texto ? { texto, waUrl: enlaceWhatsApp(telefono, texto) } : null
 }
 
 /** Gate `margen_confirmado` (etapa de Cierre económico). Opt-in por etapa; apagado no frena. */

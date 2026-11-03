@@ -11,6 +11,8 @@
  * y antes de marcar, el reintento no duplica el correo.
  */
 
+import { idDeRespuestaResend, registrarAvisoEquipo } from '../../../supabase/functions/_shared/aviso-equipo'
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = { from: (t: string) => any }
 
@@ -84,21 +86,27 @@ export class CorreosDelEquipo {
     if (!key) return { estado: 'omitido', motivo: 'sin_resend_api_key' }
     const enlace = enlaceAlNegocio(await this.slugDe(p.workspaceId), p.negocioId)
     const cuerpo = cuerpoDelCorreo(p.texto, enlace)
+    const asunto = asuntoDelCorreo(p.tipo, p.negocioNombre)
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'Idempotency-Key': p.idempotencyKey },
       body: JSON.stringify({
         from: 'MéTRIK ONE <noreply@metrikone.co>',
         to: [para],
-        subject: asuntoDelCorreo(p.tipo, p.negocioNombre),
+        subject: asunto,
         html: cuerpo.html,
         text: cuerpo.text,
       }),
     })
+    // Traza en `avisos_equipo`: con el id de Resend, `resend-webhook` le pone entregado, rebotado o
+    // suprimido. Nunca lanza.
+    const traza = { origen: 'recordatorios' as const, workspaceId: p.workspaceId, negocioId: p.negocioId, destino: para, titulo: asunto }
     if (!res.ok) {
       const detalle = await res.text().catch(() => '')
+      await registrarAvisoEquipo(this.svc, { ...traza, estado: 'fallido', motivo: `resend_${res.status}: ${detalle}`.slice(0, 200) })
       throw new Error(`Resend ${res.status}: ${detalle.slice(0, 200)}`)
     }
+    await registrarAvisoEquipo(this.svc, { ...traza, estado: 'enviado', proveedorId: await idDeRespuestaResend(res) })
     return { estado: 'enviado', motivo: null }
   }
 }

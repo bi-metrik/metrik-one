@@ -9,7 +9,8 @@ import { validateCorregir, type EstadoCotizacion } from '@/lib/cotizaciones/stat
 import { hayCotizacionEditableEnEtapa } from '@/lib/cotizaciones/etapa-editable'
 import { formatCOP } from '@/lib/cobros/format'
 import { cobradoConfirmado } from '@/lib/cobros/saldo-negocio'
-import { politicaMargenDelNegocio } from '@/lib/cotizaciones/convencion-margen'
+import { politicaYReglasDelNegocio } from '@/lib/cotizaciones/convencion-margen'
+import { reglasAlNacer } from '@/lib/cotizaciones/reglas-margen'
 import { motivoParaNoSalir, recortarParaLog } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoPorCapturasDesactualizadas } from '@/lib/cotizaciones/captura-desactualizada-datos'
 import { precioAprobadoDeCotizacion, preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
@@ -21,9 +22,11 @@ import { duplicarCotizacionCompleta } from '@/lib/cotizaciones/duplicar-cotizaci
 import { terminosInicialesDeCotizacion } from '@/lib/cotizaciones/terminos-al-crear'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { createServiceClient } from '@/lib/supabase/server'
+import { EMBED_NEGOCIO_ENVIO, motivoAutorizacionDeCotizacion, motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { registrarEnvioCotizacion } from '@/lib/negocios/seguimiento-datos'
 import { esOrigenVersion } from '@/lib/negocios/seguimiento'
 import { generarServiciosDesdeTarifa, soltarServiciosDeAceptacion } from '@/lib/viaje/servicios-viaje-datos'
+import { borradorRecienCreado, VENTANA_MS } from '@/lib/cotizaciones/crear-sin-duplicar'
 
 export async function getCotizacionesNegocio(negocioId: string) {
   const { supabase, error } = await getWorkspace()
@@ -42,6 +45,16 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
+  // Un doble clic en «Nueva cotización» no crea dos borradores (COT-2026-0005 y 0006 de Trappvel,
+  // un segundo de diferencia): el borrador vacío recién creado de este negocio se reusa.
+  const { data: recientes } = await supabase
+    .from('cotizaciones')
+    .select('id, estado, created_at, valor_total')
+    .eq('negocio_id' as never, negocioId)
+    .gte('created_at', new Date(Date.now() - VENTANA_MS).toISOString())
+  const reciente = borradorRecienCreado((recientes ?? []) as never, Date.now())
+  if (reciente) return { success: true as const, id: reciente }
+
   const { data: consecutivoRaw } = await supabase.rpc('get_next_cotizacion_consecutivo', {
     p_workspace_id: workspaceId,
   })
@@ -52,7 +65,9 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
   // cotización y ahí se quedan. Si se leyeran de la línea en cada recálculo,
   // reconfigurar la línea le movería el precio —y el veredicto del margen— a
   // cotizaciones ya enviadas a clientes.
-  const { convencion, defaultPct, pisoPct, avisoPct } = await politicaMargenDelNegocio(supabase, negocioId)
+  // Las reglas de margen (brief del 2026-10-27) nacen copiadas igual, solo si la línea las declara.
+  const { politica, reglas } = await politicaYReglasDelNegocio(supabase, negocioId)
+  const { convencion, defaultPct, pisoPct, avisoPct } = politica
 
   // Los términos también nacen COPIADOS de la línea (C5, 2026-09-23), solo con la plantilla
   // que imprime el texto del cliente (Trappvel). Sin texto base, o en otro workspace, `null`
@@ -83,6 +98,9 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
     piso_margen_pct: pisoPct,
     aviso_margen_pct: avisoPct,
     ...(terminos ? { terminos_condiciones: terminos } : {}),
+    // Solo con reglas en la línea: sin ellas la fila nace igual que antes (y no nombra una
+    // columna que la migración `reglas_margen` todavía no haya creado).
+    ...(reglas ? { reglas_margen: reglasAlNacer(reglas) } : {}),
   }).select('id').single()
 
   if (dbError) return { success: false as const, error: dbError.message ?? 'Error al crear cotización' }
@@ -96,6 +114,11 @@ export async function createCotizacionDetalladaNegocio(negocioId: string) {
 export async function enviarCotizacionNegocio(cotizacionId: string, negocioId: string) {
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
+
+  // La autorización de datos del cliente frena ENVIAR (y aprobar), no armar la cotización
+  // (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea declara el gate.
+  const motivoDatos = await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId })
+  if (motivoDatos) return { success: false as const, error: motivoDatos }
 
   // Con el pantallazo de otros pasajeros en alguna línea, no sale (decisión del
   // 2026-09-22). Antes del margen: con el precio de otros pasajeros, el margen no dice nada.
@@ -217,6 +240,8 @@ export async function aceptarCotizacionNegocio(
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false as const, error: 'No autenticado' }
 
+  // La autorización de datos del cliente frena ENVIAR (y aprobar), no armar la cotización
+  // (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Solo donde la línea declara el gate.
   // Desde borrador, «Aprobar» se salta el envío (`skip_enviar`): la misma regla que
   // «Enviar». Una que ya salió (`enviada`) se aprueba igual: registra lo que el cliente
   // aceptó.
@@ -230,14 +255,25 @@ export async function aceptarCotizacionNegocio(
   })
   if (motivo) return { success: false as const, error: motivo }
 
-  // Obtener valor_total y estado de la cotización
-  const { data: cot, error: cotErr } = await supabase
+  // Obtener valor_total y estado de la cotización, con el negocio y las etapas de su línea en la
+  // MISMA ida: la autorización de datos del cliente frena aprobar, como enviar (reunión del
+  // 2026-10-22, `autorizacion-datos/envio.ts`). Si el embebido falla, la lectura de siempre y la
+  // autorización por separado.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const conNegocio = await (supabase as any)
     .from('cotizaciones')
-    .select('valor_total, estado, consecutivo')
+    .select(`valor_total, estado, consecutivo, ${EMBED_NEGOCIO_ENVIO}`)
     .eq('id', cotizacionId)
     .single()
+  const { data: cot, error: cotErr } = conNegocio.error
+    ? await supabase.from('cotizaciones').select('valor_total, estado, consecutivo').eq('id', cotizacionId).single()
+    : conNegocio
 
   if (cotErr || !cot) return { success: false as const, error: 'Cotización no encontrada' }
+  const motivoDatos = conNegocio.error
+    ? await motivoAutorizacionParaEnviar(supabase, { workspaceId, negocioId })
+    : await motivoAutorizacionDeCotizacion(supabase, { workspaceId, negocioId, negocio: (cot as { negocio_envio?: unknown }).negocio_envio })
+  if (motivoDatos) return { success: false as const, error: motivoDatos }
   const estadoCot = (cot as { estado: string }).estado
   if (estadoCot !== 'enviada' && estadoCot !== 'borrador') {
     return { success: false as const, error: 'Solo se pueden aprobar cotizaciones en borrador o enviadas' }
@@ -600,6 +636,16 @@ export async function corregirCotizacionAceptada(cotizacionId: string, negocioId
     valor_nuevo: null,
     contenido: `${cot.consecutivo ? `Cotización ${cot.consecutivo}` : 'La cotización'} volvió a borrador para corregirla${venia}.`.slice(0, 280),
   }, 'corregirCotizacionAceptada')
+  if (soltados.rastro) {
+    await registrarActividad(supabase, {
+      workspace_id: workspaceId,
+      entidad_tipo: 'negocio',
+      entidad_id: negocioId,
+      tipo: 'sistema',
+      autor_id: null,
+      contenido: soltados.rastro,
+    }, 'corregirCotizacionAceptada')
+  }
 
   revalidatePath(`/negocios/${negocioId}`)
   return { success: true as const }

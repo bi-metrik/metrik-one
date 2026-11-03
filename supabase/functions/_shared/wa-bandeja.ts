@@ -1011,14 +1011,13 @@ async function encabezadoDelEscrito(
 }
 
 /**
- * `identifyUser` no devuelve el `staff.id` (devuelve `user_id`, el de auth). Se resuelve aquí,
- * acotado al workspace: `staff.profile_id` es único en toda la base y un staff de otro
- * workspace no puede quedar como remitente de este.
+ * El `staff.id` de quien escribe. Lo resuelve `identificarRemitente` por teléfono (`user.staff_id`); si no llegó
+ * (un `WaUser` armado a mano), se busca por el perfil, acotado al workspace: `staff.profile_id` es único en toda la
+ * base y un staff de otro workspace no puede quedar como remitente de este.
  */
 export async function staffIdDelRemitente(supabase: SupabaseClient, user: WaUser): Promise<string | null> {
+  if (user.staff_id) return user.staff_id;
   if (!user.user_id) return null;
-  // `wa_identify_user` no vive en las migraciones del repo, así que no está escrito si su
-  // `user_id` es el del perfil o el del staff: se aceptan las dos, siempre dentro del workspace.
   const { data, error } = await supabase
     .from('staff')
     .select('id')

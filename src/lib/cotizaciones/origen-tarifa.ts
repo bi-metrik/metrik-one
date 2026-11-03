@@ -23,7 +23,8 @@ export interface OrigenTarifaExtraida {
   canal: 'neta' | 'comisionable' | 'publica' | 'sin_dato'
   comision_pct: number | null
   iva_incluido: boolean
-  iva_pct: number
+  /** `null` = nadie declaró IVA (ni el tarifario ni la ficha): «Calcular con IVA» no le suma nada. */
+  iva_pct: number | null
   moneda: string
   archivo: string | null
   /** El `leidaEn` de la lectura que escribió: si la casilla 1 cambia (otro pantallazo), deja de valer. */
@@ -63,7 +64,7 @@ export function leerOrigenTarifaExtraida(raw: unknown): OrigenTarifaExtraida | n
     canal,
     comision_pct: typeof raw.comision_pct === 'number' ? raw.comision_pct : null,
     iva_incluido: raw.iva_incluido === true,
-    iva_pct: typeof raw.iva_pct === 'number' ? raw.iva_pct : 19,
+    iva_pct: typeof raw.iva_pct === 'number' && raw.iva_pct > 0 ? raw.iva_pct : null,
     moneda: typeof raw.moneda === 'string' ? raw.moneda : 'COP',
     archivo: typeof raw.archivo === 'string' ? raw.archivo : null,
     leidaEn: raw.leidaEn,

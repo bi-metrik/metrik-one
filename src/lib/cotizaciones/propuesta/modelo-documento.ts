@@ -36,7 +36,7 @@
  *    llamado a apartar abre el WhatsApp de la asesora, no un link de pago.
  */
 import type { CotizacionPDFProps, FotoPDF } from '@/lib/pdf/cotizacion-props'
-import type { HotelPDF, ServicioPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
+import type { CargoEnDestinoPDF, HotelPDF, ServicioPDF, VueloPDF } from '@/lib/cotizaciones/detalle-viaje'
 import {
   capitulosDelViaje,
   ciudadDeCapitulo,
@@ -57,6 +57,7 @@ import { siglasDeTramos } from '@/lib/cotizaciones/aerolineas'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import { asiPuedesPagar, type AsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
 import type { AnticipoPropuesta } from './anticipo'
+import { destinatarioDeLaPropuesta, type ClienteDelNegocio, type Destinatario } from './destinatario'
 
 // ── Entrada ───────────────────────────────────────────────────────────────────
 
@@ -70,6 +71,16 @@ export interface ServicioDelDocumento extends ServicioPDF {
    * de ida. El modelo le pone la salida de la estadía donde cae esa fecha (`trayectos.ts`).
    */
   fechaIda?: string | null
+  /**
+   * La línea de la que sale. El día a día la usa para no pintar dos veces la misma línea: la que
+   * tiene día asignado llega aquí Y en `props.dias` (brief del 2026-10-22, punto 1).
+   */
+  itemId?: string
+  /**
+   * N7-4 / V7-3 (QA del 2026-10-29): la línea es un carro de alquiler, no un traslado. Dónde se
+   * recoge y dónde se devuelve, tal como los leyó la captura.
+   */
+  alquiler?: { recogida: string | null; devolucion: string | null; vehiculo: string | null; fechaDevolucion?: string | null }
 }
 
 /** Un viajero con nombre. `menor` = niño o infante. */
@@ -94,11 +105,18 @@ export interface EntradaModeloPropuesta {
    * (`lugaresDeOpcionales`). Sin él, la ciudad se busca en el nombre del plan.
    */
   lugaresDeOpcionales?: ({ ciudad: string | null; fecha: string | null } | null)[]
+  /** El contacto y la empresa del negocio: a quién va dirigida la propuesta (2026-10-27). */
+  cliente?: ClienteDelNegocio | null
+  /**
+   * S3 (QA del 2026-10-29): cuántos viajan (adultos, niños e infantes). Con uno, el documento le habla
+   * de usted; con varios o sin dato, de ustedes.
+   */
+  numeroDeViajeros?: number | null
 }
 
 // ── Salida ────────────────────────────────────────────────────────────────────
 
-export type ClaveTarifa = 'economica' | 'recomendada' | 'superior' | 'otra'
+export type ClaveTarifa = 'economica' | 'intermedia' | 'recomendada' | 'superior' | 'otra'
 
 /** Una línea de dinero, como la imprime «Inversión» hoy (`lineasImpresas` de la plantilla). */
 export interface LineaDoc {
@@ -107,6 +125,8 @@ export interface LineaDoc {
   unidad: string | null
   total: number
   adicionales: string[]
+  /** Reglas de margen: «Descuento · motivo: −$X» bajo la opción con descuento. `null` = nada. */
+  nota: string | null
 }
 
 export interface TarifaDoc {
@@ -121,6 +141,8 @@ export interface TarifaDoc {
   /** «Incluye IVA de $ X» con `linea_incluida`; si no, `null`. Igual que hoy. */
   notaIva: string | null
   lineas: LineaDoc[]
+  /** Reglas de margen: los descuentos sobre el total de esta tarifa, con su descripción. */
+  descuentos: { descripcion: string; valor: number }[]
   /** Las estrellas que tienen TODOS sus hoteles con categoría («4★»); `null` si varían o no hay. */
   estrellas: number | null
   hoteles: { nombre: string; estrellas: number | null; ciudad: string | null }[]
@@ -156,7 +178,7 @@ export interface ParadaDoc {
 }
 
 export interface EventoDoc {
-  tipo: 'vuelo' | 'hotel' | 'tren' | 'traslado' | 'actividad'
+  tipo: 'vuelo' | 'hotel' | 'tren' | 'traslado' | 'actividad' | 'carro'
   hora: string | null
   texto: string
   /**
@@ -167,6 +189,14 @@ export interface EventoDoc {
   porTarifa: { tarifas: number[]; texto: string; siglas?: string[] }[]
   /** Solo vuelos: `salida` el día que sale, `llegada` el día que llega (si llega al día siguiente). */
   momento?: 'salida' | 'llegada'
+  /**
+   * Con varias versiones, las ÚNICAS a las que pertenece el hecho (índices de tarifa). Ausente = es
+   * de todas. QA del #1369: el regreso de la Opción 2 (22 dic, 4 noches) salía en el día 5 como si
+   * fuera de todas, y la Recomendada regresaba el 23.
+   */
+  tarifas?: number[]
+  /** Solo vuelos: el tramo de regreso (el segundo de su vuelo). */
+  regreso?: boolean
 }
 
 export interface DiaDoc {
@@ -193,8 +223,29 @@ export interface OpcionHotelDoc {
   tarifas: number[]
   hotel: string
   estrellas: number | null
+  /**
+   * V6 / V8-3 (QA del 2026-10-29): la zona o el barrio de ESTE hotel («NoMad, Manhattan», «Centro»).
+   * La tarjeta la imprime; la ciudad del capítulo es el destino. `null` = no se sabe.
+   */
+  zona?: string | null
   habitacion: string | null
   regimen: string | null
+  /**
+   * Lo que incluye la opción además del régimen: las casillas del paquete de bloqueo, o lo escrito en
+   * el ingreso manual (D6, 2026-10-29). `null` = nada que decir.
+   */
+  incluye: string | null
+  /**
+   * Con varias versiones: lo que el paquete de ESTA marca como no incluido y otra versión sí trae
+   * («Alimentación, Traslados»). Ausente = nada que decir (prueba corta del #1352).
+   */
+  noIncluye?: string
+  /**
+   * La estancia de ESTA opción cuando no es la del capítulo (QA del #1359): con paquetes de 4 y de 5
+   * noches, la tarjeta de la de 4 copiaba las fechas y las noches de la Recomendada. Ausente = la del
+   * capítulo (`CiudadDoc.desde/hasta/noches`).
+   */
+  estancia?: { desde: string | null; hasta: string | null; noches: number | null }
   /** Ver la cabecera: viaja en el modelo, imprimirla es decisión aparte. */
   cancelacion: string | null
   /** Lo que se paga en el hotel («Tasa turística: 41,28 EUR»). */
@@ -211,11 +262,14 @@ export interface CiudadDoc {
 }
 
 export interface TrayectoDoc {
-  tipo: 'tren' | 'traslado'
+  /** `alquiler`: un carro de alquiler (N7-4), que no es un traslado. */
+  tipo: 'tren' | 'traslado' | 'alquiler'
   fecha: string | null
   hora: string | null
   descripcion: string
   tarifas: number[]
+  /** Solo `alquiler`: dónde se recoge, dónde y cuándo se devuelve, y el vehículo. */
+  alquiler?: { recogida: string | null; devolucion: string | null; fechaDevolucion: string | null; vehiculo: string | null }
 }
 
 export interface OpcionalDoc {
@@ -243,6 +297,8 @@ export interface ModeloPropuesta {
     titulo: string
     intro: string | null
     viajeros: string | null
+    /** Cuántos viajan (adultos, niños e infantes). `null` = nadie declaró la composición. */
+    numeroDeViajeros: number | null
     destino: string | null
     fechas: string | null
     duracion: string | null
@@ -250,6 +306,8 @@ export interface ModeloPropuesta {
     fotosCiudades: FotoPDF[]
     /** Decisión 1: nombres de pila que se pueden imprimir (los de menores solo con autorización). */
     nombres: string[]
+    /** A quién va dirigida, con nombre propio; `null` sin contacto (el documento habla a los pasajeros). */
+    destinatario: Destinatario | null
   }
   ruta: { origen: string | null; paradas: ParadaDoc[]; regreso: string | null }
   dias: DiaDoc[]
@@ -271,6 +329,8 @@ export interface ModeloPropuesta {
     totalEsDeLaRecomendada: boolean
     /** Sin tarifas: las líneas del documento («Inversión» de hoy). */
     lineas: LineaDoc[]
+    /** Reglas de margen: los descuentos sobre el TOTAL, con su descripción. Vacío = ninguno. */
+    descuentos: { descripcion: string; valor: number }[]
     incluye: string[]
     noIncluye: string[]
     /** Uno por tarifa (en el orden de `tarifas`), o uno solo con el total. Vacío sin plan en la línea. */
@@ -288,8 +348,20 @@ export interface ModeloPropuesta {
     /** Decisión 3: a quién le escribe el cliente para apartar. */
     asesora: { nombre: string | null; whatsapp: string | null } | null
   }
+  /**
+   * S3 (QA del 2026-10-29): a quién le habla el documento. `singular` = viaja una persona (usted);
+   * `plural` = dos o más, o no se sabe (ustedes). Nunca tú.
+   */
+  voz: VozDelDocumento
   /** Lo que no cuadra y alguien tiene que mirar antes de imprimir. */
   avisos: string[]
+}
+
+export type VozDelDocumento = 'singular' | 'plural'
+
+/** La voz por la cantidad de viajeros: una persona, usted; varias o sin dato, ustedes. */
+export function vozPorViajeros(n: number | null | undefined): VozDelDocumento {
+  return n === 1 ? 'singular' : 'plural'
 }
 
 // ── Reglas ────────────────────────────────────────────────────────────────────
@@ -310,12 +382,15 @@ export function nombreDeTarifaParaCliente(nombre: string | null | undefined, esP
 export function claveDeTarifa(nombre: string | null | undefined): ClaveTarifa {
   const k = claveTarifa(nombre)
   if (k.includes('econom')) return 'economica'
+  if (k.includes('intermedia')) return 'intermedia'
   if (k.includes('recomend')) return 'recomendada'
   if (k.includes('premium') || k.includes('superior')) return 'superior'
   return 'otra'
 }
 
-const ORDEN_CLAVE: Record<ClaveTarifa, number> = { economica: 0, recomendada: 1, superior: 2, otra: 3 }
+// La Intermedia va entre la Económica y la Recomendada: solo existe cuando la Recomendada es la más
+// cara (segunda vuelta de la COT-2026-0008, `repartoPorPrecio`), y el orden sigue al precio.
+const ORDEN_CLAVE: Record<ClaveTarifa, number> = { economica: 0, intermedia: 0.5, recomendada: 1, superior: 2, otra: 3 }
 
 /**
  * Lo mismo que `lineasImpresas` de `cotizacion-trappvel-pdf.tsx`: el total de una línea es
@@ -323,7 +398,7 @@ const ORDEN_CLAVE: Record<ClaveTarifa, number> = { economica: 0, recomendada: 1,
  * cargar @react-pdf en un módulo puro; la prueba de paridad la vigila.
  */
 export function lineasDelDocumento(
-  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number }[],
+  items: { nombre: string; precio_venta: number; descuento_porcentaje: number; cantidad: number; unidad?: string | null; adicionales?: string[]; valorAdicionales?: number; nota?: string | null }[],
 ): LineaDoc[] {
   return items.map((i) => {
     const cantidad = i.cantidad ?? 1
@@ -334,6 +409,7 @@ export function lineasDelDocumento(
       unidad: i.unidad ?? null,
       total: base + (i.valorAdicionales ?? 0),
       adicionales: i.adicionales ?? [],
+      nota: i.nota ?? null,
     }
   })
 }
@@ -430,9 +506,13 @@ function textoDeVueloDelDia(v: VueloPDF, fila: { salida: string | null; llegada:
 
 function cargoDelHotel(props: CotizacionPDFProps, h: HotelPDF): string | null {
   const cargos = props.viaje?.cargosEnDestino ?? []
+  const destino = props.viaje?.destino ?? null
+  const ciudadDelCargo = (c: CargoEnDestinoPDF) => claveDeCiudad(lugarDelHotel(c.ciudad, destino).ciudad)
   const delHotel = cargos.find((c) => c.hotel && h.hotel && c.hotel === h.hotel)
-    ?? cargos.find((c) => !c.hotel && claveDeCiudad(c.ciudad) !== '' && claveDeCiudad(c.ciudad) === claveDeCiudad(h.ciudad))
-  return delHotel ? `${delHotel.concepto}: ${delHotel.monto}` : null
+    ?? cargos.find((c) => !c.hotel && ciudadDelCargo(c) !== '' && ciudadDelCargo(c) === claveDeCiudad(h.ciudad))
+  if (!delHotel) return null
+  const { concepto, monto } = cargoParaElCliente(delHotel)
+  return `${concepto}: ${monto}`
 }
 
 /**
@@ -450,6 +530,102 @@ export function nombresParaLaPropuesta(viajeros: readonly ViajeroConNombre[], me
   return salida
 }
 
+// ── Ciudad y zona del hotel (V6, V8-3, V7-4 del QA del 2026-10-29) ─────────────
+
+/** «SAN ANDRÉS» → «San Andrés»; lo que ya viene con minúsculas queda igual. */
+export function nombrePropio(s: string | null | undefined): string | null {
+  const t = (s ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return null
+  if (t !== t.toUpperCase()) return t
+  const menores = new Set(['y', 'e', 'de', 'del', 'la', 'las', 'los', 'el', 'en'])
+  return t
+    .toLowerCase()
+    .split(' ')
+    .map((p, i) => (i > 0 && menores.has(p) ? p : p.charAt(0).toUpperCase() + p.slice(1)))
+    .join(' ')
+}
+
+/** El destino del viaje si es UN lugar («San Andrés»); con varios («Orlando y Miami»), `null`. */
+export function destinoUnico(destino: string | null | undefined): string | null {
+  const t = nombrePropio(destino)
+  if (!t) return null
+  return /\s(?:y|e)\s|,|·|\//i.test(t) ? null : t
+}
+
+const contienePalabras = (largo: string, corto: string) => {
+  const k = llano(corto).replace(/[^a-z0-9]+/g, ' ').trim()
+  return k.length >= 3 && ` ${llano(largo).replace(/[^a-z0-9]+/g, ' ')} `.includes(` ${k} `)
+}
+
+/**
+ * La ciudad y la zona de un hotel desde lo que leyó la captura. La lectura escribe la zona y la
+ * ciudad juntas, en dos órdenes:
+ *  - «zona / ciudad»: «NoMad, Manhattan / Nueva York», «Disney Springs / Orlando»,
+ *    «Willemstad / Curazao». La ciudad es la parte que nombra el destino del viaje; si ninguna lo
+ *    nombra, la última.
+ *  - «ciudad - zona» o «ciudad · zona»: «Madrid - Sol», «Santa Marta · Bello Horizonte».
+ * La coma sola no separa zona: «Providencia, San Andrés y Providencia, Colombia» es la ciudad con
+ * su departamento y su país. Antes la propuesta tomaba la primera parte: «DESTINOS: NoMad».
+ */
+export function lugarDelHotel(texto: string | null | undefined, destino?: string | null): { ciudad: string | null; zona: string | null } {
+  const t = (texto ?? '').replace(/\s+/g, ' ').trim()
+  if (!t) return { ciudad: null, zona: null }
+  const partes = t.split(/\s+\/\s+/).map((x) => x.trim()).filter(Boolean)
+  if (partes.length > 1) {
+    const nombraDestino = destino ? partes.findIndex((p) => contienePalabras(destino, ciudadDeCapitulo(p) ?? p)) : -1
+    const i = nombraDestino >= 0 ? nombraDestino : partes.length - 1
+    const zona = partes.filter((_, j) => j !== i).join(' · ')
+    return { ciudad: ciudadDeCapitulo(partes[i]), zona: zona || null }
+  }
+  const zona = /^[^,]*?\s+[-–—·|]\s+(.+)$/.exec(t.split(',')[0])?.[1]?.trim() ?? null
+  return { ciudad: ciudadDeCapitulo(t), zona }
+}
+
+/**
+ * El cargo en destino como lo lee el cliente (V7-2 del QA del 2026-10-29): «Resort fee (cargo del
+ * hotel): 35 USD por noche (210 USD por 6 noches)». Una lectura anterior no sabe qué cargo es ni si
+ * es por noche: dice «Impuestos o cargos del hotel» y el valor tal cual, sin afirmar que es un
+ * impuesto.
+ *
+ * V-17 (ronda 3): el destination fee se llama por su nombre (antes salía «Resort fee»), y la unidad
+ * puede ser también por persona o por persona y noche, con el total estimado cuando se conocen las
+ * noches y los huéspedes.
+ */
+export function cargoParaElCliente(c: CargoEnDestinoPDF): { concepto: string; monto: string } {
+  const leido = (c.conceptoLeido ?? '').replace(/\s+/g, ' ').trim()
+  const k = llano(leido)
+  const concepto = /destination/.test(k)
+    ? 'Destination fee (cargo del hotel)'
+    : /resort|facility|amenit|urban fee/.test(k)
+      ? 'Resort fee (cargo del hotel)'
+      : /city tax|tourist tax|tasa turistica|impuesto turistico|taxe de sejour|tassa di soggiorno|ecotasa/.test(k)
+        ? 'Tasa turística'
+        : /impuesto|tasa|tax/.test(k)
+          ? 'Impuestos y tasas de hospedaje'
+          : c.concepto && c.concepto !== 'Impuestos y tasas de hospedaje'
+            ? c.concepto
+            : 'Impuestos o cargos del hotel'
+  if ((!c.porNoche && !c.porPersona) || typeof c.valor !== 'number') return { concepto, monto: c.monto }
+  const cifra = (v: number) => `${v.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${c.moneda ? ` ${c.moneda}` : ''}`
+  const unidad = c.porNoche && c.porPersona ? 'por persona por noche' : c.porNoche ? 'por noche' : 'por persona'
+  // El total solo si se conoce todo lo que lo multiplica: sin las noches o sin los huéspedes, la
+  // cifra por unidad y nada más (mejor eso que un total que no es).
+  const noches = c.porNoche ? (c.noches && c.noches > 0 ? c.noches : null) : 1
+  const personas = c.porPersona ? (c.personas && c.personas > 0 ? c.personas : null) : 1
+  const veces = noches !== null && personas !== null ? noches * personas : null
+  const cuenta = [
+    c.porPersona && personas ? `${personas} ${personas === 1 ? 'persona' : 'personas'}` : null,
+    c.porNoche && noches ? `${noches} ${noches === 1 ? 'noche' : 'noches'}` : null,
+  ].filter(Boolean).join(' y ')
+  const total = veces !== null && veces > 1 ? ` (${cifra(Math.round(c.valor * veces * 100) / 100)} por ${cuenta})` : ''
+  return { concepto, monto: `${cifra(c.valor)} ${unidad}${total}` }
+}
+
+/** «Ingreso al PNN Tayrona…» → «ingreso al PNN Tayrona…», sin tocar una sigla («PNN …»). */
+function minusculaInicialPago(t: string): string {
+  return /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t
+}
+
 // ── El modelo ─────────────────────────────────────────────────────────────────
 
 export function modeloDePropuesta({
@@ -460,6 +636,8 @@ export function modeloDePropuesta({
   anticipo = null,
   asesora = null,
   lugaresDeOpcionales = [],
+  cliente = null,
+  numeroDeViajeros: viajerosDeclarados = null,
 }: EntradaModeloPropuesta): ModeloPropuesta {
   const v = props.viaje ?? null
   const inicio = v?.fechaInicio ?? null
@@ -478,6 +656,7 @@ export function modeloDePropuesta({
       precio: it.precio,
       notaIva: ivaDelBloque > 0 ? `Incluye IVA de ${pesos(ivaDelBloque)}` : null,
       lineas: lineasDelDocumento(it.items),
+      descuentos: it.descuentos ?? [],
       estrellas: null,
       hoteles: [],
       vuelos: [],
@@ -508,14 +687,26 @@ export function modeloDePropuesta({
   )
 
   // ── Hoteles por ciudad ──
-  const hotelesTodos = v?.hoteles ?? []
+  // V6 / V8-3 / V7-4 · la ciudad del hotel es la del destino; la zona va aparte (`lugarDelHotel`).
+  const hotelesTodos: HotelPDF[] = (v?.hoteles ?? []).map((h) => {
+    const lugar = lugarDelHotel(h.ciudad, v?.destino ?? null)
+    return { ...h, ciudad: lugar.ciudad, zona: h.zona ?? lugar.zona }
+  })
   const capitulos = capitulosDelViaje(hotelesTodos, principal, v?.destino ?? null).filter((c) => c.hotel || c.alternativas.length > 0)
-  const opcion = (h: HotelPDF): OpcionHotelDoc => ({
+  const noIncluidasDe = new WeakMap<OpcionHotelDoc, string[]>()
+  const opcion = (h: HotelPDF): OpcionHotelDoc => {
+    const o = opcionSinNoIncluye(h)
+    if (h.noIncluidoEnCasillas?.length) noIncluidasDe.set(o, h.noIncluidoEnCasillas)
+    return o
+  }
+  const opcionSinNoIncluye = (h: HotelPDF): OpcionHotelDoc => ({
     tarifas: porTarifas ? [...(h.tarifas ?? [])] : [],
     hotel: h.hotel ?? h.linea,
     estrellas: h.estrellas ?? null,
+    zona: h.zona ?? null,
     habitacion: h.habitacion,
     regimen: h.regimen,
+    incluye: h.incluye ?? null,
     cancelacion: h.cancelacion,
     cargoEnDestino: cargoDelHotel(props, h),
     foto: h.foto ?? null,
@@ -524,21 +715,49 @@ export function modeloDePropuesta({
     o.tarifas.length === 0 ? -1 : Math.min(...o.tarifas.map((t) => ORDEN_CLAVE[bloques[t]?.clave ?? 'otra'] * 100 + t))
   const hoteles: CiudadDoc[] = capitulos.map((c) => {
     const ancla = c.hotel ?? c.alternativas[0]
+    const desde = fechaIso(ancla?.checkIn, inicio)
+    const hasta = fechaIso(ancla?.checkOut, inicio)
+    const noches = ancla?.noches ?? null
+    // QA del #1359 · cada versión con su estancia: una alternativa con otras fechas u otras noches
+    // (un paquete de 4 noches junto a la Recomendada de 5) las lleva en su tarjeta.
+    const conEstancia = (h: HotelPDF): OpcionHotelDoc => {
+      const o = opcion(h)
+      const e = { desde: fechaIso(h.checkIn, inicio), hasta: fechaIso(h.checkOut, inicio), noches: h.noches ?? null }
+      if (h !== ancla && (e.desde !== desde || e.hasta !== hasta || e.noches !== noches)) o.estancia = e
+      return o
+    }
     return {
       ciudad: c.ciudad,
-      desde: fechaIso(ancla?.checkIn, inicio),
-      hasta: fechaIso(ancla?.checkOut, inicio),
-      noches: ancla?.noches ?? null,
-      opciones: [c.hotel, ...c.alternativas].filter((h): h is HotelPDF => h !== null).map(opcion).sort((a, b) => ordenDeOpcion(a) - ordenDeOpcion(b)),
+      desde,
+      hasta,
+      noches,
+      opciones: [c.hotel, ...c.alternativas].filter((h): h is HotelPDF => h !== null).map(conEstancia).sort((a, b) => ordenDeOpcion(a) - ordenDeOpcion(b)),
     }
   })
+  // Un hotel sin ciudad (el paquete de bloqueo solo dice la zona) duerme en el destino del viaje,
+  // si el viaje es a un solo lugar. Antes la zona hacía de destino: «DESTINOS: Centro (4N)».
+  const unico = destinoUnico(v?.destino)
+  if (unico) for (const c of hoteles) if (!c.ciudad) c.ciudad = unico
   // En el orden del viaje, no en el de las líneas: la COT-2026-0026 real decía «Madrid ·
   // Ámsterdam · Barcelona · París» porque Ámsterdam se cargó segundo. Sin fecha, al final.
   hoteles.sort((a, b) => (a.desde ?? '9999').localeCompare(b.desde ?? '9999'))
+  // Prueba corta del #1352 · con varias versiones, cada tarjeta dice lo que a su paquete le falta y
+  // otra versión sí trae: «Incluido en todas» ya no lo afirma de todas.
+  if (porTarifas) {
+    const todas = hoteles.flatMap((c) => c.opciones)
+    for (const o of todas) {
+      const faltan = (noIncluidasDe.get(o) ?? []).filter((x) =>
+        todas.some((otra) => otra !== o && (otra.incluye ?? '').split(',').some((y) => llano(y).trim() === llano(x).trim())))
+      if (faltan.length > 0) o.noIncluye = faltan.join(', ')
+    }
+  }
 
   // El trayecto de vuelta sin fecha propia sale el día que termina la estadía donde cae el de ida
   // («Amsterdam Centraal - hotel» el 21 y «hotel - aeropuerto Schiphol» el 23).
   const serviciosConFecha: ServicioDelDocumento[] = servicios.map((s) => {
+    // La fecha de devolución del carro solo sale si la trae la lectura (Vera, 2026-10-29): deducirla
+    // del primer vuelo y mostrarla al cliente sería afirmar algo que nadie leyó.
+    if (s.alquiler) return s
     if (s.fecha || !s.fechaIda) return s
     const ida = fechaIso(s.fechaIda, inicio)
     const estadia = ida ? hoteles.find((h) => h.desde && h.hasta && ida >= h.desde && ida < h.hasta) : undefined
@@ -547,13 +766,16 @@ export function modeloDePropuesta({
 
   // ── Trenes y traslados ──
   const filasTrayecto: TrayectoDoc[] = serviciosConFecha
-    .filter((s) => s.tipo === 'traslado')
+    .filter((s) => s.tipo === 'traslado' || s.tipo === 'tren')
     .map((s) => ({
-      tipo: esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
+      tipo: s.alquiler ? ('alquiler' as const) : s.tipo === 'tren' || esTren(s.descripcion) ? ('tren' as const) : ('traslado' as const),
       fecha: fechaIso(s.fecha, inicio) ?? s.fecha,
       hora: s.hora ?? null,
       descripcion: s.descripcion,
       tarifas: porTarifas ? [...(s.tarifas ?? [])] : [],
+      ...(s.alquiler
+        ? { alquiler: { recogida: s.alquiler.recogida, devolucion: s.alquiler.devolucion, fechaDevolucion: s.alquiler.fechaDevolucion ?? null, vehiculo: s.alquiler.vehiculo } }
+        : {}),
     }))
     .sort((a, b) => (a.fecha ?? '').localeCompare(b.fecha ?? '') || (a.hora ?? '').localeCompare(b.hora ?? ''))
   const trayectos = {
@@ -635,16 +857,28 @@ export function modeloDePropuesta({
     }
   })
 
+  // V7-2 (QA del 2026-10-29): qué cargo es y, con varias versiones, en cuáles aplica. Antes decía
+  // «Impuestos y tasas de hospedaje (Orlando)» a secas, aunque solo lo pagaba la Económica.
+  const versionesDe = (idx: number[] | undefined): string => {
+    if (!porTarifas || !idx || idx.length === 0 || idx.length >= bloques.length) return ''
+    const nombres = [...new Set(idx)].sort((a, b) => ORDEN_CLAVE[bloques[a]?.clave ?? 'otra'] - ORDEN_CLAVE[bloques[b]?.clave ?? 'otra']).map((i) => bloques[i]?.nombre).filter((x): x is string => !!x)
+    if (nombres.length === 0) return ''
+    return nombres.length === 1 ? `, solo en la versión ${nombres[0]}` : `, solo en las versiones ${yLista(nombres)}`
+  }
   const noIncluye = [
     ...new Set((v?.cargosEnDestino ?? []).map((c) => {
-      const ciudad = ciudadDeCapitulo(c.ciudad)
-      return `${c.concepto}${ciudad ? ` (${ciudad})` : ''}, que se pagan en destino`
+      const ciudad = lugarDelHotel(c.ciudad, v?.destino ?? null).ciudad
+      const { concepto } = cargoParaElCliente(c)
+      return `${concepto}${ciudad ? ` en ${ciudad}` : ''}: se paga en el hotel${versionesDe(c.tarifas)}`
     })),
+    // V-13 (QA del 2026-10-29, ronda 3): lo que se paga allá y no es del hotel (el ingreso al PNN
+    // Tayrona). Tal cual lo leyó la captura, con su monto si lo traía.
+    ...new Set((v?.pagosEnDestino ?? []).map((p) => `Se paga en destino: ${minusculaInicialPago(p.texto)}${versionesDe(p.tarifas)}`)),
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]
 
   // ── Día a día ──
-  const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios: serviciosConFecha, porTarifas, principal })
+  const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios: serviciosConFecha, porTarifas, principal, versiones: bloques.length })
   repartirOpcionales(dias, opcionales)
 
   // ── Portada y lo formal ──
@@ -659,10 +893,13 @@ export function modeloDePropuesta({
   const duracion = nochesDeHotel > 0 && diasDelViaje > 0
     ? `${diasDelViaje} ${diasDelViaje === 1 ? 'día' : 'días'} · ${nochesDeHotel} ${nochesDeHotel === 1 ? 'noche' : 'noches'}`
     : v?.duracion ?? null
+  // S3 (QA del 2026-10-29): con un solo viajero el documento le habla a él (usted), no al grupo.
+  const numeroDeViajeros = typeof viajerosDeclarados === 'number' && viajerosDeclarados > 0 ? viajerosDeclarados : null
+  const voz = vozPorViajeros(numeroDeViajeros)
   const introGuardado = v?.intro?.trim() || null
-  const intro = introGuardado && textoConLaVozDelDocumento(introGuardado, nochesDeHotel)
+  const intro = introGuardado && textoConLaVozDelDocumento(introGuardado, nochesDeHotel, voz)
     ? introGuardado
-    : introDeterminista({ paradas, trenes: filasTrayecto.filter((t) => t.tipo === 'tren').length, hoteles, dias })
+    : introDeterminista({ paradas, trenes: filasTrayecto.filter((t) => t.tipo === 'tren').length, hoteles, dias, voz })
 
   return {
     portada: {
@@ -670,12 +907,14 @@ export function modeloDePropuesta({
       titulo,
       intro,
       viajeros: v?.viajeros ?? null,
+      numeroDeViajeros,
       destino: v?.destino ?? null,
       fechas: v?.fechas ?? null,
       duracion,
       foto: v?.foto ?? null,
       fotosCiudades: v?.fotosCiudades ?? [],
       nombres: nombresParaLaPropuesta(viajeros, menoresAutorizados),
+      destinatario: destinatarioDeLaPropuesta(cliente),
     },
     ruta,
     dias,
@@ -692,7 +931,13 @@ export function modeloDePropuesta({
       notaIva,
       totalEsDeLaRecomendada,
       lineas,
-      incluye: porTarifas ? incluyeDeTodas(v?.incluye ?? [], { hoteles, vuelos, tarifas: bloques.length, noches: nochesDeHotel }) : v?.incluye ?? [],
+      descuentos: props.descuentosTotal ?? [],
+      incluye: porTarifas
+        ? incluyeDeTodas(v?.incluye ?? [], {
+          hoteles, vuelos, tarifas: bloques.length, noches: nochesDeHotel,
+          nochesPorVersion: bloques.map((_, i) => hotelesTodos.filter((h) => deLaTarifa(h, i)).reduce((a, h) => a + (h.noches ?? 0), 0)),
+        })
+        : v?.incluye ?? [],
       noIncluye,
       planes,
       anticipo: anticipo && anticipo.monto > 0 ? anticipo : null,
@@ -702,9 +947,10 @@ export function modeloDePropuesta({
       pie,
       firma,
       creditos: creditosDeFotos([v?.foto, ...(v?.fotosCiudades ?? [])]),
-      antesDeViajar: (v?.antesDeViajar ?? []).map(enLaVozDelDocumento),
+      antesDeViajar: (v?.antesDeViajar ?? []).map((t) => enLaVozDelDocumento(t, voz)),
       asesora,
     },
+    voz,
     avisos,
   }
 }
@@ -761,11 +1007,17 @@ export function descripcionDeOpcional(descripcion: string | null | undefined): s
  * viaje por Europa! … 13 noches» (usted, exclamación y una noche de más). Un texto que no pasa no se
  * imprime: sale el determinista (`introDeterminista`).
  */
-export function textoConLaVozDelDocumento(texto: string, nochesDeHotel: number): boolean {
+export function textoConLaVozDelDocumento(texto: string, nochesDeHotel: number, voz: VozDelDocumento = 'plural'): boolean {
   if (/[¡!]/.test(texto)) return false
-  if (/\busted\b/i.test(texto)) return false
-  // Imperativos de usted que los modelos repiten al abrir.
-  if (/\b(prep[aá]rese|disfrute|descubra|recuerde|tenga|llegue|conozca|rel[aá]jese|d[eé]jese|sum[eé]rjase|viva)\b/i.test(texto)) return false
+  if (voz === 'singular') {
+    // S3 · un viajero: el texto le habla a él. «Ustedes» o un imperativo plural no van.
+    if (/\bustedes\b/i.test(texto)) return false
+    if (/\b(prep[aá]rense|disfruten|descubran|recuerden|tengan|lleguen|conozcan|rel[aá]jense|d[eé]jense|vivan)\b/i.test(texto)) return false
+  } else {
+    if (/\busted\b/i.test(texto)) return false
+    // Imperativos de usted que los modelos repiten al abrir.
+    if (/\b(prep[aá]rese|disfrute|descubra|recuerde|tenga|llegue|conozca|rel[aá]jese|d[eé]jese|sum[eé]rjase|viva)\b/i.test(texto)) return false
+  }
   const noches = /(\d+)\s+noches?\b/i.exec(texto)
   if (noches && nochesDeHotel > 0 && Number(noches[1]) !== nochesDeHotel) return false
   return true
@@ -784,8 +1036,21 @@ const IMPERATIVOS_DE_USTED: [string, string][] = [
  * documentos», «Llegue al aeropuerto…», «le sugerimos empacar ropa abrigada». Solo cambia lo que
  * conoce (una lista cerrada de imperativos y «le sugerimos»); el resto queda como se revisó.
  */
-export function enLaVozDelDocumento(texto: string): string {
+export function enLaVozDelDocumento(texto: string, voz: VozDelDocumento = 'plural'): string {
   let t = texto.replace(/¡/g, '').replace(/!/g, '.').replace(/\.{2,}/g, '.')
+  if (voz === 'singular') {
+    // S3 · un solo viajero: de ustedes a usted, con la misma lista cerrada al revés.
+    for (const [uno, varios] of IMPERATIVOS_DE_USTED) {
+      t = t.replace(new RegExp(`(^|[^\\p{L}])(${varios})(?![\\p{L}])`, 'giu'), (_m, antes: string, palabra: string) =>
+        `${antes}${palabra[0] === palabra[0].toUpperCase() ? uno[0].toUpperCase() + uno.slice(1) : uno}`,
+      )
+    }
+    return t
+      .replace(/\b([Ll])es (sugerimos|recomendamos|pedimos|aconsejamos|recordamos)\b/g, '$1e $2')
+      .replace(/\bustedes\b/g, 'usted')
+      .replace(/\bUstedes\b/g, 'Usted')
+      .trim()
+  }
   for (const [uno, varios] of IMPERATIVOS_DE_USTED) {
     t = t.replace(new RegExp(`(^|[^\\p{L}])(${uno})(?![\\p{L}])`, 'giu'), (_m, antes: string, palabra: string) =>
       `${antes}${palabra[0] === palabra[0].toUpperCase() ? varios[0].toUpperCase() + varios.slice(1) : varios}`,
@@ -798,22 +1063,35 @@ export function enLaVozDelDocumento(texto: string): string {
     .trim()
 }
 
+/**
+ * ¿El régimen es SOLO alojamiento con desayuno? (D6 de Mauricio, 2026-10-29.) «Todos los hoteles
+ * incluyen el desayuno» se decía de «(FULL) Desayuno, Almuer.» porque nombra el desayuno: el cliente
+ * leía un plan que no es el suyo. Un plan con almuerzo, cena, pensión o todo incluido no se resume así.
+ */
+export function regimenSoloDesayuno(regimen: string | null | undefined): boolean {
+  const r = llano(regimen ?? '')
+  return /desayuno/.test(r) && !/(almuer|cena|full|todo incluido|pension|all inclusive|media pension|completa)/.test(r)
+}
+
 /** «A», «A y B», «A, B y C». */
 function yLista(xs: string[]): string {
   return xs.length <= 1 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`
 }
 
 /** El intro armado solo con datos, en la voz del documento. `null` sin paradas. */
-export function introDeterminista(p: { paradas: ParadaDoc[]; trenes: number; hoteles: CiudadDoc[]; dias: DiaDoc[] }): string | null {
+export function introDeterminista(p: { paradas: ParadaDoc[]; trenes: number; hoteles: CiudadDoc[]; dias: DiaDoc[]; voz?: VozDelDocumento }): string | null {
   if (p.paradas.length === 0) return null
+  const uno = p.voz === 'singular'
+  // Dos estadías seguidas en la misma ciudad (dos hoteles en Orlando) se nombran una vez.
+  const nombres = p.paradas.map((x) => x.ciudad).filter((c, i, xs) => i === 0 || claveDeCiudad(c) !== claveDeCiudad(xs[i - 1]))
   const noches = p.paradas.reduce((a, x) => a + (x.noches ?? 0), 0)
-  const ciudades = yLista(p.paradas.map((x) => x.ciudad))
+  const ciudades = yLista(nombres)
   const abre = noches > 0 ? `${noches} ${noches === 1 ? 'noche' : 'noches'} en ${ciudades}` : `Un viaje por ${ciudades}`
-  const tren = p.trenes > 0 && p.paradas.length > 1 ? ', y entre ciudades van en tren, de centro a centro' : ''
+  const tren = p.trenes > 0 && p.paradas.length > 1 ? `, y entre ciudades ${uno ? 'va' : 'van'} en tren, de centro a centro` : ''
   const frases = [`${abre}${tren}.`]
   const regimenes = p.hoteles.flatMap((c) => c.opciones.map((o) => o.regimen ?? ''))
-  if (regimenes.length > 0 && regimenes.every((r) => /desayuno/i.test(r))) frases.push('Todos los hoteles incluyen el desayuno.')
-  if (p.dias.some((d) => d.libre)) frases.push('Los días libres quedan abiertos para que ustedes decidan.')
+  if (regimenes.length > 0 && regimenes.every(regimenSoloDesayuno)) frases.push('Todos los hoteles incluyen el desayuno.')
+  if (p.dias.some((d) => d.libre)) frases.push(uno ? 'Los días libres quedan abiertos para que usted decida.' : 'Los días libres quedan abiertos para que ustedes decidan.')
   return frases.join(' ')
 }
 
@@ -826,19 +1104,68 @@ export function introDeterminista(p: { paradas: ParadaDoc[]; trenes: number; hot
  */
 export function incluyeDeTodas(
   incluye: string[],
-  m: { hoteles: CiudadDoc[]; vuelos: FilaVueloDoc[]; tarifas: number; noches: number },
+  m: {
+    hoteles: CiudadDoc[]
+    vuelos: FilaVueloDoc[]
+    tarifas: number
+    noches: number
+    /**
+     * Las noches de hotel de cada versión (prueba corta del #1352). Con paquetes sin ciudad no hay
+     * paradas y `noches` daba 0: el renglón decía «Hoteles» sin noches. Si todas coinciden manda esta
+     * cifra; si no, el rango.
+     */
+    nochesPorVersion?: number[]
+  },
 ): string[] {
   const deUnaVersion = (tarifas: number[]) => tarifas.length > 0 && tarifas.length < m.tarifas
   const nombres = (xs: (string | null)[]) =>
     [...new Set(xs.filter((x): x is string => !!x).flatMap((x) => [llano(x).trim(), llano(x.replace(/^hotel\s+/i, '')).trim()]))].filter((x) => x.length >= 3)
-  const hoteles = nombres(m.hoteles.flatMap((c) => c.opciones.filter((o) => deUnaVersion(o.tarifas)).map((o) => o.hotel)))
-  const aerolineas = nombres(m.vuelos.filter((f) => deUnaVersion(f.tarifas)).map((f) => f.aerolinea))
+  // Prueba corta del #1352 · el mismo hotel o la misma aerolínea en TODAS las versiones (dos filas
+  // iguales, una por versión) no «cambia según la versión»: se cuenta la unión de sus versiones.
+  const cubre = (xs: { nombre: string | null; tarifas: number[] }[]) => {
+    const por = new Map<string, Set<number>>()
+    for (const x of xs) {
+      if (!x.nombre) continue
+      const k = llano(x.nombre).trim()
+      por.set(k, new Set([...(por.get(k) ?? []), ...x.tarifas]))
+    }
+    return (x: { nombre: string | null }) => !x.nombre || (por.get(llano(x.nombre).trim())?.size ?? 0) < m.tarifas
+  }
+  const opcionesHotel = m.hoteles.flatMap((c) => c.opciones).map((o) => ({ nombre: o.hotel, tarifas: o.tarifas }))
+  const filasVuelo = m.vuelos.map((f) => ({ nombre: f.aerolinea, tarifas: f.tarifas }))
+  const hotelCambia = cubre(opcionesHotel)
+  const aerolineaCambia = cubre(filasVuelo)
+  const hoteles = nombres(opcionesHotel.filter((o) => deUnaVersion(o.tarifas) && hotelCambia(o)).map((o) => o.nombre))
+  const aerolineas = nombres(filasVuelo.filter((f) => deUnaVersion(f.tarifas) && aerolineaCambia(f)).map((f) => f.nombre))
   const nombra = (linea: string, lista: string[]) => {
     const t = ` ${llano(linea).replace(/[^a-z0-9]+/g, ' ')} `
     return lista.some((n) => t.includes(` ${n.replace(/[^a-z0-9]+/g, ' ').trim()} `))
   }
-  const desayuno = m.hoteles.length > 0 && m.hoteles.every((c) => c.opciones.every((o) => /desayuno/i.test(o.regimen ?? '')))
-  const lineaHotel = `${m.noches > 0 ? `${m.noches} ${m.noches === 1 ? 'noche' : 'noches'} de hotel` : 'Hoteles'}${desayuno ? ' con desayuno' : ''}; el hotel cambia según la versión`
+  const desayuno = m.hoteles.length > 0 && m.hoteles.every((c) => c.opciones.every((o) => regimenSoloDesayuno(o.regimen ?? '')))
+  const porVersion = (m.nochesPorVersion ?? []).length === m.tarifas && (m.nochesPorVersion ?? []).every((n) => n > 0) ? m.nochesPorVersion! : []
+  const minimo = porVersion.length > 0 ? Math.min(...porVersion) : 0
+  const maximo = porVersion.length > 0 ? Math.max(...porVersion) : 0
+  const nochesN = (n: number) => `${n} ${n === 1 ? 'noche' : 'noches'}`
+  const cuantasNoches = porVersion.length > 0
+    ? minimo === maximo ? `${nochesN(minimo)} de hotel` : `De ${minimo} a ${nochesN(maximo)} de hotel`
+    : m.noches > 0 ? `${nochesN(m.noches)} de hotel` : 'Hoteles'
+  const queCambia = porVersion.length > 0 && minimo !== maximo ? 'el hotel y las noches cambian según la versión' : 'el hotel cambia según la versión'
+  const lineaHotel = `${cuantasNoches}${desayuno ? ' con desayuno' : ''}; ${queCambia}`
+  // Prueba corta del #1352 · «Incluido en todas» es la INTERSECCIÓN: lo que una opción de hotel dice
+  // que incluye (las casillas del paquete) solo va aquí si lo incluyen todas las versiones. Lo que
+  // va en algunas ya lo dice la tarjeta de su hotel.
+  const deLaOpcion = (o: OpcionHotelDoc) => (o.incluye ?? '').split(',').map((x) => llano(x).trim()).filter(Boolean)
+  const opciones = m.hoteles.flatMap((c) => c.opciones)
+  const dichoPorAlguna = new Set(opciones.flatMap(deLaOpcion))
+  const enTodasLasVersiones = (linea: string) => {
+    const k = llano(linea).trim()
+    if (!dichoPorAlguna.has(k)) return true
+    for (let i = 0; i < m.tarifas; i++) {
+      const suyas = opciones.filter((o) => o.tarifas.length === 0 || o.tarifas.includes(i))
+      if (!suyas.some((o) => deLaOpcion(o).includes(k))) return false
+    }
+    return true
+  }
   const lineaVuelo = 'Tiquetes aéreos de ida y regreso; la aerolínea cambia según la versión'
   const salida: string[] = []
   for (const linea of incluye) {
@@ -846,9 +1173,16 @@ export function incluyeDeTodas(
       if (!salida.includes(lineaHotel)) salida.push(lineaHotel)
     } else if (nombra(linea, aerolineas)) {
       if (!salida.includes(lineaVuelo)) salida.push(lineaVuelo)
-    } else salida.push(linea)
+    } else if (enTodasLasVersiones(linea)) salida.push(linea)
   }
   return salida
+}
+
+/** «Walt Disney World · 4 días · Orlando» → 4. Solo de 2 a 14: más es un dato mal leído. */
+function diasDeLaActividad(descripcion: string): number | null {
+  const m = /(?:^|·)\s*(\d{1,2})\s*d[ií]as?\b/i.exec(descripcion) ?? /\bde\s+(\d{1,2})\s+d[ií]as\b/i.exec(descripcion)
+  const n = m ? Number(m[1]) : 0
+  return n >= 2 && n <= 14 ? n : null
 }
 
 /** Más días que esto es un dato mal leído, no un viaje. */
@@ -863,9 +1197,19 @@ function diaADia(p: {
   servicios: ServicioDelDocumento[]
   porTarifas: boolean
   principal: number | null
+  /** Cuántas versiones tiene el documento. */
+  versiones: number
 }): DiaDoc[] {
   const inicio = iso(leerFecha(p.inicio))
   if (!inicio) return []
+  // Las versiones de un hecho, si no es de todas: el día a día dice de cuál es.
+  const soloDe = (xs: (number[] | undefined)[]): { tarifas?: number[] } => {
+    if (!p.porTarifas) return {}
+    const todas = [...new Set(xs.flatMap((x) => x ?? []))].sort((a, b) => a - b)
+    // Un hecho sin versiones leídas (`[]`) es de todas, como en el resto del documento.
+    if (xs.some((x) => !x || x.length === 0) || todas.length === 0 || todas.length >= p.versiones) return {}
+    return { tarifas: todas }
+  }
   const eventos = new Map<string, EventoDoc[]>()
   const poner = (fecha: string | null, e: EventoDoc) => {
     if (!fecha) return
@@ -887,7 +1231,10 @@ function diaADia(p: {
       return { ...pt, siglas: t ? siglasDeTramos(t.vu.aerolinea ?? t.vu.linea, t.f.numero) : [] }
     })
     const conCajas = porTarifa.length > 1
+    const deVersiones = soloDe(grupo.map((t) => t.tarifas))
     poner(primero.fecha, {
+      ...deVersiones,
+      ...(primero.sentido === 1 ? { regreso: true } : {}),
       tipo: 'vuelo',
       // Con una caja por versión, la hora va en cada caja: cada versión sale a una hora distinta.
       hora: conCajas ? null : primero.f.salida,
@@ -900,6 +1247,7 @@ function diaADia(p: {
       const alLlegar = p.porTarifas ? agruparPorTexto(llegan, (t) => `llega ${t.f.llegada}`) : []
       const cajas = alLlegar.length > 1
       poner(sumarDias(primero.fecha, 1), {
+        ...soloDe(llegan.map((t) => t.tarifas)),
         tipo: 'vuelo',
         hora: cajas ? null : (llegan[0].f.llegada ?? null),
         texto: `Llegada a ${primero.f.hasta ?? '?'}`,
@@ -922,22 +1270,54 @@ function diaADia(p: {
   }
 
   // Traslados, trenes y actividades con fecha.
+  const yaEnServicios = new Set<string>()
+  // Hasta dónde llega el viaje antes de los servicios: una actividad de varios días no lo alarga.
+  const ultimoDia = [...eventos.keys(), ...p.capitulos.map((c) => c.hasta).filter((f): f is string => f !== null)].sort().pop() ?? null
   for (const s of p.servicios) {
-    const tipo = s.tipo === 'actividad' ? 'actividad' : esTren(s.descripcion) ? 'tren' : 'traslado'
-    poner(fechaIso(s.fecha, p.inicio), { tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
+    if (s.itemId && fechaIso(s.fecha, p.inicio)) yaEnServicios.add(s.itemId)
+    // N7-4 / V7-3 · el carro de alquiler: el día que se recoge y el día que se devuelve.
+    const deVersiones = soloDe([s.tarifas])
+    if (s.alquiler) {
+      const vehiculo = s.alquiler.vehiculo ? ` · ${s.alquiler.vehiculo}` : ''
+      poner(fechaIso(s.fecha, p.inicio), { ...deVersiones, tipo: 'carro', hora: s.hora ?? null, texto: `Recogida del carro de alquiler${s.alquiler.recogida ? ` en ${s.alquiler.recogida}` : ''}${vehiculo}`, porTarifa: [] })
+      if (s.alquiler.fechaDevolucion) {
+        poner(s.alquiler.fechaDevolucion, { ...deVersiones, tipo: 'carro', hora: null, texto: `Devolución del carro${s.alquiler.devolucion ? ` en ${s.alquiler.devolucion}` : ''}`, porTarifa: [] })
+      }
+      continue
+    }
+    const tipo = s.tipo === 'actividad' ? 'actividad' : s.tipo === 'tren' || esTren(s.descripcion) ? 'tren' : 'traslado'
+    const fecha = fechaIso(s.fecha, p.inicio)
+    poner(fecha, { ...deVersiones, tipo, hora: s.hora ?? null, texto: s.descripcion, porTarifa: [] })
+    // V7-5 (QA del 2026-10-29) · una actividad de varios días (Disney, 4 días) ocupa los días que
+    // siguen: antes solo salía el primero y los demás decían «Día libre», aunque estaban pagados.
+    const dias = tipo === 'actividad' && fecha ? diasDeLaActividad(s.descripcion) : null
+    if (dias && fecha) {
+      const nombre = s.descripcion.split(' · ')[0].trim()
+      for (let k = 2; k <= dias; k++) {
+        const otro = sumarDias(fecha, k - 1)
+        if (ultimoDia && otro >= ultimoDia) break
+        poner(otro, { ...deVersiones, tipo: 'actividad', hora: null, texto: `${nombre} (día ${k} de ${dias})`, porTarifa: [] })
+      }
+    }
   }
 
-  // Los días que alguien asignó (sin tarifas: así llegan hoy en `props.dias`).
+  // Los días que alguien asignó (sin tarifas: así llegan hoy en `props.dias`). La actividad o el
+  // traslado con día asignado YA salió arriba como servicio (el día manda sobre la fecha leída,
+  // `servicios-del-documento.ts`): pintarlo otra vez daba la actividad dos veces y «2 visitas» en
+  // la portada con un solo servicio (brief del 2026-10-22, punto 1). Se reconoce por la línea.
   for (const d of p.props.dias ?? []) {
-    const fecha = iso(fechaDelDia(p.inicio, d.dia))
-    for (const it of d.items) poner(fecha, { tipo: 'actividad', hora: null, texto: it.nombre, porTarifa: [] })
+    const fecha = iso(fechaDelDia(p.props.viaje?.inicioDeLosDias ?? p.inicio, d.dia))
+    for (const it of d.items) {
+      if (it.id && yaEnServicios.has(it.id)) continue
+      poner(fecha, { tipo: 'actividad', hora: null, texto: it.nombre, porTarifa: [] })
+    }
   }
 
   const fechas = [...eventos.keys(), ...p.capitulos.map((c) => c.hasta).filter((f): f is string => f !== null)]
   const fin = fechas.reduce((a, f) => (diaNumero(f) > diaNumero(a) ? f : a), inicio)
   // Tope: una fecha mal leída (el año de otro viaje) no puede pintar meses de días vacíos.
   const total = Math.min(diaNumero(fin) - diaNumero(inicio) + 1, MAX_DIAS)
-  const orden: Record<EventoDoc['tipo'], number> = { vuelo: 1, traslado: 1, tren: 1, hotel: 3, actividad: 4 }
+  const orden: Record<EventoDoc['tipo'], number> = { vuelo: 1, traslado: 1, tren: 1, carro: 2, hotel: 3, actividad: 4 }
   // El traslado que sale del hotel (al aeropuerto, a la estación) va antes que el vuelo o el tren
   // de ese día; el que llega al hotel, después. La COT-2026-0026 real ponía «Estación Barcelona
   // Sants → hotel» antes del AVE que los llevaba a Barcelona.

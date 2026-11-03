@@ -42,11 +42,12 @@ import {
   resultadosLoteValida,
   type LoteVista,
 } from '@/lib/actions/valida-lotes';
-import { TOPE_FILAS_LOTE } from '@/lib/valida/lote';
+import { TOPE_FILAS_LOTE, errorTamanoArchivoLote, type AvisoTiposDocumento } from '@/lib/valida/lote';
 import { esMotivoCorte, type MotivoCorte, type SaldoBolsa } from '@/lib/valida/corte-bolsa';
 import { ActivaTuPlan, SaldoConsultas } from './activa-tu-plan';
 import { FranjaPrueba, type PruebaEnPantalla } from './franja-prueba';
 import { formatFecha } from '@/lib/dates/bogota'
+import { mensajeErrorValida } from '@/lib/valida/mensajes-error'
 import { PALETA } from '@/lib/marca/paleta'
 
 type TabKey = 'puntual' | 'masiva' | 'historial';
@@ -402,6 +403,9 @@ function ConsultaPuntualForm({ onPersisted, modoVitrina = false, onCorte, onCons
                   <option value="CC">CC</option>
                   <option value="CE">CE</option>
                   <option value="PAS">Pasaporte</option>
+                  <option value="TI">TI</option>
+                  <option value="PPT">PPT</option>
+                  <option value="RC">Registro civil</option>
                 </>
               ) : (
                 <option value="NIT">NIT</option>
@@ -735,6 +739,7 @@ type EstadoCargue =
   | { fase: 'inicial' }
   | { fase: 'preparando' }
   | { fase: 'confirmar_saldo'; alcanzan: number; consultables: number; total: number }
+  | { fase: 'confirmar_tipos'; aviso: AvisoTiposDocumento; total: number }
   | { fase: 'lote'; lote: LoteVista }
   | { fase: 'error'; mensaje: string };
 
@@ -769,6 +774,9 @@ function ConsultaMasivaForm({
   const [accion, setAccion] = useState(false);
   // Lo ya descontado del contador de la bolsa por este lote, para no descontarlo dos veces.
   const descontadas = useRef<Record<string, number>>({});
+  // La persona ya aceptó que las filas con un tipo de documento no reconocido no se consulten: el
+  // paso de la bolsa, si viene después, no vuelve a preguntarlo.
+  const tiposAceptados = useRef(false);
 
   const loteId = estado.fase === 'lote' ? estado.lote.id : null;
   const activo = estado.fase === 'lote' && (estado.lote.estado === 'en_cola' || estado.lote.estado === 'procesando' || estado.lote.estado === 'preparando');
@@ -825,8 +833,20 @@ function ConsultaMasivaForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loteId, activo]);
 
+  // El peso se mira en el navegador, ANTES de subir: Vercel corta en 4,5 MB y la persona veía un error
+  // sin explicación. El servidor lo vuelve a mirar (`crearLoteValida`).
+  function elegirArchivo(f: File | null) {
+    const error = f ? errorTamanoArchivoLote(f.size) : null;
+    if (error) {
+      setArchivo(null);
+      setEstado({ fase: 'error', mensaje: error });
+      return;
+    }
+    setArchivo(f);
+  }
+
   const drop = useFileDrop({
-    onFiles: f => setArchivo(f[0] ?? null),
+    onFiles: f => elegirArchivo(f[0] ?? null),
     disabled: estado.fase === 'preparando' || activo,
   });
 
@@ -850,6 +870,11 @@ function ConsultaMasivaForm({
       setEstado({ fase: 'error', mensaje: 'Selecciona un archivo XLSX' });
       return;
     }
+    const errorTamano = errorTamanoArchivoLote(archivo.size);
+    if (errorTamano) {
+      setEstado({ fase: 'error', mensaje: errorTamano });
+      return;
+    }
     setEstado({ fase: 'preparando' });
     const fd = new FormData();
     fd.append('archivo', archivo);
@@ -857,6 +882,7 @@ function ConsultaMasivaForm({
       negocio_id_lote: negocioLote?.id ?? null,
       titulo: titulo.trim() || null,
       limite,
+      aceptarTiposDocumento: tiposAceptados.current,
     });
     if (r.ok) {
       descontadas.current[r.lote.id] = 0;
@@ -868,6 +894,10 @@ function ConsultaMasivaForm({
       setEstado({ fase: 'inicial' });
       return;
     }
+    if ('aviso' in r) {
+      setEstado({ fase: 'confirmar_tipos', aviso: r.aviso, total: r.total });
+      return;
+    }
     if ('alcanzan' in r) {
       setEstado({ fase: 'confirmar_saldo', alcanzan: r.alcanzan, consultables: r.consultables, total: r.total });
       return;
@@ -877,6 +907,7 @@ function ConsultaMasivaForm({
 
   function iniciarCargue(e: React.FormEvent) {
     e.preventDefault();
+    tiposAceptados.current = false;
     void crear(null);
   }
 
@@ -989,6 +1020,16 @@ function ConsultaMasivaForm({
           <p className="text-sm font-semibold text-tinta">Preparando cargue…</p>
           <p className="text-xs text-tinta-suave">Leyendo el archivo, validando filas y revisando tu saldo.</p>
         </div>
+      ) : estado.fase === 'confirmar_tipos' ? (
+        <AvisoTipos
+          aviso={estado.aviso}
+          total={estado.total}
+          onProcesar={() => {
+            tiposAceptados.current = true;
+            void crear(null);
+          }}
+          onCancelar={() => setEstado({ fase: 'inicial' })}
+        />
       ) : estado.fase === 'confirmar_saldo' ? (
         <div data-cargue-saldo className="rounded-lg border border-[#E5E7EB] p-5 space-y-3">
           <p className="text-sm font-semibold text-tinta">
@@ -1062,13 +1103,13 @@ function ConsultaMasivaForm({
                   ? archivo.name
                   : 'Arrastra o selecciona un archivo XLSX'}
               </p>
-              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 5 MB / {TOPE_FILAS_LOTE.toLocaleString('es-CO')} filas</p>
+              <p className="text-xs text-tinta-suave mt-1">Solo .xlsx — hasta 4 MB / {TOPE_FILAS_LOTE.toLocaleString('es-CO')} filas</p>
             </div>
             <input
               id="archivo-batch"
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={e => setArchivo(e.target.files?.[0] ?? null)}
+              onChange={e => elegirArchivo(e.target.files?.[0] ?? null)}
               className="hidden"
             />
           </label>
@@ -1085,6 +1126,56 @@ function ConsultaMasivaForm({
           {estado.fase === 'error' && <ErrorBox msg={estado.mensaje} />}
         </form>
       )}
+    </div>
+  );
+}
+
+function AvisoTipos({
+  aviso,
+  total,
+  onProcesar,
+  onCancelar,
+}: {
+  aviso: AvisoTiposDocumento;
+  total: number;
+  onProcesar: () => void;
+  onCancelar: () => void;
+}) {
+  const una = aviso.filas === 1;
+  return (
+    <div data-cargue-tipos className="rounded-lg border border-[#E5E7EB] p-5 space-y-3">
+      <p className="text-sm font-semibold text-tinta">
+        {una ? '1 fila' : `${aviso.filas} filas`} de {total} {una ? 'tiene' : 'tienen'} un tipo de documento que Valida no
+        consulta.
+      </p>
+      <p className="text-sm text-tinta-suave">
+        En la columna <code className="bg-papel px-1 rounded">tipo_documento</code> usa CC, CE, NIT, PAS, TI, PPT o RC.
+        También se entienden «Cédula», «Pasaporte», «PP», «PA», «Tarjeta de identidad» o «Registro civil». Si procesas así, esas filas no se consultan ni se cobran.
+      </p>
+      <ul className="text-xs text-tinta-suave space-y-1">
+        {aviso.ejemplos.map((e) => (
+          <li key={e.fila}>
+            <span className="font-semibold text-tinta">Fila {e.fila}</span> ({e.valor || 'vacío'}): {e.mensaje}
+          </li>
+        ))}
+        {aviso.filas > aviso.ejemplos.length && <li>Y {aviso.filas - aviso.ejemplos.length} más.</li>}
+      </ul>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-tinta text-white font-semibold hover:bg-[#374151] transition-colors"
+        >
+          Corregir el archivo
+        </button>
+        <button
+          type="button"
+          onClick={onProcesar}
+          className="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel transition-colors"
+        >
+          Procesar de todas formas
+        </button>
+      </div>
     </div>
   );
 }
@@ -1567,10 +1658,23 @@ export function HistorialTable({
   );
 }
 
-function ErrorBox({ msg }: { msg: string }) {
+/**
+ * El error de una consulta, un cargue o una descarga, en llano: nunca el código crudo del motor o de
+ * ONE (`mensajeErrorValida`). El código, si lo hay, va pequeño como detalle técnico para soporte.
+ */
+export function ErrorBox({ msg }: { msg: string }) {
+  const { mensaje, codigo } = mensajeErrorValida(msg);
   return (
-    <div className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-center gap-2">
-      <ShieldAlert className="h-4 w-4" /> {msg}
+    <div
+      role="alert"
+      data-error-valida={codigo ?? ''}
+      className="p-3 rounded-lg bg-alerta/10 border border-alerta/30 text-[#B91C1C] text-sm flex items-start gap-2"
+    >
+      <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p>{mensaje}</p>
+        {codigo && <p className="mt-1 text-[11px] text-[#B91C1C]/70 break-all">Detalle técnico: {codigo}</p>}
+      </div>
     </div>
   );
 }

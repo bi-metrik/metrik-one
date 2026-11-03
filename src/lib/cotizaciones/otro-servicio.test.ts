@@ -35,8 +35,9 @@ describe('el catálogo', () => {
   it('«otro» es un tipo de ranura, pero no de los que se detectan ni de los botones de siempre', () => {
     expect(esTipoRanura('otro')).toBe(true)
     expect(esTipoConPantallazo('otro')).toBe(false)
-    expect(TIPOS_CON_PANTALLAZO).toEqual(['vuelo', 'hotel', 'actividad', 'traslado'])
-    expect(gruposCanonicos().map(g => g.grupo)).toEqual(['vuelo', 'hotel', 'actividad', 'traslado'])
+    // QA G9 (M9-1): el tren se detecta y tiene su botón, como los de siempre.
+    expect(TIPOS_CON_PANTALLAZO).toEqual(['vuelo', 'hotel', 'actividad', 'traslado', 'tren'])
+    expect(gruposCanonicos().map(g => g.grupo)).toEqual(['vuelo', 'hotel', 'actividad', 'traslado', 'tren'])
     expect(ranuraSoloPorPasos(OTRO)).toBe(true)
     expect(ranuraSoloPorPasos(ranuraPorSlug('hotel_detalle'))).toBe(false)
   })

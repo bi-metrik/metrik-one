@@ -15,7 +15,7 @@
  *   · Si el staff configurado no está activo, no es del workspace o no tiene el área del rol, no
  *     asigna y lo deja en el log del servidor. El avance de etapa sigue igual.
  *   · Escribe por `asignarResponsable` (fila con rol + línea en el timeline), con `assigned_by`
- *     NULL y una nota que dice que fue automático y por qué etapa.
+ *     NULL, `asignado_origen = 'regla_etapa'` con la etapa, y una nota que dice que fue automático.
  *   · Nunca lanza: un fallo aquí no puede tumbar el movimiento de etapa que ya ocurrió.
  *
  * Quien mueve la etapa la llama DESPUÉS del UPDATE exitoso, con el mismo cliente con el que movió
@@ -105,6 +105,9 @@ export async function asignarResponsableAlEntrar(
       assignedBy: null,
       rol: cfg.rol,
       nota: `asignado automáticamente al entrar a ${nombreEtapa}`,
+      // La campanita y el detalle dicen «al entrar a la etapa <Etapa>» (migración 20261026090000).
+      origen: 'regla_etapa',
+      etapaId: p.etapaId,
     })
     if (res.error) {
       console.error(`[responsable automático] no se pudo asignar (negocio=${p.negocioId}): ${res.error}`)

@@ -41,9 +41,12 @@ import { describe, expect, it } from 'vitest';
 import {
   actualizacionDeAcuse,
   acuseDesdeLastEvent,
+  esEventoEnviado,
   interpretarAcuse,
   leerCabecerasSvix,
+  motivoDeFalla,
   motivoDeRebote,
+  motivoDeSupresion,
   MOTIVO_MAX,
   MOTIVO_REBOTE_RECONSTRUIDO,
   TOLERANCIA_SEGUNDOS,
@@ -531,10 +534,9 @@ describe('acuseDesdeLastEvent (el backfill)', () => {
     }
   });
 
-  it('suppressed devuelve null: el vocabulario de estado no tiene donde ponerlo', () => {
-    // Hueco declarado, no olvidado. `suppressed` quiere decir que Resend acepto
-    // el POST y no envio nada, asi que la fila dice `enviado` sobre un correo
-    // que no salio. El backfill lo cuenta aparte en vez de elegirle un estado.
+  it('suppressed devuelve null en el backfill: lo historico lo decide una persona', () => {
+    // El webhook en vivo lo aplica (`suprimido`, 2026-10-26); el backfill lo
+    // sigue contando aparte en vez de reescribir el historico solo.
     expect(acuseDesdeLastEvent('suppressed', EMAIL_ID, CUANDO)).toBeNull();
   });
 
@@ -547,5 +549,70 @@ describe('acuseDesdeLastEvent (el backfill)', () => {
     // el webhook ya aplico el acuse, no cambie nada.
     const a = acuseDesdeLastEvent('bounced', EMAIL_ID, CUANDO)!;
     expect(actualizacionDeAcuse(a).guarda).toEqual({ columna: 'estado', modo: 'igual_a', valor: 'enviado' });
+  });
+});
+
+// ── email.suppressed y email.failed (2026-10-26) ─────────────────────────────
+// Payloads de https://resend.com/docs/webhooks/emails/suppressed.md y failed.md
+// (leidos el 2026-10-26).
+describe('email.suppressed y email.failed', () => {
+  const SUPRESION = {
+    message: 'Resend has suppressed sending to this address because it is on the account-level suppression list. This does not count toward your bounce rate metric',
+    type: 'OnAccountSuppressionList',
+  };
+
+  it('lee un email.suppressed con el tipo y el mensaje de Resend', () => {
+    const r = interpretarAcuse(evento('email.suppressed', { suppressed: SUPRESION }), AHORA);
+    expect(r.ok).toBe(true);
+    if (!r.ok || r.acuse.clase !== 'suprimido') throw new Error('no es suprimido');
+    expect(r.acuse.motivo.startsWith('suprimido: OnAccountSuppressionList: Resend has suppressed')).toBe(true);
+    expect(r.acuse.motivo.length).toBeLessThanOrEqual(MOTIVO_MAX);
+  });
+
+  it('un email.suppressed sin detalle queda «suprimido» a secas', () => {
+    expect(motivoDeSupresion(undefined)).toBe('suprimido');
+    expect(motivoDeSupresion({ type: '  ' })).toBe('suprimido');
+  });
+
+  it('lee un email.failed con la razon', () => {
+    const r = interpretarAcuse(evento('email.failed', { failed: { reason: 'reached_daily_quota' } }), AHORA);
+    expect(r).toMatchObject({ ok: true, acuse: { clase: 'fallido', motivo: 'resend_failed: reached_daily_quota' } });
+    expect(motivoDeFalla(null)).toBe('resend_failed');
+  });
+
+  it('suprimido y fallido escriben estado y motivo con la MISMA guarda del rebote', () => {
+    const sup: Acuse = { clase: 'suprimido', emailId: EMAIL_ID, ocurridoEn: AHORA, motivo: 'suprimido' };
+    const fal: Acuse = { clase: 'fallido', emailId: EMAIL_ID, ocurridoEn: AHORA, motivo: 'resend_failed: x' };
+    expect(actualizacionDeAcuse(sup)).toEqual({
+      set: { estado: 'suprimido', motivo: 'suprimido' },
+      guarda: { columna: 'estado', modo: 'igual_a', valor: 'enviado' },
+    });
+    expect(actualizacionDeAcuse(fal)).toEqual({
+      set: { estado: 'fallido', motivo: 'resend_failed: x' },
+      guarda: { columna: 'estado', modo: 'igual_a', valor: 'enviado' },
+    });
+  });
+
+  it('entregado y queja siguen sin escribir estado: no pueden deshacer un suprimido ni un fallido', () => {
+    for (const a of [
+      { clase: 'entregado', emailId: EMAIL_ID, ocurridoEn: AHORA },
+      { clase: 'queja', emailId: EMAIL_ID, ocurridoEn: AHORA },
+    ] as Acuse[]) {
+      expect(actualizacionDeAcuse(a).set).not.toHaveProperty('estado');
+    }
+  });
+});
+
+describe('esEventoEnviado', () => {
+  it('solo email.sent', () => {
+    expect(esEventoEnviado(evento('email.sent'))).toBe(true);
+    for (const otro of ['email.delivered', 'email.suppressed', 'email.failed', 'email.sent.x']) {
+      expect(esEventoEnviado(evento(otro))).toBe(false);
+    }
+    for (const basura of [null, undefined, 'email.sent', 42]) expect(esEventoEnviado(basura)).toBe(false);
+  });
+
+  it('email.sent sigue sin ser un acuse de la traza', () => {
+    expect(interpretarAcuse(evento('email.sent'), AHORA)).toEqual({ ok: false, razon: 'tipo_no_manejado:email.sent' });
   });
 });
