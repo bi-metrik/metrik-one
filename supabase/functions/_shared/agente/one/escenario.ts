@@ -10,7 +10,7 @@ import type { ConfigAgente } from '../config.ts';
 import { atenderPendientes } from '../cola.ts';
 import type { DepsCola } from '../cola.ts';
 import { AlmacenMemoria, MensajeroMemoria, Reloj, nuevoId } from '../memoria.ts';
-import type { FilaConversacion, Modelo, Reglamento, RolTraza, Salida, Traza } from '../tipos.ts';
+import type { Dominio, FilaConversacion, Modelo, Reglamento, RolTraza, Salida, Traza } from '../tipos.ts';
 import { dominioOne } from './dominio.ts';
 import { componerOne, funcionesDelCargo, reglamentoOneDelTurno } from './cargos.ts';
 import type { Composicion } from '../componer.ts';
@@ -76,6 +76,13 @@ export async function escenarioOne(p: {
   reloj?: () => number;
   /** El lector de soportes (en pruebas, uno guionado; en el arnés, el real). Sin él, los soportes no se leen. */
   lector?: Lector | null;
+  /** Otro puerto en memoria (el del modo obras) y el dominio armado sobre él. Sin esto, el dominio ONE de siempre.
+   * Con `dominio`, como el modo obras en producción (`wa-agente.ts`, `armarObras`): sin componedor ni paso a persona. */
+  puerto?: PuertoOneMemoria;
+  dominio?: (puerto: PuertoOneMemoria, ahora: () => number) => Dominio;
+  guardaTexto?: (texto: string, herramientas: string[]) => string[];
+  /** El teléfono del remitente (dos remitentes en el mismo workspace son dos escenarios). */
+  phone?: string;
   /**
    * Las funciones del turno (un rol de la base, ya intersecadas con las prendidas). Sin ellas, las del cargo (`rol`,
    * `cargos.ts`), como en producción sin roles.
@@ -93,7 +100,8 @@ export async function escenarioOne(p: {
   const reloj = new Reloj(Date.parse('2026-10-21T15:00:00Z'));
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
-  const puerto = new PuertoOneMemoria({ negocios: p.negocios, gastos: p.gastos, contactos: p.contactos });
+  const puerto = p.puerto ?? new PuertoOneMemoria({ negocios: p.negocios, gastos: p.gastos, contactos: p.contactos });
+  const tel = p.phone ?? TEL_ONE_PRUEBA;
   // Lo que el dominio anota de un soporte (referencia, lectura) queda en la fila, como en `wa_conversacion`.
   puerto.alAnotar = (filaId, media) => {
     const f = almacen.filas.find((x) => x.id === filaId);
@@ -107,20 +115,22 @@ export async function escenarioOne(p: {
   const motor = dominioOne(puerto, { rol, ahora: reloj.ahora, lector: p.lector ?? null, empresa: 'Empresa de Prueba', ...(p.sinComponer ? {} : { funciones: claves }) });
   // El paso a una persona (§4.2): la ficha `rol.escalamiento` del reglamento, o el WhatsApp de MeTRIK.
   const escalamiento = escalamientoDe(base, ESCALAMIENTO_METRIK, () => {});
-  const persona = p.sinComponer || p.sinPersona ? null : dominioPersona({ config: escalamiento, empresa: 'Empresa de Prueba', base: motor });
-  const composicion = p.sinComponer ? null : componerOne(motor, funciones, () => {}, persona);
+  const propio = p.dominio ? p.dominio(puerto, reloj.ahora) : null;
+  const persona = propio || p.sinComponer || p.sinPersona ? null : dominioPersona({ config: escalamiento, empresa: 'Empresa de Prueba', base: motor });
+  const composicion = propio || p.sinComponer ? null : componerOne(motor, funciones, () => {}, persona);
   const escalamientos: FilaEscalamiento[] = [];
   const puertoEsc: PuertoEscalamientos = p.escalamientos ?? { registrar: async (f) => { escalamientos.push(f); } };
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: composicion ? composicion.dominio : motor,
+    dominio: propio ?? (composicion ? composicion.dominio : motor),
+    ...(p.guardaTexto ? { guardaTexto: p.guardaTexto } : {}),
     reglamento: composicion ? await reglamentoOneDelTurno(base, composicion) : base,
-    ...(composicion ? { rol: p.rolTraza ?? rolDeCargo(rol, claves) } : {}),
+    ...(composicion ? { rol: p.rolTraza ?? rolDeCargo(rol, claves) } : propio && p.rolTraza ? { rol: p.rolTraza } : {}),
     config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
     ahoraMs: reloj.ahora,
     reloj: p.reloj ?? (() => reloj.ahora()),
     almacen, mensajero,
-    workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA,
+    workspaceId: WS_ONE_PRUEBA, phone: tel,
     remitente: p.remitente ?? { nombre: 'Ana Dueña', rol },
     nuevoId,
     // La ventana de los adjuntos espera en el reloj de la prueba, no en el de verdad.
@@ -136,7 +146,7 @@ export async function escenarioOne(p: {
     const antes = mensajero.enviados.length;
     const trazasAntes = almacen.trazas().length;
     const t0 = performance.now();
-    almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: clase === 'documento' ? 'otro' : clase, texto: texto || null, toqueId: extra.toqueId, media: extra.media });
+    almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: tel, clase: clase === 'documento' ? 'otro' : clase, texto: texto || null, toqueId: extra.toqueId, media: extra.media });
     await atenderPendientes(deps);
     const nuevos = mensajero.enviados.slice(antes);
     pasos.push({ clase, texto, salidas: nuevos.map((e) => e.salida), ms: nuevos.length ? Math.round(nuevos[0].at - t0) : null, trazas: almacen.trazas().slice(trazasAntes) });
@@ -151,7 +161,7 @@ export async function escenarioOne(p: {
     semilla(filas) {
       for (const f of filas) {
         reloj.avanzar(10_000);
-        almacen.filas.push({ id: nuevoId(), workspace_id: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, texto: null, turno_id: 'semilla', traza: null, created_at: new Date(reloj.ahora()).toISOString(), ...f } as FilaConversacion);
+        almacen.filas.push({ id: nuevoId(), workspace_id: WS_ONE_PRUEBA, phone: tel, texto: null, turno_id: 'semilla', traza: null, created_at: new Date(reloj.ahora()).toISOString(), ...f } as FilaConversacion);
       }
     },
     escribe: (t, o) => correr('escrito', t, {}, o?.despuesMs),
@@ -172,7 +182,7 @@ export async function escenarioOne(p: {
       for (const m of mensajes) {
         reloj.avanzar(m.despuesMs ?? 1_000);
         if (m.escribe !== undefined) {
-          almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: 'escrito', texto: m.escribe });
+          almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: tel, clase: 'escrito', texto: m.escribe });
           continue;
         }
         const id = `media-${++fotos}`;
@@ -180,7 +190,7 @@ export async function escenarioOne(p: {
         const media = m.documento !== undefined
           ? { tipo: 'documento', id, mime: m.archivo?.mime ?? 'application/pdf', nombre: m.documento }
           : { tipo: 'imagen', id };
-        almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: TEL_ONE_PRUEBA, clase: m.documento !== undefined ? 'otro' : 'imagen', texto: (m.pie ?? m.foto ?? '') || null, media });
+        almacen.entrante({ workspaceId: WS_ONE_PRUEBA, phone: tel, clase: m.documento !== undefined ? 'otro' : 'imagen', texto: (m.pie ?? m.foto ?? '') || null, media });
       }
       await atenderPendientes(deps);
       const nuevos = mensajero.enviados.slice(antes);

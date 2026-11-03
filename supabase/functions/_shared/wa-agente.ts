@@ -11,7 +11,7 @@
 // escribió `registrarEntrante` justo antes.
 // ============================================================
 
-import { agenteOnePorDefecto, dominioDelAgente, leerConfigAgente, leerConfigOne } from './agente/config.ts';
+import { agenteOnePorDefecto, dominioDelAgente, leerConfigAgente, leerConfigOne, modoObras } from './agente/config.ts';
 import { atenderPendientes } from './agente/cola.ts';
 import { BOT_BANDEJA, dominioBandeja } from './agente/bandeja/dominio.ts';
 import { leeSoportes, turnoViajes } from './agente/bandeja/turno-con-rol.ts';
@@ -24,10 +24,14 @@ import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
 import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { lectorDeDocumentosDeViaje } from './agente/bandeja/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
+import { dominioObras } from './agente/one/obras.ts';
+import { BOT_OPERARIO, dominioOperario, sinPesos } from './agente/one/operario.ts';
+import { puertoObrasSupabase } from './agente/one/puerto-obras-supabase.ts';
+import { reglamentoObras, reglamentoOperario } from './agente/one/reglamento-obras.ts';
 import { turnoOne } from './agente/one/turno-con-rol.ts';
 import { escalamientosSupabase } from './agente/persona-produccion.ts';
 import { resolverRol, rolPrevio } from './agente/roles.ts';
-import type { RolTraza } from './agente/tipos.ts';
+import type { Dominio, Reglamento, RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { alertarCaidaWa, almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
@@ -279,9 +283,13 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     const empresa = ws?.name ? String(ws.name) : null;
     const puerto = puertoOneSupabase(supabase, user);
     const lector = lectorDeSoportes({ llaveGemini: llave });
+    // Modo obras (2026-10-21): el operario y la gestión entran con su dominio, armado por el código (C5: el operario es un
+    // candado de rol, no conducta del modelo). Va ANTES de los roles de la base: una asignación no le abre a un operario
+    // más que su llegada y sus días. El resto del equipo sigue por los roles o por su cargo, como en todo workspace.
+    const obras = modoObras(bot) ? await armarObras(supabase, user, String(ws?.name ?? 'la empresa'), String(ws?.slug ?? ''), lector, config.reglamentoId) : null;
     // Qué atiende este turno (spec 2026-10-26, asistentes-roles-y-funciones): con roles en la base, el rol de quien
     // escribe; sin roles (o sin la migración todavía), el dominio ONE recortado a su cargo. Una ida a la base.
-    const turno = await turnoOne(user.role, {
+    const turno = obras ? { tipo: 'atender' as const, ...obras, composicion: undefined } : await turnoOne(user.role, {
       resolver: () => resolverRol(supabase, {
         workspaceId: user.workspace_id, canal: 'wa_one', staff: user.staff_id ?? null, colaborador: user.collaborator_id ?? null,
         cargo: user.role, inbox: inboxWaOne(),
@@ -315,11 +323,12 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
       // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
       dominio: turno.dominio,
+      ...('guardaTexto' in turno && turno.guardaTexto ? { guardaTexto: turno.guardaTexto } : {}),
       reglamento: turno.reglamento,
       rol: turno.rol,
       // El paso a una persona (spec 2026-10-26, §4.2): el botón al WhatsApp de MeTRIK (o al de la ficha del rol), la
-      // señal del código y la fila de `asistente_escalamientos`.
-      persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one', escalamientos: escalamientosSupabase(supabase) },
+      // señal del código y la fila de `asistente_escalamientos`. En modo obras no va: el diseño de obras no lo tiene.
+      ...('escalamiento' in turno ? { persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one' as const, escalamientos: escalamientosSupabase(supabase) } } : {}),
       config,
       ahoraMs: () => Date.now(),
       reloj: () => performance.now(),
@@ -334,7 +343,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
         await alertarCaidaWa(supabase, almacen, traza, {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), canal: 'one', phone, turnoId: turno.turnoId,
         });
-        await revisarCupo(cupoSupabase(supabase, almacen), {
+        // En modo obras el cupo del contrato se cuenta en mensajes (Anexo 1.4), con el desglose gestión / operarios.
+        await revisarCupo(cupoSupabase(supabase, almacen, { mensajes: !!obras }), {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
         });
       },
@@ -383,4 +393,45 @@ async function rolPrevioWa(supabase: SupabaseClient, workspaceId: string, phone:
     return null;
   }
   return rolPrevio((data ?? []) as Array<{ traza?: { rol?: RolTraza | null } | null }>);
+}
+
+// ── Modo obras (2026-10-21) ──────────────────────────────────────────────────
+//
+// Diseño: proyectos/imperviun/proyecto-360/docs/diseno/asistente-whatsapp.md. Con `bot_conversacional.obras = true`:
+//   · un colaborador de tipo `operario` (C5) entra con el dominio del operario: solo marca su llegada y ve sus días, y la
+//     guarda del texto no deja salir pesos. Si no se puede leer su tipo, entra como operario (lo mínimo, nunca de más);
+//   · un usuario de gestión (owner/admin) entra con el dominio de obras (pagos, ingresos, facturas, cierre, asistencia);
+//   · el resto del equipo, por los roles de la base o por su cargo (`turnoOne`), como en todo workspace.
+// Ni roles ni componedor: el dominio del operario declara solo sus herramientas, y el de gestión trae los ganchos de la
+// tanda (recordatorio, [Verlos], botones que no escriben) que el componedor no conoce. Sin paso a persona (§4.2).
+// Un reglamento publicado por el workspace (bot `one` o `one_operario`) reemplaza al del código.
+
+/** El rol de la traza en modo obras: lo fija el código, no una asignación de la base. Pura. */
+export function rolObras(quien: 'gestion' | 'operario'): RolTraza {
+  return { clave: `obras:${quien}`, id: null, version: null, reglamento_id: null, por: quien === 'operario' ? 'colaborador' : 'cargo', funciones: [] };
+}
+
+export async function armarObras(
+  supabase: SupabaseClient, user: WaUser, nombre: string, slug: string, lector: ReturnType<typeof lectorDeSoportes>, reglamentoId: string | null,
+): Promise<{ dominio: Dominio; reglamento: Reglamento; rol: RolTraza; guardaTexto?: (t: string) => string[] } | null> {
+  const puerto = puertoObrasSupabase(supabase, user);
+  if (user.collaborator_id) {
+    const { data, error } = await supabase.from('wa_collaborators').select('tipo').eq('id', user.collaborator_id).eq('workspace_id', user.workspace_id).maybeSingle();
+    if (error) console.error('[agente-obras] no se pudo leer el tipo del colaborador; entra como operario:', error.message);
+    const tipo = error ? 'operario' : String((data as { tipo?: string } | null)?.tipo ?? 'equipo');
+    if (tipo !== 'operario') return null;
+    return {
+      dominio: dominioOperario(puerto, { collaboratorId: user.collaborator_id, nombre: user.name || 'el operario' }),
+      reglamento: (await cargarReglamento(supabase, user.workspace_id, BOT_OPERARIO, null)) ?? await reglamentoOperario(nombre),
+      rol: rolObras('operario'),
+      guardaTexto: sinPesos,
+    };
+  }
+  if (!['owner', 'admin'].includes(user.role)) return null;
+  const base = (Deno.env.get('APP_BASE_DOMAIN') || 'metrikone.co').trim();
+  return {
+    dominio: dominioObras(puerto, { rol: user.role, empresa: nombre, urlApp: slug ? `https://${slug}.${base}` : null, lector }),
+    reglamento: (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, reglamentoId)) ?? await reglamentoObras(nombre),
+    rol: rolObras('gestion'),
+  };
 }
