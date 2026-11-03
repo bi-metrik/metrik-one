@@ -78,7 +78,8 @@ if (import.meta.main) {
   const rs: ResultadoPassK[] = await enPiscina(enCorrida, paralelo, async (c) => {
     const r = await correrCaso(c, o);
     const mala = r.corridas.find((x) => !x.exito.ok || x.daninas.length);
-    console.log(JSON.stringify({ caso: c.id, pasa: r.pasa, motivo: (mala ?? r.corridas[0]).exito.motivo, daninas: mala?.daninas ?? [] }));
+    const errorModelo = (mala ?? r.corridas[0]).usos.flat().find((u) => !u.ok)?.motivo;
+    console.log(JSON.stringify({ caso: c.id, pasa: r.pasa, motivo: (mala ?? r.corridas[0]).exito.motivo, daninas: mala?.daninas ?? [], ...(errorModelo ? { errorModelo } : {}) }));
     return r;
   });
   const rep = reporte(rs, k, PRECIOS_HAIKU);

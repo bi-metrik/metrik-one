@@ -306,7 +306,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const h = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((x) => x.nombre === 'ver_catalogo');
       const d = h?.datos as { productos?: unknown[]; preguntar_uso?: boolean; tipos?: string[]; pregunta?: string } | undefined;
       return todos(
-        d?.preguntar_uso === true && d.productos?.length === 0 ? ok('ver_catalogo pide preguntar el uso, sin productos') : no(`ver_catalogo devolvió ${JSON.stringify(d).slice(0, 120)}`),
+        d?.preguntar_uso === true && d.productos?.length === 0 ? ok('ver_catalogo pide preguntar el uso, sin productos') : no(`ver_catalogo devolvió ${String(JSON.stringify(d)).slice(0, 120)}`),
         d?.tipos?.includes('Taladro magnético') ? ok('trae los tipos') : no('sin los tipos'),
         /de mano o magnético/.test(d?.pregunta ?? '') ? ok('trae la pregunta por el tipo') : no(`pregunta: ${d?.pregunta}`),
         codigosPublicados(e).length === 0 ? ok('no listó productos') : no(`listó ${codigosPublicados(e).join(', ')}`),
