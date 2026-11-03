@@ -15,7 +15,7 @@ import type { PedidoModelo } from './tipos'
  * Los modelos son guiones: ninguna llamada a un modelo real.
  */
 
-const PEDIDO = 'Necesito que me ayudes con una cotizacion para 3 adultos + 1 menor de 6 años para Punta Cana del 10 al 15 de marzo 2027'
+const PEDIDO = 'Necesito que me ayudes con una cotizacion para 3 adultos + 1 menor de 6 años para Punta Cana del 10 al 15 de marzo 2027, la llevo yo'
 const DATOS_CLIENTE = 'Camilo Rojas 3005550199 camilo.prueba@ejemplo.co'
 const REF = 'Camilo Rojas (cel. …0199)'
 

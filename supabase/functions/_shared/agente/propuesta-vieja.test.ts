@@ -36,7 +36,7 @@ describe('una propuesta pendiente queda atrás cuando la conversación pasa a ot
     ])
     const e = await escenario({ modelo, contactos: [MARTIN], viajes: VIAJES })
 
-    await e.escribe('Vamos a iniciar un nuevo viaje para Martín Mora')
+    await e.escribe('Vamos a iniciar un nuevo viaje para Martín Mora, la llevo yo')
     const nuevo = propuestaVigente(e.almacen.filas)!
     expect(nuevo.accion).toBe('viaje_nuevo')
 
