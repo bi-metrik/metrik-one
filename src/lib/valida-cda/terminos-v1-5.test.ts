@@ -8,10 +8,12 @@ import {
   datosDelTextoV15,
   deFechaLarga,
   esTerminosV15,
+  exigenciaV15,
   fechaExigeAceptacion,
   finUltimoPeriodoPagado,
   periodosPendientesAntesDe,
   pospuestaHoy,
+  textoExigidaV15,
   textoPeriodos,
   textosPantallaV15,
 } from './terminos-v1-5'
@@ -106,9 +108,29 @@ describe('el bloqueante de Vera: la transición de la cláusula 11.7', () => {
     })
   })
 
-  it('pagados los períodos de la transición, el del 23-dic sigue la regla de su vencimiento (27-dic)', () => {
-    expect(mora(450000, '2027-01-01', VIGENCIA_V15).estado).toBe('en_mora')
-    expect(mora(450000, '2027-01-02', VIGENCIA_V15).estado).toBe('restringido')
+  it('pagados los períodos de la transición, el del 23-dic se mide desde su renovación: Suspendida el 29-dic, Cancelada el 23-ene', () => {
+    expect(mora(450000, '2026-12-23', VIGENCIA_V15).estado).toBe('al_dia')
+    expect(mora(450000, '2026-12-24', VIGENCIA_V15)).toEqual({
+      estado: 'en_mora',
+      vencio: '2026-12-23',
+      restringeDesde: '2026-12-29',
+      corteDesde: '2027-01-23',
+    })
+    expect(mora(450000, '2026-12-28', VIGENCIA_V15).estado).toBe('en_mora')
+    expect(mora(450000, '2026-12-29', VIGENCIA_V15).estado).toBe('restringido')
+    expect(mora(450000, '2027-01-22', VIGENCIA_V15).estado).toBe('restringido')
+    expect(mora(450000, '2027-01-23', VIGENCIA_V15).estado).toBe('suspendido')
+  })
+
+  it('CONTROL sin la v1.5: el período del 23-dic sigue la v1.4 sobre su vencimiento (27-dic)', () => {
+    expect(mora(450000, '2027-01-01', null).estado).toBe('en_mora')
+    expect(mora(450000, '2027-01-02', null).estado).toBe('restringido')
+  })
+
+  it('un período desde la vigencia sin período en el concepto se mide por su vencimiento', () => {
+    const sinConcepto = CUOTAS.map((c) => ({ ...c, concepto: null }))
+    expect(mora(450000, '2027-01-01', VIGENCIA_V15, sinConcepto).estado).toBe('en_mora')
+    expect(mora(450000, '2027-01-02', VIGENCIA_V15, sinConcepto).estado).toBe('restringido')
   })
 
   it('una cuota sin período en el concepto se juzga por su vencimiento', () => {
@@ -242,6 +264,61 @@ describe('las variables de la pantalla salen del dato', () => {
     // Los otros tres: 16-ene; si pagan el del 23-dic al 22-ene, el 23-ene.
     expect(fechaExigeAceptacion('2027-01-16', finUltimoPeriodoPagado(conEstado(600000)))).toBe('2027-01-23')
     expect(fechaExigeAceptacion(null, '2027-01-22')).toBeNull()
+  })
+
+  describe('16.4: desde cuándo se niegan las consultas sin la v1.5 aceptada', () => {
+    const fin = (pagos: number, cuotas = CUOTAS) =>
+      finUltimoPeriodoPagado(
+        cuotasConEstado({ cuotas, cobros: pagado(pagos), hoy: '2026-12-20', ahoraISO: '2026-12-20T15:00:00Z' }),
+      )
+    const exige = (base: string, finPagado: string | null | 'sin_dato', hoy: string) =>
+      exigenciaV15({ base, finPagado, hoy }).estado
+
+    it('Maxitec sin período pagado posterior (pagó hasta el 22-nov): consulta el 21-dic, no el 22-dic', () => {
+      const f = fin(300000, CUOTAS.slice(0, 3))
+      expect(f).toBe('2026-11-22')
+      expect(exige('2026-12-22', f, '2026-12-21')).toBe('no_exigida')
+      expect(exigenciaV15({ base: '2026-12-22', finPagado: f, hoy: '2026-12-22' })).toEqual({ estado: 'exigida', desde: '2026-12-22' })
+      expect(exige('2026-12-22', f, '2027-02-01')).toBe('exigida')
+    })
+
+    it('Maxitec con el período del 23-nov al 22-dic pagado: no se bloquea el 22-dic, sí el 23-dic', () => {
+      const f = fin(450000, CUOTAS.slice(0, 3))
+      expect(f).toBe('2026-12-22')
+      expect(exige('2026-12-22', f, '2026-12-22')).toBe('no_exigida')
+      expect(exigenciaV15({ base: '2026-12-22', finPagado: f, hoy: '2026-12-23' })).toEqual({ estado: 'exigida', desde: '2026-12-23' })
+    })
+
+    it('Caquetá, El Carmen y Puertotest: el 16-ene sin período posterior; el 23-ene si pagaron el del 23-dic al 22-ene', () => {
+      expect(exige('2027-01-16', fin(450000), '2027-01-15')).toBe('no_exigida')
+      expect(exige('2027-01-16', fin(450000), '2027-01-16')).toBe('exigida')
+      expect(exige('2027-01-16', fin(600000), '2027-01-16')).toBe('no_exigida')
+      expect(exige('2027-01-16', fin(600000), '2027-01-22')).toBe('no_exigida')
+      expect(exige('2027-01-16', fin(600000), '2027-01-23')).toBe('exigida')
+    })
+
+    it('sin ningún período pagado, la fecha base', () => {
+      expect(exige('2027-01-16', null, '2027-01-16')).toBe('exigida')
+      expect(exige('2027-01-16', null, '2027-01-15')).toBe('no_exigida')
+    })
+
+    it('sin poder leer las cuotas no se exige (no se bloquea un período que podría estar pagado)', () => {
+      expect(exige('2027-01-16', 'sin_dato', '2027-01-16')).toBe('no_exigida')
+      expect(exige('2027-01-16', 'sin_dato', '2027-03-01')).toBe('no_exigida')
+    })
+
+    it('sin fecha base legible en el texto, no se exige', () => {
+      expect(exigenciaV15({ base: null, finPagado: null, hoy: '2027-06-01' }).estado).toBe('no_exigida')
+      expect(exigenciaV15({ base: '16 de enero', finPagado: null, hoy: '2027-06-01' }).estado).toBe('no_exigida')
+    })
+
+    it('el texto de la pantalla desde esa fecha es el del final del anexo A', () => {
+      expect(textoExigidaV15('MAXITEC S.A.S.')).toBe(
+        'Para seguir consultando en Valida, MAXITEC S.A.S. necesita aceptar la versión 1.5 de los Términos. Tu ' +
+          'información está guardada. Puedes pedir la copia de tu bitácora y tus reportes a mauricio.moreno@metrik.com.co.',
+      )
+      expect(textoExigidaV15(null)).toContain('Valida, tu empresa necesita aceptar')
+    })
   })
 
   it('el texto de la pantalla de Maxitec el 1-nov, con sus fechas', () => {

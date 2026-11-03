@@ -2599,6 +2599,11 @@ interface Props {
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
   /**
+   * La obra (cierre, facturas y llegadas), armada en el servidor con `modules.obras`. Va antes de
+   * la Actividad. `null` en los workspaces sin obras.
+   */
+  obra?: React.ReactNode
+  /**
    * Falta la autorización de datos del cliente y la línea la pide (reunión del 2026-10-22). La
    * ficha ya lo dice en `banner`; esto lo lee la página de la cotización para su lista de Revisar.
    */
@@ -2659,6 +2664,7 @@ export default function NegocioDetailClient({
   errorMsg,
   banner,
   extras,
+  obra,
   viaje = null,
   centro,
   cotActualId = null,
@@ -3102,6 +3108,8 @@ export default function NegocioDetailClient({
             negocioCerrado={negocioCerrado}
           />
         )}
+
+        {obra}
 
         {/* ── Activity log ── */}
         <div className="rounded-xl border border-border bg-card">

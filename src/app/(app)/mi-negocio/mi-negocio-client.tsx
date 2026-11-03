@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange, KeyRound } from 'lucide-react'
+import { Briefcase, Palette, Package, Receipt, UsersRound, Target, Sparkles, CreditCard, Workflow, ShieldCheck, FileCheck2, FileText, Percent, CalendarRange, KeyRound, HardHat, Smartphone } from 'lucide-react'
 import type { ExpenseCategory, FixedExpense, FiscalProfile, Staff, MonthlyTarget, Servicio, Workspace, WorkspaceFeature } from '@/types/database'
 import type { StaffConAreas, DefaultResponsableMap } from '@/lib/actions/equipo-areas'
 
@@ -24,6 +24,9 @@ import PilaSection from './pila-section'
 import TerminosSection from './terminos-section'
 import MargenSection from './margen-section'
 import TemporadasSection from './temporadas-section'
+import RubrosObraSection from './rubros-obra-section'
+import ColaboradoresSection from './colaboradores-section'
+import { obrasActivas } from '@/lib/obras/modulo'
 import BovedaSection from './boveda-section'
 import { textoCupo } from '@/lib/usuarios-espacio/reglas'
 
@@ -88,6 +91,7 @@ interface SectionDef {
   wsTipo?: 'nativo' | 'clarity' // Si definido, solo visible para ese tipo de workspace
   soloConPoliticaDePrecio?: boolean // Si true, solo visible cuando alguna linea usa margen minimo o recargo
   soloConPropuestaViaje?: boolean // Si true, solo en espacios con propuesta de viaje (Trappvel)
+  soloConObras?: boolean // Si true, solo con `modules.obras` (rubros de obra y colaboradores con jornada)
 }
 
 const SECTIONS: SectionDef[] = [
@@ -108,6 +112,9 @@ const SECTIONS: SectionDef[] = [
   { key: 'margen', label: 'Margen y recargo', icon: Percent, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPoliticaDePrecio: true },
   // Calendario de temporadas de la agencia (2026-10-19). Sin `wsTipo` por lo mismo que los términos.
   { key: 'temporadas', label: 'Temporadas', icon: CalendarRange, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConPropuestaViaje: true },
+  // Obras (2026-10-21): rubros de obra y colaboradores de WhatsApp con su jornada. Solo con `modules.obras`.
+  { key: 'rubros-obra', label: 'Rubros de obra', icon: HardHat, maxScore: 0, scoreKey: 'servicios', roles: ['owner', 'admin'], modules: ['business'], soloConObras: true },
+  { key: 'colaboradores-wa', label: 'Colaboradores de WhatsApp', icon: Smartphone, maxScore: 0, scoreKey: 'equipo', roles: ['owner', 'admin'], modules: ['business'], soloConObras: true },
   { key: 'reglas-validacion', label: 'Reglas de validación', icon: ShieldCheck, maxScore: 0, scoreKey: 'marca', roles: ['owner', 'admin'], modules: ['compliance'] },
   // Bóveda de llaves (2026-10-26): solo la ve el dueño, y solo el dueño real la cambia (no «Ver como» ni MéTRIK).
   { key: 'boveda-llaves', label: 'Bóveda de llaves', icon: KeyRound, maxScore: 0, scoreKey: 'marca', roles: ['owner'] },
@@ -190,6 +197,10 @@ export default function MiNegocioClient({
         return 'Texto del PDF'
       case 'temporadas':
         return 'Alta, media y baja'
+      case 'rubros-obra':
+        return 'Opciones de cada gasto'
+      case 'colaboradores-wa':
+        return 'Tipo y valor de jornada'
       case 'reglas-validacion':
         return 'Listas cautelares'
       case 'boveda-llaves':
@@ -212,6 +223,7 @@ export default function MiNegocioClient({
     if (s.wsTipo && s.wsTipo !== workspaceTipo) return false
     if (s.soloConPoliticaDePrecio && !usaPoliticaDePrecio) return false
     if (s.soloConPropuestaViaje && !tienePropuestaViaje) return false
+    if (s.soloConObras && !obrasActivas(mod)) return false
     // Si la sección define módulos requeridos, al menos uno debe estar activo
     if (s.modules && s.modules.length > 0) {
       return s.modules.some(m => mod[m])
@@ -504,6 +516,12 @@ function renderSection(
           <MargenContribucionSection />
         </div>
       )
+
+    case 'rubros-obra':
+      return <RubrosObraSection />
+
+    case 'colaboradores-wa':
+      return <ColaboradoresSection />
 
     case 'reglas-validacion':
       return <ReglasValidacionSection workspaceId={props.workspace?.id} />
