@@ -96,6 +96,7 @@ export function revisarBorrador(a: {
     pistas: borrador.pistas,
     lineas: a.lineas,
     grupoViaje: a.composicion,
+    destinoViaje: a.destinoViaje ?? null,
   })
   const leida = opcionDeBorrador(capId, borrador.tipo, borrador.lectura, destino.como === 'nueva' ? null : destino.grupo)
   const donde = textoDeDestino(destino, borrador.tipo, borrador.pistas, ubicaciones, { lectura: borrador.lectura, destinoViaje: a.destinoViaje ?? null })

@@ -77,7 +77,8 @@ export async function leerImagenDeCaptura(args: {
     }
   }
 
-  const leida = construirLecturaCasilla(ranura, veredicto, new Date().toISOString())
+  // Un precio por persona sin ocupación en la imagen se multiplica por los del viaje.
+  const leida = construirLecturaCasilla(ranura, veredicto, new Date().toISOString(), viaje.composicion)
   // La huella del archivo, para que la bandeja no procese dos veces el mismo pantallazo (P10).
   const huella = await huellaDeImagen(dataUrl)
   if (huella) leida.huellaImagen = huella

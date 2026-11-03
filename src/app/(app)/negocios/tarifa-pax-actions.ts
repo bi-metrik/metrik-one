@@ -945,7 +945,7 @@ async function aceptarLectura(
     ? (delaCotizacion(b.destinoId) ? { como: 'habitacion' as const, itemId: b.destinoId!, grupo: '', sobra: false } : null)
     // Una actividad solo es opción de otra si quien cotiza lo eligió (brief del 2026-10-05,
     // «actividades tras la limpieza»): «Agregar como otra opción» manda la actividad de al lado.
-    : (b.decision === 'opcion' ? opcionElegidaDeActividad(b.tipo, b.destinoId, lineas as unknown as LineaParaUbicar[]) : null) ?? ubicarLectura({ tipo: b.tipo, lectura, pistas, lineas: lineas as unknown as LineaParaUbicar[], grupoViaje: ctx.viaje.composicion, sinHabitacion: b.decision === 'opcion' })
+    : (b.decision === 'opcion' ? opcionElegidaDeActividad(b.tipo, b.destinoId, lineas as unknown as LineaParaUbicar[]) : null) ?? ubicarLectura({ tipo: b.tipo, lectura, pistas, lineas: lineas as unknown as LineaParaUbicar[], grupoViaje: ctx.viaje.composicion, sinHabitacion: b.decision === 'opcion', destinoViaje: ctx.viaje.destino })
   if (!destino) return { ok: false, codigo: 'DESTINO', mensaje: 'Esa opción ya no está en la cotización. Recarga la página.' }
 
   if (destino.como === 'habitacion') {
