@@ -97,6 +97,7 @@ export function textoLectura(l: LecturaAdjunto | null | undefined): string {
     l.fecha ? `fecha ${l.fecha}` : null,
     l.comercio ? `comercio ${escapar(l.comercio, 80)}` : null,
     l.nit ? `NIT ${l.nit}` : null,
+    l.numero_transaccion ? `transacción ${escapar(l.numero_transaccion, 60)}` : null,
     l.descripcion ? `concepto ${escapar(l.descripcion, 160)}` : null,
     l.titular_destino ? `el dinero llega a la cuenta de ${escapar(l.titular_destino, 80)}` : null,
   ].filter(Boolean);
