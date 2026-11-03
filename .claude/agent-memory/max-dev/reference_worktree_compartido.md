@@ -16,5 +16,8 @@ sesión>`): la otra ya tenía cambios sin commitear en otra rama. Mirar `git sta
 - Cuando la otra instancia cierra, BORRA el worktree: la carpeta queda vacía y git desde ahí resuelve al checkout
   principal (rama main). No hacer nada que escriba ahí; recrear el worktree en esa misma carpeta vacía.
 
+Pasó otra vez el 3-nov: la otra instancia hizo `reset --hard origin/main` en el worktree compartido y borró
+mis cambios sin commitear. Commitear y pushear la rama apenas haya un cambio que valga.
+
 **How to apply:** si el worktree trae cambios ajenos, no tocarlos; abrir uno propio y commitear desde el asignado
 cuando quede libre. Ver [[reference-worktree-aislado-comandos]].

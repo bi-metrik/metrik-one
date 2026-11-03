@@ -188,6 +188,8 @@ export function destinoDeReglas(args: {
   pistas: { lugar: string | null; origen: string | null; destino: string | null }
   lineas: readonly Linea[]
   grupoViaje: Composicion | null
+  /** El destino del viaje: una zona dentro de él es otra opción del mismo hotel. */
+  destinoViaje?: string | null
 }): DestinoPorPasos {
   const completa = completaDe(args.tipo, args.lectura, args.lineas, args.grupoViaje)
   if (completa) {
@@ -202,7 +204,7 @@ export function destinoDeReglas(args: {
       fuente: 'reglas',
     }
   }
-  const d = ubicarLectura({ tipo: args.tipo, lectura: args.lectura, pistas: args.pistas, lineas: args.lineas, grupoViaje: args.grupoViaje })
+  const d = ubicarLectura({ tipo: args.tipo, lectura: args.lectura, pistas: args.pistas, lineas: args.lineas, grupoViaje: args.grupoViaje, destinoViaje: args.destinoViaje ?? null })
   if (d.como === 'habitacion') {
     return { como: 'habitacion', itemId: d.itemId, grupo: d.grupo, razon: 'Mismo hotel y mismas fechas: suma dentro de la opción.', duda: false, fuente: 'reglas' }
   }

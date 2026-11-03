@@ -69,7 +69,7 @@ import {
 } from '@/lib/cotizaciones/revision-captura'
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
-import type { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
+import { MENSAJE_PAQUETE_SIN_BLOQUEO, type RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { EventoProvisional } from '@/lib/cotizaciones/aceptar-optimista'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
@@ -1224,6 +1224,13 @@ export default function BandejaCapturas({
                     nuevoTurno(c.id)
                     actualizar(c.id, { estado: { fase: 'descartada' } })
                     alPaquete(c.dataUrl)
+                    return
+                  }
+                  // Sin viaje en bloqueo NO hay lector de paquete: el genérico le pedía hotel y precio
+                  // al vuelo del paquete y volvía a preguntar (SAN ANDRÉS, 2026-11-03). Se dice qué falta.
+                  if (t === 'paquete' && !bloqueo) {
+                    nuevoTurno(c.id)
+                    actualizar(c.id, { estado: { fase: 'rechazada', mensaje: MENSAJE_PAQUETE_SIN_BLOQUEO } })
                     return
                   }
                   void procesar(c.id, c.dataUrl, t)

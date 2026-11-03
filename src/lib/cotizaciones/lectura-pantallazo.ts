@@ -788,7 +788,46 @@ function multiplicador(
   if (base === 'por_noche') {
     return { cantidad: Math.max(1, nochesDeEstadia(porSlug)), unidad: 'noches' }
   }
+  if (precioEsPorPersona(ranura, base)) {
+    const personas = personasDeLaCaptura(porSlug) ?? 1
+    const noches = base === 'por_persona_noche' ? Math.max(1, nochesDeEstadia(porSlug)) : 1
+    return { cantidad: personas * noches, unidad: 'pax' }
+  }
   return { cantidad: 1, unidad: ranura.unidadPorDefecto }
+}
+
+/**
+ * ¿El precio leído es el de UNA persona? (Trappvel, 2026-11-03, negocio SAN ANDRÉS).
+ *
+ * El hotel solo sabía «total» o «por noche»: el lector escribía `por_persona` (Sol Caribe,
+ * 3.110.717 por persona) y, fuera del enum, el multiplicador lo tomaba como total; el costo de
+ * 3 adultos quedaba en el de uno y la confirmación lo partía entre 3.
+ *
+ * El paquete de bloqueo SIEMPRE se vende por persona (brief del 2026-10-27): sin `total` dicho
+ * por la pantalla, su precio es el de una persona.
+ */
+export function precioEsPorPersona(ranura: Pick<DefinicionRanura, 'slug'>, base: string | null | undefined): boolean {
+  if (base === 'por_persona' || base === 'por_persona_noche') return true
+  return ranura.slug === 'paquete_detalle' && base !== 'total'
+}
+
+/**
+ * Cuántas personas muestra la captura: adultos + niños + infantes si los separa; si no, el total
+ * de personas; si no, `pax`. `null` = la captura no lo dice (lo completa quien la recibe con la
+ * ocupación de la línea, `construirLecturaCasilla`).
+ */
+export function personasDeLaCaptura(porSlug: Map<string, string | null | undefined>): number | null {
+  const n = (slug: string) => {
+    const v = numero(porSlug.get(slug) ?? null)
+    return v !== null && v >= 0 ? Math.round(v) : null
+  }
+  const partes = [n('ocupacion_adultos'), n('ocupacion_ninos'), n('ocupacion_infantes')]
+  const suma = partes.reduce<number>((a, x) => a + (x ?? 0), 0)
+  if (partes.some(x => x !== null) && suma > 0) return suma
+  const total = n('ocupacion_total')
+  if (total !== null && total > 0) return total
+  const pax = n('pax')
+  return pax !== null && pax > 0 ? pax : null
 }
 
 /**
