@@ -56,7 +56,7 @@ export interface EntradaTurno {
   nuevos: FilaConversacion[];
   ctx: ContextoDominio;
   /** El turno sigue a un hecho que la persona acaba de confirmar con un toque (`seguirTrasToque`). */
-  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito' };
+  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito'; huella?: string };
 }
 
 export interface SalidaTurno {
@@ -184,14 +184,18 @@ export function mismaPropuesta(a: Pick<Propuesta, 'accion' | 'datos'>, b: Pick<P
 async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversacion[] | 'error' | null = null): Promise<string[]> {
   const vig = vigenteDe(e.filas, deps.dominio);
   const delDominio = [...((await deps.dominio.estado?.(e.ctx)) ?? []), ...lineasRegistros(regs)];
+  // Lo que el toque escribió, con sus datos (arnés 2026-11-03, b-borrados-dos-pdf: con «✅ Gasto de $6.880 registrado» a
+  // secas y un G2 borrado de $6.880 en el Estado, Haiku volvía a proponer la ida en vez de seguir con la vuelta).
+  const hecha = e.tras?.huella ? propuestas(e.filas).find((x) => x.p.huella === e.tras!.huella)?.p : undefined;
+  const queSeHizo = hecha ? ` Lo que se registró: ${hecha.resumen.split('\n').filter((l) => !/^¿.*\?$/.test(l.trim())).join(' · ')}.` : '';
   return [
     `Ahora: ${fechaBogota(deps.ahoraMs())} (Bogotá).`,
     `Escribe: ${e.ctx.remitente.nombre} (${e.ctx.remitente.rol}).`,
     `Propuesta pendiente: ${vig ? `${vig.resumen.replace(/\n/g, ' · ')} — espera su toque` : 'ninguna'}.`,
     ...delDominio,
     ...(e.tras ? [
-      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')} La confirmación ya la escribe el sistema: no la repitas.`,
-      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si no queda nada, llama \`${TERMINAR}\`.`,
+      `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')}${queSeHizo} La confirmación ya la escribe el sistema: no la repitas, y no vuelvas a proponer eso.`,
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
     ] : []),
   ];
 }
@@ -460,6 +464,15 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
         devolver(p.error);
         continue;
       }
+      // Tras un hecho, la persona no dijo nada nuevo: proponer otra vez lo que su toque acaba de escribir es un eco, no una
+      // intención (arnés con Haiku, 2026-10-31, b-borrados-dos-pdf: «Sí» registró el gasto de $27.000 y en el mismo mensaje
+      // salió la misma propuesta; el toque siguiente lo registró dos veces). Si de verdad eran dos iguales, lo dice en su turno.
+      const hecha = e.tras?.huella ? propuestas(e.filas).find((x) => x.p.huella === e.tras!.huella)?.p : undefined;
+      if (hecha && (d.mismoHecho ? d.mismoHecho(hecha, p.propuesta) : mismaPropuesta(hecha, p.propuesta))) {
+        traza.candados!.push({ candado: 'repite_lo_hecho', detalle: `${accion}: igual a la recién ejecutada ${hecha.huella}` });
+        devolver('No se envió: eso es justo lo que se acaba de registrar con el toque (la confirmación va arriba). No lo propongas otra vez: sigue con lo que falta (p. ej. el siguiente soporte) o llama `terminar`.');
+        continue;
+      }
       // La respuesta que va arriba del resumen (opcional): mismo tope y mismo verificador que `responder`.
       let arriba: string | null = null;
       let texto = String(args.texto ?? '').trim();
@@ -689,9 +702,15 @@ export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: S
   const origen = toque.traza.tipo === 'si_escrito' ? 'si_escrito' : 'toque_propuesta';
   // La fila que guardará la traza del toque es la última nueva: con el hecho puesto, la conversación es la de después.
   const conHecho = e.nuevos.at(-1)?.id;
-  const filas = e.filas.map((f) => (f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  // El «sí» escrito ya se gastó en el toque: en este turno se ve así, no como un pedido nuevo (arnés 2026-11-03,
+  // b-borrados-dos-pdf: «[escrito de Ana] Sí» como mensaje nuevo, y Haiku volvía a proponer lo que acababa de confirmar;
+  // con el botón, «[toque: Registrar]», no pasaba).
+  const gastado = (f: FilaConversacion): FilaConversacion =>
+    origen === 'si_escrito' && f.direccion === 'entrante' && esSiSolo(f.texto) ? { ...f, texto: `${f.texto} [con este «sí» confirmó la propuesta de arriba: ya quedó hecho]` } : f;
+  const filas = e.filas.map((f) => gastado(f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  const nuevos = e.nuevos.map((f) => filas.find((x) => x.id === f.id) ?? f);
   const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
-  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen } });
+  const m = await turnoDelModelo(deps, { ...e, filas, nuevos, ctx, tras: { lineas: ej.lineas ?? [], origen, huella: ej.huella } });
   return {
     salida: m.salida,
     traza: {

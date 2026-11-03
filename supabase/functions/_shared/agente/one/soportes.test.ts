@@ -325,7 +325,7 @@ describe('varios soportes seguidos: cada uno es su gasto', () => {
       fila('b', { clase: 'toque', traza: { tipo: 'toque_propuesta', bot: 'one', ejecucion: { huella: 'h', resultado: 'ejecutada', escrituras: [{ tipo: 'gasto', id: 'g', monto: 6880, foto: 'a' }] } } }),
       fila('c', { clase: 'reenvio', media: { tipo: 'documento', id: 'm2', nombre: 'reenviado.pdf' } }),
     ]
-    expect(soporteDe(filas, '#1')).toEqual({ error: 'El #1 ya es el soporte de otro gasto. Pregunta si hay otro soporte.' })
+    expect(soporteDe(filas, '#1')).toEqual({ error: 'El #1 ya es el soporte de otro gasto (el de $6.880, ya registrado). Si es ese mismo gasto, ya quedó: no lo propongas otra vez y sigue con lo que falta. Si es un gasto distinto, pregunta si hay otro soporte.' })
     // Un PDF reenviado también sirve de soporte.
     expect(soporteDe(filas, '#3')).toMatchObject({ fila: 'c', mediaId: 'm2', tipo: 'documento', nombre: 'reenviado.pdf', ref: null })
     expect(soporteDe(filas, '#2')).toHaveProperty('error')

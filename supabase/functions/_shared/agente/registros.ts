@@ -30,9 +30,19 @@ export function lineasRegistros(regs: RegistroConversacion[] | 'error' | null): 
   return [
     `Registros hechos en esta conversación, revisados en la base en este turno (el historial NO prueba que algo exista; esto sí): ${vigentes.length ? vigentes.map((r) => `${r.alias} · ${r.que}`).join(' | ') : 'ninguno sigue en la base'}.`,
     ...(borrados.length ? [
-      `YA NO EXISTEN en la base (los borraron después): ${borrados.map((r) => `${r.alias} (${r.que})`).join(', ')}. Aunque la conversación diga que quedaron registrados, no existen: no digas que están registrados, no los corrijas ni les adjuntes nada. Si te piden registrarlos otra vez, propónlos como registros NUEVOS (con lo que traigan sus soportes).`,
+      `YA NO EXISTEN en la base (los borraron después): ${borrados.map((r) => `${r.alias} (${r.que}${otraVez(r, regs) ? `; ya se volvió a registrar: ${otraVez(r, regs)!.alias}` : ''})`).join(', ')}. Aunque la conversación diga que quedaron registrados, no existen: no digas que están registrados, no los corrijas ni les adjuntes nada. Registrar otra vez SOLO los que la persona señale: si mandó soportes (fotos o PDF) y dice «estos», son los de esos soportes, no los de esta lista; uno de esta lista sin soporte nuevo, solo si lo nombra (su alias, su monto o lo que fue). Si no queda claro cuáles, pregunta antes de proponer. Los que sí, como registros NUEVOS (con lo que traigan sus soportes). Uno que ya se volvió a registrar no se registra otra vez.`,
     ] : []),
   ];
+}
+
+/**
+ * El registro vigente, hecho DESPUÉS en la conversación, que repite a uno borrado (mismas cifras y lo mismo de base:
+ * arnés 2026-11-03, b-borrados-dos-pdf: con «G2 $6.880 ya no existe» al lado de G4, la ida recién vuelta a registrar,
+ * Haiku seguía proponiendo la ida). Pura.
+ */
+function otraVez(b: RegistroConversacion, regs: RegistroConversacion[]): RegistroConversacion | undefined {
+  const i = regs.indexOf(b);
+  return regs.find((v, j) => j > i && v.estado === 'vigente' && (v.montos ?? []).join() === (b.montos ?? []).join() && !!b.montos?.length && v.que.startsWith(b.que));
 }
 
 const VERBO_REGISTRO = /\b(registrad[oa]s?|qued[óo]|quedaron|ya est[áa]n?|cargad[oa]s?|anotad[oa]s?|guardad[oa]s?|existen?)\b/iu;

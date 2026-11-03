@@ -347,6 +347,12 @@ export interface Dominio {
    * para el modelo, o null. En ONE: no dice que guarda «el mensaje completo» si lo que va es un texto suyo y no la nota.
    */
   revisarTextoPropuesta?(texto: string, propuesta: Propuesta): string | null;
+  /**
+   * ¿`nueva` es lo mismo que `hecha`, la propuesta que un toque acaba de ejecutar? (2026-11-03). El núcleo no deja salir
+   * ese eco en el turno que sigue al hecho. Ausente = misma acción y mismos `datos`. En ONE: sin contar el aviso
+   * `parecido`, que tras el hecho apunta justo al gasto recién escrito.
+   */
+  mismoHecho?(hecha: Propuesta, nueva: Propuesta): boolean;
   cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
     | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
     | { ok: false; error: string; candado: string }

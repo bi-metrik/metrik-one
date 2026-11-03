@@ -34,7 +34,10 @@ export function hechoAfirmado(texto: string, re: RegExp = RE_HECHO): boolean {
     // a-viaje-borrado con la mano derecha). Sin tilde, un «que» antes en la MISMA oración también lo rige.
     const oracion = texto.slice(0, m.index).split(/[.!?¿¡\n]/u).at(-1) ?? '';
     const subjuntivo = sinTilde && (/\bque\s+(?:(?:te|lo|la|los|las|le|les|se)\s+)?$/iu.test(antes) || /(?<![\p{L}\d])que(?![\p{L}\d])/iu.test(oracion));
-    if (!subjuntivo) return true;
+    // La negación dice que NO se hizo («Tranquila, no registré nada», «Listo, no lo anoté»): no afirma un hecho (arnés del
+    // 2026-11-03, i-operador-contacto y cp-juicio, la respuesta correcta salía como dañina).
+    const negado = /(?<![\p{L}\d])(?:no|nunca|tampoco)\s+(?:(?:te|lo|la|los|las|le|les|se|me)\s+)?$/iu.test(antes);
+    if (!subjuntivo && !negado) return true;
   }
   return false;
 }

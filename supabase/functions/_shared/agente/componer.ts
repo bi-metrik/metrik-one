@@ -249,6 +249,12 @@ export function componerDominio(o: OpcionesComponer): Composicion {
         return m?.revisarTextoPropuesta ? m.revisarTextoPropuesta(texto, p) : null;
       },
     } as Pick<Dominio, 'revisarTextoPropuesta'> : {}),
+    ...(deUsados('mismoHecho').length ? {
+      mismoHecho(hecha: Propuesta, nueva: Propuesta) {
+        const m = motorDeAccion(hecha);
+        return m?.mismoHecho ? m.mismoHecho(hecha, nueva) : hecha.accion === nueva.accion && JSON.stringify(hecha.datos) === JSON.stringify(nueva.datos);
+      },
+    } as Pick<Dominio, 'mismoHecho'> : {}),
   };
 
   return {
