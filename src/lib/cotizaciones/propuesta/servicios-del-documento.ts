@@ -14,12 +14,14 @@
  *
  * Puro.
  */
-import { fechaCorta, lecturaDeTraslado, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { esAlquilerDeCarro, fechaCorta, lecturaDeTraslado, lecturaDeTren, lugarDelServicio, serviciosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import { esFechaCivil, sumarDiasCivil } from '@/lib/viaje/plan-pagos'
 import type { ServicioDelDocumento } from './modelo-documento'
-import { trayectosDeTraslado } from './trayectos'
+import { trayectoDeTren, trayectosDeTraslado, vehiculoLegible } from './trayectos'
 
 export interface ItemDeServicio extends ItemConLectura {
+  /** La línea (`items.id`): el día a día no la pinta dos veces (ver `ServicioDelDocumento.itemId`). */
+  id?: string | null
   /** Día del viaje asignado (1 = el de salida). */
   dia_relativo?: number | null
   /** Índices de tarifa a los que pertenece. Vacío o ausente = todas. */
@@ -32,8 +34,34 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
   for (const item of items) {
     const dia = typeof item.dia_relativo === 'number' && item.dia_relativo >= 1 ? item.dia_relativo : null
     const fechaDelDia = dia !== null && inicioIso ? fechaCorta(sumarDiasCivil(inicioIso, dia - 1)) : null
-    const tarifas = item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}
+    const tarifas = {
+      ...(item.tarifas && item.tarifas.length > 0 ? { tarifas: [...item.tarifas] } : {}),
+      ...(item.id ? { itemId: item.id } : {}),
+    }
+    // QA G9 (M9-1 / V9-3) · el tren con su operador, su número y su hora de salida.
+    const tren = lecturaDeTren(item)
+    if (tren) {
+      const t = trayectoDeTren(tren)
+      if (t) salida.push({ tipo: 'tren', descripcion: t.descripcion, fecha: fechaDelDia ?? t.fecha, hora: t.hora, ...tarifas })
+      continue
+    }
     const lectura = lecturaDeTraslado(item)
+    // N7-4 / V7-3 (QA del 2026-10-29): el carro de alquiler no es un traslado. Un solo servicio con
+    // dónde se recoge y dónde se devuelve; el modelo lo rotula «Alquiler de carro».
+    if (lectura && esAlquilerDeCarro(item)) {
+      const [recogida, devolucion] = (lectura.trayecto ?? '').replace(/\s*\n\s*/g, ' - ').split(/\s*(?:->|→|=>)\s*|\s+[-–]\s+/).map((x) => x.trim()).filter(Boolean)
+      const fechaLeida = fechaCorta(/(\d{4}-\d{2}-\d{2})/.exec(lectura.fecha ?? '')?.[1] ?? null)
+      const vehiculo = vehiculoLegible(lectura.vehiculo)
+      salida.push({
+        tipo: 'traslado',
+        descripcion: ['Alquiler de carro', vehiculo].filter(Boolean).join(' · '),
+        fecha: fechaDelDia ?? fechaLeida,
+        hora: null,
+        alquiler: { recogida: recogida ?? null, devolucion: devolucion ?? recogida ?? null, vehiculo },
+        ...tarifas,
+      })
+      continue
+    }
     if (lectura) {
       trayectosDeTraslado(lectura).forEach((t, i) => {
         // El día asignado es el del primer trayecto; el de vuelta sin fecha propia se deduce de él.
@@ -50,7 +78,7 @@ export function serviciosDelDocumento(items: readonly ItemDeServicio[], inicio: 
       })
       continue
     }
-    for (const s of serviciosDeItems([item])) {
+    for (const { esAlquiler: _alquiler, ...s } of serviciosDeItems([item])) {
       salida.push({ ...s, fecha: fechaDelDia ?? s.fecha, hora: null, ...tarifas })
     }
   }

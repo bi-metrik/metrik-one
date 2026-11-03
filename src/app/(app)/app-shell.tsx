@@ -10,6 +10,7 @@ import {
   HardHat,
   Timer,
   Radar,
+  Ticket,
   BarChart3,
   QrCode,
   LayoutDashboard,
@@ -39,6 +40,7 @@ import {
   CreditCard,
   Wrench,
   Brain,
+  Sparkles,
 } from 'lucide-react'
 import { useState } from 'react'
 import FAB from './fab'
@@ -53,6 +55,15 @@ import type { PlatformAdminState } from '@/lib/actions/platform-admin'
 import type { OpcionesImpersonacion } from '@/lib/actions/impersonation'
 import type { ActiveTimer } from './timer-actions'
 import { rutaPermitida, vitrinasDelEspacio } from '@/lib/modulos/gate'
+import { NOVEDADES } from '@/lib/novedades/novedades'
+import { llaveVistas, marcarVistas, novedadesDelEspacio } from '@/lib/novedades/vistas'
+import {
+  BotonNovedades,
+  NumeritoNovedades,
+  PanelNovedades,
+  etiquetaNovedades,
+  useNovedadesNoVistas,
+} from '@/components/novedades'
 
 interface BrandingProps {
   colorPrimario?: string
@@ -75,6 +86,8 @@ interface WorkspaceModules {
   ferreteria?: boolean
   /** Radar SECOP: convocatorias públicas cruzadas contra los temas del cliente (/radar). */
   radar_secop?: boolean
+  /** Funciones con cupo y reservas (/funciones). Ver `src/lib/funciones/`. */
+  funciones?: boolean
   conciliacion?: boolean
   /** FAB global "Registrar pago" (opt-in por workspace). Ver fab-pago-actions.ts. */
   fab_registrar_pago?: boolean
@@ -134,6 +147,8 @@ interface AppShellProps {
   timerActivo?: ActiveTimer | null
   /** La biblioteca de fotos de la propuesta de viaje (`/fotos`): solo con plantilla html. */
   bibliotecaFotos?: boolean
+  /** Id del usuario de la sesión: separa el «visto» de Novedades por persona en el navegador. */
+  usuarioId?: string | null
 }
 
 const COLOR_PUNTO = { verde: '#10B981', ambar: '#D97706', rojo: '#DC2626' } as const
@@ -333,6 +348,12 @@ const RADAR_NAV_ITEMS = [
   { href: '/radar', label: 'Radar SECOP', icon: Radar, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
 ]
 
+// Funciones: cupo y reservas (extra inferior, activable por flag). Todos los roles ven; la base
+// decide quién escribe (las RPC de `funcion_*` exigen rol que edita).
+const FUNCIONES_NAV_ITEMS = [
+  { href: '/funciones', label: 'Funciones', icon: Ticket, roles: ['owner', 'admin', 'supervisor', 'operator', 'read_only'] },
+]
+
 // Compartidos (siempre visibles)
 const SHARED_NAV_ITEMS = [
   { href: '/directorio', label: 'Directorio', icon: Users, roles: ['owner', 'admin', 'supervisor'] },
@@ -440,6 +461,7 @@ export default function AppShell({
   impersonacion = null,
   timerActivo = null,
   bibliotecaFotos = false,
+  usuarioId = null,
 }: AppShellProps) {
   const pathname = usePathname()
   // Los Link del menu NO precargan al entrar en pantalla (prefetch={false}):
@@ -503,6 +525,17 @@ export default function AppShell({
   }
   const moduloGate = <T extends { href: string }>(items: T[]): T[] =>
     items.filter((i) => rutaPermitida(i.href, ctxGate))
+
+  // ── Novedades ── (`lib/novedades/novedades.ts`). Solo las del producto del espacio; sin
+  // ninguna, no hay entrada. «Visto» vive en el navegador de cada persona.
+  const novedades = novedadesDelEspacio(NOVEDADES, ctxGate)
+  const llaveNovedades = llaveVistas(usuarioId)
+  const novedadesSinVer = useNovedadesNoVistas(llaveNovedades, novedades)
+  const [novedadesAbierto, setNovedadesAbierto] = useState(false)
+  const abrirNovedades = () => {
+    setNovedadesAbierto(true)
+    marcarVistas(llaveNovedades, novedades.map((n) => n.id))
+  }
 
   // En modo vitrina, Números y Tableros se FUERZAN aunque sus módulos (business)
   // estén off — son vitrinas de upsell. Sin esto no aparecen en un workspace
@@ -575,8 +608,9 @@ export default function AppShell({
   const certItems = moduloGate(vitrinaGate(mod.cert_qr ? filterByRole(CERT_NAV_ITEMS, role) : []))
   const ferreteriaItems = moduloGate(vitrinaGate(mod.ferreteria ? filterByRole(FERRETERIA_NAV_ITEMS, role) : []))
   const radarItems = moduloGate(vitrinaGate(mod.radar_secop ? filterByRole(RADAR_NAV_ITEMS, role) : []))
+  const funcionesItems = moduloGate(vitrinaGate(mod.funciones ? filterByRole(FUNCIONES_NAV_ITEMS, role) : []))
   const solicitudesItems = moduloGate(vitrinaGate(mod.wa_customer_bot ? filterByRole(SOLICITUDES_NAV_ITEMS, role) : []))
-  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems]
+  const extrasItems = [...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...funcionesItems]
   // Caja: Movimientos (si business) + Cuentas de cobro (si cobros_recurrentes). Roles ya filtrados.
   const cajaItems = moduloGate(vitrinaGate([
     ...(mod.business && roleAllowed(CAJA_MOVIMIENTOS_ITEM.href, CAJA_MOVIMIENTOS_ITEM.roles) ? [CAJA_MOVIMIENTOS_ITEM] : []),
@@ -596,7 +630,7 @@ export default function AppShell({
         : (mod.calidad_llamadas ? '/calidad' : (mod.valida_api ? '/valida-api' : (mod.ferreteria ? '/ferreteria' : (mod.radar_secop ? '/radar' : '/mi-negocio'))))))
 
   // Mobile tab bar: split into primary (visible) and secondary (in "Más" panel)
-  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...workflowsItems]
+  const allMobileItems = [...businessItems, ...cajaItems, ...contabilidadItems, ...complianceItems, ...validacionItems, ...calidadItems, ...sharedItems, ...solicitudesItems, ...validaItems, ...validaApiItems, ...certItems, ...ferreteriaItems, ...radarItems, ...funcionesItems, ...workflowsItems]
   const primaryHrefs = modoVitrina
     // Valida más las vitrinas que abre ESTE espacio (un CDA, ninguna): la misma regla del menú.
     ? ['/valida', ...vitrinasDelEspacio(mod)]
@@ -1054,6 +1088,29 @@ export default function AppShell({
             </div>
           )}
 
+          {/* Novedades — botón (abre un panel, no es una ruta), con el numerito de lo no visto. */}
+          {novedades.length > 0 && (
+            <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }} data-nav-novedades>
+              <button
+                type="button"
+                onClick={abrirNovedades}
+                title={!sidebarExpanded ? 'Novedades' : undefined}
+                aria-label={etiquetaNovedades(novedadesSinVer)}
+                className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] font-medium transition-all hover:opacity-90 ${
+                  sidebarExpanded ? '' : 'justify-center'
+                }`}
+                style={{ backgroundColor: 'transparent', color: 'var(--sidebar-muted)' }}
+              >
+                <Sparkles className="h-4 w-4 shrink-0" />
+                {sidebarExpanded && <span className="flex-1 text-left">Novedades</span>}
+                <NumeritoNovedades
+                  cuenta={novedadesSinVer}
+                  className={sidebarExpanded ? '' : 'absolute right-1 top-1'}
+                />
+              </button>
+            </div>
+          )}
+
           {/* Suscripción — al final, separada: lo que el espacio paga, no una herramienta. */}
           {suscripcion && (
             <div className="pt-1" style={{ borderTop: '1px solid var(--sidebar-border)' }} data-nav-suscripcion>
@@ -1216,6 +1273,7 @@ export default function AppShell({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {novedades.length > 0 && <BotonNovedades cuenta={novedadesSinVer} onAbrir={abrirNovedades} />}
             {notificationBell}
             {suscripcion ? (
               // Con Suscripción, el avatar abre el menú de perfil: Suscripción primero, luego salir.
@@ -1370,6 +1428,9 @@ export default function AppShell({
 
       {/* FAB — solo en workspaces con modulo business activo (no aplica en compliance-only como ALMA).
           En modo vitrina se oculta: el shell es comercial, no operativo. */}
+      {novedades.length > 0 && (
+        <PanelNovedades abierto={novedadesAbierto} onAbiertoChange={setNovedadesAbierto} lista={novedades} />
+      )}
       {mod.business && !modoVitrina && <FAB role={role} registrarPagoEnabled={!!mod.fab_registrar_pago} modules={mod as Record<string, boolean | undefined>} timerActivo={timerActivo} />}
       </div>
     </div>

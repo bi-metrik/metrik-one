@@ -1,5 +1,9 @@
 'use client'
 
+import { diferenciaDeCambio, diferenciaDeCambioDelServicio, montoEnMoneda, tasaPagoValida, textoDiferenciaDeCambio, textoPagoEnMoneda } from '@/lib/viaje/moneda-servicio'
+import { tasaComoTexto } from '@/lib/cotizaciones/tasa-cotizacion'
+import { avisosDeLectura, type LecturaPagoProveedor } from '@/lib/viaje/lectura-pago-proveedor'
+import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
@@ -15,6 +19,7 @@ import {
   puedeAdjuntarVoucher,
   puedeEditarServicios,
   puedeTraerServicios,
+  viajeParaReglas,
   type EstadoServicio,
 } from '@/lib/viaje/estado-servicio'
 import {
@@ -26,20 +31,26 @@ import {
   porcentajePersonal,
   resumenDelTablero,
   sigueDelTablero,
+  pildorasDeHitos,
+  type ColorPildora,
   totalesDelTablero,
   type DatosBloqueServicios,
   type FilaVista,
   type FiltroTablero,
 } from '@/lib/viaje/bloque-servicios'
 import {
+  baseDesviacion,
   configReglasPago,
   desviacion,
+  desviacionDelViaje,
   reglasQueRompe,
   reglasSinAprobar,
   totalTrasPago,
   type AprobacionLeida,
   type MedioPagoProveedor,
 } from '@/lib/viaje/reglas-pago'
+import { confirmacionFueraDeLoPactado } from '@/lib/viaje/pago-fuera-de-lo-pactado'
+import { confirmacionCambioLocalizador, confirmacionSacarDelViaje } from '@/lib/viaje/sacar-del-viaje'
 import {
   actualizarServicio,
   adjuntarArchivoServicio,
@@ -50,6 +61,8 @@ import {
   traerServiciosDeCotizacion,
   type CambiosServicio,
 } from '../../servicios-viaje-actions'
+import FechasServicio, { LineaDeFechas } from './FechasServicio'
+import { claseDeServicio, etiquetaTipoServicio } from '@/lib/viaje/etiqueta-servicio'
 
 /**
  * Bloque «Servicios del viaje»: el tablero de Reservas y pagos (F0 + F3). Una fila por servicio
@@ -69,18 +82,11 @@ const COLOR_TIPO: Record<string, string> = {
   vuelo: 'border-l-sky-500',
   hotel: 'border-l-violet-500',
   traslado: 'border-l-amber-500',
+  tren: 'border-l-amber-500',
   actividad: 'border-l-emerald-500',
   asistencia: 'border-l-rose-500',
   otro: 'border-l-gray-400',
-}
-
-const ETIQUETA_TIPO: Record<string, string> = {
-  vuelo: 'Vuelo',
-  hotel: 'Hotel',
-  traslado: 'Traslado',
-  actividad: 'Actividad',
-  asistencia: 'Asistencia',
-  otro: 'Otro',
+  paquete: 'border-l-teal-500',
 }
 
 const PILDORA: Record<EstadoServicio, string> = {
@@ -94,8 +100,15 @@ const PILDORA: Record<EstadoServicio, string> = {
 }
 
 const COLOR_FECHA = { verde: 'text-green-700', ambar: 'text-amber-600', rojo: 'text-red-600' } as const
-const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500' } as const
+const PUNTO_ETAPA = { verde: 'bg-green-500', ambar: 'bg-amber-500', rojo: 'bg-red-500', gris: 'bg-muted-foreground/40' } as const
 const FILTROS: FiltroTablero[] = ['todos', 'por_pagar', 'esperando', 'falta_confirmar']
+/** Píldoras de hito (Noor §3.2): el color nunca va solo, el texto dice el estado. */
+const COLOR_PILDORA_HITO: Record<ColorPildora, string> = {
+  gris: 'border-border bg-muted text-muted-foreground',
+  ambar: 'border-amber-300 bg-amber-50 text-amber-800',
+  rojo: 'border-red-300 bg-red-50 text-red-700',
+  verde: 'border-green-300 bg-green-50 text-green-800',
+}
 
 interface BloqueServiciosProps {
   negocioId: string
@@ -160,8 +173,10 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable,
 
   const totales = totalesDelTablero(vista)
   const personal = porcentajePersonal(vista)
-  const sigue = sigueDelTablero(vista, hoy)
-  const color = colorDeLaEtapa(vista, hoy)
+  // El punto y el «Sigue:» con la regla del gate `servicios_listos` (barrido 2026-10-22).
+  const exige = datos.reglas?.exigeConfirmacion ?? true
+  const sigue = sigueDelTablero(vista, hoy, datos.hitos ?? [], exige)
+  const color = colorDeLaEtapa(vista, hoy, exige)
   const visibles = filtrarTablero(vista, filtro)
   return (
     <div className="space-y-3">
@@ -221,12 +236,15 @@ export default function BloqueServicios({ negocioId, modo, datos, esResponsable,
 }
 
 /** ¿Este pago pediría a Edgar? Lo mismo que decide el servidor (`reglas-pago`). */
-function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, medio: MedioPagoProveedor | null): string[] {
+function pideAEdgar(v: FilaVista, datos: DatosBloqueServicios, monto: number, medio: MedioPagoProveedor | null, diferenciaCambio = 0): string[] {
   if (!medio || !(monto > 0)) return []
   const rotas = reglasQueRompe({
     monto,
     pagadoAntes: v.pagado,
     costoCotizado: v.servicio.costo_cotizado,
+    valorPorPagar: v.servicio.valor_por_pagar,
+    viaje: viajeParaReglas(datos.filas, v.servicio.id),
+    diferenciaCambio,
     medio,
     cobradoCliente: datos.cobradoCliente ?? 0,
     precioAprobado: datos.precioAprobado ?? 0,
@@ -264,11 +282,15 @@ function FilaServicio({
   const detalle = [s.proveedor_nombre ?? 'Falta el proveedor', s.localizador ? `loc. ${s.localizador}` : null]
     .filter(Boolean)
     .join(' · ')
-  const d = desviacion(v.pagado, s.costo_cotizado)
+  // H6-3 · lo que movió la TRM no es sobrecosto del proveedor: se dice aparte.
+  const cambio = diferenciaDeCambioDelServicio(s.moneda, s.gastos)
+  const d = desviacion(v.pagado, Math.max(0, s.costo_cotizado + cambio.pesos))
   const umbral = (datos.reglas ?? configReglasPago(null)).umbralPct
   const pctTexto = Number.isFinite(d.pct) ? ` +${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %` : ''
+  // M3-4: lo que el proveedor cobró de menos queda a la vista (no se «pierde» en lo cotizado).
+  const aFavor = s.valor_por_pagar !== null && s.valor_por_pagar < s.costo_cotizado ? s.costo_cotizado - s.valor_por_pagar : 0
   return (
-    <li className={`rounded-md border border-l-4 ${COLOR_TIPO[s.tipo] ?? COLOR_TIPO.otro} bg-card`}>
+    <li className={`rounded-md border border-l-4 ${COLOR_TIPO[claseDeServicio(s)] ?? COLOR_TIPO.otro} bg-card`}>
       <button
         type="button"
         onClick={alternar}
@@ -276,21 +298,37 @@ function FilaServicio({
         className="flex w-full min-h-11 items-start gap-2 p-2.5 text-left"
       >
         <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{ETIQUETA_TIPO[s.tipo] ?? 'Otro'}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{etiquetaTipoServicio(s)}</p>
           <p className={`break-words text-sm font-medium ${v.estado === 'cancelado' ? 'line-through text-muted-foreground' : ''}`}>{s.nombre}</p>
           <p className="break-words text-xs text-muted-foreground">{detalle}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+            {v.estado !== 'cancelado' && <LineaDeFechas s={s} />}
             {fecha && <span className={COLOR_FECHA[fecha.color]}>{fecha.texto}</span>}
             <span className="tabular-nums text-muted-foreground">
-              Cotizado {formatCOP(s.costo_cotizado)} · Pagado {formatCOP(v.pagado)}
+              Cotizado {formatCOP(s.costo_cotizado)}{s.moneda ? ` (${montoEnMoneda(s.moneda.monto, s.moneda.moneda)} a ${tasaComoTexto(s.moneda.tasa)})` : ''} · Pagado {formatCOP(v.pagado)}
+              {s.moneda && cambio.pesos !== 0 && (
+                <span className="text-muted-foreground"> · {cambio.pesos > 0 ? '+' : '−'}{formatCOP(Math.abs(cambio.pesos))} de {textoDiferenciaDeCambio(s.moneda, cambio.tasas)}</span>
+              )}
               {d.pesos > 0 && (
                 <span className={d.pct > umbral ? 'text-red-600' : 'text-amber-600'}> +{formatCOP(d.pesos)}{pctTexto}</span>
+              )}
+              {aFavor > 0 && (
+                <span className="text-green-700"> · Cobró {formatCOP(v.aPagar)}: {formatCOP(aFavor)} a favor</span>
               )}
             </span>
           </div>
           <p className="text-[11px] text-muted-foreground">
             {s.gastos.some(g => g.soporte_url) ? '◉' : '○'} soporte · {s.voucher_ref ? '◉' : '○'} voucher · {s.confirmacion_ref ? '◉' : '○'} confirmado
           </p>
+          {datos.hitos && datos.hitos.length > 0 && v.estado !== 'cancelado' && (
+            <span className="flex flex-wrap gap-1" data-pildoras-hito>
+              {pildorasDeHitos(datos.hitos, s.id, hoy, datos.nombres ?? {}).map(p => (
+                <span key={p.clave} title={p.detalle} className={`rounded-full border px-2 py-0.5 text-[11px] ${COLOR_PILDORA_HITO[p.color]}`} data-color={p.color}>
+                  {p.texto}
+                </span>
+              ))}
+            </span>
+          )}
         </div>
         <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PILDORA[v.estado]}`}>{ETIQUETA_ESTADO[v.estado]}</span>
         <ChevronDown className={`mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${abierta ? 'rotate-180' : ''}`} />
@@ -362,10 +400,19 @@ function HojaServicio({
         type="text"
         defaultValue={valor ?? ''}
         placeholder={placeholder}
-        disabled={!puedeEditar || isPending}
+        // Sin `isPending`: deshabilitar el campo con el foco dentro lo saca del foco y lo que se
+        // escribe después cae en otro campo (QA 2026-10-29, N1-1).
+        disabled={!puedeEditar}
         onBlur={e => {
           const nuevo = e.target.value.trim()
-          if (nuevo !== (valor ?? '')) guardar({ [clave]: nuevo }, { [clave]: valor ?? '' }, `${etiqueta}: guardado.`)
+          if (nuevo === (valor ?? '')) return
+          // H9-4: un localizador ya guardado no se pisa sin decirlo.
+          const seguro = clave === 'localizador' ? confirmacionCambioLocalizador(valor, nuevo) : null
+          if (seguro && !window.confirm(seguro)) {
+            e.target.value = valor ?? ''
+            return
+          }
+          guardar({ [clave]: nuevo }, { [clave]: valor ?? '' }, `${etiqueta}: guardado.`)
         }}
         className="h-11 w-full rounded-md border px-2 text-sm disabled:bg-muted"
       />
@@ -393,6 +440,8 @@ function HojaServicio({
 
       <Aprobaciones v={v} datos={datos} direccion={direccion} alGuardar={alGuardar} />
 
+      <FechasServicio key={`fechas:${s.fechas_corregidas_at ?? ''}:${s.fecha_servicio ?? ''}:${s.fecha_fin ?? ''}`} s={s} puedeEditar={puedeEditar} nombres={datos.nombres} alGuardar={alGuardar} />
+
       <p className="text-xs font-semibold">1 Reserva</p>
       {campoTexto('Proveedor', 'proveedor_nombre', s.proveedor_nombre, '¿Con quién lo reservaste?')}
       {campoTexto('Localizador', 'localizador', s.localizador)}
@@ -402,7 +451,9 @@ function HojaServicio({
           key={`limite:${s.fecha_limite_pago ?? ''}`}
           type="date"
           defaultValue={s.fecha_limite_pago ?? ''}
-          disabled={!puedeEditar || isPending}
+          // Sin `isPending`: si otro campo guardaba mientras se escribía la fecha, el campo se
+          // deshabilitaba sin «blur» y la fecha no se guardaba (QA 2026-10-29, M1-2).
+          disabled={!puedeEditar}
           onBlur={e => {
             if (e.target.value !== (s.fecha_limite_pago ?? '')) {
               guardar({ fecha_limite_pago: e.target.value }, { fecha_limite_pago: s.fecha_limite_pago ?? '' }, 'Fecha límite: guardada.')
@@ -413,10 +464,39 @@ function HojaServicio({
       </label>
 
       <p className="text-xs font-semibold">2 Pago</p>
-      <PagosHechos v={v} medios={datos.medios ?? []} />
+      <PagosHechos
+        v={v}
+        medios={datos.medios ?? []}
+        // M3-4: el proveedor cobró menos de lo cotizado. Se dice con un toque, sin inventar un pago.
+        alCobrarMenos={puedeEditar && v.estado !== 'cancelado' && v.estado !== 'esperando'
+          ? () => guardar({ valor_por_pagar: v.pagado }, { valor_por_pagar: s.valor_por_pagar }, `${s.proveedor_nombre?.trim() || 'El proveedor'} cobró ${formatCOP(v.pagado)}: ${formatCOP(s.costo_cotizado - v.pagado)} a favor.`)
+          : null}
+      />
+      {puedeEditar && v.estado !== 'cancelado' && (
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">Lo que cobra el proveedor</span>
+          <input
+            key={`cobra:${s.valor_por_pagar ?? ''}`}
+            type="text"
+            inputMode="numeric"
+            defaultValue={s.valor_por_pagar ?? ''}
+            placeholder={`Lo cotizado: ${formatCOP(s.costo_cotizado)}`}
+            onBlur={e => {
+              const limpio = e.target.value.replace(/[^\d]/g, '')
+              const nuevo = limpio === '' ? null : Number(limpio)
+              if (nuevo !== (s.valor_por_pagar ?? null)) {
+                guardar({ valor_por_pagar: nuevo }, { valor_por_pagar: s.valor_por_pagar }, nuevo === null ? 'Vuelve a lo cotizado.' : 'Lo que cobra el proveedor: guardado.')
+              }
+            }}
+            className="h-11 w-full rounded-md border px-2 text-sm tabular-nums"
+          />
+          <span className="block text-[11px] text-muted-foreground">Solo si cobra menos de lo cotizado. Vacío = lo cotizado.</span>
+        </label>
+      )}
       {v.estado !== 'cancelado' && v.estado !== 'confirmado' && v.estado !== 'pagado' && v.estado !== 'esperando' && (
         puedeEditar
-          ? <FormularioPago v={v} datos={datos} alGuardar={alGuardar} />
+          // La llave con lo pagado: tras un pago el valor sugerido es lo que falta, no el pago anterior (M3-4).
+          ? <FormularioPago key={`pago:${v.pagado}:${v.aPagar}`} v={v} datos={datos} alGuardar={alGuardar} />
           : <p className="text-xs text-muted-foreground">Por pagar {formatCOP(Math.max(0, v.aPagar - v.pagado))}.</p>
       )}
       {v.estado === 'esperando' && (
@@ -438,7 +518,11 @@ function HojaServicio({
             </button>
           )}
           {s.estado !== 'cancelado' ? (
-            <button type="button" disabled={isPending} onClick={() => guardar({ estado: 'cancelado' }, { estado: s.estado }, 'Sacado del viaje.')}
+            <button type="button" disabled={isPending} onClick={() => {
+              // N9-9 / H9-3: se confirma, con lo que pasa con la plata del servicio.
+              if (!window.confirm(confirmacionSacarDelViaje({ nombre: s.nombre, costoCotizado: s.costo_cotizado, pagadoProveedor: v.pagado }))) return
+              guardar({ estado: 'cancelado' }, { estado: s.estado }, 'Sacado del viaje.')
+            }}
               className="min-h-11 rounded-md px-3 text-xs text-muted-foreground underline disabled:opacity-60">
               Sacar del viaje
             </button>
@@ -455,7 +539,7 @@ function HojaServicio({
 }
 
 /** Los pagos ya registrados de la fila, cada uno con su medio y su soporte. */
-function PagosHechos({ v, medios }: { v: FilaVista; medios: readonly MedioPagoProveedor[] }) {
+function PagosHechos({ v, medios, alCobrarMenos }: { v: FilaVista; medios: readonly MedioPagoProveedor[]; alCobrarMenos: (() => void) | null }) {
   const gastos = v.servicio.gastos
   if (gastos.length === 0) {
     return <p className="text-xs text-muted-foreground">Por pagar {formatCOP(v.aPagar)}. Todavía no hay pagos.</p>
@@ -479,7 +563,17 @@ function PagosHechos({ v, medios }: { v: FilaVista; medios: readonly MedioPagoPr
           </li>
         )
       })}
-      {v.aPagar - v.pagado > 0 && <li className="text-muted-foreground">Falta pagar {formatCOP(v.aPagar - v.pagado)}.</li>}
+      {v.aPagar - v.pagado > 0 && (
+        <li className="space-y-1 text-muted-foreground">
+          <span className="block">Falta pagar {formatCOP(v.aPagar - v.pagado)}.</span>
+          {alCobrarMenos && (
+            <button type="button" onClick={alCobrarMenos}
+              className="min-h-11 rounded-md border px-3 text-xs text-foreground">
+              El proveedor cobró {formatCOP(v.pagado)}: no falta nada
+            </button>
+          )}
+        </li>
+      )}
     </ul>
   )
 }
@@ -494,9 +588,13 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   const medios = datos.medios ?? []
   const falta = Math.max(0, v.aPagar - v.pagado)
   const [montoTexto, setMontoTexto] = useState(falta > 0 ? String(Math.round(falta)) : '')
+  const [trmTexto, setTrmTexto] = useState('')
   const [medioId, setMedioId] = useState(medios.length === 1 ? medios[0].id : '')
   const [fecha, setFecha] = useState(todayBogotaISO())
   const [soporte, setSoporte] = useState<string | null>(null)
+  // M-12 · lo leído del soporte y el número de comprobante (prellenado, editable).
+  const [lectura, setLectura] = useState<LecturaPagoProveedor | null>(null)
+  const [referencia, setReferencia] = useState('')
   const [isPending, startTransition] = useTransitionTolerante()
   const intencion = useIntencion()
   const archivoRef = useRef<HTMLInputElement>(null)
@@ -508,10 +606,22 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
 
   const monto = Math.round(Number(montoTexto.replace(/[^\d]/g, '')) || 0)
   const medio = medios.find(m => m.id === medioId) ?? null
-  const motivos = pideAEdgar(v, datos, monto, medio)
+  // H6-3 · servicio cotizado en otra moneda: la TRM del pago separa la diferencia de cambio.
+  const enMoneda = v.servicio.moneda ?? null
+  const tasaPago = parseMontoCop(trmTexto)
+  const tasaPagoOk = !!enMoneda && tasaPagoValida(tasaPago, enMoneda.tasa)
+  const cambioPrevio = diferenciaDeCambioDelServicio(enMoneda, v.servicio.gastos).pesos
+  const cambioTotal = cambioPrevio + (enMoneda && tasaPagoOk ? diferenciaDeCambio(monto, enMoneda.tasa, tasaPago as number) : 0)
+  const motivos = pideAEdgar(v, datos, monto, medio, cambioTotal)
   const total = totalTrasPago({ monto, pagadoAntes: v.pagado })
-  const d = desviacion(total, v.servicio.costo_cotizado)
+  const base = baseDesviacion(v.servicio.costo_cotizado, v.servicio.valor_por_pagar)
+  const d = desviacion(total, Math.max(0, base + cambioTotal))
+  const sobreViaje = desviacionDelViaje(total, { costoCotizado: v.servicio.costo_cotizado, valorPorPagar: v.servicio.valor_por_pagar }, viajeParaReglas(datos.filas, v.servicio.id))
   const listo = monto > 0 && !!medio && !!soporte
+  // M-12 · lo leído contra lo que faltaba pagar, ANTES de guardar. Pagado en la moneda del
+  // servicio, lo esperado en pesos es a la TRM del pago: lo que movió la TRM no es diferencia aquí.
+  const esperadoLeido = enMoneda && lectura?.tasa ? Math.round((falta / enMoneda.tasa) * lectura.tasa) : falta
+  const avisosLectura = lectura ? avisosDeLectura(lectura, esperadoLeido, v.servicio.proveedor_nombre ?? null) : []
 
   function subir(file: File | null | undefined) {
     if (!file) return
@@ -525,14 +635,36 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
         return
       }
       setSoporte(r.referencia)
-      toast.success('Soporte listo. Revisa el valor y toca «Registrar pago».')
+      const l = r.lectura
+      setLectura(l)
+      if (!l) {
+        toast.success('Soporte listo. No se pudo leer: escribe los datos y toca «Registrar pago».')
+        return
+      }
+      // Propone; la asesora revisa y confirma con «Registrar pago».
+      if (l.monto) setMontoTexto(String(l.monto))
+      if (l.fecha && l.fecha <= todayBogotaISO()) setFecha(l.fecha)
+      if (l.medioId && medios.some(m => m.id === l.medioId)) setMedioId(l.medioId)
+      if (l.referencia) setReferencia(l.referencia)
+      if (enMoneda && l.moneda === enMoneda.moneda && l.tasa) setTrmTexto(tasaComoTexto(l.tasa))
+      toast.success('Soporte leído. Revisa los datos y toca «Registrar pago».')
     })
   }
 
   function registrar() {
     if (!listo || !medio || !soporte) return
+    // Fuera de lo pactado (Mauricio 2026-10-29): se pregunta en pantalla antes de registrar.
+    const fuera = confirmacionFueraDeLoPactado({
+      monto,
+      pagadoAntesServicio: v.pagado,
+      costoCotizado: v.servicio.costo_cotizado,
+      pagadoProveedores: totalesDelTablero(filasVista(datos.filas)).pagado,
+      cobradoCliente: datos.cobradoCliente ?? 0,
+      diferenciaCambio: cambioTotal,
+    })
+    if (fuera && !window.confirm(fuera)) return
     startTransition(async () => {
-      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte }, intencion.clave())
+      const r = await registrarPagoServicio({ servicioId: v.servicio.id, monto, fecha, medioId: medio.id, soporteRef: soporte, tasaPago: tasaPagoOk ? tasaPago : null, referencia: referencia.trim() || null }, intencion.clave())
       intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
@@ -541,6 +673,7 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
       if (r.esperando.length > 0) toast.success(`Pago registrado. Quedó esperando a Edgar: ${r.esperando.join(' ')}`)
       else toast.success('Pago registrado.')
       setSoporte(null)
+      setLectura(null)
       alGuardar()
     })
   }
@@ -548,7 +681,7 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
   function pedir() {
     if (!medio || !(monto > 0)) return
     startTransition(async () => {
-      const r = await pedirAprobacionServicio({ servicioId: v.servicio.id, monto, medioId: medio.id }, intencion.clave())
+      const r = await pedirAprobacionServicio({ servicioId: v.servicio.id, monto, medioId: medio.id, tasaPago: tasaPagoOk ? tasaPago : null }, intencion.clave())
       intencion.cerrar()
       if (!r.ok) {
         toast.error(r.error)
@@ -561,6 +694,31 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
 
   return (
     <div className="space-y-2 rounded-md border bg-muted/30 p-2">
+      {enMoneda && (
+        <div className="space-y-1" data-pago-en-moneda>
+          <p className="text-xs text-muted-foreground">{textoPagoEnMoneda(enMoneda)}</p>
+          <label className="block space-y-1">
+            <span className="text-xs font-medium">TRM del pago ({enMoneda.moneda} → COP)</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={trmTexto}
+              placeholder={`ej. ${tasaComoTexto(enMoneda.tasa)}`}
+              onChange={e => {
+                setTrmTexto(e.target.value)
+                // Con la TRM, el valor en pesos de lo que falta pagar en la moneda (editable).
+                const t = parseMontoCop(e.target.value)
+                if (falta > 0 && tasaPagoValida(t, enMoneda.tasa)) setMontoTexto(String(Math.round((falta / enMoneda.tasa) * (t as number))))
+              }}
+              disabled={isPending}
+              className="h-11 w-full rounded-md border px-2 text-sm tabular-nums sm:w-48"
+            />
+          </label>
+          {trmTexto.trim() !== '' && !tasaPagoOk && (
+            <p className="text-xs text-amber-700">Esa TRM está muy lejos de la cotizada ({tasaComoTexto(enMoneda.tasa)}): revísala.</p>
+          )}
+        </div>
+      )}
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block space-y-1">
           <span className="text-xs font-medium">Valor pagado</span>
@@ -587,9 +745,28 @@ function FormularioPago({ v, datos, alGuardar }: { v: FilaVista; datos: DatosBlo
         </select>
       </label>
       {medio && <p className="text-xs text-muted-foreground">Titular: {medio.titular === 'personal' ? 'Personal' : 'Empresa'}</p>}
+      <label className="block space-y-1">
+        <span className="text-xs font-medium">Número de comprobante</span>
+        <input type="text" value={referencia} onChange={e => setReferencia(e.target.value)} disabled={isPending} maxLength={120}
+          className="h-11 w-full rounded-md border px-2 text-sm" />
+      </label>
+      {lectura && (
+        <div className="space-y-0.5 rounded-md border border-sky-200 bg-sky-50 p-2 text-xs" data-lectura-soporte>
+          <p className="text-sky-900">
+            Leído del soporte{lectura.monto ? `: ${formatCOP(lectura.monto)}` : ''}{lectura.moneda && lectura.montoMoneda ? ` (${montoEnMoneda(lectura.montoMoneda, lectura.moneda)}${lectura.tasa ? ` a TRM ${tasaComoTexto(lectura.tasa)}` : ''})` : ''}{lectura.destinatario ? ` a ${lectura.destinatario}` : ''}. Revisa antes de registrar.
+          </p>
+          {avisosLectura.map(a => <p key={a} className="font-medium text-amber-700" data-aviso-lectura>{a}</p>)}
+        </div>
+      )}
+      {enMoneda && cambioTotal !== 0 && monto > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {cambioTotal > 0 ? '+' : '−'}{formatCOP(Math.abs(cambioTotal))} de diferencia de cambio: no es sobrecosto del proveedor.
+        </p>
+      )}
       {d.pesos > 0 && monto > 0 && (
         <p className={`text-xs ${motivos.length > 0 ? 'text-red-600' : 'text-amber-600'}`}>
-          +{formatCOP(d.pesos)} sobre lo cotizado{Number.isFinite(d.pct) ? ` (+${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %)` : ''}
+          +{formatCOP(d.pesos)} sobre {base < v.servicio.costo_cotizado ? 'lo que cobra el proveedor' : 'lo cotizado'}{Number.isFinite(d.pct) ? ` (+${(Math.round(d.pct * 10) / 10).toLocaleString('es-CO')} %)` : ''}
+          {sobreViaje === 0 ? '. El viaje entero no se pasa de lo cotizado.' : ''}
         </p>
       )}
 

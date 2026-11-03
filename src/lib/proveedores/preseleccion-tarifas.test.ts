@@ -25,10 +25,10 @@ describe('lo que viene marcado al abrir (punto 3)', () => {
     expect(p.marcadas).toEqual({ 0: { indice: 0, cantidad: 2, noches: null, tipo: 'adulto' }, 1: { indice: 1, cantidad: 1, noches: null, tipo: 'nino' } })
   })
 
-  it('varias para el mismo pasajero: gana la de menor total; se puede cambiar', () => {
+  it('el mismo servicio en varias filas para el mismo pasajero (neto y al público): gana la de menor total', () => {
     const o = oferta([
-      { categoria: 'Superior', ocupacion: 'doble', base_precio: 'por_habitacion_noche', precio: 380000 },
-      { categoria: 'Estándar', ocupacion: 'doble', base_precio: 'por_habitacion_noche', precio: 300000 },
+      { categoria: 'Estándar', ocupacion: 'doble', base_precio: 'por_habitacion_noche', precio_tipo: 'publico', precio: 380000 },
+      { categoria: 'Estándar', ocupacion: 'doble', base_precio: 'por_habitacion_noche', precio_tipo: 'neto', precio: 300000 },
     ])
     const p = preseleccion(o.opciones, o.composicion, o.calendario)
     expect(p.como).toBe('mas_barata')
@@ -36,12 +36,21 @@ describe('lo que viene marcado al abrir (punto 3)', () => {
     expect(p.marcadas[1]).toMatchObject({ cantidad: 1, noches: 3 })
   })
 
+  it('dos habitaciones distintas NO se desempatan por precio: no se marca nada (prueba del #1229)', () => {
+    const o = oferta([
+      { categoria: 'Superior', ocupacion: 'doble', base_precio: 'por_habitacion_noche', precio: 380000 },
+      { categoria: 'Estándar', ocupacion: 'doble', base_precio: 'por_habitacion_noche', precio: 300000 },
+    ])
+    const p = preseleccion(o.opciones, o.composicion, o.calendario)
+    expect(p).toEqual({ marcadas: {}, como: 'varios_servicios', servicios: 2 })
+  })
+
   it('las filtradas (otra temporada) y las sin base de precio no se marcan', () => {
     const o = oferta(
       [
         { categoria: 'Estándar', temporada_id: 'A', base_precio: 'por_habitacion_noche', ocupacion: 'doble', precio: 100 },
         { categoria: 'Estándar', temporada_id: 'B', base_precio: 'por_habitacion_noche', ocupacion: 'doble', precio: 50 },
-        { categoria: 'Sin base', precio: 10 },
+        { categoria: 'Estándar', ocupacion: 'doble', precio: 10 },
       ],
       undefined, '2027-02-01', '2027-02-04',
       [{ id: 'A', nombre: 'Baja', rangos: [{ desde: '2027-01-01', hasta: '2027-03-01' }] }, { id: 'B', nombre: 'Alta', rangos: [{ desde: '2027-06-01', hasta: '2027-07-01' }] }],
@@ -51,17 +60,17 @@ describe('lo que viene marcado al abrir (punto 3)', () => {
 
   it('con filas por persona para adulto, la elección va por persona; sin ellas, por el total', () => {
     const o = oferta([
-      { categoria: 'Grupo', base_precio: 'por_grupo', precio: 50000 },
-      { categoria: 'Persona', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 40000 },
+      { categoria: 'Tour', base_precio: 'por_grupo', precio: 50000 },
+      { categoria: 'Tour', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 40000 },
     ])
     expect(Object.keys(preseleccion(o.opciones, o.composicion, o.calendario).marcadas)).toEqual(['1'])
   })
 
   it('no mezcla monedas: la más barata manda la moneda', () => {
     const o = oferta([
-      { categoria: 'COP', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 400000 },
-      { categoria: 'USD', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 90, moneda: 'USD' },
-      { categoria: 'Niño COP', base_precio: 'por_persona', tipo_pasajero: 'nino', precio: 1000 },
+      { categoria: 'Tour', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 400000 },
+      { categoria: 'Tour', base_precio: 'por_persona', tipo_pasajero: 'adulto', precio: 90, moneda: 'USD' },
+      { categoria: 'Tour', base_precio: 'por_persona', tipo_pasajero: 'nino', precio: 1000 },
     ], { adultos: 2, ninos: 1, infantes: 0 }, '2027-02-01', null)
     const p = preseleccion(o.opciones, o.composicion, o.calendario)
     const monedas = Object.keys(p.marcadas).map((k) => o.opciones.find((x) => x.indice === Number(k))!.moneda)

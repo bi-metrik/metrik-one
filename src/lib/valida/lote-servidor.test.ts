@@ -61,7 +61,7 @@ type Llamada = { url: string; init: { method: string; headers: Record<string, st
 let llamadas: Llamada[] = []
 let enVuelo = 0
 let maxEnVuelo = 0
-let responder: (cuerpo: Record<string, unknown>, n: number) => { status: number; body: unknown } = respuestaNormal
+let responder: (cuerpo: Record<string, unknown>, n: number) => { status: number; body: unknown; headers?: Record<string, string> } = respuestaNormal
 let alLlamar: ((cuerpo: Record<string, unknown>) => void) | null = null
 
 function respuestaNormal(cuerpo: Record<string, unknown>): { status: number; body: unknown } {
@@ -93,7 +93,7 @@ const fetchFalso = vi.fn(async (url: string, init: Llamada['init']) => {
   alLlamar?.(cuerpo)
   const r = responder(cuerpo, n)
   enVuelo -= 1
-  return { ok: r.status < 300, status: r.status, json: async () => r.body }
+  return { ok: r.status < 300, status: r.status, headers: new Headers(r.headers ?? {}), json: async () => r.body }
 })
 
 // ─── Datos ───────────────────────────────────────────────────────────────────────
@@ -245,6 +245,31 @@ describe('una fila del lote da EXACTAMENTE lo que daba la ruta del navegador', (
   })
 })
 
+describe('el tipo de documento del XLSX llega a Valida con su código', () => {
+  // Datos inventados. Hasta el 2026-10-23 «CEDULA» o «PP» iban tal cual y Valida respondía 400.
+  const XLSX_TIPOS = [
+    { tipo_persona: 'natural', nombre_completo: 'Ana Prueba Uno', tipo_documento: 'CÉDULA', numero_documento: '10000001' },
+    { tipo_persona: 'natural', nombre_completo: 'Beto Prueba Dos', tipo_documento: 'pp', numero_documento: 'AB123456' },
+    { tipo_persona: 'natural', nombre_completo: 'Caro Prueba Tres', tipo_documento: 'TI', numero_documento: '10000003' },
+    { tipo_persona: 'natural', nombre_completo: 'Dani Prueba Cuatro', tipo_documento: 'X', numero_documento: '10000004' },
+  ]
+
+  it('CÉDULA va como CC, PP como PAS y TI como TI; X no se manda, no va al historial y dice por qué', async () => {
+    const preparadas = filasDesdeXlsx(XLSX_TIPOS, new Map(), null)
+    const lote = sembrarLote({ filas: preparadas.map((f) => f.input), errores: preparadas.map((f) => f.error) })
+    for (let i = 0; i < preparadas.length; i++) await procesarFilaLote(ctx(lote), await reclamar(lote))
+
+    const cuerpos = llamadas.map((l) => JSON.parse(l.init.body) as { documento: { tipo: string } })
+    expect(cuerpos.map((c) => c.documento.tipo)).toEqual(['CC', 'PAS', 'TI'])
+    expect(consultas().map((c) => c.documento_tipo)).toEqual(['CC', 'PAS', 'TI'])
+
+    const filas = doble.tablas.valida_lote_filas
+    expect(filas.map((f) => f.estado)).toEqual(['hecha', 'hecha', 'hecha', 'error'])
+    expect(String(filas[3].resultado_error)).toContain('Tipo de documento no reconocido: usa CC, CE, NIT, PAS, TI, PPT o RC')
+    expect(doble.tablas.valida_lotes[0].severidades).toEqual({ sin_hallazgo: 3, error: 1 })
+  })
+})
+
 // ─── 2. Idempotencia ─────────────────────────────────────────────────────────────
 
 describe('una fila nunca se cobra ni se guarda dos veces', () => {
@@ -288,15 +313,108 @@ describe('una fila nunca se cobra ni se guarda dos veces', () => {
     expect(consultas()[0].severidad).toBe('sin_hallazgo')
   })
 
-  it('un tope de tiempo NO se reintenta (Valida pudo seguir y cobrar): queda en error, como siempre', async () => {
+  it('un tope de tiempo se reintenta UNA vez con la misma llave: la fila recibe su resultado', async () => {
+    // El tope del lote (70 s) pasa el maxDuration de Valida (60 s): cuando ONE se rinde, la primera
+    // llamada ya terminó o murió. Si terminó y cobró, la llave hace que Valida repita la respuesta.
     fetchFalso.mockImplementationOnce(async () => {
       throw new DOMException('The operation timed out.', 'TimeoutError')
     })
     const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
     await procesarFilaLote(ctx(lote), await reclamar(lote))
-    expect(fetchFalso).toHaveBeenCalledTimes(1)
+    expect(fetchFalso).toHaveBeenCalledTimes(2)
+    expect(consultas()).toHaveLength(1)
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
+    expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'hecha' })
+  })
+
+  it('un error de red también se reintenta con la misma llave', async () => {
+    fetchFalso.mockImplementationOnce(async () => {
+      throw new TypeError('fetch failed')
+    })
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(llamadas.filter((l) => !l.url.includes('resend'))).toHaveLength(1)
+    expect(fetchFalso).toHaveBeenCalledTimes(2)
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
+  })
+
+  it('si el reintento también se agota, la fila queda en error (una sola consulta en el historial)', async () => {
+    const tope = async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError')
+    }
+    fetchFalso.mockImplementationOnce(tope).mockImplementationOnce(tope)
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(fetchFalso).toHaveBeenCalledTimes(2)
+    expect(consultas()).toHaveLength(1)
     expect(consultas()[0].severidad).toBe('error')
     expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'error', resultado_error: 'valida_tiempo_agotado' })
+  })
+})
+
+// ─── 2a. 429 de Valida (tope de ritmo, metrik-valida#78) ─────────────────────────
+
+describe('429 rate_limit: se espera Retry-After y se reintenta con la misma llave, sin cobrar dos veces', () => {
+  const tope = (segundos: string) => ({ status: 429, body: { error: 'rate_limit' }, headers: { 'Retry-After': segundos } })
+
+  it('un 429 y luego respuesta: espera lo que pidió Valida y la fila queda con UNA consulta', async () => {
+    responder = (c, n) => (n === 1 ? tope('3') : respuestaNormal(c))
+    const antes = reloj
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    const r = await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(r.tipo).toBe('hecha')
+    expect(llamadas).toHaveLength(2)
+    expect(llamadas[0].init.headers['Idempotency-Key']).toBe(llamadas[1].init.headers['Idempotency-Key'])
+    expect(reloj - antes).toBeGreaterThanOrEqual(3_000)
+    expect(consultas()).toHaveLength(1)
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
+  })
+
+  it('429 que no cede: la fila vuelve a la cola SIN error ni consulta en el historial', async () => {
+    responder = () => tope('5')
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    const r = await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(r).toEqual({ tipo: 'ritmo', esperaMs: 5_000 })
+    expect(llamadas).toHaveLength(3)
+    expect(consultas()).toHaveLength(0)
+    expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'pendiente' })
+  })
+})
+
+// ─── 2b. Búsqueda incompleta (503 de metrik-valida#66) ───────────────────────────
+
+describe('búsqueda incompleta: Valida no la registró, ONE tampoco la guarda como resultado', () => {
+  const incompleta = () => ({ status: 503, body: { error: 'busqueda_incompleta' } })
+
+  it('consulta puntual: devuelve el código para la pantalla y no deja fila en el historial', async () => {
+    responder = incompleta
+    const r = await consultarValida({ tipo: 'natural', nombre: 'Ana Ruiz' })
+    expect(r).toEqual({ ok: false, error: 'busqueda_incompleta' })
+    expect(consultas()).toHaveLength(0)
+  })
+
+  it('CONTROL — otro error del motor sí se sigue guardando como siempre', async () => {
+    responder = () => ({ status: 500, body: { error: 'db_error' } })
+    await consultarValida({ tipo: 'natural', nombre: 'Ana Ruiz' })
+    expect(consultas()).toHaveLength(1)
+    expect(consultas()[0].severidad).toBe('error')
+  })
+
+  it('cargue masivo: tras el reintento, la fila queda en error con el código y sin consulta en el historial', async () => {
+    responder = incompleta
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(llamadas).toHaveLength(2)
+    expect(consultas()).toHaveLength(0)
+    expect(doble.tablas.valida_lote_filas[0]).toMatchObject({ estado: 'error', resultado_error: 'busqueda_incompleta' })
+    expect(doble.tablas.valida_lotes[0].procesadas).toBe(1)
+  })
+
+  it('si el reintento sí completa, la fila tiene su resultado', async () => {
+    responder = (c, n) => (n === 1 ? incompleta() : respuestaNormal(c))
+    const lote = sembrarLote({ filas: [{ tipo: 'natural', nombre: 'Ana Ruiz' }] })
+    await procesarFilaLote(ctx(lote), await reclamar(lote))
+    expect(consultas()[0].severidad).toBe('sin_hallazgo')
   })
 })
 

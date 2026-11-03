@@ -46,13 +46,14 @@ import {
 } from '@/lib/cotizaciones/tarifa-pasajero'
 import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
+import { comisionDelPantallazo, comisionEscrita, conComision, lecturaTraeComision, margenAlElegirTipo, motivoComisionInvalida, propuestaDelPantallazo, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
 import { esCorregible } from '@/lib/cotizaciones/correcciones'
 import { casillasConEstadia, firmaDeEstadia, lecturaConEstadia } from '@/lib/cotizaciones/estadia'
 import { descripcionDeLinea, descripcionReescribible, validarCorreccion } from '@/lib/cotizaciones/ficha-linea'
-import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { textoDeLineaDeViaje } from '@/lib/negocios/mayusculas'
 import { camposDeLectura } from '@/lib/cotizaciones/campos-de-lectura'
 import type { TipoRubroViaje } from '@/lib/catalogos/constants'
 import { deleteItem, recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
@@ -92,6 +93,9 @@ import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios
 import { borrarImagenesDeCaptura, guardarImagenDeCaptura, imagenComoDataUrl, imagenesDeTarifa } from '@/lib/cotizaciones/imagen-captura'
 import { guardarFotoHotel } from '@/lib/cotizaciones/foto-hotel-almacen'
 import { medirEtapa } from '@/lib/actions/tiempos-de-ruta'
+import { esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
+import { planDePropagacion, tasaDeCotizacionPara, type LineaConTasa } from '@/lib/cotizaciones/tasa-cotizacion'
+import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 
 /**
  * Tarifa por tipo de pasajero: leer un pantallazo en su casilla, confirmar el costo por
@@ -167,6 +171,16 @@ export type ResultadoTarifa = {
    * faltante queda en su bloque (R1, reunión del 2026-09-23). `CONTEXTO` y `ERROR` sí frenan.
    */
   codigo?: 'CONTEXTO' | 'PENDIENTE' | 'ERROR'
+  /**
+   * Solo `confirmarTarifaPorPasajero` con la tasa escrita: a cuántas OTRAS líneas de la misma
+   * moneda llegó esa tasa (H5/H28). Ausente = a ninguna.
+   */
+  propagadas?: number
+  /**
+   * Solo `ajustarOpcion`: el motivo del descuento al cliente que se quitó porque la opción quedó
+   * Pública (se avisa: la tarjeta de la Pública no lo muestra).
+   */
+  descuentoQuitado?: string
   /**
    * Solo `ponerFotoDelHotel` en un espacio con biblioteca de fotos: el hotel como quedó en la
    * biblioteca (la foto ya NO se guarda en la opción). Ausente = se guardó en la opción, como antes.
@@ -460,7 +474,7 @@ async function guardarLecturaEnItem(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { error: errNombre } = await (supabase as any)
         .from('items')
-        .update({ nombre: aMayusculas(nombreLeido) })
+        .update({ nombre: textoDeLineaDeViaje(nombreLeido, leida.origen) })
         .eq('id', itemId)
       // El nombre no puede tumbar una lectura que ya quedó guardada: se reporta y se sigue.
       if (errNombre) console.warn('[tarifa-pax] no se pudo escribir el nombre leído:', errNombre.message)
@@ -536,6 +550,21 @@ async function contextoDeCotizacion(cotizacionId: string, sesion?: Awaited<Retur
   return { supabase, negocioId: (cot.negocio_id ?? null) as string | null, viaje }
 }
 
+/**
+ * Las líneas de la cotización para la tasa (H5/H28). Sin orden y sin romper: si no se pueden leer,
+ * no hay tasa de la cotización y la línea pide la suya, como siempre.
+ */
+async function lineasParaLaTasa(supabase: unknown, cotizacionId: string): Promise<LineaConTasa[]> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any).from('items').select('*').eq('cotizacion_id', cotizacionId)
+    if (error || !Array.isArray(data)) return []
+    return data as LineaConTasa[]
+  } catch {
+    return []
+  }
+}
+
 async function lineasDeCotizacion(supabase: unknown, cotizacionId: string): Promise<Record<string, unknown>[] | { error: string }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any).from('items').select('*').eq('cotizacion_id', cotizacionId).order('orden')
@@ -579,12 +608,16 @@ export async function leerCapturaEnBorrador(
   const ranura = definicionDeTipo(tipo)
   const reservaVariasHabitaciones = tipo === 'hotel' && opciones?.porPasos === true
     && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
+  // Brief del 2026-10-29, punto 4 · el traslado de ida y regreso de un solo pantallazo.
+  const trasladoIdaYRegreso = tipo === 'traslado' && opciones?.porPasos === true
+    && (await exigirPorPasos(ctx.supabase, cotizacionId)).ok
   const r = await leerImagenDeCaptura({
     ranura,
     dataUrl,
     viaje: ctx.viaje,
     enfoque,
     ...(reservaVariasHabitaciones ? { opciones: { reservaVariasHabitaciones: true } } : {}),
+    ...(trasladoIdaYRegreso ? { opciones: { trasladoIdaYRegreso: true } } : {}),
   })
   if (!r.ok) return r
   const leida = r.leida
@@ -1380,6 +1413,24 @@ export interface CambiosDeAjuste {
   precios?: Record<string, number | null>
   /** «Volver a lo que calculó ONE»: sin precios a mano y con el margen que ONE puso. */
   volverACalculado?: boolean
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Pública deja el margen de
+   * la opción en 0 (o en el del proveedor, si la captura trajo los dos precios); Neta lo devuelve
+   * al de la cotización (o al del proveedor). Queda como decisión de una persona.
+   */
+  tipoTarifa?: TipoTarifa
+  /**
+   * Reglas de margen (2026-10-27, `reglas-margen.ts`): el descuento que el cliente ve en esta
+   * opción (el del hotel), con su motivo. `null` lo quita.
+   */
+  descuentoCliente?: { motivo: string; tipo: 'pct' | 'monto'; valor: number } | null
+  /**
+   * La comisión que trae una tarifa Pública, en % (decisión D3, 2026-10-29). Con ella la línea entra
+   * al margen general; `null` la quita, y sin comisión la cotización no se puede enviar.
+   */
+  comisionPct?: number | null
+  /** La misma comisión escrita en PESOS por toda la línea (D3). Excluye a `comisionPct`. */
+  comisionMonto?: number | null
 }
 
 /**
@@ -1396,11 +1447,42 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
     ? (conf.costos.length > 0 ? conf.costos.map(c => c.tipo as string) : (conf.porHabitacion ?? []).map(h => claveDeHabitacion(h.numero)))
     : [])
 
+  if (cambios.tipoTarifa !== undefined && cambios.tipoTarifa !== 'neta' && cambios.tipoTarifa !== 'publica') {
+    return { success: false, error: 'Elige si la tarifa es neta o pública.' }
+  }
+  if (cambios.descuentoCliente) {
+    const motivo = motivoDescuentoInvalido(cambios.descuentoCliente)
+    if (motivo) return { success: false, error: motivo }
+  }
+  // D3 (2026-10-29): la comisión en % o en pesos. `undefined` = no se toca.
+  const comision: ComisionEscrita | null | undefined = cambios.comisionMonto !== undefined
+    ? (cambios.comisionMonto === null ? null : { tipo: 'monto', valor: cambios.comisionMonto })
+    : cambios.comisionPct !== undefined
+      ? (cambios.comisionPct === null ? null : { tipo: 'pct', valor: cambios.comisionPct })
+      : undefined
+  if (comision) {
+    const invalida = motivoComisionInvalida(comision)
+    if (invalida) return { success: false, error: invalida }
+    if ((cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo ?? 'neta') !== 'publica') {
+      return { success: false, error: 'La comisión es de una tarifa Pública.' }
+    }
+  }
+  if (cambios.descuentoCliente && (cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo) === 'publica') {
+    return { success: false, error: 'Una tarifa Pública va al precio público: el descuento es de una tarifa Neta.' }
+  }
+  const margenDelProveedor = conf?.margenProveedor
+    ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
+    : null
   let margen: number | null | undefined
+  if (cambios.tipoTarifa !== undefined) {
+    // El tipo decide el margen con que arranca la opción; un margen escrito en la misma llamada
+    // (abajo) manda sobre él.
+    margen = margenAlElegirTipo(cambios.tipoTarifa, margenDelProveedor)
+  }
   if (cambios.volverACalculado) {
-    margen = conf?.margenProveedor
-      ? margenDeLineaSegunConvencion(conf.margenProveedor, item.convencionMargen ?? CONVENCION_MARGEN_POR_DEFECTO)
-      : null
+    // Lo que calcula ONE: el margen del proveedor si lo hay; si no, el del tipo de la tarifa
+    // (Pública en 0, Neta hereda el de la cotización).
+    margen = margenAlElegirTipo(cambios.tipoTarifa ?? tarifa.tipoTarifa?.tipo ?? 'neta', margenDelProveedor)
   } else if (cambios.margenPct !== undefined) {
     const m = cambios.margenPct
     if (m !== null && (!Number.isFinite(m) || m < 0 || m >= 100)) return { success: false, error: 'El margen va de 0 a 99,9 %.' }
@@ -1413,7 +1495,41 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
 
   const { por, porId } = await quienEscribe(supabase)
   const en = new Date().toISOString()
-  const guardado = await guardarTarifa(supabase, itemId, actual => {
+  let descuentoQuitado: string | undefined
+  const guardado = await guardarTarifa(supabase, itemId, leida => {
+    const actual: TarifaPax = cambios.tipoTarifa !== undefined
+      ? { ...leida, tipoTarifa: { tipo: cambios.tipoTarifa, origen: 'persona', por, en } }
+      : { ...leida }
+    // La comisión vive en la decisión de Pública: es de ella, y se va si la línea vuelve a Neta.
+    if (comision !== undefined && actual.tipoTarifa?.tipo === 'publica') {
+      // Quien la escribe se hace dueño de la decisión: releer el pantallazo ya no la pisa.
+      actual.tipoTarifa = conComision({ ...actual.tipoTarifa, origen: actual.tipoTarifa.origen === 'pantallazo' ? 'persona' : actual.tipoTarifa.origen }, comision)
+    } else if (cambios.tipoTarifa === 'publica' && actual.tipoTarifa?.tipo === 'publica' && conf?.margenProveedor) {
+      // M6 (QA Trappvel, 2026-10-29): Pública sobre un pantallazo con los dos precios. La comisión ya
+      // la dijo la captura: viene escrita (la que tenía la decisión anterior, o la leída).
+      const previa = comisionEscrita(leida.tipoTarifa ?? null) ?? comisionDelPantallazo(conf.margenProveedor)
+      if (previa) actual.tipoTarifa = conComision(actual.tipoTarifa, previa)
+    }
+    if (cambios.descuentoCliente !== undefined) {
+      if (cambios.descuentoCliente === null) delete actual.descuentoCliente
+      else {
+        const d = cambios.descuentoCliente
+        actual.descuentoCliente = {
+          motivo: d.motivo.trim(),
+          tipo: d.tipo,
+          valor: d.tipo === 'pct' ? Math.round(d.valor * 100) / 100 : Math.round(d.valor),
+          por,
+          en,
+        }
+      }
+    }
+    // Pública = el precio público: un descuento guardado de cuando era Neta quedaría aplicado en
+    // la cascada sin verse (la tarjeta de la Pública muestra la comisión). Se quita y se avisa,
+    // igual que en el paquete de bloqueo (Vera, 2026-10-29).
+    if (actual.tipoTarifa?.tipo === 'publica' && actual.descuentoCliente) {
+      descuentoQuitado = actual.descuentoCliente.motivo || 'sin motivo'
+      delete actual.descuentoCliente
+    }
     const precios = cambios.volverACalculado ? {} : { ...(actual.preciosAMano ?? {}) }
     for (const [clave, v] of Object.entries(cambios.precios ?? {})) {
       if (v === null) delete precios[clave]
@@ -1434,7 +1550,7 @@ export async function ajustarOpcion(itemId: string, cambios: CambiosDeAjuste): P
   if (errItem) return { success: false, error: errItem.message }
   await recalcularTotales(item.cotizacionId)
   if (item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
-  return { success: true, tarifa: guardado.tarifa }
+  return { success: true, tarifa: guardado.tarifa, ...(descuentoQuitado ? { descuentoQuitado } : {}) }
 }
 
 /**
@@ -1771,6 +1887,35 @@ export async function escribirPrecioQueFalta(
   return { success: true, tarifa: c.tarifa ?? guardado.tarifa, anterior, ...(c.success ? {} : { error: c.error }) }
 }
 
+/**
+ * M7-1 / M9-2 (QA Trappvel 2026-10-29) · «El total es de la habitación»: el hotel con menores cuyo
+ * pantallazo trae un solo total para una habitación familiar se costea con ese total, sin pedir la
+ * resta de pantallazos. Después se confirma como cualquier lectura: en otra moneda, con la tasa de
+ * la cotización si ya la hay (`confirmarTarifaPorPasajero`); si no, la tarjeta pide la tasa.
+ * `usar: false` lo deshace y la línea vuelve a pedir el pantallazo que falta.
+ */
+export async function usarTotalDeHabitacion(itemId: string, usar: boolean): Promise<ResultadoTarifa> {
+  const ctx = await contexto(itemId)
+  if ('error' in ctx) return { success: false, error: ctx.error as string }
+  if (ctx.ranura.slug !== 'hotel_detalle') return { success: false, error: 'Solo un hotel cobra por habitación.' }
+  const l1 = ctx.tarifa.casillas?.grupo_completo
+  if (!l1) return { success: false, error: 'Pega primero el pantallazo del hotel.' }
+  const { por } = usar ? await quienEscribe(ctx.supabase) : { por: null }
+  const guardado = await guardarTarifa(ctx.supabase, itemId, actual => {
+    const primera = actual.casillas?.grupo_completo
+    if (!primera) return actual
+    const { totalDeHabitacion: _viejo, ...resto } = primera
+    void _viejo
+    const nueva: LecturaCasilla = usar ? { ...resto, totalDeHabitacion: { por, en: new Date().toISOString() } } : resto
+    return { ...actual, casillas: { ...actual.casillas, grupo_completo: nueva } }
+  })
+  if ('error' in guardado) return { success: false, error: guardado.error }
+  const c = usar ? await confirmarTarifaPorPasajero(itemId, null) : null
+  if (ctx.item.negocioId) revalidatePath(`/negocios/${ctx.item.negocioId}`)
+  // Sin tasa todavía no es un error: el costo queda por confirmar y la tarjeta pide la tasa.
+  return { success: true, tarifa: c?.tarifa ?? guardado.tarifa }
+}
+
 // ── Composición de la línea (CC4b, P7) ───────────────────────────────────────
 
 /**
@@ -1875,9 +2020,74 @@ export async function elegirMonedaDeTarifa(
 
 // ── Confirmar el costo por pasajero ──────────────────────────────────────────
 
+/**
+ * Confirma el costo de la línea. Con la tasa ESCRITA (no `null`), la tasa queda como la de la
+ * cotización para esa moneda y llega a las demás líneas en esa moneda (H5/H28 de la QA Trappvel
+ * del 2026-10-29, `tasa-cotizacion.ts`). Sin tasa, una línea en otra moneda toma la que ya tiene
+ * la cotización.
+ */
 export async function confirmarTarifaPorPasajero(
   itemId: string,
   tasaCambio: number | null,
+): Promise<ResultadoTarifa> {
+  const r = await confirmarTarifaDeLinea(itemId, tasaCambio)
+  const conf = r.tarifa?.confirmada
+  if (!r.success || tasaCambio === null || !conf || conf.moneda === 'COP' || conf.tasa === null) return r
+  const propagadas = await propagarTasaEnLaCotizacion(itemId, conf.moneda, conf.tasa)
+  return propagadas > 0 ? { ...r, propagadas } : r
+}
+
+/**
+ * Lleva la tasa escrita en `origenId` a las demás líneas de la cotización en la misma moneda: las
+ * de tarifa leída se vuelven a confirmar con ella y las de costo a mano recalculan sus pesos. Una
+ * línea que no se deja (le falta una captura, la moneda está supuesta) se queda como estaba: su
+ * tarjeta sigue pidiendo lo que le falte. Devuelve cuántas líneas cambiaron.
+ */
+export async function propagarTasaEnLaCotizacion(origenId: string, moneda: string, tasa: number): Promise<number> {
+  // Exportada (la usa el costo a mano): es un endpoint alcanzable, así que valida lo que recibe.
+  const codigo = codigoDeMoneda(moneda)
+  if (!codigo || codigo === 'COP' || typeof tasa !== 'number' || !Number.isFinite(tasa) || tasa <= 0) return 0
+  moneda = codigo
+  const { supabase, error } = await getWorkspace()
+  if (error) return 0
+  const item = await leerItem(supabase, origenId)
+  if (!item || !isEditable(item.estado)) return 0
+  const lineas = await lineasParaLaTasa(supabase, item.cotizacionId)
+  const plan = planDePropagacion(lineas, moneda, tasa, origenId)
+  let n = 0
+  for (const id of plan.reconfirmar) {
+    const r = await confirmarTarifaDeLinea(id, tasa)
+    if (r.success) n++
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any
+  for (const m of plan.costoManual) {
+    // Con rubros confirmados el costo lo mandan ellos (mismo guard que `guardarCostoManualEnMoneda`).
+    const { data: rubros } = await sb.from('rubros').select('*').eq('item_id', m.id)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (((rubros ?? []) as any[]).some(esConfirmado)) continue
+    const fila = lineas.find(l => l.id === m.id)
+    const actual = leerTarifaPax(fila?.tarifa_pax)
+    if (!actual.costoManual) continue
+    const tarifa: TarifaPax = {
+      ...actual,
+      costoManual: { ...actual.costoManual, tasa, en: new Date().toISOString() },
+      actualizadaEn: new Date().toISOString(),
+    }
+    const { error: errUpd } = await sb
+      .from('items')
+      .update({ subtotal: Math.round(m.valor * tasa), tarifa_pax: tarifa })
+      .eq('id', m.id)
+    if (!errUpd) n++
+  }
+  if (plan.costoManual.length > 0) await recalcularTotales(item.cotizacionId)
+  if (n > 0 && item.negocioId) revalidatePath(`/negocios/${item.negocioId}`)
+  return n
+}
+
+async function confirmarTarifaDeLinea(
+  itemId: string,
+  tasaEscrita: number | null,
 ): Promise<ResultadoTarifa> {
   const ctx = await contexto(itemId)
   if ('error' in ctx) return { success: false, error: ctx.error as string, codigo: 'CONTEXTO' }
@@ -1904,6 +2114,12 @@ export async function confirmarTarifaPorPasajero(
   if (monedaTarifa.asumida) return { success: false, error: MENSAJE_MONEDA_ASUMIDA, codigo: 'PENDIENTE' }
 
   const moneda = estado.moneda
+  // Sin tasa escrita, la de la cotización para esta moneda (H5/H28): la que ya se escribió en otra
+  // línea. Si nadie la ha escrito, sigue faltando y se pide, como siempre (el sistema no inventa TRM).
+  let tasaCambio = tasaEscrita
+  if (tasaCambio === null && moneda !== 'COP') {
+    tasaCambio = tasaDeCotizacionPara(await lineasParaLaTasa(supabase, item.cotizacionId), moneda, itemId)
+  }
   const costos: TarifaConfirmada['costos'] = []
   for (const c of estado.costos) {
     // Brief del 2026-10-05, punto 11 · se pasa a pesos el TOTAL del tipo y después se divide. Antes
@@ -1991,8 +2207,10 @@ export async function confirmarTarifaPorPasajero(
   // (`descripcionDeLinea`). Y tampoco se pisa si la escribió una persona: hasta el
   // 2026-09-22 esta confirmación la reescribía SIEMPRE, así que volver a pegar un pantallazo
   // se llevaba lo que alguien hubiera corregido a mano (regla 4 del brief).
-  const descripcionNueva = aMayusculas(
+  const origenDeLectura = primera?.origen
+  const descripcionNueva = textoDeLineaDeViaje(
     descripcionDeLinea(ranura, casillas, tarifa.correcciones, item.descripcion),
+    origenDeLectura,
   ) || null
   const reescribeDescripcion = descripcionReescribible(
     item.descripcion,
@@ -2044,11 +2262,12 @@ export async function confirmarTarifaPorPasajero(
   // pantallazo termina impreso al lado de lo que alguien escribió a mano, y una lista que
   // alterna «LATAM BOGOTÁ–PUNTA CANA» con «Hard Rock Punta Cana» se lee como dos
   // cotizaciones distintas. Aquí es seguro por construcción: esta acción solo corre sobre
-  // una línea con RANURA, o sea una línea de viaje.
+  // una línea con RANURA, o sea una línea de viaje. La que nació de la tarifa de un proveedor
+  // guarda la capitalización normal (`textoDeLineaDeViaje`, brief del 2026-10-22, punto 2).
   const { error: errItem } = await sb
     .from('items')
     .update({
-      ...(nombreLeido ? { nombre: aMayusculas(nombreLeido) } : {}),
+      ...(nombreLeido ? { nombre: textoDeLineaDeViaje(nombreLeido, origenDeLectura) } : {}),
       ...(reescribeDescripcion ? { descripcion: descripcionNueva } : {}),
       // La línea es el grupo: el reparto por pasajero lo dicen los rubros y el PDF.
       cantidad: 1,
@@ -2093,6 +2312,19 @@ export async function confirmarTarifaPorPasajero(
     // El costo a mano deja de aplicar (arriba `subtotal` quedó en 0 y mandan los rubros): su
     // anotación de moneda ya no explica nada.
     delete siguiente.costoManual
+    // M6 (QA Trappvel, 2026-10-29): el pantallazo trae el precio público y la comisión de la agencia
+    // → ONE propone Pública con la comisión leída. Nunca encima de lo que eligió una persona o el
+    // tarifario, ni sobre una opción con descuento al cliente (una Pública no lleva descuento).
+    if (!siguiente.descuentoCliente) {
+      const propuesta = propuestaDelPantallazo(
+        siguiente.tipoTarifa ?? null,
+        margenProveedor,
+        lecturaTraeComision(casillas.grupo_completo),
+        confirmada.confirmadaEn,
+      )
+      if (propuesta === 'quitar') delete siguiente.tipoTarifa
+      else if (propuesta) siguiente.tipoTarifa = propuesta
+    }
     return siguiente
   })
   if ('error' in guardado) return { success: false, error: guardado.error, codigo: 'ERROR' }
@@ -2155,7 +2387,7 @@ export async function corregirCampoDeFicha(
   const sincroniza = typeof delSistema === 'string'
     && descripcionReescribible(item.descripcion, delSistema, true)
   const descripcionNueva = sincroniza
-    ? aMayusculas(descripcionDeLinea(ranura, tarifa.casillas ?? {}, siguientes, item.descripcion)) || null
+    ? textoDeLineaDeViaje(descripcionDeLinea(ranura, tarifa.casillas ?? {}, siguientes, item.descripcion), tarifa.casillas?.grupo_completo?.origen) || null
     : null
 
   // La descripción primero: si no se pudo escribir, la marca no se mueve y la línea queda

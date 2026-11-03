@@ -227,6 +227,71 @@ describe('envío (F1-1, C3)', () => {
   })
 })
 
+describe('H10-1 · la versión nueva reemplaza a la enviada (QA del 2026-10-29)', () => {
+  beforeEach(() => {
+    sembrar({ seguimiento: true })
+    Object.assign(cot('cot-1'), { estado: 'enviada', consecutivo: 'COT-2026-0020' })
+    Object.assign(cot('cot-2'), { consecutivo: 'COT-2026-0021' })
+  })
+
+  it('sin decir que reemplaza, no sale y el mensaje nombra la enviada y la salida', async () => {
+    const r = await enviarCotizacion('cot-2')
+    expect(r.success).toBe(false)
+    expect(r.error).toMatch(/COT-2026-0020/)
+    expect(r.error).toMatch(/reemplázala/)
+    expect([cot('cot-1').estado, cot('cot-2').estado]).toEqual(['enviada', 'borrador'])
+  })
+
+  it('reemplazando la enviada: la v1 queda rechazada, la v2 enviada y la actividad lo dice', async () => {
+    const r = await enviarCotizacion('cot-2', 'enviar', 'cot-1')
+    expect(r.success).toBe(true)
+    expect([cot('cot-1').estado, cot('cot-2').estado]).toEqual(['rechazada', 'enviada'])
+    expect(tablas.activity_log.some((a) => String(a.contenido).includes('La COT-2026-0020 quedó rechazada: la reemplaza la COT-2026-0021'))).toBe(true)
+    expect(envios()).toHaveLength(1)
+  })
+
+  it('el id a reemplazar tiene que ser el de la enviada: otro no rechaza nada', async () => {
+    const r = await enviarCotizacion('cot-2', 'enviar', 'cot-otra')
+    expect(r.success).toBe(false)
+    expect([cot('cot-1').estado, cot('cot-2').estado]).toEqual(['enviada', 'borrador'])
+  })
+
+  it('frenada por margen, la v1 sigue enviada (no se rechaza antes de tiempo)', async () => {
+    bloqueoMargen = 'bajo el mínimo'
+    const r = await enviarCotizacion('cot-2', 'enviar', 'cot-1')
+    expect(r.success).toBe(false)
+    expect([cot('cot-1').estado, cot('cot-2').estado]).toEqual(['enviada', 'borrador'])
+  })
+
+  it('si la v2 ya no estaba en borrador, la v1 vuelve a enviada', async () => {
+    cot('cot-2').estado = 'aceptada'
+    const r = await enviarCotizacion('cot-2', 'enviar', 'cot-1')
+    expect(r.success).toBe(false)
+    expect(cot('cot-1').estado).toBe('enviada')
+  })
+})
+
+describe('H10-3 · perder el negocio cierra sus cotizaciones abiertas (QA del 2026-10-29)', () => {
+  it('«Se perdió»: la enviada y el borrador quedan rechazados; la aceptada y las de otro negocio no se tocan', async () => {
+    sembrar({ seguimiento: true })
+    cot('cot-1').estado = 'enviada'
+    tablas.cotizaciones.push(
+      { id: 'cot-otro', workspace_id: WS, negocio_id: 'neg-otro', estado: 'enviada' },
+    )
+    expect((await perderNegocio(NEG, 'competencia')).error).toBeNull()
+    expect([cot('cot-1').estado, cot('cot-2').estado, cot('cot-otro').estado]).toEqual(['rechazada', 'rechazada', 'enviada'])
+    expect(tablas.activity_log.some((a) => String(a.contenido).includes('Sus 2 cotizaciones abiertas quedaron rechazadas'))).toBe(true)
+  })
+
+  it('el auto-perdido del cuarto aplazamiento (seguimiento apagado) también las cierra', async () => {
+    sembrar({ vecesPausado: 3 })
+    cot('cot-1').estado = 'enviada'
+    const r = await pausarNegocio(NEG, 'silencio', enMesDias(5))
+    expect(r.autoPerdido).toBe(true)
+    expect([cot('cot-1').estado, cot('cot-2').estado]).toEqual(['rechazada', 'rechazada'])
+  })
+})
+
 describe('versiones (F1-3)', () => {
   beforeEach(() => sembrar({ seguimiento: true }))
 

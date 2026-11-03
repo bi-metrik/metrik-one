@@ -149,8 +149,13 @@ async function emitirReciboAutomatico(workspaceId: string, cobroId: string, nego
 
   // `ya_emitido` y `duplicado_en_siigo` no son fallos aquí: son la idempotencia
   // haciendo su trabajo cuando el mismo cobro se toca dos veces.
+  //
+  // Tampoco el RC-3 que va en el de otro pago del negocio (SOE-029): es uno por negocio y
+  // sale del comprobante UPME. Sí se registra cuando falta el comprobante (`bloqueo`).
   const noEsFallo = ['ya_emitido', 'duplicado_en_siigo']
-  if (!r.ok && !noEsFallo.includes(r.motivo)) {
+  if (!r.ok && r.motivo === 'rc3_del_negocio') {
+    if (r.bloqueo) console.error('[recibo-automatico] RC-3 frenado del cobro', cobroId, r.mensaje)
+  } else if (!r.ok && !noEsFallo.includes(r.motivo)) {
     console.error('[recibo-automatico] no se emitió el RC-3 del cobro', cobroId, r.motivo)
   }
 }

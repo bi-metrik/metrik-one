@@ -22,6 +22,10 @@ export const CLAVES_SECRETAS = [
   'siigo_partner_id',
   'valida_api_key',
   'funnelchat_webhook_token',
+  // Bold del workspace (bóveda de llaves, 2026-10-26). Sin respaldo en `config_extra`: nunca estuvieron ahí.
+  'bold_identity_key',
+  'bold_secret_key',
+  'bold_secret_key_anterior',
 ] as const
 
 export type ClaveSecreta = (typeof CLAVES_SECRETAS)[number]
@@ -60,7 +64,7 @@ export async function leerSecretosWorkspace(
 }
 
 /** Ruta de la clave dentro de `config_extra` mientras dure la transicion. */
-const RUTA_EN_CONFIG_EXTRA: Record<ClaveSecreta, readonly string[]> = {
+const RUTA_EN_CONFIG_EXTRA: Partial<Record<ClaveSecreta, readonly string[]>> = {
   drive_refresh_token: ['drive_refresh_token'],
   drive_client_id: ['drive_client_id'],
   drive_client_secret: ['drive_client_secret'],
@@ -78,8 +82,10 @@ export function secretoConRespaldo(
   clave: ClaveSecreta,
 ): string | undefined {
   if (esTextoNoVacio(vault[clave])) return vault[clave]
+  const ruta = RUTA_EN_CONFIG_EXTRA[clave]
+  if (!ruta) return undefined
   let nodo: unknown = configExtra ?? {}
-  for (const paso of RUTA_EN_CONFIG_EXTRA[clave]) {
+  for (const paso of ruta) {
     if (!nodo || typeof nodo !== 'object') return undefined
     nodo = (nodo as Record<string, unknown>)[paso]
   }

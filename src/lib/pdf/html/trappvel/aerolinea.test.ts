@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { ENTRADA_EUROPA, PROPS_EUROPA, VUELOS_EUROPA } from '../../../../../test/propuesta-europa'
 import { AEROLINEAS, COLOR_SIN_IDENTIFICAR } from '@/lib/cotizaciones/aerolineas'
 import { modeloDePropuesta, type EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
+import { insigniasDeVuelo, nombreDeAerolinea, pastillaAerolinea, pastillasDeVuelo } from './aerolinea'
 import { htmlDePropuesta, type RecursosPropuesta } from './plantilla'
 
 const RECURSOS: RecursosPropuesta = { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'Agencia de ejemplo' }
@@ -52,29 +52,37 @@ describe('la pastilla', () => {
     const al = /\.al \{[^}]*\}/.exec(h)![0]
     expect(al).toContain('font: 700 6pt')
     expect(al).toMatch(/border-radius: 1\.8mm/)
-    expect(h).toMatch(/\.tag \{[^}]*font: 700 6\.8pt/)
+    expect(h).toMatch(/\.tag \{[^}]*font: 800 6\.4pt/)
+  })
+
+  it('la insignia de la tarjeta de vuelo: el nombre sobre el color de la marca, una por aerolínea (formato de Edgar)', () => {
+    expect(insigniasDeVuelo('Avianca', 'AV92')).toBe('<span class="bd" data-aerolinea="AV" style="background:#FF0000;color:#FFFFFF">Avianca</span>')
+    expect(siglas(insigniasDeVuelo('Iberia', 'IB6586 · LA4521'))).toEqual(['IB', 'LA'])
+    expect(insigniasDeVuelo('Iberia', 'IB6586 · LA4521')).toContain('>LATAM</span>')
+    expect(insigniasDeVuelo('Charter <b>', null)).toContain('>Charter &lt;b&gt;</span>')
+    expect(insigniasDeVuelo(null, null)).toBe('')
   })
 })
 
 describe('COT-2026-0026: la pastilla en cada lugar donde aparece un vuelo', () => {
   const h = html()
 
-  it('tabla «Vuelos»: cada vuelo con la suya, al lado del nombre; las etiquetas de versión siguen', () => {
-    const v = seccion(h, '>Vuelos<')
-    expect(siglas(v)).toEqual(['AV', 'AF', 'IB', 'IB', 'LH', 'KL'])
-    expect(v).toContain('data-aerolinea="AF" style="background:linear-gradient(to top,#FF0000 0 .55mm,#051040 .55mm)')
-    expect(v).toMatch(/data-aerolinea="AV"[^>]*>AV<\/span><span class="fl">Avianca AV26<\/span>/)
+  it('tarjetas de «Vuelos y tren»: cada vuelo con su insignia, en orden de salida; las etiquetas de versión siguen', () => {
+    const v = seccion(h, '>Vuelos y tren<')
+    expect(siglas(v)).toEqual(['IB', 'AF', 'AV', 'IB', 'LH', 'KL'])
+    expect(v).toContain('data-aerolinea="AF" style="background:#051040;color:#FFFFFF">Air France</span>')
+    expect(v).toMatch(/data-aerolinea="AV"[^>]*>Avianca<\/span><span class="num">AV26<\/span>/)
     expect(v).toContain('<span class="tag tE">Económica</span>')
     expect(v).toContain('<span class="tag tR">Recomendada</span>')
   })
 
   it('las cajitas del día a día: la aerolínea de cada versión', () => {
     const d = seccion(h, 'class="sec dias"')
-    const sale = d.slice(d.indexOf('<div class="d">10<small>'), d.indexOf('<div class="d">11<small>'))
+    const sale = d.slice(d.indexOf('<small>DÍA</small>1<'), d.indexOf('<small>DÍA</small>2<'))
     expect(siglas(sale)).toEqual(['AV', 'AF', 'IB'])
     expect(sale).toMatch(/>AV<\/span>Avianca 19:20, directo/)
     // El día que llegan solo dice la hora: sin aerolínea, sin pastilla.
-    const llega = d.slice(d.indexOf('<div class="d">11<small>'), d.indexOf('<div class="d">12<small>'))
+    const llega = d.slice(d.indexOf('<small>DÍA</small>2<'), d.indexOf('<small>DÍA</small>3<'))
     expect(siglas(llega)).toEqual([])
   })
 
@@ -83,17 +91,17 @@ describe('COT-2026-0026: la pastilla en cada lugar donde aparece un vuelo', () =
     expect(tarjetas.map(siglas)).toEqual([['AV', 'IB'], ['AF', 'LH'], ['IB', 'KL']])
   })
 
-  it('la ruta de un vistazo no nombra aerolínea: no lleva pastilla', () => {
-    const ruta = h.slice(h.indexOf('<div class="route">'), h.indexOf('</div>\n', h.indexOf('<div class="route">')))
-    expect(siglas(ruta)).toEqual([])
+  it('la portada no nombra aerolínea: no lleva pastilla', () => {
+    const portada = h.slice(h.indexOf('<div class="top">'), h.indexOf('</section>'))
+    expect(siglas(portada)).toEqual([])
   })
 
-  it('un vuelo con escala en otra aerolínea: una pastilla por tramo en la tabla, la caja y la tarjeta', () => {
+  it('un vuelo con escala en otra aerolínea: una pastilla por tramo en la tarjeta de vuelo, la caja del día y la de la versión', () => {
     const vuelos = VUELOS_EUROPA.map((v) => (v.numeroVuelo === 'AF423' ? { ...v, numeroVuelo: 'AF423 · KL1704' } : v))
     const h2 = html({ ...ENTRADA_EUROPA, props: { ...PROPS_EUROPA, viaje: { ...PROPS_EUROPA.viaje!, vuelos } } })
-    expect(siglas(seccion(h2, '>Vuelos<'))).toEqual(['AV', 'AF', 'KL', 'IB', 'IB', 'LH', 'KL'])
+    expect(siglas(seccion(h2, '>Vuelos y tren<'))).toEqual(['IB', 'AF', 'KL', 'AV', 'IB', 'LH', 'KL'])
     const d = seccion(h2, 'class="sec dias"')
-    expect(siglas(d.slice(d.indexOf('<div class="d">10<small>'), d.indexOf('<div class="d">11<small>')))).toEqual(['AV', 'AF', 'KL', 'IB'])
+    expect(siglas(d.slice(d.indexOf('<small>DÍA</small>1<'), d.indexOf('<small>DÍA</small>2<')))).toEqual(['AV', 'AF', 'KL', 'IB'])
     const recomendada = seccion(h2, '>Elijan su versión<').split('<div class="tf').slice(1)[1]
     expect(siglas(recomendada)).toEqual(['AF', 'KL', 'LH'])
   })

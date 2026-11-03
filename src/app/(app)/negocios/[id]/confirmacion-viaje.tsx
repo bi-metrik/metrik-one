@@ -12,7 +12,15 @@ type Db = any
  */
 export async function leerConfirmacionViaje(
   supabase: Db,
-  args: { workspaceId: string; negocioId: string; staffId: string | null; role: string | null; areas: string[] },
+  args: {
+    workspaceId: string
+    negocioId: string
+    staffId: string | null
+    role: string | null
+    areas: string[]
+    /** Falta la autorización de datos: el motivo de «Enviar», para decirlo antes de llenar la hoja. */
+    motivoAutorizacion?: string | null
+  },
 ): Promise<React.ReactNode> {
   let vista
   try {
@@ -33,5 +41,5 @@ export async function leerConfirmacionViaje(
     esResponsable = !!data
   }
   const quien = { role: args.role, staffId: args.staffId, areas: args.areas, aprobadores: vista.aprobadores, esResponsable }
-  return <ConfirmacionViajePanel vista={vista} puedeConfirmar={puedeConfirmarCliente(quien)} esDireccion={esAprobador(quien)} />
+  return <ConfirmacionViajePanel vista={vista} puedeConfirmar={puedeConfirmarCliente(quien)} esDireccion={esAprobador(quien)} motivoAutorizacion={args.motivoAutorizacion ?? null} />
 }

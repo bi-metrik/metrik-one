@@ -20,6 +20,8 @@
 import { nivelDetalleDesde, type NivelDetalle } from './detalle-viaje'
 import { normalizarComposicion, type Composicion } from './tarifa-pasajero'
 import { memoDeAceptacion } from './memo-de-aceptacion'
+import { A_MEDIDA, modalidadDesdeFilas, SLUG_MODALIDAD, SLUG_OPERADOR, type ModalidadDelViaje } from './bloqueo-modalidad'
+import { visaEnTramite } from '@/lib/viaje/condicion-visa'
 
 export interface ViajeDelNegocio {
   composicion: Composicion | null
@@ -83,11 +85,27 @@ export function viajeDesdeFilas(filas: Record<string, unknown>[]): ViajeDelNegoc
   }
 }
 
+/** El texto de `edades_menores` de la Solicitud. La primera fila con valor gana. */
+export function edadesMenoresDesdeFilas(filas: readonly Record<string, unknown>[]): string | null {
+  for (const f of filas) {
+    const v = f.edades_menores
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+    const t = textoLibre(v)
+    if (t) return t.slice(0, 200)
+  }
+  return null
+}
+
+/**
+ * El viaje del negocio. De la MISMA lectura sale la modalidad (A medida | Bloqueo, `bloqueo-modalidad.ts`):
+ * la página de la cotización la necesita y una consulta más rompería su presupuesto de idas. Va aparte de
+ * `viaje` a propósito: `ViajeDelNegocio` lo compara medio motor y no tiene por qué cambiar.
+ */
 export async function leerViajeDelNegocio(
   supabase: unknown,
   negocioId: string | null,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null }> {
-  if (!negocioId) return { viaje: VIAJE_VACIO, error: null }
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad?: ModalidadDelViaje; edadesMenores?: string | null; visaEnTramite?: boolean; requisitos?: string | null }> {
+  if (!negocioId) return { viaje: VIAJE_VACIO, error: null, modalidad: A_MEDIDA }
   // Dentro de una aceptación de la forma por pasos (una o un lote) el viaje no cambia: se lee una
   // vez (`memo-de-aceptacion.ts`). Fuera, como siempre.
   return memoDeAceptacion(`viaje:${negocioId}`, () => leerViajeSinMemo(supabase, negocioId))
@@ -96,7 +114,7 @@ export async function leerViajeDelNegocio(
 async function leerViajeSinMemo(
   supabase: unknown,
   negocioId: string,
-): Promise<{ viaje: ViajeDelNegocio; error: string | null }> {
+): Promise<{ viaje: ViajeDelNegocio; error: string | null; modalidad: ModalidadDelViaje; edadesMenores: string | null; visaEnTramite: boolean; requisitos: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from('negocio_bloques')
@@ -105,9 +123,24 @@ async function leerViajeSinMemo(
       + 'fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso, '
       // Los tres que alimentan la portada del documento del cliente. Un bloque que no los
       // declara devuelve null en esas columnas: no hay 400 que tolerar ni nada que romper.
-      + 'destino:data->destino, presentacion_destino:data->presentacion_destino, nivel_detalle:data->nivel_detalle',
+      + 'destino:data->destino, presentacion_destino:data->presentacion_destino, nivel_detalle:data->nivel_detalle, '
+      // Viaje en bloqueo (brief del 2026-10-27). Un bloque que no los declara devuelve null.
+      + `${SLUG_MODALIDAD}:data->>${SLUG_MODALIDAD}, ${SLUG_OPERADOR}:data->>${SLUG_OPERADOR}, `
+      // Las edades de los menores de la Solicitud: precargan la edad del niño del paquete (2026-10-29).
+      + 'edades_menores:data->>edades_menores, '
+      // Visa en trámite (Mauricio 2026-10-29): la condición del PDF y del mensaje (`condicion-visa.ts`).
+      + 'requisitos_especiales:data->>requisitos_especiales',
     )
     .eq('negocio_id', negocioId)
-  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message }
-  return { viaje: viajeDesdeFilas((data ?? []) as Record<string, unknown>[]), error: null }
+  if (error) return { viaje: VIAJE_VACIO, error: (error as { message: string }).message, modalidad: A_MEDIDA, edadesMenores: null, visaEnTramite: false, requisitos: null }
+  const filas = (data ?? []) as Record<string, unknown>[]
+  return {
+    viaje: viajeDesdeFilas(filas),
+    error: null,
+    modalidad: modalidadDesdeFilas(filas),
+    edadesMenores: edadesMenoresDesdeFilas(filas),
+    visaEnTramite: filas.some(f => visaEnTramite(typeof f.requisitos_especiales === 'string' ? f.requisitos_especiales : null)),
+    // S-07 (QA del 2026-10-29, ronda 3): lo pedido con condición llega Opcional en la bandeja.
+    requisitos: filas.map(f => (typeof f.requisitos_especiales === 'string' ? f.requisitos_especiales.trim() : '')).filter(Boolean).join('\n') || null,
+  }
 }

@@ -17,7 +17,7 @@ const viaje: MarcoDelNegocio = {
   negocioId: 'neg-1',
   viaje: { destino: 'San Andrés', fechas: { inicio: '2026-11-09', fin: '2026-11-13' }, composicion: { adultos: 2, ninos: 0, infantes: 1 } },
   iataDestino: null,
-  solicitud: { destino: 'San Andrés', alcance: null, fechas: null, tipoDeFechas: null, pasajeros: null, requisitos: null } as MarcoDelNegocio['solicitud'],
+  solicitud: { filas: [{ clave: 'destino', label: 'Destino', valor: 'San Andrés' }], tienePresupuesto: false } as MarcoDelNegocio['solicitud'],
   perfil: null,
   cotizaciones: [
     { id: 'cot-19', codigo: 'COT-2026-0019', estado: 'borrador', valorTotal: 4_588_235, editadaEl: null },

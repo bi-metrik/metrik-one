@@ -52,6 +52,18 @@ vi.mock('@/lib/siigo/recibos', () => ({
   },
 }))
 
+// SOE-029: el pago `c1` es el titular del RC-3 del negocio (la regla tiene sus pruebas).
+vi.mock('@/lib/siigo/rc3-negocio-servidor', async () => {
+  const { planRc3DelNegocio } = await vi.importActual<typeof import('@/lib/siigo/rc3-negocio')>('@/lib/siigo/rc3-negocio')
+  return {
+    cargarPlanRc3: async () => planRc3DelNegocio({
+      comprobante: { estado: 'ok', valor: 550035 },
+      techoTarifa: 550035,
+      pagos: [{ id: 'c1', fecha: '2026-09-20', aTarifa: 550035, marca: null, noAplica: false }],
+    }),
+  }
+})
+
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => ({
     from: (tabla: string) => {

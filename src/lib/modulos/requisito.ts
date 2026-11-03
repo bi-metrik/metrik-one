@@ -50,6 +50,8 @@ export const REQUISITO = {
   ferreteria: { modulos: ['ferreteria'] },
   /** Obras: cierre, facturas por obra, llegadas, rubros de obra y colaboradores con jornada (`/obras`). */
   obras: { modulos: ['clarity'], funcion: 'obras' },
+  /** `/funciones`: cupo y reservas de funciones (Sabor & Experiencias, etapa 2). */
+  funciones: { modulos: ['funciones'] },
 } as const satisfies Record<string, RequisitoModulo>
 
 export function cumpleRequisitoModulo(req: RequisitoModulo, ctx: ContextoGate): boolean {

@@ -147,7 +147,7 @@ describe('asignarResponsableAlEntrar', () => {
     const { client, ops, responsables } = fakeDb({ etapas: etapasSoena, staff: [camila] })
     const r = await asignarResponsableAlEntrar(client, { negocioId: 'n1', etapaId: CARGUE, workspaceId: WS })
     expect(r).toBe('asignado')
-    expect(responsables).toEqual([{ negocio_id: 'n1', staff_id: CAMILA, rol: 'operaciones', assigned_by: null }])
+    expect(responsables).toEqual([{ negocio_id: 'n1', staff_id: CAMILA, rol: 'operaciones', assigned_by: null, asignado_origen: 'regla_etapa', asignado_etapa_id: CARGUE }])
     const evt = eventoLog(ops)
     expect(evt?.contenido).toBe('Responsable agregado: Camila como operaciones (asignado automáticamente al entrar a Cargue)')
     expect(evt?.autor_id).toBeNull()

@@ -39,11 +39,24 @@ function columnasDeLaTabla(): Set<string> {
 
 const COLUMNAS_REALES = columnasDeLaTabla()
 
+/** Columnas de `staff` según los tipos generados de producción. */
+const COLUMNAS_STAFF = new Set(['id', 'workspace_id', 'full_name', 'phone_whatsapp', 'profile_id', 'is_active', 'es_principal', 'tipo_acceso'])
+
+/** Lo que devuelve `wa_identify_user` según `src/types/database.ts` (la definición viva). */
+const COLUMNAS_RPC = (() => {
+  const tipos = readFileSync(join(__dirname, '..', '..', '..', 'src', 'types', 'database.ts'), 'utf8')
+  const bloque = /wa_identify_user: \{[\s\S]*?Returns: \{([\s\S]*?)\}\[\]/.exec(tipos)?.[1] ?? ''
+  return [...bloque.matchAll(/^\s*([a-z_]+):/gm)].map((m) => m[1]).sort()
+})()
+
 type Fila = Record<string, unknown>
 
 /** Cliente falso que responde como PostgREST: 42703 si se pide una columna que no existe. */
 function clienteFalso(opts: {
+  /** Filas que devuelve `wa_identify_user`: con la forma REAL de producción (sin `user_id` ni id del staff). */
   staff?: Fila[]
+  /** La tabla `staff` (id, workspace_id, full_name, phone_whatsapp, profile_id). */
+  tablaStaff?: Fila[]
   colaboradores?: Fila[]
   workspaces?: Fila[]
   errorColaboradores?: { code: string; message: string }
@@ -62,8 +75,17 @@ function clienteFalso(opts: {
           return q
         },
         limit() { return q },
+        then(ok: (r: unknown) => unknown, ko?: (e: unknown) => unknown) {
+          return Promise.resolve(resolverLista()).then(ok, ko)
+        },
         async maybeSingle() { return resolver() },
         async single() { return resolver() },
+      }
+      function resolverLista() {
+        if (tabla !== 'staff') throw new Error(`lista inesperada de ${tabla}`)
+        const faltante = columnas.find((c) => !COLUMNAS_STAFF.has(c))
+        if (faltante) return { data: null, error: { code: '42703', message: `column staff.${faltante} does not exist` } }
+        return { data: (opts.tablaStaff ?? []).filter((f) => filtros.every((fn) => fn(f))), error: null }
       }
       function resolver() {
         if (tabla === 'wa_collaborators') {
@@ -84,6 +106,11 @@ function clienteFalso(opts: {
       return q
     },
   }
+}
+
+/** Una fila de `wa_identify_user` con SOLO las columnas que devuelve en producción. */
+function filaRpc(f: { full_name: string; phone_whatsapp: string; es_principal?: boolean }): Fila {
+  return { workspace_id: 'ws-trappvel', es_principal: false, tipo_acceso: 'ambos', ...f }
 }
 
 const TRAPPVEL = { id: 'ws-trappvel', subscription_status: 'trial', modules: { business: true } }
@@ -132,13 +159,14 @@ describe('identificarRemitente por wa_collaborators', () => {
 
   it('el staff gana sobre el colaborador', async () => {
     const sb = clienteFalso({
-      staff: [{ workspace_id: 'ws-trappvel', full_name: 'Dueña', es_principal: true, user_id: 'u-1' }],
+      staff: [filaRpc({ full_name: 'Dueña', phone_whatsapp: '+573114559030', es_principal: true })],
+      tablaStaff: [{ id: 'st-duena', workspace_id: 'ws-trappvel', full_name: 'Dueña', phone_whatsapp: '+573114559030', profile_id: 'p-duena' }],
       colaboradores: [TATIANA],
       workspaces: [TRAPPVEL],
     })
     const user = await identificarRemitente(sb, '573114559030')
     expect(user?.role).toBe('owner')
-    expect(user?.user_id).toBe('u-1')
+    expect(user?.user_id).toBe('p-duena')
     expect(user?.collaborator_id).toBeUndefined()
   })
 
@@ -153,5 +181,63 @@ describe('identificarRemitente por wa_collaborators', () => {
     const fuente = readFileSync(join(__dirname, '..', 'wa-webhook', 'index.ts'), 'utf8')
     expect(fuente).toMatch(/return identificarRemitente\(supabase, phone\)/)
     expect(fuente).not.toMatch(/from\('wa_collaborators'\)/)
+  })
+})
+
+/**
+ * El bug del 2026-10-22: `wa_identify_user` no devuelve `user_id` ni el id del staff, y el código lo leía de ahí. Todo
+ * remitente del equipo quedaba sin perfil: los viajes del bot con `assigned_by` nulo y la campanita sin autor.
+ * VISTO FALLAR: con `user_id: staffMatch.user_id || undefined` de vuelta (y sin `leerStaff`), caen las tres primeras.
+ */
+describe('identificarRemitente por staff (forma real de wa_identify_user)', () => {
+  const EDGAR = { id: 'st-edgar', workspace_id: 'ws-trappvel', full_name: 'Edgar Alba', phone_whatsapp: '+57 310 000 0001', profile_id: 'p-edgar' }
+
+  it('el doble de la RPC tiene exactamente las columnas de producción', () => {
+    expect(COLUMNAS_RPC).toEqual(['es_principal', 'full_name', 'phone_whatsapp', 'tipo_acceso', 'workspace_id'])
+    expect(Object.keys(filaRpc({ full_name: 'x', phone_whatsapp: 'y' })).sort()).toEqual(COLUMNAS_RPC)
+  })
+
+  it('resuelve el staff y su perfil por el teléfono que devolvió la RPC', async () => {
+    const sb = clienteFalso({
+      staff: [filaRpc({ full_name: 'Edgar Alba', phone_whatsapp: EDGAR.phone_whatsapp, es_principal: true })],
+      tablaStaff: [EDGAR, { ...EDGAR, id: 'st-otro-ws', workspace_id: 'ws-otro', profile_id: 'p-otro' }],
+      workspaces: [TRAPPVEL],
+    })
+    const user = await identificarRemitente(sb, '573100000001')
+    expect(user?.staff_id).toBe('st-edgar')
+    expect(user?.user_id).toBe('p-edgar')
+  })
+
+  it('dos staff con el mismo teléfono en el workspace: desempata el nombre', async () => {
+    const sb = clienteFalso({
+      staff: [filaRpc({ full_name: 'Edgar Alba', phone_whatsapp: EDGAR.phone_whatsapp })],
+      tablaStaff: [{ ...EDGAR, id: 'st-homonimo', full_name: 'Otra Persona', profile_id: 'p-x' }, EDGAR],
+      workspaces: [TRAPPVEL],
+    })
+    const user = await identificarRemitente(sb, '573100000001')
+    expect(user?.staff_id).toBe('st-edgar')
+  })
+
+  it('staff sin perfil: entra con su staff, sin user_id', async () => {
+    const sb = clienteFalso({
+      staff: [filaRpc({ full_name: 'Edgar Alba', phone_whatsapp: EDGAR.phone_whatsapp })],
+      tablaStaff: [{ ...EDGAR, profile_id: null }],
+      workspaces: [TRAPPVEL],
+    })
+    const user = await identificarRemitente(sb, '573100000001')
+    expect(user?.staff_id).toBe('st-edgar')
+    expect(user?.user_id).toBeUndefined()
+  })
+
+  it('sin fila de staff que cruce: sigue entrando (sin autor), no se cae', async () => {
+    const sb = clienteFalso({
+      staff: [filaRpc({ full_name: 'Edgar Alba', phone_whatsapp: EDGAR.phone_whatsapp })],
+      tablaStaff: [],
+      workspaces: [TRAPPVEL],
+    })
+    const user = await identificarRemitente(sb, '573100000001')
+    expect(user?.name).toBe('Edgar Alba')
+    expect(user?.staff_id).toBeUndefined()
+    expect(user?.user_id).toBeUndefined()
   })
 })

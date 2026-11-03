@@ -56,6 +56,7 @@
 import { campoRequeridoCumplido, campoVisible, type CampoConfig } from './campo-completo'
 import { valorCumpleCondicion } from './condicion-bloque'
 import { parsearNumeroColombiano } from './numero-colombiano'
+import { campoLoDefineElPaquete } from '@/lib/cotizaciones/bloqueo-modalidad'
 
 export type NivelCampo = 'minimo' | 'deseable'
 
@@ -225,6 +226,8 @@ export function calcularNiveles(
       continue
     }
     if (!campoVisible(f, efectivos)) continue
+    // N-13: en Bloqueo la categoría del hotel la define el paquete; no se pide para cotizar.
+    if (campoLoDefineElPaquete(f.slug, efectivos)) continue
 
     const pedir = leerPedirSi(f.pedir_si)
     if ('error' in pedir) {

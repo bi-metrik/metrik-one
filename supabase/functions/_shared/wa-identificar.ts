@@ -11,6 +11,14 @@
 //     contra las columnas reales de la tabla;
 //   - un colaborador entra siempre como `operator` (la tabla no guarda rol);
 //   - todo error de lectura se registra en el log en vez de tragarse.
+//
+// El otro bug (2026-10-22, Trappvel): `wa_identify_user` devuelve SOLO `workspace_id, full_name,
+// phone_whatsapp, es_principal, tipo_acceso` (ver `src/types/database.ts`): ni `user_id` ni el id del
+// staff. El código leía `staffMatch.user_id`, que nunca llegaba, así que TODO remitente del equipo
+// quedaba sin perfil ni staff: viajes del bot con `assigned_by` nulo, timeline sin autor, campanita
+// sin «quién». Los dobles de las pruebas devolvían `user_id` y por eso nadie lo vio. Ahora el staff
+// (id y `profile_id`) se resuelve aquí con la fila que devolvió la RPC: mismo workspace y el MISMO
+// `phone_whatsapp` guardado (la RPC ya hizo el cruce por dígitos), desempatado por el nombre.
 
 import type { SupabaseClient, UserRole, WaUser } from './types.ts';
 
@@ -37,7 +45,10 @@ export async function identificarRemitente(
   const staffMatch = staffRows?.[0];
 
   if (staffMatch) {
-    const modulos = await leerWorkspace(supabase, staffMatch.workspace_id);
+    const [modulos, staff] = await Promise.all([
+      leerWorkspace(supabase, staffMatch.workspace_id),
+      leerStaff(supabase, staffMatch),
+    ]);
 
     let role: UserRole = 'operator';
     if (staffMatch.es_principal) {
@@ -51,7 +62,8 @@ export async function identificarRemitente(
       phone: normalized,
       name: staffMatch.full_name,
       role,
-      user_id: staffMatch.user_id || undefined,
+      user_id: staff?.profile_id ?? undefined,
+      staff_id: staff?.id ?? undefined,
       subscription_status: modulos?.subscription_status || 'trial',
       modulos: modulos ?? null,
     };
@@ -83,6 +95,39 @@ export async function identificarRemitente(
   }
 
   return null;
+}
+
+/** Lo que devuelve `wa_identify_user` (forma real de producción: sin `user_id` ni id del staff). */
+interface FilaIdentificada {
+  workspace_id: string;
+  full_name: string | null;
+  phone_whatsapp: string | null;
+  es_principal?: boolean | null;
+  tipo_acceso?: string | null;
+}
+
+/**
+ * El staff de la fila que devolvió la RPC: mismo workspace, mismo `phone_whatsapp` tal como está guardado y, si hay
+ * dos con el mismo teléfono, el del mismo nombre. Sin coincidencia, null (el remitente sigue entrando, sin autor).
+ */
+async function leerStaff(
+  supabase: SupabaseClient,
+  fila: FilaIdentificada,
+): Promise<{ id: string; profile_id: string | null } | null> {
+  if (!fila.phone_whatsapp) return null;
+  const { data, error } = await supabase
+    .from('staff')
+    .select('id, profile_id, full_name')
+    .eq('workspace_id', fila.workspace_id)
+    .eq('phone_whatsapp', fila.phone_whatsapp)
+    .limit(5);
+  if (error) {
+    console.error(`[wa-identificar] staff del remitente fallo: ${error.code ?? ''} ${error.message ?? ''}`);
+    return null;
+  }
+  const filas = (data ?? []) as Array<{ id: string; profile_id: string | null; full_name: string | null }>;
+  const elegido = filas.length === 1 ? filas[0] : filas.find((f) => f.full_name === fila.full_name) ?? null;
+  return elegido ? { id: elegido.id, profile_id: elegido.profile_id ?? null } : null;
 }
 
 /**

@@ -166,9 +166,17 @@ describe('C3 · hotel y servicio «No va»', () => {
     const { props, texto } = await pdf()
     expect(JSON.stringify(props.sugeridos ?? null)).not.toMatch(/VERDE MAR|LORD PIERRE|Verde Mar|Lord Pierre/)
     expect(texto).not.toMatch(/Verde Mar|VERDE MAR|Lord Pierre|LORD PIERRE/)
-    // Y vuelve igual.
+    // Y vuelve: cada tarifa toma la propuesta de ONE para el hotel. El caso fijo guarda la
+    // Recomendada con la regla de antes (la primera pegada, Verde Mar); desde el 2026-10-29 ONE
+    // propone la intermedia (con dos, la más cara: Lord Pierre), así que el total no es el de antes.
+    // ⚠️ «No va» suelta la elección de cada tarifa en ese servicio: una elección a mano no vuelve
+    // con «Incluido» (pendiente, va en el PR).
     await estadoDeServicioPorPasos(COT_SAN_ANDRES, HOTEL_SA, 'incluido')
-    expect(valorTotal()).toBe(total)
+    const eleccion = (nombre: string) => seleccion((base.tablas.cotizacion_itinerarios as Fila[]).find(t => t.nombre === nombre)!.id as string)
+    expect(eleccion('Económica')).toContain('h-verde-mar')
+    expect(eleccion('Recomendada')).toContain('h-lord-pierre')
+    expect(eleccion('Premium')).toContain('h-lord-pierre')
+    expect(valorTotal()).toBeGreaterThan(total)
   }, 60_000)
 
   it('la actividad que no va recuerda que era Opcional y vuelve así', async () => {

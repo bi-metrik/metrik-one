@@ -205,6 +205,8 @@ export async function sendDocument(
  * Send an interactive CTA URL button (free-form, dentro de ventana 24h).
  * Es el tipo que dispara el In-App Browser de WhatsApp (abrir sin salir de la app)
  * para números habilitados — a diferencia de un link de texto plano, que abre el navegador externo.
+ * Límites de la doc oficial de Meta (interactive-cta-url-messages, leída el 2026-10-26): cuerpo ≤ 1024 caracteres,
+ * texto del botón ≤ 20. Devuelve el wamid (o null si Meta lo rechazó); los llamadores de antes lo ignoran.
  */
 export async function sendCtaUrl(
   phone: string,
@@ -212,17 +214,17 @@ export async function sendCtaUrl(
   displayText: string,
   url: string,
   ctx: EnvioCtx = {},
-): Promise<void> {
-  await postMessage(phone, {
+): Promise<string | null> {
+  return await postMessage(phone, {
     messaging_product: 'whatsapp',
     to: phone,
     type: 'interactive',
     interactive: {
       type: 'cta_url',
-      body: { text: body },
+      body: { text: [...body].slice(0, 1024).join('') },
       action: {
         name: 'cta_url',
-        parameters: { display_text: displayText.slice(0, 20), url },
+        parameters: { display_text: [...displayText].slice(0, 20).join(''), url },
       },
     },
   }, ctx);

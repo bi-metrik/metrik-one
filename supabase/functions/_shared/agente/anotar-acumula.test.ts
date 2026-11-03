@@ -164,7 +164,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     // El grupo lo entendió el modelo: 0 niños sin que nadie escribiera «sin niños».
     expect(t4[0].texto).toContain('• Niños: 0')
     expect(t4[0].texto).not.toMatch(/Reenvíame/)
-    expect(t4[0].texto).toMatch(/Para cotizar faltaría: Ciudad de salida, Categoría de hotel\./)
+    expect(t4[0].texto).toMatch(/Falta para cotizar: Ciudad de salida, Categoría de hotel\./)
     // La extracción vio lo que dijo antes de abrir (no solo el último mensaje), la fecha de hoy y las opciones.
     expect(e.puerto.extracciones[0]).toEqual([M0, M1, M2, M3])
     expect(prompts[0]).toMatch(/Hoy es \d{4}-\d{2}-\d{2}/)
@@ -183,7 +183,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     expect(r5).toContain('• Fecha de regreso: 7 dic')
     expect(r5).toContain('• Categoría de hotel: 4 estrellas')
     expect(r5).toContain('• Requisitos especiales: Hotel de 3 o 4 estrellas')
-    expect(r5).toContain('Para cotizar faltaría: Ciudad de salida.')
+    expect(r5).toContain('Falta para cotizar: Ciudad de salida.')
     expect(r5).not.toMatch(/¿cuál\?/)
     expect(e.puerto.extracciones[1]).toEqual([M0, M1, M2, M3, M5])
     // Lo que el viaje ya tiene (de la pendiente no, del viaje sí) le llega al modelo: aquí el destino.

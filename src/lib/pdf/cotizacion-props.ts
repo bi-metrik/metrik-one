@@ -12,6 +12,7 @@
 
 import type {
   CargoEnDestinoPDF,
+  PagoEnDestinoPDF,
   HotelPDF,
   NivelDetalle,
   VueloPDF,
@@ -117,6 +118,12 @@ export interface ViajePDF {
    */
   fechaInicio?: string | null
   /**
+   * Desde dónde se cuentan los días asignados («día 3»): el inicio de la SOLICITUD, que es con
+   * el que la pantalla los muestra. Solo viaja cuando el viaje cotizado empieza otro día que la
+   * solicitud (`fechas-del-viaje.ts`); ausente, cuentan desde `fechaInicio`.
+   */
+  inicioDeLosDias?: string | null
+  /**
    * El titular de la portada, del texto para el cliente (`cotizaciones.documento_cliente`).
    * Reemplaza al nombre del negocio como título. Ausente o `null`, el título es el de
    * siempre. Solo llega un texto que una persona REVISÓ (`textoImprimible`).
@@ -136,9 +143,19 @@ export interface ViajePDF {
    * «Inversión» repetida.
    */
   incluye?: string[]
+  /**
+   * Lo que el paquete de bloqueo NO incluye, como lo dijo el operador (V5 del QA del 2026-10-29).
+   * Sale en «A tener en cuenta». Ausente = nada que decir.
+   */
+  noIncluye?: string[]
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]
+  /**
+   * V-13 (QA del 2026-10-29, ronda 3): lo que el viajero paga en destino y no es un cargo del
+   * hotel (el ingreso a un parque). Sale en «No incluido» como «Se paga en destino». Ausente = nada.
+   */
+  pagosEnDestino?: PagoEnDestinoPDF[]
   nivelDetalle: NivelDetalle
   /**
    * El pie de marca que va en todas las páginas y la firma del documento.
@@ -225,7 +242,19 @@ export interface CotizacionPDFProps {
      * Ausente vale 0: es todo lo que no es un viaje con adicionales.
      */
     valorAdicionales?: number
+    /**
+     * Reglas de margen (2026-10-27): «Descuento · motivo: −$X» bajo la opción que lo lleva (el
+     * descuento por hotel). El precio de la línea ya lo trae descontado. Ausente = nada.
+     */
+    nota?: string | null
   }[]
+
+  /**
+   * Reglas de margen (2026-10-27): los descuentos sobre el total del documento (los del TOTAL), con
+   * su descripción. Van entre el subtotal y el TOTAL; la suma de `items` menos estos descuentos es
+   * el total. `null` o ausente = ninguno, el documento de siempre.
+   */
+  descuentosTotal?: { descripcion: string; valor: number }[] | null
 
   /**
    * R7 · los bloques de la propuesta, uno por itinerario marcado «va en propuesta».
@@ -260,7 +289,14 @@ export interface CotizacionPDFProps {
       adicionales?: string[]
       /** Ver `items[].valorAdicionales`: TIENE que entrar en el total impreso. */
       valorAdicionales?: number
+      /** Ver `items[].nota`. */
+      nota?: string | null
     }[]
+    /**
+     * Reglas de margen (2026-10-27): los descuentos sobre el total de ESTA tarifa, con su
+     * descripción. La suma de las líneas menos estos descuentos es `precio`. Ausente = ninguno.
+     */
+    descuentos?: { descripcion: string; valor: number }[]
   }[] | null
   /**
    * El itinerario DÍA POR DÍA: un bloque por día, con las líneas que le tocan.
@@ -284,6 +320,8 @@ export interface CotizacionPDFProps {
     /** El ordinal del viaje. Se imprime «Día 3», nunca una fecha. */
     dia: number
     items: {
+      /** La línea (`items.id`). El día a día de la propuesta nueva no la repite si ya es un servicio. */
+      id?: string
       nombre: string
       descripcion: string | null
       precio_venta: number

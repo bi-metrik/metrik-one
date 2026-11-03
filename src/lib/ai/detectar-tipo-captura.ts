@@ -64,20 +64,22 @@ export const PROMPT_DETECCION =
   '- hotel: alojamiento. Se ve el nombre de un hotel o resort, una habitación, fechas de entrada y salida ' +
   '(check-in, check-out) o un número de noches.\n' +
   '- actividad: un tour, una excursión, una entrada, una experiencia.\n' +
-  '- traslado: transporte por tierra (aeropuerto a hotel, transfer, van privada).\n' +
+  '- tren: tiquete o reserva de tren. Se ve un operador de trenes (Renfe, Trenitalia, SNCF, Eurostar, ' +
+  'Italo, Ouigo, Deutsche Bahn, AVE, Frecciarossa, TGV), estaciones de tren o la palabra tren.\n' +
+  '- traslado: transporte por tierra que NO es tren (aeropuerto a hotel, transfer, van privada, bus).\n' +
   '- ninguno: no es la cotización de un componente de viaje, no se puede saber, o muestra un PAQUETE con ' +
   'vuelo y hotel juntos en un solo precio.\n\n' +
   'Además:\n' +
   '- lugar: para hotel, actividad o traslado, la ciudad o zona donde queda, tal como aparece en la ' +
   'pantalla. null si no aparece.\n' +
-  '- origen y destino: solo para vuelo, la ciudad de salida y la de llegada de la IDA, tal como aparecen. ' +
+  '- origen y destino: solo para vuelo o tren, la ciudad (o estación) de salida y la de llegada de la IDA, tal como aparecen. ' +
   'null si no aparecen.\n' +
   'NUNCA inventes ni deduzcas lo que no está escrito en la imagen. Responde solo el JSON.'
 
 const ESQUEMA = {
   type: 'OBJECT',
   properties: {
-    tipo: { type: 'STRING', enum: ['vuelo', 'hotel', 'actividad', 'traslado', 'ninguno'] },
+    tipo: { type: 'STRING', enum: ['vuelo', 'hotel', 'actividad', 'traslado', 'tren', 'ninguno'] },
     lugar: { type: 'STRING', nullable: true },
     origen: { type: 'STRING', nullable: true },
     destino: { type: 'STRING', nullable: true },
@@ -102,13 +104,14 @@ function textoOVacio(v: unknown): string | null {
 export function normalizarDeteccion(raw: unknown): TipoDetectado {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const tipoCrudo = typeof r.tipo === 'string' ? r.tipo.trim().toLowerCase() : ''
-  // Solo los cuatro de siempre: «otro» lo elige la persona en la cotización por pasos, nunca la detección.
+  // Solo los de siempre (y el tren, QA G9): «otro» lo elige la persona en la cotización por pasos, nunca la detección.
   const tipo = esTipoConPantallazo(tipoCrudo) ? tipoCrudo : null
+  const conRuta = tipo === 'vuelo' || tipo === 'tren'
   return {
     tipo,
-    lugar: tipo && tipo !== 'vuelo' ? textoOVacio(r.lugar) : null,
-    origen: tipo === 'vuelo' ? textoOVacio(r.origen) : null,
-    destino: tipo === 'vuelo' ? textoOVacio(r.destino) : null,
+    lugar: tipo && !conRuta ? textoOVacio(r.lugar) : null,
+    origen: conRuta ? textoOVacio(r.origen) : null,
+    destino: conRuta ? textoOVacio(r.destino) : null,
   }
 }
 
@@ -129,7 +132,7 @@ export function normalizarDeteccion(raw: unknown): TipoDetectado {
  * rescatado no deja pasar nada que un tipo normal no dejara pasar.
  */
 export function rescatarCortada(texto: string): TipoDetectado | null {
-  const tipo = /"tipo"\s*:\s*"(vuelo|hotel|actividad|traslado|ninguno)"/.exec(texto)?.[1]
+  const tipo = /"tipo"\s*:\s*"(vuelo|hotel|actividad|traslado|tren|ninguno)"/.exec(texto)?.[1]
   if (!tipo) return null
   const campo = (nombre: string): string | null => {
     const m = new RegExp(`"${nombre}"\\s*:\\s*"([^"\\n\\\\]*)"`).exec(texto)

@@ -8,10 +8,12 @@
 //   `crearContactoConGuardian`), los viajes con `calcularNiveles`, el negocio nuevo como lo crea la bandeja hoy
 //   (`crearNegocio`, con la empresa espejo) y la carga con la extracción del núcleo (`bandeja/extraccion.ts`: el modelo
 //   clasifica, el código solo valida) y `cargarEnExistente`, que no pisa lo que una persona editó.
-// · `cargarReglamento`, `cupoSupabase`.
+// · `cargarReglamento`, `cupoSupabase` (el aviso del cupo sale por correo desde el 2026-10-26).
+// · `caidaSupabase`, `alertarCaidaWa`: el correo inmediato si se caen los modelos (`caida.ts`).
 // ============================================================
 
 import { sendButtons, sendList, sendTextoConId, sendTypingIndicator } from '../wa-respond.ts';
+import { sendCtaUrl } from '../wa-respond.ts';
 import { crearContactoConGuardian, fichasPorLlave, fichasPorNombre } from '../wa-cliente.ts';
 import type { Llave } from '../wa-cliente-reglas.ts';
 import {
@@ -20,13 +22,18 @@ import {
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
-import type { PlanCarga } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeCarga, planDeCarga, propuestoDe, registradoDe, traeArchivo } from './bandeja/carga.ts';
+import type { AdjuntoCarga, PlanCarga } from './bandeja/carga.ts';
+import { bajarMedia, subirSoporte } from '../wa-media.ts';
+import type { PuertoAdjuntos } from './adjuntos.ts';
 import { esquemaCarga, esquemaCargaCompacta, instruccionesCarga, omitidosCompacta } from './bandeja/extraccion.ts';
 import { aplanarBloques, calcularNiveles } from '../niveles-solicitud.ts';
 import { todayBogotaISO } from '../bogota.ts';
 import { renombrarSegunPlantilla } from '../nombre-viaje.ts';
-import { enviarAvisoInterno } from '../wa-alerta.ts';
+import { CORREO_MAURICIO, enviarCorreoInterno, htmlDeTexto } from '../correo-interno.ts';
+import type { CorreoInterno } from '../correo-interno.ts';
+import { aliasConversacionWa, alertarSiCaido, caidaDelTurno } from './caida.ts';
+import type { PuertosCaida } from './caida.ts';
 import type { SupabaseClient } from '../types.ts';
 import { fichaValida, huellaDe } from './reglamento.ts';
 import type { MiembroEquipo, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
@@ -35,7 +42,8 @@ import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { EstadoPerfil } from '../perfil-contacto.ts';
 import type { PuertosCupo } from './uso.ts';
-import type { Almacen, FilaConversacion, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
+import { conDespliegue } from './despliegue.ts';
+import type { Almacen, FilaConversacion, MediaFila, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
 type Fila = Record<string, unknown>;
 const COLUMNAS = 'id, workspace_id, phone, direccion, clase, formato, texto, opciones, toque_id, contexto_wamid, wa_message_id, media, turno_id, traza, created_at';
@@ -54,7 +62,7 @@ export function almacenSupabase(supabase: SupabaseClient): Almacen {
     async cerrarTurno(p) {
       const r = await Promise.all([
         supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas),
-        supabase.from('wa_conversacion').update({ traza: p.traza }).eq('id', p.filaTraza),
+        supabase.from('wa_conversacion').update({ traza: conDespliegue(p.traza) }).eq('id', p.filaTraza),
         p.salientes.length ? supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('wa_message_id', p.salientes) : Promise.resolve({ error: null }),
       ]);
       for (const x of r) if (x.error) console.error('[agente] no se pudo cerrar el turno:', x.error.message);
@@ -82,6 +90,8 @@ export function mensajeroWa(): Mensajero {
     async enviar(phone: string, s: Salida, ctx) {
       const envio = { origen: 'bot' as const, workspaceId: ctx.workspaceId, intent: ctx.intent };
       if (s.tipo === 'texto') return await sendTextoConId(phone, s.texto, envio);
+      // El botón con link (paso a una persona, §4.2): `interactive.type = "cta_url"`, cuerpo ≤ 1024 y botón ≤ 20.
+      if (s.tipo === 'enlace') return await sendCtaUrl(phone, s.texto, s.boton, s.url, envio);
       if (s.tipo === 'botones') return await sendButtons(phone, s.texto, s.opciones.map((o) => ({ id: o.id, title: o.titulo })), envio);
       return await sendList(phone, s.texto, s.boton, s.opciones.map((o) => ({ id: o.id, title: o.titulo, ...(o.descripcion ? { description: o.descripcion } : {}) })), envio);
     },
@@ -92,12 +102,15 @@ export function mensajeroWa(): Mensajero {
 
 const cacheReglamento = new Map<string, { r: Reglamento; vence: number }>();
 
-/** La versión del puntero o la última publicada. `null` si no hay ninguna (el agente no corre). Caché de 60 s. */
-export async function cargarReglamento(supabase: SupabaseClient, workspaceId: string, bot: string, id: string | null): Promise<Reglamento | null> {
-  const k = `${workspaceId}|${bot}|${id ?? ''}`;
+/**
+ * La versión del puntero o la última publicada. `null` si no hay ninguna (el agente no corre). Caché de 60 s.
+ * `conBanco`: trae también `bancoValido` (columna calculada `banco_valido`, migración 20261030190000).
+ */
+export async function cargarReglamento(supabase: SupabaseClient, workspaceId: string, bot: string, id: string | null, o: { conBanco?: boolean } = {}): Promise<Reglamento | null> {
+  const k = `${workspaceId}|${bot}|${id ?? ''}|${o.conBanco ? 'b' : ''}`;
   const c = cacheReglamento.get(k);
   if (c && c.vence > Date.now()) return c.r;
-  let q = supabase.from('bot_reglamentos').select('id, version, huella, fichas').eq('workspace_id', workspaceId).eq('bot', bot);
+  let q = supabase.from('bot_reglamentos').select(o.conBanco ? 'id, version, huella, fichas, banco_valido' : 'id, version, huella, fichas').eq('workspace_id', workspaceId).eq('bot', bot);
   q = id ? q.eq('id', id) : q.order('version', { ascending: false }).limit(1);
   const { data, error } = await q.maybeSingle();
   if (error || !data) {
@@ -105,7 +118,10 @@ export async function cargarReglamento(supabase: SupabaseClient, workspaceId: st
     return null;
   }
   const fichas = ((Array.isArray(data.fichas) ? data.fichas : []) as unknown[]).map(fichaValida).filter((f): f is NonNullable<ReturnType<typeof fichaValida>> => !!f);
-  const r: Reglamento = { id: data.id as string, version: Number(data.version), huella: String(data.huella || await huellaDe(fichas)), fichas };
+  const r: Reglamento = {
+    id: data.id as string, version: Number(data.version), huella: String(data.huella || await huellaDe(fichas)), fichas,
+    ...(o.conBanco ? { bancoValido: (data as { banco_valido?: unknown }).banco_valido === true } : {}),
+  };
   cacheReglamento.set(k, { r, vence: Date.now() + 60_000 });
   return r;
 }
@@ -124,15 +140,57 @@ export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen): Puerto
     },
     tomarCandado: (k, s) => almacen.tomarCandado(k, s),
     async avisar(texto, variables) {
-      // El canal de avisos internos de siempre (el mismo del número desconocido): a MéTRIK, nunca al cliente.
-      const admin = (Deno.env.get('WA_ADMIN_NOTIFY_PHONE') || '').replace(/\D/g, '');
-      if (!admin) {
-        console.warn('[agente] cupo de uso justo sin avisar: falta WA_ADMIN_NOTIFY_PHONE');
-        return;
-      }
-      await enviarAvisoInterno(admin, 'agente_cupo', texto, variables);
+      // A MéTRIK por correo, nunca al cliente (spec 2026-10-26, §4.1 punto 5: por WhatsApp se perdían fuera de la
+      // ventana de 24 h). Un correo por umbral y por mes: el candado ya lo asegura y la llave de Resend también.
+      const r = await enviarCorreoInterno(correoAvisoCupo(texto, variables));
+      if (!r.ok) console.error('[agente] no salió el aviso del cupo:', r.error);
     },
   };
+}
+
+/** El correo del aviso del cupo de uso justo. Pura. */
+export function correoAvisoCupo(texto: string, v: Record<string, string>): CorreoInterno {
+  const asunto = Number(v.umbral) >= 100 ? 'pasó su cupo' : `va en el ${v.umbral} % del cupo`;
+  return {
+    to: CORREO_MAURICIO,
+    subject: `Cupo del asistente: ${v.workspace} ${asunto} de ${v.mes}`,
+    text: texto,
+    html: htmlDeTexto(texto),
+    idempotencyKey: `agente-cupo/${v.workspace}/${v.mes}/${v.umbral}`,
+  };
+}
+
+// ── Caída de los modelos (spec 2026-10-26, §4.1) ─────────────────────────────
+
+/**
+ * Los puertos del correo de caída en WhatsApp (ONE y la bandeja): los candados del almacén, la cuenta de
+ * conversaciones sin respuesta del modelo en la última hora (`wa_conversacion`, índice parcial de las trazas del
+ * modelo) y Resend.
+ */
+export function caidaSupabase(supabase: SupabaseClient, almacen: Pick<Almacen, 'tomarCandado' | 'soltarCandado'>, workspaceId: string): PuertosCaida {
+  return {
+    tomarCandado: (k, s) => almacen.tomarCandado(k, s),
+    soltarCandado: (k) => almacen.soltarCandado(k),
+    async sinRespuesta(desdeIso) {
+      const { data, error } = await supabase.from('wa_conversacion').select('phone')
+        .eq('workspace_id', workspaceId).gte('created_at', desdeIso).eq('traza->>tipo', 'modelo').like('traza->>error', 'modelo:%').limit(2000);
+      if (error) return null;
+      return new Set(((data ?? []) as Fila[]).map((x) => String(x.phone))).size;
+    },
+    enviarCorreo: (m) => enviarCorreoInterno(m),
+  };
+}
+
+/** El correo si se cayeron los modelos en un turno de WhatsApp. Nunca lanza (ver `alertarSiCaido`). */
+export async function alertarCaidaWa(
+  supabase: SupabaseClient, almacen: Pick<Almacen, 'tomarCandado' | 'soltarCandado'>, traza: Traza,
+  o: { workspaceId: string; workspaceNombre: string; canal: 'one' | 'bandeja'; phone: string; turnoId: string | null },
+): Promise<void> {
+  if (!caidaDelTurno(traza)) return;
+  await alertarSiCaido(caidaSupabase(supabase, almacen, o.workspaceId), traza, {
+    workspaceId: o.workspaceId, workspaceNombre: o.workspaceNombre, canal: o.canal,
+    conversacion: await aliasConversacionWa(o.workspaceId, o.phone), turnoId: o.turnoId, ahoraMs: Date.now(),
+  });
 }
 
 // ── La bandeja ───────────────────────────────────────────────────────────────
@@ -147,12 +205,42 @@ export function cortarContenido(s: string): string {
   return c.length <= MAX_CONTENIDO_ACTIVIDAD ? s : `${c.slice(0, MAX_CONTENIDO_ACTIVIDAD - 1).join('')}…`;
 }
 
+/**
+ * Los adjuntos de la conversación (foto o PDF, 2026-10-21), igual que el dominio ONE (`one/puerto-supabase.ts`): se bajan
+ * de Meta, se suben al llegar a `gastos-soportes/<ws>/whatsapp/<fila>` (el bucket de los archivos que llegan por
+ * WhatsApp; la app lo abre por `/api/archivos/abrir`, que valida el workspace de la ruta) y lo preparado se anota en
+ * `wa_conversacion.media`.
+ */
+export function puertoAdjuntosSupabase(supabase: SupabaseClient, workspaceId: string): PuertoAdjuntos {
+  return {
+    async bajarAdjunto(mediaId) {
+      const m = await bajarMedia(mediaId);
+      return m ? { bytes: m.buffer, mime: m.mimeType } : null;
+    },
+    guardarAdjunto: (filaId, archivo) => subirSoporte(supabase, workspaceId, `whatsapp/${filaId}`, { buffer: archivo.bytes, mimeType: archivo.mime }),
+    async anotarMedia(filaId: string, media: MediaFila) {
+      try {
+        const { error } = await supabase.from('wa_conversacion').update({ media }).eq('id', filaId).eq('workspace_id', workspaceId);
+        if (error) console.error('[agente] no se pudo anotar el adjunto en la conversación:', error.message);
+      } catch (err) {
+        console.error('[agente] no se pudo anotar el adjunto en la conversación:', err);
+      }
+    },
+  };
+}
+
+/** La línea de la actividad del viaje por un archivo que quedó de soporte (≤ 280: CHECK de `activity_log.contenido`). Pura. */
+export function contenidoSoporte(a: Pick<AdjuntoCarga, 'tipo' | 'nombre'>): string {
+  const que = a.tipo === 'documento' ? `PDF «${(a.nombre ?? 'sin nombre').slice(0, 120)}»` : 'foto';
+  return `📎 Soporte que llegó por WhatsApp (${que}), cargado con el bot.`;
+}
+
 function relUno(v: unknown): Fila | null {
   return Array.isArray(v) ? (v[0] as Fila | undefined) ?? null : (v as Fila | null) ?? null;
 }
 
 export function puertoBandejaSupabase(
-  supabase: SupabaseClient, workspaceId: string, staffId: string | null, o: { extraccionCompacta?: boolean } = {},
+  supabase: SupabaseClient, workspaceId: string, staffId: string | null, o: { extraccionCompacta?: boolean; adjuntos?: boolean } = {},
 ): PuertoBandeja {
   const leerViaje = async (codigo: string): Promise<ViajeAgente | null | 'error'> => {
     const { data: neg, error } = await supabase.from('negocios').select('id, codigo, nombre, estado, contacto_id, contactos(nombre)')
@@ -202,6 +290,24 @@ export function puertoBandejaSupabase(
 
   return {
     equipoComercial,
+    // Leer adjuntos (2026-10-21): con `adjuntos` (el interruptor `agente_config.leer_adjuntos`, por defecto sí).
+    ...(o.adjuntos ? {
+      adjuntos: puertoAdjuntosSupabase(supabase, workspaceId),
+      async soportesEnViaje(viajeId: string, adjuntos: AdjuntoCarga[]) {
+        // El viaje es de este workspace (la propuesta ya lo validó; se vuelve a mirar al escribir).
+        const { data: neg, error: errN } = await supabase.from('negocios').select('id').eq('id', viajeId).eq('workspace_id', workspaceId).maybeSingle();
+        if (errN) throw new Error(`no se pudo revisar el viaje: ${errN.message}`);
+        if (!neg) throw new Error('el viaje no es de este workspace');
+        // Solo referencias de ESTE workspace (`one://gastos-soportes/<ws>/…`): la fila de la conversación las dejó así.
+        const propias = adjuntos.filter((a) => a.ref.startsWith(`one://gastos-soportes/${workspaceId}/`));
+        if (!propias.length) throw new Error('ningún archivo es de este workspace');
+        const { error } = await supabase.from('activity_log').insert(propias.map((a) => ({
+          workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'comentario', autor_id: staffId,
+          contenido: contenidoSoporte(a), link_url: a.ref,
+        })));
+        if (error) throw new Error(`no se pudo dejar el soporte en la actividad: ${error.message}`);
+      },
+    } : {}),
     async linea() {
       const cfg = await configDeLinea(supabase, workspaceId);
       if (typeof cfg === 'string') return 'la línea de la bandeja';
@@ -233,7 +339,8 @@ export function puertoBandejaSupabase(
       const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
     },
-    async prepararCarga(viajeId, textos, previo) {
+    async prepararCarga(viajeId, textos, previo, oc) {
+      const pedido = oc?.pedido ?? [];
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
@@ -242,8 +349,11 @@ export function puertoBandejaSupabase(
       const t0 = performance.now();
       const lectura = await leerConModelo(
         // `perfil`: lo de la persona sale aparte y va a su perfil como sugerido con el toque de la carga.
-        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true }),
-        `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`,
+        // `documentos`: algún texto trae lo leído de una foto o un PDF (sin archivos, el prompt de siempre).
+        // `preguntas`: lo ya preguntado del viaje no se vuelve a preguntar; `reenviados`: quién dijo cada texto.
+        // `pedido`: lo que el comercial escribió al pedir la tanda va después, «escrito por el comercial», y manda si choca.
+        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true, documentos: textos.some(traeArchivo), preguntas: (oc?.preguntas ?? []).map((q) => q.texto), ...(pedido.length ? { pedido: true } : {}) }),
+        `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido, oc?.reenviados))}`,
         compacta ? esquemaCargaCompacta(campos, { perfil: true }) : esquemaCarga(campos, { perfil: true }),
       );
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
@@ -253,8 +363,8 @@ export function puertoBandejaSupabase(
         console.log(`[agente] extracción compacta ${Math.round(performance.now() - t0)} ms${omitidos.length ? `; omitió ${omitidos.join(', ')}` : ''}`);
       }
       return planDeCarga({
-        bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
-        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,
+        bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos: [...textos, ...pedido], raw: lectura.json,
+        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo, preguntas: oc?.preguntas,
       });
     },
     async cargar(viajeId, plan) {

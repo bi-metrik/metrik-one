@@ -24,11 +24,13 @@ import PerfilFotos from '@/app/(app)/fotos/perfil-fotos'
 import { DialogoAutorizacionFoto } from '@/app/(app)/fotos/autorizacion-foto'
 import { contestarMismoPerfil, subirFotoABiblioteca, type PedidoFoto } from '@/app/(app)/fotos/actions'
 import { noEsEsteProveedor } from '@/app/(app)/negocios/tarifas-proveedor-actions'
+import { asociarConHotel } from '@/app/(app)/negocios/por-pasos-actions'
 import { origenVigente } from '@/lib/cotizaciones/origen-tarifa'
 import type { PedidoAutorizacion } from '@/lib/fotos/autorizacion'
 import type { CategoriaFoto } from '@/lib/fotos/categoria'
 import { fotoDeLaTarjeta, type ElementoVista } from '@/lib/fotos/vista'
 import TarjetaCosto from '@/app/(app)/negocios/tarjeta-costo'
+import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import PastillaAerolinea from '@/app/(app)/negocios/pastilla-aerolinea'
 import { AlertaDecision } from '@/components/viaje/alerta-decision'
 import { BTN, BTN_PRIM, INPUT } from '@/components/viaje/estilo'
@@ -36,7 +38,7 @@ import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-a
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, pagosEnDestinoDeItems, textoUnidadDelCargo, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -87,6 +89,7 @@ import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
 import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { comisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -199,7 +202,14 @@ export default function TarjetaOpcion({
   actividad = null,
   porPasos = null,
   autorizador = null,
+  hotelesDelViaje = [],
+  reglasDeLinea = null,
 }: {
+  /**
+   * Las reglas de margen de esta línea (brief del 2026-10-27), de la cascada por opción: colchón
+   * del vuelo, descuento del hotel, comisión de la Pública. `null` sin reglas.
+   */
+  reglasDeLinea?: ReglasDeLinea | null
   itemId: string
   numero: number
   item: ItemConLectura
@@ -238,6 +248,11 @@ export default function TarjetaOpcion({
    * 6: un solo montaje). Antes vivía en `respaldo` y una línea confirmada no lo veía nunca.
    */
   cambiarCosto?: ReactNode
+  /**
+   * Las opciones de hotel de la cotización, para «Va con el hotel» de un traslado (reunión del
+   * 2026-10-22, punto 5, `va-con-hotel.ts`). Solo por pasos; vacío, no se ofrece.
+   */
+  hotelesDelViaje?: { id: string; nombre: string }[]
   /** La nota para el cliente de una opción que no es hotel (el hotel la escribe sobre la hoja). */
   nota: ReactNode
   /** «Hotel en Providencia»: el bloque, como lo nombra la hoja del cliente. */
@@ -677,12 +692,29 @@ export default function TarjetaOpcion({
             onCambio={onCambio}
             autorizador={autorizador}
             apilable={porPasos !== null}
+            tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
+            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario' || tarifa.tipoTarifa?.origen === 'pantallazo' ? tarifa.tipoTarifa.origen : false}
+            reglas={reglasDeLinea
+              ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null }
+              : null}
+            comision={comisionEscrita(tarifa.tipoTarifa)}
           />
 
           {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
               «Usar tarifa de proveedor»; con él, «Cambiar el costo». */}
           {editable && cambiarCosto}
           {!confirmada && respaldo}
+
+          {/* Un traslado va con UNA opción de hotel o sirve para todas (reunión del 2026-10-22). */}
+          {esTraslado && porPasos !== null && hotelesDelViaje.length > 1 && (
+            <VaConHotel
+              itemId={itemId}
+              editable={editable}
+              hoteles={hotelesDelViaje}
+              actual={tarifa.vaConHotel ?? null}
+              onCambio={onCambio}
+            />
+          )}
 
           {/* El traslado, la actividad y (desde el 2026-10-05, D3) el vuelo también tienen su
               hoja: la línea de «Inversión» del documento y, en el vuelo, sus filas de la tabla
@@ -784,9 +816,12 @@ function Ficha({ item, esHotel, composicion }: { item: ItemConLectura; esHotel: 
     if (cargo) {
       filas.push({
         dt: 'Se paga en el destino',
-        dd: <>{`${cargo.valor.toLocaleString('es-CO')}${cargo.moneda ? ` ${cargo.moneda}` : ''}`}<small className="text-xs font-normal text-[#6E6A62]"> · lo paga el viajero allá</small></>,
+        // V-17 (ronda 3): con su unidad; «35 USD» a secas se leía como de toda la estadía.
+        dd: <>{`${cargo.valor.toLocaleString('es-CO')}${cargo.moneda ? ` ${cargo.moneda}` : ''}${textoUnidadDelCargo(item)}`}<small className="text-xs font-normal text-[#6E6A62]"> · lo paga el viajero allá</small></>,
       })
     }
+    // V-13 (ronda 3): lo que se paga allá y no es del hotel (el ingreso a un parque).
+    for (const p of pagosEnDestinoDeItems([item])) filas.push({ dt: 'Aparte, en destino', dd: p.texto })
     if (filas.length === 0) return null
     return (
       <dl className="m-0 grid grid-cols-3 gap-x-4 gap-y-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] p-3 max-sm:grid-cols-2" data-ficha>
@@ -1277,5 +1312,44 @@ function PideHabitacion({ itemId, texto, onCambio }: { itemId: string; texto: st
       </label>
       {rechazo && <p className="m-0 text-xs font-medium text-[#B3382C]">{rechazo}</p>}
     </div>
+  )
+}
+
+/**
+ * «Va con el hotel»: el traslado cuenta solo en las tarifas que llevan esa opción de hotel; en
+ * «Sirve para cualquier hotel» es general (una tarifa por zona, para las tres opciones).
+ */
+function VaConHotel({ itemId, editable, hoteles, actual, onCambio }: {
+  itemId: string
+  editable: boolean
+  hoteles: { id: string; nombre: string }[]
+  actual: string | null
+  onCambio: () => void
+}) {
+  const [isPending, startTransition] = useTransitionTolerante()
+  const vigente = actual && hoteles.some(h => h.id === actual) ? actual : ''
+  return (
+    <label className="flex flex-wrap items-center gap-2 text-[13px]" data-va-con-hotel={vigente || 'general'}>
+      <span className="font-semibold">Va con</span>
+      <select
+        aria-label="Con qué hotel va este traslado"
+        value={vigente}
+        disabled={!editable || isPending}
+        onChange={e => {
+          const v = e.target.value || null
+          startTransition(async () => {
+            const r = await asociarConHotel(itemId, v)
+            if (!r.success) { toast.error(r.error); return }
+            toast.success(v ? 'El traslado va con ese hotel en las tarifas que lo llevan.' : 'El traslado sirve para cualquier hotel.')
+            onCambio()
+          })
+        }}
+        className="max-w-full rounded-lg border border-[#CFCAC0] bg-white px-2 py-1 text-[13px]"
+      >
+        <option value="">Cualquier hotel (general)</option>
+        {hoteles.map(h => <option key={h.id} value={h.id}>{h.nombre}</option>)}
+      </select>
+      <span className="text-xs text-[#6E6A62]">Cada tarifa toma el traslado de su hotel.</span>
+    </label>
   )
 }

@@ -27,6 +27,27 @@ export function pastillasDeVuelo(aerolinea: string | null | undefined, numero: s
 }
 
 /**
+ * Las insignias de la tarjeta de vuelo (formato de Edgar del 2026-10-14): el nombre de la
+ * aerolínea en versalitas sobre el color de su marca, como «VUELING» en amarillo o «IBERIA» en
+ * rojo. Una por aerolínea que opera algún tramo (#1147), con el color del catálogo; sin sigla, la
+ * del nombre en el color de una desconocida. Vacío si no hay ni nombre ni sigla.
+ */
+export function insigniasDeVuelo(aerolinea: string | null | undefined, numero: string | null | undefined): string {
+  const siglas = siglasDeTramos(aerolinea, numero)
+  const insignia = (texto: string, sigla: string | null) => {
+    const c = colorDeAerolinea(sigla)
+    const limpio = texto.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    return `<span class="bd" data-aerolinea="${(sigla ?? '').replace(/[^A-Z0-9]/gi, '')}" style="background:${c.fondo};color:${c.texto}">${limpio}</span>`
+  }
+  if (siglas.length === 0) {
+    const nombre = nombreDeAerolinea(aerolinea, numero)
+    return nombre ? insignia(nombre, null) : ''
+  }
+  if (siglas.length === 1) return insignia(nombreDeAerolinea(aerolinea, numero) ?? siglas[0], siglas[0])
+  return siglas.map((s) => insignia(aerolineaDeSigla(s)?.nombre ?? s, s)).join('')
+}
+
+/**
  * El nombre que va junto a la pastilla. El de la línea, salvo que el número diga que el vuelo
  * lo opera OTRA aerolínea del catálogo (regreso con otra, como en `aerolineaDeFila` de #1147).
  */

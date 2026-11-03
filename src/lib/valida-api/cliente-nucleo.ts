@@ -126,3 +126,71 @@ export async function llamarValidaNucleo<T>(
 
   return { tipo: 'ok', status: respuesta.status, datos: datos as T }
 }
+
+// ─── Archivos (PDF) ──────────────────────────────────────────────────────────────────────────────
+
+export type ResultadoArchivoValida =
+  | { tipo: 'ok'; status: number; bytes: Uint8Array }
+  | { tipo: 'rechazada'; status: number; codigo: string; mensaje: string }
+  | { tipo: 'no_disponible'; motivo: MotivoNoDisponible; status?: number }
+
+/** Armar un PDF en Valida tarda más que una lectura: su ruta tiene `maxDuration = 60`. */
+export const TIMEOUT_ARCHIVO_MS = 58_000
+
+/**
+ * Lo mismo que `llamarValidaNucleo`, para las rutas que responden un ARCHIVO (los reportes PDF de
+ * `/clientes/{id}/reportes*`, metrik-valida#83). Misma firma, mismo actor y mismos tres resultados;
+ * un 2xx no se parsea, se devuelven los bytes. Un error sí viene en JSON (`{ error, message }`).
+ * Tampoco aquí se registra ningún cuerpo.
+ */
+export async function pedirArchivoValidaNucleo(
+  peticion: PeticionValida,
+  deps: DependenciasCliente,
+): Promise<ResultadoArchivoValida> {
+  const registrar = deps.registrar ?? (() => {})
+  const secreto = (deps.secreto ?? '').trim()
+  if (!secreto) return { tipo: 'no_disponible', motivo: 'sin_secreto' }
+  const base = (deps.base ?? '').trim().replace(/\/+$/, '')
+  if (!/^https?:\/\//.test(base)) return { tipo: 'no_disponible', motivo: 'sin_base' }
+
+  const cuerpoTexto = peticion.metodo === 'GET' || peticion.cuerpo === undefined ? '' : JSON.stringify(peticion.cuerpo)
+  const headers: Record<string, string> = {
+    ...encabezadosOne(secreto, peticion.actor, cuerpoTexto, deps.ahora()),
+    accept: 'application/pdf, application/json',
+  }
+  if (cuerpoTexto) headers['content-type'] = 'application/json'
+
+  const controlador = new AbortController()
+  const temporizador = setTimeout(() => controlador.abort(), deps.timeoutMs ?? TIMEOUT_ARCHIVO_MS)
+  let respuesta: Response
+  try {
+    respuesta = await deps.fetch(`${base}/api/one/v1${peticion.ruta}`, {
+      method: peticion.metodo,
+      headers,
+      body: cuerpoTexto || undefined,
+      signal: controlador.signal,
+      cache: 'no-store',
+    })
+  } catch (e) {
+    const abortado = (e as { name?: string } | null)?.name === 'AbortError'
+    registrar(`[valida-api] ${peticion.metodo} ${peticion.ruta} -> ${abortado ? 'tiempo agotado' : 'error de red'}`)
+    return { tipo: 'no_disponible', motivo: abortado ? 'tiempo_agotado' : 'red' }
+  } finally {
+    clearTimeout(temporizador)
+  }
+
+  if (respuesta.status >= 400) {
+    const d = ((await respuesta.json().catch(() => null)) ?? {}) as { error?: unknown; message?: unknown }
+    const codigo = typeof d.error === 'string' ? d.error : 'error_desconocido'
+    registrar(`[valida-api] ${peticion.metodo} ${peticion.ruta} -> ${respuesta.status} ${codigo}`)
+    if (respuesta.status >= 500) return { tipo: 'no_disponible', motivo: 'error_valida', status: respuesta.status }
+    const mensaje = typeof d.message === 'string' ? d.message : 'Valida rechazó la operación.'
+    return { tipo: 'rechazada', status: respuesta.status, codigo, mensaje }
+  }
+
+  try {
+    return { tipo: 'ok', status: respuesta.status, bytes: new Uint8Array(await respuesta.arrayBuffer()) }
+  } catch {
+    return { tipo: 'no_disponible', motivo: 'respuesta_invalida', status: respuesta.status }
+  }
+}

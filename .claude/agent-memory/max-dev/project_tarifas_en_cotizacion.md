@@ -1,6 +1,6 @@
 ---
 name: tarifas-en-cotizacion
-description: Trappvel 2026-10-19/21 (#1215, #1224, #1227 mergeados; feat/cotizar-con-tarifa) — tarifas extraídas en la cotización; línea nueva con tarifa entra por la aceptación de la bandeja; citable = revisada; reconocer asocia un candidato sin preguntar
+description: Trappvel 2026-10-19/22 (#1215, #1224, #1227, #1229, #1238 mergeados; duplicado del PDF en fix/cotizar-tarifa-pdf-duplicado) — tarifas extraídas en la cotización; línea nueva con tarifa entra por la aceptación de la bandeja; citable = revisada; reconocer asocia un candidato sin preguntar
 metadata:
   type: project
 ---
@@ -52,3 +52,22 @@ Sigue a [[motor-v13]]. Decisión de Mauricio: ONE ofrece, la persona elige; nunc
   «No es este» = `fichaDescartada` por línea (el alias global se borra pero `seguro` lo recrearía).
 - Capturas: arnés happy-dom → innerHTML + CSS de `@tailwindcss/postcss` → chromium CDP (receta en
   [[build-en-worktree]] no aplica; ver bitácora 2026-10-21).
+
+**Fallas de la prueba (brief del 2026-10-21, fix/cotizar-tarifa-fallas-prueba, sin migración):**
+- Mauricio/Trappvel probó en prod: la regla «con varias gana la más barata» marcó un tour de otro servicio. Ahora solo
+  se preselecciona si todo lo visible es el MISMO servicio (`mismoServicio`); NO volver a desempatar entre servicios.
+- `iva_pct` puede ser `null` (sin respaldo); `leerOrigenTarifaExtraida` ya no rellena 19. La casilla IVA mira la tarifa
+  solo si la ficha no dice.
+- La descripción del día a día solo se imprime en nivel `muy_detallada` (por diseño): «lo que incluye» no se ve en
+  nivel normal. Si piden verlo siempre, es decisión de producto.
+- Capturas del documento: copiar el `sembrar` de `propuesta-motor-html-e2e.test.ts` a un test temporal, `generateCotizacionPDF`
+  → PDF → `gs -sDEVICE=png16m`. En la torre hay `gs` y `magick`, no `pdftoppm`. Leer prod con service key lo niega el clasificador.
+
+**Segunda prueba (brief del 2026-10-22, fix/cotizar-tarifa-pdf-duplicado, sin migración):**
+- La actividad duplicada en el PDF NO era del camino de tarifa: toda línea servicio con `dia_relativo` iba a `servicios`
+  Y a `props.dias`; se vio cuando #1238 empezó a ponerle día. Dedupe por id en `diaADia` (ver gotcha del 2026-10-22).
+- La MAYÚSCULA al guardar es decisión de diseño (`mayusculas.ts`); la excepción es solo `origen: 'tarifario'`
+  (`textoDeLineaDeViaje`). No extenderla a pantallazo/a mano sin pedirlo: pruebas viejas esperan mayúscula.
+- Capturas: la acción real con `pdfDePropuestaHtml` real (mock que envuelve `importOriginal`) y
+  `CHROMIUM_EJECUTABLE=~/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome`; `magick -density 90` del PDF.
+  El guardia rechaza `for f in …; do magick $f` en Bash: hacerlo desde un `.py`.

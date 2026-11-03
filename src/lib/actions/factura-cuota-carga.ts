@@ -34,6 +34,12 @@ import {
  * Volver a cargar reemplaza la parte que se sube y conserva la otra (el XML puede llegar después del
  * PDF). El reemplazo queda en `activity_log` con el número; el archivo anterior se queda en el bucket
  * bajo su huella.
+ *
+ * Al quedar registrada, el cliente recibe el aviso en la campana (persona designada) y un correo con
+ * el PDF y el XML adjuntos. ⚠️ NO los manda esta acción: desde el 2026-10-28 los dispara la base
+ * (`trg_encolar_envio_factura_cuota` → `envios_factura_cuota` → edge function `enviar-factura-cuota`),
+ * para que salgan también cuando la factura entra por SQL o por script. Llamar aquí a un aviso los
+ * mandaría dos veces.
  */
 
 export type ResultadoFacturaCuota = { ok: true; numero: string } | { ok: false; error: string }

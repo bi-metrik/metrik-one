@@ -79,8 +79,10 @@ describe('la ciudad sin la zona del hotel', () => {
     expect(m.dias.map((d) => d.ciudad).filter(Boolean)).not.toContain('Madrid - Sol')
     const html = htmlDePropuesta(m, recursos)
     expect(html).not.toContain('Madrid - Sol')
-    expect(html).not.toContain('Herengracht')
-    expect(m.precio.noIncluye[0]).toBe('Tasa turística (Barcelona), que se pagan en destino')
+    // V6 (QA del 2026-10-29): la zona sale SOLO en la tarjeta de su hotel, nunca como destino.
+    expect(html.match(/Herengracht/g) ?? []).toHaveLength(1)
+    expect(html).toContain('<div class="caps zona">Herengracht</div>')
+    expect(m.precio.noIncluye[0]).toBe('Tasa turística en Barcelona: se paga en el hotel')
   })
 })
 
@@ -98,8 +100,11 @@ describe('el orden del viaje, no el de las líneas', () => {
       'Paris Nord - Amsterdam Centraal · Eurostar 9325, Standard',
       null,
     ])
-    const ruta = html.slice(html.indexOf('class="route"'), html.indexOf('Lo que van a vivir'))
-    for (const tren of ['AVE 03071 Renfe', 'TGV INOUI 9714', 'Eurostar 9325']) expect(ruta).toContain(tren)
+    // Cada tren, con su nombre corto, en su tarjeta de «Vuelos y tren» (formato de Edgar, 2026-10-27).
+    const i = html.indexOf('>Vuelos y tren<')
+    expect(i).toBeGreaterThan(-1)
+    const vuelos = html.slice(i, html.indexOf('</section>', i))
+    for (const tren of ['AVE 03071 Renfe', 'TGV INOUI 9714', 'Eurostar 9325']) expect(vuelos).toContain(`<span class="num">${tren}</span>`)
   })
 })
 
@@ -180,7 +185,7 @@ describe('«Incluido en todas» de verdad en todas', () => {
 
   it('sin tarifas (una sola versión), el texto revisado tal cual', () => {
     const lineas = ['3 noches en el Hotel Catalonia Puerta del Sol']
-    expect(incluyeDeTodas(lineas, { hoteles: [{ ciudad: 'Madrid', desde: null, hasta: null, noches: 3, opciones: [{ tarifas: [], hotel: 'Catalonia Puerta del Sol', estrellas: 4, habitacion: null, regimen: null, cancelacion: null, cargoEnDestino: null, foto: null }] }], vuelos: [], tarifas: 1, noches: 3 })).toEqual(lineas)
+    expect(incluyeDeTodas(lineas, { hoteles: [{ ciudad: 'Madrid', desde: null, hasta: null, noches: 3, opciones: [{ tarifas: [], hotel: 'Catalonia Puerta del Sol', estrellas: 4, habitacion: null, regimen: null, incluye: null, cancelacion: null, cargoEnDestino: null, foto: null }] }], vuelos: [], tarifas: 1, noches: 3 })).toEqual(lineas)
   })
 })
 

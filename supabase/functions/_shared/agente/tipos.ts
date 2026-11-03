@@ -48,9 +48,29 @@ export interface LecturaAdjunto {
   comercio: string | null;
   nit: string | null;
   descripcion: string | null;
+  /**
+   * En una consignación, depósito o transferencia: el titular de la cuenta a la que llegó el dinero (2026-10-22). Si es
+   * la empresa del workspace, el dinero ENTRÓ: es un pago recibido, no un gasto. Ausente en lecturas viejas.
+   */
+  titular_destino?: string | null;
   /** Por qué no hay lectura (no se pudo bajar, el modelo no respondió). */
   motivo?: string;
+  /**
+   * Solo la lectura de la bandeja (documentos que manda el cliente de una agencia, `bandeja/lectura-adjunto.ts`): qué es
+   * el documento. `viaje` = pide o describe un viaje; `identidad` = pasaporte, cédula; `pago` = comprobante de pago.
+   */
+  clase?: ClaseDocumento;
+  /** Solo la bandeja: lo que el documento dice que sirve para el viaje, con sus palabras (entra a la carga como dato). */
+  texto?: string | null;
+  /**
+   * Lectura mixta (2026-10-29, `bandeja/lectura-mixta.ts`): un rol con viajes Y gastos (la mano derecha de Trappvel) lee
+   * cada archivo con los dos lectores; trae lo del viaje (`clase`, `texto`) y lo del soporte (monto, fecha, comercio, NIT,
+   * concepto, titular). La conversación muestra las dos cosas y el modelo decide por contexto qué es.
+   */
+  mixta?: boolean;
 }
+
+export type ClaseDocumento = 'viaje' | 'identidad' | 'pago' | 'otro';
 
 /**
  * `wa_conversacion.media` (jsonb). El webhook escribe `tipo` e `id` (y, en un documento, `mime` y `nombre`); el dominio
@@ -59,6 +79,8 @@ export interface LecturaAdjunto {
 export interface MediaFila {
   tipo: string;
   id: string;
+  /** Cuántas veces se intentó leer (una lectura que falló por tiempo o por la descarga se reintenta hasta 3). */
+  intentos?: number;
   mime?: string;
   nombre?: string;
   ref?: string | null;
@@ -128,7 +150,13 @@ export interface Opcion { id: string; titulo: string; descripcion?: string }
 export type Salida =
   | { tipo: 'texto'; texto: string }
   | { tipo: 'botones'; texto: string; opciones: Opcion[] }
-  | { tipo: 'lista'; texto: string; boton: string; opciones: Opcion[] };
+  | { tipo: 'lista'; texto: string; boton: string; opciones: Opcion[] }
+  /**
+   * Un botón que abre un link (spec 2026-10-26, §4.2: el paso a una persona en ONE abre el WhatsApp de MeTRIK con el
+   * mensaje escrito). En WhatsApp sale como `interactive.type = "cta_url"` (cuerpo ≤ 1024, botón ≤ 20); en Chatwoot,
+   * como texto con el link debajo. Lo arma siempre el código, nunca el modelo.
+   */
+  | { tipo: 'enlace'; texto: string; boton: string; url: string };
 
 export interface Mensajero {
   /** Marca leído y enciende «escribiendo…» (una sola llamada a Meta). Nunca lanza. */
@@ -172,6 +200,11 @@ export interface Reglamento {
   version: number;
   huella: string;
   fichas: Ficha[];
+  /**
+   * Si la versión pasó su banco del arnés (`banco_valido` de la base, migración 20261030190000). Solo lo pide quien lo
+   * exige para atender en vivo (`chatwoot-agente`); ausente, nadie lo pidió.
+   */
+  bancoValido?: boolean;
 }
 
 // ── El dominio (por bot) ─────────────────────────────────────────────────────
@@ -242,6 +275,17 @@ export interface Dominio {
    * Sin la bandera (la bandeja) la propuesta sigue viva mientras la conversación no consulte otra cosa (`sobre`).
    */
   propuestaVenceConRespuesta?: boolean;
+  /**
+   * Lo mismo, por acción (2026-10-29): un dominio compuesto de motores con distinta bandera (viajes sin ella, ONE con
+   * ella) dice la del motor dueño de la acción de la propuesta. Si está, manda sobre `propuestaVenceConRespuesta`.
+   */
+  venceConRespuesta?(accion: string): boolean;
+  /**
+   * Tope en tokens del resultado de una lectura, por nombre, cuando no cabe en el de todas (`TOPES_BLOQUE.resultado`,
+   * 400). El asistente público lo sube para `ver_catalogo`: una ficha de experiencia ocupa ~250-300 y con dos vigentes
+   * a la vez el resultado se cortaba a la mitad (medido el 2026-10-26).
+   */
+  topesResultado?: Record<string, number>;
   /** Las herramientas de lectura del dominio. */
   lecturas: DeclaracionHerramienta[];
   /** Las acciones de `proponer`. */
@@ -249,8 +293,12 @@ export interface Dominio {
   /** Descripción de los `datos` de `proponer` por acción (va en la declaración). */
   datosProponer: Record<string, unknown>;
   leer(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<ResultadoHerramienta>;
-  /** Arma la propuesta con datos reales o devuelve el error para el modelo (el candado). */
-  proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string }>;
+  /**
+   * Arma la propuesta con datos reales o devuelve el error para el modelo (el candado). `respaldo`: lo que el candado leyó
+   * de la base en este turno y le cuenta al modelo (p. ej. las cuotas pendientes de un ingreso que no cuadra); respalda
+   * esas cifras ante el verificador, igual que el resultado de una lectura.
+   */
+  proponer(accion: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; propuesta: Propuesta } | { ok: false; error: string; candado: string; respaldo?: unknown }>;
   /** Ejecuta una propuesta tocada. Idempotencia por huella: la asegura el núcleo. Lanza si no pudo. */
   ejecutar(propuesta: Propuesta, ctx: ContextoDominio): Promise<Hechos>;
   /**
@@ -278,23 +326,72 @@ export interface Dominio {
   /** Una línea del estado que solo el dominio sabe (la tanda abierta). */
   estado?(ctx: ContextoDominio): string[] | Promise<string[]>;
   /**
+   * Los registros que la conversación dice que se hicieron, revisados en la base en este turno (`registros.ts`). El
+   * núcleo los pone en el Estado, anota los mensajes viejos, ataja con el verificador «ya está registrado» de uno
+   * borrado y no deja proponer sobre él. `'error'`: no se pudo revisar. Una consulta por turno.
+   */
+  registros?(ctx: ContextoDominio): Promise<RegistroConversacion[] | 'error'>;
+  /**
    * Herramientas del dominio que CIERRAN el turno con una salida que escribe el código, no el modelo (`link_autorizacion`:
    * el link real y el mensaje para reenviar tal cual). Pueden ser varios mensajes: el primero va como respuesta y los
    * demás salen después, en orden. El modelo solo decide llamarla y con qué ficha.
    */
   cierres?: DeclaracionHerramienta[];
+  /**
+   * Revisa una respuesta del modelo antes de que salga (2026-10-21). Devuelve el error para el modelo, o null. En ONE: la
+   * lista para elegir a qué negocio va un gasto (con «Gasto de empresa») solo la arma el código (`preguntar_destino`).
+   */
+  revisarRespuesta?(salida: Salida, ctx: ContextoDominio): string | null;
+  /**
+   * Revisa el `texto` que el modelo pone arriba de una propuesta, contra la propuesta misma (2026-10-26). Devuelve el error
+   * para el modelo, o null. En ONE: no dice que guarda «el mensaje completo» si lo que va es un texto suyo y no la nota.
+   */
+  revisarTextoPropuesta?(texto: string, propuesta: Propuesta): string | null;
   cerrar?(nombre: string, args: Record<string, unknown>, ctx: ContextoDominio): Promise<
     | { ok: true; salidas: Salida[]; datos?: unknown; privado?: unknown }
     | { ok: false; error: string; candado: string }
   >;
 }
 
+/**
+ * Un registro que la conversación dice que se hizo (un gasto G1, un viaje abierto), con su estado en la base AHORA
+ * (`Dominio.registros`, 2026-10-21: «la conversación da la intención; la verdad la da la base»).
+ */
+export interface RegistroConversacion {
+  /** El id en la base (el de la escritura de la traza). */
+  id: string;
+  /** Cómo lo nombra la conversación (G1, «M1 26 9»). */
+  alias: string;
+  /** Una línea con lo que es, con los datos de la base si sigue (o los de la traza si ya no existe). */
+  que: string;
+  estado: 'vigente' | 'borrado';
+  /** Sus cifras (para que el verificador no deje afirmar la de uno borrado). */
+  montos?: number[];
+}
+
 // ── La traza ─────────────────────────────────────────────────────────────────
+
+/**
+ * El rol que atendió el turno (spec 2026-10-26, §2.9): la clave, la versión de su reglamento y sus funciones. En el
+ * camino de hoy de ONE (sin roles en la base) la clave es `cargo:<cargo>` y no hay versión.
+ */
+export interface RolTraza {
+  clave: string;
+  id: string | null;
+  version: number | null;
+  reglamento_id: string | null;
+  por: 'staff' | 'colaborador' | 'cargo' | 'inbox';
+  funciones: Array<{ funcion: string; parametros: Record<string, unknown> }>;
+}
 
 export interface Traza {
   tipo: 'modelo' | 'toque_propuesta' | 'si_escrito' | 'reenvio' | 'sin_turno';
   bot: string;
   reglamento?: { id: string; version: number; huella: string } | null;
+  /** El despliegue de la función que atendió (`DENO_DEPLOYMENT_ID`, `despliegue.ts`); lo pone el almacén al guardar. */
+  despliegue?: string;
+  /** El rol del turno (§2.9). Ausente en los dominios que no se componen (la bandeja). */
+  rol?: RolTraza | null;
   /** Desde que llegó el webhook del último mensaje del turno hasta que salió la respuesta. */
   ms_turno?: number;
   ms_modelo?: number;
@@ -326,9 +423,18 @@ export interface Traza {
    */
   tras_toque?: { origen: 'toque_propuesta' | 'si_escrito'; resultado: 'propuesta' | 'respuesta' | 'terminar' | 'solo_hecho' } | null;
   salida?: Salida | null;
+  /** Los registros de la conversación como estaban en la base en este turno (alias y estado). */
+  registros?: Array<{ alias: string; estado: string }> | 'error' | null;
   /** Los adjuntos que el dominio preparó antes del turno (bajados, guardados, leídos) y cuánto tardó. */
   adjuntos?: Array<Record<string, unknown>> | null;
   /** Los mensajes que salieron después de `salida` en el mismo turno (un cierre del dominio con varios mensajes). */
   salidas_extra?: Salida[] | null;
+  /**
+   * El traspaso a una persona de este turno (spec 2026-10-26, §4.2), si lo hubo: `ofrecido` (sin que la persona lo
+   * pidiera; nunca dos turnos seguidos), `link` (lo pidió: el botón al WhatsApp) o `pasado` (Chatwoot). `senal`: quién lo
+   * disparó, el modelo (motivo) o el código (dos «no pude» seguidos, tres correcciones de lo mismo). `resumen`: una
+   * línea armada por el código, sin datos sensibles (la misma de `asistente_escalamientos`).
+   */
+  escalamiento?: { modo: 'ofrecido' | 'pasado' | 'link'; motivo: string; senal: 'modelo' | 'codigo'; resumen?: string } | null;
   error?: string | null;
 }

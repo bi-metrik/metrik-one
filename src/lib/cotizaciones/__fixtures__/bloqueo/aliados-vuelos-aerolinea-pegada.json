@@ -1,0 +1,8 @@
+{
+  "_fuente": "Respuesta del modelo a proyectos/trappvel/clarity/docs/entrada/bloqueos/2026-10-27_aliados-vuelos.png como salió en la prueba en producción del 2026-10-28: el logo «JS» de JetSMART con su código «JA» al lado, leído como «JSJA». Reconstruida a mano; no es una grabación.",
+  "es_vuelo": true,
+  "tramos": [
+    { "aerolinea": "JSJA", "numero_vuelo": "vuelo 5150", "origen": "BOG", "destino": "CTG", "fecha": "2027-02-05", "hora_salida": "4:45", "hora_llegada": "6:22", "fecha_llegada": "2027-02-05", "directo": true, "escalas": 0 },
+    { "aerolinea": "JSJA", "numero_vuelo": "vuelo 5167", "origen": "CTG", "destino": "BOG", "fecha": "2027-02-08", "hora_salida": "21:39", "hora_llegada": "23:15", "fecha_llegada": "2027-02-08", "directo": true, "escalas": 0 }
+  ]
+}

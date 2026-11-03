@@ -7,7 +7,7 @@ import { reciboUberSintetico } from '../arnes/soportes/pdf-minimo'
 
 const PDF = { bytes: reciboUberSintetico(), mime: 'application/pdf', nombre: 'recibo-uber.pdf' }
 const JPG = { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), mime: 'image/jpeg' }
-const LEIDO = { legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Carrera 7 a Calle 26' }
+const LEIDO = { legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: null, descripcion: 'viaje de Carrera 7 a Calle 26', titular_destino: null }
 
 const respuesta = (cuerpo: unknown, estado = 200) => new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'content-type': 'application/json' } })
 const respuestaGemini = (j: unknown) => respuesta({ candidates: [{ content: { parts: [{ text: JSON.stringify(j) }] }, finishReason: 'STOP' }] })
@@ -43,15 +43,16 @@ describe('el pedido de lectura', () => {
 describe('normalizarLectura', () => {
   it('monto entero positivo, fecha real AAAA-MM-DD, textos cortos', () => {
     expect(normalizarLectura({ legible: true, monto: 6880.4, fecha: '2026-10-21', comercio: '  Uber  ', nit: 'NIT 900.123.456-7', descripcion: 'viaje' }))
-      .toEqual({ legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: '900123456-7', descripcion: 'viaje' })
+      .toEqual({ legible: true, monto: 6880, fecha: '2026-10-21', comercio: 'Uber', nit: '900123456-7', descripcion: 'viaje', titular_destino: null })
     expect(normalizarLectura({ legible: true, monto: '6880', fecha: '21/10/2026' })).toMatchObject({ monto: 6880, fecha: null })
   })
 
-  it('sin monto no es legible; basura no rompe', () => {
+  it('sin monto no es legible; con el total leído sí, aunque el modelo dude; basura no rompe', () => {
     expect(normalizarLectura({ legible: true, monto: 0 })).toMatchObject({ legible: false, monto: null })
     expect(normalizarLectura({ legible: true, monto: -5 })).toMatchObject({ legible: false })
     expect(normalizarLectura(null)).toMatchObject({ legible: false, monto: null, fecha: null, comercio: null })
-    expect(normalizarLectura({ legible: false, monto: 6880 })).toMatchObject({ legible: false, monto: 6880 })
+    // Arnés con el modelo real (2026-10-21): un comprobante de depósito volvió con el total y `legible: false`.
+    expect(normalizarLectura({ legible: false, monto: 6880 })).toMatchObject({ legible: true, monto: 6880 })
   })
 
   it('jsonDeRespuesta quita cercas y descarta lo que no es JSON', () => {

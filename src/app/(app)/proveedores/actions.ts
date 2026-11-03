@@ -35,6 +35,7 @@ import { SIN_TARIFAS, tarifasCitablesPorProveedor, type ExtraccionParaCitar, typ
 import { ciudadDeFichaEsDepartamento, faltasDeFicha, quitarNotaCiudadPorConfirmar, textoCiudadEsDepartamento, tieneNotaCiudadPorConfirmar, type FaltaFicha } from '@/lib/proveedores/completitud'
 import { aliasPorCambio, claveCiudad, claveDeProveedor, ciudadDeClave, espacioDeTipo, esTipoProveedor, tieneFotos, type EspacioProveedor, type TarifaCanal, type TipoProveedor } from '@/lib/proveedores/tipos'
 import { hoyBogota, type VigenciaTarifario } from '@/lib/proveedores/vigencia'
+import { textoPax } from '@/lib/proveedores/oferta-tarifas'
 import {
   COLUMNAS_PROVEEDOR,
   COLUMNAS_TARIFARIO,
@@ -768,7 +769,8 @@ function filasVista(tarifario: Record<string, unknown> | null): FilaExtraccionVi
       plan: textoDe(r.plan),
       ocupacion: textoDe(r.ocupacion),
       pasajero: textoDe(r.tipo_pasajero),
-      pax: min === null && max === null ? null : min === max ? `${min}` : `${min ?? 1}–${max ?? '…'}`,
+      // Completo, sin «…» que parezca cortado (prueba del #1229, punto c).
+      pax: textoPax(min, max),
       base: textoDe(r.base_precio),
       precio: typeof r.precio === 'number' && Number.isFinite(r.precio) ? r.precio : null,
       monedaMotor: textoDe(r.moneda) ?? monedaT,

@@ -112,6 +112,14 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       },
     ],
   },
+  'src/lib/valida-cda/terminos-v1-5.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'la pantalla de aceptación de los Términos Plan CDA v1.5 (anexo A de Emilio, gate de Vera del ' +
+      '2026-10-29), ítem 4: la copia de la bitácora y los reportes se pide sin costo durante 10 años ' +
+      '(cláusula 9.3, Ley 962 de 2005, art. 28). Es el texto aprobado del anexo: va literal.',
+  },
   'src/lib/compliance/vinculacion-publica.ts': {
     tipo: 'plazo',
     declara: 'derivado',
@@ -188,6 +196,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       'el glosario del reglamento de prueba del núcleo conversacional define infante como «menor de 2 años»: ' +
       'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
   },
+  'supabase/functions/_shared/agente/arnes/conducta.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el guion del arnés de conducta dice «1 niño menor de 11 años»: la EDAD de un pasajero de la ' +
+      'conversación rehecha. No hay plazo de conservación en este archivo.',
+  },
   'supabase/functions/_shared/agente/arnes/conjuntos.ts': {
     tipo: 'no-es-plazo',
     razon:
@@ -205,6 +219,13 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     razon:
       'un caso adversario del arnés del asistente de Sabor es un menor que escribe («tengo 15 años»): una EDAD. ' +
       'No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/publico/arnes/fichas-prueba.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'las fichas [EJEMPLO] del arnés del asistente de Sabor dicen la edad mínima de cada experiencia («solo mayores ' +
+      'de 18 años» en la cata, «desde 12 años» en la clase de sushi): EDADES de asistentes. No hay plazo de ' +
+      'conservación en este archivo.',
   },
   'supabase/functions/_shared/agente/arnes/extraccion-casos.ts': {
     tipo: 'no-es-plazo',
@@ -268,6 +289,18 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     razon:
       'instrucción al lector de pantallazos: un menor de MENOS DE 2 AÑOS de edad es infante ' +
       '(R8, regla 7). No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/correr.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de un viajero en la lectura falsa de la solicitud sintética del arnés («un niño de 7 años»). ' +
+      'No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/soportes/pdf-minimo.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'EDAD de los viajeros inventados de la solicitud de viaje sintética del arnés («Laura Prueba, 38 años»). ' +
+      'No hay plazo de conservación en este archivo.',
   },
 };
 

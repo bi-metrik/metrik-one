@@ -17,6 +17,8 @@ export interface LineaDelDocumento {
   orden?: number | null
   dia_relativo?: number | null
   entra_al_precio?: boolean | null
+  /** Para `vaConHotel` (el traslado que va con un hotel, `va-con-hotel.ts`). */
+  tarifa_pax?: unknown
 }
 
 /**
@@ -41,6 +43,8 @@ export function aportaAlTotal<T extends LineaDelDocumento>(items: T[]): (i: T) =
         orden: i.orden ?? 0,
         dia_relativo: i.dia_relativo ?? null,
         entra_al_precio: i.entra_al_precio ?? null,
+        // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+        tarifa_pax: i.tarifa_pax,
       })),
     ),
   )

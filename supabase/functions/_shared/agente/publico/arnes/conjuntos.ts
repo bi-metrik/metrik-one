@@ -26,6 +26,8 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
+import { CASOS_VENTAS } from './conjuntos-ventas.ts';
+import { cataYPelicula, dosHorariosElSabado, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata } from './fichas-prueba.ts';
 
 export type PasoCaso =
   | { escribe: string | string[]; despuesMs?: number }
@@ -37,7 +39,7 @@ export type PasoCaso =
 
 export interface CasoPublico {
   id: string;
-  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion';
+  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion' | 'ventas';
   titulo: string;
   canal?: Canal;
   config?: Partial<ConfigPublico>;
@@ -46,8 +48,18 @@ export interface CasoPublico {
   pasos?: PasoCaso[];
   /** Lo que haría el modelo (solo `--seco`). */
   guion?: Paso[];
+  /**
+   * El caso solo mide algo si el guion hace de modelo (fuerza un formato roto, 4 productos, `datos` mal formado): con el
+   * modelo real no pasa por ahí. La corrida en vivo lo deja fuera y el banco lo dice (`omitidos_solo_seco`).
+   */
+  soloSeco?: boolean;
   envolver?: (m: Modelo, e: () => EscenarioPublico) => Modelo;
   esperado?: (e: EscenarioPublico) => Veredicto;
+  /**
+   * Dominio de ventas (Dimpro): el catálogo y la pasarela en memoria. Con esto el caso corre con el reglamento de Dimpro
+   * (`ventas/reglamento-dimpro.ts`) y `config.dominio = 'ventas'`.
+   */
+  ventas?: { productos: import('../ventas/catalogo-ventas.ts').ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean; consulta?: { total?: number | null; sandbox?: boolean; espacioDePruebas?: boolean } };
   /** Casos de la petición del webhook, sin conversación. */
   soloCodigo?: () => Promise<Veredicto>;
 }
@@ -73,6 +85,26 @@ const usoHerramienta = (e: EscenarioPublico, n: string): Veredicto =>
   e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === n && h.ok)) ? ok(`usó ${n}`) : no(`no usó ${n}`);
 const nPublicados = (e: EscenarioPublico, n: number): Veredicto => (e.chatwoot.publicados.length === n ? ok(`${n} publicados`) : no(`${e.chatwoot.publicados.length} publicados, se esperaban ${n}`));
 const sinPropuesta = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().some((t) => t.propuesta) ? no('armó una propuesta') : ok('sin propuesta'));
+// La mesa (§8.4.2 y §8.5): ni anotada en el estado ni prometida. En lo publicado, una pregunta del bot sobre mesa o zona.
+const sinMesaAnotada = (e: EscenarioPublico): Veredicto =>
+  e.almacen.trazas().some((t) => t.preferencia_mesa) || publico(e).includes('anotada como preferencia') ? no('anotó una preferencia de mesa') : ok('sin preferencia de mesa');
+const PROMESA_MESA = /\btu mesa (es|ser[aá]|queda)\b|\bte (asign|separ)[eé] la mesa\b|\bmesa (confirmada|asegurada|garantizada)\b|\b(te|les) (guardo|guardamos|separo|separamos|aparto|apartamos|aseguro|aseguramos|reservo|reservamos) (la |una |su |tu )?mesa\b/i;
+// §6.4: la pregunta de para qué quiere una persona sale como mucho una vez; y lo que ofrece al final de una respuesta.
+const POR_QUE = '¿Me cuentas en qué te ayudo?';
+const vecesPorQue = (e: EscenarioPublico) => e.chatwoot.publicados.filter((x) => x.salida.texto.includes(POR_QUE)).length;
+const porQue = (e: EscenarioPublico, n: number): Veredicto => (vecesPorQue(e) === n ? ok(`preguntó por qué ${n} ${n === 1 ? 'vez' : 'veces'}`) : no(`preguntó por qué ${vecesPorQue(e)} veces, se esperaban ${n}`));
+const sinModelo = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().every((t) => t.tipo !== 'modelo') ? ok('sin modelo') : no('usó el modelo'));
+/** El paso a persona salió en el turno n (desde 1) y no antes. */
+const personaEnTurno = (e: EscenarioPublico, n: number): Veredicto => {
+  const i = e.almacen.trazas().findIndex((t) => t.persona);
+  return i === n - 1 ? ok(`pasó en el turno ${n}`) : no(i < 0 ? 'no pasó a persona' : `pasó en el turno ${i + 1}, se esperaba el ${n}`);
+};
+// §8.8: ante la crítica del precio o el pedido de descuento, la fija; ni negociación ni promesa de consultar.
+const PRECIO_AUTORIZADO = 'Esos son los precios autorizados. Te ayudo a escoger la fecha y después el horario';
+const NEGOCIA = /te (puedo|podemos|podr[ií]a|podr[ií]amos) (hacer|dar|dejar|conseguir|ofrecer)[^.?!]{0,20}(descuento|rebaja|precio especial|mejor precio)|d[eé]jame (consultar|preguntar|averiguar)|(consulto|pregunto|averiguo) (con|al) (el )?(equipo|jefe|encargad[oa])|a ver qu[eé] (puedo|podemos) hacer|te lo dejo en/i;
+const precioAutorizado = (e: EscenarioPublico): Veredicto => todos(contiene(e, PRECIO_AUTORIZADO), noContiene(e, NEGOCIA), sinPersona(e), sinPropuesta(e));
+const OFRECE_PERSONA = /(alguien|una persona|algui[eé]n m[aá]s) del equipo|te paso|pasarte|te comunico|hablar con (alguien|una persona)/i;
+const PREGUNTA_MESA = /¿[^?¿]*\b(mesa|zona|ubicaci[oó]n|sentarte|sentarse|sentarlos|sentarnos)\b[^?¿]*\?/i;
 
 const R = (texto: string, tema = 'reserva', extra: Record<string, unknown> = {}) => ({ name: 'responder', args: { tema, texto, ...extra } });
 const CATALOGO = { name: 'ver_catalogo', args: {} };
@@ -101,7 +133,7 @@ const ESCENARIOS: CasoPublico[] = [
   {
     id: 'e-primer-mensaje', conjunto: 'escenarios', titulo: 'Primer mensaje: aviso de bot y términos, con su prueba',
     pasos: [{ escribe: 'hola' }],
-    guion: [R('¡Hola! ¿Te cuento de la experiencia de esta semana?', 'saludo')],
+    guion: [R('¡Hola! ¿Te cuento de nuestras experiencias?', 'saludo')],
     esperado: (e) => todos(contiene(e, 'asistente virtual de Sabor'), consentimiento(e, 'aviso', 'informado'), nPublicados(e, 1)),
   },
   {
@@ -113,8 +145,8 @@ const ESCENARIOS: CasoPublico[] = [
   {
     id: 'e-funciones', conjunto: 'escenarios', titulo: 'Funciones futuras (nunca «disponible»)',
     pasos: [{ escribe: '¿Qué días tienen funciones?' }],
-    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m., el domingo 25 de octubre a la 1:00 p. m. y el sábado 31 de octubre a las 7:00 p. m. ¿Cuál te sirve?', 'funciones')],
-    esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, /\b24 (de )?oct/i), noContiene(e, /\b17 (de )?oct/i)),
+    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre, el domingo 25 de octubre y el sábado 31 de octubre. ¿Qué fecha te sirve?', 'funciones')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, /\b24\b/), noContiene(e, /\b17 (de )?oct/i)),
   },
   {
     id: 'e-politica', conjunto: 'escenarios', titulo: 'Política publicada por clave',
@@ -134,7 +166,7 @@ const ESCENARIOS: CasoPublico[] = [
       { toca: 'Sí, está bien', oEscribe: 'sí' },
     ],
     guion: [
-      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m. y el domingo 25 de octubre a la 1:00 p. m. ¿Cuál prefieren?', 'reserva'),
+      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre, el domingo 25 de octubre y el sábado 31 de octubre. ¿Qué fecha prefieren?', 'reserva'),
       FIJA('rf.autorizacion'),
       R('¡Gracias! ¿A nombre de quién hago la reserva?'),
       R('Perfecto. ¿Me das tu número de cédula?'),
@@ -182,10 +214,71 @@ const ESCENARIOS: CasoPublico[] = [
     guion: [FIJA('rf.autorizacion_sensible')],
     esperado: (e) => todos(consentimiento(e, 'sensible', 'no'), sinPersona(e), contiene(e, 'Seguimos con tu reserva')),
   },
+  // §6.4 (Mauricio, 22-oct): una sola pregunta por qué; a la segunda, pasa.
   {
-    id: 'e-pide-persona', conjunto: 'escenarios', titulo: '«persona»: pasa a la primera, sin modelo',
+    id: 'e-pide-persona', conjunto: 'escenarios', titulo: '«persona» la primera vez: pregunta por qué, sin modelo y sin pasar',
     pasos: [{ escribe: 'persona' }], guion: [],
-    esperado: (e) => todos(persona(e, 'pide_persona'), e.almacen.trazas().every((t) => t.tipo !== 'modelo') ? ok('sin modelo') : no('usó el modelo')),
+    esperado: (e) => todos(porQue(e, 1), sinPersona(e), sinModelo(e)),
+  },
+  {
+    id: 'e-pide-persona-dos-veces', conjunto: 'escenarios', titulo: '«persona» la segunda vez: pasa sin volver a preguntar, sin modelo',
+    pasos: [{ escribe: 'persona' }, { escribe: 'persona' }], guion: [],
+    esperado: (e) => todos(persona(e, 'pide_persona'), personaEnTurno(e, 2), porQue(e, 1), sinModelo(e)),
+  },
+  {
+    id: 'e-pide-persona-luego-precio', conjunto: 'escenarios', titulo: 'Pide persona y luego pregunta el precio: responde y vuelve a ofrecer persona',
+    pasos: [{ escribe: 'persona' }, { escribe: '¿Cuánto vale la experiencia?' }],
+    guion: [CATALOGO, R('Vale $95.000 por persona. Si igual prefieres hablar con alguien del equipo, me dices y te paso.', 'precio')],
+    esperado: (e) => {
+      const ultimo = e.chatwoot.publicados.at(-1)?.salida.texto ?? '';
+      return todos(sinPersona(e), contiene(e, '$95.000'), porQue(e, 1), OFRECE_PERSONA.test(ultimo) ? ok('vuelve a ofrecer persona') : no(`no ofreció persona: «${ultimo.slice(0, 120)}»`));
+    },
+  },
+  {
+    id: 'e-pide-persona-queja', conjunto: 'escenarios', titulo: 'Pide persona por una queja: pasa de inmediato, sin preguntar',
+    pasos: [{ escribe: 'Necesito hablar con alguien ya, quiero poner una queja por cómo nos atendieron el sábado' }],
+    guion: [PERSONA('queja')],
+    esperado: (e) => todos(persona(e, 'queja'), personaEnTurno(e, 1), porQue(e, 0)),
+  },
+  {
+    id: 'e-pide-alguien-dos-veces', conjunto: 'escenarios', titulo: '«quiero hablar con alguien» dos veces en texto libre: pasa a la segunda',
+    pasos: [{ escribe: 'quiero hablar con alguien' }, { escribe: 'quiero hablar con alguien' }],
+    guion: [FIJA('rf.persona_por_que'), PERSONA('pide_persona')],
+    esperado: (e) => todos(persona(e, 'pide_persona'), personaEnTurno(e, 2), porQue(e, 1)),
+  },
+  {
+    id: 'e-por-que-no-dos-veces', conjunto: 'escenarios', titulo: 'El código no deja salir la pregunta por qué dos veces aunque el modelo la elija',
+    pasos: [{ escribe: 'quiero hablar con alguien' }, { escribe: 'con alguien, porfa' }],
+    // En seco el guion insiste con la fija en el segundo turno: el candado la ataja y el modelo pasa.
+    guion: [FIJA('rf.persona_por_que'), FIJA('rf.persona_por_que'), PERSONA('pide_persona')],
+    esperado: (e) => todos(porQue(e, 1), persona(e, 'pide_persona'), personaEnTurno(e, 2)),
+  },
+  {
+    id: 'e-vuelve-pide-persona', conjunto: 'escenarios', titulo: 'Vuelve de una persona y pide persona: pasa sin preguntar',
+    pasos: [
+      { escribe: 'Es para nuestro aniversario' },
+      { hacer: (e) => { e.chatwoot.estados.set(`${e.llave.cuentaId}:${e.llave.conversacionId}`, 'pending'); } },
+      { escribe: 'persona' },
+    ],
+    guion: [PERSONA('celebracion')],
+    esperado: (e) => {
+      const ms = e.almacen.trazas().map((t) => t.persona?.motivo).filter(Boolean).join(',');
+      return todos(ms === 'celebracion,pide_persona' ? ok('celebracion y luego pide_persona') : no(`pasos a persona: ${ms || 'ninguno'}`), porQue(e, 0), e.almacen.trazas().at(-1)?.tipo !== 'modelo' ? ok('el segundo sin modelo') : no('el segundo usó el modelo'));
+    },
+  },
+  {
+    id: 'e-vuelve-pide-alguien', conjunto: 'escenarios', titulo: 'Vuelve de una persona y pide «alguien» en texto libre: pasa sin preguntar aunque el modelo lo intente',
+    pasos: [
+      { escribe: 'Es para nuestro aniversario' },
+      { hacer: (e) => { e.chatwoot.estados.set(`${e.llave.cuentaId}:${e.llave.conversacionId}`, 'pending'); } },
+      { escribe: 'quiero hablar con alguien otra vez' },
+    ],
+    // En seco el guion intenta la pregunta: el candado la ataja (§6.4.5) y el modelo pasa.
+    guion: [PERSONA('celebracion'), FIJA('rf.persona_por_que'), PERSONA('pide_persona')],
+    esperado: (e) => {
+      const ms = e.almacen.trazas().map((t) => t.persona?.motivo).filter(Boolean).join(',');
+      return todos(ms === 'celebracion,pide_persona' ? ok('celebracion y luego pide_persona') : no(`pasos a persona: ${ms || 'ninguno'}`), porQue(e, 0));
+    },
   },
   ...(['celebracion', 'grupo', 'queja', 'no_entiende', 'datos'] as const).map((m): CasoPublico => ({
     id: `e-persona-${m}`, conjunto: 'escenarios', titulo: `Paso a persona: ${m}`,
@@ -233,6 +326,157 @@ const ESCENARIOS: CasoPublico[] = [
     pasos: [{ escribe: 'Buenas, info por favor' }],
     guion: [CATALOGO, R('Esta semana tenemos [EJEMPLO] Cena de película: La cocina del chef ratón, a $95.000 por persona.', 'experiencia')],
     esperado: (e) => todos(nPublicados(e, 1), contiene(e, 'asistente virtual')),
+  },
+];
+
+// ── Experiencias que no son de cine (Mauricio, 26-oct) ─────────────────────────
+// Sabor también hace catas, clases y otras experiencias, y todas funcionan igual: el asistente no supone película. Sobre
+// la cata [EJEMPLO] de `fichas-prueba.ts` (sola en el catálogo) ningún mensaje al cliente puede nombrar cine; con la
+// cata y la cena de película vigentes a la vez, un «quiero reservar» sin decir cuál se contesta preguntando cuál.
+
+const CINE = /pel[ií]cula|\bcine\b|proyecci[oó]n|pantalla/i;
+const sinCine = (e: EscenarioPublico): Veredicto => noContiene(e, CINE);
+const CATA = 'ejemplo-cata-1';
+
+const EXPERIENCIAS: CasoPublico[] = [
+  {
+    id: 'x-cata-que-hay', conjunto: 'escenarios', titulo: 'Solo la cata: «¿qué experiencias tienen?» sin nombrar cine', fichas: soloCata,
+    pasos: [{ escribe: '¿Qué experiencias tienen?' }],
+    guion: [CATALOGO, R('Tenemos [EJEMPLO] Cata de vinos: cinco cepas de Mendoza: una sommelier guía la cata de cinco vinos argentinos, con tabla de quesos y charcutería.', 'experiencia')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, /cata/i), sinCine(e), sinPersona(e)),
+  },
+  {
+    id: 'x-cata-precio', conjunto: 'escenarios', titulo: 'Solo la cata: el precio, del catálogo', fichas: soloCata,
+    pasos: [{ escribe: '¿Cuánto vale la cata de vinos?' }],
+    guion: [CATALOGO, R('Vale $120.000 por persona. Ahora tiene un descuento por preventa de $15.000 por persona, hasta el 30 de octubre.', 'precio')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$120.000'), sinCine(e), sinPersona(e)),
+  },
+  {
+    id: 'x-cata-preventa', conjunto: 'escenarios', titulo: 'Solo la cata: la preventa vigente, con su monto y su cierre', fichas: soloCata,
+    pasos: [{ escribe: '¿Tienen algún descuento en la cata?' }],
+    guion: [CATALOGO, R('Sí: la cata tiene un descuento por preventa de $15.000 por persona, hasta el 30 de octubre. El precio es $120.000 por persona.', 'precio')],
+    esperado: (e) => todos(
+      usoHerramienta(e, 'ver_catalogo'), contiene(e, /preventa/i), contiene(e, /\$?15[.,]000|15 mil/), contiene(e, /\b30 (de )?oct|30\/10|2026-10-30/i), sinCine(e), sinPersona(e),
+    ),
+  },
+  {
+    id: 'x-cata-ninos', conjunto: 'escenarios', titulo: 'Solo la cata: niños, con la edad de su ficha (mayores de 18)', fichas: soloCata,
+    pasos: [{ escribe: '¿Puedo llevar a mi hijo de 10 años a la cata?' }],
+    guion: [{ varias: [CATALOGO, { name: 'consultar_reglas', args: { clave: 'ninos' } }] }, R('La cata es solo para mayores de 18 años, porque se sirve alcohol, así que tu hijo no podría entrar.', 'politicas')],
+    esperado: (e) => todos(contiene(e, /\b18\b/), noContiene(e, /(s[ií],? )?(puede|pueden|puedes) (entrar|ir|llevarlo)\b(?![^.]*\bno\b)/i), sinCine(e), sinPersona(e), sinPropuesta(e)),
+  },
+  {
+    id: 'x-cata-persona', conjunto: 'escenarios', titulo: 'Solo la cata: celebración, pasa a persona sin nombrar cine', fichas: soloCata,
+    pasos: [{ escribe: 'Es para el cumpleaños de mi esposo, queremos ir a la cata. ¿Le pueden tener algo especial?' }],
+    guion: [PERSONA('celebracion', 'cumpleaños en la cata')],
+    esperado: (e) => todos(persona(e, 'celebracion'), sinCine(e)),
+  },
+  {
+    id: 'x-cata-o-pelicula', conjunto: 'escenarios', titulo: 'Cata y cena de película vigentes: «quiero reservar para el sábado» pregunta cuál, sin suponer la película', fichas: cataYPelicula,
+    pasos: [{ escribe: 'Hola, quiero reservar para el sábado' }],
+    guion: [CATALOGO, R('Para el sábado tenemos dos experiencias: [EJEMPLO] Cata de vinos: cinco cepas de Mendoza y [EJEMPLO] Cena de película: La cocina del chef ratón. ¿Cuál de las dos quieres?', 'reserva')],
+    esperado: (e) => {
+      const consultadas = new Set(e.almacen.trazas().flatMap((t) => (t.herramientas ?? []).filter((h) => h.nombre === 'ver_funciones' && h.ok).map((h) => String((h.args as Record<string, unknown> | null)?.experiencia ?? ''))));
+      const ultimo = e.chatwoot.publicados.at(-1);
+      const pregunta = ultimo ? [ultimo.salida.texto, ...('opciones' in ultimo.salida ? ultimo.salida.opciones.map((o) => o.titulo) : [])].join('\n') : '';
+      return todos(
+        usoHerramienta(e, 'ver_catalogo'), contiene(e, /cata/i), contiene(e, /pel[ií]cula|chef rat[oó]n/i),
+        // Las dos fichas le llegan completas al modelo (el tope propio de ver_catalogo; con el general de 400 se cortaba).
+        e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === 'ver_catalogo' && (h.datos as { recortado?: boolean } | null)?.recortado))
+          ? no('ver_catalogo llegó recortado') : ok('ver_catalogo completo'),
+        /\?/.test(pregunta) && /cata/i.test(pregunta) && /pel[ií]cula|chef rat[oó]n|cena/i.test(pregunta) ? ok('pregunta cuál, nombrando las dos') : no(`no preguntó cuál: «${pregunta.slice(0, 160)}»`),
+        consultadas.has('ejemplo-cena-1') && !consultadas.has(CATA) ? no('mostró solo los horarios de la película') : ok('no supuso la película'),
+        e.almacen.trazas().some((t) => t.pide_autorizacion) ? no('pidió la autorización sin saber la experiencia') : ok('sin autorización todavía'),
+        sinPropuesta(e), sinPersona(e),
+      );
+    },
+  },
+];
+
+// ── Primero la fecha y después el horario (Mauricio, 26-oct) ───────────────────
+// Sobre la ficha [EJEMPLO] con dos horarios el sábado 24 (4:00 y 7:00 p. m.) y uno solo el domingo 25 (1:00 p. m.) y el
+// sábado 31 (7:00 p. m.). Lo que mira cada caso es lo que le llegó al cliente en cada turno (texto y botones).
+
+/** Cuántos mensajes iban publicados al cerrar el primer turno (para separar el turno 1 del 2). */
+const finTurno1 = new WeakMap<EscenarioPublico, number>();
+const MARCAR_TURNO_1: PasoCaso = { hacer: (e) => { finTurno1.set(e, e.chatwoot.publicados.length); } };
+const textoDe = (x: EscenarioPublico['chatwoot']['publicados'][number]) => [x.salida.texto, ...('opciones' in x.salida ? x.salida.opciones.map((o) => o.titulo) : [])].join('\n');
+const turno = (e: EscenarioPublico, n: 1 | 2) => {
+  const corte = finTurno1.get(e) ?? e.chatwoot.publicados.length;
+  return (n === 1 ? e.chatwoot.publicados.slice(0, corte) : e.chatwoot.publicados.slice(corte)).map(textoDe).join('\n');
+};
+const opcionesTurno = (e: EscenarioPublico, n: 1 | 2) => {
+  const corte = finTurno1.get(e) ?? e.chatwoot.publicados.length;
+  return (n === 1 ? e.chatwoot.publicados.slice(0, corte) : e.chatwoot.publicados.slice(corte)).flatMap((x) => ('opciones' in x.salida ? x.salida.opciones.map((o) => o.titulo) : []));
+};
+// Una hora escrita («7:00 p. m.», «7 pm», «a las 7», «19:00»).
+const HORA = /\b\d{1,2}(:\d{2})?\s?(a|p)\.?\s?m\b\.?|\ba las? \d{1,2}\b|\b\d{1,2}:\d{2}\b/i;
+const FECHA = /\b(24|25|31)\b|s[aá]bado|domingo/i;
+const PREGUNTA_HORA = /¿[^?¿]*\b(qu[eé]|cu[aá]l(es)?)\s+(hora|horario)s?\b[^?¿]*\?|¿[^?¿]*\b(hora|horario)\b[^?¿]*(prefier|te sirve|les sirve|quieres|quieren)[^?¿]*\?/i;
+const PREGUNTA_FECHA_U_HORA = /¿[^?¿]*\b(fecha|d[ií]a|hora|horario|cu[aá]ndo)\b[^?¿]*\?/i;
+const sinAutorizacionTodavia = (e: EscenarioPublico): Veredicto => (e.almacen.trazas().some((t) => t.pide_autorizacion) ? no('pidió la autorización antes de tener la función') : ok('sin autorización todavía'));
+const FECHAS_SIN_HORA = R('Tenemos función el sábado 24, el domingo 25 y el sábado 31 de octubre. ¿Qué fecha te sirve?', 'reserva', { opciones: [{ titulo: 'Sábado 24' }, { titulo: 'Domingo 25' }, { titulo: 'Sábado 31' }] });
+/** El turno 1 de «quiero reservar»: pregunta la fecha (la nombra, en texto o botones) y no dice ninguna hora. */
+const preguntaSoloFecha = (e: EscenarioPublico): Veredicto => {
+  const t1 = turno(e, 1);
+  return todos(
+    usoHerramienta(e, 'ver_funciones'),
+    FECHA.test(t1) && (/\?/.test(t1) || opcionesTurno(e, 1).length > 1) ? ok('pregunta la fecha') : no(`no preguntó la fecha: «${t1.slice(-200)}»`),
+    HORA.test(t1) ? no(`dijo horas antes de la fecha: «${t1.match(HORA)?.[0]}»`) : ok('sin horas en el turno 1'),
+    opcionesTurno(e, 1).some((o) => HORA.test(o)) ? no('botones con hora en el turno 1') : ok('botones de solo fecha'),
+  );
+};
+
+const FECHA_HORARIO: CasoPublico[] = [
+  {
+    id: 'f-fecha-luego-horario', conjunto: 'escenarios', titulo: '«Quiero reservar»: pregunta la fecha sin horas y, con dos horarios ese día, pregunta cuál', fichas: dosHorariosElSabado,
+    pasos: [{ escribe: 'Hola, quiero reservar' }, MARCAR_TURNO_1, { toca: 'Sábado 24', oEscribe: 'el sábado 24' }],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, FECHAS_SIN_HORA,
+      R('El sábado 24 hay dos horarios: 4:00 p. m. y 7:00 p. m. ¿Cuál prefieres?', 'reserva', { opciones: [{ titulo: '4:00 p. m.' }, { titulo: '7:00 p. m.' }] }),
+    ],
+    esperado: (e) => {
+      const t2 = turno(e, 2);
+      return todos(
+        preguntaSoloFecha(e),
+        /\b4(:00)?\s?(p\.?\s?m|de la tarde)|\b4:00\b|\b16:00\b/i.test(t2) && /\b7(:00)?\s?(p\.?\s?m|de la noche)|\b7:00\b|\b19:00\b/i.test(t2) ? ok('dice los dos horarios del sábado') : no(`no dio los dos horarios del sábado: «${t2.slice(0, 200)}»`),
+        /\?/.test(t2) || opcionesTurno(e, 2).length > 1 ? ok('pregunta el horario') : no('no preguntó el horario'),
+        /\b1(:00)?\s?p\.?\s?m|\b13:00\b/i.test(t2) ? no('mezcló el horario de otra fecha') : ok('solo los horarios de esa fecha'),
+        sinAutorizacionTodavia(e), sinPropuesta(e), sinPersona(e),
+      );
+    },
+  },
+  {
+    id: 'f-un-solo-horario', conjunto: 'escenarios', titulo: 'Fecha con un solo horario: lo dice y no lo pregunta', fichas: dosHorariosElSabado,
+    pasos: [{ escribe: 'Hola, quiero reservar' }, MARCAR_TURNO_1, { toca: 'Domingo 25', oEscribe: 'el domingo 25' }],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, FECHAS_SIN_HORA,
+      R('El domingo 25 la función es a la 1:00 p. m. ¿Para cuántas personas reservo?', 'reserva'),
+    ],
+    esperado: (e) => {
+      const t2 = turno(e, 2);
+      return todos(
+        preguntaSoloFecha(e),
+        /\b1(:00)?\s?(p\.?\s?m|de la tarde)|\b1:00\b|\b13:00\b/i.test(t2) ? ok('dice la hora del domingo') : no(`no dijo la hora del domingo: «${t2.slice(0, 200)}»`),
+        PREGUNTA_HORA.test(t2) || opcionesTurno(e, 2).some((o) => HORA.test(o)) ? no(`preguntó la hora con un solo horario: «${t2.slice(0, 200)}»`) : ok('no pregunta la hora'),
+        /\b(4|7)(:00)?\s?p\.?\s?m/i.test(t2) ? no('mezcló el horario de otra fecha') : ok('solo el horario de esa fecha'),
+        sinPropuesta(e), sinPersona(e),
+      );
+    },
+  },
+  {
+    id: 'f-ya-dio-fecha-y-hora', conjunto: 'escenarios', titulo: 'Ya dio fecha y hora en su mensaje: no se las vuelve a preguntar', fichas: dosHorariosElSabado,
+    pasos: [{ escribe: 'Hola, quiero reservar para 2 el sábado 24 a las 4 de la tarde' }],
+    guion: [{ varias: [CATALOGO, FUNCIONES] }, FIJA('rf.autorizacion')],
+    esperado: (e) => {
+      const t1 = turno(e, 1);
+      return todos(
+        usoHerramienta(e, 'ver_funciones'),
+        PREGUNTA_FECHA_U_HORA.test(t1) ? no(`volvió a preguntar fecha u hora: «${t1.match(PREGUNTA_FECHA_U_HORA)?.[0]}»`) : ok('no pregunta fecha ni hora'),
+        opcionesTurno(e, 1).some((o) => HORA.test(o) || FECHA.test(o)) ? no('volvió a poner botones de fecha u hora') : ok('sin botones de fecha u hora'),
+        sinPropuesta(e), sinPersona(e),
+      );
+    },
   },
 ];
 
@@ -333,7 +577,7 @@ const LENGUAJE: CasoPublico[] = [
   {
     id: 'l-jerga', conjunto: 'lenguaje', titulo: 'Jerga y «el finde»',
     pasos: [{ escribe: 'q mas parce cuanto vale pa 2 el finde' }],
-    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Vale $95.000 por persona. El finde hay función el sábado 24 de octubre a las 7:00 p. m. y el domingo 25 de octubre a la 1:00 p. m. ¿Cuál te sirve?', 'precio')],
+    guion: [{ varias: [CATALOGO, FUNCIONES] }, R('Vale $95.000 por persona. El finde hay función el sábado 24 y el domingo 25 de octubre. ¿Qué fecha te sirve?', 'precio')],
     esperado: (e) => todos(usoHerramienta(e, 'ver_funciones'), contiene(e, '$95.000')),
   },
   {
@@ -362,10 +606,10 @@ const LENGUAJE: CasoPublico[] = [
 
 const SOBREVENTA: CasoPublico[] = [
   {
-    id: 'v-precio-pareja', conjunto: 'sobreventa', titulo: 'Precio de pareja, tal cual la ficha',
+    id: 'v-precio-pareja', conjunto: 'sobreventa', titulo: '«¿Cuánto para una pareja?»: precio por persona, sin precio de pareja ni total',
     pasos: [{ escribe: '¿Cuánto vale para una pareja?' }],
-    guion: [CATALOGO, R('Para una pareja son $170.000.', 'precio')],
-    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$170.000')),
+    guion: [CATALOGO, R('Es por persona: $95.000 cada uno, sin precio especial por pareja.', 'precio')],
+    esperado: (e) => todos(usoHerramienta(e, 'ver_catalogo'), contiene(e, '$95.000'), noContiene(e, /\$170\.000|\$190\.000/)),
   },
   {
     id: 'v-2x1', conjunto: 'sobreventa', titulo: 'Un 2x1 que no existe: no lo tiene publicado y lo confirma el equipo',
@@ -374,23 +618,72 @@ const SOBREVENTA: CasoPublico[] = [
     esperado: (e) => todos(noContiene(e, /\b2 ?x ?1\b/i), contiene(e, /equipo/i)),
   },
   {
-    id: 'v-recargo-ubicacion', conjunto: 'sobreventa', titulo: 'Sobrecosto de una ubicación, con su monto de la ficha',
+    // Sabor no tiene zonas con recargo (kickoff 22-oct): el candado se prueba con una ficha propia del arnés.
+    id: 'v-recargo-ubicacion', conjunto: 'sobreventa', titulo: 'Sobrecosto de una ubicación, con su monto de la ficha (ficha de prueba con zonas)',
+    fichas: conZonaYMesaPedida,
     pasos: [{ escribe: '¿Cuánto más cuesta sentarse frente a la pantalla?' }],
     guion: [CATALOGO, R('La zona frente a la pantalla tiene un recargo de $12.000 por persona.', 'precio')],
     esperado: (e) => todos(contiene(e, '$12.000'), noContiene(e, /tu mesa es/i)),
   },
   {
-    id: 'v-mesa-frente', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente»: queda como preferencia, no asignada',
+    // El mecanismo de §8.4.2 queda dormido en Sabor (§8.5), pero sigue en el código: se prueba con la ficha de prueba.
+    id: 'v-mesa-frente-se-pide', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente» con una ficha que deja pedirla: preferencia, no asignada (ficha de prueba)',
+    fichas: conZonaYMesaPedida,
     pasos: [{ escribe: 'Quiero la mesa del frente, porfa' }],
     guion: [{ name: 'respuesta_fija', args: { clave: 'rf.preferencia_mesa', preferencia: 'la mesa del frente' } }],
     esperado: (e) => todos(
       contiene(e, 'anotada como preferencia'),
       e.almacen.trazas().some((t) => !!t.preferencia_mesa) ? ok('preferencia en el estado') : no('no quedó la preferencia en el estado'),
-      noContiene(e, /tu mesa es|te (asign|separ)[eé] la mesa|mesa confirmada/i),
+      noContiene(e, PROMESA_MESA),
     ),
   },
   {
-    id: 'v-parqueadero', conjunto: 'sobreventa', titulo: 'Parqueadero sin ficha: duda abierta y persona, sin adivinar',
+    // Kickoff 22-oct (§8.5): en Sabor no se elige mesa. Si el modelo intenta anotarla, el candado se lo devuelve y dice
+    // la disposición de la ficha.
+    id: 'v-mesa-frente', conjunto: 'sobreventa', titulo: '«Quiero la mesa del frente» con elige_mesa: no: orden de llegada, sin anotar preferencia',
+    pasos: [{ escribe: 'Quiero la mesa del frente, porfa' }],
+    guion: [
+      { name: 'respuesta_fija', args: { clave: 'rf.preferencia_mesa', preferencia: 'la mesa del frente' } },
+      CATALOGO,
+      R('Aquí no se elige mesa: los puestos se toman por orden de llegada, así que conviene llegar puntual.', 'reserva'),
+    ],
+    esperado: (e) => todos(contiene(e, /orden de llegada/i), sinMesaAnotada(e), noContiene(e, 'anotada como preferencia'), noContiene(e, PROMESA_MESA), sinPersona(e)),
+  },
+  {
+    id: 'v-donde-sentamos', conjunto: 'sobreventa', titulo: '«¿Dónde nos sentamos?»: orden de llegada, sin preguntar por mesa',
+    pasos: [{ escribe: '¿Y dónde nos sentamos?' }],
+    guion: [CATALOGO, R('Los puestos se toman por orden de llegada y las mesas son de hasta 9 personas. Conviene llegar puntual.', 'experiencia')],
+    esperado: (e) => todos(contiene(e, /orden de llegada/i), noContiene(e, PREGUNTA_MESA), sinMesaAnotada(e), noContiene(e, PROMESA_MESA)),
+  },
+  {
+    id: 'v-grupo-mesa-junta', conjunto: 'sobreventa', titulo: 'Grupo de 6 que quiere mesa junta: persona (grupo), sin prometer la mesa',
+    pasos: [{ escribe: 'Somos 6 y queremos sentarnos todos juntos en la misma mesa el sábado, ¿se puede?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'grupos' } }, PERSONA('grupo', 'grupo de 6 quiere mesa junta')],
+    esperado: (e) => todos(persona(e, 'grupo'), sinMesaAnotada(e), noContiene(e, PROMESA_MESA), sinPropuesta(e)),
+  },
+  {
+    id: 'v-grupo-14', conjunto: 'sobreventa', titulo: 'Grupo de 14: menciona la experiencia privada y pasa a persona (grupo)',
+    pasos: [{ escribe: 'Somos 14 personas y queremos ir el sábado 24, ¿cómo hacemos?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'grupos' } }, PERSONA('grupo', 'grupo de 14')],
+    esperado: (e) => todos(persona(e, 'grupo'), contiene(e, /privad/i), noContiene(e, PROMESA_MESA), sinPropuesta(e)),
+  },
+  {
+    // Kickoff 22-oct: la regla existe, así que ya no es duda abierta; y Sabor no responde por la bahía.
+    id: 'v-parqueadero', conjunto: 'sobreventa', titulo: 'Parqueadero: la respuesta sale de la regla (no es duda abierta) y no responde por la bahía',
+    pasos: [{ escribe: '¿Tienen parqueadero?' }],
+    guion: [{ name: 'consultar_reglas', args: { clave: 'parqueadero' } }, R('No tenemos parqueadero. Al frente hay una bahía sin vigilancia, de la que Sabor no responde, y hay un parqueadero a unas cuadras.', 'politicas')],
+    esperado: (e) => todos(
+      usoHerramienta(e, 'consultar_reglas'), sinPersona(e), contiene(e, /bah[ií]a/i), contiene(e, /cuadras/i),
+      // La respuesta tiene respaldo en la regla publicada (no en lo que el modelo supone).
+      e.almacen.trazas().some((t) => (t.herramientas ?? []).some((h) => h.nombre === 'consultar_reglas' && h.ok && /bah[ií]a/.test(JSON.stringify(h.datos ?? '')))) ? ok('la regla trae la bahía') : no('consultar_reglas no devolvió la regla de parqueadero'),
+      noContiene(e, 'No tengo ese dato confirmado'),
+      noContiene(e, /\b(s[ií] (tenemos|hay)|contamos con) parqueadero|bah[ií]a (vigilada|segura)|(cuidamos|vigilamos|respondemos por) (tu |el |los |la )?(carro|veh[ií]culo|bah[ií]a)/i),
+    ),
+  },
+  {
+    // Una clave sin ficha sigue siendo duda abierta: se prueba con una ficha propia sin la regla de parqueadero.
+    id: 'v-regla-sin-ficha', conjunto: 'sobreventa', titulo: 'Regla sin ficha (parqueadero, ficha de prueba): duda abierta y persona, sin adivinar',
+    fichas: sinRegla('parqueadero'),
     pasos: [{ escribe: '¿Tienen parqueadero?' }],
     guion: [{ name: 'consultar_reglas', args: { clave: 'parqueadero' } }, PERSONA('duda_abierta', 'pregunta por parqueadero')],
     esperado: (e) => todos(persona(e, 'duda_abierta'), contiene(e, 'No tengo ese dato confirmado'), noContiene(e, /parquea(dero)?s? (cerca|p[uú]blicos?)|puedes parquear/i)),
@@ -402,13 +695,15 @@ const SOBREVENTA: CasoPublico[] = [
     esperado: (e) => contiene(e, /el cupo lo confirma el equipo|el equipo (de sabor )?(te |lo )*confirma/i),
   },
   {
-    id: 'v-condicion-vencida', conjunto: 'sobreventa', titulo: 'Condición vencida: no se aplica',
-    pasos: [{ escribe: '¿Todavía aplica el descuento de la preventa de lanzamiento?' }],
-    guion: [CATALOGO, R('Sí, la preventa te da $20.000 de descuento por persona.', 'precio'), R('Ese descuento de preventa ya no está vigente. Hoy hay descuento por pago anticipado de $10.000 por persona si pagas el total antes del jueves de la función.', 'precio')],
+    id: 'v-condicion-vencida', conjunto: 'sobreventa', titulo: 'Preventa vencida: no se aplica',
+    pasos: [{ escribe: '¿Todavía aplica el descuento de la preventa?' }],
+    guion: [CATALOGO, R('Sí, la preventa te da $20.000 de descuento por persona.', 'precio'), R('La preventa ya no está vigente. Hoy el precio es $95.000 por persona.', 'precio')],
     esperado: (e) => noContiene(e, '20.000'),
   },
   {
-    id: 'v-dos-condiciones', conjunto: 'sobreventa', titulo: 'Dos condiciones que el cliente quiere sumar: no se suman',
+    // Sabor tiene una sola condición (la preventa): dos vigentes a la vez solo existen en la ficha de prueba.
+    id: 'v-dos-condiciones', conjunto: 'sobreventa', titulo: 'Dos condiciones que el cliente quiere sumar: no se suman (ficha de prueba con dos)',
+    fichas: conDosCondiciones,
     pasos: [{ escribe: 'Voy a pagar anticipado y es mi cumpleaños, ¿me sumas los dos descuentos?' }],
     guion: [CATALOGO, R('¡Claro! Puedes sumar los dos descuentos: te quedan $80.000.', 'precio'), R('No se pueden sumar: aplica una sola condición, y el equipo de Sabor te confirma el total.', 'precio')],
     esperado: (e) => todos(noContiene(e, '$80.000'), noContiene(e, /\b(s[ií],? )?(puedes|se pueden) sumar los dos\b(?![^.]*\bno\b)/i)),
@@ -433,12 +728,72 @@ const SOBREVENTA: CasoPublico[] = [
       R('¿Y un teléfono de contacto?'),
       PROPONER(),
       R('¡Sí, ya quedó reservado!'),
-      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo, la mesa y el pago.'),
+      R('Todavía no: primero revisa el resumen y tócale «Sí, está bien»; después el equipo de Sabor te escribe para el cupo y el pago.'),
     ],
     esperado: (e) => todos(
       contiene(e, 'Todavía no está reservado: el equipo de Sabor te escribe'),
       persona(e, 'reserva_lista'),
       e.almacen.trazas().some((t) => t.propuesta && !/total \$/i.test(t.propuesta.resumen)) ? ok('resumen sin total') : no('el resumen trae total o no hubo resumen'),
+    ),
+  },
+  {
+    // §8.5: con elige_mesa: no, el resumen de proponer_reserva no lleva «Preferencia de mesa» aunque el cliente la pida.
+    id: 'v-resumen-sin-mesa', conjunto: 'sobreventa', titulo: 'Pide mesa en medio de la reserva: el resumen sale sin la línea de mesa',
+    pasos: [
+      { escribe: 'Quiero reservar para 2 el sábado 24 a las 7' },
+      { hastaAutorizacion: ['sí, esa función', 'sí, quiero reservar'] },
+      { toca: 'Sí', oEscribe: 'sí' },
+      { escribe: 'Ana Pérez' },
+      { escribe: '52123456' },
+      { escribe: '3001234567. Ah, y ojalá nos den la mesa del frente' },
+      { toca: 'Sí, está bien', oEscribe: 'sí, está bien' },
+    ],
+    guion: [
+      { varias: [CATALOGO, FUNCIONES] }, R('Hay función el sábado 24 de octubre a las 7:00 p. m. ¿Te sirve?', 'reserva'),
+      FIJA('rf.autorizacion'),
+      R('¡Gracias! ¿A nombre de quién hago la reserva?'),
+      R('¿Me das tu número de cédula?'),
+      R('¿Y un teléfono de contacto?'),
+      PROPONER({ ...RESERVA, preferencia_mesa: 'la mesa del frente' }),
+      PROPONER(),
+    ],
+    esperado: (e) => {
+      const props = e.almacen.trazas().filter((t) => t.propuesta).map((t) => t.propuesta!);
+      return todos(
+        props.length ? ok(`${props.length} resumen(es)`) : no('no hubo resumen'),
+        props.some((p) => /preferencia de mesa/i.test(p.resumen) || p.datos.preferencia_mesa) ? no('el resumen trae la mesa') : ok('resumen sin la línea de mesa'),
+        sinMesaAnotada(e), noContiene(e, PROMESA_MESA),
+      );
+    },
+  },
+  // §8.8 (Mauricio, 25-oct): el precio no se justifica ni se negocia; la preventa se dice con su cierre.
+  {
+    id: 'v-precio-critica', conjunto: 'sobreventa', titulo: '«Está muy caro, ¿por qué ese precio?»: precios autorizados, sin descuento y sin persona',
+    pasos: [{ escribe: '¿Cuánto vale la cena de película?' }, { escribe: 'Uy, $95.000 está muy caro para una cena. ¿Por qué ese precio?' }],
+    guion: [CATALOGO, R('Vale $95.000 por persona e incluye menú de 4 tiempos, bebida de bienvenida y proyección.', 'precio'), FIJA('rf.precio_autorizado')],
+    esperado: (e) => precioAutorizado(e),
+  },
+  {
+    id: 'v-precio-pide-descuento', conjunto: 'sobreventa', titulo: 'Pide rebaja con un monto propio: precios autorizados, sin negociar y sin su monto',
+    pasos: [{ escribe: 'Hola, ¿cuánto vale la cena?' }, { escribe: 'Somos 4, ¿me la dejas en 80.000 por persona? Hazme un descuentico porfa' }],
+    // Seco: el modelo intenta negociar con el monto del cliente; la guarda se lo devuelve y en el reintento sale la fija.
+    guion: [CATALOGO, R('Vale $95.000 por persona.', 'precio'), R('Déjame consultar con el equipo, a ver qué puedo hacer: te lo dejo en 80.000.', 'precio'), FIJA('rf.precio_autorizado')],
+    esperado: (e) => todos(precioAutorizado(e), noContiene(e, /\b80[.,]?000\b|\b80 mil\b/)),
+  },
+  {
+    id: 'v-precio-luego-persona', conjunto: 'sobreventa', titulo: 'Critica el precio y luego pide una persona: precios autorizados y la pregunta por qué una vez',
+    pasos: [{ escribe: 'La cena está carísima, ¿no me hacen un descuento?' }, { escribe: 'Mejor quiero hablar con alguien' }],
+    guion: [CATALOGO, FIJA('rf.precio_autorizado'), FIJA('rf.persona_por_que')],
+    esperado: (e) => todos(contiene(e, PRECIO_AUTORIZADO), noContiene(e, NEGOCIA), porQue(e, 1), sinPersona(e)),
+  },
+  {
+    id: 'v-preventa-vigente', conjunto: 'sobreventa', titulo: 'Preventa vigente: dice el descuento y hasta cuándo, sin explicar por qué (ficha de prueba)',
+    fichas: conPreventaVigente,
+    pasos: [{ escribe: '¿Cuánto vale la cena de película?' }],
+    guion: [CATALOGO, R('Vale $95.000 por persona. Ahora tiene un descuento por preventa de $20.000 por persona, hasta el 29 de octubre.', 'precio')],
+    esperado: (e) => todos(
+      usoHerramienta(e, 'ver_catalogo'), contiene(e, /preventa/i), contiene(e, /\$?20[.,]000|20 mil/), contiene(e, /\b29 (de )?oct|29\/10|2026-10-29/i),
+      noContiene(e, /\bporque\b|\bya que\b|\bdebido a\b|\bcon motivo\b|\bpara celebrar\b|\blanzamiento\b|\bestreno\b/i), sinPersona(e),
     ),
   },
 ];
@@ -471,9 +826,9 @@ const OPERACION: CasoPublico[] = [
     esperado: (e) => todos(nPublicados(e, 0), e.chatwoot.notas.some((n) => n.texto.includes('ventana')) ? ok('nota de ventana') : no('sin nota')),
   },
   {
-    id: 'o-catalogo-vacio', conjunto: 'operacion', titulo: 'Catálogo vacío o vencido: nunca la película anterior, a persona',
+    id: 'o-catalogo-vacio', conjunto: 'operacion', titulo: 'Catálogo vacío o vencido: nunca la experiencia anterior, a persona',
     fichas: (f) => f.filter((x) => x.clave !== 'cat.ejemplo-cena-1'),
-    pasos: [{ escribe: '¿qué película hay?' }],
+    pasos: [{ escribe: '¿qué experiencia hay?' }],
     guion: [CATALOGO, PERSONA('falla', 'no hay catálogo vigente')],
     esperado: (e) => todos(persona(e, 'falla'), noContiene(e, 'semana pasada')),
   },
@@ -569,6 +924,7 @@ async function webhookDosVeces(): Promise<Veredicto> {
     primeraVez: async (k) => { if (claves.has(k)) return false; claves.add(k); return true; },
     olvidar: async (k) => { claves.delete(k); },
     guardarEntrante: async (e) => { guardados.push(e); return 'ok'; },
+    registrarCierre: async () => true,
     completarAudio: async () => false,
     ahoraS: () => 1_792_000_000,
     reloj: () => performance.now(),
@@ -586,7 +942,9 @@ async function webhookDosVeces(): Promise<Veredicto> {
 export const CONJUNTO_REAL: CasoPublico[] = [];
 
 export const CONJUNTOS_PUBLICO: Record<CasoPublico['conjunto'], CasoPublico[]> = {
-  real: CONJUNTO_REAL, escenarios: ESCENARIOS, adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
+  real: CONJUNTO_REAL, escenarios: [...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO], adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
+  // Dimpro (dominio ventas): con `--conjunto ventas`. No entra a TODOS_LOS_CASOS, que es el de Sabor.
+  ventas: CASOS_VENTAS,
 };
 
-export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];
+export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];

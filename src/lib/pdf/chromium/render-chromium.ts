@@ -24,6 +24,12 @@ export interface OpcionesPdf {
   encabezado?: string
   /** Tope de toda la impresión, en ms. */
   timeoutMs?: number
+  /**
+   * Otra versión del mismo documento, más compacta (QA del #1359). Si la primera sale en más de una
+   * hoja, se imprime también esta en la MISMA página de Chromium y gana la que tenga menos hojas (a
+   * igual número, la primera). Ausente, o igual a la primera, no se imprime.
+   */
+  alternativa?: string | null
 }
 
 export interface MedidasRender {
@@ -46,11 +52,25 @@ export interface MedidasRender {
   chromiumRssPicoMb: number | null
   peticionesBloqueadas: string[]
   version: string
+  /** Hojas de la primera versión y, si se imprimió la alternativa, las suyas. */
+  hojas?: { primera: number; alternativa: number | null; gano: 'primera' | 'alternativa' }
 }
 
 export interface ResultadoPdf {
   pdf: Buffer
   medidas: MedidasRender
+  /** El HTML que se imprimió, solo si fue la alternativa. */
+  html?: string
+}
+
+/** Cuántas hojas tiene un PDF. `null` si no se puede leer. */
+export async function hojasDelPdf(pdf: Uint8Array): Promise<number | null> {
+  try {
+    const { PDFDocument } = await import('pdf-lib')
+    return (await PDFDocument.load(pdf, { updateMetadata: false })).getPageCount()
+  } catch {
+    return null
+  }
 }
 
 const MB = 1024 * 1024
@@ -176,7 +196,7 @@ export async function imprimirHtmlAPdf(html: string, opts: OpcionesPdf = {}): Pr
     await page.evaluate(() => document.fonts.ready.then(() => true))
     const t4 = performance.now()
     muestrear()
-    const pdf = await page.pdf({
+    const imprimir = () => page.pdf({
       printBackground: true,
       preferCSSPageSize: true,
       displayHeaderFooter: Boolean(opts.pie || opts.encabezado),
@@ -184,6 +204,25 @@ export async function imprimirHtmlAPdf(html: string, opts: OpcionesPdf = {}): Pr
       footerTemplate: opts.pie ?? '<span></span>',
       timeout,
     })
+    let pdf = await imprimir()
+    let hojas: MedidasRender['hojas']
+    let htmlImpreso: string | undefined
+    // QA del #1359 · la última hoja casi vacía: la versión compacta, si ahorra una hoja.
+    if (opts.alternativa && opts.alternativa !== html) {
+      const primera = await hojasDelPdf(pdf)
+      if (primera !== null && primera > 1) {
+        await page.setContent(opts.alternativa, { waitUntil: 'load', timeout })
+        await page.evaluate(() => document.fonts.ready.then(() => true))
+        const otro = await imprimir()
+        const alternativa = await hojasDelPdf(otro)
+        const gana = alternativa !== null && alternativa < primera
+        hojas = { primera, alternativa, gano: gana ? 'alternativa' : 'primera' }
+        if (gana) {
+          pdf = otro
+          htmlImpreso = opts.alternativa
+        }
+      }
+    }
     const t5 = performance.now()
     muestrear()
     const pico = chromiumPico as { rss: number; hwm: number } | null
@@ -204,7 +243,9 @@ export async function imprimirHtmlAPdf(html: string, opts: OpcionesPdf = {}): Pr
         chromiumRssPicoMb: pico ? Math.round(pico.rss / 1024) : null,
         peticionesBloqueadas: bloqueadas,
         version,
+        ...(hojas ? { hojas } : {}),
       },
+      ...(htmlImpreso ? { html: htmlImpreso } : {}),
     }
   } finally {
     clearInterval(reloj)

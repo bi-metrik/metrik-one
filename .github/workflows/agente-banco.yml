@@ -1,0 +1,93 @@
+name: Arnés de Agus
+
+# Encargo 2026-10-30 (versiones con banco): un cambio de código de Agus sale a
+# producción con cada merge a `main`, y hasta hoy solo lo medían las pruebas
+# unitarias. Este job corre el arnés con Haiku real, k = 3, en cada PR que toque
+# el agente: ONE (`wa_one`, el canal que ya atiende gente), los dos roles de
+# Trappvel y el asistente público. Falla si un caso no pasa k de k o si hay una
+# sola escritura dañina.
+#
+# La llave: el secreto `ANTHROPIC_API_KEY_PRUEBAS` (la de PRUEBAS, nunca la de
+# producción). Lo agrega Mauricio. Sin él el job FALLA con un mensaje claro: no
+# hay corrida en seco que pase en verde, porque en seco no se mide al modelo.
+#
+# Que sea check requerido en `main` lo decide Mauricio después de ver el costo
+# (queda en el resumen de cada corrida).
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/_shared/agente/**'
+      - 'supabase/functions/wa-webhook/**'
+      - 'supabase/functions/chatwoot-agente/**'
+      - 'supabase/functions/_shared/llm-anthropic.ts'
+      - '.github/workflows/agente-banco.yml'
+
+concurrency:
+  group: agente-banco-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  arnes:
+    name: Arnés de Agus (pass^k)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY_PRUEBAS }}
+      ANTHROPIC_API_KEY_PRUEBAS: ${{ secrets.ANTHROPIC_API_KEY_PRUEBAS }}
+      ARNES: supabase/functions/_shared/agente
+    steps:
+      - uses: actions/checkout@v4
+      - name: La llave de pruebas
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY_PRUEBAS" ]; then
+            echo "::error::Falta el secreto ANTHROPIC_API_KEY_PRUEBAS del repo: el arnés no corre sin modelo y no se marca verde en seco. Lo agrega Mauricio en Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # Una llamada mínima antes de gastar en todo: si la llave no sirve o no hay
+      # crédito, se para aquí.
+      - name: Humo
+        id: humo
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/humo" --humo
+      # `one.ts` no tiene `--k`: tres corridas, y el veredicto exige todos los
+      # casos bien en las tres (pass^3 por caso).
+      - name: ONE (wa_one), corrida 1
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$RUNNER_TEMP/arnes/one-1"
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      - name: ONE (wa_one), corrida 2
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$RUNNER_TEMP/arnes/one-2"
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      - name: ONE (wa_one), corrida 3
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/one.ts" --salida "$RUNNER_TEMP/arnes/one-3"
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      # Los roles con las fichas del código. `--excluir`: los mismos 6 casos que
+      # quedaron fuera de los bancos publicados el 29-oct (la bandeja de hoy
+      # tampoco los pasa k de k); corren y se reportan, y sus dañinas cuentan.
+      - name: Rol mano_derecha (k = 3)
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-mano_derecha" --rol mano_derecha --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      - name: Rol asesor_viajes (k = 3)
+        run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-asesor_viajes" --rol asesor_viajes --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      - name: Asistente público (k = 3)
+        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --k 3
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      - name: Veredicto
+        if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+        run: >
+          deno run -A --node-modules-dir=none "$ARNES/arnes/veredicto-ci.ts"
+          --one "$RUNNER_TEMP/arnes/one-1,$RUNNER_TEMP/arnes/one-2,$RUNNER_TEMP/arnes/one-3"
+          --banco "$RUNNER_TEMP/arnes/rol-mano_derecha,$RUNNER_TEMP/arnes/rol-asesor_viajes,$RUNNER_TEMP/arnes/publico"
+      - name: Guardar las transcripciones
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: arnes-agus
+          path: ${{ runner.temp }}/arnes
+          retention-days: 14

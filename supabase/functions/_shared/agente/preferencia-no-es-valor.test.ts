@@ -120,8 +120,9 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     const t1 = await e.escribe(M1)
     expect(t1[0].tipo).toBe('botones')
     const r1 = t1[0].texto
-    expect(linea(r1)[0]).toBe('"Económico": ¿lo dejo como nota o es un rango? (Menos de $3 millones / Entre $3 y $5 millones / Solo como nota)')
-    expect(linea(r1)[1]).toBe(`¿Lo anoto en ${COD} · QUITO?`)
+    // Desde 2026-10-29 lo que se confirma va arriba y la duda debajo, sin la frase citada.
+    expect(linea(r1)[0]).toBe(`¿Lo anoto en ${COD} · QUITO?`)
+    expect(linea(r1)).toContain('¿Lo dejo como nota o es un rango? (Menos de $3 millones / Entre $3 y $5 millones / Solo como nota)')
     expect(linea(r1)).toContain('• Fecha de regreso: 27 ene (calculado)')
     expect(linea(r1)).toContain('• Adultos: 3 (calculado)')
     expect(linea(r1)).toContain('• Infantes: 1 (deducido)')
@@ -290,7 +291,7 @@ describe('las dudas de la extracción', () => {
     }, [DUDA]) })
     expect(p.plan.sugeridos.presupuesto).toBeUndefined()
     expect(p.plan.sugeridos.fecha_salida.valor).toBe('2027-01-17')
-    expect(p.duda).toBe('"Económico": ¿lo dejo como nota o es un rango? (Menos de $3 millones / Entre $3 y $5 millones / Solo como nota)')
+    expect(p.duda).toBe('¿Lo dejo como nota o es un rango? (Menos de $3 millones / Entre $3 y $5 millones / Solo como nota)')
   })
 
   it('una sola pregunta: primero la del mínimo para cotizar; acotada y de un campo que existe', () => {

@@ -128,6 +128,24 @@ export function leerPayload(cuerpo: unknown): MensajeChatwoot {
   };
 }
 
+/**
+ * Chatwoot resolvió la conversación: `conversation_status_changed` a `resolved` (ahí el payload ES la conversación, con
+ * `id` = el número visible), o la actividad de `message_created` con la conversación ya `resolved`. null si no es eso. Pura.
+ */
+export function cierreDeChatwoot(cuerpo: unknown): { conversacionId: number; inboxId: number | null; cuentaId: number | null } | null {
+  const p = obj(cuerpo);
+  if (p.event === 'conversation_status_changed' && p.status === 'resolved') {
+    const id = ent(p.id) ?? ent(p.display_id);
+    return id === null ? null : { conversacionId: id, inboxId: ent(p.inbox_id), cuentaId: ent(obj(p.account).id) ?? ent(p.account_id) };
+  }
+  const conv = obj(p.conversation);
+  if (p.event === 'message_created' && (p.message_type === 'activity' || p.message_type === 2) && conv.status === 'resolved') {
+    const id = ent(conv.id) ?? ent(conv.display_id);
+    return id === null ? null : { conversacionId: id, inboxId: ent(obj(p.inbox).id) ?? ent(conv.inbox_id), cuentaId: ent(obj(p.account).id) };
+  }
+  return null;
+}
+
 /** El canal desde el tipo de canal de Chatwoot (si el inbox no lo declara en la configuración). Pura. */
 export function canalDeChatwoot(c: string | null): Canal {
   const t = (c ?? '').toLowerCase();

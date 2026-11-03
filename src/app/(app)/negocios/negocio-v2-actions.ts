@@ -14,6 +14,7 @@ import { GATE_AUTORIZACION } from '@/lib/autorizacion-datos/estado'
 import { configSeguimiento, etiquetaMotivoPerdida, mensajeTopeAplazamientos, motivoPerdidaInvalido, type ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import { configSeguimientoDelNegocio } from '@/lib/negocios/seguimiento-datos'
 import { evaluarGatesSeguimiento } from '@/lib/negocios/gates-seguimiento'
+import { evaluarGateCotizacionRequerida } from '@/lib/negocios/gate-cotizacion-requerida'
 import { sinNegociosDePruebaAjenos } from '@/lib/negocios/negocios-de-prueba'
 import { evaluarGateServicios } from '@/lib/viaje/servicios-viaje-datos'
 import { datosDelTablero } from '@/lib/viaje/servicios-tablero-datos'
@@ -52,7 +53,7 @@ import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanon
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { valorSinIvaDeFactura } from '@/lib/upme/valor-factura'
-import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { revisarTarifaEnBloque } from '@/lib/upme/tarifa-confirmada'
 import { cortarVersionCronograma } from '@/lib/cronograma/cortar-version'
@@ -96,6 +97,7 @@ import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from 
 import { anticipoEsperado, estadoAnticipo, notaAnticipoCubierto, type EstadoAnticipo } from '@/lib/negocios/anticipo-cubierto'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
+import { fechaDeCierreDeVenta } from '@/lib/negocios/fecha-cierre-venta'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
   sumarRecaudoConfirmado,
@@ -131,6 +133,7 @@ import { resolverDerivado, type LockWhen } from '@/lib/negocios/campo-derivado'
 import { soloSiCumple, type SoloSiBloque } from '@/lib/negocios/condicion-bloque'
 import { puedeOmitirGate, marcaOmitido, CLAVE_OMITIDO } from '@/lib/negocios/gate-omitible'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
+import { puedeAsignarResponsableEnWorkspace } from '@/lib/permissions/asignar-responsable-servidor'
 import { tiposReprocesoOperativo } from '@/lib/negocios/reproceso-operativo'
 import {
   anclaDeBloques,
@@ -155,6 +158,7 @@ import {
 } from '@/lib/contactos/campanas'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { origenDeCopiaHeredada } from '@/lib/negocios/devolucion'
+import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { documentoCompartidoQuedaResuelto } from '@/lib/negocios/casilla-compartida'
 import { formulariosOrigenDeCopias, historialSinOrigenesGenerables, slugsDeCopiasSinOrigen } from '@/lib/negocios/copia-de-formulario'
 import { recolectarReferenciasFuente, referenciasFaltantes, aplanarDataBloque } from '@/lib/negocios/referencias-fuente'
@@ -200,7 +204,16 @@ import { avisarSobrepagoSiCorresponde } from '@/lib/cobros/aviso-sobrepago-servi
 import { cerrarReprocesoSiSeRehizoElTramo } from '@/lib/negocios/cierre-reproceso-servidor'
 import { crearCobrosSoenaCore, leerModeloDineroNegocio, leerModeloDineroCompleto } from '@/lib/actions/conciliacion-actions'
 import { bloqueCobrosCompleto, cobradoConfirmado, resumenDeCobro } from '@/lib/cobros/saldo-negocio'
+import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
+import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
+import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
+import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
+import { areaNoCierraElBloque } from '@/lib/negocios/cierre-por-tipo'
+import { configEntrega, GATE_VOUCHERS } from '@/lib/viaje/entrega'
+import { autorizacionEstaPendiente, faltaAutorizacionDelNegocio, lineaExigeAutorizacion, MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
+import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
+import type { QuienAsigno } from './[id]/responsables-rol'
 import { leerAviso } from '@/lib/correcciones/retroceso'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -216,6 +229,7 @@ import {
   type AtencionCita,
   type EstadoBloque,
 } from '@/lib/negocios/seguimiento-citas'
+import { cerrarCotizacionesDelNegocioPerdido, textoCotizacionesCerradas } from '@/lib/cotizaciones/cerrar-al-perder'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
@@ -267,6 +281,9 @@ export type EtapaNegocio = {
   // etapa de MAYOR orden se queda sin ninguna después, el cálculo devuelve null y la
   // pantalla concluye que el proceso termina ahí, dejándola sin botón de avanzar.
   routing?: { default_etapa_orden?: number } | null
+  // config_extra.gates → los gates con nombre de la etapa. Hoy solo lo lee el estado derivado del
+  // bloque de servicios: en la etapa que pide los vouchers, el bloque no está completo sin ellos.
+  gates?: string[]
 }
 
 /**
@@ -374,8 +391,8 @@ export type NegocioDetalle = {
     rol: string | null
     segmento: string | null
   } | null
-  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). */
-  responsables: Array<{ id: string; full_name: string }>
+  /** Multi-responsable (fuente de verdad: negocio_responsables N:M). `rol` = área del responsable. */
+  responsables: Array<{ id: string; full_name: string; rol: string | null; asignacion?: QuienAsigno }>
   /**
    * Recaudo pendiente para pasar a operaciones. Presente (no null) solo cuando la
    * etapa actual tiene el gate `saldo:handoff` (ej. Documentación). El bloque de
@@ -416,7 +433,8 @@ export type NegocioDetalle = {
    */
   campanas_contacto?: ResumenCampanas | null
   /**
-   * Día en que el negocio se volvió VENTA = el del primer cobro imputado.
+   * Día en que el negocio se volvió VENTA = el del primer cobro imputado (en viajes, el de la
+   * confirmación del cliente: `lib/negocios/fecha-cierre-venta.ts`, QA G11).
    * Sale tal cual de `v_venta_mes_comercial.fecha_venta`, la definición canónica
    * que ya fecha la venta en `/numeros`, `/equipo`, `lib/negocios/cartera` y
    * `lib/epayco/fecha-transaccion`. Columna `date`, no instante.
@@ -1218,12 +1236,59 @@ export async function getEtapasSegmentador(): Promise<EtapaDelSegmentador[]> {
 
 // ── Detalle de un negocio ─────────────────────────────────────────────────────
 
+/**
+ * Quién asignó a cada responsable y cómo (`assigned_by`, `asignado_origen`, `asignado_etapa_id`; migración
+ * 20261026090000), por `staff_id`. Lectura APARTE de la de los responsables a propósito: si la columna todavía no existe
+ * o la lectura falla, el detalle sigue mostrando a los responsables, solo sin la línea de quién los asignó.
+ * El nombre del asignador sale del staff de ESTE workspace cuyo `profile_id` es `assigned_by` (el UNIQUE de
+ * `staff.profile_id` es global: sin el filtro, un platform_admin saldría con su staff de otro workspace).
+ */
+async function leerAsignacionesResponsables(
+  supabase: unknown, negocioId: string, workspaceId: string,
+): Promise<Map<string, QuienAsigno>> {
+  const out = new Map<string, QuienAsigno>()
+  const { data, error } = await db(supabase)
+    .from('negocio_responsables')
+    .select('staff_id, assigned_at, assigned_by, asignado_origen, etapas_negocio(nombre), staff!negocio_responsables_staff_id_fkey(profile_id)')
+    .eq('negocio_id', negocioId)
+  if (error) {
+    console.error('[negocio] sin quién asignó a los responsables:', error.message)
+    return out
+  }
+  type Fila = {
+    staff_id: string; assigned_at: string | null; assigned_by: string | null; asignado_origen: string | null
+    etapas_negocio: { nombre: string | null } | null; staff: { profile_id: string | null } | null
+  }
+  const filas = (data ?? []) as Fila[]
+  const perfiles = [...new Set(filas.map((f) => f.assigned_by).filter((x): x is string => !!x))]
+  const nombres = new Map<string, string>()
+  if (perfiles.length > 0) {
+    const { data: st } = await db(supabase).from('staff').select('profile_id, full_name')
+      .eq('workspace_id', workspaceId).in('profile_id', perfiles)
+    for (const x of (st ?? []) as Array<{ profile_id: string; full_name: string | null }>) {
+      if (x.full_name) nombres.set(x.profile_id, x.full_name)
+    }
+  }
+  for (const f of filas) {
+    out.set(f.staff_id, {
+      assigned_at: f.assigned_at,
+      origen: f.asignado_origen,
+      asignadoPor: f.assigned_by ? nombres.get(f.assigned_by) ?? null : null,
+      seAsigno: !!f.assigned_by && f.assigned_by === f.staff?.profile_id,
+      etapa: f.etapas_negocio?.nombre ?? null,
+    })
+  }
+  return out
+}
+
 async function getNegocioDetalle(id: string): Promise<{
   negocio: NegocioDetalle
   bloques: Array<BloqueConfig & { instancia: NegocioBloque | null }>
   etapasLinea: EtapaNegocio[]
   etapasNoAplican: EtapaNoAplica[]
   blockIdByConfigId: Record<string, string>
+  /** La línea declara el gate `autorizacion_datos` en alguna etapa (`autorizacion-datos/envio.ts`). */
+  exigeAutorizacionDatos: boolean
 } | null> {
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return null
@@ -1276,12 +1341,16 @@ async function getNegocioDetalle(id: string): Promise<{
   // Responsables (multi) desde negocio_responsables (N:M) — fuente de verdad.
   const { data: respRows } = await db(supabase)
     .from('negocio_responsables')
-    .select('staff_id, assigned_at, staff!negocio_responsables_staff_id_fkey(id, full_name)')
+    .select('staff_id, assigned_at, rol, staff!negocio_responsables_staff_id_fkey(id, full_name)')
     .eq('negocio_id', id)
     .order('assigned_at', { ascending: true })
-  const responsables = ((respRows ?? []) as Array<{ staff: { id: string; full_name: string } | null }>)
-    .map((r) => r.staff)
-    .filter((s): s is { id: string; full_name: string } => s !== null)
+  // `rol` ('comercial' | 'operaciones' | null) viaja para que el detalle diga el área.
+  type FilaResp = { rol: string | null; staff: { id: string; full_name: string } | null }
+  const responsables = ((respRows ?? []) as FilaResp[])
+    .filter((r): r is FilaResp & { staff: { id: string; full_name: string } } => r.staff !== null)
+    .map((r) => ({ id: r.staff.id, full_name: r.staff.full_name, rol: r.rol }))
+  const asignaciones = await leerAsignacionesResponsables(supabase, id, workspaceId)
+  const responsablesConAsignacion = responsables.map((r) => ({ ...r, ...(asignaciones.has(r.id) ? { asignacion: asignaciones.get(r.id)! } : {}) }))
 
   // Día en que este negocio se volvió venta, para el header: el del PRIMER cobro
   // imputado. Se lee de `v_venta_mes_comercial`, que es la definición canónica —la
@@ -1333,13 +1402,15 @@ async function getNegocioDetalle(id: string): Promise<{
   const negocioMetadata = (negocioRaw.metadata ?? {}) as Record<string, unknown>
   const negocioTyped = {
     ...negocioRaw,
-    responsables,
+    responsables: responsablesConAsignacion,
     campanas_contacto: campanasContacto,
-    fecha_venta: fechaVenta,
+    // En viajes, la de la confirmación del cliente (QA G11): ver `fecha-cierre-venta.ts`.
+    fecha_venta: fechaDeCierreDeVenta(fechaVenta, negocioMetadata),
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
   let etapasLinea: EtapaNegocio[] = []
+  let exigeAutorizacionDatos = false
   let etapasNoAplican: EtapaNoAplica[] = []
   if (negocioTyped.linea_id) {
     const { data: etapas } = await db(supabase)
@@ -1364,6 +1435,7 @@ async function getNegocioDetalle(id: string): Promise<{
       negocioTyped.etapa_actual_id ?? null,
     )
 
+    exigeAutorizacionDatos = lineaExigeAutorizacion((etapas ?? []) as { config_extra?: unknown }[])
     etapasLinea = ((etapas ?? []) as Record<string, unknown>[]).map(e => ({
       id: e.id as string,
       linea_id: e.linea_id as string,
@@ -1376,6 +1448,7 @@ async function getNegocioDetalle(id: string): Promise<{
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
       reproceso_operativo: tiposReprocesoOperativo(e.config_extra as Record<string, unknown> | null),
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
+      gates: (((e.config_extra as { gates?: unknown } | null)?.gates ?? []) as unknown[]).filter((g): g is string => typeof g === 'string'),
     }))
 
     // ── Desenlace que devolvió el caso a una etapa anterior ────────────────────
@@ -2148,6 +2221,7 @@ async function getNegocioDetalle(id: string): Promise<{
     etapasLinea,
     etapasNoAplican,
     blockIdByConfigId: Object.fromEntries(blockIdByConfigId),
+    exigeAutorizacionDatos,
   }
 }
 
@@ -3288,6 +3362,15 @@ async function cambiarEtapaNegocioConGateSinClave(
     }
   }
 
+  // Lo que falta para avanzar, de TODAS las familias de gates de la etapa juntas (barrido
+  // ámbar, 2026-10-22). Antes cada familia devolvía apenas fallaba y el equipo descubría los
+  // pendientes de a uno: con saldo pendiente solo salía «Saldo pendiente» y, al saldar, recién
+  // aparecía la confirmación del cierre. Ahora cada familia AGREGA sus líneas en el orden de
+  // siempre y se devuelven todas en un solo aviso, después del margen.
+  // Una lectura que falla sigue agregando su línea (fail-closed); el override no cambia: con
+  // motivo, el bloque de abajo no corre y el margen decide solo, como hoy.
+  const pendientesGate: BloquePendienteGate[] = []
+
   // Verificar gates si no hay motivo de override
   if (!motivoOverride && negocio.etapa_actual_id) {
     // ANTES de evaluar los gates: cerrar automáticamente los bloques gate de anticipo
@@ -3338,10 +3421,7 @@ async function cambiarEtapaNegocioConGateSinClave(
       const retienen = pendientesIds.filter(p => !omitibles.some(o => o.bloque_config_id === p.bloque_config_id))
 
       if (retienen.length > 0) {
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: retienen.map(b => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })),
-        }
+        pendientesGate.push(...retienen.map(b => ({ nombre: b.nombre ?? 'Bloque', es_gate: true })))
       }
 
       // Todos los que faltaban vencieron: se marcan como "no aplica" —con motivo,
@@ -3350,7 +3430,8 @@ async function cambiarEtapaNegocioConGateSinClave(
       //
       // La escritura queda diferida (ver `aplicarOmisiones` arriba): solo corre cuando
       // el avance está confirmado y a punto de ejecutarse.
-      aplicarOmisiones = async () => {
+      // Si algún bloque retiene, el avance no ocurre: no hay omisiones que escribir.
+      if (retienen.length === 0) aplicarOmisiones = async () => {
         const ahora = new Date().toISOString()
         for (const p of omitibles) {
           const cfg = cfgPorId.get(p.bloque_config_id)
@@ -3402,9 +3483,20 @@ async function cambiarEtapaNegocioConGateSinClave(
         .eq('entidad_id', negocioId)
         .eq('tipo', 'comentario')
       if ((count ?? 0) === 0) {
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'Comentario en actividad', es_gate: true }] }
+        pendientesGate.push({ nombre: 'Comentario en actividad', es_gate: true })
       }
     }
+
+    // Gate custom: cotizacion_requerida — el negocio tiene al menos una cotización viva. Opt-in
+    // por etapa; sin el id en `config_extra.gates` no consulta nada. Complementa a
+    // `margen_sobre_piso`, que solo juzga las cotizaciones que existen.
+    const faltaCotizacion = await evaluarGateCotizacionRequerida(db(supabase), {
+      workspaceId,
+      negocioId,
+      gates: etapaGates,
+      mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
+    })
+    if (faltaCotizacion) pendientesGate.push({ nombre: faltaCotizacion, es_gate: true })
 
     // Gates de seguimiento (post-cotización, F1): `cotizacion_enviada`. Opt-in por etapa; sin
     // esos ids en `config_extra.gates` no consulta nada.
@@ -3413,9 +3505,7 @@ async function cambiarEtapaNegocioConGateSinClave(
       gates: etapaGates,
       mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
     })
-    if (bloqueoSeguimiento) {
-      return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: bloqueoSeguimiento, es_gate: true }] }
-    }
+    if (bloqueoSeguimiento) pendientesGate.push({ nombre: bloqueoSeguimiento, es_gate: true })
 
     // Gate custom: saldo_cero — el HONORARIO pendiente debe estar cubierto.
     //
@@ -3428,48 +3518,17 @@ async function cambiarEtapaNegocioConGateSinClave(
     // mayoría ya en Entrega.
     //
     // Un sobrepago (saldo negativo) NO bloquea aquí: solo se compara el faltante.
+    //
+    // Lo que cubre es lo que ENTRÓ (con fecha, sin anular, con la retención de IVA) y está
+    // confirmado por la financiera: la misma cuenta de la tarjeta y del panel de Cierre
+    // económico (`lib/cobros/saldo-cero.ts`). Si no se puede leer, retiene.
     if (etapaGates.includes('saldo_cero')) {
-      const [negPrecioRes, cobrosRes, conciliadoRes] = await Promise.all([
-        db(supabase)
-          .from('negocios')
-          .select('precio_aprobado, precio_estimado')
-          .eq('id', negocioId)
-          .single(),
-        db(supabase)
-          .from('cobros')
-          .select('monto, split_json')
-          .eq('negocio_id', negocioId)
-          .eq('workspace_id', workspaceId)
-          ,
-        db(supabase)
-          .from('negocio_conciliacion')
-          .select('conciliado')
-          .eq('negocio_id', negocioId)
-          .eq('workspace_id', workspaceId)
-          .maybeSingle(),
-      ])
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const negPrecio = negPrecioRes.data as any
-      const precio = negPrecio?.precio_aprobado ?? negPrecio?.precio_estimado ?? 0
-      // Solo el recaudo CONFIRMADO cubre el saldo (ver `lib/negocios/recaudo-confirmado.ts`).
-      const cobrosSaldo = (cobrosRes.data ?? []) as CobroParaRecaudo[]
-      const conciliadoSaldo = (conciliadoRes.data as { conciliado: boolean } | null)?.conciliado === true
-      const totalCobrado = sumarRecaudoConfirmado(cobrosSaldo, conciliadoSaldo)
-      const saldo = precio - totalCobrado
-
-      if (saldo > TOLERANCIA_SALDO_COP) {
-        const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-        // Nombrar la plata que está registrada pero sin confirmar. Decir solo "faltan $X"
-        // manda a la financiera a buscar un pago que YA está en el sistema esperando su
-        // visto bueno.
-        const sinConfirmar = recaudoPendienteDeConfirmar(cobrosSaldo, conciliadoSaldo)
-        const detalle = sinConfirmar > 0
-          ? ` (hay ${fmt.format(sinConfirmar)} de un reparto sin confirmar por el área financiera)`
-          : ''
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: `Saldo pendiente: ${fmt.format(saldo)}${detalle}`, es_gate: true }],
-        }
+      const lectura = await leerSaldoCero(db(supabase), { workspaceId, negocioId })
+      if (!lectura.ok) {
+        pendientesGate.push({ nombre: lectura.error, es_gate: true })
+      } else {
+        const mensaje = mensajeSaldoCero(lectura.saldo)
+        if (mensaje) pendientesGate.push({ nombre: mensaje, es_gate: true })
       }
     }
 
@@ -3481,30 +3540,25 @@ async function cambiarEtapaNegocioConGateSinClave(
       gates: etapaGates,
       mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
     })
-    if (faltaConfirmacion.length > 0) {
-      return { error: 'gate_bloqueado', bloquesPendientes: faltaConfirmacion.map((nombre) => ({ nombre, es_gate: true })) }
-    }
+    pendientesGate.push(...faltaConfirmacion.map((nombre) => ({ nombre, es_gate: true })))
 
     // Gate de Reservas y pagos (F3-7): todo servicio que va, pagado con soporte, medio y
     // titular, sin aprobación abierta y confirmado. Opt-in por etapa; máximo 3 líneas y «y N más».
     const faltaServicios = await evaluarGateServicios(db(supabase), { workspaceId, negocioId, gates: etapaGates })
     if (faltaServicios.length > 0) {
-      return { error: 'gate_bloqueado', bloquesPendientes: lineasDelGate(faltaServicios).map((nombre) => ({ nombre, es_gate: true })) }
+      pendientesGate.push(...lineasDelGate(faltaServicios).map((nombre) => ({ nombre, es_gate: true })))
     }
 
     // Gates de Documentos y entrega (F4): vouchers, documentos del viajero, cobro mínimo y
     // paquete enviado. Opt-in por etapa; con `entrega_viaje.activo` apagado no frena.
     const faltaEntrega = await evaluarGateEntrega(db(supabase), { workspaceId, negocioId, gates: etapaGates })
-    if (faltaEntrega.length > 0) {
-      return { error: 'gate_bloqueado', bloquesPendientes: faltaEntrega.map((nombre) => ({ nombre, es_gate: true })) }
-    }
+    pendientesGate.push(...faltaEntrega.map((nombre) => ({ nombre, es_gate: true })))
 
     // Gate del Cierre económico (F6-4/F6-5): margen calculado y confirmado por la dirección con
     // la huella vigente, saldo a favor decidido. Opt-in por etapa; con `cierre_viaje` apagado no frena.
+    // No cede al override (H-35): la pantalla no ofrece «Omitir» sobre algo que se va a negar.
     const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: etapaGates })
-    if (faltaCierre.length > 0) {
-      return { error: 'gate_bloqueado', bloquesPendientes: faltaCierre.map((nombre) => ({ nombre, es_gate: true })) }
-    }
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true, omitible: false })))
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
     // operaciones (handoff comercial → operaciones, ej. salida de Documentación).
@@ -3538,10 +3592,7 @@ async function cambiarEtapaNegocioConGateSinClave(
         if (esCeroDeliberado(propuestasHandoff, negHandoff?.precio_aprobado ?? null)) {
           // Nada que recaudar: el handoff no exige recaudo.
         } else {
-          return {
-            error: 'gate_bloqueado',
-            bloquesPendientes: [{ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true }],
-          }
+          pendientesGate.push({ nombre: 'Aprueba la propuesta económica antes de pasar a operaciones', es_gate: true })
         }
       } else {
 
@@ -3581,7 +3632,7 @@ async function cambiarEtapaNegocioConGateSinClave(
         const gateMessages = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
         const nombre = gateMessages['saldo:handoff']
           ?? `Recaudo insuficiente para pasar a operaciones: falta ${fmt.format(pend.pendienteTotal)}${desglose}`
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        pendientesGate.push({ nombre, es_gate: true })
       }
       } // fin else (precioHandoff > 0)
     }
@@ -3623,7 +3674,7 @@ async function cambiarEtapaNegocioConGateSinClave(
         const actualStr = typeof actual === 'boolean' ? String(actual) : String(actual ?? '')
         if (actualStr !== expected) {
           const nombre = gateMessages[gate] ?? `Campo "${slug}" debe ser "${expected}"`
-          return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+          pendientesGate.push({ nombre, es_gate: true })
         }
       }
     }
@@ -3689,7 +3740,7 @@ async function cambiarEtapaNegocioConGateSinClave(
           const gateMessagesAlguno = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
           const nombre = gateMessagesAlguno['campos_alguno']
             ?? `Al menos uno de estos campos debe ser "${esperado}": ${camposExigidos.join(', ')}`
-          return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+          pendientesGate.push({ nombre, es_gate: true })
         }
       }
     }
@@ -3708,8 +3759,8 @@ async function cambiarEtapaNegocioConGateSinClave(
         .eq('bloque_configs.etapa_id', negocio.etapa_actual_id)
       if (errSol) {
         // Sin poder leer no se puede afirmar que el mínimo está: el lado seguro es retener.
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre: 'No se pudo revisar el mínimo de la solicitud', es_gate: true }] }
-      }
+        pendientesGate.push({ nombre: 'No se pudo revisar el mínimo de la solicitud', es_gate: true })
+      } else {
       type FilaSol = { data: unknown; bloque_configs: { orden: number | null; config_extra: { fields?: unknown } | null; bloque_definitions: { tipo?: string } | null } | null }
       const filas = ((bloquesSol ?? []) as FilaSol[])
         .filter(b => b.bloque_configs?.bloque_definitions?.tipo === 'datos')
@@ -3719,11 +3770,9 @@ async function cambiarEtapaNegocioConGateSinClave(
       if (niveles.errores.length > 0) console.warn('[cambiarEtapa] solicitud_minimo con config dudosa:', niveles.errores)
       if (niveles.minimo.faltan.length > 0) {
         const msgs = (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>
-        return {
-          error: 'gate_bloqueado',
-          bloquesPendientes: [{ nombre: mensajeMinimoIncompleto(niveles.minimo, msgs['solicitud_minimo']), es_gate: true }],
-        }
+        pendientesGate.push({ nombre: mensajeMinimoIncompleto(niveles.minimo, msgs['solicitud_minimo']), es_gate: true })
       }
+      } // fin else (errSol)
     }
 
     // Gate custom: autorizacion_datos — el cliente autorizó el tratamiento de sus datos en el
@@ -3736,7 +3785,7 @@ async function cambiarEtapaNegocioConGateSinClave(
         supabase, workspaceId, negocioId, staffId: staffId ?? null,
         mensajes: (etapaActualConfigExtra.gate_messages ?? {}) as Record<string, string>,
       })
-      if (bloqueo) return { error: 'gate_bloqueado', bloquesPendientes: [bloqueo] }
+      if (bloqueo) pendientesGate.push(bloqueo)
     }
 
     // Gate custom: sobrepago_conciliado — si el total cobrado supera el precio del
@@ -3800,10 +3849,7 @@ async function cambiarEtapaNegocioConGateSinClave(
         const accion = camposConc['accion_extra']
         if (accion == null || String(accion) === '') {
           const fmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-          return {
-            error: 'gate_bloqueado',
-            bloquesPendientes: [{ nombre: `Concilia el sobrepago de ${fmt.format(extra)}`, es_gate: true }],
-          }
+          pendientesGate.push({ nombre: `Concilia el sobrepago de ${fmt.format(extra)}`, es_gate: true })
         }
       }
     }
@@ -3856,7 +3902,7 @@ async function cambiarEtapaNegocioConGateSinClave(
             ? `Conciliación pendiente: faltan ${fmt.format(descuadre.faltante)} del honorario`
             : `Conciliación pendiente: sobran ${fmt.format(descuadre.exceso)} sobre el valor a recaudar`
         const nombre = gateMessages['conciliacion_diana'] ?? defaultMsg
-        return { error: 'gate_bloqueado', bloquesPendientes: [{ nombre, es_gate: true }] }
+        pendientesGate.push({ nombre, es_gate: true })
       }
     }
   }
@@ -3895,13 +3941,25 @@ async function cambiarEtapaNegocioConGateSinClave(
           const nombre = gateMessagesMargen['margen_sobre_piso'] ?? veredicto.mensaje
           // Para quien no es el dueño, el bloqueo no cede al override: la pantalla no
           // le ofrece «Omitir» sobre algo que el servidor le va a rechazar.
-          return {
-            error: 'gate_bloqueado',
-            bloquesPendientes: [{ nombre, es_gate: true, ...(esDueno ? {} : { omitible: false }) }],
-          }
+          pendientesGate.push({ nombre, es_gate: true, ...(esDueno ? {} : { omitible: false }) })
         }
       }
     }
+  }
+
+  // Gate del Cierre económico con override (QA Trappvel 2026-10-29, H-35): «Omitir gate» con motivo
+  // tampoco salta la confirmación del margen. Sin ella `cierre_viaje` queda en null y nadie sabe
+  // cuánto dejó el viaje, que es justo lo que la etapa existe para fijar. Sin override ya lo evaluó
+  // el bloque de arriba; aquí solo el camino que ese bloque no recorre, y no cede (`omitible: false`).
+  if (motivoOverride && negocio.etapa_actual_id) {
+    const gatesCierre = (etapaActualConfigExtra.gates ?? []) as string[]
+    const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: gatesCierre })
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true, omitible: false })))
+  }
+
+  // Todas las familias juntas, en el orden de siempre (ver `pendientesGate` arriba).
+  if (pendientesGate.length > 0) {
+    return { error: 'gate_bloqueado', bloquesPendientes: pendientesGate }
   }
 
   // ── Control de fraude: congelar negocio con referencia duplicada sin resolver ──
@@ -6712,6 +6770,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   etapasNoAplican: EtapaNoAplica[]
   datosOtrasEtapas: Record<number, Record<string, unknown>>
   datosPorSlug: Record<string, Record<string, unknown>>
+  /**
+   * La línea pide la autorización de datos y el cliente todavía no la dio: se cotiza, pero no se
+   * envía (reunión del 2026-10-22). La ficha lo dice arriba.
+   */
+  autorizacionPendiente?: boolean
+  /** Con la autorización pendiente, lo mismo que responde «Enviar» (`MENSAJE_ENVIO`). */
+  motivoAutorizacion?: string | null
+  /** Con la autorización pendiente, QUÉ falta (N7-2): la general, la de menores o el contacto. */
+  faltaAutorizacion?: 'sin_contacto' | 'generales' | 'menores' | null
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -7301,7 +7368,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       if (fila) {
         seleccion = fila.seleccion
         const ctx = await contextoDeCotizacion(supabase, cotizacionAceptada.id)
-        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).costoDirecto : costoRespaldo
+        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id).costoDirecto : costoRespaldo
       }
     }
     presupuestoPorRubro = calcularPresupuestoPorRubro(
@@ -8272,7 +8339,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // aunque la etapa pertenezca a otra. Sin la marca, el resultado es el de antes.
     const invitadoAEsteBloque = ((configExtra.areas_editoras ?? []) as Area[])
       .some(a => areasEfectivasUsuario.has(a))
-    if (areaReadonly && !invitadoAEsteBloque) enrichedConfigExtra._areaReadonly = true
+    // Servicios del viaje: los permisos son POR FILA (`puedeEditarServicios`, `puedeAdjuntarVoucher`)
+    // y el servidor los revisa en cada acción. Cerrarlo por área dejaba a la comercial responsable
+    // sin el voucher que le llega a ella en Reservas y pagos (QA 2026-10-29, H3-1).
+    if (areaReadonly && !invitadoAEsteBloque && !areaNoCierraElBloque(defTipo)) enrichedConfigExtra._areaReadonly = true
     // Devolución en la copia heredada: la capacidad la declara el bloque ORIGINAL una sola
     // vez y la copia la hereda junto con el archivo. Declararla en cada copia sería
     // declarar lo mismo cuatro veces y garantizar que se desincronicen, con un síntoma
@@ -8287,6 +8357,15 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       ) {
         enrichedConfigExtra.devolucion_habilitada = true
       }
+    }
+    // Copia de solo lectura de un documento: no recibe archivos ni correcciones (el servidor
+    // las rechaza en `documento-actions.destinoDeEscritura`), así que la pantalla dice DÓNDE
+    // está el original para cambiarlo. Sin el nombre de la etapa, la copia solo podía decir
+    // «etapa 6», y quien la mira no sabe cuál es (SOENA, SOE-028).
+    if (defTipo === 'documento' && copiaDeSoloLectura(configExtra)) {
+      const ordenOrigen = configExtra.source_etapa_orden
+      const etapaOrigen = base.etapasLinea.find(e => e.orden === ordenOrigen)
+      if (etapaOrigen?.nombre) enrichedConfigExtra._origenEtapaNombre = etapaOrigen.nombre
     }
     // Corrección del valor aprobado: capacidad declarada por persona en el
     // workspace, NO derivada del rol (ver `corregirAprobacion`). Se resuelve
@@ -8401,12 +8480,88 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     if (errCierre) console.error('[getNegocioDetalle] no se pudieron cerrar los gates heredados ya llenos:', errCierre)
   }
 
+  // ── ¿Falta la autorización de datos? ──
+  // Con la MISMA regla que frena «Enviar», «Aprobar» y el gate (`faltaAutorizacionDelNegocio`), sin
+  // depender de que el bloque se pinte: el de «Autorización de datos» vive en Solicitud y, como su
+  // trabajo no queda en `negocio_bloques.data`, el historial lo salta mientras falte la firma. Antes
+  // la bandera salía de los candidatos de abajo y en Cotización quedaba siempre en `false`
+  // (prueba con clics del 2026-10-25): el aviso desaparecía justo cuando más hacía falta.
+  // Si no se puede leer, no se afirma nada aquí; «Enviar» igual falla cerrado.
+  const faltaAutorizacion = base.exigeAutorizacionDatos
+    ? faltaAutorizacionDelNegocio(db(supabase), { workspaceId, negocioId: id, contactoId: base.negocio.contacto_id ?? null })
+      .catch((e: unknown) => {
+        console.error('[getNegocioDetalle] no se pudo revisar la autorización de datos:', e)
+        return 'error' as const
+      })
+    : null
+  // ── Autorización, ficha y servicios: el estado lo dice el gate, no la fila ──
+  // Su trabajo no se guarda en el bloque (vive en el contacto o en `negocio_servicios`), así que
+  // nadie marcaba `negocio_bloques.estado`: la autorización firmada seguía en «Pendiente»
+  // (barrido 2026-10-22). Se deriva con la MISMA regla del gate, se pinta y se persiste en los dos
+  // sentidos: una autorización revocada vuelve a pendiente. Ver `estado-bloques-derivado.ts`.
+  {
+    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown>; etapa_id?: string }
+    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[]; exigeVouchers?: boolean }> = []
+    // En la etapa cuyo gate pide los vouchers (Documentos y entrega), el bloque de servicios no
+    // está completo sin ellos: antes nacía «Completo» con el gate pidiéndolos (QA 2026-10-29, M1-1).
+    const entregaActiva = configEntrega(lineaConfigExtra).activo
+    const pideVouchers = (etapaId: string | undefined) =>
+      entregaActiva && !!etapaId && (base.etapasLinea.find(e => e.id === etapaId)?.gates ?? []).includes(GATE_VOUCHERS)
+    const recoger = (lista: ConInstancia[]) => lista.forEach((b, i) => {
+      const tipo = tipoDerivado(b.bloque_definitions?.tipo, b.config_extra)
+      if (!tipo || !b.instancia) return
+      candidatos.push({
+        lista, i, instanciaId: b.instancia.id, actual: b.instancia.estado, tipo,
+        ...(tipo === 'ficha' ? { campos: (b.config_extra.campos ?? []) as CampoContacto[] } : {}),
+        ...(tipo === 'servicios' ? { exigeVouchers: pideVouchers(b.etapa_id) } : {}),
+      })
+    })
+    recoger(bloquesConExtra as unknown as ConInstancia[])
+    recoger(bloquesEtapasPrevias as unknown as ConInstancia[])
+    if (candidatos.length > 0) {
+      const derivados = await derivarEstadosDeBloques(db(supabase), {
+        workspaceId,
+        negocioId: id,
+        contactoId: base.negocio.contacto_id ?? null,
+        configLinea: lineaConfigExtra,
+        bloques: candidatos,
+        ...(faltaAutorizacion ? { faltaAutorizacion } : {}),
+      }).catch((e) => {
+        console.error('[getNegocioDetalle] no se pudo derivar el estado de los bloques:', e)
+        return new Map<string, EstadoBloqueDerivado | null>()
+      })
+      const { completar, reabrir } = cambiosDeEstado(candidatos.map(c => ({ ...c, derivado: derivados.get(c.instanciaId) ?? null })))
+      for (const c of candidatos) {
+        const estado = derivados.get(c.instanciaId)
+        if (!estado || (!completar.includes(c.instanciaId) && !reabrir.includes(c.instanciaId))) continue
+        const b = c.lista[c.i]
+        c.lista[c.i] = { ...b, instancia: { ...b.instancia!, estado } }
+      }
+      const ahora = new Date().toISOString()
+      const [errCompletar, errReabrir] = await Promise.all([
+        completar.length > 0
+          ? db(supabase).from('negocio_bloques').update({ estado: 'completo', completado_at: ahora, updated_at: ahora }).in('id', completar).then((r: { error: unknown }) => r.error)
+          : null,
+        reabrir.length > 0
+          ? db(supabase).from('negocio_bloques').update({ estado: 'pendiente', completado_at: null, updated_at: ahora }).in('id', reabrir).then((r: { error: unknown }) => r.error)
+          : null,
+      ])
+      if (errCompletar || errReabrir) console.error('[getNegocioDetalle] no se pudo guardar el estado derivado de los bloques:', errCompletar ?? errReabrir)
+    }
+  }
+
+  const faltaLeida = faltaAutorizacion ? await faltaAutorizacion : null
+  const autorizacionPendiente = autorizacionEstaPendiente(faltaLeida)
+
   return {
     negocio: base.negocio,
     noAplica,
     datosClave: await datosClavePromesa,
     bloques: bloquesConExtra,
     etapasLinea: base.etapasLinea,
+    autorizacionPendiente,
+    motivoAutorizacion: autorizacionPendiente && faltaLeida ? MENSAJE_ENVIO[faltaLeida] : null,
+    faltaAutorizacion: autorizacionPendiente && faltaLeida && faltaLeida !== 'error' ? faltaLeida : null,
     etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente
@@ -8779,6 +8934,9 @@ export async function perderNegocio(
 
   if (updErr) return { error: (updErr as { message: string }).message }
 
+  // H10-3: perdido el negocio, sus cotizaciones abiertas no siguen «enviadas» ni en borrador.
+  const cerradas = await cerrarCotizacionesDelNegocioPerdido(db(supabase), { workspaceId, negocioId })
+
   // Log en activity_log
   const razonLabel = etiquetaMotivoPerdida(cfgSeguimiento, razon)
   if (staffId) {
@@ -8788,7 +8946,7 @@ export async function perderNegocio(
       entidad_id: negocioId,
       tipo: 'cambio_estado',
       autor_id: staffId,
-      contenido: `Negocio desistido. Motivo: ${razonLabel}`,
+      contenido: `Negocio desistido. Motivo: ${razonLabel}${textoCotizacionesCerradas(cerradas)}`,
       valor_nuevo: 'perdido',
     }, 'perderNegocio')
   }
@@ -8885,6 +9043,8 @@ export async function pausarNegocio(
       .eq('id', negocioId)
       .eq('workspace_id', workspaceId)
     if (updErr) return { error: (updErr as { message: string }).message }
+    // H10-3: el auto-perdido también cierra sus cotizaciones abiertas.
+    await cerrarCotizacionesDelNegocioPerdido(db(supabase), { workspaceId, negocioId })
 
     if (staffId) {
       await registrarActividad(supabase, {
@@ -9488,8 +9648,8 @@ export async function completarNegocio(
       autor_id: staffId,
       ...(esCierreNoFacturable ? { campo_modificado: 'cierre_no_facturable' } : {}),
       contenido: esCierreNoFacturable
-        ? `Proyecto completado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
-        : 'Proyecto completado',
+        ? `Negocio cerrado sin facturación. Motivo: ${motivoLabel}.${notaNoFacturable ? ` Nota: ${notaNoFacturable}` : ''}`
+        : 'Negocio cerrado',
       valor_nuevo: 'completado',
     }, 'completarNegocio')
   }
@@ -9541,11 +9701,12 @@ export async function agregarResponsable(
 }> {
   // userId = profile.id, que es lo que `assigned_by` exige (FK a profiles). El staff.id
   // del autor lo traduce `asignarResponsable` al anotar, acotado al workspace del negocio.
-  const { supabase, workspaceId, role, userId, error } = await getWorkspace()
+  const { supabase, workspaceId, role, userId, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const allowed = ['owner', 'admin', 'supervisor']
-  if (!role || !allowed.includes(role)) {
+  // owner/admin/supervisor, o la persona declarada en
+  // `config_extra.asignar_responsable.staff_ids`. MISMA regla que la lista y el detalle.
+  if (!(await puedeAsignarResponsableEnWorkspace(workspaceId, { role, staffId }))) {
     return { error: 'Sin permisos para asignar responsable' }
   }
 
@@ -9597,8 +9758,8 @@ export async function quitarResponsable(
   const { supabase, workspaceId, role, staffId, error } = await getWorkspace()
   if (error || !workspaceId) return { error: 'No autenticado' }
 
-  const allowed = ['owner', 'admin', 'supervisor']
-  if (!role || !allowed.includes(role)) {
+  // Misma regla que `agregarResponsable` (`puedeAsignarResponsable`).
+  if (!(await puedeAsignarResponsableEnWorkspace(workspaceId, { role, staffId }))) {
     return { error: 'Sin permisos para quitar responsable' }
   }
 

@@ -4,7 +4,7 @@ import { MARCA_POR_DEFECTO, marcaDelWorkspace } from './marca-workspace';
 // Columnas reales de `workspaces` (src/types/database.ts). El falso se comporta como
 // PostgREST: una columna que no existe devuelve error 42703 y `data` null. Asi la prueba
 // mata el bug de SOE-010 (pedir `nombre`), no solo el mapeo de la respuesta.
-const COLUMNAS = new Set(['id', 'name', 'slug', 'config_extra', 'modules']);
+const COLUMNAS = new Set(['id', 'name', 'slug', 'config_extra', 'modules', 'logo_url']);
 
 function falso(fila: Record<string, unknown> | null) {
   const pedidas: string[] = [];
@@ -45,7 +45,13 @@ describe('marcaDelWorkspace', () => {
     const r = await marcaDelWorkspace(supabase, 'w1');
     expect(r.marca).toBe('SOENA');
     expect(r.configExtra).toEqual({ email_respuesta: 'hola@soena.co' });
+    expect(r.logoUrl).toBeNull();
     expect(espia).not.toHaveBeenCalled();
+  });
+
+  it('trae el logo del workspace si lo tiene', async () => {
+    const { supabase } = falso({ id: 'w1', name: 'SOENA', config_extra: null, logo_url: ' https://x.supabase.co/logo.jpeg ' });
+    expect((await marcaDelWorkspace(supabase, 'w1')).logoUrl).toBe('https://x.supabase.co/logo.jpeg');
   });
 
   it('sin nombre cae al respaldo neutro', async () => {
@@ -67,7 +73,7 @@ describe('marcaDelWorkspace', () => {
       }),
     };
     const r = await marcaDelWorkspace(supabase, 'w1');
-    expect(r).toEqual({ marca: MARCA_POR_DEFECTO, configExtra: null });
+    expect(r).toEqual({ marca: MARCA_POR_DEFECTO, configExtra: null, logoUrl: null });
     expect(espia).toHaveBeenCalledOnce();
     expect(String(espia.mock.calls[0][0])).toContain('w1');
   });

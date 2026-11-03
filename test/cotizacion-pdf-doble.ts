@@ -11,7 +11,15 @@
 
 export type Fila = Record<string, unknown>
 
-export const base: { tablas: Record<string, Fila[]>; secuencia: number } = { tablas: {}, secuencia: 0 }
+export const base: {
+  tablas: Record<string, Fila[]>
+  secuencia: number
+  /**
+   * Una escritura que falla a propósito (para probar el orden de escrituras sin transacción):
+   * devuelve `true` y esa operación responde con error sin tocar la tabla. Ausente = nada falla.
+   */
+  fallar?: ((tabla: string, operacion: 'insert' | 'update' | 'delete') => boolean) | null
+} = { tablas: {}, secuencia: 0 }
 
 export function clienteFalso() {
   return {
@@ -54,7 +62,40 @@ function constructor(tabla: string) {
       const c = (tablas.cotizaciones ?? []).find(x => x.id === f.cotizacion_id)
       salida.cotizaciones = c ? { estado: c.estado, negocio_id: c.negocio_id ?? null, workspace_id: c.workspace_id ?? null, convencion_margen: c.convencion_margen ?? null } : null
     }
-    if (columnas.includes('empresas(')) salida.empresas = null
+    // Las etapas de la línea del negocio (`autorizacion-datos/envio.ts`): ¿alguna pide la
+    // autorización de datos? En `negocios` directo, o embebido en la cotización (`negocio_envio`).
+    const etapasDe = (lineaId: unknown) => (tablas.etapas_negocio ?? [])
+      .filter(e => e.linea_id === lineaId)
+      .map(e => ({ config_extra: e.config_extra ?? null }))
+    if (tabla === 'negocios' && columnas.includes('lineas_negocio(etapas_negocio(')) {
+      salida.lineas_negocio = f.linea_id ? { etapas_negocio: etapasDe(f.linea_id) } : null
+    }
+    // El PDF lee la línea con su config Y sus etapas en una ida (`lineas_negocio(config_extra, etapas_negocio(...))`).
+    if (tabla === 'negocios' && columnas.includes('lineas_negocio(config_extra, etapas_negocio(')) {
+      const l = (tablas.lineas_negocio ?? []).find(x => x.id === f.linea_id)
+      salida.lineas_negocio = l ? { config_extra: l.config_extra, etapas_negocio: etapasDe(f.linea_id) } : null
+    }
+    // El cliente del negocio para el PDF (`cotizacion-pdf-actions.ts`): su empresa y su contacto.
+    if (tabla === 'negocios' && columnas.includes('empresas(')) {
+      const e = (tablas.empresas ?? []).find(x => x.id === f.empresa_id)
+      salida.empresas = e ? { ...e } : null
+    }
+    if (tabla === 'negocios' && columnas.includes('contactos(')) {
+      const c = (tablas.contactos ?? []).find(x => x.id === f.contacto_id)
+      salida.contactos = c ? { nombre: c.nombre ?? null } : null
+    }
+    if (tabla === 'cotizaciones' && columnas.includes('negocio_envio:negocios')) {
+      const n = (tablas.negocios ?? []).find(x => x.id === f.negocio_id)
+      salida.negocio_envio = n
+        ? { linea_id: n.linea_id ?? null, contacto_id: n.contacto_id ?? null, lineas_negocio: n.linea_id ? { etapas_negocio: etapasDe(n.linea_id) } : null }
+        : null
+    }
+    // La ficha fijada en la línea (`items.proveedor_id` → `fotos_perfiles`), para las fotos del PDF.
+    if (tabla === 'items' && columnas.includes('ficha:fotos_perfiles(')) {
+      const p = (tablas.fotos_perfiles ?? []).find(x => x.id === f.proveedor_id)
+      salida.ficha = p ? { tipo: p.tipo, clave: p.clave } : null
+    }
+    if (columnas.includes('empresas(') && salida.empresas === undefined) salida.empresas = null
     if (columnas.includes('oportunidades(')) salida.oportunidades = null
     return salida
   }
@@ -72,6 +113,7 @@ function constructor(tabla: string) {
       const filas = [...fotos.map(f => ({ ...f, clave_pedida: f.clave })), ...deAlias].filter(f => filtros.every(fn => fn(f)))
       return { data: filas, error: null }
     }
+    if (operacion !== 'select' && base.fallar?.(tabla, operacion)) return { data: null, error: { message: `falla inyectada: ${operacion} en ${tabla}` } }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {

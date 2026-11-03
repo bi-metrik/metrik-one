@@ -6,7 +6,8 @@
 //
 // Etapa 1 (§8.1), con su candado en código:
 //   · `ver_catalogo`      lectura. Solo experiencias vigentes hoy (Bogotá). Vacío o vencido: error que manda a persona.
-//   · `ver_funciones`     lectura. Solo funciones futuras de esa experiencia; nunca dice «disponible».
+//   · `ver_funciones`     lectura. Solo funciones futuras de esa experiencia, agrupadas por fecha (primero la fecha y
+//                         después el horario, Mauricio 26-oct); nunca dice «disponible».
 //   · `consultar_reglas`  lectura. Solo políticas publicadas (`pol.*`).
 //   · `proponer` (acción `reserva`, = `proponer_reserva` del diseño). No escribe. Exige la autorización `general` (§5.2).
 //     El código arma el resumen desde el catálogo y desde lo que el cliente escribió DESPUÉS del «sí»: un nombre, una
@@ -15,7 +16,7 @@
 //   · `pasar_a_persona`   cierre. `motivo` de lista cerrada; la nota y las etiquetas las arma el código; no repite un
 //     motivo en la misma conversación (sin bucles, §6.1), salvo que la persona lo pida otra vez.
 //   · `respuesta_fija`    cierre. El modelo elige cuál y el código la manda tal cual (§7): la autorización (Sí / No), la
-//     autorización del dato sensible, o «no compartas datos de tarjeta».
+//     autorización del dato sensible, «no compartas datos de tarjeta», o «esos son los precios autorizados» (§8.8).
 //   · `responder`         del núcleo, con su verificador (cifras, fechas y links con respaldo; 600 caracteres).
 // Etapa 2 (§8.2): `consultar_cupo`, `apartar`, `generar_link_pago` y `verificar_pago` quedan DECLARADAS Y APAGADAS en
 // `HERRAMIENTAS_ETAPA_2`: no se le muestran al modelo, y si las nombra, el núcleo responde que no existen.
@@ -23,12 +24,12 @@
 // ============================================================
 
 import { RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, estadoAutorizacion, salidaAutorizacion } from './autorizacion.ts';
-import { CLAVES_REGLAS, condicionesVigentes, cuandoBogota, funcionesFuturas, pesos, politicas, vigentes, zonaDe } from './catalogo.ts';
+import { CLAVES_REGLAS, condicionesVigentes, cuandoBogota, funcionesFuturas, funcionesPorFecha, pesos, politicas, vigentes, zonaDe } from './catalogo.ts';
 import type { Experiencia } from './catalogo.ts';
 import { respuestaFija } from '../reglamento.ts';
 import type { ContextoDominio, DeclaracionHerramienta, Dominio, Propuesta, Reglamento, ResultadoHerramienta, Salida } from '../tipos.ts';
 import type { FilaPublica, MotivoPersona, TrazaPublica } from './tipos.ts';
-import { MOTIVOS_PERSONA } from './tipos.ts';
+import { MOTIVOS_EXPERIENCIAS as MOTIVOS_PERSONA } from './tipos.ts';
 
 export const BOT_PUBLICO = 'asistente-publico';
 export const PASAR_A_PERSONA = 'pasar_a_persona';
@@ -38,7 +39,17 @@ export const RF_PREFERENCIA_MESA = 'rf.preferencia_mesa';
 export const RF_CUPO = 'rf.cupo_lo_confirma_el_equipo';
 export const RF_SIGUIENTE_PASO = 'rf.siguiente_paso';
 export const RF_DUDA_ABIERTA = 'rf.duda_abierta';
-export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO] as const;
+/** §6.4.1: antes de pasar a quien pide una persona, una sola pregunta por qué. */
+export const RF_PERSONA_POR_QUE = 'rf.persona_por_que';
+/** §8.8: ante «¿por qué ese precio?», «está muy caro» o «hazme un descuento», los precios son los autorizados. */
+export const RF_PRECIO_AUTORIZADO = 'rf.precio_autorizado';
+/**
+ * Tope del resultado de `ver_catalogo` (tokens del núcleo, 4 caracteres por token). Una experiencia ocupa ~250-300: con
+ * el tope general de 400, dos vigentes a la vez (una cata y una cena de película) se cortaban a la mitad. Medido el
+ * 2026-10-26: una 245-294, dos 521, tres 728. 1500 deja entrar completas unas cinco.
+ */
+export const TOPE_VER_CATALOGO = 1500;
+export const FIJAS_DEL_MODELO = [RF_AUTORIZACION, RF_AUTORIZACION_SENSIBLE, RF_TARJETA, RF_PREFERENCIA_MESA, RF_CUPO, RF_PERSONA_POR_QUE, RF_PRECIO_AUTORIZADO] as const;
 
 /** Motivos que sí se repiten: la persona lo vuelve a pedir, o es otra reserva, o es urgente. */
 const REPETIBLES: MotivoPersona[] = ['pide_persona', 'reserva_lista', 'datos', 'crisis', 'duda_abierta'];
@@ -58,6 +69,30 @@ const filasDe = (ctx: ContextoDominio) => ctx.conversacion as FilaPublica[];
 /** Los motivos por los que esta conversación ya pasó a persona. Pura. */
 export function motivosYaPasados(filas: FilaPublica[]): MotivoPersona[] {
   return filas.map((f) => (f.traza as TrazaPublica | null)?.persona?.motivo).filter((m): m is MotivoPersona => !!m);
+}
+
+/** ¿Ya volvió de una persona? El bot solo atiende en `pending`: un paso a persona previo es un `pending` tras `open`. Pura. */
+export function volvioDePersona(filas: FilaPublica[]): boolean {
+  return motivosYaPasados(filas).length > 0;
+}
+
+/**
+ * ¿Ya le salió al cliente `rf.persona_por_que` en esta conversación (§6.4.4)? Cuenta lo publicado (la traza con
+ * salida), venga del código («persona» escrito solo) o del modelo (`respuesta_fija`). Pura.
+ */
+export function porQueYaSalio(filas: FilaPublica[]): boolean {
+  return filas.some((f) => {
+    const t = f.traza as TrazaPublica | null;
+    if (!t?.salida) return false;
+    return t.respuesta_fija === RF_PERSONA_POR_QUE
+      || (t.herramientas ?? []).some((h) => h.ok && h.nombre === RESPUESTA_FIJA && (h.args as { clave?: unknown } | null)?.clave === RF_PERSONA_POR_QUE);
+  });
+}
+
+/** ¿El último mensaje que le salió al cliente fue `rf.persona_por_que`? (lo que conteste ahora es la respuesta). Pura. */
+export function ultimoFuePorQue(filas: FilaPublica[]): boolean {
+  const ultima = filas.filter((f) => (f.traza as TrazaPublica | null)?.salida).at(-1);
+  return !!ultima && porQueYaSalio([ultima]);
 }
 
 const normal = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
@@ -140,7 +175,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: 'ver_funciones',
-      description: 'Las funciones futuras de una experiencia (día y hora, hora de Bogotá), con su id. No dice si hay cupo: nunca digas que hay cupo ni que está disponible. «Pa\'l finde» no es una función: muestra las opciones y pregunta cuál.',
+      description: 'Las funciones futuras de una experiencia, agrupadas por fecha (hora de Bogotá): cada fecha con sus horarios y el id de cada uno. Para reservar, pregunta primero la fecha (opciones con solo la fecha, sin horas) y después el horario de esa fecha; si la fecha tiene un solo horario, dilo y no lo preguntes; si el cliente ya dijo fecha y hora, no las vuelvas a preguntar. No dice si hay cupo: nunca digas que hay cupo ni que está disponible. «Pa\'l finde» no es una fecha: muestra las fechas de ese fin de semana y pregunta cuál.',
       parameters: { type: 'object', properties: { experiencia: { type: 'string', description: 'El id de la experiencia que devolvió ver_catalogo.' } }, required: ['experiencia'] },
     },
     {
@@ -165,7 +200,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
     },
     {
       name: RESPUESTA_FIJA,
-      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures.`,
+      description: `Manda una respuesta fija, tal cual la escribe el sistema. ${RF_AUTORIZACION}: antes de pedir nombre, cédula o teléfono para la reserva (pide la autorización con Sí / No; es la ÚNICA forma de pedirla: nunca la redactes tú en responder). ${RF_AUTORIZACION_SENSIBLE}: si la persona menciona una restricción alimentaria, alergia o dato de salud (no repitas el dato). ${RF_TARJETA}: si escribe o pide escribir datos de tarjeta. ${RF_PREFERENCIA_MESA}: si pide una mesa o zona (pon en \`preferencia\` lo que pidió; el sistema la anota como preferencia, nunca como asignada, y dice el recargo de la zona si lo hay). ${RF_CUPO}: si pregunta si hay cupo o pide que se lo asegures. ${RF_PERSONA_POR_QUE}: si pide una persona sin decir para qué (una sola vez por conversación; si ya la mandaste o ya lo atendió una persona, usa pasar_a_persona). ${RF_PRECIO_AUTORIZADO}: si pregunta por qué ese precio, dice que está caro o pide un descuento o una rebaja (no negocies ni pases a persona solo por eso).`,
       parameters: {
         type: 'object',
         properties: {
@@ -179,6 +214,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
 
   return {
     bot: BOT_PUBLICO,
+    topesResultado: { ver_catalogo: TOPE_VER_CATALOGO },
     lecturas,
     acciones: ['reserva'],
     datosProponer: {
@@ -209,8 +245,8 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         const exp = String(args.experiencia ?? '');
         if (!vigentes(r, ahora).some((e) => e.id === exp)) return { ok: false, datos: null, error: `«${exp}» no es una experiencia vigente. Usa un id de ver_catalogo.` };
         const fs = funcionesFuturas(r, exp, ahora);
-        if (!fs.length) return { ok: true, datos: { funciones: [], nota: 'No hay funciones futuras publicadas para esta experiencia.' } };
-        return { ok: true, datos: { funciones: fs.map((f) => ({ id: f.id, cuando: cuandoBogota(f.inicio) })) }, sobre: exp };
+        if (!fs.length) return { ok: true, datos: { fechas: [], nota: 'No hay funciones futuras publicadas para esta experiencia.' } };
+        return { ok: true, datos: { fechas: funcionesPorFecha(fs) }, sobre: exp };
       }
       if (nombre === 'consultar_reglas') {
         const clave = String(args.clave ?? '');
@@ -260,7 +296,7 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         `• ${personas} ${personas === 1 ? 'persona' : 'personas'} · ${pesos(exp.precioPersona)} por persona${exp.precioPareja !== null ? ` (${pesos(exp.precioPareja)} por pareja)` : ''}`,
         ...(pedida ? [`• ${lineaPreferenciaMesa(pedida)}`] : []),
         `• ${campos.nombre} · C.C. ${digitos(campos.cedula)} · Tel. ${digitos(campos.telefono)}`,
-        'El equipo de Sabor te confirma el total, el cupo, la mesa y el pago. ¿Está bien?',
+        'El equipo de Sabor te confirma el total, el cupo y el pago. ¿Está bien?',
       ].join('\n');
       const propuesta: Propuesta = {
         accion: 'reserva',
@@ -288,7 +324,10 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         `Autorización de datos para la reserva: ${lineaG}.`,
         ...(sen.estado !== 'no_pedida' ? [`Dato de salud: ${sen.estado === 'si' ? 'autorizado (ya pasó a persona)' : sen.estado === 'no' ? 'no autorizado: no lo menciones ni lo guardes' : 'autorización pedida, sin respuesta'}.`] : []),
         ...(preferenciaMesa(filas) ? [`Preferencia de mesa anotada (por confirmar, no asignada): ${preferenciaMesa(filas)}.`] : []),
-        ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')} (no repitas esos motivos salvo pide_persona).`] : []),
+        ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')} (no repitas esos motivos salvo pide_persona). Si pide una persona otra vez: pasar_a_persona motivo pide_persona, sin preguntar por qué.`] : []),
+        ...(!pasados.length && porQueYaSalio(filas) ? [ultimoFuePorQue(filas)
+          ? 'Tu último mensaje fue la pregunta de para qué quiere una persona (rf.persona_por_que). Si ahora pide algo que resuelves, contéstalo y TERMINA el mensaje ofreciéndole otra vez pasar con una persona del equipo. Si es algo que no resuelves, pasa con ese motivo. Si insiste en una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona. No vuelvas a preguntar por qué.'
+          : 'Ya le preguntaste por qué quiere una persona (rf.persona_por_que): no lo vuelvas a preguntar. Si vuelve a pedir una persona o dice que solo quiere hablar con alguien: pasar_a_persona motivo pide_persona.'] : []),
       ];
     },
 
@@ -319,6 +358,18 @@ export function dominioPublico(o: OpcionesDominioPublico): Dominio {
         if (clave === RF_TARJETA) {
           const s: Salida = { tipo: 'texto', texto: respuestaFija(r, RF_TARJETA) };
           return { ok: true, salidas: [s], privado: { enmascarar: true } };
+        }
+        if (clave === RF_PERSONA_POR_QUE) {
+          // §6.4.4 y §6.4.5: una sola vez por conversación, y nunca a quien vuelve de una persona.
+          if (volvioDePersona(filas)) return { ok: false, error: 'Ya lo atendió una persona y lo devolvieron: si pide una persona, pasar_a_persona motivo pide_persona, sin preguntar.', candado: 'persona_por_que_tras_persona' };
+          if (porQueYaSalio(filas)) return { ok: false, error: 'Ya le preguntaste por qué quiere una persona: no lo vuelvas a preguntar. Si pide una persona, pasar_a_persona motivo pide_persona.', candado: 'persona_por_que_repetida' };
+          return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_PERSONA_POR_QUE) }] };
+        }
+        if (clave === RF_PRECIO_AUTORIZADO) {
+          // Un reglamento publicado antes del 25-oct no la trae: sin texto no sale un mensaje vacío.
+          const texto = respuestaFija(r, RF_PRECIO_AUTORIZADO);
+          if (!texto) return { ok: false, error: 'Sin ese texto: contesta con responder que esos son los precios publicados, sin negociar ni prometer descuentos.', candado: 'fija_sin_texto' };
+          return { ok: true, salidas: [{ tipo: 'texto', texto }] };
         }
         if (clave === RF_CUPO) return { ok: true, salidas: [{ tipo: 'texto', texto: respuestaFija(r, RF_CUPO) }] };
         if (clave === RF_PREFERENCIA_MESA) {

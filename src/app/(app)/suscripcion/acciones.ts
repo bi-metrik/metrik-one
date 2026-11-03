@@ -7,6 +7,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { generarEnlacePagoCuota } from '@/lib/cobros/enlace-pago-cuota-servidor'
 import { enlaceDeCuotaPendiente } from '@/lib/seccion-suscripcion/pagar-ahora'
+import { enlaceDeReactivacion, SIN_SUSPENSION } from '@/lib/valida-registro/reactivacion-servidor'
 import { leerEquipo } from '@/lib/seccion-suscripcion/carga-servidor'
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { comprarLicencia, cotizarLicencia, liberarLicencia } from '@/lib/seccion-suscripcion/licencias-servidor'
@@ -24,6 +25,13 @@ import {
   validarInvitacion,
 } from '@/lib/usuarios-espacio/reglas'
 import { cambiarRolUsuario, invitarUsuario, reenviarInvitacion, retirarUsuario } from '@/lib/usuarios-espacio/servidor'
+import { getCachedUser } from '@/lib/supabase/auth-user'
+import {
+  cobrarPendienteConTarjeta,
+  quitarTarjetaCda,
+  registrarTarjetaCda,
+  type EntradaTarjetaCda,
+} from '@/lib/valida-cda/tarjeta-cda-servidor'
 import {
   cambiarMencion,
   elegirPlanAnual as elegirPlanAnualServidor,
@@ -287,6 +295,13 @@ export async function pagarCuotaPendiente(): Promise<Resultado<{ url: string }>>
   const r = await ctxEscritura()
   if (!r.ok) return r
   const db = createServiceClient() as unknown as SupabaseClient
+  // Un plan suspendido por la reversión del pago se reactiva pagando el período con su propio cobro
+  // (`reactivacion-servidor.ts`): el de la cuota quedó anulado y no admite enlace.
+  const reactivacion = await enlaceDeReactivacion(r.ctx.workspaceId, { db })
+  if (reactivacion.ok || reactivacion.error !== SIN_SUSPENSION) {
+    if (reactivacion.ok) refrescar()
+    return reactivacion
+  }
   const res = await enlaceDeCuotaPendiente(r.ctx, {
     db,
     generar: async (p) => {
@@ -332,6 +347,40 @@ export async function cambiarMencionPlanAnual(p: { autoriza: boolean; textoMostr
   return res
 }
 
+// ── Pago automático con tarjeta de un CDA (Términos v1.5, 2.4; diseño del 2026-10-30) ────
+
+/**
+ * Registrar o cambiar la tarjeta: solo la persona designada en su sesión (D1) y con la v1.5 aceptada (D2),
+ * lo vuelve a exigir `tarjeta-cda-servidor.ts`. El correo con que se crea el cliente en ePayco es el de
+ * la sesión, nunca uno que mande el navegador.
+ */
+async function registrarTarjetaPagoAutomaticoSinClave(p: EntradaTarjetaCda): Promise<Resultado<{ ultimos4: string | null }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const { user } = await getCachedUser()
+  const res = await registrarTarjetaCda(r.ctx, p, { correo: user?.email ?? null })
+  if (res.ok) refrescar()
+  return res
+}
+
+/** «Quitar tarjeta»: el plan vuelve al enlace de pago y se pide a ePayco borrarla. */
+export async function quitarTarjetaPagoAutomatico(): Promise<Resultado<{ borrada: boolean }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = await quitarTarjetaCda(r.ctx)
+  if (res.ok) refrescar()
+  return res
+}
+
+/** «Pagar ahora con esta tarjeta»: lo atrasado, solo con este clic y la huella de lo que se confirmó (D3). */
+async function pagarPendienteConTarjetaSinClave(p: { huella: string }): Promise<Resultado<{ texto: string }>> {
+  const r = await ctxEscritura()
+  if (!r.ok) return r
+  const res = await cobrarPendienteConTarjeta(r.ctx, p.huella)
+  refrescar()
+  return res
+}
+
 // ── Idempotencia por intención (brief del doble guardado, 2026-10-06) ──────────────────
 // Las acciones de abajo son la puerta pública; su cuerpo vive en `<nombre>SinClave`. Con la
 // clave del navegador (`useIntencion`), la misma intención repetida (POST que Chromium
@@ -355,6 +404,20 @@ export async function pedirContactoDeSustenta(p: { origen?: string } = {}, inten
   return accionIdempotente<Awaited<ReturnType<typeof pedirContactoDeSustentaSinClave>>>(
     { accion: 'pedirContactoDeSustenta', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
     () => pedirContactoDeSustentaSinClave(p),
+  )
+}
+
+export async function registrarTarjetaPagoAutomatico(p: EntradaTarjetaCda, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof registrarTarjetaPagoAutomaticoSinClave>>>(
+    { accion: 'registrarTarjetaPagoAutomatico', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => registrarTarjetaPagoAutomaticoSinClave(p),
+  )
+}
+
+export async function pagarPendienteConTarjeta(p: { huella: string }, intencion?: string) {
+  return accionIdempotente<Awaited<ReturnType<typeof pagarPendienteConTarjetaSinClave>>>(
+    { accion: 'pagarPendienteConTarjeta', clave: intencion, args: [p], enCurso: () => ({ ok: false, error: MENSAJE_EN_CURSO }) },
+    () => pagarPendienteConTarjetaSinClave(p),
   )
 }
 

@@ -167,6 +167,25 @@ const NO_ES_OCUPACION =
   'que sigue al nombre de la habitación (SA, AD, MP, PC, TI) tampoco: «Standard Room AD» es alojamiento y ' +
   'desayuno, no un adulto. No los uses como número de personas.'
 
+/**
+ * Un cobro que el viajero paga EN DESTINO y que no es un cargo del hotel (V-13 del QA del
+ * 2026-10-29, ronda 3): el ingreso a un parque nacional, la tasa de entrada a una isla. No suma al
+ * precio; el documento lo dice como «Se paga en destino», con su monto si la pantalla lo trae.
+ */
+const PAGO_EN_DESTINO: CampoRanura = {
+  slug: 'pago_destino_otro',
+  label: 'Otro pago en destino',
+  tipo: 'texto',
+  min: false,
+  alerta_revision: true,
+  descripcion_ai:
+    'Un cobro que la pantalla dice que el viajero paga APARTE en destino y que NO es un cargo ni un impuesto del ' +
+    'hotel o del proveedor: el ingreso a un parque nacional, la tasa de entrada a una isla, un impuesto de salida. ' +
+    'Escríbelo corto, con quién lo cobra, su monto y su moneda si la pantalla los trae, y si es por persona ' +
+    '(ej. «Ingreso al PNN Tayrona, en taquilla, por persona» o «Tarjeta de turismo de San Andrés: 146.000 COP por persona»). ' +
+    'No repitas aquí el resort fee, el destination fee ni los impuestos del hotel. null si no aparece.',
+}
+
 const OCUPACION: CampoRanura[] = [
   {
     slug: 'ocupacion_adultos',
@@ -627,6 +646,34 @@ const HOTEL: DefinicionRanura = {
       min: false,
       descripcion_ai: 'Código ISO 4217 de la moneda de esos impuestos en destino (MXN, USD, EUR...). null si no aparece.',
     },
+    // QA Trappvel del 2026-10-29 (V7-2): «Resort fee US$ 35.00 por noche» se guardaba como «35 USD»
+    // y el documento lo llamaba «Impuestos»: el cliente leía un sexto de lo que paga allá.
+    {
+      slug: 'impuestos_destino_concepto',
+      label: 'Concepto del cargo en destino',
+      tipo: 'texto',
+      min: false,
+      descripcion_ai:
+        'Cómo llama la pantalla a ese cargo que se paga en destino, tal cual: «Resort fee», «Destination fee», ' +
+        '«City tax», «Tasa turística», «Impuestos y tasas». null si no hay cargo en destino.',
+    },
+    {
+      slug: 'impuestos_destino_base',
+      label: 'El cargo en destino es',
+      tipo: 'enum',
+      min: false,
+      // V-17 (QA del 2026-10-29, ronda 3): también por persona. «35 USD» a secas se leía como de
+      // toda la estadía y el cliente calculaba seis veces menos.
+      opciones: ['total', 'por_noche', 'por_persona', 'por_persona_noche'],
+      descripcion_ai:
+        'La unidad del valor del cargo en destino: total (por toda la estadía), por_noche (por cada noche: «per night», ' +
+        '«por noche», «/noche»), por_persona (por cada huésped, una vez: «per person», «por persona», «pp») o ' +
+        'por_persona_noche (por huésped y por noche: «per person per night», «por persona por noche»). Responde ' +
+        'exactamente uno de: total, por_noche, por_persona, por_persona_noche. null si no hay cargo o la pantalla no lo dice.',
+    },
+    // V-13 (QA del 2026-10-29, ronda 3): el ingreso al PNN Tayrona no es un cargo del hotel, pero el
+    // viajero lo paga allá; no se capturaba y el cliente no se enteraba.
+    PAGO_EN_DESTINO,
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
@@ -650,6 +697,8 @@ const ACTIVIDAD: DefinicionRanura = {
     { slug: 'duracion', label: 'Duración', tipo: 'texto', min: false, descripcion_ai: 'Duración tal como aparece (3 horas, día completo...).' },
     { slug: 'idioma', label: 'Idioma', tipo: 'texto', min: false, descripcion_ai: 'Idioma en que se presta el servicio.' },
     { slug: 'pax', label: 'Personas', tipo: 'numero', min: true, descripcion_ai: 'Número de personas de la reserva. Si no se ve, null: no supongas 1.' },
+    // V-13: la caminata al Cabo San Juan no incluye el ingreso al parque.
+    PAGO_EN_DESTINO,
     ...OCUPACION,
     MONEDA,
     PRECIO_TOTAL,
@@ -675,6 +724,44 @@ const TRASLADO: DefinicionRanura = {
     MONEDA,
     PRECIO_TOTAL,
     basePrecio(['total', 'por_pax'], 'total = es el precio del trayecto completo; por_pax = es el precio por persona.'),
+    ...COSTO_AGENCIA,
+  ],
+}
+
+/**
+ * «Tren» (QA Trappvel 2026-10-29, M9-1 · decisión 5 de Mauricio): el tiquete de tren (Renfe,
+ * Trenitalia, SNCF, Eurostar, Italo…). Hasta aquí se leía como traslado «tren»: sin horas, sin el
+ * operador en el documento y sin poder ser opción del vuelo del mismo trayecto.
+ *
+ * Se lee como un traslado (trayecto + fecha, mismos slugs: la identidad, la bandeja y el aviso de
+ * trayecto repetido lo comparan igual) con lo propio del tren: operador, número y horas.
+ *
+ * ⚠️ Las etiquetas «Operador del tren» y «Nº de tren» son SOLO suyas a propósito: `ranuraDeLectura`
+ * reconoce una lectura por las etiquetas que una sola ranura declara, y así una opción de tren
+ * dentro de un bloque de vuelo (juntadas como opciones del mismo trayecto) sigue siendo tren en el
+ * documento y en Reservas.
+ */
+const TREN: DefinicionRanura = {
+  slug: 'tren_detalle',
+  label: 'Tren',
+  grupos: ['tren', 'trenes'],
+  queSePide: 'El detalle del tiquete o de la reserva del tren ya escogido, con su horario y precio.',
+  queNoSirve: 'La lista de horarios con varios trenes: se sube el que ya se eligió.',
+  unidadPorDefecto: 'pax',
+  campos: [
+    { slug: 'proveedor', label: 'Operador del tren', tipo: 'texto', min: true, descripcion_ai: 'Quién opera el tren tal como aparece, con el tipo de tren si se ve: Renfe AVE, Trenitalia Frecciarossa, SNCF TGV INOUI, Eurostar, Italo, Ouigo, Deutsche Bahn ICE.' },
+    { slug: 'trayecto', label: 'Trayecto', tipo: 'texto', min: true, descripcion_ai: 'Estación de salida y de llegada, en ese orden, separadas por « -> » (ej. «Paris Gare de Lyon -> Roma Termini»). Con un cambio de tren, la salida del primero y la llegada del último.' },
+    { slug: 'fecha_hora', label: 'Fecha', tipo: 'fecha', min: true, descripcion_ai: 'Fecha del viaje en tren en formato AAAA-MM-DD. Si la pantalla muestra día y mes pero NO el año, devuelve --MM-DD (ej. --10-23): NUNCA inventes el año. Si también muestra el día de la semana, agrégalo tras una barra: --10-23/vie.' },
+    { slug: 'hora_salida', label: 'Hora de salida', tipo: 'texto', min: false, descripcion_ai: 'Hora de salida del tren en formato HH:MM de 24 horas. null si no se ve.' },
+    { slug: 'hora_llegada', label: 'Hora de llegada', tipo: 'texto', min: false, descripcion_ai: 'Hora de llegada del tren (del último si hay cambio) en formato HH:MM de 24 horas. null si no se ve.' },
+    { slug: 'numero_tren', label: 'Nº de tren', tipo: 'texto', min: false, descripcion_ai: 'Número o números de tren tal como aparecen (ej. 9241, FR 9535). null si no se ve.' },
+    { slug: 'cambio', label: 'Cambio de tren', tipo: 'texto', min: false, descripcion_ai: 'Estación donde se cambia de tren, si la hay (ej. «Milano Centrale»). null si es directo o no se ve.' },
+    { slug: 'clase', label: 'Clase', tipo: 'texto', min: false, descripcion_ai: 'Clase o tarifa del tiquete (Turista, Business, Standard Premier, 1ª, 2ª…). null si no se ve.' },
+    { slug: 'pax', label: 'Personas', tipo: 'numero', min: true, descripcion_ai: 'Número de viajeros del tiquete. Si no se ve, null: no supongas 1.' },
+    ...OCUPACION,
+    MONEDA,
+    PRECIO_TOTAL,
+    basePrecio(['total', 'por_pax'], 'total = es el precio de todos los viajeros; por_pax = es el precio de uno solo.'),
     ...COSTO_AGENCIA,
   ],
 }
@@ -712,16 +799,43 @@ const OTRO: DefinicionRanura = {
   ],
 }
 
+/**
+ * «Paquete de bloqueo» (Trappvel, brief del 2026-10-27): en un viaje en BLOQUEO cada opción es UN
+ * paquete del operador —hotel + vuelo en fechas cerradas, un valor por persona— armado con DOS
+ * pantallazos que la asesora une en el mismo paquete (`bloqueo-paquete.ts`). Su lectura NO pasa por
+ * este contrato: tiene su propio lector (`bloqueo-extraccion.ts`), porque trae una tabla de precios por
+ * acomodación y la fila de íconos de lo que incluye. Los campos de aquí solo nombran la ranura.
+ *
+ * ⚠️ Solo lo escribe la cotización por pasos de un viaje en bloqueo: fuera de los botones de siempre y
+ * de la detección. Los sinónimos son estrechos a propósito: un grupo libre «paquete» de una cotización
+ * vieja NO se vuelve ranura.
+ */
+const PAQUETE: DefinicionRanura = {
+  slug: 'paquete_detalle',
+  label: 'Paquete de bloqueo',
+  grupos: ['paquete de bloqueo', 'paquetes de bloqueo'],
+  queSePide: 'Dos pantallazos que van juntos: el del hotel (con la tabla de precios por persona) y el del vuelo.',
+  queNoSirve: 'Pantallazos de hotel y vuelo de paquetes distintos en el mismo paquete.',
+  unidadPorDefecto: 'paquete',
+  campos: [
+    { slug: 'nombre', label: 'Hotel', tipo: 'texto', min: true, descripcion_ai: 'Nombre del hotel del paquete.' },
+    MONEDA,
+    PRECIO_TOTAL,
+  ],
+}
+
 const RANURAS: Record<string, DefinicionRanura> = {
   [VUELO.slug]: VUELO,
   [HOTEL.slug]: HOTEL,
   [ACTIVIDAD.slug]: ACTIVIDAD,
   [TRASLADO.slug]: TRASLADO,
+  [TREN.slug]: TREN,
   [OTRO.slug]: OTRO,
+  [PAQUETE.slug]: PAQUETE,
 }
 
 /** Las ranuras que solo escribe la cotización por pasos: fuera de los botones de siempre. */
-const SOLO_POR_PASOS: ReadonlySet<string> = new Set([OTRO.slug])
+const SOLO_POR_PASOS: ReadonlySet<string> = new Set([OTRO.slug, PAQUETE.slug])
 
 /** ¿Esta ranura solo la escribe la cotización por pasos («Otro servicio»)? */
 export function ranuraSoloPorPasos(ranura: Pick<DefinicionRanura, 'slug'> | null | undefined): boolean {
@@ -749,7 +863,9 @@ export function ranuraSoloPorPasos(ranura: Pick<DefinicionRanura, 'slug'> | null
  * segunda lista para la misma pregunta se desincroniza el día que se agregue un
  * sinónimo: el síntoma sería una columna que desaparece de la tabla sin que nada falle.
  */
-export const RANURAS_COMBINABLES: readonly string[] = [VUELO.slug, HOTEL.slug]
+// El paquete de bloqueo (hotel + vuelo del operador, D5 de Mauricio, 2026-10-29) se cruza como un hotel:
+// cada tarifa lleva UN paquete y la propuesta muestra cada paquete con su precio.
+export const RANURAS_COMBINABLES: readonly string[] = [VUELO.slug, HOTEL.slug, PAQUETE.slug]
 
 /**
  * ¿Un `items.grupo` abre columna en la tabla de combinaciones?

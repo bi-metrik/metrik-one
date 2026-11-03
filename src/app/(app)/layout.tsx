@@ -225,6 +225,7 @@ export default async function AppLayout({
         impersonacion={impersonacion}
         timerActivo={timerActivo}
         bibliotecaFotos={tienePropuestaHtml(workspace.cotizacion_template_slug)}
+        usuarioId={user.id}
         notificationBell={
           <NotificationBell
             userId={user.id}

@@ -7,12 +7,14 @@
  * F3-7 (gate servicios_listos), C15/§7.4 (el servidor rechaza a quien no puede).
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 type Fila = Record<string, unknown>
 
 let tablas: Record<string, Fila[]> = {}
 let secuencia = 0
+/** Tabla cuya lectura falla (barrido 2026-10-22: el gate falla cerrado). */
+let tablaCaida: string | null = null
 
 const WS = '64010015-a9a2-4aca-be83-e456cf217d96'
 const LINEA = 'linea-viaje'
@@ -39,6 +41,12 @@ vi.mock('@/lib/actions/get-workspace', () => ({
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: () => clienteFalso(),
   createClient: async () => clienteFalso(),
+}))
+// M-12 · el lector de soportes (Gemini) y Storage son dobles: la prueba no llama a nadie.
+const lectorFalso = vi.fn()
+vi.mock('@/lib/ai/extract-fields', () => ({ extractFieldsFromDocument: (...a: unknown[]) => lectorFalso(...a) }))
+vi.mock('@/lib/almacenamiento/one', () => ({
+  subirAOne: async (e: { path: string }) => ({ referencia: `one://ve-documentos/${e.path}` }),
 }))
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../../test/exigir-modulo-doble')).dobleExigirModulo())
@@ -95,6 +103,7 @@ function constructor(tabla: string) {
   }
 
   const ejecutar = (): { data: unknown; error: { code?: string; message: string } | null; count?: number } => {
+    if (operacion === 'select' && tabla === tablaCaida) return { data: null, error: { message: 'caída' } }
     const todas = tablas[tabla] ?? (tablas[tabla] = [])
     const coinciden = todas.filter(f => filtros.every(fn => fn(f)))
     if (operacion === 'insert') {
@@ -171,9 +180,11 @@ function constructor(tabla: string) {
 }
 
 import {
+  actualizarServicio,
   decidirAprobacionServicio,
   pedirAprobacionServicio,
   registrarPagoServicio,
+  subirSoporteServicio,
   type EntradaPagoServicio,
 } from './servicios-viaje-actions'
 import { evaluarGateServicios, leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
@@ -188,6 +199,7 @@ const SOPORTE = `one://ve-documentos/${WS}/negocios/${NEG}/servicios/sv-vuelo/so
 
 function sembrar(opts: { anticipo?: number; activo?: boolean } = {}) {
   secuencia = 0
+  tablaCaida = null
   rol = 'operator'
   areas = ['operaciones']
   staffId = 's-ale'
@@ -401,5 +413,168 @@ describe('gate servicios_listos (F3-7)', () => {
     expect(await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: [] })).toEqual([])
     sembrar({ activo: false })
     expect(await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })).toEqual([])
+  })
+
+  it('con la línea encendida y ningún servicio que vaya, frena (barrido 2026-10-22)', async () => {
+    tablas.negocio_servicios = []
+    const falta = await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })
+    expect(falta.map(f => f.texto)).toEqual(['No hay servicios del viaje registrados.'])
+    // Solo filas «No va»: tampoco hay nada listo.
+    sembrar()
+    tablas.negocio_servicios = tablas.negocio_servicios.filter(s => s.estado === 'cancelado')
+    expect((await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })).map(f => f.texto))
+      .toEqual(['No hay servicios del viaje registrados.'])
+  })
+
+  it('si no puede leer el negocio, los servicios, los pagos o las aprobaciones, frena', async () => {
+    for (const t of ['negocios', 'negocio_servicios', 'gastos', 'aprobaciones_excepcion']) {
+      sembrar()
+      for (const s of tablas.negocio_servicios) s.confirmacion_ref = 'x'
+      tablaCaida = t
+      const falta = await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })
+      expect(falta.map(f => f.texto), t).toEqual(['No se pudieron leer los servicios del viaje. Intenta de nuevo.'])
+    }
+  })
+})
+
+describe('QA Trappvel 2026-10-29: el proveedor cobra menos y la desviación del viaje', () => {
+  const SOPORTE_HOTEL = `one://ve-documentos/${WS}/negocios/${NEG}/servicios/sv-hotel/soporte-1.jpg`
+  const confirmarTodo = () => { for (const s of tablas.negocio_servicios) s.confirmacion_ref = 'one://ve-documentos/x/confirmacion.pdf' }
+  const gate = async () => (await evaluarGateServicios(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['servicios_listos'] })).map(f => f.texto)
+
+  it('M3-4: el hotel cobró menos; operaciones lo dice y el gate pasa sin inventar un pago', async () => {
+    await registrarPagoServicio(pagoVuelo())
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    confirmarTodo()
+    expect(await gate()).toEqual(['Hotel Arena Blanca: falta pagar $310.000'])
+
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })).toEqual({ ok: true })
+    expect(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!.valor_por_pagar).toBe(2_100_000)
+    expect(await gate()).toEqual([])
+    expect(tablas.gastos).toHaveLength(2)
+    expect(tablas.activity_log.some(a => String(a.contenido).includes('$310.000 menos de lo cotizado'))).toBe(true)
+  })
+
+  it('M3-4: más de lo cotizado, cero o sin permiso no se escribe; igual a lo cotizado queda vacío', async () => {
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_500_000 })).toMatchObject({ ok: false })
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 0 })).toMatchObject({ ok: false })
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_410_000 })).toEqual({ ok: true })
+    expect(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!.valor_por_pagar).toBeNull()
+    areas = ['comercial']; staffId = 's-dani'
+    expect(await actualizarServicio('sv-hotel', { valor_por_pagar: 2_000_000 })).toMatchObject({ ok: false, error: expect.stringContaining('no permite') })
+  })
+
+  it('H3-4: el vuelo se pasa lo mismo que el hotel ahorró; la aprobación pedida caduca y el viaje sigue', async () => {
+    // Viaje 03: el vuelo se paga primero (+$310.000, pide a Edgar), luego el hotel sale $310.000 más barato.
+    await registrarPagoServicio(pagoVuelo({ monto: 1_490_000 }))
+    expect(aprobacionesDe('sv-vuelo')).toEqual([expect.objectContaining({ tipo: 'desviacion_costo', estado: 'solicitada' })])
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    expect(aprobacionesDe('sv-vuelo').map(a => a.estado)).toEqual(['caducada'])
+    confirmarTodo()
+    expect(await gate()).toEqual([])
+    expect(tablas.activity_log.some(a => String(a.contenido).includes('el viaje entero no se pasa'))).toBe(true)
+  })
+
+  it('H3-4: con el ahorro ya registrado, el sobrecosto del vuelo no pide aprobación', async () => {
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    expect(await registrarPagoServicio(pagoVuelo({ monto: 1_490_000 }))).toMatchObject({ ok: true, esperando: [] })
+    // Si el viaje SÍ se pasa (un peso más), se pide como siempre.
+    sembrar({ anticipo: 2_000_000 })
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    expect(await registrarPagoServicio(pagoVuelo({ monto: 1_490_001 }))).toMatchObject({ ok: true, esperando: [expect.stringContaining('más de lo cotizado')] })
+  })
+
+  it('H3-4: borrar el ahorro que compensaba vuelve a pedir la aprobación del sobrecosto', async () => {
+    await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: 2_100_000, soporteRef: SOPORTE_HOTEL }))
+    await actualizarServicio('sv-hotel', { valor_por_pagar: 2_100_000 })
+    await registrarPagoServicio(pagoVuelo({ monto: 1_490_000 }))
+    expect(aprobacionesDe('sv-vuelo')).toHaveLength(0)
+    await actualizarServicio('sv-hotel', { valor_por_pagar: null })
+    expect(aprobacionesDe('sv-vuelo')).toEqual([expect.objectContaining({ tipo: 'desviacion_costo', estado: 'solicitada', huella: 'desviacion_costo|1490000' })])
+  })
+
+  it('M3-5: el pago a proveedor deja la fecha del pago', async () => {
+    await registrarPagoServicio(pagoVuelo())
+    expect(tablas.gastos[0]).toMatchObject({ fecha: HOY, fecha_pago: HOY })
+  })
+})
+
+describe('QA Trappvel 2026-10-29 · G12: leer el soporte del pago a proveedor (M-12)', () => {
+  const campos = (o: Record<string, string | null>) => ({ data: Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { value: v, confidence: 0.95, manual: false }])) })
+  const subir = async (servicioId: string) => {
+    const fd = new FormData()
+    fd.set('servicioId', servicioId)
+    fd.set('file', new File([new Uint8Array([1, 2, 3])], 'pagoprov.png', { type: 'image/png' }))
+    return subirSoporteServicio(fd)
+  }
+  const keyAntes = process.env.GEMINI_API_KEY
+  beforeEach(() => { lectorFalso.mockReset(); process.env.GEMINI_API_KEY = 'llave-de-prueba' })
+  afterEach(() => { process.env.GEMINI_API_KEY = keyAntes })
+
+  it('subir el soporte lo LEE con el lector de comprobantes y propone valor, fecha, medio y comprobante; no registra nada', async () => {
+    lectorFalso.mockResolvedValue(campos({
+      monto: '1.000.000', fecha: '2026-10-29', banco_origen: 'Bancolombia', cuenta_origen: '****4417',
+      referencia: '0000PRUEBA03P1', destinatario: 'SATENA', moneda: null, monto_moneda: null, tasa_cambio: null,
+    }))
+    const r = await subir('sv-vuelo')
+    expect(r).toMatchObject({
+      ok: true,
+      referencia: expect.stringMatching(/^one:\/\//),
+      lectura: { monto: 1_000_000, fecha: '2026-10-29', medioId: 'tc-empresa', referencia: '0000PRUEBA03P1', moneda: null },
+    })
+    // El mismo lector del comprobante del viajero, con los campos del pago a proveedor.
+    expect(lectorFalso).toHaveBeenCalledTimes(1)
+    const [, mime, camposPedidos, llave] = lectorFalso.mock.calls[0]
+    expect(mime).toBe('image/png')
+    expect(llave).toBe('llave-de-prueba')
+    expect((camposPedidos as Array<{ slug: string }>).map(c => c.slug)).toEqual(expect.arrayContaining(['monto', 'referencia', 'moneda', 'tasa_cambio']))
+    expect(tablas.gastos).toHaveLength(0)
+  })
+
+  it('si no se puede leer, el soporte queda y la lectura viene vacía para escribir a mano', async () => {
+    lectorFalso.mockResolvedValue({ data: null, error: 'x' })
+    expect(await subir('sv-vuelo')).toMatchObject({ ok: true, lectura: null })
+    lectorFalso.mockRejectedValue(new Error('caído'))
+    expect(await subir('sv-vuelo')).toMatchObject({ ok: true, lectura: null })
+    delete process.env.GEMINI_API_KEY
+    expect(await subir('sv-vuelo')).toMatchObject({ ok: true, lectura: null })
+  })
+
+  it('servicio cotizado en USD: propone la moneda, el monto en USD y la TRM del soporte', async () => {
+    Object.assign(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!, { moneda: 'USD', costo_moneda: 580.72, tasa_cotizada: 4150 })
+    lectorFalso.mockResolvedValue(campos({ monto: '2.456.446', moneda: 'USD', monto_moneda: '580.72', tasa_cambio: '4.230' }))
+    expect(await subir('sv-hotel')).toMatchObject({ ok: true, lectura: { monto: 2_456_446, moneda: 'USD', montoMoneda: 580.72, tasa: 4230 } })
+  })
+
+  it('el pago guarda el número de comprobante y la empresa del proveedor', async () => {
+    tablas.negocio_servicios.find(s => s.id === 'sv-vuelo')!.proveedor_empresa_id = 'emp-satena'
+    await registrarPagoServicio(pagoVuelo({ referencia: ' 0000PRUEBA03P1 ' }))
+    expect(tablas.gastos[0]).toMatchObject({ external_ref: '0000PRUEBA03P1', empresa_id: 'emp-satena' })
+    expect(tablas.activity_log.some(a => String(a.contenido).includes('comprobante 0000PRUEBA03P1'))).toBe(true)
+  })
+})
+
+describe('QA Trappvel 2026-10-29 · G12: la diferencia de cambio no es sobrecosto (H-25)', () => {
+  // Hotel cotizado en USD 580,72 a 4.150 = $2.410.000. Se paga a TRM 4.360 (+5,06 %, por encima
+  // del umbral del 5 %): toda la diferencia es de cambio.
+  const enUsd = () => Object.assign(tablas.negocio_servicios.find(s => s.id === 'sv-hotel')!, { moneda: 'USD', costo_moneda: 580.72, tasa_cotizada: 4150 })
+  const SOPORTE_HOTEL = `one://ve-documentos/${WS}/negocios/${NEG}/servicios/sv-hotel/soporte-1.jpg`
+
+  it('un pago solo con diferencia de cambio no pide la aprobación de Edgar y deja la TRM en el gasto', async () => {
+    enUsd()
+    const pesos = Math.round(580.72 * 4360)
+    const r = await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: pesos, soporteRef: SOPORTE_HOTEL, tasaPago: 4360 }))
+    expect(r).toEqual({ ok: true, gastoId: expect.any(String), esperando: [] })
+    expect(aprobacionesDe('sv-hotel')).toHaveLength(0)
+    expect(tablas.gastos[0]).toMatchObject({ moneda: 'USD', tasa_cambio: 4360 })
+  })
+
+  it('el mismo valor sin TRM sí es sobrecosto y pide a Edgar', async () => {
+    enUsd()
+    const r = await registrarPagoServicio(pagoVuelo({ servicioId: 'sv-hotel', monto: Math.round(580.72 * 4360), soporteRef: SOPORTE_HOTEL }))
+    expect(r).toMatchObject({ ok: true, esperando: [expect.stringContaining('más de lo cotizado')] })
   })
 })

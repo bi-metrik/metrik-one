@@ -45,6 +45,11 @@ export interface CotizacionParaGate {
 /** Estados que NO fijan el precio de un negocio: no se miran. */
 const ESTADOS_MUERTOS = new Set(['rechazada', 'vencida'])
 
+/** Una cotización viva: ni rechazada ni vencida. La usa también `cotizacion_requerida`. */
+export function esCotizacionViva(c: { estado: string | null }): boolean {
+  return !ESTADOS_MUERTOS.has((c.estado ?? '').toLowerCase())
+}
+
 /** Precedencia: lo aceptado manda sobre lo enviado, y lo enviado sobre el borrador. */
 const PRECEDENCIA = ['aceptada', 'enviada', 'borrador']
 
@@ -57,7 +62,7 @@ const PRECEDENCIA = ['aceptada', 'enviada', 'borrador']
  * documento que nadie va a mandar.
  */
 export function cotizacionesQueFijanElPrecio<T extends CotizacionParaGate>(cotizaciones: T[]): T[] {
-  const vivas = cotizaciones.filter(c => !ESTADOS_MUERTOS.has((c.estado ?? '').toLowerCase()))
+  const vivas = cotizaciones.filter(esCotizacionViva)
   for (const estado of PRECEDENCIA) {
     const enEsteEscalon = vivas.filter(c => (c.estado ?? '').toLowerCase() === estado)
     if (enEsteEscalon.length > 0) return enEsteEscalon

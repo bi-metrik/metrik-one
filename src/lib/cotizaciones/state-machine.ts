@@ -77,6 +77,37 @@ export function validateEnviar(ctx: ValidateContext): { valid: boolean; error?: 
   return { valid: true }
 }
 
+/**
+ * H10-1 (QA de punta a punta del 2026-10-29, viaje 10): el cliente pide otra versión cuando el
+ * negocio ya está en Seguimiento. La v1 está enviada y la regla de arriba (una sola enviada por
+ * negocio) dejaba la v2 armada sin poder salir: el único «Rechazar» vivía en el bloque de E2.
+ *
+ * Ahora la v2 REEMPLAZA a la v1 al enviarse, pero solo si quien envía lo dijo con el id de la
+ * enviada que vio en pantalla (`reemplazarId`): así nadie rechaza sin querer una cotización que
+ * no conocía (otra pestaña, otra comercial). La regla «una sola enviada» no cambia: la v1 pasa a
+ * `rechazada` en el mismo envío.
+ */
+export type DecisionEnvioConOtra =
+  | { ok: true; reemplaza: { id: string; consecutivo: string | null } | null }
+  | { ok: false; error: string }
+
+export function decidirEnvioConOtraEnviada(
+  otraEnviada: { id: string; consecutivo?: string | null } | null,
+  reemplazarId?: string | null,
+): DecisionEnvioConOtra {
+  if (!otraEnviada) return { ok: true, reemplaza: null }
+  if (reemplazarId && reemplazarId === otraEnviada.id) {
+    return { ok: true, reemplaza: { id: otraEnviada.id, consecutivo: otraEnviada.consecutivo ?? null } }
+  }
+  return { ok: false, error: mensajeYaHayEnviada(otraEnviada.consecutivo ?? null) }
+}
+
+/** Lo que se dice cuando ya hay una enviada: cuál es y cómo se sale (reemplazarla). */
+export function mensajeYaHayEnviada(consecutivo: string | null): string {
+  const cual = consecutivo ? `la ${consecutivo}` : 'otra cotización'
+  return `Ya está enviada ${cual}. Para mandar esta versión, reemplázala: ${cual} queda rechazada y esta sale en su lugar.`
+}
+
 export function validateAceptar(ctx: ValidateContext): { valid: boolean; error?: string } {
   if (ctx.currentStatus !== 'enviada') {
     return { valid: false, error: 'Solo se puede aceptar una cotización enviada' }

@@ -156,8 +156,8 @@ describe('el supuesto del traslado se ANUNCIA y es permanente', () => {
 })
 
 describe('qué grupos se cruzan: la lista sale del catálogo de ranuras', () => {
-  it('son exactamente dos, y son vuelo y hotel', () => {
-    expect([...RANURAS_COMBINABLES]).toEqual(['vuelo_detalle', 'hotel_detalle'])
+  it('son vuelo, hotel y el paquete de bloqueo (D5, 2026-10-29: cada paquete es una tarifa)', () => {
+    expect([...RANURAS_COMBINABLES]).toEqual(['vuelo_detalle', 'hotel_detalle', 'paquete_detalle'])
   })
 
   it('los sinónimos declarados también se cruzan', () => {

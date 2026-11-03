@@ -59,6 +59,7 @@ vi.mock('@/lib/ai/extract-fields', () => ({
   extractFieldsFromDocument: (...a: any[]) => extraerMock(...a),
 }))
 let archivoEnStorage: Blob | null = null
+let autorizada = false
 
 vi.mock('@/lib/modulos/exigir-modulo', async () =>
   (await import('../../../../test/exigir-modulo-doble')).dobleExigirModulo())
@@ -68,7 +69,10 @@ vi.mock('@/lib/modulos/exigir-modulo', async () =>
 function clienteFalso() {
   return {
     from: (tabla: string) => constructor(tabla),
-    rpc: async () => ({ data: null, error: null }),
+    // La autorización de datos del contacto (`autorizacion_datos_estado`): la regla vive en la RPC.
+    rpc: async (fn: string) => fn === 'autorizacion_datos_estado'
+      ? { data: { existe: true, vigente: { generales: autorizada } }, error: null }
+      : { data: null, error: null },
     storage: { from: () => ({ download: async () => (archivoEnStorage ? { data: archivoEnStorage, error: null } : { data: null, error: { message: 'no' } }) }) },
   }
 }
@@ -97,7 +101,9 @@ function constructor(tabla: string) {
     if (columnas.includes('rubros(')) salida.rubros = (tablas.rubros ?? []).filter(r => r.item_id === f.id).map(r => ({ ...r }))
     if (columnas.includes('lineas_negocio(')) {
       const l = (tablas.lineas_negocio ?? []).find(x => x.id === f.linea_id)
-      salida.lineas_negocio = l ? { config_extra: l.config_extra } : null
+      // Las etapas de la línea, para saber si alguna pide la autorización de datos (`envio.ts`).
+      const etapas = columnas.includes('etapas_negocio(') ? { etapas_negocio: (tablas.etapas_negocio ?? []).filter(e => e.linea_id === f.linea_id).map(e => ({ config_extra: e.config_extra })) } : {}
+      salida.lineas_negocio = l ? { config_extra: l.config_extra, ...etapas } : null
     }
     if (columnas.includes('itinerario_opciones(')) {
       salida.itinerario_opciones = (tablas.itinerario_opciones ?? []).filter(o => o.itinerario_id === f.id).map(o => ({ item_id: o.item_id }))
@@ -199,11 +205,12 @@ import {
   pedirAprobacionPlan,
   type EntradaConfirmacion,
 } from './confirmacion-viaje-actions'
-import { evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import { evaluarGatesConfirmacion, leerVistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
 import { planSugerido, sumarDiasCivil, type CuotaPlan } from '@/lib/viaje/plan-pagos'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { reiniciarModulo } from '../../../../test/exigir-modulo-doble'
 import { TERMINOS_BASE_TRAPPVEL } from '@/lib/cotizaciones/__fixtures__/terminos-base-trappvel'
+import { MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
 
 // ── Escenario sintético: Cusco, dos tarifas ──────────────────────────────────
 
@@ -343,6 +350,27 @@ describe('apagado: nada cambia (§7.1)', () => {
   })
 })
 
+describe('H10-2 · un negocio perdido no se confirma (QA del 2026-10-29)', () => {
+  it('desistido en Seguimiento: la acción se niega y no toca la cotización, el plan ni la confirmación', async () => {
+    sembrar()
+    tablas.negocios[0].estado = 'perdido'
+    const r = await confirmarClienteViaje(entrada())
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toMatch(/cerrado/)
+    expect(tablas.cotizaciones[0].estado).toBe('enviada')
+    expect(planes()).toHaveLength(0)
+    expect(meta().confirmacion_cliente).toBeUndefined()
+  })
+
+  it('la vista lo dice: `negocioAbierto` en falso', async () => {
+    sembrar()
+    tablas.negocios[0].estado = 'perdido'
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.negocioAbierto).toBe(false)
+  })
+})
+
 describe('«El cliente confirmó» en una acción (F2-2)', () => {
   beforeEach(() => sembrar())
 
@@ -418,6 +446,63 @@ describe('«El cliente confirmó» en una acción (F2-2)', () => {
   })
 })
 
+describe('cotización sin tarifas: una sola opción por componente (2026-10-22)', () => {
+  /** LATAM + hotel + traslado: la única combinación posible. */
+  const TOTAL_UNICO = 2_200_000 + 1_300_000 + 250_000
+
+  function sinTarifas(valorTotal: number) {
+    sembrar()
+    tablas.items = tablas.items.filter((i) => i.id !== 'vb')
+    tablas.cotizacion_itinerarios = []
+    tablas.itinerario_opciones = []
+    tablas.cotizaciones[0].valor_total = valorTotal
+  }
+
+  it('la vista trae una tarifa única con el total de la cotización, sin itinerario', async () => {
+    sinTarifas(TOTAL_UNICO)
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.errorTarifas).toBeNull()
+    expect(vista?.tarifas).toEqual([{ itinerarioId: null, nombre: 'Total de la cotización', esRecomendada: false, precio: TOTAL_UNICO, motivo: null }])
+  })
+
+  it('sin total la lista queda vacía y sin error: la hoja muestra su aviso', async () => {
+    sinTarifas(0)
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.tarifas).toEqual([])
+    expect(vista?.errorTarifas).toBeNull()
+  })
+
+  it('se confirma con itinerarioId null: precio aprobado, plan acordado por ese total, servicios y gates', async () => {
+    sinTarifas(TOTAL_UNICO)
+    const r = await confirmarClienteViaje(entrada({ itinerarioId: null, cuotas: sugerido(TOTAL_UNICO) }))
+    expect(r).toMatchObject({ ok: true, servicios: 3 })
+    expect(tablas.cotizaciones[0].estado).toBe('aceptada')
+    expect(tablas.cotizaciones[0].tarifa_aceptada_id ?? null).toBeNull()
+    expect(neg().precio_aprobado).toBe(TOTAL_UNICO)
+    expect(planes()).toHaveLength(1)
+    expect(planes()[0]).toMatchObject({ estado: 'acordado', total: TOTAL_UNICO })
+    const conf = meta().confirmacion_cliente as Fila
+    expect(conf).toMatchObject({ itinerario_id: null, tarifa_nombre: null, total: TOTAL_UNICO })
+    expect((conf.mensaje as Fila).texto).not.toContain('*Tarifa:*')
+
+    const gates = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E4, mensajes: {} })
+    expect(gates).toEqual(['Para pasar a Reservas y pagos falta: el anticipo con su comprobante y la cuenta donde entró.'])
+  })
+
+  it('con el IVA sobre el ingreso propio encima, el plan se mide contra el mismo precio que se aprueba', async () => {
+    sinTarifas(TOTAL_UNICO)
+    tablas.workspaces[0].config_extra = { iva_cotizacion: { base: 'ingreso_propio', en_documento: 'linea_incluida', precio: 'iva_aparte' } }
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    const precio = vista?.tarifas[0]?.precio ?? 0
+    expect(precio).toBeGreaterThan(TOTAL_UNICO)
+
+    const r = await confirmarClienteViaje(entrada({ itinerarioId: null, cuotas: sugerido(precio) }))
+    expect(r.ok).toBe(true)
+    expect(neg().precio_aprobado).toBe(precio)
+    expect(planes()[0]).toMatchObject({ estado: 'acordado', total: precio })
+  })
+})
+
 describe('plan que no suma o fuera de la regla (F2-3)', () => {
   beforeEach(() => sembrar())
 
@@ -461,6 +546,26 @@ describe('plan que no suma o fuera de la regla (F2-3)', () => {
     expect(r.ok).toBe(true)
     const acordado = planes().find(p => p.estado === 'acordado') as Fila
     expect(acordado).toMatchObject({ dentro_de_regla: false, aprobacion_id: ap.id })
+  })
+
+  it('el panel lee el plan vigente como el gate: una pedida más nueva no tapa la aprobada (barrido 2026-10-22)', async () => {
+    const mitad = Math.round(TOTAL_REC / 2)
+    const cuotas: CuotaPlan[] = [
+      { numero: 0, monto: mitad, fecha: HOY, concepto: null },
+      { numero: 1, monto: TOTAL_REC - mitad, fecha: SALIDA, concepto: null },
+    ]
+    await pedirAprobacionPlan(entrada({ cuotas, motivo: 'prima de diciembre' }))
+    const ap = tablas.aprobaciones_excepcion[0]
+    staffId = 's-edgar'; rol = 'operator'; areas = ['direccion']
+    await decidirAprobacionPlan(NEG, ap.id as string, 'aprobada', null)
+    staffId = 's-dani'; areas = ['comercial']
+    expect((await confirmarClienteViaje(entrada({ cuotas }))).ok).toBe(true)
+    // Después alguien pidió otra aprobación (otras cuotas) que sigue abierta: es la ÚLTIMA.
+    tablas.aprobaciones_excepcion.push({ id: 'ap-nueva', negocio_id: NEG, tipo: 'plan_fuera_de_regla', estado: 'solicitada', huella: 'otra', entidad_tipo: 'plan_pago', solicitada_at: '2999-01-01T00:00:00Z', detalle: {} })
+    const gates = await evaluarGatesConfirmacion(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['plan_pagos_acordado'], mensajes: {} })
+    expect(gates).toEqual([])
+    const vista = await leerVistaConfirmacion(clienteFalso(), WS, NEG)
+    expect(vista?.estado.planVigente).toBe(true)
   })
 
   it('«No aprobar» exige motivo', async () => {
@@ -601,6 +706,9 @@ describe('riel de cobro: registrar el pago del viajero (F2-5, F2-8)', () => {
     expect(r.ok).toBe(true)
     expect(tablas.cobros).toHaveLength(1)
     expect(tablas.cobros[0]).toMatchObject({ monto: 1_215_000, fecha: HOY, tipo_cobro: 'anticipo', cuenta_recaudo: 'bancolombia-3241', external_ref: 'M4471023' })
+    // `cobros.created_by` apunta a auth.users: va el usuario, no el staff (con el staff, la FK
+    // rechazaba todo pago en producción; QA de punta a punta del 2026-10-29).
+    expect(tablas.cobros[0].created_by).toBe('p-s-dani')
     expect((tablas.cobros[0].soporte as Fila).url).toBe(`one://ve-documentos/${SOPORTE.storage_path}`)
     if (!r.ok) return
     expect(r.avanzo).toBe('Reservas y pagos')
@@ -639,12 +747,48 @@ describe('riel de cobro: registrar el pago del viajero (F2-5, F2-8)', () => {
     expect(tablas.cobros).toHaveLength(0)
   })
 
+  it('Deshacer: otra persona no deshace el pago de quien lo registró', async () => {
+    const r = await registrarPagoViajero(pagoEntrada())
+    if (!r.ok) throw new Error(r.error)
+    staffId = 's-edgar'
+    expect((await deshacerPagoViajero(NEG, r.cobroId)).ok).toBe(false)
+    expect(tablas.cobros).toHaveLength(1)
+  })
+
   it('Deshacer (8): el pago desaparece y el negocio vuelve a Confirmación', async () => {
     const r = await registrarPagoViajero(pagoEntrada())
     if (!r.ok) throw new Error(r.error)
     expect(await deshacerPagoViajero(NEG, r.cobroId)).toEqual({ ok: true })
     expect(tablas.cobros).toHaveLength(0)
     expect(neg().etapa_actual_id).toBe('e4')
+  })
+})
+
+/**
+ * QA G11 (2026-10-30, bitácora del bloqueo): con un anticipo de $1,5 M sobre $3,2 M el negocio pasó
+ * solo de Seguimiento a Reservas y pagos; en la actividad Confirmación no aparecía. VISTO FALLAR
+ * sobre main: el pago parcial movía a e5 y la confirmación no dejaba rastro de su paso de etapa.
+ */
+describe('el avance solo no se salta Confirmación (QA G11)', () => {
+  beforeEach(confirmado)
+
+  it('el paso a Confirmación queda en la actividad', () => {
+    expect(tablas.activity_log.some((a) => a.tipo === 'cambio_etapa' && a.valor_anterior === 'Seguimiento' && a.valor_nuevo === 'Confirmación')).toBe(true)
+  })
+
+  it('con el anticipo a medias el negocio sigue en Confirmación y operaciones no recibe «ya puedes reservar»', async () => {
+    const anticipo = Number([...tablas.negocio_plan_cuotas].sort((a, b) => Number(a.numero) - Number(b.numero))[0].monto)
+    const r = await registrarPagoViajero(pagoEntrada({ monto: anticipo - 500_000 }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.avanzo).toBeNull()
+    expect(r.textoAvance).toBe(`Faltan $500.000 del anticipo: el negocio sigue en Confirmación. Pasa solo a Reservas y pagos con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`)
+    expect(neg().etapa_actual_id).toBe('e4')
+    expect(tablas.notificaciones.some((n) => n.tipo === 'handoff')).toBe(false)
+    // Con el resto del anticipo, pasa solo.
+    const r2 = await registrarPagoViajero(pagoEntrada({ monto: 500_000, referencia: 'M4471099' }))
+    expect(r2.ok && r2.avanzo).toBe('Reservas y pagos')
+    expect(neg().etapa_actual_id).toBe('e5')
   })
 })
 
@@ -715,5 +859,38 @@ describe('riel de cobro: lectura del comprobante (F2-4)', () => {
 
   it('un archivo de otro espacio no se lee', async () => {
     expect((await leerComprobantePago(NEG, { ...SOPORTE, storage_path: 'otro-ws/x.png' })).ok).toBe(false)
+  })
+})
+
+describe('sin la autorización de datos no se confirma (2026-10-25)', () => {
+  // La línea pide la autorización en Cotización, como después del SQL del #1257.
+  const conGate = () => {
+    sembrar()
+    autorizada = false
+    tablas.etapas_negocio[0].config_extra = { gates: ['autorizacion_datos'] }
+  }
+  beforeEach(conGate)
+
+  it('sin firma: no confirma, con el motivo de «Enviar», y no escribe nada', async () => {
+    const r = await confirmarClienteViaje(entrada())
+    expect(r).toEqual({ ok: false, error: MENSAJE_ENVIO.generales })
+    expect(planes()).toHaveLength(0)
+    expect(meta().confirmacion_cliente).toBeUndefined()
+    expect(tablas.cotizaciones[0].estado).toBe('enviada')
+  })
+
+  it('con la cotización ya aprobada tampoco (antes pasaba: solo frenaba la aprobación)', async () => {
+    tablas.cotizaciones[0].estado = 'aceptada'
+    tablas.cotizaciones[0].tarifa_aceptada_id = 'it-rec'
+    const r = await confirmarClienteViaje(entrada())
+    expect(r.ok).toBe(false)
+    expect(meta().confirmacion_cliente).toBeUndefined()
+  })
+
+  it('firmada: confirma como siempre', async () => {
+    autorizada = true
+    const r = await confirmarClienteViaje(entrada())
+    expect(r.ok).toBe(true)
+    expect(meta().confirmacion_cliente).toBeDefined()
   })
 })

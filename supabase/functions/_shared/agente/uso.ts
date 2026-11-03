@@ -7,8 +7,9 @@
 // `sumarUso` es la misma cuenta en TypeScript (la usan el arnés y las pruebas de paridad).
 //
 // Cupo: `bot_conversacional.cupo_turnos_mes` (800 por defecto). Al 80 % y al 100 % se avisa UNA vez por umbral y por
-// mes a MéTRIK (no al cliente), por el canal de avisos internos de siempre (`enviarAvisoInterno` a
-// WA_ADMIN_NOTIFY_PHONE). Pasar el cupo NO corta el servicio: es una señal para hablar con el cliente.
+// mes a MéTRIK (no al cliente), por correo desde el 2026-10-26 (`cupoSupabase` en `produccion.ts`; antes por WhatsApp a
+// WA_ADMIN_NOTIFY_PHONE, que se perdía fuera de la ventana de 24 h). Pasar el cupo NO corta el servicio: es una señal
+// para hablar con el cliente.
 // ============================================================
 
 import type { Traza } from './tipos.ts';

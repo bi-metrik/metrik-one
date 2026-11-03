@@ -106,6 +106,14 @@ describe('verificador', () => {
     expect(verificar('Cuesta $3.500.000.', resp).join()).toContain('cifra')
     expect(verificar('Llevas el 80 % del mínimo.', resp).join()).toContain('porcentaje')
   })
+  it('un número con miles de un solo dígito se lee entero («2.800», no «800»): Dimpro, 29-oct', () => {
+    const taladro = respaldoDe(['ver_catalogo → MP-38 Taladro Ferton TLJ513 de 13 mm 550 W, 0 a 2.800 rpm; MP-44 1.200 W'])
+    expect(verificar('El MP-38 es de 550 W, de 0 a 2.800 rpm.', taladro)).toEqual([])
+    expect(verificar('El MP-44 es de 1.200 W.', taladro)).toEqual([])
+    // Lo inventado sigue sin salir, con o sin miles.
+    expect(verificar('Llega a 3.500 rpm.', taladro).join()).toContain('3.500')
+    expect(verificar('Llega a 800 rpm.', taladro).join()).toContain('800')
+  })
   it('no lee palabras: ni mayúsculas como nombres ni verbos como hechos (los falsos rechazos del 2026-10-07 y 10-09)', () => {
     const viaje = respaldoDe(['ver_viaje → M1 26 1 MIAMI 7N, falta destino, ciudad de salida, fechas, pasajeros, categoría de hotel'])
     expect(verificar('Para cotizar M1 26 1 (MIAMI 7N) falta:\n• Destino\n• Pasajeros (adultos, niños, infantes)\n\nEnvíame los datos y los anotamos.', viaje)).toEqual([])

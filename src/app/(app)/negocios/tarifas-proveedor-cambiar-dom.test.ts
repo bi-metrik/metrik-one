@@ -36,7 +36,7 @@ vi.mock('@/app/(app)/negocios/tarifas-proveedor-actions', () => ({
   },
   crearLineaConTarifa: async (...args: unknown[]) => {
     llamadas.crear.push(args)
-    return { ok: true, itemId: 'nuevo-1', donde: 'Actividad en Cartagena · Opción 1', confirmada: true, pendiente: null, moneda: 'COP', total: 210000, aPagarAgencia: null }
+    return { ok: true, itemId: 'nuevo-1', donde: 'Actividad en Cartagena · Opción 1', servicio: 'Tour Ficticio de Bahía', confirmada: true, pendiente: null, moneda: 'COP', total: 210000, aPagarAgencia: null }
   },
   elegirTarifasDeLinea: async (...args: unknown[]) => {
     llamadas.elegir.push(args)
@@ -123,8 +123,8 @@ async function montarLinea(costoActual: number | null, v = vista) {
   })
 }
 
-describe('«Usar tarifa de proveedor»: la línea nace con la tarifa en tres toques', () => {
-  it('abrir → el proveedor → la tarifa ya marcada → «Usar · $210.000»', async () => {
+describe('«Usar tarifa de proveedor»: la línea nace con la tarifa en cuatro toques', () => {
+  it('abrir → el proveedor (dos tours distintos: nada marcado) → la tarifa → «Usar · $210.000»', async () => {
     llamadas.vistaNueva = { ...vista, elegida: null, tipoNueva: 'actividad' }
     let creada: string | null = null
     await act(async () => {
@@ -142,19 +142,24 @@ describe('«Usar tarifa de proveedor»: la línea nace con la tarifa en tres toq
     const vencida = contenedor.querySelector('[data-ficha-vencida="p2"]')
     expect(vencida?.textContent).toContain('pide el tarifario nuevo')
     expect(vencida?.querySelector('button')).toBeNull()
-    // 2 · el proveedor: sus tarifas, con la más barata del adulto ya marcada.
+    // 2 · el proveedor: dos tours DISTINTOS. ONE no elige por precio (prueba del #1229, punto 1):
+    // nada marcado, el pie sin total, y se pide elegir.
     await act(async () => { contenedor.querySelector<HTMLButtonElement>('[data-ficha="p1"]')!.click() })
     toques++
     await asentar()
-    expect(marcadas()).toBe(1)
-    expect(casilla(0).checked).toBe(true)
-    expect(contenedor.querySelector('[data-preseleccion="mas_barata"]')).not.toBeNull()
+    expect(marcadas()).toBe(0)
+    expect(contenedor.querySelector('[data-preseleccion="varios_servicios"]')?.textContent).toContain('2 servicios distintos')
+    expect(usar().textContent).toBe('Elige una tarifa')
+    expect(usar().textContent).not.toContain('$')
+    // 3 · la tarifa.
+    await act(async () => { casilla(0).click() })
+    toques++
     expect(usar().textContent).toContain('Usar · $210.000')
-    // 3 · Usar.
+    // 4 · Usar.
     await act(async () => { usar().click() })
     toques++
     await asentar()
-    expect(toques).toBe(3)
+    expect(toques).toBe(4)
     expect(llamadas.crear).toHaveLength(1)
     const [cotizacionId, proveedorId, eleccion, , tasa, opciones] = llamadas.crear[0] as [string, string, { filas: { indice: number; cantidad: number }[] }, unknown, number | null, { idAceptacion: string; medida: { segundos: number } }]
     expect([cotizacionId, proveedorId, tasa]).toEqual(['c1', 'p1', null])
@@ -174,6 +179,7 @@ describe('«Usar tarifa de proveedor»: la línea nace con la tarifa en tres toq
     await asentar()
     await act(async () => { contenedor.querySelector<HTMLButtonElement>('[data-ficha="p1"]')!.click() })
     await asentar()
+    await act(async () => { casilla(0).click() })
     await act(async () => { casilla(1).click() })
     expect(marcadas()).toBe(1)
     expect(casilla(1).checked).toBe(true)
@@ -236,5 +242,17 @@ describe('«Cambiar el costo»: el mismo panel', () => {
     const lista = contenedor.querySelector('[data-opciones-tarifa]')!
     expect(contenedor.querySelectorAll('.overflow-y-auto')).toHaveLength(1)
     expect(origen.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+// Brief del 2026-10-22, menor: el aviso nombra la actividad, no el grupo genérico.
+describe('el aviso al agregar la línea', () => {
+  const base = { ok: true as const, itemId: 'i', donde: 'Actividad en Cartagena', confirmada: true, pendiente: null, moneda: 'COP', total: 190000, aPagarAgencia: null }
+  it('con servicio, lo nombra', () => {
+    expect(mod.avisoDeLineaAgregada({ ...base, servicio: 'Playa Ficticia con almuerzo' })).toBe('«Playa Ficticia con almuerzo» agregada: $190.000 de costo.')
+    expect(mod.avisoDeLineaAgregada({ ...base, servicio: 'Playa Ficticia con almuerzo', confirmada: false, pendiente: 'Falta la tasa.' })).toBe('«Playa Ficticia con almuerzo» agregada. Falta la tasa.')
+  })
+  it('sin servicio (hotel), dice dónde quedó, como antes', () => {
+    expect(mod.avisoDeLineaAgregada({ ...base, donde: 'Hotel en Cartagena', servicio: null })).toBe('Línea agregada en Hotel en Cartagena: $190.000 de costo.')
   })
 })

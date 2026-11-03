@@ -6,7 +6,7 @@
  *   · `c.esPrueba` fuera del filtro del tablero → cae «excluye es_prueba y cuadra».
  */
 import { describe, expect, it } from 'vitest'
-import { loProximo, pendientesDe, tableroDeMargen, type ViajePendiente } from './mis-pendientes'
+import { loProximo, pendientesDe, serviciosProximosDe, tableroDeMargen, type ServicioPendiente, type ViajePendiente } from './mis-pendientes'
 
 const HOY = '2026-11-02'
 
@@ -95,5 +95,58 @@ describe('tablero de margen (F6-8)', () => {
     ]
     expect(tableroDeMargen(cierres).viajes.map(v => v.negocioId)).toEqual(['a'])
     expect(tableroDeMargen(cierres, new Set(['p'])).viajes.map(v => v.negocioId)).toEqual(['a', 'p'])
+  })
+})
+
+describe('servicios próximos (fechas de servicio, 2026-10-21)', () => {
+  const sv = (o: Partial<ServicioPendiente>): ServicioPendiente => ({
+    id: 'x', nombre: 'Servicio', proveedor_nombre: null, estado: 'reservado', costo_cotizado: 0, valor_por_pagar: null,
+    confirmacion_ref: null, fecha_limite_pago: null, gastos: [], aprobaciones: [], ...o,
+  })
+  const conServicios = (servicios: ServicioPendiente[], o: Partial<ViajePendiente> = {}) => viaje({ servicios, ...o })
+
+  it('ordena por fecha y hora, con el momento del servicio; sin fecha, al final como «Falta la fecha»', () => {
+    const v = conServicios([
+      sv({ id: 'tour', nombre: 'Tour en lancha', tipo: 'actividad' }),
+      sv({ id: 'hotel', nombre: 'Hotel Andino', tipo: 'hotel', fecha_servicio: '2026-11-04', fecha_fin: '2026-11-07' }),
+      sv({ id: 'vuelo', nombre: 'Vuelo BOG-CUZ', tipo: 'vuelo', fecha_servicio: '2026-11-04', tramos: [
+        { fecha: '2026-11-04', hora_salida: '06:10', hora_llegada: null, origen: 'BOG', destino: 'CUZ', aerolinea: null, numero_vuelo: null },
+        { fecha: '2026-11-07', hora_salida: '18:30', hora_llegada: null, origen: 'CUZ', destino: 'BOG', aerolinea: null, numero_vuelo: null },
+      ] }),
+      sv({ id: 'traslado', nombre: 'Traslado al hotel', tipo: 'traslado', fecha_servicio: '2026-11-04', hora_inicio: '09:30:00' }),
+    ])
+    const p = serviciosProximosDe([v], ALE, HOY)
+    expect(p.map(x => [x.id, x.fecha, x.hora, x.momento])).toEqual([
+      ['vuelo', '2026-11-04', '06:10', 'Ida'],
+      ['traslado', '2026-11-04', '09:30', null],
+      ['hotel', '2026-11-04', null, 'Check-in'],
+      ['tour', null, null, null],
+    ])
+  })
+
+  it('de un vuelo que ya salió muestra el regreso; lo de más de 14 días no sale', () => {
+    const v = conServicios([
+      sv({ id: 'vuelo', tipo: 'vuelo', fecha_servicio: '2026-10-30', tramos: [
+        { fecha: '2026-10-30', hora_salida: '06:10', hora_llegada: null, origen: null, destino: null, aerolinea: null, numero_vuelo: null },
+        { fecha: '2026-11-05', hora_salida: '18:30', hora_llegada: null, origen: null, destino: null, aerolinea: null, numero_vuelo: null },
+      ] }),
+      sv({ id: 'lejos', tipo: 'hotel', fecha_servicio: '2026-11-20' }),
+    ])
+    expect(serviciosProximosDe([v], ALE, HOY).map(x => [x.id, x.fecha, x.momento])).toEqual([['vuelo', '2026-11-05', 'Regreso']])
+  })
+
+  it('el responsable del servicio lo ve; si no tiene, el de operaciones del negocio; la comercial no', () => {
+    const v = conServicios([
+      sv({ id: 'suyo', tipo: 'hotel', fecha_servicio: '2026-11-04', responsable_staff_id: 's-dani' }),
+      sv({ id: 'sin', tipo: 'hotel', fecha_servicio: '2026-11-05' }),
+    ])
+    expect(serviciosProximosDe([v], DANI, HOY).map(x => x.id)).toEqual(['suyo'])
+    expect(serviciosProximosDe([v], ALE, HOY).map(x => x.id)).toEqual(['sin'])
+  })
+
+  it('solo viajes confirmados y servicios que no están en «No va»', () => {
+    const servicios = [sv({ id: 'h', tipo: 'hotel', fecha_servicio: '2026-11-04' }), sv({ id: 'nova', tipo: 'hotel', fecha_servicio: '2026-11-04', estado: 'cancelado' })]
+    expect(serviciosProximosDe([conServicios(servicios, { etapaNumero: 3 })], ALE, HOY)).toEqual([])
+    expect(serviciosProximosDe([conServicios(servicios, { etapaNumero: 4 })], ALE, HOY).map(x => x.id)).toEqual(['h'])
   })
 })

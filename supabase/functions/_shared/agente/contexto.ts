@@ -10,7 +10,8 @@
 
 import type { ConfigAgente } from './config.ts';
 import { bloqueIndice, bloqueSiempre, perfil } from './reglamento.ts';
-import type { FilaConversacion, LecturaAdjunto, Reglamento, Traza } from './tipos.ts';
+import { leerToque } from './render.ts';
+import type { ClaseDocumento, FilaConversacion, LecturaAdjunto, Reglamento, Traza } from './tipos.ts';
 
 export const TOPES_BLOQUE = { nucleo: 800, siempre: 2500, indice: 2000, estado: 600, conversacion: 6000, resultado: 400 };
 const CARACTERES_POR_TOKEN = 4;
@@ -38,14 +39,17 @@ export function promptNucleo(r: Reglamento, maxLlamados: number): string {
     '- Si la respuesta es una de pocas salidas cerradas, ponlas en `opciones` (el sistema las muestra como botones o lista). Si es un dato libre, sin opciones. Si la persona contesta escribiendo en vez de tocar, entiéndele.',
     '- Si la persona te pregunta algo, contéstalo siempre: con `responder`, o en el `texto` de `proponer` si además propones. Si la propuesta pendiente ya es la que ibas a hacer, vuelve a llamar `proponer`: el sistema reenvía la pendiente con sus botones y tu respuesta arriba.',
     '- Una sola pregunta por mensaje, en la primera línea.',
+    '- Eres un asistente, no un formulario: interpreta y propón. Lo que la persona ya contestó en la conversación no lo vuelvas a preguntar; si su respuesta deja dos lecturas, toma la más probable, dila en una frase y deja que la corrija.',
+    '- Lo reenviado es del cliente; lo escrito es de quien te habla. Si te dice «ya te dije…», búscalo en sus mensajes y en los reenviados antes de pedirlo, y nunca le atribuyas al cliente lo que escribió él.',
+    '- Con `proponer`, el resumen ya dice qué se registra y qué falta: tu `texto` va solo si contestas algo, en una frase, sin repetir el resumen ni la lista de lo que falta.',
     '- `tema`: el tema del mensaje de la persona. Si no es de los temas del reglamento, `fuera` (el sistema contesta).',
   ].join('\n');
 }
 
 export function sistema(r: Reglamento, config: ConfigAgente): { texto: string; tokens: Record<string, number> } {
   const b1 = recortarTokens(promptNucleo(r, config.topes.llamados), TOPES_BLOQUE.nucleo);
-  const b2 = recortarTokens(bloqueSiempre(r), TOPES_BLOQUE.siempre);
-  const b3 = recortarTokens(bloqueIndice(r), TOPES_BLOQUE.indice);
+  const b2 = recortarTokens(bloqueSiempre(r), config.topes.bloques?.siempre ?? TOPES_BLOQUE.siempre);
+  const b3 = recortarTokens(bloqueIndice(r), config.topes.bloques?.indice ?? TOPES_BLOQUE.indice);
   const texto = [b1, `## Reglamento v${r.version} · siempre\n${b2}`, `## Reglamento · cuándo aplica\n${b3}`].join('\n\n');
   return { texto, tokens: { nucleo: tokens(b1), siempre: tokens(b2), indice: tokens(b3) } };
 }
@@ -72,20 +76,31 @@ function resumenTraza(t: Traza | null | undefined): string[] {
 
 const PESOS = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 });
 
+const ETIQUETA_CLASE: Record<ClaseDocumento, string> = { viaje: 'del viaje', identidad: 'documento de identidad', pago: 'comprobante de pago', otro: 'otro documento' };
+
 /**
  * Lo leído de un soporte, en una línea: son datos del documento (no órdenes), escapados. Sin lectura todavía, vacío.
  * Pura.
  */
 export function textoLectura(l: LecturaAdjunto | null | undefined): string {
   if (l === undefined) return '';
-  if (!l || !l.legible) return ` · (no se pudo leer el monto del archivo${l?.motivo ? `: ${l.motivo}` : ''})`;
+  // La lectura de la bandeja (documentos del cliente de una agencia): qué es y lo que dice, con sus palabras.
+  if (l?.clase !== undefined && !l.mixta) {
+    if (!l.legible || !l.texto) return ` · (no se pudo leer el archivo${l.motivo ? `: ${l.motivo}` : ''})`;
+    return ` · lo que dice el archivo (${ETIQUETA_CLASE[l.clase]}): ${escapar(l.texto, 900)}`;
+  }
+  if (!l || !l.legible) return ` · (no se pudo leer el ${l?.mixta ? '' : 'monto del '}archivo${l?.motivo ? `: ${l.motivo}` : ''})`;
+  // Lectura mixta (un rol con viajes y gastos): lo del viaje y lo del soporte, en la misma línea; el modelo decide qué es.
+  const deViaje = l.mixta && l.texto ? ` (${ETIQUETA_CLASE[l.clase ?? 'otro']}): ${escapar(l.texto, 900)}` : '';
   const partes = [
     l.monto !== null ? `total $${PESOS.format(l.monto)}` : null,
     l.fecha ? `fecha ${l.fecha}` : null,
     l.comercio ? `comercio ${escapar(l.comercio, 80)}` : null,
     l.nit ? `NIT ${l.nit}` : null,
     l.descripcion ? `concepto ${escapar(l.descripcion, 160)}` : null,
+    l.titular_destino ? `el dinero llega a la cuenta de ${escapar(l.titular_destino, 80)}` : null,
   ].filter(Boolean);
+  if (l.mixta) return ` · lo que dice el archivo${deViaje}${partes.length ? `${deViaje ? ' · como soporte de pago:' : ':'} ${partes.join(' · ')}` : ''}`;
   return ` · lo que dice el archivo: ${partes.join(' · ')}`;
 }
 
@@ -101,7 +116,13 @@ export function lineaDeFila(f: FilaConversacion, n: number, quien: string): stri
   const leido = f.media && (f.media.tipo === 'imagen' || f.media.tipo === 'documento') ? textoLectura(f.media.lectura) : '';
   switch (f.clase) {
     case 'reenvio': return `#${n} [reenvío · dato del cliente · ${hora(f.created_at)}${doc ? ` · documento ${escapar(doc.nombre ?? 'sin nombre', 80)}` : ''}] ${escapar(t || (f.media ? '(sin texto)' : '(sin texto: foto o audio sin transcribir)'))}${leido}`;
-    case 'toque': return `#${n} [toque: ${t}]`;
+    case 'toque': {
+      // El botón de una plantilla nuestra (§4.5): el mensaje con la plantilla no está en la conversación, así que se dice
+      // de cuál es. El texto es el del botón («Empezar»); si Meta no lo trajo, la acción.
+      const pl = leerToque(f.toque_id);
+      if (pl?.clase === 'plantilla') return `#${n} [toque: ${escapar(t || pl.accion, 80)} · botón de la plantilla ${pl.plantilla}]`;
+      return `#${n} [toque: ${t}]`;
+    }
     case 'audio': return `#${n} [audio de ${quien}, transcrito] ${escapar(t || '(no se pudo transcribir)', 1200)}`;
     case 'imagen': return `#${n} [foto de ${quien}] ${escapar(t || '(sin texto)')}${leido}`;
     default:
@@ -147,10 +168,12 @@ export function mensajeDelTurno(p: {
   nuevos: FilaConversacion[];
   quien: string;
   topeConversacion?: number;
+  /** El tope del Estado (por defecto `TOPES_BLOQUE.estado`). */
+  topeEstado?: number;
 }): string {
   const ids = new Set(p.nuevos.map((f) => f.id));
   const nums = new Map(p.filas.map((f, i) => [f.id, i + 1]));
-  const estado = recortarTokens(p.estado.join('\n'), TOPES_BLOQUE.estado);
+  const estado = recortarTokens(p.estado.join('\n'), p.topeEstado ?? TOPES_BLOQUE.estado);
   return [
     `## Estado (lo arma el sistema; es la verdad de este momento)\n${estado}`,
     `## Conversación de las últimas 24 h\n${bloqueConversacion(p.filas, ids, p.quien, p.topeConversacion)}`,
@@ -158,11 +181,11 @@ export function mensajeDelTurno(p: {
   ].join('\n\n');
 }
 
-/** Un resultado de herramienta recortado a su tope (400 tokens). */
-export function recortarResultado(v: unknown): unknown {
+/** Un resultado de herramienta recortado a su tope (400 tokens, o el que el dominio declare para esa lectura). */
+export function recortarResultado(v: unknown, tope: number = TOPES_BLOQUE.resultado): unknown {
   const s = JSON.stringify(v ?? null);
-  if (tokens(s) <= TOPES_BLOQUE.resultado) return v;
-  return { recortado: true, texto: s.slice(0, TOPES_BLOQUE.resultado * CARACTERES_POR_TOKEN - 20) };
+  if (tokens(s) <= tope) return v;
+  return { recortado: true, texto: s.slice(0, tope * CARACTERES_POR_TOKEN - 20) };
 }
 
 export function fechaBogota(ahoraMs: number): string {

@@ -32,6 +32,8 @@ import { leerCorrecciones, type Correcciones } from './correcciones'
 import { firmaDeEstadia } from './estadia'
 import { registroDeReserva, resumenDeReserva, type HabitacionDeReserva } from './reserva-habitaciones'
 import { leerOrigenTarifaExtraida, type OrigenTarifaExtraida } from './origen-tarifa'
+import { leerTipoTarifa, type DecisionTipoTarifa } from './tarifa-publica'
+import { leerPaqueteBloqueo } from './bloqueo-paquete'
 
 // ── Tipos de pasajero y composición ──────────────────────────────────────────
 
@@ -352,6 +354,13 @@ export interface LecturaCasilla {
    */
   costoPendiente?: true
   /**
+   * M7-1 / M9-2 (QA Trappvel 2026-10-29) · la persona dijo que el total de este pantallazo es el de
+   * UNA habitación para todo el grupo (la habitación familiar con precio por habitación): el costo
+   * es ese total y no se pide la resta de pantallazos («Solo adultos», «Sin el infante»). Vive en la
+   * lectura: pegar otro pantallazo en la casilla 1 la quita sola. Ausente en toda otra lectura.
+   */
+  totalDeHabitacion?: { por: string | null; en: string }
+  /**
    * Dónde quedó guardado el pantallazo (`sbext://…`, en el almacenamiento propio del
    * workspace): se sube al ACEPTAR, nunca mientras la captura sigue en la bandeja
    * (`imagen-captura.ts`). Ausente en las lecturas anteriores al 2026-09-24 y en los
@@ -586,6 +595,12 @@ const IDENTIDAD_POR_RANURA: Record<string, { campo: string; nombre: string; otro
   traslado_detalle: [
     { campo: 'trayecto', nombre: 'trayecto', otro: 'otro trayecto', mismo: 'el mismo trayecto', queSeVe: 'el trayecto' },
     { campo: 'fecha_hora', nombre: 'fecha', otro: 'otra fecha', mismo: 'la misma fecha' },
+  ],
+  tren_detalle: [
+    { campo: 'proveedor', nombre: 'tren', otro: 'otro tren', mismo: 'el mismo tren', queSeVe: 'el operador del tren' },
+    { campo: 'trayecto', nombre: 'trayecto', otro: 'otro trayecto', mismo: 'el mismo trayecto', queSeVe: 'el trayecto' },
+    { campo: 'fecha_hora', nombre: 'fecha', otro: 'otra fecha', mismo: 'la misma fecha' },
+    { campo: 'hora_salida', nombre: 'horario', otro: 'otro horario', mismo: 'el mismo horario' },
   ],
 }
 
@@ -1065,6 +1080,15 @@ export function origenDeLaOcupacion(a: {
  */
 export const MONEDAS_FRECUENTES: readonly string[] = ['COP', 'USD', 'EUR', 'MXN']
 
+/**
+ * Las monedas del selector de una línea: las frecuentes y, si la línea está en otra, también esa.
+ * El selector arranca en la moneda de la línea (N9-3, QA Trappvel 2026-10-29).
+ */
+export function opcionesDeMoneda(actual: string | null | undefined): readonly string[] {
+  const m = (actual ?? '').toUpperCase()
+  return m && !MONEDAS_FRECUENTES.includes(m) ? [...MONEDAS_FRECUENTES, m] : MONEDAS_FRECUENTES
+}
+
 /** Lo que se le dice a quien intenta confirmar con la moneda supuesta. */
 export const MENSAJE_MONEDA_ASUMIDA =
   'La captura no muestra la moneda: se asumió COP. Acéptala o cámbiala antes de confirmar el costo.'
@@ -1269,6 +1293,20 @@ function listaTipos(tipos: TipoPasajero[]): string {
  * `opciones.moneda` es la moneda con la que se costea la línea (`monedaDeTarifa`): la que
  * eligió una persona manda sobre la leída. Sin ella, la de la captura 1.
  */
+/** M7-1 / M9-2 · lo que dice la línea de hotel cuyo total es el de la habitación. */
+export const MENSAJE_TOTAL_DE_HABITACION = 'El total es el de la habitación para todo el grupo: el costo es'
+
+/**
+ * ¿Se puede ofrecer «El total es de la habitación»? Un hotel cuyo pantallazo 1 trae un solo total
+ * para un grupo con menores, sin otra captura para restar (M7-1 / M9-2, QA Trappvel 2026-10-29).
+ */
+export function ofreceTotalDeHabitacion(estado: EstadoTarifa | null | undefined, ranuraSlug: string | null | undefined, casillas: CasillasLeidas | null | undefined): boolean {
+  if (ranuraSlug !== 'hotel_detalle' || estado?.estado !== 'falta') return false
+  const l1 = casillas?.grupo_completo
+  if (!l1 || l1.costoPendiente || l1.totalDeHabitacion) return false
+  return !casillas?.sin_infantes && !casillas?.solo_adultos
+}
+
 /** Lo que dice la opción escrita a mano sin costo mientras nadie lo elige. */
 export const MENSAJE_COSTO_PENDIENTE = 'Esta opción todavía no tiene costo: elígelo con «Usar tarifa de proveedor», pega un pantallazo o escríbelo a mano.'
 
@@ -1463,6 +1501,23 @@ function resolverTarifaPorFuente(
       costoTotal: costo,
       origen: 'habitaciones',
       mensaje: `Una reserva de ${registro.length} habitaciones en un pantallazo: el costo es su total, ${formatoMonto(costo, moneda)}. No hace falta nada más.`,
+      porHabitacion: [{ numero: 1, ocupacion: c, total: costo, nombre }],
+    }
+  }
+
+  // 2e · hotel con menores cuyo total es el de la habitación (M7-1 / M9-2): lo dijo una persona
+  // con «El total es de la habitación». Sin partirlo por pasajero, como la reserva de 2d. Con otra
+  // captura pegada para restar, manda la resta.
+  if (ranuraSlug === 'hotel_detalle' && l1.totalDeHabitacion && !defs.slice(1).some(d => casillas[d.clave])) {
+    const costo = montoDeCosto(l1)
+    const nombre = (l1.identidad.tipo_habitacion ?? '').trim() || 'Habitación'
+    return {
+      estado: 'resuelta',
+      costos: [],
+      moneda,
+      costoTotal: costo,
+      origen: 'habitaciones',
+      mensaje: `${MENSAJE_TOTAL_DE_HABITACION} ${formatoMonto(costo, moneda)}. No hace falta nada más.`,
       porHabitacion: [{ numero: 1, ocupacion: c, total: costo, nombre }],
     }
   }
@@ -1784,6 +1839,12 @@ export type PreciosAMano = Record<string, PrecioAMano>
 export const claveDeHabitacion = (numero: number) => `hab:${numero}`
 
 export interface TarifaPax {
+  /**
+   * El paquete de un viaje en BLOQUEO (brief del 2026-10-27, `bloqueo-paquete.ts`): los dos
+   * pantallazos (hotel y vuelo) leídos y revisados, la distribución por acomodación y lo que incluye.
+   * Ausente en toda línea que no es un paquete. Se guarda crudo y se lee con `leerPaqueteBloqueo`.
+   */
+  bloqueo?: unknown
   /** La composición propia del ítem (CC4b). Ausente = la del viaje. */
   composicion?: Composicion | null
   casillas?: CasillasLeidas
@@ -1865,6 +1926,49 @@ export interface TarifaPax {
    * ni fotos ni proveedor. Ausente = como siempre.
    */
   fichaDescartada?: string
+  /**
+   * Tarifa pública o neta (reunión del 2026-10-22, `tarifa-publica.ts`). Ausente = Neta, como toda
+   * línea anterior a esto.
+   */
+  tipoTarifa?: DecisionTipoTarifa
+  /**
+   * El traslado (o servicio) que va con UNA opción de hotel: el id de esa opción (reunión del
+   * 2026-10-22, punto 5, `va-con-hotel.ts`). Solo cuenta en las tarifas que llevan ese hotel.
+   * Ausente = general: sirve para cualquier hotel, como siempre.
+   */
+  vaConHotel?: string
+  /**
+   * El descuento que el cliente ve en esta opción, con su motivo (reglas de margen del 2026-10-27,
+   * `reglas-margen.ts`: el descuento por hotel). Ausente = sin descuento, como toda línea anterior.
+   */
+  descuentoCliente?: DescuentoClienteGuardado
+}
+
+/** `tarifa_pax.descuentoCliente` tal como se guarda. La regla que lo lee es `reglas-margen.ts`. */
+export interface DescuentoClienteGuardado {
+  motivo: string
+  tipo: 'pct' | 'monto'
+  valor: number
+  por?: string | null
+  en?: string
+}
+
+/**
+ * El descuento guardado, sin interpretarlo: solo se comprueba la forma para no perderlo en la
+ * próxima escritura (ver `leerTarifaPax`). La validación de negocio vive en `reglas-margen.ts`.
+ */
+function leerDescuentoCliente(raw: unknown): DescuentoClienteGuardado | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const r = raw as Record<string, unknown>
+  const valor = Number(r.valor)
+  if (typeof r.motivo !== 'string' || !r.motivo.trim() || (r.tipo !== 'pct' && r.tipo !== 'monto') || !Number.isFinite(valor) || valor <= 0) return null
+  return {
+    motivo: r.motivo.slice(0, 200),
+    tipo: r.tipo,
+    valor,
+    por: typeof r.por === 'string' ? r.por.slice(0, 200) : null,
+    en: typeof r.en === 'string' ? r.en : '',
+  }
 }
 
 /** Lo escrito a mano de un tipo de pasajero, con quién y cuándo. */
@@ -2102,6 +2206,10 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
   const costosAMano = leerCostosAMano(r.costosAMano)
   const tarifaExtraida = leerOrigenTarifaExtraida(r.tarifaExtraida)
   const fichaDescartada = typeof r.fichaDescartada === 'string' && r.fichaDescartada.trim() ? r.fichaDescartada.slice(0, 300) : null
+  const tipoTarifa = leerTipoTarifa(r.tipoTarifa)
+  const vaConHotel = typeof r.vaConHotel === 'string' && r.vaConHotel.trim() ? r.vaConHotel.slice(0, 100) : null
+  const descuentoCliente = leerDescuentoCliente(r.descuentoCliente)
+  const bloqueo = leerPaqueteBloqueo(r.bloqueo)
   return {
     composicion: normalizarComposicion(r.composicion),
     casillas,
@@ -2128,6 +2236,14 @@ export function leerTarifaPax(raw: unknown): TarifaPax {
     ...(tarifaExtraida ? { tarifaExtraida } : {}),
     // Igual: sin «No es este» en la tarjeta la llave no aparece.
     ...(fichaDescartada ? { fichaDescartada } : {}),
+    // Igual: sin decisión de tarifa pública o neta la llave no aparece (es Neta).
+    ...(tipoTarifa ? { tipoTarifa } : {}),
+    // Igual: un servicio general (sin hotel) no lleva la llave.
+    ...(vaConHotel ? { vaConHotel } : {}),
+    // Igual: sin descuento al cliente la llave no aparece.
+    ...(descuentoCliente ? { descuentoCliente } : {}),
+    // Igual: solo un paquete de bloqueo lleva la llave.
+    ...(bloqueo ? { bloqueo } : {}),
   }
 }
 

@@ -46,7 +46,14 @@ const viaje = {
   negocioId: 'neg-1',
   viaje: { destino: 'Providencia', fechas: { inicio: '2026-11-09', fin: '2026-11-13' }, composicion: { adultos: 2, ninos: 1, infantes: 0 } },
   iataDestino: 'PVA',
-  solicitud: { destino: 'Providencia', alcance: 'Nacional', fechas: '9 al 13 nov 2026', tipoDeFechas: 'fechas fijas', pasajeros: '2 adultos, 1 niño', requisitos: null },
+  solicitud: {
+    filas: [
+      { clave: 'destino' as const, label: 'Destino', valor: 'Providencia · Nacional' },
+      { clave: 'fechas' as const, label: 'Fechas', valor: '9 al 13 nov 2026 · Fechas fijas' },
+      { clave: 'pasajeros' as const, label: 'Pasajeros', valor: '2 adultos, 1 niño' },
+    ],
+    tienePresupuesto: false,
+  },
   perfil: { tipo: 'Leisure', conQuienViaja: 'ESPOSA E HIJO', bolsillo: 'Medio', preferencias: null, notas: null },
   cotizaciones: [
     { id: 'cot-1', codigo: 'COT-2026-0012', estado: 'borrador', valorTotal: 4180118, editadaEl: '2026-09-23T14:00:00Z' },

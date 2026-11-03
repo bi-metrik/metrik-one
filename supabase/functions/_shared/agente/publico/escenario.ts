@@ -15,6 +15,9 @@ import type { ConfigPublico } from './config.ts';
 import { AlmacenPublicoMemoria, ChatwootMemoria, RelojPublico, TranscriptorMemoria, nuevoIdPublico } from './memoria.ts';
 import { REGLAMENTO_SABOR } from './reglamento-sabor.ts';
 import type { Canal, FilaPublica, LlaveConversacion, TrazaPublica } from './tipos.ts';
+import type { ventasEnMemoria } from './ventas/puertos-ventas.ts';
+
+export type VentasMemoria = ReturnType<typeof ventasEnMemoria>;
 
 export const WS_PUBLICO = '00000000-0000-4000-9000-00000000a5a5';
 
@@ -38,6 +41,8 @@ export interface EscenarioPublico {
   chatwoot: ChatwootMemoria;
   transcriptor: TranscriptorMemoria;
   deps: DepsPublico;
+  /** Dominio de ventas: el catálogo, la pasarela y los links en memoria. */
+  ventas?: VentasMemoria;
   pasos: PasoPublico[];
   /** Escribe un mensaje (o varios seguidos, que llegan como ráfaga) y lo atiende. */
   escribe(texto: string | string[], o?: { despuesMs?: number }): Promise<Salida[]>;
@@ -61,6 +66,14 @@ export async function escenarioPublico(p: {
   fallarHerramienta?: () => boolean;
   precios?: DepsPublico['precios'];
   conversacionId?: number;
+  /** Con roles: las funciones del rol, el catálogo (de prueba) y el rol para la traza (ver `cola.ts`). */
+  funciones?: DepsPublico['funciones'];
+  catalogo?: DepsPublico['catalogo'];
+  rol?: DepsPublico['rol'];
+  /** Dónde quedan los pasos a persona (`asistente_escalamientos`). Sin él, no se escriben (como en el arnés). */
+  escalamientos?: DepsPublico['escalamientos'];
+  /** Dominio de ventas (con `config.dominio = 'ventas'`). */
+  ventas?: VentasMemoria;
 }): Promise<EscenarioPublico> {
   const reloj = new RelojPublico(undefined, p.vivo ?? false);
   const almacen = new AlmacenPublicoMemoria(reloj, WS_PUBLICO);
@@ -87,6 +100,11 @@ export async function escenarioPublico(p: {
     nuevoId: nuevoIdPublico,
     dormir: async (ms) => { reloj.avanzar(ms); },
     fallarHerramienta: p.fallarHerramienta,
+    ...(p.funciones ? { funciones: p.funciones } : {}),
+    ...(p.catalogo ? { catalogo: p.catalogo } : {}),
+    ...(p.rol ? { rol: p.rol } : {}),
+    ...(p.escalamientos ? { escalamientos: p.escalamientos } : {}),
+    ...(p.ventas ? { ventas: p.ventas.puertos } : {}),
   };
   const pasos: PasoPublico[] = [];
   let mensajeId = 100;
@@ -101,7 +119,7 @@ export async function escenarioPublico(p: {
   const entrante = (clase: FilaPublica['clase'], texto: string | null, extra: { toqueId?: string; adjunto?: FilaPublica['adjunto'] } = {}) =>
     almacen.entrante({ llave, canal, clase, texto, mensajeId: ++mensajeId, ...extra });
   return {
-    llave, canal, reloj, almacen, chatwoot, transcriptor, deps, pasos,
+    llave, canal, reloj, almacen, chatwoot, transcriptor, deps, pasos, ...(p.ventas ? { ventas: p.ventas } : {}),
     async escribe(texto, o) {
       const textos = Array.isArray(texto) ? texto : [texto];
       reloj.avanzar(o?.despuesMs ?? 20_000);

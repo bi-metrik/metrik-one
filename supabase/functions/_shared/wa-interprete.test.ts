@@ -195,19 +195,25 @@ describe('interruptor apagado: el webhook no hace ni una consulta más que hoy',
     }
   });
 
-  it('identificar al remitente sigue siendo UNA lectura de workspaces (+ la RPC): el interruptor va en ella', async () => {
+  it('identificar al remitente sigue siendo UNA lectura de workspaces (+ la RPC y su staff): el interruptor va en ella', async () => {
     const llamadas: string[] = [];
     let columnas = '';
     const sb = {
-      rpc: async (n: string) => { llamadas.push(`rpc:${n}`); return { data: [{ workspace_id: WS, full_name: 'X', es_principal: true, user_id: 'u' }], error: null }; },
+      // La forma real de `wa_identify_user` (sin `user_id`): el staff se resuelve aparte, por su teléfono.
+      rpc: async (n: string) => { llamadas.push(`rpc:${n}`); return { data: [{ workspace_id: WS, full_name: 'X', phone_whatsapp: '573000000001', es_principal: true, tipo_acceso: 'ambos' }], error: null }; },
       from: (t: string) => {
         llamadas.push(`from:${t}`);
-        const q = { select: (c: string) => { columnas = c; return q; }, eq: () => q, single: async () => ({ data: { subscription_status: 'trial', modules: {}, bot_conversacional: null }, error: null }) };
+        const q = {
+          select: (c: string) => { if (t === 'workspaces') columnas = c; return q; }, eq: () => q, limit: () => q,
+          then: (ok: (r: unknown) => unknown) => Promise.resolve({ data: [{ id: 'st-x', profile_id: 'p-x', full_name: 'X' }], error: null }).then(ok),
+          single: async () => ({ data: { subscription_status: 'trial', modules: {}, bot_conversacional: null }, error: null }),
+        };
         return q;
       },
     };
     const u = await identificarRemitente(sb, '573000000001');
-    expect(llamadas).toEqual(['rpc:wa_identify_user', 'from:workspaces']);
+    expect(llamadas).toEqual(['rpc:wa_identify_user', 'from:workspaces', 'from:staff']);
+    expect(u?.staff_id).toBe('st-x');
     expect(columnas).toBe('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot');
     // Nulo (la llave no existe en `config_extra`): apagado.
     expect(interruptorDe(u!, () => undefined).activo).toBe(false);

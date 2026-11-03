@@ -10,14 +10,16 @@ import type { FichaCliente, Llave } from '../wa-cliente-reglas.ts';
 import { calcularNiveles } from '../niveles-solicitud.ts';
 import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente } from '../wa-carga-reglas.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeCarga, planDeCarga, propuestoDe, registradoDe, traeArchivo } from './bandeja/carga.ts';
 import { instruccionesCarga } from './bandeja/extraccion.ts';
-import type { PlanCarga } from './bandeja/carga.ts';
+import type { AdjuntoCarga, OpcionesCarga, PlanCarga, PreguntaPrevia } from './bandeja/carga.ts';
+import type { PuertoAdjuntos } from './adjuntos.ts';
+import type { ArchivoAdjunto } from './one/lectura-adjunto.ts';
 import type { HechoConOrigen, MiembroEquipo, PuertoBandeja, ViajeAgente } from './bandeja/dominio.ts';
 import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { DimensionPerfil, EstadoPerfil, HechoExistente, OrigenPerfil } from '../perfil-contacto.ts';
-import type { Almacen, FilaConversacion, Mensajero, Salida, Traza } from './tipos.ts';
+import type { Almacen, FilaConversacion, MediaFila, Mensajero, Salida, Traza } from './tipos.ts';
 
 export interface ContactoMem { id: string; nombre: string; celular?: string | null; correo?: string | null; usuario?: string | null }
 export interface ViajeMem { id: string; codigo: string; contactoId: string; nombre: string; destino: string | null; abierto: boolean; datos: Record<string, unknown> }
@@ -126,7 +128,11 @@ function normal(s: string): string {
  * producción, `prepararCarga` de `produccion.ts`). Sin él, el esquema de respuesta no deja al modelo devolver lo de la
  * persona aunque el prompt se lo pida (cp-mixto, 2026-10-14).
  */
-export type ExtractorMemoria = (p: { textos: string[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string; perfil?: boolean }) => Promise<unknown>;
+/**
+ * `reenviados`: por texto, si es un reenvío del cliente. `pedido`: lo que el comercial escribió al pedir la carga de una
+ * tanda (va después de `textos`, «escrito por el comercial»; ver `mensajesDeCarga`). Sin pedido, no viene.
+ */
+export type ExtractorMemoria = (p: { textos: string[]; reenviados?: boolean[]; mensajes: string; campos: CampoEntendible[]; yaTiene: Record<string, unknown>; instrucciones: string; perfil?: boolean; pedido?: string[] }) => Promise<unknown>;
 
 /**
  * El directorio, los viajes y lo escrito. Sin `campos`, la extracción es determinista (sin modelo): guarda los textos
@@ -143,10 +149,48 @@ export class PuertoMemoria implements PuertoBandeja {
   extraer: ExtractorMemoria | null;
   /** Lo que recibió la extracción en cada llamado (para las pruebas). */
   extracciones: string[][] = [];
+  /** Cada extracción con quién dijo cada texto y lo que ya se había preguntado (para el banco de conducta). */
+  cargas: Array<{ textos: string[]; reenviados: boolean[]; preguntas: PreguntaPrevia[] }> = [];
   private consecutivo = new Map<string, number>();
   /** El equipo comercial (`equipoComercial`). Reemplazable; `'error'` simula la lectura caída. */
   equipo: MiembroEquipo[] | 'error';
-  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[]; campos?: CampoEntendible[]; extraer?: ExtractorMemoria; ahora?: () => number; equipo?: MiembroEquipo[] } = {}) {
+  /**
+   * Los adjuntos (foto o PDF, 2026-10-21), solo si el escenario los pide (`conAdjuntos`): los archivos que «están en
+   * Meta» por media id, lo subido al llegar, lo anotado en cada fila y los soportes que quedaron en la actividad.
+   */
+  archivos = new Map<string, ArchivoAdjunto>();
+  mediaRota = new Set<string>();
+  subidos = new Map<string, string>();
+  anotados = new Map<string, MediaFila>();
+  soportes: Array<{ viajeId: string; ref: string; tipo: string; nombre: string | null }> = [];
+  /** Para simular que la actividad no deja escribir el soporte. */
+  fallarSoporte = false;
+  /** Lo que hace `anotarMedia` con la conversación (el escenario lo conecta a su almacén, como la base en producción). */
+  alAnotar: ((filaId: string, media: MediaFila) => void) | null = null;
+  adjuntos?: PuertoAdjuntos;
+  soportesEnViaje?: (viajeId: string, adjuntos: AdjuntoCarga[]) => Promise<void>;
+
+  constructor(p: { contactos?: ContactoMem[]; viajes?: ViajeMem[]; campos?: CampoEntendible[]; extraer?: ExtractorMemoria; ahora?: () => number; equipo?: MiembroEquipo[]; conAdjuntos?: boolean } = {}) {
+    if (p.conAdjuntos) {
+      this.adjuntos = {
+        bajarAdjunto: async (mediaId) => (this.mediaRota.has(mediaId) ? null : this.archivos.get(mediaId) ?? { bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), mime: 'image/jpeg', nombre: null }),
+        guardarAdjunto: async (filaId, archivo) => {
+          const ref = `one://gastos-soportes/ws/whatsapp/${filaId}.${archivo.mime === 'application/pdf' ? 'pdf' : 'jpg'}`;
+          this.subidos.set(ref, filaId);
+          return ref;
+        },
+        anotarMedia: async (filaId, media) => {
+          this.anotados.set(filaId, media);
+          this.alAnotar?.(filaId, media);
+        },
+      };
+      this.soportesEnViaje = async (viajeId, adjuntos) => {
+        if (this.fallarSoporte) throw new Error('la actividad no deja escribir');
+        if (!this.viajes.some((v) => v.id === viajeId)) throw new Error('viaje inexistente');
+        for (const a of adjuntos) this.soportes.push({ viajeId, ref: a.ref, tipo: a.tipo, nombre: a.nombre });
+        this.escrituras.push({ tipo: 'soporte', viajeId, refs: adjuntos.map((a) => a.ref) });
+      };
+    }
     this.equipo = structuredClone(p.equipo ?? EQUIPO_PRUEBA);
     this.contactos = structuredClone(p.contactos ?? []);
     this.viajes = structuredClone(p.viajes ?? []);
@@ -228,13 +272,24 @@ export class PuertoMemoria implements PuertoBandeja {
     return { id: v.id, codigo: v.codigo, nombre: v.nombre };
   }
 
-  async prepararCarga(viajeId: string, textos: string[], previo?: unknown) {
+  /** Lo que el comercial escribió al pedir cada carga (`pedido`), en el orden de `extracciones` (para las pruebas). */
+  pedidos: string[][] = [];
+
+  async prepararCarga(viajeId: string, textos: string[], previo?: unknown, oc?: OpcionesCarga) {
     const v = this.viajes.find((x) => x.id === viajeId)!;
     if (this.campos && this.extraer) {
+      const pedido = oc?.pedido ?? [];
       this.extracciones.push([...textos]);
+      this.pedidos.push([...pedido]);
+      this.cargas.push({ textos: [...textos], reenviados: [...(oc?.reenviados ?? textos.map(() => true))], preguntas: [...(oc?.preguntas ?? [])] });
       const data = { destino: v.destino, ...v.datos };
-      const raw = await this.extraer({ textos, mensajes: mensajesDeTextos(textos).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data, instrucciones: instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true }), perfil: true });
-      return planDeCarga({ bloques: [{ fields: this.campos, data }], textos, raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo });
+      const instrucciones = instruccionesCarga(this.campos, this.hoyISO(), data, propuestoDe(previo), undefined, { perfil: true, documentos: textos.some(traeArchivo), preguntas: (oc?.preguntas ?? []).map((q) => q.texto), ...(pedido.length ? { pedido: true } : {}) });
+      // Como producción: el pedido va numerado después de los textos y sostiene valores con ellos (`validarCarga`).
+      const raw = await this.extraer({
+        textos, reenviados: oc?.reenviados, mensajes: mensajesDeCarga(textos, pedido, oc?.reenviados).map((m) => `[${m.n}] ${m.cuerpo}`).join('\n'), campos: this.campos, yaTiene: data,
+        instrucciones, perfil: true, ...(pedido.length ? { pedido } : {}),
+      });
+      return planDeCarga({ bloques: [{ fields: this.campos, data }], textos: [...textos, ...pedido], raw, hoyISO: this.hoyISO(), ahoraIso: new Date(this.ahora()).toISOString(), previo, preguntas: oc?.preguntas });
     }
     const antes = (previo as { textos?: string[] } | undefined)?.textos ?? [];
     const todos = [...antes, ...textos.filter((t) => !antes.includes(t))];

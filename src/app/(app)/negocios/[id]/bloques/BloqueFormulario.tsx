@@ -9,6 +9,7 @@ import {
   Loader2,
   CheckCircle2,
   ExternalLink,
+  Download,
   AlertTriangle,
   RefreshCw,
   History,
@@ -191,9 +192,14 @@ export default function BloqueFormulario({
         <span className="text-xs font-medium">{label}</span>
         {versionActual && <span className="text-[10px] text-muted-foreground">v{versionActual}</span>}
         {driveUrl && (
-          <a href={hrefArchivo(driveUrl) ?? undefined} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline">
-            <ExternalLink className="h-3 w-3" /> Ver PDF
-          </a>
+          <div className="ml-auto flex items-center gap-1.5">
+            <a href={hrefArchivo(driveUrl) ?? undefined} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5">
+              <ExternalLink className="h-3 w-3" /> Ver PDF
+            </a>
+            <a href={hrefArchivo(driveUrl, { descargar: true }) ?? undefined} download className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5">
+              <Download className="h-3 w-3" /> Descargar
+            </a>
+          </div>
         )}
       </div>
     )
@@ -225,9 +231,14 @@ export default function BloqueFormulario({
           )}
         </div>
         {driveUrl && (
-          <a href={hrefArchivo(driveUrl) ?? undefined} target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1 text-[11px] text-primary hover:underline">
-            <ExternalLink className="h-3 w-3" /> Ver PDF actual
-          </a>
+          <div className="shrink-0 flex items-center gap-1.5">
+            <a href={hrefArchivo(driveUrl) ?? undefined} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5">
+              <ExternalLink className="h-3 w-3" /> Ver PDF actual
+            </a>
+            <a href={hrefArchivo(driveUrl, { descargar: true }) ?? undefined} download className="inline-flex items-center gap-1 rounded-md border border-border bg-white px-2 py-0.5 text-[11px] text-primary hover:bg-primary/5">
+              <Download className="h-3 w-3" /> Descargar
+            </a>
+          </div>
         )}
       </div>
 
@@ -453,9 +464,14 @@ export default function BloqueFormulario({
               <span className="text-muted-foreground">{fmtFecha(v.generated_at)}</span>
               {v.autor && <span className="text-muted-foreground/70">· {v.autor}</span>}
               {v.drive_url && (
-                <a href={hrefArchivo(v.drive_url) ?? undefined} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-primary hover:underline">
-                  <ExternalLink className="h-3 w-3" /> PDF
-                </a>
+                <span className="ml-auto inline-flex items-center gap-2">
+                  <a href={hrefArchivo(v.drive_url) ?? undefined} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                    <ExternalLink className="h-3 w-3" /> PDF
+                  </a>
+                  <a href={hrefArchivo(v.drive_url, { descargar: true }) ?? undefined} download className="inline-flex items-center gap-1 text-primary hover:underline">
+                    <Download className="h-3 w-3" /> Descargar
+                  </a>
+                </span>
               )}
             </div>
           ))}

@@ -144,7 +144,8 @@ describe('ofrecer y elegir', () => {
   it('ofrece las tarifas con el filtro a la vista; nada se elige solo', async () => {
     const r = await tarifasDeLinea(ITEM)
     expect(r.ok && r.opciones.map((o) => [o.indice, o.fueraPor])).toEqual([[0, []], [1, ['temporada']], [2, []], [3, ['pasajero']], [4, []]])
-    expect(r.ok && r.ajustes).toEqual({ canal: 'neta', comisionPct: null, ivaIncluido: false, ivaPct: 19 })
+    // El tarifario ficticio no declara IVA ni la ficha lo dice: sin % (prueba del #1229, punto 3).
+    expect(r.ok && r.ajustes).toEqual({ canal: 'neta', comisionPct: null, ivaIncluido: false, ivaPct: null })
     expect(item().tarifa_pax).toBeNull()
     expect(base.tablas.rubros).toEqual([])
   })
@@ -157,7 +158,8 @@ describe('ofrecer y elegir', () => {
     expect(t.casillas?.grupo_completo).toMatchObject({ origen: 'tarifario', total: 900000, moneda: 'COP' })
     expect(t.tarifaExtraida).toMatchObject({ extraccion_id: EXT, proveedor_id: HOTEL, filas: [{ indice_fila: 0, cantidad: 1, noches: 3, tipo: null }], canal: 'neta', moneda: 'COP', por: 'Ana Ficticia' })
     expect(t.confirmada).toMatchObject({ costoTotalCOP: 900000 })
-    expect(item().nombre).toBe('HOTEL FICTICIO PLAYA')
+    // Con la tarifa del proveedor, la columna guarda la capitalización normal (brief del 2026-10-22, punto 2).
+    expect(item().nombre).toBe('Hotel Ficticio Playa')
     // La vista dice qué tarifa tiene elegida la línea.
     const v = await tarifasDeLinea(ITEM)
     expect(v.ok && v.elegida?.filas[0].indice_fila).toBe(0)

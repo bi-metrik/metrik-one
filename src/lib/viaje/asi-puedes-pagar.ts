@@ -12,7 +12,7 @@
  * nadie arma esto y el PDF no cambia.
  */
 
-import { configPlanPagos, planSugerido, REGLA_POR_DEFECTO, type ReglaPlan } from './plan-pagos'
+import { configPlanPagos, planSugerido, REGLA_POR_DEFECTO, sumarDiasCivil, type ReglaPlan } from './plan-pagos'
 
 /** Lo que el PDF y la pantalla necesitan para armar la sección, además del total. */
 export interface EntradaAsiPuedesPagar {
@@ -25,7 +25,7 @@ export interface EntradaAsiPuedesPagar {
 
 export interface FilaAsiPuedesPagar {
   monto: number
-  /** «al confirmar (anticipo)», «hasta el 19 de noviembre», «hasta el 4 de diciembre, día del viaje». */
+  /** «al confirmar (anticipo)», «hasta el 19 de noviembre», «hasta el 3 de diciembre, un día antes del viaje». */
   cuando: string
   /** En la fila que completa el mínimo: lo acumulado hasta ahí (el resto, `null`). */
   llevas: number | null
@@ -60,9 +60,9 @@ function diasEnPalabras(n: number): string {
   return palabras[n] ?? String(n)
 }
 
-/** «El 80 % quince días antes de salir y el resto el día del viaje.» */
+/** «El 80 % quince días antes de salir y el resto un día antes del viaje.» */
 export function reglaEnPalabras(regla: ReglaPlan = REGLA_POR_DEFECTO): string {
-  return `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir y el resto el día del viaje.`
+  return `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir y el resto un día antes del viaje.`
 }
 
 export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar): AsiPuedesPagar {
@@ -71,18 +71,19 @@ export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar): A
   const cuotas = planSugerido({ total, fechaSalida: entrada.fechaSalida, hoy: entrada.hoy, regla })
   if (!cuotas || cuotas.length === 0 || !entrada.fechaSalida) return { ...base, filas: null, suma: 0 }
 
-  const salida = entrada.fechaSalida
+  // El saldo vence el día anterior a la salida (decisión 2026-10-29).
+  const diaAntes = sumarDiasCivil(entrada.fechaSalida, -1)
   let acumulado = 0
   const minimo = Math.min(Math.round(total), Math.ceil((Math.round(total) * regla.pct_minimo) / 100 / 1000) * 1000)
   const filas: FilaAsiPuedesPagar[] = cuotas.map((c, i) => {
     acumulado += c.monto
     const completaMinimo = acumulado >= minimo && acumulado - c.monto < minimo
     const esAnticipo = i === 0
-    const esElViaje = c.fecha === salida && !esAnticipo
+    const esDiaAntes = c.fecha === diaAntes && !esAnticipo
     const cuando = esAnticipo
       ? 'al confirmar (anticipo)'
-      : esElViaje
-        ? `hasta el ${fechaLarga(c.fecha)}, día del viaje`
+      : esDiaAntes
+        ? `hasta el ${fechaLarga(c.fecha)}, un día antes del viaje`
         : `hasta el ${fechaLarga(c.fecha)}`
     return { monto: c.monto, cuando, llevas: completaMinimo && acumulado < Math.round(total) ? acumulado : null }
   })

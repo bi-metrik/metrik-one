@@ -11,6 +11,7 @@ import type { DatosBloqueServicios } from '@/lib/viaje/bloque-servicios'
 
 vi.mock('../../servicios-viaje-actions', () => ({
   actualizarServicio: vi.fn(),
+  actualizarFechasServicio: vi.fn(),
   adjuntarArchivoServicio: vi.fn(),
   traerServiciosDeCotizacion: vi.fn(),
   registrarPagoServicio: vi.fn(),
@@ -129,5 +130,58 @@ describe('BloqueServicios', () => {
     expect(h).toContain('Esperando a Edgar')
     expect(h).toContain('Falta confirmar')
     expect(h).toContain('Sigue:')
+  })
+
+  it('fechas: la fila cerrada dice cuándo o «Falta la fecha»; la hoja del vuelo edita cada tramo con campos nativos de 44 px', () => {
+    const vuelo = {
+      ...datos().filas[0],
+      fecha_servicio: '2026-11-10', hora_inicio: '06:10', fecha_fin: '2026-11-15', hora_fin: '20:05',
+      tramos: [
+        { fecha: '2026-11-10', hora_salida: '06:10', hora_llegada: '07:45', origen: 'BOG', destino: 'ADZ', aerolinea: 'Aerolínea X', numero_vuelo: 'XX100' },
+        { fecha: '2026-11-15', hora_salida: '18:30', hora_llegada: '20:05', origen: 'ADZ', destino: 'BOG', aerolinea: 'Aerolínea X', numero_vuelo: null },
+      ],
+      fechas_corregidas_at: '2026-10-21T15:00:00Z', fechas_corregidas_por: 's-ale',
+    }
+    const h = html(datos({ filas: [vuelo, datos().filas[1]], nombres: { 's-ale': 'Alejandra' } }), 'editable', false, 's1')
+    expect(h).toContain('mar 10 nov · 06:10 → dom 15 nov · 20:05')
+    expect(h).toContain('Falta la fecha') // el hotel, sin fecha leída
+    expect(h).toContain('Ida')
+    expect(h).toContain('Regreso')
+    expect(h).toContain('Corregida a mano por Alejandra el mié 21 oct.')
+    expect(h.match(/type="date"/g)?.length).toBeGreaterThanOrEqual(3) // 2 tramos + fecha límite
+    expect(h.match(/type="time"/g)?.length).toBe(4)
+    expect(h).toContain('Guardar fechas')
+    expect(h).toContain('Agregar tramo')
+    for (const campo of h.match(/<input[^>]*type="(date|time)"[^>]*>/g) ?? []) expect(campo).toContain('h-11')
+    for (const p of PROHIBIDAS) expect(h.toLowerCase()).not.toContain(p.toLowerCase())
+  })
+
+  it('fechas: el hotel se edita con check-in y check-out; quien no edita no ve «Guardar fechas»', () => {
+    const hotel = { ...datos().filas[1], fecha_servicio: '2026-11-10', fecha_fin: '2026-11-13' }
+    const h = html(datos({ filas: [hotel] }), 'editable', false, 's2')
+    expect(h).toContain('Check-in')
+    expect(h).toContain('Check-out')
+    expect(h).toContain('value="2026-11-13"')
+    const comercial = html(datos({ filas: [hotel], quien: { ...OPERACIONES, areas: ['comercial'] } }), 'editable', false, 's2')
+    expect(comercial).not.toContain('Guardar fechas')
+  })
+
+  it('QA 2026-10-29 M3-4: pagado de menos ofrece «el proveedor cobró esto» y lo que cobra queda a la vista como a favor', () => {
+    const medios = [{ id: 'tc-emp', label: 'Tarjeta empresa ••4417', titular: 'empresa' as const }]
+    const g = { monto: 1_500_000, soporte_url: 'one://s', medio_pago: 'tc-emp', titular_medio: 'empresa' }
+    const debe = datos({ medios, cobradoCliente: 2_000_000, filas: [{ ...datos().filas[0], gastos: [g] }] })
+    const h = html(debe, 'editable', false, 's1')
+    expect(h).toContain('Falta pagar $')
+    expect(h).toContain('El proveedor cobró $')
+    expect(h).toContain('Lo que cobra el proveedor')
+    const cobro = html(datos({ medios, filas: [{ ...datos().filas[0], gastos: [g], valor_por_pagar: 1_500_000 }] }), 'editable', false, 's1')
+    expect(cobro).toContain('a favor')
+    expect(cobro).not.toContain('Falta pagar')
+  })
+
+  it('QA 2026-10-29 H3-1: la comercial responsable ve cómo subir el voucher; la que no es responsable, no', () => {
+    const comercial = { ...OPERACIONES, areas: ['comercial'] }
+    expect(html(datos({ quien: comercial }), 'editable', true, 's2')).toContain('Pegar voucher')
+    expect(html(datos({ quien: comercial }), 'editable', false, 's2')).not.toContain('Pegar voucher')
   })
 })

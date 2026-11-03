@@ -15,6 +15,7 @@ import {
 } from '@/lib/cotizaciones/recargo-linea'
 import { isEditable } from '@/lib/cotizaciones/state-machine'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { leerReglasDeCotizacion } from '@/lib/cotizaciones/reglas-margen'
 
 /**
  * El recargo fijo, del lado del servidor.
@@ -64,10 +65,15 @@ export async function aplicarRecargo(cotizacionId: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: cot } = await (supabase as any)
     .from('cotizaciones')
-    .select('id, negocio_id, oportunidad_id, estado')
+    // `*`: `reglas_margen` la agrega una migración; nombrarla antes devolvería un 400.
+    .select('*')
     .eq('id', cotizacionId)
     .maybeSingle()
   if (!cot) return { success: false as const, error: 'Cotización no encontrada' }
+  // Con reglas de margen (2026-10-27) el colchón de cada tiquete reemplaza el recargo fijo.
+  if (leerReglasDeCotizacion(cot.reglas_margen)) {
+    return { success: false as const, error: 'Esta cotización usa el colchón por tiquete en los vuelos: no lleva el recargo fijo.' }
+  }
   // Una cotización ya enviada no cambia de precio por un botón: se duplica o se corrige.
   if (!isEditable(cot.estado)) {
     return { success: false as const, error: 'Esta cotización ya no es un borrador: su precio no se cambia agregándole un recargo.' }

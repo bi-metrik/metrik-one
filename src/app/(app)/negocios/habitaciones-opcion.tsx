@@ -1,5 +1,6 @@
 'use client'
 
+import { tasaComoTexto, textoAyudaTasa, textoTasaPropagada, type TasaDeCotizacion } from '@/lib/cotizaciones/tasa-cotizacion'
 import { MENSAJE_LECTURA_INTERRUMPIDA } from '@/lib/cotizaciones/lectura-sin-silencio'
 import { useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
@@ -48,6 +49,7 @@ export default function HabitacionesDeOpcion({
   monedaSlot,
   onGuardada,
   onCambio,
+  tasasCotizacion = {},
 }: {
   itemId: string
   tarifa: TarifaPax
@@ -57,10 +59,12 @@ export default function HabitacionesDeOpcion({
   monedaSlot: ReactNode
   onGuardada: (t: TarifaPax) => void
   onCambio: () => void
+  /** La tasa de la cotización por moneda (H5/H28): la casilla de la tasa arranca con ella. */
+  tasasCotizacion?: Record<string, TasaDeCotizacion>
 }) {
   const [leyendo, setLeyendo] = useState(false)
   const [rechazo, setRechazo] = useState<string | null>(null)
-  const [tasa, setTasa] = useState('')
+  const [tasaEscrita, setTasa] = useState<string | null>(null)
   const [isPending, startTransition] = useTransitionTolerante()
 
   const grupo = composicionViaje ?? tarifa.composicion ?? null
@@ -77,16 +81,18 @@ export default function HabitacionesDeOpcion({
 
   const monedaResuelta = estado.estado === 'resuelta' ? estado.moneda : 'COP'
   const enCOP = monedaResuelta === 'COP'
+  const tasaDeLaCotizacion = enCOP ? null : tasasCotizacion[monedaResuelta]?.tasa ?? null
+  const tasa = tasaEscrita ?? (tasaDeLaCotizacion !== null ? tasaComoTexto(tasaDeLaCotizacion) : '')
   const tasaNum = parseMontoCop(tasa) ?? Number.NaN
   const tasaValida = enCOP || (Number.isFinite(tasaNum) && tasaNum > 0)
   const ocupado = isPending || leyendo
 
-  function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax }>, exito: string) {
+  function accion(fn: () => Promise<{ success: boolean; error?: string; tarifa?: TarifaPax; propagadas?: number }>, exito: string) {
     startTransition(async () => {
       const r = await fn()
       if (!r.success) { toast.error(r.error ?? 'No se pudo guardar'); return }
       if (r.tarifa) onGuardada(r.tarifa)
-      toast.success(exito)
+      toast.success(r.propagadas ? `${exito} ${textoTasaPropagada(r.tarifa?.confirmada?.moneda ?? '', r.propagadas)}` : exito)
       onCambio()
     })
   }
@@ -214,6 +220,9 @@ export default function HabitacionesDeOpcion({
                 aria-label={`Tasa de cambio ${monedaResuelta} a COP`}
                 className="w-40 rounded border bg-background px-2 py-1 text-sm"
               />
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {textoAyudaTasa(monedaResuelta, tasaDeLaCotizacion !== null && tasaEscrita === null)}
+              </p>
             </div>
           )}
           {monedaTarifa.asumida && (

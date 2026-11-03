@@ -5,20 +5,26 @@ import { textoLatinoProfundo } from '@/lib/texto/texto-latino';
 import { createServiceClient } from '@/lib/supabase/server';
 import { getCachedUser } from '@/lib/supabase/auth-user';
 import { accesoValida } from '@/lib/valida/acceso-servidor';
-import { credencialValida, leerSaldoValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
+import { credencialValida, leerSaldoValida } from '@/lib/valida/credencial-servidor';
+import { pdfDeValidaDelEspacio } from '@/lib/valida/reporte-servidor';
 import type { MotivoCorte } from '@/lib/valida/corte-bolsa';
 import {
   CONSULTAS_POR_PDF,
   FILAS_PARA_AVISO_CORREO,
   TOPE_FILAS_LOTE,
+  errorTamanoArchivoLote,
   autorizadoHasta,
+  avisoTiposDocumento,
   filaConsume,
   filasDesdeXlsx,
   loteActivo,
   partesDelPdf,
   recortarAlSaldo,
   textoPausa,
+  celdasFilaResultado,
+  type AvisoTiposDocumento,
   type EstadoLote,
+  type FilaResultadoLote,
   type FilaXLSX,
 } from '@/lib/valida/lote';
 import { despertarTrabajador, pausarLote } from '@/lib/valida/lote-servidor';
@@ -145,7 +151,12 @@ export type ErrorCrearLote =
   | { ok: false; error: string }
   /** La bolsa no alcanza: `alcanzan` de `consultables` filas. Con `limite` se procesan las primeras. */
   | { ok: false; error: 'saldo_insuficiente'; alcanzan: number; consultables: number; total: number }
-  | { ok: false; error: MotivoCorte; corte: true };
+  | { ok: false; error: MotivoCorte; corte: true }
+  /**
+   * Filas con un tipo de documento que no se va a consultar («X», TI…). Se avisa ANTES de crear el
+   * lote; con `aceptarTiposDocumento` el lote se crea y esas filas salen en error sin cobrarse.
+   */
+  | { ok: false; error: 'tipos_documento'; aviso: AvisoTiposDocumento; total: number };
 
 async function negociosPorCodigo(svc: Svc, workspaceId: string, codigos: string[]): Promise<Map<string, string>> {
   const mapa = new Map<string, string>();
@@ -163,7 +174,12 @@ async function negociosPorCodigo(svc: Svc, workspaceId: string, codigos: string[
 
 export async function crearLoteValida(
   fd: FormData,
-  opts: { negocio_id_lote?: string | null; titulo?: string | null; limite?: number | null } = {},
+  opts: {
+    negocio_id_lote?: string | null;
+    titulo?: string | null;
+    limite?: number | null;
+    aceptarTiposDocumento?: boolean;
+  } = {},
 ): Promise<{ ok: true; lote: LoteVista } | ErrorCrearLote> {
   const acceso = await accesoValida({ consultaNueva: true });
   if (!acceso.ok) return { ok: false, error: acceso.error };
@@ -172,7 +188,8 @@ export async function crearLoteValida(
 
   const file = fd.get('archivo');
   if (!(file instanceof File)) return { ok: false, error: 'archivo_no_provisto' };
-  if (file.size > 5 * 1024 * 1024) return { ok: false, error: 'archivo_excede_5mb' };
+  const errorTamano = errorTamanoArchivoLote(file.size);
+  if (errorTamano) return { ok: false, error: errorTamano };
 
   let rows: FilaXLSX[];
   try {
@@ -214,6 +231,13 @@ export async function crearLoteValida(
 
   const { llave } = await credencialValida(workspaceId);
   if (!llave) return { ok: false, error: 'valida_api_key_no_configurada' };
+
+  // El tipo de documento ANTES de arrancar: la persona corrige el archivo o acepta que esas filas no
+  // se consulten. Va antes de la bolsa porque esas filas no gastan consulta.
+  if (!opts.aceptarTiposDocumento) {
+    const aviso = avisoTiposDocumento(filas);
+    if (aviso) return { ok: false, error: 'tipos_documento', aviso, total: totalArchivo };
+  }
 
   // La bolsa ANTES de arrancar: un lote que no alcanza no empieza sin que la persona lo acepte. Sin
   // bolsa (plan mensual, licencia de los CDA) no hay contador que comparar: Valida nunca corta por
@@ -400,9 +424,6 @@ export async function pdfLoteValida(
   const l = await leerLote(svc, acceso.workspaceId, loteId);
   if (!l) return { ok: false, error: 'lote_no_encontrado' };
 
-  const { llave } = await credencialValida(acceso.workspaceId);
-  if (!llave) return { ok: false, error: 'valida_api_key_no_configurada' };
-
   const desde = Math.max(0, Math.floor(parte)) * CONSULTAS_POR_PDF;
   const [{ data: filas, error }, { count }] = await Promise.all([
     svc
@@ -428,33 +449,12 @@ export async function pdfLoteValida(
   const numero = Math.floor(desde / CONSULTAS_POR_PDF) + 1;
   const titulo = partes > 1 ? `${l.titulo ?? 'Cargue'} · parte ${numero} de ${partes}` : l.titulo;
 
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte-lote`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${llave}` },
-      body: JSON.stringify({ consulta_ids: ids, titulo: titulo ?? null }),
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    const sufijo = partes > 1 ? `-parte-${numero}` : '';
-    return { ok: true, data: { base64: buf.toString('base64'), filename: `valida-cargue-${l.id.slice(0, 8)}${sufijo}.pdf` } };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf_lote' };
-  }
+  // Con la llave o, si venció (fin de la prueba, reverso del pago), firmado como ONE (cláusula 11.2).
+  const r = await pdfDeValidaDelEspacio(acceso.workspaceId, { tipo: 'lote', consultaIds: ids, titulo: titulo ?? null });
+  if (!r.ok) return r;
+  const sufijo = partes > 1 ? `-parte-${numero}` : '';
+  return { ok: true, data: { base64: r.bytes.toString('base64'), filename: `valida-cargue-${l.id.slice(0, 8)}${sufijo}.pdf` } };
 }
-
-const SEVERIDAD_TEXTO: Record<string, string> = {
-  alto: 'Alto',
-  medio: 'Medio',
-  bajo: 'Bajo',
-  informativo: 'Informativo',
-  sin_hallazgo: 'Sin hallazgo',
-  error: 'Error',
-};
 
 /** Los resultados del lote en un XLSX, una fila por fila del archivo, en su orden. */
 export async function resultadosLoteValida(
@@ -466,16 +466,7 @@ export async function resultadosLoteValida(
   const l = await leerLote(svc, acceso.workspaceId, loteId);
   if (!l) return { ok: false, error: 'lote_no_encontrado' };
 
-  type Fila = {
-    posicion: number;
-    entrada: { tipo?: string; nombre?: string; documento?: { tipo?: string; numero?: string } } | null;
-    estado: string;
-    severidad: string | null;
-    total_matches: number | null;
-    valida_consulta_id: string | null;
-    resultado_error: string | null;
-    error_parseo: string | null;
-  };
+  type Fila = FilaResultadoLote;
   const filas: Fila[] = [];
   // PostgREST entrega a lo sumo 1.000 filas por consulta.
   for (let desde = 0; desde < l.total + 1000; desde += 1000) {
@@ -492,17 +483,7 @@ export async function resultadosLoteValida(
 
   const hoja = XLSX.utils.aoa_to_sheet([
     ['fila', 'tipo_persona', 'nombre', 'tipo_documento', 'numero_documento', 'severidad', 'coincidencias', 'consulta_valida', 'observacion'],
-    ...filas.map((f) => [
-      f.posicion + 1, // la fila del XLSX, contando el encabezado
-      f.entrada?.tipo ?? '',
-      f.entrada?.nombre ?? '',
-      f.entrada?.documento?.tipo ?? '',
-      f.entrada?.documento?.numero ?? '',
-      f.estado === 'pendiente' || f.estado === 'en_curso' ? 'Sin consultar' : SEVERIDAD_TEXTO[f.severidad ?? ''] ?? f.severidad ?? '',
-      f.total_matches ?? '',
-      f.valida_consulta_id ?? '',
-      f.error_parseo ?? f.resultado_error ?? '',
-    ]),
+    ...filas.map(celdasFilaResultado),
   ]);
   hoja['!cols'] = [{ wch: 6 }, { wch: 12 }, { wch: 36 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 38 }, { wch: 40 }];
   const libro = XLSX.utils.book_new();

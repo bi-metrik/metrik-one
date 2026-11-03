@@ -180,8 +180,12 @@ describe('cobrar una cuota con la tarjeta', () => {
     const e = epayco({ estado: 'aprobado', externalRef: 'epayco-2', fecha: '2026-10-12', monto: 150000 })
     expect((await cobrarCuotaConTarjeta({ db: pagada.db, adapterPara: e.adapterPara }, { cobradorId: METRIK, cuotaId: 'q1' })).tipo).toBe('pagada')
     const pendiente = crearDoble(base({ cobros: [{ id: 'c1', workspace_id: METRIK, plan_cobro_id: 'p1', numero_cuota: 1, tipo_cobro: 'programado', fecha: null, anulado_at: null, external_ref: 'epayco-1' }] }))
-    expect((await cobrarCuotaConTarjeta({ db: pendiente.db, adapterPara: e.adapterPara }, { cobradorId: METRIK, cuotaId: 'q1' })).tipo).toBe('pendiente_previo')
+    // Con el cargo pendiente se CONSULTA a ePayco (la conciliación, `cargo-tardio.test.ts`); si sigue
+    // pendiente, no se cobra otra vez.
+    const sigue = epayco({ estado: 'pendiente', externalRef: 'epayco-1' })
+    expect((await cobrarCuotaConTarjeta({ db: pendiente.db, adapterPara: sigue.adapterPara }, { cobradorId: METRIK, cuotaId: 'q1' })).tipo).toBe('pendiente_previo')
     expect(e.cargos).toHaveLength(0)
+    expect(sigue.cargos).toHaveLength(0)
   })
 
   it('pendiente: deja la referencia para que la cierre la confirmación', async () => {

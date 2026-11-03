@@ -6,14 +6,20 @@ import { soportePasaGate } from '@/lib/modulos/gate'
 import type { ValidaConsultaInput } from '@/lib/actions/valida-consultas'
 import { credencialValida } from './credencial-servidor'
 import { motivoCorteDeError, type MotivoCorte, type PruebaValida } from './corte-bolsa'
+import { CODIGO_BUSQUEDA_INCOMPLETA, CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO } from './mensajes-error'
 import { llamarValida, persistirConsulta, recalcularScoreNegocio, type RespuestaValida } from './consulta-servidor'
 import {
   FILA_RECLAMO_S,
   FILAS_PARA_AVISO_CORREO,
   TURNO_MS,
   TURNO_RECLAMO_S,
+  TIMEOUT_VALIDA_LOTE_MS,
+  MAX_REINTENTOS_RITMO,
   claveIdempotenciaFila,
+  esperaRitmoMs,
   concurrenciaDelLote,
+  filaSeConsulta,
+  llamadaReintentable,
   lotesSimultaneos,
   severidadDelConteo,
   textoPausa,
@@ -71,6 +77,8 @@ export type ResultadoFila =
   | { tipo: 'corte'; motivo: MotivoCorte }
   | { tipo: 'rechazo'; error: string }
   | { tipo: 'reintentar'; error: string }
+  /** Valida respondió 429 aun tras esperar: la fila volvió a la cola sin error; el corredor espera. */
+  | { tipo: 'ritmo'; esperaMs: number }
 
 export type ContextoTurno = {
   svc: Svc
@@ -210,8 +218,10 @@ async function devolver(svc: Svc, fila: FilaLote): Promise<void> {
  * agrega es la idempotencia: la `Idempotency-Key` de la fila y la fila como llave única del historial.
  *
  * Diferencias con la ruta del navegador, todas para no cobrar ni ensuciar:
- *   - un 5xx de Valida se reintenta UNA vez con la misma llave (Valida no guardó nada; si lo hizo,
- *     repite la respuesta sin cobrar). Antes quedaba como fila en error;
+ *   - un 5xx, un tope de tiempo o un error de red se reintenta UNA vez con la misma llave (Valida no
+ *     guardó nada; si lo hizo, repite la respuesta sin cobrar). El tope de la llamada pasa el
+ *     `maxDuration` de Valida (`TIMEOUT_VALIDA_LOTE_MS`): el reintento nunca corre a la par de la
+ *     primera. Antes un tope de 30 s dejaba la fila en error y la consulta cobrada en Valida;
  *   - un 401/402 que no es corte de la bolsa (llave revocada, paquete vencido sin pago) detiene el
  *     lote: todas las filas siguientes responderían lo mismo. Antes se guardaba una fila en error por
  *     cada una (no se cobraban);
@@ -232,11 +242,40 @@ export async function procesarFilaLote(ctx: ContextoTurno, fila: FilaLote): Prom
   }
 
   const input = fila.entrada
+
+  // Un tipo de documento que Valida no acepta («X», TI mientras Valida no lo consulte): Valida la
+  // rechazaría con 400 sin cobrar. No se llama ni va al historial; la fila queda en error con la frase
+  // que puso el parseo, que el XLSX de resultados muestra tal cual.
+  if (!filaSeConsulta(input)) {
+    await terminar(svc, fila, {
+      estado: 'error',
+      severidad: 'error',
+      consulta: null,
+      validaId: null,
+      matches: 0,
+      error: fila.error_parseo ?? CODIGO_TIPO_DOCUMENTO_NO_ACEPTADO,
+    })
+    return { tipo: 'hecha', negocioParaScore: null }
+  }
+
   const clave = claveIdempotenciaFila(fila.id)
-  let resultado: RespuestaValida = await llamarValida(llave, input, { claveIdempotencia: clave })
-  if (!resultado.ok && (resultado.status ?? 0) >= 500) {
+  const opciones = { claveIdempotencia: clave, timeoutMs: TIMEOUT_VALIDA_LOTE_MS }
+  let resultado: RespuestaValida = await llamarValida(llave, input, opciones)
+  if (llamadaReintentable(resultado)) {
     await dormir(ESPERA_REINTENTO_MS)
-    resultado = await llamarValida(llave, input, { claveIdempotencia: clave })
+    resultado = await llamarValida(llave, input, opciones)
+  }
+  // 429: Valida no registró ni cobró. Se espera su Retry-After y se reintenta con la misma llave.
+  for (let i = 0; i < MAX_REINTENTOS_RITMO; i++) {
+    const espera = esperaRitmoMs(resultado)
+    if (espera === null) break
+    await dormir(espera)
+    resultado = await llamarValida(llave, input, opciones)
+  }
+  const esperaFinal = esperaRitmoMs(resultado)
+  if (esperaFinal !== null) {
+    await devolver(svc, fila)
+    return { tipo: 'ritmo', esperaMs: esperaFinal }
   }
 
   if (!resultado.ok) {
@@ -249,6 +288,20 @@ export async function procesarFilaLote(ctx: ContextoTurno, fila: FilaLote): Prom
     if (resultado.status === 401 || resultado.status === 402) {
       await devolver(svc, fila)
       return { tipo: 'rechazo', error: resultado.error }
+    }
+    // La búsqueda no se completó ni con el reintento: Valida no la registró ni la cobró, así que no
+    // va al historial (igual que la consulta puntual). La fila queda en error con el código, que el
+    // XLSX de resultados traduce a «No completada, reintenta».
+    if (resultado.error === CODIGO_BUSQUEDA_INCOMPLETA) {
+      await terminar(svc, fila, {
+        estado: 'error',
+        severidad: 'error',
+        consulta: null,
+        validaId: null,
+        matches: 0,
+        error: CODIGO_BUSQUEDA_INCOMPLETA,
+      })
+      return { tipo: 'hecha', negocioParaScore: null }
     }
   }
 
@@ -463,6 +516,11 @@ export async function correrTurno(
         // Una falla de la base a mitad de la fila: queda reclamada y vuelve cuando venza el reclamo.
         console.error(`[valida-lotes] ${lote.id} fila ${fila.posicion}:`, (e as Error)?.message ?? e)
         return
+      }
+      if (r.tipo === 'ritmo') {
+        // La fila volvió a la cola: este corredor baja el ritmo antes de tomar otra.
+        await (opciones.dormir ?? dormirReal)(r.esperaMs)
+        continue
       }
       if (r.tipo === 'corte') detener ??= { motivo: r.motivo, detalle: null }
       else if (r.tipo === 'rechazo') detener ??= { motivo: 'valida_rechazo', detalle: r.error }

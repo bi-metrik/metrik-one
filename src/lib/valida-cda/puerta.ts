@@ -19,11 +19,13 @@ import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import {
   REGLA_MORA_AUTOSERVICIO,
+  REGLA_MORA_CDA,
   enPlazoParaAceptar,
   estadoMora,
   mensajeConsultasRestringidas,
   mensajeSuspendidoPorMora,
   vigenciaRestriccion,
+  vigenciaTransicion,
   type EstadoMora,
 } from './plazos'
 import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/terminos-plan'
@@ -68,6 +70,12 @@ import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/te
  *     la v1.4) y, desde la vigencia registrada de la v1.4 de ESE contrato (6-nov-2026 para los cuatro
  *     CDA), la de más de 5 días restringe las consultas nuevas con el histórico abierto (11.1). Ver
  *     `plazos.ts` (`vigenciaRestriccion`).
+ *
+ * ## La transición de la v1.5 (2026-10-29, gate de Vera)
+ *
+ * Con una v1.5 de los Términos registrada y publicada (aceptada o por aviso), los períodos que empiezan
+ * antes de su vigencia (1-dic-2026) se pagan hasta el 30-nov y no restringen antes del 6-dic ni pausan
+ * antes del 31-dic (cláusula 11.7): `transicionDesde`, aplicado en `resolverMora`.
  *
  * ## Una modificación por aviso NUNCA cierra (2026-10-07, dictamen de Emilio)
  *
@@ -122,6 +130,12 @@ export type EntradaValidaCda =
       modificacion: EstadoEntrada | null
       /** Desde cuándo rige la restricción de los 5 días para este contrato; `null` = no rige. */
       restriccionDesde: string | null
+      /**
+       * La vigencia de la v1.5 del contrato (cláusula 11.7, transición), o `null` sin v1.5 publicada: los
+       * períodos que empiezan antes de ella no restringen ni pausan por mora antes del 6 y el 31 de
+       * diciembre (ver `plazos.ts`, sección 3).
+       */
+      transicionDesde: string | null
       /**
        * El contrato es de una cuenta autogestionada (sus Términos son los de autoservicio): la mora
        * sigue la 11 de ESOS Términos (`REGLA_MORA_AUTOSERVICIO`: suspensión a los 10 días con los
@@ -231,6 +245,7 @@ async function resolver(): Promise<EntradaValidaCda> {
     modificaciones,
     modificacion,
     restriccionDesde: vigenciaRestriccion(documentos),
+    transicionDesde: vigenciaTransicion(documentos),
     autoservicio: documentos.some((d) => d.slug === TERMINOS_AUTOSERVICIO.slug),
     usuarioDelCliente:
       perfil !== null && !perfil.platformAdmin && perfil.workspaceId === workspaceId && impersonating !== true,
@@ -286,7 +301,7 @@ async function resolverMora(): Promise<MoraValidaCda> {
       ? { estado: 'al_dia' }
       : e.autoservicio
         ? estadoMora(delServicio.pago, e.hoy, '2000-01-01', REGLA_MORA_AUTOSERVICIO)
-        : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde)
+        : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde, REGLA_MORA_CDA, e.transicionDesde)
   return { tipo: 'ok', lectura, mora }
 }
 

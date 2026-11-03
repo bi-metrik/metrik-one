@@ -1,18 +1,20 @@
 'use server';
 
 import { createServiceClient } from '@/lib/supabase/server';
-import { credencialValida, VALIDA_API_BASE } from '@/lib/valida/credencial-servidor';
+import { credencialValida } from '@/lib/valida/credencial-servidor';
+import { pdfDeValidaDelEspacio } from '@/lib/valida/reporte-servidor';
 import { motivoCorteDeError } from '@/lib/valida/corte-bolsa';
 import { resolverNombresUsuarios } from './_usuarios';
 import { accesoValida as accesoValidaBase } from '@/lib/valida/acceso-servidor';
 import { llamarValida, persistirConsulta, recalcularScoreNegocio } from '@/lib/valida/consulta-servidor';
+import { CODIGO_BUSQUEDA_INCOMPLETA } from '@/lib/valida/mensajes-error';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
 export type TipoPersona = 'natural' | 'juridica';
-export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS';
+export type TipoDocumento = 'CC' | 'CE' | 'NIT' | 'PAS' | 'TI' | 'PPT' | 'RC';
 export type Severidad = 'alto' | 'medio' | 'bajo' | 'informativo' | 'sin_hallazgo' | 'error';
 export type TierLista = '1_vinculante' | '2_obligatoria' | '3_referencia' | '4_kyc_nacional';
 
@@ -112,9 +114,6 @@ async function accesoValida(
   return r.ok ? r : { ok: false, error: r.error };
 }
 
-async function getWorkspaceValidaApiKey(workspaceId: string): Promise<string | null> {
-  return (await credencialValida(workspaceId)).llave;
-}
 
 /**
  * En el REINTENTO de una fila del cargue masivo: ¿el primer intento ya alcanzo a guardar esta
@@ -231,6 +230,10 @@ export async function consultarValida(
   if (!resultado.ok) {
     const corte = motivoCorteDeError(resultado.error, prueba);
     if (corte) return { ok: false, error: corte };
+    // La búsqueda en alguna lista no se completó (503 de metrik-valida#66): Valida no la registró
+    // ni la cobró. Por la misma razón del corte no se guarda: una fila `error` en el historial se
+    // leía como un resultado. La pantalla dice «no pudimos revisar todas las listas; intenta de nuevo».
+    if (resultado.error === CODIGO_BUSQUEDA_INCOMPLETA) return { ok: false, error: CODIGO_BUSQUEDA_INCOMPLETA };
   }
 
   const persisted = await persistirConsulta({
@@ -253,6 +256,31 @@ export async function consultarValida(
 }
 
 // ─── Plantilla XLSX ───────────────────────────────────────────────────────
+
+/**
+ * La hoja que dice qué va en cada columna. Hasta el 2026-10-23 la plantilla solo traía ejemplos, y
+ * la columna `tipo_documento` llegaba con «CEDULA», «PP» o «TI», que Valida rechazaba.
+ */
+function hojaValoresPlantilla(sinNegocio: boolean): XLSX.WorkSheet {
+  const filas: string[][] = [
+    ['columna', 'valores aceptados', 'notas'],
+    ['tipo_persona', 'natural · juridica', 'Obligatoria.'],
+    ['nombre_completo', 'Nombre completo o razón social', 'Obligatorio si no hay documento.'],
+    [
+      'tipo_documento',
+      'CC · CE · NIT · PAS · TI · PPT · RC',
+      'CC: cédula de ciudadanía. CE: cédula de extranjería. NIT: personas jurídicas. PAS: pasaporte. ' +
+        'TI: tarjeta de identidad. PPT: Permiso por Protección Temporal. RC: registro civil. ' +
+        'También se entienden «Cédula», «Cédula de extranjería», «Pasaporte», «PP», «PA», «Tarjeta de identidad» y «Registro civil». ' +
+        'Vacío con número: natural se consulta como CC (PAS si el número trae letras) y jurídica como NIT.',
+    ],
+    ['numero_documento', 'Solo el número', 'Sin puntos ni espacios. Para NIT, sin dígito de verificación.'],
+  ];
+  if (!sinNegocio) filas.push(['negocio_codigo', 'Código del negocio (ej. C1 26 1)', 'Opcional.']);
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  ws['!cols'] = [{ wch: 18 }, { wch: 32 }, { wch: 100 }];
+  return ws;
+}
 
 export async function descargarPlantillaValida(
   opts: { sinNegocio?: boolean } = {},
@@ -282,6 +310,7 @@ export async function descargarPlantillaValida(
       ? [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }]
       : [{ wch: 14 }, { wch: 30 }, { wch: 16 }, { wch: 18 }, { wch: 18 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Consultas');
+    XLSX.utils.book_append_sheet(wb, hojaValoresPlantilla(sinNegocio), 'Valores aceptados');
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
     return {
@@ -305,32 +334,18 @@ export async function descargarPDFConsultaValida(
 > {
   const acceso = await accesoValida();
   if (!acceso.ok) return acceso;
-  const workspaceId = acceso.workspaceId;
 
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
-  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
-
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte/${validaConsultaId}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return {
-      ok: true,
-      data: {
-        base64: buf.toString('base64'),
-        filename: `valida-reporte-${validaConsultaId.slice(0, 8)}.pdf`,
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf' };
-  }
+  // Con la llave o, si venció (fin de la prueba, reverso del pago), firmado como ONE: la cláusula 11.2
+  // deja los reportes al cliente durante la suspensión. Ver `@/lib/valida/reporte-pdf`.
+  const r = await pdfDeValidaDelEspacio(acceso.workspaceId, { tipo: 'consulta', consultaId: validaConsultaId });
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    data: {
+      base64: r.bytes.toString('base64'),
+      filename: `valida-reporte-${validaConsultaId.slice(0, 8)}.pdf`,
+    },
+  };
 }
 
 // ─── Generar PDF de lote completo ─────────────────────────────────────────
@@ -344,9 +359,6 @@ export async function generarPDFLoteValida(
   const acceso = await accesoValida();
   if (!acceso.ok) return acceso;
   const workspaceId = acceso.workspaceId;
-
-  const apiKey = await getWorkspaceValidaApiKey(workspaceId);
-  if (!apiKey) return { ok: false, error: 'valida_api_key_no_configurada' };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = createServiceClient() as any;
@@ -368,34 +380,15 @@ export async function generarPDFLoteValida(
     return { ok: false, error: 'lote_sin_consultas_validas' };
   }
 
-  try {
-    const res = await fetch(`${VALIDA_API_BASE}/api/v1/reporte-lote`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        consulta_ids: consultaIds,
-        titulo: titulo ?? null,
-      }),
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      return { ok: false, error: body.error ?? `HTTP ${res.status}` };
-    }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return {
-      ok: true,
-      data: {
-        base64: buf.toString('base64'),
-        filename: `valida-cargue-${loteId.slice(0, 8)}.pdf`,
-      },
-    };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'error_pdf_lote' };
-  }
+  const r = await pdfDeValidaDelEspacio(workspaceId, { tipo: 'lote', consultaIds, titulo: titulo ?? null });
+  if (!r.ok) return r;
+  return {
+    ok: true,
+    data: {
+      base64: r.bytes.toString('base64'),
+      filename: `valida-cargue-${loteId.slice(0, 8)}.pdf`,
+    },
+  };
 }
 
 // ─── Historial ────────────────────────────────────────────────────────────

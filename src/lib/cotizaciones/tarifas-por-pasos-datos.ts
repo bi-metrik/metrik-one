@@ -113,5 +113,13 @@ export async function sincronizarTarifas(
       .eq('id', m.itinerarioId)
     if (error) return { ok: false, error: error.message }
   }
+  // Premium ⇄ Intermedia (el hotel que sobra va en medio, `repartoPorPrecio`).
+  for (const r of plan.nombres ?? []) {
+    const { error } = await supabase
+      .from('cotizacion_itinerarios')
+      .update({ nombre: r.nombre })
+      .eq('id', r.itinerarioId)
+    if (error) return { ok: false, error: error.message }
+  }
   return { ok: true, plan, despues }
 }

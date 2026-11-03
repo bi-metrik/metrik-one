@@ -42,6 +42,7 @@ import {
   ajustesPorDefecto,
   calcularEleccion,
   lecturaDeTarifa,
+  fechaDeActividadNueva,
   ofrecerTarifas,
   origenVigente,
   revisarAjustes,
@@ -56,6 +57,8 @@ import { esTarifaCanal, type TarifaCanal } from '@/lib/proveedores/tipos'
 import { avisoDeTarifario, fechaCorta, hoyBogota, type AvisoTarifario } from '@/lib/proveedores/vigencia'
 import { createServiceClient } from '@/lib/supabase/server'
 import { aceptarCapturaDeBandeja, confirmarTarifaPorPasajero, type BorradorParaAceptar } from './tarifa-pax-actions'
+import { recalcularTotales } from './cotizacion-actions'
+import { propuestaDelTarifario } from '@/lib/cotizaciones/tarifa-publica'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = any
@@ -422,7 +425,7 @@ async function preparar(ctx: Contexto, elegida?: string | null): Promise<Prepara
   vista.opciones = oferta.opciones
   vista.avisos = oferta.avisos
   vista.calendario = oferta.calendario
-  vista.ajustes = ajustesPorDefecto({ ficha: { tarifaCanal: esTarifaCanal(f.tarifa_canal) ? (f.tarifa_canal as TarifaCanal) : null, ivaIncluido: f.iva_incluido ?? null }, tarifario: rev.tarifario })
+  vista.ajustes = ajustesPorDefecto({ ficha: { tarifaCanal: esTarifaCanal(f.tarifa_canal) ? (f.tarifa_canal as TarifaCanal) : null, ivaIncluido: f.iva_incluido ?? null, ivaDeclarado: f.iva_declarado ?? null }, tarifario: rev.tarifario })
   return { ctx, vista, ficha: f, extraccionId: rev.id, tarifario: rev.tarifario }
 }
 
@@ -491,7 +494,7 @@ function calcular(p: Preparado, eleccion: Eleccion, ajustes: Partial<AjustesDeCo
   if (!composicion) return { error: 'Falta decir a cuántos pasajeros cubre la línea.' }
   if (!vista.calendario || !vista.ajustes) return { error: 'Vuelve a abrir las tarifas.' }
   const elegidas = (Array.isArray(eleccion?.filas) ? eleccion.filas : []).map((f) => vista.opciones.find((o) => o.indice === f?.indice)).filter((o): o is OpcionTarifa => !!o)
-  const defecto = ajustesPorDefecto({ fila: elegidas[0] ?? null, ficha: { tarifaCanal: esTarifaCanal(ficha.tarifa_canal) ? (ficha.tarifa_canal as TarifaCanal) : null, ivaIncluido: ficha.iva_incluido ?? null }, tarifario: p.tarifario })
+  const defecto = ajustesPorDefecto({ fila: elegidas[0] ?? null, ficha: { tarifaCanal: esTarifaCanal(ficha.tarifa_canal) ? (ficha.tarifa_canal as TarifaCanal) : null, ivaIncluido: ficha.iva_incluido ?? null, ivaDeclarado: ficha.iva_declarado ?? null }, tarifario: p.tarifario })
   const aj = revisarAjustes(ajustes ?? null, defecto)
   if (!aj.ok) return { error: aj.error }
   const c = calcularEleccion({ opciones: vista.opciones, eleccion, composicion, calendario: vista.calendario, ajustes: aj.ajustes })
@@ -587,6 +590,7 @@ export async function elegirTarifasDeLinea(
 
   // El costo se confirma con la acción de siempre: ella resuelve, escribe los rubros y recalcula.
   const conf = await confirmarTarifaPorPasajero(ctx.item.id as string, tasaValida(tasa))
+  await proponerTipoDelTarifario(ctx.db, ctx.item.id as string, x.calculo.ajustes.canal)
   if (ctx.negocioId) revalidatePath(`/negocios/${ctx.negocioId}`)
   return {
     ok: true,
@@ -598,10 +602,53 @@ export async function elegirTarifasDeLinea(
   }
 }
 
+// ── Tarifa pública o neta, propuesta por el tarifario (reunión del 2026-10-22) ──
+
+/**
+ * Si el tarifario dice que el precio es al público o comisionable, la línea se propone como
+ * PÚBLICA: margen 0, el cliente paga el precio público (`tarifa-publica.ts`). Con la comisión
+ * declarada, la confirmación ya dejó el costo en el neto y el margen en la comisión: ese margen no
+ * se toca. Lo que eligió una persona en la tarjeta no se pisa. Un tarifario neto (o que deja de
+ * decir público) retira la propuesta anterior y la línea vuelve a heredar el margen.
+ *
+ * No falla la elección: si no se puede escribir, la línea queda Neta, como antes, y se anota.
+ */
+async function proponerTipoDelTarifario(db: Cliente, itemId: string, canal: string | null): Promise<void> {
+  const { data: fila, error } = await db.from('items').select('*').eq('id', itemId).maybeSingle()
+  if (error || !fila) return
+  const actual = leerTarifaPax(fila.tarifa_pax)
+  const propuesta = propuestaDelTarifario(actual.tipoTarifa ?? null, canal, new Date().toISOString())
+  if (propuesta === null) return
+  const siguiente: TarifaPax = { ...actual }
+  if (propuesta === 'quitar') delete siguiente.tipoTarifa
+  else siguiente.tipoTarifa = propuesta
+  const patch: Record<string, unknown> = { tarifa_pax: siguiente }
+  const conComision = !!actual.confirmada?.margenProveedor
+  if (fila.precio_manual !== true && !conComision) {
+    if (propuesta !== 'quitar') patch.margen_porcentaje = 0
+    else if (Number(fila.margen_porcentaje) === 0 && fila.margen_porcentaje !== null) patch.margen_porcentaje = null
+  }
+  const { error: eUpd } = await db.from('items').update(patch).eq('id', itemId)
+  if (eUpd) {
+    console.warn('[tarifas-proveedor] no se pudo proponer la tarifa pública:', eUpd.message)
+    return
+  }
+  if (typeof fila.cotizacion_id === 'string' && 'margen_porcentaje' in patch) await recalcularTotales(fila.cotizacion_id)
+}
+
 // ── Crear la línea con la tarifa (brief del 2026-10-21, punto 2) ─────────────
 
 export type ResultadoLineaNueva =
-  | (Extract<ResultadoEleccion, { ok: true }> & { itemId: string; donde: string })
+  | (Extract<ResultadoEleccion, { ok: true }> & {
+      itemId: string
+      donde: string
+      /**
+       * El servicio de la fila («Playa Blanca con almuerzo»), para que el aviso nombre la actividad
+       * y no el grupo genérico «Actividad en Santa Marta» (brief del 2026-10-22, menor). `null` en
+       * hotel y vuelo: ahí el grupo ya dice cuál es.
+       */
+      servicio: string | null
+    })
   | { ok: false; error: string }
 
 /**
@@ -639,16 +686,19 @@ export async function crearLineaConTarifa(
   const tipo = tipoDeLineaDeFicha(ficha, porPasos)
   const ranura = definicionDeTipo(tipo)
   const leidaEn = new Date().toISOString()
-  // Un hotel lleva las fechas del viaje (entrada y salida); un tour o un traslado no inventa su
-  // día: queda «Sin día» y la tarjeta lo pide, como uno escrito a mano sin fecha.
+  // Un hotel lleva las fechas del viaje (entrada y salida). Un tour no inventa su día: lleva la
+  // fecha de la fila o, en un viaje de un día, ese día (prueba del #1229, punto e); si no, queda
+  // «Sin día» y la tarjeta lo pide. La aceptación lo vuelve el «Día del viaje» (editable). Un
+  // traslado no lleva fecha.
   const esHotel = ranura.slug === 'hotel_detalle'
+  const diaDeActividad = ranura.slug === 'actividad_detalle' ? fechaDeActividadNueva(x.elegidas, p.vista.fechas) : null
   const lectura = lecturaDeTarifa({
     ranura,
     calculo: x.calculo,
     elegidas: x.elegidas,
     proveedor: { nombre: ficha.nombre, ciudad: ficha.ciudad ?? null },
     composicion: x.composicion,
-    entrada: esHotel ? p.vista.fechas.entrada : null,
+    entrada: esHotel ? p.vista.fechas.entrada : diaDeActividad,
     salida: esHotel ? p.vista.fechas.salida : null,
     leidaEn,
   })
@@ -697,11 +747,13 @@ export async function crearLineaConTarifa(
     const conf = await confirmarTarifaPorPasajero(aceptada.itemId, t)
     pendiente = conf.success ? null : conf.error ?? pendiente
   }
+  await proponerTipoDelTarifario(ctx.db, aceptada.itemId, x.calculo.ajustes.canal)
   if (ctx.negocioId) revalidatePath(`/negocios/${ctx.negocioId}`)
   return {
     ok: true,
     itemId: aceptada.itemId,
     donde: aceptada.donde,
+    servicio: ranura.slug === 'hotel_detalle' || ranura.slug === 'vuelo_detalle' ? null : (lectura.nombre ?? '').trim() || null,
     confirmada: pendiente === null,
     pendiente,
     moneda: x.calculo.moneda,

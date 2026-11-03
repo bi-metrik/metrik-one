@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert } from 'lucide-react'
+import { Bell, Check, X, CheckCheck, Flame, FolderKanban, AtSign, TrendingDown, UserPlus, UserCheck, Package, CircleDollarSign, ShieldAlert, CalendarCheck, AlarmClock, FileText, MailWarning } from 'lucide-react'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
 import {
   marcarCompletada,
@@ -11,8 +11,10 @@ import {
   type NotificacionItem,
 } from '@/lib/actions/notificaciones'
 import { leerNotificaciones, REFRESCO_MINIMO_AL_VOLVER_MS } from '@/lib/notificaciones/leer'
+import { mensajeSecundario } from '@/lib/notificaciones/mensaje-secundario'
 import { toast } from 'sonner'
 import { seCierraDecidiendo } from '@/lib/compliance/alarma-hallazgo'
+import { BotonWhatsApp } from '@/components/boton-whatsapp'
 
 // ── Helpers ───────────────────────────────────────────
 
@@ -46,6 +48,12 @@ const TIPO_ICON: Record<string, React.ElementType> = {
   cuenta_cobro_pendiente_aprobacion: CircleDollarSign,
   compliance_hallazgo: ShieldAlert,
   compliance_delta_contraparte: ShieldAlert,
+  factura_cargada: FileText,
+  // Hitos de gestión del viaje (2026-10-22): el resumen del día abre la Agenda; el vencido, el viaje.
+  agenda_del_dia: CalendarCheck,
+  hito_vencido: AlarmClock,
+  // SOE-031: el correo al cliente rebotó; hay que corregir su dirección.
+  aviso_cliente_rebotado: MailWarning,
 }
 
 const TIPO_COLOR: Record<string, string> = {
@@ -63,6 +71,10 @@ const TIPO_COLOR: Record<string, string> = {
   cuenta_cobro_pendiente_aprobacion: '#8B5CF6',
   compliance_hallazgo: 'var(--alerta)',
   compliance_delta_contraparte: 'var(--alerta)',
+  factura_cargada: 'var(--acento)',
+  agenda_del_dia: 'var(--acento)',
+  hito_vencido: 'var(--alerta)',
+  aviso_cliente_rebotado: 'var(--alerta)',
 }
 
 // ── Componente principal ──────────────────────────────
@@ -377,6 +389,8 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
             {!loading && pendientes.map((item) => {
               const Icon = TIPO_ICON[item.tipo] ?? Bell
               const color = TIPO_COLOR[item.tipo] ?? 'var(--tinta-suave)'
+              // Quién asignó / por qué llegó: vive en metadata.mensaje, no en el título.
+              const detalle = mensajeSecundario(item.metadata, item.contenido)
 
               return (
                 <div
@@ -399,9 +413,15 @@ export default function NotificationBell({ userId, initialItems, initialTotal }:
                     <p className="text-[13px] font-medium text-foreground leading-snug">
                       {item.contenido}
                     </p>
+                    {detalle && (
+                      <p className="mt-0.5 text-[12px] text-muted-foreground leading-snug">
+                        {detalle}
+                      </p>
+                    )}
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {tiempoRelativo(item.created_at)}
                     </p>
+                    <BotonWhatsApp metadata={item.metadata} />
                   </div>
 
                   {/* Acciones */}

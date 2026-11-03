@@ -132,6 +132,30 @@ describe('el filtro de un solo espacio (reintento a mano en un preview, `?ws=`)'
   })
 })
 
+describe('el cargo que queda pendiente y se aprueba en segundos', () => {
+  it('si la confirmación ya registró el pago cuando el cargo escribe cobro_pendiente, el cargo cierra el registro', async () => {
+    const t = tablas(AVISADO)
+    t.suscripciones_producto = [{ id: 'sus-1', workspace_id: 'ws-metrik', valida_registro_id: 'reg-1' }]
+    t.cobros = [
+      { id: 'cobro-1', workspace_id: 'ws-metrik', negocio_id: null, suscripcion_id: 'sus-1', numero_cuota: 1, tipo_cobro: 'programado', monto: 150000, fecha: null, anulado_at: null, external_ref: null, notas: null },
+    ]
+    t.cobro_intentos_tarjeta = [{ id: 'i-1', cobro_id: 'cobro-1', plan_cobro_id: 'plan-1', numero_cuota: 1, intento: 0, resultado: 'en_curso', referencia: null }]
+    const m = montar(t, {
+      cobrarCuota: async () => {
+        // Mientras el cargo esperaba a ePayco: la confirmación de la aprobación registró el pago y cerró
+        // el intento; el registro estaba en `cobrando` y no lo pudo cerrar.
+        Object.assign(m.tablas.cobros[0], { fecha: '2026-10-21', external_ref: 'epayco-9001' })
+        Object.assign(m.tablas.cobro_intentos_tarjeta[0], { resultado: 'aprobado', referencia: 'epayco-9001' })
+        return { tipo: 'pendiente', cobroId: 'cobro-1' }
+      },
+    })
+    await procesarCobrosTrasPrueba({ ...m.deps, ahoraMs: cron('2026-10-21') })
+    expect(m.registro()).toMatchObject({ cobro_estado: 'cobrado', cobro_ref: 'epayco-9001' })
+    // El cobro del día 7 no lleva C3 (como en el acto).
+    expect(m.correos).toHaveLength(0)
+  })
+})
+
 describe('el cobro en la fecha fija', () => {
   it('el cron del martes 07:00 (antes de las 15:00) no cobra; el del miércoles sí', async () => {
     const m = montar(tablas(AVISADO))

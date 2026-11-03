@@ -9,8 +9,64 @@ import 'server-only'
  */
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
 import type { CatalogoPropuesta, FotoDeCatalogo } from '@/lib/pdf/html/propuesta-html'
-import { creditoDeFila, dataUrlDeFila, filaDe, fotosDe, leerCatalogo, type FilaCatalogo } from './catalogo'
-import { claveDeFoto, fotoImprimible, MAX_FOTOS_EXTRA, objetivo, sinRepetir, type ObjetivoFoto } from './clave'
+import { creditoDeFila, dataUrlDeFila, fotosDe, leerCatalogo, type FilaCatalogo } from './catalogo'
+import { claveDeFoto, fotoImprimible, MAX_FOTOS_EXTRA, nombreLlano, objetivo, sinRepetir, type ObjetivoFoto } from './clave'
+import { formaPosible, ordenarPorCategoria } from './forma'
+
+/**
+ * Las fotos de una llave que pueden salir en el documento, en su orden. Las de un hotel, además,
+ * sin collages irregulares ni verticales (`formaPosible`: quedan en la biblioteca, marcadas, pero no
+ * se imprimen; una de paneles iguales la confirma el PDF con los píxeles) y por categoría: fachada → habitación → zonas comunes (regla de fotos, 2026-10-29).
+ */
+export function fotosParaElDocumento(filas: FilaCatalogo[], o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): FilaCatalogo[] {
+  const todas = fotosDe(filas, o)
+  return o.tipo === 'hotel' ? ordenarPorCategoria(todas.filter((f) => formaPosible(f.proporcion))) : todas
+}
+
+/**
+ * La ficha FIJADA en la línea de cada hotel (`items.proveedor_id`): llave del hotel en el documento
+ * (`claveDeFoto('hotel', hotel, ciudad)`) → llave del perfil de la ficha. Es lo que la tarjeta usa
+ * para mostrar y subir las fotos (`fotosParaTarjetas`, por id): sin esto el documento las buscaba
+ * por el nombre leído y no las encontraba si la llave de la ficha era otra (reunión del 2026-10-22,
+ * punto 3: los hoteles salían sin foto).
+ */
+export type FichasDeHotel = ReadonlyMap<string, string>
+
+type HotelDelDocumento = { hotel: string | null; linea: string; ciudad: string | null }
+
+/**
+ * Las llaves donde buscar las fotos de un hotel, en orden: la de su ficha fijada, la suya, y las de
+ * los hoteles del documento con el MISMO nombre (con su ficha). Lo último es porque el motor html
+ * pregunta por la ciudad del CAPÍTULO, no por la del hotel (`ciudadDeCapitulo`): una alternativa de
+ * otra zona en el mismo capítulo («Playa del Carmen» dentro de «Cancún») se quedaba sin foto.
+ */
+function clavesDeHotel(hotel: string, ciudad: string | null, hoteles: readonly HotelDelDocumento[], fichas: FichasDeHotel): string[] {
+  const propia = claveDeFoto('hotel', hotel, ciudad)
+  const nombre = nombreLlano(hotel)
+  const mismos = hoteles.filter((h) => nombreLlano(h.hotel ?? h.linea) === nombre).map((h) => claveDeFoto('hotel', h.hotel ?? h.linea, h.ciudad))
+  const salida: string[] = []
+  for (const k of [propia, ...mismos]) {
+    const ficha = fichas.get(k)
+    if (ficha) salida.push(ficha)
+    if (k) salida.push(k)
+  }
+  return [...new Set(salida)]
+}
+
+/** Los objetivos de los hoteles: por su nombre y, si su línea fijó una ficha, por la ficha. */
+function objetivosDeHoteles(hoteles: readonly HotelDelDocumento[], fichas: FichasDeHotel): (ObjetivoFoto | null)[] {
+  return hoteles.flatMap((h) => {
+    const propio = objetivo('hotel', h.hotel ?? h.linea, h.ciudad)
+    const ficha = propio ? fichas.get(propio.clave) : undefined
+    return ficha && propio ? [{ ...propio, clave: ficha }, propio] : [propio]
+  })
+}
+
+/** Las ciudades del viaje además de la llave de cada hotel: cada parte de «A / B» y el destino. */
+function ciudadesDelViaje(props: CotizacionPDFProps): (ObjetivoFoto | null)[] {
+  const textos = [...(props.viaje?.hoteles ?? []).flatMap((h) => (h.ciudad ?? '').split('/')), props.viaje?.destino ?? '']
+  return textos.map((t) => t.trim()).filter(Boolean).map((t) => objetivo('ciudad', t))
+}
 
 /** Un plan opcional del documento con la ciudad de su línea (la misma llave que su tarjeta). */
 export interface OpcionalDelDocumento {
@@ -35,12 +91,15 @@ function clavesDeOpcionales(opcionales: readonly OpcionalDelDocumento[]): Map<st
  * lugar.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string, props: CotizacionPDFProps, opcionales: readonly OpcionalDelDocumento[] = []): Promise<CatalogoPropuesta | null> {
+export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string, props: CotizacionPDFProps, opcionales: readonly OpcionalDelDocumento[] = [], fichas: FichasDeHotel = new Map()): Promise<CatalogoPropuesta | null> {
   const hoteles = props.viaje?.hoteles ?? []
   const deOpcionales = clavesDeOpcionales(opcionales)
   const objetivos = sinRepetir([
     ...hoteles.map((h) => objetivo('ciudad', h.ciudad)),
-    ...hoteles.map((h) => objetivo('hotel', h.hotel ?? h.linea, h.ciudad)),
+    // La imagen del destino para la portada (regla de fotos, 2026-10-29): la parada puede ser la otra
+    // parte de «Willemstad / Curacao» o el destino del viaje (QA G7), no solo la llave del hotel.
+    ...ciudadesDelViaje(props),
+    ...objetivosDeHoteles(hoteles, fichas),
     ...deOpcionales.values(),
   ])
   const filas = (await leerCatalogo(supabase, workspaceId, objetivos.map((o) => o.clave))).filter((f) => fotoImprimible(f.tipo, f.origen, f.revisada))
@@ -56,20 +115,28 @@ export async function catalogoParaLaPropuesta(supabase: any, workspaceId: string
           revisada: f.revisada,
           credito: creditoDeFila(f),
           foco: f.foco_x !== null && f.foco_y !== null ? { x: Number(f.foco_x), y: Number(f.foco_y) } : null,
+          proporcion: f.proporcion === null || f.proporcion === undefined ? null : Number(f.proporcion),
+          categoria: f.categoria ?? null,
         })
       }
     }),
   )
   /** La principal de la llave con sus extras, todas ya leídas. */
   const de = (o: Pick<ObjetivoFoto, 'tipo' | 'clave'>): FotoDeCatalogo | null => {
-    const todas = fotosDe(filas, o).map((f) => leidas.get(f.id)).filter((x): x is FotoDeCatalogo => !!x)
+    const todas = fotosParaElDocumento(filas, o).map((f) => leidas.get(f.id)).filter((x): x is FotoDeCatalogo => !!x)
     if (todas.length === 0) return null
     const [primera, ...resto] = todas
     return resto.length > 0 ? { ...primera, extras: resto.slice(0, MAX_FOTOS_EXTRA) } : primera
   }
   return {
     ciudad: (ciudad) => de({ tipo: 'ciudad', clave: claveDeFoto('ciudad', ciudad) }),
-    hotel: (hotel, ciudad) => de({ tipo: 'hotel', clave: claveDeFoto('hotel', hotel, ciudad) }),
+    hotel: (hotel, ciudad) => {
+      for (const clave of clavesDeHotel(hotel, ciudad, hoteles, fichas)) {
+        const f = de({ tipo: 'hotel', clave })
+        if (f) return f
+      }
+      return null
+    },
     actividad: (nombre) => {
       const o = deOpcionales.get(nombre)
       return o ? de(o) : null
@@ -89,16 +156,22 @@ export async function fotosDeBibliotecaDelDocumento(
   workspaceId: string,
   hoteles: { hotel: string | null; linea: string; ciudad: string | null }[],
   opcionales: readonly OpcionalDelDocumento[] = [],
+  fichas: FichasDeHotel = new Map(),
 ) {
-  const deHoteles = sinRepetir(hoteles.map((h) => objetivo('hotel', h.hotel ?? h.linea, h.ciudad)))
+  const propios = sinRepetir(hoteles.map((h) => objetivo('hotel', h.hotel ?? h.linea, h.ciudad)))
+  const deHoteles = sinRepetir(objetivosDeHoteles(hoteles, fichas))
   const deOpcionales = clavesDeOpcionales(opcionales)
   const objetivos = sinRepetir([...deHoteles, ...deOpcionales.values()])
   const mapa = new Map<string, { proporcion: number | null; credito: string | null }>()
   const porClave = new Map<string, FilaCatalogo>()
   if (objetivos.length > 0) {
     const filas = (await leerCatalogo(supabase, workspaceId, objetivos.map((o) => o.clave))).filter((f) => fotoImprimible(f.tipo, f.origen, f.revisada))
-    for (const o of objetivos) {
-      const f = filaDe(filas, o)
+    // Cada hotel bajo SU llave del documento (la que pide `fotosDeHotelesDelDocumento`), con la foto
+    // de su ficha fijada si la tiene y, si no, la de su nombre.
+    for (const o of [...propios, ...deOpcionales.values()]) {
+      const ficha = o.tipo === 'hotel' ? fichas.get(o.clave) : undefined
+      const primera = (x: Pick<ObjetivoFoto, 'tipo' | 'clave'>) => fotosParaElDocumento(filas, x)[0] ?? null
+      const f = (ficha ? primera({ tipo: 'hotel', clave: ficha }) : null) ?? primera(o)
       if (!f) continue
       porClave.set(`${o.tipo}:${o.clave}`, f)
       mapa.set(`${o.tipo}:${o.clave}`, {

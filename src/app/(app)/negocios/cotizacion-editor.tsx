@@ -1,6 +1,7 @@
 'use client'
 
-import { Fragment, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { tasasDeCotizacion, type LineaConTasa } from '@/lib/cotizaciones/tasa-cotizacion'
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
 import {
@@ -29,6 +30,8 @@ import { formatCOP } from '@/lib/contacts/constants'
 import { CONVENCION_MARGEN_POR_DEFECTO, margenParaPrecio, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
 import { margenDeLineaSegunConvencion } from '@/lib/cotizaciones/margen-proveedor'
 import { calcularCascada, type Cascada } from '@/lib/cotizaciones/totales'
+import { leerReglasDeCotizacion, paramsPorOpcion, pctDescuentoTotal } from '@/lib/cotizaciones/reglas-margen'
+import { margenDeLaCotizacion } from '@/lib/cotizaciones/margen-de-cotizacion'
 import {
   nombreDelMargen,
   nivelDeMargen,
@@ -138,9 +141,13 @@ import {
 import {
   itemsDelItinerario,
   itemsQueAportanAlTotal,
+  margenParaElMinimo,
   normalizarGrupo,
   ranurasPorSupuesto,
 } from '@/lib/cotizaciones/itinerarios'
+import { nombresVisiblesDeTarifas } from '@/lib/cotizaciones/tarifas'
+import { huellaDelAvisoDelPdf, idAvisoPdfBorrador } from '@/lib/cotizaciones/aviso-pdf-borrador'
+import { calculoEnPantalla } from '@/lib/cotizaciones/calculo-en-pantalla'
 import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import {
   soloConfirmados,
@@ -172,9 +179,19 @@ import type { FiscalProfile, Client } from '@/types/database'
 import type { NivelDetalle } from '@/lib/cotizaciones/detalle-viaje'
 import type { EstadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
+import { AvisoVersionNueva } from '@/app/(app)/negocios/aviso-version-nueva'
+import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
+import { tarjetaDeOpcionEn } from '@/lib/cotizaciones/enfocar-comision'
+import { crearPaqueteBloqueo, paqueteEnPropuesta } from '@/app/(app)/negocios/bloqueo-actions'
+import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
+import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
-import { listaUnica } from '@/lib/cotizaciones/lista-unica'
+import { listaUnica, opcionesFueraDeLaPropuesta } from '@/lib/cotizaciones/lista-unica'
+import { firmaDeTarifa } from '@/lib/cotizaciones/tarifas-por-pasos'
+import { avisosDeOrdenDeTarifas, tarifasSinMandar } from '@/lib/cotizaciones/tarifas-al-cliente'
 import { opcionesSinPrecio } from '@/lib/cotizaciones/precio-que-falta'
+import { motivoPaquetesIncompletos, paquetesIncompletos } from '@/lib/cotizaciones/bloqueo-incompleto'
+import { motivoPublicasSinComision, publicasSinComisionQueSalen } from '@/lib/cotizaciones/comision-publica'
 import { estadoDeLinea } from '@/lib/cotizaciones/estado-servicio'
 import { conReintentoDeRed } from '@/lib/red/con-reintento'
 
@@ -266,6 +283,8 @@ interface CotizacionData {
   terminos_condiciones?: string | null
   /** Que significa `margen_porcentaje` aqui. Ausente vale `markup`, como antes. */
   convencion_margen?: ConvencionMargen | null
+  /** Las reglas de margen que copió al nacer (`reglas-margen.ts`). Ausente = sin reglas. */
+  reglas_margen?: unknown
 }
 
 interface ClientFiscal {
@@ -370,6 +389,8 @@ interface Props {
    * tiene uno («Hotel en Cancún»). Ausente = la ranura se sugiere con su tipo a secas.
    */
   destinoViaje?: string | null
+  /** S-07 (QA del 2026-10-29, ronda 3): los requisitos de la Solicitud, para la bandeja. */
+  requisitosViaje?: string | null
   /**
    * Las fechas del viaje (etapa 1 del negocio), para el renglón del paso «Viaje» del flujo de
    * Trappvel. Ausente = el renglón no las dice.
@@ -402,6 +423,22 @@ interface Props {
   pedidoAutorizacion?: { por: string | null; en: string } | null
   /** Con la forma por pasos: el paso con que abre (`?paso=tarifas|revisar`, decisión J). */
   pasoInicial?: 1 | 2 | 3
+  /**
+   * Con la forma por pasos: por qué no se puede ENVIAR mientras el cliente no autorice sus datos
+   * (reunión del 2026-10-22, `autorizacion-datos/envio.ts`). Se arma igual; `null` = nada que decir.
+   */
+  motivoAutorizacionDatos?: string | null
+  /**
+   * Con la forma por pasos: el viaje es Bloqueo (brief del 2026-10-27), con su operador. `null` = A
+   * medida, la pantalla de siempre. Cada opción de la ranura «Paquete de bloqueo» se pinta con su
+   * tarjeta de paquete (hotel + vuelo).
+   */
+  bloqueo?: { operador: string | null; edadesMenores?: string | null } | null
+  /**
+   * H10-1: otra cotización del negocio ya está enviada. Con esta en borrador, el editor lo dice
+   * arriba y «Enviar» la reemplaza (la enviada queda rechazada). `null` = no hay otra enviada.
+   */
+  otraEnviada?: { id: string; consecutivo: string | null } | null
 }
 
 /** Lo que la cotización por pasos le pide a la tarjeta de una opción (`TarjetaOpcion.porPasos`). */
@@ -410,7 +447,7 @@ type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1 }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, requisitosViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null, otraEnviada = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -432,6 +469,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   )
   const initialItems: ItemRow[] = aPintar.items
   const frescaVigente = aPintar.deLaLecturaPropia
+  // La tasa de la cotización por moneda (H5/H28, `tasa-cotizacion.ts`): la casilla de la tasa de
+  // cada línea arranca con ella, y el servidor la propaga al escribirla.
+  const tasasCotizacion = tasasDeCotizacion(initialItems as unknown as LineaConTasa[])
   // Sin lectura propia, el MISMO objeto de la página: fuera del viaje el editor no cambia en nada.
   const adicionales: NonNullable<Props['adicionales']> = frescaVigente
     ? { ...adicionalesDeLaPagina, porItem: aPintar.adicionalesPorItem }
@@ -517,6 +557,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // La tarjeta de la opción (prototipo del 2026-09-24): lo que una opción eliminada devuelve a
   // la bandeja y qué opciones de hotel tienen un pantallazo esperando decisión en ella.
   const receptorBandeja = useRef<ReceptorDeBandeja>(null)
+  // Viaje en bloqueo (QA del 2026-10-29): el puente entre el pegado de la bandeja y las tarjetas
+  // de los paquetes. Uno por editor; sin bloqueo nadie lo usa.
+  const [registroPaquetes] = useState(() => new RegistroDePaquetes())
   const [pendientesEnBandeja, setPendientesEnBandeja] = useState<Record<string, string>>({})
 
   // Catalog
@@ -610,7 +653,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     abrirLinea(itemId)
     let intentos = 0
     const buscar = () => {
-      const el = document.querySelector(`[data-linea-id="${CSS.escape(itemId)}"]`)
+      // La línea o el paquete de bloqueo (`data-item-id`): prueba corta del #1352.
+      const el = tarjetaDeOpcionEn(document, itemId)
       if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
       if (++intentos < 20) setTimeout(buscar, 250)
     }
@@ -621,9 +665,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     setExpandedItems(todosExpandidos ? new Set() : new Set(itemsVisibles.map(i => i.id)))
   }
 
+  // H10-1: la enviada que esta versión reemplaza al salir (solo un borrador reemplaza).
+  const reemplaza = cotizacion.estado === 'borrador' ? otraEnviada : null
   const handleEnviar = () => {
     startTransition(async () => {
-      const res = await enviarCotizacion(cotizacion.id)
+      const res = await enviarCotizacion(cotizacion.id, 'enviar', reemplaza?.id ?? null)
       if (res.success) {
         toast.success('Cotización enviada')
         refrescar()
@@ -657,8 +703,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   const confirmarEnvio = () => {
     startTransition(async () => {
       const res = porPasosOn
-        ? await enviarPorPasos(cotizacion.id, 'descargado')
-        : await enviarCotizacion(cotizacion.id, 'descargado')
+        ? await enviarPorPasos(cotizacion.id, 'descargado', reemplaza?.id ?? null)
+        : await enviarCotizacion(cotizacion.id, 'descargado', reemplaza?.id ?? null)
       setPreguntandoEnvio(false)
       if (res.success) {
         toast.success('Quedó enviada: arranca el seguimiento.')
@@ -669,9 +715,26 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     })
   }
 
+  // QA del #1342 · el aviso ámbar del PDF de borrador nombra cifras de ESE momento (el margen, la
+  // comisión que faltaba). Cuando la cotización cambia, se quita: el próximo PDF dice lo vigente.
+  const huellaAviso = useMemo(() => huellaDelAvisoDelPdf({
+    items: initialItems,
+    tarifas: (itinerarios?.itinerarios ?? []).map(t => ({ id: t.id, vaEnPropuesta: t.vaEnPropuesta, seleccion: t.seleccion })),
+    cotizacion: cotizacion as unknown as Record<string, unknown>,
+  }), [initialItems, itinerarios, cotizacion])
+  const huellaDelAviso = useRef<string | null>(null)
+  useEffect(() => {
+    if (huellaDelAviso.current === null || huellaDelAviso.current === huellaAviso) return
+    huellaDelAviso.current = null
+    toast.dismiss(idAvisoPdfBorrador(cotizacion.id))
+  }, [huellaAviso, cotizacion.id])
+
   const handleDescargarPDF = () => {
     startTransition(async () => {
-      const res = await generateCotizacionPDF(cotizacion.id)
+      const res = await generateCotizacionPDF(cotizacion.id, {
+        porPasos: porPasos?.encendido === true,
+        incluyePorOne: porPasos?.encendido === true && porPasos.piezas.incluye_por_one === true,
+      })
       if (res.success && res.pdf) {
         // Convert base64 to blob and trigger download
         const byteChars = atob(res.pdf)
@@ -691,7 +754,9 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           // Bajo el margen mínimo sin autorización, o con pantallazos de otros pasajeros:
           // el PDF lleva marca de agua y no se guardó. Se dice en ámbar y se queda en
           // pantalla, no como un «listo».
-          toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { duration: Infinity, closeButton: true })
+          // QA del #1342 · con su id: se quita solo cuando la cotización cambia (ver abajo).
+          toast.warning(aviso ?? 'PDF de borrador: no se puede enviar.', { id: idAvisoPdfBorrador(cotizacion.id), duration: Infinity, closeButton: true })
+          huellaDelAviso.current = huellaAviso
         } else {
           toast.success('PDF descargado')
           // Almacenamiento externo: el PDF se descargó pero no quedó guardado en el
@@ -876,7 +941,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   // El margen de la cotización, con el default de la línea de negocio como respaldo:
   // una cotización recién creada todavía no tiene el suyo, y sin este respaldo el pie
   // mostraría 0% sobre un negocio que sí tiene margen configurado.
-  const margenCotizacion = cotizacion.margen_porcentaje ?? Number(cotizacion.margen_default_pct) ?? 0
+  // D4 (2026-10-29): un 0 guardado no anula el de la línea (`margen-de-cotizacion.ts`).
+  const margenCotizacion = margenDeLaCotizacion(cotizacion) ?? 0
 
   // Los números de la cotización salen de la MISMA cascada que aplica el servidor al
   // guardar. Calcularlos aquí por separado fue exactamente el defecto anterior: la
@@ -902,6 +968,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       precio_manual: item.precio_manual,
       // Punto 11 del brief del 2026-10-05: lo mismo que `recalcularTotales`.
       pasajeros: pasajerosParaCuadre(item.tarifa_pax, costoSinIva),
+      // Tarifa pública (2026-10-22): la línea sale de la medida del margen mínimo.
+      tarifa_pax: item.tarifa_pax,
+      // Reglas de margen (2026-10-27): vuelo, hotel o lo demás, y la ruta del vuelo.
+      grupo: item.grupo ?? null,
+      nombre: item.nombre,
     }
   }), Object.values(adicionales.porItem).flat())
   const paramsCascada = {
@@ -909,16 +980,23 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     margenPct: margenCotizacion,
     descuentoComercialPct: cotizacion.descuento_porcentaje,
     convencionMargen,
+    // Las reglas de margen que la cotización copió al nacer. Sin ellas, la cascada de siempre.
+    reglas: leerReglasDeCotizacion(cotizacion.reglas_margen),
   }
 
   // Por LÍNEA: sobre todas, porque una alternativa que no aporta al total igual
-  // necesita su precio — es el número con el que se la compara contra la otra.
-  const cascada = calcularCascada(paraCascada, paramsCascada)
+  // necesita su precio — es el número con el que se la compara contra la otra. Sin puntos
+  // extra ni descuentos sobre el total: esos son de una tarifa, no de cada opción.
+  const cascada = calcularCascada(paraCascada, paramsPorOpcion(paramsCascada))
 
   // R-A1 · el TOTAL suma cada ranura una sola vez. Es el mismo helper y la misma
   // cascada que aplica `recalcularTotales` al guardar: si la pantalla tuviera su
   // propia regla, el total de arriba y el de la base volverían a discrepar, que fue
   // exactamente el defecto que obligó a compartir `calcularCascada`.
+  // «Va con el hotel» de un traslado (reunión del 2026-10-22): las opciones de hotel de la cotización.
+  const hotelesParaTraslados = initialItems
+    .filter(i => !i.es_ajuste && ranuraDeGrupo(i.grupo ?? null)?.slug === 'hotel_detalle')
+    .map(i => ({ id: i.id, nombre: nombreVisibleDeLinea(i as never) || i.nombre || 'Hotel' }))
   const itemsParaRanuras = initialItems.map(i => ({
     id: i.id,
     grupo: i.grupo ?? null,
@@ -929,6 +1007,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     // Sin estos dos, la pantalla sumaría lo que `recalcularTotales` ya no suma.
     dia_relativo: i.dia_relativo ?? null,
     entra_al_precio: i.entra_al_precio ?? null,
+    // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+    tarifa_pax: i.tarifa_pax,
   }))
   /**
    * Con principal, la decisión está tomada y el total sale de ÉL (R5): no hay supuesto
@@ -940,7 +1020,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
    * principal», así que el aviso de abajo solo cubre el hueco que quedaba:
    * alternativas cargadas y NINGUNA combinación construida.
    */
-  const seleccionPrincipal = (itinerarios?.itinerarios ?? []).find(i => i.esPrincipal)?.seleccion ?? null
+  const filaPrincipal = (itinerarios?.itinerarios ?? []).find(i => i.esPrincipal) ?? null
+  const seleccionPrincipal = filaPrincipal?.seleccion ?? null
+  // Con principal el total es el de ESA tarifa: lleva sus descuentos propios (`descuentoAplicaA`).
+  const paramsDelTotal = filaPrincipal ? { ...paramsCascada, tarifaId: filaPrincipal.id } : paramsCascada
   const hayPrincipal = seleccionPrincipal !== null
 
   const aportanAlTotal = new Set(
@@ -950,7 +1033,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   )
   const cascadaTotal = calcularCascada(
     paraCascada.filter(i => aportanAlTotal.has(i.id) || i.es_ajuste === true),
-    paramsCascada,
+    paramsDelTotal,
   )
   /**
    * Los supuestos que TODAVÍA aplican.
@@ -980,7 +1063,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       // De dónde a dónde va el vuelo, para cuando el recargo aplica solo a internacionales.
       tarifa_pax: i.tarifa_pax,
     })),
-    politicaRecargo,
+    // Con reglas de margen el colchón de cada tiquete reemplaza el recargo fijo: no se ofrece.
+    paramsCascada.reglas ? { ...politicaRecargo, activo: false } : politicaRecargo,
     // B4 · solo cuenta si el recargo va por pasajero: los que viajan según el negocio.
     pasajerosDelViaje(composicionViaje),
   )
@@ -1016,7 +1100,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
   }
   const opcionesIva = {
     tarifaPct: tarifaIvaDelVendedor(fiscalProfile),
-    descuentoComercialPct: cotizacion.descuento_porcentaje,
+    // Con reglas de margen, los descuentos sobre el total también bajan la base del IVA.
+    descuentoComercialPct: pctDescuentoTotal(paramsDelTotal),
     precio: configIvaEfectiva.precio,
   }
   const ivaPorLinea = conIvaSobreIngresoPropio
@@ -1081,7 +1166,30 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     : salida
   const notaMargen = notaDeMargen(salidaVista)
   const motivoMargen = 'motivoBoton' in notaMargen ? notaMargen.motivoBoton : null
-  const motivoBotonEnviar = motivoEnvio ?? motivoMargen
+  // Viaje en bloqueo (QA del 2026-10-29): un paquete incompleto (costo 0, infante sin costo, niño
+  // fuera del rango CHD, acomodación sin precio) no sale. La misma cuenta que `enviarPorPasos`, que
+  // la revisa antes del margen: un paquete en cero no es «margen bajo el mínimo».
+  const tarifasEnPropuesta = (itinerarios?.itinerarios ?? []).filter(t => t.vaEnPropuesta)
+  const lineasSinAjuste = initialItems.filter(i => !i.es_ajuste)
+  const paquetesSinCompletar = paquetesIncompletos(
+    lineasSinAjuste.map(i => ({ id: i.id, nombre: i.nombre ?? null, grupo: i.grupo ?? null, es_ajuste: false, tarifa_pax: i.tarifa_pax })),
+    tarifasEnPropuesta.length > 0 ? new Set(tarifasEnPropuesta.flatMap(t => itemsDelItinerario(lineasSinAjuste as never[], t.seleccion))) : null,
+    composicionViaje ?? null,
+    // La edad del niño que ya dice la Solicitud cuenta, como en la tarjeta y en el servidor.
+    bloqueo?.edadesMenores ?? null,
+  )
+  const motivoPaquete = motivoPaquetesIncompletos(paquetesSinCompletar)
+  // D3 (2026-10-29): una Pública que va al cliente sin la comisión de la agencia no se envía.
+  const idsQueSalen = new Set(tarifasEnPropuesta.length > 0
+    ? tarifasEnPropuesta.flatMap(t => itemsDelItinerario(lineasSinAjuste as never[], t.seleccion))
+    : itemsQueAportanAlTotal(lineasSinAjuste as never[]))
+  const publicasSinComisionDelEnvio = publicasSinComisionQueSalen(
+    lineasSinAjuste.map(i => ({ id: i.id, nombre: i.nombre ?? null, es_ajuste: false, tarifa_pax: i.tarifa_pax })),
+    idsQueSalen,
+  )
+  const motivoComision = motivoPublicasSinComision(publicasSinComisionDelEnvio)
+  // La autorización de datos va primero: es lo primero que revisa el servidor al enviar.
+  const motivoBotonEnviar = motivoAutorizacionDatos ?? motivoPaquete ?? motivoComision ?? motivoEnvio ?? motivoMargen
 
   const avisosCobertura = avisosDeCobertura(
     initialItems.map(i => ({
@@ -1109,6 +1217,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     dia_relativo: i.dia_relativo ?? null,
     mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
     entra_al_precio: i.entra_al_precio ?? null,
+    // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+    tarifa_pax: i.tarifa_pax,
     es_ajuste: i.es_ajuste ?? false,
     orden: i.orden ?? 0,
     precio_venta: i.precio_venta ?? 0,
@@ -1445,6 +1555,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         grupo: i.grupo ?? null,
         dia_relativo: i.dia_relativo ?? null,
         entra_al_precio: i.entra_al_precio ?? null,
+        // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+        tarifa_pax: i.tarifa_pax,
         mostrar_en_sugeridos: i.mostrar_en_sugeridos ?? null,
         orden: i.orden ?? 0,
       }))
@@ -1530,6 +1642,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           es_ajuste: item.es_ajuste ?? false,
           dia_relativo: item.dia_relativo ?? null,
           entra_al_precio: item.entra_al_precio ?? null,
+          // El traslado que va con un hotel (2026-10-22, `va-con-hotel.ts`).
+          tarifa_pax: item.tarifa_pax,
         }
         const esFueraDelPrecio = fueraDelPrecio(lineaDelInterruptor)
         const puedeSalirDelPrecio =
@@ -1671,6 +1785,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   composicionViaje={composicionViaje}
                   tarifaPax={item.tarifa_pax}
                   costoUnitarioLinea={costoUnitario}
+                  tasasCotizacion={tasasCotizacion}
                   sugeridosGuardados={rubrosSugeridos}
                   onCambio={() => refrescar()}
                 />
@@ -1736,6 +1851,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                           itemId={item.id}
                           subtotalPesos={costoManual}
                           tarifaPax={item.tarifa_pax}
+                          tasasCotizacion={tasasCotizacion}
                           onCambio={() => refrescar()}
                         />
                       ) : (
@@ -2416,7 +2532,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               margenAplicado={Number(itemMargen) || 0}
               convencion={convencionMargen}
               administrativosPct={(Number(cotizacion.aiu_admin_pct) || 0) + (Number(cotizacion.aiu_imprevistos_pct) || 0)}
-              pisoPct={umbrales.pisoPct}
+              // Con reglas de margen la tarjeta no juzga contra el mínimo global (eso es de la
+              // tarifa): un hotel contra su piso de hotel; lo demás solo avisa si vende bajo costo.
+              pisoPct={paramsCascada.reglas
+                ? (linea?.reglas?.tipo === 'hotel' ? paramsCascada.reglas.politica.pisoHotelPct : 0)
+                : umbrales.pisoPct}
+              reglasDeLinea={porPasosDeOpcion ? linea?.reglas ?? null : null}
               adicionales={adicionales.porItem[item.id] ?? []}
               adicionalesDisponible={adicionales.disponible}
               margenCotizacion={{ margenPct: margenCotizacion, convencion: convencionMargen }}
@@ -2425,6 +2546,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onEliminar={porPasosDeOpcion ? () => porPasosDeOpcion.onEliminar() : nombre => eliminarOpcionDevolviendo(item, nombre)}
               porPasos={porPasosDeOpcion ? { enTarifas: porPasosDeOpcion.enTarifas, menuExtra: porPasosDeOpcion.menuExtra } : null}
               autorizador={salida?.dueno ?? null}
+              hotelesDelViaje={porPasosDeOpcion ? hotelesParaTraslados : []}
               onMover={() => setMoverGrupoDe(item.id)}
               mover={editable && moverGrupoDe === item.id ? (
                 <div className="px-3 pb-2">
@@ -2939,6 +3061,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               onPendientes={setPendientesEnBandeja}
               fechasViaje={fechasViaje}
               destinoViaje={destinoViaje}
+              requisitosViaje={requisitosViaje}
               onCambio={refrescar}
               conTarifasDeProveedor
             />
@@ -3300,7 +3423,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
         ofrecerAdministrativos={!lineasPorTipo}
         onMargenChange={pct => {
           startTransition(async () => {
-            await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+            const r = await updateCotizacion(cotizacion.id, { margen_porcentaje: pct })
+            if (!r.success) { toast.error(r.error ?? 'No se pudo cambiar el margen'); refrescar(); return }
             await recalcularTotales(cotizacion.id)
             refrescar()
           })
@@ -3500,6 +3624,8 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
     estadoCotizacion: cotizacion.estado,
   })
   const enPropuesta = (itinerarios?.itinerarios ?? []).filter(i => i.vaEnPropuesta)
+  // Sin nombre, «Opción N» como el documento (QA del #1342), no «Tarifa».
+  const nombresDeTarifas = nombresVisiblesDeTarifas(itinerarios?.itinerarios ?? [])
   // Las actividades opcionales y las que no van se cuentan aparte, sin sumarlas (punto 0).
   const notaFuera = notaDeActividadesFuera(itemsParaDia)
   const resumenDeComponentes = `${resumenDeBloques(estadosDeBloque)}${notaFuera ? ` · ${notaFuera}` : ''}`
@@ -3610,14 +3736,15 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
                   <span className="text-base font-semibold tabular-nums">{formatCOP(cascadaTotal.precioVenta)}</span>
                 </div>
                 <div className="mt-0.5 flex justify-between gap-2 text-muted-foreground">
-                  <span>Costo {formatCOP(cascadaTotal.costoDeVenta)}</span>
-                  <span>Margen {formatMargenPct(cascadaTotal.margenRealPct) ?? '—'}</span>
+                  {/* QA del #1342 · lo que paga la agencia y, con una Pública sin comisión, que falta. */}
+                  <span>Costo {calculoEnPantalla(cascadaTotal).publicasSinComision > 0 ? '—' : formatCOP(calculoEnPantalla(cascadaTotal).costoDeVenta)}</span>
+                  <span>Margen {calculoEnPantalla(cascadaTotal).publicasSinComision > 0 ? 'falta la comisión' : formatMargenPct(calculoEnPantalla(cascadaTotal).margenDelViajePct) ?? '—'}</span>
                 </div>
                 {enPropuesta.length > 0 && (
                   <ul className="mt-2 space-y-0.5 border-t pt-2">
                     {enPropuesta.map(t => (
                       <li key={t.id} className="flex justify-between gap-2">
-                        <span>{t.nombre ?? 'Tarifa'}</span>
+                        <span>{nombresDeTarifas.get(t.id) ?? t.nombre ?? 'Tarifa'}</span>
                         <span className="tabular-nums">
                           {formatCOP(t.precio)}
                           <span className="ml-1 text-muted-foreground">· {formatMargenPct(t.margenRealPct) ?? '—'}</span>
@@ -3695,7 +3822,10 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       noVan.set(g, { itemId: i.id, nombre: resolverRanura(g)?.nombre ?? etiquetaDeRanura(g) })
     }
     return listaUnica({
+      autorizacionDatos: motivoAutorizacionDatos,
       sinPrecio: opcionesSinPrecio(lineasConLectura, idsQueSalen, composicionViaje ?? null),
+      paquetes: paquetesSinCompletar,
+      publicasSinComision: publicasSinComisionDelEnvio,
       capturas: motivoEnvio ? { motivo: motivoEnvio, itemId: desactualizadas[0]?.itemId ?? null } : null,
       tarifas: tarifasDeLaPagina,
       salida: salidaVista as never,
@@ -3708,6 +3838,21 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       recargo: recargo.estado === 'falta' ? `Falta el ${recargo.etiqueta.toLowerCase()}.` : null,
       viaje: viaje.motivo ? `Pendiente: ${viaje.motivo}.` : null,
       ivaSinCalcular: !mostrarResumenFiscal && ivaVigente && !ivaVigente.calculable && cascadaTotal.precioVenta > 0 ? motivoIvaSinCalcular(ivaVigente.sinCosto) : null,
+      // Brief del 2026-10-29, punto 3 · el hotel o vuelo cargado que no sale en la propuesta.
+      fueraDeLaPropuesta: opcionesFueraDeLaPropuesta(lineasConLectura as never[], tarifasDeLaPagina).map(o => {
+        const i = itemPorIdVista.get(o.itemId)
+        return { ...o, nombre: (i ? nombreVisibleDeLinea(i as never) : '') || i?.nombre || 'Una opción' }
+      }),
+      // N-17 (QA del 2026-10-29, ronda 3) · la tarifa con nombre que no se manda, y el orden de precios.
+      ...(() => {
+        const alCliente = (itinerarios?.itinerarios ?? []).map(t => ({
+          nombre: t.nombre,
+          precio: t.precio,
+          vaEnPropuesta: t.vaEnPropuesta,
+          firma: firmaDeTarifa(lineasConLectura as never[], t.seleccion),
+        }))
+        return { tarifasSinMandar: tarifasSinMandar(alCliente), ordenDeTarifas: avisosDeOrdenDeTarifas(alCliente) }
+      })(),
       // Decisión del 2026-10-14 · la reserva de varias habitaciones que no cuadra con el viaje.
       reservasQueNoCuadran: lineasConLectura.flatMap(i => {
         if (!idsQueSalen.has(i.id) || ranuraDeGrupo(i.grupo ?? null)?.slug !== 'hotel_detalle') return []
@@ -3737,6 +3882,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
       leyendo={conteoBandeja.leyendo}
       pasoInicial={pasoInicial}
       motivoBotonEnviar={motivoBotonEnviar}
+      reemplaza={reemplaza}
       listaUnica={listaPorPasos}
       conteoLista={listaPorPasos ? { rojos: listaPorPasos.impide.length, ambar: listaPorPasos.revisar.length - (conteoBandeja.porAceptar > 0 ? 1 : 0) } : {
         rojos: motivoBotonEnviar ? 1 : 0,
@@ -3758,14 +3904,68 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
           destinoViaje={destinoViaje}
+          requisitosViaje={requisitosViaje}
           onCambio={refrescar}
           conTarifasDeProveedor
+          bloqueo={bloqueo ? {
+            registro: registroPaquetes,
+            paquetes: initialItems
+              .filter(i => !i.es_ajuste && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle')
+              .map((i, n) => ({ itemId: i.id, titulo: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)?.hotel.hotel || `Paquete ${n + 1}` })),
+            abrir: mostrarOpcion,
+            crearPaquete: async () => {
+              const r = await crearPaqueteBloqueo(cotizacion.id)
+              if (!r.success) return { ok: false as const, error: r.error }
+              refrescar()
+              mostrarOpcion(r.itemId)
+              return { ok: true as const, itemId: r.itemId }
+            },
+          } : null}
         />
       )}
       agregarSinPantallazo={jsxAgregar}
+      bloqueo={bloqueo ? (
+        <SeccionBloqueo cotizacionId={cotizacion.id} operador={bloqueo.operador} editable={editable} onCreado={id => { refrescar(); mostrarOpcion(id) }} />
+      ) : null}
       tarjetaDeOpcion={(id, pp) => {
         const item = itemPorIdVista.get(id)
-        return item ? pintarLinea(item, true, pp) : null
+        if (!item) return null
+        // Viaje en bloqueo: la opción de la ranura «Paquete de bloqueo» es un paquete (hotel + vuelo).
+        if (ranuraDeGrupo(item.grupo ?? null)?.slug === 'paquete_detalle') {
+          return (
+            <TarjetaPaqueteBloqueo
+              cotizacionId={cotizacion.id}
+              itemId={item.id}
+              tarifaPax={item.tarifa_pax}
+              precioVenta={item.precio_venta ?? null}
+              editable={editable}
+              operador={bloqueo?.operador ?? null}
+              pasajeros={composicionViaje ? { adultos: composicionViaje.adultos, ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null}
+              edadesNinosSolicitud={edadesNinosDeLaSolicitud(bloqueo?.edadesMenores ?? null, composicionViaje ? { ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null)}
+              vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
+              onCambio={() => refrescar()}
+              onEliminar={pp.onEliminar}
+              registro={registroPaquetes}
+              reglasDeLinea={paramsCascada.reglas ? lineaPorItem.get(item.id)?.reglas ?? null : null}
+              margenAplicado={lineaPorItem.get(item.id)?.margenAplicado ?? null}
+              // D5 (2026-10-29): el «va en la propuesta» de la tarifa del paquete.
+              enPropuesta={(() => {
+                const suya = (itinerarios?.itinerarios ?? []).find(t => t.seleccion.includes(item.id))
+                return suya ? suya.vaEnPropuesta : null
+              })()}
+              // QA del #1342 · fuera de la transición del editor: la tarjeta muestra el cambio y
+              // «Guardando…» mientras tanto, y el refresco trae las tarifas nuevas (al quitar la
+              // Recomendada, la pasa a otro paquete: cambian dos tarjetas y el total).
+              onEnPropuesta={async va => {
+                const r = await paqueteEnPropuesta(item.id, va)
+                if (!r.success) toast.error(r.error)
+                refrescar()
+                return r.success
+              }}
+            />
+          )
+        }
+        return pintarLinea(item, true, pp)
       }}
       revisarLista={(
         <>
@@ -3847,10 +4047,12 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
           onPendientes={setPendientesEnBandeja}
           fechasViaje={fechasViaje}
           destinoViaje={destinoViaje}
+          requisitosViaje={requisitosViaje}
           onCambio={refrescar}
           conTarifasDeProveedor
         />
       )}
+      {editable && reemplaza && <AvisoVersionNueva consecutivo={reemplaza.consecutivo} />}
       {porPasosOn ? vistaPorPasos : lineasPorTipo ? pasosDelViaje : (
         <div className="space-y-3">
           {jsxExpandir}
@@ -3949,6 +4151,12 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
   )
 }
 
+/** A cuántas líneas se aplica el margen de hoteles (con reglas de margen). */
+function notaMargenDeHoteles(n: number): string {
+  if (n === 0) return 'no lo toma ninguna opción: cada una lleva el suyo'
+  return n === 1 ? 'lo toma 1 hotel Neta sin margen propio' : `lo toman ${n} hoteles Neta sin margen propio`
+}
+
 /**
  * El pie de la cotización: la cascada completa, de lo que cuesta a lo que se cobra.
  *
@@ -3957,7 +4165,7 @@ function Renglon({ etiqueta, valor, nota, fuerte, tono }: {
  * diera: el cliente veía una línea "Administración e imprevistos" que nadie había
  * cotizado, y el margen no se podía leer en ninguna parte.
  */
-function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, ofrecerAdministrativos = true, onMargenChange, onAIUChange, onDescuentoChange }: {
+export function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, editable, aiuAdminPct, aiuImprevPct, umbrales, pisoBloqueaAvance = false, ofrecerAdministrativos = true, onMargenChange, onAIUChange, onDescuentoChange }: {
   cascada: Cascada
   margenPct: number
   convencionMargen: ConvencionMargen
@@ -3993,11 +4201,19 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
   // El margen real se separa del general cuando alguna línea margina distinto, trae
   // precio a mano, o cuando la cotización quedó en la convención vieja de recargo
   // sobre el costo. Si no pasa nada de eso, son el mismo número.
-  const margenRealEsOtraCosa =
-    cascada.margenRealPct !== null && Math.abs(cascada.margenRealPct - margenPct) >= 0.05
+  // Con tarifas Públicas o reglas de margen, el costo y el margen se dicen como los mide el
+  // encabezado: la agencia paga el precio público menos la comisión (brief del 2026-10-29, falla 2).
+  const enPantalla = calculoEnPantalla(cascada)
+  const margenDelViaje = enPantalla.margenDelViajePct
+  // Con reglas, la casilla de la cotización es el margen de los HOTELES Neta: no se compara con el
+  // del viaje (un plan o una Pública no lo toman), así que el del viaje se dice siempre «real».
+  const conReglas = enPantalla.lineasQueTomanElMargen !== null
+  const margenRealEsOtraCosa = conReglas
+    || (margenDelViaje !== null && Math.abs(margenDelViaje - margenPct) >= 0.05)
 
-  const nivelConsolidado = nivelDeMargen(cascada.margenRealPct, umbrales)
-  const margenConsolidado = formatMargenPct(cascada.margenRealPct)
+  // El nivel (rojo/ámbar) se juzga como el mínimo, y la cifra es la misma que se juzga.
+  const nivelConsolidado = nivelDeMargen(margenParaElMinimo(cascada), umbrales)
+  const margenConsolidado = formatMargenPct(margenDelViaje)
 
   return (
     <div className="rounded-lg bg-muted/50 p-4 space-y-2">
@@ -4074,13 +4290,39 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
         />
       )}
 
+      {/* La comisión de las tarifas Públicas: la agencia paga el precio público menos ella (D2). */}
+      {enPantalla.comisionPublicas > 0 && (
+        <Renglon
+          etiqueta="Comisión de tarifas públicas"
+          valor={enPantalla.comisionPublicas}
+          nota="la agencia paga el precio público menos su comisión"
+          tono="rojo"
+        />
+      )}
+
       <div className="border-t pt-2">
-        <Renglon etiqueta="Costo de venta" valor={cascada.costoDeVenta} nota="lo que hay que poner" fuerte />
+        <Renglon etiqueta="Costo de venta" valor={enPantalla.costoDeVenta} nota="lo que hay que poner" fuerte />
       </div>
+
+      {/* Con reglas de margen la casilla de la cotización solo la toman los hoteles Neta sin margen
+          propio (en por pasos se edita arriba, «Margen de hoteles»). Se llama igual, dice a cuántas
+          líneas se aplica y, si no la toma ninguna, no muestra un porcentaje que no está en el precio
+          (brief del 2026-10-29, falla 2). */}
+      {conReglas && (!editable || enPantalla.lineasQueTomanElMargen === 0) && (
+        <div className="flex items-baseline justify-between gap-2 border-t pt-2 text-sm" data-margen-de-hoteles>
+          <span className="text-muted-foreground">
+            Margen de hoteles
+            <span className="ml-1 text-[10px]">{notaMargenDeHoteles(enPantalla.lineasQueTomanElMargen ?? 0)}</span>
+          </span>
+          <span className="font-medium tabular-nums">
+            {enPantalla.lineasQueTomanElMargen === 0 ? '—' : formatMargenPct(margenPct)}
+          </span>
+        </div>
+      )}
 
       {/* MARGEN — el de la cotización completa. Las líneas que traen el suyo lo dicen
           en su propia fila, así que el número de aquí no las alcanza. */}
-      {editable && (
+      {editable && (!conReglas || (enPantalla.lineasQueTomanElMargen ?? 0) > 0) && (
         <div className="flex items-center justify-between gap-2 border-t pt-2">
           {/* Se llama "Margen general" porque es como lo nombra quien cotiza. El
               matiz de la convención no se pierde: va en el tooltip, y el margen
@@ -4091,7 +4333,8 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
               ? 'Se calcula sobre la venta: el número que escribes ES el margen real.'
               : `Se calcula como ${nombreDelMargen(convencionMargen).toLowerCase()} sobre el costo, así que el margen real sale un poco por debajo. Lo ves abajo, junto al precio de venta.`}
           >
-            Margen general
+            {conReglas ? 'Margen de hoteles' : 'Margen general'}
+            {conReglas && <span className="ml-1 text-[10px] font-normal">{notaMargenDeHoteles(enPantalla.lineasQueTomanElMargen ?? 0)}</span>}
           </label>
           <div className="relative w-24">
             <input
@@ -4102,8 +4345,10 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
               step="0.01"
               className="w-full rounded border bg-background py-1.5 pl-2 pr-6 text-sm tabular-nums"
               onBlur={e => {
-                const pct = Number(e.target.value) || 0
-                if (pct === margenPct) return
+                // D4 (2026-10-29): borrar la casilla no es escribir un 0 (`Number('')` es 0).
+                if (e.target.value.trim() === '') return
+                const pct = Number(e.target.value)
+                if (!Number.isFinite(pct) || pct === margenPct) return
                 onMargenChange(pct)
               }}
               onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
@@ -4156,6 +4401,12 @@ function TotalesMargen({ cascada, margenPct, convencionMargen, descuentoPct, edi
             cuando ya era malo.
             La etiqueta cambia a "Margen real" cuando NO coincide con el general,
             que es lo que obliga a mirar los dos por separado. */}
+        {!margenConsolidado && enPantalla.publicasSinComision > 0 && (
+          <div className="mt-0.5 flex items-baseline justify-between gap-2" data-margen-sin-comision>
+            <span className="text-[11px] text-muted-foreground">Margen real del viaje</span>
+            <span className="text-[11px] font-semibold text-red-600">sin medir · falta la comisión de una tarifa pública</span>
+          </div>
+        )}
         {margenConsolidado && cascada.costoDeVenta > 0 && (
           <div className="mt-0.5 flex items-baseline justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">

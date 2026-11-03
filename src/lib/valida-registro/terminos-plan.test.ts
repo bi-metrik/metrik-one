@@ -21,6 +21,8 @@ import { huellaParteII, terminosParaElRegistro } from './terminos-registro-servi
  * La huella de la Parte II se fijó el 2026-10-14 comparando el código con el archivo, y otra vez con la v2.1
  * (cobro del primer mes al confirmar, texto de Max pendiente de Emilio): si alguien
  * cambia una letra del texto, esta prueba cae y obliga a subir la versión (lo ya aceptado no cambia).
+ * Fijada otra vez el 2026-10-29 con la v2.2 (`terminos-valida-v2.2-autoservicio.md`, texto de Emilio aprobado
+ * por Mauricio): el código y el archivo dan el mismo texto, del título a la 16.6, letra por letra.
  */
 
 const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
@@ -28,17 +30,17 @@ const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex')
 describe('el texto de los Términos', () => {
   it('ya no es un marcador', () => {
     expect(terminosPlanListos()).toBe(true)
-    expect(TERMINOS_PLAN).toMatchObject({ slug: 'terminos-uso-valida-autogestion', version: 'v2.1', titulo: 'Términos de Uso de VALIDA' })
+    expect(TERMINOS_PLAN).toMatchObject({ slug: 'terminos-uso-valida-autogestion', version: 'v2.2', titulo: 'Términos de Uso de VALIDA' })
   })
 
   it('la Parte II es la del archivo, letra por letra (huella fijada)', () => {
-    expect(sha(PARTE_II_TERMINOS)).toBe('7d5389c619f2bb99603aa7f0bfa32b246cd0fcfda9a70d67beff51f4fc8684eb')
-    expect(PARTE_II_TERMINOS.length).toBe(29953)
+    expect(sha(PARTE_II_TERMINOS)).toBe('2c3e137baf74247e341bdda5074375795fc1534bae04f7c38483b6bb5aecf532')
+    expect(PARTE_II_TERMINOS.length).toBe(30433)
     expect(huellaParteII()).toBe(sha(PARTE_II_TERMINOS))
   })
 
   it('va del título a la 16.6: sin las secciones A a D ni la marca del PDF', () => {
-    expect(TERMINOS_PLAN.plantilla.startsWith('# TÉRMINOS DE USO DE VALIDA\n\n**Variante: Autoservicio · Versión 2.1 · Rige desde {fecha_publicacion}**')).toBe(true)
+    expect(TERMINOS_PLAN.plantilla.startsWith('# TÉRMINOS DE USO DE VALIDA\n\n**Variante: Autoservicio · Versión 2.2 · Rige desde {fecha_publicacion}**')).toBe(true)
     expect(PARTE_II_TERMINOS.startsWith('## PARTE II. TÉRMINOS\n\n### 0. Cómo se leen estos Términos')).toBe(true)
     expect(PARTE_II_TERMINOS.endsWith('si ese cobro falla, aplica el numeral 7.5 de las Condiciones de la prueba gratis.')).toBe(true)
     expect(TERMINOS_PLAN.plantilla).toBe(`${PARTE_I_ORDEN}${SEPARADOR_PARTES}${PARTE_II_TERMINOS}`)
@@ -82,6 +84,18 @@ describe('el texto de los Términos', () => {
     expect(PARTE_II_TERMINOS).toContain('hecho cuando el Cliente confirma en su cuenta que activa el plan o, sin esa confirmación, después del fin del plazo')
   })
 
+  it('v2.2: el reverso del pago corta el plan en el acto (3.6, 11.2 y 11.3 nueva; decisión de Mauricio, 2026-10-27)', () => {
+    expect(PARTE_II_TERMINOS).toContain('Si en ese plazo no se paga, aplica la cláusula 11.1. Si un pago ya hecho se reversa, aplica la cláusula 11.3.')
+    expect(PARTE_II_TERMINOS).toContain('Si pasan treinta (30) días calendario de suspensión por falta de pago o por reversión del pago sin que el Cliente pague')
+    expect(PARTE_II_TERMINOS).toContain(
+      '11.3. **Reversión del pago.** Si el pago de un período se reversa ante la pasarela o el banco emisor, incluido un contracargo, ese período queda sin pagar y METRIK puede suspender el Servicio de inmediato, sin el aviso previo de la cláusula 11.1.',
+    )
+    // La 11.3 va entre la 11.2 y la 12, y la 13.1 (nueva aceptación) no cambia.
+    expect(PARTE_II_TERMINOS.indexOf('11.2. ')).toBeLessThan(PARTE_II_TERMINOS.indexOf('11.3. '))
+    expect(PARTE_II_TERMINOS.indexOf('11.3. ')).toBeLessThan(PARTE_II_TERMINOS.indexOf('12.1. '))
+    expect(PARTE_II_TERMINOS).toContain('requiere su nueva aceptación en los términos de la cláusula 16; mientras no la acepte, rige la versión que aceptó.')
+  })
+
   it('el plan, el precio y la forma de pago van escritos en la Orden, no en campos', () => {
     expect(PARTE_I_ORDEN).toContain('| Usuarios incluidos | 2 |')
     expect(PARTE_I_ORDEN).toContain('| Consultas incluidas | Hasta 3.000 por mes |')
@@ -105,7 +119,7 @@ describe('los Términos de una empresa, llenos en el registro', () => {
     const r = terminosParaElRegistro(p, { VERCEL_ENV: 'production' })
     if (!r.ok) throw new Error(r.faltan.join(','))
     const t = r.terminos
-    expect(t.version).toBe('v2.1')
+    expect(t.version).toBe('v2.2')
     expect(t.sha256).toBe(sha(t.texto))
     expect(t.texto).toContain('| Razón social (declarada en el registro) | ACME S.A.S. |')
     expect(t.texto).toContain('| NIT (declarado en el registro) | 900.123.456-7 |')

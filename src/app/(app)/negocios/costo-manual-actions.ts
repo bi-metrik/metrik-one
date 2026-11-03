@@ -8,6 +8,7 @@ import { normalizarCostoManual, type EntradaCostoManual } from '@/lib/cotizacion
 import { esConfirmado } from '@/lib/cotizaciones/rubros-sugeridos'
 import { isEditable, type EstadoCotizacion } from '@/lib/cotizaciones/state-machine'
 import { leerTarifaPax, type TarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
+import { propagarTasaEnLaCotizacion } from '@/app/(app)/negocios/tarifa-pax-actions'
 
 /**
  * El costo escrito a mano de una línea de viaje, en la moneda del proveedor.
@@ -28,7 +29,7 @@ import { leerTarifaPax, type TarifaPax } from '@/lib/cotizaciones/tarifa-pasajer
 export async function guardarCostoManualEnMoneda(
   itemId: string,
   entrada: EntradaCostoManual,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; propagadas?: number }> {
   const { supabase, userId, error } = await getWorkspace()
   if (error) return { success: false, error: 'No autenticado' }
 
@@ -77,6 +78,8 @@ export async function guardarCostoManualEnMoneda(
   if (errUpd) return { success: false, error: errUpd.message }
 
   await recalcularTotales(item.cotizacion_id as string)
+  // La tasa escrita es la de la cotización para esa moneda (H5/H28): llega a las demás líneas.
+  const propagadas = limpio.origen ? await propagarTasaEnLaCotizacion(itemId, limpio.origen.moneda, limpio.origen.tasa) : 0
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
-  return { success: true }
+  return { success: true, ...(propagadas > 0 ? { propagadas } : {}) }
 }
