@@ -331,7 +331,7 @@ describe('derivarRespuestaDeCita', () => {
     ['Medellín', 'true'],
     ['Cali', 'true'],
     ['Bucaramanga', 'true'],
-    ['Manizales', 'false'],
+    ['Manizales', 'true'],
     ['Girardot', 'false'],
     ['Tuluá', 'false'],
     ['Villavicencio', 'false'],

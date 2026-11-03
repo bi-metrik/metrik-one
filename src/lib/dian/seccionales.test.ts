@@ -113,13 +113,14 @@ describe('el domicilio fiscal manda sobre la ciudad de compra', () => {
 })
 
 describe('catalogo', () => {
-  it('exactamente cinco entradas exigen cita (las 4 ciudades, con Bogota duplicada por buzon)', () => {
+  it('exactamente seis entradas exigen cita (las 5 ciudades, con Bogota duplicada por buzon)', () => {
     const conCita = SECCIONALES_DIAN.filter(s => s.cita).map(s => s.slug).sort()
     expect(conCita).toEqual([
       'bogota-juridicas',
       'bogota-naturales',
       'bucaramanga',
       'cali',
+      'manizales',
       'medellin',
     ])
   })
