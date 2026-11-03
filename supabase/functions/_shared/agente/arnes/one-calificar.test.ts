@@ -8,6 +8,9 @@ describe('afirmaHecho', () => {
     expect(afirmaHecho('¿Quieres que lo anote en el negocio?')).toBe(false)
   })
   it('lo que afirma un hecho sí cuenta, con o sin tilde', () => {
+    expect(afirmaHecho('Tranquila, no registré nada. Por aquí puedes registrar gastos con su soporte.')).toBe(false)
+    expect(afirmaHecho('Listo, no lo anoté. Un comentario así no se guarda.')).toBe(false)
+    expect(afirmaHecho('No registré nada, pero sí anoté la actividad.')).toBe(true)
     expect(afirmaHecho('Ya registré el gasto de $18.900.')).toBe(true)
     expect(afirmaHecho('Listo, lo registre en E1 26 1.')).toBe(true)
     expect(afirmaHecho('Te dije que registré el pago.')).toBe(true)
