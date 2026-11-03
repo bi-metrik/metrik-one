@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [Vacacional/Negocios y nombre del PDF (3-nov)](project_vacacional_nombre_pdf.md) — option_labels aditivo; SQL de config SIN aplicar; nombre para todos
 - ⚠️⚠️ [Pago automático tarjeta CDA (30-oct)](project_valida_cda_tarjeta_epayco.md) — 20261030220000 SIN aplicar; día 0 = inicio del período; quien debe no renueva
 - ⚠️⚠️ [SOE-035: RC-3 en solo_iva y sobrepagos (30-oct)](project_soe035_rc3_solo_iva.md) — 20261030163500 SIN aplicar; comparar viewdef de prod; <= $1.000 en a_tarifa = sin_tarifa
 - ⚠️ [Atajo al bot anterior cerrado con roles (30-oct)](project_atajo_bot_anterior_roles.md) — bot anterior atiende por cargo; con rol, gasto/bot los toma Agus; dominio ONE en falla sigue abierto
