@@ -24,4 +24,14 @@ describe('fichas del banco con Haiku real (3-nov)', () => {
     expect(ficha('alc.complemento').hacer).toMatch(/sin «¿Necesitas algo más\?» ni otra oferta/)
     expect(ficha('alc.producto').hacer).toMatch(/Si ver_catalogo trae `pregunta`, esa es LA pregunta del mensaje/)
   })
+
+  it('segunda ronda: la compra no es duda, otra ciudad va a persona, «ya pagué» no es persona_por_que, por código cierra con pregunta', () => {
+    expect(ficha('proc.compra').hacer).toMatch(/no es una duda ni se pasa a persona/)
+    expect(ficha('proc.compra').hacer).toMatch(/aunque antes dijera Bogotá: no llames proponer, pasar_a_persona motivo fuera_de_zona/)
+    expect(ficha('alc.duda_abierta').cuando).toMatch(/no está escogiendo/)
+    expect(ficha('persona.pide').hacer).toMatch(/«Ya pagué» no es pedir una persona/)
+    expect(ficha('alc.pago').hacer).toMatch(/no uses rf.persona_por_que/)
+    expect(ficha('alc.producto').hacer).toMatch(/«¿Te sirve\?» sola en la última línea\./)
+    expect(ficha('alc.producto').hacer).toMatch(/no preguntes «¿con qué te ayudo\?»/)
+  })
 })
