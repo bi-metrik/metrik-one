@@ -127,6 +127,10 @@ export interface PuertoBandeja {
 export const BOT_BANDEJA = 'bandeja-solicitudes';
 export const ACCIONES = ['viaje_nuevo', 'cargar_tanda', 'anotar_en_viaje', 'crear_cliente', 'descartar', 'perfil_contacto'];
 
+/** Lo que el turno de seguir sabe tras guardar un perfil: qué NO quedó hecho. Lo del mensaje lo interpreta el modelo. */
+export const NOTA_TRAS_PERFIL =
+  'Ese toque solo guardó en el perfil de la persona: en ningún viaje quedó anotado nada, aunque antes se haya dicho que se anotaría. Si el mismo mensaje traía datos de un viaje (fechas, pasajeros, destino), siguen sin anotar: propón `anotar_en_viaje` con ese viaje.';
+
 // ── Lo que dice la conversación ──────────────────────────────────────────────
 
 const delEquipo = (f: FilaConversacion) => f.direccion === 'entrante' && f.clase !== 'reenvio';
@@ -380,6 +384,8 @@ const DATOS_PROPONER = {
     description: [
       'perfil_contacto: lo que el comercial quiere que se recuerde de una PERSONA para atenderla mejor en sus próximos viajes,',
       'sin un viaje de por medio («recuerda que a … le gusta …», «… siempre viaja con …»). Un elemento por hecho.',
+      'Si el mismo mensaje trae también datos de un viaje (fechas, pasajeros), no es perfil_contacto: es anotar_en_viaje,',
+      'que lleva también lo de la persona a su perfil.',
       `dimension: ${DIMENSIONES_PERFIL.map((d) => `${d} = ${ETIQUETA_DIMENSION[d]}`).join('; ')}.`,
       'De los menores solo cuántos y de qué edades, sin nombres. Marca con clase lo que no es un dato: sensible (salud,',
       'creencias, vida íntima) o juicio (una opinión sobre la persona); el sistema no los guarda y te dice qué contestar.',
@@ -924,8 +930,10 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
     if (p.accion === 'crear_cliente') return { lineas: h.lineas, seguir: true };
     // Lo mismo tras guardar en el perfil: el mensaje pudo traer también datos de un viaje (arnés con Haiku, 2026-11-03,
     // cp-mixto en la asesora: propuso primero el perfil, el «sí» lo guardó y la fecha de salida del M1 26 2 no se
-    // propuso nunca). El modelo decide si queda algo; si no, termina.
-    if (p.accion === 'perfil_contacto') return { lineas: h.lineas, seguir: true };
+    // propuso nunca). El modelo decide si queda algo; si no, termina. La nota dice lo que el toque NO hizo: con la línea
+    // general del Estado sola (PR #1397, corrida 41691210744) Haiku seguía terminando 2 de 3, con su «lo de la fecha lo
+    // anoto en el M1 26 2» del turno anterior a la vista.
+    if (p.accion === 'perfil_contacto') return { lineas: h.lineas, seguir: true, nota: NOTA_TRAS_PERFIL };
     if (p.accion !== 'viaje_nuevo') return null;
     const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
     if (!v) return null;
