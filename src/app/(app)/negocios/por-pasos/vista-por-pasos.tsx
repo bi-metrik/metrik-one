@@ -61,7 +61,9 @@ import {
   estadoDeLosPasos,
   lineasParaLaCascada,
   loQueSuma,
+  MOTIVO_PAQUETE_SIN_COSTO,
   preciosDeLasOpciones,
+  sinCostoDelViaje,
   sigue,
   tarifasCalculadas,
   margenDelEncabezado as margenDeTotal,
@@ -263,9 +265,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     bajoMinimo.push({ nombre: 'La cotización' })
   }
   const autorizacionVigente = !!p.salida?.excepcion
-  const sinCosto = renglones
-    .filter(r => !r.noSuma && (r.sinCosto || (r.opcionId && faltaPrecio(r.opcionId))))
-    .map(r => ({ servicio: r.nombre, motivo: r.sinCosto ? 'Falta el costo' : faltaPrecio(r.opcionId!)! }))
+  const sinCosto = sinCostoDelViaje(renglones, faltaPrecio, nombreDeOpcion)
 
   const entradaPasos = {
     servicios: servicios.length,
@@ -554,7 +554,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                 const resumen = s.opciones.length > 1
                   ? `${s.opciones.length} opciones · ${s.opciones.map(nombreDeOpcion).join(' · ')}`
                   : resumenDeOpcion(porId.get(s.opciones[0])!) ?? nombreDeOpcion(s.opciones[0])
-                const avisoServicio = s.opciones.map(faltaPrecio).find(Boolean) ?? (renglon?.sinCosto ? 'Falta el costo' : null) ?? trayectoRepetido.get(s.grupo) ?? null
+                const avisoServicio = s.opciones.map(faltaPrecio).find(Boolean) ?? (renglon?.sinCosto ? 'Falta el costo' : null) ?? (renglon?.opcionSinCosto ? `${MOTIVO_PAQUETE_SIN_COSTO}: ${nombreDeOpcion(renglon.opcionSinCosto)}` : null) ?? trayectoRepetido.get(s.grupo) ?? null
                 return (
                   <ServicioPorPasos
                     key={s.grupo}

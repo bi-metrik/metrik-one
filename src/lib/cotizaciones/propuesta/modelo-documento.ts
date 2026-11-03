@@ -246,11 +246,24 @@ export interface OpcionHotelDoc {
    * capítulo (`CiudadDoc.desde/hasta/noches`).
    */
   estancia?: { desde: string | null; hasta: string | null; noches: number | null }
+  /**
+   * Con varias versiones de un bloqueo: cómo se reparte el grupo en el hotel de ESTE paquete («2
+   * habitaciones de 1 adulto + 1 niño»). Ausente = no es un paquete o el documento es de una sola
+   * versión (el formato de Edgar no cambia).
+   */
+  acomodacion?: string
   /** Ver la cabecera: viaja en el modelo, imprimirla es decisión aparte. */
   cancelacion: string | null
   /** Lo que se paga en el hotel («Tasa turística: 41,28 EUR»). */
   cargoEnDestino: string | null
   foto: { url: string; proporcion?: number | null } | null
+}
+
+export interface VersionIncluyeDoc {
+  /** El índice de la tarifa (`TarifaDoc.indice`). */
+  tarifa: number
+  incluye: string[]
+  noIncluye: string[]
 }
 
 export interface CiudadDoc {
@@ -333,6 +346,13 @@ export interface ModeloPropuesta {
     descuentos: { descripcion: string; valor: number }[]
     incluye: string[]
     noIncluye: string[]
+    /**
+     * Con varias versiones de un bloqueo (reprueba del 2026-10-30): lo que trae SOLO cada versión y
+     * lo que su paquete no incluye. «Incluido en todas» es la intersección; sin esto, el tour del
+     * paquete A y su «No incluye: tarjeta de turismo, propinas» no salían. En el orden de `tarifas`;
+     * solo las versiones con algo que decir. Vacío con una versión.
+     */
+    porVersion: VersionIncluyeDoc[]
     /** Uno por tarifa (en el orden de `tarifas`), o uno solo con el total. Vacío sin plan en la línea. */
     planes: PlanDoc[]
     /** Decisión 3: el anticipo asignado a mano. `null` = la propuesta no dice ninguna cifra para apartar. */
@@ -710,6 +730,8 @@ export function modeloDePropuesta({
     cancelacion: h.cancelacion,
     cargoEnDestino: cargoDelHotel(props, h),
     foto: h.foto ?? null,
+    // Reprueba del 2026-10-30 · con varias versiones, el reparto de habitaciones de cada paquete.
+    ...(porTarifas && h.paquete && h.ocupacion ? { acomodacion: h.ocupacion } : {}),
   })
   const ordenDeOpcion = (o: OpcionHotelDoc) =>
     o.tarifas.length === 0 ? -1 : Math.min(...o.tarifas.map((t) => ORDEN_CLAVE[bloques[t]?.clave ?? 'otra'] * 100 + t))
@@ -877,6 +899,31 @@ export function modeloDePropuesta({
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]
 
+  // Reprueba del bloqueo (2026-10-30) · lo de cada versión: lo que solo ella incluye y lo que su
+  // paquete no incluye. Lo que el paquete no incluye en TODAS las versiones va una vez, arriba.
+  const porVersion: VersionIncluyeDoc[] = []
+  if (porTarifas) {
+    const opcionesDe = (i: number) => hoteles.flatMap((c) => c.opciones).filter((o) => o.tarifas.length === 0 || o.tarifas.includes(i))
+    const partes = (t: string | null | undefined) => (t ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+    const incluyeDe = (i: number) => [...new Set(opcionesDe(i).flatMap((o) => partes(o.incluye)))]
+    const enTodas = (x: string) => bloques.every((_, i) => incluyeDe(i).some((y) => llano(y) === llano(x)))
+    const textoNoIncluyeDe = (i: number) => [...new Set(hotelesTodos.filter((h) => h.paquete?.noIncluye && deLaTarifa(h, i)).map((h) => h.paquete!.noIncluye as string))]
+    const textosPorVersion = bloques.map((_, i) => textoNoIncluyeDe(i))
+    const comun = textosPorVersion[0]?.filter((t) => textosPorVersion.every((xs) => xs.some((y) => llano(y) === llano(t)))) ?? []
+    for (const t of comun) {
+      const r = `No incluido en el paquete: ${minusculaInicialNoIncluye(t)}`
+      if (!noIncluye.includes(r)) noIncluye.push(r)
+    }
+    for (const t of tarifasOrdenadas) {
+      const incluye = incluyeDe(t.indice).filter((x) => !enTodas(x))
+      const noIncluyeVersion = [
+        ...opcionesDe(t.indice).flatMap((o) => partes(o.noIncluye)),
+        ...textosPorVersion[t.indice].filter((x) => !comun.some((c) => llano(c) === llano(x))),
+      ]
+      if (incluye.length > 0 || noIncluyeVersion.length > 0) porVersion.push({ tarifa: t.indice, incluye, noIncluye: [...new Set(noIncluyeVersion)] })
+    }
+  }
+
   // ── Día a día ──
   const dias = diaADia({ props, inicio, vuelos: v?.vuelos ?? [], hoteles: hotelesTodos, capitulos: hoteles, servicios: serviciosConFecha, porTarifas, principal, versiones: bloques.length })
   repartirOpcionales(dias, opcionales)
@@ -939,6 +986,7 @@ export function modeloDePropuesta({
         })
         : v?.incluye ?? [],
       noIncluye,
+      porVersion,
       planes,
       anticipo: anticipo && anticipo.monto > 0 ? anticipo : null,
     },
@@ -1423,4 +1471,10 @@ function repartirOpcionales(dias: DiaDoc[], opcionales: OpcionalDoc[]): void {
       d.opcionales.push(...nombres.slice(desde, hasta))
     })
   }
+}
+
+/** «Tarjeta de turismo, propinas» → «tarjeta de turismo, propinas», salvo una sigla en mayúsculas. */
+function minusculaInicialNoIncluye(t: string): string {
+  const x = t.trim()
+  return x && x !== x.toLocaleUpperCase('es-CO') ? x.charAt(0).toLocaleLowerCase('es-CO') + x.slice(1) : x
 }

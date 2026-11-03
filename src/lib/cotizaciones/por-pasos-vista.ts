@@ -443,6 +443,9 @@ export function viajeEnOrden(
 
 // ── Lo que suma (la Recomendada) ────────────────────────────────────────────
 
+/** El motivo con que «Armar el viaje» y «Sigue» nombran un paquete en $0 que no es el de la Recomendada. */
+export const MOTIVO_PAQUETE_SIN_COSTO = 'Falta el costo del paquete'
+
 export interface RenglonQueSuma {
   grupo: string
   nombre: string
@@ -453,6 +456,13 @@ export interface RenglonQueSuma {
   /** «No va», «Opcional: se ofrece aparte», o `null` si suma. */
   noSuma: string | null
   sinCosto: boolean
+  /**
+   * Bloqueo (reprueba del 2026-10-30, P5): la primera OTRA opción del paquete que va al cliente y
+   * está en $0. Con un paquete vacío en la Opción 3, el bloque quedaba ✓ y «Sigue» saltaba a Tarifas
+   * porque `sinCosto` solo mira la Recomendada. Un paquete nunca vale $0 (`faltasDelPaquete` lo frena
+   * al enviar); lo que no va (No va / Opcional) ya sale por `noSuma`. `null` = ninguna.
+   */
+  opcionSinCosto: string | null
   /** «Lord Pierre va en Premium» por cada otra opción. */
   otras: { opcionId: string; tarifas: string[] }[]
 }
@@ -471,6 +481,13 @@ export function loQueSuma(
   return tramos.flatMap(tr => tr.servicios.map(s => {
     const opcionId = (rec?.opcionPorServicio[s.grupo] ?? s.opciones[0]) || null
     const p = opcionId ? precios.get(opcionId) : undefined
+    const enCero = (id: string) => !((precios.get(id)?.costo ?? 0) > 0) && !((precios.get(id)?.precio ?? 0) > 0)
+    // Las opciones del paquete que se ofrecen: con tarifas, las de las que van al cliente; sin
+    // tarifas, todas (lo mismo que mira `paquetesIncompletos` al enviar).
+    const queVan = (id: string) => tarifas.length === 0 || otrasQueVan.some(t => t.opcionPorServicio[s.grupo] === id)
+    const opcionSinCosto = s.tipo === 'paquete' && s.estado === 'incluido'
+      ? s.opciones.find(id => id !== opcionId && queVan(id) && enCero(id)) ?? null
+      : null
     return {
       grupo: s.grupo,
       nombre: s.nombre,
@@ -479,12 +496,33 @@ export function loQueSuma(
       precio: p?.precio ?? 0,
       noSuma: s.estado === 'no' ? 'No va' : s.estado === 'opcional' ? 'Opcional: se ofrece aparte' : null,
       sinCosto: s.estado === 'incluido' && !((p?.costo ?? 0) > 0) && !((p?.precio ?? 0) > 0),
+      opcionSinCosto,
       otras: s.opciones.filter(id => id !== opcionId).map(id => ({
         opcionId: id,
         tarifas: otrasQueVan.filter(t => t.opcionPorServicio[s.grupo] === id).map(t => t.nombre ?? 'Tarifa'),
       })),
     }
   }))
+}
+
+/**
+ * Los servicios que van y no están costeados: el criterio del paso 1 («Armar el viaje») y de
+ * «Sigue». La opción de la Recomendada sin costo o sin precio por pasajero y, en un bloqueo, otro
+ * paquete que va al cliente en $0 (reprueba del 2026-10-30, P5).
+ */
+export function sinCostoDelViaje(
+  renglones: readonly RenglonQueSuma[],
+  faltaPrecio: (opcionId: string) => string | null,
+  nombreDeOpcion: (opcionId: string) => string,
+): { servicio: string; motivo: string }[] {
+  return [
+    ...renglones
+      .filter(r => !r.noSuma && (r.sinCosto || (r.opcionId && faltaPrecio(r.opcionId))))
+      .map(r => ({ servicio: r.nombre, motivo: r.sinCosto ? 'Falta el costo' : faltaPrecio(r.opcionId!)! })),
+    ...renglones
+      .filter(r => !r.noSuma && !r.sinCosto && r.opcionSinCosto)
+      .map(r => ({ servicio: nombreDeOpcion(r.opcionSinCosto!), motivo: MOTIVO_PAQUETE_SIN_COSTO })),
+  ]
 }
 
 // ── Los tres pasos: dónde estoy, qué falta y qué sigue ───────────────────────
