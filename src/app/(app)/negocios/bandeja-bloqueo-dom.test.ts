@@ -327,3 +327,36 @@ describe('el pegado arma los paquetes en el servidor (SAN ANDRÉS, 2026-11-03)',
     expect(envios.some(u => u.includes('detectar-captura'))).toBe(true)
   })
 })
+
+describe('«¿Pública o Neta?» una vez por paquete, en la bandeja (Mauricio, 2026-11-03)', () => {
+  async function montarConPreguntas(porElegir: { itemId: string; titulo: string }[], elegir: (id: string, t: 'publica' | 'neta') => Promise<{ ok: true } | { ok: false; error: string }>) {
+    await act(async () => {
+      root!.render(React.createElement(Bandeja, {
+        cotizacionId: 'cot-7', items: [], composicion: { adultos: 3, ninos: 0, infantes: 0 }, porPasos: true,
+        bloqueo: { registro: new Registro(), paquetes: [], abrir: () => {}, crearPaquete: async () => ({ ok: true as const, itemId: 'x' }), tarifasPorElegir: porElegir, elegirTarifa: elegir },
+      }))
+    })
+  }
+
+  it('una pregunta por paquete, sin respuesta marcada; el botón responde por ESE paquete', async () => {
+    const respuestas: [string, string][] = []
+    await montarConPreguntas(
+      [{ itemId: 'pq-1', titulo: 'Paquete 1 · AV 9376' }, { itemId: 'pq-4', titulo: 'Paquete 2 · AV 9370' }],
+      async (id, t) => { respuestas.push([id, t]); return { ok: true } },
+    )
+    const preguntas = [...contenedor.querySelectorAll('[data-tarifa-por-elegir]')]
+    expect(preguntas.map(p => p.getAttribute('data-tarifa-por-elegir'))).toEqual(['pq-1', 'pq-4'])
+    expect(textoDe(preguntas[0])).toContain('Paquete 1 · AV 9376: ¿cómo viene la tarifa del operador?')
+    // Dos botones, nada preseleccionado (no hay radio ni casilla marcada).
+    expect([...preguntas[0].querySelectorAll('button')].map(b => textoDe(b))).toEqual(['Pública (el precio ya trae la comisión)', 'Neta'])
+    expect(preguntas[0].querySelectorAll('input:checked, [aria-pressed="true"]')).toHaveLength(0)
+    await clic(preguntas[1].querySelector('[data-elegir-tarifa="publica"]')!)
+    await clic(preguntas[0].querySelector('[data-elegir-tarifa="neta"]')!)
+    expect(respuestas).toEqual([['pq-4', 'publica'], ['pq-1', 'neta']])
+  })
+
+  it('sin paquetes por responder no hay pregunta', async () => {
+    await montarConPreguntas([], async () => ({ ok: true }))
+    expect(contenedor.querySelector('[data-tarifas-por-elegir]')).toBeNull()
+  })
+})

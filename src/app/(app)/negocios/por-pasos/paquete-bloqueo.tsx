@@ -20,6 +20,7 @@ import {
   conEdadesDeLaSolicitud,
   costoDelPaquete,
   edadesIniciales,
+  etiquetaRangoNino,
   fechasDelPaquete,
   leerPaqueteBloqueo,
   paqueteVacio,
@@ -190,7 +191,14 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const candidatos = useMemo(() => operadoresDeLaSolicitud(p.operador), [p.operador])
   const [delDirectorio, setDelDirectorio] = useState<string[]>([])
   const [fichaOperador, setFichaOperador] = useState<string | null | undefined>(undefined)
-  const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
+  // Con «¿Pública o Neta?» abierta (paquete armado por la bandeja), nada marcado: lo elige la asesora.
+  const [comision, setComision] = useState<Comision | null>(
+    tipoGuardado === 'publica' ? 'incluida' : tipoGuardado === 'neta' || !guardado?.tarifaPorElegir ? 'por_incluir' : null,
+  )
+  // La respuesta llegó por la bandeja con la tarjeta abierta: la tarjeta la toma si no tenía ninguna.
+  useEffect(() => {
+    if (tipoGuardado) setComision(c => c ?? (tipoGuardado === 'publica' ? 'incluida' : 'por_incluir'))
+  }, [tipoGuardado])
   // La comisión de la agencia (D3): visible desde el inicio con «Pública», y se guarda con el paquete.
   const [comisionAgencia, setComisionAgencia] = useState<ComisionEscrita | null>(comisionGuardadaEscrita)
   const [imagenes, setImagenes] = useState<{ hotel?: ImagenNueva & { vista: string }; vuelo?: ImagenNueva & { vista: string } }>({})
@@ -338,7 +346,7 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
           hotel: imagenes.hotel ? { dataUrl: imagenes.hotel.dataUrl, huella: imagenes.hotel.huella } : null,
           vuelo: imagenes.vuelo ? { dataUrl: imagenes.vuelo.dataUrl, huella: imagenes.vuelo.huella } : null,
         },
-        comision,
+        ...(comision ? { comision } : {}),
         ...(comision === 'incluida' ? { comisionAgencia } : {}),
       })
       if (!r.success) { toast.error(r.error); return }
@@ -562,9 +570,32 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                   </tr>
                 )}
                 <tr data-acomodacion="nino">
-                  <td>Niño{h.nino?.edadMin !== null && h.nino?.edadMin !== undefined ? ` (${h.nino.edadMin}-${h.nino.edadMax ?? '?'} años)` : ''}</td>
-                  <td><input aria-label="Precio por niño" className={`${CAJA} w-28`} inputMode="numeric" value={h.nino?.precio ?? ''}
-                    onChange={e => cambiar(x => { x.hotel.nino = { edadMin: x.hotel.nino?.edadMin ?? null, edadMax: x.hotel.nino?.edadMax ?? null, precio: numeroONulo(e.target.value) }; return x })} /></td>
+                  {(h.ninosPorEdad?.length ?? 0) >= 2 ? (
+                    <>
+                      {/* CHD por rango de edad (2026-11-03): cada niño paga el rango de su edad. */}
+                      <td>Niño (por edad)</td>
+                      <td data-ninos-por-edad>
+                        {h.ninosPorEdad!.map((r, i) => (
+                          <label key={i} className="flex items-center gap-1 text-[11px]">
+                            {etiquetaRangoNino(r)}
+                            <input aria-label={`Precio ${etiquetaRangoNino(r)}`} className={`${CAJA} w-24`} inputMode="numeric" value={r.precio ?? ''}
+                              onChange={e => cambiar(x => {
+                                const rangos = (x.hotel.ninosPorEdad ?? []).map((y, j) => (j === i ? { ...y, precio: numeroONulo(e.target.value) } : y))
+                                x.hotel.ninosPorEdad = rangos
+                                x.hotel.nino = rangos[0] ?? null
+                                return x
+                              })} />
+                          </label>
+                        ))}
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>Niño{h.nino?.edadMin !== null && h.nino?.edadMin !== undefined ? ` (${h.nino.edadMin}-${h.nino.edadMax ?? '?'} años)` : ''}</td>
+                      <td><input aria-label="Precio por niño" className={`${CAJA} w-28`} inputMode="numeric" value={h.nino?.precio ?? ''}
+                        onChange={e => cambiar(x => { x.hotel.nino = { edadMin: x.hotel.nino?.edadMin ?? null, edadMax: x.hotel.nino?.edadMax ?? null, precio: numeroONulo(e.target.value) }; return x })} /></td>
+                    </>
+                  )}
                   <td colSpan={2}><input aria-label="Niños" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.ninos || ''}
                     onChange={e => cambiar(x => {
                       x.distribucion.ninos = numeroONulo(e.target.value) ?? 0
@@ -572,7 +603,11 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                       if (x.distribucion.ninos > 0 && (x.distribucion.edadesNinos ?? []).length === 0) x.distribucion.edadesNinos = edadesDeTexto(edadesTexto)
                       return x
                     })} /> niños</td>
-                  <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'nino')?.total ?? null)}</td>
+                  <td className="text-right">{(() => {
+                    // Con rangos por edad hay una fila de costo por rango: se suman.
+                    const filas = costo.filas.filter(f => f.clave === 'nino')
+                    return pesos(filas.length === 0 || filas.some(f => f.total === null) ? null : filas.reduce((a, f) => a + (f.total ?? 0), 0))
+                  })()}</td>
                   <td />
                 </tr>
                 <tr data-acomodacion="infante">

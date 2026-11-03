@@ -16,9 +16,11 @@
  *    (3 adultos → 1 Triple) entre las acomodaciones con precio de la tabla; los niños con la tarifa CHD y
  *    sus edades de la Solicitud; los infantes. Costo = precio por persona × personas (`costoDelPaquete`).
  *    Lo que no se puede deducir queda vacío y lo dice la tarjeta: no se pregunta en una lista.
- *  · «Tarifa del operador: Pública / Neta» (Mauricio, 2026-11-03): una opción NUEVA hereda la de sus
- *    hermanas del paquete (con su comisión); un paquete nuevo, la del último paquete. Sin ninguna
- *    decidida, el default de siempre (Neta). Con Pública el total por personas es el precio al cliente.
+ *  · «Tarifa del operador: Pública / Neta» (Mauricio, 2026-11-03, segunda vuelta): SIN default. Cada
+ *    paquete NUEVO nace con la pregunta (`tarifaPorElegir`), que la bandeja le hace a la asesora una
+ *    vez por paquete. Una opción nueva hereda la respuesta de sus hermanas (con su comisión); si el
+ *    paquete todavía no la tiene, hereda la pregunta. Otro vuelo = otro paquete = otra pregunta. Con
+ *    Pública el total por personas es el precio al cliente.
  *
  * Puro: sin red y sin base. La escritura es de `pegarEnBloqueo` (`bloqueo-actions.ts`).
  */
@@ -35,6 +37,8 @@ import {
   type TramoBloqueo,
   type VueloBloqueo,
 } from './bloqueo-paquete'
+import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { formaDesdeGrupo } from './ranuras-cotizacion'
 
 /** Una opción de la ranura «Paquete de bloqueo» de la cotización. */
 export interface OpcionDeBloqueo {
@@ -67,8 +71,8 @@ export interface ContextoDeArmado {
 }
 
 export type PlanDeArmado =
-  /** Paquete nuevo (ranura nueva) con su primera opción. */
-  | { accion: 'nuevo_paquete'; paquete: PaqueteBloqueo; tarifa: TarifaDeOpcion | null }
+  /** Paquete nuevo (ranura nueva) con su primera opción. Siempre con la pregunta Pública / Neta. */
+  | { accion: 'nuevo_paquete'; paquete: PaqueteBloqueo; tarifa: null }
   /** Opción nueva (otro hotel) en el paquete vigente, con la tarifa de sus hermanas. */
   | { accion: 'nueva_opcion'; grupo: string; paquete: PaqueteBloqueo; tarifa: TarifaDeOpcion | null }
   /** Opciones que ya existen y cambian (la opción sin hotel, o el vuelo de todo el paquete). */
@@ -152,6 +156,42 @@ export function paqueteVigente(opciones: readonly OpcionDeBloqueo[]): OpcionDeBl
   return opciones.filter(o => o.numero === numero)
 }
 
+/**
+ * El grupo de la ranura «Paquete de bloqueo» de número más alto: el paquete vigente. A él agrega «+
+ * Paquete» (2026-11-03; antes iba siempre al primero). `null` sin paquetes.
+ */
+export function grupoDelPaqueteVigente(filas: readonly { grupo: string | null; es_ajuste?: boolean | null }[]): string | null {
+  let mejor: { grupo: string; numero: number } | null = null
+  for (const i of filas) {
+    if (i.es_ajuste === true || !i.grupo || ranuraDeGrupo(i.grupo)?.slug !== 'paquete_detalle') continue
+    const numero = formaDesdeGrupo(i.grupo)?.numero ?? 1
+    if (!mejor || numero > mejor.numero) mejor = { grupo: i.grupo, numero }
+  }
+  return mejor?.grupo ?? null
+}
+
+/**
+ * Los paquetes con «¿Pública o Neta?» sin responder: UNO por paquete (la ranura), con la primera opción
+ * que tiene la pregunta abierta y un título para la bandeja («Paquete 2 · AV 9370»). En orden de número.
+ */
+export function paquetesConTarifaPorElegir(
+  lineas: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; paquete: PaqueteBloqueo | null }[],
+): { itemId: string; titulo: string }[] {
+  const porGrupo = new Map<string, { itemId: string; numero: number; vuelo: VueloBloqueo | null }>()
+  for (const l of lineas) {
+    if (l.es_ajuste === true || !l.grupo || ranuraDeGrupo(l.grupo)?.slug !== 'paquete_detalle') continue
+    if (!l.paquete?.tarifaPorElegir || porGrupo.has(l.grupo)) continue
+    porGrupo.set(l.grupo, { itemId: l.id, numero: formaDesdeGrupo(l.grupo)?.numero ?? 1, vuelo: l.paquete.vuelo })
+  }
+  return [...porGrupo.values()]
+    .sort((a, b) => a.numero - b.numero)
+    .map(x => {
+      const t = x.vuelo?.tramos[0]
+      const vuelo = t ? [t.aerolinea, t.numeroVuelo].filter(Boolean).join(' ') : ''
+      return { itemId: x.itemId, titulo: `Paquete ${x.numero}${vuelo ? ` · ${vuelo}` : ''}` }
+    })
+}
+
 // ── El plan ───────────────────────────────────────────────────────────────────
 
 /** La tarifa decidida de la primera opción que la tenga. */
@@ -162,11 +202,13 @@ function tarifaDe(opciones: readonly OpcionDeBloqueo[]): TarifaDeOpcion | null {
 export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: LecturaParaArmar, ctx: ContextoDeArmado): PlanDeArmado {
   const vigente = paqueteVigente(opciones)
   const vueloVigente = vueloDe(vigente)
-  // Un paquete nuevo toma la tarifa del último paquete (el vigente), si la decidió.
-  const tarifaNueva = tarifaDe(vigente)
+  // La opción nueva toma la respuesta de sus hermanas; sin respuesta, la pregunta sigue abierta.
+  const tarifaHermanas = tarifaDe(vigente)
+  // Un paquete nuevo NO hereda la del anterior (Mauricio, 2026-11-03): se pregunta otra vez.
+  const paqueteNuevo = (base: PaqueteBloqueo): PlanDeArmado => ({ accion: 'nuevo_paquete', paquete: { ...base, tarifaPorElegir: true }, tarifa: null })
 
   if (lectura.cual === 'vuelo') {
-    if (vigente.length === 0) return { accion: 'nuevo_paquete', paquete: { ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo }, tarifa: null }
+    if (vigente.length === 0) return paqueteNuevo({ ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
     if (!vueloVigente) {
       return {
         accion: 'actualizar',
@@ -174,7 +216,7 @@ export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: Lec
       }
     }
     if (mismoVuelo(vueloVigente, lectura.vuelo)) return { accion: 'repetido', mensaje: 'Ese vuelo ya está en el paquete.' }
-    return { accion: 'nuevo_paquete', paquete: { ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo }, tarifa: tarifaNueva }
+    return paqueteNuevo({ ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
   }
 
   const conHotel = (base: PaqueteBloqueo): PaqueteBloqueo => ({
@@ -183,7 +225,7 @@ export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: Lec
     incluye: lectura.incluye,
     distribucion: distribucionPorComposicion(lectura.hotel, ctx),
   })
-  if (vigente.length === 0) return { accion: 'nuevo_paquete', paquete: conHotel(paqueteVacio(ctx.operadorInicial)), tarifa: null }
+  if (vigente.length === 0) return paqueteNuevo(conHotel(paqueteVacio(ctx.operadorInicial)))
   // El mismo hotel otra vez en el mismo paquete: no se duplica.
   const nombre = norm(lectura.hotel.hotel)
   if (nombre && vigente.some(o => tieneHotel(o.paquete) && norm(o.paquete!.hotel.hotel) === nombre && norm(o.paquete!.hotel.zona) === norm(lectura.hotel.zona))) {
@@ -192,8 +234,11 @@ export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: Lec
   const libre = vigente.find(o => !tieneHotel(o.paquete))
   if (libre) {
     const base = libre.paquete ?? { ...paqueteVacio(ctx.operadorInicial), vuelo: vueloVigente }
-    return { accion: 'actualizar', cambios: [{ itemId: libre.itemId, paquete: conHotel(base) }] }
+    // Una opción sin respuesta en un paquete sin respuesta: la pregunta queda abierta.
+    const preguntar = !libre.tarifa && !tarifaHermanas
+    return { accion: 'actualizar', cambios: [{ itemId: libre.itemId, paquete: preguntar ? { ...conHotel(base), tarifaPorElegir: true } : conHotel(base) }] }
   }
   const operador = vigente.find(o => o.paquete?.operador)?.paquete?.operador ?? ctx.operadorInicial
-  return { accion: 'nueva_opcion', grupo: vigente[0].grupo, paquete: conHotel({ ...paqueteVacio(operador), vuelo: vueloVigente }), tarifa: tarifaNueva }
+  const nueva = conHotel({ ...paqueteVacio(operador), vuelo: vueloVigente })
+  return { accion: 'nueva_opcion', grupo: vigente[0].grupo, paquete: tarifaHermanas ? nueva : { ...nueva, tarifaPorElegir: true }, tarifa: tarifaHermanas }
 }

@@ -57,6 +57,10 @@ export const PROMPT_HOTEL_BLOQUEO = [
   '  Lo mismo para el niño y el infante (sus columnas).',
   '- nino: el precio por niño (CHD, menor) y su rango de edad en años (ej. «CHD 02-11» → edad_min 2, edad_max 11). null si',
   '  no aparece.',
+  '- ninos_por_edad: si la tabla trae VARIOS precios de niño por rango de edad (ej. «CHD 2-3» y «CHD 4-11», o',
+  '  «CHD 02-04» y «CHD 5-10», o «CHD 2» y «CHD 03-11»; el rótulo dice la edad en años), UNA entrada por cada rango, en el orden en',
+  '  que aparecen, con su precio y su edad_min y edad_max («CHD 2» → 2 y 2). Con un solo rango, []. En nino pon el',
+  '  primero.',
   '- infante: el precio por infante (INF, bebé de menos de 24 meses; ej. «INF 180.000» → precio 180000). Si dice que el',
   '  infante no paga o es gratis, precio 0. null si la pantalla no muestra infante. No lo confundas con el niño (CHD).',
   '- iconos: CADA ícono de la fila de servicios incluidos (pequeños dibujos junto al hotel), en orden. Para cada uno:',
@@ -131,6 +135,19 @@ export const ESQUEMA_HOTEL_BLOQUEO = {
         edad_min: { type: 'integer', ...NULO },
         edad_max: { type: 'integer', ...NULO },
         columnas: COLUMNAS,
+      },
+    },
+    ninos_por_edad: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          precio: { type: 'number', ...NULO },
+          edad_min: { type: 'integer', ...NULO },
+          edad_max: { type: 'integer', ...NULO },
+          columnas: COLUMNAS,
+        },
+        required: ['precio'],
       },
     },
     infante: {
@@ -315,6 +332,15 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
   const n = esObj(raw.nino) ? raw.nino : null
   const precioNino = n ? costoDe(n) : null
   const nino = n ? { precio: precioNino !== null && precioNino > 0 ? precioNino : null, edadMin: entero(n.edad_min, 0, 17), edadMax: entero(n.edad_max, 0, 17) } : null
+  // CHD por rango de edad (2026-11-03): con dos o más rangos legibles, todos; cada niño paga el suyo.
+  const ninosPorEdad = (Array.isArray(raw.ninos_por_edad) ? raw.ninos_por_edad : [])
+    .filter(esObj)
+    .map(x => {
+      const precio = costoDe(x)
+      return { precio: precio !== null && precio > 0 ? precio : null, edadMin: entero(x.edad_min, 0, 17), edadMax: entero(x.edad_max, 0, 17) }
+    })
+    .filter(x => x.precio !== null && (x.edadMin !== null || x.edadMax !== null))
+    .slice(0, 6)
   const precioInfante = esObj(raw.infante) ? costoDe(raw.infante) : null
   const hotel: HotelBloqueo = {
     hotel: textoCorto(raw.hotel),
@@ -327,7 +353,8 @@ export function hotelDesdeLectura(raw: unknown): LecturaHotelBloqueo {
     compraAntesDe: fechaIso(raw.compra_antes_de),
     moneda: (textoCorto(raw.moneda, 3) ?? 'COP').toUpperCase(),
     precios,
-    nino: nino && (nino.precio !== null || nino.edadMin !== null || nino.edadMax !== null) ? nino : null,
+    nino: ninosPorEdad.length >= 2 ? ninosPorEdad[0] : nino && (nino.precio !== null || nino.edadMin !== null || nino.edadMax !== null) ? nino : null,
+    ...(ninosPorEdad.length >= 2 ? { ninosPorEdad } : {}),
     // Si la pantalla trae «INF 180.000», se lee; si no, lo escribe la asesora. 0 = el infante no paga.
     infante: precioInfante !== null ? { precio: precioInfante } : null,
     columnaCosto,

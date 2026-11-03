@@ -366,6 +366,12 @@ export interface BloqueoDeBandeja {
    * no pregunta a qué paquete va. `otroServicio`: no es hotel ni vuelo, va a la lectura de siempre.
    */
   armar?: (dataUrl: string) => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>
+  /**
+   * Los paquetes con «¿Pública o Neta?» sin responder (Mauricio, 2026-11-03): UNO por paquete (su
+   * primera opción), sin respuesta preseleccionada. Las opciones que entren después heredan la respuesta.
+   */
+  tarifasPorElegir?: { itemId: string; titulo: string }[]
+  elegirTarifa?: (itemId: string, tipo: 'publica' | 'neta') => Promise<{ ok: true } | { ok: false; error: string }>
 }
 
 let contador = 0
@@ -1324,6 +1330,13 @@ export default function BandejaCapturas({
           {armando === 1 ? 'Poniendo el pantallazo en el paquete…' : `Poniendo ${armando} pantallazos en los paquetes…`}
         </p>
       )}
+      {bloqueo?.elegirTarifa && (bloqueo.tarifasPorElegir ?? []).length > 0 && (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tarifas-por-elegir>
+          {(bloqueo.tarifasPorElegir ?? []).map(pq => (
+            <PreguntaTarifa key={pq.itemId} itemId={pq.itemId} titulo={pq.titulo} elegir={bloqueo.elegirTarifa!} />
+          ))}
+        </ul>
+      )}
       {porUbicar.length > 0 && bloqueo && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-por-ubicar-bloqueo>
           {porUbicar.map(x => (
@@ -1350,6 +1363,38 @@ export default function BandejaCapturas({
 }
 
 const NADA = () => {}
+
+/**
+ * «¿La tarifa del operador es Pública o Neta?», una vez por paquete armado por la bandeja (Mauricio,
+ * 2026-11-03). Sin respuesta preseleccionada: mientras no se responda, el paquete no lleva margen
+ * encima y no se puede enviar.
+ */
+function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
+  const [enviando, setEnviando] = useState<'publica' | 'neta' | null>(null)
+  async function responder(tipo: 'publica' | 'neta') {
+    if (enviando) return
+    setEnviando(tipo)
+    const r = await elegir(itemId, tipo).catch(() => ({ ok: false as const, error: 'No se pudo guardar. Vuelve a intentarlo.' }))
+    setEnviando(null)
+    if (!r.ok) toast.error(r.error)
+  }
+  return (
+    <li className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] p-2 text-[13px]" data-tarifa-por-elegir={itemId}>
+      <span className="min-w-0 flex-1">
+        <span className="font-semibold">{titulo}: ¿cómo viene la tarifa del operador?</span>
+        <span className="block text-xs text-[#6E6A62]">Vale para todos los hoteles de este paquete. Hasta que respondas, no se puede enviar.</span>
+      </span>
+      <span className="flex flex-wrap gap-1.5">
+        <button type="button" className={BTN} disabled={enviando !== null} data-elegir-tarifa="publica" onClick={() => void responder('publica')}>
+          {enviando === 'publica' ? 'Guardando…' : 'Pública (el precio ya trae la comisión)'}
+        </button>
+        <button type="button" className={BTN} disabled={enviando !== null} data-elegir-tarifa="neta" onClick={() => void responder('neta')}>
+          {enviando === 'neta' ? 'Guardando…' : 'Neta'}
+        </button>
+      </span>
+    </li>
+  )
+}
 
 /**
  * Lo que la fila de la cotización por pasos agrega (C5): la frase de a dónde va (tocable), su

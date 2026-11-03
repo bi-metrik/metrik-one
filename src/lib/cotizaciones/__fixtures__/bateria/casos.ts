@@ -140,7 +140,8 @@ export const conMargen = (costo: number, m: number) => Math.round(costo / (1 - m
 const REGLAS = (descuentos: DescuentoSobreTotal[] = []) => reglasAJsonb({ politica: POLITICA_REGLAS_POR_DEFECTO, puntosExtra: 0, descuentos })
 
 /** Las tablas comunes: la cotización, el negocio de una línea de viaje con el piso en la salida. */
-function tablasBase(c: { cot: string; neg: string; consecutivo: string; destino: string; margen: number | null; reglas: Fila | null; items: Fila[]; tarifas?: { id: string; nombre: string; orden: number; va: boolean; seleccion: string[] }[] }): Record<string, Fila[]> {
+/** Las tablas del doble de Supabase para una cotización de viaje (también para pruebas fuera de la batería). */
+export function tablasBase(c: { cot: string; neg: string; consecutivo: string; destino: string; margen: number | null; reglas: Fila | null; items: Fila[]; tarifas?: { id: string; nombre: string; orden: number; va: boolean; seleccion: string[] }[] }): Record<string, Fila[]> {
   const tarifas = c.tarifas ?? []
   return {
     cotizaciones: [{
