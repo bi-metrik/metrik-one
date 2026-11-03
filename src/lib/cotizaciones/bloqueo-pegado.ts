@@ -28,9 +28,19 @@ export type CasillaPaquete = 'hotel' | 'vuelo'
  * Sin ella la bandeja leía el pantallazo con la ranura genérica, que le exige hotel y precio: el
  * vuelo del paquete se rechazaba y volvía a preguntar qué era, ya sin la opción del paquete.
  */
-export const MENSAJE_PAQUETE_SIN_BLOQUEO =
+export const MENSAJE_PAQUETE_SIN_BLOQUEO_SIN_BOTON =
   'Este viaje no está marcado como Bloqueo. En «Condiciones del viaje» pon Modalidad: Bloqueo y vuelve a pegar: ' +
   'el paquete se arma con su tabla de precios por persona y su vuelo, que no necesita precio.'
+
+/**
+ * Con el botón «Marcar el viaje como Bloqueo» en la tarjeta (2026-11-03): el botón es el camino, sin
+ * salir de la cotización ni volver a pegar (`modalidad-actions.ts`).
+ */
+export const MENSAJE_PAQUETE_SIN_BLOQUEO =
+  'Este viaje no está marcado como Bloqueo. Márcalo aquí y este pantallazo se lee como paquete: ' +
+  'con su tabla de precios por persona y su vuelo, que no necesita precio.'
+
+export const BOTON_MARCAR_BLOQUEO = 'Marcar el viaje como Bloqueo'
 
 export interface EstadoDePaquete {
   itemId: string

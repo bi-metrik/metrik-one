@@ -39,7 +39,7 @@ export type EstadoDeProceso =
    * ofrece «Reintentar» con la misma imagen: volver a buscar el pantallazo y pegarlo es lo
    * que no hay que pedirle a nadie.
    */
-  | { fase: 'rechazada'; mensaje: string; detalle?: string; reintentar?: boolean }
+  | { fase: 'rechazada'; mensaje: string; detalle?: string; reintentar?: boolean; marcarBloqueo?: boolean }
   /**
    * P10 · otra imagen con el mismo servicio y el mismo precio que una opción que ya estaba.
    * `habitacion`: R8, regla 6 — una habitación más de un hotel cuyo grupo ya está cubierto;
