@@ -76,9 +76,10 @@ jobs:
         run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-asesor_viajes" --rol asesor_viajes --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
       # El asistente público en vivo es Dimi (Dimpro, dominio ventas): `--conjunto ventas` corre con
-      # `REGLAMENTO_DIMPRO` del código, que es la versión publicada (v8 del 30-oct) en todo lo que lee el modelo; solo
-      # le falta el mapa real de venta cruzada, que se queda en la base (Mauricio, 3-nov) y que los casos reemplazan
-      # por uno inventado. Las fichas de Sabor (`REGLAMENTO_SABOR`) no atienden a nadie y no entran a este paso.
+      # `REGLAMENTO_DIMPRO` del código, la fuente de lo que se publica (las semillas de `sql/dimpro/`). La v8 del 30-oct
+      # era igual en todo lo que lee el modelo salvo el mapa de venta cruzada, que los casos reemplazan por uno
+      # inventado; un cambio de fichas en el código entra aquí antes de publicarse. Por la API corre con los cortes de
+      # producción de ventas. Las fichas de Sabor (`REGLAMENTO_SABOR`) no atienden a nadie y no entran a este paso.
       - name: Asistente público (k = 3)
         run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --conjunto ventas --k 3
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}

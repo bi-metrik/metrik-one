@@ -119,6 +119,18 @@ export const TEXTOS_PREGUNTAS: TextosActualizacion = {
 };
 
 /**
+ * Banco con Haiku real (3-nov): el «ya pagué» sin link pasa a persona sin preguntar detalles, el link sin pedido sigue
+ * la compra, el complemento rechazado no trae «¿Necesitas algo más?» y la pregunta de ver_catalogo va sola.
+ */
+export const CLAVES_BANCO_3NOV = ['alc.pago', 'alc.link_sin_pedido', 'alc.complemento', 'alc.producto'];
+export const TEXTOS_BANCO_3NOV: TextosActualizacion = {
+  titulo: 'Asistente de VENTAS de Dimpro tras el banco con Haiku real (3-nov): pago sin link, link sin pedido, complemento\n-- rechazado y una sola pregunta.',
+  uso: 'semilla-sql-dimpro.ts --banco-3nov',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con el candado de autorización que ve el «sí» del turno (PR del 3-nov).',
+  nota: 'asistente de ventas Dimpro: ajustes del banco con Haiku real (3-nov)',
+};
+
+/**
  * El SQL que carga (o reemplaza) el mapa de venta cruzada sin redesplegar: la ficha `ventas.complementos` con el mapa de
  * un JSON `{ "MP-38": [{ "codigo": "MP-30", "razon": "…" }] }`. Lo que no tenga código y razón se rechaza (no se carga
  * un mapa a medias). Idempotente como las demás. Los complementos que no estén publicados y activos se ignoran al
@@ -199,6 +211,7 @@ $$;
 if (import.meta.main) {
   const iMapa = Deno.args.indexOf('--complementos');
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
+    : Deno.args.includes('--banco-3nov') ? actualizacionSqlDimpro(CLAVES_BANCO_3NOV, REGLAMENTO_DIMPRO, TEXTOS_BANCO_3NOV)
     : Deno.args.includes('--saludo') ? actualizacionSqlDimpro(CLAVES_SALUDO, REGLAMENTO_DIMPRO, TEXTOS_SALUDO)
     : Deno.args.includes('--preguntas') ? actualizacionSqlDimpro(CLAVES_PREGUNTAS, REGLAMENTO_DIMPRO, TEXTOS_PREGUNTAS)
     : Deno.args.includes('--nombre') ? actualizacionSqlDimpro(CLAVES_NOMBRE, REGLAMENTO_DIMPRO, TEXTOS_NOMBRE)
