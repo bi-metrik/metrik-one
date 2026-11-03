@@ -8,7 +8,7 @@
 // [código, sin modelo] el toque de una propuesta y el «sí» escrito solo: se ejecuta si la huella sigue vigente, una sola
 // vez (candado por huella).
 // [modelo, después del hecho] si el dominio lo pide (`trasEjecutar` con `seguir`), el modelo tiene un turno para seguir
-// (`seguirTrasToque`): propone lo que el hecho destrabó, pregunta lo que falta o llama `terminar`. Sale en el mismo
+// (`seguirTrasToque`): propone lo pedido que sigue sin proponer, pregunta lo que falta o llama `terminar`. Sale en el mismo
 // mensaje que la confirmación, debajo de ella; si el modelo falla, sale solo la confirmación.
 // Todo deja traza: llamados, tokens por modelo, herramientas, reglas, candados, verificador y tiempos.
 // ============================================================
@@ -201,7 +201,9 @@ async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversaci
     ...delDominio,
     ...(e.tras ? [
       `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')}${queSeHizo} La confirmación ya la escribe el sistema: no la repitas, y no vuelvas a proponer eso.`,
-      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que este paso destrabó, propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
+      // «que este paso destrabó» dejaba fuera lo que venía en el mismo mensaje (arnés de Trappvel 2026-11-03, cp-mixto en
+      // la asesora: guardó el perfil con el «sí», terminó y la fecha de salida del viaje, dicha junto, no se propuso nunca).
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que todavía no se ha propuesto ni hecho, aunque este paso no lo haya destrabado (lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría), propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
     ] : []),
   ];
 }
