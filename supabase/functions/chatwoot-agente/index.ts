@@ -4,10 +4,11 @@
 // Diseño: proyectos/sabor-experiencias/clarity/docs/entrada/diseno-asistente-etapa1.md (§2, §3).
 // URL: …/functions/v1/chatwoot-agente?ws=<slug>   (una URL por workspace en el Agent Bot de Chatwoot)
 //
-// La petición hace solo esto y responde (`_shared/agente/publico/entrada.ts`): firma y antigüedad, filtros,
-// deduplicación por id de mensaje y guardar el mensaje. Responde 200 ANTES de cualquier trabajo; el resto (ráfaga,
-// transcripción, modelo, publicar) corre en `EdgeRuntime.waitUntil` con candado por conversación
-// (`_shared/agente/publico/cola.ts`).
+// La petición responde 200 de una y todo corre en `EdgeRuntime.waitUntil`: firma y antigüedad, filtros, deduplicación
+// por id de mensaje y guardar el mensaje (`_shared/agente/publico/entrada.ts`), y después la ráfaga, transcripción,
+// modelo y publicar, con candado por conversación (`_shared/agente/publico/cola.ts`). Chatwoot espera 5 s al Agent Bot
+// y, ante un error o un tiempo vencido, no reintenta: abre la conversación y el bot queda callado (3-nov: guardar la
+// dirección tardó 4,4 s por un pico de latencia y el resumen del pedido no salió). Por eso nada se espera antes de responder.
 //
 // Secretos (Supabase, por workspace; no se crean desde este PR):
 //   CHATWOOT_WEBHOOK_SECRET_<SLUG>   el secreto que genera Chatwoot al crear el Agent Bot.
@@ -225,16 +226,14 @@ Deno.serve(async (req) => {
     }
   }
   const cuerpo = await req.text();
-  const puertos = puertosEntradaSupabase(supabase, (slug) => Deno.env.get(variableSecreta('CHATWOOT_WEBHOOK_SECRET', slug)));
-  let r;
-  try {
-    r = await recibir({ slug: url.searchParams.get('ws'), cuerpo, firma: req.headers.get('x-chatwoot-signature'), timestamp: req.headers.get('x-chatwoot-timestamp') }, puertos);
-  } catch (e) {
-    // La base no respondió: 500 para que Chatwoot reintente (la deduplicación absorbe el reintento).
-    console.error('[chatwoot-agente] falla al recibir:', e);
-    return new Response(JSON.stringify({ ok: false }), { status: 500, headers: { 'content-type': 'application/json' } });
-  }
-  if (r.status !== 200) console.warn(`[chatwoot-agente] ${r.status}: ${r.motivo}`);
-  if (r.atender) enSegundoPlano(atender(supabase, r.atender));
-  return new Response(JSON.stringify({ ok: r.status === 200, motivo: r.motivo }), { status: r.status, headers: { 'content-type': 'application/json' } });
+  const ws = url.searchParams.get('ws');
+  const firma = req.headers.get('x-chatwoot-signature');
+  const timestamp = req.headers.get('x-chatwoot-timestamp');
+  enSegundoPlano((async () => {
+    const puertos = puertosEntradaSupabase(supabase, (slug) => Deno.env.get(variableSecreta('CHATWOOT_WEBHOOK_SECRET', slug)));
+    const r = await recibir({ slug: ws, cuerpo, firma, timestamp }, puertos);
+    if (r.status !== 200) console.warn(`[chatwoot-agente] ${r.status}: ${r.motivo}`);
+    if (r.atender) await atender(supabase, r.atender);
+  })());
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
 });
