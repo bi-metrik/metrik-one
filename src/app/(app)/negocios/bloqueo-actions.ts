@@ -16,12 +16,15 @@ import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
 import { leerTarifaPax, type TarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { leerModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
 import { leerPantallazoDeBloqueo, type LecturaBloqueo } from '@/lib/cotizaciones/bloqueo-leer'
-import { costoDelPaquete, descripcionDelPaquete, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
+import { costoDelPaquete, descripcionDelPaquete, edadesNinosDeLaSolicitud, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { guardarImagenDeCaptura } from '@/lib/cotizaciones/imagen-captura'
-import { fichaDelOperador, operadorAlGuardar, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
+import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
+import { planDelPegado, type OpcionDeBloqueo, type PlanDeArmado, type TarifaDeOpcion } from '@/lib/cotizaciones/bloqueo-armado'
+import { formaDesdeGrupo } from '@/lib/cotizaciones/ranuras-cotizacion'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 
 /**
  * Las acciones del PAQUETE DE BLOQUEO en la cotización por pasos (brief del 2026-10-27).
@@ -414,4 +417,93 @@ export async function ajustarReglasDelPaquete(itemId: string, cambios: ReglasDel
   await recalcularTotales(item.cotizacion_id as string)
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
   return { success: true }
+}
+
+export type ResultadoPegadoEnBloqueo =
+  /** `itemId`: la opción que recibió el pantallazo (para abrirla). */
+  | { success: true; accion: PlanDeArmado['accion']; itemId: string | null; mensaje: string }
+  /** `otroServicio`: no es ni hotel ni vuelo (un traslado, una actividad): va a la lectura de siempre. */
+  | { success: false; error: string; otroServicio?: true }
+
+/**
+ * El pegado de la bandeja principal en un viaje en Bloqueo ARMA los paquetes (SAN ANDRÉS, 2026-11-03;
+ * reglas en `bloqueo-armado.ts`): un vuelo abre o completa el paquete, cada hotel es una opción del
+ * paquete vigente, con las habitaciones según los viajeros de la Solicitud. Lee con el lector del
+ * bloqueo y escribe con `guardarPaqueteBloqueo` (mismas guardas, mismo costo, mismas tarifas).
+ */
+export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Promise<ResultadoPegadoEnBloqueo> {
+  if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const sb = supabase as Supabase
+  const b = await exigirBloqueo(sb, cotizacionId)
+  if (!b.ok) return { success: false, error: b.error }
+
+  const lectura = await leerPantallazoDeBloqueo('detectar', dataUrl)
+  if (!lectura.ok) return lectura.elegir ? { success: false, error: lectura.mensaje, otroServicio: true } : { success: false, error: lectura.mensaje }
+
+  const { data: filas, error: errItems } = await sb
+    .from('items')
+    .select('id, grupo, es_ajuste, tarifa_pax')
+    .eq('cotizacion_id', cotizacionId)
+  if (errItems) return { success: false, error: errItems.message as string }
+  const opciones: OpcionDeBloqueo[] = ((filas ?? []) as { id: string; grupo: string | null; es_ajuste: boolean | null; tarifa_pax: unknown }[])
+    .filter(i => i.es_ajuste !== true && ranuraDeGrupo(i.grupo)?.slug === 'paquete_detalle')
+    .map(i => ({
+      itemId: i.id,
+      grupo: normalizarGrupo(i.grupo) ?? (i.grupo as string),
+      numero: formaDesdeGrupo(i.grupo)?.numero ?? 1,
+      paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo),
+      tarifa: tarifaDeOpcion(leerTarifaPax(i.tarifa_pax)),
+    }))
+
+  const { viaje, edadesMenores } = await leerViajeDelNegocio(sb, b.negocioId)
+  const c = viaje.composicion
+  const pasajeros = c ? { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes } : null
+  const plan = planDelPegado(opciones, lectura.cual === 'hotel'
+    ? { cual: 'hotel', hotel: lectura.hotel, incluye: lectura.incluye, operador: lectura.operador ?? null }
+    : { cual: 'vuelo', vuelo: lectura.vuelo }, {
+    operadorInicial: operadorInicialDelPaquete(b.operador),
+    pasajeros,
+    edadesNinos: edadesNinosDeLaSolicitud(edadesMenores ?? null, pasajeros ? { ninos: pasajeros.ninos, infantes: pasajeros.infantes } : null),
+  })
+  if (plan.accion === 'repetido') return { success: true, accion: 'repetido', itemId: null, mensaje: plan.mensaje }
+
+  const imagenes = { [lectura.cual]: { dataUrl, huella: lectura.huella } }
+  const hotelLeido = lectura.cual === 'hotel' ? (lectura.hotel.hotel ?? null) : null
+  const guardar = async (itemId: string, paquete: unknown, tarifa: TarifaDeOpcion | null = null) => {
+    // La opción nueva hereda «Pública / Neta» (y la comisión) del paquete; sin decidir, el default.
+    const decision = tarifa
+      ? { comision: tarifa.tipo === 'publica' ? 'incluida' as const : 'por_incluir' as const, ...(tarifa.tipo === 'publica' ? { comisionAgencia: tarifa.comision } : {}) }
+      : {}
+    const r = await guardarPaqueteBloqueo(itemId, { paquete, imagenes, ...decision })
+    return r.success ? null : r.error
+  }
+
+  if (plan.accion === 'actualizar') {
+    for (const x of plan.cambios) {
+      const e = await guardar(x.itemId, x.paquete)
+      if (e) return { success: false, error: e }
+    }
+    const mensaje = lectura.cual === 'vuelo' ? 'Vuelo puesto en el paquete.' : `${hotelLeido ?? 'El hotel'} quedó en el paquete.`
+    return { success: true, accion: 'actualizar', itemId: plan.cambios[0]?.itemId ?? null, mensaje }
+  }
+
+  const creada = plan.accion === 'nuevo_paquete'
+    ? await crearRanuraConOpcion(cotizacionId, 'paquete')
+    : await agregarOpcionARanura(cotizacionId, plan.grupo)
+  if (!creada.success) return { success: false, error: creada.error }
+  const e = await guardar(creada.itemId, plan.paquete, plan.tarifa)
+  if (e) return { success: false, error: e }
+  const mensaje = plan.accion === 'nuevo_paquete'
+    ? (lectura.cual === 'vuelo' ? 'Paquete nuevo con este vuelo: los hoteles que pegues ahora van a este paquete.' : `Paquete nuevo con ${hotelLeido ?? 'este hotel'}.`)
+    : `${hotelLeido ?? 'El hotel'} es otra opción del paquete.`
+  return { success: true, accion: plan.accion, itemId: creada.itemId, mensaje }
+}
+
+/** Pública / Neta decidida de una opción, con su comisión. `null` = sin decidir. */
+function tarifaDeOpcion(t: TarifaPax): TarifaDeOpcion | null {
+  const d = t.tipoTarifa
+  if (!d || (d.tipo !== 'publica' && d.tipo !== 'neta')) return null
+  return { tipo: d.tipo, comision: comisionEscrita(d) }
 }

@@ -182,7 +182,7 @@ import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { AvisoVersionNueva } from '@/app/(app)/negocios/aviso-version-nueva'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
 import { tarjetaDeOpcionEn } from '@/lib/cotizaciones/enfocar-comision'
-import { crearPaqueteBloqueo, paqueteEnPropuesta } from '@/app/(app)/negocios/bloqueo-actions'
+import { crearPaqueteBloqueo, paqueteEnPropuesta, pegarEnBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
@@ -3919,6 +3919,13 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               refrescar()
               mostrarOpcion(r.itemId)
               return { ok: true as const, itemId: r.itemId }
+            },
+            // El pegado arma los paquetes (2026-11-03): vuelo → paquete, hotel → opción del vigente.
+            armar: async dataUrl => {
+              const r = await pegarEnBloqueo(cotizacion.id, dataUrl)
+              if (!r.success) return { ok: false as const, error: r.error, ...(r.otroServicio ? { otroServicio: true } : {}) }
+              if (r.accion !== 'repetido') refrescar()
+              return { ok: true as const, mensaje: r.mensaje }
             },
           } : null}
         />
