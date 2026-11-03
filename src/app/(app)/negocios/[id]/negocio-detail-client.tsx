@@ -1947,10 +1947,13 @@ function BloqueRenderer({
           // server-side en `actualizarBloqueData`; aquí solo se decide si el botón
           // aparece. `_areaReadonly` lo calcula el servidor: si el área del usuario
           // no cubre el stage del bloque, no hay corrección que valga.
+          // El ejecutor responsable del negocio también corrige, igual que en
+          // BloqueDocumento: `guardEditarBloque` ya lo dejaba (área + responsable) y
+          // era la pantalla la que no le mostraba el botón (SOE-037, fecha de cita DIAN).
           puedeCorregir={
             modo === 'visible' &&
             configExtra.corregir_campos_gerencial === true &&
-            puedeCorregirDocumentos(userRole) &&
+            (puedeCorregirDocumentos(userRole) || bloque._esResponsable === true) &&
             (configExtra as { _areaReadonly?: boolean })._areaReadonly !== true
           }
         />

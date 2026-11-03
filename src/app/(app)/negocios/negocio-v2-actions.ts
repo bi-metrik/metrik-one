@@ -1795,7 +1795,7 @@ async function getNegocioDetalle(id: string): Promise<{
       // Auto-init "Cita DIAN" (SOENA): un bloque `datos` con
       // config_extra.cita_dian_confirmacion lee la Dirección Seccional del RUT
       // (casilla 12) y persiste si el caso requiere cita previa en la DIAN. Solo
-      // Bogotá, Medellín, Cali y Bucaramanga la exigen; el resto va directo a
+      // Bogotá, Medellín, Cali, Bucaramanga y Manizales la exigen; el resto va directo a
       // certificado bancario.
       //
       // La fuente es el flag `cita` del catálogo de seccionales, el mismo que

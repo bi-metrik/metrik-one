@@ -18,11 +18,12 @@ import {
  * ser literal.
  */
 describe('requiereCitaDian', () => {
-  it('exige cita en las cuatro seccionales acordadas con Deisy (2026-07-24)', () => {
+  it('exige cita en las seccionales acordadas con Deisy (2026-07-24) y Manizales (SOE-037, 2026-11-03)', () => {
     expect(requiereCitaDian('Impuestos de Bogotá').requiere_cita).toBe(true)
     expect(requiereCitaDian('Impuestos de Medellín').requiere_cita).toBe(true)
     expect(requiereCitaDian('Impuestos de Cali').requiere_cita).toBe(true)
     expect(requiereCitaDian('Impuestos y Aduanas de Bucaramanga').requiere_cita).toBe(true)
+    expect(requiereCitaDian('Impuestos y Aduanas de Manizales').requiere_cita).toBe(true)
   })
 
   it('NO exige cita en Barranquilla ni en Grandes Contribuyentes', () => {
@@ -41,7 +42,6 @@ describe('requiereCitaDian', () => {
       'Impuestos de Cúcuta',
       'Impuestos y Aduanas de Girardot',
       'Impuestos y Aduanas de Ibagué',
-      'Impuestos y Aduanas de Manizales',
     ]) {
       expect(requiereCitaDian(texto).requiere_cita, texto).toBe(false)
     }
@@ -168,7 +168,7 @@ describe('ciudadesConCitaDian', () => {
     // Bogota vive dos veces en el catalogo (naturales y juridicas, correos
     // distintos). Lo que la ayuda lista son CIUDADES: si Bogota saliera dos
     // veces, el texto se leeria como si hubiera cinco.
-    expect(ciudadesConCitaDian()).toEqual(['Bogotá', 'Medellín', 'Cali', 'Bucaramanga'])
+    expect(ciudadesConCitaDian()).toEqual(['Bogotá', 'Medellín', 'Cali', 'Bucaramanga', 'Manizales'])
   })
 
   it('cada ciudad listada tiene efectivamente cita en el catalogo', () => {
@@ -179,6 +179,6 @@ describe('ciudadesConCitaDian', () => {
   })
 
   it('se lee dentro de una frase, con la "y" antes de la ultima', () => {
-    expect(textoCiudadesConCitaDian()).toBe('Bogotá, Medellín, Cali y Bucaramanga')
+    expect(textoCiudadesConCitaDian()).toBe('Bogotá, Medellín, Cali, Bucaramanga y Manizales')
   })
 })
