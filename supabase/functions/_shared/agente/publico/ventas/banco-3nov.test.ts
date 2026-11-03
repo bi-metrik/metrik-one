@@ -33,5 +33,7 @@ describe('fichas del banco con Haiku real (3-nov)', () => {
     expect(ficha('alc.pago').hacer).toMatch(/no uses rf.persona_por_que/)
     expect(ficha('alc.producto').hacer).toMatch(/«¿Te sirve\?» sola en la última línea\./)
     expect(ficha('alc.producto').hacer).toMatch(/no preguntes «¿con qué te ayudo\?»/)
+    expect(ficha('alc.saludo').cuando).toMatch(/si pregunta qué tienen o qué venden, eso es alc.producto/)
+    expect(ficha('alc.producto').hacer).toMatch(/llama ver_catalogo con buscar = lo que escribió: si trae catalogo_vacio/)
   })
 })
