@@ -137,9 +137,9 @@ export interface HotelBloqueo {
   precios: PrecioAcomodacion[]
   nino: PrecioNino | null
   /**
-   * La tabla CHD por RANGO DE EDAD cuando el operador trae varios (ATN: «CHD 2-3 años» y «CHD 4-11
-   * años»; «CHD 02-04» y «CHD 5-10»; Trappvel, 2026-11-03). Cada niño paga el rango de SU edad
-   * (`precioNinoPorEdad`). Con un solo rango, ausente: manda `nino`, como siempre. `nino` es el
+   * La tabla CHD por RANGO DE EDAD cuando el operador trae varios (ATN: «CHD 2-3» y «CHD 4-11»;
+   * «CHD 02-04» y «CHD 5-10»; Trappvel, 2026-11-03). Cada niño paga el rango de SU edad
+   * (`rangoNinoParaEdad`). Con un solo rango, ausente: manda `nino`, como siempre. `nino` es el
    * primero de la tabla, para lo que lee un solo rango.
    */
   ninosPorEdad?: PrecioNino[]
@@ -366,7 +366,7 @@ export function rangoNinoParaEdad(h: Pick<HotelBloqueo, 'nino' | 'ninosPorEdad'>
   return que[0] ?? null
 }
 
-/** «CHD 2-3 años», para la tarjeta y los avisos. */
+/** La etiqueta del rango («CHD 2-3» seguido de la palabra años), para la tarjeta y los avisos. */
 export function etiquetaRangoNino(r: PrecioNino): string {
   if (r.edadMin !== null && r.edadMax !== null) return r.edadMin === r.edadMax ? `CHD ${r.edadMin} años` : `CHD ${r.edadMin}-${r.edadMax} años`
   if (r.edadMin !== null) return `CHD desde ${r.edadMin} años`
