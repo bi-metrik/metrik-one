@@ -27,7 +27,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { base, clienteFalso, type Fila } from '../../../../test/cotizacion-pdf-doble'
-import { CASO_QA_1352, CASO_QA_1359, CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
+import { CASO_QA_1352, CASO_QA_1359, CASO_REPRUEBA_BLOQUEO, CASOS, type CasoBateria, type ClaveCaso } from '@/lib/cotizaciones/__fixtures__/bateria/casos'
 import { algunoBajoElPiso, clave, lineaEsperada, margenEsperado, soloDesayuno } from '@/lib/cotizaciones/__fixtures__/bateria/oraculo'
 import { modeloDePropuesta, type EntradaModeloPropuesta, type ModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
 import type { CotizacionPDFProps } from '@/lib/pdf/cotizacion-props'
@@ -610,7 +610,12 @@ describe('Prueba corta del #1352 · bloqueo de tres paquetes, uno sin alimentaci
     // «Desayuno en todos los hoteles» con un hotel sin alimentación era falso.
     expect(hospedaje).not.toContain('en todos los hoteles')
     expect(hospedaje).toContain('No incluye Alimentación, Traslados')
-    expect(seccion(h, 'Qué incluye')).not.toMatch(/Traslados/)
+    // «Incluido en todas» no los afirma; desde la reprueba del bloqueo (2026-10-30) van en la tarjeta
+    // de la versión que los trae (y en la que no, como «No incluye»).
+    const queIncluye = seccion(h, 'Qué incluye')!
+    expect(queIncluye.slice(0, queIncluye.indexOf('Solo en'))).not.toMatch(/Traslados/)
+    expect(queIncluye).toContain('Solo en Recomendada Alimentación Traslados')
+    expect(queIncluye).toContain('Solo en Opción 2 No incluye Alimentación Traslados')
   }, 60_000)
 
   it('D3 · dos versiones sin zona (no hay paradas): el renglón del hotel lleva las noches', async () => {
@@ -819,5 +824,91 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
     const filas = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
     expect(filas.find(f => f.seleccion.includes(creado.itemId))!.vaEnPropuesta).toBe(true)
     expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'no va', [DECAMAR]: 'va' })
+  }, 60_000)
+})
+
+// ── Reprueba del bloqueo (2026-10-30): acomodación y lo de cada versión en el PDF ──
+
+describe('Reprueba del bloqueo · dos paquetes: acomodación y lo que trae cada versión (acciones reales)', () => {
+  const caso = CASO_REPRUEBA_BLOQUEO as unknown as CasoBateria
+  const RECURSOS: RecursosPropuesta = { foto: () => null, fotoDeCiudad: () => null, logo: null, marca: 'Agencia de prueba' }
+  const ISLENO = 'Hotel Isleño Ficticio'
+  const SPRATT = 'Hotel Spratt Ficticio'
+  const texto = (h: string) => h.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  const seccion = (h: string, titulo: string) => {
+    const i = h.indexOf(`>${titulo}<`)
+    return i < 0 ? null : texto(h.slice(i, h.indexOf('</section>', i) < 0 ? undefined : h.indexOf('</section>', i)))
+  }
+  const tarjetaDeHotel = (h: string, hotel: string) => {
+    const i = h.indexOf(`>${hotel}<`)
+    expect(i, `no está la tarjeta de ${hotel}`).toBeGreaterThan(0)
+    const fin = h.indexOf('<div class="hc">', i)
+    return texto(h.slice(h.lastIndexOf('<div class="hc">', i), fin < 0 ? undefined : fin))
+  }
+  let r: Resultado
+  beforeAll(async () => { r = await correr(caso) }, 60_000)
+
+  it('las dos versiones van al cliente, como en la reprueba', () => {
+    expect(r.modelo.tarifas.map(t => t.nombre).sort()).toEqual(['Opción 2', 'Recomendada'])
+  })
+
+  it('cada hotel dice su acomodación: 2 habitaciones de 1 adulto + 1 niño', () => {
+    const opciones = r.modelo.hoteles.flatMap(c => c.opciones)
+    for (const o of opciones) expect(o.acomodacion).toBe('2 habitaciones de 1 adulto + 1 niño')
+    for (const compacto of [false, true]) {
+      const h = htmlDePropuesta(r.modelo, RECURSOS, { compacto })
+      for (const hotel of [ISLENO, SPRATT]) expect(tarjetaDeHotel(h, hotel)).toContain('Acomodación 2 habitaciones de 1 adulto + 1 niño')
+    }
+  })
+
+  it('«Incluido en todas» sigue siendo la intersección; lo de una sola versión va en su tarjeta, con su etiqueta', () => {
+    const indice = (n: string) => r.modelo.tarifas.find(t => t.nombre === n)!.indice
+    expect(r.modelo.precio.incluye).not.toContain('Planes / tours')
+    expect(r.modelo.precio.porVersion).toEqual([
+      { tarifa: indice('Recomendada'), incluye: ['Planes / tours'], noIncluye: ['Tarjeta de turismo, propinas'] },
+      { tarifa: indice('Opción 2'), incluye: [], noIncluye: ['Planes / tours'] },
+    ])
+    for (const compacto of [false, true]) {
+      const h = htmlDePropuesta(r.modelo, RECURSOS, { compacto })
+      const incluye = seccion(h, 'Qué incluye') ?? seccion(h, 'Qué incluye y condiciones')
+      expect(incluye).toMatch(/Solo en Recomendada Planes \/ tours No incluye Tarjeta de turismo, propinas/)
+      expect(incluye).toMatch(/Solo en Opción 2 No incluye Planes \/ tours/)
+      // La etiqueta lleva el color de su versión (la misma clase que en vuelos y hospedaje).
+      expect(h).toMatch(/Solo en <span class="tag t[A-Z]">Recomendada<\/span>/)
+    }
+  })
+
+  it('lo que el paquete no incluye en TODAS las versiones va una sola vez, en «No incluido»', async () => {
+    const paquetes = structuredClone(CASO_REPRUEBA_BLOQUEO.paquetes) as unknown as { paquete: { incluye: { noIncluye: string | null } } }[]
+    paquetes[1].paquete.incluye.noIncluye = 'Tarjeta de turismo, propinas'
+    const otro = { ...CASO_REPRUEBA_BLOQUEO, paquetes } as unknown as CasoBateria
+    const m = (await correr(otro)).modelo
+    expect(m.precio.noIncluye).toContain('No incluido en el paquete: tarjeta de turismo, propinas')
+    expect(m.precio.porVersion.flatMap(v => v.noIncluye)).not.toContain('Tarjeta de turismo, propinas')
+    r = await correr(caso)
+  }, 60_000)
+
+  it('con un solo paquete, el formato de siempre: sin acomodación ni tarjetas por versión', async () => {
+    const uno = { ...CASO_REPRUEBA_BLOQUEO, paquetes: [CASO_REPRUEBA_BLOQUEO.paquetes[0]] } as unknown as CasoBateria
+    const m = (await correr(uno)).modelo
+    expect(m.tarifas).toHaveLength(0)
+    expect(m.hoteles.flatMap(c => c.opciones).every(o => o.acomodacion === undefined)).toBe(true)
+    expect(m.precio.porVersion).toEqual([])
+    expect(htmlDePropuesta(m, RECURSOS)).not.toContain('Solo en')
+    r = await correr(caso)
+  }, 60_000)
+
+  // Con Chromium (la torre, `CHROMIUM_EJECUTABLE`): el PDF real de las dos versiones con lo nuevo.
+  it.skipIf(!process.env.CHROMIUM_EJECUTABLE)('con Chromium, el PDF impreso dice la acomodación y lo de cada versión', async () => {
+    estado.chromium = true
+    try {
+      await medir(caso)
+    } finally {
+      estado.chromium = false
+    }
+    const h = texto(estado.impreso!.html)
+    expect(h).toContain('Acomodación 2 habitaciones de 1 adulto + 1 niño')
+    expect(h).toMatch(/Solo en Recomendada Planes \/ tours No incluye Tarjeta de turismo, propinas/)
+    if (process.env.PROPUESTA_PDF_SALIDA) (await import('node:fs')).writeFileSync(process.env.PROPUESTA_PDF_SALIDA, estado.impreso!.pdf)
   }, 60_000)
 })
