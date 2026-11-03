@@ -5,7 +5,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { datosDePropuesta } from '../../nucleo'
 import { pidioTrasTope, esTituloDelSi } from '../cola'
 import type { FilaPublica, TrazaPublica } from '../tipos'
-import { productoEnCurso } from './dominio-ventas'
+import { acabaDeAutorizar, productoEnCurso } from './dominio-ventas'
 import { partirSugerencias, planDeEnvios, separarCierre } from './partir-ventas'
 import type { FotoDelTurno } from './fotos-ventas'
 import { direccionNoEscrita, piezasDireccion } from './direccion-ventas'
@@ -213,5 +213,21 @@ describe('SQL de la ronda 3 y del mapa (PGlite)', () => {
     await db.exec(leer(ARCHIVO))
     expect(await versiones()).toBe(3)
     expect((await publicada()).get('ventas.complementos')).toBeTruthy()
+  })
+})
+
+describe('acabaDeAutorizar (Dimpro, 3-nov: autorizó y lo pasó a persona por no entender)', () => {
+  const fila = (direccion: 'entrante' | 'saliente', traza?: Partial<TrazaPublica>): FilaPublica =>
+    ({ id: crypto.randomUUID(), direccion, clase: direccion === 'entrante' ? 'escrito' : 'bot', texto: 'x', traza: traza as TrazaPublica }) as FilaPublica
+  const si = { autorizacion: { tipo: 'general', respuesta: 'si' } } as unknown as Partial<TrazaPublica>
+  const no = { autorizacion: { tipo: 'general', respuesta: 'no' } } as unknown as Partial<TrazaPublica>
+
+  it('el último mensaje del cliente es el «sí» a la autorización', () => {
+    expect(acabaDeAutorizar([fila('saliente'), fila('entrante', si)])).toBe(true)
+  })
+  it('un «no», o un mensaje posterior al «sí», no cuentan', () => {
+    expect(acabaDeAutorizar([fila('entrante', no)])).toBe(false)
+    expect(acabaDeAutorizar([fila('entrante', si), fila('saliente'), fila('entrante')])).toBe(false)
+    expect(acabaDeAutorizar([])).toBe(false)
   })
 })
