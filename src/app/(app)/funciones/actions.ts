@@ -203,7 +203,7 @@ export interface PreciosCampana {
   abono_persona: number | null
   permite_pago_total: boolean
   tope_sobreventa: number | null
-  /** Plazo del saldo: días antes de la función (1 a 30). */
+  /** Plazo del saldo: días antes de la función (0 a 30; 0 = hasta que empieza). */
   dias_saldo_antes: number
 }
 
