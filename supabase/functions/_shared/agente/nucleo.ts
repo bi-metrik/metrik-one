@@ -206,7 +206,7 @@ async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversaci
       ...(e.tras.nota ? [e.tras.nota] : []),
       // «que este paso destrabó» dejaba fuera lo que venía en el mismo mensaje (arnés de Trappvel 2026-11-03, cp-mixto en
       // la asesora: guardó el perfil con el «sí», terminó y la fecha de salida del viaje, dicha junto, no se propuso nunca).
-      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que todavía no se ha propuesto ni hecho, aunque este paso no lo haya destrabado (lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría), propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
+      `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que todavía no quedó hecho, aunque este paso no lo haya destrabado (lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría), propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
     ] : []),
   ];
 }

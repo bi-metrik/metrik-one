@@ -384,6 +384,8 @@ const DATOS_PROPONER = {
     description: [
       'perfil_contacto: lo que el comercial quiere que se recuerde de una PERSONA para atenderla mejor en sus próximos viajes,',
       'sin un viaje de por medio («recuerda que a … le gusta …», «… siempre viaja con …»). Un elemento por hecho.',
+      'Si el mismo mensaje trae también datos de un viaje (fechas, pasajeros), no es perfil_contacto: es anotar_en_viaje,',
+      'que lleva también lo de la persona a su perfil.',
       `dimension: ${DIMENSIONES_PERFIL.map((d) => `${d} = ${ETIQUETA_DIMENSION[d]}`).join('; ')}.`,
       'De los menores solo cuántos y de qué edades, sin nombres. Marca con clase lo que no es un dato: sensible (salud,',
       'creencias, vida íntima) o juicio (una opinión sobre la persona); el sistema no los guarda y te dice qué contestar.',

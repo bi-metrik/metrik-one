@@ -17,6 +17,8 @@ import type { CampoEntendible } from '../../wa-entendimiento-reglas.ts';
 /** `toca` con `oEscribe`: si el bot no mostró ese botón, la persona escribe eso (y no «sí»). */
 export interface PasoGuion {
   escribe?: string; reenvia?: string; toca?: string; oEscribe?: string; /** Un audio, ya transcrito. */ dicta?: string;
+  /** Con `toca`: solo si el bot mostró ese botón; si no, la persona no hace nada (una confirmación que puede no hacer falta). */
+  siHay?: boolean;
   /**
    * Una foto o un PDF sintético (2026-10-21): `solicitud` (PDF de una solicitud de viaje), `pantallazo` (foto de un chat
    * del cliente), `factura` (foto de una factura de ferretería: no es del viaje). Del comercial o reenviado.
@@ -423,6 +425,9 @@ export const CONJUNTO_PERFIL: CasoArnes[] = [
     pasos: [
       { escribe: 'Para el M1 26 2 de Martín: salen el 20 de noviembre, viaja siempre con la esposa y les gusta el buen vino' },
       { toca: 'Anotar', oEscribe: 'sí' },
+      // Si el bot propuso primero el perfil, el «sí» lo guarda y el turno de seguir propone lo del viaje: hay que
+      // confirmarlo (PR #1397). Si ya se anotó con el primer toque, no queda botón y no se hace nada.
+      { toca: 'Anotar', siHay: true },
     ],
     esperado: (p) => {
       const d = p.viajes.find((x) => x.codigo === 'M1 26 2')!.datos;

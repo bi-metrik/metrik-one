@@ -394,7 +394,7 @@ describe('mixto: una solicitud que trae datos de la persona', () => {
         (p) => {
           const estado = String(p.mensajes[0].parts[0].text)
           expect(estado).toContain('Acaba de quedar hecho, con el toque de el comercial: Guardé en el perfil de MAURICIO MORENO')
-          expect(estado).toContain('todavía no se ha propuesto ni hecho, aunque este paso no lo haya destrabado')
+          expect(estado).toContain('todavía no quedó hecho, aunque este paso no lo haya destrabado')
           expect(estado).toContain('lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría')
           expect(estado).not.toContain('que este paso destrabó')
           // La nota de la bandeja: el perfil no anotó nada en el viaje (corrida 41691210744: con la línea general sola,
