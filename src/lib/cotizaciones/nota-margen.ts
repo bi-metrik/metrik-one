@@ -16,7 +16,7 @@
  * de la nota no se puedan contradecir.
  */
 
-import { pctTexto } from './piso-salida'
+import { causasBajoMinimo } from './causas-margen'
 
 /** Lo que el servidor manda de la salida (`SalidaVista`), sin lo que no se usa aquí. */
 export interface SalidaParaNota {
@@ -26,7 +26,11 @@ export interface SalidaParaNota {
   excepcion: unknown | null
   lineas?: number
   lineasSinCosto?: number
-  bajoMinimo?: { nombre: string | null; margenPct: number | null }[]
+  /**
+   * Lo que frena, con su margen global y, con reglas de margen, los hoteles que quedaron bajo su
+   * piso (`causas-margen.ts`): la nota dice la causa real, no solo el global.
+   */
+  bajoMinimo?: { nombre: string | null; margenPct: number | null; hoteles?: { nombre: string | null; margenPct: number }[]; pisoHotelPct?: number }[]
   /** Una línea sin costo entra al total que sale (`falta-costo.ts`). Ausente = no aplica. */
   faltaCosto?: string | null
 }
@@ -68,16 +72,11 @@ export function notaDeMargen(salida: SalidaParaNota | null | undefined): NotaDeM
   // `undefined` = una vista que no trae el conteo: se cae a la nota de siempre.
   if (lineas === 0) return { tipo: 'sin_lineas', motivoBoton: MOTIVO_SIN_LINEAS }
 
-  const medidos = (salida.bajoMinimo ?? []).filter(s => s.margenPct !== null)
-  if (salida.bloquea && medidos.length > 0 && salida.pisoPct !== null) {
-    const piso = salida.pisoPct
-    const minimo = pctTexto(piso)
-    const titulo = medidos
-      .map(s => {
-        const cifra = `${pctTexto(s.margenPct as number, piso)}, mínimo ${minimo}`
-        return s.nombre ? `${s.nombre}: margen ${cifra}` : `Margen ${cifra}`
-      })
-      .join(' · ')
+  // Brief del 2026-10-28 · cada causa por separado: un hotel bajo su piso no se dice como «margen
+  // 12,4 %, mínimo 12 %» (que se lee como una contradicción).
+  const causas = salida.pisoPct === null ? [] : (salida.bajoMinimo ?? []).flatMap(s => causasBajoMinimo(s, salida.pisoPct as number))
+  if (salida.bloquea && causas.length > 0) {
+    const titulo = causas.join(' · ')
     return { tipo: 'bajo_minimo', titulo: `${titulo}.`, motivoBoton: `${titulo}. Necesita la autorización del dueño.` }
   }
 

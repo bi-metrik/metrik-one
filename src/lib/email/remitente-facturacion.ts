@@ -1,12 +1,6 @@
 /**
- * El remitente de TODO correo de cobro de MéTRIK: cuentas de cobro, enlace automático de pago de
- * cuotas y el cobro tras la prueba de Valida.
- *
- * Una sola constante para que los tres no vuelvan a separarse: hasta el 2026-10-26 el enlace
- * automático y el cobro de prueba seguían saliendo de `facturacion@metrikone.co` (el dominio del
- * plan Free de Resend) mientras la cuenta de cobro ya salía de `metrik.com.co` (#1295).
- * `metrik.com.co` está verificado en Resend (plan Pro).
- *
- * Módulo puro: lo importan el servidor de Next y las pruebas sin cargar Drive ni Resend.
+ * El remitente de los correos de cobro y facturación. La constante vive en
+ * `supabase/functions/_shared/remitente-facturacion.ts` porque también la usa la edge function
+ * `enviar-factura-cuota` (que no alcanza `src/`): una sola fuente para Next y Deno.
  */
-export const FROM_FACTURACION = 'MéTRIK · Facturación <facturacion@metrik.com.co>'
+export { FROM_FACTURACION } from '../../../supabase/functions/_shared/remitente-facturacion.ts'

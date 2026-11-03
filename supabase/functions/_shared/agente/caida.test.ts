@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CONFIG_POR_DEFECTO } from './config'
-import { aliasConversacionWa, alertarSiCaido, caidaDelTurno, clavesCaida, correoCaida, motivoCorto } from './caida'
+import { aliasConversacionWa, alertarSiCaido, alertarSinBanco, caidaDelTurno, clavesCaida, correoCaida, correoSinBanco, motivoCorto } from './caida'
 import type { PuertosCaida } from './caida'
 import { TEL_PRUEBA, WS_PRUEBA, escenario } from './escenario'
 import { modeloGemini } from './modelo-gemini'
@@ -282,5 +282,42 @@ describe('las piezas', () => {
     const t = { bot: 'one', error: 'modelo: http 529', uso: [uso('a', false, 'http 529')] } as Traza
     expect(await alertarSiCaido(p, t, d)).toBe('enviado')
     expect(await alertarSiCaido(p, t, d)).toBe('ya_avisado')
+  })
+})
+
+describe('versión sin banco (encargo 2026-10-30)', () => {
+  const datos = { workspaceId: 'ws-1', workspaceNombre: 'dimpro', canal: 'chatwoot' as const, conversacion: 'cw:1:2', turnoId: null, ahoraMs: Date.UTC(2026, 9, 30, 19) }
+  const puertos = () => {
+    const tomadas = new Set<string>()
+    const enviados: Array<{ subject: string; idempotencyKey?: string }> = []
+    const p: PuertosCaida = {
+      tomarCandado: async (k) => (tomadas.has(k) ? false : (tomadas.add(k), true)),
+      soltarCandado: async (k) => { tomadas.delete(k) },
+      enviarCorreo: async (c) => { enviados.push(c); return { ok: true as const } },
+    }
+    return { p, enviados, tomadas }
+  }
+
+  it('un correo por workspace al día, con su llave de idempotencia', async () => {
+    const { p, enviados } = puertos()
+    expect(await alertarSinBanco(p, datos)).toBe('enviado')
+    expect(await alertarSinBanco(p, { ...datos, conversacion: 'cw:1:3' })).toBe('ya_avisado')
+    expect(await alertarSinBanco(p, { ...datos, ahoraMs: datos.ahoraMs + 24 * 3600 * 1000 })).toBe('enviado')
+    expect(enviados.map((e) => e.subject)).toEqual(['Asistente sin banco: dimpro', 'Asistente sin banco: dimpro'])
+    expect(enviados[0].idempotencyKey).toMatch(/^agente-sin-banco\/ws-1\/\d+$/)
+  })
+
+  it('si el envío falla suelta el candado para que el próximo turno lo intente', async () => {
+    const { p, tomadas } = puertos()
+    p.enviarCorreo = async () => ({ ok: false as const, error: 'caído', status: 500 })
+    expect(await alertarSinBanco(p, datos)).toBe('fallo_envio')
+    expect(tomadas.size).toBe(0)
+  })
+
+  it('el correo dice qué pasa y cómo se arregla, sin teléfono', () => {
+    const c = correoSinBanco({ datos })
+    expect(c.text).toContain('version_sin_banco')
+    expect(c.text).toContain('--k 3')
+    expect(c.text).toContain('cw:1:2')
   })
 })

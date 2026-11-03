@@ -34,7 +34,7 @@ y tres textos, §1.8 del diseño, que manda sobre lo anterior); P4 (preventa = i
   `funcion_guardar_campana`, como `tope_sobreventa`, para no cambiar la firma). La reserva guarda su FOTO
   (`funcion_reservas.dias_saldo_antes`). P16 (26-oct, Mauricio): se acepta 0 = hasta que empieza la función
   (`funcion_plazo_saldo(t,0)=t`), migración `20261026210000_funciones_saldo_plazo_cero.sql` (rama
-  feat/funciones-saldo-plazo-cero; SIN aplicar al abrir el PR; dry-run `scripts/funciones-saldo-plazo-cero-dry-run.mjs`).
+  feat/funciones-saldo-plazo-cero; APLICADA en prod el 3-nov; dry-run `scripts/funciones-saldo-plazo-cero-dry-run.mjs`).
   Las pruebas SQL cargan módulo → puerta cerrada (20261026220000, aplicada) → plazo 0; versión menor que la de la
   puerta, se dejó así (sin guarda de orden). Textos fijados por Mauricio 28-oct (2.ª versión, pendiente de Vera): oferta
   con 0 «…con el link hasta que empiece la experiencia, o durante la experiencia, con nuestro equipo.» y la bienvenida

@@ -112,6 +112,10 @@ export class ChatwootMemoria implements MensajeroChatwoot {
   etiquetas = new Map<string, Set<string>>();
   equipos = new Map<string, number>();
   estados = new Map<string, string>();
+  /** Las fotos adjuntas publicadas (dominio de ventas). */
+  fotos: Array<{ conv: string; url: string; texto: string; id: number }> = [];
+  /** Las URLs cuya foto falla al publicarse (simula la descarga o la subida caídas). */
+  fotosQueFallan = new Set<string>();
   /** Simula una caída de Chatwoot al publicar. */
   fallar: 'no' | 'rechazo' | 'incierto' = 'no';
   private n = 5000;
@@ -123,6 +127,13 @@ export class ChatwootMemoria implements MensajeroChatwoot {
     if (this.fallar === 'incierto') return { ok: false, incierto: true, motivo: 'corte' };
     const id = ++this.n;
     this.publicados.push({ conv: llaveTexto(l), salida: structuredClone(s), id, at: performance.now() });
+    return { ok: true, id };
+  }
+
+  async publicarFoto(l: LlaveConversacion, foto: { url: string; texto: string }): Promise<ResultadoPublicar> {
+    if (this.fotosQueFallan.has(foto.url)) return { ok: false, incierto: false, motivo: 'foto: http 404 (simulada)' };
+    const id = ++this.n;
+    this.fotos.push({ conv: llaveTexto(l), url: foto.url, texto: foto.texto, id });
     return { ok: true, id };
   }
 

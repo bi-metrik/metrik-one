@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { BedDouble, Car, Package, Plane, Ticket } from 'lucide-react'
+import { BedDouble, Car, Package, Plane, Ticket, TrainFront } from 'lucide-react'
 
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
@@ -16,8 +16,8 @@ import type { ServicioDelViaje } from '@/lib/cotizaciones/por-pasos-vista'
  * opciones (la tarjeta de siempre de cada opción) y «+ Otra opción» al pie.
  */
 
-const ICONO: Record<ServicioDelViaje['tipo'], typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, actividad: Ticket, otro: Package, paquete: Package }
-const NOMBRE_TIPO: Record<ServicioDelViaje['tipo'], string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', actividad: 'Actividad', otro: 'Otro', paquete: 'Paquete' }
+const ICONO: Record<ServicioDelViaje['tipo'], typeof Plane> = { vuelo: Plane, hotel: BedDouble, traslado: Car, tren: TrainFront, actividad: Ticket, otro: Package, paquete: Package }
+const NOMBRE_TIPO: Record<ServicioDelViaje['tipo'], string> = { vuelo: 'Vuelo', hotel: 'Hotel', traslado: 'Traslado', tren: 'Tren', actividad: 'Actividad', otro: 'Otro', paquete: 'Paquete' }
 
 export function ServicioPorPasos({
   servicio,

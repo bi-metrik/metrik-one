@@ -24,6 +24,7 @@
  */
 
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
+import { esOperadorMezclado, operadoresDeLaSolicitud } from './bloqueo-operador'
 
 // ── Acomodaciones ─────────────────────────────────────────────────────────────
 
@@ -85,6 +86,11 @@ export interface IncluyeBloqueo {
   sinIdentificar: IconoSinIdentificar[]
   /** El texto que acompaña los íconos, tal cual («Receptivos… traslados in y out»). */
   texto: string | null
+  /**
+   * Lo que el paquete NO incluye, tal cual lo dice la pantalla («No incluye: tarjeta de turismo,
+   * propinas») o lo escribe la asesora (V5 del QA del 2026-10-29). Ausente en paquetes viejos = `null`.
+   */
+  noIncluye?: string | null
 }
 
 export function casillasVacias(): CasillasIncluye {
@@ -106,6 +112,15 @@ export interface PrecioNino {
   edadMax: number | null
 }
 
+/**
+ * El precio del infante (QA del 2026-10-29). La pantalla del operador casi nunca lo trae: lo
+ * escribe la asesora después de preguntarlo. `0` es un valor (el infante no paga); `null` = sin
+ * dato, y con infantes en el viaje el paquete queda incompleto.
+ */
+export interface PrecioInfante {
+  precio: number | null
+}
+
 export interface HotelBloqueo {
   hotel: string | null
   zona: string | null
@@ -121,6 +136,13 @@ export interface HotelBloqueo {
   /** Solo las acomodaciones que aparecen en la pantalla, en el orden en que aparecen. */
   precios: PrecioAcomodacion[]
   nino: PrecioNino | null
+  /** Ausente en paquetes guardados antes del 2026-10-29: se lee como `null`. */
+  infante?: PrecioInfante | null
+  /**
+   * El rótulo de la columna de la que salió el costo cuando la pantalla trae varias («Neta agencia»,
+   * «Pública con descuento»; M5-1 / M2-1 del QA del 2026-10-29). `null` = una sola columna o a mano.
+   */
+  columnaCosto?: string | null
 }
 
 export interface TramoBloqueo {
@@ -145,6 +167,19 @@ export interface DistribucionBloqueo {
   /** Cuántas HABITACIONES toma de cada acomodación. */
   habitaciones: Partial<Record<Acomodacion, number>>
   ninos: number
+  /** Cuántos infantes van en el paquete. Ausente (paquetes viejos) = 0. */
+  infantes?: number
+  /**
+   * Habitaciones de 1 adulto + 1 niño (H2-2 del QA del 2026-10-29): «menor con un adulto, el adulto
+   * paga Doble». Cada una suma UN adulto a la tarifa Doble; su niño es uno de los `ninos` (tarifa
+   * CHD), que siguen siendo el total de niños del paquete. Ausente (paquetes viejos) = 0.
+   */
+  adultoConNino?: number
+  /**
+   * La edad de cada niño, la que escribe la asesora. Con ella se revisa el rango CHD del operador:
+   * un niño fuera del rango no es tarifa de niño. Ausente o vacío = no se escribió.
+   */
+  edadesNinos?: number[]
 }
 
 /** Lo que se guarda en `items.tarifa_pax.bloqueo`. */
@@ -165,7 +200,7 @@ export interface PaqueteBloqueo {
 export function hotelVacio(): HotelBloqueo {
   return {
     hotel: null, zona: null, noches: null, habitacion: null, planAlimentacion: null, temporada: null,
-    tarifaPromo: false, compraAntesDe: null, moneda: 'COP', precios: [], nino: null,
+    tarifaPromo: false, compraAntesDe: null, moneda: 'COP', precios: [], nino: null, infante: null,
   }
 }
 
@@ -177,7 +212,7 @@ export function paqueteVacio(operador: string | null = null): PaqueteBloqueo {
     vuelo: null,
     salidaManual: null,
     incluye: { casillas: casillasVacias(), sinIdentificar: [], texto: null },
-    distribucion: { habitaciones: {}, ninos: 0 },
+    distribucion: { habitaciones: {}, ninos: 0, infantes: 0, edadesNinos: [] },
     imagenes: { hotel: null, vuelo: null },
   }
 }
@@ -279,7 +314,15 @@ export function leerHotel(v: unknown): HotelBloqueo {
     moneda: (textoCorto(v.moneda, 3) ?? 'COP').toUpperCase(),
     precios: leerPrecios(v.precios),
     nino: nino && (nino.precio !== null || nino.edadMin !== null || nino.edadMax !== null) ? nino : null,
+    infante: esObj(v.infante) ? { precio: montoNoNegativo(v.infante.precio) } : null,
+    columnaCosto: textoCorto(v.columnaCosto, 60),
   }
+}
+
+/** Como `montoPositivo`, pero el 0 vale: «el infante no paga» es un precio. */
+export function montoNoNegativo(v: unknown): number | null {
+  if (v === 0 || v === '0') return 0
+  return montoPositivo(v)
 }
 
 export function leerTramo(v: unknown): TramoBloqueo | null {
@@ -319,18 +362,84 @@ export function leerIncluye(v: unknown): IncluyeBloqueo {
       categoria: esCategoriaIncluye(i.categoria) || i.categoria === 'ninguna' ? (i.categoria as CategoriaIncluye | 'ninguna') : null,
     }))
     .slice(0, 12)
-  return { casillas, sinIdentificar, texto: textoCorto(v.texto, 400) }
+  return { casillas, sinIdentificar, texto: textoCorto(v.texto, 400), noIncluye: textoCorto(v.noIncluye, 400) }
 }
 
 export function leerDistribucion(v: unknown): DistribucionBloqueo {
   const habitaciones: Partial<Record<Acomodacion, number>> = {}
-  if (!esObj(v)) return { habitaciones, ninos: 0 }
+  if (!esObj(v)) return { habitaciones, ninos: 0, infantes: 0, edadesNinos: [] }
   const crudas = esObj(v.habitaciones) ? v.habitaciones : {}
   for (const a of ACOMODACIONES) {
     const n = enteroEntre(crudas[a], 0, 200)
     if (n !== null && n > 0) habitaciones[a] = n
   }
-  return { habitaciones, ninos: enteroEntre(v.ninos, 0, 200) ?? 0 }
+  const edadesNinos = (Array.isArray(v.edadesNinos) ? v.edadesNinos : [])
+    .map(e => enteroEntre(e, 0, 17))
+    .filter((e): e is number => e !== null)
+    .slice(0, 200)
+  const adultoConNino = enteroEntre(v.adultoConNino, 0, 200) ?? 0
+  return {
+    habitaciones,
+    ninos: enteroEntre(v.ninos, 0, 200) ?? 0,
+    infantes: enteroEntre(v.infantes, 0, 200) ?? 0,
+    edadesNinos,
+    ...(adultoConNino > 0 ? { adultoConNino } : {}),
+  }
+}
+
+/**
+ * Las edades de los NIÑOS que dice la Solicitud del negocio (`edades_menores`, texto libre: «edad 8»,
+ * «9, 4», «7, 1.5»), para precargar la tarjeta del paquete (prueba real del 2026-10-29: la ficha decía
+ * la edad 8 y la tarjeta la pedía vacía). Las de 0 a 17, enteras.
+ *
+ * El campo trae niños E infantes: con infantes en la solicitud, las edades bajo 2 son de ellos
+ * y no cuentan como niño. Una edad en meses («6 meses») es de un infante y nunca se lee como edad en años cumplidos. Se toman a lo sumo `ninos` edades. Sin edades legibles, `[]`.
+ */
+export function edadesNinosDeLaSolicitud(valor: unknown, pasajeros: { ninos: number; infantes: number } | null): number[] {
+  const texto = typeof valor === 'number' ? String(valor) : typeof valor === 'string' ? valor : ''
+  // «6 meses», «18 meses»: es un bebé (infante), nunca la edad 6. No se toma como edad de niño.
+  const crudas = [...texto.matchAll(/(\d+(?:\.\d+)?)\s*(mes(?:es)?\b)?/gi)]
+    .map(m => ({ valor: Number(m[1]), enMeses: !!m[2] }))
+    .filter(x => Number.isFinite(x.valor) && x.valor >= 0 && (x.enMeses || x.valor < 18))
+  let infantes = pasajeros?.infantes ?? 0
+  const ninos: number[] = []
+  for (const { valor, enMeses } of crudas) {
+    if (enMeses) {
+      // En meses: si son menos de 24 es un infante (ocupa su lugar); si no, se pasa a años.
+      if (valor < 24) { if (infantes > 0) infantes--; continue }
+      const anios = Math.floor(valor / 12)
+      if (anios < 18) ninos.push(anios)
+      continue
+    }
+    if (infantes > 0 && valor < 2) { infantes--; continue }
+    ninos.push(Math.floor(valor))
+  }
+  const tope = pasajeros ? pasajeros.ninos : ninos.length
+  return ninos.slice(0, Math.max(0, tope))
+}
+
+/**
+ * El paquete con la edad de cada niño que dice la Solicitud, si no tiene las suyas (Vera sobre el
+ * #1326: la edad precargada en la tarjeta tiene que contar también en el freno, sin esperar a
+ * Guardar). Solo con niños en el paquete: sin ellos, una edad de la Solicitud no frena por rango CHD.
+ * No muta el paquete.
+ */
+export function conEdadesDeLaSolicitud<P extends PaqueteBloqueo | null>(paquete: P, deLaSolicitud: readonly number[] | null | undefined): P {
+  if (!paquete) return paquete
+  const d = paquete.distribucion
+  if (d.ninos <= 0) return paquete
+  const edades = edadesIniciales(d.edadesNinos, deLaSolicitud).slice(0, d.ninos)
+  if (edades.length === (d.edadesNinos ?? []).length) return paquete
+  return { ...paquete, distribucion: { ...d, edadesNinos: edades } }
+}
+
+/**
+ * Las edades con que abre la tarjeta: las guardadas mandan; sin ellas, las de la Solicitud. Siempre
+ * editables (la asesora las cambia en la casilla).
+ */
+export function edadesIniciales(guardadas: readonly number[] | null | undefined, deLaSolicitud: readonly number[] | null | undefined): number[] {
+  if (guardadas && guardadas.length > 0) return [...guardadas]
+  return [...(deLaSolicitud ?? [])]
 }
 
 function refImagen(v: unknown): string | null {
@@ -356,7 +465,7 @@ export function leerPaqueteBloqueo(raw: unknown): PaqueteBloqueo | null {
 // ── El costo ──────────────────────────────────────────────────────────────────
 
 export interface FilaDeCosto {
-  clave: Acomodacion | 'nino'
+  clave: Acomodacion | 'adulto_con_nino' | 'nino' | 'infante'
   etiqueta: string
   habitaciones: number | null
   personas: number
@@ -366,10 +475,11 @@ export interface FilaDeCosto {
 
 export interface CostoDelPaquete {
   filas: FilaDeCosto[]
-  /** Adultos (personas en habitaciones) + niños. */
+  /** Adultos (personas en habitaciones) + niños + infantes. */
   personas: number
   adultos: number
   ninos: number
+  infantes: number
   /** `null` si falta algún precio de lo distribuido o no hay nada distribuido. */
   total: number | null
   /** Por qué no hay total. */
@@ -377,6 +487,8 @@ export interface CostoDelPaquete {
 }
 
 const redondear = (n: number) => Math.round(n * 100) / 100
+
+export const ETIQUETA_ADULTO_CON_NINO = '1 adulto + 1 niño'
 
 /**
  * Costo del paquete = Σ (precio por persona × personas de esa acomodación) + niños × precio CHD.
@@ -397,6 +509,15 @@ export function costoDelPaquete(p: Pick<PaqueteBloqueo, 'hotel' | 'distribucion'
     else total += precio * personas
     filas.push({ clave: a, etiqueta: ETIQUETA_ACOMODACION[a], habitaciones: hab, personas, precioPorPersona: precio, total: precio === null ? null : redondear(precio * personas) })
   }
+  // 1 adulto + 1 niño: el adulto paga la Doble (nota de Aliados y de Tu Reserva); el niño va en `ninos`.
+  const conNino = p.distribucion.adultoConNino ?? 0
+  if (conNino > 0) {
+    adultos += conNino
+    const precio = p.hotel.precios.find(x => x.acomodacion === 'doble')?.precioPorPersona ?? null
+    if (precio === null) falta.push('Falta el precio por persona de la doble (lo paga el adulto que va con un niño).')
+    else total += precio * conNino
+    filas.push({ clave: 'adulto_con_nino', etiqueta: ETIQUETA_ADULTO_CON_NINO, habitaciones: conNino, personas: conNino, precioPorPersona: precio, total: precio === null ? null : redondear(precio * conNino) })
+  }
   const ninos = p.distribucion.ninos
   if (ninos > 0) {
     const precio = p.hotel.nino?.precio ?? null
@@ -404,8 +525,15 @@ export function costoDelPaquete(p: Pick<PaqueteBloqueo, 'hotel' | 'distribucion'
     else total += precio * ninos
     filas.push({ clave: 'nino', etiqueta: 'Niño', habitaciones: null, personas: ninos, precioPorPersona: precio, total: precio === null ? null : redondear(precio * ninos) })
   }
+  const infantes = p.distribucion.infantes ?? 0
+  if (infantes > 0) {
+    const precio = p.hotel.infante?.precio ?? null
+    if (precio === null) falta.push('Falta el precio por infante.')
+    else total += precio * infantes
+    filas.push({ clave: 'infante', etiqueta: 'Infante', habitaciones: null, personas: infantes, precioPorPersona: precio, total: precio === null ? null : redondear(precio * infantes) })
+  }
   if (filas.length === 0) falta.push('Pon cuántas habitaciones de cada acomodación toma el grupo.')
-  return { filas, personas: adultos + ninos, adultos, ninos, total: falta.length === 0 ? redondear(total) : null, falta }
+  return { filas, personas: adultos + ninos + infantes, adultos, ninos, infantes, total: falta.length === 0 ? redondear(total) : null, falta }
 }
 
 // ── Las fechas ────────────────────────────────────────────────────────────────
@@ -456,7 +584,7 @@ export function fechasDelPaquete(p: Pick<PaqueteBloqueo, 'vuelo' | 'salidaManual
 // ── Los avisos ────────────────────────────────────────────────────────────────
 
 export interface AvisoBloqueo {
-  clave: 'falta_costo' | 'fechas_noches' | 'compra_vencida' | 'sin_tiquete' | 'personas' | 'infantes' | 'sin_fechas' | 'moneda' | 'iconos_sin_clasificar'
+  clave: 'falta_costo' | 'fechas_noches' | 'compra_vencida' | 'sin_tiquete' | 'personas' | 'infantes' | 'nino_fuera_de_rango' | 'nino_sin_edad' | 'acomodacion_sin_precio' | 'sin_fechas' | 'moneda' | 'iconos_sin_clasificar' | 'sin_operador'
   /** `rojo` = no se puede guardar el costo; `ambar` = se guarda, pero hay que mirarlo. */
   nivel: 'rojo' | 'ambar'
   texto: string
@@ -467,6 +595,11 @@ export interface ContextoAvisos {
   hoy: string
   /** Los pasajeros de la solicitud. `null` = la solicitud no los dice. */
   pasajeros: { adultos: number; ninos: number; infantes: number } | null
+  /**
+   * El operador de la solicitud (`operador_bloqueo`), tal cual. Con VARIOS («ALIADOS TRAVEL / TU
+   * RESERVA»), un paquete sin operador propio pide elegirlo (H-13 del QA del 2026-10-29).
+   */
+  operadorSolicitud?: string | null
 }
 
 function fechaCorta(iso: string): string {
@@ -481,6 +614,8 @@ export function avisosDelPaquete(p: PaqueteBloqueo, ctx: ContextoAvisos): AvisoB
   const avisos: AvisoBloqueo[] = []
   const costo = costoDelPaquete(p)
   for (const f of costo.falta) avisos.push({ clave: 'falta_costo', nivel: 'rojo', texto: f })
+  // Lo que deja el paquete incompleto y no sale del costo (QA del 2026-10-29): frena «Enviar».
+  for (const f of faltasFueraDelCosto(p, ctx.pasajeros)) avisos.push({ clave: f.clave, nivel: 'rojo', texto: f.texto })
   if (p.hotel.moneda !== 'COP') {
     avisos.push({ clave: 'moneda', nivel: 'rojo', texto: `El paquete está en ${p.hotel.moneda}: por ahora el bloqueo se cotiza en pesos. Escribe los precios en COP.` })
   }
@@ -497,6 +632,16 @@ export function avisosDelPaquete(p: PaqueteBloqueo, ctx: ContextoAvisos): AvisoB
         texto: `El vuelo va del ${fechaCorta(fechas.salida)} al ${fechaCorta(fechas.regreso)} (${plural(dias, 'noche', 'noches')}) y el hotel dice ${plural(p.hotel.noches, 'noche', 'noches')}.`,
       })
     }
+  }
+
+  // H-13 (QA del 2026-10-29): con dos operadores en la solicitud, cada paquete dice el suyo.
+  const operadores = operadoresDeLaSolicitud(ctx.operadorSolicitud)
+  if (operadores.length > 1 && (!p.operador || esOperadorMezclado(p.operador))) {
+    avisos.push({
+      clave: 'sin_operador',
+      nivel: 'ambar',
+      texto: `¿De qué operador es este paquete? La solicitud nombra ${operadores.length}: ${operadores.join(', ')}. Elígelo arriba para que el servicio quede con su operador.`,
+    })
   }
 
   if (p.hotel.compraAntesDe && ctx.hoy > p.hotel.compraAntesDe) {
@@ -516,18 +661,126 @@ export function avisosDelPaquete(p: PaqueteBloqueo, ctx: ContextoAvisos): AvisoB
     avisos.push({ clave: 'iconos_sin_clasificar', nivel: 'ambar', texto: `${plural(pendientes, 'ícono sin identificar', 'íconos sin identificar')}: dile a ONE qué es.` })
   }
 
+  const conNino = p.distribucion.adultoConNino ?? 0
+  if (conNino > p.distribucion.ninos) {
+    avisos.push({
+      clave: 'personas',
+      nivel: 'ambar',
+      texto: `Hay ${plural(conNino, 'habitación', 'habitaciones')} de 1 adulto + 1 niño y ${plural(p.distribucion.ninos, 'niño', 'niños')} en el paquete: cada una lleva su niño en «Niños».`,
+    })
+  }
+
   const pax = ctx.pasajeros
-  if (pax && costo.filas.length > 0) {
+  // El total que no cuadra ya es una falta (rojo, frena «Enviar»): aquí solo el reparto distinto.
+  if (pax && costo.filas.length > 0 && costo.personas === viajerosComparables(costo, pax)) {
     const partes: string[] = []
     if (costo.adultos !== pax.adultos) partes.push(`${plural(costo.adultos, 'adulto', 'adultos')} en las habitaciones y la solicitud dice ${pax.adultos}`)
     if (costo.ninos !== pax.ninos) partes.push(`${plural(costo.ninos, 'niño', 'niños')} en el paquete y la solicitud dice ${pax.ninos}`)
+    if (costo.infantes !== pax.infantes) partes.push(`${plural(costo.infantes, 'infante', 'infantes')} en el paquete y la solicitud dice ${pax.infantes}`)
     if (partes.length > 0) avisos.push({ clave: 'personas', nivel: 'ambar', texto: `No cuadra con la solicitud: ${partes.join('; ')}.` })
-    if (pax.infantes > 0) {
-      avisos.push({ clave: 'infantes', nivel: 'ambar', texto: `La solicitud trae ${plural(pax.infantes, 'infante', 'infantes')} y el paquete no tiene precio de infante: pregúntalo al operador.` })
-    }
   }
   return avisos
 }
+
+// ── Paquete incompleto: frena «Enviar» (QA del 2026-10-29) ───────────────────
+
+export interface FaltaDelPaquete {
+  clave: 'falta_costo' | 'personas' | 'infantes' | 'nino_fuera_de_rango' | 'nino_sin_edad' | 'acomodacion_sin_precio'
+  texto: string
+}
+
+export const FALTA_EL_COSTO = 'Falta el costo del paquete.'
+
+/**
+ * Los viajeros de la solicitud contra los que se mide el paquete. Un infante que el paquete no
+ * reparte ya tiene su propia falta («Va 1 infante y el paquete no tiene su costo»): no se cuenta dos veces.
+ */
+function viajerosComparables(costo: Pick<CostoDelPaquete, 'infantes'>, pax: NonNullable<ContextoAvisos['pasajeros']>): number {
+  return pax.adultos + pax.ninos + (costo.infantes > 0 ? pax.infantes : 0)
+}
+
+/**
+ * Por qué las personas del paquete no son los viajeros de la solicitud, o `null` si cuadran (o no
+ * hay con qué comparar: sin solicitud o sin nada repartido). Mira el TOTAL de personas; el reparto
+ * entre adultos y niños que no cuadra con el total igual es un aviso ámbar (`avisosDelPaquete`).
+ */
+export function personasDelPaquete(p: Pick<PaqueteBloqueo, 'hotel' | 'distribucion'>, pasajeros: ContextoAvisos['pasajeros']): string | null {
+  if (!pasajeros) return null
+  const costo = costoDelPaquete(p)
+  if (costo.filas.length === 0) return null
+  const viajeros = viajerosComparables(costo, pasajeros)
+  if (costo.personas === viajeros) return null
+  const solicitud = [
+    plural(pasajeros.adultos, 'adulto', 'adultos'),
+    pasajeros.ninos > 0 ? plural(pasajeros.ninos, 'niño', 'niños') : null,
+    pasajeros.infantes > 0 ? plural(pasajeros.infantes, 'infante', 'infantes') : null,
+  ].filter(Boolean).join(', ')
+  // Cada habitación cuenta sus personas: «Doble = 2» son 4 adultos. Con niños en la solicitud, lo
+  // usual es que cada uno duerma con un adulto.
+  const pista = pasajeros.ninos > 0 && costo.adultos > pasajeros.adultos
+    ? ' Cada habitación doble son 2 adultos: si cada niño duerme con un adulto, usa «1 adulto + 1 niño».'
+    : ''
+  return `El paquete es para ${plural(costo.personas, 'persona', 'personas')} y viajan ${viajeros} (${solicitud}).${pista}`
+}
+
+/**
+ * Lo que deja el paquete incompleto sin salir de `costoDelPaquete`: una acomodación de la tabla sin
+ * precio, un infante sin costo y un niño fuera del rango CHD del operador.
+ */
+function faltasFueraDelCosto(p: PaqueteBloqueo, pasajeros: ContextoAvisos['pasajeros']): FaltaDelPaquete[] {
+  const out: FaltaDelPaquete[] = []
+  const repartidas = new Set(ACOMODACIONES.filter(a => (p.distribucion.habitaciones[a] ?? 0) > 0))
+  for (const pr of p.hotel.precios) {
+    // La repartida sin precio ya la dice el costo; aquí la que está en la tabla y nadie llenó.
+    if (pr.precioPorPersona === null && !repartidas.has(pr.acomodacion)) {
+      out.push({ clave: 'acomodacion_sin_precio', texto: `La ${ETIQUETA_ACOMODACION[pr.acomodacion].toLowerCase()} no tiene precio: escríbelo o quita la acomodación.` })
+    }
+  }
+  // Un infante repartido sin precio ya lo dice el costo; aquí el que trae la solicitud.
+  const infantesDelPaquete = p.distribucion.infantes ?? 0
+  const infantes = pasajeros?.infantes ?? 0
+  if (infantes > 0 && infantesDelPaquete === 0 && (p.hotel.infante?.precio ?? null) === null) {
+    out.push({ clave: 'infantes', texto: `${infantes === 1 ? 'Va 1 infante' : `Van ${infantes} infantes`} y el paquete no tiene su costo: pregúntalo al operador y escríbelo (0 si no paga).` })
+  }
+  // Sin la edad de cada niño no se sabe si es tarifa de niño (Vera, 2026-10-29).
+  const sinEdad = p.distribucion.ninos - (p.distribucion.edadesNinos ?? []).length
+  if (sinEdad > 0) {
+    out.push({ clave: 'nino_sin_edad', texto: sinEdad === 1 ? 'Falta la edad de un niño.' : `Falta la edad de ${sinEdad} niños.` })
+  }
+  const min = p.hotel.nino?.edadMin ?? null
+  const max = p.hotel.nino?.edadMax ?? null
+  if (min !== null || max !== null) {
+    const fuera = (p.distribucion.edadesNinos ?? []).filter(e => (min !== null && e < min) || (max !== null && e > max))
+    if (fuera.length > 0) {
+      const rango = `${min ?? 0}-${max ?? 17} años`
+      const edades = fuera.length === 1 ? `Un niño de ${fuera[0]} años está` : `Niños de ${fuera.join(', ')} años están`
+      out.push({ clave: 'nino_fuera_de_rango', texto: `${edades} fuera del rango CHD del operador (${rango}): cotízalo como adulto o confirma el precio con el operador.` })
+    }
+  }
+  // H2-2 (QA del 2026-10-29): «Doble = 2» con 2 niños daba 6 personas para un viaje de 4, sin aviso.
+  // Las personas del paquete tienen que ser los viajeros de la solicitud: si no, el costo es de otro grupo.
+  const personas = personasDelPaquete(p, pasajeros)
+  if (personas) out.push({ clave: 'personas', texto: personas })
+  return out
+}
+
+/**
+ * Por qué este paquete no se puede enviar. Vacío = completo. `null` en `paquete` es una opción del
+ * bloqueo que nunca se guardó: no tiene costo.
+ *
+ * El costo en cero va primero y con su nombre («Falta el costo del paquete»): sin él, la cotización
+ * frenaba como margen bajo el mínimo (COT-2026-0007 de Trappvel, QA del 2026-10-29).
+ */
+export function faltasDelPaquete(paquete: PaqueteBloqueo | null, pasajeros: ContextoAvisos['pasajeros']): FaltaDelPaquete[] {
+  if (!paquete) return [{ clave: 'falta_costo', texto: FALTA_EL_COSTO }]
+  const costo = costoDelPaquete(paquete)
+  const out: FaltaDelPaquete[] = []
+  if (costo.total === null || costo.total <= 0) {
+    out.push({ clave: 'falta_costo', texto: costo.falta[0] ? `${FALTA_EL_COSTO} ${costo.falta[0]}` : FALTA_EL_COSTO })
+  }
+  return [...out, ...faltasFueraDelCosto(paquete, pasajeros)]
+}
+
 
 // ── Para el documento y la tarjeta ────────────────────────────────────────────
 
@@ -561,6 +814,7 @@ export function descripcionDelPaquete(p: PaqueteBloqueo): string {
   const incluye = incluidoEnPalabras(p.incluye)
   if (incluye.length > 0) partes.push(`Incluye: ${incluye.join(', ')}`)
   for (const t of p.vuelo?.tramos ?? []) partes.push(`Vuelo ${textoDeTramo(t)}`)
+  if (p.incluye.noIncluye) partes.push(`No incluye: ${p.incluye.noIncluye}`)
   return partes.join('\n')
 }
 

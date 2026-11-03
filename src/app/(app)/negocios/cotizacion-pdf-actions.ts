@@ -2,6 +2,7 @@
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { createServiceClient } from '@/lib/supabase/server'
+import { firmaConLaAsesora, pieConLaAsesora, type AsesoraDeLaCotizacion } from '@/lib/cotizaciones/propuesta/asesora'
 import { bogotaParts, todayBogotaISO } from '@/lib/dates/bogota'
 import { renderToBuffer } from '@react-pdf/renderer'
 import CotizacionPDF from '@/lib/pdf/cotizacion-pdf'
@@ -29,6 +30,7 @@ import { avisosDeCobertura } from '@/lib/cotizaciones/cobertura-opciones'
 import { diasDelItinerario, fueraDelPrecio, itemsSugeridos, sugeridosVisibles } from '@/lib/cotizaciones/dia-relativo'
 import {
   cargosEnDestinoDeItems,
+  pagosEnDestinoDeItems,
   ciudadDeActividad,
   destinoDeItinerario,
   duracionDelViaje,
@@ -38,7 +40,10 @@ import {
   vuelosDeItems,
 } from '@/lib/cotizaciones/detalle-viaje'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { hotelesConFechasDelViaje, rangoDelViajeCotizado } from '@/lib/cotizaciones/fechas-del-viaje'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { terminosConCondicionVisa } from '@/lib/viaje/condicion-visa'
+import { terminosConTasaDeCambio } from '@/lib/cotizaciones/nota-tasa-pdf'
 import { describirOcupacion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { hayTarifaPorPasajero, lineasDesactualizadas, motivoParaNoEnviar } from '@/lib/cotizaciones/captura-desactualizada'
 import { MENSAJE_SIN_PASAJEROS } from '@/lib/cotizaciones/captura-desactualizada-datos'
@@ -64,6 +69,8 @@ import { vigenciaEnDias } from '@/lib/cotizaciones/condiciones-comerciales'
 import { fotosDeCiudad } from '@/lib/pdf/fotos-ciudad'
 import { fotosDelViaje } from '@/lib/pdf/fotos-del-viaje'
 import { descripcionVisibleDeLinea, nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
+import { hotelesDePaquetes, noIncluyeDePaquetes, vuelosDePaquetes } from '@/lib/cotizaciones/bloqueo-documento'
+import { esLineaDePaquete } from '@/lib/cotizaciones/bloqueo-incompleto'
 import { precioPorHabitacionDeItem, precioPorPasajeroDeItem, preciosPorPasajeroDelViaje } from '@/lib/cotizaciones/precio-pasajero-pdf'
 import { calcularFiscal, type FiscalProfile } from '@/lib/fiscal/calculos'
 import {
@@ -90,6 +97,8 @@ import { evaluarSalida } from '@/lib/cotizaciones/piso-salida-datos'
 import { motivoSinRecomendada } from '@/lib/cotizaciones/tarifas'
 import { ponerMarcaDeBorrador } from '@/lib/pdf/marca-borrador'
 import { avisoDeBorrador, motivosDeBorrador } from '@/lib/cotizaciones/motivos-borrador'
+import { frenosDePaqueteYPasajero } from '@/lib/cotizaciones/frenos-de-paquete-y-pasajero'
+import { autorizacionDelNegocioLeido, MENSAJE_ENVIO, type NegocioParaEnvio } from '@/lib/autorizacion-datos/envio'
 import { imagenComoDataUrl } from '@/lib/cotizaciones/imagen-captura'
 import { claveDeHotel, fotosDeHotelesDelDocumento } from '@/lib/fotos/foto-hotel-documento'
 import type { OpcionalDelDocumento } from '@/lib/fotos/catalogo-propuesta'
@@ -264,7 +273,21 @@ export async function generateCotizacionPDF(
    * del dueño, ni el almacenamiento, ni Drive, ni el registro de la salida. Sin la opción, todo como
    * siempre.
    */
-  opciones?: { vistaPrevia?: boolean },
+  opciones?: {
+    vistaPrevia?: boolean
+    /**
+     * Quien llama dice si la cotización se trabaja por pasos (el PDF no mira el interruptor, criterio
+     * N4). Con él, el precio por pasajero que falta (P12) también deja el PDF como borrador, porque
+     * así frena `enviarPorPasos`. Solo AGREGA la marca: sin la opción, como siempre.
+     */
+    porPasos?: boolean
+    /**
+     * La pieza `incluye_por_one` de la forma por pasos (QA del #1342): «Incluye» lo arma ONE con lo
+     * que se cobra aunque el texto para el cliente no esté revisado ni tenga la marca. Solo lo pasa
+     * quien sabe que la pieza está encendida (el PDF no mira el interruptor, N4).
+     */
+    incluyePorOne?: boolean
+  },
 ) {
   const vistaPrevia = opciones?.vistaPrevia === true
   const { supabase, workspaceId, staffId, error } = await getWorkspace()
@@ -299,7 +322,8 @@ export async function generateCotizacionPDF(
    * la propuesta el total sería un supuesto, así que el PDF sale como borrador, igual que
    * bajo el margen mínimo. Sin tarifas (`[]`, R6) no dice nada y todo sigue como antes.
    */
-  const sinRecomendada = motivoSinRecomendada((await leerItinerarios(supabase, cotizacionId)) ?? [])
+  const tarifasDelPdf = (await leerItinerarios(supabase, cotizacionId)) ?? []
+  const sinRecomendada = motivoSinRecomendada(tarifasDelPdf)
 
   // Get empresa: primero por oportunidad, luego por negocio, luego fallback
   type EmpresaRow = {
@@ -329,9 +353,11 @@ export async function generateCotizacionPDF(
   }
 
   // Para cotizaciones de negocio, intentar obtener empresa del negocio
-  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null; configLinea: unknown }
+  type NegocioInfo = { id: string; nombre: string | null; carpeta_url: string | null; linea_id: string | null; configLinea: unknown; responsableId: string | null }
   let negocioInfo: NegocioInfo | null = null
   let contactoDelNegocio: string | null = null
+  // El negocio con las etapas de su línea, para la autorización de datos (la regla de «Enviar»).
+  let negocioParaEnvio: NegocioParaEnvio | null = null
 
   if (cot.negocio_id) {
     const { data: negocio } = await supabase
@@ -339,7 +365,7 @@ export async function generateCotizacionPDF(
       // La línea viaja en la MISMA ida (embed): «Así puedes pagar» lee su `config_extra` y una
       // consulta aparte le sumaba una ida a todo PDF de negocio (presupuesto V5 de C0).
       // El contacto también (2026-10-27): la propuesta de viaje dice a quién va dirigida.
-      .select('id, nombre, carpeta_url, linea_id, empresa_id, lineas_negocio(config_extra), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento), contactos(nombre)')
+      .select('id, nombre, carpeta_url, linea_id, empresa_id, contacto_id, responsable_id, lineas_negocio(config_extra, etapas_negocio(config_extra)), empresas(nombre, numero_documento, contacto_nombre, contacto_email, tipo_persona, regimen_tributario, gran_contribuyente, agente_retenedor, telefono, direccion_fiscal, municipio, departamento), contactos(nombre)')
       .eq('id', cot.negocio_id)
       .single()
     if (negocio) {
@@ -351,6 +377,12 @@ export async function generateCotizacionPDF(
         carpeta_url: negocio.carpeta_url,
         linea_id: (negocio as { linea_id?: string | null }).linea_id ?? null,
         configLinea: (filaLinea as { config_extra?: unknown } | null | undefined)?.config_extra ?? null,
+        responsableId: (negocio as { responsable_id?: string | null }).responsable_id ?? null,
+      }
+      negocioParaEnvio = {
+        linea_id: negocioInfo.linea_id,
+        contacto_id: (negocio as { contacto_id?: string | null }).contacto_id ?? null,
+        lineas_negocio: (filaLinea as NegocioParaEnvio['lineas_negocio']) ?? null,
       }
       if (!empresa) {
         empresa = (negocio.empresas as EmpresaRow | null) ?? null
@@ -543,12 +575,16 @@ export async function generateCotizacionPDF(
    * (`precioPorPasajeroDeItem`).
    *
    * Los pasajeros del viaje se leen UNA vez y solo si alguna línea tiene tarifa por
-   * pasajero: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
+   * pasajero o es un paquete de bloqueo: una cotización que no es de viaje no paga la consulta (R6). Si esa lectura
    * falla, borrador: sin los pasajeros no se puede saber si el precio es el de hoy, y un
    * PDF limpio lo afirmaría.
    */
   const conTarifaPorPasajero = hayTarifaPorPasajero(items)
-  const lecturaDelViaje = negocioInfo && conTarifaPorPasajero
+  // Un bloqueo de solo paquetes no trae tarifa por pasajero (`tarifa_pax.bloqueo`), pero su freno
+  // necesita los pasajeros y las edades de la Solicitud, como `enviarPorPasos` (Vera sobre el #1326).
+  const conPaquete = items.some(i => esLineaDePaquete({ grupo: i.grupo ?? null, es_ajuste: i.es_ajuste ?? null })
+    || !!(i.tarifa_pax && typeof i.tarifa_pax === 'object' && (i.tarifa_pax as { bloqueo?: unknown }).bloqueo))
+  const lecturaDelViaje = negocioInfo && (conTarifaPorPasajero || conPaquete)
     ? await leerViajeDelNegocio(supabase, negocioInfo.id)
     : null
   const viajeDelNegocio = lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.viaje : null
@@ -571,6 +607,27 @@ export async function generateCotizacionPDF(
   const motivoPantallazos = sinPasajerosDelViaje
     ? MENSAJE_SIN_PASAJEROS
     : motivoParaNoEnviar(desactualizadas)
+
+  /**
+   * Lo que frena «Enviar» antes del margen (prueba real del bloqueo de Trappvel, 2026-10-29): la
+   * autorización de datos del cliente (la regla de `enviarCotizacion`, con el negocio ya leído), el
+   * paquete de bloqueo incompleto y, por pasos, el precio por pasajero (P12). Las mismas funciones
+   * que el envío: si «Enviar» frena, el PDF sale con la marca. La Neta con margen sano y la
+   * autorización pendiente salía limpia (heredado de #1257, 2026-10-25).
+   */
+  const motivoDatos = negocioInfo
+    ? await (async () => {
+        const v = await autorizacionDelNegocioLeido(supabase, { workspaceId, negocioId: negocioInfo!.id, negocio: negocioParaEnvio })
+        return v.falta ? MENSAJE_ENVIO[v.falta] : null
+      })()
+    : null
+  const frenos = frenosDePaqueteYPasajero({
+    items: items.filter(i => i.id).map(i => ({ ...i, id: i.id as string })),
+    tarifas: tarifasDelPdf,
+    composicion: composicionViaje,
+    edadesMenores: lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje.edadesMenores ?? null : null,
+    conPrecioPorPasajero: opciones?.porPasos === true,
+  })
 
   // Calculate fiscal
   type Regimen = FiscalProfile['regimen_tributario']
@@ -647,22 +704,33 @@ export async function generateCotizacionPDF(
   // exactamente el OR de las condiciones. La Recomendada fuera de la propuesta tiene su
   // propio motivo: sin ella el total es un supuesto, y eso no es un problema de margen.
   const motivosBorrador = motivosDeBorrador({
+    autorizacionDatos: motivoDatos !== null,
+    precioPorPasajero: frenos.precioPorPasajero !== null,
+    paqueteIncompleto: frenos.paquete !== null,
+    comisionPublica: frenos.comision !== null,
     pantallazos: motivoPantallazos !== null,
     sinRecomendada: sinRecomendada !== null,
     faltaCosto: salida?.aplica === true && salida.faltaCosto !== null,
     faltaTasa: salida?.aplica === true && salida.faltaTasa === true,
-    margen: salidaBloquea,
+    // Con un paquete incompleto su costo no está en la cuenta: «margen bajo el mínimo» señalaría la
+    // causa equivocada (la misma regla que la lista única de Revisar).
+    // Lo mismo con una Pública sin comisión (D3): el margen no se puede medir; la causa es la comisión.
+    margen: salidaBloquea && frenos.paquete === null && frenos.comision === null,
     ivaSinCalcular,
     ivaIncluidoSinPlantilla,
   })
   const esBorrador = motivosBorrador.length > 0
   const avisoBorrador = esBorrador
     ? avisoDeBorrador(motivosBorrador, {
+        autorizacion_datos: motivoDatos,
+        precio_por_pasajero: frenos.precioPorPasajero,
+        paquete_incompleto: frenos.paquete,
+        comision_publica: frenos.comision,
         pantallazos: motivoPantallazos,
         recomendada: sinRecomendada,
         incompleto: salida?.aplica === true ? salida.faltaCosto : null,
         incompleto_tasa: salida?.aplica === true ? salida.faltaCosto : null,
-        margen: salidaBloquea ? salida!.mensaje : null,
+        margen: salidaBloquea && frenos.paquete === null && frenos.comision === null ? salida!.mensaje : null,
         iva_sin_calcular: ivaSinCalcular ? motivoIvaSinCalcular(ivaCot!.sinCosto) : null,
         iva_incluido_sin_plantilla: ivaIncluidoSinPlantilla ? MOTIVO_IVA_INCLUIDO_SIN_PLANTILLA : null,
       })
@@ -860,19 +928,18 @@ export async function generateCotizacionPDF(
   // Quien firma el documento. Se resuelve SOLO si la plantilla lo imprime, para no
   // cobrarle una consulta a los workspaces que no lo usan.
   //
-  // OJO con lo que este dato significa: `cotizaciones` no guarda quien la creo, asi
-  // que esto es el staff que APRETO GENERAR, no necesariamente quien la elaboro. Si
-  // el usuario no tiene ficha de staff queda null y la plantilla omite la firma.
+  // OJO con lo que este dato significa: `cotizaciones` no guarda quien la creo. Desde el
+  // 2026-10-29 es la responsable comercial del negocio y, si el negocio no tiene, el staff que
+  // APRETO GENERAR. Sin ficha de staff queda null y la plantilla omite la firma.
   let emisor: { nombre: string; cargo: string | null } | null = null
-  if (plantillaPropia && staffId) {
-    const { data: staff } = await supabase
-      .from('staff')
-      .select('full_name, position')
-      .eq('id', staffId)
-      .maybeSingle<{ full_name: string | null; position: string | null }>()
-    if (staff?.full_name) {
-      emisor = { nombre: staff.full_name, cargo: staff.position ?? null }
-    }
+  // Brief del 2026-10-29, punto 5 · la asesora de la cotización: la responsable comercial del
+  // negocio o, sin ella, quien genera. La MISMA lectura de la ficha sirve a la firma de siempre y
+  // a los datos de la asesora en el pie (sin una ida más a la base).
+  let asesoraDoc: AsesoraDeLaCotizacion | null = null
+  const staffDeLaAsesora = negocioInfo?.responsableId ?? staffId ?? null
+  if (plantillaPropia && staffDeLaAsesora) {
+    asesoraDoc = await leerAsesoraDeLaCotizacion(supabase, staffDeLaAsesora)
+    if (asesoraDoc) emisor = { nombre: asesoraDoc.nombre, cargo: asesoraDoc.cargo }
   }
 
   // R7 · los bloques de la propuesta. `null` cuando la cotizacion no tiene
@@ -1182,20 +1249,20 @@ export async function generateCotizacionPDF(
   const fichasDeHotel = new Map<string, string>()
   // Motor `html`: la ciudad y el día de cada plan opcional, para ponerlo en los días libres.
   let lugaresOpcionalesDoc: LugarDeOpcional[] = []
+  // S3 (QA del 2026-10-29): cuántos viajan, para que la propuesta le hable a uno (usted) o a varios
+  // (ustedes). Va aparte de las props a propósito: las de @react-pdf no cambian.
+  let numeroDeViajerosDoc: number | null = null
   // «Así puedes pagar» (F2, PR 7): solo con `plan_pagos.activo` en la línea del negocio.
   let entradaPlan: CotizacionPDFProps['asiPuedesPagar'] = null
   // Un borrador de ONE sin revisar no sale en el PDF; se avisa, sin bloquear la descarga.
   let avisoTexto: string | null = null
+  // Visa en trámite en la Solicitud (Mauricio 2026-10-29): la condición va en los términos.
+  let conVisaEnTramite = false
   if (plantillaPropia && negocioInfo) {
     // Ya leído arriba cuando alguna línea tiene tarifa por pasajero: no se paga dos veces.
-    const delNegocio = viajeDelNegocio ?? (await leerViajeDelNegocio(supabase, negocioInfo.id)).viaje
-    if (negocioInfo.linea_id) {
-      // Sin poder leer la línea, apagado: el documento sale como hoy.
-      entradaPlan = entradaAsiPuedesPagar(
-        negocioInfo.configLinea,
-        { fechaSalida: delNegocio.fechas.inicio, hoy: todayBogotaISO() },
-      )
-    }
+    const lectura = lecturaDelViaje && !lecturaDelViaje.error ? lecturaDelViaje : await leerViajeDelNegocio(supabase, negocioInfo.id)
+    const delNegocio = lectura.viaje
+    conVisaEnTramite = lectura.visaEnTramite ?? false
     const paraLecturaDe = (i: ItemRow) => ({
       nombre: i.nombre ?? '',
       grupo: i.grupo ?? null,
@@ -1211,8 +1278,28 @@ export async function generateCotizacionPDF(
       descripcion: i.descripcion ?? null,
     })
     const paraLectura = itemsImpresos.map(paraLecturaDe)
-    const vuelos = vuelosDeItems(paraLectura)
-    const hoteles = hotelesDeItems(paraLectura)
+    // Viaje en bloqueo (QA del 2026-10-29): el hotel y los vuelos del paquete viven en
+    // `tarifa_pax.bloqueo`, no en las casillas del pantallazo. Solo se DESCRIBEN aquí: no entran a
+    // `vuelosDeItems`, que también usan el margen y el recargo.
+    const vuelosDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...vuelosDeItems(xs), ...vuelosDePaquetes(xs)]
+    // D6 (2026-10-29): un paquete sin vuelo ni salida manual toma las fechas del viaje del negocio.
+    const hotelesDoc = (xs: ReturnType<typeof paraLecturaDe>[]) => [...hotelesDeItems(xs), ...hotelesDePaquetes(xs, delNegocio.fechas)]
+    const vuelos = vuelosDoc(paraLectura)
+    // Las fechas del viaje COTIZADO (brief del 2026-10-29, punto 1): las de los servicios; el
+    // rango de la solicitud solo si ninguno tiene fecha. El hotel sin fechas en su captura toma
+    // la llegada y el regreso del vuelo.
+    const hotelesLeidos = hotelesDoc(paraLectura)
+    const rango = rangoDelViajeCotizado({ vuelos, hoteles: hotelesLeidos }, delNegocio.fechas)
+    const hoteles = hotelesConFechasDelViaje(hotelesLeidos, rango)
+    if (negocioInfo.linea_id) {
+      // Sin poder leer la línea, apagado: el documento sale como hoy. El «día del viaje» es el
+      // inicio del viaje COTIZADO, el mismo de la portada (segunda vuelta de la COT-2026-0008,
+      // punto 2): con el de la solicitud el plan decía «21 de junio» en un documento del 26.
+      entradaPlan = entradaAsiPuedesPagar(
+        negocioInfo.configLinea,
+        { fechaSalida: rango.inicio, hoy: todayBogotaISO() },
+      )
+    }
 
     /**
      * Con VARIAS tarifas en la propuesta, los vuelos y hoteles del documento son los de las
@@ -1234,6 +1321,8 @@ export async function generateCotizacionPDF(
     let vuelosDelDocumento = vuelos
     let hotelesDelDocumento = hoteles
     let cargosEnDestino = cargosEnDestinoDeItems(paraLectura)
+    // V-13 (ronda 3): lo que se paga en destino y no es del hotel (el ingreso a un parque).
+    let pagosEnDestino = pagosEnDestinoDeItems(paraLectura)
     if (bloques && bloques.length > 1) {
       const tarifasDe = new Map<string, number[]>()
       bloques.forEach((b, idx) => {
@@ -1243,9 +1332,10 @@ export async function generateCotizacionPDF(
         .map(id => itemPorId.get(id))
         .filter((i): i is ItemRow => i !== undefined)
       const marcar = <T,>(lista: T[], i: ItemRow) => lista.map(x => ({ ...x, tarifas: tarifasDe.get(i.id as string) ?? [] }))
-      vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDeItems([paraLecturaDe(i)]), i))
-      hotelesDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(hotelesDeItems([paraLecturaDe(i)]), i))
+      vuelosDelDocumento = itemsDeLaPropuesta.flatMap(i => marcar(vuelosDoc([paraLecturaDe(i)]), i))
+      hotelesDelDocumento = hotelesConFechasDelViaje(itemsDeLaPropuesta.flatMap(i => marcar(hotelesDoc([paraLecturaDe(i)]), i)), rango)
       cargosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(cargosEnDestinoDeItems([paraLecturaDe(i)]), i))
+      pagosEnDestino = itemsDeLaPropuesta.flatMap(i => marcar(pagosEnDestinoDeItems([paraLecturaDe(i)]), i))
     }
     // La ficha fijada en cada línea de hotel: sus fotos son las que la tarjeta muestra y guarda.
     for (const i of itemPorId.values()) {
@@ -1322,11 +1412,15 @@ export async function generateCotizacionPDF(
       : null
     // C6 · con la marca `incluye_origen = 'one'`, «Incluye» lo arma ONE con lo que se cobra en
     // lo que el documento describe. Sin la marca no se calcula nada: el documento de siempre.
+    // QA del #1342 · con la pieza `incluye_por_one` (lo dice quien llama, N4) «Incluye» lo arma ONE
+    // aunque el texto no tenga la marca ni esté revisado: es lo que promete la pantalla.
+    const incluyePorOne = documentoCliente?.incluye_origen === 'one' || (opciones?.incluyePorOne === true && plantillaUsaTextoDelCliente(templateSlug))
     const textoCliente = textoParaElViaje(
       documentoCliente,
-      documentoCliente?.incluye_origen === 'one'
+      incluyePorOne
         ? incluyeDeOne(itemsImpresos.filter(i => i.entra_al_precio !== false).map(paraLecturaDe), delNegocio.nivelDetalle)
         : null,
+      { incluyeSinRevisar: incluyePorOne },
     )
     avisoTexto = avisoDelTextoEnPdf(documentoCliente)
     // El texto revisado que quedó viejo (brief del 2026-10-08): la misma huella que el panel del
@@ -1335,25 +1429,35 @@ export async function generateCotizacionPDF(
       const ctxTexto = await leerContextoTextoCliente(supabase, cotizacionId)
       avisoTexto = avisoDelTextoViejoEnPdf(documentoCliente, ctxTexto?.huella ?? null)
     }
+    if (delNegocio.composicion) {
+      numeroDeViajerosDoc = delNegocio.composicion.adultos + delNegocio.composicion.ninos + delNegocio.composicion.infantes
+    }
     const viaje = {
       ...textoCliente,
       viajeros: delNegocio.composicion ? describirOcupacion(delNegocio.composicion, 'y') : null,
       destino,
-      fechas: rangoDeFechas(delNegocio.fechas.inicio, delNegocio.fechas.fin),
-      duracion: duracionDelViaje(delNegocio.fechas.inicio, delNegocio.fechas.fin),
+      fechas: rangoDeFechas(rango.inicio, rango.fin),
+      duracion: duracionDelViaje(rango.inicio, rango.fin),
       presentacion: delNegocio.presentacion,
       // Las fotos salen del banco PROVISIONAL (`fotos-ciudad.ts`) y solo para la plantilla
       // que las imprime. `fotosDeCiudad` es la única puerta al banco: cuando llegue el real
       // (async, en la base), se cambia allá y esta línea sigue igual.
       foto: fotos?.portada ?? null,
       fotosCiudades: fotos?.ciudades ?? [],
-      fechaInicio: delNegocio.fechas.inicio,
+      fechaInicio: rango.inicio,
+      // Los días asignados («día 3») cuentan desde la solicitud, como en la pantalla.
+      ...(rango.inicio !== delNegocio.fechas.inicio ? { inicioDeLosDias: delNegocio.fechas.inicio } : {}),
       vuelos: vuelosDelDocumento,
       hoteles: hotelesDelDocumento,
       cargosEnDestino,
+      ...(pagosEnDestino.length > 0 ? { pagosEnDestino } : {}),
+      // V5 (QA del 2026-10-29): lo que el paquete de bloqueo no incluye, si se leyó o se escribió.
+      ...(() => { const n = noIncluyeDePaquetes(paraLectura); return n.length > 0 ? { noIncluye: n } : {} })(),
       nivelDetalle: delNegocio.nivelDetalle,
-      pie: config.pie,
-      firma: config.firma,
+      // Brief del 2026-10-29, punto 5 · el pie y la firma con los datos de la asesora (la
+      // responsable del negocio, o quien genera). Sin su ficha, los configurados de siempre.
+      pie: pieConLaAsesora(config.pie, asesoraDoc),
+      firma: firmaConLaAsesora(config.firma, asesoraDoc),
     }
     const hayAlgoQueDescribir =
       viaje.viajeros !== null
@@ -1363,6 +1467,7 @@ export async function generateCotizacionPDF(
       || vuelos.length > 0
       || hoteles.length > 0
       || cargosEnDestino.length > 0
+      || pagosEnDestino.length > 0
       || Object.keys(textoCliente).length > 0
     viajePDF = hayAlgoQueDescribir ? viaje : null
   }
@@ -1379,7 +1484,8 @@ export async function generateCotizacionPDF(
       notas: cot.notas,
       descuento_porcentaje: cot.descuento_porcentaje ?? 0,
       descuento_valor: cot.descuento_valor ?? 0,
-      terminos_condiciones: (cot as unknown as CotizacionNuevosCampos).terminos_condiciones,
+      // H8 (QA 2026-10-29): si alguna línea se costeó en otra moneda, la tarjeta «Tasa de cambio».
+      terminos_condiciones: terminosConCondicionVisa(terminosConTasaDeCambio((cot as unknown as CotizacionNuevosCampos).terminos_condiciones, items), conVisaEnTramite),
     },
     empresa: {
       nombre: empresa.nombre ?? '',
@@ -1441,11 +1547,13 @@ export async function generateCotizacionPDF(
   let buffer: Buffer | null = null
   let renderedVia: 'react-pdf' | 'chromium' = 'react-pdf'
   let avisoFormato: string | null = null
+  // Regla de fotos (2026-10-29): los hoteles cuya ficha sale con menos de 3 fotos. No bloquea.
+  let avisosFotos: string[] = []
   if (motorHtml) {
     // Si el motor nuevo falla (Chromium, tiempo, una foto rota), el cliente no se queda sin
     // cotización: sale la de @react-pdf y quien descarga lo sabe.
     try {
-      buffer = await propuestaConMotorHtml(supabase, {
+      const hecho = await propuestaConMotorHtml(supabase, {
         props: propsPDF,
         servicios: serviciosDoc,
         lugaresDeOpcionales: lugaresOpcionalesDoc,
@@ -1453,11 +1561,15 @@ export async function generateCotizacionPDF(
         fichasDeHotel,
         documentoCliente: (cot as unknown as Record<string, unknown>).documento_cliente,
         cliente: clienteDelNegocio,
-        staffId: staffId ?? null,
+        numeroDeViajeros: numeroDeViajerosDoc,
+        // El botón de apartar abre el WhatsApp de la MISMA asesora que firma (punto 5).
+        staffId: staffDeLaAsesora,
         workspaceId,
         marca: ws?.name ?? 'Mi Empresa',
         logoUrl: ws?.logo_url ?? null,
       })
+      buffer = hecho.pdf
+      avisosFotos = hecho.avisosFotos
       renderedVia = 'chromium'
     } catch (e) {
       console.error('[cotizacion-pdf] el motor html falló; sale el formato anterior:', e instanceof Error ? e.message : e)
@@ -1472,7 +1584,8 @@ export async function generateCotizacionPDF(
       : await renderToBuffer(createElement(plantillaPropia ?? CotizacionPDF, propsPDF) as any)
   }
   // La clave solo existe con el motor encendido: apagado, la respuesta es la de siempre.
-  const conMotor = motorHtml ? { avisoFormato } : {}
+  const conFotos = avisosFotos.length > 0 ? { avisosFotos } : {}
+  const conMotor = motorHtml ? { avisoFormato, ...conFotos } : {}
 
   // Borrador: marca de agua y fuera, sin guardar ni registrar (ver `esBorrador`).
   if (esBorrador) {
@@ -1496,7 +1609,7 @@ export async function generateCotizacionPDF(
   const base64 = Buffer.from(buffer).toString('base64')
   const filename = `${cot.consecutivo}.pdf`
   // Vista previa: el documento, sin guardarlo ni registrarlo.
-  if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia }
+  if (vistaPrevia) return { success: true, pdf: base64, filename, fiscal, vistaPrevia: true as const, renderedVia, ...conFotos }
 
   // Este camino nunca guardó el PDF en ningún lado (solo lo devuelve para descargar), y
   // en un workspace en Drive sigue igual. Con almacenamiento externo queda además en el
@@ -1561,12 +1674,14 @@ async function propuestaConMotorHtml(
     documentoCliente: unknown
     /** El contacto y la empresa del negocio: a quién va dirigida la propuesta. */
     cliente: ClienteDelNegocio
+    /** S3 · cuántos viajan; `null` = no se sabe (ustedes). */
+    numeroDeViajeros?: number | null
     staffId: string | null
     workspaceId: string
     marca: string
     logoUrl: string | null
   },
-): Promise<Buffer> {
+): Promise<{ pdf: Buffer; avisosFotos: string[] }> {
   let asesora: { nombre: string | null; whatsapp: string | null } | null = null
   if (e.staffId) {
     const { data } = await supabase
@@ -1582,7 +1697,7 @@ async function propuestaConMotorHtml(
   const { catalogoParaLaPropuesta } = await import('@/lib/fotos/catalogo-propuesta')
   const catalogo = await catalogoParaLaPropuesta(supabase, e.workspaceId, e.props, e.opcionales, e.fichasDeHotel ?? new Map()).catch(() => null)
   const { pdfDePropuestaHtml } = await import('@/lib/pdf/html/propuesta-html')
-  const { pdf, medidas } = await pdfDePropuestaHtml(
+  const { pdf, medidas, avisosFotos } = await pdfDePropuestaHtml(
     {
       props: e.props,
       servicios: e.servicios,
@@ -1590,6 +1705,7 @@ async function propuestaConMotorHtml(
       anticipo: leerAnticipo(e.documentoCliente),
       asesora,
       cliente: e.cliente,
+      numeroDeViajeros: e.numeroDeViajeros ?? null,
     },
     {
       marca: e.marca,
@@ -1598,6 +1714,33 @@ async function propuestaConMotorHtml(
       catalogo,
     },
   )
-  console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length }))
-  return pdf
+  console.info('[pdf-html] propuesta', JSON.stringify({ totalMs: medidas.totalMs, pdfBytes: medidas.pdfBytes, bloqueadas: medidas.peticionesBloqueadas.length, hojas: medidas.hojas ?? null }))
+  return { pdf, avisosFotos: (avisosFotos ?? []).map(a => a.texto) }
+}
+
+/**
+ * La asesora de la cotización (brief del 2026-10-29, punto 5): su ficha de staff y el correo de su
+ * usuario. `null` sin ficha o sin nombre. El correo vive en Auth: si no se puede leer, va sin él.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function leerAsesoraDeLaCotizacion(supabase: any, staffIdAsesora: string | null): Promise<AsesoraDeLaCotizacion | null> {
+  if (!staffIdAsesora) return null
+  const { data } = await supabase
+    .from('staff')
+    .select('full_name, position, phone_whatsapp, profile_id')
+    .eq('id', staffIdAsesora)
+    .maybeSingle()
+  const fila = data as { full_name?: string | null; position?: string | null; phone_whatsapp?: string | null; profile_id?: string | null } | null
+  const nombre = fila?.full_name?.trim()
+  if (!fila || !nombre) return null
+  let correo: string | null = null
+  if (fila.profile_id) {
+    try {
+      const { data: u } = await createServiceClient().auth.admin.getUserById(fila.profile_id)
+      correo = u?.user?.email?.trim() || null
+    } catch {
+      correo = null
+    }
+  }
+  return { nombre, cargo: fila.position?.trim() || null, correo, celular: fila.phone_whatsapp?.trim() || null }
 }

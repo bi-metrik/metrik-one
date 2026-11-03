@@ -28,7 +28,7 @@ type Cliente = any
 export const MENSAJE_ENVIO: Record<FaltaGate | 'error', string> = {
   sin_contacto: 'El negocio no tiene contacto: asígnale el cliente y pídele la autorización de datos antes de enviar la cotización.',
   generales: MENSAJE_ENVIO_PENDIENTE,
-  menores: 'El viaje lleva menores y el cliente no autorizó el uso de sus datos: la cotización se puede armar, pero no enviar. Envíale el link desde «Autorización de datos».',
+  menores: 'El viaje lleva menores y falta la autorización de los datos de los menores: la cotización se puede armar, pero no enviar. Pide el link en el aviso «Falta la autorización» de la ficha del negocio: ahí se copia o se envía por correo.',
   error: 'No se pudo revisar la autorización de datos del cliente. Vuelve a intentarlo.',
 }
 

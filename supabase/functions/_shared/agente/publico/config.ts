@@ -40,8 +40,13 @@ export interface InboxPublico {
   anuncio7Dias: boolean;
 }
 
+/** De qué es el asistente: experiencias con reserva (Sabor) o venta de productos del catálogo de Ferretería (Dimpro). */
+export type DominioAsistente = 'experiencias' | 'ventas';
+
 export interface ConfigPublico {
   activo: boolean;
+  /** `chatwoot.dominio`. Sin él (o con otro valor), `experiencias`: lo de siempre. */
+  dominio: DominioAsistente;
   cuentaId: number | null;
   apiUrl: string;
   inboxes: InboxPublico[];
@@ -82,6 +87,7 @@ export const TERMINOS_EJEMPLO = 'https://ejemplo.invalid/sabor/terminos-EJEMPLO'
 
 export const CONFIG_PUBLICO_POR_DEFECTO: ConfigPublico = {
   activo: false,
+  dominio: 'experiencias',
   cuentaId: null,
   apiUrl: 'https://app.chatwoot.com',
   inboxes: [],
@@ -100,6 +106,23 @@ export const CONFIG_PUBLICO_POR_DEFECTO: ConfigPublico = {
   pausaLargaHoras: 24,
   equipos: {},
 };
+
+/**
+ * Los cortes del reintento con aviso en el dominio de VENTAS (Dimpro), cuando `config_extra` no los fija. Medido en
+ * Messenger el 29-oct: un turno normal de ventas (catálogo + respuesta, a veces una vuelta del verificador) tarda 7-13 s,
+ * así que con el `corte_1` de 5 s el aviso «tu respuesta está tomando un poco más de lo esperado» salía en casi todos
+ * los turnos (Mauricio: «tiene muchos errores»). A 20 s solo sale con una demora de verdad; el corte total da margen
+ * al segundo intento. Sabor (experiencias) sigue con 5 s / 20 s.
+ */
+export const CORTES_VENTAS = { corte1Ms: 20_000, corteTotalMs: 45_000 } as const;
+
+/**
+ * Ventas, ronda 3 (30-oct): las pausas entre los envíos de un turno partido por producto. Chatwoot manda cada mensaje a
+ * Messenger en un trabajo aparte y la foto tarda más (Messenger la baja): sin pausa, el texto del producto siguiente
+ * podía llegar antes que la foto del anterior. SIN VERIFICAR contra Messenger: si aun así se cruzan, se suben.
+ */
+export const PAUSA_TRAS_FOTO_MS = 2500;
+export const PAUSA_ENTRE_MENSAJES_MS = 800;
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === 'object' && !Array.isArray(v) ? v as Obj : null);
@@ -162,11 +185,15 @@ export function leerConfigPublico(botConversacional: unknown): ConfigPublico {
   if (!c) return d;
   const topes = obj(c.topes) ?? {};
   const audio = obj(c.audio) ?? {};
-  const corte1Ms = numero(c.corte_1_ms, d.corte1Ms, 1000, 30_000);
-  const corteTotalMs = Math.max(numero(c.corte_total_ms, d.corteTotalMs, 2000, 60_000), corte1Ms + 1000);
+  const dominio = c.dominio === 'ventas' ? 'ventas' : 'experiencias';
+  // Ventas usa sus propios cortes por defecto (`CORTES_VENTAS`); lo que diga la configuración manda.
+  const cortes = dominio === 'ventas' ? CORTES_VENTAS : d;
+  const corte1Ms = numero(c.corte_1_ms, cortes.corte1Ms, 1000, 30_000);
+  const corteTotalMs = Math.max(numero(c.corte_total_ms, cortes.corteTotalMs, 2000, 60_000), corte1Ms + 1000);
   const presupuesto = c.presupuesto_diario_usd;
   return {
     activo: c.activo === true,
+    dominio,
     cuentaId: entero(c.cuenta_id),
     apiUrl: enlace(c.api_url)?.replace(/\/+$/, '') ?? d.apiUrl,
     inboxes: leerInboxes(c.inboxes),

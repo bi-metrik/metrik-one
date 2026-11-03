@@ -23,6 +23,9 @@ vi.mock('@/lib/actions/get-workspace', () => ({
   getWorkspace: async () => ({ supabase: clienteFalso(), workspaceId: 'ws-1', userId: 'p-1', error: null }),
 }))
 vi.mock('@/app/(app)/negocios/cotizacion-actions', () => ({ recalcularTotales: async () => { recalculos += 1 } }))
+// D5 (2026-10-29): crear y guardar cierran como toda acción por pasos (tarifas + total). Aquí cuenta
+// como el recálculo; las tarifas de cada paquete las prueba la batería (`bateria-cotizaciones-e2e`).
+vi.mock('@/lib/cotizaciones/por-pasos-cierre', () => ({ cerrarAccionPorPasos: async () => { recalculos += 1; return { success: true, valorTotal: null } } }))
 vi.mock('@/lib/cotizaciones/por-pasos-datos', () => ({
   exigirPorPasos: async () => (porPasosEncendido ? { ok: true, estado: {} } : { ok: false, error: 'La cotización por pasos no está encendida' }),
 }))
@@ -86,7 +89,7 @@ function consulta(tabla: string) {
   return api
 }
 
-const { crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo } = await import('./bloqueo-actions')
+const { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo } = await import('./bloqueo-actions')
 const { leerTarifaPax } = await import('@/lib/cotizaciones/tarifa-pasajero')
 const { leerPaqueteBloqueo } = await import('@/lib/cotizaciones/bloqueo-paquete')
 
@@ -219,5 +222,122 @@ describe('«+ Paquete»', () => {
     tablas.items = []
     expect((await crearPaqueteBloqueo('cot-1')).success).toBe(false)
     expect(tablas.items).toEqual([])
+  })
+})
+
+describe('comisión propia y descuento al cliente del paquete (decisión del 2026-10-29)', () => {
+  it('la comisión de una tarifa Incluida (Pública) se guarda en tarifa_pax y sobrevive a «Guardar paquete»', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    const r = await ajustarReglasDelPaquete('item-1', { comisionPct: 10 })
+    expect(r.success).toBe(true)
+    expect(leerTarifaPax(item().tarifa_pax).tipoTarifa).toMatchObject({ tipo: 'publica', comisionPct: 10 })
+    expect(recalculos).toBe(2)
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    expect(leerTarifaPax(item().tarifa_pax).tipoTarifa?.comisionPct).toBe(10)
+    // Vuelve a Neta: la comisión era de la Pública y se va.
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    expect(leerTarifaPax(item().tarifa_pax).tipoTarifa?.comisionPct).toBeUndefined()
+  })
+
+  it('una comisión sobre una tarifa Neta se rechaza sin escribir', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    const antes = structuredClone(item().tarifa_pax)
+    const r = await ajustarReglasDelPaquete('item-1', { comisionPct: 10 })
+    expect(r.success).toBe(false)
+    expect(item().tarifa_pax).toEqual(antes)
+  })
+
+  it('el descuento al cliente se guarda con su motivo, se quita con null, y sin motivo se rechaza', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    expect((await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: '', tipo: 'pct', valor: 6 } })).success).toBe(false)
+    const r = await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    expect(r.success).toBe(true)
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toMatchObject({ motivo: 'Reserva esta semana', tipo: 'pct', valor: 6, por: 'Tatiana' })
+    // El paquete sigue intacto.
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.hotel.hotel).toBe('Hotel Cartagena Dubai')
+    await ajustarReglasDelPaquete('item-1', { descuentoCliente: null })
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeUndefined()
+  })
+
+  it('en una línea que no es paquete, o una cotización enviada, no escribe', async () => {
+    tablas.items[0].grupo = 'hotel'
+    expect((await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 2 } })).success).toBe(false)
+    tablas.items[0].grupo = GRUPO
+    estadoDeLaCotizacion = 'enviada'
+    expect((await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 2 } })).success).toBe(false)
+    expect(item().tarifa_pax).toBeNull()
+  })
+})
+
+describe('pasar a Pública con un descuento guardado (Vera, 2026-10-29)', () => {
+  it('el descuento se quita y se avisa: nada queda aplicado sin verse', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeTruthy()
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    expect(r.success && r.descuentoQuitado).toBe('Reserva esta semana')
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeUndefined()
+  })
+
+  it('a una Pública no se le pone descuento', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'incluida' })
+    const r = await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'X', tipo: 'pct', valor: 2 } })
+    expect(r.success).toBe(false)
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente).toBeUndefined()
+  })
+
+  it('seguir en Neta conserva el descuento', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    await ajustarReglasDelPaquete('item-1', { descuentoCliente: { motivo: 'Reserva esta semana', tipo: 'pct', valor: 6 } })
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido(), comision: 'por_incluir' })
+    expect(r.success && r.descuentoQuitado).toBeFalsy()
+    expect(leerTarifaPax(item().tarifa_pax).descuentoCliente?.motivo).toBe('Reserva esta semana')
+  })
+})
+
+describe('H-13 (QA G10 del 2026-10-30) · el operador es de cada paquete', () => {
+  // La reprueba de hoy: la solicitud dice «ALIADOS TRAVEL / TU RESERVA» y los dos paquetes guardaban
+  // ese mismo texto, con `items.proveedor_id` null. Aliados Travel SÍ está en el Directorio.
+  beforeEach(() => {
+    tablas.negocio_bloques = [{ negocio_id: 'neg-1', modalidad_viaje: 'bloqueo', operador_bloqueo: 'ALIADOS TRAVEL / TU RESERVA' }]
+    tablas.items[0].proveedor_id = null
+    tablas.fotos_perfiles = [
+      { id: 'ficha-aliados', workspace_id: 'ws-1', tipo: 'proveedor', tipo_proveedor: 'operador', nombre: 'Aliados Travel' },
+      { id: 'ficha-hotel', workspace_id: 'ws-1', tipo: 'hotel', tipo_proveedor: 'hotel', nombre: 'Tu Reserva' },
+    ]
+  })
+
+  it('con dos operadores en la solicitud, un paquete sin operador NO hereda el texto mezclado', async () => {
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido() })
+    expect(r.success).toBe(true)
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBeNull()
+    expect(item().proveedor_id).toBeNull()
+  })
+
+  it('el operador elegido en el paquete queda en él y, si está en el Directorio, ligado a su ficha', async () => {
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'ALIADOS TRAVEL' } })
+    expect(r.success && r.fichaOperador).toBe('Aliados Travel')
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBe('ALIADOS TRAVEL')
+    expect(item().proveedor_id).toBe('ficha-aliados')
+  })
+
+  it('cambiar a un operador que no está en el Directorio suelta la ficha del anterior (y no toma la de un hotel)', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'ALIADOS TRAVEL' } })
+    const r = await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'TU RESERVA' } })
+    expect(r.success && r.fichaOperador).toBeNull()
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBe('TU RESERVA')
+    expect(item().proveedor_id).toBeNull()
+  })
+
+  it('el texto mezclado escrito en el paquete tampoco se guarda como operador', async () => {
+    await guardarPaqueteBloqueo('item-1', { paquete: { ...(await paqueteLeido()), operador: 'ALIADOS TRAVEL / TU RESERVA' } })
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBeNull()
+  })
+
+  it('con UN operador en la solicitud todo sigue igual: el paquete lo hereda (y se liga si está)', async () => {
+    tablas.negocio_bloques = [{ negocio_id: 'neg-1', modalidad_viaje: 'bloqueo', operador_bloqueo: 'Aliados Travel' }]
+    await guardarPaqueteBloqueo('item-1', { paquete: await paqueteLeido() })
+    expect(leerPaqueteBloqueo(leerTarifaPax(item().tarifa_pax).bloqueo)?.operador).toBe('Aliados Travel')
+    expect(item().proveedor_id).toBe('ficha-aliados')
   })
 })

@@ -42,6 +42,7 @@ const CAMPOS_POR_TIPO: Record<TipoRanura, readonly string[]> = {
   vuelo: ['aerolinea', 'numero_vuelo', 'fecha_salida', 'hora_salida', 'hora_llegada', 'costo'],
   hotel: ['tipo_habitacion', 'regimen', 'check_in', 'check_out', 'politica_cancelacion', 'costo'],
   traslado: ['proveedor', 'trayecto', 'tipo_vehiculo', 'fecha_hora', 'costo'],
+  tren: ['proveedor', 'trayecto', 'fecha_hora', 'hora_salida', 'hora_llegada', 'numero_tren', 'costo'],
   actividad: ['proveedor', 'nombre', 'fecha', 'duracion', 'costo'],
   otro: ['nombre', 'proveedor', 'costo'],
   paquete: ['nombre', 'costo'],

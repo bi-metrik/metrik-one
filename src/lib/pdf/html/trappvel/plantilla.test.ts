@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { ENTRADA_EUROPA, PRECIO_E, PRECIO_P, PRECIO_R, PROPS_EUROPA } from '../../../../../test/propuesta-europa'
 import { ENTRADA_CURAZAO, PRECIO_CUR_P, PRECIO_CUR_R, TERMINOS_CURAZAO } from '../../../../../test/propuesta-curazao'
 import { modeloDePropuesta, type EntradaModeloPropuesta } from '@/lib/cotizaciones/propuesta/modelo-documento'
-import { bloquesDeTerminos, esc, fotosDePortada, htmlDePropuesta, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
+import { bloquesDeTerminos, creditoCortoDePortada, esc, fotoDePortada, htmlDePropuesta, ROTULO_IMAGEN_PORTADA, pesos, pieDeHoja, type RecursosPropuesta } from './plantilla'
 
 const RECURSOS: RecursosPropuesta = {
   foto: (url) => (url ? { src: `data:image/jpeg;base64,FOTO`, foco: null } : null),
@@ -98,23 +98,40 @@ describe('htmlDePropuesta · COT-2026-0026 de muestra', () => {
 })
 
 describe('portada como la de Edgar', () => {
-  it('collage de hasta 4 fotos: la de portada, las de ciudad y, si faltan, las de los hoteles de la Recomendada', () => {
+  it('con imagen aprobada del destino: esa sola, con «Imagen ilustrativa» y su crédito; sin ella, la portada de siempre (regla de fotos del 2026-10-29)', () => {
     const m = modeloDePropuesta(ENTRADA_CURAZAO)
     const r: RecursosPropuesta = {
       ...RECURSOS,
       foto: (url) => (url ? { src: `data:${url.split('/').pop()}`, foco: null } : null),
     }
-    // Sin foto de portada ni de ciudad: primero el hotel de la Recomendada, después el de la Superior.
-    expect(fotosDePortada(m, r).map((f) => f.src)).toEqual(['data:parkplaza.jpg', 'data:pullman.jpg'])
-    const conCiudad = { ...r, fotoDeCiudad: () => ({ src: 'data:ciudad', foco: null }) }
-    expect(fotosDePortada(m, conCiudad).map((f) => f.src)).toEqual(['data:ciudad', 'data:parkplaza.jpg', 'data:pullman.jpg'])
-    const h = htmlDePropuesta(m, conCiudad)
-    expect(h).toContain('<div class="fotos" style="grid-template-columns:repeat(3,1fr)">')
-    // Nunca más de cuatro.
-    expect(fotosDePortada(modeloDePropuesta(ENTRADA_EUROPA), { ...r, fotoDeCiudad: (c) => ({ src: `data:${c}`, foco: null }) })).toHaveLength(4)
+    // Sin imagen del destino: el collage de siempre (los hoteles de la Recomendada), nunca la banda de colores.
+    expect(fotoDePortada(m, r)).toBeNull()
+    const sin = htmlDePropuesta(m, r)
+    const heroSin = sin.slice(sin.indexOf('<div class="hero'), sin.indexOf('<div class="aviso"'))
+    expect(heroSin).toMatch(/^<div class="hero conaviso"><div class="fotos" style="grid-template-columns:repeat\(2,1fr\)">/)
+    expect(heroSin).not.toContain(ROTULO_IMAGEN_PORTADA)
+    expect(sin).not.toMatch(/hero marca|#e6197a,#8a2cb5 55%,#1ca2b8\); \}\n\.hero/)
+    // Con imagen del destino: esa sola, con el rótulo y el crédito corto.
+    m.portada.foto = { url: '/banco/curazao.jpg', rotulo: 'CURAZAO', credito: 'Handelskade, Willemstad, Charles Hoffman (Wikimedia Commons, CC BY-SA 2.0)' }
+    expect(fotoDePortada(m, r)?.src).toBe('data:curazao.jpg')
+    const con = htmlDePropuesta(m, r)
+    const heroCon = con.slice(con.indexOf('<div class="hero'), con.indexOf('<div class="aviso"'))
+    expect(heroCon).toContain('<div class="hero confoto conaviso"><div class="foto" style="background-image:url(data:curazao.jpg)')
+    expect(heroCon).toContain(`<span class="ilustrativa">${ROTULO_IMAGEN_PORTADA}</span><span class="ilustrativa credito">Foto: Charles Hoffman · CC BY-SA 2.0</span>`)
+    expect((heroCon.match(/background-image/g) ?? []).length).toBe(1)
+    expect(heroCon).not.toContain('class="fotos"')
+    // La sombra más oscura del PDF final y el rótulo siempre encima.
+    expect(con).toMatch(/\.hero\.confoto::after \{[^}]*rgba\(27,31,59,\.72\) 100%[^}]*rgba\(27,31,59,\.62\) 0%/)
+    expect(con).toMatch(/\.hero \.ilustrativa \{[^}]*z-index:2/)
   })
 
-  it('sin ninguna foto, la banda queda con el degradado (sin collage)', () => {
+  it('el crédito corto de la portada', () => {
+    expect(creditoCortoDePortada('Handelskade, Willemstad, Charles Hoffman (Wikimedia Commons, CC BY-SA 2.0)')).toBe('Foto: Charles Hoffman · CC BY-SA 2.0')
+    expect(creditoCortoDePortada('Felviper (Wikimedia Commons, CC BY-SA 4.0)')).toBe('Foto: Felviper · CC BY-SA 4.0')
+    expect(creditoCortoDePortada(null)).toBeNull()
+  })
+
+  it('sin ninguna foto, la banda queda con el degradado oscuro de siempre (sin collage)', () => {
     const h = html(ENTRADA_CURAZAO, { ...RECURSOS, foto: () => null })
     expect(h).toContain('<div class="hero conaviso"><div class="in">')
     expect(h).not.toContain('class="fotos"')
@@ -127,7 +144,7 @@ describe('portada como la de Edgar', () => {
     m.portada.intro = null
     const sinIntro = htmlDePropuesta(m, RECURSOS)
     expect(sinIntro).not.toContain('class="aviso"')
-    expect(sinIntro).toContain('<div class="hero">')
+    expect(sinIntro).toMatch(/<div class="hero(?: confoto)?">/)
   })
 
   it('las 4 tarjetas rosadas y una ficha por viajero con sus iniciales (los menores sin autorización no salen)', () => {
@@ -482,5 +499,48 @@ describe('htmlDePropuesta · saltos de hoja y la etiqueta del plan', () => {
     const planes = seccion('Planes para los días libres')
     expect(planes).not.toContain('class="where"')
     expect(planes).toContain('<div class="n">Palacio Real de Madrid</div><div class="caps">Madrid · dom 13</div>')
+  })
+})
+
+describe('QA del #1359 · la versión compacta (solo se imprime si ahorra una hoja)', () => {
+  const m = modeloDePropuesta(ENTRADA_CURAZAO)
+  const normal = htmlDePropuesta(m, RECURSOS)
+  const compacta = htmlDePropuesta(m, RECURSOS, { compacto: true })
+  const dias = (h: string) => seccionDe(h, 'Itinerario día a día')
+
+  it('sin la opción, el documento de siempre: un bloque por día', () => {
+    expect(htmlDePropuesta(m, RECURSOS, {})).toBe(normal)
+    expect(normal).toContain('<body>')
+    expect((dias(normal).match(/<div class="day">/g) ?? []).length).toBe(m.dias.length)
+    expect(normal).not.toContain('DÍAS</small>')
+  })
+
+  it('los días libres seguidos van en un bloque «Días 2–5», con el rango de fechas', () => {
+    const d = dias(compacta)
+    expect(compacta).toContain('<body class="compacto">')
+    expect(d).toContain('<div class="dn rango"><small>DÍAS</small>2–5</div>')
+    expect(texto(d)).toContain('viernes 27 al lunes 30 de noviembre Días libres en Willemstad Libres Días abiertos para ustedes.')
+    // Los días con algo (la salida y el regreso) siguen solos, igual que en la normal.
+    expect(d).toContain('<div class="dn"><small>DÍA</small>1</div>')
+    expect(d).toContain('<div class="dn"><small>DÍA</small>6</div>')
+    expect((d.match(/<div class="day">/g) ?? []).length).toBe(3)
+  })
+
+  it('lo demás dice lo mismo: solo cambian los días libres', () => {
+    const sinDias = (h: string) => texto(h.replace(/<section class="sec dias">[\s\S]*?<\/section>/, ''))
+    expect(sinDias(compacta)).toBe(sinDias(normal))
+  })
+
+  it('un día libre con plan opcional o con foto no se junta', () => {
+    const conFoto: RecursosPropuesta = { ...RECURSOS, fotoDeCiudad: () => ({ src: 'data:image/jpeg;base64,CIUDAD', foco: null }) }
+    const d = dias(htmlDePropuesta(modeloDePropuesta(ENTRADA_CURAZAO), conFoto, { compacto: true }))
+    // La foto de la ciudad va el primer día en ella: ese día sigue solo, y los libres que siguen se juntan.
+    expect(d).toContain('<div class="dn"><small>DÍA</small>1</div>')
+    expect(d).toContain('<small>DÍAS</small>2–5')
+    const europa = modeloDePropuesta(ENTRADA_EUROPA)
+    const conPlan = europa.dias.filter((x) => x.opcionales.length > 0).map((x) => x.numero)
+    expect(conPlan.length).toBeGreaterThan(0)
+    const de = dias(htmlDePropuesta(europa, RECURSOS, { compacto: true }))
+    for (const n of conPlan) expect(de).toContain(`<div class="dn"><small>DÍA</small>${n}</div>`)
   })
 })

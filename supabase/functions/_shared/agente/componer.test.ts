@@ -14,6 +14,9 @@ import { dominioPublico } from './publico/dominio'
 import { reglamentoSabor } from './publico/escenario'
 import type { ContextoDominio, Dominio, Propuesta } from './tipos'
 import { ESCALAMIENTO_METRIK, dominioPersona } from './persona'
+import { dominioBandeja } from './bandeja/dominio'
+import { fichasBaseBandeja } from './bandeja/roles-trappvel'
+import { PuertoMemoria } from './memoria'
 
 /**
  * La prueba de permisos del componedor (spec 2026-10-26, §2.6 punto 5): para cada cargo de ONE y para un rol de prueba
@@ -160,6 +163,26 @@ describe('el catálogo cubre cada herramienta de cada motor una sola vez', () =>
     expect(Object.keys(c.duenas).sort()).toEqual([...delMotor].sort())
   })
 
+  it('motor viajes: toda lectura, acción y cierre de la bandeja tiene exactamente una función dueña', () => {
+    const m = dominioBandeja(new PuertoMemoria({}))
+    const todas = Object.keys(CATALOGO).filter((k) => !CATALOGO[k].comun)
+    const c = componerDominio({ motores: { viajes: m }, funciones: todas, log: () => {} })
+    expect(c.errores).toEqual([])
+    const delMotor = [...m.lecturas.map((x) => x.name), ...m.acciones, ...(m.cierres ?? []).map((x) => x.name)]
+    expect(Object.keys(c.duenas).sort()).toEqual([...delMotor].sort())
+    for (const n of delMotor) expect([n, CATALOGO[c.duenas[n]].herramientas.viajes]).toBeTruthy()
+  })
+
+  it('viajes + one + persona (la mano derecha): ninguna herramienta con dos dueñas ni sin motor', () => {
+    const viajes = dominioBandeja(new PuertoMemoria({}))
+    const one = motorOne()
+    const todas = Object.keys(CATALOGO).filter((k) => !CATALOGO[k].comun && k !== 'equipo.contactos')
+    const c = componerDominio({ motores: { viajes, one, persona: personaDe(viajes) }, funciones: todas, log: () => {} })
+    expect(c.errores).toEqual([])
+    expect(c.descartadas).toEqual([])
+    expect([...c.declaradas.acciones].sort()).toEqual([...viajes.acciones, 'gasto', 'adjuntar_soporte', 'corregir_gasto', 'actividad', 'ingreso'].sort())
+  })
+
   it('motor persona: su único cierre, `pasar_a_persona`, es de `comun.persona`', () => {
     const m = motorOne()
     const c = componerConPersona(m, [])
@@ -240,6 +263,11 @@ describe('las reglas de composición', () => {
 
   it('fichasOne: toda ficha que una función dice tener existe en el reglamento de ONE', () => {
     const claves = new Set(fichasOne('x').map((f) => f.clave))
-    for (const f of Object.values(CATALOGO)) for (const k of f.fichas) expect([f.clave, claves.has(k)]).toEqual([f.clave, true])
+    for (const f of Object.values(CATALOGO).filter((x) => 'one' in x.herramientas)) for (const k of f.fichas) expect([f.clave, claves.has(k)]).toEqual([f.clave, true])
+  })
+
+  it('reglamento de la bandeja: toda ficha que una función de viajes dice tener existe en él', () => {
+    const claves = new Set(fichasBaseBandeja().map((f) => f.clave))
+    for (const f of Object.values(CATALOGO).filter((x) => 'viajes' in x.herramientas)) for (const k of f.fichas) expect([f.clave, k, claves.has(k)]).toEqual([f.clave, k, true])
   })
 })

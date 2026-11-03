@@ -8,6 +8,7 @@
 
 import { FUNCIONES_COMUNES } from './comunes.ts';
 import { FUNCIONES_EQUIPO_ONE } from './equipo-one.ts';
+import { FUNCIONES_EQUIPO_VIAJES } from './equipo-viajes.ts';
 import type { Funcion } from './tipos.ts';
 
 export const RE_CLAVE_FUNCION = /^(equipo|recolector|clientes|comun)\.[a-z][a-z0-9_]*$/;
@@ -26,4 +27,4 @@ export function catalogoDe(funciones: Funcion[]): Catalogo {
   return Object.freeze(c);
 }
 
-export const CATALOGO: Catalogo = catalogoDe([...FUNCIONES_COMUNES, ...FUNCIONES_EQUIPO_ONE]);
+export const CATALOGO: Catalogo = catalogoDe([...FUNCIONES_COMUNES, ...FUNCIONES_EQUIPO_ONE, ...FUNCIONES_EQUIPO_VIAJES]);

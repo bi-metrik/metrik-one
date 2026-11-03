@@ -5,10 +5,12 @@
  *
  * Todo detrás de `lineas_negocio.config_extra.entrega_viaje.activo` (y del plan de pagos, que es
  * de donde sale el cobro mínimo). Cada acción revisa el rol EN EL SERVIDOR (Vera §7.4):
- *   · enviar el paquete: la comercial dueña del negocio y la dirección;
+ *   · enviar el paquete: la comercial dueña del negocio, la dirección y operaciones asignada al
+ *     negocio (QA 2026-10-29, H1-3);
  *   · «Enviar igual» sin el 80 %: solo la dirección, con motivo (aprobación registrada, tipo
  *     `enviar_paquete_sin_cobro`, que cuenta en su tablero);
- *   · cargar documentos del viajero: la comercial dueña, operaciones y la dirección.
+ *   · cargar documentos del viajero: la comercial dueña, operaciones y la dirección. Cada documento
+ *     dice de qué viajero es (QA 2026-10-29, H9-5/H6-4; `documentos-por-viajero.ts`).
  *
  * El paquete sale por C1: el PDF queda en Storage, el correo lo lleva adjunto si el contacto tiene
  * correo, y la comercial lo manda desde su WhatsApp con el mensaje listo (`wa.me`) y toca «Ya lo
@@ -32,15 +34,26 @@ import {
   documentoDesdeLectura,
   mensajePaquete,
   mensajeVouchers,
+  puedeEnviarPaquete,
   type LecturaDocumento,
   type TipoDocumentoViajero,
 } from '@/lib/viaje/entrega'
 import { leerVistaEntrega } from '@/lib/viaje/entrega-datos'
+import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import {
+  ETIQUETA_CLASE,
+  documentosViajeroParaGuardar,
+  leerDocumentosViajero,
+  viajerosDelViaje,
+  type ClaseDocumento,
+  type DocumentosViajeroGuardados,
+  type ViajeroDelViaje,
+} from '@/lib/viaje/documentos-por-viajero'
 import { armarPaquetePdf } from '@/lib/viaje/entrega-paquete'
 
 const MENSAJE_EN_CURSO = 'Tu acción anterior todavía se está guardando. Espera un momento.'
 const APAGADO = 'Esta línea no usa la entrega del viaje.'
-const SIN_PERMISO_ENVIO = 'Solo la comercial del negocio o la dirección envían el paquete.'
+const SIN_PERMISO_ENVIO = 'Solo la comercial del negocio, operaciones asignada o la dirección envían el paquete.'
 const SIN_PERMISO_DOCS = 'Solo la comercial del negocio, operaciones o la dirección cargan documentos del viajero.'
 const SOLO_DIRECCION = 'Solo la dirección puede enviar el paquete sin el cobro mínimo.'
 
@@ -96,6 +109,13 @@ export async function leerDocumentoViajero(negocioId: string, soporte: SoporteSu
 export interface EntradaDocumentoViajero {
   negocioId: string
   tipo: TipoDocumentoViajero
+  /**
+   * De qué viajero de este viaje es (`adulto-1` el titular, `adulto-2`, `nino-1`…). Con un solo
+   * viajero puede faltar; con varios es obligatorio (H6-4: no más pasaportes sin dueño).
+   */
+  viajero?: string | null
+  /** Pasaporte (por defecto), registro civil o permiso de salida (estos dos, solo de menores). */
+  clase?: ClaseDocumento | null
   numero: string | null
   nombre: string | null
   pais: string | null
@@ -113,6 +133,31 @@ function limpio(v: string | null | undefined, max: number): string | null {
   return t ? t.slice(0, max) : null
 }
 
+/** Los viajeros de este viaje (composición de la etapa 1) y lo ya asignado en el negocio. */
+async function viajerosYGuardados(ctx: Ctx): Promise<{ viajeros: ViajeroDelViaje[]; guardados: DocumentosViajeroGuardados; meta: Record<string, unknown> }> {
+  const [{ viaje }, contactoRes, negRes] = await Promise.all([
+    leerViajeDelNegocio(ctx.supabase, ctx.negocio.id),
+    ctx.negocio.contacto_id
+      ? ctx.supabase.from('contactos').select('nombre').eq('id', ctx.negocio.contacto_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    ctx.supabase.from('negocios').select('metadata').eq('id', ctx.negocio.id).eq('workspace_id', ctx.workspaceId).maybeSingle(),
+  ])
+  const nombre = (((contactoRes as { data?: { nombre?: string | null } | null }).data?.nombre) ?? '').trim()
+  const meta = (((negRes as { data?: { metadata?: Record<string, unknown> | null } | null }).data?.metadata) ?? {}) as Record<string, unknown>
+  return { viajeros: viajerosDelViaje(viaje.composicion, nombre), guardados: leerDocumentosViajero(meta), meta }
+}
+
+async function guardarAsignacion(ctx: Ctx, meta: Record<string, unknown>, g: DocumentosViajeroGuardados): Promise<string | null> {
+  const { error } = await ctx.supabase
+    .from('negocios')
+    .update({ metadata: { ...meta, documentos_viajero: documentosViajeroParaGuardar(g) } })
+    .eq('id', ctx.negocio.id)
+    .eq('workspace_id', ctx.workspaceId)
+  return error ? error.message : null
+}
+
+const CLASES: readonly ClaseDocumento[] = ['pasaporte', 'registro_civil', 'permiso_salida']
+
 /** Guarda el documento EN EL CONTACTO (C11). El mismo tipo y número vigente se actualiza, no se duplica. */
 export async function guardarDocumentoViajero(input: EntradaDocumentoViajero): Promise<{ ok: true } | { ok: false; error: string }> {
   const c = await contexto(input.negocioId)
@@ -121,11 +166,20 @@ export async function guardarDocumentoViajero(input: EntradaDocumentoViajero): P
   if (!ctx.puedeConfirmar && !(await esDeOperaciones(ctx))) return { ok: false, error: SIN_PERMISO_DOCS }
   if (!ctx.negocio.contacto_id) return { ok: false, error: 'El negocio no tiene contacto: agrégalo antes de cargar documentos.' }
   if (!TIPOS.includes(input.tipo)) return { ok: false, error: 'Ese tipo de documento no existe.' }
+  const clase: ClaseDocumento = input.clase ?? 'pasaporte'
+  if (!CLASES.includes(clase)) return { ok: false, error: 'Ese tipo de documento no existe.' }
+  // Registro civil y permiso de salida se guardan como «otro» (el CHECK de la tabla no los tiene).
+  const tipo: TipoDocumentoViajero = clase === 'pasaporte' ? input.tipo : 'otro'
+  const { viajeros, guardados, meta } = await viajerosYGuardados(ctx)
+  const claveViajero = (input.viajero ?? '').trim() || (viajeros.length === 1 ? viajeros[0].clave : '')
+  const viajero = viajeros.find(v => v.clave === claveViajero)
+  if (!viajero) return { ok: false, error: 'Elige de qué viajero es el documento.' }
+  if (clase !== 'pasaporte' && !viajero.menor) return { ok: false, error: `El ${ETIQUETA_CLASE[clase].toLowerCase()} se pide solo a los menores.` }
   const numero = limpio(input.numero, 60)?.replace(/\s+/g, '').toUpperCase() ?? null
   for (const f of [input.fechaEmision, input.fechaVencimiento]) {
     if (f && !FECHA.test(f)) return { ok: false, error: 'Revisa las fechas del documento.' }
   }
-  if (input.tipo === 'pasaporte' && (!numero || !input.fechaVencimiento)) {
+  if (tipo === 'pasaporte' && (!numero || !input.fechaVencimiento)) {
     return { ok: false, error: 'Escribe el número y el vencimiento del pasaporte.' }
   }
   let archivoRef: string | null = null
@@ -138,7 +192,7 @@ export async function guardarDocumentoViajero(input: EntradaDocumentoViajero): P
   const fila = {
     workspace_id: ctx.workspaceId,
     contacto_id: ctx.negocio.contacto_id,
-    tipo: input.tipo,
+    tipo,
     numero,
     nombre_en_documento: limpio(input.nombre, 200),
     pais: limpio(input.pais, 80),
@@ -154,15 +208,35 @@ export async function guardarDocumentoViajero(input: EntradaDocumentoViajero): P
         .select('id, archivo_ref')
         .eq('workspace_id', ctx.workspaceId)
         .eq('contacto_id', ctx.negocio.contacto_id)
-        .eq('tipo', input.tipo)
+        .eq('tipo', tipo)
         .eq('numero', numero)
         .eq('vigente', true)
         .maybeSingle()).data as { id: string; archivo_ref: string | null } | null)
     : null
-  const { error } = existente
-    ? await ctx.supabase.from('contacto_documentos').update({ ...fila, archivo_ref: archivoRef ?? existente.archivo_ref }).eq('id', existente.id).eq('workspace_id', ctx.workspaceId)
-    : await ctx.supabase.from('contacto_documentos').insert({ ...fila, archivo_ref: archivoRef, vigente: true, created_by: ctx.staffId })
-  if (error) return { ok: false, error: `No se pudo guardar el documento: ${error.message}` }
+  // El mismo pasaporte no puede ser de dos viajeros del mismo viaje.
+  if (existente && clase === 'pasaporte') {
+    const antes = guardados.asignados[existente.id]
+    if (antes && antes.viajero !== viajero.clave && viajeros.some(v => v.clave === antes.viajero)) {
+      const de = viajeros.find(v => v.clave === antes.viajero)!.etiqueta
+      return { ok: false, error: `Ese pasaporte ya está cargado como de ${de}.` }
+    }
+  }
+  let documentoId: string | null = existente?.id ?? null
+  if (existente) {
+    const { error } = await ctx.supabase.from('contacto_documentos').update({ ...fila, archivo_ref: archivoRef ?? existente.archivo_ref }).eq('id', existente.id).eq('workspace_id', ctx.workspaceId)
+    if (error) return { ok: false, error: `No se pudo guardar el documento: ${error.message}` }
+  } else {
+    const { data, error } = await ctx.supabase.from('contacto_documentos').insert({ ...fila, archivo_ref: archivoRef, vigente: true, created_by: ctx.staffId }).select('id').maybeSingle()
+    if (error) return { ok: false, error: `No se pudo guardar el documento: ${error.message}` }
+    documentoId = (data as { id?: string } | null)?.id ?? null
+  }
+  if (documentoId) {
+    const errAsig = await guardarAsignacion(ctx, meta, {
+      ...guardados,
+      asignados: { ...guardados.asignados, [documentoId]: { viajero: viajero.clave, clase } },
+    })
+    if (errAsig) return { ok: false, error: `El documento quedó en el contacto, pero no se pudo marcar de quién es: ${errAsig}` }
+  }
 
   await registrarActividad(ctx.supabase, {
     workspace_id: ctx.workspaceId,
@@ -170,8 +244,69 @@ export async function guardarDocumentoViajero(input: EntradaDocumentoViajero): P
     entidad_id: ctx.negocio.id,
     tipo: 'cambio',
     autor_id: ctx.staffId,
-    contenido: `Documento del viajero guardado en el contacto: ${input.tipo === 'pasaporte' ? 'pasaporte' : input.tipo}${numero ? ` ${numero}` : ''}.`.slice(0, 280),
+    contenido: `Documento del viajero guardado en el contacto: ${ETIQUETA_CLASE[clase].toLowerCase()}${numero ? ` ${numero}` : ''} de ${viajero.etiqueta}.`.slice(0, 280),
   }, 'guardarDocumentoViajero')
+  revalidatePath(`/negocios/${ctx.negocio.id}`)
+  return { ok: true }
+}
+
+/** Un pasaporte del contacto que no es de ningún viajero de este viaje: se dice de quién es. */
+export async function asignarDocumentoViajero(negocioId: string, documentoId: string, claveViajero: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const c = await contexto(negocioId)
+  if (!c.ok) return c
+  const ctx = c.ctx
+  if (!ctx.puedeConfirmar && !(await esDeOperaciones(ctx))) return { ok: false, error: SIN_PERMISO_DOCS }
+  if (!ctx.negocio.contacto_id) return { ok: false, error: 'El negocio no tiene contacto.' }
+  const { data: doc } = await ctx.supabase
+    .from('contacto_documentos')
+    .select('id, tipo, numero')
+    .eq('id', documentoId)
+    .eq('workspace_id', ctx.workspaceId)
+    .eq('contacto_id', ctx.negocio.contacto_id)
+    .eq('vigente', true)
+    .maybeSingle()
+  const d = doc as { id: string; tipo: string; numero: string | null } | null
+  if (!d || d.tipo !== 'pasaporte') return { ok: false, error: 'Ese pasaporte no está en el contacto.' }
+  const { viajeros, guardados, meta } = await viajerosYGuardados(ctx)
+  const viajero = viajeros.find(v => v.clave === claveViajero)
+  if (!viajero) return { ok: false, error: 'Elige de qué viajero es el documento.' }
+  const err = await guardarAsignacion(ctx, meta, { ...guardados, asignados: { ...guardados.asignados, [d.id]: { viajero: viajero.clave, clase: 'pasaporte' } } })
+  if (err) return { ok: false, error: `No se pudo guardar: ${err}` }
+  await registrarActividad(ctx.supabase, {
+    workspace_id: ctx.workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: ctx.negocio.id,
+    tipo: 'cambio',
+    autor_id: ctx.staffId,
+    contenido: `Pasaporte${d.numero ? ` ${d.numero}` : ''} asignado a ${viajero.etiqueta}.`.slice(0, 280),
+  }, 'asignarDocumentoViajero')
+  revalidatePath(`/negocios/${ctx.negocio.id}`)
+  return { ok: true }
+}
+
+/**
+ * ¿Los menores viajan con sus dos padres? Sí: no se pide permiso de salida. No: se pide el permiso
+ * de cada menor. Queda anotado en el negocio (H9-5: ONE lo pregunta y no lo supone).
+ */
+export async function responderMenoresConPadres(negocioId: string, ambos: boolean): Promise<{ ok: true } | { ok: false; error: string }> {
+  const c = await contexto(negocioId)
+  if (!c.ok) return c
+  const ctx = c.ctx
+  if (!ctx.puedeConfirmar && !(await esDeOperaciones(ctx))) return { ok: false, error: SIN_PERMISO_DOCS }
+  if (typeof ambos !== 'boolean') return { ok: false, error: 'Responde sí o no.' }
+  const { guardados, meta } = await viajerosYGuardados(ctx)
+  const err = await guardarAsignacion(ctx, meta, { ...guardados, menoresConAmbosPadres: ambos })
+  if (err) return { ok: false, error: `No se pudo guardar: ${err}` }
+  await registrarActividad(ctx.supabase, {
+    workspace_id: ctx.workspaceId,
+    entidad_tipo: 'negocio',
+    entidad_id: ctx.negocio.id,
+    tipo: 'cambio',
+    autor_id: ctx.staffId,
+    contenido: ambos
+      ? 'Los menores viajan con sus dos padres: no se pide permiso de salida.'
+      : 'Los menores no viajan con sus dos padres: se pide permiso de salida de cada uno.',
+  }, 'responderMenoresConPadres')
   revalidatePath(`/negocios/${ctx.negocio.id}`)
   return { ok: true }
 }
@@ -205,7 +340,7 @@ async function enviarPaqueteSinClave(input: EntradaEnviarPaquete): Promise<Resul
   const c = await contexto(input.negocioId)
   if (!c.ok) return c
   const ctx = c.ctx
-  if (!ctx.puedeConfirmar) return { ok: false, error: SIN_PERMISO_ENVIO }
+  if (!puedeEnviarPaquete(ctx.quien)) return { ok: false, error: SIN_PERMISO_ENVIO }
   const vista = await leerVistaEntrega(ctx.supabase, ctx.workspaceId, input.negocioId)
   if (!vista) return { ok: false, error: APAGADO }
 
@@ -348,7 +483,7 @@ export async function enviarPaquete(input: EntradaEnviarPaquete, intencion?: str
 export async function marcarPaqueteMandado(negocioId: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const c = await contexto(negocioId)
   if (!c.ok) return c
-  if (!c.ctx.puedeConfirmar) return { ok: false, error: SIN_PERMISO_ENVIO }
+  if (!puedeEnviarPaquete(c.ctx.quien)) return { ok: false, error: SIN_PERMISO_ENVIO }
   const vista = await leerVistaEntrega(c.ctx.supabase, c.ctx.workspaceId, negocioId)
   if (!vista?.paquete) return { ok: false, error: 'Primero envía el paquete.' }
   const yo = await nombreYCorreo(c.ctx.supabase, c.ctx.staffId)

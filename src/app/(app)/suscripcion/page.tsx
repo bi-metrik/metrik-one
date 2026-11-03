@@ -14,7 +14,9 @@ import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
 import { accionesSobreUsuario, esAdministradorSinCosto } from '@/lib/usuarios-espacio/reglas'
 import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor'
 import { leerOpcionesPago } from '@/lib/valida-cda/plan-anual-servidor'
+import { vistaPagoAutomatico } from '@/lib/valida-cda/tarjeta-cda-servidor'
 import { OpcionesPago } from './opciones-pago'
+import { PagoAutomatico } from './pago-automatico'
 import { PestanaPagos } from './pestana-pagos'
 import SuscripcionClient, { type PestanaSuscripcion } from './suscripcion-client'
 import { TarjetaPago } from './tarjeta-pago'
@@ -70,13 +72,15 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
   // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
   const rechazoTarjeta = ctx.contrato.suscripcionId ? await rechazoDeLaTarjeta(ctx, createServiceClient()) : null
-  const [pagos, terminos, equipo, sugerencia, opcionesPago] = await Promise.all([
+  const [pagos, terminos, equipo, sugerencia, opcionesPago, pagoAutomatico] = await Promise.all([
     leerPagosCda(ctx.entrada),
     esOne ? null : leerTerminosEmpresaCda(ctx.entrada),
     leerEquipo(ctx),
     esOne ? null : estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
     // El Plan Anual: solo Valida de los CDA, con términos aceptados y el contrato encendido.
     esOne || !aprobada ? null : leerOpcionesPago(ctx),
+    // El pago automático con tarjeta de los CDA (Términos v1.5, 2.4): solo la persona designada lo ve.
+    esOne || !aprobada ? null : vistaPagoAutomatico(ctx),
   ])
 
   const { contrato, resumen } = ctx
@@ -109,7 +113,12 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         )}
       </section>
     ) : ctx.pago ? (
-      <TarjetaPago lectura={ctx.pago} pagarAhora={!soloLectura && ofrecePagarAhora(ctx)} rechazoTarjeta={rechazoTarjeta} />
+      <TarjetaPago
+        lectura={ctx.pago}
+        pagarAhora={!soloLectura && ofrecePagarAhora(ctx)}
+        rechazoTarjeta={rechazoTarjeta}
+        avisoTarjeta={pagoAutomatico?.tipo === 'activa' ? pagoAutomatico.fallo : null}
+      />
     ) : null
 
   // «Aceptados el {fecha} por {nombre}», de la constancia verificada.
@@ -184,6 +193,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         pagos={
           <PestanaPagos
             carga={pagos}
+            pagoAutomatico={pagoAutomatico ? <PagoAutomatico vista={pagoAutomatico} soloLectura={soloLectura} /> : null}
             opciones={
               opcionesPago?.tipo === 'ok' ? (
                 <OpcionesPago opciones={opcionesPago} soloLectura={soloLectura} nombreSugerido={ctx.designadoNombre} />

@@ -9,7 +9,9 @@ Brief `proyectos/trappvel/clarity/briefs/2026-10-22_brief-max-tarifa-publica-net
 Sin migración de esquema: los dos datos nuevos viven en `items.tarifa_pax` (`tipoTarifa`, `vaConHotel`), leídos en
 `leerTarifaPax` (si no, se pierden en la próxima escritura).
 
-- **Pública fuera del mínimo**: `calcularCascada` devuelve `publicas` (peso + `exentaDelMinimo`); `margenMedible` mide las
+- ⚠️ **Reemplazado el 2026-10-29 (D2/D3, [[decisiones-1029-cotizacion]])**: ya no hay exención; la Pública entra con
+  su comisión y sin ella frena. Lo de abajo es historia.
+- **Pública fuera del mínimo** (hasta el 29-oct): `calcularCascada` devuelve `publicas` (peso + `exentaDelMinimo`); `margenMedible` mide las
   Netas; `motivoDeRechazo({ exenta })`. Sin Públicas, cuenta idéntica (igualdad C0 verde). La huella suma `'publica'`
   solo en esas líneas. `cascada.margenRealPct` sigue siendo el de todo el dinero (registro, «Lo que suma»).
 - El toggle solo aparece con `apilable` (por pasos): apagado, `tarjeta-costo-apagado.fixture.html` es byte a byte.

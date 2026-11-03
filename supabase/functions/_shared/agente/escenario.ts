@@ -18,6 +18,15 @@ import type { CampoEntendible } from '../wa-entendimiento-reglas.ts';
 import { huellaDe } from './reglamento.ts';
 import type { Ficha, FilaConversacion, Modelo, Reglamento, Salida, Traza } from './tipos.ts';
 import type { ArchivoAdjunto, Lector } from './one/lectura-adjunto.ts';
+import type { Composicion } from './componer.ts';
+import { reglamentoDelTurno } from './componer.ts';
+import { componerViajes } from './bandeja/turno-con-rol.ts';
+import { dominioOne } from './one/dominio.ts';
+import { PuertoOneMemoria } from './one/puerto-memoria.ts';
+import type { NegocioMem } from './one/puerto-memoria.ts';
+import { ESCALAMIENTO_METRIK, escalamientoDe } from './persona.ts';
+import type { FilaEscalamiento } from './persona.ts';
+import { bloquesDelTurno } from './bandeja/turno-con-rol.ts';
 
 export const WS_PRUEBA = '00000000-0000-4000-8000-00000000a0a0';
 export const TEL_PRUEBA = '573000009444';
@@ -44,6 +53,12 @@ export interface Escenario {
   almacen: AlmacenMemoria;
   mensajero: MensajeroMemoria;
   puerto: PuertoMemoria;
+  /** Con un rol que trae funciones de ONE: el puerto ONE en memoria (gastos, cobros, actividades). */
+  puertoOne: PuertoOneMemoria | null;
+  /** Con un rol: lo que armó el componedor. */
+  composicion: Composicion | null;
+  /** Con un rol: las filas de `asistente_escalamientos` que dejó la conversación. */
+  escalamientos: FilaEscalamiento[];
   deps: DepsCola;
   escribe(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
   reenvia(texto: string, o?: { despuesMs?: number }): Promise<Salida[]>;
@@ -75,8 +90,16 @@ export async function escenario(p: {
   remitente?: { nombre: string; rol: string };
   /** El lector de los documentos del viaje (2026-10-21): en pruebas uno guionado; en el arnés, el real. Sin él, como antes. */
   lector?: Lector | null;
+  /**
+   * Un rol (2026-10-29, roles de Trappvel): la bandeja compuesta con sus funciones, como en producción
+   * (`bandeja/turno-con-rol.ts`). `reglamento` es el del rol (bot `rol:<clave>`). Con funciones de ONE, el motor ONE va
+   * con `negocios` (los viajes vistos como negocios de ONE) y su puerto en memoria.
+   */
+  rol?: { clave: string; funciones: string[]; negocios?: NegocioMem[] };
+  /** Desde cuándo corre el reloj de la prueba (ms). Por defecto, el de `Reloj` (2026-10-06). */
+  inicio?: number;
 }): Promise<Escenario> {
-  const reloj = new Reloj();
+  const reloj = p.inicio !== undefined ? new Reloj(p.inicio) : new Reloj();
   const almacen = new AlmacenMemoria(reloj);
   const mensajero = new MensajeroMemoria(almacen);
   const puerto = new PuertoMemoria({ contactos: p.contactos, viajes: p.viajes, campos: p.campos, extraer: p.extraer, ahora: reloj.ahora, equipo: p.equipo, conAdjuntos: !!p.lector });
@@ -85,11 +108,27 @@ export async function escenario(p: {
     const f = almacen.filas.find((x) => x.id === filaId);
     if (f) f.media = structuredClone(media);
   };
+  const reglamento = p.reglamento ?? await reglamentoDePrueba();
+  const puertoOne = p.rol ? new PuertoOneMemoria({ negocios: p.rol.negocios ?? [] }) : null;
+  const escalamientos: FilaEscalamiento[] = [];
+  const escalamiento = escalamientoDe(reglamento, ESCALAMIENTO_METRIK, () => {});
+  const composicion = p.rol ? componerViajes({
+    funciones: p.rol.funciones,
+    motorViajes: () => dominioBandeja(puerto, { lector: p.lector ?? null, ahora: reloj.ahora }),
+    motorOne: (claves, empresa) => dominioOne(puertoOne!, { rol: 'owner', ahora: reloj.ahora, lector: null, empresa, funciones: claves }),
+    escalamiento, empresa: 'Agencia de Prueba', log: () => {},
+  }) : null;
+  const bloques = composicion ? bloquesDelTurno(composicion) : null;
+  const config = { ...CONFIG_POR_DEFECTO, activo: true, ...p.config };
   const deps: DepsCola = {
     modelo: p.modelo,
-    dominio: dominioBandeja(puerto, { lector: p.lector ?? null, ahora: reloj.ahora }),
-    reglamento: p.reglamento ?? await reglamentoDePrueba(),
-    config: { ...CONFIG_POR_DEFECTO, activo: true, ...p.config },
+    dominio: composicion ? composicion.dominio : dominioBandeja(puerto, { lector: p.lector ?? null, ahora: reloj.ahora }),
+    reglamento: composicion ? await reglamentoDelTurno(reglamento, composicion, { huella: huellaDe }) : reglamento,
+    config: bloques ? { ...config, topes: { ...config.topes, bloques } } : config,
+    ...(p.rol ? {
+      rol: { clave: p.rol.clave, id: `rol-${p.rol.clave}`, version: 1, reglamento_id: reglamento.id, por: 'staff' as const, funciones: p.rol.funciones.map((funcion) => ({ funcion, parametros: {} })) },
+      persona: { config: escalamiento, empresa: 'Agencia de Prueba', rolClave: p.rol.clave, canal: 'wa_one' as const, escalamientos: { registrar: async (f: FilaEscalamiento) => { escalamientos.push(f); } } },
+    } : {}),
     ahoraMs: reloj.ahora,
     reloj: p.reloj ?? (() => reloj.ahora()),
     almacen, mensajero,
@@ -123,7 +162,7 @@ export async function escenario(p: {
         } as FilaConversacion);
       }
     },
-    reloj, almacen, mensajero, puerto, deps,
+    reloj, almacen, mensajero, puerto, puertoOne, composicion, escalamientos, deps,
     escribe: (t, o) => correr('escrito', t, undefined, o?.despuesMs),
     reenvia: (t, o) => correr('reenvio', t, undefined, o?.despuesMs ?? 3_000),
     dicta: (t, o) => correr('audio', t, undefined, o?.despuesMs),

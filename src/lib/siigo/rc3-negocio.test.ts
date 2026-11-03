@@ -82,11 +82,19 @@ describe('dos pagos: un solo recibo, no pedazos', () => {
     expect(plan.titularId).toBe('b')
   })
 
-  it('con solo el primer pago, el RC-3 todavía no se ofrece: no se acusa plata que no entró', () => {
-    const plan = planRc3DelNegocio({ comprobante: ok(701_812), techoTarifa: 701_812, pagos: [V0633[0]] })
+  it('con solo un abono parcial de la tarifa, el RC-3 todavía no se ofrece: no se acusa plata que no entró', () => {
+    const plan = planRc3DelNegocio({
+      comprobante: ok(701_812), techoTarifa: 701_812, pagos: [pago('a', '2026-09-10', 350_000)],
+    })
     expect(plan.estado).toBe('esperando_pagos')
     expect(plan.titularId).toBeNull()
     expect(motivoSinRc3(plan, 'a')?.mensaje).toContain('van $')
+  })
+
+  it('con solo los $45 del primer pago de V0633 no hay tarifa: es sobrepago del honorario (SOE-035)', () => {
+    const plan = planRc3DelNegocio({ comprobante: ok(701_812), techoTarifa: 701_812, pagos: [V0633[0]] })
+    expect(plan.estado).toBe('sin_tarifa')
+    expect(plan.titularId).toBeNull()
   })
 
   it('una diferencia menor que el piso de materialidad cuenta como completa', () => {
@@ -166,7 +174,7 @@ describe('sin comprobante bloquea; no cae a la tarifa confirmada', () => {
 
   it('el bloqueo se muestra aunque los pagos no completen la tarifa', () => {
     const plan = planRc3DelNegocio({
-      comprobante: { estado: 'falta' }, techoTarifa: 701_812, pagos: [pago('a', '2026-09-10', 45)],
+      comprobante: { estado: 'falta' }, techoTarifa: 701_812, pagos: [pago('a', '2026-09-10', 350_000)],
     })
     expect(plan.titularId).toBe('a')
     expect(motivoSinRc3(plan, 'a')?.bloqueo).toBe(true)
@@ -204,5 +212,78 @@ describe('leerComprobanteUpme', () => {
     const v = (x: unknown) => ({ campos: { valor_pagado: { value: x } } })
     expect(leerComprobanteUpme([v(701_812), v('701.812')])).toEqual(ok(701_812))
     expect(leerComprobanteUpme([v(701_812), v(700_000)]).estado).toBe('ambiguo')
+  })
+})
+
+/**
+ * SOE-035 (2026-10-30). En SOENA 7 pagos quedaban frenados pidiendo el comprobante UPME:
+ *   - V0660 (servicio completo) pagó $45 más que el honorario y esos $45 cayeron en la franja
+ *     de la tarifa. No es tarifa: no genera RC-3 ni frena.
+ *   - V0602 / V0658: SOENA todavía no le paga a la UPME. El mensaje lo dice así.
+ *   - la fila frenada muestra la porción UPME (`tarifaSinAcusar`), no el pago entero.
+ */
+describe('SOE-035: sobrepagos menores y el RC-3 que espera a la UPME', () => {
+  it('V0660: $45 en la franja de la tarifa sin comprobante no frena ni genera RC-3', () => {
+    const plan = planRc3DelNegocio({
+      comprobante: { estado: 'falta' }, techoTarifa: 701_812, pagos: [pago('c1', '2026-10-20', 45)],
+    })
+    expect(plan.estado).toBe('sin_tarifa')
+    expect(plan.titularId).toBeNull()
+    expect(plan.roles.get('c1')).toBe('fuera')
+    expect(plan.tarifaSinAcusar).toBe(0)
+    expect(motivoSinRc3(plan, 'c1')?.bloqueo).toBe(false)
+  })
+
+  it('el piso es TOLERANCIA_SALDO_COP: $1.000 todavía es sobrepago, $1.001 ya es tarifa', () => {
+    const conPiso = planRc3DelNegocio({
+      comprobante: { estado: 'falta' }, techoTarifa: 701_812, pagos: [pago('c1', '2026-10-20', 1_000)],
+    })
+    expect(conPiso.estado).toBe('sin_tarifa')
+    const encima = planRc3DelNegocio({
+      comprobante: { estado: 'falta' }, techoTarifa: 701_812, pagos: [pago('c1', '2026-10-20', 1_001)],
+    })
+    expect(encima.estado).toBe('sin_comprobante')
+  })
+
+  it('el piso mira lo del NEGOCIO: dos sobrantes que juntos pasan de $1.000 sí son tarifa', () => {
+    const plan = planRc3DelNegocio({
+      comprobante: { estado: 'falta' },
+      techoTarifa: 701_812,
+      pagos: [pago('a', '2026-10-01', 600), pago('b', '2026-10-02', 600)],
+    })
+    expect(plan.estado).toBe('sin_comprobante')
+  })
+
+  it('con un RC-3 ya emitido, unos pesos más no borran la tarifa del negocio', () => {
+    const plan = planRc3DelNegocio({
+      comprobante: ok(701_812),
+      techoTarifa: 701_812,
+      pagos: [pago('a', '2026-10-01', 500, { marca: rc3('RC-3-9', 500) })],
+    })
+    expect(plan.estado).not.toBe('sin_tarifa')
+    expect(plan.roles.get('a')).toBe('con_recibo_propio')
+  })
+
+  it('V0602: sin comprobante el mensaje dice que aún no se le ha pagado a la UPME', () => {
+    const plan = planRc3DelNegocio({
+      comprobante: { estado: 'falta' }, techoTarifa: 701_812, pagos: [pago('c1', '2026-10-01', 701_812)],
+    })
+    const motivo = motivoSinRc3(plan, 'c1')
+    expect(motivo?.bloqueo).toBe(true)
+    expect(motivo?.mensaje).toMatch(/^Aún no se ha pagado a la UPME: el recibo sale cuando se cargue el comprobante/)
+  })
+
+  it('la porción por acusar es la UPME de los pagos que van en el RC-3, no el pago entero', () => {
+    const plan = planRc3DelNegocio({
+      comprobante: { estado: 'falta' },
+      techoTarifa: 701_812,
+      pagos: [
+        pago('a', '2026-09-01', 200_000, { marca: rc3('RC-3-1', 200_000) }),
+        pago('b', '2026-09-10', 300_000),
+        pago('c', '2026-09-20', 201_812),
+      ],
+    })
+    expect(plan.estado).toBe('sin_comprobante')
+    expect(plan.tarifaSinAcusar).toBe(501_812)
   })
 })

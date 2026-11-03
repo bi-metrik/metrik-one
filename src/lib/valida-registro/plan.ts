@@ -182,6 +182,41 @@ export interface PlanAbierto {
    * marca se va con él. Una marca sin `corte` es de antes de esa decisión: no suspende nada.
    */
   reversado?: { at: string; referencia_pago: string; corte?: CorteReverso; recobro_cobro_id?: string }
+  /**
+   * La terminación de la suscripción a los 30 días calendario de suspensión sin pago (Términos de
+   * autoservicio 11.2, `terminacion-servidor.ts`). Vive en el plan a propósito: el pago que levanta la
+   * suspensión abre un ciclo nuevo, que reemplaza `valida_plan` entero y con él una terminación `por_terminar`.
+   */
+  terminacion?: TerminacionPlan
+}
+
+/**
+ * - `por_terminar`: cumplió los 30 días, pero la terminación está apagada en producción
+ *   (`TERMINACION_30_DIAS_APROBADA`): solo se registra y se avisa a MéTRIK (ensayo).
+ * - `terminada`: se cerraron los cobros (contrato terminado, plan sin renovación, suscripción cancelada)
+ *   y se pidió a ePayco borrar la tarjeta. Lo que quedó a medias (`tarjeta.pendiente`, aviso fallido) lo
+ *   reintenta el cron.
+ */
+export interface TerminacionPlan {
+  estado: 'por_terminar' | 'terminada'
+  motivo: 'mora' | 'reverso'
+  /** El instante en que empezó la suspensión: vencimiento de la bolsa (mora) o `anulado_en` (reverso). */
+  suspendida_desde: string
+  /** El día de Bogotá en que se cumplen los 30 días (`diaDeTerminacion`). */
+  dia_terminacion: string
+  detectada_at: string
+  terminada_at?: string
+  /** Contrato, plan de cobro y suscripción de los que se cerraron los cobros. */
+  contrato_id?: string
+  cobrador_id?: string
+  negocio_id?: string | null
+  suscripcion_id?: string | null
+  /** Contrato terminado, plan sin renovación y suscripción cancelada: no hay más cobros. */
+  cobros_cerrados?: boolean
+  /** La petición a la pasarela de borrar el medio de pago (11.2). */
+  tarjeta?: { estado: 'borrada' | 'pendiente' | 'sin_tarjeta' | 'final'; intentos: number; at: string; error?: string }
+  /** El aviso interno a MéTRIK (nunca al cliente: «sin más aviso»). */
+  aviso_interno?: { estado: 'enviado' | 'fallido'; at: string; error?: string }
 }
 
 /**

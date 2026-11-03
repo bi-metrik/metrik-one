@@ -59,6 +59,7 @@ import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import type { CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
+import { completoCierraLaEdicion } from '@/lib/negocios/cierre-por-tipo'
 import { copiaDeSoloLectura, modoDeCopiaGenerable, origenDeCopiaGenerable } from '@/lib/negocios/copia-heredada'
 import { negocioCerrado as estaCerrado } from '@/lib/negocios/motivo-cierre'
 import type { LineaBase } from '@/lib/negocios/presupuesto-ejecucion'
@@ -118,6 +119,7 @@ const BloqueMovimientos = dynamic(() => import('./bloques/BloqueMovimientos'))
 const BloqueResultado = dynamic(() => import('./bloques/BloqueResultado'))
 const BloqueServicios = dynamic(() => import('./bloques/BloqueServicios'))
 const BloqueHistorial = dynamic(() => import('./bloques/BloqueHistorial'))
+const BloqueAvisosCliente = dynamic(() => import('./bloques/BloqueAvisosCliente'))
 const BloqueFormulario = dynamic(() => import('./bloques/BloqueFormulario'))
 const BloquePagosEpayco = dynamic(() => import('./bloques/BloquePagosEpayco'))
 const BloquePagoExterno = dynamic(() => import('./bloques/BloquePagoExterno'))
@@ -1117,7 +1119,10 @@ function SelectorEtapa({
   // trabaja en la etapa, no si el proceso termina ahi. Ver `lib/negocios/etapa-cierre.ts`.
   const cierreConfig = {
     cerrar: { label: 'Cerrar', icon: CheckCircle2, btnClass: 'border-green-200 text-green-600 hover:bg-green-50' },
-    perder: { label: 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
+    // N10-2 (QA del 2026-10-29): con el seguimiento encendido, la guía de Seguimiento y el diálogo
+    // hablan de «Se perdió» («¿Por qué se perdió?», toast «Se perdió. Quedó el motivo.»): el botón
+    // se llama igual. Sin seguimiento, «Desistir» de siempre.
+    perder: { label: seguimiento?.activo ? 'Se perdió' : 'Desistir', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
     cancelar: { label: 'Cancelar', icon: XCircle, btnClass: 'border-red-200 text-red-500 hover:bg-red-50' },
   }[accionDeCierre(etapaParaCierre, hayEtapaCierre)]
 
@@ -1209,11 +1214,12 @@ function SelectorEtapa({
               <button
                 onClick={() => setShowPausaDialog(true)}
                 disabled={isPending}
-                title={`Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
+                title={seguimiento?.activo ? `Aplazar (${vecesPausado}/${MAX_PAUSAS} usados)` : `Pausar negocio (${vecesPausado}/${MAX_PAUSAS} pausas usadas)`}
                 className="inline-flex items-center gap-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent disabled:opacity-60"
               >
                 <Pause className="h-3 w-3" />
-                <span className="hidden sm:inline">Pausar</span>
+                {/* N10-2: con seguimiento, el diálogo ya se llama «Aplazar»; el botón también. */}
+                <span className="hidden sm:inline">{seguimiento?.activo ? 'Aplazar' : 'Pausar'}</span>
               </button>
             )}
             <ReprocesoBoton
@@ -1741,7 +1747,9 @@ function BloqueRenderer({
     // factura, la IA extrae un dato mal, el bloque se marca completo en ese instante
     // y ya no puede corregirlo aunque el negocio siga en su etapa. Corregir un campo
     // recién extraído es parte de cargarlo, no una corrección hacia atrás.
-    if (bloque.instancia?.estado === 'completo' && tipo !== 'datos' && tipo !== 'documento') return 'visible'
+    // Servicios del viaje tampoco: su estado lo pone el gate y el voucher, la fecha límite y la
+    // confirmación se siguen cargando con la fila confirmada (QA 2026-10-29, M1-1). Ver `cierre-por-tipo`.
+    if (bloque.instancia?.estado === 'completo' && completoCierraLaEdicion(tipo)) return 'visible'
     switch (tipo) {
       case 'datos':
         // Misma regla que `guardarPagosMulti` en el servidor (`lib/permissions/multi-pago.ts`).
@@ -1785,6 +1793,7 @@ function BloqueRenderer({
       case 'resultado':
       case 'ejecucion':
       case 'historial':
+      case 'avisos_cliente':
         return 'visible'
       default:
         return 'editable'
@@ -2250,6 +2259,10 @@ function BloqueRenderer({
     case 'historial':
       return <BloqueHistorial data={historialData} />
 
+    // Correos al cliente de esta etapa y su acuse (SOE-031). Solo lectura: lee `avisos_cliente`.
+    case 'avisos_cliente':
+      return <BloqueAvisosCliente negocioId={negocioId} bloqueConfigId={bloque.id} />
+
     case 'formulario':
       return (
         <BloqueFormulario
@@ -2576,6 +2589,11 @@ interface Props {
   /** Igual que `banner`, pero al final de la columna principal (bloques de Valida). */
   extras?: React.ReactNode
   /**
+   * La obra (cierre, facturas y llegadas), armada en el servidor con `modules.obras`. Va antes de
+   * la Actividad. `null` en los workspaces sin obras.
+   */
+  obra?: React.ReactNode
+  /**
    * Falta la autorización de datos del cliente y la línea la pide (reunión del 2026-10-22). La
    * ficha ya lo dice en `banner`; esto lo lee la página de la cotización para su lista de Revisar.
    */
@@ -2636,6 +2654,7 @@ export default function NegocioDetailClient({
   errorMsg,
   banner,
   extras,
+  obra,
   viaje = null,
   centro,
   cotActualId = null,
@@ -3079,6 +3098,8 @@ export default function NegocioDetailClient({
             negocioCerrado={negocioCerrado}
           />
         )}
+
+        {obra}
 
         {/* ── Activity log ── */}
         <div className="rounded-xl border border-border bg-card">

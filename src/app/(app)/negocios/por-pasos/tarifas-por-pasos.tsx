@@ -1,12 +1,15 @@
 'use client'
 
+import { avisosDeOrdenDeTarifas } from '@/lib/cotizaciones/tarifas-al-cliente'
 import { useState, type ReactNode } from 'react'
 
 import { BTN, BTN_PRIM, INPUT, LINK } from '@/components/viaje/estilo'
 import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-acciones'
+import { causasBajoMinimo } from '@/lib/cotizaciones/causas-margen'
 import { MOTIVOS_COMBINACION } from '@/lib/cotizaciones/motivo-combinacion'
 import { pesos } from '@/lib/cotizaciones/tarjeta-opcion'
 import type { ServicioDelViaje, TarifaCalculada } from '@/lib/cotizaciones/por-pasos-vista'
+import { esIntermedia } from '@/lib/cotizaciones/tarifas'
 
 /**
  * Paso 2 · TARIFAS (diseño, Paso 2, «Cómo se ve», rehecho el 2026-10-12).
@@ -31,7 +34,8 @@ export interface ServicioConOpciones extends ServicioDelViaje {
 export interface ReglasEnTarifas {
   puntosExtra: number
   puntosMax: number
-  descuentos: { id: string; descripcion: string; pct: number }[]
+  /** `aplicaA`: el id de UNA tarifa (2026-10-29); ausente o `null` = a todas. */
+  descuentos: { id: string; descripcion: string; pct: number; aplicaA?: string | null }[]
   pisoHotelPct: number
 }
 
@@ -47,6 +51,10 @@ export interface AutorizacionVista {
   pedido: { por: string | null } | null
   disponible: boolean
 }
+
+/** «Recomendada, Opción 2 y Opción 3». */
+const listaDeNombres = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} y ${xs[xs.length - 1]}`)
+const cuantas = (n: number) => ['cero', 'una', 'dos', 'tres', 'cuatro', 'cinco'][n] ?? String(n)
 
 const pct = (v: number | null) => (v === null ? '—' : `${String(Math.round(v * 10) / 10).replace('.', ',')} %`)
 
@@ -85,6 +93,7 @@ export function TarifasPorPasos({
   reglas = null,
   onPuntos,
   onDescuentos,
+  delTotal = null,
 }: {
   tarifas: TarifaCalculada[]
   servicios: ServicioConOpciones[]
@@ -128,9 +137,18 @@ export function TarifasPorPasos({
    */
   reglas?: ReglasEnTarifas | null
   onPuntos?: (puntos: number) => void
-  onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number }[]) => void
+  onDescuentos?: (descuentos: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[]) => void
+  /**
+   * El margen del total, el MISMO que pinta el encabezado (`margenDelEncabezado`). Sin tarifas que
+   * vayan al cliente (un solo hotel, nada que escoger) es lo único que hay que medir: sin él, el
+   * rótulo «Margen global (no se edita):» quedaba vacío (falla 1 del brief del 2026-10-28).
+   */
+  delTotal?: { margenPct: number | null; sinComision: number; hotelesBajoPiso: { id: string | undefined; margenPct: number }[] } | null
 }) {
-  const soloRecomendada = servicios.length > 0 && !servicios.some(s => s.tipo === 'vuelo' || s.tipo === 'hotel')
+  // Un paquete de bloqueo se margina como hotel (`tipoParaMargen`): la casilla lo nombra.
+  const conPaquete = servicios.some(s => s.tipo === 'paquete')
+  // El paquete de bloqueo se escoge como un hotel: cada paquete es una tarifa (D5, 2026-10-29).
+  const soloRecomendada = servicios.length > 0 && !servicios.some(s => s.tipo === 'vuelo' || s.tipo === 'hotel' || s.tipo === 'paquete')
   const visibles = servicios.length === 0 || soloRecomendada ? tarifas.filter(t => t.canon === 'Recomendada' || t.esPrincipal) : tarifas
   const [ver, setVer] = useState<string>(() => (visibles.find(t => t.canon === 'Recomendada') ?? visibles[0])?.id ?? 'comparar')
   const actual = visibles.find(t => t.id === ver) ?? null
@@ -140,25 +158,54 @@ export function TarifasPorPasos({
   const [renombrando, setRenombrando] = useState<string | null>(null)
   const [verCalculo, setVerCalculo] = useState(false)
   const vanAlCliente = (t: TarifaCalculada) => t.esPrincipal || (t.vaEnPropuesta && !t.igualA)
+  // N-17 (QA del 2026-10-29, ronda 3): la Premium por debajo de la Recomendada (o la Económica por
+  // encima) se dice aquí, junto al total de esa tarifa, y otra vez en «Revisar y enviar».
+  const ordenFuera = new Map(avisosDeOrdenDeTarifas(tarifas.map(x => ({
+    nombre: x.nombre,
+    precio: x.precio,
+    vaEnPropuesta: vanAlCliente(x),
+    firma: JSON.stringify(Object.entries(x.opcionPorServicio).sort()),
+  }))).map(a => [a.nombre, a.texto]))
   /** Los hoteles de una tarifa que, con su descuento, quedaron bajo el piso de hotel (reglas). */
   const hotelesBajos = (t: TarifaCalculada) => t.cascada?.reglas?.hotelesBajoPiso ?? []
-  const bajoMinimo = tarifas.filter(t => vanAlCliente(t) && ((!t.exenta && t.margenReal !== null && t.margenReal < pisoPct) || hotelesBajos(t).length > 0))
-  /** El margen real de una tarifa, dicho con las líneas de tarifa pública que no cuenta. */
-  const margenDeTarifa = (t: TarifaCalculada) => (t.exenta ? 'solo tarifa pública' : pct(t.margenReal))
-  // Con reglas, las Públicas CON comisión sí cuentan: la nota nombra solo las que no.
-  const sinContar = (t: TarifaCalculada) => (reglas ? t.cascada?.reglas?.publicasSinComision ?? 0 : t.publicas)
+  /**
+   * Lo que se mide: las tarifas que van al cliente o, sin ninguna, el total (el que pinta el
+   * encabezado). Cada uno con su margen y sus hoteles bajo el piso.
+   */
+  const medidos: { id: string; nombre: string | null; margenReal: number | null; sinComision: number; hoteles: { id: string | undefined; margenPct: number }[]; tarifa: TarifaCalculada | null }[] =
+    tarifas.some(vanAlCliente)
+      ? tarifas.filter(vanAlCliente).map(t => ({ id: t.id, nombre: t.nombre, margenReal: t.margenReal, sinComision: t.sinComision, hoteles: hotelesBajos(t), tarifa: t }))
+      : delTotal
+        ? [{ id: 'total', nombre: null, margenReal: delTotal.margenPct, sinComision: delTotal.sinComision, hoteles: delTotal.hotelesBajoPiso, tarifa: null }]
+        : []
+  // D3 (2026-10-29): una Pública sin comisión no se autoriza: se escribe la comisión. No va aquí.
+  const globalBajo = (t: { sinComision: number; margenReal: number | null }) => t.sinComision === 0 && t.margenReal !== null && t.margenReal < pisoPct
+  const bajoMinimo = medidos.filter(t => globalBajo(t) || t.hoteles.length > 0)
+  /** Por qué pide la autorización, cada causa por separado (`causas-margen.ts`). */
+  const causasDe = (t: (typeof medidos)[number]) => causasBajoMinimo({
+    nombre: t.nombre,
+    margenPct: t.sinComision > 0 ? null : t.margenReal,
+    hoteles: t.hoteles.map(h => ({ nombre: nombreDeOpcion(h.id ?? ''), margenPct: h.margenPct })),
+    pisoHotelPct: reglas?.pisoHotelPct ?? 0,
+  }, pisoPct)
+  /** El margen general de una tarifa (D2); con una Pública sin comisión no se puede medir (D3). */
+  const margenDeTarifa = (t: { sinComision: number; margenReal: number | null }) => (t.sinComision > 0 ? 'falta la comisión' : pct(t.margenReal))
   const notaPublicas = (t: TarifaCalculada) => {
-    const n = sinContar(t)
-    if (t.exenta || n === 0) return ''
-    return reglas
-      ? ` (sin ${n === 1 ? '1 pública sin comisión' : `${n} públicas sin comisión`})`
-      : ` (sin ${n === 1 ? '1 de tarifa pública' : `${n} de tarifa pública`})`
+    const n = t.sinComision
+    if (n === 0) return ''
+    return ` (${n === 1 ? '1 pública sin comisión' : `${n} públicas sin comisión`})`
   }
   const [puntosEscritos, setPuntosEscritos] = useState<string | null>(null)
-  const [nuevoDescuento, setNuevoDescuento] = useState<{ descripcion: string; pct: string } | null>(null)
+  const [nuevoDescuento, setNuevoDescuento] = useState<{ descripcion: string; pct: string; aplicaA: string } | null>(null)
+  /** A qué tarifa aplica un descuento, como se lee en su chip (`aplicaA` vacío = todas). */
+  const aplicaATexto = (aplicaA: string | null | undefined) => {
+    if (!aplicaA) return 'Todas las tarifas'
+    const t = tarifas.find(x => x.id === aplicaA)
+    return t ? `Solo ${t.nombre ?? 'esta tarifa'}` : 'Su tarifa ya no existe: no se aplica'
+  }
 
   const pregunta = (() => {
-    const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : `qué opción de ${s.nombre}`))]
+    const que = [...new Set(servicios.map(s => s.tipo === 'hotel' ? 'qué hotel' : s.tipo === 'vuelo' ? 'qué vuelo' : s.tipo === 'traslado' ? 'qué traslado' : s.tipo === 'paquete' ? 'qué paquete' : `qué opción de ${s.nombre}`))]
     const lista = que.length <= 1 ? que.join('') : `${que.slice(0, -1).join(', ')} y ${que[que.length - 1]}`
     const t = `¿${lista} va${visibles.length > 1 ? ' en cada tarifa' : ''}?`
     return t.charAt(0) + t.charAt(1).toUpperCase() + t.slice(2)
@@ -172,24 +219,28 @@ export function TarifasPorPasos({
         {t.canon === 'Recomendada' ? 'siempre se manda' : vanAlCliente(t) ? 'se manda al cliente' : 'no se manda'}
       </small>
       {/* N12 (H8) · una tarifa que no es Económica, Recomendada ni Premium lo dice: no es una pestaña más. */}
-      {t.canon === null && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
+      {/* En un bloqueo cada paquete es su tarifa (D5): ahí no es «extra». */}
+      {t.canon === null && !conPaquete && !esIntermedia(t.nombre) && <small className="text-[10.5px] font-semibold opacity-75" data-tarifa-extra>No es una de las tres tarifas</small>}
     </>
   )
 
   const margenYAutorizacion = (
     <div className="flex flex-col gap-2 rounded-xl border border-[#E2DED5] bg-white p-3" data-margen-unico>
       <label className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="font-semibold">{reglas ? 'Margen de hoteles' : 'Margen'}</span>
+        <span className="font-semibold">{reglas ? (conPaquete ? 'Margen de hoteles y paquetes' : 'Margen de hoteles') : 'Margen'}</span>
         <input
           type="text"
           inputMode="decimal"
-          aria-label={reglas ? 'Margen de los hoteles' : 'Margen de la cotización'}
+          aria-label={reglas ? (conPaquete ? 'Margen de los hoteles y paquetes' : 'Margen de los hoteles') : 'Margen de la cotización'}
           disabled={!editable || ocupado}
           value={margenEscrito ?? String(margenPct).replace('.', ',')}
           onChange={e => setMargenEscrito(e.target.value)}
           onBlur={() => {
             if (margenEscrito === null) return
-            const v = Number(margenEscrito.replace(',', '.'))
+            // D4 (2026-10-29): borrar la casilla no es escribir un 0 (`Number('')` es 0): era el 0
+            // que dejaba las Netas a costo (COT-2026-0009).
+            const t = margenEscrito.trim()
+            const v = t === '' ? Number.NaN : Number(t.replace(',', '.'))
             setMargenEscrito(null)
             if (Number.isFinite(v) && v !== margenPct) onMargen(v)
           }}
@@ -224,7 +275,7 @@ export function TarifasPorPasos({
               className={`${INPUT} !w-[70px] text-right tabular-nums`}
               data-puntos-extra
             />
-            <span className="text-xs text-[#6E6A62]">de 0 a {String(reglas.puntosMax).replace('.', ',')} puntos sobre el total · van en el precio de hoteles y planes, nunca en los vuelos</span>
+            <span className="text-xs text-[#6E6A62]">de 0 a {String(reglas.puntosMax).replace('.', ',')} puntos sobre el total · van en el precio de hoteles{conPaquete ? ', paquetes' : ''} y planes, nunca en los vuelos</span>
           </label>
           <div className="flex flex-col gap-1.5" data-descuentos-total>
             <span className="text-sm font-semibold">Descuentos sobre el total <span className="text-xs font-normal text-[#6E6A62]">· el cliente los ve con su descripción</span></span>
@@ -232,6 +283,23 @@ export function TarifasPorPasos({
               <span key={d.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] px-2.5 py-1.5 text-[13px]" data-descuento-total={d.id}>
                 <span className="min-w-0 flex-1">{d.descripcion}</span>
                 <b className="tabular-nums">{pct(d.pct)}</b>
+                {/* A qué tarifa aplica (2026-10-29): después de la cifra, para que «descripción %» se lea junto. */}
+                {editable ? (
+                  <select
+                    aria-label={`A qué tarifa aplica «${d.descripcion}»`}
+                    className={`${INPUT} !w-auto !py-0.5 text-xs`}
+                    disabled={ocupado}
+                    value={d.aplicaA ?? ''}
+                    onChange={e => onDescuentos?.(reglas.descuentos.map(x => (x.id === d.id ? { ...x, aplicaA: e.target.value || null } : x)))}
+                    data-aplica-a={d.aplicaA ?? 'todas'}
+                  >
+                    <option value="">Todas las tarifas</option>
+                    {tarifas.map(t => <option key={t.id} value={t.id}>Solo {t.nombre ?? 'esta tarifa'}</option>)}
+                    {d.aplicaA && !tarifas.some(t => t.id === d.aplicaA) && <option value={d.aplicaA}>Su tarifa ya no existe: no se aplica</option>}
+                  </select>
+                ) : (
+                  <small className="text-xs text-[#6E6A62]" data-aplica-a={d.aplicaA ?? 'todas'}>{aplicaATexto(d.aplicaA)}</small>
+                )}
                 {editable && (
                   <button
                     type="button"
@@ -268,6 +336,18 @@ export function TarifasPorPasos({
                     onChange={e => setNuevoDescuento({ ...nuevoDescuento, pct: e.target.value })}
                   />
                 </label>
+                <label className="flex flex-col gap-0.5 text-xs text-[#6E6A62]">
+                  <span>Aplica a</span>
+                  <select
+                    className={`${INPUT} !w-auto`}
+                    value={nuevoDescuento.aplicaA}
+                    onChange={e => setNuevoDescuento({ ...nuevoDescuento, aplicaA: e.target.value })}
+                    data-nuevo-aplica-a
+                  >
+                    <option value="">Todas las tarifas</option>
+                    {tarifas.map(t => <option key={t.id} value={t.id}>Solo {t.nombre ?? 'esta tarifa'}</option>)}
+                  </select>
+                </label>
                 <button
                   type="button"
                   className={BTN_PRIM}
@@ -275,7 +355,7 @@ export function TarifasPorPasos({
                   onClick={() => {
                     const v = Number(nuevoDescuento.pct.replace(',', '.'))
                     if (!nuevoDescuento.descripcion.trim() || !Number.isFinite(v) || v <= 0 || v >= 100) return
-                    onDescuentos?.([...reglas.descuentos, { descripcion: nuevoDescuento.descripcion.trim(), pct: v }])
+                    onDescuentos?.([...reglas.descuentos, { descripcion: nuevoDescuento.descripcion.trim(), pct: v, ...(nuevoDescuento.aplicaA ? { aplicaA: nuevoDescuento.aplicaA } : {}) }])
                     setNuevoDescuento(null)
                   }}
                 >
@@ -284,7 +364,7 @@ export function TarifasPorPasos({
                 <button type="button" className={BTN} onClick={() => setNuevoDescuento(null)}>Cancelar</button>
               </span>
             ) : (
-              <button type="button" className={`${LINK} self-start text-[13px]`} disabled={ocupado} onClick={() => setNuevoDescuento({ descripcion: '', pct: '' })} data-agregar-descuento-total>
+              <button type="button" className={`${LINK} self-start text-[13px]`} disabled={ocupado} onClick={() => setNuevoDescuento({ descripcion: '', pct: '', aplicaA: '' })} data-agregar-descuento-total>
                 + Descuento sobre el total
               </button>
             ))}
@@ -307,22 +387,23 @@ export function TarifasPorPasos({
       )}
       <p className="m-0 text-[13px]" data-margenes-reales>
         {reglas ? 'Margen global (no se edita):' : 'Margen real:'}{' '}
-        {tarifas.filter(vanAlCliente).map((t, i) => (
+        {medidos.map((t, i) => (
           <span key={t.id}>
             {i > 0 && ' · '}
-            <b className={t.exenta ? '' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}>
-              {t.nombre} {margenDeTarifa(t)}
+            <b className={`whitespace-nowrap ${t.sinComision > 0 ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < pisoPct ? 'text-[#B3382C]' : t.margenReal !== null && t.margenReal < avisoPct ? 'text-[#9A5F0C]' : ''}`} data-margen-medido={t.id}>
+              {t.nombre ? `${t.nombre} ` : ''}{margenDeTarifa(t)}
             </b>
-            {notaPublicas(t) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t)}</span>}
+            {t.tarifa && notaPublicas(t.tarifa) && <span className="text-xs text-[#6E6A62]">{notaPublicas(t.tarifa)}</span>}
           </span>
         ))}
       </p>
       {bajoMinimo.length > 0 && autorizacion && (
         <div className="flex flex-col gap-1.5 rounded-lg border border-[#EBC1BB] bg-[#FBEDEB] p-2.5 text-[13px]" data-autorizacion>
-          <span className="font-semibold text-[#B3382C]">{bajoMinimo.map(t => t.nombre).join(' y ')} · Bajo el mínimo</span>
-          {bajoMinimo.flatMap(t => hotelesBajos(t).map(h => (
-            <span key={`${t.id}-${h.id}`} className="text-xs text-[#B3382C]" data-hotel-bajo-piso>
-              {nombreDeOpcion(h.id ?? '')} con su descuento queda al {pct(h.margenPct)} (mínimo de hotel {pct(reglas?.pisoHotelPct ?? 0)}) · {t.nombre}
+          <span className="font-semibold text-[#B3382C]">{[bajoMinimo.map(t => t.nombre).filter(Boolean).join(' y '), 'Bajo el mínimo'].filter(Boolean).join(' · ')}</span>
+          {/* Brief del 2026-10-28 · la causa real: el hotel con su nombre, el global solo si lo es. */}
+          {bajoMinimo.flatMap(t => causasDe(t).map((c, i) => (
+            <span key={`${t.id}-${i}`} className="text-xs text-[#B3382C]" data-causa-margen={i < t.hoteles.length ? 'hotel' : 'global'}>
+              {c}
             </span>
           )))}
           {autorizacion.vigente ? (
@@ -351,7 +432,7 @@ export function TarifasPorPasos({
                           setMotivo('')
                         }}
                       >
-                        Autorizar {pct(bajoMinimo[0]?.margenReal ?? null)}
+                        {bajoMinimo[0] && globalBajo(bajoMinimo[0]) ? `Autorizar ${pct(bajoMinimo[0].margenReal)}` : 'Autorizar'}
                       </button>
                       <button type="button" className={BTN} onClick={() => setAutorizando(false)}>Cancelar</button>
                     </span>
@@ -482,7 +563,14 @@ export function TarifasPorPasos({
       <div className="flex flex-wrap items-end gap-3 border-t-2 border-[#191713] pt-2" data-total-tarifa>
         <span className="min-w-0 flex-1">
           <small className="block text-[11px] font-bold uppercase tracking-wide text-[#6E6A62]">Total {t.nombre}</small>
-          <small className="block text-xs text-[#6E6A62] tabular-nums">costo {pesos(t.costo)} · ganas {pesos(t.precio - t.costo)} · margen {reglas ? 'global' : 'real'} {margenDeTarifa(t)}{notaPublicas(t)}</small>
+          {/* QA del #1342 · el costo es lo que PAGA la agencia (D2): con una Pública, su precio público
+              menos la comisión. Sin la comisión no se sabe: decía «ganas $0» junto a un 5,8 %. */}
+          <small className="block text-xs text-[#6E6A62] tabular-nums" data-costo-tarifa>
+            {t.costoAgencia === null
+              ? <>costo y ganancia: <b className="text-[#B3382C]">falta la comisión</b></>
+              : <>costo {pesos(t.costoAgencia)} · ganas {pesos(t.precio - t.costoAgencia)}</>}
+            {' · '}margen {reglas ? 'global' : 'real'} {margenDeTarifa(t)}{notaPublicas(t)}
+          </small>
           {reglas && t.cascada?.reglas && (t.cascada.reglas.puntosPesos > 0 || t.cascada.reglas.descuentos.length > 0) && (
             <small className="block text-xs text-[#6E6A62] tabular-nums" data-desglose-tarifa>
               {t.cascada.reglas.puntosPesos > 0 ? `incluye ${pesos(t.cascada.reglas.puntosPesos)} de puntos extra · ` : ''}
@@ -504,6 +592,9 @@ export function TarifasPorPasos({
                 Mandarla al cliente
               </label>
               {t.igualA && <span className="text-[11.5px] font-semibold text-[#9A5F0C]">Quedó igual a la {t.igualA}: no se manda. Cambia una opción para mandarla.</span>}
+              {t.nombre && ordenFuera.has(t.nombre) && (
+                <span className="text-[11.5px] font-semibold text-[#9A5F0C]" data-orden-tarifa>{ordenFuera.get(t.nombre)}</span>
+              )}
             </span>
           )}
         </span>
@@ -568,13 +659,24 @@ export function TarifasPorPasos({
           <p className="m-0 text-lg font-bold">{pregunta}</p>
           <p className="m-0 text-[13px] text-[#6E6A62]">
             {visibles.length > 1
-              ? 'El cliente recibe hasta tres maneras de hacer el mismo viaje: Económica, Recomendada y Premium. Escoge, para cada una, cuál opción va. La Recomendada es el total de la cotización.'
+              // QA del #1359 · los mismos nombres que las pestañas: en un bloqueo, «Opción 2», «Opción 3».
+              ? conPaquete
+                ? `El cliente recibe una manera de hacer el viaje por cada paquete que va: ${listaDeNombres(visibles.map(t => t.nombre ?? 'Tarifa'))}. Escoge, para cada una, qué paquete va. La Recomendada es el total de la cotización.`
+                : `El cliente recibe hasta ${cuantas(visibles.length)} maneras de hacer el mismo viaje: ${listaDeNombres(visibles.map(t => t.nombre ?? 'Tarifa'))}. Escoge, para cada una, cuál opción va. La Recomendada es el total de la cotización.`
               : `Una sola tarifa: la Recomendada. Vuelos y hoteles tienen una sola manera; las opciones son solo de ${servicios.map(s => s.nombre).join(' y ')}. Escoge aquí cuál va: no se crean Económica ni Premium, y el PDF conserva el «Día a día».`}
           </p>
         </>
       )}
       {visibles.length > 0 && (
-        <div role="tablist" aria-label="Tarifas" className="sticky top-[118px] z-10 flex gap-1.5 overflow-x-auto bg-[#F3F1EC] pb-0.5">
+        <div
+          role="tablist"
+          aria-label="Tarifas"
+          // QA del #1359 · debajo de la barra «Sigue», con su alto real (`barra-pasos.tsx`), y con un
+          // margen: antes un alto fijo la dejaba encima de las pestañas.
+          style={{ top: 'calc(var(--alto-barra-pasos, 118px) + 8px)', scrollMarginTop: 'calc(var(--alto-barra-pasos, 118px) + 8px)' }}
+          className="sticky z-10 flex gap-1.5 overflow-x-auto bg-[#F3F1EC] py-0.5"
+          data-pestanas-tarifas
+        >
           {visibles.map(t => (
             <button
               key={t.id}

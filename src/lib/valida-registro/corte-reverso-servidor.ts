@@ -170,7 +170,7 @@ async function avisarCliente(
   if (!mismoDiaDelCorte(corte.anulado_en ?? at, ahora.getTime())) {
     aviso = { estado: 'vencido', at, error: 'no salió el día del corte: ya no se manda' }
   } else if (!avisoClienteHabilitado(deps.env ?? process.env)) {
-    aviso = { estado: 'retenido', at, error: 'correo pendiente de Vera (AVISO_REVERSO_CLIENTE_APROBADO)' }
+    aviso = { estado: 'retenido', at, error: 'correo retenido en producción (AVISO_REVERSO_CLIENTE_APROBADO = false)' }
   } else if (!registro?.correo) {
     aviso = { estado: 'fallido', at, error: 'el espacio no tiene registro con correo' }
   } else {

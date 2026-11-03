@@ -73,6 +73,7 @@ import { ETIQUETA_ABONO_A_MANO, esMotivoAbonoAMano } from '@/lib/siigo/abono'
 import { negociosDePruebaOcultos, sinOcultos } from '@/lib/negocios/negocios-de-prueba'
 import {
   leerComprobanteUpme,
+  MENSAJE_SIN_COMPROBANTE_UPME,
   planRc3DelNegocio,
   SLUG_COMPROBANTE_UPME,
   type PlanRc3,
@@ -126,6 +127,19 @@ export interface PagoConRecibo {
    * del RC-3 de un negocio con comprobante.
    */
   rc3: { comprobante: number; ya_acusado: number } | null
+  /**
+   * La porción UPME que el RC-3 del negocio va a acusar, cuando el RC-3 está FRENADO (sin
+   * comprobante, o comprobante ambiguo). Es la cifra que se muestra en la fila en vez del
+   * pago entero (SOE-035: V0610 mostraba $459.000 y Tesorería leyó que los valores no
+   * correspondían). Null en el resto: con el RC-3 emitible la cifra es `valor_upme`.
+   */
+  porcion_upme: number | null
+  /**
+   * El RC-3 espera el comprobante de pago a la UPME (SOENA todavía no le ha pagado). Frena
+   * el botón igual que un faltante, pero es una frase entera, no «Falta …»: no hay un dato
+   * roto que corregir, hay un pago a la UPME que todavía no se hace (SOE-035).
+   */
+  espera_upme: string | null
   /**
    * Qué le falta por acusar a un cobro que YA tiene algún recibo.
    *
@@ -423,8 +437,12 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
     estado: EstadoRecibo
     /** Por qué no lleva recibo propio (SOE-029), cuando su RC-3 va en el del negocio. */
     motivoNoAplica?: string
-    /** Lo que frena el RC-3 del negocio (sin comprobante), en el pago donde se muestra. */
+    /** Lo que frena el RC-3 del negocio (comprobante ambiguo), en el pago donde se muestra. */
     faltaRc3?: string
+    /** El RC-3 espera el comprobante (todavía no se le pagó a la UPME). */
+    esperaUpme?: string
+    /** Porción UPME que acusará el RC-3 frenado. */
+    porcionUpme?: number | null
     rc3?: { comprobante: number; ya_acusado: number } | null
   }
   const clasificar = (c: FilaCobro): Clasificado | null => {
@@ -449,6 +467,10 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
       // franja de este pago.
       const plan = c.negocio_id ? planRc3PorNegocio.get(c.negocio_id) : undefined
       const rol = plan?.roles.get(c.id)
+      // SOE-035: unos pesos de sobrepago del honorario que el reparto dejó en la franja de
+      // la tarifa (V0660: $45) no son tarifa. Sin un recibo de caja de antes, no aparece.
+      // Solo con el reparto de ESTE pago a la vista: sin él no se sabe qué trae.
+      if (plan?.estado === 'sin_tarifa' && repartoPorCobro.has(c.id) && marcasCaja.length === 0) return null
       if (plan && rol === 'titular' && !c.recibo_no_aplica) {
         if (plan.estado === 'emitir') {
           return {
@@ -456,11 +478,16 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
             rc3: { comprobante: plan.comprobante!, ya_acusado: plan.resuelto },
           }
         }
+        const porcionUpme = plan.tarifaSinAcusar > 0 ? plan.tarifaSinAcusar : null
+        if (plan.estado === 'comprobante_ambiguo') {
+          return {
+            c, cfg, esperados: ['pasante'], marcasCaja, valorUpme: null, estado: 'pendiente', porcionUpme,
+            faltaRc3: 'un solo valor en el comprobante de pago UPME (hay varios distintos: revisa el bloque del comprobante en el negocio)',
+          }
+        }
         return {
-          c, cfg, esperados: ['pasante'], marcasCaja, valorUpme: null, estado: 'pendiente',
-          faltaRc3: plan.estado === 'comprobante_ambiguo'
-            ? 'un solo valor en el comprobante de pago UPME (hay varios distintos: revisa el bloque del comprobante en el negocio)'
-            : 'el valor del comprobante de pago UPME (revisa el bloque del comprobante en el negocio)',
+          c, cfg, esperados: ['pasante'], marcasCaja, valorUpme: null, estado: 'pendiente', porcionUpme,
+          esperaUpme: MENSAJE_SIN_COMPROBANTE_UPME,
         }
       }
       if (plan && rol === 'en_el_del_negocio' && !c.recibo_no_aplica) {
@@ -471,7 +498,7 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
             ? 'Sin recibo propio: la tarifa UPME del negocio ya tiene su RC-3'
             : plan.estado === 'esperando_pagos'
               ? `Sin recibo propio: el RC-3 del negocio sale cuando los pagos completen la tarifa (van ${fmtCOP(plan.tarifaRecibida)} de ${fmtCOP(plan.meta ?? 0)})`
-              : 'Sin recibo propio: va en el RC-3 del negocio, que espera el valor del comprobante UPME'
+              : 'Sin recibo propio: va en el RC-3 del negocio, que sale cuando se cargue el comprobante de pago UPME'
         return { c, cfg, esperados: [], marcasCaja, valorUpme: null, estado: 'no_aplica', motivoNoAplica: motivo }
       }
     }
@@ -572,7 +599,9 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
       .map(b => b.negocio_id),
   )
 
-  const pagos: PagoConRecibo[] = clasificados.map(({ c, cfg, esperados, marcasCaja, valorUpme, estado, motivoNoAplica, faltaRc3, rc3 }) => {
+  const pagos: PagoConRecibo[] = clasificados.map(({
+    c, cfg, esperados, marcasCaja, valorUpme, estado, motivoNoAplica, faltaRc3, esperaUpme, porcionUpme, rc3,
+  }) => {
     const neg = c.negocio_id ? porId.get(c.negocio_id) : undefined
     const meta = (neg?.metadata ?? {}) as Record<string, Record<string, unknown> | undefined>
     const contacto = neg?.contacto_id ? contactoPorId.get(neg.contacto_id) : undefined
@@ -602,6 +631,7 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
       // lo haría volver sin emitir se dice aquí, antes de oprimirlo.
       if (!cfg?.pasante) faltantes.push('el recibo de la tarifa UPME en la configuración de la línea')
       else if (faltaRc3) faltantes.push(faltaRc3)
+      else if (esperaUpme) { /* frena por `espera_upme`, no es un dato que falte */ }
       else if (valorUpme == null) faltantes.push('el reparto del pago (cuánto es tarifa UPME)')
 
       const delAbono = avisoDelAbono(c)
@@ -633,6 +663,8 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
       })),
       valor_upme: valorUpme,
       rc3: rc3 ?? null,
+      porcion_upme: porcionUpme ?? null,
+      espera_upme: estado === 'pendiente' ? esperaUpme ?? null : null,
       componentes_pendientes: componentesPendientes,
       no_aplica_motivo: (c.recibo_no_aplica?.motivo as string | undefined) ?? motivoNoAplica ?? null,
       facturado: !!meta.siigo_factura?.numero,
@@ -657,7 +689,7 @@ async function armarControl(workspaceId: string, staffId: string | null): Promis
       no_aplica: pagos.filter(p => p.estado === 'no_aplica').length,
       // Un RC-3 frenado por falta de comprobante no tiene cifra: no se inventa con el pago.
       valor_pendiente: pendientes.reduce((s, p) => s + (p.valor_upme ?? (cfgPasante(p) ? 0 : p.monto)), 0),
-      emitibles: pendientes.filter(p => p.faltantes.length === 0).length,
+      emitibles: pendientes.filter(p => p.faltantes.length === 0 && !p.espera_upme).length,
       abonos_a_mano: abonosAMano.length,
     },
   }

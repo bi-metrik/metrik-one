@@ -18,7 +18,8 @@ export type OrigenAvisoEquipo =
   | 'avisar-asignacion'
   | 'alertas-plazo'
   | 'recordatorios'
-  | 'resend-volumen';
+  | 'resend-volumen'
+  | 'enviar-factura-cuota';
 
 export interface FilaAvisoEquipo {
   origen: OrigenAvisoEquipo;

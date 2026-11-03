@@ -131,14 +131,21 @@ describe('las tres tarifas se reparten por precio (paso 4 de Noor)', () => {
       .toEqual({ Económica: ['b'], Recomendada: ['c'], Premium: ['a'] })
   })
 
-  it('dos opciones: la Recomendada es la más barata de las dos', () => {
+  it('dos opciones: la Recomendada es la más cara de las dos (Mauricio, 2026-10-29)', () => {
     expect(repartoPorPrecio([{ grupo: 'hotel', candidatos: ['a', 'b'] }], precioDe))
-      .toEqual({ Económica: ['b'], Recomendada: ['b'], Premium: ['a'] })
+      .toEqual({ Económica: ['b'], Recomendada: ['a'], Premium: ['a'] })
   })
 
-  it('cuatro opciones: la del medio se toma hacia abajo', () => {
+  it('cuatro opciones: la más cercana al punto medio; a igual distancia, la más barata', () => {
+    // 100 · 200 · 300 · 400: punto medio 250, empatan 200 y 300 → 200.
     expect(repartoPorPrecio([{ grupo: 'hotel', candidatos: ['a', 'b', 'c', 'd'] }], precioDe))
       .toEqual({ Económica: ['b'], Recomendada: ['c'], Premium: ['d'] })
+    // 100 · 110 · 120 · 1000: punto medio 550 → 120 (no «la del medio por posición»).
+    const sesgo: Record<string, number> = { p: 100, q: 110, r: 120, s: 1000 }
+    expect(repartoPorPrecio([{ grupo: 'hotel', candidatos: ['s', 'p', 'r', 'q'] }], id => sesgo[id]).Recomendada).toEqual(['r'])
+    // 100 · 500 · 600 · 1000: punto medio 550 → empatan 500 y 600 → 500.
+    const par: Record<string, number> = { p: 100, q: 500, r: 600, s: 1000 }
+    expect(repartoPorPrecio([{ grupo: 'hotel', candidatos: ['p', 'q', 'r', 's'] }], id => par[id]).Recomendada).toEqual(['q'])
   })
 
   it('una opción sin precio (todavía sin pantallazo) no entra al reparto', () => {

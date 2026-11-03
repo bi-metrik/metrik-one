@@ -36,6 +36,8 @@ const pagoMixto = (p: Partial<PagoConRecibo> = {}): PagoConRecibo => ({
   recibos: [],
   valor_upme: 701_812,
   rc3: { comprobante: 701_812, ya_acusado: 0 },
+  porcion_upme: null,
+  espera_upme: null,
   componentes_pendientes: [],
   no_aplica_motivo: null,
   facturado: true,
@@ -118,6 +120,42 @@ describe('el formulario del recibo: la tarifa UPME, no el pago', () => {
       expect(texto(html)).not.toContain('Recibo por')
       expect(texto(html)).not.toContain('consignó')
     }
+  })
+})
+
+// SOE-035: V0610 mostraba $459.000 (el pago entero) en una fila frenada y Diana leyó que
+// los valores no correspondían. La cifra es la porción UPME y el aviso dice qué se espera.
+describe('la fila frenada: porción UPME y la espera del pago a la UPME', () => {
+  const frenado = (p: Partial<PagoConRecibo> = {}) => pagoMixto({
+    monto: 459_000, valor_upme: null, rc3: null, porcion_upme: 12_500,
+    espera_upme: 'Aún no se ha pagado a la UPME: el recibo sale cuando se cargue el comprobante de pago UPME en el negocio.',
+    ...p,
+  })
+
+  it('pone en grande la porción UPME y lo consignado en chico', () => {
+    const html = renderToStaticMarkup(React.createElement(FilaPago, { pago: frenado(), onCambio: () => {} }))
+    const t = texto(html)
+
+    expect(t).toMatch(/Tarifa UPME \$\s?12\.500 consignó \$\s?459\.000/)
+    expect(html).toMatch(/font-bold[^>]*>\$\s?12\.500</)
+    expect(html).not.toMatch(/font-bold[^>]*>\$\s?459\.000</)
+  })
+
+  it('dice que aún no se ha pagado a la UPME, sin «Falta» y sin botón', () => {
+    const t = texto(renderToStaticMarkup(React.createElement(FilaPago, { pago: frenado(), onCambio: () => {} })))
+
+    expect(t).toContain('Aún no se ha pagado a la UPME: el recibo sale cuando se cargue el comprobante')
+    expect(t).not.toContain('Falta')
+    expect(t).not.toContain('Emitir recibo')
+  })
+
+  it('si además falta el RUT, dice las dos cosas', () => {
+    const t = texto(renderToStaticMarkup(React.createElement(FilaPago, {
+      pago: frenado({ faltantes: ['RUT del cliente'] }), onCambio: () => {},
+    })))
+
+    expect(t).toContain('Aún no se ha pagado a la UPME')
+    expect(t).toContain('Falta RUT del cliente')
   })
 })
 

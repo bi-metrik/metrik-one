@@ -54,6 +54,11 @@ export interface ConfigAgente {
     texto: number;
     turnoMs: number;
     ventanaHoras: number;
+    /**
+     * Topes de los bloques del prompt (tokens) que reemplazan los de `contexto.ts` (`TOPES_BLOQUE`) en este turno. No
+     * se lee de la base: lo pone el turno de un rol con dos motores (viajes + ONE, `bandeja/turno-con-rol.ts`).
+     */
+    bloques?: { siempre?: number; indice?: number; estado?: number };
   };
   /** Cupo de uso justo: turnos del modelo por mes. Pasarlo NO corta: avisa a MéTRIK. */
   cupoTurnosMes: number;
@@ -197,4 +202,12 @@ export function leerConfigOne(botConversacional: unknown): ConfigAgente {
   const c = leerConfigAgente(botConversacional);
   const propio = obj(obj(botConversacional)?.agente_config)?.corte_ms;
   return typeof propio === 'number' ? c : { ...c, corteMs: CORTE_ONE_MS };
+}
+
+/**
+ * `bot_conversacional.obras === true` (2026-10-21): el modo obras del dominio ONE (pagos con pantallazo, ingresos,
+ * facturas, rubros propios, llegadas de los operarios, cierre y asistencia). Solo con `true` literal. Pura.
+ */
+export function modoObras(botConversacional: unknown): boolean {
+  return obj(botConversacional)?.obras === true;
 }

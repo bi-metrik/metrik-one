@@ -244,7 +244,7 @@ export function armarFilasDeRegistro(args: {
       }
     }
 
-    const suya = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+    const suya = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
     const motivo = normalizarMotivo(fila.motivoCodigo, fila.motivoTexto)
 
     return {
@@ -330,7 +330,7 @@ export function armarFilaDeAceptacion(args: {
     quien: args.quien,
     salidaAt: args.aceptadaAt,
   })
-  const precioDe = (f: FilaItinerario) => cascadaDeItinerario(args.ctx.items, f.seleccion, args.ctx.params).precioVenta
+  const precioDe = (f: FilaItinerario) => cascadaDeItinerario(args.ctx.items, f.seleccion, args.ctx.params, f.id).precioVenta
   return {
     ...base,
     evento: 'aceptacion',

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import Link from 'next/link'
+import { EnlaceNuevaCotizacion } from '../enlace-nueva-cotizacion'
 import { FileSpreadsheet, Plus, ExternalLink, CheckCircle2, Lock, Copy, Trash2, PencilLine } from 'lucide-react'
 import { toast } from 'sonner'
 import { enviarCotizacionNegocio, aceptarCotizacionNegocio, rechazarCotizacionNegocio, duplicarCotizacionNegocio, eliminarCotizacionBorrador, corregirCotizacionAceptada, opcionesDeAprobacion } from '../cotizacion/actions'
@@ -399,13 +400,13 @@ export default function BloqueCotizacion({ negocioId, modo, cotizaciones, skipEn
 
       {/* Nueva cotización — oculto si hay aceptada */}
       {modo === 'editable' && !hayAceptada && (
-        <Link
-          href={`/negocios/${negocioId}/cotizacion/nueva`}
+        <EnlaceNuevaCotizacion
+          negocioId={negocioId}
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-acento/40 bg-acento/5 py-2.5 text-xs font-medium text-acento hover:border-acento hover:bg-acento/10 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
           Nueva cotización
-        </Link>
+        </EnlaceNuevaCotizacion>
       )}
     </div>
   )

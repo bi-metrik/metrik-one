@@ -14,19 +14,30 @@ import { esFuncionAusente } from '@/lib/valida-api/mapeo'
 import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/valida-api/terminos-servidor'
 import { modificacionesPorAceptar } from '@/lib/valida-api/terminos'
 import type { DocumentoContractual } from '@/lib/valida-api/resultados'
-import { leerProximoPagoCda, type LecturaPago } from './pago-servidor'
+import { leerCuentaCda, leerProximoPagoCda, type LecturaPago } from './pago-servidor'
+import { cuotasConEstado } from './pago-pendiente'
 import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import {
   REGLA_MORA_AUTOSERVICIO,
+  REGLA_MORA_CDA,
   enPlazoParaAceptar,
   estadoMora,
   mensajeConsultasRestringidas,
   mensajeSuspendidoPorMora,
   vigenciaRestriccion,
+  vigenciaTransicion,
   type EstadoMora,
 } from './plazos'
 import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/terminos-plan'
+import {
+  datosDelTextoV15,
+  esTerminosV15,
+  exigenciaV15,
+  finUltimoPeriodoPagado,
+  textoExigidaV15,
+  type ExigenciaV15,
+} from './terminos-v1-5'
 
 /**
  * La puerta de Valida para los CDA: antes de consultar listas, la persona designada por la empresa
@@ -68,6 +79,20 @@ import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/te
  *     la v1.4) y, desde la vigencia registrada de la v1.4 de ESE contrato (6-nov-2026 para los cuatro
  *     CDA), la de más de 5 días restringe las consultas nuevas con el histórico abierto (11.1). Ver
  *     `plazos.ts` (`vigenciaRestriccion`).
+ *
+ * ## La transición de la v1.5 (2026-10-29, gate de Vera)
+ *
+ * Con una v1.5 de los Términos registrada y publicada (aceptada o por aviso), los períodos que empiezan
+ * antes de su vigencia (1-dic-2026) se pagan hasta el 30-nov y no restringen antes del 6-dic ni pausan
+ * antes del 31-dic (cláusula 11.7): `transicionDesde`, aplicado en `resolverMora`.
+ *
+ * ## La aceptación de la v1.5 se exige desde la fecha de la 16.4 (2026-11-03)
+ *
+ * La excepción a la regla de abajo: desde {fecha_exige_aceptacion} del texto registrado de ESE CDA (o el
+ * día siguiente al fin del último período pagado, si es posterior), una v1.5 sin aceptar niega las
+ * consultas nuevas (`exigenciaV15Cda`, cobrada en `validaCdaPermiteConsultar`). No cierra el módulo: el
+ * historial, los reportes y la exportación de la 9.3 siguen abiertos. Sin poder leer las cuotas no se
+ * exige (ver `exigenciaV15` en `terminos-v1-5.ts`).
  *
  * ## Una modificación por aviso NUNCA cierra (2026-10-07, dictamen de Emilio)
  *
@@ -122,6 +147,12 @@ export type EntradaValidaCda =
       modificacion: EstadoEntrada | null
       /** Desde cuándo rige la restricción de los 5 días para este contrato; `null` = no rige. */
       restriccionDesde: string | null
+      /**
+       * La vigencia de la v1.5 del contrato (cláusula 11.7, transición), o `null` sin v1.5 publicada: los
+       * períodos que empiezan antes de ella no restringen ni pausan por mora antes del 6 y el 31 de
+       * diciembre (ver `plazos.ts`, sección 3).
+       */
+      transicionDesde: string | null
       /**
        * El contrato es de una cuenta autogestionada (sus Términos son los de autoservicio): la mora
        * sigue la 11 de ESOS Términos (`REGLA_MORA_AUTOSERVICIO`: suspensión a los 10 días con los
@@ -231,6 +262,7 @@ async function resolver(): Promise<EntradaValidaCda> {
     modificaciones,
     modificacion,
     restriccionDesde: vigenciaRestriccion(documentos),
+    transicionDesde: vigenciaTransicion(documentos),
     autoservicio: documentos.some((d) => d.slug === TERMINOS_AUTOSERVICIO.slug),
     usuarioDelCliente:
       perfil !== null && !perfil.platformAdmin && perfil.workspaceId === workspaceId && impersonating !== true,
@@ -286,12 +318,40 @@ async function resolverMora(): Promise<MoraValidaCda> {
       ? { estado: 'al_dia' }
       : e.autoservicio
         ? estadoMora(delServicio.pago, e.hoy, '2000-01-01', REGLA_MORA_AUTOSERVICIO)
-        : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde)
+        : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde, REGLA_MORA_CDA, e.transicionDesde)
   return { tipo: 'ok', lectura, mora }
 }
 
 /** La mora del contrato de Valida del espacio. Una sola lectura por request. */
 export const moraValidaCda = cache(resolverMora)
+
+export type ExigenciaV15Cda = Extract<ExigenciaV15, { estado: 'no_exigida' }> | { estado: 'exigida'; desde: string; mensaje: string }
+
+async function resolverExigenciaV15(): Promise<ExigenciaV15Cda> {
+  const e = await entradaValidaCda()
+  // `modificaciones` solo trae la v1.5 publicada y SIN aceptar: aceptada, la exigencia no aplica.
+  const v15 = e.tipo === 'ok' ? e.modificaciones.find(esTerminosV15) : undefined
+  if (e.tipo !== 'ok' || !v15) return { estado: 'no_exigida' }
+  const texto = datosDelTextoV15(v15.textoMd)
+  if (!texto.exigeDesde) {
+    console.error('[valida-cda] la v1.5 registrada no trae la fecha de la 16.4:', v15.documentoId)
+    return { estado: 'no_exigida' }
+  }
+  // Antes de la fecha base no se leen las cuotas: la fecha que exige nunca es anterior.
+  if (e.hoy < texto.exigeDesde) return { estado: 'no_exigida' }
+  const cuenta = e.servicioContratadoId ? await leerCuentaCda(e.servicioContratadoId) : null
+  const finPagado =
+    cuenta?.estado === 'ok'
+      ? finUltimoPeriodoPagado(
+          cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: e.hoy, ahoraISO: new Date().toISOString() }),
+        )
+      : 'sin_dato'
+  const r = exigenciaV15({ base: texto.exigeDesde, finPagado, hoy: e.hoy })
+  return r.estado === 'exigida' ? { ...r, mensaje: textoExigidaV15(texto.razonSocial) } : r
+}
+
+/** La exigencia de la v1.5 (16.4) para el espacio. Una sola evaluación por request. */
+export const exigenciaV15Cda = cache(resolverExigenciaV15)
 
 /**
  * ¿El espacio puede operar Valida (entrar, listar, ver y descargar reportes)? La pregunta que hacen la
@@ -308,14 +368,16 @@ export async function validaCdaPermiteOperar(): Promise<{ ok: true } | { ok: fal
 
 /**
  * ¿El espacio puede hacer una CONSULTA NUEVA (individual o masiva)? Lo de `validaCdaPermiteOperar` y,
- * además, que la mora no tenga las consultas restringidas (cláusula 11.1, v1.4). Una lectura caída de
- * cuotas no restringe (`moraValidaCda`).
+ * además, que la mora no tenga las consultas restringidas (cláusula 11.1, v1.4) y que, llegada la fecha
+ * de la 16.4, la v1.5 esté aceptada (`exigenciaV15Cda`). Una lectura caída de cuotas no restringe.
  */
 export async function validaCdaPermiteConsultar(): Promise<{ ok: true } | { ok: false; error: string }> {
   const operar = await validaCdaPermiteOperar()
   if (!operar.ok) return operar
   const m = await moraValidaCda()
   if (m.tipo === 'ok' && m.mora.estado === 'restringido') return { ok: false, error: mensajeConsultasRestringidas(m.mora) }
+  const v15 = await exigenciaV15Cda()
+  if (v15.estado === 'exigida') return { ok: false, error: v15.mensaje }
   return { ok: true }
 }
 

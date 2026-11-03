@@ -5,7 +5,7 @@
 //   deno run -A --node-modules-dir=none supabase/functions/_shared/agente/publico/arnes/correr.ts --salida <dir> --seco
 //   deno run -A --node-modules-dir=none …/correr.ts --salida <dir> --cli [--k 3] [--paralelo 4] [--modelo claude-haiku-5-5]
 //   ANTHROPIC_API_KEY_PRUEBAS=… deno run -A --node-modules-dir=none …/correr.ts --salida <dir> [--k 3]
-//   Comunes: [--conjunto escenarios|adversario|lenguaje|operacion|real|todo] [--solo id1,id2]
+//   Comunes: [--conjunto escenarios|adversario|lenguaje|operacion|real|ventas|todo] [--solo id1,id2]
 //            [--fichas-rol <fichas.json>]   las fichas del ROL que se va a publicar (un arreglo de fichas en JSON); sin
 //                                            él, REGLAMENTO_SABOR. Deja `banco.json`: lo que pide asistente_publicar_rol
 //                                            (`pasa`, `k`, `fecha`, `huella_fichas` = huellaPublicable de esas fichas).
@@ -57,6 +57,8 @@ if (import.meta.main) {
   const nombreModelo = arg('--modelo') ?? MODELO_HAIKU_55;
   const paralelo = Number(arg('--paralelo') ?? (cli ? 4 : 1));
   const casos = (conjunto === 'todo' ? TODOS_LOS_CASOS : CONJUNTOS_PUBLICO[conjunto] ?? []).filter((c) => !solo || solo.includes(c.id));
+  const omitidos = seco ? [] : casos.filter((c) => c.soloSeco).map((c) => c.id);
+  const enCorrida = casos.filter((c) => !omitidos.includes(c.id));
   if (cli) ESCALA.x = ESCALA_CLI;
   const modelo: OpcionesCorrida['modelo'] = seco ? null
     : cli ? () => modeloCli({ modelo: nombreModelo, concurrencia: paralelo })
@@ -68,7 +70,7 @@ if (import.meta.main) {
     ...(cli ? { configBase: { corte1Ms: 60_000, corteTotalMs: 180_000 }, escala: ESCALA_CLI } : {}),
   };
   const t0 = Date.now();
-  const rs: ResultadoPassK[] = await enPiscina(casos, paralelo, async (c) => {
+  const rs: ResultadoPassK[] = await enPiscina(enCorrida, paralelo, async (c) => {
     const r = await correrCaso(c, o);
     const mala = r.corridas.find((x) => !x.exito.ok || x.daninas.length);
     console.log(JSON.stringify({ caso: c.id, pasa: r.pasa, motivo: (mala ?? r.corridas[0]).exito.motivo, daninas: mala?.daninas ?? [] }));
@@ -125,6 +127,6 @@ if (import.meta.main) {
     fichas: fichasBase, k, arnes: `publico/arnes/correr.ts --conjunto ${conjunto}${solo ? ` --solo ${solo.join(',')}` : ''}`,
     modelo: seco ? 'seco' : nombreModelo, seco, resultados: rs.map((r) => ({ id: r.id, pasa: r.pasa, daninas: r.corridas.reduce((n, x) => n + x.daninas.length, 0) })),
   });
-  await Deno.writeTextFile(`${salida}/banco.json`, JSON.stringify(banco, null, 2));
+  await Deno.writeTextFile(`${salida}/banco.json`, JSON.stringify(omitidos.length ? { ...banco, omitidos_solo_seco: omitidos } : banco, null, 2));
   console.log(JSON.stringify({ etiqueta, passK: rep.passK, casos: rep.casos, daninas: rep.daninas, internos: rep.internos, porConjunto: rep.porConjunto }));
 }

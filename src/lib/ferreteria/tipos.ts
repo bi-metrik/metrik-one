@@ -151,6 +151,11 @@ export interface VentaFila {
   negocio_id: string | null
   entregada_at: string | null
   registrado_por: string | null
+  /**
+   * Unidades (migración 20261029150000, default 1). Solo se escribe cuando es más de 1: así una base sin la columna
+   * sigue registrando las ventas de siempre.
+   */
+  cantidad?: number
   created_at?: string
 }
 

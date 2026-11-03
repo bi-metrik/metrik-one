@@ -1,5 +1,6 @@
 import { leerVistaEntrega } from '@/lib/viaje/entrega-datos'
 import { esAprobador, puedeConfirmarCliente } from '@/lib/viaje/confirmacion'
+import { puedeEnviarPaquete } from '@/lib/viaje/entrega'
 import { aprobadoresDeLinea } from '@/lib/viaje/estado-servicio'
 import EntregaViajePanel from './entrega-viaje-panel'
 
@@ -38,13 +39,14 @@ export async function leerEntregaViaje(
     aprobadores: aprobadoresDeLinea(config?.config_extra),
     esResponsable: !!resp,
   }
-  const puedeEnviar = puedeConfirmarCliente(quien)
+  // Operaciones asignada al negocio también envía el paquete (QA 2026-10-29, H1-3).
+  const puedeEnviar = puedeEnviarPaquete(quien)
   return (
     <EntregaViajePanel
       vista={vista}
       puedeEnviar={puedeEnviar}
       esDireccion={esAprobador(quien)}
-      puedeDocumentos={puedeEnviar || args.areas.includes('operaciones')}
+      puedeDocumentos={puedeConfirmarCliente(quien) || args.areas.includes('operaciones')}
     />
   )
 }

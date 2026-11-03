@@ -18,11 +18,17 @@
  */
 
 import { aMayusculas } from '@/lib/negocios/mayusculas'
+import { descripcionDelPaquete, leerPaqueteBloqueo } from './bloqueo-paquete'
 import { descripcionDeLinea } from './ficha-linea'
 import { ranuraDeGrupo } from './ranuras-pantallazo'
 import { leerTarifaPax } from './tarifa-pasajero'
 
-const RANURAS_CON_NOMBRE_LEIDO = new Set(['hotel_detalle', 'traslado_detalle', 'vuelo_detalle', 'actividad_detalle'])
+/**
+ * El paquete de bloqueo (QA del 2026-10-29) también: `guardarPaqueteBloqueo` escribe el nombre del
+ * hotel y la descripción en mayúscula, y la propuesta los imprimía así. Lo leído vive en
+ * `tarifa_pax.bloqueo`, no en las casillas de la lectura.
+ */
+const RANURAS_CON_NOMBRE_LEIDO = new Set(['hotel_detalle', 'traslado_detalle', 'vuelo_detalle', 'actividad_detalle', 'paquete_detalle'])
 
 export function nombreVisibleDeLinea(item: { nombre?: string | null; grupo?: string | null; tarifa_pax?: unknown }): string {
   // Sin ranura de viaje, el nombre llega idéntico (el PDF de las otras plantillas no cambia).
@@ -31,7 +37,9 @@ export function nombreVisibleDeLinea(item: { nombre?: string | null; grupo?: str
   const slug = ranuraDeGrupo(item.grupo ?? null)?.slug
   if (!nombre || !slug || !RANURAS_CON_NOMBRE_LEIDO.has(slug)) return tal
   const t = leerTarifaPax(item.tarifa_pax)
-  const leido = (t.casillas?.grupo_completo?.nombre ?? t.habitaciones?.[0]?.lectura.nombre ?? '').trim()
+  const leido = (slug === 'paquete_detalle'
+    ? leerPaqueteBloqueo(t.bloqueo)?.hotel.hotel ?? ''
+    : t.casillas?.grupo_completo?.nombre ?? t.habitaciones?.[0]?.lectura.nombre ?? '').trim()
   return leido && nombre === aMayusculas(leido) ? leido : tal
 }
 
@@ -50,6 +58,11 @@ export function descripcionVisibleDeLinea(item: { descripcion?: string | null; g
   const ranura = ranuraDeGrupo(item.grupo ?? null)
   if (!guardada || !ranura || !RANURAS_CON_NOMBRE_LEIDO.has(ranura.slug)) return tal
   const t = leerTarifaPax(item.tarifa_pax)
+  if (ranura.slug === 'paquete_detalle') {
+    const paquete = leerPaqueteBloqueo(t.bloqueo)
+    const leida = paquete ? descripcionDelPaquete(paquete).trim() : ''
+    return leida && guardada === aMayusculas(leida).trim() ? leida : tal
+  }
   if (!t.casillas?.grupo_completo) return tal
   const leida = descripcionDeLinea(ranura, t.casillas, t.correcciones, null).trim()
   return leida && guardada === aMayusculas(leida).trim() ? leida : tal

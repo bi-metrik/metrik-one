@@ -37,11 +37,17 @@ h3 { font: 700 10.5pt/1.25 Poppins, sans-serif; margin: 0 0 1.5mm; color: var(--
 .top img { height: 8.8mm; display:block; }
 .top b.pop { font-size: 15pt; color: var(--ink); }
 
-/* Portada: collage de fotos con banda oscura */
+/* Portada: con imagen aprobada del destino, ESA sola a todo lo ancho, con sombra para el título, el
+   rótulo «Imagen ilustrativa» y el crédito siempre a la vista (regla de fotos del 2026-10-29). Sin
+   ella, la de siempre: el collage con la banda oscura. Nunca la banda de colores. */
 .hero { position:relative; height: 57mm; border-radius: 3.7mm; overflow:hidden; background: linear-gradient(120deg,#1b1f3b,#3b2a6b 60%,#1e2e5c); }
 .hero .fotos { position:absolute; inset:0; display:grid; gap: .5mm; }
 .hero .fotos div { background-size: cover; background-position: center; }
 .hero::after { content:""; position:absolute; inset:0; background: linear-gradient(90deg, rgba(27,31,59,.6) 0%, rgba(27,31,59,.3) 55%, rgba(27,31,59,.08) 100%), linear-gradient(rgba(27,31,59,0) 45%, rgba(27,31,59,.3)); }
+.hero .foto { position:absolute; inset:0; background-size: cover; background-position: center; }
+.hero.confoto::after { background: linear-gradient(rgba(27,31,59,0) 30%, rgba(27,31,59,.72) 100%), linear-gradient(90deg, rgba(27,31,59,.62) 0%, rgba(27,31,59,.3) 60%, rgba(27,31,59,.15) 100%); }
+.hero .ilustrativa { position:absolute; top: 2.8mm; right: 3.4mm; z-index:2; font: 600 6.2pt/1.2 Inter, sans-serif; letter-spacing: .4px; color:#fff; background: rgba(27,31,59,.5); padding: .6mm 2mm; border-radius: 1mm; }
+.hero .ilustrativa.credito { top: 7.4mm; font-size: 5.4pt; background: rgba(27,31,59,.35); }
 .hero .in { position:absolute; left: 7.8mm; right: 10mm; bottom: 7mm; z-index:1; color:#fff; }
 .hero.conaviso .in { bottom: 14.5mm; }
 .hero .dt { font: 700 8.6pt Inter, sans-serif; letter-spacing: 2.6px; text-transform: uppercase; color: #fff; opacity: .92; }
@@ -125,6 +131,7 @@ thead { display: table-header-group; }
 .day::before { content:""; position:absolute; left: 6.9mm; top: 17.4mm; bottom: 2mm; width: .7mm; border-radius: .35mm; background: linear-gradient(#a879d6, rgba(190,153,223,.15)); }
 .day .dn { width: 15.2mm; height: 15.2mm; border-radius: 50%; background: linear-gradient(150deg,#e6197a 0%,#8a2cb5 48%,#3f7fbd 100%); box-shadow: 0 1.3mm 3.4mm rgba(230,25,122,.3); color:#fff; font: 700 15pt/1 Poppins, sans-serif; display:flex; flex-direction:column; align-items:center; justify-content:center; }
 .day .dn small { font: 800 5.4pt Inter, sans-serif; letter-spacing: 1px; margin-bottom: .6mm; opacity: .95; }
+.day .dn.rango { font-size: 10.5pt; letter-spacing: -.2px; }
 .day .df { font: 700 7.85pt Inter, sans-serif; letter-spacing: 1.6px; text-transform: uppercase; color: var(--rosa); margin-top: .4mm; }
 .day .t { font: 600 12.8pt/1.3 Poppins, sans-serif; color: var(--ink); margin: .5mm 0 2mm; }
 .day .cuerpo.foto { display:grid; grid-template-columns: 39.7mm 1fr; gap: 4.4mm; align-items: start; }
@@ -178,6 +185,7 @@ thead { display: table-header-group; }
 .sign { margin-top: 3mm; display:flex; justify-content: space-between; align-items: flex-end; break-inside: avoid; }
 .sign b.pop { font: 700 10.5pt Poppins, sans-serif; color: var(--ink); }
 .credits { font-size: 6.4pt; color: var(--mute); margin-top: 4mm; line-height: 1.35; }
+.sign .credits { flex: 1; margin: 0 5mm; text-align: right; align-self: flex-end; }
 
 /* Fotos extra de la biblioteca: en el MISMO recuadro (mismo alto), principal 2/3 y extras 1/3. */
 .img.mosaico { display:grid; grid-template-columns: 2fr 1fr; gap: .6mm; background: #fff; }
@@ -185,6 +193,27 @@ thead { display: table-header-group; }
 .img.mosaico.n2 { grid-template-rows: 1fr 1fr; }
 .img.mosaico .m0 { grid-row: 1 / -1; background-size: cover; background-position: center; }
 .img.mosaico .mx { background-size: cover; background-position: center; }
+.img.fila { display:grid; grid-template-rows: 1fr; gap: .6mm; background: #fff; }
+.img.fila .mx { background-size: cover; background-position: center; }
+
+/*
+ * La versión compacta (QA del #1359): solo se imprime si ahorra una hoja (\`imprimirHtmlAPdf\`,
+ * \`alternativa\`). Los días libres seguidos ya vienen juntos; aquí, un poco menos de aire.
+ */
+.compacto .sec { margin-top: 2.6mm; }
+.compacto .day { padding-bottom: 1.4mm; }
+.compacto .day .t { margin: .3mm 0 1.2mm; }
+.compacto .day .cuerpo.foto { grid-template-columns: 30mm 1fr; }
+.compacto .day .ph { height: 18mm; }
+.compacto .cta { padding: 2.6mm 6mm; }
+.compacto .btns { gap: 1.4mm; }
+.compacto .card { padding: 2.6mm 4.4mm 2mm; }
+.compacto .sh { margin-bottom: 1.8mm; }
+.compacto .sh .sq { width: 8.6mm; height: 8.6mm; }
+.compacto .tf { padding: 3.2mm 4.6mm 2mm; }
+.compacto .tf .row { padding: .9mm 0; }
+.compacto .btn { padding: 1.7mm 4mm; }
+.compacto .sign { margin-top: 2mm; }
 `
 
 /** Los símbolos SVG que usa el documento (`<use href="#plane"/>`). */

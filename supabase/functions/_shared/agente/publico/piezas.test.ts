@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { claseEntrante, claveDeduplicacion, filtrar, firmaChatwoot, leerPayload, verificarFirmaChatwoot } from './chatwoot-webhook'
-import { CONFIG_PUBLICO_POR_DEFECTO, TERMINOS_EJEMPLO, leerConfigPublico, variableSecreta } from './config'
+import { CONFIG_PUBLICO_POR_DEFECTO, CORTES_VENTAS, TERMINOS_EJEMPLO, leerConfigPublico, variableSecreta } from './config'
 import { enlacesFueraDeLista } from './enlaces'
 import { preciosSinHerramienta } from './precios'
 import { ventana, TOPE_SEGUIDOS_TIKTOK } from './ventana'
@@ -84,6 +84,14 @@ describe('configuración (`bot_conversacional.chatwoot`)', () => {
     expect(c.modelo).toMatchObject({ proveedor: 'anthropic', modelo: 'claude-haiku-5-5', esfuerzo: 'medium', pensamiento: true })
     expect(CONFIG_PUBLICO_POR_DEFECTO.rafagaMs).toBe(2500)
     expect(variableSecreta('CHATWOOT_API_TOKEN', 'sabor-experiencias')).toBe('CHATWOOT_API_TOKEN_SABOR_EXPERIENCIAS')
+  })
+  it('ventas (Dimpro) usa 20 s / 45 s por defecto: el aviso de demora no sale en un turno normal; Sabor sigue en 5 s / 20 s', () => {
+    // Messenger, 29-oct: los turnos de ventas tardan 7-13 s y con 5 s el aviso salía en casi todos.
+    expect(leerConfigPublico({ chatwoot: { activo: true, dominio: 'ventas' } })).toMatchObject({ corte1Ms: CORTES_VENTAS.corte1Ms, corteTotalMs: CORTES_VENTAS.corteTotalMs })
+    expect(CORTES_VENTAS.corte1Ms).toBeGreaterThanOrEqual(20_000)
+    expect(leerConfigPublico({ chatwoot: { activo: true } })).toMatchObject({ corte1Ms: 5000, corteTotalMs: 20000 })
+    // Lo que fije config_extra manda, en los dos dominios.
+    expect(leerConfigPublico({ chatwoot: { activo: true, dominio: 'ventas', corte_1_ms: 9000, corte_total_ms: 30000 } })).toMatchObject({ corte1Ms: 9000, corteTotalMs: 30000 })
   })
 })
 
@@ -228,6 +236,7 @@ describe('la petición del webhook (§3.1)', () => {
       primeraVez: async (k) => { if (claves.has(k)) return false; claves.add(k); return true },
       olvidar: async (k) => { claves.delete(k) },
       guardarEntrante: async () => 'ok',
+      registrarCierre: async () => true,
       completarAudio: async () => true,
       ahoraS: () => 1792000000,
       reloj: () => 0,
@@ -256,6 +265,14 @@ describe('la petición del webhook (§3.1)', () => {
     const r = await pedir(PAYLOAD_DOC_MESSAGE_CREATED, p)
     expect(r.status).toBe(200)
     expect(r.atender).toBeUndefined()
+  })
+  it('Chatwoot resuelve la conversación: deja la marca de cierre (no es un mensaje que atender)', async () => {
+    const cierres: unknown[] = []
+    const p = puertos({ registrarCierre: async (c) => { cierres.push(c); return true } })
+    expect(await pedir({ event: 'conversation_status_changed', status: 'resolved', id: 9001, inbox_id: 5 }, p)).toMatchObject({ status: 200, motivo: 'cierre registrado' })
+    expect(cierres).toEqual([{ llave: { workspaceId: 'ws', cuentaId: 77, conversacionId: 9001 }, inboxId: 5, canal: 'instagram' }])
+    expect(await pedir({ event: 'conversation_status_changed', status: 'resolved', id: 9001, inbox_id: 6 }, p)).toMatchObject({ motivo: 'cierre de otro inbox' })
+    expect(cierres).toHaveLength(1)
   })
   it('message_updated con audio completa la URL sin deduplicar', async () => {
     const p = puertos()

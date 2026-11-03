@@ -1,0 +1,33 @@
+{
+  "_fuente": "Respuesta SIMULADA del modelo al pantallazo 01-bloqueo-tureserva-hotel-iberostar-bavaro.png del QA del 2026-10-29 (viaje 05). Columnas con rótulo y tipo que el modelo confundió (M5-1): la «con descuento» marcada como única; el rótulo manda.",
+  "es_oferta_de_hotel": true,
+  "hotel": "Iberostar Selection Bávaro",
+  "noches": 5,
+  "plan_alimentacion": "Todo Incluido",
+  "moneda": "COP",
+  "precios_por_persona": [
+    { "acomodacion": "sencilla", "precio": 6943200, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 7890000 },
+      { "rotulo": "Pública con descuento", "tipo": "unica", "precio": 6943200 },
+      { "rotulo": "Tarifa neta agencia", "tipo": "unica", "precio": 6312000 } ] },
+    { "acomodacion": "doble", "precio": 4822400, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 5480000 },
+      { "rotulo": "Pública con descuento", "tipo": "unica", "precio": 4822400 },
+      { "rotulo": "Tarifa neta agencia", "tipo": "unica", "precio": 4384000 } ] },
+    { "acomodacion": "triple", "precio": 4567200, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 5190000 },
+      { "rotulo": "Pública con descuento", "tipo": "unica", "precio": 4567200 },
+      { "rotulo": "Tarifa neta agencia", "tipo": "unica", "precio": 4152000 } ] }
+  ],
+  "nino": { "precio": 2068000, "edad_min": 2, "edad_max": 11, "columnas": [
+    { "rotulo": "Pública", "tipo": "publica", "precio": 2350000 },
+    { "rotulo": "Pública con descuento", "tipo": "unica", "precio": 2068000 },
+    { "rotulo": "Tarifa neta agencia", "tipo": "unica", "precio": 1880000 } ] },
+  "infante": { "precio": 690000, "columnas": [
+    { "rotulo": "Pública", "tipo": "publica", "precio": 690000 },
+    { "rotulo": "Pública con descuento", "tipo": "unica", "precio": 690000 },
+    { "rotulo": "Tarifa neta agencia", "tipo": "unica", "precio": 690000 } ] },
+  "iconos": [],
+  "texto_incluye": null,
+  "incluye_por_texto": []
+}

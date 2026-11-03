@@ -38,7 +38,7 @@ import { ItemMenu, MenuAcciones, SeparadorMenu } from '@/components/viaje/menu-a
 import { Miniatura, MiniaturaManual, useVistaAmpliada } from '@/components/viaje/pantallazo'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import { aplicarCorrecciones, esCorregible, leerCorrecciones, leidosPorSlug } from '@/lib/cotizaciones/correcciones'
-import { cargoDeItem, hotelesDeItems, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
+import { cargoDeItem, hotelesDeItems, pagosEnDestinoDeItems, textoUnidadDelCargo, vuelosDeItems, type ItemConLectura } from '@/lib/cotizaciones/detalle-viaje'
 import {
   costoPorTipoDeHabitaciones,
   habitacionesDeTarifa,
@@ -89,6 +89,7 @@ import { nombreVisibleDeLinea } from '@/lib/cotizaciones/nombre-visible'
 import { pedidoDeLinea } from '@/lib/cotizaciones/proveedor-de-linea'
 import { CheckVa, ModoYDia, useActividad, type ActividadDeTarjeta } from '@/app/(app)/negocios/actividad-control'
 import { TEXTO_ACTIVIDAD_NO_VA, TEXTO_VUELO_NO_VA } from '@/lib/cotizaciones/actividad-en-cotizacion'
+import { comisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 
 /**
  * La tarjeta de una opción de viaje (prototipo aprobado por Mauricio el 2026-09-24,
@@ -692,10 +693,11 @@ export default function TarjetaOpcion({
             autorizador={autorizador}
             apilable={porPasos !== null}
             tipoTarifa={tarifa.tipoTarifa?.tipo ?? 'neta'}
-            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario'}
+            tipoPropuesto={tarifa.tipoTarifa?.origen === 'tarifario' || tarifa.tipoTarifa?.origen === 'pantallazo' ? tarifa.tipoTarifa.origen : false}
             reglas={reglasDeLinea
-              ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null, comisionPct: tarifa.tipoTarifa?.comisionPct ?? null }
+              ? { linea: reglasDeLinea, descuento: tarifa.descuentoCliente ?? null }
               : null}
+            comision={comisionEscrita(tarifa.tipoTarifa)}
           />
 
           {/* Las tarifas del proveedor: UN panel (brief del 2026-10-21, punto 6). Sin costo,
@@ -814,9 +816,12 @@ function Ficha({ item, esHotel, composicion }: { item: ItemConLectura; esHotel: 
     if (cargo) {
       filas.push({
         dt: 'Se paga en el destino',
-        dd: <>{`${cargo.valor.toLocaleString('es-CO')}${cargo.moneda ? ` ${cargo.moneda}` : ''}`}<small className="text-xs font-normal text-[#6E6A62]"> · lo paga el viajero allá</small></>,
+        // V-17 (ronda 3): con su unidad; «35 USD» a secas se leía como de toda la estadía.
+        dd: <>{`${cargo.valor.toLocaleString('es-CO')}${cargo.moneda ? ` ${cargo.moneda}` : ''}${textoUnidadDelCargo(item)}`}<small className="text-xs font-normal text-[#6E6A62]"> · lo paga el viajero allá</small></>,
       })
     }
+    // V-13 (ronda 3): lo que se paga allá y no es del hotel (el ingreso a un parque).
+    for (const p of pagosEnDestinoDeItems([item])) filas.push({ dt: 'Aparte, en destino', dd: p.texto })
     if (filas.length === 0) return null
     return (
       <dl className="m-0 grid grid-cols-3 gap-x-4 gap-y-2 rounded-lg border border-[#E2DED5] bg-[#F8F7F3] p-3 max-sm:grid-cols-2" data-ficha>

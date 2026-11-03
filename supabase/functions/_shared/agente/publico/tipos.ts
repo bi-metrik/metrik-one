@@ -56,17 +56,30 @@ export interface Tramos {
 
 export type MotivoPersona =
   | 'reserva_lista' | 'restriccion' | 'celebracion' | 'grupo' | 'pide_persona' | 'queja' | 'pago' | 'no_entiende'
-  | 'menor' | 'crisis' | 'abuso' | 'duda_abierta' | 'datos' | 'falla';
+  | 'menor' | 'crisis' | 'abuso' | 'duda_abierta' | 'datos' | 'falla'
+  // Dominio de ventas (Dimpro, 29-oct): el pago no se pudo cobrar, el pago quedó aprobado y hay que despachar, y los
+  // casos que el bot no resuelve (fuera de la tabla de flete, más de 3 unidades, factura especial, garantía o cambio,
+  // producto fuera del catálogo).
+  | 'pago_no_disponible' | 'despachar' | 'fuera_de_zona' | 'cantidad' | 'factura' | 'garantia' | 'no_en_catalogo';
 
-export const MOTIVOS_PERSONA: MotivoPersona[] = [
+/** Los motivos del asistente de experiencias (Sabor). El dominio de ventas tiene los suyos (`ventas/dominio-ventas.ts`). */
+export const MOTIVOS_EXPERIENCIAS: MotivoPersona[] = [
   'reserva_lista', 'restriccion', 'celebracion', 'grupo', 'pide_persona', 'queja', 'pago', 'no_entiende',
   'menor', 'crisis', 'abuso', 'duda_abierta', 'datos', 'falla',
+];
+
+/** Todos los motivos (la configuración de equipos y las etiquetas los aceptan todos). */
+export const MOTIVOS_PERSONA: MotivoPersona[] = [
+  ...MOTIVOS_EXPERIENCIAS,
+  'pago_no_disponible', 'despachar', 'fuera_de_zona', 'cantidad', 'factura', 'garantia', 'no_en_catalogo',
 ];
 
 /** La etiqueta de Chatwoot de cada motivo (§6.1). */
 export const ETIQUETA_MOTIVO: Record<MotivoPersona, string> = {
   reserva_lista: 'reserva', restriccion: 'restriccion', celebracion: 'celebracion', grupo: 'grupo', pide_persona: 'persona',
   queja: 'queja', pago: 'pago', no_entiende: 'no_entiende', menor: 'menor', crisis: 'crisis', abuso: 'abuso', duda_abierta: 'duda', datos: 'datos', falla: 'falla',
+  pago_no_disponible: 'pago', despachar: 'despachar', fuera_de_zona: 'flete', cantidad: 'cantidad', factura: 'factura',
+  garantia: 'garantia', no_en_catalogo: 'catalogo',
 };
 
 export type TipoAutorizacion = 'general' | 'sensible';
@@ -102,6 +115,8 @@ export type TrazaPublica = Traza & {
   pide_autorizacion?: TipoAutorizacion | null;
   /** El paso a persona que hizo este turno. */
   persona?: PasoAPersona | null;
+  /** La fila es la marca de que Chatwoot resolvió la conversación: lo de antes ya no cuenta (`desdeCierre`). */
+  cierre?: boolean;
   /** El aviso de demora salió en este turno (`rf.demora`). */
   demora?: boolean;
   /** Mensajes de este turno que se guardaron enmascarados (dato de salud). */
@@ -116,6 +131,11 @@ export type TrazaPublica = Traza & {
   preferencia_mesa?: string | null;
   /** Topes que actuaron (presupuesto, turnos por conversación, anti-spam). */
   topes?: string[];
+  /**
+   * Ventas: las fotos de los productos que nombró la respuesta (una por producto, máximo 3), con lo que pasó. Una que
+   * falla no frena nada: el texto ya salió.
+   */
+  fotos?: Array<{ codigo: string; ok: boolean; motivo?: string }>;
 };
 
 /** Lo que el turno publica: la salida y, si aplica, el paso a persona después. */

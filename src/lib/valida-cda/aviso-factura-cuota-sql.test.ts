@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { TIPO_AVISO_FACTURA } from './aviso-factura-cuota'
+import { TIPO_AVISO_FACTURA } from '../../../supabase/functions/_shared/aviso-factura-cuota.ts'
 
 /**
  * La migración del tipo `factura_cargada`, ejecutada en PGlite: amplía el CHECK de

@@ -20,7 +20,7 @@
  */
 
 import { useMemo, useState, useTransition } from 'react'
-import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban, Mail } from 'lucide-react'
+import { Receipt, Check, AlertTriangle, Loader2, ExternalLink, Ban, Mail, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import BusquedaInput from '@/components/busqueda-input'
 import { emitirReciboDeNegocio } from '@/lib/actions/facturacion-actions'
@@ -242,6 +242,20 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
               </span>
             )}
           </>
+        ) : pago.porcion_upme != null && pago.porcion_upme > 0 ? (
+          // SOE-035: el RC-3 está frenado. La cifra es la porción UPME que va a acusar, no el
+          // pago entero: con el pago en grande, Tesorería leyó que los valores no cuadraban.
+          <>
+            <span className="block text-[10px]" style={{ color: 'var(--tinta-suave)' }}>Tarifa UPME</span>
+            <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
+              {fmtCOP(pago.porcion_upme)}
+            </span>
+            {Math.round(pago.porcion_upme) !== Math.round(pago.monto) && (
+              <span className="block text-[10px] tabular-nums" style={{ color: 'var(--tinta-suave)' }}>
+                consignó {fmtCOP(pago.monto)}
+              </span>
+            )}
+          </>
         ) : (
           <span className="block text-[13px] font-bold tabular-nums" style={{ color: 'var(--tinta)' }}>
             {fmtCOP(pago.monto)}
@@ -292,11 +306,22 @@ export function FilaPago({ pago, onCambio }: { pago: PagoConRecibo; onCambio: ()
         )}
 
         {pago.estado === 'pendiente' && (
-          pago.faltantes.length > 0 ? (
-            <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
-              <AlertTriangle className="h-3.5 w-3.5" />
-              Falta {pago.faltantes.join(', ')}
-            </span>
+          pago.faltantes.length > 0 || pago.espera_upme ? (
+            <div className="flex flex-col items-start gap-0.5">
+              {/* SOE-035: no es un dato roto, es un pago a la UPME que todavía no se hace. */}
+              {pago.espera_upme && (
+                <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B45309' }}>
+                  <Clock className="h-3.5 w-3.5" />
+                  {pago.espera_upme}
+                </span>
+              )}
+              {pago.faltantes.length > 0 && (
+                <span className="inline-flex items-center gap-1 text-[11px]" style={{ color: '#B91C1C' }}>
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Falta {pago.faltantes.join(', ')}
+                </span>
+              )}
+            </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <button

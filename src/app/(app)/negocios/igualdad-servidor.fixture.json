@@ -1644,8 +1644,12 @@
       ],
       "cargosEnDestino": [],
       "nivelDetalle": "normal",
-      "pie": null,
-      "firma": null
+      "pie": "Asesora de Prueba · Asesora",
+      "firma": {
+        "nombre": "Asesora de Prueba",
+        "cargo": "Asesora",
+        "contacto": null
+      }
      }
     },
     "resultado": {
@@ -3071,8 +3075,12 @@
       ],
       "cargosEnDestino": [],
       "nivelDetalle": "normal",
-      "pie": null,
-      "firma": null
+      "pie": "Asesora de Prueba · Asesora",
+      "firma": {
+        "nombre": "Asesora de Prueba",
+        "cargo": "Asesora",
+        "contacto": null
+      }
      }
     },
     "resultado": {
@@ -4572,8 +4580,12 @@
       ],
       "cargosEnDestino": [],
       "nivelDetalle": "normal",
-      "pie": null,
-      "firma": null
+      "pie": "Asesora de Prueba · Asesora",
+      "firma": {
+        "nombre": "Asesora de Prueba",
+        "cargo": "Asesora",
+        "contacto": null
+      }
      }
     },
     "resultado": {
@@ -5815,8 +5827,12 @@
       ],
       "cargosEnDestino": [],
       "nivelDetalle": "normal",
-      "pie": null,
-      "firma": null
+      "pie": "Asesora de Prueba · Asesora",
+      "firma": {
+        "nombre": "Asesora de Prueba",
+        "cargo": "Asesora",
+        "contacto": null
+      }
      }
     },
     "resultado": {

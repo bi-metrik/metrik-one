@@ -10,6 +10,7 @@ import { getCachedUser } from '@/lib/supabase/auth-user'
 import { esBrandingPorDefecto } from '@/lib/marca/paleta'
 import { lineaUsaPoliticaDePrecio } from '@/lib/cotizaciones/politica-de-linea'
 import { tienePropuestaHtml } from '@/lib/pdf/motor-html'
+import { esEditorDePlantillas } from '@/lib/plantillas-documento/servidor'
 
 export default async function MiNegocioPage() {
   const supabase = await createClient()
@@ -147,6 +148,9 @@ export default async function MiNegocioPage() {
 
   // Licencias: perfiles vs max_seats, sin la persona designada del contrato (administrador sin costo).
   const licencias = await leerLicenciasDelEspacio(supabase, workspaceId)
+  // «Plantillas de documentos»: solo la lista explícita del workspace ve el enlace (la
+  // página y las acciones lo vuelven a exigir).
+  const editaPlantillas = await esEditorDePlantillas(supabase, workspaceId, user.id)
   const licenseUsed = licencias.usados
   const licenseMax = licencias.max
   const licenseAdminSinCostoId = licencias.adminSinCostoId
@@ -195,6 +199,7 @@ export default async function MiNegocioPage() {
 
   return (
     <MiNegocioClient
+      editaPlantillas={editaPlantillas}
       workspace={workspace}
       workspaceTipo={workspaceTipo}
       modules={workspaceModules}

@@ -23,6 +23,8 @@ import {
 } from './enlace-automatico'
 import { FROM_FACTURACION } from '@/lib/email/remitente-facturacion'
 import { generarEnlacePagoCuota, type ResultadoEnlaceCuota } from './enlace-pago-cuota-servidor'
+import { entraAlCobroAutomatico, fechasDelFallo } from '@/lib/valida-cda/tarjeta-cda'
+import { tarjetasCdaDePlanes, type TarjetaCda } from '@/lib/valida-cda/tarjeta-cda-lectura'
 
 /**
  * Paso 6 del cron diario: el enlace de pago en línea de las cuotas de los contratos de servicio se
@@ -193,11 +195,11 @@ export async function generarEnlacesAutomaticos(
   const planIds = planes.map((x) => x.id)
 
   // 3. Cuotas dentro de la ventana y los cobros programados de esos planes.
-  const cuotas = await traerTodo<{ id: string; plan_cobro_id: string; numero: number; fecha_vencimiento: string }>(
+  const cuotas = await traerTodo<{ id: string; plan_cobro_id: string; numero: number; fecha_vencimiento: string; concepto_detalle?: string | null }>(
     (desde, hasta) =>
       db
         .from('plan_cobro_cuotas')
-        .select('id, plan_cobro_id, numero, fecha_vencimiento')
+        .select('id, plan_cobro_id, numero, fecha_vencimiento, concepto_detalle')
         .in('plan_cobro_id', planIds)
         // Una cuota en cero (usuarios adicionales de un período del Plan Anual, sin ninguno) no se cobra.
         .gt('monto', 0)
@@ -260,9 +262,27 @@ export async function generarEnlacesAutomaticos(
       rech.error ? [] : ((rech.data ?? []) as { plan_cobro_id: string; numero_cuota: number }[]).map((f) => `${f.plan_cobro_id}|${f.numero_cuota}`),
     )
   }
+  // Un CDA con la tarjeta del pago automático (Términos v1.5, 2.4): lo atrasado (períodos que empiezan
+  // el día del registro o antes) NO lo cobra la tarjeta, así que sigue recibiendo su enlace como siempre.
+  // Sin poder leer las tarjetas, ninguna cuota de esos planes recibe enlace (el lado de no cobrar dos veces).
+  let tarjetasCda = new Map<string, TarjetaCda>()
+  if (conTarjeta.size > 0) {
+    try {
+      tarjetasCda = await tarjetasCdaDePlanes(db, [...conTarjeta])
+    } catch (e) {
+      console.error('[enlace-automatico] tarjetas de los CDA:', e instanceof Error ? e.message : e)
+    }
+  }
+  const conceptoPorCuota = new Map(cuotas.map((c) => [c.id, c.concepto_detalle ?? null]))
+  const fueraDeLaTarjeta = (c: CuotaCandidata) => {
+    const t = tarjetasCda.get(c.planCobroId)
+    return t !== undefined && !entraAlCobroAutomatico({ concepto: conceptoPorCuota.get(c.cuotaId) ?? null, fechaVencimiento: c.fechaVencimiento }, t.cobroDesde)
+  }
   if (conTarjeta.size > 0) {
     const antes = seleccion.candidatas.length
-    seleccion.candidatas = seleccion.candidatas.filter((c) => !conTarjeta.has(c.planCobroId) || rechazadas.has(`${c.planCobroId}|${c.numero}`))
+    seleccion.candidatas = seleccion.candidatas.filter(
+      (c) => !conTarjeta.has(c.planCobroId) || rechazadas.has(`${c.planCobroId}|${c.numero}`) || fueraDeLaTarjeta(c),
+    )
     resumen.conTarjetaSinRechazo = antes - seleccion.candidatas.length
   }
   resumen.candidatas = seleccion.candidatas.length
@@ -301,7 +321,23 @@ export async function generarEnlacesAutomaticos(
       continue
     }
 
-    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, { ...p, tarjetaRechazada: rechazadas.has(`${cand.planCobroId}|${cand.numero}`) })
+    const tarjetaRechazada = rechazadas.has(`${cand.planCobroId}|${cand.numero}`)
+    const tarjeta = tarjetaRechazada ? tarjetasCda.get(cand.planCobroId) : undefined
+    const aviso = await avisarEnlaceGenerado(db, deps, cand, r, contratos, {
+      ...p,
+      tarjetaRechazada,
+      // El correo del CDA dice la tarjeta, el reintento y desde cuándo se pausan las consultas nuevas.
+      tarjetaCda: tarjeta
+        ? {
+            ultimos4: tarjeta.ultimos4,
+            ...fechasDelFallo({
+              cuota: { concepto: conceptoPorCuota.get(cand.cuotaId) ?? null, fechaVencimiento: cand.fechaVencimiento },
+              transicion: tarjeta.terminosVigenteDesde,
+              hoy: p.hoy,
+            }),
+          }
+        : null,
+    })
     await anotarEnAncla(
       db,
       {
@@ -368,7 +404,7 @@ async function avisarEnlaceGenerado(
   cand: CuotaCandidata,
   r: Extract<ResultadoEnlaceCuota, { ok: true }>,
   contratos: readonly FilaContrato[],
-  p: { hoy: string; ahoraMs: number; tarjetaRechazada: boolean },
+  p: { hoy: string; ahoraMs: number; tarjetaRechazada: boolean; tarjetaCda?: DatosAvisoEnlace['tarjetaCda'] },
 ): Promise<{ estado: EstadoAviso; motivo: string | null }> {
   const registrar = async (fila: { estado: EstadoAviso; destino?: string | null; titulo?: string | null; motivo?: string | null; proveedorId?: string | null }) => {
     // `avisos_cliente` es del negocio (negocio_id NOT NULL): el de una suscripción va a su bitácora.
@@ -431,6 +467,7 @@ async function avisarEnlaceGenerado(
     enlaceExpira: r.expira,
     urlSuscripcion: (deps.urlSuscripcion ?? urlSuscripcionPorDefecto)(slug),
     tarjetaRechazada: p.tarjetaRechazada,
+    tarjetaCda: p.tarjetaCda ?? null,
   }
   const asunto = asuntoAvisoEnlace(datos)
   const envio = await (deps.enviarCorreo ?? enviarPorResend)({

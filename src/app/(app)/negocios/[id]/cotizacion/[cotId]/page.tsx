@@ -20,6 +20,7 @@ import { leerLineasPorTipo } from '@/lib/cotizaciones/por-pasos-datos'
 import { estadoPorPasos } from '@/lib/cotizaciones/por-pasos'
 import { configSeguimiento } from '@/lib/negocios/seguimiento'
 import { entradaAsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { inicioDelViajeDeLaCotizacion } from '@/lib/cotizaciones/fechas-del-viaje'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { MENSAJE_ENVIO_PENDIENTE } from '@/lib/autorizacion-datos/mensajes'
@@ -85,18 +86,27 @@ export default async function CotizacionNegocioPage({
 
   // Check if any cotizacion in this negocio has estado='aceptada'
   let frozen = false
+  // H10-1: otra cotización del negocio ya enviada. Con esta en borrador, el editor lo dice desde
+  // que se abre y «Enviar» la reemplaza. Sale de la MISMA consulta de la aceptada (sin idas de más);
+  // si la lectura falla, nada: el servidor frena igual.
+  let otraEnviada: { id: string; consecutivo: string | null } | null = null
   try {
     const { supabase: sbCheck } = await getWorkspace()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: accepted } = await (sbCheck as any)
+    const { data: abiertas } = await (sbCheck as any)
       .from('cotizaciones')
-      .select('id')
+      .select('id, estado, consecutivo')
       .eq('negocio_id', id)
-      .eq('estado', 'aceptada')
-      .limit(1)
+      .in('estado', ['aceptada', 'enviada'])
+    const filas = (Array.isArray(abiertas) ? abiertas : []) as { id: string; estado: string; consecutivo: string | null }[]
+    const accepted = filas.filter(f => f.estado === 'aceptada')
     // Freeze if there's an accepted quote AND the current one is NOT the accepted one
-    if (accepted && accepted.length > 0 && accepted[0].id !== cotId) {
+    if (accepted.length > 0 && accepted[0].id !== cotId) {
       frozen = true
+    }
+    const enviada = filas.find(f => f.estado === 'enviada' && f.id !== cotId)
+    if (enviada && (cotizacion as { estado?: string } | null)?.estado === 'borrador') {
+      otraEnviada = { id: enviada.id, consecutivo: enviada.consecutivo ?? null }
     }
   } catch {
     // Non-critical — if check fails, don't freeze
@@ -237,23 +247,34 @@ export default async function CotizacionNegocioPage({
   let composicionViaje: Composicion | null = null
   // El destino nombra las ranuras que todavía no tienen nombre («Hotel en Cancún»).
   let destinoViaje: string | null = null
+  let requisitosViaje: string | null = null
   // Las fechas del viaje, para el renglón del paso «Viaje» (brief del 2026-09-23).
   let fechasViaje: { inicio: string | null; fin: string | null } | null = null
   // El nivel de detalle del documento: la hoja del cliente de cada opción lo respeta.
   let nivelDetalle: NivelDetalle | null = null
   let modalidadViaje: ModalidadDelViaje | null = null
+  let edadesMenoresViaje: string | null = null
   try {
     const { supabase: sbViaje } = await getWorkspace()
-    const { viaje, error: errViaje, modalidad } = await leerViajeDelNegocio(sbViaje, id)
+    const { viaje, error: errViaje, modalidad, edadesMenores, requisitos } = await leerViajeDelNegocio(sbViaje, id)
     if (errViaje) console.warn('[cotizacion] no se pudo leer la composición del viaje:', errViaje)
     composicionViaje = viaje.composicion
     destinoViaje = viaje.destino
+    requisitosViaje = requisitos ?? null
     fechasViaje = viaje.fechas
     nivelDetalle = viaje.nivelDetalle
     modalidadViaje = modalidad ?? null
+    edadesMenoresViaje = edadesMenores ?? null
   } catch {
     // Sin composición del viaje la pantalla la pide por línea.
   }
+
+  // «Así puedes pagar» cuenta desde el día del viaje COTIZADO, el mismo que imprime el PDF (segunda
+  // vuelta de la COT-2026-0008, punto 2): las líneas de la Recomendada si va en la propuesta.
+  const principalEnPropuesta = itinerarios.itinerarios.find(it => it.vaEnPropuesta && it.esPrincipal) ?? null
+  const inicioDelViajeCotizado = fechasViaje
+    ? inicioDelViajeDeLaCotizacion(items, principalEnPropuesta, fechasViaje)
+    : null
 
   // ¿Líneas por tipo («+ Vuelo», «+ Hotel»…) en vez de nombre libre? Solo si la línea del
   // negocio declara quiénes viajan (`lineas-por-tipo.ts`). Si no se puede leer, la pantalla
@@ -320,7 +341,7 @@ export default async function CotizacionNegocioPage({
   const pedidoAutorizacion = estadoPasos.encendido ? await getPedidoDeAutorizacion(cotId).catch(() => null) : null
   // Viaje en bloqueo (brief del 2026-10-27): sale de la misma lectura del viaje, sin consultas de más, y
   // solo cuenta con la forma por pasos. Sin respuesta, A medida (el servidor lo exige en cada acción).
-  const bloqueo = estadoPasos.encendido && modalidadViaje?.bloqueo ? { operador: modalidadViaje.operador } : null
+  const bloqueo = estadoPasos.encendido && modalidadViaje?.bloqueo ? { operador: modalidadViaje.operador, edadesMenores: edadesMenoresViaje } : null
   // La carga del negocio que pinta el marco (cotización de viaje): se lee UNA vez, aquí, y de ella
   // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
   // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.
@@ -336,6 +357,7 @@ export default async function CotizacionNegocioPage({
       bloqueo={bloqueo}
       pedidoAutorizacion={pedidoAutorizacion}
       motivoAutorizacionDatos={motivoAutorizacionDatos}
+      otraEnviada={otraEnviada}
       pasoInicial={paso === 'revisar' ? 3 : paso === 'tarifas' ? 2 : 1}
       oportunidadId={id}
       // Con los tipos regenerados, `convencion_margen` llega como `string` de la base y el
@@ -362,10 +384,11 @@ export default async function CotizacionNegocioPage({
       configIva={configIva}
       mostrarResumenFiscal={mostrarResumenFiscal}
       destinoViaje={destinoViaje}
+      requisitosViaje={requisitosViaje}
       fechasViaje={fechasViaje}
       leidaEn={leidaEn}
       seguimiento={seguimientoActivo}
-      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: fechasViaje?.inicio ?? null, hoy: todayBogotaISO() })}
+      asiPuedesPagar={entradaAsiPuedesPagar(configLineaPlan, { fechaSalida: inicioDelViajeCotizado, hoy: todayBogotaISO() })}
     />
   )
 

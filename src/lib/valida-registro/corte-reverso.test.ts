@@ -24,7 +24,7 @@ const { cortarCicloEnValida, reintentarCortesPorReverso, suspensionPorReversoEnP
 const { abrirCicloSiCorresponde, reconciliarCiclosValida } = await import('./ciclo-servidor')
 const { enlaceDeReactivacion, SIN_SUSPENSION } = await import('./reactivacion-servidor')
 const { planSuspendidoPorReverso } = await import('./plan')
-const { correoSuspensionPorReverso, frasesSuspension, corteTrasRespuesta } = await import('./corte-reverso')
+const { correoSuspensionPorReverso, frasesSuspension, corteTrasRespuesta, avisoClienteHabilitado, AVISO_REVERSO_CLIENTE_APROBADO } = await import('./corte-reverso')
 
 const METRIK = 'ws-metrik'
 const PAGADOR = 'ws-cda-prueba'
@@ -292,9 +292,24 @@ describe('Valida caída, rechazos finales y el correo', () => {
     expect(r.estado).toBe('pendiente')
   })
 
-  it('en producción, sin el visto bueno de Vera, el corte se hace y el correo queda retenido', async () => {
-    const { tablas, c } = await reversar(base(), valida(OK_ANULADO), correos(), { VERCEL_ENV: 'production' })
-    expect(corteDe(tablas)).toMatchObject({ estado: 'anulado', aviso_cliente: { estado: 'retenido' } })
+  it('en producción, con el visto bueno de Vera (2026-10-29), el corte se hace y el correo sale una vez', async () => {
+    expect(AVISO_REVERSO_CLIENTE_APROBADO).toBe(true)
+    expect(avisoClienteHabilitado({ VERCEL_ENV: 'production' })).toBe(true)
+    const { tablas, c } = await reversar(base(), valida(OK_ANULADO), correos(), { VERCEL_ENV: 'production', NEXT_PUBLIC_BASE_DOMAIN: 'metrikone.co' })
+    expect(corteDe(tablas)).toMatchObject({ estado: 'anulado', aviso_cliente: { estado: 'enviado' } })
+    expect(c.cliente).toHaveLength(1)
+    expect(c.cliente[0].idempotencyKey).toBe(`valida-reverso-cliente-${COBRO}`)
+  })
+
+  it('en producción, el correo que no salió el día del corte tampoco sale al día siguiente', async () => {
+    const c = correos()
+    const fallido = { ...c, enviarCliente: async () => ({ ok: false as const, error: 'resend_500' }) }
+    const PROD = { VERCEL_ENV: 'production', NEXT_PUBLIC_BASE_DOMAIN: 'metrikone.co' }
+    const { db, tablas } = await reversar(base(), valida(OK_ANULADO), fallido, PROD)
+    expect(corteDe(tablas)).toMatchObject({ aviso_cliente: { estado: 'fallido' } })
+    const manana = new Date('2026-10-28T12:00:00Z')
+    await reintentarCortesPorReverso({ db, llamar: valida(OK_ANULADO).llamar, enviarCorreo: c.enviarCliente, env: PROD, ahora: () => manana })
+    expect(corteDe(tablas)).toMatchObject({ aviso_cliente: { estado: 'vencido' } })
     expect(c.cliente).toHaveLength(0)
   })
 

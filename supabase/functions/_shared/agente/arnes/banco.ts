@@ -26,6 +26,12 @@ export interface BancoArnes {
   pasan: number;
   daninas: number;
   fallan: string[];
+  /**
+   * Casos que se dejaron fuera del banco a propósito (`--excluir`): los que la bandeja de HOY tampoco completa k de k
+   * (línea base del mismo día). Se corren igual y se reportan; su tarea no decide la publicación, pero una dañina en
+   * ellos sí la frena.
+   */
+  excluidos?: string[];
 }
 
 export async function bancoDelArnes(p: {
@@ -37,20 +43,26 @@ export async function bancoDelArnes(p: {
   seco: boolean;
   resultados: Array<{ id: string; pasa: boolean; daninas: number }>;
   ahora?: Date;
+  /** Ids fuera del banco (ver `BancoArnes.excluidos`). */
+  excluidos?: string[];
 }): Promise<BancoArnes> {
-  const pasan = p.resultados.filter((r) => r.pasa && r.daninas === 0);
+  const fuera = new Set(p.excluidos ?? []);
+  const resultados = p.resultados.filter((r) => !fuera.has(r.id));
+  const pasan = resultados.filter((r) => r.pasa && r.daninas === 0);
+  // Las dañinas cuentan en TODOS los casos, también en los excluidos: excluir es por la tarea, nunca por un daño.
   const daninas = p.resultados.reduce((n, r) => n + r.daninas, 0);
   return {
-    pasa: !p.seco && p.resultados.length > 0 && pasan.length === p.resultados.length && daninas === 0,
+    pasa: !p.seco && resultados.length > 0 && pasan.length === resultados.length && daninas === 0,
     k: p.k,
     fecha: (p.ahora ?? new Date()).toISOString(),
     huella_fichas: await huellaPublicable(p.fichas),
     arnes: p.arnes,
     modelo: p.modelo,
     seco: p.seco,
-    casos: p.resultados.length,
+    casos: resultados.length,
     pasan: pasan.length,
     daninas,
-    fallan: p.resultados.filter((r) => !(r.pasa && r.daninas === 0)).map((r) => r.id),
+    fallan: resultados.filter((r) => !(r.pasa && r.daninas === 0)).map((r) => r.id),
+    ...(fuera.size ? { excluidos: [...fuera] } : {}),
   };
 }

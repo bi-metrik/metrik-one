@@ -4,4 +4,4 @@
  * pantalla de la cotización. La regla vive en `envio.ts`.
  */
 export const MENSAJE_ENVIO_PENDIENTE =
-  'Falta que el cliente autorice el tratamiento de sus datos: la cotización se puede armar, pero no enviar. Envíale el link desde «Autorización de datos».'
+  'Falta que el cliente autorice el tratamiento de sus datos: la cotización se puede armar, pero no enviar. Pide el link en el aviso «Falta la autorización» de la ficha del negocio: ahí se copia o se envía por correo.'

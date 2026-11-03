@@ -154,6 +154,11 @@ export interface HotelPDF {
   linea: string
   hotel: string | null
   ciudad: string | null
+  /**
+   * El barrio o la zona del hotel, cuando se sabe aparte de la ciudad (el paquete de bloqueo la
+   * lee como «zona»). La propuesta la imprime en la tarjeta del hotel, nunca como destino (V6).
+   */
+  zona?: string | null
   habitacion: string | null
   regimen: string | null
   checkIn: string | null
@@ -176,6 +181,12 @@ export interface HotelPDF {
    */
   incluye?: string | null
   /**
+   * Lo que el paquete de bloqueo marca como NO incluido (casilla en «no», nunca la vacía), con las
+   * etiquetas del cliente («Traslados»). Con varias versiones, la tarjeta dice lo que a esta le falta
+   * y otra sí trae (prueba corta del #1352). Ausente = nada marcado en «no».
+   */
+  noIncluidoEnCasillas?: string[]
+  /**
    * El rango de edad del niño que da el hotel, del ingreso manual. Con él el documento dice
    * «Tarifa niño de X a Y años cumplidos a la fecha del viaje»; ausente, no dice nada.
    */
@@ -195,6 +206,12 @@ export interface HotelPDF {
   fotoRef?: string
   /** Ancho entre alto de la foto guardada. */
   fotoProporcion?: number | null
+  /**
+   * La entrada y la salida NO salieron de la captura: son las de la solicitud del viaje (7.4,
+   * «(del viaje)») y nadie las corrigió. El documento las cambia por las de los servicios
+   * cuando el vuelo dice otra cosa (`fechas-del-viaje.ts`). Ausente = leídas o corregidas.
+   */
+  fechasDelViaje?: true
 }
 
 /**
@@ -215,6 +232,16 @@ export interface CargoEnDestinoPDF {
   concepto: string
   monto: string
   observacion: string
+  /** Cómo lo llama la captura («Resort fee», «City tax»). Ausente en lecturas anteriores. */
+  conceptoLeido?: string
+  /** El valor es POR NOCHE (V7-2). Con `noches`, el documento dice también el total. */
+  porNoche?: true
+  /** El valor es POR PERSONA (V-17, ronda 3). Con `personas`, el documento dice también el total. */
+  porPersona?: true
+  personas?: number
+  valor?: number
+  moneda?: string | null
+  noches?: number
   /** Ver `VueloPDF.tarifas`: las tarifas de la propuesta que duermen en ese hotel. */
   tarifas?: number[]
 }
@@ -423,13 +450,25 @@ export function ranuraDeLectura(campos: { label: string; valor: string }[] | und
   return candidatas.length === 1 ? candidatas[0] : null
 }
 
+/** Vuelo y tren: los transportes que pueden ser opciones del mismo trayecto (M9-1, QA G9). */
+const TRANSPORTES: ReadonlySet<string> = new Set(['vuelo_detalle', 'tren_detalle'])
+
 /**
  * La ranura de la línea: la de su grupo y, si el grupo no es una, la de su lectura.
  *
- * El grupo manda cuando resuelve: es la decisión explícita de quien cotiza.
+ * El grupo manda cuando resuelve: es la decisión explícita de quien cotiza. Con UNA excepción
+ * (QA Trappvel 2026-10-29, M9-1 · decisión 5 de Mauricio): un tren y un vuelo del mismo trayecto
+ * juntados como opciones del mismo bloque. El bloque es de un tipo, pero cada opción sigue siendo
+ * lo que se leyó: el tren se imprime como tren y el vuelo como vuelo. Solo entre vuelo y tren, y
+ * solo cuando la lectura lo dice sin empate (`ranuraDeLectura`).
  */
 export function ranuraDelItem(item: ItemConLectura): DefinicionRanura | null {
-  return ranuraDeGrupo(item.grupo) ?? ranuraDeLectura(casillaDelItem(item)?.campos)
+  const porGrupo = ranuraDeGrupo(item.grupo)
+  if (porGrupo && TRANSPORTES.has(porGrupo.slug)) {
+    const leida = ranuraDeLectura(casillaDelItem(item)?.campos)
+    return leida && TRANSPORTES.has(leida.slug) ? leida : porGrupo
+  }
+  return porGrupo ?? ranuraDeLectura(casillaDelItem(item)?.campos)
 }
 
 /**
@@ -448,6 +487,20 @@ function detalleDelItem(item: ItemConLectura): Record<string, string> {
 }
 
 const texto = (d: Record<string, string>, slug: string): string | null => d[slug] ?? null
+
+/**
+ * ¿La entrada y la salida del hotel son las de la solicitud y no las de la captura? Las dos
+ * marcadas «(del viaje)» y ninguna fecha corregida (COT-2026-0008: la captura no mostraba
+ * fechas y la ficha decía las del rango que dio la cliente, 21 jun – 4 jul).
+ */
+function fechasTomadasDelViaje(item: ItemConLectura, ranura: DefinicionRanura): boolean {
+  if (fechasCorregidas(leerTarifaPax(item.tarifa_pax).correcciones)) return false
+  const campos = casillaDelItem(item)?.campos ?? []
+  const etiqueta = new Map(ranura.campos.map(c => [c.slug, c.label]))
+  const delViaje = (slug: string) =>
+    campos.some(c => c.label === etiqueta.get(slug) && /\(del viaje\)\s*$/i.test(String(c.valor ?? '')))
+  return delViaje('check_in') && delViaje('check_out')
+}
 
 /**
  * ⚠️ Lee lo GUARDADO tal como lo devolvió el modelo, con o sin punto de miles: por eso pasa
@@ -560,8 +613,13 @@ export function tramosDelItem(
   detalle: Record<string, string> = detalleDelItem(item),
 ): { tramos: TramoVuelo[]; numerosSinTramo: string | null } {
   const derivados = tramosDeCampos(slug => detalle[slug])
-  const guardados = leerTramos(item.tramos)
+  let guardados = leerTramos(item.tramos)
   if (!guardados) return derivados
+  // M9-3: el regreso fantasma se guardaba y se llevaba el número (uno solo no se reparte). Sin él,
+  // la ida guardada sin número toma el de la lectura, que ya es solo suyo.
+  if (guardados.length === 1 && !guardados[0].numero && derivados.tramos.length === 1 && derivados.tramos[0].numero) {
+    guardados = [{ ...guardados[0], numero: derivados.tramos[0].numero }]
+  }
   return {
     tramos: guardados,
     numerosSinTramo: guardados.some(t => t.numero) ? null : derivados.numerosSinTramo,
@@ -619,7 +677,8 @@ function ocupacionDeLaUnicaQueVa(r: RepartoHabitaciones): string | null {
 export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
   const out: HotelPDF[] = []
   for (const item of items) {
-    if (ranuraDelItem(item)?.slug !== 'hotel_detalle') continue
+    const ranura = ranuraDelItem(item)
+    if (ranura?.slug !== 'hotel_detalle') continue
     const d = detalleDelItem(item)
     // Con varias habitaciones, la acomodación es la de TODAS (el cliente ve el reparto
     // entero); la ocupación del primer pantallazo solo describe su habitación.
@@ -669,6 +728,8 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
       nota: notaDeLaLinea(item),
       // Sin foto del hotel la llave no aparece: la ficha de siempre se arma igual que antes.
       ...(tarifa.fotoHotel ? { fotoRef: tarifa.fotoHotel.ref, fotoProporcion: tarifa.fotoHotel.proporcion } : {}),
+      // Sin la marca la llave no aparece: la ficha de siempre se arma igual que antes.
+      ...(fechasTomadasDelViaje(item, ranura) ? { fechasDelViaje: true as const } : {}),
     })
   }
   return out
@@ -686,16 +747,27 @@ export function hotelesDeItems(items: ItemConLectura[]): HotelPDF[] {
  * que recibe eso rellena el hueco inventando.
  */
 export interface ServicioPDF {
-  tipo: 'traslado' | 'actividad'
+  tipo: 'traslado' | 'actividad' | 'tren'
   /** «Aeropuerto - hotel · Privado», «Tour Johnny Cay · Día completo · San Andrés». */
   descripcion: string
   fecha: string | null
+  /** N7-4 (QA del 2026-10-29): el traslado es un carro de alquiler (`esAlquilerDeCarro`). */
+  esAlquiler?: true
 }
 
 export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
   const out: ServicioPDF[] = []
   for (const item of items) {
     const slug = ranuraDelItem(item)?.slug
+    if (slug === 'tren_detalle') {
+      // M9-1 / V9-3 (QA G9) · el tren con su operador y su número: «Paris Gare de Lyon - Roma Termini · Trenitalia Frecciarossa · 9241».
+      const d = detalleDelItem(item)
+      const descripcion = [texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null), texto(d, 'proveedor'), texto(d, 'numero_tren')]
+        .filter((p): p is string => Boolean(p))
+        .join(' · ')
+      if (descripcion) out.push({ tipo: 'tren', descripcion, fecha: fechaCorta(texto(d, 'fecha_hora')) })
+      continue
+    }
     if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') continue
     const d = detalleDelItem(item)
     const esTraslado = slug === 'traslado_detalle'
@@ -709,9 +781,30 @@ export function serviciosDeItems(items: ItemConLectura[]): ServicioPDF[] {
       tipo: slug === 'traslado_detalle' ? 'traslado' : 'actividad',
       descripcion,
       fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+      ...(esTraslado && esAlquilerDeCarro(item) ? { esAlquiler: true as const } : {}),
     })
   }
   return out
+}
+
+/**
+ * ¿Esta línea de traslado es un CARRO DE ALQUILER? (QA Trappvel del 2026-10-29, N7-4 y V7-3.)
+ *
+ * No hay tipo de servicio «alquiler de carro»: el carro entra por la ranura de traslado y el
+ * documento le decía al cliente «Traslado Aeropuerto Orlando (MCO) → Aeropuerto Miami (MIA)» el día
+ * que llegaba. Se reconoce por las palabras del alquiler o por la arrendadora que lo presta (lo que
+ * se lee en el nombre de la línea, el trayecto, el vehículo o el proveedor). Ante la duda, NO: un
+ * traslado de verdad rotulado como carro sería peor que lo de hoy.
+ */
+const PALABRAS_DE_ALQUILER = /\b(alquiler|car\s+rental|rental\s+car|rent\s*a\s*car|renta\s+de\s+(?:carro|auto|veh[ií]culo)|carro\s+rentado|auto\s+rentado)\b/i
+const ARRENDADORAS = /\b(alamo|hertz|avis|budget|enterprise\s+rent|enterprise|national\s+car|sixt|thrifty|dollar\s+rent|europcar|localiza|payless\s+car|fox\s+rent|rentacar|rent\s+a\s+car)\b/i
+
+export function esAlquilerDeCarro(item: ItemConLectura): boolean {
+  if (ranuraDelItem(item)?.slug !== 'traslado_detalle') return false
+  const d = detalleDelItem(item)
+  const textos = [item.nombre, item.grupo, texto(d, 'trayecto'), texto(d, 'tipo_vehiculo')].filter(Boolean).join(' · ')
+  if (PALABRAS_DE_ALQUILER.test(textos)) return true
+  return ARRENDADORAS.test(texto(d, 'proveedor') ?? '')
 }
 
 /**
@@ -732,17 +825,45 @@ export function lecturaDeTraslado(item: ItemConLectura): { trayecto: string | nu
 }
 
 /**
+ * La lectura de un TREN (QA G9, M9-1 / V9-3): el trayecto, el operador, el número, la fecha y las
+ * horas, con lo corregido encima. `null` si la línea no es un tren.
+ */
+export function lecturaDeTren(item: ItemConLectura): {
+  trayecto: string | null
+  operador: string | null
+  numero: string | null
+  fecha: string | null
+  horaSalida: string | null
+  horaLlegada: string | null
+  cambio: string | null
+  clase: string | null
+} | null {
+  if (ranuraDelItem(item)?.slug !== 'tren_detalle') return null
+  const d = detalleDelItem(item)
+  return {
+    trayecto: texto(d, 'trayecto') ?? ((item.nombre ?? '').trim() || null),
+    operador: texto(d, 'proveedor'),
+    numero: texto(d, 'numero_tren'),
+    fecha: texto(d, 'fecha_hora'),
+    horaSalida: texto(d, 'hora_salida'),
+    horaLlegada: texto(d, 'hora_llegada'),
+    cambio: texto(d, 'cambio'),
+    clase: texto(d, 'clase'),
+  }
+}
+
+/**
  * Dónde y cuándo es una actividad o un traslado, según su lectura (con lo corregido encima):
  * la ciudad (solo la actividad la lee) y la fecha corta («14 dic»). Lo usa la propuesta para
  * poner cada plan opcional en los días libres de su ciudad.
  */
 export function lugarDelServicio(item: ItemConLectura): { ciudad: string | null; fecha: string | null } {
   const slug = ranuraDelItem(item)?.slug
-  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle') return { ciudad: null, fecha: null }
+  if (slug !== 'traslado_detalle' && slug !== 'actividad_detalle' && slug !== 'tren_detalle') return { ciudad: null, fecha: null }
   const d = detalleDelItem(item)
   return {
     ciudad: slug === 'actividad_detalle' ? texto(d, 'ciudad') : null,
-    fecha: fechaCorta(texto(d, slug === 'traslado_detalle' ? 'fecha_hora' : 'fecha')),
+    fecha: fechaCorta(texto(d, slug === 'actividad_detalle' ? 'fecha' : 'fecha_hora')),
   }
 }
 
@@ -813,7 +934,70 @@ export function cargosEnDestinoDeItems(items: ItemConLectura[]): CargoEnDestinoP
       concepto: 'Impuestos y tasas de hospedaje',
       monto: `${cargo.valor.toLocaleString('es-CO', { maximumFractionDigits: 2 })}${cargo.moneda ? ` ${cargo.moneda}` : ''}`,
       observacion: 'Se paga en el hotel. No está incluido en el precio.',
+      // V7-2 (QA del 2026-10-29): cómo lo llama la pantalla y si es por noche. Solo en lecturas
+      // nuevas; sin ellas las llaves no aparecen y el redactor ve lo de siempre.
+      ...(() => {
+        const leido = texto(d, 'impuestos_destino_concepto')
+        const unidad = unidadDelCargo(texto(d, 'impuestos_destino_base'))
+        const noches = nochesDe(d, leerTarifaPax(item.tarifa_pax).correcciones)
+        // V-17 (ronda 3): por persona multiplica por los huéspedes de la captura.
+        const personas = personasDe(d)
+        const porNoche = unidad === 'por_noche' || unidad === 'por_persona_noche'
+        const porPersona = unidad === 'por_persona' || unidad === 'por_persona_noche'
+        return {
+          ...(leido ? { conceptoLeido: leido } : {}),
+          ...(porNoche || porPersona ? { valor: cargo.valor, moneda: cargo.moneda } : {}),
+          ...(porNoche ? { porNoche: true as const, ...(noches ? { noches } : {}) } : {}),
+          ...(porPersona ? { porPersona: true as const, ...(personas ? { personas } : {}) } : {}),
+        }
+      })(),
     })
+  }
+  return out
+}
+
+/** La unidad del cargo en destino que dijo la lectura (V-17). `null` = no lo dijo (es el total). */
+export type UnidadDelCargo = 'total' | 'por_noche' | 'por_persona' | 'por_persona_noche'
+
+export function unidadDelCargo(valor: string | null | undefined): UnidadDelCargo | null {
+  const v = (valor ?? '').trim().toLowerCase()
+  return v === 'total' || v === 'por_noche' || v === 'por_persona' || v === 'por_persona_noche' ? v : null
+}
+
+/** Cuántos huéspedes muestra la captura (adultos + niños + infantes). `null` si no se ve. */
+function personasDe(d: Record<string, string>): number | null {
+  const partes = ['ocupacion_adultos', 'ocupacion_ninos', 'ocupacion_infantes'].map(s => numero(d, s))
+  if (partes.every(x => x === null)) return null
+  const n = partes.reduce<number>((a, x) => a + (x ?? 0), 0)
+  return n > 0 ? n : null
+}
+
+/**
+ * La unidad del cargo como la lee la asesora en la tarjeta de la opción (V-17): « por noche»,
+ * « por persona», « por persona por noche» o vacío (es el total).
+ */
+export function textoUnidadDelCargo(item: ItemConLectura): string {
+  const u = unidadDelCargo(texto(detalleDelItem(item), 'impuestos_destino_base'))
+  return u === 'por_noche' ? ' por noche' : u === 'por_persona' ? ' por persona' : u === 'por_persona_noche' ? ' por persona por noche' : ''
+}
+
+/**
+ * Lo que el viajero paga EN DESTINO y no es un cargo del hotel (V-13 del QA del 2026-10-29, ronda
+ * 3): el ingreso a un parque nacional, la tasa de entrada a una isla. Tal cual lo leyó la captura,
+ * con su monto si lo traía. Uno por opción que lo tenga; no suma a ningún precio.
+ */
+export interface PagoEnDestinoPDF {
+  texto: string
+  /** Ver `VueloPDF.tarifas`: las tarifas de la propuesta que llevan esa opción. */
+  tarifas?: number[]
+}
+
+export function pagosEnDestinoDeItems(items: ItemConLectura[]): PagoEnDestinoPDF[] {
+  const out: PagoEnDestinoPDF[] = []
+  for (const item of items) {
+    const t = texto(detalleDelItem(item), 'pago_destino_otro')
+    const limpio = (t ?? '').replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '')
+    if (limpio) out.push({ texto: limpio })
   }
   return out
 }

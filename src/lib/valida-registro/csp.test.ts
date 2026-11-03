@@ -40,6 +40,16 @@ describe('CSP de /valida/empezar', () => {
     expect(directivas(politicaRegistroValida('no-es-url')).get('connect-src')).toEqual(["'self'", API_EPAYCO])
   })
 
+  it('dentro del espacio (/suscripcion/tarjeta de un CDA): los mismos scripts, más el logo y la sesión en vivo de Supabase', () => {
+    const e = directivas(politicaRegistroValida('https://yfjqscvvxetobiidnepa.supabase.co/', false, true))
+    expect(e.get('script-src')).toEqual(p.get('script-src'))
+    expect(e.get('connect-src')).toEqual(["'self'", API_EPAYCO, 'https://yfjqscvvxetobiidnepa.supabase.co', 'wss://yfjqscvvxetobiidnepa.supabase.co'])
+    expect(e.get('img-src')).toEqual(["'self'", 'data:', 'blob:', 'https://yfjqscvvxetobiidnepa.supabase.co'])
+    expect(e.get('frame-ancestors')).toEqual(["'none'"])
+    // El registro no cambia.
+    expect(p.get('img-src')).toEqual(["'self'", 'data:', 'blob:'])
+  })
+
   it('en desarrollo abre eval y el websocket de recarga, y solo ahí', () => {
     const dev = directivas(politicaRegistroValida(undefined, true))
     expect(dev.get('script-src')).toContain("'unsafe-eval'")

@@ -352,7 +352,13 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
-import { enviarPaquete, guardarDocumentoViajero, marcarPaqueteMandado } from './entrega-viaje-actions'
+import {
+  asignarDocumentoViajero,
+  enviarPaquete,
+  guardarDocumentoViajero,
+  marcarPaqueteMandado,
+  responderMenoresConPadres,
+} from './entrega-viaje-actions'
 import { evaluarGateEntrega } from '@/lib/viaje/entrega-datos'
 import { registrarPagoViajero } from './riel-cobro-actions'
 
@@ -375,6 +381,18 @@ async function listoParaEntregar(opts: { vouchers?: boolean; internacional?: boo
   }
   neg().etapa_actual_id = 'e6'
   subidos = []
+}
+
+/** Los documentos de los 3 viajeros del escenario (2 adultos y una bebé) y la respuesta de los padres. */
+async function documentosCompletos() {
+  const base = { negocioId: NEG, pais: 'Colombia', fechaEmision: null, soporte: null, leidoPorIa: false }
+  const pas = (viajero: string, numero: string) =>
+    guardarDocumentoViajero({ ...base, tipo: 'pasaporte', clase: 'pasaporte', viajero, numero, nombre: null, fechaVencimiento: '2035-01-01' })
+  expect((await pas('adulto-1', 'AB123456')).ok).toBe(true)
+  expect((await pas('adulto-2', 'AB654321')).ok).toBe(true)
+  expect((await pas('infante-1', 'AB000001')).ok).toBe(true)
+  expect((await guardarDocumentoViajero({ ...base, tipo: 'otro', clase: 'registro_civil', viajero: 'infante-1', numero: '1234567890', nombre: null, fechaVencimiento: null })).ok).toBe(true)
+  expect((await responderMenoresConPadres(NEG, true)).ok).toBe(true)
 }
 
 async function pagarAnticipo() {
@@ -427,7 +445,7 @@ describe('paquete por C1 (F4-4)', () => {
     await listoParaEntregar()
     await pagarAnticipo()
     neg().etapa_actual_id = 'e6'
-    await guardarDocumentoViajero({ negocioId: NEG, tipo: 'pasaporte', numero: 'AB123456', nombre: 'CAROLINA PRUEBA', pais: 'Colombia', fechaEmision: null, fechaVencimiento: '2035-01-01', soporte: null, leidoPorIa: false })
+    await documentosCompletos()
     const antes = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: GATES_E6 })
     expect(antes).toEqual(['Falta enviar el paquete de viaje.'])
 
@@ -469,22 +487,39 @@ describe('paquete por C1 (F4-4)', () => {
     expect((meta().paquete_viaje as Fila).envios).toBe(1)
   })
 
-  it('otra comercial no envía; operaciones sola tampoco (§7.4)', async () => {
+  it('otra comercial no envía; operaciones sin asignar tampoco (§7.4)', async () => {
     await listoParaEntregar()
     await pagarAnticipo()
     staffId = 's-tati'
     expect((await enviarPaquete({ negocioId: NEG, nota: null })).ok).toBe(false)
-    staffId = 's-dani'
     areas = ['operaciones']
     expect((await enviarPaquete({ negocioId: NEG, nota: null })).ok).toBe(false)
     expect(meta().paquete_viaje).toBeUndefined()
+  })
+
+  it('operaciones ASIGNADA al negocio envía el paquete y marca «Ya lo mandé» (H1-3); «Enviar igual» sigue siendo de la dirección', async () => {
+    await listoParaEntregar()
+    tablas.negocio_responsables.push({ negocio_id: NEG, staff_id: 's-tati', rol: 'operaciones' })
+    staffId = 's-tati'
+    areas = ['operaciones']
+    const igual = await enviarPaquete({ negocioId: NEG, nota: null, enviarIgualMotivo: 'urge' })
+    expect(igual).toMatchObject({ ok: false, error: 'Solo la dirección puede enviar el paquete sin el cobro mínimo.' })
+    staffId = 's-dani'
+    areas = ['comercial']
+    await pagarAnticipo()
+    staffId = 's-tati'
+    areas = ['operaciones']
+    const r = await enviarPaquete({ negocioId: NEG, nota: null })
+    expect(r.ok).toBe(true)
+    expect((meta().paquete_viaje as Fila).enviado_por).toBe('s-tati')
+    expect((await marcarPaqueteMandado(NEG)).ok).toBe(true)
   })
 })
 
 describe('documentos del viajero en el contacto (F4-2, C11)', () => {
   it('el pasaporte se guarda en el contacto; el mismo número se actualiza, no se duplica', async () => {
     await listoParaEntregar()
-    const base = { negocioId: NEG, tipo: 'pasaporte' as const, nombre: 'CAROLINA PRUEBA', pais: null, fechaEmision: null, soporte: null, leidoPorIa: true }
+    const base = { negocioId: NEG, tipo: 'pasaporte' as const, viajero: 'adulto-1', nombre: 'CAROLINA PRUEBA', pais: null, fechaEmision: null, soporte: null, leidoPorIa: true }
     expect((await guardarDocumentoViajero({ ...base, numero: 'ab 123 456', fechaVencimiento: '2027-01-10' })).ok).toBe(true)
     expect((await guardarDocumentoViajero({ ...base, numero: 'AB123456', fechaVencimiento: '2031-01-10' })).ok).toBe(true)
     expect(tablas.contacto_documentos).toHaveLength(1)
@@ -493,7 +528,7 @@ describe('documentos del viajero en el contacto (F4-2, C11)', () => {
 
   it('sin número o sin vencimiento el pasaporte no se guarda; operaciones sí puede cargarlo', async () => {
     await listoParaEntregar()
-    const base = { negocioId: NEG, tipo: 'pasaporte' as const, nombre: null, pais: null, fechaEmision: null, soporte: null, leidoPorIa: false }
+    const base = { negocioId: NEG, tipo: 'pasaporte' as const, viajero: 'adulto-2', nombre: null, pais: null, fechaEmision: null, soporte: null, leidoPorIa: false }
     expect((await guardarDocumentoViajero({ ...base, numero: 'AB1', fechaVencimiento: null })).ok).toBe(false)
     areas = ['operaciones']
     tablas.staff_areas = [{ staff_id: 's-dani', area: 'operaciones' }]
@@ -502,10 +537,57 @@ describe('documentos del viajero en el contacto (F4-2, C11)', () => {
     expect((await guardarDocumentoViajero({ ...base, numero: 'AB1', fechaVencimiento: '2035-01-01' })).ok).toBe(true)
   })
 
-  it('internacional sin pasaporte: el gate lo pide', async () => {
+  it('internacional sin pasaporte: el gate pide el de cada viajero, y de la bebé su registro civil (H9-5)', async () => {
     await listoParaEntregar()
     const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })
-    expect(gate).toEqual(['Falta el pasaporte del viajero.'])
+    expect(gate).toEqual([
+      'Faltan el pasaporte de Carolina (titular), el pasaporte de Adulto 2, el pasaporte de Infante 1, el registro civil de Infante 1 y saber si los menores viajan con sus dos padres.',
+    ])
+  })
+
+  it('un viajero solo: lo de siempre, el pasaporte sin asignar cuenta', async () => {
+    await listoParaEntregar()
+    const b = tablas.negocio_bloques[0] as Fila
+    b.adultos = 1
+    b.infantes = 0
+    expect(await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })).toEqual(['Falta el pasaporte del viajero.'])
+    tablas.contacto_documentos = [{ id: 'doc-viejo', workspace_id: WS, contacto_id: 'c-1', tipo: 'pasaporte', numero: 'ZZ1', fecha_vencimiento: '2035-01-01', vigente: true }]
+    expect(await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })).toEqual([])
+  })
+
+  it('UN pasaporte no basta para el grupo; con varios viajeros hay que decir de quién es (H6-4)', async () => {
+    await listoParaEntregar()
+    const base = { negocioId: NEG, tipo: 'pasaporte' as const, nombre: 'LUCIA PRUEBA', pais: null, fechaEmision: null, soporte: null, leidoPorIa: true, fechaVencimiento: '2035-01-01' }
+    expect(await guardarDocumentoViajero({ ...base, numero: 'LU1' })).toMatchObject({ ok: false, error: 'Elige de qué viajero es el documento.' })
+    expect((await guardarDocumentoViajero({ ...base, numero: 'LU1', viajero: 'infante-1' })).ok).toBe(true)
+    const asignados = ((meta().documentos_viajero as Fila).asignados) as Record<string, Fila>
+    expect(Object.values(asignados)).toEqual([{ viajero: 'infante-1', clase: 'pasaporte' }])
+    // El mismo pasaporte no puede quedar a nombre de otro viajero.
+    expect(await guardarDocumentoViajero({ ...base, numero: 'LU1', viajero: 'adulto-2' })).toMatchObject({ ok: false, error: 'Ese pasaporte ya está cargado como de Infante 1.' })
+    const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })
+    expect(gate[0]).toMatch(/^Faltan el pasaporte de Carolina \(titular\), el pasaporte de Adulto 2, el registro civil de Infante 1/)
+  })
+
+  it('menores: registro civil siempre; permiso de salida solo si no viajan con sus dos padres', async () => {
+    await listoParaEntregar()
+    await documentosCompletos()
+    expect(await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })).toEqual([])
+    expect((await responderMenoresConPadres(NEG, false)).ok).toBe(true)
+    expect(await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })).toEqual(['Falta el permiso de salida de Infante 1.'])
+    const r = await guardarDocumentoViajero({ negocioId: NEG, tipo: 'otro', clase: 'permiso_salida', viajero: 'infante-1', numero: null, nombre: null, pais: null, fechaEmision: null, fechaVencimiento: null, soporte: { storage_path: `${WS}/documentos-viajero/permiso.pdf`, file_name: 'permiso.pdf', mime_type: 'application/pdf' }, leidoPorIa: false })
+    expect(r.ok).toBe(true)
+    expect(await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })).toEqual([])
+    // A un adulto no se le pide registro civil.
+    const adulto = await guardarDocumentoViajero({ negocioId: NEG, tipo: 'otro', clase: 'registro_civil', viajero: 'adulto-2', numero: '123', nombre: null, pais: null, fechaEmision: null, fechaVencimiento: null, soporte: null, leidoPorIa: false })
+    expect(adulto).toMatchObject({ ok: false, error: 'El registro civil se pide solo a los menores.' })
+  })
+
+  it('un pasaporte que ya estaba en el contacto se asigna a un viajero', async () => {
+    await listoParaEntregar()
+    tablas.contacto_documentos = [{ id: 'doc-viejo', workspace_id: WS, contacto_id: 'c-1', tipo: 'pasaporte', numero: 'CA1', fecha_vencimiento: '2035-01-01', vigente: true }]
+    expect((await asignarDocumentoViajero(NEG, 'doc-viejo', 'adulto-1')).ok).toBe(true)
+    const gate = await evaluarGateEntrega(clienteFalso(), { workspaceId: WS, negocioId: NEG, gates: ['documentos_viajero'] })
+    expect(gate[0]).not.toContain('Carolina')
   })
 
   it('sin saber si es nacional o internacional, el gate lo pregunta (no supone nacional)', async () => {

@@ -25,6 +25,9 @@ import { TIPOS_DOCUMENTO_TITULAR, nombreEnTarjeta, type TipoDocumentoTitular } f
  * franquicias, de https://epayco.com/recursos-graficos/, sin recortar ni recolorear): quien paga ve
  * que esos datos los recibe ePayco y no un formulario de METRIK. ePayco no ofrece una captura
  * alojada que devuelva un token reutilizable; ver la CSP de esta página en `lib/valida-registro/csp.ts`.
+ *
+ * También la usa el pago automático de los CDA (`/suscripcion/tarjeta`, Términos v1.5 2.4), sin el aviso de
+ * la prueba (`texto` y `duracionMs` son de la prueba) y con su propia leyenda.
  */
 
 /** Lo que dice el recuadro, encima de los campos. */
@@ -66,14 +69,16 @@ const FECHA_HORA = new Intl.DateTimeFormat('es-CO', {
 interface PropsTarjeta {
   llavePublica: string
   correo: string
-  /** El texto del aviso §2.3, con `{fecha_y_hora_vence}` por llenar (no entra a la huella). */
-  texto: string
+  /** El texto del aviso §2.3, con `{fecha_y_hora_vence}` por llenar (no entra a la huella). Sin él, no se pinta. */
+  texto?: string
   /** Cuánto dura la prueba desde que se abre: la fecha que se muestra es ahora más esto. */
-  duracionMs: number
+  duracionMs?: number
+  /** El título del recuadro. Por defecto, el del registro. */
+  leyenda?: string
 }
 
 const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function TarjetaEpayco(
-  { llavePublica, correo, texto, duracionMs },
+  { llavePublica, correo, texto, duracionMs = 0, leyenda = 'Tarjeta para el plan' },
   ref,
 ) {
   const bloque = useRef<HTMLDivElement>(null)
@@ -121,8 +126,8 @@ const TarjetaEpayco = forwardRef<TarjetaEpaycoHandle, PropsTarjeta>(function Tar
     <fieldset className="space-y-3 rounded-lg border border-border p-3" data-tarjeta-epayco>
       <Script src={SCRIPT_JQUERY} integrity={INTEGRIDAD_JQUERY} crossOrigin="anonymous" strategy="afterInteractive" />
       <Script src={SCRIPT_EPAYCO} strategy="afterInteractive" onLoad={() => setCargado(true)} />
-      <legend className="px-1 text-sm font-medium text-foreground">Tarjeta para el plan</legend>
-      <p className="text-xs text-muted-foreground">{texto.replace('{fecha_y_hora_vence}', vence)}</p>
+      <legend className="px-1 text-sm font-medium text-foreground">{leyenda}</legend>
+      {texto && <p className="text-xs text-muted-foreground">{texto.replace('{fecha_y_hora_vence}', vence)}</p>}
       {/* El recuadro de ePayco: solo lo que va a ePayco. El documento y el celular quedan afuera porque los recibe ONE. */}
       <section
         aria-label="Pago seguro con ePayco"

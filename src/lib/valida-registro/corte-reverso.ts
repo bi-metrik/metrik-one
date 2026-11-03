@@ -14,11 +14,12 @@ import type { ResultadoValida } from '@/lib/valida-api/cliente-nucleo'
 import type { CorteReverso } from './plan'
 
 /**
- * ⚠️ PENDIENTE DE VERA: el correo al cliente (texto mínimo de Emilio, 2026-10-27). Mientras esté en
- * `false`, en PRODUCCIÓN el corte se hace igual y el correo NO sale (queda `retenido`); en un preview sí
- * sale. Encenderlo es un PR que cambia esta línea después del visto bueno de Vera.
+ * El correo al cliente (texto mínimo de Emilio, 2026-10-27). Vera lo aprobó el 2026-10-29 en segunda
+ * vuelta, sin cambios de texto, tras resolverse su bloqueo (el PDF del reporte daba 401 después del
+ * corte: metrik-valida#83 y ONE #1315). Encendido: en producción el correo sale. Volver a `false` lo
+ * retiene otra vez en producción (queda `retenido`) sin tocar el corte.
  */
-export const AVISO_REVERSO_CLIENTE_APROBADO = false
+export const AVISO_REVERSO_CLIENTE_APROBADO = true
 
 /** Intentos de anular antes de dejarlo a una persona (webhook + cron diario: un mes, de sobra). */
 export const TOPE_INTENTOS_CORTE = 30
@@ -84,7 +85,7 @@ export function mismoDiaDelCorte(anuladoEn: string, ahoraMs: number): boolean {
   return diaBogota(anuladoEn) === diaBogota(ahoraMs)
 }
 
-/** ¿Puede salir el correo al cliente? En producción solo con el visto bueno de Vera. */
+/** ¿Puede salir el correo al cliente? En producción, solo con el visto bueno de Vera (dado el 2026-10-29). */
 export function avisoClienteHabilitado(env: Record<string, string | undefined> = process.env): boolean {
   return env.VERCEL_ENV !== 'production' || AVISO_REVERSO_CLIENTE_APROBADO
 }
@@ -112,7 +113,7 @@ function escapar(t: string): string {
 }
 
 /**
- * ⚠️ PENDIENTE DE VERA (ver `AVISO_REVERSO_CLIENTE_APROBADO`). El cuerpo es el texto mínimo de Emilio,
+ * Aprobado por Vera el 2026-10-29 (ver `AVISO_REVERSO_CLIENTE_APROBADO`). El cuerpo es el texto mínimo de Emilio,
  * palabra por palabra; el saludo, el asunto y la firma son los de los demás correos de Valida.
  */
 export function correoSuspensionPorReverso(d: DatosSuspension & { url: string }): { subject: string; text: string; html: string } {

@@ -14,7 +14,8 @@ import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 import { preciosDeLasTarifas } from '@/lib/fiscal/iva-cotizacion-datos'
 import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
-import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type ReglaPlan } from './plan-pagos'
+import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type HitoProveedor, type ReglaPlan } from './plan-pagos'
+import { hitosDeTarifa, hitosPorTarifa } from './hitos-proveedor'
 import {
   esAnticipoConSoporte,
   GATES_CONFIRMACION,
@@ -46,6 +47,11 @@ export interface TarifaConfirmable {
   esRecomendada: boolean
   precio: number | null
   motivo: string | null
+  /**
+   * H-17 · los pagos al proveedor con fecha límite de esta tarifa (la «Compra antes del» de un
+   * paquete de bloqueo). El plan sugerido y la validación los miran. Ausente o vacío = ninguno.
+   */
+  hitosProveedor?: HitoProveedor[]
 }
 
 export interface PlanGuardado {
@@ -122,10 +128,17 @@ export interface VistaConfirmacion {
   gateMensajes: Record<string, string>
   etapaConfirmacion: { id: string; nombre: string; numero: number } | null
   etapaActual: { id: string; nombre: string; numero: number; orden: number } | null
+  /**
+   * El negocio sigue abierto (H10-2, QA del 2026-10-29). Perdido, desistido o cancelado, la hoja
+   * «El cliente confirmó» no se ofrece: la acción ya lo rechaza en el servidor (`contextoViaje`).
+   */
+  negocioAbierto: boolean
   /** ¿La etapa actual es la de confirmación o una anterior? (decide si se muestra la hoja). */
   antesDeConfirmacion: boolean
   enConfirmacion: boolean
   terminosBase: string | null
+  /** La Solicitud registra una visa en trámite (`condicion-visa.ts`): el mensaje lleva la condición. */
+  visaEnTramite: boolean
   agencia: string
   comercial: string | null
   hayPago: boolean
@@ -373,6 +386,10 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     } else {
       errorTarifas = precios.error
     }
+    if (tarifas.length > 0) {
+      const hitos = await hitosPorTarifa(db, String(cot.id))
+      if (hitos.size > 0) tarifas = tarifas.map((t) => ({ ...t, hitosProveedor: hitosDeTarifa(hitos, t.itinerarioId) }))
+    }
   }
 
   const metadata = negocio.metadata ?? {}
@@ -421,9 +438,12 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     gateMensajes: ((etapaConf?.config_extra as { gate_messages?: Record<string, string> } | null)?.gate_messages ?? {}) as Record<string, string>,
     etapaConfirmacion: etapaConf ? { id: etapaConf.id, nombre: etapaConf.nombre, numero: etapaConf.numero } : null,
     etapaActual: etapaActual ? { id: etapaActual.id, nombre: etapaActual.nombre, numero: etapaActual.numero, orden: etapaActual.orden } : null,
+    // La MISMA regla que `contextoViaje` usa para negar las acciones.
+    negocioAbierto: !negocio.estado || negocio.estado === 'abierto',
     antesDeConfirmacion: !!etapaConf && !!etapaActual && etapaActual.orden < etapaConf.orden,
     enConfirmacion: !!etapaConf && etapaActual?.id === etapaConf.id,
     terminosBase: typeof configLinea.terminos_base === 'string' ? configLinea.terminos_base : null,
+    visaEnTramite: viajeRes.visaEnTramite ?? false,
     agencia: ((wsRes.data as { name?: string } | null)?.name ?? '').trim() || 'la agencia',
     comercial: responsables.map((r) => r.staff?.full_name?.trim()).find(Boolean) ?? null,
     hayPago,

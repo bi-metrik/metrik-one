@@ -22,7 +22,7 @@ import {
 import type { CampoEntendible, SalidaEntendida, Sugerido } from '../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, trazaCarga } from '../wa-carga-reglas.ts';
 import { textoParaModelo } from '../wa-guardianes.ts';
-import { lineaCargada, mensajesDeTextos, planDeCarga, propuestoDe, registradoDe, traeArchivo } from './bandeja/carga.ts';
+import { lineaCargada, mensajesDeCarga, planDeCarga, propuestoDe, registradoDe, traeArchivo } from './bandeja/carga.ts';
 import type { AdjuntoCarga, PlanCarga } from './bandeja/carga.ts';
 import { bajarMedia, subirSoporte } from '../wa-media.ts';
 import type { PuertoAdjuntos } from './adjuntos.ts';
@@ -42,6 +42,7 @@ import type { AutorizacionAgente } from './bandeja/autorizacion.ts';
 import { planGuardado } from '../perfil-contacto.ts';
 import type { EstadoPerfil } from '../perfil-contacto.ts';
 import type { PuertosCupo } from './uso.ts';
+import { conDespliegue } from './despliegue.ts';
 import type { Almacen, FilaConversacion, MediaFila, Mensajero, Reglamento, Salida, Traza } from './tipos.ts';
 
 type Fila = Record<string, unknown>;
@@ -61,7 +62,7 @@ export function almacenSupabase(supabase: SupabaseClient): Almacen {
     async cerrarTurno(p) {
       const r = await Promise.all([
         supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas),
-        supabase.from('wa_conversacion').update({ traza: p.traza }).eq('id', p.filaTraza),
+        supabase.from('wa_conversacion').update({ traza: conDespliegue(p.traza) }).eq('id', p.filaTraza),
         p.salientes.length ? supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('wa_message_id', p.salientes) : Promise.resolve({ error: null }),
       ]);
       for (const x of r) if (x.error) console.error('[agente] no se pudo cerrar el turno:', x.error.message);
@@ -101,12 +102,15 @@ export function mensajeroWa(): Mensajero {
 
 const cacheReglamento = new Map<string, { r: Reglamento; vence: number }>();
 
-/** La versión del puntero o la última publicada. `null` si no hay ninguna (el agente no corre). Caché de 60 s. */
-export async function cargarReglamento(supabase: SupabaseClient, workspaceId: string, bot: string, id: string | null): Promise<Reglamento | null> {
-  const k = `${workspaceId}|${bot}|${id ?? ''}`;
+/**
+ * La versión del puntero o la última publicada. `null` si no hay ninguna (el agente no corre). Caché de 60 s.
+ * `conBanco`: trae también `bancoValido` (columna calculada `banco_valido`, migración 20261030190000).
+ */
+export async function cargarReglamento(supabase: SupabaseClient, workspaceId: string, bot: string, id: string | null, o: { conBanco?: boolean } = {}): Promise<Reglamento | null> {
+  const k = `${workspaceId}|${bot}|${id ?? ''}|${o.conBanco ? 'b' : ''}`;
   const c = cacheReglamento.get(k);
   if (c && c.vence > Date.now()) return c.r;
-  let q = supabase.from('bot_reglamentos').select('id, version, huella, fichas').eq('workspace_id', workspaceId).eq('bot', bot);
+  let q = supabase.from('bot_reglamentos').select(o.conBanco ? 'id, version, huella, fichas, banco_valido' : 'id, version, huella, fichas').eq('workspace_id', workspaceId).eq('bot', bot);
   q = id ? q.eq('id', id) : q.order('version', { ascending: false }).limit(1);
   const { data, error } = await q.maybeSingle();
   if (error || !data) {
@@ -114,15 +118,30 @@ export async function cargarReglamento(supabase: SupabaseClient, workspaceId: st
     return null;
   }
   const fichas = ((Array.isArray(data.fichas) ? data.fichas : []) as unknown[]).map(fichaValida).filter((f): f is NonNullable<ReturnType<typeof fichaValida>> => !!f);
-  const r: Reglamento = { id: data.id as string, version: Number(data.version), huella: String(data.huella || await huellaDe(fichas)), fichas };
+  const r: Reglamento = {
+    id: data.id as string, version: Number(data.version), huella: String(data.huella || await huellaDe(fichas)), fichas,
+    ...(o.conBanco ? { bancoValido: (data as { banco_valido?: unknown }).banco_valido === true } : {}),
+  };
   cacheReglamento.set(k, { r, vence: Date.now() + 60_000 });
   return r;
 }
 
 // ── Cupo ─────────────────────────────────────────────────────────────────────
 
-export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen): PuertosCupo {
+export function cupoSupabase(supabase: SupabaseClient, almacen: Almacen, o: { mensajes?: boolean } = {}): PuertosCupo {
   return {
+    // Con `mensajes` (modo obras, cupo del contrato en mensajes, Anexo 1.4): `bot_mensajes_mes`.
+    ...(o.mensajes ? {
+      async mensajesDelMes(workspaceId: string, mes: string) {
+        const { data, error } = await supabase.rpc('bot_mensajes_mes', { p_workspace_id: workspaceId, p_mes: `${mes}-01` });
+        if (error) {
+          console.error('[agente] no se pudieron contar los mensajes del mes:', error.message);
+          return null;
+        }
+        const d = (data ?? {}) as { total?: number; gestion?: number; operario?: number };
+        return { total: Number(d.total ?? 0), gestion: Number(d.gestion ?? 0), operario: Number(d.operario ?? 0) };
+      },
+    } : {}),
     async turnosDelMes(workspaceId, mes) {
       const { data, error } = await supabase.rpc('bot_uso_mes', { p_workspace_id: workspaceId, p_mes: `${mes}-01` });
       if (error) {
@@ -332,7 +351,8 @@ export function puertoBandejaSupabase(
       const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
     },
-    async prepararCarga(viajeId, textos, previo) {
+    async prepararCarga(viajeId, textos, previo, oc) {
+      const pedido = oc?.pedido ?? [];
       const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
@@ -342,8 +362,10 @@ export function puertoBandejaSupabase(
       const lectura = await leerConModelo(
         // `perfil`: lo de la persona sale aparte y va a su perfil como sugerido con el toque de la carga.
         // `documentos`: algún texto trae lo leído de una foto o un PDF (sin archivos, el prompt de siempre).
-        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true, documentos: textos.some(traeArchivo) }),
-        `Mensajes:\n${textoParaModelo(mensajesDeTextos(textos))}`,
+        // `preguntas`: lo ya preguntado del viaje no se vuelve a preguntar; `reenviados`: quién dijo cada texto.
+        // `pedido`: lo que el comercial escribió al pedir la tanda va después, «escrito por el comercial», y manda si choca.
+        instruccionesCarga(campos, todayBogotaISO(), yaTiene, propuestoDe(previo), undefined, { compacta, perfil: true, documentos: textos.some(traeArchivo), preguntas: (oc?.preguntas ?? []).map((q) => q.texto), ...(pedido.length ? { pedido: true } : {}) }),
+        `Mensajes:\n${textoParaModelo(mensajesDeCarga(textos, pedido, oc?.reenviados))}`,
         compacta ? esquemaCargaCompacta(campos, { perfil: true }) : esquemaCarga(campos, { perfil: true }),
       );
       if (lectura.error || lectura.json === null) throw new Error(lectura.error ?? 'sin lectura');
@@ -353,8 +375,8 @@ export function puertoBandejaSupabase(
         console.log(`[agente] extracción compacta ${Math.round(performance.now() - t0)} ms${omitidos.length ? `; omitió ${omitidos.join(', ')}` : ''}`);
       }
       return planDeCarga({
-        bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos, raw: lectura.json,
-        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo,
+        bloques: bloques.map((b) => ({ fields: b.fields as CampoEntendible[], data: b.data })), textos: [...textos, ...pedido], raw: lectura.json,
+        hoyISO: todayBogotaISO(), ahoraIso: new Date().toISOString(), previo, preguntas: oc?.preguntas,
       });
     },
     async cargar(viajeId, plan) {

@@ -6,13 +6,17 @@
 // Interruptor: `config_extra.bot_conversacional.agente === true` (llega en la misma lectura que identifica al
 // remitente). Apagado, `atenderConAgente` devuelve false sin una sola consulta y todo sigue como en `main`.
 // Prendido, atiende todo lo del equipo en ese workspace salvo «gasto …» (el bot de gastos) y los botones que no son
-// suyos (términos, aviso de datos, resúmenes de la bandeja de antes). El mensaje ya está en `wa_conversacion`: lo
+// suyos (términos, aviso de datos, resúmenes de la bandeja de antes). Con un rol activo del asistente, «gasto …» y
+// «bot …» también son del agente: quien tiene rol nunca cae al bot anterior por esos prefijos (2026-10-30). El mensaje ya está en `wa_conversacion`: lo
 // escribió `registrarEntrante` justo antes.
 // ============================================================
 
-import { agenteOnePorDefecto, dominioDelAgente, leerConfigAgente, leerConfigOne } from './agente/config.ts';
+import { agenteOnePorDefecto, dominioDelAgente, leerConfigAgente, leerConfigOne, modoObras } from './agente/config.ts';
 import { atenderPendientes } from './agente/cola.ts';
 import { BOT_BANDEJA, dominioBandeja } from './agente/bandeja/dominio.ts';
+import { leeSoportes, turnoViajes } from './agente/bandeja/turno-con-rol.ts';
+import type { TurnoViajes } from './agente/bandeja/turno-con-rol.ts';
+import { lectorMixto } from './agente/bandeja/lectura-mixta.ts';
 import { modeloGemini } from './agente/modelo-gemini.ts';
 import { entornoPorDefecto, haikuActivo } from './llm-anthropic.ts';
 import { BOT_ONE, dominioOne } from './agente/one/dominio.ts';
@@ -20,16 +24,22 @@ import { puertoOneSupabase } from './agente/one/puerto-supabase.ts';
 import { lectorDeSoportes } from './agente/one/lectura-adjunto.ts';
 import { lectorDeDocumentosDeViaje } from './agente/bandeja/lectura-adjunto.ts';
 import { reglamentoOne } from './agente/one/reglamento.ts';
+import { dominioObras } from './agente/one/obras.ts';
+import { BOT_OPERARIO, dominioOperario, sinPesos } from './agente/one/operario.ts';
+import { puertoObrasSupabase } from './agente/one/puerto-obras-supabase.ts';
+import { reglamentoObras, reglamentoOperario } from './agente/one/reglamento-obras.ts';
 import { turnoOne } from './agente/one/turno-con-rol.ts';
 import { escalamientosSupabase } from './agente/persona-produccion.ts';
 import { resolverRol, rolPrevio } from './agente/roles.ts';
-import type { RolTraza } from './agente/tipos.ts';
+import type { Dominio, Reglamento, RolTraza } from './agente/tipos.ts';
 import { logMessage } from './wa-rate-limit.ts';
 import { alertarCaidaWa, almacenSupabase, cargarReglamento, cupoSupabase, mensajeroWa, puertoBandejaSupabase } from './agente/produccion.ts';
 import { leerToque } from './agente/render.ts';
 import { revisarCupo } from './agente/uso.ts';
 import { completarTexto } from './wa-conversacion.ts';
-import { staffIdDelRemitente } from './wa-bandeja.ts';
+import { configDelWorkspace, staffIdDelRemitente } from './wa-bandeja.ts';
+import { empiezaConPrefijoBot } from './wa-bandeja-reglas.ts';
+import { RF_ROL_NO_LEIDO } from './agente/one/turno-con-rol.ts';
 import { transcribeAudio, PROMPT_TRANSCRIPCION_LITERAL } from './wa-transcribe.ts';
 import { fuentesDeComposicion, leerConfigTranscripcion, pistasDeFunciones, pistasSiEncendidas } from './agente/pistas.ts';
 import type { Composicion } from './agente/componer.ts';
@@ -61,14 +71,41 @@ export function fueraDelAgente(message: Pick<IncomingMessage, 'type' | 'text' | 
 export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, message: IncomingMessage): Promise<boolean> {
   const bot = user.modulos?.bot_conversacional;
   if (dominioDelAgente(bot, message.phone) !== 'bandeja') return false;
-  if (fueraDelAgente(message)) return false;
+  // «gasto …» va al bot de gastos de siempre, salvo que quien escribe tenga un rol del asistente (abajo).
+  const gastoDeSiempre = esGastoDeSiempre(message);
+  if (fueraDelAgente(message) && !gastoDeSiempre) return false;
   const config = leerConfigAgente(bot);
+  const llave = Deno.env.get('GEMINI_API_KEY') ?? '';
+  const phone = message.phone.replace(/\D/g, '');
+  const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
+  const ws: { name?: unknown; slug?: unknown } = {};
+
+  // Con roles (2026-10-29, Trappvel): qué rol atiende a quien escribe. Sin roles en la base, el camino de hoy, igual.
+  const turnoRol = await turnoViajes({
+    resolver: () => resolverRol(supabase, {
+      workspaceId: user.workspace_id, canal: 'wa_one', staff: user.staff_id ?? null, colaborador: user.collaborator_id ?? null,
+      cargo: user.role, inbox: inboxWaOne(),
+    }),
+    rolPrevio: () => rolPrevioWa(supabase, user.workspace_id, phone, config.topes.ventanaHoras),
+    reglamentoDelRol: (clave, id) => cargarReglamento(supabase, user.workspace_id, `rol:${clave}`, id),
+    motorViajes: (funciones) => motorViajesDe(supabase, user.workspace_id, staffId, config, llave, funciones),
+    // Sin lector propio: los adjuntos los prepara el motor de viajes (uno solo baja y lee cada archivo).
+    motorOne: (funciones, empresa) => dominioOne(puertoOneSupabase(supabase, user), { rol: user.role, lector: null, empresa, funciones }),
+    empresa: async () => {
+      Object.assign(ws, (await supabase.from('workspaces').select('name, slug').eq('id', user.workspace_id).maybeSingle()).data ?? {});
+      return ws.name ? String(ws.name) : null;
+    },
+  });
+  if (turnoRol.tipo !== 'hoy') {
+    return await atenderConRolDeViajes(supabase, user, message, turnoRol, { config, llave, phone, workspaceNombre: String(ws.slug ?? user.workspace_id) });
+  }
+  if (gastoDeSiempre) return false;
+
   const reglamento = await cargarReglamento(supabase, user.workspace_id, BOT_BANDEJA, config.reglamentoId);
   if (!reglamento) {
     console.warn(`[agente] ${user.workspace_id} tiene el agente prendido sin reglamento publicado: sigue el bot de siempre`);
     return false;
   }
-  const llave = Deno.env.get('GEMINI_API_KEY') ?? '';
   // Con Haiku de principal, la llave de Gemini solo hace falta para el respaldo (sin ella corre sin respaldo, con aviso
   // en el log). Sin Haiku ni Gemini no hay modelo: sigue el bot de siempre.
   if (!llave && !haikuActivo()) {
@@ -84,7 +121,6 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
   }
 
   const almacen = almacenSupabase(supabase);
-  const staffId = user.collaborator_id ? null : await staffIdDelRemitente(supabase, user);
   await atenderPendientes({
     modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
     // Las fotos y los PDF (2026-10-21): se guardan al llegar, se leen (Haiku; respaldo Gemini) y lo leído entra a la carga
@@ -100,7 +136,7 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
     almacen,
     mensajero: mensajeroWa(),
     workspaceId: user.workspace_id,
-    phone: message.phone.replace(/\D/g, ''),
+    phone,
     remitente: { nombre: user.name || 'el comercial', rol: user.collaborator_id ? 'colaborador' : user.role },
     nuevoId: () => crypto.randomUUID(),
     despuesDelTurno: async (traza, turno) => {
@@ -111,6 +147,100 @@ export async function atenderConAgente(supabase: SupabaseClient, user: WaUser, m
       await revisarCupo(cupoSupabase(supabase, almacen), {
         workspaceId: user.workspace_id, workspaceNombre, cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
       });
+    },
+  });
+  return true;
+}
+
+/**
+ * ¿La bandeja mandaría este mensaje al bot anterior por su prefijo («gasto …», «bot …» o los de
+ * `config_extra.bandeja_solicitudes.prefijos_bot`)? Solo lo escrito, no lo reenviado (como `rutaDelMensaje`).
+ */
+async function vaAlBotAnterior(supabase: SupabaseClient, workspaceId: string, message: IncomingMessage): Promise<boolean> {
+  if (message.type !== 'text' || message.reenviado === true) return false;
+  return empiezaConPrefijoBot(message.text, (await configDelWorkspace(supabase, workspaceId)).prefijosBot);
+}
+
+/** «gasto …» escrito (no reenviado): sin rol del asistente va al bot de gastos de siempre. Pura. */
+export function esGastoDeSiempre(message: Pick<IncomingMessage, 'type' | 'text' | 'reenviado'>): boolean {
+  return message.type === 'text' && message.reenviado !== true && /^\s*gasto\b/i.test(message.text ?? '');
+}
+
+/**
+ * El motor de viajes de un rol: la bandeja de hoy, con el lector de documentos del viaje; si el rol también registra
+ * gastos o ingresos (la mano derecha), con el lector MIXTO (viaje + soporte de pago, `bandeja/lectura-mixta.ts`).
+ */
+function motorViajesDe(supabase: SupabaseClient, workspaceId: string, staffId: string | null, config: ReturnType<typeof leerConfigAgente>, llave: string, funciones: string[]) {
+  const lector = !config.leerAdjuntos ? null
+    : leeSoportes(funciones)
+      ? lectorMixto(lectorDeDocumentosDeViaje({ llaveGemini: llave }), lectorDeSoportes({ llaveGemini: llave }))
+      : lectorDeDocumentosDeViaje({ llaveGemini: llave });
+  return dominioBandeja(
+    puertoBandejaSupabase(supabase, workspaceId, staffId, { extraccionCompacta: config.extraccionCompacta, adjuntos: config.leerAdjuntos }),
+    { lector },
+  );
+}
+
+/**
+ * El turno de la bandeja con el ROL de quien escribe (o la respuesta fija si usa roles y no tiene uno): el dominio
+ * compuesto (viajes, más ONE si el rol lo trae, más el paso a una persona), el reglamento `rol:<clave>`, la traza `rol`
+ * y la fila de `asistente_escalamientos`.
+ */
+async function atenderConRolDeViajes(
+  supabase: SupabaseClient, user: WaUser, message: IncomingMessage, turno: Exclude<TurnoViajes, { tipo: 'hoy' }>,
+  o: { config: ReturnType<typeof leerConfigAgente>; llave: string; phone: string; workspaceNombre: string },
+): Promise<boolean> {
+  const { config, llave, phone, workspaceNombre } = o;
+  if (turno.tipo === 'parar') {
+    // El workspace usa roles y quien escribe no tiene uno activo: lo fijo, sin modelo y sin el dominio completo.
+    console.warn(`[agente] ${user.workspace_id}: sin rol activo (${turno.motivo}), respuesta fija`);
+    await mensajeroWa().enviar(phone, { tipo: 'texto', texto: turno.texto }, { workspaceId: user.workspace_id, intent: 'agente.sin_rol' });
+    await soltarDelAgente(supabase, message);
+    return true;
+  }
+  // Con un rol, «gasto …» y «bot …» los atiende el agente con ESE rol, aunque el rol no registre gastos (Mauricio,
+  // 2026-10-30, «cierra el atajo»): el bot anterior entra con el cargo del remitente (`operator` registra gastos y
+  // actividades), no con su rol, así que soltarlos ahí le daba plata a quien el rol se la quita. Si el rol no tiene la
+  // función, el agente contesta con su alcance (la ficha `alc.plata` de la asesora).
+  if (!llave && !haikuActivo()) {
+    // Sin modelo, lo demás sigue el camino de hoy (la bandeja lo guarda); un prefijo del bot anterior, no.
+    if (await vaAlBotAnterior(supabase, user.workspace_id, message)) {
+      console.error('[agente] sin GEMINI_API_KEY ni Haiku activo: prefijo del bot con rol, respuesta fija');
+      await mensajeroWa().enviar(phone, { tipo: 'texto', texto: RF_ROL_NO_LEIDO }, { workspaceId: user.workspace_id, intent: 'agente.sin_modelo' });
+      await soltarDelAgente(supabase, message);
+      return true;
+    }
+    console.error('[agente] sin GEMINI_API_KEY ni Haiku activo: sigue el bot de siempre');
+    return false;
+  }
+  const empresa = turno.empresa;
+
+  if (message.type === 'audio' && message.audio_id) {
+    const pistas = await pistasDeLaNota(supabase, user, turno.composicion);
+    const r = await transcribeAudio(message.audio_id, { prompt: PROMPT_TRANSCRIPCION_LITERAL, maxOutputTokens: 8192, exigirFinCompleto: true, pistas });
+    if (r.text) await completarTexto(supabase, message.wa_message_id, r.text);
+  }
+
+  const almacen = almacenSupabase(supabase);
+  await atenderPendientes({
+    modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
+    dominio: turno.dominio,
+    reglamento: turno.reglamento,
+    rol: turno.rol,
+    persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one', escalamientos: escalamientosSupabase(supabase) },
+    // Dos motores (viajes + ONE): los bloques del prompt con más tope (el reglamento junto no cabe en el de uno).
+    config: turno.bloques ? { ...config, topes: { ...config.topes, bloques: turno.bloques } } : config,
+    ahoraMs: () => Date.now(),
+    reloj: () => performance.now(),
+    almacen,
+    mensajero: mensajeroWa(),
+    workspaceId: user.workspace_id,
+    phone,
+    remitente: { nombre: user.name || 'el comercial', rol: user.collaborator_id ? 'colaborador' : user.role },
+    nuevoId: () => crypto.randomUUID(),
+    despuesDelTurno: async (traza, t) => {
+      await alertarCaidaWa(supabase, almacen, traza, { workspaceId: user.workspace_id, workspaceNombre, canal: 'bandeja', phone: message.phone, turnoId: t.turnoId });
+      await revisarCupo(cupoSupabase(supabase, almacen), { workspaceId: user.workspace_id, workspaceNombre, cupo: config.cupoTurnosMes, ahoraMs: Date.now() });
     },
   });
   return true;
@@ -153,9 +283,13 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
     const empresa = ws?.name ? String(ws.name) : null;
     const puerto = puertoOneSupabase(supabase, user);
     const lector = lectorDeSoportes({ llaveGemini: llave });
+    // Modo obras (2026-10-21): el operario y la gestión entran con su dominio, armado por el código (C5: el operario es un
+    // candado de rol, no conducta del modelo). Va ANTES de los roles de la base: una asignación no le abre a un operario
+    // más que su llegada y sus días. El resto del equipo sigue por los roles o por su cargo, como en todo workspace.
+    const obras = modoObras(bot) ? await armarObras(supabase, user, String(ws?.name ?? 'la empresa'), String(ws?.slug ?? ''), lector, config.reglamentoId) : null;
     // Qué atiende este turno (spec 2026-10-26, asistentes-roles-y-funciones): con roles en la base, el rol de quien
     // escribe; sin roles (o sin la migración todavía), el dominio ONE recortado a su cargo. Una ida a la base.
-    const turno = await turnoOne(user.role, {
+    const turno = obras ? { tipo: 'atender' as const, ...obras, composicion: undefined } : await turnoOne(user.role, {
       resolver: () => resolverRol(supabase, {
         workspaceId: user.workspace_id, canal: 'wa_one', staff: user.staff_id ?? null, colaborador: user.collaborator_id ?? null,
         cargo: user.role, inbox: inboxWaOne(),
@@ -189,11 +323,12 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
       modelo: modeloGemini({ llave, principal: config.principal, respaldo: config.respaldo, corteMs: config.corteMs }),
       // Las fotos y los PDF que llegan se guardan como soporte al llegar y se leen con el modelo (Haiku; respaldo Gemini).
       dominio: turno.dominio,
+      ...('guardaTexto' in turno && turno.guardaTexto ? { guardaTexto: turno.guardaTexto } : {}),
       reglamento: turno.reglamento,
       rol: turno.rol,
       // El paso a una persona (spec 2026-10-26, §4.2): el botón al WhatsApp de MeTRIK (o al de la ficha del rol), la
-      // señal del código y la fila de `asistente_escalamientos`.
-      persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one', escalamientos: escalamientosSupabase(supabase) },
+      // señal del código y la fila de `asistente_escalamientos`. En modo obras no va: el diseño de obras no lo tiene.
+      ...('escalamiento' in turno ? { persona: { config: turno.escalamiento, empresa, rolClave: turno.rol.clave, canal: 'wa_one' as const, escalamientos: escalamientosSupabase(supabase) } } : {}),
       config,
       ahoraMs: () => Date.now(),
       reloj: () => performance.now(),
@@ -208,7 +343,8 @@ export async function atenderConAgenteOne(supabase: SupabaseClient, user: WaUser
         await alertarCaidaWa(supabase, almacen, traza, {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), canal: 'one', phone, turnoId: turno.turnoId,
         });
-        await revisarCupo(cupoSupabase(supabase, almacen), {
+        // En modo obras el cupo del contrato se cuenta en mensajes (Anexo 1.4), con el desglose gestión / operarios.
+        await revisarCupo(cupoSupabase(supabase, almacen, { mensajes: !!obras }), {
           workspaceId: user.workspace_id, workspaceNombre: String(ws?.slug ?? user.workspace_id), cupo: config.cupoTurnosMes, ahoraMs: Date.now(),
         });
       },
@@ -257,4 +393,45 @@ async function rolPrevioWa(supabase: SupabaseClient, workspaceId: string, phone:
     return null;
   }
   return rolPrevio((data ?? []) as Array<{ traza?: { rol?: RolTraza | null } | null }>);
+}
+
+// ── Modo obras (2026-10-21) ──────────────────────────────────────────────────
+//
+// Diseño: proyectos/imperviun/proyecto-360/docs/diseno/asistente-whatsapp.md. Con `bot_conversacional.obras = true`:
+//   · un colaborador de tipo `operario` (C5) entra con el dominio del operario: solo marca su llegada y ve sus días, y la
+//     guarda del texto no deja salir pesos. Si no se puede leer su tipo, entra como operario (lo mínimo, nunca de más);
+//   · un usuario de gestión (owner/admin) entra con el dominio de obras (pagos, ingresos, facturas, cierre, asistencia);
+//   · el resto del equipo, por los roles de la base o por su cargo (`turnoOne`), como en todo workspace.
+// Ni roles ni componedor: el dominio del operario declara solo sus herramientas, y el de gestión trae los ganchos de la
+// tanda (recordatorio, [Verlos], botones que no escriben) que el componedor no conoce. Sin paso a persona (§4.2).
+// Un reglamento publicado por el workspace (bot `one` o `one_operario`) reemplaza al del código.
+
+/** El rol de la traza en modo obras: lo fija el código, no una asignación de la base. Pura. */
+export function rolObras(quien: 'gestion' | 'operario'): RolTraza {
+  return { clave: `obras:${quien}`, id: null, version: null, reglamento_id: null, por: quien === 'operario' ? 'colaborador' : 'cargo', funciones: [] };
+}
+
+export async function armarObras(
+  supabase: SupabaseClient, user: WaUser, nombre: string, slug: string, lector: ReturnType<typeof lectorDeSoportes>, reglamentoId: string | null,
+): Promise<{ dominio: Dominio; reglamento: Reglamento; rol: RolTraza; guardaTexto?: (t: string) => string[] } | null> {
+  const puerto = puertoObrasSupabase(supabase, user);
+  if (user.collaborator_id) {
+    const { data, error } = await supabase.from('wa_collaborators').select('tipo').eq('id', user.collaborator_id).eq('workspace_id', user.workspace_id).maybeSingle();
+    if (error) console.error('[agente-obras] no se pudo leer el tipo del colaborador; entra como operario:', error.message);
+    const tipo = error ? 'operario' : String((data as { tipo?: string } | null)?.tipo ?? 'equipo');
+    if (tipo !== 'operario') return null;
+    return {
+      dominio: dominioOperario(puerto, { collaboratorId: user.collaborator_id, nombre: user.name || 'el operario' }),
+      reglamento: (await cargarReglamento(supabase, user.workspace_id, BOT_OPERARIO, null)) ?? await reglamentoOperario(nombre),
+      rol: rolObras('operario'),
+      guardaTexto: sinPesos,
+    };
+  }
+  if (!['owner', 'admin'].includes(user.role)) return null;
+  const base = (Deno.env.get('APP_BASE_DOMAIN') || 'metrikone.co').trim();
+  return {
+    dominio: dominioObras(puerto, { rol: user.role, empresa: nombre, urlApp: slug ? `https://${slug}.${base}` : null, lector }),
+    reglamento: (await cargarReglamento(supabase, user.workspace_id, BOT_ONE, reglamentoId)) ?? await reglamentoObras(nombre),
+    rol: rolObras('gestion'),
+  };
 }

@@ -49,6 +49,7 @@ import {
   type ConfirmacionGuardada,
 } from '@/lib/viaje/confirmacion-datos'
 import { enviarCorreoAlViajero, trazarWhatsAppManual } from '@/lib/viaje/correo-viajero'
+import { hitosDeTarifa, hitosPorTarifa } from '@/lib/viaje/hitos-proveedor'
 import { contextoViaje, nombreYCorreo, type ContextoViaje } from '@/lib/viaje/contexto-viaje'
 import { motivoAutorizacionParaEnviar } from '@/lib/autorizacion-datos/envio'
 import { aceptarCotizacionNegocio } from './[id]/cotizacion/actions'
@@ -85,13 +86,15 @@ async function prepararPlan(ctx: Contexto, input: EntradaPlan) {
   if (!cot) return { ok: false as const, error: 'Cotización no encontrada en este negocio.' }
   const total = await totalDeTarifa(ctx.supabase, { workspaceId: ctx.workspaceId, cotizacionId: cot.id, itinerarioId: input.itinerarioId })
   if (!total.ok) return { ok: false as const, error: total.error }
-  const { viaje } = await leerViajeDelNegocio(ctx.supabase, ctx.negocio.id)
+  const { viaje, visaEnTramite } = await leerViajeDelNegocio(ctx.supabase, ctx.negocio.id)
   const regla = configPlanPagos(ctx.configLinea).regla
   const hoy = todayBogotaISO()
-  const v = validarPlan(cuotas, { total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla })
-  const sugerido = planSugerido({ total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla })
+  // H-17: la «Compra antes del» del paquete de la tarifa escogida (lo que se le paga al operador).
+  const hitos = hitosDeTarifa(await hitosPorTarifa(ctx.supabase, cot.id), input.itinerarioId)
+  const v = validarPlan(cuotas, { total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla, hitos })
+  const sugerido = planSugerido({ total: total.total, fechaSalida: viaje.fechas.inicio, hoy, regla, hitos })
   const esSugerido = !!sugerido && huellaPlan(sugerido, total.total) === huellaPlan(cuotas, total.total)
-  return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre: total.nombre, viaje, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
+  return { ok: true as const, cuotas, cot, total: total.total, tarifaNombre: total.nombre, viaje, visaEnTramite: visaEnTramite ?? false, regla, hoy, v, origen: esSugerido ? ('sugerido' as const) : ('ajustado' as const) }
 }
 
 async function guardarPlanPropuestoSinClave(input: EntradaPlan) {
@@ -182,6 +185,7 @@ async function pedirAprobacionPlanSinClave(input: EntradaPlan) {
         fecha_minimo: p.v.fechaMinimo,
         pct_al_minimo: pct,
         despues_del_viaje: p.v.despuesDelViaje,
+        ...(p.v.proveedor && !p.v.proveedor.cubierto ? { proveedor_sin_cubrir: p.v.proveedor } : {}),
         cuotas: p.cuotas,
         razon: input.motivo?.trim().slice(0, 500) || null,
       },
@@ -193,7 +197,9 @@ async function pedirAprobacionPlanSinClave(input: EntradaPlan) {
   await svc.from('negocio_planes_pago').update({ aprobacion_id: (ap as { id: string }).id }).eq('id', guardado.planId)
 
   const cliente = c.ctx.negocio.nombre ?? 'el negocio'
-  const porque = p.v.fechaMinimo
+  const porque = p.v.proveedor && !p.v.proveedor.cubierto && p.v.cumpleMinimo
+    ? `${p.v.proveedor.operador ?? 'el operador'} cobra antes del ${fechaCorta(p.v.proveedor.fecha)} ${pesos(p.v.proveedor.requerido)} y a esa fecha el cliente llevaría ${pesos(p.v.proveedor.acumulado)}`
+    : p.v.fechaMinimo
     ? `al ${fechaCorta(p.v.fechaMinimo)} llevaría el ${pct} % (la regla pide el ${p.regla.pct_minimo} %)`
     : 'el plan no se puede medir contra la fecha del viaje'
   await avisarAprobadores(svc, {
@@ -407,6 +413,7 @@ async function confirmarClienteViajeSinClave(input: EntradaConfirmacion): Promis
     extra: input.extra?.slice(0, 1000) ?? null,
     comercial: comercial ? primerNombre(comercial) : null,
     agencia,
+    visaEnTramite: p.visaEnTramite,
   })
   const waUrl = enlaceWhatsApp(viajero.telefono, texto)
 
@@ -476,6 +483,21 @@ async function confirmarClienteViajeSinClave(input: EntradaConfirmacion): Promis
     if (destino && actual && actual.orden < destino.orden) {
       const mov = await cambiarEtapaNegocio(input.negocioId, destino.id)
       if (mov.error) console.error('[confirmarClienteViaje] la confirmación quedó, pero el negocio no pasó de etapa:', mov.error)
+      // QA G11 (2026-10-30): este paso no dejaba rastro, y con el anticipo registrado enseguida la
+      // actividad leía «avanzó a Seguimiento» → «avanzó a Reservas y pagos»: Confirmación no se veía.
+      else {
+        await registrarActividad(ctx.supabase, {
+          workspace_id: ctx.workspaceId,
+          entidad_tipo: 'negocio',
+          entidad_id: input.negocioId,
+          tipo: 'cambio_etapa',
+          autor_id: ctx.staffId,
+          campo_modificado: 'etapa',
+          valor_anterior: actual.nombre,
+          valor_nuevo: destino.nombre,
+          contenido: 'El cliente confirmó',
+        }, 'confirmarClienteViaje')
+      }
     }
   }
 

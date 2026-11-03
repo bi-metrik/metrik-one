@@ -23,6 +23,7 @@ import {
   normalizarComposicion,
   precioPorPasajero,
   repartirProporcional,
+  ofreceTotalDeHabitacion,
   resolverTarifa,
   tarifaMasReciente,
   validarLecturaEnCasilla,
@@ -192,6 +193,21 @@ describe('resolución con el banco real', () => {
     expect(suma).not.toBe(1826206)
     expect(e.costos[0].deDonde).toContain('$2.019.412')
     expect(e.costos[1].deDonde).toContain('$9.706')
+  })
+
+  it('M7-1 / M9-2: con «El total es de la habitación», el total es el costo y no se pide la resta', () => {
+    const casillas = { grupo_completo: { ...CANCUN, moneda: 'USD', totalDeHabitacion: { por: 'Ana', en: '2026-10-29T10:00:00Z' } } }
+    expect(ofreceTotalDeHabitacion(resolverTarifa(DOS_ADULTOS_UN_NINO, { grupo_completo: CANCUN }, 'hotel_detalle'), 'hotel_detalle', { grupo_completo: CANCUN })).toBe(true)
+    const e = resolverTarifa(DOS_ADULTOS_UN_NINO, casillas, 'hotel_detalle')
+    expect(e.estado).toBe('resuelta')
+    if (e.estado !== 'resuelta') return
+    expect(e.moneda).toBe('USD')
+    expect(e.costos).toEqual([])
+    expect(e.porHabitacion?.[0].total).toBe(e.costoTotal)
+    expect(e.costoTotal).toBe(CANCUN.aPagarAgencia ?? CANCUN.total)
+    expect(ofreceTotalDeHabitacion(e, 'hotel_detalle', casillas)).toBe(false)
+    // Fuera de un hotel, la marca no cambia nada.
+    expect(ofreceTotalDeHabitacion(resolverTarifa(DOS_ADULTOS_UN_NINO, { grupo_completo: CANCUN }, 'actividad_detalle'), 'actividad_detalle', { grupo_completo: CANCUN })).toBe(false)
   })
 
   it('Bedsonline Cancún: un solo total con un niño es «falta desglose» y pide la casilla 2 (TP4, P4)', () => {

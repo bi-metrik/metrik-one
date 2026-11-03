@@ -67,6 +67,8 @@ const TIPOS_ACCION_PROPIA = new Set([
   'ejecucion',
   'historial',
   'movimientos',
+  // Correos al cliente y su acuse (SOE-031): lo llena la base, no una persona.
+  'avisos_cliente',
 ])
 
 /**

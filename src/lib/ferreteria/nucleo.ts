@@ -312,7 +312,9 @@ export interface PendienteCanal {
 }
 
 export async function listarPendientes(repo: RepoFerreteria, ws: string): Promise<PendienteCanal[]> {
-  const pubs = await repo.publicacionesPendientes(ws)
+  // Solo Marketplace: el cron aplica los pendientes en Facebook. Una publicación de canal 'tienda' (los complementos del
+  // asistente de ventas, 30-oct) no tiene aviso allá: pedirle al cron que la busque es un error seguro.
+  const pubs = (await repo.publicacionesPendientes(ws)).filter((p) => p.canal === 'marketplace')
   const salida: PendienteCanal[] = []
   for (const p of pubs.sort((a, b) => a.codigo.localeCompare(b.codigo))) {
     const desde = p.pendiente_desde ?? p.updated_at ?? new Date(0).toISOString()

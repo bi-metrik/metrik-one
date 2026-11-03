@@ -44,6 +44,7 @@ export const PROMPT_LECTURA = [
   '- fecha: la fecha del pago o de la factura, en formato AAAA-MM-DD.',
   '- comercio: quien cobra (Uber, el nombre de la tienda o de la empresa que factura).',
   '- nit: el NIT de quien cobra, si aparece (solo dígitos y guion del dígito de verificación).',
+  '- numero_transaccion: el número de la transacción, del comprobante o la referencia de una transferencia o consignación (Bancolombia, Nequi, Daviplata…), tal como aparece, solo dígitos y letras. null si no aparece. No es el NIT ni un número de cuenta.',
   '- descripcion: el concepto en pocas palabras, con lo que el documento dice (un viaje: «viaje de <origen> a <destino>»; una compra: lo comprado). Sin el monto.',
   '- titular_destino: solo en una consignación, depósito o transferencia: el nombre del titular de la cuenta a la que LLEGA el dinero, tal como está escrito. En un recibo, factura o tiquete, null.',
   '- legible: false si el archivo no es un soporte de pago o no se alcanza a leer el total.',
@@ -58,10 +59,11 @@ const ESQUEMA = {
     fecha: { type: ['string', 'null'] },
     comercio: { type: ['string', 'null'] },
     nit: { type: ['string', 'null'] },
+    numero_transaccion: { type: ['string', 'null'] },
     descripcion: { type: ['string', 'null'] },
     titular_destino: { type: ['string', 'null'] },
   },
-  required: ['legible', 'monto', 'fecha', 'comercio', 'nit', 'descripcion', 'titular_destino'],
+  required: ['legible', 'monto', 'fecha', 'comercio', 'nit', 'numero_transaccion', 'descripcion', 'titular_destino'],
 };
 
 function base64(bytes: Uint8Array): string {
@@ -112,6 +114,7 @@ export function normalizarLectura(v: unknown): LecturaAdjunto {
   const f = typeof o.fecha === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.fecha.trim()) ? o.fecha.trim() : null;
   const fecha = f && !Number.isNaN(Date.parse(`${f}T12:00:00Z`)) ? f : null;
   const nit = corto(o.nit, 20)?.replace(/[^\d-]/g, '') || null;
+  const numero = corto(o.numero_transaccion, 60)?.replace(/[^0-9A-Za-z]/g, '') || null;
   return {
     // Con el total leído, es legible aunque el modelo dude de qué clase de soporte es (arnés 2026-10-21: un comprobante de
     // depósito de $350.000 volvió con el monto y `legible: false`, y el bot pidió el monto que el archivo traía).
@@ -119,6 +122,7 @@ export function normalizarLectura(v: unknown): LecturaAdjunto {
     monto, fecha,
     comercio: corto(o.comercio, 80),
     nit,
+    numero_transaccion: numero,
     descripcion: corto(o.descripcion, 160),
     titular_destino: corto(o.titular_destino, 80),
   };

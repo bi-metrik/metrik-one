@@ -13,7 +13,9 @@
  *   · autorización → `faltaParaAvanzar` sobre la RPC `autorizacion_datos_estado` (el gate
  *     `autorizacion_datos`, `gate-servidor.ts`). Revocada o con versión mayor por aceptar, vuelve
  *     a pendiente;
- *   · servicios → `serviciosListos` (el gate `servicios_listos`);
+ *   · servicios → `serviciosListos` (el gate `servicios_listos`) y, en la etapa cuyo gate pide
+ *     los vouchers (`vouchers_completos`, Documentos y entrega), además los vouchers. Sin esto la
+ *     copia de E6 nacía «Completo» con su gate pidiendo un voucher (QA 2026-10-29, M1-1);
  *   · ficha → los campos `required` de la config del bloque, llenos en el contacto.
  *
  * Puro: no toca DB ni red.
@@ -22,6 +24,7 @@
 import { faltaParaAvanzar, type EstadoAutorizacion } from '@/lib/autorizacion-datos/estado'
 import { leerCampo, type CampoContacto, type ValoresContacto } from '@/lib/contactos/campos-contacto'
 import { serviciosListos } from '@/lib/viaje/gate-servicios'
+import { vouchersDelViaje } from '@/lib/viaje/entrega'
 import type { ServicioDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
 
 export type EstadoBloque = 'completo' | 'pendiente'
@@ -52,8 +55,10 @@ export function estadoFicha(campos: readonly CampoContacto[], valores: ValoresCo
   return campos.filter(c => c.required).every(c => lleno(c, leerCampo(valores, c.slug))) ? 'completo' : 'pendiente'
 }
 
-export function estadoServicios(filas: readonly ServicioDelNegocio[], exigeConfirmacion: boolean): EstadoBloque {
-  return serviciosListos(filas, exigeConfirmacion) ? 'completo' : 'pendiente'
+export function estadoServicios(filas: readonly ServicioDelNegocio[], exigeConfirmacion: boolean, exigeVouchers = false): EstadoBloque {
+  if (!serviciosListos(filas, exigeConfirmacion)) return 'pendiente'
+  if (exigeVouchers && vouchersDelViaje(filas).faltan.length > 0) return 'pendiente'
+  return 'completo'
 }
 
 /**

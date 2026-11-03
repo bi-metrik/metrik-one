@@ -184,6 +184,20 @@ export function permisosDeFunciones(funciones: Iterable<string>): Permisos {
 
 // ── Cómo se nombra un negocio ────────────────────────────────────────────────
 
+/** Días alrededor de la fecha del gasto en que otro con el mismo monto y destino se avisa como posible repetido. */
+export const DIAS_GASTO_PARECIDO = 10;
+
+/**
+ * Un gasto ya registrado que el nuevo parece repetir: mismo monto (±1 peso), mismo destino (el negocio, o los dos de
+ * empresa) y a 10 días o menos de su fecha (caso real 2026-10-28: «Resend» de $65.000 quedó dos veces, el 25 y el 28 de
+ * octubre, sin aviso). Solo avisa: decidir si es otro lo dice la persona. Pura.
+ */
+export function gastoParecido(gastos: GastoOne[], g: { monto: number; negocio: string | null; fecha: string }): GastoOne | null {
+  const dia = (iso: string) => Date.parse(`${iso.slice(0, 10)}T00:00:00Z`) / 86_400_000;
+  return gastos.find((x) => Math.abs(x.monto - g.monto) <= 1 && (x.negocio ?? null) === g.negocio
+    && Math.abs(dia(x.fecha) - dia(g.fecha)) <= DIAS_GASTO_PARECIDO) ?? null;
+}
+
 const corto = (s: string, max: number) => ([...s].length <= max ? s : `${[...s].slice(0, max - 1).join('')}…`);
 
 /** «P1 26 5 · Pérez Construcciones — Remodelación cocina»: siempre código, empresa (o el contacto) y nombre. Pura. */
@@ -213,13 +227,14 @@ export function numeroDeFila(v: unknown): number | null {
  * Ids de las filas de foto o PDF que ya son soporte de un gasto escrito en esta conversación. `borrados`: gastos que ya no
  * están en la base: su soporte vuelve a quedar libre (para registrarlo de nuevo). Pura.
  */
-function fotosUsadas(filas: FilaConversacion[], borrados: ReadonlySet<string> = new Set()): Set<string> {
-  const s = new Set<string>();
+function fotosUsadas(filas: FilaConversacion[], borrados: ReadonlySet<string> = new Set()): Map<string, number | null> {
+  // Cada soporte usado, con el monto del gasto del que ya es soporte (para decírselo al modelo).
+  const s = new Map<string, number | null>();
   for (const f of filas) {
     if (f.traza?.ejecucion?.resultado !== 'ejecutada') continue;
     for (const e of f.traza.ejecucion.escrituras ?? []) {
       const gasto = e.tipo === 'gasto' ? e.id : e.gasto;
-      if (typeof e.foto === 'string' && !(typeof gasto === 'string' && borrados.has(gasto))) s.add(e.foto);
+      if (typeof e.foto === 'string' && !(typeof gasto === 'string' && borrados.has(gasto))) s.set(e.foto, typeof e.monto === 'number' ? e.monto : null);
     }
   }
   return s;
@@ -250,7 +265,13 @@ export function soporteDe(filas: FilaConversacion[], v: unknown, borrados: Reado
   if (!esSoporte(f)) {
     return { error: `«${String(v)}» no es una foto ni un PDF de esta conversación. El soporte es el #n de una línea «[foto de …]» o «[documento de …]».` };
   }
-  if (fotosUsadas(filas, borrados).has(f.id)) return { error: `El #${n} ya es el soporte de otro gasto. Pregunta si hay otro soporte.` };
+  const usadas = fotosUsadas(filas, borrados);
+  if (usadas.has(f.id)) {
+    // Arnés 2026-11-03 (b-borrados-dos-pdf): tras registrar la ida, el modelo la volvió a proponer con otra descripción y
+    // «pregunta si hay otro soporte» lo llevó a preguntar por un recibo que ya estaba usado, en vez de seguir con la vuelta.
+    const monto = usadas.get(f.id);
+    return { error: `El #${n} ya es el soporte de otro gasto${monto ? ` (el de ${formatCOP(monto)}, ya registrado)` : ''}. Si es ese mismo gasto, ya quedó: no lo propongas otra vez y sigue con lo que falta. Si es un gasto distinto, pregunta si hay otro soporte.` };
+  }
   return {
     fila: f.id, mediaId: f.media.id, ref: f.media.ref ?? null, tipo: f.media.tipo as 'imagen' | 'documento',
     nombre: f.media.nombre ?? null, lectura: f.media.lectura ?? null, n: n!,
@@ -472,6 +493,17 @@ export function prometeCompletoSinNota(texto: string, p: Pick<Propuesta, 'accion
   return /\b(complet[oa]s?|enter[oa]s?|integr[oa]s?|tal cual|sin cortes?|textual(mente)?)\b/.test(t);
 }
 
+/**
+ * ¿El texto dice que el gasto ya no existe cuando la base tiene uno parecido? (caso real 2026-10-29: «El gasto de
+ * $65.000 en Resend que registramos antes ya no existe en la base, así que lo registro de nuevo» con el del 25-oct en la
+ * base: el modelo hablaba del de prueba que se borró y la propuesta salió contradiciendo su propio aviso). Pura.
+ */
+export function niegaElParecido(texto: string, p: Pick<Propuesta, 'accion' | 'datos'>): boolean {
+  if (p.accion !== 'gasto' || !p.datos.parecido) return false;
+  const t = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return /\bno existe\b|\bya no (esta|aparece|figura|hay)\b|\b(fue|se|lo|la) (borr|elimin)/.test(t);
+}
+
 const digitos = (s: unknown) => String(s ?? '').replace(/\D/g, '');
 
 /**
@@ -666,7 +698,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
   const ahora = o.ahora ?? (() => Date.now());
   // Baja, sube y lee los soportes recientes que todavía no se prepararon (`../adjuntos.ts`, común con la bandeja).
   const prepararTurno = preparadorDeAdjuntos(puerto, {
-    lector: o.lector ?? null, ahora, desdeMs: PREPARAR_DESDE_MS, max: PREPARAR_MAX, omitir: (ctx) => fotosUsadas(ctx.conversacion),
+    lector: o.lector ?? null, ahora, desdeMs: PREPARAR_DESDE_MS, max: PREPARAR_MAX, omitir: (ctx) => new Set(fotosUsadas(ctx.conversacion).keys()),
   });
 
   // Los gastos de la conversación contra la base: una consulta por turno (el Estado y la propuesta la piden en el mismo).
@@ -821,6 +853,10 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     const cc = await puerto.centroCostos({ negocioId: negocio?.id ?? null, descripcion });
     const etiquetaCentro = cc.centro === 'directa_negocio' ? 'Negocio' : cc.centro === 'distribuible_one' ? 'ONE' : cc.centro === 'distribuible_clarity' ? 'Clarity' : cc.centro ? 'Mixto' : null;
     const destino = negocio ? `📁 ${nombreNegocio(negocio)}` : '🏢 Gasto de empresa (sin negocio)';
+    // ¿Ya está registrado? La base manda: se lee en el turno. Si no responde, se propone sin el aviso.
+    const desde = new Date(Date.parse(`${fecha}T12:00:00Z`) - DIAS_GASTO_PARECIDO * 86_400_000).toISOString();
+    const recientes = await puerto.gastosRecientes({ desdeIso: desde, negocioId: negocio?.id ?? null, limite: 200 }).catch(() => 'error' as const);
+    const parecido = recientes === 'error' ? null : gastoParecido(recientes.gastos, { monto, negocio: negocio?.codigo ?? null, fecha });
     const resumen = [
       `💰 Gasto de ${formatCOP(monto)} · ${CATEGORIA_LABELS[categoria] ?? categoria}`,
       destino,
@@ -831,6 +867,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
       // El soporte dice otro monto: se ve en el resumen, nunca se adjunta callado.
       ...(foto?.lectura && montoDistinto(foto.lectura, monto) ? [lineaDistinto(foto.lectura, monto)] : []),
       ...(etiquetaCentro ? [`🏷️ Centro: ${etiquetaCentro}`] : []),
+      ...(parecido ? [`⚠️ Ya hay uno parecido: ${formatCOP(parecido.monto)} el ${fechaConDia(parecido.fecha)}${parecido.descripcion ? ` («${corto(parecido.descripcion, 60)}»)` : ''}. Si es el mismo, toca No.`] : []),
       '¿Lo registro?',
     ].join('\n');
     return {
@@ -844,6 +881,7 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
           // `mensaje_original` NO va aquí: cambia con cada mensaje y la misma propuesta dejaría de ser «la misma»
           // (`propuesta_repetida`). Se toma al ejecutar.
           centro: cc.centro, origen: cc.origen,
+          parecido: parecido ? { monto: parecido.monto, fecha: parecido.fecha, descripcion: parecido.descripcion || null } : null,
         },
         resumen, ...(negocio ? { sobre: negocio.codigo } : {}), si: 'Registrar', no: 'No',
       },
@@ -1176,9 +1214,21 @@ export function dominioOne(puerto: PuertoOne, o: { rol: string; ahora?: () => nu
     // La base manda (2026-10-21): los gastos que la conversación dice que se registraron, revisados en este turno.
     registros: async (ctx) => registrosDeGastos(await gastosVigentes(ctx)),
     revisarRespuesta: (s) => listaDeDestinoDelModelo(s),
-    revisarTextoPropuesta: (texto, p) => prometeCompletoSinNota(texto, p)
-      ? 'No se envió: el texto dice que va el mensaje completo, y lo que se guarda es el `texto` que escribiste tú. Si la persona pidió registrar su nota, pon `nota: "#n"` (va tal cual); si no, quita esa frase.'
-      : null,
+    revisarTextoPropuesta: (texto, p) => {
+      if (prometeCompletoSinNota(texto, p)) {
+        return 'No se envió: el texto dice que va el mensaje completo, y lo que se guarda es el `texto` que escribiste tú. Si la persona pidió registrar su nota, pon `nota: "#n"` (va tal cual); si no, quita esa frase.';
+      }
+      if (niegaElParecido(texto, p)) {
+        const x = p.datos.parecido as { monto: number; fecha: string; descripcion: string | null };
+        return `No se envió: el texto dice que el gasto ya no existe, y en la base hay uno parecido: ${formatCOP(x.monto)} el ${fechaConDia(x.fecha)}${x.descripcion ? ` («${x.descripcion}»)` : ''}. No digas que no existe: di que ya hay uno así y que, si es el mismo, toque No.`;
+      }
+      return null;
+    },
+    // Un gasto es el mismo si coincide en monto, negocio y fecha y no trae un soporte distinto (la descripción y el aviso
+    // `parecido` no cuentan: en el arnés volvió con otra descripción y sin el recibo). Otro recibo del mismo monto sí sale.
+    mismoHecho: (a, b) => a.accion === b.accion && (a.accion === 'gasto'
+      ? a.datos.monto === b.datos.monto && a.datos.negocio_id === b.datos.negocio_id && a.datos.fecha === b.datos.fecha && (b.datos.foto == null || b.datos.foto === a.datos.foto)
+      : JSON.stringify({ ...a.datos, parecido: null }) === JSON.stringify({ ...b.datos, parecido: null })),
     cierres: CIERRES_ONE,
     cerrar: (n, a) => cerrar(n, a),
     reenvios: 'mensaje',

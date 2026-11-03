@@ -79,8 +79,10 @@ describe('la ciudad sin la zona del hotel', () => {
     expect(m.dias.map((d) => d.ciudad).filter(Boolean)).not.toContain('Madrid - Sol')
     const html = htmlDePropuesta(m, recursos)
     expect(html).not.toContain('Madrid - Sol')
-    expect(html).not.toContain('Herengracht')
-    expect(m.precio.noIncluye[0]).toBe('Tasa turística (Barcelona), que se pagan en destino')
+    // V6 (QA del 2026-10-29): la zona sale SOLO en la tarjeta de su hotel, nunca como destino.
+    expect(html.match(/Herengracht/g) ?? []).toHaveLength(1)
+    expect(html).toContain('<div class="caps zona">Herengracht</div>')
+    expect(m.precio.noIncluye[0]).toBe('Tasa turística en Barcelona: se paga en el hotel')
   })
 })
 
@@ -183,7 +185,7 @@ describe('«Incluido en todas» de verdad en todas', () => {
 
   it('sin tarifas (una sola versión), el texto revisado tal cual', () => {
     const lineas = ['3 noches en el Hotel Catalonia Puerta del Sol']
-    expect(incluyeDeTodas(lineas, { hoteles: [{ ciudad: 'Madrid', desde: null, hasta: null, noches: 3, opciones: [{ tarifas: [], hotel: 'Catalonia Puerta del Sol', estrellas: 4, habitacion: null, regimen: null, cancelacion: null, cargoEnDestino: null, foto: null }] }], vuelos: [], tarifas: 1, noches: 3 })).toEqual(lineas)
+    expect(incluyeDeTodas(lineas, { hoteles: [{ ciudad: 'Madrid', desde: null, hasta: null, noches: 3, opciones: [{ tarifas: [], hotel: 'Catalonia Puerta del Sol', estrellas: 4, habitacion: null, regimen: null, incluye: null, cancelacion: null, cargoEnDestino: null, foto: null }] }], vuelos: [], tarifas: 1, noches: 3 })).toEqual(lineas)
   })
 })
 

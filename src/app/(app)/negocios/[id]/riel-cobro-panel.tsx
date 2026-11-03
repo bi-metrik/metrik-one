@@ -274,7 +274,8 @@ function HojaComprobante({ vista, archivoInicial, nombre, onCerrar, onRegistrado
         return
       }
       onRegistrado()
-      if (res.textoAvance) toast.message(`${res.textoAvance} El negocio pasó a ${res.avanzo}.`)
+      // Con el anticipo a medias el negocio no pasa: el texto dice cuánto falta (QA G11).
+      if (res.textoAvance) toast.message(res.avanzo ? `${res.textoAvance} El negocio pasó a ${res.avanzo}.` : res.textoAvance)
       // Deshacer (8): pasados los 8 s sale el recibo.
       let deshecho = false
       const id = toast.success('Pago registrado. El recibo sale en 8 s', {

@@ -32,8 +32,10 @@ import {
   pesos,
   planSugerido,
   reglaEnPalabras,
+  fechaLimiteSaldo,
   validarPlan,
   type CuotaPlan,
+  type HitoProveedor,
 } from '@/lib/viaje/plan-pagos'
 import {
   gatesConfirmacionPendientes,
@@ -76,6 +78,14 @@ const BOTON = 'inline-flex min-h-11 items-center justify-center gap-1.5 rounded-
 const BOTON_PRIMARIO = `${BOTON} bg-[#10B981] text-white hover:bg-[#059669]`
 const BOTON_SECUNDARIO = `${BOTON} border border-[#E5E7EB] bg-white text-[#1A1A1A] hover:bg-gray-50`
 
+/**
+ * ¿El cliente pudo decir que sí a esta cotización? Solo si ya le llegó (enviada) o ya la aceptó. Un
+ * borrador no (QA del #1342: la tarjeta salía en un borrador sin aceptación).
+ */
+export function cotizacionConfirmable(estado: string | null | undefined): boolean {
+  return estado === 'enviada' || estado === 'aceptada'
+}
+
 function Linea({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
     <li className="flex items-start gap-2 text-sm">
@@ -110,6 +120,12 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
 
   // Antes de confirmar y sin cotización para confirmar, no hay nada que mostrar.
   if (!conf && (!vista.cotizacion || !(vista.antesDeConfirmacion || vista.enConfirmacion))) return null
+  // H10-2 (QA del 2026-10-29): un negocio perdido o desistido no ofrece «El cliente confirmó». La
+  // acción ya lo rechaza en el servidor; la pantalla no debe invitar a un clic que va a fallar.
+  if (!conf && !vista.negocioAbierto) return null
+  // QA del #1342 · un borrador no le ha llegado al cliente: no hay qué confirmar y la tarjeta
+  // «Confirmación · El cliente dijo sí» no sale. Con la confirmación registrada sale siempre.
+  if (!conf && !cotizacionConfirmable(vista.cotizacion?.estado)) return null
 
   function yaLoMande() {
     startTransition(async () => {
@@ -264,10 +280,10 @@ function AprobacionPendiente({ vista }: { vista: VistaConfirmacion }) {
 
 // ── La hoja «El cliente confirmó» ────────────────────────────────────────────
 
-function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string): CuotaPlan[] {
+function cuotasIniciales(vista: VistaConfirmacion, total: number, hoy: string, hitos: HitoProveedor[]): CuotaPlan[] {
   const guardado = vista.plan && vista.plan.estado === 'propuesta' && vista.plan.total === total ? vista.plan.cuotas : null
   if (guardado && guardado.length > 0) return guardado
-  return planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla })
+  return planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos })
     ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }]
 }
 
@@ -293,6 +309,8 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
   const [tarifaId, setTarifaId] = useState<string | null>(inicial ? claveTarifa(inicial) : null)
   const tarifa = tarifasConPrecio.find((t) => claveTarifa(t) === tarifaId) ?? null
   const total = tarifa?.precio ?? 0
+  // H-17: la «Compra antes del» del paquete de esta tarifa (lo que se le paga al operador).
+  const hitos = useMemo(() => tarifa?.hitosProveedor ?? [], [tarifa])
 
   const [fecha, setFecha] = useState(hoy)
   const [pantallazo, setPantallazo] = useState<{ storage_path: string; file_name: string; mime_type: string } | null>(null)
@@ -303,7 +321,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
   const [titNombre, setTitNombre] = useState('')
   const [titCorreo, setTitCorreo] = useState('')
   const [correoCliente, setCorreoCliente] = useState('')
-  const [cuotas, setCuotas] = useState<CuotaPlan[]>(() => cuotasIniciales(vista, total, hoy))
+  const [cuotas, setCuotas] = useState<CuotaPlan[]>(() => cuotasIniciales(vista, total, hoy, hitos))
   const [motivoPlan, setMotivoPlan] = useState('')
   const [conPrerreserva, setConPrerreserva] = useState(false)
   const [venceA, setVenceA] = useState('')
@@ -315,10 +333,10 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
   useEffect(() => {
     if (totalPrevio.current === total) return
     totalPrevio.current = total
-    setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])
-  }, [total, hoy, vista.viaje.fechaSalida, vista.regla])
+    setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])
+  }, [total, hoy, vista.viaje.fechaSalida, vista.regla, hitos])
 
-  const ctxPlan = { total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }
+  const ctxPlan = { total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }
   const v = validarPlan(cuotas, ctxPlan)
   const lineas = lineasDeValidacion(v, ctxPlan)
   const huella = huellaPlan(cuotas, total)
@@ -344,6 +362,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
     extra,
     comercial: vista.comercial ? primerNombre(vista.comercial) : null,
     agencia: vista.agencia,
+    visaEnTramite: vista.visaEnTramite,
   }), [vista, tarifa, total, cuotas, v.fechaMinimo, hoy, extra])
 
   const puedeConfirmarYa = !motivoAutorizacion && !!tarifa && v.cuadra && !v.despuesDelViaje && (v.dentroDeRegla || aprobadaParaEste)
@@ -535,10 +554,10 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
               ))}
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ?? hoy, concepto: null }])}>
+              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas((cs) => [...cs, { numero: cs.length, monto: Math.max(0, v.diferencia), fecha: vista.viaje.fechaSalida ? fechaLimiteSaldo(vista.viaje.fechaSalida, hoy) : hoy, concepto: null }])}>
                 <Plus className="h-4 w-4" /> Cuota
               </button>
-              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>
+              <button type="button" className={BOTON_SECUNDARIO} onClick={() => setCuotas(planSugerido({ total, fechaSalida: vista.viaje.fechaSalida, hoy, regla: vista.regla, hitos }) ?? [{ numero: 0, monto: total, fecha: hoy, concepto: 'Anticipo' }])}>
                 Volver al plan sugerido
               </button>
             </div>

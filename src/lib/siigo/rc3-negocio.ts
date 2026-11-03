@@ -36,6 +36,12 @@
  *    comprobante entero con $45 recibidos sería acusar plata que no entró.
  * 4. **Sin comprobante no hay RC-3.** Si el negocio no tiene `valor_pagado` (falta el bloque
  *    o falló la extracción), NO se cae a la tarifa confirmada: se bloquea con un mensaje.
+ *    Casi siempre es que SOENA todavía no le ha pagado a la UPME (SOE-035): el mensaje lo
+ *    dice así, no como un dato roto.
+ * 5. **Unos pesos en la franja de la tarifa no son tarifa** (SOE-035). Si todo lo que
+ *    entró a `a_tarifa` en el negocio no pasa del piso de materialidad
+ *    (`TOLERANCIA_SALDO_COP`), es un sobrepago del honorario que el reparto dejó caer ahí
+ *    (V0660: $45). No genera RC-3 ni frena pidiendo comprobante: se trata como sin tarifa.
  *
  * ── Idempotencia ────────────────────────────────────────────────────────────
  *
@@ -47,7 +53,7 @@
  * que la cifra de la pantalla y la del recibo salgan de la misma cuenta.
  */
 
-import { TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
+import { saldoCuadrado, TOLERANCIA_SALDO_COP } from '@/lib/negocios/tolerancia-saldo'
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 import { hayReciboPorElTotal, recibosDelCobro } from './recibo-componentes'
 
@@ -55,8 +61,12 @@ import { hayReciboPorElTotal, recibosDelCobro } from './recibo-componentes'
 export const SLUG_COMPROBANTE_UPME = 'comprobante_pago_upme'
 export const CAMPO_VALOR_COMPROBANTE_UPME = 'valor_pagado'
 
+/**
+ * Sin comprobante. Casi siempre es que SOENA todavía no le pagó a la UPME (SOE-035: V0602,
+ * V0658): el aviso viejo («Falta el valor del comprobante…») se leía como un dato roto.
+ */
 export const MENSAJE_SIN_COMPROBANTE_UPME =
-  'Falta el valor del comprobante de pago UPME: revisa el bloque del comprobante en el negocio.'
+  'Aún no se ha pagado a la UPME: el recibo sale cuando se cargue el comprobante de pago UPME en el negocio.'
 
 /** Lo que dice el comprobante del negocio. */
 export type ComprobanteUpme =
@@ -128,6 +138,11 @@ export interface PlanRc3 {
   valor: number | null
   /** Suma de la porción UPME de los pagos vivos, en el orden del reparto. */
   tarifaRecibida: number
+  /**
+   * Porción UPME que ningún recibo acusa todavía: la de los pagos que van en el RC-3 del
+   * negocio. Es la cifra que se muestra en la fila frenada (SOE-035), en vez del pago entero.
+   */
+  tarifaSinAcusar: number
   /** Hasta dónde tienen que llegar los pagos para completar la tarifa. */
   meta: number | null
   /**
@@ -222,11 +237,18 @@ export function planRc3DelNegocio(entrada: {
     if (!titularId && completo) titularId = ultimoSinReciboAntes
   }
 
-  const hayTarifa = pagos.some(p => (Number(p.aTarifa) || 0) > 0)
   const pendientes = pagos.filter(p => roles.get(p.id) === 'en_el_del_negocio')
-  const base0 = { comprobante, resuelto, tarifaRecibida, meta, roles }
+  const tarifaSinAcusar = redondear(pendientes.reduce((s, p) => s + Math.max(0, Number(p.aTarifa) || 0), 0))
+  const base0 = { comprobante, resuelto, tarifaRecibida, tarifaSinAcusar, meta, roles }
 
-  if (!hayTarifa) return { ...base0, estado: 'sin_tarifa', valor: null, titularId: null }
+  // Regla 5: unos pesos en la franja de la tarifa son un sobrepago del honorario, no tarifa.
+  // Solo cuando ningún pago tiene ya un RC-3: si lo tiene, la tarifa sí entró.
+  const algunRc3 = pagos.some(p => tieneRc3(p.marca))
+  const hayTarifa = tarifaRecibida > 0 && (algunRc3 || !saldoCuadrado(tarifaRecibida))
+  if (!hayTarifa) {
+    for (const p of pendientes) roles.set(p.id, 'fuera')
+    return { ...base0, tarifaSinAcusar: 0, estado: 'sin_tarifa', valor: null, titularId: null }
+  }
 
   if (entrada.comprobante.estado !== 'ok') {
     // El bloqueo se muestra en un pago, aunque los pagos no hayan completado la tarifa:

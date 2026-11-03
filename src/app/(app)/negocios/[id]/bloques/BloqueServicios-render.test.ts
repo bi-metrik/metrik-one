@@ -165,4 +165,23 @@ describe('BloqueServicios', () => {
     const comercial = html(datos({ filas: [hotel], quien: { ...OPERACIONES, areas: ['comercial'] } }), 'editable', false, 's2')
     expect(comercial).not.toContain('Guardar fechas')
   })
+
+  it('QA 2026-10-29 M3-4: pagado de menos ofrece «el proveedor cobró esto» y lo que cobra queda a la vista como a favor', () => {
+    const medios = [{ id: 'tc-emp', label: 'Tarjeta empresa ••4417', titular: 'empresa' as const }]
+    const g = { monto: 1_500_000, soporte_url: 'one://s', medio_pago: 'tc-emp', titular_medio: 'empresa' }
+    const debe = datos({ medios, cobradoCliente: 2_000_000, filas: [{ ...datos().filas[0], gastos: [g] }] })
+    const h = html(debe, 'editable', false, 's1')
+    expect(h).toContain('Falta pagar $')
+    expect(h).toContain('El proveedor cobró $')
+    expect(h).toContain('Lo que cobra el proveedor')
+    const cobro = html(datos({ medios, filas: [{ ...datos().filas[0], gastos: [g], valor_por_pagar: 1_500_000 }] }), 'editable', false, 's1')
+    expect(cobro).toContain('a favor')
+    expect(cobro).not.toContain('Falta pagar')
+  })
+
+  it('QA 2026-10-29 H3-1: la comercial responsable ve cómo subir el voucher; la que no es responsable, no', () => {
+    const comercial = { ...OPERACIONES, areas: ['comercial'] }
+    expect(html(datos({ quien: comercial }), 'editable', true, 's2')).toContain('Pegar voucher')
+    expect(html(datos({ quien: comercial }), 'editable', false, 's2')).not.toContain('Pegar voucher')
+  })
 })

@@ -31,6 +31,15 @@
  *     ausente                                    → comportamiento actual (stage === 'cobro')
  *
  * Sin el flag ninguna línea de ningún workspace cambia de comportamiento.
+ *
+ * ## Lo que el saldo NO puede saltar (QA Trappvel 2026-10-29, H-35)
+ *
+ * Que el cliente esté al día no dice nada sobre si la dirección confirmó cuánto dejó el viaje. El
+ * Cierre económico de Trappvel es `stage = 'cobro'` sin flag, así que con el saldo en cero el
+ * avance desde «En viaje» lo atravesaba y aterrizaba en Postventa con `cierre_viaje` en null: nadie
+ * confirmó el margen. Una etapa que declara un gate que solo cumple una PERSONA
+ * (`GATES_QUE_EL_SALDO_NO_CUMPLE`) nunca se salta por saldo, ni con el flag en `true`: el flag dice
+ * que la etapa es de cobro, no que su confirmación sobre.
  */
 
 import { saldoCuadrado } from './tolerancia-saldo'
@@ -38,9 +47,23 @@ import { saldoCuadrado } from './tolerancia-saldo'
 /** Máximo de saltos encadenados en un solo avance. Backstop, no un límite esperado. */
 export const MAX_SALTOS_ENCADENADOS = 5
 
+/**
+ * Gates que el saldo nunca cumple: los confirma una persona. Una etapa que declara alguno de estos
+ * no se salta por saldo (H-35). `margen_confirmado` es el Cierre económico del viaje
+ * (`lib/viaje/cierre-viaje.ts`); `postventa_completa`, la Postventa.
+ */
+export const GATES_QUE_EL_SALDO_NO_CUMPLE = ['margen_confirmado', 'postventa_completa'] as const
+
 export interface EtapaSalto {
   stage?: string | null
-  config_extra?: { saltar_si_saldo_cero?: unknown; conciliar_sobrepago?: unknown } | null
+  config_extra?: { saltar_si_saldo_cero?: unknown; conciliar_sobrepago?: unknown; gates?: unknown } | null
+}
+
+/** ¿La etapa declara un gate que solo cumple una persona? Entonces no se salta por saldo. */
+export function declaraGateQueElSaldoNoCumple(etapa: EtapaSalto | null | undefined): boolean {
+  const gates = etapa?.config_extra?.gates
+  if (!Array.isArray(gates)) return false
+  return gates.some(g => (GATES_QUE_EL_SALDO_NO_CUMPLE as readonly unknown[]).includes(g))
 }
 
 /**
@@ -50,6 +73,7 @@ export interface EtapaSalto {
  * (una config a medio escribir no debe cambiar el comportamiento en silencio).
  */
 export function aplicaSaltoPorSaldo(etapa: EtapaSalto | null | undefined): boolean {
+  if (declaraGateQueElSaldoNoCumple(etapa)) return false
   const flag = etapa?.config_extra?.saltar_si_saldo_cero
   if (typeof flag === 'boolean') return flag
   return etapa?.stage === 'cobro'

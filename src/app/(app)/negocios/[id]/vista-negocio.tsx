@@ -11,6 +11,7 @@ import BloqueValida from './bloques/BloqueValida'
 import BloqueRiesgoSarlaft from './bloques/BloqueRiesgoSarlaft'
 import CerradoHeaderBanner from './cerrado-header-banner'
 import { AvisoAutorizacionPendiente } from './aviso-autorizacion-pendiente'
+import { avisoNegocioCerrado } from '@/lib/negocios/aviso-negocio-cerrado'
 import { negocioCerrado } from '@/lib/negocios/motivo-cierre'
 import { puedeOmitirGatesConMotivo } from '@/lib/permissions/omitir-gates'
 import { puedeAsignarResponsable } from '@/lib/permissions/asignar-responsable'
@@ -30,6 +31,9 @@ import { leerRielCobro } from './riel-cobro'
 import { leerEntregaViaje } from './entrega-viaje'
 import { leerViajeFinal } from './viaje-final'
 import { leerFacturaViaje } from './factura-viaje'
+import { obrasActivas, puedeEditarObras, puedeVerObras } from '@/lib/obras/modulo'
+import { leerPanelObra } from '@/lib/obras/servidor'
+import PanelObra from './obra/panel-obra'
 import { leerSeguimientoViaje } from './seguimiento-viaje'
 
 /**
@@ -142,6 +146,8 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   // Archivos en el proyecto propio del cliente (`storage_provider`): sin carpeta de Drive
   // y con subida directa a ese proyecto. Se lee de la MISMA fila de config de abajo.
   let almacenamientoExterno = false
+  // Obras (`modules.obras`): cierre, facturas por obra y llegadas en la ficha. Sin la llave, nada.
+  let conObras = false
   if (workspaceId) {
     const svc = createServiceClient()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -154,6 +160,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     puedeAvanzarCruces = puedeAvanzarCrucesConMotivo(staffId, ws?.config_extra ?? null)
     puedeAsignarResponsables = puedeAsignarResponsable({ role, staffId }, ws?.config_extra ?? null)
     almacenamientoExterno = esAlmacenamientoExterno(ws?.config_extra ?? null)
+    conObras = obrasActivas(modules)
     if (exigeCarpetaLocal(ws?.config_extra ?? null)) {
       carpetaLocal.visible = true
       carpetaLocal.puedeEditar = await resolverPermisoCarpetaLocal(
@@ -197,6 +204,18 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
       </div>
     )
     : null
+  // H10-2: perdido o cancelado SIN `cierre_motivo` (todo cierre en venta), la ficha igual lo marca.
+  const marcaCerrado = !bannerCierre && cerrado
+    ? avisoNegocioCerrado({ estado: data.negocio.estado, razonCierre: data.negocio.razon_cierre, closedAt: data.negocio.closed_at, seguimiento: data.seguimiento })
+    : null
+  const avisoCerrado = marcaCerrado
+    ? (
+      <div role="status" className="mb-3 rounded-xl border border-[#E5E7EB] bg-[#F3F4F6] px-3 py-2.5 text-[13px] text-[#191713]" data-aviso-negocio-cerrado>
+        <b>{marcaCerrado.titulo}</b>
+        {marcaCerrado.detalle && <span className="text-[#6B7280]"> · {marcaCerrado.detalle}</span>}
+      </div>
+    )
+    : null
 
   // Confirmación del viaje (F2): solo en líneas con `plan_pagos.activo`; en las demás no lee nada.
   // Riel de cobro (F2): solo con plan acordado. Va arriba, debajo de la cabecera.
@@ -211,11 +230,14 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
   const viajeFinal = viajeFinalLeido?.panel ?? null
   // La autorización de datos pendiente: se cotiza, no se envía (reunión del 2026-10-22). Solo con
   // el negocio abierto.
-  const avisoAutorizacion = data.autorizacionPendiente === true && !data.negocio.cierre_motivo ? <AvisoAutorizacionPendiente /> : null
-  const banner = bannerCierre || avisoAutorizacion || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
+  const avisoAutorizacion = data.autorizacionPendiente === true && !data.negocio.cierre_motivo && !cerrado
+    ? <AvisoAutorizacionPendiente falta={data.faltaAutorizacion ?? 'generales'} negocioId={id} puedePedir={!!role && role !== 'read_only'} />
+    : null
+  const banner = bannerCierre || avisoCerrado || avisoAutorizacion || rielCobro || confirmacionViaje || facturaViaje || entregaViaje || viajeFinal || seguimientoViaje
     ? (
       <>
         {bannerCierre}
+        {avisoCerrado}
         {avisoAutorizacion}
         {seguimientoViaje}
         {rielCobro}
@@ -280,6 +302,10 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     )
     : null
 
+  const obra = workspaceId && conObras && puedeVerObras(role)
+    ? <PanelObra negocioId={id} panel={await leerPanelObra(supabase, workspaceId, id)} puedeEditar={puedeEditarObras(role)} />
+    : null
+
   let viaje: VistaNegocio['viaje'] = null
   if (workspaceId) {
     try {
@@ -330,6 +356,7 @@ export async function cargarVistaNegocio(id: string): Promise<VistaNegocio | nul
     autorizacionPendiente: data.autorizacionPendiente === true,
     motivoAutorizacion: data.motivoAutorizacion ?? null,
     extras: extras,
+    obra,
     viaje,
   }
 }

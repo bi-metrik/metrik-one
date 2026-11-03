@@ -8,9 +8,11 @@
  * Forma del sugerido (Vera C2, la de Noor §4.1):
  *   · anticipo del 30 % al confirmar (hoy);
  *   · una cuota que completa el 80 % quince días antes de salir (T-15);
- *   · el 20 % restante el día del viaje.
- * Si T-15 ya pasó o es hoy: 80 % al confirmar y 20 % el día del viaje. Sin fecha de salida, o con la
- * salida ya pasada, no hay sugerido (la pantalla dice la regla en palabras).
+ *   · el 20 % restante el día ANTERIOR a la salida (decisión de Mauricio 2026-10-29, QA H3: el
+ *     100 % queda pagado 24 h antes de viajar, no el día del viaje).
+ * Si T-15 ya pasó o es hoy: 80 % al confirmar y 20 % el día anterior. Con la salida mañana u hoy,
+ * el 100 % al confirmar. Sin fecha de salida, o con la salida ya pasada, no hay sugerido (la
+ * pantalla dice la regla en palabras).
  *
  * Redondeo a $1.000: el anticipo se redondea; el acumulado del 80 % se redondea HACIA ARRIBA (un
  * redondeo hacia abajo dejaría el sugerido fuera de su propia regla); la última cuota absorbe el
@@ -38,6 +40,61 @@ export interface CuotaPlan {
   /** `YYYY-MM-DD`. */
   fecha: string
   concepto: string | null
+}
+
+/**
+ * Un pago al proveedor con fecha límite (H-17 del QA de Trappvel del 2026-10-29): la «Compra antes
+ * del 15/12» de un paquete de bloqueo con tarifa promo. A esa fecha el cliente tiene que llevar, por
+ * lo menos, lo que se le paga al operador; si no, la agencia pone la plata.
+ */
+export interface HitoProveedor {
+  /** `YYYY-MM-DD`: la última fecha para pagarle al proveedor. */
+  fecha: string
+  /** Lo que se le paga (el costo del paquete), en pesos. */
+  monto: number
+  /** Quién cobra («TU RESERVA»), para el texto. */
+  operador: string | null
+}
+
+/** Lo que el plan debe llevar a la fecha de un hito: la suma de los hitos hasta esa fecha, a $1.000 hacia arriba, sin pasar del total. */
+function requeridoAl(hitos: readonly HitoProveedor[], fecha: string, total: number): number {
+  const suma = hitos.filter((h) => h.fecha <= fecha).reduce((s, h) => s + Math.max(0, Number(h.monto) || 0), 0)
+  return Math.min(total, Math.ceil(suma / 1000) * 1000)
+}
+
+/** Los hitos que cuentan: con fecha válida, monto positivo y que no hayan pasado (uno vencido ya no sostiene la tarifa: lo avisa el paquete). */
+function hitosVigentes(hitos: readonly HitoProveedor[] | null | undefined, hoy: string): HitoProveedor[] {
+  return (hitos ?? [])
+    .filter((h) => esFechaCivil(h.fecha) && h.fecha >= hoy && Number(h.monto) > 0)
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))
+}
+
+const acumuladoAl = (cuotas: readonly CuotaPlan[], fecha: string) =>
+  cuotas.filter((c) => esFechaCivil(c.fecha) && c.fecha <= fecha).reduce((s, c) => s + Math.round(Number(c.monto) || 0), 0)
+
+/**
+ * Adelanta plata del plan para que a la fecha de cada hito el cliente lleve lo que se le paga al
+ * proveedor. Pone una cuota en la fecha del hito y la saca de las cuotas que vienen después (la
+ * primera primero), así que el total no cambia y lo acumulado a T-15 y al día del saldo tampoco.
+ */
+function cubrirHitos(cuotas: CuotaPlan[], hitos: readonly HitoProveedor[], total: number): CuotaPlan[] {
+  let out = cuotas.map((c) => ({ ...c }))
+  for (const h of hitos) {
+    const falta = requeridoAl(hitos, h.fecha, total) - acumuladoAl(out, h.fecha)
+    if (falta <= 0) continue
+    let porQuitar = falta
+    for (const c of [...out].sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0))) {
+      if (porQuitar <= 0) break
+      if (c.fecha <= h.fecha) continue
+      const quita = Math.min(c.monto, porQuitar)
+      c.monto -= quita
+      porQuitar -= quita
+    }
+    const concepto = `Compra del paquete${h.operador ? ` con ${h.operador}` : ''}`
+    out = [...out.filter((c) => c.monto > 0), { numero: 0, monto: falta - porQuitar, fecha: h.fecha, concepto }]
+    out.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : a.numero - b.numero))
+  }
+  return juntarMismoDia(out.map((c, i) => ({ ...c, numero: i })))
 }
 
 export interface ConfigPlanPagos {
@@ -88,6 +145,26 @@ export function fechaDelMinimo(fechaSalida: string, hoy: string, regla: ReglaPla
   return t > hoy ? t : hoy
 }
 
+/**
+ * Hasta qué fecha debe quedar pagado el 100 %: el día anterior a la salida, o hoy si ese día ya
+ * pasó (viaje mañana u hoy). Decisión de Mauricio 2026-10-29.
+ */
+export function fechaLimiteSaldo(fechaSalida: string, hoy: string): string {
+  const t = sumarDiasCivil(fechaSalida, -1)
+  return t > hoy ? t : hoy
+}
+
+/** Junta las cuotas que caen el mismo día (conserva el concepto de la primera) y renumera. */
+function juntarMismoDia(cuotas: CuotaPlan[]): CuotaPlan[] {
+  const out: CuotaPlan[] = []
+  for (const c of cuotas) {
+    const prev = out[out.length - 1]
+    if (prev && prev.fecha === c.fecha) prev.monto += c.monto
+    else out.push({ ...c, numero: out.length })
+  }
+  return out
+}
+
 const redondear = (v: number) => Math.round(v / 1000) * 1000
 const redondearArriba = (v: number) => Math.ceil(v / 1000) * 1000
 
@@ -97,19 +174,36 @@ export function planSugerido(args: {
   fechaSalida: string | null
   hoy: string
   regla?: ReglaPlan
+  /** Los pagos al proveedor con fecha límite (H-17). Sin ellos, el sugerido de siempre. */
+  hitos?: readonly HitoProveedor[] | null
+}): CuotaPlan[] | null {
+  const base = planSugeridoSinHitos(args)
+  const hitos = hitosVigentes(args.hitos, args.hoy)
+  if (!base || hitos.length === 0) return base
+  return cubrirHitos(base, hitos, Math.round(args.total))
+}
+
+function planSugeridoSinHitos(args: {
+  total: number
+  fechaSalida: string | null
+  hoy: string
+  regla?: ReglaPlan
 }): CuotaPlan[] | null {
   const regla = args.regla ?? REGLA_POR_DEFECTO
   const total = Math.round(args.total)
   if (!(total > 0) || !esFechaCivil(args.fechaSalida) || args.fechaSalida < args.hoy) return null
   const salida = args.fechaSalida
-  const tMin = sumarDiasCivil(salida, -regla.dias_antes)
+  const saldo = fechaLimiteSaldo(salida, args.hoy)
+  // Con una regla de 0 o 1 días, el T-n no puede caer después del día del saldo.
+  const tReglaSinTope = sumarDiasCivil(salida, -regla.dias_antes)
+  const tMin = tReglaSinTope < saldo ? tReglaSinTope : saldo
   const minimo = Math.min(total, redondearArriba((total * regla.pct_minimo) / 100))
 
-  // Viaje a 15 días o menos: el mínimo al confirmar y el resto el día del viaje.
+  // Viaje a 15 días o menos: el mínimo al confirmar y el resto el día anterior a la salida.
   if (tMin <= args.hoy) {
     const cuotas: CuotaPlan[] = [{ numero: 0, monto: minimo, fecha: args.hoy, concepto: 'Anticipo' }]
-    if (total - minimo > 0) cuotas.push({ numero: 1, monto: total - minimo, fecha: salida, concepto: 'Saldo' })
-    return cuotas
+    if (total - minimo > 0) cuotas.push({ numero: 1, monto: total - minimo, fecha: saldo, concepto: 'Saldo' })
+    return juntarMismoDia(cuotas)
   }
 
   const anticipo = Math.min(minimo, Math.max(1000, redondear((total * regla.anticipo_pct) / 100)))
@@ -118,9 +212,9 @@ export function planSugerido(args: {
     cuotas.push({ numero: cuotas.length, monto: minimo - anticipo, fecha: tMin, concepto: null })
   }
   if (total - minimo > 0) {
-    cuotas.push({ numero: cuotas.length, monto: total - minimo, fecha: salida, concepto: 'Saldo' })
+    cuotas.push({ numero: cuotas.length, monto: total - minimo, fecha: saldo, concepto: 'Saldo' })
   }
-  return cuotas
+  return juntarMismoDia(cuotas)
 }
 
 /** Ordena por fecha y renumera (0 = la primera, el anticipo). No muta la entrada. */
@@ -141,19 +235,29 @@ export interface ValidacionPlan {
   acumuladoAlMinimo: number
   pctAlMinimo: number
   cumpleMinimo: boolean
-  /** Alguna cuota cae después del día del viaje. */
+  /** Alguna cuota cae después del día del viaje (bloquea). */
   despuesDelViaje: boolean
+  /**
+   * Alguna cuota cae después de `fechaLimiteSaldo` (el día anterior a la salida): el viaje no
+   * quedaría pagado 24 h antes. No bloquea: queda fuera de la regla y pide aprobación.
+   */
+  saldoTarde: boolean
   /** Alguna cuota con monto ≤ 0 o fecha inválida. */
   cuotaInvalida: boolean
+  /**
+   * H-17 · el pago al proveedor con fecha límite que el plan mira: el primero que NO queda cubierto
+   * o, si todos lo quedan, el último. `null` sin hitos vigentes.
+   */
+  proveedor: { fecha: string; requerido: number; acumulado: number; operador: string | null; cubierto: boolean } | null
   /** Suma = total y todas las cuotas válidas: se puede guardar. */
   cuadra: boolean
-  /** Cuadra, ninguna después del viaje, y cumple el mínimo: no pide aprobación. */
+  /** Cuadra, todo pagado el día anterior a la salida, y cumple el mínimo: no pide aprobación. */
   dentroDeRegla: boolean
 }
 
 export function validarPlan(
   cuotas: readonly CuotaPlan[],
-  ctx: { total: number; fechaSalida: string | null; hoy: string; regla?: ReglaPlan },
+  ctx: { total: number; fechaSalida: string | null; hoy: string; regla?: ReglaPlan; hitos?: readonly HitoProveedor[] | null },
 ): ValidacionPlan {
   const regla = ctx.regla ?? REGLA_POR_DEFECTO
   const total = Math.round(ctx.total)
@@ -169,7 +273,17 @@ export function validarPlan(
   // Sin fecha de salida no hay contra qué medir: el plan no puede quedar «dentro de la regla».
   const cumpleMinimo = !!fechaMinimo && acumuladoAlMinimo * 100 >= total * regla.pct_minimo
   const despuesDelViaje = conFecha && cuotas.some((c) => esFechaCivil(c.fecha) && c.fecha > (ctx.fechaSalida as string))
+  const limiteSaldo = conFecha ? fechaLimiteSaldo(ctx.fechaSalida as string, ctx.hoy) : null
+  const saldoTarde = !!limiteSaldo && cuotas.some((c) => esFechaCivil(c.fecha) && c.fecha > limiteSaldo)
   const cuadra = !cuotaInvalida && diferencia === 0 && total > 0
+  let proveedor: ValidacionPlan['proveedor'] = null
+  const hitos = hitosVigentes(ctx.hitos, ctx.hoy)
+  for (const h of hitos) {
+    const requerido = requeridoAl(hitos, h.fecha, total)
+    const acumulado = acumuladoAl(cuotas, h.fecha)
+    proveedor = { fecha: h.fecha, requerido, acumulado, operador: h.operador, cubierto: acumulado >= requerido }
+    if (!proveedor.cubierto) break
+  }
   return {
     suma,
     diferencia,
@@ -178,9 +292,12 @@ export function validarPlan(
     pctAlMinimo,
     cumpleMinimo,
     despuesDelViaje,
+    saldoTarde,
     cuotaInvalida,
+    proveedor,
     cuadra,
-    dentroDeRegla: cuadra && !despuesDelViaje && cumpleMinimo,
+    // Un plan que deja a la agencia pagándole al operador antes de recibir la plata no está en regla.
+    dentroDeRegla: cuadra && !despuesDelViaje && !saldoTarde && cumpleMinimo && (proveedor?.cubierto ?? true),
   }
 }
 
@@ -229,7 +346,7 @@ export function fechaConDia(f: string): string {
 }
 
 /** La línea de validación en vivo, arriba del editor (Noor §4.2). */
-export function lineasDeValidacion(v: ValidacionPlan, ctx: { total: number; regla?: ReglaPlan; fechaSalida: string | null }): Array<{ ok: boolean; texto: string }> {
+export function lineasDeValidacion(v: ValidacionPlan, ctx: { total: number; regla?: ReglaPlan; fechaSalida: string | null; hoy?: string }): Array<{ ok: boolean; texto: string }> {
   const regla = ctx.regla ?? REGLA_POR_DEFECTO
   const out: Array<{ ok: boolean; texto: string }> = []
   if (v.diferencia === 0) out.push({ ok: true, texto: `Suma ${pesos(v.suma)}` })
@@ -246,14 +363,23 @@ export function lineasDeValidacion(v: ValidacionPlan, ctx: { total: number; regl
   if (ctx.fechaSalida) {
     out.push(v.despuesDelViaje
       ? { ok: false, texto: `La última cuota no puede ir después del ${fechaConDia(ctx.fechaSalida)}, el día del viaje.` }
-      : { ok: true, texto: 'Última cuota antes del viaje' })
+      : v.saldoTarde
+        ? { ok: false, texto: `El viaje debe quedar pagado el ${fechaConDia(fechaLimiteSaldo(ctx.fechaSalida, ctx.hoy ?? ''))}, el día antes de salir.` }
+        : { ok: true, texto: 'Todo pagado el día antes del viaje' })
+  }
+  const pv = v.proveedor
+  if (pv) {
+    const quien = pv.operador ?? 'el operador'
+    out.push(pv.cubierto
+      ? { ok: true, texto: `Al ${fechaCorta(pv.fecha)}: cubierto lo que se le paga a ${quien} (${pesos(pv.requerido)}, compra antes del ${fechaCorta(pv.fecha)})` }
+      : { ok: false, texto: `${quien} cobra el paquete antes del ${fechaCorta(pv.fecha)} (${pesos(pv.requerido)}) y a esa fecha el cliente llevaría ${pesos(pv.acumulado)}: la agencia pondría ${pesos(pv.requerido - pv.acumulado)}.` })
   }
   return out
 }
 
 /** La regla en palabras (fecha móvil o sin fecha). */
 export function reglaEnPalabras(regla: ReglaPlan = REGLA_POR_DEFECTO): string {
-  return `${regla.pct_minimo} % quince días antes de salir y el resto el día del viaje`.replace(
+  return `${regla.pct_minimo} % quince días antes de salir y el resto un día antes del viaje`.replace(
     'quince',
     regla.dias_antes === 15 ? 'quince' : String(regla.dias_antes),
   )

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
+import { margenDeLaCotizacion } from '@/lib/cotizaciones/margen-de-cotizacion'
 import { revalidarItinerarios } from '@/app/(app)/negocios/itinerario-actions'
 import {
   faltaLaTablaDeAdicionales,
@@ -106,8 +107,8 @@ async function margenDe(supabase: any, cotizacionId: string): Promise<MargenDeCo
     .eq('id', cotizacionId)
     .maybeSingle()
   if (!data) return null
-  const margen = data.margen_porcentaje ?? data.margen_default_pct ?? null
-  return { margenPct: margen === null ? null : Number(margen), convencion: data.convencion_margen ?? null }
+  // D4 (2026-10-29): un 0 guardado sin respaldo no anula el margen de la línea.
+  return { margenPct: margenDeLaCotizacion(data), convencion: data.convencion_margen ?? null }
 }
 
 /**

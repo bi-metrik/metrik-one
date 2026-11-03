@@ -14,7 +14,7 @@ import type { FaltaGate } from '@/lib/autorizacion-datos/estado'
 import type { CampoContacto, ValoresContacto } from '@/lib/contactos/campos-contacto'
 import { serviciosViajeActivo } from '@/lib/viaje/estado-servicio'
 import { configReglasPago } from '@/lib/viaje/reglas-pago'
-import { leerServiciosDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
+import { leerServiciosDelNegocio, type ServicioDelNegocio } from '@/lib/viaje/servicios-viaje-datos'
 import { estadoFicha, estadoServicios, type EstadoBloque, type TipoDerivado } from './estado-bloques-derivado'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,6 +25,8 @@ export interface BloqueConEstadoDerivado {
   tipo: TipoDerivado
   /** Solo la ficha: los campos de su config. */
   campos?: CampoContacto[]
+  /** Solo servicios: su etapa pide los vouchers (`vouchers_completos` con la entrega encendida). */
+  exigeVouchers?: boolean
 }
 
 export async function derivarEstadosDeBloques(
@@ -51,7 +53,7 @@ export async function derivarEstadosDeBloques(
 
   for (const b of args.bloques) {
     if (b.tipo === 'autorizacion') out.set(b.instanciaId, autorizacion)
-    else if (b.tipo === 'servicios') out.set(b.instanciaId, servicios)
+    else if (b.tipo === 'servicios') out.set(b.instanciaId, servicios === null ? null : estadoServicios(servicios.filas, servicios.exigeConfirmacion, b.exigeVouchers === true))
     else out.set(b.instanciaId, ficha === undefined ? null : estadoFicha(b.campos ?? [], ficha))
   }
   return out
@@ -85,10 +87,10 @@ async function valoresDelContacto(db: Db, args: { workspaceId: string; contactoI
   return { ...c, custom_data: c.custom_data ?? {} }
 }
 
-/** El veredicto del gate `servicios_listos`. Con la línea apagada no hay veredicto. */
-async function veredictoServicios(db: Db, args: { workspaceId: string; negocioId: string; configLinea: unknown }): Promise<EstadoBloque | null> {
+/** Lo que hace falta para el veredicto de servicios (cada bloque lo juzga con los gates de su etapa). Con la línea apagada no hay veredicto. */
+async function veredictoServicios(db: Db, args: { workspaceId: string; negocioId: string; configLinea: unknown }): Promise<{ filas: ServicioDelNegocio[]; exigeConfirmacion: boolean } | null> {
   if (!serviciosViajeActivo(args.configLinea)) return null
   const filas = await leerServiciosDelNegocio(db, { workspaceId: args.workspaceId, negocioId: args.negocioId })
   if (filas === null) return null
-  return estadoServicios(filas, configReglasPago(args.configLinea).exigeConfirmacion)
+  return { filas, exigeConfirmacion: configReglasPago(args.configLinea).exigeConfirmacion }
 }

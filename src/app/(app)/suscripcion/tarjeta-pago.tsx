@@ -21,12 +21,15 @@ export function TarjetaPago({
   lectura,
   pagarAhora = false,
   rechazoTarjeta = null,
+  avisoTarjeta = null,
 }: {
   lectura: LecturaPago
   /** Una suscripción sin enlace vigente: «Pagar ahora» pide el enlace ya (`pagarCuotaPendiente`). */
   pagarAhora?: boolean
   /** La respuesta del banco al cobrar la tarjeta guardada, si la rechazó. */
   rechazoTarjeta?: string | null
+  /** El aviso de un CDA con pago automático cuyo cobro a la tarjeta no pasó (`textoFalloTarjeta`). */
+  avisoTarjeta?: string | null
 }) {
   if (lectura.estado === 'no_disponible') {
     return (
@@ -67,6 +70,11 @@ export function TarjetaPago({
               </p>
             )}
             <p className="text-xs text-tinta-suave">{NOTA_IVA_CDA}</p>
+            {avisoTarjeta && (
+              <p data-aviso-tarjeta className="text-sm text-tinta">
+                {avisoTarjeta}
+              </p>
+            )}
             {rechazoTarjeta && (
               <p data-rechazo-tarjeta className="text-sm text-tinta">
                 El banco rechazó el cobro a tu tarjeta: {rechazoTarjeta}. No se cobró nada. Puedes pagar ahora con otro

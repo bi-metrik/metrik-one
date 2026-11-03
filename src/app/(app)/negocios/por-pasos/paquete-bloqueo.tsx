@@ -1,17 +1,25 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition } from 'react'
-import { AlertTriangle, ImageIcon, Loader2, Package, Plane, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { AlertTriangle, ImageIcon, Loader2, Package, Plane, Plus, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, type ImagenNueva } from '@/app/(app)/negocios/bloqueo-actions'
+import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, operadoresDelDirectorio, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
+import { claveDeNombre, esOperadorMezclado, operadorDeLaLectura, operadorInicialDelPaquete, operadoresDeLaSolicitud } from '@/lib/cotizaciones/bloqueo-operador'
+import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
+import { comisionEscrita, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
+import { EVENTO_ENFOCAR_COMISION, type DetalleEnfocarComision } from '@/lib/cotizaciones/enfocar-comision'
+import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
 import {
   ACOMODACIONES,
   CATEGORIAS_INCLUYE,
   ETIQUETA_ACOMODACION,
+  ETIQUETA_ADULTO_CON_NINO,
   ETIQUETA_INCLUYE,
   avisosDelPaquete,
+  conEdadesDeLaSolicitud,
   costoDelPaquete,
+  edadesIniciales,
   fechasDelPaquete,
   leerPaqueteBloqueo,
   paqueteVacio,
@@ -22,6 +30,7 @@ import {
   type TramoBloqueo,
   type VueloBloqueo,
 } from '@/lib/cotizaciones/bloqueo-paquete'
+import { casillaParaPegado, type CasillaPaquete, type RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { leerTarifaPax } from '@/lib/cotizaciones/tarifa-pasajero'
 import { todayBogotaISO } from '@/lib/dates/bogota'
 
@@ -95,13 +104,45 @@ export interface PropsTarjetaPaquete {
   /** Precio al cliente de la línea (lo que guardó el servidor). */
   precioVenta: number | null
   editable: boolean
+  /**
+   * El operador de la SOLICITUD (`operador_bloqueo`), tal cual. Puede nombrar a varios («ALIADOS
+   * TRAVEL / TU RESERVA»): cada paquete guarda el suyo (H-13 del QA del 2026-10-29).
+   */
   operador: string | null
   /** Los pasajeros de la solicitud, para el aviso de personas. */
   pasajeros: { adultos: number; ninos: number; infantes: number } | null
+  /**
+   * Las edades de los niños que dice la Solicitud (`edadesNinosDeLaSolicitud`). Precargan la casilla
+   * «Edad de cada niño» si el paquete no tiene las suyas; la asesora las puede cambiar.
+   */
+  edadesNinosSolicitud?: readonly number[] | null
   /** El vuelo del primer paquete del bloqueo, para ofrecerlo en este. */
   vueloSugerido: VueloBloqueo | null
   onCambio: () => void
   onEliminar: () => void
+  /**
+   * El puente con la bandeja (QA del 2026-10-29): el Ctrl+V de la ventana y «Es paquete de bloqueo»
+   * llegan aquí, a la casilla vacía o a la que diga la detección. Sin él, solo la casilla con foco.
+   */
+  registro?: RegistroDePaquetes | null
+  /**
+   * Lo que la cascada dice de esta línea con reglas de margen (decisión de Mauricio del 2026-10-29):
+   * con ella la tarjeta ofrece «Comisión de esta tarifa» (Pública) y «+ Descuento para el cliente»
+   * (Neta), como el hotel. `null` sin reglas.
+   */
+  reglasDeLinea?: ReglasDeLinea | null
+  /** El margen que de verdad se aplicó (ya con el descuento). */
+  margenAplicado?: number | null
+  /**
+   * ¿El paquete va en la propuesta? (D5 de Mauricio, 2026-10-29): el «va en la propuesta» de su
+   * tarifa. `null` = todavía no hay tarifas (un solo paquete): no se muestra la casilla.
+   */
+  enPropuesta?: boolean | null
+  /**
+   * Incluir o sacar el paquete de la propuesta (reversible). Si devuelve una promesa, la casilla
+   * muestra el cambio en el acto y «Guardando…» hasta que termine; `false` = no se pudo (vuelve).
+   */
+  onEnPropuesta?: (va: boolean) => void | Promise<boolean>
 }
 
 type Comision = 'incluida' | 'por_incluir'
@@ -115,42 +156,179 @@ const numeroONulo = (v: string) => {
   const n = Number(v.replace(/[^\d]/g, ''))
   return v.trim() === '' || !Number.isFinite(n) ? null : n
 }
+/** «5, 8» → [5, 8]. Lo que no es una edad de 0 a 17 se ignora. */
+const edadesDeTexto = (v: string) => v.split(/[^\d]+/).filter(Boolean).map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 17)
 
 export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
   const guardado = useMemo(() => leerPaqueteBloqueo(leerTarifaPax(p.tarifaPax).bloqueo), [p.tarifaPax])
-  const tipoGuardado = leerTarifaPax(p.tarifaPax).tipoTarifa?.tipo ?? null
+  const tarifaGuardada = leerTarifaPax(p.tarifaPax)
+  const tipoGuardado = tarifaGuardada.tipoTarifa?.tipo ?? null
+  // Una Pública con comisión gana su comisión: «Margen 0 %» diría que se vende a costo (Vera). La
+  // comisión puede estar en % o en pesos (D3, 2026-10-29): en pesos se dice sobre el costo guardado.
+  const comisionGuardadaEscrita = comisionEscrita(tarifaGuardada.tipoTarifa)
+  const costoGuardado = guardado ? costoDelPaquete(guardado).total : null
+  const comisionGuardada = comisionGuardadaEscrita === null
+    ? null
+    : comisionGuardadaEscrita.tipo === 'pct'
+      ? comisionGuardadaEscrita.valor
+      : costoGuardado && costoGuardado > 0 ? (comisionGuardadaEscrita.valor / costoGuardado) * 100 : null
+  const margenVisible = comisionGuardada ?? p.margenAplicado ?? null
+  // QA del #1342 · una Pública sin comisión no tiene margen («Margen 0 %» decía que se vende a
+  // costo): falta la comisión. Y el costo de una Pública es lo que paga la agencia (D2).
+  const publicaSinComision = tipoGuardado === 'publica' && comisionGuardadaEscrita === null
+  const comisionPesosGuardada = comisionGuardadaEscrita === null || costoGuardado === null
+    ? null
+    : comisionGuardadaEscrita.tipo === 'monto'
+      ? Math.min(costoGuardado, comisionGuardadaEscrita.valor)
+      : (comisionGuardadaEscrita.valor / 100) * costoGuardado
   const [abierto, setAbierto] = useState(guardado === null)
-  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => guardado ?? paqueteVacio(p.operador))
+  // La edad de cada niño abre con la de la Solicitud si el paquete no tiene la suya (prueba real del
+  // 2026-10-29). Solo entra a la cuenta con niños en el paquete: sin ellos no frena por rango CHD.
+  const edadesDeInicio = edadesIniciales(guardado?.distribucion.edadesNinos, p.edadesNinosSolicitud)
+  // H-13: con un operador en la solicitud el paquete nace con él; con varios, sin operador (se elige).
+  const [paquete, setPaquete] = useState<PaqueteBloqueo>(() => conEdadesDeLaSolicitud(guardado ?? paqueteVacio(operadorInicialDelPaquete(p.operador)), p.edadesNinosSolicitud))
+  const candidatos = useMemo(() => operadoresDeLaSolicitud(p.operador), [p.operador])
+  const [delDirectorio, setDelDirectorio] = useState<string[]>([])
+  const [fichaOperador, setFichaOperador] = useState<string | null | undefined>(undefined)
   const [comision, setComision] = useState<Comision>(tipoGuardado === 'publica' ? 'incluida' : 'por_incluir')
+  // La comisión de la agencia (D3): visible desde el inicio con «Pública», y se guarda con el paquete.
+  const [comisionAgencia, setComisionAgencia] = useState<ComisionEscrita | null>(comisionGuardadaEscrita)
   const [imagenes, setImagenes] = useState<{ hotel?: ImagenNueva & { vista: string }; vuelo?: ImagenNueva & { vista: string } }>({})
   const [leyendo, setLeyendo] = useState<{ hotel: boolean; vuelo: boolean }>({ hotel: false, vuelo: false })
   const [rechazo, setRechazo] = useState<{ hotel?: string; vuelo?: string }>({})
+  // Un pegado que la detección no supo ubicar: la asesora dice si es el hotel o el vuelo.
+  const [porElegir, setPorElegir] = useState<{ dataUrl: string; mensaje: string } | null>(null)
+  const [detectando, setDetectando] = useState(false)
+  const [edadesTexto, setEdadesTexto] = useState(() => edadesDeInicio.join(', '))
   const [guardando, empezar] = useTransition()
+  // «Va en la propuesta» (QA del #1342): el cambio se ve en el acto. Vale mientras la tarjeta siga
+  // recibiendo el valor de antes del clic; cuando llega otro, manda el del servidor.
+  const [vaPendiente, setVaPendiente] = useState<{ va: boolean; desde: boolean | null | undefined } | null>(null)
+  const [guardandoVa, setGuardandoVa] = useState(false)
+  // Llegó otro valor del servidor: lo optimista ya no sirve (no vuelve si el valor regresa después).
+  if (vaPendiente && vaPendiente.desde !== p.enPropuesta && !guardandoVa) setVaPendiente(null)
+  const vaVisible = vaPendiente && vaPendiente.desde === p.enPropuesta ? vaPendiente.va : p.enPropuesta
+  async function cambiarVa(va: boolean) {
+    if (!p.onEnPropuesta) return
+    setVaPendiente({ va, desde: p.enPropuesta })
+    setGuardandoVa(true)
+    try {
+      const r = await p.onEnPropuesta(va)
+      if (r === false) setVaPendiente(null)
+    } catch {
+      setVaPendiente(null)
+      toast.error('No se pudo cambiar: revisa la conexión y vuelve a intentarlo.')
+    } finally {
+      setGuardandoVa(false)
+    }
+  }
 
   const costo = costoDelPaquete(paquete)
   const fechas = fechasDelPaquete(paquete)
-  const avisos = avisosDelPaquete(paquete, { hoy: todayBogotaISO(), pasajeros: p.pasajeros })
+  const avisos = avisosDelPaquete(paquete, { hoy: todayBogotaISO(), pasajeros: p.pasajeros, operadorSolicitud: p.operador })
+  const operadorMezclado = esOperadorMezclado(paquete.operador)
+
+  // Los operadores del Directorio, para elegir el del paquete (una vez, al abrir la tarjeta editable).
+  useEffect(() => {
+    if (!abierto || !p.editable || delDirectorio.length > 0) return
+    let vivo = true
+    // Si no se puede leer, la lista queda con los de la solicitud: escribir a mano sigue sirviendo.
+    Promise.resolve().then(() => operadoresDelDirectorio()).then(l => { if (vivo && Array.isArray(l)) setDelDirectorio(l) }).catch(() => {})
+    return () => { vivo = false }
+  }, [abierto, p.editable, delDirectorio.length])
+  const opcionesOperador = useMemo(() => {
+    const vistos = new Set<string>()
+    return [...candidatos, ...delDirectorio].filter(o => {
+      const k = claveDeNombre(o)
+      if (!k || vistos.has(k)) return false
+      vistos.add(k)
+      return true
+    })
+  }, [candidatos, delDirectorio])
   const h = paquete.hotel
 
   function cambiar(f: (x: PaqueteBloqueo) => PaqueteBloqueo) {
     setPaquete(x => f(structuredClone(x)))
   }
 
-  async function leer(cual: 'hotel' | 'vuelo', dataUrl: string) {
+  async function leer(cual: CasillaPaquete, dataUrl: string) {
+    setPorElegir(null)
     setLeyendo(l => ({ ...l, [cual]: true }))
     setRechazo(r => ({ ...r, [cual]: undefined }))
     try {
       const r = await leerPantallazoBloqueo(p.cotizacionId, cual, dataUrl)
       if (!r.ok) { setRechazo(x => ({ ...x, [cual]: r.mensaje })); return }
-      setImagenes(i => ({ ...i, [cual]: { dataUrl, huella: r.huella, vista: dataUrl } }))
-      if (r.cual === 'hotel') cambiar(x => ({ ...x, hotel: r.hotel, incluye: r.incluye }))
-      else cambiar(x => ({ ...x, vuelo: r.vuelo }))
+      ponerLectura(r, dataUrl)
     } catch {
       setRechazo(x => ({ ...x, [cual]: 'La lectura se interrumpió. Vuelve a pegar el pantallazo.' }))
     } finally {
       setLeyendo(l => ({ ...l, [cual]: false }))
     }
   }
+
+  function ponerLectura(r: Extract<Awaited<ReturnType<typeof leerPantallazoBloqueo>>, { ok: true }>, dataUrl: string) {
+    setImagenes(i => ({ ...i, [r.cual]: { dataUrl, huella: r.huella, vista: dataUrl } }))
+    if (r.cual === 'hotel') {
+      cambiar(x => {
+        // H-13: si el pantallazo deja ver el operador (logo o nombre) y el paquete no tiene uno propio.
+        const leido = !x.operador || esOperadorMezclado(x.operador) ? operadorDeLaLectura(r.operador ?? null, candidatos) : null
+        return { ...x, ...(leido ? { operador: leido } : {}), hotel: { ...r.hotel, infante: r.hotel.infante ?? x.hotel.infante ?? null }, incluye: r.incluye }
+      })
+    }
+    else cambiar(x => ({ ...x, vuelo: r.vuelo }))
+  }
+
+  /** Con las dos casillas vacías (o llenas), ONE decide con la detección; si no sabe, pregunta. */
+  async function leerDetectando(dataUrl: string) {
+    setPorElegir(null)
+    setDetectando(true)
+    try {
+      const r = await leerPantallazoBloqueo(p.cotizacionId, 'detectar', dataUrl)
+      if (r.ok) { ponerLectura(r, dataUrl); return }
+      setPorElegir({ dataUrl, mensaje: r.mensaje })
+    } catch {
+      setPorElegir({ dataUrl, mensaje: 'La lectura se interrumpió. Elige la casilla o vuelve a pegar el pantallazo.' })
+    } finally {
+      setDetectando(false)
+    }
+  }
+
+  // El pegado de la ventana y «Es paquete de bloqueo» de la bandeja entran por aquí (QA 2026-10-29).
+  const vivo = useRef({ abierto, paquete, imagenes, leer, leerDetectando })
+  useEffect(() => { vivo.current = { abierto, paquete, imagenes, leer, leerDetectando } })
+  const registro = p.registro ?? null
+  useEffect(() => {
+    if (!registro) return
+    const lleno = () => {
+      const v = vivo.current
+      return {
+        hotelLleno: !!(v.paquete.hotel.hotel || v.paquete.hotel.precios.length > 0 || v.paquete.imagenes.hotel || v.imagenes.hotel),
+        vueloLleno: !!((v.paquete.vuelo?.tramos.length ?? 0) > 0 || v.paquete.imagenes.vuelo || v.imagenes.vuelo),
+      }
+    }
+    return registro.registrar(p.itemId, {
+      estado: () => ({ itemId: p.itemId, abierto: vivo.current.abierto, ...lleno() }),
+      recibir: (dataUrl, casilla) => {
+        setAbierto(true)
+        const cual = casilla ?? casillaParaPegado(lleno())
+        if (cual) void vivo.current.leer(cual, dataUrl)
+        else void vivo.current.leerDetectando(dataUrl)
+      },
+    })
+  }, [registro, p.itemId])
+
+  // «Ir» desde «Impide enviar · Falta la comisión» (QA del #1342): la tarjeta se abre en Pública y
+  // `pedirFocoEnComision` pone el foco en la casilla cuando aparece.
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
+    const alPedir = (e: Event) => {
+      if ((e as CustomEvent<DetalleEnfocarComision>).detail?.itemId !== p.itemId) return
+      setAbierto(true)
+      setComision('incluida')
+    }
+    window.addEventListener(EVENTO_ENFOCAR_COMISION, alPedir)
+    return () => window.removeEventListener(EVENTO_ENFOCAR_COMISION, alPedir)
+  }, [p.itemId])
 
   function guardar() {
     empezar(async () => {
@@ -161,31 +339,70 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
           vuelo: imagenes.vuelo ? { dataUrl: imagenes.vuelo.dataUrl, huella: imagenes.vuelo.huella } : null,
         },
         comision,
+        ...(comision === 'incluida' ? { comisionAgencia } : {}),
       })
       if (!r.success) { toast.error(r.error); return }
       setPaquete(r.paquete)
+      setFichaOperador(r.fichaOperador ?? null)
       setImagenes({})
+      if (r.descuentoQuitado) toast.warning(`Se quitó el descuento para el cliente («${r.descuentoQuitado}»): la tarifa con la comisión incluida es el precio público.`)
       toast.success(r.costo === null ? 'Paquete guardado, todavía sin costo.' : 'Paquete guardado.')
       p.onCambio()
     })
   }
 
-  const ocupado = guardando || leyendo.hotel || leyendo.vuelo
+  const ocupado = guardando || leyendo.hotel || leyendo.vuelo || detectando
+
+  // QA del #1342 · la comisión de un paquete YA guardado como Pública se guarda al salir de la
+  // casilla (antes esperaba a «Guardar paquete» y nada lo decía). Uno nuevo, o que todavía no es
+  // Pública en la base, la guarda el botón: lo dice la nota de la casilla.
+  const comisionSeGuardaSola = guardado !== null && tipoGuardado === 'publica' && comision === 'incluida'
+  function alEscribirComision(c: ComisionEscrita | null) {
+    setComisionAgencia(c)
+    if (!comisionSeGuardaSola) return
+    ajustarReglas(c === null ? { comisionPct: null } : c.tipo === 'pct' ? { comisionPct: c.valor } : { comisionMonto: c.valor })
+  }
+
+  function ajustarReglas(cambios: ReglasDelPaquete) {
+    empezar(async () => {
+      const r = await ajustarReglasDelPaquete(p.itemId, cambios)
+      if (!r.success) { toast.error(r.error); return }
+      p.onCambio()
+    })
+  }
   const disponibles = ACOMODACIONES.filter(a => !h.precios.some(x => x.acomodacion === a))
 
   return (
-    <article data-paquete-bloqueo className="rounded-lg border bg-white p-3 text-xs">
+    <article data-paquete-bloqueo data-item-id={p.itemId} className="rounded-lg border bg-white p-3 text-xs"
+      onFocusCapture={() => registro?.activar(p.itemId)} onPointerDownCapture={() => registro?.activar(p.itemId)}>
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <p className="m-0 text-sm font-semibold">{h.hotel ?? 'Paquete sin hotel'}</p>
           <p className="m-0 text-[11px] text-[#6E6A62]">
-            {[h.zona, h.noches ? `${h.noches} noches` : null, fechas.salida && fechas.regreso ? `${fechas.salida} → ${fechas.regreso}` : fechas.salida, costo.personas > 0 ? `${costo.personas} personas` : null]
+            {[paquete.operador && !operadorMezclado ? paquete.operador : null, h.zona, h.noches ? `${h.noches} noches` : null, fechas.salida && fechas.regreso ? `${fechas.salida} → ${fechas.regreso}` : fechas.salida, costo.personas > 0 ? `${costo.personas} personas` : null]
               .filter(Boolean).join(' · ') || 'Pega el hotel y el vuelo de este paquete.'}
           </p>
         </div>
         <div className="text-right">
-          <p className="m-0 text-[11px] text-[#6E6A62]">Costo {pesos(guardado ? costoDelPaquete(guardado).total : null)}</p>
+          {guardado && tipoGuardado === 'publica' ? (
+            <p className="m-0 text-[11px] text-[#6E6A62]" data-costo-agencia>
+              {comisionPesosGuardada === null
+                ? <>Costo de la agencia: <b className="text-[#B3382C]">falta la comisión</b></>
+                : <>Costo de la agencia {pesos((costoGuardado ?? 0) - comisionPesosGuardada)}</>}
+            </p>
+          ) : (
+            <p className="m-0 text-[11px] text-[#6E6A62]">Costo {pesos(guardado ? costoDelPaquete(guardado).total : null)}</p>
+          )}
           <p className="m-0 text-sm font-semibold tabular-nums">{pesos(p.precioVenta)}</p>
+          {guardado && publicaSinComision ? (
+            <p className="m-0 text-[11px] font-semibold text-[#B3382C]" data-margen-paquete="falta-comision">
+              Margen: falta la comisión
+            </p>
+          ) : margenVisible !== null && guardado && (
+            <p className="m-0 text-[11px] text-[#6E6A62]" data-margen-paquete>
+              Margen {String(Math.round(margenVisible * 10) / 10).replace('.', ',')} %{comisionGuardada !== null ? ' (comisión)' : ''}
+            </p>
+          )}
         </div>
       </header>
 
@@ -193,9 +410,21 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         <button type="button" className="text-[11px] font-semibold text-[#0E5C43] underline" onClick={() => setAbierto(a => !a)}>
           {abierto ? 'Cerrar' : 'Ver y editar el paquete'}
         </button>
+        {/* D5 (2026-10-29): incluir o sacar el paquete de la propuesta, sin borrarlo. */}
+        {p.enPropuesta !== null && p.enPropuesta !== undefined && p.onEnPropuesta && (
+          <label className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#191713]" data-paquete-en-propuesta={vaVisible ? 'si' : 'no'}>
+            <input type="checkbox" checked={!!vaVisible} disabled={!p.editable || ocupado || guardandoVa} onChange={e => void cambiarVa(e.target.checked)} />
+            Va en la propuesta
+            {guardandoVa && (
+              <span className="inline-flex items-center gap-1 font-normal text-[#6E6A62]" data-guardando-propuesta>
+                <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Guardando…
+              </span>
+            )}
+          </label>
+        )}
         {p.editable && (
           <button type="button" className="inline-flex items-center gap-1 text-[11px] text-red-700" onClick={p.onEliminar}>
-            <Trash2 className="h-3 w-3" aria-hidden /> Quitar paquete
+            <Trash2 className="h-3 w-3" aria-hidden /> Borrar paquete
           </button>
         )}
       </div>
@@ -210,6 +439,59 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                 vista={imagenes.vuelo?.vista ?? null} guardada={!!paquete.imagenes.vuelo} onImagen={d => leer('vuelo', d)} />
             </div>
           )}
+          {detectando && (
+            <p className="m-0 flex items-center gap-1.5 text-[11px] text-[#6E6A62]" data-detectando-paquete>
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> Leyendo el pantallazo pegado…
+            </p>
+          )}
+          {porElegir && p.editable && (
+            <div data-elegir-casilla className="flex flex-wrap items-center gap-2 rounded bg-amber-50 p-1.5 text-[11px] font-medium text-amber-900">
+              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+              {porElegir.mensaje}
+              <button type="button" data-es-casilla="hotel" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => void leer('hotel', porElegir.dataUrl)}>Es el hotel</button>
+              <button type="button" data-es-casilla="vuelo" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => void leer('vuelo', porElegir.dataUrl)}>Es el vuelo</button>
+              {registro && (
+                <button type="button" data-es-casilla="otro" className="rounded border border-amber-300 bg-white px-2 py-0.5"
+                  onClick={() => { if (registro.aLaBandeja(porElegir.dataUrl)) setPorElegir(null); else toast.error('No se pudo devolver a la bandeja. Pégalo allí.') }}>
+                  Otro servicio
+                </button>
+              )}
+              <button type="button" data-es-casilla="descartar" className="rounded border border-amber-300 bg-white px-2 py-0.5" onClick={() => setPorElegir(null)}>Descartar</button>
+            </div>
+          )}
+
+          {/* ── Operador del paquete (H-13 del QA del 2026-10-29) ── */}
+          <fieldset disabled={!p.editable} className="space-y-1" data-operador-paquete>
+            <legend className="text-[11px] font-semibold uppercase tracking-wide text-[#6E6A62]">Operador del paquete</legend>
+            {candidatos.length > 1 && (
+              <div className="flex flex-wrap gap-1.5">
+                {candidatos.map(c => {
+                  const elegido = claveDeNombre(paquete.operador) === claveDeNombre(c)
+                  return (
+                    <button key={c} type="button" data-operador-opcion={c} aria-pressed={elegido}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${elegido ? 'border-[#0E5C43] bg-[#0E5C43] text-white' : 'border-[#D9E7E0] bg-white text-[#0E5C43]'}`}
+                      onClick={() => { setFichaOperador(undefined); cambiar(x => { x.operador = c; return x }) }}>
+                      {c}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <label className={ETIQUETA}>
+              {candidatos.length > 1 ? 'O escríbelo' : 'Operador'}
+              <input className={`${CAJA} sm:w-72`} list={`operadores-${p.itemId}`} aria-label="Operador del paquete"
+                value={operadorMezclado ? '' : paquete.operador ?? ''}
+                onChange={e => { setFichaOperador(undefined); const v = e.target.value; cambiar(x => { x.operador = vacioANulo(v); return x }) }} />
+              <datalist id={`operadores-${p.itemId}`}>
+                {opcionesOperador.map(o => <option key={o} value={o} />)}
+              </datalist>
+            </label>
+            {fichaOperador !== undefined && paquete.operador && !operadorMezclado && (
+              <p className="m-0 text-[11px] text-[#6E6A62]" data-ficha-operador={fichaOperador ? 'si' : 'no'}>
+                {fichaOperador ? `Ligado a la ficha «${fichaOperador}» del Directorio.` : 'No está en el Directorio de proveedores: el servicio queda con el nombre escrito.'}
+              </p>
+            )}
+          </fieldset>
 
           {/* ── Hotel ── */}
           <fieldset disabled={!p.editable} className="space-y-2">
@@ -257,23 +539,71 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
                     </tr>
                   )
                 })}
+                {(h.precios.some(x => x.acomodacion === 'doble') || (paquete.distribucion.adultoConNino ?? 0) > 0) && (
+                  // H2-2 (QA del 2026-10-29): «menor con un adulto, el adulto paga Doble». Cada habitación
+                  // suma un adulto a la Doble; su niño es uno de «Niños» (se sube solo si faltan).
+                  <tr data-acomodacion="adulto_con_nino">
+                    <td>{ETIQUETA_ADULTO_CON_NINO} <span className="text-[#6E6A62]">(adulto a Doble)</span></td>
+                    <td>{pesos(h.precios.find(x => x.acomodacion === 'doble')?.precioPorPersona ?? null)}</td>
+                    <td><input aria-label="Habitaciones de 1 adulto + 1 niño" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.adultoConNino || ''}
+                      onChange={e => cambiar(x => {
+                        const n = numeroONulo(e.target.value) ?? 0
+                        if (n > 0) x.distribucion.adultoConNino = n
+                        else delete x.distribucion.adultoConNino
+                        if (x.distribucion.ninos < n) {
+                          x.distribucion.ninos = n
+                          if ((x.distribucion.edadesNinos ?? []).length === 0) x.distribucion.edadesNinos = edadesDeTexto(edadesTexto)
+                        }
+                        return x
+                      })} /></td>
+                    <td>{costo.filas.find(f => f.clave === 'adulto_con_nino')?.personas ?? 0}</td>
+                    <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'adulto_con_nino')?.total ?? null)}</td>
+                    <td />
+                  </tr>
+                )}
                 <tr data-acomodacion="nino">
                   <td>Niño{h.nino?.edadMin !== null && h.nino?.edadMin !== undefined ? ` (${h.nino.edadMin}-${h.nino.edadMax ?? '?'} años)` : ''}</td>
                   <td><input aria-label="Precio por niño" className={`${CAJA} w-28`} inputMode="numeric" value={h.nino?.precio ?? ''}
                     onChange={e => cambiar(x => { x.hotel.nino = { edadMin: x.hotel.nino?.edadMin ?? null, edadMax: x.hotel.nino?.edadMax ?? null, precio: numeroONulo(e.target.value) }; return x })} /></td>
                   <td colSpan={2}><input aria-label="Niños" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.ninos || ''}
-                    onChange={e => cambiar(x => { x.distribucion.ninos = numeroONulo(e.target.value) ?? 0; return x })} /> niños</td>
+                    onChange={e => cambiar(x => {
+                      x.distribucion.ninos = numeroONulo(e.target.value) ?? 0
+                      // Al poner niños, las edades de la casilla (precargadas de la Solicitud) entran a la cuenta.
+                      if (x.distribucion.ninos > 0 && (x.distribucion.edadesNinos ?? []).length === 0) x.distribucion.edadesNinos = edadesDeTexto(edadesTexto)
+                      return x
+                    })} /> niños</td>
                   <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'nino')?.total ?? null)}</td>
+                  <td />
+                </tr>
+                <tr data-acomodacion="infante">
+                  <td>Infante</td>
+                  <td><input aria-label="Precio por infante" className={`${CAJA} w-28`} inputMode="numeric" placeholder="0 si no paga" value={h.infante?.precio ?? ''}
+                    onChange={e => cambiar(x => { x.hotel.infante = { precio: numeroONulo(e.target.value) }; return x })} /></td>
+                  <td colSpan={2}><input aria-label="Infantes" className={`${CAJA} w-16`} type="number" min={0} value={paquete.distribucion.infantes || ''}
+                    onChange={e => cambiar(x => { x.distribucion.infantes = numeroONulo(e.target.value) ?? 0; return x })} /> infantes</td>
+                  <td className="text-right">{pesos(costo.filas.find(f => f.clave === 'infante')?.total ?? null)}</td>
                   <td />
                 </tr>
               </tbody>
             </table>
+            {paquete.distribucion.ninos > 0 && (
+              <label className={`${ETIQUETA} max-w-xs`}>
+                Edad de cada niño (para revisar el rango CHD)
+                <input aria-label="Edades de los niños" className={CAJA} placeholder="Ej.: 5, 8" value={edadesTexto}
+                  onChange={e => { setEdadesTexto(e.target.value); const edades = edadesDeTexto(e.target.value); cambiar(x => { x.distribucion.edadesNinos = edades; return x }) }} />
+              </label>
+            )}
             {disponibles.length > 0 && p.editable && (
               <select aria-label="Agregar acomodación" className={CAJA} value=""
                 onChange={e => { const a = e.target.value as Acomodacion; if (a) cambiar(x => { x.hotel.precios.push({ acomodacion: a, precioPorPersona: null }); return x }) }}>
                 <option value="">+ Acomodación</option>
                 {disponibles.map(a => <option key={a} value={a}>{ETIQUETA_ACOMODACION[a]}</option>)}
               </select>
+            )}
+            {h.columnaCosto && (
+              <p className="m-0 text-[11px] text-[#6E6A62]" data-columna-costo>
+                La pantalla trae varias columnas de precio: el costo es la columna «{h.columnaCosto}».
+              </p>
             )}
             <p className="m-0 text-right text-sm font-semibold tabular-nums" data-costo-paquete>
               {costo.personas} personas · Costo del paquete {pesos(costo.total)}
@@ -314,6 +644,9 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
               </label>
             ))}
             {paquete.incluye.texto && <p className="m-0 text-[11px] text-[#6E6A62]">Dice la pantalla: «{paquete.incluye.texto}»</p>}
+            {/* V5 (QA del 2026-10-29): lo que no incluye sale en «A tener en cuenta» de la propuesta. */}
+            <Campo etiqueta="No incluye (sale en la propuesta)" valor={paquete.incluye.noIncluye ?? null}
+              onCambio={v => cambiar(x => { x.incluye.noIncluye = vacioANulo(v); return x })} />
           </fieldset>
 
           {/* ── Vuelo ── */}
@@ -358,12 +691,40 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
             )}
           </fieldset>
 
-          {/* ── Comisión: la casilla de siempre (Pública / Neta) ── */}
-          <fieldset disabled={!p.editable} className="flex flex-wrap gap-3 text-[11px]">
-            <legend className="text-[11px] font-semibold uppercase tracking-wide text-[#6E6A62]">Comisión</legend>
-            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'incluida'} onChange={() => setComision('incluida')} /> Incluida en el precio (margen 0 %)</label>
-            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'por_incluir'} onChange={() => setComision('por_incluir')} /> Por incluir (margen de la cotización)</label>
+          {/* ── Tarifa: Pública (con la comisión de la agencia, obligatoria) o Neta (D3, 2026-10-29) ── */}
+          <fieldset disabled={!p.editable} className="flex flex-col gap-1.5 text-[11px]">
+            <legend className="text-[11px] font-semibold uppercase tracking-wide text-[#6E6A62]">Tarifa del operador</legend>
+            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'incluida'} onChange={() => setComision('incluida')} /> Pública: el precio ya trae la comisión de la agencia</label>
+            {comision === 'incluida' && (
+              <div className="pl-5" data-comision-paquete>
+                <CampoComision
+                  comision={comisionAgencia}
+                  editable={p.editable}
+                  ocupado={ocupado}
+                  onComision={alEscribirComision}
+                  nota={comisionSeGuardaSola ? 'Se guarda al salir de la casilla.' : 'Se guarda con «Guardar paquete».'}
+                />
+              </div>
+            )}
+            <label className="flex items-center gap-1"><input type="radio" name={`comision-${p.itemId}`} checked={comision === 'por_incluir'} onChange={() => setComision('por_incluir')} /> Neta: por incluir (margen de la cotización)</label>
           </fieldset>
+
+          {/* Descuento al cliente de un paquete Neto, como el hotel (decisión del 2026-10-29). Sobre lo
+              GUARDADO. La comisión de la Pública va arriba, con el tipo de tarifa. */}
+          {p.reglasDeLinea && guardado && tipoGuardado !== 'publica' && (
+            <div data-reglas-paquete>
+              <ReglasDeOpcion
+                reglas={p.reglasDeLinea}
+                descuento={tarifaGuardada.descuentoCliente ?? null}
+                comision={null}
+                publica={false}
+                editable={p.editable}
+                ocupado={ocupado}
+                onDescuento={d => ajustarReglas({ descuentoCliente: d })}
+                onComision={() => {}}
+              />
+            </div>
+          )}
 
           {avisos.length > 0 && (
             <ul className="m-0 list-none space-y-1 p-0" data-avisos-paquete>
@@ -409,6 +770,7 @@ function CasillaPantallazo({ titulo, icono, leyendo, rechazo, vista, guardada, o
   onImagen: (dataUrl: string) => void
 }) {
   const entrada = useRef<HTMLInputElement>(null)
+  const zona = useRef<HTMLDivElement>(null)
   function desdeArchivo(archivo: File | null | undefined) {
     if (!archivo || !archivo.type.startsWith('image/')) return
     const lector = new FileReader()
@@ -417,9 +779,11 @@ function CasillaPantallazo({ titulo, icono, leyendo, rechazo, vista, guardada, o
   }
   return (
     <div data-casilla-paquete={titulo.toLowerCase()} className="space-y-1">
+      {/* QA del 2026-10-29: el clic ENFOCA la casilla para pegar; abrir archivos es «Subir archivo». */}
       <div
+        ref={zona}
         tabIndex={0}
-        role="button"
+        role="textbox"
         aria-label={`Pega el pantallazo del ${titulo.toLowerCase()} de este paquete`}
         onPaste={e => {
           const i = Array.from(e.clipboardData.items).find(x => x.type.startsWith('image/'))
@@ -429,14 +793,17 @@ function CasillaPantallazo({ titulo, icono, leyendo, rechazo, vista, guardada, o
         }}
         onDragOver={e => e.preventDefault()}
         onDrop={e => { e.preventDefault(); desdeArchivo(e.dataTransfer.files?.[0]) }}
-        onClick={() => entrada.current?.click()}
-        className="flex min-h-[64px] cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed bg-[#F5F4F2] p-2 text-[11px] text-[#6B7280] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30"
+        onClick={() => zona.current?.focus()}
+        className="flex min-h-[64px] cursor-text items-center justify-center gap-1.5 rounded-lg border border-dashed bg-[#F5F4F2] p-2 text-[11px] text-[#6B7280] focus:border-[#10B981] focus:outline-none focus:ring-2 focus:ring-[#10B981]/30"
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- vista local del pantallazo pegado (data URL) */}
         {vista ? <img src={vista} alt={`Pantallazo del ${titulo.toLowerCase()}`} className="max-h-16 rounded" /> : (leyendo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : icono)}
-        <span>{leyendo ? `Leyendo el ${titulo.toLowerCase()}…` : `${titulo}: pega (Ctrl+V / Cmd+V), arrastra o elige el pantallazo${guardada && !vista ? ' · ya hay uno guardado' : ''}`}</span>
-        <input ref={entrada} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => desdeArchivo(e.target.files?.[0])} />
+        <span>{leyendo ? `Leyendo el ${titulo.toLowerCase()}…` : `${titulo}: haz clic aquí y pega (Ctrl+V / Cmd+V), o arrastra el pantallazo${guardada && !vista ? ' · ya hay uno guardado' : ''}`}</span>
       </div>
+      <button type="button" data-subir-archivo className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0E5C43]" onClick={() => entrada.current?.click()}>
+        <Upload className="h-3 w-3" aria-hidden /> Subir archivo
+      </button>
+      <input ref={entrada} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={e => { desdeArchivo(e.target.files?.[0]); e.target.value = '' }} />
       {rechazo && <p className="m-0 text-[11px] font-medium text-red-700">{rechazo}</p>}
     </div>
   )

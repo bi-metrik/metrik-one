@@ -7,6 +7,9 @@ import {
   completadoDeFila,
   fechaPorDiaDelViaje,
   fechasDeFila,
+  fechaDeLlegada,
+  fechasDeTramos,
+  llegaAlDiaSiguiente,
   resumenDeFechas,
   SIN_FECHAS,
   validarFechasEditadas,
@@ -140,5 +143,17 @@ describe('completar filas ya generadas', () => {
     expect(resumenDeFechas({ ...SIN_FECHAS, fecha_servicio: '2026-11-10', hora_inicio: '06:10', fecha_fin: '2026-11-15' })).toBe('mar 10 nov · 06:10 → dom 15 nov')
     expect(resumenDeFechas({ ...SIN_FECHAS, fecha_servicio: '2026-11-10', fecha_fin: '2026-11-10', hora_inicio: '06:10', hora_fin: '07:45' })).toBe('mar 10 nov · 06:10 → 07:45')
     expect(resumenDeFechas(SIN_FECHAS)).toBeNull()
+  })
+
+  it('vuelo nocturno: la llegada lleva «(+1 día)» (S9-2)', () => {
+    const t = { fecha: '2027-07-01', hora_salida: '16:55', hora_llegada: '08:45', origen: 'BOG', destino: 'MAD', aerolinea: 'Iberia', numero_vuelo: '6584' }
+    expect(llegaAlDiaSiguiente(t)).toBe(true)
+    expect(fechaDeLlegada(t)).toBe('2027-07-02')
+    expect(resumenDeFechas(fechasDeTramos([t]))).toBe('jue 1 jul · 16:55 → 08:45 (+1 día)')
+    expect(resumenDeFechas({ ...SIN_FECHAS, fecha_servicio: '2027-07-01', fecha_fin: '2027-07-01', hora_inicio: '22:00', hora_fin: '06:00' })).toBe('jue 1 jul · 22:00 → 06:00 (+1 día)')
+    // De día, o sin una de las horas, no se adivina.
+    expect(llegaAlDiaSiguiente({ hora_salida: '07:00', hora_llegada: '09:00' })).toBe(false)
+    expect(llegaAlDiaSiguiente({ hora_salida: '23:00', hora_llegada: null })).toBe(false)
+    expect(fechaDeLlegada({ fecha: '2027-07-01', hora_salida: null, hora_llegada: '08:00' })).toBe('2027-07-01')
   })
 })

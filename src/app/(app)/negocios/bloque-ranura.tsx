@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react'
 import { useTransitionTolerante } from '@/hooks/use-transition-tolerante'
 import { useRouter } from 'next/navigation'
-import { BedDouble, Car, Check, Info, MoreHorizontal, Package, Plane, Plus, Ticket, Trash2 } from 'lucide-react'
+import { BedDouble, Car, Check, Info, MoreHorizontal, Package, Plane, Plus, Ticket, TrainFront, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { agregarOpcionARanura } from '@/app/(app)/negocios/ranura-actions'
@@ -252,6 +252,7 @@ const ICONO: Record<TipoRanura | 'otro', typeof Plane> = {
   vuelo: Plane,
   hotel: BedDouble,
   traslado: Car,
+  tren: TrainFront,
   actividad: Ticket,
   otro: Package,
   paquete: Package,

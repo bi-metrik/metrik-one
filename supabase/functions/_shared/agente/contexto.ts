@@ -39,14 +39,17 @@ export function promptNucleo(r: Reglamento, maxLlamados: number): string {
     '- Si la respuesta es una de pocas salidas cerradas, ponlas en `opciones` (el sistema las muestra como botones o lista). Si es un dato libre, sin opciones. Si la persona contesta escribiendo en vez de tocar, entiéndele.',
     '- Si la persona te pregunta algo, contéstalo siempre: con `responder`, o en el `texto` de `proponer` si además propones. Si la propuesta pendiente ya es la que ibas a hacer, vuelve a llamar `proponer`: el sistema reenvía la pendiente con sus botones y tu respuesta arriba.',
     '- Una sola pregunta por mensaje, en la primera línea.',
+    '- Eres un asistente, no un formulario: interpreta y propón. Lo que la persona ya contestó en la conversación no lo vuelvas a preguntar; si su respuesta deja dos lecturas, toma la más probable, dila en una frase y deja que la corrija.',
+    '- Lo reenviado es del cliente; lo escrito es de quien te habla. Si te dice «ya te dije…», búscalo en sus mensajes y en los reenviados antes de pedirlo, y nunca le atribuyas al cliente lo que escribió él.',
+    '- Con `proponer`, el resumen ya dice qué se registra y qué falta: tu `texto` va solo si contestas algo, en una frase, sin repetir el resumen ni la lista de lo que falta.',
     '- `tema`: el tema del mensaje de la persona. Si no es de los temas del reglamento, `fuera` (el sistema contesta).',
   ].join('\n');
 }
 
 export function sistema(r: Reglamento, config: ConfigAgente): { texto: string; tokens: Record<string, number> } {
   const b1 = recortarTokens(promptNucleo(r, config.topes.llamados), TOPES_BLOQUE.nucleo);
-  const b2 = recortarTokens(bloqueSiempre(r), TOPES_BLOQUE.siempre);
-  const b3 = recortarTokens(bloqueIndice(r), TOPES_BLOQUE.indice);
+  const b2 = recortarTokens(bloqueSiempre(r), config.topes.bloques?.siempre ?? TOPES_BLOQUE.siempre);
+  const b3 = recortarTokens(bloqueIndice(r), config.topes.bloques?.indice ?? TOPES_BLOQUE.indice);
   const texto = [b1, `## Reglamento v${r.version} · siempre\n${b2}`, `## Reglamento · cuándo aplica\n${b3}`].join('\n\n');
   return { texto, tokens: { nucleo: tokens(b1), siempre: tokens(b2), indice: tokens(b3) } };
 }
@@ -82,19 +85,23 @@ const ETIQUETA_CLASE: Record<ClaseDocumento, string> = { viaje: 'del viaje', ide
 export function textoLectura(l: LecturaAdjunto | null | undefined): string {
   if (l === undefined) return '';
   // La lectura de la bandeja (documentos del cliente de una agencia): qué es y lo que dice, con sus palabras.
-  if (l?.clase !== undefined) {
+  if (l?.clase !== undefined && !l.mixta) {
     if (!l.legible || !l.texto) return ` · (no se pudo leer el archivo${l.motivo ? `: ${l.motivo}` : ''})`;
     return ` · lo que dice el archivo (${ETIQUETA_CLASE[l.clase]}): ${escapar(l.texto, 900)}`;
   }
-  if (!l || !l.legible) return ` · (no se pudo leer el monto del archivo${l?.motivo ? `: ${l.motivo}` : ''})`;
+  if (!l || !l.legible) return ` · (no se pudo leer el ${l?.mixta ? '' : 'monto del '}archivo${l?.motivo ? `: ${l.motivo}` : ''})`;
+  // Lectura mixta (un rol con viajes y gastos): lo del viaje y lo del soporte, en la misma línea; el modelo decide qué es.
+  const deViaje = l.mixta && l.texto ? ` (${ETIQUETA_CLASE[l.clase ?? 'otro']}): ${escapar(l.texto, 900)}` : '';
   const partes = [
     l.monto !== null ? `total $${PESOS.format(l.monto)}` : null,
     l.fecha ? `fecha ${l.fecha}` : null,
     l.comercio ? `comercio ${escapar(l.comercio, 80)}` : null,
     l.nit ? `NIT ${l.nit}` : null,
+    l.numero_transaccion ? `transacción ${escapar(l.numero_transaccion, 60)}` : null,
     l.descripcion ? `concepto ${escapar(l.descripcion, 160)}` : null,
     l.titular_destino ? `el dinero llega a la cuenta de ${escapar(l.titular_destino, 80)}` : null,
   ].filter(Boolean);
+  if (l.mixta) return ` · lo que dice el archivo${deViaje}${partes.length ? `${deViaje ? ' · como soporte de pago:' : ':'} ${partes.join(' · ')}` : ''}`;
   return ` · lo que dice el archivo: ${partes.join(' · ')}`;
 }
 
@@ -162,10 +169,12 @@ export function mensajeDelTurno(p: {
   nuevos: FilaConversacion[];
   quien: string;
   topeConversacion?: number;
+  /** El tope del Estado (por defecto `TOPES_BLOQUE.estado`). */
+  topeEstado?: number;
 }): string {
   const ids = new Set(p.nuevos.map((f) => f.id));
   const nums = new Map(p.filas.map((f, i) => [f.id, i + 1]));
-  const estado = recortarTokens(p.estado.join('\n'), TOPES_BLOQUE.estado);
+  const estado = recortarTokens(p.estado.join('\n'), p.topeEstado ?? TOPES_BLOQUE.estado);
   return [
     `## Estado (lo arma el sistema; es la verdad de este momento)\n${estado}`,
     `## Conversación de las últimas 24 h\n${bloqueConversacion(p.filas, ids, p.quien, p.topeConversacion)}`,

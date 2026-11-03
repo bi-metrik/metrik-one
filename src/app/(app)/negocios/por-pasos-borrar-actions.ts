@@ -162,6 +162,32 @@ export async function reponerOpcionesPorPasos(
       escribio = true
     }
   }
+  // Las tarifas que NO tenían la opción borrada vuelven a la que tenían en ese servicio: al volver
+  // a tener opciones, la propuesta de ONE (la Recomendada intermedia, 2026-10-29) no puede pisar una
+  // elección que ya estaba. Deshacer deja todo como antes de borrar.
+  const repuestasPorGrupo = new Map<string, Set<string>>()
+  for (const foto of fotos) {
+    const grupo = normalizarGrupo((foto.item.grupo ?? null) as string | null) ?? ''
+    const conLaBorrada = repuestasPorGrupo.get(grupo) ?? new Set<string>()
+    for (const s of foto.selecciones) if (s.item_id === foto.item.id) conLaBorrada.add(s.itinerario_id)
+    repuestasPorGrupo.set(grupo, conLaBorrada)
+  }
+  for (const [grupo, conLaBorrada] of repuestasPorGrupo) {
+    const hermanasAntes = new Set(antes.ctx.items.filter(i => (normalizarGrupo(i.grupo ?? null) ?? '') === grupo).map(i => i.id))
+    const hermanas = despues.ctx.items.filter(i => (normalizarGrupo(i.grupo ?? null) ?? '') === grupo).map(i => i.id)
+    for (const f of antes.filas) {
+      if (conLaBorrada.has(f.id)) continue
+      // Un servicio que se quedó con una sola opción no se nombra (es la única): era esa.
+      const tenia = f.seleccion.find(id => hermanasAntes.has(id)) ?? (hermanasAntes.size === 1 ? [...hermanasAntes][0] : undefined)
+      const ahora = despues.filas.find(x => x.id === f.id)?.seleccion.filter(id => hermanas.includes(id)) ?? []
+      if (!tenia || (ahora.length === 1 && ahora[0] === tenia)) continue
+      const { error: eDel } = await supabase.from('itinerario_opciones').delete().eq('itinerario_id', f.id).in('item_id', hermanas)
+      if (eDel) return { success: false, error: eDel.message }
+      const { error: eIns } = await supabase.from('itinerario_opciones').insert({ itinerario_id: f.id, item_id: tenia })
+      if (eIns) return { success: false, error: eIns.message }
+      escribio = true
+    }
+  }
   for (const m of Array.isArray(marcas) ? marcas : []) {
     if (!m || !tarifasDeLaCotizacion.has(m.itinerarioId) || typeof m.va !== 'boolean') continue
     const { error: eMarca } = await supabase.from('cotizacion_itinerarios').update({ va_en_propuesta: m.va }).eq('id', m.itinerarioId)

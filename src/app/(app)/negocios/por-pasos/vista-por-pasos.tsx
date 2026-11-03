@@ -1,5 +1,8 @@
 'use client'
 
+import { textoDeMandar } from '@/lib/cotizaciones/tarifas-al-cliente'
+import { ranuraDeGrupo } from '@/lib/cotizaciones/ranuras-pantallazo'
+import { eleccionOptimista } from '@/lib/cotizaciones/tarifas-por-pasos'
 import { useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
@@ -27,6 +30,7 @@ import {
   agregarOpcionPorPasos,
 } from '@/app/(app)/negocios/por-pasos-actions'
 import { borrarOpcionesPorPasos, reponerOpcionesPorPasos, soltarImagenesPorPasos } from '@/app/(app)/negocios/por-pasos-borrar-actions'
+import { avisosDeTrayectoRepetido, vuelosParaJuntarElTren } from '@/lib/cotizaciones/trayecto-repetido'
 import { autorizarBajoElMinimo } from '@/app/(app)/negocios/margen-salida-actions'
 import { eliminarItinerario, guardarMotivoDeTarifa, renombrarItinerario } from '@/app/(app)/negocios/itinerario-actions'
 import type { LecturaDevuelta } from '@/app/(app)/negocios/tarifa-pax-actions'
@@ -34,7 +38,8 @@ import type { SalidaVista } from '@/app/(app)/negocios/margen-salida-actions'
 import { ItemMenu, SeparadorMenu } from '@/components/viaje/menu-acciones'
 import type { FilaAdicional } from '@/lib/cotizaciones/adicionales'
 import type { ParametrosCascada } from '@/lib/cotizaciones/totales'
-import { ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { costoDeAgencia, publicasSinComision, ranurasConAlternativas } from '@/lib/cotizaciones/itinerarios'
+import { pedirFocoEnComision } from '@/lib/cotizaciones/enfocar-comision'
 import { lineasConMargenPropio } from '@/lib/cotizaciones/margen-propio'
 import { tipoParaMargen, type ReglasDeCotizacion } from '@/lib/cotizaciones/reglas-margen'
 import { hotelesAsociados } from '@/lib/cotizaciones/va-con-hotel'
@@ -59,6 +64,7 @@ import {
   preciosDeLasOpciones,
   sigue,
   tarifasCalculadas,
+  margenDelEncabezado as margenDeTotal,
   viajeEnOrden,
   type FilaDeLinea,
   type NumeroDePaso,
@@ -103,6 +109,8 @@ export interface PropsVistaPorPasos {
   pasoInicial: NumeroDePaso
   /** Por qué no se envía (lo de siempre): pantallazos de otros pasajeros, margen, costo. */
   motivoBotonEnviar: string | null
+  /** H10-1: la enviada que esta versión reemplaza al enviarse. `null` = no hay otra enviada. */
+  reemplaza?: { id: string; consecutivo: string | null } | null
   /** Cuántas cosas rojas y ámbar muestra la lista de Revisar (C6 la vuelve única). */
   conteoLista: { rojos: number; ambar: number }
   bandeja: ReactNode
@@ -207,6 +215,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   )
   const tarifas = useMemo(() => tarifasCalculadas(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
   const total = useMemo(() => cascadaDelTotal(lineas, params, tarifasPantalla), [lineas, params, tarifasPantalla])
+  // Brief del 2026-10-28 (falla 1) · UNA cifra para el encabezado y para «Tarifas». Con reglas es el
+  // margen global (el que se juzga contra el mínimo, `margenMedible`); sin reglas, el de siempre.
+  const margenDelEncabezado = margenDeTotal(total, params)
   const precios = useMemo(() => preciosDeLasOpciones(lineas, params), [lineas, params])
   // V2 · los bloques que se están aceptando se pintan en el viaje; al total y a las tarifas no
   // entran (no tienen precio todavía).
@@ -236,6 +247,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     if (!f) return null
     return textoCortoDeOpcion({ grupo: f.grupo ?? null, tarifa_pax: f.tarifa_pax }, p.composicionViaje)
   }, [porId, p.composicionViaje])
+  // G1 · M9-1 · un vuelo y un traslado (el tren) del mismo trayecto y día se cobran los dos: se dice.
+  const trayectoRepetido = useMemo(() => avisosDeTrayectoRepetido(tramos.flatMap(t => t.servicios), id => porId.get(id)), [tramos, porId])
   const asociados = useMemo(() => hotelesAsociados(lineas), [lineas])
   const candidatasPorServicio = useMemo(() => new Map(ranurasConAlternativas(lineas).map(r => [r.grupo, r.candidatos])), [lineas])
   const conOpciones: ServicioConOpciones[] = servicios
@@ -244,7 +257,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const renglones = loQueSuma(tramos, tarifas, precios)
   const vanAlCliente = tarifas.filter(t => t.esPrincipal || (t.vaEnPropuesta && !t.igualA))
   // Con reglas de margen, un hotel bajo su piso (con su descuento) también pide la autorización.
-  const bajoMinimo = vanAlCliente.filter(t => (t.margenReal !== null && t.margenReal < p.umbrales.pisoPct) || (t.cascada?.reglas?.hotelesBajoPiso.length ?? 0) > 0)
+  const bajoMinimo: { nombre: string | null }[] = vanAlCliente.filter(t => (t.margenReal !== null && t.margenReal < p.umbrales.pisoPct) || (t.cascada?.reglas?.hotelesBajoPiso.length ?? 0) > 0)
+  // Sin tarifas que vayan al cliente se mide el total (lo mismo que hace la salida).
+  if (vanAlCliente.length === 0 && p.salida?.aplica && ((publicasSinComision(total) === 0 && margenDelEncabezado !== null && margenDelEncabezado < p.umbrales.pisoPct) || (total.reglas?.hotelesBajoPiso.length ?? 0) > 0)) {
+    bajoMinimo.push({ nombre: 'La cotización' })
+  }
   const autorizacionVigente = !!p.salida?.excepcion
   const sinCosto = renglones
     .filter(r => !r.noSuma && (r.sinCosto || (r.opcionId && faltaPrecio(r.opcionId))))
@@ -263,6 +280,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     // el precio por pasajero que falta y la línea sin costo. Sumarle `sinCosto` contaba dos veces lo
     // mismo («2 cosas impiden enviar» con una sola en la lista). Sin la lista, como siempre.
     rojos: p.listaUnica ? p.listaUnica.impide.length : p.conteoLista.rojos + (sinCosto.length > 0 ? 1 : 0),
+    // La barra dice lo mismo que la lista y que el botón: el primer motivo que impide enviar.
+    primerImpide: p.listaUnica
+      ? (p.listaUnica.impide[0]?.texto ?? null)
+      : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null),
+    impide: p.listaUnica ? p.listaUnica.impide : null,
     ambar: p.conteoLista.ambar + p.pantallazosPorAceptar,
     texto: p.texto,
     enviada: p.enviada,
@@ -276,8 +298,19 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   }
   /** «Ir» de la lista única: la tarjeta, la tarifa, la bandeja o el párrafo exacto. */
   const irDesdeLaLista = (d: DestinoDeIr) => {
-    if (d.a === 'opcion') { setPaso(1); p.onAbrirOpcion(d.itemId); return }
+    if (d.a === 'opcion') {
+      // Prueba corta del #1352: la opción vive dentro de su servicio, plegado al llegar al Paso 1.
+      const grupo = servicios.find(s => s.opciones.includes(d.itemId))?.grupo
+      if (grupo) setAbiertos(a => (a.has(grupo) ? a : new Set([...a, grupo])))
+      setPaso(1)
+      p.onAbrirOpcion(d.itemId)
+      // QA del #1342 · «Falta la comisión»: la tarjeta se abre y el foco queda en la casilla.
+      if (d.campo === 'comision') void pedirFocoEnComision(d.itemId)
+      return
+    }
     if (d.a === 'tarifas') { irAPaso(2); return }
+    // El arreglo a un toque (punto 3 del 2026-10-29): la misma elección de Tarifas, con su «Deshacer».
+    if (d.a === 'poner-en-tarifa') { elegir(d.itinerarioId, d.grupo, d.itemId); return }
     if (d.a === 'bandeja' || d.a === 'viaje') { irAPaso(1); return }
     if (typeof document !== 'undefined') document.getElementById('doc')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -303,13 +336,34 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
   const elegir = (tarifaId: string, grupo: string, itemId: string) => {
     const t = p.tarifasDelServidor.find(x => x.id === tarifaId)
     const candidatas = candidatasPorServicio.get(grupo) ?? []
-    const base = overrides[tarifaId]?.seleccion ?? t?.seleccion ?? []
-    setOverrides(o => ({ ...o, [tarifaId]: { ...o[tarifaId], seleccion: [...base.filter(id => !candidatas.includes(id)), itemId] } }))
+    // QA del #1359 (defecto 7) · en un bloqueo, la tarifa que pierde el paquete también cambia en el
+    // acto (toma el que quedó libre): antes mostraba un momento el precio del paquete que ya no era suyo.
+    const cambios = eleccionOptimista({
+      items: lineas,
+      tarifas: tarifasPantalla,
+      tarifaId,
+      candidatas,
+      itemId,
+      esPaquete: ranuraDeGrupo(grupo)?.slug === 'paquete_detalle',
+    })
+    const previos = Object.fromEntries(Object.keys(cambios).map(id => [id, overrides[id]]))
+    setOverrides(o => {
+      const n = { ...o }
+      for (const [id, c] of Object.entries(cambios)) {
+        const pintada = tarifasPantalla.find(x => x.id === id)
+        n[id] = { ...o[id], seleccion: c.seleccion, ...(pintada && pintada.vaEnPropuesta !== c.va ? { va: c.va } : {}) }
+      }
+      return n
+    })
     void correr(async () => {
       const r = await elegirOpcionEnTarifa(tarifaId, grupo, itemId)
       if (!r.success) {
         toast.error(r.error)
-        setOverrides(o => { const n = { ...o }; delete n[tarifaId]; return n })
+        setOverrides(o => {
+          const n = { ...o }
+          for (const [id, antes] of Object.entries(previos)) { if (antes) n[id] = antes; else delete n[id] }
+          return n
+        })
         return
       }
       const servicio = servicios.find(s => s.grupo === grupo)?.nombre ?? 'El servicio'
@@ -327,7 +381,8 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         setOverrides(o => { const n = { ...o }; if (n[tarifaId]) delete n[tarifaId].va; return n })
         return
       }
-      ofrecer('Cambiaste qué tarifas van en la propuesta.', deshacerCon({ tipo: 'mandar', cotizacionId: p.cotizacionId, itinerarioId: tarifaId, escrita: va, anterior: r.anterior }))
+      // N-17 (ronda 3): el aviso dice qué pasó con esa tarifa; antes era igual para marcar y desmarcar.
+      ofrecer(textoDeMandar(p.tarifasDelServidor.find(x => x.id === tarifaId)?.nombre ?? null, va), deshacerCon({ tipo: 'mandar', cotizacionId: p.cotizacionId, itinerarioId: tarifaId, escrita: va, anterior: r.anterior }))
       p.refrescar()
     })
   }
@@ -358,13 +413,13 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     })
   }
 
-  const cambiarReglas = (cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number }[] }, texto: string) => {
+  const cambiarReglas = (cambio: { puntosExtra?: number; descuentos?: { id?: string; descripcion: string; pct: number; aplicaA?: string | null }[] }, texto: string) => {
     const actuales = params.reglas
     if (!actuales) return
     setReglasLocal({
       ...actuales,
       ...(cambio.puntosExtra !== undefined ? { puntosExtra: cambio.puntosExtra } : {}),
-      ...(cambio.descuentos ? { descuentos: cambio.descuentos.map((d, i) => ({ id: d.id ?? `nuevo-${i}`, descripcion: d.descripcion, pct: d.pct })) } : {}),
+      ...(cambio.descuentos ? { descuentos: cambio.descuentos.map((d, i) => ({ id: d.id ?? `nuevo-${i}`, descripcion: d.descripcion, pct: d.pct, ...(d.aplicaA ? { aplicaA: d.aplicaA } : {}) })) } : {}),
     })
     void correr(async () => {
       const r = await reglasPorPasos(p.cotizacionId, cambio)
@@ -499,7 +554,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                 const resumen = s.opciones.length > 1
                   ? `${s.opciones.length} opciones · ${s.opciones.map(nombreDeOpcion).join(' · ')}`
                   : resumenDeOpcion(porId.get(s.opciones[0])!) ?? nombreDeOpcion(s.opciones[0])
-                const avisoServicio = s.opciones.map(faltaPrecio).find(Boolean) ?? (renglon?.sinCosto ? 'Falta el costo' : null)
+                const avisoServicio = s.opciones.map(faltaPrecio).find(Boolean) ?? (renglon?.sinCosto ? 'Falta el costo' : null) ?? trayectoRepetido.get(s.grupo) ?? null
                 return (
                   <ServicioPorPasos
                     key={s.grupo}
@@ -511,7 +566,11 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                     editable={p.editable}
                     ocupado={ocupado}
                     estados={estadosPermitidos(s.grupo)}
-                    juntables={servicios.filter(x => x.tipo === s.tipo && x.grupo !== s.grupo).map(x => ({ grupo: x.grupo, nombre: x.nombre }))}
+                    juntables={[
+                      ...servicios.filter(x => x.tipo === s.tipo && x.grupo !== s.grupo),
+                      // M9-1 (QA G9) · el tren se junta como opción del vuelo del mismo trayecto.
+                      ...vuelosParaJuntarElTren(s, servicios, id => porId.get(id)),
+                    ].map(x => ({ grupo: x.grupo, nombre: x.nombre }))}
                     aviso={avisoServicio}
                     onAlternar={() => alternar(s.grupo)}
                     onEstado={e => cambiarEstado(s.grupo, e)}
@@ -555,6 +614,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
                                 nombre={nombreDeOpcion(id)}
                                 tipos={tipos}
                                 moneda={monedaDeTarifa(leerTarifaPax(f?.tarifa_pax)).moneda}
+                                esHotel={ranuraDeGrupo(f?.grupo ?? null)?.slug === 'hotel_detalle'}
                                 onGuardado={p.refrescar}
                               />
                             ) : null
@@ -632,6 +692,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         : null}
       onPuntos={n => cambiarReglas({ puntosExtra: n }, n === 0 ? 'Quitaste los puntos extra.' : 'Los puntos extra quedaron en el precio de hoteles y planes.')}
       onDescuentos={lista => cambiarReglas({ descuentos: lista }, 'Quedaron los descuentos sobre el total.')}
+      delTotal={{ margenPct: margenDelEncabezado, sinComision: publicasSinComision(total), hotelesBajoPiso: total.reglas?.hotelesBajoPiso ?? [] }}
       propios={propios.map(x => ({ ...x, nombre: nombreDeOpcion(x.id) }))}
       onSeguirMargen={seguirMargen}
       onPedir={() => void correr(async () => {
@@ -692,6 +753,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
     p.margenPct,
     JSON.stringify(p.tarifasDelServidor),
     p.filas.map(f => `${f.id}:${f.grupo}:${f.entra_al_precio}:${f.subtotal ?? ''}:${f.precio_venta ?? ''}`).join(','),
+    // QA del #1342 · la comisión de una Pública no mueve ni el costo ni el precio, pero sí la marca
+    // de borrador y el margen: sin ella aquí, el documento de Revisar quedaba con la marca vieja.
+    p.filas.map(f => JSON.stringify((f.tarifa_pax as { tipoTarifa?: unknown } | null)?.tipoTarifa ?? null)).join(','),
   ].join('|')
   const paso3 = (
     <RevisarPorPasos
@@ -699,9 +763,7 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
       enviada={p.enviada}
       editable={p.editable}
       ocupado={ocupado}
-      motivoParaNoEnviar={p.listaUnica
-        ? (p.listaUnica.impide[0]?.texto ?? null)
-        : p.motivoBotonEnviar ?? (sinCosto.length > 0 ? `${sinCosto[0].motivo}: ${sinCosto[0].servicio}.` : null)}
+      motivoParaNoEnviar={entradaPasos.primerImpide}
       lista={p.listaUnica ? <ListaUnicaPorPasos lista={p.listaUnica} onIr={irDesdeLaLista} /> : p.revisarLista}
       documento={(
         <>
@@ -710,8 +772,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
         </>
       )}
       onDescargar={p.onDescargar}
+      reemplaza={p.reemplaza ? p.reemplaza.consecutivo : undefined}
       onEnviar={() => void correr(async () => {
-        const r = await enviarPorPasos(p.cotizacionId)
+        const r = p.reemplaza ? await enviarPorPasos(p.cotizacionId, undefined, p.reemplaza.id) : await enviarPorPasos(p.cotizacionId)
         if (!r.success) { toast.error(r.error); return }
         toast.success('Cotización enviada')
         p.refrescar()
@@ -744,8 +807,9 @@ export default function VistaPorPasos(p: PropsVistaPorPasos) {
             nombreDeOpcion,
             faltaPrecio,
             total: total.precioVenta,
-            costo: total.costoDeVenta,
-            margenPct: total.margenRealPct,
+            costo: costoDeAgencia(total),
+            margenPct: margenDelEncabezado,
+            sinComision: publicasSinComision(total) > 0,
             otrasQueVan: vanAlCliente.filter(t => !t.esPrincipal).map(t => ({ nombre: t.nombre ?? 'Tarifa', precio: t.precio })),
             pantallazosEnBandeja: p.pantallazosPorAceptar,
             incompleto: sinCosto.length > 0,

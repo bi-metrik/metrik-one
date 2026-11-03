@@ -1,6 +1,7 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { leerSecretosWorkspace, secretoConRespaldo } from '@/lib/secretos/workspace'
+import { clienteValidaDe } from '@/lib/valida-api/reglas'
 import { pruebaDeConfig, saldoDePruebaVencida, saldoDesdeCuentaConsumo, type PruebaValida, type SaldoBolsa } from './corte-bolsa'
 
 export const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valida.metrikone.co'
@@ -13,7 +14,9 @@ export const VALIDA_API_BASE = process.env.VALIDA_API_BASE || 'https://api.valid
  * MeTRIK, donde `descargarPDFConsultaValida` los devolvía a cualquiera que tuviera un id. Sin llave,
  * la consulta falla a la vista. Vault primero; `config_extra` solo mientras dure el traslado.
  */
-export async function credencialValida(workspaceId: string): Promise<{ llave: string | null; prueba: PruebaValida | null }> {
+export async function credencialValida(
+  workspaceId: string,
+): Promise<{ llave: string | null; prueba: PruebaValida | null; clienteId: string | null }> {
   const svc = createServiceClient()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data } = await (svc.from('workspaces') as any)
@@ -22,7 +25,11 @@ export async function credencialValida(workspaceId: string): Promise<{ llave: st
     .single()
   const config = (data?.config_extra ?? null) as Record<string, unknown> | null
   const llave = secretoConRespaldo(await leerSecretosWorkspace(workspaceId), config, 'valida_api_key')
-  return { llave: llave ?? null, prueba: pruebaDeConfig(config) }
+  const prueba = pruebaDeConfig(config)
+  // El cliente de Valida del espacio: el del plan (`valida_cliente_id`) o, mientras dura la prueba, el
+  // de `valida_prueba`. Solo lo usa la descarga de reportes por la ruta firmada (`reporte-pdf.ts`).
+  const clienteId = clienteValidaDe(config) ?? clienteValidaDe({ valida_cliente_id: prueba?.cliente_id })
+  return { llave: llave ?? null, prueba, clienteId }
 }
 
 const TIMEOUT_SALDO_MS = 4_000

@@ -183,12 +183,13 @@ describe('C5 · V4 · «Aceptar los 11» en lote', () => {
     const buceo = r.resultados!.find(x => x.id === 'cap-caso-11')!.resultado.itemId!
     expect(s.get(normalizarGrupo(tabla('items').find(i => i.id === buceo)!.grupo as string)!)).toEqual([buceo])
 
-    // Las tarifas que propone ONE: la Recomendada lleva la primera pegada de cada servicio.
+    // Las tarifas que propone ONE: la Recomendada lleva el hotel intermedio (con dos, el más caro:
+    // Mauricio 2026-10-29) y, en la actividad, la primera pegada.
     const rec = tabla('cotizacion_itinerarios').find(t => t.nombre === 'Recomendada')!
     const enRec = new Set(tabla('itinerario_opciones').filter(o => o.itinerario_id === rec.id).map(o => o.item_id))
     const primera = (id: string) => r.resultados!.find(x => x.id === id)!.resultado.itemId!
-    for (const id of ['cap-caso-03', 'cap-caso-05', 'cap-caso-09']) expect(enRec.has(primera(id)), id).toBe(true)
-    for (const id of ['cap-caso-04', 'cap-caso-06', 'cap-caso-10']) expect(enRec.has(primera(id)), id).toBe(false)
+    for (const id of ['cap-caso-04', 'cap-caso-06', 'cap-caso-09']) expect(enRec.has(primera(id)), id).toBe(true)
+    for (const id of ['cap-caso-03', 'cap-caso-05', 'cap-caso-10']) expect(enRec.has(primera(id)), id).toBe(false)
     expect(rec.va_en_propuesta).toBe(true)
   }, 60_000)
 

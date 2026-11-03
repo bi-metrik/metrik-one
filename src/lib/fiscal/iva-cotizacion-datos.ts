@@ -105,7 +105,12 @@ export async function ivaDeLaCotizacion(
   }
 
   const todas = liquidarIva(lineasParaIva(calcularCascada(ctx.items, paramsPorOpcion(ctx.params)).lineas, metaDe), opciones)
-  const vigente = liquidarIva(lineasParaIva(cascadaVigente(ctx, filas).lineas, metaDe), opciones)
+  // La vigente es la del principal (si lo hay): con sus descuentos propios.
+  const idPrincipal = filas?.find(f => f.esPrincipal)?.id ?? null
+  const vigente = liquidarIva(
+    lineasParaIva(cascadaVigente(ctx, filas).lineas, metaDe),
+    { ...opciones, descuentoComercialPct: pctDescuentoTotal({ ...ctx.params, tarifaId: idPrincipal }) },
+  )
 
   // Una línea sin costo solo importa si el cliente la puede comprar: la cotización de hoy
   // o una de las tarifas que salen en la propuesta. Una alternativa descartada no frena.
@@ -114,8 +119,9 @@ export async function ivaDeLaCotizacion(
   for (const fila of filas ?? []) {
     if (!fila.vaEnPropuesta) continue
     const tarifa = liquidarIva(
-      lineasParaIva(cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).lineas, metaDe),
-      opciones,
+      lineasParaIva(cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id).lineas, metaDe),
+      // Los descuentos de ESTA tarifa bajan su base (los de otra tarifa, no).
+      { ...opciones, descuentoComercialPct: pctDescuentoTotal({ ...ctx.params, tarifaId: fila.id }) },
     )
     porTarifa.set(fila.id, tarifa)
     for (const nombre of tarifa.sinCosto) sinCosto.add(nombre)
@@ -227,7 +233,7 @@ export async function preciosDeLasTarifas(
   return {
     ok: true,
     tarifas: enPropuesta.map(fila => {
-      const precioCascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).precioVenta
+      const precioCascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id).precioVenta
       const liq = iva?.porTarifa.get(fila.id) ?? null
       const calculable = !liq || liq.calculable
       const encima = liq && !ivaIncluidoEnElPrecio(config) ? liq.iva : 0

@@ -145,6 +145,7 @@ vi.mock('react', async (original) => ({ ...(await original<typeof import('react'
 
 const {
   entradaValidaCda,
+  exigenciaV15Cda,
   moraValidaCda,
   puedeVerPagosCda,
   terminosValidaPermitenOperar,
@@ -496,5 +497,167 @@ describe('quién ve la plata del contrato (franja, avisos de cuota, pagos y arch
     expect(await puedeVerPagosCda(comoDesignada)).toBe(true)
     sesionWs.userId = OPERADOR
     expect(await puedeVerPagosCda(await entradaValidaCda())).toBe(false)
+  })
+})
+
+describe('la v1.5 publicada: transición de la cláusula 11.7 (bloqueante de Vera, 2026-10-29)', () => {
+  // Las cuotas reales de Caquetá: la del 23-sep pagada; la del 23-oct (vence el 27-oct) y la del 23-nov
+  // (vence el 27-nov) impagas.
+  const CONCEPTO = 'Suscripción VALIDA · Plan CDA — servicio de computación en la nube (SaaS) · periodo del'
+  const CUOTA_OCT = {
+    ...CUOTA_1,
+    cuota_id: '66666666-6666-4666-8666-666666666601',
+    numero: 2,
+    fecha_vencimiento: '2026-10-27',
+    concepto: `${CONCEPTO} 23-oct al 22-nov`,
+  }
+  const CUOTA_NOV = {
+    ...CUOTA_1,
+    cuota_id: '66666666-6666-4666-8666-666666666602',
+    numero: 3,
+    fecha_vencimiento: '2026-11-27',
+    concepto: `${CONCEPTO} 23-nov al 22-dic`,
+  }
+  const DOC_V14_HASTA: DocumentoContractual = { ...DOC_V14, vigenteHasta: '2026-11-30' }
+  const DOC_V15: DocumentoContractual = {
+    ...DOC_V14,
+    documentoId: '88888888-8888-4888-8888-888888888888',
+    version: 'v1.5',
+    pdfSha256: 'c'.repeat(64),
+    vigenteDesde: '2026-12-01',
+    vigenteHasta: null,
+    reemplazaId: DOC_V14.documentoId,
+    publicadaAt: '2026-11-01T05:00:00Z',
+  }
+  beforeEach(() => {
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, DOC_V14_HASTA, DOC_V15]
+    escenario.cuotas = { data: [CUOTA_1, CUOTA_OCT, CUOTA_NOV], error: null }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }], error: null }
+  })
+
+  it('la vigencia de la transición sale de la v1.5 registrada; solo se ofrece aceptar la v1.5', async () => {
+    escenario.hoy = '2026-11-01'
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.transicionDesde).toBe('2026-12-01')
+    expect(e.tipo === 'ok' && e.modificaciones.map((d) => d.version)).toEqual(['v1.5'])
+  })
+
+  it('6-nov, 27-nov y 30-nov: consulta y opera (la v1.4 ya no restringe ni pausa por esos períodos)', async () => {
+    for (const hoy of ['2026-11-06', '2026-11-27', '2026-11-30']) {
+      escenario.hoy = hoy
+      expect(await validaCdaPermiteConsultar(), hoy).toEqual({ ok: true })
+      const m = await moraValidaCda()
+      expect(m.tipo === 'ok' && m.mora.estado, hoy).toBe('al_dia')
+    }
+  })
+
+  it('1 al 5-dic: aviso con la restricción el 6-dic; 6-dic: no consulta pero opera; 31-dic: pausa', async () => {
+    escenario.hoy = '2026-12-05'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    const m = await moraValidaCda()
+    expect(m.tipo === 'ok' && m.mora).toEqual({
+      estado: 'en_mora',
+      vencio: '2026-11-30',
+      restringeDesde: '2026-12-06',
+      corteDesde: '2026-12-31',
+    })
+    escenario.hoy = '2026-12-06'
+    const r = await validaCdaPermiteConsultar()
+    expect(!r.ok && r.error).toContain('restringidas desde el 6-dic')
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-30'
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-31'
+    const p = await validaCdaPermiteOperar()
+    expect(!p.ok && p.error).toContain('pausada desde el 31-dic')
+  })
+
+  it('CONTROL: sin la v1.5 registrada, la v1.4 restringe el 6-nov y pausa el 27-nov', async () => {
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, DOC_V14]
+    escenario.hoy = '2026-11-06'
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
+    escenario.hoy = '2026-11-27'
+    expect((await validaCdaPermiteOperar()).ok).toBe(false)
+  })
+})
+
+describe('la exigencia de la v1.5 desde la fecha de la 16.4 (Maxitec: 22-dic-2026)', () => {
+  const CONCEPTO = 'Suscripción VALIDA · Plan CDA — servicio de computación en la nube (SaaS) · periodo del'
+  const cuota = (numero: number, vence: string, periodo: string) => ({
+    ...CUOTA_1,
+    cuota_id: `66666666-6666-4666-8666-66666666670${numero}`,
+    numero,
+    fecha_vencimiento: vence,
+    concepto: `${CONCEPTO} ${periodo}`,
+  })
+  const OCT = cuota(2, '2026-10-27', '23-oct al 22-nov')
+  const NOV = cuota(3, '2026-11-27', '23-nov al 22-dic')
+  /** Las formas exactas que exige el generador (`datosDelTextoV15`), con las fechas de Maxitec. */
+  const TEXTO_V15 = [
+    '**EL CLIENTE**: MAXITEC S.A.S., NIT 900.000.000-1',
+    'La fecha de renovación del Cliente es el día 23 de cada mes.',
+    'Hasta el **21 de diciembre de 2026**, fecha en que vencía el plazo.',
+    'Desde el **22 de diciembre de 2026**, o desde el día siguiente al fin del último período pagado si es posterior, sin esa aceptación no se pueden hacer consultas.',
+  ].join('\n\n')
+  const V15: DocumentoContractual = {
+    ...DOC_V14,
+    documentoId: '99999999-9999-4999-8999-999999999999',
+    version: 'v1.5',
+    textoMd: TEXTO_V15,
+    pdfSha256: 'c'.repeat(64),
+    vigenteDesde: '2026-12-01',
+    vigenteHasta: null,
+    reemplazaId: DOC_V14.documentoId,
+    publicadaAt: '2026-11-01T05:00:00Z',
+  }
+  const pagos = (monto: number) => ({ data: [{ monto: String(monto), estado: 'pagado' }], error: null })
+
+  beforeEach(() => {
+    escenario.documentos = [DOC_ACEPTADO_HASTA_V14, { ...DOC_V14, vigenteHasta: '2026-11-30' }, V15]
+    // Sin período pagado posterior: pagó hasta el 22-nov y no hay cuota impaga (sin mora de por medio).
+    escenario.cuotas = { data: [CUOTA_1, OCT], error: null }
+    escenario.cobros = pagos(300000)
+  })
+
+  it('sin período pagado posterior: consulta el 21-dic; desde el 22-dic no consulta, pero opera (historial y reportes)', async () => {
+    escenario.hoy = '2026-12-21'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-22'
+    const r = await validaCdaPermiteConsultar()
+    expect(r).toEqual({
+      ok: false,
+      error:
+        'Para seguir consultando en Valida, MAXITEC S.A.S. necesita aceptar la versión 1.5 de los Términos. Tu ' +
+        'información está guardada. Puedes pedir la copia de tu bitácora y tus reportes a mauricio.moreno@metrik.com.co.',
+    })
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2026-12-22' })
+  })
+
+  it('con el período del 23-nov al 22-dic pagado: no se bloquea el 22-dic, sí desde el 23-dic', async () => {
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV], error: null }
+    escenario.cobros = pagos(450000)
+    escenario.hoy = '2026-12-22'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2026-12-23'
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
+    expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2026-12-23' })
+  })
+
+  it('aceptada la v1.5, consulta igual pasada la fecha', async () => {
+    escenario.documentos = [
+      DOC_ACEPTADO_HASTA_V14,
+      { ...DOC_V14, vigenteHasta: '2026-11-30' },
+      { ...V15, aceptadoAt: '2026-12-10T15:00:00Z', aceptadoPor: 'Alba', aceptadoCanal: 'modulo' },
+    ]
+    escenario.hoy = '2027-01-20'
+    expect(await exigenciaV15Cda()).toEqual({ estado: 'no_exigida' })
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+  })
+
+  it('sin poder leer las cuotas no se exige: no hay prueba de que no haya un período pagado', async () => {
+    escenario.cuotas = { data: null, error: { message: 'caída' } }
+    escenario.hoy = '2026-12-22'
+    expect(await exigenciaV15Cda()).toEqual({ estado: 'no_exigida' })
   })
 })

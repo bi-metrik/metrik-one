@@ -21,8 +21,10 @@
 //                         lista de supresion.
 //   · email.failed     -> `estado = 'fallido'` + `motivo = resend_failed: <razon>`
 //                         (2026-10-26): acepto el POST y no lo pudo mandar.
-//   Los cinco se aplican a `avisos_cliente` Y a `avisos_equipo` (los correos
-//   internos al equipo), con las mismas guardas. Un correo vive en una sola.
+//   Los cinco se aplican a `avisos_cliente`, a `avisos_equipo` (los correos
+//   internos al equipo) y a `envios_factura_cuota` (el correo con la factura de
+//   una cuota, por `resend_id`, 2026-10-28), con las mismas guardas. Un correo
+//   vive en una sola.
 //
 //   · email.sent       -> NO es un acuse: suma 1 al contador del periodo con la
 //                         RPC `resend_contar_enviado` (deduplicada por svix-id) y,
@@ -168,23 +170,32 @@ Deno.serve(async (req) => {
   const { set, guarda } = actualizacionDeAcuse(acuse);
   const svc = getServiceClient();
 
-  // Las dos tablas, con la misma escritura y la misma guarda.
-  const aplicar = (tabla: 'avisos_cliente' | 'avisos_equipo') => {
-    let consulta = svc
-      .from(tabla)
-      .update(set)
-      .eq('proveedor_id', acuse.emailId)
-      // `proveedor_id` solo lo tienen las filas de correo, pero declararlo deja
-      // escrito de que canal habla este webhook.
-      .eq('canal', 'email');
+  // Las tres tablas, con la misma escritura y la misma guarda.
+  const aplicar = (tabla: 'avisos_cliente' | 'avisos_equipo' | 'envios_factura_cuota') => {
+    let consulta = tabla === 'envios_factura_cuota'
+      // El correo con la factura de una cuota (2026-10-28): solo hay correo, y el id de Resend
+      // vive en `resend_id`. Mismas columnas de acuse (`estado`, `motivo`, `entregado_at`,
+      // `queja_at`) y la misma guarda: solo una fila `enviado` pasa a rebotado/suprimido/fallido.
+      ? svc.from(tabla).update(set).eq('resend_id', acuse.emailId)
+      : svc
+        .from(tabla)
+        .update(set)
+        .eq('proveedor_id', acuse.emailId)
+        // `proveedor_id` solo lo tienen las filas de correo, pero declararlo deja
+        // escrito de que canal habla este webhook.
+        .eq('canal', 'email');
     consulta = guarda.modo === 'es_nulo'
       ? consulta.is(guarda.columna, null)
       : consulta.eq(guarda.columna, guarda.valor);
     return consulta.select('id');
   };
 
-  const [cliente, equipo] = await Promise.all([aplicar('avisos_cliente'), aplicar('avisos_equipo')]);
-  const error = cliente.error ?? equipo.error;
+  const [cliente, equipo, factura] = await Promise.all([
+    aplicar('avisos_cliente'),
+    aplicar('avisos_equipo'),
+    aplicar('envios_factura_cuota'),
+  ]);
+  const error = cliente.error ?? equipo.error ?? factura.error;
 
   if (error) {
     // La base fallo: el acuse NO quedo aplicado y un reintento si puede
@@ -197,7 +208,8 @@ Deno.serve(async (req) => {
 
   const filasCliente = cliente.data?.length ?? 0;
   const filasEquipo = equipo.data?.length ?? 0;
-  if (filasCliente + filasEquipo === 0) {
+  const filasFactura = factura.data?.length ?? 0;
+  if (filasCliente + filasEquipo + filasFactura === 0) {
     // Dos casos legitimos caen aqui y ninguno es un error: un correo sin traza
     // (auth, Next) y un acuse repetido que ya se aplico. No se distinguen desde
     // aqui, y tampoco hace falta: en los dos el resultado correcto es no hacer nada.
@@ -206,11 +218,12 @@ Deno.serve(async (req) => {
   }
 
   console.log(
-    '[resend-webhook] %s aplicado: cliente=%d equipo=%d (email_id=%s)',
+    '[resend-webhook] %s aplicado: cliente=%d equipo=%d factura=%d (email_id=%s)',
     acuse.clase,
     filasCliente,
     filasEquipo,
+    filasFactura,
     acuse.emailId,
   );
-  return json({ ok: true, aplicado: filasCliente + filasEquipo });
+  return json({ ok: true, aplicado: filasCliente + filasEquipo + filasFactura });
 });

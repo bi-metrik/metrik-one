@@ -32,8 +32,8 @@ import {
   type LecturaComprobante,
 } from '@/lib/viaje/riel-cobro'
 import { cuentasDelNegocio, emitirReciboViaje, leerVistaRiel } from '@/lib/viaje/riel-cobro-datos'
-import { etapaDeConfirmacion, evaluarGatesConfirmacion } from '@/lib/viaje/confirmacion-datos'
-import { enlaceWhatsApp } from '@/lib/viaje/confirmacion'
+import { cobrosDelNegocio, etapaDeConfirmacion, evaluarGatesConfirmacion, planAcordado } from '@/lib/viaje/confirmacion-datos'
+import { anticipoDelPlanCubierto, enlaceWhatsApp } from '@/lib/viaje/confirmacion'
 import { enviarCorreoAlViajero } from '@/lib/viaje/correo-viajero'
 import { cambiarEtapaNegocioConGate, recalcularNegocioPorCambioDeRecaudo } from './negocio-v2-actions'
 
@@ -142,7 +142,7 @@ async function registrarPagoViajeroSinClave(input: EntradaPagoViajero): Promise<
       soporte,
       external_ref: input.referencia?.trim().slice(0, 120) || null,
       notas: input.banco ? `Desde ${input.banco.trim().slice(0, 80)}` : null,
-      created_by: ctx.staffId,
+      created_by: ctx.userId,
     })
     .select('id')
     .single()
@@ -177,7 +177,7 @@ export async function registrarPagoViajero(input: EntradaPagoViajero, intencion?
 
 type Ctx = Extract<Awaited<ReturnType<typeof contextoViaje>>, { ok: true }>['ctx']
 
-async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa: string; texto: string } | null> {
+async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa: string | null; texto: string } | null> {
   if (!ctx.negocio.linea_id) return null
   const { data: etapasRaw } = await ctx.supabase
     .from('etapas_negocio')
@@ -198,6 +198,19 @@ async function avanzarConElAnticipo(ctx: Ctx, cobroId: string): Promise<{ etapa:
   if (pendientes.length > 0) return null
   const siguiente = etapas.find((e) => e.orden > conf.orden)
   if (!siguiente) return null
+  // QA G11: el avance SOLO pasa con la cuota del anticipo cubierta; a mano, la etapa sigue dejando
+  // pasar con cualquier pago con soporte (el gate no cambia).
+  const [acordado, cobros] = await Promise.all([
+    planAcordado(ctx.supabase, ctx.negocio.id),
+    cobrosDelNegocio(ctx.supabase, ctx.workspaceId, ctx.negocio.id),
+  ])
+  const anticipo = anticipoDelPlanCubierto(acordado?.cuotas, cobros)
+  if (!anticipo.cubierto) {
+    return {
+      etapa: null,
+      texto: `Faltan ${pesos(anticipo.falta)} del anticipo: el negocio sigue en ${conf.nombre}. Pasa solo a ${siguiente.nombre} con el anticipo completo; si ya se acordó otra cosa, avánzalo a mano.`,
+    }
+  }
   const mov = await cambiarEtapaNegocioConGate(ctx.negocio.id, siguiente.id)
   if (mov.error) {
     console.warn('[registrarPagoViajero] el anticipo entró pero la etapa no pasó:', mov.error)
@@ -262,7 +275,7 @@ async function deshacerPagoViajeroSinClave(negocioId: string, cobroId: string) {
   if (!fila) return { ok: true as const }
   if (fila.siigo_recibo) return { ok: false as const, error: 'El recibo ya salió: el pago se anula con motivo, no se deshace.' }
   const edad = Date.now() - Date.parse(fila.created_at ?? '')
-  if (!(edad >= 0 && edad <= VENTANA_DESHACER_MS) || (fila.created_by && fila.created_by !== c.ctx.staffId)) {
+  if (!(edad >= 0 && edad <= VENTANA_DESHACER_MS) || (fila.created_by && fila.created_by !== c.ctx.userId)) {
     return { ok: false as const, error: 'Ya pasó el momento de deshacer: el pago se anula con motivo.' }
   }
   const { error } = await c.ctx.supabase.from('cobros').delete().eq('id', cobroId).eq('workspace_id', c.ctx.workspaceId)

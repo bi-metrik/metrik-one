@@ -26,6 +26,7 @@ import type { EscenarioPublico } from '../escenario.ts';
 import type { Canal } from '../tipos.ts';
 import type { Veredicto } from './calificar.ts';
 import { PAYLOAD_DOC_MESSAGE_CREATED } from './fixture-chatwoot.ts';
+import { CASOS_VENTAS } from './conjuntos-ventas.ts';
 import { cataYPelicula, dosHorariosElSabado, conDosCondiciones, conPreventaVigente, conZonaYMesaPedida, sinRegla, soloCata } from './fichas-prueba.ts';
 
 export type PasoCaso =
@@ -38,7 +39,7 @@ export type PasoCaso =
 
 export interface CasoPublico {
   id: string;
-  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion';
+  conjunto: 'real' | 'escenarios' | 'adversario' | 'lenguaje' | 'sobreventa' | 'operacion' | 'ventas';
   titulo: string;
   canal?: Canal;
   config?: Partial<ConfigPublico>;
@@ -47,8 +48,18 @@ export interface CasoPublico {
   pasos?: PasoCaso[];
   /** Lo que haría el modelo (solo `--seco`). */
   guion?: Paso[];
+  /**
+   * El caso solo mide algo si el guion hace de modelo (fuerza un formato roto, 4 productos, `datos` mal formado): con el
+   * modelo real no pasa por ahí. La corrida en vivo lo deja fuera y el banco lo dice (`omitidos_solo_seco`).
+   */
+  soloSeco?: boolean;
   envolver?: (m: Modelo, e: () => EscenarioPublico) => Modelo;
   esperado?: (e: EscenarioPublico) => Veredicto;
+  /**
+   * Dominio de ventas (Dimpro): el catálogo y la pasarela en memoria. Con esto el caso corre con el reglamento de Dimpro
+   * (`ventas/reglamento-dimpro.ts`) y `config.dominio = 'ventas'`.
+   */
+  ventas?: { productos: import('../ventas/catalogo-ventas.ts').ProductoVenta[]; sinLlaves?: boolean; pasarelaCaida?: boolean; consulta?: { total?: number | null; sandbox?: boolean; espacioDePruebas?: boolean } };
   /** Casos de la petición del webhook, sin conversación. */
   soloCodigo?: () => Promise<Veredicto>;
 }
@@ -913,6 +924,7 @@ async function webhookDosVeces(): Promise<Veredicto> {
     primeraVez: async (k) => { if (claves.has(k)) return false; claves.add(k); return true; },
     olvidar: async (k) => { claves.delete(k); },
     guardarEntrante: async (e) => { guardados.push(e); return 'ok'; },
+    registrarCierre: async () => true,
     completarAudio: async () => false,
     ahoraS: () => 1_792_000_000,
     reloj: () => performance.now(),
@@ -931,6 +943,8 @@ export const CONJUNTO_REAL: CasoPublico[] = [];
 
 export const CONJUNTOS_PUBLICO: Record<CasoPublico['conjunto'], CasoPublico[]> = {
   real: CONJUNTO_REAL, escenarios: [...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO], adversario: ADVERSARIO, lenguaje: LENGUAJE, sobreventa: SOBREVENTA, operacion: OPERACION,
+  // Dimpro (dominio ventas): con `--conjunto ventas`. No entra a TODOS_LOS_CASOS, que es el de Sabor.
+  ventas: CASOS_VENTAS,
 };
 
 export const TODOS_LOS_CASOS: CasoPublico[] = [...CONJUNTO_REAL, ...ESCENARIOS, ...EXPERIENCIAS, ...FECHA_HORARIO, ...ADVERSARIO, ...LENGUAJE, ...SOBREVENTA, ...OPERACION];

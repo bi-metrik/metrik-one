@@ -13,13 +13,15 @@
  *     cotización (`origen = 'cotizacion'`, la más antigua). Es la huella que deja
  *     `aceptarCotizacionNegocio` en una línea con servicios del viaje; sin filas, «Falta la fecha»;
  *   · documentos de los viajeros: `contacto_documentos` vigentes del contacto del negocio (el mismo
- *     criterio del gate de documentos, `faltaDocumentos`);
+ *     criterio del gate de documentos: uno por viajero, `documentos-por-viajero.ts`);
  *   · marcas: `negocio_hitos`.
  */
 
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import { aprobadoresDeLinea } from './estado-servicio'
-import { esInternacional, faltaDocumentos, type DocumentoViajero } from './entrega'
+import { normalizarComposicion } from '@/lib/cotizaciones/tarifa-pasajero'
+import { esInternacional, type DocumentoViajero } from './entrega'
+import { documentosPorViajero, leerDocumentosViajero, mensajeDocumentosViaje, viajerosDelViaje } from './documentos-por-viajero'
 import { configHitos, hitosDelViaje, type ConfigHitos, type Hito, type MarcaHito, type ServicioHitos, type ViajeHitos } from './hitos'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,8 +97,8 @@ export async function leerViajesParaHitos(
         .in('negocio_id', t),
       'servicios',
     )),
-    porTandas(ids, async t => filas<{ negocio_id: string; fecha_salida: unknown; fecha_regreso: unknown; destino: unknown; destino_tipo: unknown }>(
-      await db.from('negocio_bloques').select('negocio_id, fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso, destino:data->destino, destino_tipo:data->destino_tipo').in('negocio_id', t),
+    porTandas(ids, async t => filas<{ negocio_id: string; fecha_salida: unknown; fecha_regreso: unknown; destino: unknown; destino_tipo: unknown; adultos?: unknown; ninos?: unknown; infantes?: unknown }>(
+      await db.from('negocio_bloques').select('negocio_id, fecha_salida:data->fecha_salida, fecha_regreso:data->fecha_regreso, destino:data->destino, destino_tipo:data->destino_tipo, adultos:data->adultos, ninos:data->ninos, infantes:data->infantes').in('negocio_id', t),
       'bloques',
     )),
     porTandas(contactoIds, async t => filas<{ id: string; nombre: string | null; telefono: string | null }>(await db.from('contactos').select('id, nombre, telefono').in('id', t), 'contactos')),
@@ -125,8 +127,16 @@ export async function leerViajesParaHitos(
     const regreso = b.map(x => fecha(x.fecha_regreso)).find(Boolean) ?? null
     const docs = n.contacto_id ? documentos.filter(d => d.contacto_id === n.contacto_id) : []
     const nombre = (contacto?.nombre ?? '').trim()
+    // El mismo criterio del gate de E6: los documentos de CADA viajero (QA 2026-10-29, H9-5).
+    const composicion = b.map(x => normalizarComposicion(x)).find(Boolean) ?? null
     const documentosCompletos = internacional === true
-      ? faltaDocumentos({ internacional, documentos: docs, fechaRegreso: regreso, nombreContacto: nombre }) === null
+      ? mensajeDocumentosViaje(documentosPorViajero({
+          internacional,
+          documentos: docs,
+          guardados: leerDocumentosViajero(n.metadata),
+          viajeros: viajerosDelViaje(composicion, nombre),
+          fechaRegreso: regreso,
+        })) === null
       : docs.length > 0
     const creadas = svs.filter(s => s.origen === 'cotizacion' && s.created_at).map(s => s.created_at as string).sort()
     return {

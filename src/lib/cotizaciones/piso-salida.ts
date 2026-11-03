@@ -45,10 +45,10 @@
  * `piso-salida-datos.ts`, que solo corre en el servidor.
  */
 
-import { cascadaDeItinerario, exentaDelMinimo, margenMedible, motivoDeRechazo, nombreDeItinerario, ranurasSinResolver } from './itinerarios'
+import { cascadaDeItinerario, margenMedible, motivoDeRechazo, nombreDeItinerario, publicasSinComision, ranurasSinResolver } from './itinerarios'
 import { etiquetaDeRanura } from './ranuras-pantallazo'
 import { nombreVisibleDeLinea } from './nombre-visible'
-import { esTarifaPublica, tipoTarifaDeLinea } from './tarifa-publica'
+import { esTarifaPublica, leerTipoTarifa, tipoTarifaDeLinea } from './tarifa-publica'
 import { comisionDePublica, descuentoDeLinea, reglasAJsonb } from './reglas-margen'
 import type { Cascada } from './totales'
 import { cascadaVigente, type ContextoCotizacion, type FilaItinerario } from './itinerarios-datos'
@@ -73,6 +73,11 @@ export interface SujetoDeSalida {
    */
   hotelesBajoPiso?: { nombre: string | null; margenPct: number }[]
   pisoHotelPct?: number
+  /**
+   * D3 (2026-10-29): cuántas Públicas de este sujeto no tienen su comisión. Con alguna, el margen no
+   * se puede medir y la causa es esa. Ausente = ninguna. No entra en la huella.
+   */
+  publicasSinComision?: number
 }
 
 /** Una línea tal como quedó autorizada: solo lo que mueve plata. */
@@ -138,7 +143,7 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
       ? [...marcadas]
           .sort((a, b) => a.orden - b.orden)
           .map((fila, i) => {
-            const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params)
+            const cascada = cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id)
             const faltantes = ranurasSinResolver(ctx.items, fila.seleccion)
             const margen = margenMedible(cascada)
             const hoteles = hotelesBajoPisoDe(ctx, cascada)
@@ -149,8 +154,9 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
               total: Math.round(cascada.precioVenta),
               margenRealPct: margen,
               ranurasFaltantes: faltantes,
-              bajoPiso: motivoDeRechazo({ ranurasFaltantes: faltantes, margenRealPct: margen, pisoPct, exenta: exentaDelMinimo(cascada), ...hoteles }) !== null,
+              bajoPiso: motivoDeRechazo({ ranurasFaltantes: faltantes, margenRealPct: margen, pisoPct, sinComision: publicasSinComision(cascada), ...hoteles }) !== null,
               ...(hoteles.hotelesBajoPiso.length > 0 ? hoteles : {}),
+              ...(publicasSinComision(cascada) > 0 ? { publicasSinComision: publicasSinComision(cascada) } : {}),
             }
           })
       : [(() => {
@@ -164,8 +170,9 @@ export function medirSalida(ctx: ContextoCotizacion, filas: FilaItinerario[] | n
             total: Math.round(cascada.precioVenta),
             margenRealPct: margen,
             ranurasFaltantes: [],
-            bajoPiso: motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margen, pisoPct, exenta: exentaDelMinimo(cascada), ...hoteles }) !== null,
+            bajoPiso: motivoDeRechazo({ ranurasFaltantes: [], margenRealPct: margen, pisoPct, sinComision: publicasSinComision(cascada), ...hoteles }) !== null,
             ...(hoteles.hotelesBajoPiso.length > 0 ? hoteles : {}),
+            ...(publicasSinComision(cascada) > 0 ? { publicasSinComision: publicasSinComision(cascada) } : {}),
           }
         })()]
 
@@ -229,7 +236,7 @@ function conteoDeLineas(
 ): ConteoDeLineas {
   const ajuste = new Set(ctx.items.filter(i => i.es_ajuste === true).map(i => i.id))
   const cascadas = marcadas
-    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params))
+    ? marcadas.map(f => cascadaDeItinerario(ctx.items, f.seleccion, ctx.params, f.id))
     : [cascadaVigente(ctx, filas)]
   const vistas = new Map<string, boolean>()
   for (const cascada of cascadas) {
@@ -289,6 +296,9 @@ function cifrasDeReglas(tarifaPax: unknown): string[] {
   if (tipoTarifaDeLinea(tarifaPax) === 'publica') {
     const c = comisionDePublica(tarifaPax)
     if (c !== null) out.push(`comision:${c}`)
+    // D3 (2026-10-29): la comisión en pesos. Solo cuando existe: las huellas de antes no cambian.
+    const monto = leerTipoTarifa((tarifaPax as { tipoTarifa?: unknown } | null)?.tipoTarifa)?.comisionMonto
+    if (monto !== null && monto !== undefined) out.push(`comision-pesos:${monto}`)
   }
   return out
 }
@@ -339,6 +349,9 @@ export function mensajeDeSalida(bajoPiso: SujetoDeSalida[], pisoPct: number, due
     if (s.ranurasFaltantes.length > 0) {
       const faltan = s.ranurasFaltantes.map(etiquetaDeRanura).join(', ')
       return `${quien} está incompleta (falta elegir ${faltan}), así que su margen no se puede medir.`
+    }
+    if (s.margenRealPct === null && (s.publicasSinComision ?? 0) > 0) {
+      return `${quien} lleva ${s.publicasSinComision === 1 ? 'una tarifa Pública' : `${s.publicasSinComision} tarifas Públicas`} sin su comisión: sin ella el margen no se puede medir.`
     }
     if (s.margenRealPct === null) {
       return `${quien} no tiene un margen que se pueda medir (le falta el costo o el precio), y el mínimo es ${minimo}.`

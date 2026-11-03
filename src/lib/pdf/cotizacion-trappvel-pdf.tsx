@@ -1339,6 +1339,8 @@ export default function CotizacionTrappvelPDF({
   // Con varias tarifas hay un cargo por hotel, y tres hoteles de la misma ciudad dirían tres
   // veces lo mismo: la línea se escribe una vez.
   const noIncluye = [
+    // Lo que el operador del paquete dice que no incluye (V5, 2026-10-29): es un hecho del documento.
+    ...(v.noIncluye ?? []).map(t => t.trim()).filter(Boolean),
     ...new Set(v.cargosEnDestino.map(c => `${c.concepto}${c.ciudad ? ` (${c.ciudad})` : ''}, que se pagan en destino`)),
     ...(opcionales.length > 0 ? ['Las actividades opcionales listadas al final de este documento'] : []),
   ]
@@ -1386,7 +1388,7 @@ export default function CotizacionTrappvelPDF({
   const entradas: EntradaTiempo[] = []
   for (const d of bloquesDia) {
     const [primero, ...resto] = d.items
-    const fecha = fechaDelDia(v.fechaInicio, d.dia)
+    const fecha = fechaDelDia(v.inicioDeLosDias ?? v.fechaInicio, d.dia)
     // La condición de cancelación del proveedor no sale al cliente (`sinCancelacionDelProveedor`).
     const nota = (it: { descripcion?: string | null }) => sinCancelacionDelProveedor(it.descripcion)
     entradas.push({

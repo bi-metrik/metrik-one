@@ -83,7 +83,7 @@ describe('valorRc3DelCobro', () => {
     tablas.negocio_bloques = []
     expect(await valorRc3DelCobro(svcFalso(), 'ws', 'neg-1', 'b')).toEqual({
       ok: false,
-      mensaje: 'Falta el valor del comprobante de pago UPME: revisa el bloque del comprobante en el negocio.',
+      mensaje: 'Aún no se ha pagado a la UPME: el recibo sale cuando se cargue el comprobante de pago UPME en el negocio.',
       bloqueo: true,
     })
   })

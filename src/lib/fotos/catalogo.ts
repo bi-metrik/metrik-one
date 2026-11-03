@@ -20,6 +20,8 @@ import 'server-only'
 import type { AutorizacionFoto } from './autorizacion'
 import type { CategoriaFoto } from './categoria'
 import { borrarDeCatalogo, bytesDeCatalogo, guardarEnCatalogo, prepararFoto, type FotoPreparada } from './catalogo-almacen'
+import { formaAdmitida, MENSAJE_FORMA } from './forma'
+import { panelesDeFoto } from './paneles'
 import { creditoDeFoto, MAX_FOTOS_POR_ELEMENTO, nombreLlano, type ObjetivoFoto, type OrigenFoto, type TipoFoto } from './clave'
 
 export const TABLA_CATALOGO = 'fotos_catalogo'
@@ -196,6 +198,12 @@ export async function ponerFotoPropia(a: {
   }
   const lista = await prepararFoto(a.bytes)
   if (!lista) return { ok: false, mensaje: 'Ese archivo no es una foto o pesa demasiado. Usa un JPG o un PNG.' }
+  // Regla de fotos (2026-10-29): un hotel no recibe collages ni fotos verticales. Las ciudades y los
+  // tours sí (una panorámica de la ciudad sirve en la portada).
+  // Una de paneles iguales (díptico o tríptico del sitio oficial) sí entra: ocupa varias casillas.
+  if (a.objetivo.tipo === 'hotel' && !formaAdmitida(lista.ancho / lista.alto) && (await panelesDeFoto(lista.buffer, lista.ancho / lista.alto)) === 1) {
+    return { ok: false, mensaje: MENSAJE_FORMA }
+  }
   return guardarFoto({ ...a, foto: lista })
 }
 

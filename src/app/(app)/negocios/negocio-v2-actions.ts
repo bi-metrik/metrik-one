@@ -53,7 +53,7 @@ import { seccionalDesdeRut, requiereCitaDian, nombreOficialSeccional, labelCanon
 import { fijarSeccionalNegocio } from '@/lib/negocios/seccional-negocio'
 import { aplicarComputedAutoFill } from '@/lib/upme/auto-fill'
 import { valorSinIvaDeFactura } from '@/lib/upme/valor-factura'
-import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, TOLERANCIA_SALDO_COP, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
+import { calcularPendienteHandoff, valorARecaudar, esCeroDeliberado, descuadreConciliacion, type PendienteHandoff, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 import { saldoCuadrado } from '@/lib/negocios/tolerancia-saldo'
 import { revisarTarifaEnBloque } from '@/lib/upme/tarifa-confirmada'
 import { cortarVersionCronograma } from '@/lib/cronograma/cortar-version'
@@ -97,6 +97,7 @@ import { aplicaSaltoPorSaldo, debeSaltarPorSaldo, MAX_SALTOS_ENCADENADOS } from 
 import { anticipoEsperado, estadoAnticipo, notaAnticipoCubierto, type EstadoAnticipo } from '@/lib/negocios/anticipo-cubierto'
 import { resolverEtapasNoAplican, type EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { cierreAutomaticoActivo, cierraAlLlegar, MOTIVO_CIERRE_AUTOMATICO } from '@/lib/negocios/cierre-automatico'
+import { fechaDeCierreDeVenta } from '@/lib/negocios/fecha-cierre-venta'
 import { confirmacionAvance, type ConfirmacionAvance } from '@/lib/negocios/confirmacion-avance'
 import {
   sumarRecaudoConfirmado,
@@ -207,6 +208,8 @@ import { mensajeSaldoCero } from '@/lib/cobros/saldo-cero'
 import { leerSaldoCero } from '@/lib/cobros/saldo-cero-datos'
 import { cambiosDeEstado, tipoDerivado, type EstadoBloque as EstadoBloqueDerivado, type TipoDerivado } from '@/lib/negocios/estado-bloques-derivado'
 import { derivarEstadosDeBloques } from '@/lib/negocios/estado-bloques-derivado-datos'
+import { areaNoCierraElBloque } from '@/lib/negocios/cierre-por-tipo'
+import { configEntrega, GATE_VOUCHERS } from '@/lib/viaje/entrega'
 import { autorizacionEstaPendiente, faltaAutorizacionDelNegocio, lineaExigeAutorizacion, MENSAJE_ENVIO } from '@/lib/autorizacion-datos/envio'
 import type { CampoContacto } from '@/lib/contactos/campos-contacto'
 import { asignarResponsable } from '@/lib/negocios/responsable-rol'
@@ -226,6 +229,7 @@ import {
   type AtencionCita,
   type EstadoBloque,
 } from '@/lib/negocios/seguimiento-citas'
+import { cerrarCotizacionesDelNegocioPerdido, textoCotizacionesCerradas } from '@/lib/cotizaciones/cerrar-al-perder'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { bloqueoCarpetaLocal, type BloqueoGate } from '@/lib/negocios/gate-carpeta-local'
 import { exigeCarpetaLocal, normalizarCarpetaLocal } from '@/lib/negocios/carpeta-local'
@@ -277,6 +281,9 @@ export type EtapaNegocio = {
   // etapa de MAYOR orden se queda sin ninguna después, el cálculo devuelve null y la
   // pantalla concluye que el proceso termina ahí, dejándola sin botón de avanzar.
   routing?: { default_etapa_orden?: number } | null
+  // config_extra.gates → los gates con nombre de la etapa. Hoy solo lo lee el estado derivado del
+  // bloque de servicios: en la etapa que pide los vouchers, el bloque no está completo sin ellos.
+  gates?: string[]
 }
 
 /**
@@ -426,7 +433,8 @@ export type NegocioDetalle = {
    */
   campanas_contacto?: ResumenCampanas | null
   /**
-   * Día en que el negocio se volvió VENTA = el del primer cobro imputado.
+   * Día en que el negocio se volvió VENTA = el del primer cobro imputado (en viajes, el de la
+   * confirmación del cliente: `lib/negocios/fecha-cierre-venta.ts`, QA G11).
    * Sale tal cual de `v_venta_mes_comercial.fecha_venta`, la definición canónica
    * que ya fecha la venta en `/numeros`, `/equipo`, `lib/negocios/cartera` y
    * `lib/epayco/fecha-transaccion`. Columna `date`, no instante.
@@ -1396,7 +1404,8 @@ async function getNegocioDetalle(id: string): Promise<{
     ...negocioRaw,
     responsables: responsablesConAsignacion,
     campanas_contacto: campanasContacto,
-    fecha_venta: fechaVenta,
+    // En viajes, la de la confirmación del cliente (QA G11): ver `fecha-cierre-venta.ts`.
+    fecha_venta: fechaDeCierreDeVenta(fechaVenta, negocioMetadata),
   } as unknown as NegocioDetalle
 
   // Cargar etapas de la línea para la barra de progreso
@@ -1439,6 +1448,7 @@ async function getNegocioDetalle(id: string): Promise<{
       es_buzon: (e.config_extra as { buzon_leads?: boolean } | null)?.buzon_leads === true,
       reproceso_operativo: tiposReprocesoOperativo(e.config_extra as Record<string, unknown> | null),
       routing: ((e.config_extra as { routing?: { default_etapa_orden?: number } } | null)?.routing ?? null),
+      gates: (((e.config_extra as { gates?: unknown } | null)?.gates ?? []) as unknown[]).filter((g): g is string => typeof g === 'string'),
     }))
 
     // ── Desenlace que devolvió el caso a una etapa anterior ────────────────────
@@ -3546,8 +3556,9 @@ async function cambiarEtapaNegocioConGateSinClave(
 
     // Gate del Cierre económico (F6-4/F6-5): margen calculado y confirmado por la dirección con
     // la huella vigente, saldo a favor decidido. Opt-in por etapa; con `cierre_viaje` apagado no frena.
+    // No cede al override (H-35): la pantalla no ofrece «Omitir» sobre algo que se va a negar.
     const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: etapaGates })
-    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true })))
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true, omitible: false })))
 
     // Gate custom: saldo:handoff — control de recaudo para soltar el negocio a
     // operaciones (handoff comercial → operaciones, ej. salida de Documentación).
@@ -3934,6 +3945,16 @@ async function cambiarEtapaNegocioConGateSinClave(
         }
       }
     }
+  }
+
+  // Gate del Cierre económico con override (QA Trappvel 2026-10-29, H-35): «Omitir gate» con motivo
+  // tampoco salta la confirmación del margen. Sin ella `cierre_viaje` queda en null y nadie sabe
+  // cuánto dejó el viaje, que es justo lo que la etapa existe para fijar. Sin override ya lo evaluó
+  // el bloque de arriba; aquí solo el camino que ese bloque no recorre, y no cede (`omitible: false`).
+  if (motivoOverride && negocio.etapa_actual_id) {
+    const gatesCierre = (etapaActualConfigExtra.gates ?? []) as string[]
+    const faltaCierre = await evaluarGateCierre(db(supabase), { workspaceId, negocioId, gates: gatesCierre })
+    pendientesGate.push(...faltaCierre.map((nombre) => ({ nombre, es_gate: true, omitible: false })))
   }
 
   // Todas las familias juntas, en el orden de siempre (ver `pendientesGate` arriba).
@@ -6756,6 +6777,8 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   autorizacionPendiente?: boolean
   /** Con la autorización pendiente, lo mismo que responde «Enviar» (`MENSAJE_ENVIO`). */
   motivoAutorizacion?: string | null
+  /** Con la autorización pendiente, QUÉ falta (N7-2): la general, la de menores o el contacto. */
+  faltaAutorizacion?: 'sin_contacto' | 'generales' | 'menores' | null
   bloquesEtapasPrevias: Array<{
     etapa_orden: number
     etapa_nombre: string
@@ -7345,7 +7368,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
       if (fila) {
         seleccion = fila.seleccion
         const ctx = await contextoDeCotizacion(supabase, cotizacionAceptada.id)
-        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params).costoDirecto : costoRespaldo
+        costoRespaldo = ctx ? cascadaDeItinerario(ctx.items, fila.seleccion, ctx.params, fila.id).costoDirecto : costoRespaldo
       }
     }
     presupuestoPorRubro = calcularPresupuestoPorRubro(
@@ -8316,7 +8339,10 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     // aunque la etapa pertenezca a otra. Sin la marca, el resultado es el de antes.
     const invitadoAEsteBloque = ((configExtra.areas_editoras ?? []) as Area[])
       .some(a => areasEfectivasUsuario.has(a))
-    if (areaReadonly && !invitadoAEsteBloque) enrichedConfigExtra._areaReadonly = true
+    // Servicios del viaje: los permisos son POR FILA (`puedeEditarServicios`, `puedeAdjuntarVoucher`)
+    // y el servidor los revisa en cada acción. Cerrarlo por área dejaba a la comercial responsable
+    // sin el voucher que le llega a ella en Reservas y pagos (QA 2026-10-29, H3-1).
+    if (areaReadonly && !invitadoAEsteBloque && !areaNoCierraElBloque(defTipo)) enrichedConfigExtra._areaReadonly = true
     // Devolución en la copia heredada: la capacidad la declara el bloque ORIGINAL una sola
     // vez y la copia la hereda junto con el archivo. Declararla en cada copia sería
     // declarar lo mismo cuatro veces y garantizar que se desincronicen, con un síntoma
@@ -8474,14 +8500,20 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
   // (barrido 2026-10-22). Se deriva con la MISMA regla del gate, se pinta y se persiste en los dos
   // sentidos: una autorización revocada vuelve a pendiente. Ver `estado-bloques-derivado.ts`.
   {
-    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown> }
-    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[] }> = []
+    type ConInstancia = { instancia: { id: string; estado: string } | null; bloque_definitions: { tipo?: string } | null; config_extra: Record<string, unknown>; etapa_id?: string }
+    const candidatos: Array<{ lista: ConInstancia[]; i: number; instanciaId: string; actual: string; tipo: TipoDerivado; campos?: CampoContacto[]; exigeVouchers?: boolean }> = []
+    // En la etapa cuyo gate pide los vouchers (Documentos y entrega), el bloque de servicios no
+    // está completo sin ellos: antes nacía «Completo» con el gate pidiéndolos (QA 2026-10-29, M1-1).
+    const entregaActiva = configEntrega(lineaConfigExtra).activo
+    const pideVouchers = (etapaId: string | undefined) =>
+      entregaActiva && !!etapaId && (base.etapasLinea.find(e => e.id === etapaId)?.gates ?? []).includes(GATE_VOUCHERS)
     const recoger = (lista: ConInstancia[]) => lista.forEach((b, i) => {
       const tipo = tipoDerivado(b.bloque_definitions?.tipo, b.config_extra)
       if (!tipo || !b.instancia) return
       candidatos.push({
         lista, i, instanciaId: b.instancia.id, actual: b.instancia.estado, tipo,
         ...(tipo === 'ficha' ? { campos: (b.config_extra.campos ?? []) as CampoContacto[] } : {}),
+        ...(tipo === 'servicios' ? { exigeVouchers: pideVouchers(b.etapa_id) } : {}),
       })
     })
     recoger(bloquesConExtra as unknown as ConInstancia[])
@@ -8529,6 +8561,7 @@ export async function getNegocioDetalleCompleto(id: string): Promise<{
     etapasLinea: base.etapasLinea,
     autorizacionPendiente,
     motivoAutorizacion: autorizacionPendiente && faltaLeida ? MENSAJE_ENVIO[faltaLeida] : null,
+    faltaAutorizacion: autorizacionPendiente && faltaLeida && faltaLeida !== 'error' ? faltaLeida : null,
     etapasNoAplican: base.etapasNoAplican,
     datosOtrasEtapas,
     // Data de bloques fuente indexada por slug estable — para que el cliente
@@ -8901,6 +8934,9 @@ export async function perderNegocio(
 
   if (updErr) return { error: (updErr as { message: string }).message }
 
+  // H10-3: perdido el negocio, sus cotizaciones abiertas no siguen «enviadas» ni en borrador.
+  const cerradas = await cerrarCotizacionesDelNegocioPerdido(db(supabase), { workspaceId, negocioId })
+
   // Log en activity_log
   const razonLabel = etiquetaMotivoPerdida(cfgSeguimiento, razon)
   if (staffId) {
@@ -8910,7 +8946,7 @@ export async function perderNegocio(
       entidad_id: negocioId,
       tipo: 'cambio_estado',
       autor_id: staffId,
-      contenido: `Negocio desistido. Motivo: ${razonLabel}`,
+      contenido: `Negocio desistido. Motivo: ${razonLabel}${textoCotizacionesCerradas(cerradas)}`,
       valor_nuevo: 'perdido',
     }, 'perderNegocio')
   }
@@ -9007,6 +9043,8 @@ export async function pausarNegocio(
       .eq('id', negocioId)
       .eq('workspace_id', workspaceId)
     if (updErr) return { error: (updErr as { message: string }).message }
+    // H10-3: el auto-perdido también cierra sus cotizaciones abiertas.
+    await cerrarCotizacionesDelNegocioPerdido(db(supabase), { workspaceId, negocioId })
 
     if (staffId) {
       await registrarActividad(supabase, {

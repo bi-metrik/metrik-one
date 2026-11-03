@@ -209,6 +209,12 @@ describe('cuándo hay hitos', () => {
     expect(de(hitosDelViaje(dos, '2026-11-01'), 'confirmar_traslado').map(h => h.estado)).toEqual(['falta_fecha', 'falta_fecha'])
   })
 
+  it('vuelo nocturno: el traslado sin fecha es el día en que aterriza, no el de salida (S9-2)', () => {
+    const t = { ...tramo('2026-11-12', '23:40', 'BOG', 'MAD'), hora_llegada: '15:10' }
+    const v = viaje({ servicios: [vuelo([t]), servicio({ id: 'tr-1', tipo: 'traslado' })] })
+    expect(de(hitosDelViaje(v, '2026-11-01'), 'confirmar_traslado')[0].fechaAncla).toBe('2026-11-13')
+  })
+
   it('cambiar la fecha del servicio deja la marca vieja sin efecto: el hito nuevo nace pendiente', () => {
     const marca = { servicio_id: 'hotel-1', tramo: null, hito_id: 'reconfirmar_hotel', fecha_objetivo: '2026-11-15', estado: 'hecho' as const, evidencia_ref: null, nota: 'Llamada', hecho_por: DANI, hecho_at: '2026-11-11T15:00:00Z' }
     const antes = viaje({ servicios: [servicio({ id: 'hotel-1', tipo: 'hotel', fecha_servicio: '2026-11-15' })], marcas: [marca] })

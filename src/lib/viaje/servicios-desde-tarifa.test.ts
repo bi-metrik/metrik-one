@@ -191,6 +191,28 @@ describe('número de vuelo por tramo', () => {
     expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
   })
 
+  it('M9-3 · Iberia BOG→MAD nocturno de solo ida: el servicio no lleva un regreso MAD→BOG', () => {
+    const LECTURA_NOCTURNO = lectura(
+      { aerolinea: 'Iberia', origen: 'Bogotá', destino: 'Madrid', fecha_salida: '2027-07-01', fecha_regreso: '2027-07-02' },
+      [
+        { label: 'Hora de salida (ida)', valor: '16:55' },
+        { label: 'Hora de llegada (ida)', valor: '08:45' },
+        { label: 'Hora de salida (regreso)', valor: '16:55' },
+        { label: 'Hora de llegada (regreso)', valor: '08:45' },
+        { label: 'Nº de vuelo', valor: 'IB 6584' },
+      ],
+    )
+    const guardados = [
+      tramo('ida', { origen: 'Bogotá', destino: 'Madrid', fecha: '2027-07-01', salida: '16:55', llegada: '08:45' }),
+      tramo('regreso', { origen: 'Madrid', destino: 'Bogotá', fecha: '2027-07-02', salida: '16:55', llegada: '08:45' }),
+    ]
+    for (const tramos of [guardados, null]) {
+      const f = vuelo({ tarifa_pax: LECTURA_NOCTURNO, tramos })
+      expect(f.tramos).toHaveLength(1)
+      expect(f.tramos?.[0]).toMatchObject({ fecha: '2027-07-01', origen: 'Bogotá', destino: 'Madrid' })
+    }
+  })
+
   it('items.tramos con forma rota (regreso primero) no se usa: manda la lectura', () => {
     const f = vuelo({ tarifa_pax: LECTURA_REDONDO, tramos: [TRAMOS_REDONDO[1], TRAMOS_REDONDO[0]] })
     expect(f.tramos?.map(t => t.numero_vuelo)).toEqual(['XX 100 · XX 200', null])
@@ -206,3 +228,41 @@ describe('número de vuelo por tramo', () => {
   })
 })
 
+
+/**
+ * H-26 (QA Trappvel 2026-10-29): un servicio comisionable quedaba con `comision_esperada` null y el
+ * Cierre económico no tenía qué esperar. VISTO FALLAR sobre main: la fila no traía la comisión.
+ */
+describe('la comisión que el proveedor girará viaja a la fila (H-26)', () => {
+  const publica = (tipoTarifa: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({ tipoTarifa: { tipo: 'publica', origen: 'persona', por: 'Asesora', en: '2026-10-29T10:00:00Z', ...tipoTarifa }, ...extra })
+
+  it('Pública al 10 % sobre el precio público: la comisión esperada es el 10 % del costo', () => {
+    const items = [item('hotel', 2_000_000, { grupo: 'hotel', tarifa_pax: publica({ comisionPct: 10 }) as never })]
+    const [fila] = filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })
+    expect(fila.costo_cotizado).toBe(2_000_000)
+    expect(fila.comision_esperada).toBe(200_000)
+  })
+
+  it('Pública con la comisión en pesos', () => {
+    const items = [item('tour', 800_000, { grupo: 'actividad', tarifa_pax: publica({ comisionMonto: 96_000 }) as never })]
+    expect(filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })[0].comision_esperada).toBe(96_000)
+  })
+
+  it('Neta, o Pública sin comisión escrita: no hay comisión que esperar', () => {
+    const items = [
+      item('neta', 1_000_000, { grupo: 'hotel' }),
+      item('sin', 1_000_000, { grupo: 'actividad', orden: 2, tarifa_pax: publica({}) as never }),
+    ]
+    expect(filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS }).map(f => f.comision_esperada)).toEqual([null, null])
+  })
+
+  it('el pantallazo trajo los dos precios: el costo ya es el neto y la comisión ya se descontó al pagar', () => {
+    // Renaissance (viaje 06): público 2.316 USD, a pagar agencia 2.084,4 USD. El proveedor cobra el
+    // neto: no va a girar nada después, y esperarlo dejaría a Edgar marcando «se perdió» una plata
+    // que ya está en el margen.
+    const tarifa = publica({ comisionPct: 10, origen: 'pantallazo' }, { confirmada: { margenProveedor: { precioCliente: 9_611_400, costoAgencia: 8_650_260, margenPct: 10 } } })
+    const items = [item('renaissance', 8_650_260, { grupo: 'hotel', tarifa_pax: tarifa as never })]
+    expect(filasDeServicioDeTarifa({ items, seleccion: null, params: PARAMS })[0].comision_esperada).toBeNull()
+  })
+})

@@ -1,0 +1,42 @@
+{
+  "_fuente": "Respuesta SIMULADA del modelo al pantallazo 03-paquete-b-tureserva-hotel-ghl-sunrise.png del QA del 2026-10-29 (viaje 02). El modelo pone en `precio` la «con descuento» (el error M2-1); las columnas traen las tres.",
+  "es_oferta_de_hotel": true,
+  "hotel": "GHL Relax Hotel Sunrise Beach",
+  "zona": "Centro, frente a Spratt Bight",
+  "noches": 5,
+  "habitacion": "Estándar",
+  "plan_alimentacion": "Todo Incluido",
+  "moneda": "COP",
+  "precios_por_persona": [
+    { "acomodacion": "sencilla", "precio": 4158000, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 4620000 },
+      { "rotulo": "Pública con descuento", "tipo": "publica_descuento", "precio": 4158000 },
+      { "rotulo": "Neta agencia", "tipo": "neta", "precio": 3696000 } ] },
+    { "acomodacion": "doble", "precio": 2835000, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 3150000 },
+      { "rotulo": "Pública con descuento", "tipo": "publica_descuento", "precio": 2835000 },
+      { "rotulo": "Neta agencia", "tipo": "neta", "precio": 2520000 } ] },
+    { "acomodacion": "triple", "precio": 2691000, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 2990000 },
+      { "rotulo": "Pública con descuento", "tipo": "publica_descuento", "precio": 2691000 },
+      { "rotulo": "Neta agencia", "tipo": "neta", "precio": 2392000 } ] },
+    { "acomodacion": "cuadruple", "precio": 2592000, "columnas": [
+      { "rotulo": "Pública", "tipo": "publica", "precio": 2880000 },
+      { "rotulo": "Pública con descuento", "tipo": "publica_descuento", "precio": 2592000 },
+      { "rotulo": "Neta agencia", "tipo": "neta", "precio": 2304000 } ] }
+  ],
+  "nino": { "precio": 1602000, "edad_min": 2, "edad_max": 11, "columnas": [
+    { "rotulo": "Pública", "tipo": "publica", "precio": 1780000 },
+    { "rotulo": "Pública con descuento", "tipo": "publica_descuento", "precio": 1602000 },
+    { "rotulo": "Neta agencia", "tipo": "neta", "precio": 1424000 } ] },
+  "infante": null,
+  "iconos": [
+    { "descripcion": "avión", "categoria": "tiquete_aereo", "seguro": true },
+    { "descripcion": "cubiertos", "categoria": "alimentacion", "seguro": true },
+    { "descripcion": "van", "categoria": "traslados", "seguro": true },
+    { "descripcion": "cruz médica", "categoria": "seguro_medico", "seguro": true }
+  ],
+  "texto_incluye": null,
+  "incluye_por_texto": [],
+  "texto_no_incluye": "No incluye: tarjeta de turismo, propinas"
+}

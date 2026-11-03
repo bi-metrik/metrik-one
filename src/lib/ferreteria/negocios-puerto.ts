@@ -224,7 +224,11 @@ export async function puertoNegocios(): Promise<PuertoNegocios | { error: string
  * Mover de etapa y cerrar NO se ofrecen sin sesión: la entrega la marca una persona en Ferretería,
  * y una venta anticipada que nace no necesita ninguno de los dos.
  */
-export async function puertoNegociosSistema(workspaceId: string): Promise<PuertoNegocios | { error: string }> {
+export async function puertoNegociosSistema(
+  workspaceId: string,
+  /** De dónde vino el pago, como lo ve el cobro del negocio. */
+  fuenteNombre: 'Wompi' | 'Bold' = 'Wompi',
+): Promise<PuertoNegocios | { error: string }> {
   const svc = createServiceClient()
   const db = svc as unknown as Db
   const { data: ws, error: errWs } = await db.from('workspaces').select('modules').eq('id', workspaceId).maybeSingle()
@@ -269,7 +273,7 @@ export async function puertoNegociosSistema(workspaceId: string): Promise<Puerto
       const r = await registrarPagoEnNegocio(svc, workspaceId, null, {
         negocio_id: negocioId,
         fuente: 'otra',
-        fuente_nombre: 'Wompi',
+        fuente_nombre: fuenteNombre,
         referencia: pago.referencia,
         monto: pago.monto,
         fecha: pago.fecha,

@@ -22,6 +22,7 @@
  * y el reparto por precio. Lo que toca la base vive en `ranuras-datos.ts`.
  */
 
+import { indiceRecomendada } from './recomendada-por-precio'
 import {
   etiquetaDeRanura,
   grupoDeInstancia,
@@ -41,11 +42,11 @@ import { NOMBRES_TARIFA } from './tarifas'
  * (migración `20261013140000_cotizacion_ranuras_tipo_otro.sql`). Lo que se ofrece en la pantalla
  * de siempre y en la detección del pantallazo son los cuatro de `TIPOS_CON_PANTALLAZO`.
  */
-export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro', 'paquete'] as const
+export const TIPOS_RANURA = ['vuelo', 'hotel', 'actividad', 'traslado', 'otro', 'paquete', 'tren'] as const
 export type TipoRanura = (typeof TIPOS_RANURA)[number]
 
 /** Los cuatro tipos de siempre: los que reconoce la detección y ofrece la pantalla de siempre. */
-export const TIPOS_CON_PANTALLAZO = ['vuelo', 'hotel', 'actividad', 'traslado'] as const satisfies readonly TipoRanura[]
+export const TIPOS_CON_PANTALLAZO = ['vuelo', 'hotel', 'actividad', 'traslado', 'tren'] as const satisfies readonly TipoRanura[]
 export type TipoConPantallazo = (typeof TIPOS_CON_PANTALLAZO)[number]
 
 /** ¿Es uno de los cuatro tipos de siempre (no «otro»)? */
@@ -60,6 +61,7 @@ const SLUG_POR_TIPO: Record<TipoRanura, string> = {
   traslado: 'traslado_detalle',
   otro: 'otro_detalle',
   paquete: 'paquete_detalle',
+  tren: 'tren_detalle',
 }
 
 export function esTipoRanura(v: unknown): v is TipoRanura {
@@ -229,7 +231,8 @@ export function nombreAutomaticoDeRanura(args: {
   }
 
   const armar = (cabeza: string): string => {
-    if (args.tipo === 'vuelo') {
+    // QA G9 · el tren se nombra por su ruta como el vuelo («Tren París–Roma»), si la trae.
+    if (args.tipo === 'vuelo' || (args.tipo === 'tren' && args.origen && args.destino)) {
       const origen = ciudadCorta(args.origen)
       const destino = ciudadCorta(args.destino ?? args.lugar)
       if (origen && destino) return `${cabeza} ${origen}–${destino}`
@@ -238,7 +241,7 @@ export function nombreAutomaticoDeRanura(args: {
     }
     const lugar = ciudadCorta(args.lugar)
     // «Traslado París–Ámsterdam»: un trayecto entre dos ciudades no queda «en» ninguna.
-    if (lugar && args.tipo === 'traslado' && lugar.includes('–')) return `${cabeza} ${lugar}`
+    if (lugar && (args.tipo === 'traslado' || args.tipo === 'tren') && lugar.includes('–')) return `${cabeza} ${lugar}`
     return lugar ? `${cabeza} en ${lugar}` : cabeza
   }
 
@@ -360,8 +363,9 @@ export function ranurasDelTipo<T extends LineaParaBloque>(
  * Posición dentro de las `n` opciones con precio, de la más barata a la más cara:
  *  · Económica: la primera.
  *  · Premium: la última.
- *  · Recomendada: la del medio; con un número PAR, la más barata de las dos del medio
- *    (`floor((n-1)/2)`). Con dos opciones, la Recomendada lleva la misma que la Económica.
+ *  · Recomendada: la intermedia por precio (`indiceRecomendada`, decisión de Mauricio
+ *    2026-10-29): con tres, la del medio; con cuatro o más, la más cercana al punto medio entre
+ *    la más barata y la más cara; con dos, la más cara (`RECOMENDADA_CON_DOS_OPCIONES`).
  *
  * ⚠️ Una opción sin precio (todavía no se pegó su captura) NO entra al reparto: ponerla en la
  * Económica por «costar cero» sería elegir la opción que nadie ha costeado. Una ranura sin
@@ -389,7 +393,7 @@ export function repartoPorPrecio(
     if (n === 0) continue
     const posicion: Record<(typeof NOMBRES_TARIFA)[number], number> = {
       Económica: 0,
-      Recomendada: Math.floor((n - 1) / 2),
+      Recomendada: indiceRecomendada(conPrecio.map(c => c.precio)),
       Premium: n - 1,
     }
     for (const nombre of NOMBRES_TARIFA) reparto[nombre].push(conPrecio[posicion[nombre]].id)

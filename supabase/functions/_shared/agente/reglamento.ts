@@ -107,6 +107,17 @@ export function perfil(r: Reglamento): Record<string, unknown> {
   return r.fichas.find((x) => x.tipo === 'perfil')?.valores ?? {};
 }
 
+/**
+ * Las fichas en el orden en que las guarda una versión publicada: `bot_publicar_reglamento` (migración
+ * 20261006213200) las agrega con `jsonb_agg(f order by f->>'clave')`, y el bloque «siempre» y el índice respetan ese
+ * orden dentro de cada tipo. El arnés tiene que correr con ESTE orden, no con el del código: con el mismo contenido en
+ * otro orden, Haiku cambia de conducta (arnés del 2026-10-29: la bandeja publicada v3 es el código ordenado por clave, y
+ * av-yo pasó de 3/3 a 0/3). Orden por código de carácter, como lo devolvió la base. Pura.
+ */
+export function ordenPublicado<T extends { clave: string }>(fichas: readonly T[]): T[] {
+  return [...fichas].sort((a, b) => (a.clave < b.clave ? -1 : a.clave > b.clave ? 1 : 0));
+}
+
 /** Texto canónico de las fichas (orden por clave, llaves ordenadas): la base del sha256 de una versión. Pura. */
 export function canonico(fichas: Ficha[]): string {
   const orden = (v: unknown): unknown => {

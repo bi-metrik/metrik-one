@@ -12,6 +12,7 @@
 
 import type {
   CargoEnDestinoPDF,
+  PagoEnDestinoPDF,
   HotelPDF,
   NivelDetalle,
   VueloPDF,
@@ -117,6 +118,12 @@ export interface ViajePDF {
    */
   fechaInicio?: string | null
   /**
+   * Desde dónde se cuentan los días asignados («día 3»): el inicio de la SOLICITUD, que es con
+   * el que la pantalla los muestra. Solo viaja cuando el viaje cotizado empieza otro día que la
+   * solicitud (`fechas-del-viaje.ts`); ausente, cuentan desde `fechaInicio`.
+   */
+  inicioDeLosDias?: string | null
+  /**
    * El titular de la portada, del texto para el cliente (`cotizaciones.documento_cliente`).
    * Reemplaza al nombre del negocio como título. Ausente o `null`, el título es el de
    * siempre. Solo llega un texto que una persona REVISÓ (`textoImprimible`).
@@ -136,9 +143,19 @@ export interface ViajePDF {
    * «Inversión» repetida.
    */
   incluye?: string[]
+  /**
+   * Lo que el paquete de bloqueo NO incluye, como lo dijo el operador (V5 del QA del 2026-10-29).
+   * Sale en «A tener en cuenta». Ausente = nada que decir.
+   */
+  noIncluye?: string[]
   vuelos: VueloPDF[]
   hoteles: HotelPDF[]
   cargosEnDestino: CargoEnDestinoPDF[]
+  /**
+   * V-13 (QA del 2026-10-29, ronda 3): lo que el viajero paga en destino y no es un cargo del
+   * hotel (el ingreso a un parque). Sale en «No incluido» como «Se paga en destino». Ausente = nada.
+   */
+  pagosEnDestino?: PagoEnDestinoPDF[]
   nivelDetalle: NivelDetalle
   /**
    * El pie de marca que va en todas las páginas y la firma del documento.

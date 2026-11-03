@@ -29,7 +29,7 @@
 import { normalizarGrupo } from './itinerarios'
 import { conPasajerosDelViaje, listaDeTipos, tiposSinPrecio } from './precio-que-falta'
 import { definicionDeTipo, type TipoRanura } from './ranuras-cotizacion'
-import { etiquetaDeRanura, ranuraDeGrupo } from './ranuras-pantallazo'
+import { etiquetaDeRanura, ranuraDeGrupo, resolverRanura } from './ranuras-pantallazo'
 import {
   composicionDeLectura,
   composicionDeLinea,
@@ -212,7 +212,10 @@ export function destinoDeReglas(args: {
       como: 'hermana',
       itemId: primera?.id ?? null,
       grupo: d.grupo,
-      razon: `Mismo tipo, lugar y fechas que ${etiquetaDeRanura(d.grupo)}: compite con él.`,
+      razon: args.tipo === 'tren' && resolverRanura(d.grupo)?.definicion.slug === 'vuelo_detalle'
+        // M9-1 (QA G9) · el tren del mismo trayecto que un vuelo es su alternativa.
+        ? `Mismo trayecto y mismo día que ${etiquetaDeRanura(d.grupo)}: el tren queda como otra opción del vuelo y se cobra solo la que se escoja.`
+        : `Mismo tipo, lugar y fechas que ${etiquetaDeRanura(d.grupo)}: compite con él.`,
       duda: false,
       fuente: 'reglas',
     }

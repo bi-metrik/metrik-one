@@ -34,7 +34,7 @@
 import { esDiaHabil, siguienteDiaHabil } from '@/lib/dates/dias-habiles'
 import { anteriorDiaHabil, sumarDias } from '@/lib/recordatorios/reglas'
 import { ETAPA_VIAJE_CONFIRMADO } from './mis-pendientes'
-import { fechaEnPalabras, leerTramos, horaHHMM, type TramoServicio } from './fechas-servicio'
+import { fechaDeLlegada, fechaEnPalabras, leerTramos, horaHHMM, type TramoServicio } from './fechas-servicio'
 
 // ── Catálogo ────────────────────────────────────────────────────────────────
 
@@ -47,6 +47,7 @@ export const HITO_IDS = [
   'checkin_vuelo',
   'preregistro_migratorio',
   'detalles_tour',
+  'tiquetes_tren',
 ] as const
 export type HitoId = (typeof HITO_IDS)[number]
 
@@ -82,6 +83,8 @@ export const DEFINICIONES: Record<HitoId, DefinicionHito> = {
   confirmar_traslado: { id: 'confirmar_traslado', clase: 'movil', evidencia: 'nota', offsetDias: -2, titulo: 'Confirmar el traslado con el proveedor y mandarle al viajero la hora de recogida', corto: 'traslado', pideNota: 'Hora de recogida y contacto del conductor' },
   checkin_vuelo: { id: 'checkin_vuelo', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Check-in y pasabordo', corto: 'check-in', adjuntoObligatorio: true },
   preregistro_migratorio: { id: 'preregistro_migratorio', clase: 'fijo', evidencia: 'adjunto', offsetDias: 0, titulo: 'Pre-registro migratorio', corto: 'pre-registro' },
+  // QA G9 (M9-1) · el tren: el viajero se sube con su tiquete en la estación, sin check-in de aerolínea.
+  tiquetes_tren: { id: 'tiquetes_tren', clase: 'movil', evidencia: 'nota', offsetDias: -2, titulo: 'Mandarle al viajero los tiquetes del tren con la estación y la hora de salida', corto: 'tren', pideNota: 'Estación, hora de salida y coche o asiento' },
   detalles_tour: { id: 'detalles_tour', clase: 'fijo', evidencia: 'nota', offsetDias: -1, titulo: 'Confirmar con el proveedor del tour los detalles (hora, punto de encuentro) y mandárselos al viajero', corto: 'tour', pideNota: 'Hora y punto de encuentro' },
 }
 
@@ -535,14 +538,20 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
   }
 
   // ── Por servicio ──
-  const vuelos = vivos.filter(s => s.tipo === 'vuelo')
-  const primerTramo = vuelos.map(s => leerTramos(s.tramos)?.[0]?.fecha ?? s.fecha_servicio).filter((f): f is string => !!f).sort()[0] ?? null
+  // El paquete de bloqueo (tipo «otro» con los tramos de su vuelo, H10 del 2026-10-29) se vuela igual.
+  const vuelaConTramos = (s: (typeof vivos)[number]) => s.tipo === 'vuelo' || (s.tipo === 'otro' && (leerTramos(s.tramos)?.length ?? 0) > 0)
+  const vuelos = vivos.filter(vuelaConTramos)
+  // El traslado de llegada es el día en que ATERRIZA el primer tramo: en un vuelo nocturno, el
+  // siguiente al de salida (QA 2026-10-29, S9-2).
+  const primerTramo = vuelos
+    .map(s => { const t = leerTramos(s.tramos)?.[0]; return t ? fechaDeLlegada(t) : s.fecha_servicio })
+    .filter((f): f is string => !!f).sort()[0] ?? null
   const trasladosSinFecha = vivos.filter(s => s.tipo === 'traslado' && !s.fecha_servicio).length
   let preregistroPuesto = false
 
   for (const s of vivos) {
     const resp = delServicio(s)
-    if (s.tipo === 'vuelo') {
+    if (vuelaConTramos(s)) {
       const tramos = leerTramos(s.tramos) ?? []
       // Sin tramos leídos pero con fecha de inicio: un tramo con lo que hay (sin hora ni ruta).
       const lista: TramoServicio[] = tramos.length > 0
@@ -600,6 +609,10 @@ export function hitosDelViaje(v: ViajeHitos, hoy: string): Hito[] {
       // fecha (el de llegada, con el primer tramo); con varios, «Falta la fecha».
       const fecha = s.fecha_servicio ?? (trasladosSinFecha === 1 ? primerTramo : null)
       agregar({ id: 'confirmar_traslado', servicio: s, fechaAncla: fecha, horaAncla: horaHHMM(s.hora_inicio), verboAncla: 'es', responsable: resp })
+      continue
+    }
+    if (s.tipo === 'tren') {
+      agregar({ id: 'tiquetes_tren', servicio: s, fechaAncla: s.fecha_servicio, horaAncla: horaHHMM(s.hora_inicio), verboAncla: 'sale', responsable: resp })
       continue
     }
     if (s.tipo === 'actividad') {

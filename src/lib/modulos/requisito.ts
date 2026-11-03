@@ -48,6 +48,8 @@ export const REQUISITO = {
   cobrosRecurrentes: { modulos: ['clarity'], funcion: 'cobros_recurrentes' },
   /** `/ferreteria`: catálogo publicado, bitácora y ventas del piloto Marketplace. */
   ferreteria: { modulos: ['ferreteria'] },
+  /** Obras: cierre, facturas por obra, llegadas, rubros de obra y colaboradores con jornada (`/obras`). */
+  obras: { modulos: ['clarity'], funcion: 'obras' },
   /** `/funciones`: cupo y reservas de funciones (Sabor & Experiencias, etapa 2). */
   funciones: { modulos: ['funciones'] },
 } as const satisfies Record<string, RequisitoModulo>

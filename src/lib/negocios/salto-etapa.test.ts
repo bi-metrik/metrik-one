@@ -3,6 +3,17 @@ import { aplicaSaltoPorSaldo, debeSaltarPorSaldo } from './salto-etapa'
 import { valorARecaudar, type ModeloDinero } from '@/lib/upme/modelo-dinero'
 
 describe('qué etapas participan del salto', () => {
+  // H-35 (QA Trappvel 2026-10-29): el Cierre económico es de cobro, pero su gate lo cumple Edgar.
+  it('una etapa con un gate de persona nunca se salta por saldo, ni con el flag', () => {
+    const cierre = { stage: 'cobro', config_extra: { gates: ['saldo_cero', 'margen_confirmado'] } }
+    expect(aplicaSaltoPorSaldo(cierre)).toBe(false)
+    expect(aplicaSaltoPorSaldo({ ...cierre, config_extra: { ...cierre.config_extra, saltar_si_saldo_cero: true } })).toBe(false)
+    expect(aplicaSaltoPorSaldo({ stage: 'cobro', config_extra: { gates: ['postventa_completa'] } })).toBe(false)
+    // Los gates de plata no protegen: el saldo SÍ los cumple (Cartera y Facturación de SOENA, igual que hoy).
+    expect(aplicaSaltoPorSaldo({ stage: 'cobro', config_extra: { gates: ['saldo_cero', 'conciliacion_diana'] } })).toBe(true)
+    expect(aplicaSaltoPorSaldo({ stage: 'cobro', config_extra: { gates: ['factura:emitida'] } })).toBe(true)
+  })
+
   it('sin flag, se comporta como hasta ahora: solo las de cobro', () => {
     expect(aplicaSaltoPorSaldo({ stage: 'cobro', config_extra: {} })).toBe(true)
     expect(aplicaSaltoPorSaldo({ stage: 'venta', config_extra: {} })).toBe(false)

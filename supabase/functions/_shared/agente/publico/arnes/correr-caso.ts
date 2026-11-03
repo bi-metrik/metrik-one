@@ -15,6 +15,8 @@ import { REGLAMENTO_SABOR } from '../reglamento-sabor.ts';
 import type { PrecioModelo } from '../../uso.ts';
 import type { ConfigPublico } from '../config.ts';
 import { calificarPublico, corte1Propuesto, percentil } from './calificar.ts';
+import { REGLAMENTO_DIMPRO } from '../ventas/reglamento-dimpro.ts';
+import { ventasEnMemoria } from '../ventas/puertos-ventas.ts';
 import type { ResultadoCasoPublico } from './calificar.ts';
 import type { CasoPublico } from './conjuntos.ts';
 
@@ -53,14 +55,15 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
     try { exito = await caso.soloCodigo(); } catch (err) { exito = { ok: false, motivo: String(err).slice(0, 200) }; }
     return { id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo, exito, daninas: [], atajadas: [], internos: [], demoras: 0, turnosModelo: 0, personas: [], transcripcion: [] };
   }
-  const baseFichas = o.fichasBase ?? REGLAMENTO_SABOR;
+  const baseFichas = o.fichasBase ?? (caso.ventas ? REGLAMENTO_DIMPRO : REGLAMENTO_SABOR);
   const reglamento = await reglamentoSabor(caso.fichas ? caso.fichas(baseFichas) : baseFichas);
   const base = o.modelo ? o.modelo() : modeloGuionado(caso.guion ?? []);
   // El envoltorio necesita el escenario, que se arma con el modelo ya envuelto: se lo pasa por referencia.
   const ref: { e?: EscenarioPublico } = {};
   const modelo = caso.envolver ? caso.envolver(base, () => ref.e!) : base;
   const e = ref.e = await escenarioPublico({
-    modelo, canal: caso.canal, config: { ...o.configBase, ...escalar(caso.config, o.escala ?? 1) }, reglamento, vivo: o.vivo, fallarHerramienta: caso.fallarHerramienta ? () => true : undefined,
+    modelo, canal: caso.canal, config: { ...o.configBase, ...(caso.ventas ? { dominio: 'ventas' as const } : {}), ...escalar(caso.config, o.escala ?? 1) }, reglamento,
+    ...(caso.ventas ? { ventas: ventasEnMemoria(caso.ventas) } : {}), vivo: o.vivo, fallarHerramienta: caso.fallarHerramienta ? () => true : undefined,
     precios: o.modelo ? (o.precios ?? []) : PRECIOS_GUION,
     ...(o.rol ? { funciones: o.rol.funciones, ...(o.rol.catalogo ? { catalogo: o.rol.catalogo } : {}) } : {}),
   });

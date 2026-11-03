@@ -112,6 +112,14 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       },
     ],
   },
+  'src/lib/valida-cda/terminos-v1-5.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'la pantalla de aceptación de los Términos Plan CDA v1.5 (anexo A de Emilio, gate de Vera del ' +
+      '2026-10-29), ítem 4: la copia de la bitácora y los reportes se pide sin costo durante 10 años ' +
+      '(cláusula 9.3, Ley 962 de 2005, art. 28). Es el texto aprobado del anexo: va literal.',
+  },
   'src/lib/compliance/vinculacion-publica.ts': {
     tipo: 'plazo',
     declara: 'derivado',
@@ -187,6 +195,12 @@ const CLASIFICACION: Record<string, Clasificacion> = {
     razon:
       'el glosario del reglamento de prueba del núcleo conversacional define infante como «menor de 2 años»: ' +
       'una EDAD de pasajero. No hay plazo de conservación en este archivo.',
+  },
+  'supabase/functions/_shared/agente/arnes/conducta.ts': {
+    tipo: 'no-es-plazo',
+    razon:
+      'el guion del arnés de conducta dice «1 niño menor de 11 años»: la EDAD de un pasajero de la ' +
+      'conversación rehecha. No hay plazo de conservación en este archivo.',
   },
   'supabase/functions/_shared/agente/arnes/conjuntos.ts': {
     tipo: 'no-es-plazo',

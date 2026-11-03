@@ -16,6 +16,18 @@
 export const SLUG_MODALIDAD = 'modalidad_viaje'
 export const SLUG_OPERADOR = 'operador_bloqueo'
 
+/**
+ * Los campos de la solicitud que en Bloqueo los define el PAQUETE, no el cliente (N-13 del QA del
+ * 2026-10-29): el hotel lo trae el operador, así que «¿De qué categoría prefieren el hotel?» no se
+ * pide para cotizar. En A medida cuentan como siempre.
+ */
+export const CAMPOS_QUE_DEFINE_EL_PAQUETE: readonly string[] = ['categoria_hotel']
+
+/** ¿Este campo no se pide porque el viaje es Bloqueo y lo define el paquete? */
+export function campoLoDefineElPaquete(slug: string, valores: Record<string, unknown>): boolean {
+  return CAMPOS_QUE_DEFINE_EL_PAQUETE.includes(slug) && esValorBloqueo(valores[SLUG_MODALIDAD])
+}
+
 export interface ModalidadDelViaje {
   bloqueo: boolean
   operador: string | null

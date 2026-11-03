@@ -213,7 +213,9 @@ export default function PerfilFotos({
                     </span>
                   )}
                   {!f.seImprime && (
-                    <span className="absolute right-1 bottom-1 left-1 rounded bg-black/65 px-1 py-0.5 text-[10px] text-white">No sale en la propuesta: quítala y sube una propia</span>
+                    <span className="absolute right-1 bottom-1 left-1 rounded bg-black/65 px-1 py-0.5 text-[10px] text-white" data-no-sale={f.collageOVertical ? 'forma' : 'origen'}>
+                      {f.collageOVertical ? 'No sale en la propuesta: parece un collage o una foto vertical. Sube una foto sola' : 'No sale en la propuesta: quítala y sube una propia'}
+                    </span>
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-1 p-1">

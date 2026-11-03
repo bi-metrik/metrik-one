@@ -6,6 +6,7 @@ import {
   nitConGuion,
   nitTraeDvDeLaIdentificacion,
   diagnosticarNitDv,
+  nitBaseYDv,
 } from './nit'
 
 /**
@@ -233,5 +234,33 @@ describe('diagnosticarNitDv', () => {
   it('sin NIT', () => {
     expect(diagnosticarNitDv({ nit: null }).motivo).toBe('sin_nit')
     expect(diagnosticarNitDv({ nit: '  ' }).motivo).toBe('sin_nit')
+  })
+})
+
+describe('nitBaseYDv — ficha de la Relación de facturas (SOE-033)', () => {
+  it('toma el NIT limpio ENTERO y calcula el DV aparte', () => {
+    for (const [base, dv] of NITS_PUBLICOS) {
+      expect(nitBaseYDv(base)).toEqual({ base, dv })
+    }
+  })
+
+  /**
+   * La trampa de `separarNitDv`: el 8 final de Bancolombia es también el DV de
+   * 89090393. El `nit_proveedor` ya viene sin DV desde la extracción, así que aquí
+   * no se adivina: si este test «se arregla» esperando 89090393, el defecto vuelve.
+   */
+  it('NO le quita un dígito a un NIT limpio que termina en un DV válido', () => {
+    expect(nitBaseYDv('890903938')).toEqual({ base: '890903938', dv: '8' })
+  })
+
+  it('separa solo lo que viene separado con guion, y recalcula el DV', () => {
+    expect(nitBaseYDv('860.019.063-8')).toEqual({ base: '860019063', dv: calcularDvNit('860019063') })
+    expect(nitBaseYDv('890903938-1')).toEqual({ base: '890903938', dv: '8' })
+  })
+
+  it('sin dígitos devuelve null', () => {
+    expect(nitBaseYDv(null)).toBeNull()
+    expect(nitBaseYDv('  ')).toBeNull()
+    expect(nitBaseYDv('N/A')).toBeNull()
   })
 })
