@@ -24,6 +24,7 @@ import { inicioDelViajeDeLaCotizacion } from '@/lib/cotizaciones/fechas-del-viaj
 import { todayBogotaISO } from '@/lib/dates/bogota'
 import type { Composicion } from '@/lib/cotizaciones/tarifa-pasajero'
 import { MENSAJE_ENVIO_PENDIENTE } from '@/lib/autorizacion-datos/mensajes'
+import { leerCampoModalidad, type ValorModalidad } from '@/lib/cotizaciones/modalidad-campo'
 import {
   CONFIG_IVA_POR_DEFECTO,
   leerConfigIvaCotizacion,
@@ -342,6 +343,18 @@ export default async function CotizacionNegocioPage({
   // Viaje en bloqueo (brief del 2026-10-27): sale de la misma lectura del viaje, sin consultas de más, y
   // solo cuenta con la forma por pasos. Sin respuesta, A medida (el servidor lo exige en cada acción).
   const bloqueo = estadoPasos.encendido && modalidadViaje?.bloqueo ? { operador: modalidadViaje.operador, edadesMenores: edadesMenoresViaje } : null
+  // ¿El negocio tiene el campo «Modalidad»? Con él, la bandeja ofrece «Marcar el viaje como Bloqueo»
+  // (2026-11-03). Solo por pasos (el paquete solo existe ahí). Sin respuesta, sin botón.
+  let campoModalidad: { valor: ValorModalidad | '' } | null = null
+  if (estadoPasos.encendido) {
+    try {
+      const { supabase: sbModalidad } = await getWorkspace()
+      const { campo } = await leerCampoModalidad(sbModalidad, id)
+      campoModalidad = campo ? { valor: campo.valor } : null
+    } catch {
+      // Sin el campo, el mensaje de siempre.
+    }
+  }
   // La carga del negocio que pinta el marco (cotización de viaje): se lee UNA vez, aquí, y de ella
   // sale también si falta la autorización de datos del cliente (reunión del 2026-10-22: frena
   // enviar, no armar). Sin consultas de más; el servidor la exige igual al enviar.
@@ -355,6 +368,7 @@ export default async function CotizacionNegocioPage({
     <CotizacionEditor
       porPasos={estadoPasos}
       bloqueo={bloqueo}
+      campoModalidad={campoModalidad}
       pedidoAutorizacion={pedidoAutorizacion}
       motivoAutorizacionDatos={motivoAutorizacionDatos}
       otraEnviada={otraEnviada}

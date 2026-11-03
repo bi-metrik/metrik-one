@@ -197,6 +197,96 @@ describe('con un paquete abierto, solo el Ctrl+V de la ventana va al paquete (Ve
   })
 })
 
+describe('«Marcar el viaje como Bloqueo» desde la tarjeta (2026-11-03)', () => {
+  type Props = Parameters<typeof Bandeja>[0]
+  async function render(p: Partial<Props>) {
+    await act(async () => {
+      root!.render(React.createElement(Bandeja, { cotizacionId: 'cot-7', items: [], composicion: { adultos: 3, ninos: 0, infantes: 0 }, porPasos: true, ...p } as Props))
+    })
+  }
+  async function tarjetaSinBloqueo(marcar: Props['marcarBloqueo']) {
+    await render({ bloqueo: null, marcarBloqueo: marcar })
+    await pegar()
+    await esperar(80)
+    const fila = contenedor.querySelector('[data-captura]')!
+    await clic([...fila.querySelectorAll('button')].find(b => textoDe(b) === 'Es paquete de bloqueo')!)
+    await esperar()
+  }
+
+  it('el botón marca el viaje y, al volver la página con Bloqueo, la MISMA captura va al paquete sin volver a pegar', async () => {
+    let marcadas = 0
+    await tarjetaSinBloqueo(async () => { marcadas += 1; return { ok: true } })
+    expect(textoDe(contenedor)).toContain('Márcalo aquí')
+    const boton = contenedor.querySelector('[data-marcar-bloqueo]')
+    expect(textoDe(boton)).toBe('Marcar el viaje como Bloqueo')
+    await clic(boton!)
+    await esperar()
+    expect(marcadas).toBe(1)
+    // La página vuelve con el viaje en Bloqueo y un paquete abierto con el hotel ya puesto.
+    const registro = new Registro()
+    const recibidos: (string | null)[] = []
+    registro.registrar('pq-1', { estado: () => ({ itemId: 'pq-1', abierto: true, hotelLleno: true, vueloLleno: false }), recibir: (_d, c) => recibidos.push(c) })
+    const leidas = envios.filter(u => u.includes('leer-captura')).length
+    await render({
+      bloqueo: { registro, paquetes: [{ itemId: 'pq-1', titulo: 'Hotel Ficticio Playa' }], abrir: () => {}, crearPaquete: async () => ({ ok: true as const, itemId: 'x' }) },
+      marcarBloqueo: null,
+    })
+    await esperar()
+    expect(recibidos).toEqual(['vuelo'])
+    expect(envios.filter(u => u.includes('leer-captura')).length).toBe(leidas)
+    expect(contenedor.querySelector('[data-marcar-bloqueo]')).toBeNull()
+  })
+
+  it('sin ningún paquete todavía, crea uno y le entrega la captura', async () => {
+    await tarjetaSinBloqueo(async () => ({ ok: true }))
+    await clic(contenedor.querySelector('[data-marcar-bloqueo]')!)
+    await esperar()
+    const registro = new Registro()
+    const entregas: string[] = []
+    registro.entregar = (id: string) => { entregas.push(id); return true }
+    let creados = 0
+    await render({
+      bloqueo: { registro, paquetes: [], abrir: () => {}, crearPaquete: async () => { creados += 1; return { ok: true as const, itemId: 'pq-nuevo' } } },
+    })
+    await esperar()
+    expect(creados).toBe(1)
+    expect(entregas).toEqual(['pq-nuevo'])
+  })
+
+  it('si la marca falla, la tarjeta sigue con el botón y no se lleva nada al paquete', async () => {
+    await tarjetaSinBloqueo(async () => ({ ok: false, error: 'Sin permiso' }))
+    await clic(contenedor.querySelector('[data-marcar-bloqueo]')!)
+    await esperar()
+    expect(contenedor.querySelector('[data-marcar-bloqueo]')).not.toBeNull()
+  })
+
+  it('sin el campo Modalidad (marcarBloqueo null), el mensaje de siempre y sin botón', async () => {
+    await tarjetaSinBloqueo(null)
+    expect(textoDe(contenedor)).toContain('En «Condiciones del viaje» pon Modalidad: Bloqueo')
+    expect(contenedor.querySelector('[data-marcar-bloqueo]')).toBeNull()
+    })
+
+  it('con el armado del servidor, la captura marcada va por `armar` (pegarEnBloqueo), aun sin paquetes', async () => {
+    await tarjetaSinBloqueo(async () => ({ ok: true }))
+    await clic(contenedor.querySelector('[data-marcar-bloqueo]')!)
+    await esperar()
+    const armadas: string[] = []
+    let creados = 0
+    await render({
+      bloqueo: {
+        registro: new Registro(), paquetes: [], abrir: () => {},
+        crearPaquete: async () => { creados += 1; return { ok: true as const, itemId: 'x' } },
+        armar: async d => { armadas.push(d); return { ok: true as const, mensaje: 'listo' } },
+      },
+      marcarBloqueo: null,
+    })
+    await esperar(120)
+    expect(armadas).toHaveLength(1)
+    expect(armadas[0]).toMatch(/^data:image/)
+    expect(creados).toBe(0)
+  })
+})
+
 describe('el pegado arma los paquetes en el servidor (SAN ANDRÉS, 2026-11-03)', () => {
   async function montarConArmar(armar: (d: string) => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>) {
     const registro = new Registro()

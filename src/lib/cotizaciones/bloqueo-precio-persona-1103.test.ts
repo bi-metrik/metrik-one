@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { MENSAJE_PAQUETE_SIN_BLOQUEO } from './bloqueo-pegado'
+import { MENSAJE_PAQUETE_SIN_BLOQUEO, MENSAJE_PAQUETE_SIN_BLOQUEO_SIN_BOTON } from './bloqueo-pegado'
 import { construirLecturaCasilla } from './lectura-casilla'
 import { precioEsPorPersona, type Aceptacion, type CampoLeido } from './lectura-pantallazo'
 import { ranuraPorSlug, type DefinicionRanura } from './ranuras-pantallazo'
@@ -97,7 +97,10 @@ describe('1 · el precio por persona es por adulto: costo = precio × personas',
 
 describe('2 · «Es paquete de bloqueo» sin viaje en bloqueo dice qué hacer', () => {
   it('el mensaje manda a marcar la modalidad y aclara que el vuelo no necesita precio', () => {
-    expect(MENSAJE_PAQUETE_SIN_BLOQUEO).toContain('Modalidad: Bloqueo')
+    expect(MENSAJE_PAQUETE_SIN_BLOQUEO_SIN_BOTON).toContain('Modalidad: Bloqueo')
+    expect(MENSAJE_PAQUETE_SIN_BLOQUEO_SIN_BOTON).toContain('no necesita precio')
+    // Con el botón en la tarjeta, el camino es el botón (2026-11-03).
+    expect(MENSAJE_PAQUETE_SIN_BLOQUEO).toContain('Márcalo aquí')
     expect(MENSAJE_PAQUETE_SIN_BLOQUEO).toContain('no necesita precio')
   })
 })
