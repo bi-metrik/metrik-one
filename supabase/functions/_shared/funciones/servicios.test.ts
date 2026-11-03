@@ -389,8 +389,8 @@ describe.each([
     expect(link.dato.monto).toBe(200_000 + 100_000)
     const [pedido] = doble.pedidos()
     expect(pedido.cuerpo).toEqual({
-      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 300_000 }, description: 'Sabor: 2 funciones',
-      expiration_date: Date.parse(link.dato.venceAt),
+      amount_type: 'CLOSE', amount: { currency: 'COP', total_amount: 300_000, tip_amount: 0 }, description: 'Sabor: 2 funciones',
+      expiration_date: Date.parse(link.dato.venceAt) * 1_000_000,
     })
     expect(Date.parse(link.dato.venceAt) - Date.now()).toBeGreaterThan(25 * 60_000)
     // Las dos ya están en un pago pendiente.
@@ -599,10 +599,10 @@ describe('ningún servicio del asistente devuelve un número de cupo', () => {
 })
 
 describe('pasarela', () => {
-  it('expiration_date en milisegundos (SIN VERIFICAR en el sandbox): 13 dígitos, como los ejemplos de Bold', () => {
+  it('expiration_date en nanosegundos, como las cuotas que Bold acepta (en milisegundos rechazó el link: PL_000, 3-nov)', () => {
     const v = expiracionBold('2026-10-24T18:30:00.000Z')
-    expect(v).toBe(Date.parse('2026-10-24T18:30:00.000Z'))
-    expect(String(v)).toHaveLength(13)
+    expect(v).toBe(Date.parse('2026-10-24T18:30:00.000Z') * 1_000_000)
+    expect(String(v)).toHaveLength(19)
     expect(() => expiracionBold('mañana')).toThrow()
   })
 

@@ -42,7 +42,7 @@ import { filasDelTramo } from '../topes.ts';
 import type { LinkGuardado, PuertosVentas } from './puertos-ventas.ts';
 import { fotosConsultadas } from './fotos-ventas.ts';
 import { direccionNoEscrita } from './direccion-ventas.ts';
-import { complementosDe, mapaComplementos } from './complementos-ventas.ts';
+import { complementosDe, mapaComplementos, opcionesSinMapa } from './complementos-ventas.ts';
 import { propuestaVigente } from '../../nucleo.ts';
 
 export const GENERAR_LINK_PAGO = 'generar_link_pago';
@@ -256,7 +256,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     },
     {
       name: VER_COMPLEMENTOS,
-      description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos: pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
+      description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos fijos puede traer `opciones` (otros productos publicados): ofrece una o dos que sirvan para su trabajo («Tengo X o Y que podrían interesarte»), o si ninguna sirve, pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
       parameters: { type: 'object', properties: { codigo: { type: 'string', description: 'El código MP-xx del producto que escogió.' } }, required: ['codigo'] },
     },
     {
@@ -394,7 +394,18 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         const ps = await o.puertos.catalogo();
         const cs = complementosDe(mapaComplementos(r), String(args.codigo ?? ''), ps);
         if (!cs.length) {
-          return { ok: true, datos: { complementos: [], que_hacer: 'No hay un complemento para ofrecer: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Si dice que no, sigue con la compra.' } };
+          const ops = opcionesSinMapa(mapaComplementos(r), String(args.codigo ?? ''), ps);
+          if (!ops.length) {
+            return { ok: true, datos: { complementos: [], que_hacer: 'No hay un complemento para ofrecer: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Si dice que no, sigue con la compra.' } };
+          }
+          return {
+            ok: true,
+            datos: {
+              complementos: [],
+              opciones: ops.map((p) => { const m = productoParaModelo(p); return { codigo: m.codigo, producto: m.producto, precio: m.precio }; }),
+              que_hacer: 'No hay un complemento fijo para este producto. De estas opciones, escoge una o dos que sirvan para el mismo trabajo que te contó el cliente y ofrécelas en un mensaje corto: «Tengo X o Y que podrían interesarte», una línea por opción que empieza por su código, con nombre corto y precio; cierra preguntando si quiere agregar alguna. No digas que es compatible o que sirve para su herramienta si no lo sabes por ver_catalogo. Si ninguna tiene que ver con su trabajo, no ofrezcas nada: pregúntale una sola vez «¿Necesitas algo más para ese trabajo?». Una sola vez: si dice que no, sigue con la compra sin insistir.',
+            },
+          };
         }
         return {
           ok: true,

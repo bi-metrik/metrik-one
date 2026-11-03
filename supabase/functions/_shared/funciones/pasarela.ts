@@ -25,21 +25,21 @@ export interface PasarelaPagos {
 /**
  * `expiration_date` de Bold a partir del `vence_at` del pago. LA ÚNICA conversión de unidades: se cambia aquí.
  *
- * SIN VERIFICAR: el texto de la doc dice «nanosegundos desde la época Unix», pero sus ejemplos traen 13 dígitos, que
- * son MILISEGUNDOS. Esto devuelve milisegundos (como los ejemplos). Además, en nanosegundos el número (~1,8 × 10^18)
- * pasa `Number.MAX_SAFE_INTEGER` y no cabe exacto en un número de JS: si el sandbox pide nanosegundos, hay que mandarlo
- * como texto o BigInt (`BigInt(ms) * 1_000_000n`). Probar en el sandbox de Bold antes de encender pagos.
+ * En NANOSEGUNDOS desde la época Unix, como dice el texto de la doc y como manda las cuotas de las suscripciones
+ * (`src/lib/suscripciones/pasarela/bold.ts`), que ya crea links en producción. Hasta el 2026-11-03 iba en milisegundos
+ * (los ejemplos JSON de la doc traen 13 dígitos) y Bold rechazó el primer link real de Dimi con `HTTP 400: PL_000`.
+ * Pasa de 2^53: el redondeo del double en ese rango es de cientos de nanosegundos, irrelevante para un vencimiento.
  */
 export function expiracionBold(venceAtIso: string): number {
   const ms = Date.parse(venceAtIso);
   if (!Number.isFinite(ms)) throw new Error(`fecha de vencimiento inválida: ${venceAtIso}`);
-  return ms;
+  return Math.trunc(ms) * 1_000_000;
 }
 
 /** El cuerpo del pedido de link a Bold. Pura. */
 export interface CuerpoLinkBold {
   amount_type: 'CLOSE';
-  amount: { currency: 'COP'; total_amount: number };
+  amount: { currency: 'COP'; total_amount: number; tip_amount: 0 };
   description: string;
   expiration_date: number;
 }
@@ -48,9 +48,8 @@ export function cuerpoLinkBold(p: PedidoLink): CuerpoLinkBold {
   if (!Number.isSafeInteger(p.monto) || p.monto <= 0) throw new Error(`monto inválido: ${p.monto}`);
   return {
     amount_type: 'CLOSE',
-    // SIN VERIFICAR: los nombres dentro de `amount` (`currency`, `total_amount`) se confirman en el sandbox junto con
-    // la unidad de `expiration_date`.
-    amount: { currency: 'COP', total_amount: p.monto },
+    // Igual que las cuotas de las suscripciones, que Bold acepta: con `tip_amount: 0`.
+    amount: { currency: 'COP', total_amount: p.monto, tip_amount: 0 },
     description: p.descripcion.slice(0, 100),
     expiration_date: expiracionBold(p.venceAt),
   };
