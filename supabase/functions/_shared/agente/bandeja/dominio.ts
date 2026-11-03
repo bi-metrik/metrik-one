@@ -922,6 +922,10 @@ export function dominioBandeja(puerto: PuertoBandeja, o: { lector?: Lector | nul
     // Tras crear un cliente, el modelo decide si quedó una solicitud suya sin atender (Tatiana, 2026-10-07: pidió la
     // cotización, el bot pidió el cliente, lo creó y ahí se quedó).
     if (p.accion === 'crear_cliente') return { lineas: h.lineas, seguir: true };
+    // Lo mismo tras guardar en el perfil: el mensaje pudo traer también datos de un viaje (arnés con Haiku, 2026-11-03,
+    // cp-mixto en la asesora: propuso primero el perfil, el «sí» lo guardó y la fecha de salida del M1 26 2 no se
+    // propuso nunca). El modelo decide si queda algo; si no, termina.
+    if (p.accion === 'perfil_contacto') return { lineas: h.lineas, seguir: true };
     if (p.accion !== 'viaje_nuevo') return null;
     const v = h.escrituras?.find((x) => x.tipo === 'viaje') as { id: string; codigo: string; nombre?: string } | undefined;
     if (!v) return null;

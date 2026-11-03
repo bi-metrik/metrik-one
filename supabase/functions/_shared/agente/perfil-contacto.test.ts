@@ -357,6 +357,31 @@ describe('mixto: una solicitud que trae datos de la persona', () => {
     expect(e.puerto.escrituras.map((x) => x.tipo)).toEqual(['carga', 'perfil', 'perfil'])
   })
 
+  it('si el modelo propone primero el perfil, después del «sí» tiene un turno y propone lo del viaje', async () => {
+    // Arnés con Haiku, 2026-11-03 (cp-mixto en la asesora, 4 de 6): propuso `perfil_contacto` con la esposa y el vino, el
+    // «sí» lo guardó y ahí se quedó: la fecha de salida del viaje no se propuso nunca.
+    const e = await mundo({
+      viajes: [VIAJE], campos: CAMPOS, extraer: extraerMixto,
+      guion: [
+        { name: 'buscar', args: { texto: 'Mauricio Moreno' } },
+        { name: 'proponer', args: { accion: 'perfil_contacto', datos: { cliente: REF, hechos: [hecho('viaja siempre con la esposa', 'viaja siempre con la esposa', 'nucleo_viaje'), hecho('le gusta el buen vino', 'les gusta el buen vino')] } } },
+        (p) => {
+          expect(String(p.mensajes[0].parts[0].text)).toContain('Acaba de quedar hecho')
+          return { name: 'proponer', args: { accion: 'anotar_en_viaje', datos: { viaje: 'M1 26 1' } } }
+        },
+      ],
+    })
+    await e.escribe(MIXTO)
+    const r = await e.escribe('sí')
+    expect(r).toHaveLength(1)
+    expect(r[0].texto).toContain('Guardé en el perfil de MAURICIO MORENO')
+    expect(r[0].texto).toContain('¿Lo anoto en M1 26 1')
+    expect(perfilDe(e).map((h) => h.estado)).toEqual(['confirmado', 'confirmado'])
+    expect(e.puerto.viajes[0].datos).toEqual({})
+    await e.toca('Anotar')
+    expect(e.puerto.viajes[0].datos).toMatchObject({ fecha_salida: '2026-12-03' })
+  })
+
   it('el extractor recibe `perfil` junto con las instrucciones del perfil: el esquema tiene que dejar devolverlo', async () => {
     // Arnés con Gemini real, 2026-10-14 (cp-mixto): las instrucciones pedían `perfil` pero el arnés mandaba el esquema
     // sin él, y el esquema de respuesta manda: el modelo no podía devolver lo de la persona. Producción sí lo pedía.
