@@ -11,6 +11,8 @@ import { epaycoHabilitado, leerRefMedioPagoEpayco } from '@/lib/suscripciones/pa
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { CALENDARIO_TARJETA_CDA, cuotasACobrarCda, entraAlCobroAutomatico } from '@/lib/valida-cda/tarjeta-cda'
 import { tarjetaCdaDelNegocio, tarjetaCdaDelPlan } from '@/lib/valida-cda/tarjeta-cda-lectura'
+import { anotarCargoSaltado, pagoPorEnlaceDeLaCuota, type DepsPagoUnico } from '@/lib/valida-cda/pago-unico-servidor'
+import type { EstadoPagoPorEnlace } from '@/lib/valida-cda/pago-unico'
 import { CALENDARIO_MORA, corteVigente, esEspacioAutogestion, intentoDelDia } from './plan'
 import { titularDelCobro } from './metodo-pago'
 
@@ -58,6 +60,8 @@ export interface DepsCobroToken {
   db: SupabaseClient
   adapterPara?: (p: string) => PasarelaAdapter | null
   ahoraMs?: number
+  /** La consulta del enlace de Bold de la cuota antes del cargo (`pago-unico-servidor.ts`). */
+  consultarEnlace?: DepsPagoUnico['consultarEnlace']
 }
 
 export type ResultadoCobroToken =
@@ -65,6 +69,11 @@ export type ResultadoCobroToken =
   | { tipo: 'pagada' | 'pendiente_previo' }
   /** Ese intento del calendario ya se hizo (o lo está haciendo otra corrida): no se vuelve a cobrar. */
   | { tipo: 'ya_intentado' }
+  /**
+   * La cuota tiene un pago por su enlace de Bold en curso (PROCESSING), hecho y sin registrar (PAID), o un
+   * enlace cuyo estado no se pudo consultar: la tarjeta no se toca (`pago-unico.ts`). No gasta el intento.
+   */
+  | { tipo: 'pago_por_enlace'; estado: Exclude<EstadoPagoPorEnlace, { tipo: 'libre' }> }
   | { tipo: 'aprobado'; cobroId: string; detalle: string }
   | { tipo: 'pendiente'; cobroId: string }
   | { tipo: 'rechazado'; cobroId: string; mensaje: string }
@@ -326,6 +335,16 @@ export async function cobrarCuotaConTarjeta(
   if (fila?.fecha) return { tipo: 'pagada' }
   if (fila?.anulado_at) return { tipo: 'no_aplica', motivo: 'cobro_anulado' }
   if (fila?.external_ref?.startsWith('epayco-')) return conciliarCargoPendiente(deps, adapter, { id: fila.id, external_ref: fila.external_ref })
+
+  // El otro camino de pago (brief del 2026-11-03): si la cuota tiene un pago por su enlace de Bold en
+  // curso o hecho, la tarjeta no se toca. ANTES de reclamar el intento: saltarlo no lo gasta.
+  if (fila) {
+    const porEnlace = await pagoPorEnlaceDeLaCuota(db, { cobradorId: p.cobradorId, planCobroId: plan.data.id, numeroCuota: cuota.data.numero }, deps)
+    if (porEnlace.tipo !== 'libre') {
+      await anotarCargoSaltado(db, { cobradorId: p.cobradorId, ancla, numeroCuota: cuota.data.numero, estado: porEnlace, manual: p.manual === true })
+      return { tipo: 'pago_por_enlace', estado: porEnlace }
+    }
+  }
 
   const monto = Math.round(Number(cuota.data.monto))
   let cobroId = fila?.id ?? null
@@ -624,6 +643,8 @@ export interface ResumenCobroToken {
   cortadosPorReverso: number
   /** Planes de un CDA con un período de la tarjeta sin pagar después del día 5: no se intenta nada más. */
   fueraDeGraciaCda: number
+  /** Cuotas que hoy no se cobraron porque su enlace de Bold tiene un pago en curso (o no se pudo consultar). */
+  pagoPorEnlace: number
   errores: { cuotaId: string; error: string }[]
 }
 
@@ -648,6 +669,7 @@ export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: strin
     suspendidos: 0,
     cortadosPorReverso: 0,
     fueraDeGraciaCda: 0,
+    pagoPorEnlace: 0,
     errores: [],
   }
   if (!(deps.adapterPara ?? adapterTarjeta)('epayco')) return resumen
@@ -712,6 +734,7 @@ export async function cobrarCuotasConTarjeta(deps: DepsCobroToken & { hoy: strin
         if (r.tipo === 'aprobado') resumen.aprobadas += 1
         else if (r.tipo === 'pendiente') resumen.pendientes += 1
         else if (r.tipo === 'ya_intentado') resumen.yaIntentadas += 1
+        else if (r.tipo === 'pago_por_enlace') resumen.pagoPorEnlace += 1
         else if (r.tipo === 'rechazado') {
           resumen.rechazadas += 1
           // Primer cobro: el plan pasó a enlace. Las demás: la cuota sigue su calendario; no se cobra
@@ -768,6 +791,7 @@ async function cobrarPlanCda(
       if (r.tipo === 'aprobado') resumen.aprobadas += 1
       else if (r.tipo === 'pendiente') resumen.pendientes += 1
       else if (r.tipo === 'ya_intentado') resumen.yaIntentadas += 1
+      else if (r.tipo === 'pago_por_enlace') resumen.pagoPorEnlace += 1
       else if (r.tipo === 'rechazado') {
         resumen.rechazadas += 1
         break

@@ -22,6 +22,7 @@ export function TarjetaPago({
   pagarAhora = false,
   rechazoTarjeta = null,
   avisoTarjeta = null,
+  tarjetaActiva = null,
 }: {
   lectura: LecturaPago
   /** Una suscripción sin enlace vigente: «Pagar ahora» pide el enlace ya (`pagarCuotaPendiente`). */
@@ -30,6 +31,11 @@ export function TarjetaPago({
   rechazoTarjeta?: string | null
   /** El aviso de un CDA con pago automático cuyo cobro a la tarjeta no pasó (`textoFalloTarjeta`). */
   avisoTarjeta?: string | null
+  /**
+   * El resumen del pago automático de un CDA («Pago automático activo · tarjeta terminada en 4242 · …»). Sin
+   * enlace vigente, eso es lo que se dice: la cuota la cobra la tarjeta, no llega un enlace.
+   */
+  tarjetaActiva?: string | null
 }) {
   if (lectura.estado === 'no_disponible') {
     return (
@@ -100,6 +106,10 @@ export function TarjetaPago({
             </a>
           ) : pagarAhora ? (
             <PagarAhora />
+          ) : tarjetaActiva && !avisoTarjeta ? (
+            <p className="max-w-xs text-sm text-tinta" data-cobra-tarjeta>
+              {tarjetaActiva}
+            </p>
           ) : (
             <p className="max-w-xs text-sm text-tinta-suave" data-sin-enlace>
               {pago.enlaceVencido

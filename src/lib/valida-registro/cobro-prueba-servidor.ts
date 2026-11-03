@@ -500,6 +500,13 @@ async function registrarResultado(
         await cerrar('revisar', `no procesado ${TOPE_FALLAS_TECNICAS} veces (error técnico, sin cobro): ${res.mensaje}`)
       }
       return { tipo: 'no_procesado', mensaje: res.mensaje }
+    case 'pago_por_enlace': {
+      // La cuota tiene un pago por su enlace de Bold en curso: no se cobró la tarjeta ni se gastó el
+      // intento. Vuelve a `programado` y la corrida siguiente mira otra vez.
+      const detalle = `sin cobro con tarjeta: el enlace de Bold ${res.estado.idEnlace} tiene un pago ${res.estado.tipo === 'en_curso' ? res.estado.estado : 'sin consultar'}`
+      await cerrar('programado', detalle)
+      return { tipo: 'reintentar', detalle }
+    }
     default: {
       // Dudoso: quizá ePayco cobró y no alcanzó a responder. El plan sale de la tarjeta para que nadie
       // (ni el paso 7b) lo vuelva a cobrar; lo revisa una persona contra el panel de ePayco.
