@@ -372,9 +372,9 @@ export const CASOS_VENTAS: CasoPublico[] = [
     esperado: (e) => {
       const vc = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).filter((x) => x.nombre === 'ver_catalogo').map((x) => x.datos as { falta?: string; productos?: Array<{ codigo: string }> });
       return todos(
-        vc[0]?.falta === 'energia' && !vc[0].productos?.length ? ok('1.ª: cable o inalámbrico, sin productos') : no(`1.ª: ${JSON.stringify(vc[0]).slice(0, 120)}`),
-        vc[1]?.falta === 'presupuesto' ? ok('2.ª: el presupuesto (no repite la de cable)') : no(`2.ª: ${JSON.stringify(vc[1]).slice(0, 120)}`),
-        vc[2]?.productos?.map((p) => p.codigo).join() === 'MP-12' ? ok('3.ª: el que cabe en 200 mil') : no(`3.ª: ${JSON.stringify(vc[2]).slice(0, 160)}`),
+        vc[0]?.falta === 'energia' && !vc[0].productos?.length ? ok('1.ª: cable o inalámbrico, sin productos') : no(`1.ª: ${String(JSON.stringify(vc[0])).slice(0, 120)}`),
+        vc[1]?.falta === 'presupuesto' ? ok('2.ª: el presupuesto (no repite la de cable)') : no(`2.ª: ${String(JSON.stringify(vc[1])).slice(0, 120)}`),
+        vc[2]?.productos?.map((p) => p.codigo).join() === 'MP-12' ? ok('3.ª: el que cabe en 200 mil') : no(`3.ª: ${String(JSON.stringify(vc[2])).slice(0, 160)}`),
         respuestas(e).slice(0, 2).every((t) => !/MP-\d+/.test(t)) ? ok('las preguntas sin productos') : no(`respuestas: ${respuestas(e).join(' | ')}`),
       );
     },

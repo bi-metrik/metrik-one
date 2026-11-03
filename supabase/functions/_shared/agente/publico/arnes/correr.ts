@@ -19,7 +19,7 @@
 // recibir las 20 conversaciones de Sabor.
 // ============================================================
 
-import { MODELO_HAIKU_55 } from '../config.ts';
+import { CORTES_VENTAS, MODELO_HAIKU_55 } from '../config.ts';
 import { modeloAnthropic } from '../../modelo-anthropic.ts';
 import { CONJUNTOS_PUBLICO, ESCALA, TODOS_LOS_CASOS } from './conjuntos.ts';
 import { correrCaso, reporte } from './correr-caso.ts';
@@ -73,6 +73,10 @@ if (import.meta.main) {
   const o: OpcionesCorrida = {
     modelo, k, vivo: !seco, ...(rutaFichas ? { fichasBase } : {}), precios: PRECIOS_HAIKU,
     ...(cli ? { configBase: { corte1Ms: 60_000, corteTotalMs: 180_000 }, escala: ESCALA_CLI } : {}),
+    // Por la API el reloj es de verdad: ventas corre con los cortes de producción (`CORTES_VENTAS`, 20 s / 45 s), no con
+    // los del escenario (400 ms / 2 s, pensados para el reloj falso), que cortaban cada turno de Haiku. Los cortes que
+    // fija un caso de ventas están a escala 1:50 de esos.
+    ...(!seco && !cli && conjunto === 'ventas' ? { configBase: { ...CORTES_VENTAS }, escala: 50 } : {}),
   };
   const t0 = Date.now();
   const rs: ResultadoPassK[] = await enPiscina(enCorrida, paralelo, async (c) => {
