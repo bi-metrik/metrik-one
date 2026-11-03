@@ -30,7 +30,16 @@ export interface MedidaExtraccion { ms: number; ok: boolean; salida?: number; en
 export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [], o: { compacta?: boolean; fetch?: typeof fetch; modelo?: string } = {}): ExtractorMemoria {
   // `o.fetch`: el del arnés con Haiku (`proveedor-haiku.ts`), sin Gemini; `o.modelo`, el nombre que va en la URL.
   const f = o.fetch ?? fetchModelo;
-  return async ({ textos, reenviados, campos, instrucciones, perfil, pedido }) => {
+  // Como producción (`leerConGemini`): un JSON que no se deja leer se pide una vez más.
+  return async (p) => {
+    try {
+      return await extraerUnaVez(p);
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err;
+      return extraerUnaVez(p);
+    }
+  };
+  async function extraerUnaVez({ textos, reenviados, campos, instrucciones, perfil, pedido }: Parameters<ExtractorMemoria>[0]): Promise<unknown> {
     const t0 = performance.now();
     const res = await f(`https://generativelanguage.googleapis.com/v1beta/models/${o.modelo ?? MODELO_EXTRACCION}:generateContent`, {
       method: 'POST',
@@ -49,5 +58,5 @@ export function extraccionGemini(llave: string, registro: MedidaExtraccion[] = [
     registro.push({ ms, ok: !!txt, salida: Number(u.candidatesTokenCount ?? 0), entrada: Number(u.promptTokenCount ?? 0), razonamiento: Number(u.thoughtsTokenCount ?? 0) });
     if (!txt) throw new Error('extracción vacía');
     return JSON.parse(txt);
-  };
+  }
 }

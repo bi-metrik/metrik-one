@@ -442,12 +442,21 @@ export async function turnoDelModelo(deps: DepsTurno, e: EntradaTurno): Promise<
       const datos = leidos.ok ? leidos.datos : {};
       const th = deps.reloj();
       const borrado = leidos.ok ? propuestaSobreBorrado(datos, regs) : null;
+      // Si el dominio lanza (p. ej. la extracción de una carga devolvió un JSON roto: arnés con Haiku, 2026-11-03, a-choque,
+      // a-pdf-tanda, c1-1009), vuelve al modelo como un candado, igual que un cierre: el turno no se cae.
+      const proponerDominio = async () => {
+        try {
+          return await d.proponer(accion, datos, e.ctx);
+        } catch (err) {
+          return { ok: false as const, error: `No pude prepararlo ahora (${String(err).slice(0, 80)}). Dilo así, sin inventar el resultado, y que lo intente otra vez en un momento.`, candado: 'proponer_fallo' };
+        }
+      };
       const p = !leidos.ok
         ? { ok: false as const, error: leidos.error, candado: 'datos_mal_formados' }
         : borrado
         ? { ok: false as const, error: `${borrado.alias} ya no existe en la base (lo borraron): no se puede tocar. No digas que está registrado; si lo quieren otra vez, propónlo como uno nuevo.`, candado: 'registro_borrado' }
         : d.acciones.includes(accion)
-        ? await d.proponer(accion, datos, e.ctx)
+        ? await proponerDominio()
         : { ok: false as const, error: `Acción desconocida. Usa una de: ${d.acciones.join(', ')}.`, candado: 'accion_desconocida' };
       traza.ms_herramientas! += Math.round(deps.reloj() - th);
       const respaldoCandado = !p.ok && 'respaldo' in p ? p.respaldo : undefined;
