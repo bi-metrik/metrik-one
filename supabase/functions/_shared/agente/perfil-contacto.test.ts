@@ -10,7 +10,7 @@ import { TEXTO_NO_PUDE } from './nucleo'
 import { REGLAMENTO_ANEXO_A } from './bandeja/reglamento-anexo-a'
 import { conPerfil, FICHAS_PERFIL } from './bandeja/reglamento-perfil'
 import { perfilSql } from './bandeja/perfil-sql'
-import { filaDeLaFrase, lineasFuera } from './bandeja/dominio'
+import { filaDeLaFrase, lineasFuera, NOTA_TRAS_PERFIL } from './bandeja/dominio'
 import { esquemaCarga, instruccionesCarga, validarCarga } from './bandeja/extraccion'
 import { planGuardado, separarHechos, textoComparable } from '../perfil-contacto'
 import { CONJUNTO_PERFIL } from './arnes/conjuntos'
@@ -397,6 +397,9 @@ describe('mixto: una solicitud que trae datos de la persona', () => {
           expect(estado).toContain('todavía no se ha propuesto ni hecho, aunque este paso no lo haya destrabado')
           expect(estado).toContain('lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría')
           expect(estado).not.toContain('que este paso destrabó')
+          // La nota de la bandeja: el perfil no anotó nada en el viaje (corrida 41691210744: con la línea general sola,
+          // Haiku seguía terminando 2 de 3).
+          expect(estado).toContain(NOTA_TRAS_PERFIL)
           expect(p.herramientas.map((h) => h.name)).toContain('terminar')
           // El modelo ve el pedido entero y el «sí» marcado como gastado.
           const conversacion = p.mensajes.map((m) => m.parts.map((x) => x.text ?? '').join(' ')).join('\n')

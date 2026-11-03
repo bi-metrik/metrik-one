@@ -56,7 +56,7 @@ export interface EntradaTurno {
   nuevos: FilaConversacion[];
   ctx: ContextoDominio;
   /** El turno sigue a un hecho que la persona acaba de confirmar con un toque (`seguirTrasToque`). */
-  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito'; huella?: string };
+  tras?: { lineas: string[]; origen: 'toque_propuesta' | 'si_escrito'; huella?: string; nota?: string };
 }
 
 export interface SalidaTurno {
@@ -64,6 +64,8 @@ export interface SalidaTurno {
   traza: Traza;
   /** El hecho se ejecutó y el dominio pide un turno del modelo para seguir (`seguirTrasToque`). */
   seguir?: boolean;
+  /** La nota del dominio para el Estado del turno de seguir (`trasEjecutar` con `nota`). */
+  notaSeguir?: string;
   /** Mensajes que salen después de `salida`, en orden (un cierre del dominio con varios mensajes). */
   extras?: Salida[];
 }
@@ -201,6 +203,7 @@ async function estado(deps: DepsTurno, e: EntradaTurno, regs: RegistroConversaci
     ...delDominio,
     ...(e.tras ? [
       `Acaba de quedar hecho, con el toque de ${e.ctx.remitente.nombre}: ${e.tras.lineas.join(' ')}${queSeHizo} La confirmación ya la escribe el sistema: no la repitas, y no vuelvas a proponer eso.`,
+      ...(e.tras.nota ? [e.tras.nota] : []),
       // «que este paso destrabó» dejaba fuera lo que venía en el mismo mensaje (arnés de Trappvel 2026-11-03, cp-mixto en
       // la asesora: guardó el perfil con el «sí», terminó y la fecha de salida del viaje, dicha junto, no se propuso nunca).
       `Este turno es para seguir: si en la conversación quedó algo que ${e.ctx.remitente.nombre} pidió y que todavía no se ha propuesto ni hecho, aunque este paso no lo haya destrabado (lo que traía el mismo mensaje además de lo que acaba de quedar hecho, o lo que se le dijo que se haría), propón lo siguiente con \`proponer\` o pregunta lo que falte. Si lo siguiente ya está claro (lo pidió y tiene sus datos, p. ej. el siguiente soporte), propónlo de una: el resumen con su botón ya es la pregunta. Si no queda nada, llama \`${TERMINAR}\`.`,
@@ -778,7 +781,7 @@ export async function toqueDePropuesta(
     }
     const lineas = sig?.lineas ?? h.lineas;
     const r = salida({ tipo: 'texto', texto: lineas.join('\n') }, { ...ejecucion, lineas }, { respuesta_fija: 'rf.hecho' });
-    return sig?.seguir ? { ...r, seguir: true } : r;
+    return sig?.seguir ? { ...r, seguir: true, ...(sig.nota ? { notaSeguir: sig.nota } : {}) } : r;
   } catch (err) {
     await deps.almacen.soltarCandado(clave);
     return salida({ tipo: 'texto', texto: TEXTO_NO_PUDE }, { huella: toque.huella, accion: vig.accion, resultado: 'error' }, { error: String(err).slice(0, 200) });
@@ -841,7 +844,7 @@ export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: S
   const filas = e.filas.map((f) => gastado(f.id === conHecho ? { ...f, traza: toque.traza } : f));
   const nuevos = e.nuevos.map((f) => filas.find((x) => x.id === f.id) ?? f);
   const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
-  const m = await turnoDelModelo(deps, { ...e, filas, nuevos, ctx, tras: { lineas: ej.lineas ?? [], origen, huella: ej.huella } });
+  const m = await turnoDelModelo(deps, { ...e, filas, nuevos, ctx, tras: { lineas: ej.lineas ?? [], origen, huella: ej.huella, nota: toque.notaSeguir } });
   return {
     salida: m.salida,
     traza: {
