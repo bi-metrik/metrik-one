@@ -702,9 +702,15 @@ export async function seguirTrasToque(deps: DepsTurno, e: EntradaTurno, toque: S
   const origen = toque.traza.tipo === 'si_escrito' ? 'si_escrito' : 'toque_propuesta';
   // La fila que guardará la traza del toque es la última nueva: con el hecho puesto, la conversación es la de después.
   const conHecho = e.nuevos.at(-1)?.id;
-  const filas = e.filas.map((f) => (f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  // El «sí» escrito ya se gastó en el toque: en este turno se ve así, no como un pedido nuevo (arnés 2026-11-03,
+  // b-borrados-dos-pdf: «[escrito de Ana] Sí» como mensaje nuevo, y Haiku volvía a proponer lo que acababa de confirmar;
+  // con el botón, «[toque: Registrar]», no pasaba).
+  const gastado = (f: FilaConversacion): FilaConversacion =>
+    origen === 'si_escrito' && f.direccion === 'entrante' && esSiSolo(f.texto) ? { ...f, texto: `${f.texto} [con este «sí» confirmó la propuesta de arriba: ya quedó hecho]` } : f;
+  const filas = e.filas.map((f) => gastado(f.id === conHecho ? { ...f, traza: toque.traza } : f));
+  const nuevos = e.nuevos.map((f) => filas.find((x) => x.id === f.id) ?? f);
   const ctx: ContextoDominio = { ...e.ctx, conversacion: filas, resultadosPrevios: [...e.ctx.resultadosPrevios] };
-  const m = await turnoDelModelo(deps, { ...e, filas, ctx, tras: { lineas: ej.lineas ?? [], origen, huella: ej.huella } });
+  const m = await turnoDelModelo(deps, { ...e, filas, nuevos, ctx, tras: { lineas: ej.lineas ?? [], origen, huella: ej.huella } });
   return {
     salida: m.salida,
     traza: {
