@@ -170,7 +170,7 @@ describe('el soporte del gasto', () => {
       fila('d', { clase: 'imagen', media: { tipo: 'imagen', id: 'm2' } }),
     ]
     expect(fotoDe(filas, '#1')).toHaveProperty('error')
-    expect(fotoDe(filas, '#2')).toEqual({ error: 'El #2 ya es el soporte de otro gasto. Pregunta si hay otro soporte.' })
+    expect(fotoDe(filas, '#2')).toEqual({ error: 'El #2 ya es el soporte de otro gasto (el de $1, ya registrado). Si es ese mismo gasto, ya quedó: no lo propongas otra vez y sigue con lo que falta. Si es un gasto distinto, pregunta si hay otro soporte.' })
     expect(fotoDe(filas, 4)).toEqual({ fila: 'd', mediaId: 'm2' })
     expect(fotoDe(filas, '#9')).toHaveProperty('error')
   })

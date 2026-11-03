@@ -71,4 +71,50 @@ describe('dos PDF y gastos borrados en el historial (b-borrados-dos-pdf)', () =>
     expect(e.puerto.gastos.map((g) => [g.monto, g.soporte])).toEqual([[27000, false], [6880, true], [20389, true]])
     expect(modelo.restantes()).toBe(0)
   })
+
+  it('tras «Sí», la ida repetida con el mismo recibo: el candado dice que ya quedó, y sigue con la vuelta', async () => {
+    // Corrida 2 de 3 del PR #1388 (intento 2): Haiku volvió a proponer la ida con su #n de memoria; «pregunta si hay otro
+    // soporte» lo llevó a preguntar por ese recibo en vez de proponer la vuelta, y los toques cayeron en «Eso ya quedó hecho».
+    let rechazo = ''
+    let nIda = ''
+    const modelo = modeloGuionado([
+      (p) => {
+        nIda = numeroDe(p, 'recibo-uber.pdf')!
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de ida, Carrera 7 a Calle 26', negocio: 'V1 26 5', soporte: nIda } } }
+      },
+      // El #n de la ida, dicho de memoria en el turno que sigue al hecho (ya no sale en la lista de soportes sin usar).
+      () => ({ name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de ida', negocio: 'V1 26 5', soporte: `#${nIda}` } } }),
+      (p) => {
+        rechazo = ultimoResultado(p)
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 20389, categoria: 'transporte', descripcion: 'Uber de vuelta', negocio: 'V1 26 5', soporte: numeroDe(p, 'recibo-uber-vuelta.pdf') } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, lector: lectorSeco })
+    await e.juntos([{ documento: 'recibo-uber.pdf', archivo: PDF }, { documento: 'recibo-uber-vuelta.pdf', archivo: PDF, despuesMs: 2000 }])
+    const tras = await e.escribe('Sí')
+    expect(rechazo).toContain('ya es el soporte de otro gasto (el de $6.880, ya registrado). Si es ese mismo gasto, ya quedó: no lo propongas otra vez')
+    expect(tras[0].texto).toContain('✅ Gasto de $6.880 registrado')
+    expect(tras[0].texto).toContain('💰 Gasto de $20.389')
+    await e.toca('Registrar')
+    expect(e.puerto.gastos.map((g) => [g.monto, g.soporte])).toEqual([[6880, true], [20389, true]])
+  })
+
+  it('tras «Sí», la ida repetida SIN soporte y con otra descripción también es un eco; un recibo distinto del mismo monto no', async () => {
+    let rechazo = ''
+    const modelo = modeloGuionado([
+      (p) => ({ name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de ida, Carrera 7 a Calle 26', negocio: 'V1 26 5', soporte: numeroDe(p, 'recibo-uber.pdf') } } }),
+      { name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de ida', negocio: 'V1 26 5' } } },
+      (p) => {
+        rechazo = ultimoResultado(p)
+        // Otro recibo, mismo monto: no es eco, sale.
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de vuelta', negocio: 'V1 26 5', soporte: numeroDe(p, 'recibo-uber-vuelta.pdf') } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, lector: lectorSeco })
+    await e.juntos([{ documento: 'recibo-uber.pdf', archivo: PDF }, { documento: 'recibo-uber-vuelta.pdf', archivo: PDF, despuesMs: 2000 }])
+    const tras = await e.escribe('Sí')
+    expect(rechazo).toContain('eso es justo lo que se acaba de registrar')
+    expect(tras[0].texto).toContain('📝 Uber de vuelta')
+    expect(tras[0].texto).toContain('📎 Soporte: recibo-uber-vuelta.pdf')
+  })
 })
