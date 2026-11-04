@@ -19,6 +19,7 @@ import { revisarLetrasLeidas } from '@/lib/texto/texto-latino'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
 import { textoDelPdf } from './texto-pdf'
 import { verificarContraTexto, type VerificacionTexto } from './verificar-contra-texto'
+import { motivoDesdeRespuestaModelo, type MotivoArchivo } from '@/lib/documentos/aviso-archivo'
 
 const GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -202,7 +203,7 @@ export async function extractFieldsFromDocument(
   mimeType: string,
   campos: CampoExtraccion[],
   apiKey: string,
-): Promise<{ data: Record<string, CampoResultado> | null; error?: string }> {
+): Promise<{ data: Record<string, CampoResultado> | null; error?: string; archivo?: MotivoArchivo }> {
   if (!apiKey) {
     return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
   }
@@ -213,7 +214,7 @@ export async function extractFieldsFromDocument(
 
   const normalizedMime = SUPPORTED_MIMES[mimeType.toLowerCase()]
   if (!normalizedMime) {
-    return { data: null, error: `Tipo MIME no soportado: ${mimeType}` }
+    return { data: null, error: `Tipo MIME no soportado: ${mimeType}`, archivo: 'formato' }
   }
 
   const base64 = buffer.toString('base64')
@@ -279,7 +280,10 @@ export async function extractFieldsFromDocument(
     if (!res.ok) {
       const errBody = await res.text()
       console.error(`[extract-fields] Gemini HTTP error: ${res.status} — ${errBody.slice(0, 500)}`)
-      return { data: null, error: `Error de Gemini (${res.status})` }
+      // Un PDF sin páginas o dañado no es una falla del modelo: lo dice el `archivo`, y la pantalla
+      // pide reemplazarlo en vez de reintentar (ver `@/lib/documentos/aviso-archivo`).
+      const archivo = motivoDesdeRespuestaModelo(res.status, errBody)
+      return { data: null, error: `Error de Gemini (${res.status})`, ...(archivo ? { archivo } : {}) }
     }
 
     const data = await res.json()

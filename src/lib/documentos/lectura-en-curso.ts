@@ -33,6 +33,7 @@
  */
 
 import type { DocumentoRechazado } from './tipo-documento'
+import type { MotivoArchivo } from './aviso-archivo'
 
 export type EstadoLectura = 'leyendo' | 'lista' | 'error' | 'rechazado'
 
@@ -127,6 +128,8 @@ export interface RespuestaLectura {
     file_name: string | null
     campos: Record<string, unknown> | null
     extraction_status: 'ok' | 'failed' | 'no_key' | null
+    /** La lectura falló por el archivo: la tarjeta pide reemplazarlo (ver `aviso-archivo.ts`). */
+    extraction_archivo?: MotivoArchivo | null
   }
   error?: string
 }
