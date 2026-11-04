@@ -395,6 +395,10 @@ comment on column public.ferreteria_ventas.carrito_linea_id is
 
 -- ── 6. Retiro de ferreteria_links_bold ───────────────────────────────────────
 
+-- epoca: no-rompe ferreteria_links_bold es server-only (el navegador nunca la lee) y está vacía; el webhook de hoy lee
+-- «tabla inexistente» como «no es de Ferretería». Entre aplicar esto y desplegar chatwoot-agente, Dimi no puede crear
+-- links (pasa a persona con pago_no_disponible): aplicar y desplegar seguidos.
+
 do $$
 declare
   v_filas bigint;
