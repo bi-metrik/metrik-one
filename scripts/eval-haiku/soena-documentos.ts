@@ -42,6 +42,8 @@ const MODELO_GEMINI = arg('--modelo-gemini')
  * `bloque_configs.config_extra` de producción; así se mide antes de proponer el cambio).
  */
 const DESCRIPCIONES = arg('--descripciones')
+/** `--casos <archivo>` dentro de `casos/` (por defecto `soena-documentos.json`). */
+const CASOS = arg('--casos') ?? 'soena-documentos.json'
 const DIR = __dirname
 
 interface Llamada { caso: string; estado: number; ms: number; entrada: number; salida: number; crudo: string }
@@ -107,7 +109,7 @@ async function main() {
   }
   type CampoMedido = ReturnType<typeof comparar> & { requerido: boolean; confianza: number | null }
   type Detalle = { id: string; tipo: string; ms?: number; error?: string; campos?: CampoMedido[] }
-  let casos = JSON.parse(readFileSync(path.join(DIR, 'casos/soena-documentos.json'), 'utf8')) as Caso[]
+  let casos = JSON.parse(readFileSync(path.join(DIR, 'casos', CASOS), 'utf8')) as Caso[]
   if (SOLO) casos = casos.filter((c) => SOLO.includes(c.id))
   if (TIPOS) casos = casos.filter((c) => TIPOS.includes(c.id.split(':')[0]))
 
