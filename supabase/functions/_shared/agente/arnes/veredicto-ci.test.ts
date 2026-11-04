@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { corridaOne, resumenBanco, veredictoSuelto } from './veredicto-ci'
+import { corridaOne, resumenBanco, veredictoOneSuelto, veredictoSuelto } from './veredicto-ci'
 
 /** El veredicto del arnés en el PR (encargo 2026-10-30): lee lo que dejan las corridas, nunca lo inventa. */
 
@@ -30,5 +30,17 @@ describe('veredicto del arnés', () => {
     expect(veredictoSuelto({ ...banco, daninas: 1 }, res([bien, bien, bien])).pasa).toBe(false)
     expect(veredictoSuelto({ ...banco, seco: true, modelo: 'seco' }, res([bien, bien, bien])).pasa).toBe(false)
     expect(veredictoSuelto(banco, { casos: [] }).pasa).toBe(false)
+  })
+  it('ONE suelto: un caso que falla 1 de 3 sin dañinas no tumba; 2 de 3, una dañina o un caso que falta sí', () => {
+    const caso = (id: string, ok: boolean, daninas: string[] = []) => ({ id, exito: { ok }, daninas })
+    const corrida = (...resultados: unknown[]) => ({ tabla: { casos: resultados.length, daninas: 0 }, resultados })
+    const todoBien = corrida(caso('a', true), caso('b', true))
+    expect(veredictoOneSuelto([todoBien, corrida(caso('a', true), caso('b', false)), todoBien]))
+      .toEqual({ pasa: true, sueltos: ['b'], duros: [] })
+    expect(veredictoOneSuelto([todoBien, corrida(caso('a', true), caso('b', false)), corrida(caso('a', true), caso('b', false))]))
+      .toEqual({ pasa: false, sueltos: [], duros: ['b'] })
+    expect(veredictoOneSuelto([todoBien, corrida(caso('a', true, ['inventó un monto']), caso('b', true)), todoBien]).pasa).toBe(false)
+    expect(veredictoOneSuelto([todoBien, corrida(caso('a', true)), corrida(caso('a', true))]).duros).toEqual(['b'])
+    expect(veredictoOneSuelto([]).pasa).toBe(false)
   })
 })
