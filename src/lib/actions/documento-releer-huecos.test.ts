@@ -110,7 +110,7 @@ vi.mock('@/lib/google-drive', () => ({
   },
   setFilePublicByLink: async () => {},
   deleteDriveFile: async (id: string) => { efectos.borradosDrive.push(id) },
-  downloadDriveFile: async () => Buffer.from('%PDF-1.4'),
+  downloadDriveFile: async () => (await import('@/lib/documentos/__fixtures__/pdf')).PDF_UNA_PAGINA,
   usaCredencialesDriveGlobales: async () => false,
   padresDeArchivoDrive: async () => null,
 }))

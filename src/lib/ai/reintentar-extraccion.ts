@@ -12,6 +12,8 @@
  * action) ni importarla desde otro módulo sin arrastrar la cadena entera de Next.
  */
 
+import type { MotivoArchivo } from '@/lib/documentos/aviso-archivo'
+
 /**
  * Dos intentos. El fallo transitorio de Gemini (timeout, 429, 5xx, JSON malformado)
  * casi siempre pasa al segundo; el tercero ya es esperar por esperar delante de una
@@ -25,12 +27,18 @@ const ESPERA_MS = 600
 export interface ResultadoExtraccion<T> {
   data: T | null
   error?: string
+  /**
+   * El modelo rechazó el ARCHIVO (sin páginas, dañado, protegido…), no falló él. Es permanente:
+   * reintentar el mismo archivo falla igual, y quien lo subió tiene que reemplazarlo.
+   */
+  archivo?: MotivoArchivo
 }
 
 /**
  * Corre `ejecutar` hasta obtener datos, con un reintento ante fallo transitorio.
  *
- * ⚠️ NO se reintenta cuando Gemini **bloqueó el contenido**: eso es permanente y
+ * ⚠️ NO se reintenta cuando Gemini **bloqueó el contenido** ni cuando el modelo rechazó el
+ * archivo (`archivo`): las dos cosas son permanentes y
  * reintentarlo solo gasta el reloj de quien espera. Cualquier otro error se trata como
  * transitorio, que es el lado seguro: un reintento de más cuesta 600 ms, y uno de
  * menos deja el bloque en pendiente sin que nadie sepa por qué.
@@ -44,6 +52,7 @@ export async function extraerConReintento<T>(
     ultimo = await ejecutar()
     if (ultimo.data) return ultimo
     if (ultimo.error?.startsWith('Contenido bloqueado')) return ultimo // permanente
+    if (ultimo.archivo) return ultimo // el archivo no cambia entre intentos
     if (intento < INTENTOS_MAXIMOS) {
       console.warn(
         `[${tag}] Extracción AI falló (intento ${intento}/${INTENTOS_MAXIMOS}): ${ultimo.error}. Reintentando...`,

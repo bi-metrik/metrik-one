@@ -14,6 +14,7 @@
 // demás no pasan por aquí: ni una llamada, ni un token, ni un cambio de comportamiento.
 
 import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
+import { motivoDesdeRespuestaModelo, type MotivoArchivo } from '@/lib/documentos/aviso-archivo'
 import {
   TIPOS_DOCUMENTO,
   TIPO_ILEGIBLE,
@@ -84,7 +85,7 @@ export async function reconocerDocumento(
   buffer: Buffer,
   mimeType: string,
   apiKey: string,
-): Promise<{ data: Reconocimiento | null; error?: string }> {
+): Promise<{ data: Reconocimiento | null; error?: string; archivo?: MotivoArchivo }> {
   if (!apiKey) return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
 
   const normalizedMime = SUPPORTED_MIMES[mimeType.toLowerCase()]
@@ -123,7 +124,8 @@ export async function reconocerDocumento(
     if (!res.ok) {
       const cuerpo = await res.text()
       console.error(`[reconocer-documento] Gemini HTTP ${res.status} — ${cuerpo.slice(0, 300)}`)
-      return { data: null, error: `Error de Gemini (${res.status})` }
+      const archivo = motivoDesdeRespuestaModelo(res.status, cuerpo)
+      return { data: null, error: `Error de Gemini (${res.status})`, ...(archivo ? { archivo } : {}) }
     }
 
     const json = await res.json()

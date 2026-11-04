@@ -28,6 +28,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { PDF_UNA_PAGINA } from '@/lib/documentos/__fixtures__/pdf'
 import { leerMarca, type MarcaLectura } from '@/lib/documentos/lectura-en-curso'
 import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { dataDeFacturaParaCopias, resolverFacturaDelNegocio } from '@/lib/facturacion/factura-del-negocio'
@@ -58,7 +59,7 @@ function cliente() {
     storage: {
       from: () => ({
         download: async () => ({
-          data: new Blob([new Uint8Array([37, 80, 68, 70])], { type: 'application/pdf' }),
+          data: new Blob([new Uint8Array(PDF_UNA_PAGINA)], { type: 'application/pdf' }),
           error: null,
         }),
         remove: async () => ({ data: [], error: null }),
@@ -152,7 +153,7 @@ vi.mock('@/lib/google-drive', () => ({
   },
   setFilePublicByLink: async () => {},
   deleteDriveFile: async (id: string) => { efectos.borradosDrive.push(id) },
-  downloadDriveFile: async () => Buffer.from('%PDF-1.4'),
+  downloadDriveFile: async () => (await import('@/lib/documentos/__fixtures__/pdf')).PDF_UNA_PAGINA,
   usaCredencialesDriveGlobales: async () => false,
   padresDeArchivoDrive: async () => null,
 }))
