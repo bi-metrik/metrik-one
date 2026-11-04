@@ -123,7 +123,9 @@ export default async function SuscripcionPage({ searchParams }: Props) {
           ctx.designadoNombre && <p className="mt-1">La persona designada para aceptarlos es {ctx.designadoNombre}.</p>
         )}
       </section>
-    ) : cancelada ? null : ctx.pago ? (
+    ) : cancelada ? (
+      <ReactivarSuscripcion monto={montoReactivacion} hayCartera={hayCartera} soloLectura={soloLectura} />
+    ) : ctx.pago ? (
       <TarjetaPago
         lectura={ctx.pago}
         pagarAhora={!soloLectura && ofrecePagarAhora(ctx)}
