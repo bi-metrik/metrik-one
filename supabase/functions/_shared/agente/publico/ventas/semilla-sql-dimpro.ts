@@ -127,6 +127,15 @@ export const TEXTOS_CIERRA_SOLA: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: cierra la venta solo, sin ofrecer la persona (4-nov)',
 };
 
+/** El carrito (Mauricio, 4-nov): todo lo que el cliente lleva va en un carrito guardado, un link y un flete. */
+export const CLAVES_CARRITO = ['proc.compra', 'alc.complemento'];
+export const TEXTOS_CARRITO: TextosActualizacion = {
+  titulo: 'El carrito del asistente de VENTAS de Dimpro (4-nov): todo lo que el cliente lleva va en un carrito guardado en ONE,\n-- un solo link de Bold y un solo flete. Antes, cada pedido era de UN producto (dos productos = dos links y dos fletes).',
+  uso: 'semilla-sql-dimpro.ts --carrito',
+  despues: 'DESPUÉS de aplicar la migración 20261104210000_carritos_asistentes y del deploy de chatwoot-agente con la herramienta `carrito` guardada. Va después de 2026-11-04_cierra-sola.sql.',
+  nota: 'asistente de ventas Dimpro: carrito, un link y un flete (4-nov)',
+};
+
 /**
  * El SQL que carga (o reemplaza) el mapa de venta cruzada sin redesplegar: la ficha `ventas.complementos` con el mapa de
  * un JSON `{ "MP-38": [{ "codigo": "MP-30", "razon": "…" }] }`. Lo que no tenga código y razón se rechaza (no se carga
@@ -209,6 +218,7 @@ if (import.meta.main) {
   const iMapa = Deno.args.indexOf('--complementos');
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
     : Deno.args.includes('--cierra-sola') ? actualizacionSqlDimpro(CLAVES_CIERRA_SOLA, REGLAMENTO_DIMPRO, TEXTOS_CIERRA_SOLA)
+    : Deno.args.includes('--carrito') ? actualizacionSqlDimpro(CLAVES_CARRITO, REGLAMENTO_DIMPRO, TEXTOS_CARRITO)
     : Deno.args.includes('--saludo') ? actualizacionSqlDimpro(CLAVES_SALUDO, REGLAMENTO_DIMPRO, TEXTOS_SALUDO)
     : Deno.args.includes('--preguntas') ? actualizacionSqlDimpro(CLAVES_PREGUNTAS, REGLAMENTO_DIMPRO, TEXTOS_PREGUNTAS)
     : Deno.args.includes('--nombre') ? actualizacionSqlDimpro(CLAVES_NOMBRE, REGLAMENTO_DIMPRO, TEXTOS_NOMBRE)

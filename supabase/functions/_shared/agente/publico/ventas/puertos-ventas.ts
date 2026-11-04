@@ -9,41 +9,44 @@
 import type { CuerpoLinkBold, PasarelaPagos, PedidoLink } from '../../../funciones/pasarela.ts';
 import { cuerpoLinkBold } from '../../../funciones/pasarela.ts';
 import type { ProductoNoDisponible, ProductoVenta } from './catalogo-ventas.ts';
-
-/** Un producto del carrito de un link (tabla `ferreteria_links_bold_lineas`). */
-export interface LineaLink {
-  publicacionId: string;
-  cantidad: number;
-  precioUnitario: number;
-}
+import type { Carrito, EstadoPago, PagoCarrito } from '../carrito/modelo.ts';
+import { carritosEnMemoria } from '../carrito/repo.ts';
+import type { RepoCarritos } from '../carrito/repo.ts';
 
 /**
- * Lo que se guarda de un link creado (tabla `ferreteria_links_bold`). `publicacionId`, `cantidad` y `precioUnitario` son
- * los de la PRIMERA línea (las columnas del link); `lineas`, el carrito entero, en orden (4-nov).
+ * Un link de pago del carrito como lo ve el asistente (`carrito_pagos` + la conversación de su carrito). `registro`:
+ * `registrada` cuando el webhook ya registró la venta en ONE (pago `aprobado`).
  */
-export interface NuevoLink {
+export interface LinkGuardado {
   referencia: string;
   url: string;
   huella: string;
-  publicacionId: string;
-  cantidad: number;
-  precioUnitario: number;
-  lineas: LineaLink[];
-  flete: number;
   monto: number;
-  zona: string;
-  ruta: 'despacho' | 'recoge';
-  compradorNombre: string;
-  compradorTelefono: string;
-  direccion: string | null;
+  venceAt: string;
+  estado: EstadoPago;
+  carritoId: string;
   cuentaId: number;
   conversacionId: number;
   canal: string;
-  venceAt: string;
+  registro: 'registrada' | 'pendiente';
 }
 
-export interface LinkGuardado extends NuevoLink {
-  registro: string;
+/** El link de un pago con la conversación de su carrito. Pura. */
+export function linkDePago(p: PagoCarrito, c: Pick<Carrito, 'conv'> | null): LinkGuardado {
+  return {
+    referencia: p.referencia, url: p.url, huella: p.huella, monto: p.monto, venceAt: p.venceAt, estado: p.estado, carritoId: p.carritoId,
+    cuentaId: c?.conv.cuentaId ?? 0, conversacionId: c?.conv.conversacionId ?? 0, canal: c?.conv.canal ?? 'otro',
+    registro: p.estado === 'aprobado' ? 'registrada' : 'pendiente',
+  };
+}
+
+/** Buscar un link por huella o referencia sobre el repositorio de carritos. */
+export function linksDeCarritos(repo: RepoCarritos): Pick<PuertosVentas, 'linkPorHuella' | 'linkPorReferencia'> {
+  const con = async (p: PagoCarrito | null) => (p ? linkDePago(p, await repo.porId(p.carritoId)) : null);
+  return {
+    linkPorHuella: async (h) => con(await repo.pagoPorHuella(h)),
+    linkPorReferencia: async (r) => con(await repo.pagoPorReferencia(r)),
+  };
 }
 
 /**
@@ -61,10 +64,10 @@ export interface PuertosVentas {
   pasarela(): Promise<PasarelaPagos | null>;
   /** `GET /online/link/v1/{LNK}` con la llave del workspace. `sin_llaves` si no tiene; null si Bold no respondió. */
   consultarLink(referencia: string): Promise<EstadoLink>;
+  /** El carrito de la conversación, guardado en la base (`carritos`, migración 20261104210000). */
+  carritos: RepoCarritos;
   linkPorHuella(huella: string): Promise<LinkGuardado | null>;
   linkPorReferencia(referencia: string): Promise<LinkGuardado | null>;
-  /** Guarda el link. Lanza si no pudo (sin la fila, el webhook no reconocería el pago). */
-  guardarLink(l: NuevoLink): Promise<LinkGuardado>;
 }
 
 /** Un producto del catálogo como queda al salir de la venta (agotado): sin precio, ficha ni fotos. Pura. */
@@ -94,7 +97,7 @@ export function ventasEnMemoria(o: {
       return { ok: true, referencia, url: `https://checkout.bold.co/${referencia}` };
     },
   };
-  const links: LinkGuardado[] = [];
+  const carritos = carritosEnMemoria('ferreteria');
   const estados = new Map<string, string>();
   const consultas: string[] = [];
   const puertos: PuertosVentas = {
@@ -104,27 +107,28 @@ export function ventasEnMemoria(o: {
     async consultarLink(referencia) {
       consultas.push(referencia);
       if (o.sinLlaves) return 'sin_llaves';
-      const l = links.find((x) => x.referencia === referencia);
+      const l = carritos.estado.pagos.find((x) => x.referencia === referencia);
       if (!l) return null;
       return {
         estado: estados.get(referencia) ?? 'ACTIVE', total: o.consulta && 'total' in o.consulta ? o.consulta.total ?? null : l.monto,
         sandbox: o.consulta?.sandbox ?? false, espacioDePruebas: o.consulta?.espacioDePruebas ?? false,
       };
     },
-    linkPorHuella: async (h) => structuredClone(links.find((x) => x.huella === h) ?? null),
-    linkPorReferencia: async (r) => structuredClone(links.find((x) => x.referencia === r) ?? null),
-    async guardarLink(l) {
-      if (links.some((x) => x.huella === l.huella || x.referencia === l.referencia)) throw new Error('duplicado (23505)');
-      const g = { ...structuredClone(l), registro: 'creado' };
-      links.push(g);
-      return structuredClone(g);
-    },
+    carritos: carritos.repo,
+    ...linksDeCarritos(carritos.repo),
   };
   return {
-    puertos, links, estados, consultas, pedidos,
+    puertos, estados, consultas, pedidos, carritos,
+    /** Los links emitidos, con la entrega y la conversación de su carrito (para las pruebas y el arnés). */
+    get links() {
+      return carritos.estado.pagos.map((p) => {
+        const c = carritos.estado.carritos.find((x) => x.id === p.carritoId);
+        return { ...linkDePago(p, c ?? null), direccion: c?.entrega?.direccion ?? null, flete: c?.flete ?? null, lineas: structuredClone(c?.lineas ?? []) };
+      });
+    },
     pagar: (referencia: string) => estados.set(referencia, 'PAID'),
     /** Lo que haría el webhook al registrar la venta en ONE. */
-    registrar: (referencia: string) => { const l = links.find((x) => x.referencia === referencia); if (l) l.registro = 'registrada'; },
+    registrar: (referencia: string) => carritos.registrar(referencia),
     /** Lo que hace Ferretería al cerrar una campaña: la publicación pasa a `agotada` (sale del catálogo, sigue existiendo). */
     agotar: (codigo: string) => {
       const p = productos.find((x) => x.codigo === codigo);

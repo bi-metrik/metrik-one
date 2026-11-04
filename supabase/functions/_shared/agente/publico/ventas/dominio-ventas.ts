@@ -44,6 +44,10 @@ import { fotosConsultadas } from './fotos-ventas.ts';
 import { direccionNoEscrita } from './direccion-ventas.ts';
 import { complementosDe, mapaComplementos, opcionesSinMapa } from './complementos-ventas.ts';
 import { propuestaVigente } from '../../nucleo.ts';
+import { CARRITO, convDeContexto, declaracionCarrito, itemsDe, itemsDeCarrito, usarCarrito } from '../carrito/herramienta.ts';
+import type { ItemPedido } from '../carrito/herramienta.ts';
+import { preciosCambiados, resumenLineas } from '../carrito/modelo.ts';
+import type { LineaNueva } from '../carrito/modelo.ts';
 
 export const GENERAR_LINK_PAGO = 'generar_link_pago';
 export const VERIFICAR_PAGO = 'verificar_pago';
@@ -54,6 +58,8 @@ export const VERIFICAR_PAGO = 'verificar_pago';
  * volvía a llamar proponer y salía «Esto sigue esperando tu toque».
  */
 export const CONFIRMAR_COMPRA = 'confirmar_compra';
+/** Lo que dice el código cuando el «sí» llega a un resumen que ya no es el carrito (cambió o su link venció). */
+export const TEXTO_CARRITO_CAMBIO = 'Tu carrito cambió después de ese resumen, así que ese no te lo cobro. Dime si seguimos y te mando el resumen con lo que llevas ahora.';
 export const VER_COMPLEMENTOS = 'ver_complementos';
 /** Los cierres de ventas cuya salida escribe el código (no el modelo): no pasan por la lista blanca ni la guarda de plata. */
 export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO, CONFIRMAR_COMPRA];
@@ -115,31 +121,10 @@ export function preguntasHechas(filas: FilaPublica[]): Falta[] {
 export const MAX_UNIDADES = 3;
 /** Cuántos productos distintos lleva un carrito (más: lo atiende una persona, motivo `cantidad`). */
 export const MAX_LINEAS = 5;
-export const CARRITO = 'carrito';
-
-/** Un producto del carrito: lo que pidió el cliente (código y unidades). */
-export interface ItemCarrito { codigo: string; cantidad: number }
+export { CARRITO };
 
 /** Una línea del pedido como queda en la propuesta (y en el link). */
 export interface LineaPedido { publicacion_id: string; codigo: string; producto: string; precio_unitario: number; cantidad: number }
-
-/**
- * El carrito vigente de la conversación (4-nov, Mauricio: «a medida que el cliente va agregando elementos se va haciendo
- * un carrito y después es una sola liquidación»): el último `carrito` bueno, después de la última compra confirmada (una
- * compra confirmada lo vacía). Null si no hay. Pura.
- */
-export function carritoVigente(filas: FilaPublica[]): ItemCarrito[] | null {
-  let vigente: ItemCarrito[] | null = null;
-  for (const f of filas) {
-    const t = f.traza as TrazaPublica | null;
-    if (t?.ejecucion?.accion === 'compra' && t.ejecucion.resultado === 'ejecutada') vigente = null;
-    for (const h of t?.herramientas ?? []) {
-      const items = h.ok && h.nombre === CARRITO ? (h.datos as { items?: ItemCarrito[] } | null)?.items : null;
-      if (Array.isArray(items)) vigente = items.length ? items : null;
-    }
-  }
-  return vigente;
-}
 
 /** Las líneas de los datos de una propuesta de compra (las de antes del carrito tienen un solo producto). Pura. */
 export function lineasDe(datos: Record<string, unknown>): LineaPedido[] {
@@ -152,21 +137,13 @@ export function textoLineas(ls: LineaPedido[]): string {
   return ls.map((l) => `${l.codigo} ${l.producto} × ${l.cantidad}`).join(' · ');
 }
 
-/** Los productos que pidió el modelo (`productos: [{ producto, cantidad }]`, o el `producto`/`cantidad` sueltos). Pura. */
-export function itemsPedidos(datos: Record<string, unknown>): ItemCarrito[] | null {
-  const crudo = datos.productos;
-  if (Array.isArray(crudo)) {
-    return crudo.map((x) => {
-      const o = (x ?? {}) as Record<string, unknown>;
-      return { codigo: String(o.producto ?? o.codigo ?? '').trim(), cantidad: Number(o.cantidad) };
-    });
-  }
-  if (datos.producto !== undefined && String(datos.producto).trim()) return [{ codigo: String(datos.producto).trim(), cantidad: Number(datos.cantidad) }];
-  return null;
+/** Una línea del pedido como la guarda el carrito (foto del precio). Pura. */
+export function lineaDeCarrito(l: LineaPedido): LineaNueva {
+  return { itemTipo: 'ferreteria_publicacion', itemId: l.publicacion_id, codigo: l.codigo, descripcion: l.producto, cantidad: l.cantidad, precioUnitario: l.precio_unitario };
 }
 
 /** Valida los productos contra el catálogo publicado: cada uno existe, de 1 a 3 unidades, sin repetir. Pura. */
-export function armarLineas(ps: ProductoVenta[], items: ItemCarrito[]): { ok: true; lineas: LineaPedido[] } | { ok: false; error: string; candado: string } {
+export function armarLineas(ps: ProductoVenta[], items: ItemPedido[]): { ok: true; lineas: LineaPedido[] } | { ok: false; error: string; candado: string } {
   if (!items.length) return { ok: false, error: 'El carrito está vacío: dime qué productos lleva (código MP-xx y unidades).', candado: 'carrito_vacio' };
   if (items.length > MAX_LINEAS) return { ok: false, error: `Más de ${MAX_LINEAS} productos distintos no los armo por aquí: pasar_a_persona con motivo cantidad.`, candado: 'carrito_largo' };
   const lineas: LineaPedido[] = [];
@@ -295,26 +272,39 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const filasDe = (ctx: ContextoDominio) => ctx.conversacion as FilaPublica[];
   const fija = (clave: string, vars: Record<string, string> = {}) => textoFijo(r, clave, { ...o.vars, ...vars });
 
-  /** El link de una compra confirmada: el guardado con su huella o uno nuevo con la pasarela del workspace. */
-  async function asegurarLink(huella: string, datos: Record<string, unknown>, ctx: ContextoDominio): Promise<{ ok: true; link: LinkGuardado } | { ok: false; motivo: string }> {
+  /**
+   * El link de una compra confirmada: el registrado con su huella, o uno nuevo con la pasarela del workspace que congela el
+   * carrito guardado (`carrito_emitir_pago`). Si el carrito cambió después de la propuesta (otra versión), no se cobra:
+   * `cambio`. Un link ya vencido no se reenvía: `vencido` (se vuelve a proponer, con los precios de hoy).
+   */
+  async function asegurarLink(huella: string, datos: Record<string, unknown>): Promise<{ ok: true; link: LinkGuardado } | { ok: false; motivo: string; cambio?: true; vencido?: true }> {
     const ya = await o.puertos.linkPorHuella(huella);
-    if (ya) return { ok: true, link: ya };
+    if (ya) {
+      if (ya.estado === 'vencido' || (ya.estado === 'creado' && Date.parse(ya.venceAt) <= o.ahoraMs())) return { ok: false, motivo: `el link ${ya.referencia} venció o lo reemplazó otro`, vencido: true };
+      return { ok: true, link: ya };
+    }
+    const carritoId = String(datos.carrito_id ?? '');
+    if (!carritoId) return { ok: false, motivo: 'la propuesta no trae carrito (es de antes del carrito guardado)', cambio: true };
+    const c = await o.puertos.carritos.porId(carritoId);
+    if (!c || (c.estado !== 'abierto' && c.estado !== 'en_pago') || c.version !== Number(datos.version)) {
+      return { ok: false, motivo: 'el carrito cambió después de la propuesta', cambio: true };
+    }
     const pasarela = await o.puertos.pasarela();
     if (!pasarela) return { ok: false, motivo: 'el workspace no tiene llaves de Bold en la bóveda' };
-    const [cuenta, conv] = ctx.phone.split(':').map(Number);
-    const filas = filasDe(ctx);
     const venceAt = new Date(o.ahoraMs() + tablaFlete(r).venceHoras * 3600_000).toISOString();
     const monto = Number(datos.total);
     const ls = lineasDe(datos);
     const res = await pasarela.crearLink({ pagoId: huella, monto, venceAt, descripcion: ls.map((l) => `${l.codigo} ${l.producto} x${l.cantidad}`).join(', ') });
     if (!res.ok) return { ok: false, motivo: `Bold no creó el link: ${res.error}` };
     try {
-      const link = await o.puertos.guardarLink({
-        referencia: res.referencia, url: res.url, huella, publicacionId: ls[0].publicacion_id, cantidad: ls[0].cantidad, precioUnitario: ls[0].precio_unitario,
-        lineas: ls.map((l) => ({ publicacionId: l.publicacion_id, cantidad: l.cantidad, precioUnitario: l.precio_unitario })), flete: Number(datos.flete), monto, zona: String(datos.zona), ruta: datos.ruta === 'recoge' ? 'recoge' : 'despacho',
-        compradorNombre: String(datos.nombre), compradorTelefono: String(datos.celular), direccion: datos.direccion ? String(datos.direccion) : null,
-        cuentaId: cuenta, conversacionId: conv, canal: filas[0]?.canal ?? 'otro', venceAt,
-      });
+      const e = await o.puertos.carritos.emitirPago(c.id, c.version, {
+        zona: String(datos.zona), ruta: datos.ruta === 'recoge' ? 'recoge' : 'despacho', flete: Number(datos.flete),
+        nombre: String(datos.nombre), telefono: String(datos.celular), direccion: datos.direccion ? String(datos.direccion) : null,
+      }, { referencia: res.referencia, url: res.url, huella, monto, venceAt });
+      // El link quedó creado en Bold pero ONE no lo reconocería: no se entrega (vence solo).
+      if (!e.ok) return e.error === 'carrito_cambio' ? { ok: false, motivo: 'el carrito cambió mientras se creaba el link', cambio: true } : { ok: false, motivo: `no se registró el link ${res.referencia}: ${e.error}` };
+      const link = await o.puertos.linkPorHuella(huella);
+      if (!link) return { ok: false, motivo: `no se pudo leer el link ${res.referencia}` };
       return { ok: true, link };
     } catch (e) {
       // Sin la fila el webhook no reconocería el pago: el link no se entrega.
@@ -352,17 +342,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos fijos puede traer `opciones` (otros productos publicados): ofrece una o dos que sirvan para su trabajo («Tengo X o Y que podrían interesarte»), o si ninguna sirve, pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
       parameters: { type: 'object', properties: { codigo: { type: 'string', description: 'El código MP-xx del producto que escogió.' } }, required: ['codigo'] },
     },
-    {
-      name: CARRITO,
-      description: `El carrito de la compra: cada vez que el cliente agrega, quita o cambia un producto o sus unidades, llámala con el carrito ENTERO como queda (todos los productos, cada uno con su código MP-xx y unidades, de 1 a ${MAX_UNIDADES}). Devuelve cada línea con su precio y el subtotal (sin flete): díselo en un mensaje corto, una línea por producto, y pregúntale si quiere algo más o seguimos con la entrega. Todo el carrito se paga en UN solo link con un solo flete. Si devuelve error, haz lo que dice.`,
-      parameters: {
-        type: 'object',
-        properties: {
-          productos: { type: 'array', items: { type: 'object', properties: { producto: { type: 'string', description: 'el código MP-xx' }, cantidad: { type: 'integer', description: `unidades (1 a ${MAX_UNIDADES})` } }, required: ['producto', 'cantidad'] } },
-        },
-        required: ['productos'],
-      },
-    },
+    declaracionCarrito({
+      maxUnidades: MAX_UNIDADES, codigo: 'el código MP-xx',
+      extra: 'Con lo que devuelve, dile cómo va su carrito en un mensaje corto (una línea por producto) y pregúntale si quiere algo más o seguimos con la entrega.',
+    }),
     {
       name: 'consultar_reglas',
       description: `Las políticas publicadas, por clave: ${claves.join(', ')}. Si devuelve \`sin_dato\`, no adivines: dile que ese dato no lo tienes y sigue con la venta; solo si insiste en que alguien se lo confirme, pasa a persona con duda_abierta.`,
@@ -498,18 +481,14 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         };
       }
       if (nombre === CARRITO) {
-        const items = itemsPedidos(args) ?? [];
-        const a = armarLineas(await o.puertos.catalogo(), items);
-        if (!a.ok) return { ok: false, datos: null, error: a.error };
-        return {
-          ok: true,
-          datos: {
-            items: a.lineas.map((l) => ({ codigo: l.codigo, cantidad: l.cantidad })),
-            carrito: a.lineas.map((l) => ({ codigo: l.codigo, producto: l.producto, precio: pesos(l.precio_unitario), cantidad: l.cantidad })),
-            subtotal: pesos(totalCarrito(a.lineas.map((l) => ({ precio: l.precio_unitario, cantidad: l.cantidad })), 0)),
-            que_hacer: 'Dile cómo va su carrito: una línea por producto (código, nombre corto, unidades y precio) y el subtotal, que no incluye el flete. Pregúntale si quiere algo más o seguimos con la entrega. Todo va en un solo link de pago.',
-          },
+        const resolver = async (items: ItemPedido[]) => {
+          const a = armarLineas(await o.puertos.catalogo(), items);
+          return a.ok ? { ok: true as const, lineas: a.lineas.map(lineaDeCarrito) } : a;
         };
+        return await usarCarrito(o.puertos.carritos, convDeContexto(ctx), resolver, args, {
+          pesos,
+          queHacer: 'Dile cómo va su carrito: una línea por producto (código, nombre corto, unidades y precio) y el subtotal, que no incluye el flete. Pregúntale si quiere algo más o seguimos con la entrega. Todo va en un solo link de pago.',
+        });
       }
       if (nombre === VER_COMPLEMENTOS) {
         if (ventaCruzadaOfrecida(filasDe(ctx))) {
@@ -559,8 +538,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       // Lo que falta, dicho campo por campo (30-oct: sin `producto`, el error era «no es un código de ver_catalogo» y el
       // modelo volvía a buscar el producto en vez de completar los datos).
       const vacio = (k: string) => datos[k] === undefined || datos[k] === null || String(datos[k]).trim() === '';
-      // El carrito: lo que trae `productos` (o el producto suelto); si no trae nada, el carrito vigente de la conversación.
-      const items = itemsPedidos(datos) ?? carritoVigente(filas);
+      // El carrito: lo que trae `productos` (o el producto suelto); si no trae nada, el carrito guardado de la conversación.
+      const conv = convDeContexto(ctx);
+      const guardado = await o.puertos.carritos.vivo(conv);
+      const items = itemsDe(datos) ?? itemsDeCarrito(guardado);
       const sinCampo = [
         ...(!items?.length ? ['productos (cada producto con su código MP-xx y unidades)'] : []),
         ...(vacio('entrega') ? ['entrega (bogota o recoge)'] : []),
@@ -573,6 +554,13 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const armado = armarLineas(await o.puertos.catalogo(), items!);
       if (!armado.ok) return { ok: false, error: armado.error, candado: armado.candado };
       const lineas = armado.lineas;
+      // El carrito guardado queda igual a lo que se propone, con el precio de hoy (se re-cotiza antes de cobrar).
+      const nuevas = lineas.map(lineaDeCarrito);
+      const cambiados = preciosCambiados(guardado?.lineas ?? [], nuevas);
+      const g = await o.puertos.carritos.guardarLineas(conv, nuevas);
+      if (!g.ok) return { ok: false, error: 'Este pedido ya se está pagando o ya se pagó: no lo vuelvas a proponer. Si dice que pagó: verificar_pago.', candado: 'carrito_pagado' };
+      if (!g.carrito) return { ok: false, error: 'El carrito quedó vacío: dime qué productos lleva.', candado: 'carrito_vacio' };
+      const carrito = g.carrito;
       const tabla = tablaFlete(r);
       const zona = zonaFlete(tabla, String(datos.entrega ?? ''));
       if (!zona) return { ok: false, error: `Esa entrega no está en la tabla de flete (${tabla.zonas.map((z) => z.id).join(', ') || 'vacía'}): no cotices el flete; pasar_a_persona con motivo fuera_de_zona.`, candado: 'zona_fuera_de_tabla' };
@@ -599,6 +587,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const resumen = [
         'Revisa tu pedido:',
         ...lineas.map((l) => `• ${l.codigo} · ${l.producto}: ${l.cantidad} × ${pesos(l.precio_unitario)}`),
+        ...cambiados.map((c) => `• Ojo: el precio de ${c.codigo} cambió de ${pesos(c.antes)} a ${pesos(c.ahora)}`),
         `• ${zona.nombre}: ${zona.flete > 0 ? `flete ${pesos(zona.flete)}` : 'sin flete'}`,
         `• Total: ${pesos(total)}`,
         `• ${campos.nombre} · Cel. ${digitos(campos.celular)}${zona.ruta === 'despacho' ? ` · ${campos.direccion}` : ''}`,
@@ -607,7 +596,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const propuesta: Propuesta = {
         accion: 'compra',
         datos: {
-          lineas, zona: zona.id, zona_nombre: zona.nombre,
+          carrito_id: carrito.id, version: carrito.version, lineas, zona: zona.id, zona_nombre: zona.nombre,
           ruta: zona.ruta, flete: zona.flete, total, nombre: campos.nombre, celular: digitos(campos.celular), ...(zona.ruta === 'despacho' ? { direccion: campos.direccion } : {}),
         },
         resumen, si: 'Sí, enviar link', no: 'Corregir',
@@ -619,7 +608,11 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       // La huella la trae la propuesta guardada que confirma el núcleo (una vez por huella, con su candado).
       const huella = String((p as Propuesta & { huella?: string }).huella ?? '');
       if (!huella) throw new Error('propuesta sin huella');
-      const r1 = await asegurarLink(huella, p.datos, ctx);
+      const r1 = await asegurarLink(huella, p.datos);
+      if (!r1.ok && (r1.cambio || r1.vencido)) {
+        // No es una falla: el cliente cambió el carrito (o el link venció) después del resumen. Se vuelve a armar.
+        return { lineas: [TEXTO_CARRITO_CAMBIO], escrituras: [{ tipo: 'carrito_cambio', motivo: r1.motivo }] };
+      }
       if (!r1.ok) {
         console.error(`[asistente-ventas] sin link de pago: ${r1.motivo}`);
         return {
@@ -647,14 +640,14 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const pausa = horasDePausa(filas);
       const fotos = fotosConsultadas(filas);
       const enCurso = productoEnCurso(filas);
-      const carrito = carritoVigente(filas);
+      const carrito = await o.puertos.carritos.vivo(convDeContexto(ctx));
       return [
         ...(pausa !== null && pausa >= HORAS_CONVERSACION_NUEVA ? [`El cliente vuelve después de ${Math.floor(pausa)} h sin escribir: si solo saluda o no dice qué quiere, tómalo como una conversación nueva: salúdalo y pregúntale qué está buscando, sin decir «de nuevo» y sin suponer el producto de antes. Si su mensaje sigue claramente lo de antes, retómalo.`] : []),
         ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
         `Autorización de datos para la compra: ${lineaG}.`,
         ...(u ? [`Compra confirmada: ${textoLineas(lineasDe(u.datos))}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
         ...(enCurso ? [`Ya presentaste el ${enCurso}: si siguen hablando de ese, no repitas su código ni su nombre completo; dile «ese», el tipo («ese taladro») o la marca, o nada. El código vuelve solo para mandar su foto o si hay varios en juego.`] : []),
-        ...(carrito ? [`Carrito: ${carrito.map((x) => `${x.codigo} × ${x.cantidad}`).join(', ')}. Si agrega, quita o cambia algo, vuelve a llamar carrito con el carrito entero; en proponer, \`productos\` es este carrito.`] : []),
+        ...(carrito?.lineas.length ? [`Carrito guardado: ${resumenLineas(carrito.lineas)}${carrito.estado === 'en_pago' ? ' (ya tiene link de pago; si cambia algo, ese link se anula y sale uno nuevo con proponer)' : ''}. Si agrega, quita o cambia algo, vuelve a llamar carrito con el carrito entero; en proponer, \`productos\` es este carrito.`] : []),
         ...(compras.length ? [] : [ventaCruzadaOfrecida(filas) ? 'Venta cruzada: ya se ofreció; no ofrezcas nada más.' : 'Venta cruzada: todavía no. Cuando escoja el producto, antes de la autorización, llama ver_complementos una vez.']),
         ...(pasados.includes('despachar') ? ['El pago ya está confirmado y el despacho lo tiene el equipo: no vuelvas a verificar ni a pedir el pago.'] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')}.`] : []),
@@ -711,7 +704,12 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       if (nombre === GENERAR_LINK_PAGO) {
         const u = comprasConfirmadas(filas).at(-1);
         if (!u) return { ok: false, error: 'No hay una compra confirmada: arma la compra con proponer y espera a que el cliente la confirme. No escribas un link.', candado: 'sin_compra_confirmada' };
-        const r1 = await asegurarLink(u.huella, u.datos, ctx);
+        const r1 = await asegurarLink(u.huella, u.datos);
+        if (!r1.ok && (r1.cambio || r1.vencido)) {
+          return { ok: false, error: r1.vencido
+            ? 'Ese link de pago ya venció: vuelve a armar el pedido con proponer (el carrito guardado, con los precios de hoy) y espera su confirmación. No escribas un link.'
+            : 'El carrito cambió después de esa compra: arma el pedido de nuevo con proponer y espera su confirmación. No escribas un link.', candado: 'link_vencido' };
+        }
         if (!r1.ok) {
           return { ok: true, salidas: [{ tipo: 'texto', texto: fija('rf.persona.pago_no_disponible') || fija('rf.persona') }], datos: { sin_link: true }, privado: { persona: { motivo: 'pago_no_disponible', pidio: `reenviar el link de pago (${r1.motivo})` } } };
         }
