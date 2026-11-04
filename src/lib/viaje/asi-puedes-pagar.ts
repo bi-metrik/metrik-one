@@ -116,22 +116,34 @@ function reglaDelPlan(regla: ReglaPlan, cuotas: readonly { fecha: string }[], hi
   const fechas = cuotas.slice(1).map((c) => c.fecha)
   const deCompra = [...new Set((hitos ?? []).map((h) => h.fecha))].filter((f) => fechas.includes(f)).sort()
   if (deCompra.length === 0) return reglaEnPalabras(regla)
-  const dias = deCompra.map(fechaLarga)
+  // Vera (G15): al cliente no se le nombra al operador; cada fecha con su artículo.
+  const dias = deCompra.map((f) => `el ${fechaLarga(f)}`)
   const lista = dias.length === 1 ? dias[0] : `${dias.slice(0, -1).join(', ')} y ${dias[dias.length - 1]}`
   const compra = dias.length === 1
-    ? `El ${lista} es el último día para comprar el paquete con el operador.`
-    : `El ${lista} son los últimos días para comprar el paquete con el operador.`
+    ? `${mayuscula(lista)} es la fecha límite para comprar el paquete a este precio.`
+    : `${mayuscula(lista)} son las fechas límite para comprar a este precio.`
   const conQuince = fechas.includes(sumarDiasCivil(fechaSalida, -regla.dias_antes))
-  return `${compra} ${conQuince ? reglaEnPalabras(regla) : 'El resto, un día antes del viaje.'}`
+  // Solo se habla del «resto» si queda la fila del saldo (la última cuota, el día antes de salir).
+  const conSaldo = fechas.length > 0 && fechas[fechas.length - 1] === sumarDiasCivil(fechaSalida, -1)
+  const cola = conQuince
+    ? conSaldo
+      ? reglaEnPalabras(regla)
+      : `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir.`
+    : conSaldo
+      ? 'El resto, un día antes del viaje.'
+      : ''
+  return cola ? `${compra} ${cola}` : compra
 }
 
+const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
 /**
- * «con esto cubres el 80 % (llevas $3.242.000)», o `null`. El formato de pesos lo pone quien pinta.
+ * «con esto cubres el 80 %: llevas $3.242.000», o `null`. El formato de pesos lo pone quien pinta.
  * QA G14 (Vera): con la «Compra antes del» lo acumulado puede pasar del mínimo (7.888.000 de
  * 9.280.000 = 85 %), así que la nota dice que cubre la regla y cuánto lleva, no que lleva justo el 80 %.
  */
 export function notaDeFila(f: FilaAsiPuedesPagar, pctMinimo: number, pesos: (v: number) => string): string | null {
-  return f.llevas === null ? null : `con esto cubres el ${pctMinimo} % (llevas ${pesos(f.llevas)})`
+  return f.llevas === null ? null : `con esto cubres el ${pctMinimo} %: llevas ${pesos(f.llevas)}`
 }
 
 /** Lee `plan_pagos` de la línea para esta sección: `null` = apagado (el PDF queda como hoy). */

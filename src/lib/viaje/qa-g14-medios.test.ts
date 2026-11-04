@@ -61,9 +61,9 @@ describe('M-1 · «Así puedes pagar» usa la «Compra antes del» como el plan 
     expect(r.filas?.map((f) => f.monto)).toEqual(plan.map((c) => c.monto))
   })
 
-  it('la nota de la fila no miente con la compra antes del: «con esto cubres el 80 % (llevas $7.888.000)»', () => {
+  it('la nota de la fila no miente con la compra antes del: «con esto cubres el 80 %: llevas $7.888.000»', () => {
     const r = asiPuedesPagar(TOTAL, { ...entrada, hitos: [HITO] })
-    expect(r.filas!.map((f) => notaDeFila(f, r.pctMinimo, pesos))).toEqual([null, 'con esto cubres el 80 % (llevas $7.888.000)', null])
+    expect(r.filas!.map((f) => notaDeFila(f, r.pctMinimo, pesos))).toEqual([null, 'con esto cubres el 80 %: llevas $7.888.000', null])
   })
 
   it('sin hitos, lo de siempre (30 % hoy, completar el 80 % a T-15, el resto el día antes)', () => {

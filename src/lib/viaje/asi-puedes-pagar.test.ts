@@ -18,7 +18,7 @@ describe('asiPuedesPagar', () => {
       { monto: 810_000, cuando: 'hasta el 20 de noviembre, un día antes del viaje', llevas: null },
     ])
     expect(r.suma).toBe(4_052_000)
-    expect(notaDeFila(r.filas![1], r.pctMinimo, pesos)).toBe('con esto cubres el 80 % (llevas $3.242.000)')
+    expect(notaDeFila(r.filas![1], r.pctMinimo, pesos)).toBe('con esto cubres el 80 %: llevas $3.242.000')
   })
 
   it('las filas suman el total al peso, también con totales que no cierran en miles', () => {
@@ -79,13 +79,28 @@ describe('QA G15 · la regla en palabras es cierta para las filas', () => {
   it('la «Compra antes del» cubre el 80 %: se dice la fecha del operador, no «quince días antes»', () => {
     const r = asiPuedesPagar(9_280_000, e, [{ fecha: '2026-11-30', monto: 7_888_000, operador: 'TU RESERVA' }])
     expect(r.filas!.map((f) => f.cuando)).toEqual(['al confirmar (anticipo)', 'hasta el 30 de noviembre', 'hasta el 17 de junio, un día antes del viaje'])
-    expect(r.regla).toBe('El 30 de noviembre es el último día para comprar el paquete con el operador. El resto, un día antes del viaje.')
+    expect(r.regla).toBe('El 30 de noviembre es la fecha límite para comprar el paquete a este precio. El resto, un día antes del viaje.')
   })
 
   it('si la fila de los quince días sigue, también va la regla de siempre', () => {
     const r = asiPuedesPagar(9_280_000, e, [{ fecha: '2026-11-30', monto: 4_000_000, operador: null }])
     expect(r.filas!.map((f) => f.cuando)).toContain('hasta el 3 de junio')
-    expect(r.regla).toBe(`El 30 de noviembre es el último día para comprar el paquete con el operador. ${reglaEnPalabras()}`)
+    expect(r.regla).toBe(`El 30 de noviembre es la fecha límite para comprar el paquete a este precio. ${reglaEnPalabras()}`)
+  })
+
+  it('varias fechas de compra: cada una con su artículo, sin nombrar al operador', () => {
+    const r = asiPuedesPagar(9_280_000, e, [
+      { fecha: '2026-12-15', monto: 4_000_000, operador: 'ALIADOS TRAVEL' },
+      { fecha: '2026-11-30', monto: 4_000_000, operador: 'TU RESERVA' },
+    ])
+    expect(r.regla).toMatch(/^El 30 de noviembre y el 15 de diciembre son las fechas límite para comprar a este precio\. /)
+    expect(r.regla).not.toMatch(/operador|TU RESERVA|ALIADOS/)
+  })
+
+  it('sin fila de saldo (la compra pide todo), no habla del «resto»', () => {
+    const r = asiPuedesPagar(9_280_000, e, [{ fecha: '2026-11-30', monto: 9_280_000, operador: null }])
+    expect(r.filas!.map((f) => f.cuando)).toEqual(['al confirmar (anticipo)', 'hasta el 30 de noviembre'])
+    expect(r.regla).toBe('El 30 de noviembre es la fecha límite para comprar el paquete a este precio.')
   })
 
   it('sin hitos (o vencidos), la regla de siempre', () => {

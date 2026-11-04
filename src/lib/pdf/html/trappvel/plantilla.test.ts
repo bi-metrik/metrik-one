@@ -596,6 +596,14 @@ describe('QA G15 · «Cuánto pagan y cuándo» con la «Compra antes del» de c
     expect(t).toContain('Pueden repartirlo en más cuotas: lo acordamos con ustedes.')
   })
 
+  it('una sola alternativa con fecha de compra: la nota de fila sin doble paréntesis y la regla sin el operador', () => {
+    const e = entradaDosPaquetes([[hitoA], [hitoB]])
+    const t = pagos({ ...e, props: { ...e.props, itinerarios: null } })
+    expect(t).toContain('Hasta el 15 de diciembre (con esto cubren el 80 %: llevan $ 9.067.000) $ 5.867.000')
+    expect(t).toContain('El 15 de diciembre es la fecha límite para comprar el paquete a este precio. El resto, un día antes del viaje.')
+    expect(t).not.toContain('operador')
+  })
+
   it('con la misma fecha en los dos paquetes, una sola tabla como hoy y la nota del operador', () => {
     const t = pagos(entradaDosPaquetes([[hitoA], [{ ...hitoB, fecha: hitoA.fecha }]]))
     expect(t).toMatch(/Hasta el 15 de diciembre \$ 5\.867\.000 \$ 5\.104\.000/)

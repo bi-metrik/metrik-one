@@ -1111,7 +1111,7 @@ function cuantoYCuando(m: ModeloPropuesta): string {
     for (let i = 0; i < n; i++) {
       const ref = conFilas.find((p) => p.plan.filas![i])!.plan
       const f = ref.filas![i]
-      const nota = f.llevas === null ? null : `${voz.llevan} ${ref.pctMinimo} % (${voz.llevanMonto} ${pesos(f.llevas)})`
+      const nota = f.llevas === null ? null : `${voz.llevan} ${ref.pctMinimo} %: ${voz.llevanMonto} ${pesos(f.llevas)}`
       filas.push(
         `<tr><td><b>${esc(mayuscula(f.cuando))}</b>${nota && planes.length === 1 ? ` <span class="muted">(${esc(nota)})</span>` : ''}</td>${planes
           .map((p) => `<td class="r money">${p.plan.filas?.[i] ? esc(pesos(p.plan.filas[i].monto)) : ''}</td>`)
