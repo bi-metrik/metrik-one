@@ -27,6 +27,8 @@ export interface Validado {
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/
+/** Códigos del operador que no van en lo que lee el cliente: «(FULL)», «(P.A.M.)», «ATN 1988-P». */
+const CODIGO_OPERADOR = /\([A-Z.]{2,}\)|\bATN\b/
 
 function dias(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000)
@@ -94,8 +96,8 @@ export function validarBorrador(b: BorradorCotizacion, viajeros: Viajeros): Vali
       if (!Number.isInteger(p.precioPorPersona) || p.precioPorPersona <= 0) error(c, `Precio por persona inválido en ${p.acomodacion}: ${p.precioPorPersona}.`)
     }
     // Lo que lee el cliente no lleva códigos del operador («(FULL)», «(P.A.M.)», «ATN 1988-P»).
-    for (const [k, t] of [['habitacion', h.habitacion], ['regimen', h.regimen], ['zona', h.zona ?? '']] as const) {
-      if (/\([A-Z.]{2,}\)|\bATN\b/.test(t)) error(`${c}.${k}`, `Lleva un código del operador: «${t}».`)
+    for (const [k, t] of [['habitacion', h.habitacion], ['regimen', h.regimen], ['zona', h.zona ?? ''], ['incluye', h.incluye]] as const) {
+      if (CODIGO_OPERADOR.test(t)) error(`${c}.${k}`, `Lleva un código del operador: «${t}».`)
     }
     const total = totalDelHotel(h)
     if (total === null || total <= 0) {
@@ -111,6 +113,12 @@ export function validarBorrador(b: BorradorCotizacion, viajeros: Viajeros): Vali
     }
   }
   if (!vistas.has('Recomendada')) error('versiones', 'No hay versión Recomendada.')
+
+  // Lo mismo en el texto general: Haiku 5.5 escribió «El plan (FULL) …» en «antes de viajar».
+  const textos: [string, string][] = [['titular', b.titular], ['intro', b.intro],
+    ...b.incluye.map((t, i): [string, string] => [`incluye[${i}]`, t]),
+    ...b.antesDeViajar.map((t, i): [string, string] => [`antesDeViajar[${i}]`, t])]
+  for (const [k, t] of textos) if (CODIGO_OPERADOR.test(t)) error(k, `Lleva un código del operador: «${t}».`)
 
   // El orden de las versiones sigue al precio (no se reordena: se avisa).
   const orden = VERSIONES.filter(v => totales[v] !== undefined).map(v => totales[v] as number)

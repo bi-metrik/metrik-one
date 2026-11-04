@@ -3,16 +3,24 @@
  * validado por invariantes → PDF con la plantilla real. No lee ni escribe la base: todo entra por
  * archivos, para poder correrlo contra casos reales sin tocar producción.
  *
- *   GEMINI_API_KEY=… npx tsx scripts/piloto-asistente-cotizacion.ts \
+ *   npx tsx scripts/piloto-asistente-cotizacion.ts \
  *     --caso <dir con solicitud.json y *.png> --manual <manual.md> --casa <casa.json> \
- *     --salida <dir> [--corridas 3] [--sin-pdf]
+ *     --salida <dir> [--corridas 3] [--sin-pdf] [--via-claude-cli]
+ *
+ * Modelo: el de `MODELO_ASISTENTE` (por defecto `claude-haiku-5-5`, con `ANTHROPIC_API_KEY` o el
+ * gateway). `MODELO_ASISTENTE=gemini-…` pide `GEMINI_API_KEY`. `--via-claude-cli` manda el mismo
+ * prompt y el mismo esquema por `claude -p` con la sesión de Claude Code de la máquina, para probar
+ * sin llave de API: los tokens que reporta incluyen el contexto propio del CLI.
  *
  * Por corrida deja `corrida-N.json` (borrador, hallazgos, totales, tokens, tiempos) y el PDF.
  */
+import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { armarBorrador } from '@/lib/cotizaciones/asistente/armar-con-modelo'
+import { armarBorrador, MODELO_ASISTENTE, partesDelCaso, sistemaDelAsistente, type ResultadoArmado } from '@/lib/cotizaciones/asistente/armar-con-modelo'
+import { ESQUEMA_BORRADOR_JSON } from '@/lib/cotizaciones/asistente/borrador'
 import { validarBorrador } from '@/lib/cotizaciones/asistente/invariantes'
 import { entradaDePropuesta, type Casa, type Solicitud } from '@/lib/cotizaciones/asistente/a-propuesta'
 import { pdfDePropuestaHtml } from '@/lib/pdf/html/propuesta-html'
@@ -38,14 +46,36 @@ async function recortarFoto(archivo: string, caja: number[] | null, destino: str
   return { url: destino, proporcion: w / h }
 }
 
+/** El mismo prompt y esquema por `claude -p` (sin herramientas ni ajustes del proyecto). */
+function armarPorCli(manual: string, solicitud: Solicitud, pantallazos: { nombre: string; mime: string; base64: string }[]): ResultadoArmado {
+  const content = partesDelCaso(solicitud, pantallazos).map(p =>
+    'texto' in p ? { type: 'text', text: p.texto } : { type: 'image', source: { type: 'base64', media_type: p.imagen.mime, data: p.imagen.base64 } })
+  const t0 = Date.now()
+  const r = spawnSync('claude', ['-p', '--model', MODELO_ASISTENTE, '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+    '--system-prompt', sistemaDelAsistente(manual), '--tools', '', '--setting-sources', '', '--max-turns', '3',
+    '--json-schema', JSON.stringify(ESQUEMA_BORRADOR_JSON)],
+  { input: JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n', encoding: 'utf8', maxBuffer: 64 << 20, cwd: tmpdir() })
+  const fin = r.stdout.trim().split('\n').map(l => { try { return JSON.parse(l) } catch { return null } }).find(x => x?.type === 'result')
+  if (!fin?.structured_output) throw new Error(`claude -p no devolvió el borrador: ${(fin?.result ?? r.stderr ?? '').toString().slice(0, 300)}`)
+  const u = fin.usage ?? {}
+  const entrada = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+  return {
+    borrador: fin.structured_output,
+    uso: { promptTokens: entrada, salidaTokens: u.output_tokens ?? 0, pensamientoTokens: 0, totalTokens: entrada + (u.output_tokens ?? 0), costoUsd: fin.total_cost_usd } as ResultadoArmado['uso'],
+    ms: Date.now() - t0,
+    modelo: Object.keys(fin.modelUsage ?? {})[0] ?? MODELO_ASISTENTE,
+  }
+}
+
 async function main() {
   const caso = arg('caso'), salida = arg('salida'), corridas = Number(arg('corridas', '3'))
   const conPdf = !process.argv.includes('--sin-pdf')
   const manual = readFileSync(arg('manual'), 'utf8')
   const casa = JSON.parse(readFileSync(arg('casa'), 'utf8')) as Casa
   const solicitud = JSON.parse(readFileSync(path.join(caso, 'solicitud.json'), 'utf8')) as Solicitud
+  const porCli = process.argv.includes('--via-claude-cli')
   const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error('Falta GEMINI_API_KEY (la de pruebas)')
+  if (MODELO_ASISTENTE.startsWith('gemini') && !apiKey) throw new Error('Falta GEMINI_API_KEY (la de pruebas)')
   const archivos = readdirSync(caso).filter(f => /\.(png|jpe?g|webp)$/i.test(f)).sort()
   const pantallazos = archivos.map(f => ({
     nombre: f,
@@ -55,9 +85,9 @@ async function main() {
   mkdirSync(salida, { recursive: true })
 
   for (let n = 1; n <= corridas; n++) {
-    const r = await armarBorrador({ manual, solicitud, pantallazos, apiKey })
+    const r = porCli ? armarPorCli(manual, solicitud, pantallazos) : await armarBorrador({ manual, solicitud, pantallazos, apiKey })
     const validado = validarBorrador(r.borrador, solicitud.viajeros)
-    const registro: Record<string, unknown> = { corrida: n, ms: r.ms, uso: r.uso, ...validado, borrador: r.borrador }
+    const registro: Record<string, unknown> = { corrida: n, modelo: r.modelo, ms: r.ms, uso: r.uso, ...validado, borrador: r.borrador }
     const errores = validado.hallazgos.filter(h => h.nivel === 'error')
     if (conPdf && errores.length === 0) {
       const t0 = Date.now()

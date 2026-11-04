@@ -99,14 +99,18 @@ const obj = (properties: Record<string, unknown>, required = Object.keys(propert
   S('OBJECT', { properties, required, propertyOrdering: Object.keys(properties) })
 const arr = (items: unknown) => S('ARRAY', { items })
 
+const fecha = S('STRING', { description: 'AAAA-MM-DD' })
+const hora = S('STRING', { description: 'HH:MM, 24 horas' })
+
 export const ESQUEMA_BORRADOR = obj({
   clienteParaDocumento: str,
-  titular: str,
+  // «titular» se lee como «el titular de la reserva»: Haiku 5.5 puso ahí el nombre de la clienta.
+  titular: S('STRING', { description: 'El título del viaje (destino y temporada), no el nombre del cliente' }),
   intro: str,
   destino: str,
   vuelos: arr(obj({
     aerolinea: str, numero: str, origenIata: str, origenCiudad: str, destinoIata: str, destinoCiudad: str,
-    fecha: str, salida: str, llegada: str, escalas: int,
+    fecha, salida: hora, llegada: hora, escalas: int,
   })),
   hoteles: arr(obj({
     pantallazo: int,
@@ -129,3 +133,28 @@ export const ESQUEMA_BORRADOR = obj({
   antesDeViajar: arr(str),
   dudas: arr(obj({ campo: str, pregunta: str, queSePusoMientras: str, bloquea: S('BOOLEAN') })),
 })
+
+/**
+ * El mismo esquema en JSON Schema, para la salida estructurada de Anthropic (`output_config.format`):
+ * tipos en minúscula, `nullable` como `[tipo, 'null']`, `additionalProperties: false` en todo objeto
+ * (lo exige la API) y el formato de fecha y hora como `pattern`. Sin el patrón, Haiku 5.5 escribió
+ * «23-Dic-2026» en 5 de 6 corridas del piloto.
+ */
+function aJsonSchema(s: unknown): unknown {
+  if (Array.isArray(s)) return s.map(aJsonSchema)
+  if (!s || typeof s !== 'object') return s
+  const o: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(s)) {
+    if (k === 'propertyOrdering' || k === 'nullable') continue
+    if (k === 'type') o.type = String(v).toLowerCase()
+    else if (k === 'properties') o.properties = Object.fromEntries(Object.entries(v as object).map(([p, x]) => [p, aJsonSchema(x)]))
+    else o[k] = aJsonSchema(v)
+  }
+  if ((s as { nullable?: boolean }).nullable) o.type = [o.type, 'null']
+  if (o.type === 'object') o.additionalProperties = false
+  if (o.description === 'AAAA-MM-DD') o.pattern = '^\\d{4}-\\d{2}-\\d{2}$'
+  if (o.description === 'HH:MM, 24 horas') o.pattern = '^\\d{2}:\\d{2}$'
+  return o
+}
+
+export const ESQUEMA_BORRADOR_JSON = aJsonSchema(ESQUEMA_BORRADOR) as Record<string, unknown>

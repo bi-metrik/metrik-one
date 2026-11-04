@@ -69,6 +69,17 @@ describe('invariantes del borrador', () => {
 
   it('un código del operador en lo que lee el cliente es error', () => {
     expect(errores(borrador([hotel({ regimen: '(FULL)' })])).join()).toMatch(/código del operador/)
+    expect(errores(borrador([hotel({})], { antesDeViajar: ['El plan (FULL) no incluye bebidas.'] })).join()).toMatch(/código del operador/)
+  })
+
+  it('el esquema JSON pide fecha y hora con formato', async () => {
+    const { ESQUEMA_BORRADOR_JSON } = await import('./borrador')
+    type Nodo = { pattern?: string; additionalProperties?: boolean; properties: Record<string, Nodo>; items: Nodo }
+    const raiz = ESQUEMA_BORRADOR_JSON as unknown as Nodo
+    const vuelo = raiz.properties.vuelos.items.properties
+    expect(vuelo.fecha.pattern).toBe('^\\d{4}-\\d{2}-\\d{2}$')
+    expect(vuelo.salida.pattern).toBe('^\\d{2}:\\d{2}$')
+    expect(raiz.additionalProperties).toBe(false)
   })
 
   it('dos hoteles en la misma versión, o sin Recomendada, es error', () => {
