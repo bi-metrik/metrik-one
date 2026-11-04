@@ -211,7 +211,39 @@ describe('el texto', () => {
 
       La persona designada por tu empresa puede ver y pagar el período en la sección Suscripción de MéTRIK ONE: https://cda-elcarmen.metrikone.co/suscripcion?tab=pagos
 
-      Si ya hiciste este pago, no tienes que hacer nada.
+      Si ya hiciste este pago, no tienes que hacer nada: las consultas vuelven cuando el pago quede registrado (cláusula 11.5).
+
+      METRIK IA S.A.S."
+    `)
+  })
+
+  it('texto completo con dos períodos (Caquetá; para Vera)', () => {
+    const d = {
+      razonSocial: 'CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA',
+      suspendidaDesde: '2026-12-06',
+      canceladaDesde: '2026-12-31',
+      periodos: [
+        { periodo: 'del 23 de octubre al 22 de noviembre de 2026', saldo: 150000, enlacePago: 'https://checkout.bold.co/payment/LNK_X' },
+        { periodo: 'del 23 de noviembre al 22 de diciembre de 2026', saldo: 150000, enlacePago: null },
+      ],
+      urlPagos: 'https://cda-caqueta.metrikone.co/suscripcion?tab=pagos',
+    }
+    expect(textoCorreoSuspendida(d)).toMatchInlineSnapshot(`
+      "Hola.
+
+      Desde el 6 de diciembre de 2026, la suscripción de Valida de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA está Suspendida por pago, porque no están pagados los períodos del 23 de octubre al 22 de noviembre de 2026 y del 23 de noviembre al 22 de diciembre de 2026 (cláusula 11.2 de los Términos).
+
+      Mientras esté Suspendida por pago, tu equipo no puede hacer consultas nuevas, individuales ni masivas. Sí puede entrar a Valida, ver el historial, descargar los reportes ya generados y descargar la bitácora.
+
+      Si se paga, las consultas vuelven y tu fecha de renovación no cambia. Si no se paga, desde el 31 de diciembre de 2026 la suscripción queda Cancelada.
+
+      Para volver a consultar hay que pagar todos estos períodos:
+      Período del 23 de octubre al 22 de noviembre de 2026: $150.000. Pagar en línea: https://checkout.bold.co/payment/LNK_X
+      Período del 23 de noviembre al 22 de diciembre de 2026: $150.000
+
+      La persona designada por tu empresa puede ver y pagar los períodos en la sección Suscripción de MéTRIK ONE: https://cda-caqueta.metrikone.co/suscripcion?tab=pagos
+
+      Si ya hiciste este pago, no tienes que hacer nada: las consultas vuelven cuando el pago quede registrado (cláusula 11.5).
 
       METRIK IA S.A.S."
     `)

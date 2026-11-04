@@ -561,6 +561,8 @@ describe('la v1.5 publicada: transición de la cláusula 11.7 (bloqueante de Ver
       restringeDesde: '2026-12-06',
       corteDesde: '2026-12-31',
     })
+    // Las dos cuotas de la transición están en mora: los avisos piden pagar las dos (gate de Vera, 4-nov).
+    expect(m.tipo === 'ok' && m.periodosEnMora).toBe(2)
     escenario.hoy = '2026-12-06'
     const r = await validaCdaPermiteConsultar()
     expect(!r.ok && r.error).toContain('Suspendida por pago desde el 6 de diciembre')

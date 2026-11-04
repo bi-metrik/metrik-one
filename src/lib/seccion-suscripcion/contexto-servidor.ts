@@ -129,10 +129,12 @@ async function resolver(): Promise<ContextoSuscripcion> {
   // con la misma regla, sobre las mismas RPC de cuotas y cobros; ONE no se pausa por ella.
   let pago: LecturaPago | null
   let mora: EstadoMora
+  let periodosEnMora: number | undefined
   if (producto === 'valida_cda') {
     const m = await moraValidaCda()
     pago = m.tipo === 'ok' ? m.lectura : null
     mora = m.tipo === 'ok' ? m.mora : { estado: 'al_dia' }
+    periodosEnMora = m.tipo === 'ok' ? m.periodosEnMora : undefined
   } else {
     pago = await leerProximoPagoCda(entrada.servicioContratadoId, entrada.hoy)
     // Sin poder leer las cuotas no hay prueba de mora (el criterio de `moraValidaCda`).
@@ -183,6 +185,7 @@ async function resolver(): Promise<ContextoSuscripcion> {
       hoy: entrada.hoy,
       producto,
       transicion,
+      periodosEnMora,
     }),
   }
 }

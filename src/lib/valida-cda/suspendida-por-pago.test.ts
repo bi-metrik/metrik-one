@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { proximoPago, type CuotaDeServicio } from './pago-pendiente'
+import { cuotasConEstado, proximoPago, type CuotaDeServicio } from './pago-pendiente'
 import {
   estadoMora,
   fechaDiaMesLargo,
   fechasDePagoV15,
   mensajeSuspendidaPorPago,
   periodoEnPalabras,
+  periodosImpagosCumplidos,
   REGLA_MORA_CDA,
   textoAvisoGraciaV15,
   textoAvisoSuspendida,
@@ -82,14 +83,14 @@ describe('transición 11.7: Caquetá debe el 23-oct–22-nov (vence el 27-oct) y
 })
 
 describe('la fecha de pago que se muestra (D7): la renovación, no el 27', () => {
-  it('período v1.5: «antes del 23-dic», Suspendida el 29-dic, Cancelada el 23-ene', () => {
+  it('período v1.5: «a más tardar el 23-dic» (11.1: pagar el 23 es a tiempo), Suspendida el 29-dic, Cancelada el 23-ene', () => {
     const f = fechasDePagoV15(cuota(4, '23-dic al 22-ene', '2026-12-27'), V15)
-    expect(f).toEqual({ renovacion: '2026-12-23', forma: 'antes_del', suspendidaDesde: '2026-12-29', canceladaDesde: '2027-01-23' })
-    expect(textoPagaHasta(f!)).toBe('Paga antes del 23-dic')
+    expect(f).toEqual({ renovacion: '2026-12-23', enTransicion: false, suspendidaDesde: '2026-12-29', canceladaDesde: '2027-01-23' })
+    expect(textoPagaHasta(f!)).toBe('Paga a más tardar el 23-dic')
   })
   it('período de la transición: «a más tardar el 30-nov», Suspendida el 6-dic, Cancelada el 31-dic', () => {
     const f = fechasDePagoV15(cuota(3, '23-nov al 22-dic', '2026-11-27'), V15)
-    expect(f).toEqual({ renovacion: '2026-11-30', forma: 'a_mas_tardar', suspendidaDesde: '2026-12-06', canceladaDesde: '2026-12-31' })
+    expect(f).toEqual({ renovacion: '2026-11-30', enTransicion: true, suspendidaDesde: '2026-12-06', canceladaDesde: '2026-12-31' })
     expect(textoPagaHasta(f!)).toBe('Paga a más tardar el 30-nov')
   })
   it('sin la v1.5 no hay fecha nueva: se dice el vencimiento de siempre', () =>
@@ -97,12 +98,14 @@ describe('la fecha de pago que se muestra (D7): la renovación, no el 27', () =>
   it('lo que dice la tarjeta del pago antes, en la gracia y en Suspendida', () => {
     const f = fechasDePagoV15(cuota(4, '23-dic al 22-ene', '2026-12-27'), V15)!
     expect(textosPagoCuotaV15(f, '2026-12-20')).toEqual({
-      fecha: 'Paga antes del 23-dic',
+      fecha: 'Paga a más tardar el 23-dic',
       consecuencia: 'Si no se paga, la suscripción queda Suspendida por pago desde el 29-dic.',
       vencida: false,
     })
+    // El mismo 23 todavía es a tiempo.
+    expect(textosPagoCuotaV15(f, '2026-12-23')).toMatchObject({ fecha: 'Paga a más tardar el 23-dic', vencida: false })
     expect(textosPagoCuotaV15(f, '2026-12-25')).toEqual({
-      fecha: 'Debía pagarse antes del 23-dic',
+      fecha: 'Debía pagarse a más tardar el 23-dic',
       consecuencia: 'Si no se paga, la suscripción queda Suspendida por pago desde el 29-dic.',
       vencida: true,
     })
@@ -118,15 +121,40 @@ describe('los textos de la cláusula 11 en pantalla (para todos, sin montos)', (
     expect(periodoEnPalabras(cuotas[0])).toBe('del 23 de noviembre al 22 de diciembre')
     expect(textoAvisoGraciaV15(m, periodoEnPalabras(cuotas[0]))).toBe(
       'El período del 23 de noviembre al 22 de diciembre no está pagado. Si no se paga, desde el 6 de diciembre la ' +
-        'suscripción queda Suspendida por pago: no podrás hacer consultas nuevas, pero sí entrar, ver tu historial y descargar tus reportes.',
+        'suscripción queda Suspendida por pago: no podrás hacer consultas nuevas, pero sí entrar, ver tu historial, ' +
+        'descargar tus reportes y descargar la bitácora.',
     )
+  })
+  it('con dos períodos en mora (Caquetá del 1 al 5-dic): los cuenta y pide pagarlos todos', () => {
+    const dos = [cuota(2, '23-oct al 22-nov', '2026-10-27'), cuota(3, '23-nov al 22-dic', '2026-11-27')]
+    const m = mora(dos, '2026-12-01') as Extract<EstadoMora, { estado: 'en_mora' }>
+    expect(textoAvisoGraciaV15(m, periodoEnPalabras(dos[0]), 2)).toBe(
+      'Hay 2 períodos sin pagar, el primero del 23 de octubre al 22 de noviembre. Si no se pagan todos, desde el 6 de ' +
+        'diciembre la suscripción queda Suspendida por pago: no podrás hacer consultas nuevas, pero sí entrar, ver tu ' +
+        'historial, descargar tus reportes y descargar la bitácora.',
+    )
+  })
+  it('cuántos períodos están en mora: los dos de la transición desde el 1-dic; ninguno el 30-nov', () => {
+    const dos = [cuota(2, '23-oct al 22-nov', '2026-10-27'), cuota(3, '23-nov al 22-dic', '2026-11-27')]
+    const contar = (hoy: string, pagado = 0) =>
+      periodosImpagosCumplidos({
+        cuotas: cuotasConEstado({ cuotas: dos, cobros: pagado ? [{ monto: pagado, estado: 'pagado' }] : [], hoy, ahoraISO: `${hoy}T15:00:00Z` }),
+        tipoDeCuota: () => 'cuota',
+        ignorarTipos: ['usuarios_adicionales'],
+        transicion: V15,
+        hoy,
+        dias: 1,
+      }).length
+    expect(contar('2026-11-30')).toBe(0)
+    expect(contar('2026-12-01')).toBe(2)
+    expect(contar('2026-12-01', 150000)).toBe(1)
   })
   it('desde el 6-dic: la franja de Suspendida y el rechazo de la consulta nueva', () => {
     const m = mora(cuotas, '2026-12-06') as Extract<EstadoMora, { estado: 'restringido' }>
     expect(textoAvisoSuspendida(m)).toBe(
       'Suscripción Suspendida por pago desde el 6 de diciembre. No puedes hacer consultas nuevas. Tu historial, tus ' +
-        'reportes y la exportación de tu bitácora siguen disponibles. Si se paga, todo vuelve y tu fecha de renovación no ' +
-        'cambia. Si no se paga, desde el 31 de diciembre la suscripción queda Cancelada.',
+        'reportes y la exportación de tu bitácora siguen disponibles. Si se paga, las consultas vuelven y tu fecha de ' +
+        'renovación no cambia. Si no se paga, desde el 31 de diciembre la suscripción queda Cancelada.',
     )
     expect(mensajeSuspendidaPorPago(m)).toBe(
       'La suscripción está Suspendida por pago desde el 6 de diciembre: no se pueden hacer consultas nuevas. Tu ' +
@@ -155,8 +183,13 @@ describe('Suscripción (/suscripcion y la franja de /valida) con la v1.5', () =>
     expect(franjaValida(r('2026-11-25'), pago('2026-11-25'), V15)).toBe('Paga a más tardar el 30-nov')
   })
   it('28-nov (ya pasó el 27 guardado): todavía no es mora ni «vencida»', () => expect(r('2026-11-28').estado).toBe('por_vencer'))
-  it('1-dic: período sin pagar; 6-dic: Suspendida por pago', () => {
-    expect(r('2026-12-01')).toMatchObject({ chip: 'Período sin pagar' })
+  it('1-dic: período sin pagar (con dos, los cuenta); 6-dic: Suspendida por pago', () => {
+    expect(r('2026-12-01')).toMatchObject({
+      chip: 'Período sin pagar',
+      mensaje: 'Tu período del 23-nov al 22-dic no está pagado. Si no se paga, desde el 6-dic la suscripción queda Suspendida por pago.',
+    })
+    const dos = resumenEstado({ terminos: { estado: 'aprobada' }, pago: pago('2026-12-01'), mora: mora([c3], '2026-12-01'), hoy: '2026-12-01', transicion: V15, periodosEnMora: 2 })
+    expect(dos.mensaje).toBe('Hay 2 períodos sin pagar, el primero del 23-nov al 22-dic. Si no se pagan todos, desde el 6-dic la suscripción queda Suspendida por pago.')
     expect(r('2026-12-06')).toMatchObject({
       estado: 'restringido',
       chip: 'Suspendida por pago',

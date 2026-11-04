@@ -191,15 +191,15 @@ function Factura({ cuota: c }: { cuota: CuotaConEstado }) {
 }
 
 /**
- * La fecha de pago de una cuota con la v1.5 (D7 del diseño del 4-nov): «antes del 23-dic» para un período
- * que empieza desde la vigencia, «a más tardar el 30-nov» para uno de la transición todavía impago, y la
+ * La fecha de pago de una cuota con la v1.5 (D7 del diseño del 4-nov): «a más tardar el 23-dic» para un
+ * período que empieza desde la vigencia, «a más tardar el 30-nov» para uno de la transición impago, y la
  * línea de la Suspendida si queda saldo. Un período de la transición ya pagado conserva su vencimiento (se
  * pagó bajo la versión anterior). `null` sin la v1.5: se dice el vencimiento de siempre.
  */
 export function fechaDePagoCuota(c: CuotaConEstado, transicion: string | null): { fecha: string; suspendida: string | null } | null {
   const f = fechasDePagoV15(c, transicion)
   if (!f) return null
-  if (f.forma === 'a_mas_tardar' && c.estado === 'pagada') return null
+  if (f.enTransicion && c.estado === 'pagada') return null
   const paga = textoPagaHasta(f)
   return {
     fecha: paga.charAt(0).toLowerCase() + paga.slice(1),

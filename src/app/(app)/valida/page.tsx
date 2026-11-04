@@ -209,7 +209,9 @@ export default async function ValidaPage({ searchParams }: Props) {
   // Con la v1.5 (CDA), los textos de la cláusula 11: «Suspendida por pago» y el período impago.
   const textosV15 = hablaConLaV15(entrada);
   const pagoPendiente = mora.tipo === 'ok' && mora.pagoDelServicio?.estado === 'pendiente' ? mora.pagoDelServicio : null;
-  const avisoGraciaV15 = textosV15 ? { periodo: pagoPendiente ? periodoEnPalabras(pagoPendiente) : null } : null;
+  const avisoGraciaV15 = textosV15
+    ? { periodo: pagoPendiente ? periodoEnPalabras(pagoPendiente) : null, cuantos: mora.tipo === 'ok' ? (mora.periodosEnMora ?? 1) : 1 }
+    : null;
 
   // Modo vitrina (workspaces Valida-only): oculta la asociación a negocio en
   // consulta puntual / carga masiva / historial y quita la columna negocio_codigo

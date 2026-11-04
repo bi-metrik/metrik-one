@@ -13,7 +13,7 @@ import { formatCOP, formatFechaLetras } from '@/lib/cobros/format'
 import { PALETA } from '@/lib/marca/paleta'
 import { escaparHtml } from '@/lib/usuarios-espacio/correo'
 import type { CuotaConEstado } from './pago-pendiente'
-import { periodoDeCuota, REGLA_MORA_CDA, sumarDias, vencimientoConTransicion } from './plazos'
+import { periodoDeCuota, periodosImpagosCumplidos, REGLA_MORA_CDA } from './plazos'
 
 export interface PeriodoImpago {
   /** «del 23 de octubre al 22 de noviembre de 2026», o «la cuota 2» si el concepto no trae período. */
@@ -61,12 +61,7 @@ export function periodosQueSuspenden(p: {
   transicion: string
   hoy: string
 }): CuotaConEstado[] {
-  return p.cuotas.filter((c) => {
-    if (c.estado === 'pagada' || c.saldo <= 0) return false
-    const tipo = p.tipoDeCuota(c.numero)
-    if (tipo && p.ignorarTipos.includes(tipo)) return false
-    return sumarDias(vencimientoConTransicion(c, p.transicion), REGLA_MORA_CDA.diaRestriccion) <= p.hoy
-  })
+  return periodosImpagosCumplidos({ ...p, dias: REGLA_MORA_CDA.diaRestriccion })
 }
 
 export function asuntoCorreoSuspendida(d: Pick<DatosAvisoSuspendida, 'razonSocial' | 'suspendidaDesde'>): string {
@@ -96,7 +91,7 @@ function parrafos(d: DatosAvisoSuspendida): { intro: string[]; pagos: string[]; 
     ],
     cierre: [
       `La persona designada por tu empresa puede ver y pagar ${varios ? 'los períodos' : 'el período'} en la sección Suscripción de MéTRIK ONE: ${d.urlPagos}`,
-      'Si ya hiciste este pago, no tienes que hacer nada.',
+      'Si ya hiciste este pago, no tienes que hacer nada: las consultas vuelven cuando el pago quede registrado (cláusula 11.5).',
     ],
   }
 }

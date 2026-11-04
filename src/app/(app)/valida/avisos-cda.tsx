@@ -137,7 +137,7 @@ export function AvisoMora({
    * Un CDA con la v1.5 (`hablaConLaV15`): el aviso de la 11.1 con el período impago y la fecha de
    * Suspendida por pago. `periodo` es el de la cuota impaga más vieja, o `null` si su concepto no lo trae.
    */
-  v15?: { periodo: string | null } | null
+  v15?: { periodo: string | null; cuantos?: number } | null
   /**
    * El botón «Pagar ahora» (a /suscripcion, donde se pide el enlace). Solo la cuenta autogestionada y
    * quien ve la plata; a los CDA el aviso les queda como siempre.
@@ -151,7 +151,7 @@ export function AvisoMora({
     >
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-        <p className="font-semibold">{v15 ? textoAvisoGraciaV15(mora, v15.periodo) : textoAvisoMora(mora)}</p>
+        <p className="font-semibold">{v15 ? textoAvisoGraciaV15(mora, v15.periodo, v15.cuantos ?? 1) : textoAvisoMora(mora)}</p>
       </div>
       {pagar && (
         <Link
@@ -196,8 +196,10 @@ export function AvisoRestriccion({
               <Link href="/suscripcion?tab=pagos" className="font-semibold underline">
                 Suscripción
               </Link>{' '}
-              está la cuota vencida, con su enlace de pago.
+              {v15 ? 'están los períodos sin pagar, con su enlace de pago.' : 'está la cuota vencida, con su enlace de pago.'}
             </>
+          ) : v15 ? (
+            'La persona designada por tu empresa puede ver y pagar los períodos sin pagar.'
           ) : (
             'La persona designada por tu empresa puede ver y pagar la cuota.'
           )}

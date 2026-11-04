@@ -26,6 +26,7 @@ import {
   mensajeConsultasRestringidas,
   hablaConLaV15,
   mensajeSuspendidaPorPago,
+  periodosImpagosCumplidos,
   mensajeSuspendidoPorMora,
   vigenciaRestriccion,
   vigenciaTransicion,
@@ -303,6 +304,11 @@ export type MoraValidaCda =
       mora: EstadoMora
       /** La cuota del SERVICIO sobre la que se midió la mora (sin las de usuarios adicionales), si se pudo leer. */
       pagoDelServicio?: ProximoPago | null
+      /**
+       * Cuántos períodos del servicio están en mora (con saldo, pasada su fecha de renovación). Solo con la
+       * v1.5 y la mora en curso; con más de uno, los avisos dicen que hay que pagarlos todos (gate de Vera).
+       */
+      periodosEnMora?: number
     }
 
 async function resolverMora(): Promise<MoraValidaCda> {
@@ -327,7 +333,22 @@ async function resolverMora(): Promise<MoraValidaCda> {
       : e.autoservicio
         ? estadoMora(delServicio.pago, e.hoy, '2000-01-01', REGLA_MORA_AUTOSERVICIO)
         : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde, REGLA_MORA_CDA, e.transicionDesde)
-  return { tipo: 'ok', lectura, mora, pagoDelServicio: delServicio.estado === 'ok' ? delServicio.pago : null }
+  let periodosEnMora: number | undefined
+  if (mora.estado !== 'al_dia' && hablaConLaV15(e) && e.transicionDesde) {
+    const cuenta = await leerCuentaCda(e.servicioContratadoId)
+    if (cuenta.estado === 'ok') {
+      const tipos = new Map(cuenta.cuotas.map((c) => [c.numero, c.tipo]))
+      periodosEnMora = periodosImpagosCumplidos({
+        cuotas: cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: e.hoy, ahoraISO }),
+        tipoDeCuota: (n) => tipos.get(n),
+        ignorarTipos: TIPOS_CUOTA_SIN_MORA,
+        transicion: e.transicionDesde,
+        hoy: e.hoy,
+        dias: 1,
+      }).length
+    }
+  }
+  return { tipo: 'ok', lectura, mora, pagoDelServicio: delServicio.estado === 'ok' ? delServicio.pago : null, periodosEnMora }
 }
 
 /** La mora del contrato de Valida del espacio. Una sola lectura por request. */

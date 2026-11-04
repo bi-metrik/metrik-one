@@ -119,6 +119,8 @@ export function resumenEstado(p: {
    * vencimiento (D7 del diseño del 4-nov). `null` o ausente: los textos de siempre.
    */
   transicion?: string | null
+  /** Cuántos períodos están en mora (`moraValidaCda().periodosEnMora`); con más de uno se dice que son varios. */
+  periodosEnMora?: number
 }): ResumenEstado {
   const esOne = p.producto === 'one'
   const v15 = !esOne && p.transicion ? p.transicion : null
@@ -183,7 +185,11 @@ export function resumenEstado(p: {
         estado: 'en_mora',
         tono: 'ambar_fuerte',
         chip: 'Período sin pagar',
-        mensaje: `Tu período del ${periodo} no está pagado. Si no se paga, desde el ${fechaDiaMes(restringeDesde)} la suscripción queda Suspendida por pago.`,
+        mensaje:
+          (p.periodosEnMora ?? 1) > 1
+            ? `Hay ${p.periodosEnMora} períodos sin pagar, el primero del ${periodo}. Si no se pagan todos, desde el ` +
+              `${fechaDiaMes(restringeDesde)} la suscripción queda Suspendida por pago.`
+            : `Tu período del ${periodo} no está pagado. Si no se paga, desde el ${fechaDiaMes(restringeDesde)} la suscripción queda Suspendida por pago.`,
         requiereAccion: true,
       }
     }
