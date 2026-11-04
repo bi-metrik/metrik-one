@@ -295,6 +295,20 @@ export const CASOS_VENTAS: CasoPublico[] = [
     esperado: (e) => todos(contiene(e, 'Esos son los precios autorizados.'), noContiene(e, /200[.]?000|200 mil/), sinPersona(e), sinPropuesta(e)),
   },
   {
+    // 4-nov (conversación 10): el «Sí» a la autorización y el modelo que contesta «Listo, autorizado…» en el mismo turno.
+    // El candado de autorización improvisada no veía el «sí» de ese turno y volvía a pedir la autorización.
+    id: 'v-autorizado-una-vez', conjunto: 'ventas', titulo: 'Tras el «Sí», «autorizado» del modelo no vuelve a pedir la autorización',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [{ escribe: 'quiero el MP-01, uno, con despacho en Bogotá' }, { toca: 'Sí' }],
+    guion: [VC({ codigo: 'MP-01' }), FIJA('rf.autorizacion'), R('Listo, autorizado. ¿Me das tu nombre completo?')],
+    esperado: (e) => {
+      const pedidas = publico(e).split('¿Autorizas?').length - 1;
+      const improvisada = e.almacen.trazas().some((t) => (t.candados ?? []).some((c) => c.candado === 'autorizacion_improvisada'));
+      return todos(pedidas === 1 ? ok('la autorización se pidió una vez') : no(`la autorización se pidió ${pedidas} veces`),
+        improvisada ? no('saltó autorizacion_improvisada') : ok('sin autorizacion_improvisada'), contiene(e, '¿Me das tu nombre completo?'));
+    },
+  },
+  {
     id: 'v-especificacion-no-verificada', conjunto: 'ventas', titulo: 'Especificación no verificada: «según el catálogo del fabricante»; si insiste, persona',
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [{ escribe: '¿qué potencia y cuántas rpm tiene el MP-01?' }, { escribe: '¿pero me confirmas las rpm?' }],
