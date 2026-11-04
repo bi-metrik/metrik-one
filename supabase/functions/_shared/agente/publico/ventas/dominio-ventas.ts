@@ -35,7 +35,7 @@ import type { ContextoDominio, DeclaracionHerramienta, Dominio, Hechos, Propuest
 import type { FilaPublica, MotivoPersona, TrazaPublica } from '../tipos.ts';
 import {
   MAX_RECOMENDADOS, MAX_SUGERENCIAS, alternativasA, buscarProductos, codigosEnTexto, noDisponiblesPedidos, nombreCorto, productoParaModelo, siguientePaso,
-  sugerirProductos, productoPorCodigo, tablaFlete, totalPedido, zonaFlete,
+  sugerirProductos, productoPorCodigo, tablaFlete, totalCarrito, zonaFlete,
 } from './catalogo-ventas.ts';
 import type { Falta, Preferencias, ProductoNoDisponible, ProductoVenta } from './catalogo-ventas.ts';
 import { filasDelTramo } from '../topes.ts';
@@ -113,6 +113,73 @@ export function preguntasHechas(filas: FilaPublica[]): Falta[] {
   return [...out];
 }
 export const MAX_UNIDADES = 3;
+/** Cuántos productos distintos lleva un carrito (más: lo atiende una persona, motivo `cantidad`). */
+export const MAX_LINEAS = 5;
+export const CARRITO = 'carrito';
+
+/** Un producto del carrito: lo que pidió el cliente (código y unidades). */
+export interface ItemCarrito { codigo: string; cantidad: number }
+
+/** Una línea del pedido como queda en la propuesta (y en el link). */
+export interface LineaPedido { publicacion_id: string; codigo: string; producto: string; precio_unitario: number; cantidad: number }
+
+/**
+ * El carrito vigente de la conversación (4-nov, Mauricio: «a medida que el cliente va agregando elementos se va haciendo
+ * un carrito y después es una sola liquidación»): el último `carrito` bueno, después de la última compra confirmada (una
+ * compra confirmada lo vacía). Null si no hay. Pura.
+ */
+export function carritoVigente(filas: FilaPublica[]): ItemCarrito[] | null {
+  let vigente: ItemCarrito[] | null = null;
+  for (const f of filas) {
+    const t = f.traza as TrazaPublica | null;
+    if (t?.ejecucion?.accion === 'compra' && t.ejecucion.resultado === 'ejecutada') vigente = null;
+    for (const h of t?.herramientas ?? []) {
+      const items = h.ok && h.nombre === CARRITO ? (h.datos as { items?: ItemCarrito[] } | null)?.items : null;
+      if (Array.isArray(items)) vigente = items.length ? items : null;
+    }
+  }
+  return vigente;
+}
+
+/** Las líneas de los datos de una propuesta de compra (las de antes del carrito tienen un solo producto). Pura. */
+export function lineasDe(datos: Record<string, unknown>): LineaPedido[] {
+  if (Array.isArray(datos.lineas)) return datos.lineas as LineaPedido[];
+  return [{ publicacion_id: String(datos.publicacion_id), codigo: String(datos.codigo), producto: String(datos.producto ?? ''), precio_unitario: Number(datos.precio_unitario), cantidad: Number(datos.cantidad) }];
+}
+
+/** «MP-62 Batería… × 1 · MP-64 Puntas… × 1». Pura. */
+export function textoLineas(ls: LineaPedido[]): string {
+  return ls.map((l) => `${l.codigo} ${l.producto} × ${l.cantidad}`).join(' · ');
+}
+
+/** Los productos que pidió el modelo (`productos: [{ producto, cantidad }]`, o el `producto`/`cantidad` sueltos). Pura. */
+export function itemsPedidos(datos: Record<string, unknown>): ItemCarrito[] | null {
+  const crudo = datos.productos;
+  if (Array.isArray(crudo)) {
+    return crudo.map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      return { codigo: String(o.producto ?? o.codigo ?? '').trim(), cantidad: Number(o.cantidad) };
+    });
+  }
+  if (datos.producto !== undefined && String(datos.producto).trim()) return [{ codigo: String(datos.producto).trim(), cantidad: Number(datos.cantidad) }];
+  return null;
+}
+
+/** Valida los productos contra el catálogo publicado: cada uno existe, de 1 a 3 unidades, sin repetir. Pura. */
+export function armarLineas(ps: ProductoVenta[], items: ItemCarrito[]): { ok: true; lineas: LineaPedido[] } | { ok: false; error: string; candado: string } {
+  if (!items.length) return { ok: false, error: 'El carrito está vacío: dime qué productos lleva (código MP-xx y unidades).', candado: 'carrito_vacio' };
+  if (items.length > MAX_LINEAS) return { ok: false, error: `Más de ${MAX_LINEAS} productos distintos no los armo por aquí: pasar_a_persona con motivo cantidad.`, candado: 'carrito_largo' };
+  const lineas: LineaPedido[] = [];
+  for (const it of items) {
+    const prod = productoPorCodigo(ps, it.codigo);
+    if (!prod) return { ok: false, error: `«${it.codigo || '(vacío)'}» no está publicado hoy. Búscalo con ver_catalogo por su código y haz lo que diga (no_disponible: no lo vendas).`, candado: 'producto_invalido' };
+    if (!Number.isInteger(it.cantidad) || it.cantidad < 1) return { ok: false, error: `La cantidad de ${prod.codigo} tiene que ser un número entero de unidades (si no la ha dicho, pregúntasela).`, candado: 'cantidad_invalida' };
+    if (it.cantidad > MAX_UNIDADES) return { ok: false, error: `Más de ${MAX_UNIDADES} unidades de ${prod.codigo} no las vendo por aquí: pasar_a_persona con motivo cantidad.`, candado: 'cantidad_mayor' };
+    if (lineas.some((l) => l.codigo === prod.codigo)) return { ok: false, error: `${prod.codigo} va dos veces: ponlo una sola vez con el total de unidades.`, candado: 'producto_repetido' };
+    lineas.push({ publicacion_id: prod.publicacionId, codigo: prod.codigo, producto: prod.titulo || prod.nombre, precio_unitario: prod.precio, cantidad: it.cantidad });
+  }
+  return { ok: true, lineas };
+}
 export const TOPE_VER_CATALOGO_VENTAS = 1500;
 /** El dominio del link de Bold: entra a la lista blanca cuando el modelo repite el link (SIN VERIFICAR en el sandbox). */
 export const ENLACES_VENTAS = ['https://checkout.bold.co'];
@@ -181,7 +248,7 @@ export function bloqueNotaVentas(p: { filas: FilaPublica[]; compra: Record<strin
   const g = estadoAutorizacion(p.filas, 'general');
   const aut = g.estado === 'si' ? `sí (versión ${g.evento.texto_version}, ${g.at.slice(0, 16).replace('T', ' ')} UTC)` : g.estado === 'no' ? 'dijo que no: no se tomaron datos' : g.estado === 'pedida' ? 'pedida, sin respuesta' : 'no pedida';
   const pedido = c
-    ? `${c.codigo ?? '?'} ${c.producto ?? ''} × ${c.cantidad ?? '?'} · ${c.zona_nombre ?? c.zona ?? '?'} (flete ${pesos(Number(c.flete ?? 0))}) · total ${pesos(Number(c.total ?? 0))}`
+    ? `${textoLineas(lineasDe(c))} · ${c.zona_nombre ?? c.zona ?? '?'} (flete ${pesos(Number(c.flete ?? 0))}) · total ${pesos(Number(c.total ?? 0))}`
     : 'sin pedido confirmado';
   const entrega = c ? `${c.nombre ?? '?'} · Cel. ${c.celular ?? '?'}${c.direccion ? ` · ${c.direccion}` : ''}` : null;
   return [
@@ -238,12 +305,13 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     const filas = filasDe(ctx);
     const venceAt = new Date(o.ahoraMs() + tablaFlete(r).venceHoras * 3600_000).toISOString();
     const monto = Number(datos.total);
-    const res = await pasarela.crearLink({ pagoId: huella, monto, venceAt, descripcion: `${datos.codigo} ${String(datos.producto ?? '')} x${datos.cantidad}` });
+    const ls = lineasDe(datos);
+    const res = await pasarela.crearLink({ pagoId: huella, monto, venceAt, descripcion: ls.map((l) => `${l.codigo} ${l.producto} x${l.cantidad}`).join(', ') });
     if (!res.ok) return { ok: false, motivo: `Bold no creó el link: ${res.error}` };
     try {
       const link = await o.puertos.guardarLink({
-        referencia: res.referencia, url: res.url, huella, publicacionId: String(datos.publicacion_id), cantidad: Number(datos.cantidad),
-        precioUnitario: Number(datos.precio_unitario), flete: Number(datos.flete), monto, zona: String(datos.zona), ruta: datos.ruta === 'recoge' ? 'recoge' : 'despacho',
+        referencia: res.referencia, url: res.url, huella, publicacionId: ls[0].publicacion_id, cantidad: ls[0].cantidad, precioUnitario: ls[0].precio_unitario,
+        lineas: ls.map((l) => ({ publicacionId: l.publicacion_id, cantidad: l.cantidad, precioUnitario: l.precio_unitario })), flete: Number(datos.flete), monto, zona: String(datos.zona), ruta: datos.ruta === 'recoge' ? 'recoge' : 'despacho',
         compradorNombre: String(datos.nombre), compradorTelefono: String(datos.celular), direccion: datos.direccion ? String(datos.direccion) : null,
         cuentaId: cuenta, conversacionId: conv, canal: filas[0]?.canal ?? 'otro', venceAt,
       });
@@ -283,6 +351,17 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       name: VER_COMPLEMENTOS,
       description: 'Venta cruzada, UNA vez por conversación: cuando el cliente ya escogió un producto y antes de pedir la autorización de datos, llámala con su código. Devuelve los complementos que el catálogo relaciona con ese producto (publicados hoy, con precio, razón y tiene_foto), o ninguno. Con complementos: ofrécele el primero en un mensaje corto, una línea que empieza por su código, con nombre corto, precio y la razón que trae, y pregúntale si lo quiere agregar (su foto sale sola después de esa línea). Sin complementos fijos puede traer `opciones` (otros productos publicados): ofrece una o dos que sirvan para su trabajo («Tengo X o Y que podrían interesarte»), o si ninguna sirve, pregúntale «¿Necesitas algo más para ese trabajo?». Si dice que no o no contesta a eso, sigue con la compra sin insistir. Nunca inventes un complemento que no devuelva.',
       parameters: { type: 'object', properties: { codigo: { type: 'string', description: 'El código MP-xx del producto que escogió.' } }, required: ['codigo'] },
+    },
+    {
+      name: CARRITO,
+      description: `El carrito de la compra: cada vez que el cliente agrega, quita o cambia un producto o sus unidades, llámala con el carrito ENTERO como queda (todos los productos, cada uno con su código MP-xx y unidades, de 1 a ${MAX_UNIDADES}). Devuelve cada línea con su precio y el subtotal (sin flete): díselo en un mensaje corto, una línea por producto, y pregúntale si quiere algo más o seguimos con la entrega. Todo el carrito se paga en UN solo link con un solo flete. Si devuelve error, haz lo que dice.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          productos: { type: 'array', items: { type: 'object', properties: { producto: { type: 'string', description: 'el código MP-xx' }, cantidad: { type: 'integer', description: `unidades (1 a ${MAX_UNIDADES})` } }, required: ['producto', 'cantidad'] } },
+        },
+        required: ['productos'],
+      },
     },
     {
       name: 'consultar_reglas',
@@ -338,8 +417,11 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     lecturas,
     acciones: ['compra'],
     datosProponer: {
-      producto: { type: 'string', description: 'el código MP-xx de ver_catalogo' },
-      cantidad: { type: 'integer', description: 'unidades (1 a 3)' },
+      productos: {
+        type: 'array',
+        description: 'TODO el carrito: cada producto con su código MP-xx y unidades (1 a 3). Si ya lo armaste con carrito, es ese mismo.',
+        items: { type: 'object', properties: { producto: { type: 'string', description: 'el código MP-xx' }, cantidad: { type: 'integer' } }, required: ['producto', 'cantidad'] },
+      },
       entrega: { type: 'string', description: 'la zona de entrega de la tabla de flete (consultar_reglas: despacho_bogota o recoger)' },
       nombre: { type: 'string', description: 'como lo escribió el cliente después de autorizar' },
       celular: { type: 'string' },
@@ -415,6 +497,20 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           },
         };
       }
+      if (nombre === CARRITO) {
+        const items = itemsPedidos(args) ?? [];
+        const a = armarLineas(await o.puertos.catalogo(), items);
+        if (!a.ok) return { ok: false, datos: null, error: a.error };
+        return {
+          ok: true,
+          datos: {
+            items: a.lineas.map((l) => ({ codigo: l.codigo, cantidad: l.cantidad })),
+            carrito: a.lineas.map((l) => ({ codigo: l.codigo, producto: l.producto, precio: pesos(l.precio_unitario), cantidad: l.cantidad })),
+            subtotal: pesos(totalCarrito(a.lineas.map((l) => ({ precio: l.precio_unitario, cantidad: l.cantidad })), 0)),
+            que_hacer: 'Dile cómo va su carrito: una línea por producto (código, nombre corto, unidades y precio) y el subtotal, que no incluye el flete. Pregúntale si quiere algo más o seguimos con la entrega. Todo va en un solo link de pago.',
+          },
+        };
+      }
       if (nombre === VER_COMPLEMENTOS) {
         if (ventaCruzadaOfrecida(filasDe(ctx))) {
           return { ok: true, datos: { complementos: [], ya_ofrecido: true, que_hacer: 'Ya le ofreciste algo más en esta conversación: no lo vuelvas a ofrecer ni preguntes otra vez; sigue con la compra.' } };
@@ -463,22 +559,20 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       // Lo que falta, dicho campo por campo (30-oct: sin `producto`, el error era «no es un código de ver_catalogo» y el
       // modelo volvía a buscar el producto en vez de completar los datos).
       const vacio = (k: string) => datos[k] === undefined || datos[k] === null || String(datos[k]).trim() === '';
+      // El carrito: lo que trae `productos` (o el producto suelto); si no trae nada, el carrito vigente de la conversación.
+      const items = itemsPedidos(datos) ?? carritoVigente(filas);
       const sinCampo = [
-        ...(vacio('producto') ? ['producto (el código MP-xx que escogió)'] : []),
-        ...(vacio('cantidad') ? ['cantidad (unidades, de 1 a 3)'] : []),
+        ...(!items?.length ? ['productos (cada producto con su código MP-xx y unidades)'] : []),
         ...(vacio('entrega') ? ['entrega (bogota o recoge)'] : []),
         ...(vacio('nombre') ? ['nombre'] : []),
         ...(vacio('celular') ? ['celular'] : []),
       ];
       if (sinCampo.length) {
-        return { ok: false, error: `Faltan campos en \`datos\`: ${sinCampo.join(', ')}. Si el cliente ya los dijo en la conversación, vuelve a llamar proponer con TODOS los campos (producto, cantidad, entrega, nombre, celular y, si es despacho, direccion); pídele al cliente solo lo que de verdad no ha dicho.`, candado: 'datos_incompletos' };
+        return { ok: false, error: `Faltan campos en \`datos\`: ${sinCampo.join(', ')}. Si el cliente ya los dijo en la conversación, vuelve a llamar proponer con TODOS los campos (productos, entrega, nombre, celular y, si es despacho, direccion); pídele al cliente solo lo que de verdad no ha dicho.`, candado: 'datos_incompletos' };
       }
-      const ps = await o.puertos.catalogo();
-      const prod: ProductoVenta | null = productoPorCodigo(ps, String(datos.producto ?? ''));
-      if (!prod) return { ok: false, error: 'El producto no está publicado hoy. Búscalo con ver_catalogo por su código y haz lo que diga (no_disponible: no lo vendas); si no está, pasar_a_persona con no_en_catalogo.', candado: 'producto_invalido' };
-      const cantidad = Number(datos.cantidad);
-      if (!Number.isInteger(cantidad) || cantidad < 1) return { ok: false, error: 'La cantidad tiene que ser un número entero de unidades.', candado: 'cantidad_invalida' };
-      if (cantidad > MAX_UNIDADES) return { ok: false, error: `Más de ${MAX_UNIDADES} unidades no las vendo por aquí: pasar_a_persona con motivo cantidad.`, candado: 'cantidad_mayor' };
+      const armado = armarLineas(await o.puertos.catalogo(), items!);
+      if (!armado.ok) return { ok: false, error: armado.error, candado: armado.candado };
+      const lineas = armado.lineas;
       const tabla = tablaFlete(r);
       const zona = zonaFlete(tabla, String(datos.entrega ?? ''));
       if (!zona) return { ok: false, error: `Esa entrega no está en la tabla de flete (${tabla.zonas.map((z) => z.id).join(', ') || 'vacía'}): no cotices el flete; pasar_a_persona con motivo fuera_de_zona.`, candado: 'zona_fuera_de_tabla' };
@@ -501,12 +595,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           candado: 'dato_sin_autorizacion',
         };
       }
-      const total = totalPedido(prod.precio, cantidad, zona.flete);
-      const producto = prod.titulo || prod.nombre;
+      const total = totalCarrito(lineas.map((l) => ({ precio: l.precio_unitario, cantidad: l.cantidad })), zona.flete);
       const resumen = [
         'Revisa tu pedido:',
-        `• ${prod.codigo} · ${producto}`,
-        `• ${cantidad} × ${pesos(prod.precio)}`,
+        ...lineas.map((l) => `• ${l.codigo} · ${l.producto}: ${l.cantidad} × ${pesos(l.precio_unitario)}`),
         `• ${zona.nombre}: ${zona.flete > 0 ? `flete ${pesos(zona.flete)}` : 'sin flete'}`,
         `• Total: ${pesos(total)}`,
         `• ${campos.nombre} · Cel. ${digitos(campos.celular)}${zona.ruta === 'despacho' ? ` · ${campos.direccion}` : ''}`,
@@ -515,7 +607,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const propuesta: Propuesta = {
         accion: 'compra',
         datos: {
-          publicacion_id: prod.publicacionId, codigo: prod.codigo, producto, precio_unitario: prod.precio, cantidad, zona: zona.id, zona_nombre: zona.nombre,
+          lineas, zona: zona.id, zona_nombre: zona.nombre,
           ruta: zona.ruta, flete: zona.flete, total, nombre: campos.nombre, celular: digitos(campos.celular), ...(zona.ruta === 'despacho' ? { direccion: campos.direccion } : {}),
         },
         resumen, si: 'Sí, enviar link', no: 'Corregir',
@@ -555,12 +647,14 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const pausa = horasDePausa(filas);
       const fotos = fotosConsultadas(filas);
       const enCurso = productoEnCurso(filas);
+      const carrito = carritoVigente(filas);
       return [
         ...(pausa !== null && pausa >= HORAS_CONVERSACION_NUEVA ? [`El cliente vuelve después de ${Math.floor(pausa)} h sin escribir: si solo saluda o no dice qué quiere, tómalo como una conversación nueva: salúdalo y pregúntale qué está buscando, sin decir «de nuevo» y sin suponer el producto de antes. Si su mensaje sigue claramente lo de antes, retómalo.`] : []),
         ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
         `Autorización de datos para la compra: ${lineaG}.`,
-        ...(u ? [`Compra confirmada: ${u.datos.codigo} × ${u.datos.cantidad}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
+        ...(u ? [`Compra confirmada: ${textoLineas(lineasDe(u.datos))}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
         ...(enCurso ? [`Ya presentaste el ${enCurso}: si siguen hablando de ese, no repitas su código ni su nombre completo; dile «ese», el tipo («ese taladro») o la marca, o nada. El código vuelve solo para mandar su foto o si hay varios en juego.`] : []),
+        ...(carrito ? [`Carrito: ${carrito.map((x) => `${x.codigo} × ${x.cantidad}`).join(', ')}. Si agrega, quita o cambia algo, vuelve a llamar carrito con el carrito entero; en proponer, \`productos\` es este carrito.`] : []),
         ...(compras.length ? [] : [ventaCruzadaOfrecida(filas) ? 'Venta cruzada: ya se ofreció; no ofrezcas nada más.' : 'Venta cruzada: todavía no. Cuando escoja el producto, antes de la autorización, llama ver_complementos una vez.']),
         ...(pasados.includes('despachar') ? ['El pago ya está confirmado y el despacho lo tiene el equipo: no vuelvas a verificar ni a pedir el pago.'] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')}.`] : []),

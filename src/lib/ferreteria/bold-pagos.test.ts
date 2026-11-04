@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { guardarProducto, guardarPublicacion } from './nucleo'
 import { repoEnMemoria } from './repo-memoria'
 import type { Autor, PuertoNegocios, RepoFerreteria } from './tipos'
-import { procesarPagoBold, type DepsPagoBold, type LinkBoldFila, type RepoLinksBold } from './bold-pagos'
+import { procesarPagoBold, type DepsPagoBold, type LineaLinkBold, type LinkBoldFila, type RepoLinksBold } from './bold-pagos'
 
 /** Datos INVENTADOS. */
 const WS = 'ws-dimpro'
@@ -16,8 +16,9 @@ type FilaBase = LinkBoldFila & { reclamado_at: string | null; motivo: string | n
  * La tabla `ferreteria_links_bold` en memoria, como la base: guarda COPIAS (lo que el webhook recibió puede estar viejo),
  * el reclamo condicional (libre, o `procesando` vencido), el rechazo condicional y `venta_id` que se suelta al borrar.
  */
-function linksEnMemoria(inicial: LinkBoldFila) {
+function linksEnMemoria(inicial: LinkBoldFila, carrito: LineaLinkBold[] = []) {
   const filas: FilaBase[] = [{ ...inicial, reclamado_at: null, motivo: null }]
+  const lineas = carrito.map((l) => ({ ...l }))
   const veces: Record<string, number> = {}
   const conversaciones: string[] = []
   const fallas: { cerrarRegistrada?: boolean } = {}
@@ -42,6 +43,10 @@ function linksEnMemoria(inicial: LinkBoldFila) {
     async anotarVenta(id, ventaId) {
       f(id).venta_id = ventaId
     },
+    lineas: async () => lineas.map((l) => ({ ...l })),
+    async anotarVentaLinea(lineaId, ventaId) {
+      lineas.find((l) => l.id === lineaId)!.venta_id = ventaId
+    },
     async cerrar(id, c) {
       if (c.registro === 'registrada' && fallas.cerrarRegistrada) {
         fallas.cerrarRegistrada = false
@@ -61,7 +66,7 @@ function linksEnMemoria(inicial: LinkBoldFila) {
       return null
     },
   }
-  return { repo, filas, veces, conversaciones, fallas }
+  return { repo, filas, veces, conversaciones, fallas, lineas }
 }
 
 function negociosFalsos() {
@@ -287,5 +292,68 @@ describe('rechazos (revisión del PR #1336)', () => {
     expect(repo.estado.ventas).toHaveLength(0)
     expect(base().registro).toBe('error')
     expect((await procesarPagoBold({ ...base() }, aprobado(), deps())).body.resultado).toBe('registrada')
+  })
+})
+
+describe('carrito: un link con varios productos (4-nov)', () => {
+  let pub2: string
+  const lineasDe = (pub1: string): LineaLinkBold[] => [
+    { id: 'lin-1', publicacion_id: pub1, cantidad: 2, precio_unitario: 250_000, venta_id: null },
+    { id: 'lin-2', publicacion_id: pub2, cantidad: 1, precio_unitario: 13_900, venta_id: null },
+  ]
+
+  beforeEach(async () => {
+    await guardarProducto(repo, WS, { sku: 'EJ-PUNTAS', nombre: 'Puntas de ejemplo', costo: { fecha_lista: '2026-10-01', costo_f: 8_000 } }, AHORA)
+    const r = await guardarPublicacion(
+      repo,
+      WS,
+      { codigo: 'MP-02', sku: 'EJ-PUNTAS', titulo: 'Juego de puntas x 20', precio: 13_900, estado: 'activa' },
+      { origen: 'canal', autor: AGENTE, ahora: AHORA },
+    )
+    expect(r.ok).toBe(true)
+    pub2 = (await repo.publicacionPorCodigo(WS, 'MP-02'))!.id
+    fila = { ...fila, monto: 528_900 }
+    links = linksEnMemoria(fila, lineasDe(fila.publicacion_id))
+  })
+
+  it('una venta por producto con su negocio y su parte del cobro; el link queda con la venta de la primera línea', async () => {
+    const s = await procesarPagoBold(fila, aprobado(528_900), deps())
+    expect(s).toMatchObject({ status: 200, body: { ok: true, resultado: 'registrada' } })
+    expect(repo.estado.ventas.map((v) => [v.precio_final, v.cantidad ?? 1, v.negocio_id])).toEqual([[500_000, 2, 'neg-1'], [13_900, 1, 'neg-2']])
+    expect(neg.creados.map((n) => n.pagos)).toEqual([
+      [{ monto: 500_000, fecha: HOY, referencia: 'BOLD-LNK_PRUEBA1' }],
+      [{ monto: 13_900, fecha: HOY, referencia: 'BOLD-LNK_PRUEBA1' }],
+    ])
+    expect(links.lineas.map((l) => l.venta_id)).toEqual(repo.estado.ventas.map((v) => v.id))
+    expect(base()).toMatchObject({ registro: 'registrada', venta_id: repo.estado.ventas[0].id })
+    expect(avisos[0]).toContain('Pago Bold aprobado MP-01 ×2, MP-02 ×1')
+    expect(confirmados).toEqual(['LNK_PRUEBA1'])
+    // El mismo aviso otra vez: nada nuevo.
+    await procesarPagoBold({ ...base() }, aprobado(528_900), deps())
+    expect(repo.estado.ventas).toHaveLength(2)
+  })
+
+  it('el negocio de la segunda línea falla: 500; el reintento registra solo esa (dos ventas, dos negocios)', async () => {
+    const crear = neg.puerto.crear.bind(neg.puerto)
+    let n = 0
+    neg.puerto.crear = async (x) => {
+      if (++n === 2) throw new Error('base caída al crear el segundo negocio')
+      return crear(x)
+    }
+    const s = await procesarPagoBold(fila, aprobado(528_900), deps())
+    expect(s.status).toBe(500)
+    expect(repo.estado.ventas).toHaveLength(1)
+    expect(links.lineas.map((l) => l.venta_id)).toEqual([repo.estado.ventas[0].id, null])
+    const r = await procesarPagoBold({ ...base() }, aprobado(528_900), deps())
+    expect(r.body.resultado).toBe('registrada')
+    expect(repo.estado.ventas).toHaveLength(2)
+    expect(neg.creados).toHaveLength(2)
+    expect(base().venta_id).toBe(repo.estado.ventas[0].id)
+  })
+
+  it('el monto tiene que ser el del carrito entero (productos + un flete)', async () => {
+    const s = await procesarPagoBold(fila, aprobado(515_000), deps())
+    expect(s.body.resultado).toBe('error')
+    expect(repo.estado.ventas).toHaveLength(0)
   })
 })

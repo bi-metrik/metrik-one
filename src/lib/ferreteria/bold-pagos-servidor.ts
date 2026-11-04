@@ -73,6 +73,30 @@ export function repoLinksBold(ws: string, cliente: SupabaseClient = createServic
       const { error } = await db.from('ferreteria_links_bold').update({ venta_id: ventaId }).eq('id', id)
       if (error) throw new Error(`anotar la venta en el link de Bold: ${error.message}`)
     },
+    async lineas(linkId) {
+      const { data, error } = await db
+        .from('ferreteria_links_bold_lineas')
+        .select('id, publicacion_id, cantidad, precio_unitario, venta_id')
+        .eq('workspace_id', ws)
+        .eq('link_id', linkId)
+        .order('orden')
+      // Sin la tabla (migración sin aplicar) no hay carritos: el link es de un solo producto.
+      if (error) {
+        if (error.code === '42P01' || error.code === 'PGRST205') return []
+        throw new Error(`leer los productos del link de Bold: ${error.message}`)
+      }
+      return ((data ?? []) as Record<string, unknown>[]).map((l) => ({
+        id: String(l.id),
+        publicacion_id: String(l.publicacion_id),
+        cantidad: Number(l.cantidad),
+        precio_unitario: Number(l.precio_unitario),
+        venta_id: (l.venta_id as string | null) ?? null,
+      }))
+    },
+    async anotarVentaLinea(lineaId, ventaId) {
+      const { error } = await db.from('ferreteria_links_bold_lineas').update({ venta_id: ventaId }).eq('id', lineaId).eq('workspace_id', ws)
+      if (error) throw new Error(`anotar la venta en el producto del link de Bold: ${error.message}`)
+    },
     async marcarRechazado(id, ahoraIso) {
       const { error } = await db
         .from('ferreteria_links_bold')

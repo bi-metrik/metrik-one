@@ -17,7 +17,7 @@ const COLUMNAS_LINK = 'referencia, url, huella, publicacion_id, cantidad, precio
 export function linkDeFila(x: Fila): LinkGuardado {
   return {
     referencia: String(x.referencia), url: String(x.url), huella: String(x.huella), publicacionId: String(x.publicacion_id), cantidad: Number(x.cantidad),
-    precioUnitario: Number(x.precio_unitario), flete: Number(x.flete), monto: Number(x.monto), zona: String(x.zona), ruta: x.ruta === 'recoge' ? 'recoge' : 'despacho',
+    precioUnitario: Number(x.precio_unitario), lineas: [{ publicacionId: String(x.publicacion_id), cantidad: Number(x.cantidad), precioUnitario: Number(x.precio_unitario) }], flete: Number(x.flete), monto: Number(x.monto), zona: String(x.zona), ruta: x.ruta === 'recoge' ? 'recoge' : 'despacho',
     compradorNombre: String(x.comprador_nombre), compradorTelefono: String(x.comprador_telefono), direccion: (x.direccion as string | null) ?? null,
     cuentaId: Number(x.chatwoot_cuenta_id), conversacionId: Number(x.chatwoot_conversacion_id), canal: String(x.canal), venceAt: String(x.vence_at ?? ''), registro: String(x.registro),
   };
@@ -111,7 +111,16 @@ export function ventasSupabase(
         canal: l.canal, vence_at: l.venceAt,
       }).select(COLUMNAS_LINK).single();
       if (error || !data) throw new Error(`no se pudo guardar el link: ${error?.message ?? 'sin fila'}`);
-      return linkDeFila(data as Fila);
+      // El carrito: sin sus líneas el webhook registraría solo la primera, así que el link sin ellas no se entrega.
+      const { data: link } = await supabase.from('ferreteria_links_bold').select('id').eq('workspace_id', workspaceId).eq('referencia', l.referencia).single();
+      const { error: e2 } = await supabase.from('ferreteria_links_bold_lineas').insert(l.lineas.map((x, i) => ({
+        workspace_id: workspaceId, link_id: link?.id, orden: i + 1, publicacion_id: x.publicacionId, cantidad: x.cantidad, precio_unitario: x.precioUnitario,
+      })));
+      if (e2 || !link) {
+        await supabase.from('ferreteria_links_bold').delete().eq('workspace_id', workspaceId).eq('referencia', l.referencia);
+        throw new Error(`no se pudieron guardar los productos del link: ${e2?.message ?? 'sin id'}`);
+      }
+      return { ...linkDeFila(data as Fila), lineas: l.lineas };
     },
   };
 }

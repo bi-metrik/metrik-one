@@ -10,7 +10,17 @@ import type { CuerpoLinkBold, PasarelaPagos, PedidoLink } from '../../../funcion
 import { cuerpoLinkBold } from '../../../funciones/pasarela.ts';
 import type { ProductoNoDisponible, ProductoVenta } from './catalogo-ventas.ts';
 
-/** Lo que se guarda de un link creado (tabla `ferreteria_links_bold`). */
+/** Un producto del carrito de un link (tabla `ferreteria_links_bold_lineas`). */
+export interface LineaLink {
+  publicacionId: string;
+  cantidad: number;
+  precioUnitario: number;
+}
+
+/**
+ * Lo que se guarda de un link creado (tabla `ferreteria_links_bold`). `publicacionId`, `cantidad` y `precioUnitario` son
+ * los de la PRIMERA línea (las columnas del link); `lineas`, el carrito entero, en orden (4-nov).
+ */
 export interface NuevoLink {
   referencia: string;
   url: string;
@@ -18,6 +28,7 @@ export interface NuevoLink {
   publicacionId: string;
   cantidad: number;
   precioUnitario: number;
+  lineas: LineaLink[];
   flete: number;
   monto: number;
   zona: string;
