@@ -22,6 +22,8 @@ export function normalizarTexto(v: unknown): string {
     .toLowerCase()
     .replace(/[^a-z0-9ñ@]+/g, ' ')
     .trim()
+    // Siglas con puntos: «S.A.S.» y «SAS» son lo mismo (quedaban «s a s» contra «sas»).
+    .replace(/\b[a-z](?: [a-z]\b)+/g, (m) => m.replace(/ /g, ''))
 }
 
 function comoNumero(v: unknown): number | null {

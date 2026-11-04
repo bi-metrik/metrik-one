@@ -739,6 +739,12 @@ export const fetchModelo: typeof fetch = crearFetchModelo();
  */
 export const fetchModeloDocumentos: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' });
 
+/**
+ * La lectura de campos de un documento (`extract-fields`): el mismo interruptor que `fetchModeloDocumentos`, con Haiku en
+ * esfuerzo `medium` (SOE-038, eval sobre 40 documentos reales de SOENA).
+ */
+export const fetchModeloExtraccion: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini', esfuerzo: 'medium' });
+
 /** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real: 8 de 12). */
 export const fetchModeloActas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' });
 

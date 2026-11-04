@@ -12,6 +12,8 @@
  *     `nit`. Ver `normalizarNitYDv`.
  *  2b. Casilla 26 sin el código del tipo de documento pegado delante, y `nit_completo`
  *     sin el DV repetido (GENÉRICA). Ver `normalizarIdentificacionRut`.
+ *  2c. Razón social vacía de persona natural, armada con apellidos y nombres. Ver
+ *     `completarRazonSocialPersonaNatural`.
  *  3. `dv_desde_nit` (opt-in por campo) — recalcula el DV sobre el NIT ya limpio.
  *  4. `divipola_desde_nombres` (opt-in por campo) — códigos de ubicación desde nombres.
  *
@@ -199,6 +201,32 @@ export function normalizarIdentificacionRut(
 }
 
 /**
+ * Razón social de una persona natural vacía: se arma con las casillas 31 a 34 (primer apellido, segundo apellido,
+ * primer nombre, otros nombres), que es lo que pide su `descripcion_ai`. La casilla 35 del RUT («Razón social») va en
+ * blanco para una persona natural, y Haiku 5.5 a veces la transcribe literal, vacía (V0660, SOE-038). Solo cuando el
+ * bloque trae esas casillas, el tipo de persona es «Natural» y hay al menos un apellido y un nombre. Devuelve el valor
+ * armado, o null si no hizo nada.
+ */
+export function completarRazonSocialPersonaNatural(
+  campos: CampoExtraccion[],
+  resultado: Record<string, CampoResultado>,
+): string | null {
+  const slugs = new Set(campos.map((c) => c.slug))
+  if (!slugs.has('razon_social') || !slugs.has('primer_apellido') || !slugs.has('primer_nombre')) return null
+  const rs = resultado.razon_social
+  if (rs?.value || campoProtegido(rs)) return null
+  if (!/natural/i.test(resultado.tipo_persona?.value ?? '')) return null
+  const partes = ['primer_apellido', 'segundo_apellido', 'primer_nombre', 'otros_nombres']
+    .map((k) => resultado[k])
+    .filter((c): c is CampoResultado => !!c?.value?.trim())
+  if (!resultado.primer_apellido?.value?.trim() || !resultado.primer_nombre?.value?.trim()) return null
+  const valor = partes.map((c) => c.value!.trim()).join(' ')
+  const confidence = Math.min(...partes.map((c) => c.confidence))
+  resultado.razon_social = { value: valor, confidence, manual: false }
+  return valor
+}
+
+/**
  * Todas las normalizaciones, en orden. Ver el encabezado.
  */
 export function aplicarNormalizaciones(
@@ -234,6 +262,9 @@ export function aplicarNormalizaciones(
   for (const c of normalizarIdentificacionRut(campos, resultado)) {
     console.warn(`[documento] identificación ${c.campo}: "${c.antes}" → "${c.despues}" (${c.motivo})`)
   }
+  // Pasada 2c: razón social de persona natural desde las casillas 31 a 34.
+  const razonSocial = completarRazonSocialPersonaNatural(campos, resultado)
+  if (razonSocial) console.warn(`[documento] razon_social vacía: se arma con apellidos y nombres → "${razonSocial}"`)
   // Pasada 3: dv_desde_nit (recalcula el DV desde el NIT base ya normalizado).
   for (const campo of campos) {
     if (campo.normalizar === 'dv_desde_nit') {

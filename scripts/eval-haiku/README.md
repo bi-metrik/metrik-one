@@ -72,3 +72,22 @@ npx tsx --conditions=react-server scripts/eval-haiku/correr.ts --familia trappve
 ```
 
 Los fallos de estas dos familias sí muestran los valores (los casos son ficticios).
+
+## Documentos de SOENA (SOE-038)
+
+`soena-documentos.ts` corre `extractFieldsFromDocument` (con las normalizaciones y el reintento de producción) sobre
+`casos/soena-documentos.json`: 40 documentos reales de SOENA (14 facturas, 8 RUT, 6 certificados bancarios, 6 conceptos
+UPME y 6 comprobantes UPME), sacados con el bloque 3 de `consultas.sql`. Guarda la respuesta cruda del modelo por caso.
+
+```bash
+# Haiku 5.5
+npx tsx --tsconfig tsconfig.json --conditions=react-server scripts/eval-haiku/soena-documentos.ts --salida haiku
+# Gemini, SOLO con la llave de pruebas (archivo aparte; cualquier otra llave de Gemini lanza)
+GEMINI_LLAVE_PRUEBAS_ARCHIVO=<archivo> npx tsx --tsconfig tsconfig.json --conditions=react-server \
+  scripts/eval-haiku/soena-documentos.ts --proveedor gemini --modelo-gemini gemini-3.8-flash --salida gemini-38
+```
+
+- `--descripciones soena-descripciones.json` mide un `descripcion_ai` distinto del de producción (el texto vive en
+  `bloque_configs.config_extra`) antes de proponer el cambio.
+- El proyecto de la llave de pruebas ya no tiene `gemini-2.5-flash` (404 «no longer available to new users»): se compara
+  contra 3.8-flash y 3.5-flash-lite, y contra lo que 2.5 guardó en producción sin corrección humana.
