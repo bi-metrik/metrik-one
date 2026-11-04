@@ -194,8 +194,8 @@ describe('Suscripción (/suscripcion y la franja de /valida) con la v1.5', () =>
       estado: 'restringido',
       chip: 'Suspendida por pago',
       mensaje:
-        'La suscripción está Suspendida por pago desde el 6-dic: no hay consultas nuevas. Al pagar vuelven y tu fecha de ' +
-        'renovación no cambia; si no, desde el 31-dic queda Cancelada.',
+        'La suscripción está Suspendida por pago desde el 6-dic: no se pueden hacer consultas nuevas. Al pagar, vuelven y ' +
+        'tu fecha de renovación no cambia; si no, desde el 31-dic queda Cancelada.',
     })
   })
   it('sin la v1.5, los textos de siempre', () => {

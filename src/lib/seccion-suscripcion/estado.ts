@@ -159,8 +159,8 @@ export function resumenEstado(p: {
       tono: 'rojo',
       chip: 'Suspendida por pago',
       mensaje:
-        `La suscripción está Suspendida por pago desde el ${fechaDiaMes(p.mora.restringeDesde)}: no hay consultas nuevas. ` +
-        `Al pagar vuelven y tu fecha de renovación no cambia; si no, desde el ${fechaDiaMes(p.mora.corteDesde)} queda Cancelada.`,
+        `La suscripción está Suspendida por pago desde el ${fechaDiaMes(p.mora.restringeDesde)}: no se pueden hacer consultas nuevas. ` +
+        `Al pagar, vuelven y tu fecha de renovación no cambia; si no, desde el ${fechaDiaMes(p.mora.corteDesde)} queda Cancelada.`,
       requiereAccion: true,
     }
   }

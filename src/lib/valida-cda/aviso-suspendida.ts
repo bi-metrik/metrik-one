@@ -15,6 +15,10 @@ import { escaparHtml } from '@/lib/usuarios-espacio/correo'
 import type { CuotaConEstado } from './pago-pendiente'
 import { periodoDeCuota, periodosImpagosCumplidos, REGLA_MORA_CDA } from './plazos'
 
+/** Contacto oficial de MéTRIK para dudas del pago (revisión de Sofía, 4-nov). */
+const CORREO_DUDAS = 'mauricio.moreno@metrik.com.co'
+const WHATSAPP_DUDAS = '+57 315 950 9103'
+
 export interface PeriodoImpago {
   /** «del 23 de octubre al 22 de noviembre de 2026», o «la cuota 2» si el concepto no trae período. */
   periodo: string
@@ -87,11 +91,14 @@ function parrafos(d: DatosAvisoSuspendida): { intro: string[]; pagos: string[]; 
     ],
     pagos: [
       varios ? 'Para volver a consultar hay que pagar todos estos períodos:' : 'Para volver a consultar hay que pagar este período:',
-      ...d.periodos.map((p) => `Período ${p.periodo}: ${formatCOP(p.saldo)}${p.enlacePago ? `. Pagar en línea: ${p.enlacePago}` : ''}`),
+      ...d.periodos.map(
+        (p) => `Período ${p.periodo}: ${formatCOP(p.saldo)}. ${p.enlacePago ? `Pagar en línea: ${p.enlacePago}` : 'Se paga desde Suscripción (enlace abajo).'}`,
+      ),
     ],
     cierre: [
       `La persona designada por tu empresa puede ver y pagar ${varios ? 'los períodos' : 'el período'} en la sección Suscripción de MéTRIK ONE: ${d.urlPagos}`,
       'Si ya hiciste este pago, no tienes que hacer nada: las consultas vuelven cuando el pago quede registrado (cláusula 11.5).',
+      `Si tienes alguna duda con el pago, escríbenos a ${CORREO_DUDAS} o al WhatsApp ${WHATSAPP_DUDAS}.`,
     ],
   }
 }
@@ -110,7 +117,9 @@ export function htmlCorreoSuspendida(d: DatosAvisoSuspendida): string {
         `<tr><td style="padding:6px 12px 6px 0;vertical-align:top;">Período ${escaparHtml(r.periodo)}</td>` +
         `<td style="padding:6px 12px 6px 0;font-weight:600;white-space:nowrap;vertical-align:top;">${escaparHtml(formatCOP(r.saldo))}</td>` +
         `<td style="padding:6px 0;vertical-align:top;">${
-          r.enlacePago ? `<a href="${escaparHtml(r.enlacePago)}" style="color:${PALETA.acento};font-weight:600;">Pagar en línea</a>` : ''
+          r.enlacePago
+            ? `<a href="${escaparHtml(r.enlacePago)}" style="color:${PALETA.acento};font-weight:600;">Pagar en línea</a>`
+            : `<a href="${url}" style="color:${PALETA.acento};font-weight:600;">Pagar en Suscripción</a>`
         }</td></tr>`,
     )
     .join('')

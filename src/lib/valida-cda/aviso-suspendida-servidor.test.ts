@@ -183,7 +183,11 @@ describe('el texto', () => {
     const texto = x.enviados[0].text
     expect(texto).toContain('porque no están pagados los períodos del 23 de octubre al 22 de noviembre de 2026 y del 23 de noviembre al 22 de diciembre de 2026')
     expect(texto).toContain('Período del 23 de octubre al 22 de noviembre de 2026: $150.000. Pagar en línea: https://checkout.bold.co/payment/LNK_ABC')
-    expect(texto).toContain('Período del 23 de noviembre al 22 de diciembre de 2026: $150.000\n')
+    expect(texto).toContain('Período del 23 de noviembre al 22 de diciembre de 2026: $150.000. Se paga desde Suscripción (enlace abajo).\n')
+    const html = x.enviados[0] as unknown as { html: string }
+    expect(html.html).toContain('href="https://cda-caqueta.metrikone.co/suscripcion?tab=pagos" style="color:')
+    expect(html.html).toContain('Pagar en Suscripción')
+    expect(html.html).toContain('escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.')
     expect(texto).toContain('https://cda-caqueta.metrikone.co/suscripcion?tab=pagos')
     expect(texto).toContain('desde el 31 de diciembre de 2026 la suscripción queda Cancelada')
   })
@@ -213,6 +217,8 @@ describe('el texto', () => {
 
       Si ya hiciste este pago, no tienes que hacer nada: las consultas vuelven cuando el pago quede registrado (cláusula 11.5).
 
+      Si tienes alguna duda con el pago, escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.
+
       METRIK IA S.A.S."
     `)
   })
@@ -239,11 +245,13 @@ describe('el texto', () => {
 
       Para volver a consultar hay que pagar todos estos períodos:
       Período del 23 de octubre al 22 de noviembre de 2026: $150.000. Pagar en línea: https://checkout.bold.co/payment/LNK_X
-      Período del 23 de noviembre al 22 de diciembre de 2026: $150.000
+      Período del 23 de noviembre al 22 de diciembre de 2026: $150.000. Se paga desde Suscripción (enlace abajo).
 
       La persona designada por tu empresa puede ver y pagar los períodos en la sección Suscripción de MéTRIK ONE: https://cda-caqueta.metrikone.co/suscripcion?tab=pagos
 
       Si ya hiciste este pago, no tienes que hacer nada: las consultas vuelven cuando el pago quede registrado (cláusula 11.5).
+
+      Si tienes alguna duda con el pago, escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.
 
       METRIK IA S.A.S."
     `)
