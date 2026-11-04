@@ -118,6 +118,15 @@ export const TEXTOS_PREGUNTAS: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: preguntas primero, uno o dos (30-oct)',
 };
 
+/** Cierra sola (Mauricio, 4-nov): no ofrece pasar a una persona; solo pasa en los casos del reglamento o si la piden. */
+export const CLAVES_CIERRA_SOLA = ['alc.producto', 'alc.especificacion', 'alc.duda_abierta', 'inv.cierras_tu', 'persona.pide', 'rf.bienvenida', 'rf.autorizacion_no', 'rf.persona_por_que'];
+export const TEXTOS_CIERRA_SOLA: TextosActualizacion = {
+  titulo: 'Dimi cierra la venta solo (4-nov): no ofrece pasar a una persona; si no tiene un dato lo dice y sigue vendiendo.\n-- Pasa a persona solo en los casos del reglamento o si el cliente la pide. El aviso de entrada ya no ofrece «persona».',
+  uso: 'semilla-sql-dimpro.ts --cierra-sola',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con el candado que no deja salir la oferta de una persona.',
+  nota: 'asistente de ventas Dimpro: cierra la venta solo, sin ofrecer la persona (4-nov)',
+};
+
 /**
  * El SQL que carga (o reemplaza) el mapa de venta cruzada sin redesplegar: la ficha `ventas.complementos` con el mapa de
  * un JSON `{ "MP-38": [{ "codigo": "MP-30", "razon": "…" }] }`. Lo que no tenga código y razón se rechaza (no se carga
@@ -199,6 +208,7 @@ $$;
 if (import.meta.main) {
   const iMapa = Deno.args.indexOf('--complementos');
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
+    : Deno.args.includes('--cierra-sola') ? actualizacionSqlDimpro(CLAVES_CIERRA_SOLA, REGLAMENTO_DIMPRO, TEXTOS_CIERRA_SOLA)
     : Deno.args.includes('--saludo') ? actualizacionSqlDimpro(CLAVES_SALUDO, REGLAMENTO_DIMPRO, TEXTOS_SALUDO)
     : Deno.args.includes('--preguntas') ? actualizacionSqlDimpro(CLAVES_PREGUNTAS, REGLAMENTO_DIMPRO, TEXTOS_PREGUNTAS)
     : Deno.args.includes('--nombre') ? actualizacionSqlDimpro(CLAVES_NOMBRE, REGLAMENTO_DIMPRO, TEXTOS_NOMBRE)
