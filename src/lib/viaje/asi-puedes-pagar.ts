@@ -103,7 +103,26 @@ export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar, hi
         : `hasta el ${fechaLarga(c.fecha)}`
     return { monto: c.monto, cuando, llevas: completaMinimo && acumulado < Math.round(total) ? acumulado : null }
   })
-  return { ...base, filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
+  return { ...base, regla: reglaDelPlan(regla, cuotas, hitos ?? entrada.hitos ?? null, entrada.fechaSalida), filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
+}
+
+/**
+ * QA G15 (2026-11-03): la regla en palabras tiene que ser cierta para ESTAS filas. Cuando una
+ * cuota cae en la «Compra antes del» del operador, «El 80 % quince días antes de salir» ya no
+ * describe el plan (el pago va antes, y a veces la fila de los quince días ni sale): se dice la
+ * fecha del operador y, solo si la fila de los quince días sigue, la regla de siempre.
+ */
+function reglaDelPlan(regla: ReglaPlan, cuotas: readonly { fecha: string }[], hitos: readonly HitoProveedor[] | null, fechaSalida: string): string {
+  const fechas = cuotas.slice(1).map((c) => c.fecha)
+  const deCompra = [...new Set((hitos ?? []).map((h) => h.fecha))].filter((f) => fechas.includes(f)).sort()
+  if (deCompra.length === 0) return reglaEnPalabras(regla)
+  const dias = deCompra.map(fechaLarga)
+  const lista = dias.length === 1 ? dias[0] : `${dias.slice(0, -1).join(', ')} y ${dias[dias.length - 1]}`
+  const compra = dias.length === 1
+    ? `El ${lista} es el último día para comprar el paquete con el operador.`
+    : `El ${lista} son los últimos días para comprar el paquete con el operador.`
+  const conQuince = fechas.includes(sumarDiasCivil(fechaSalida, -regla.dias_antes))
+  return `${compra} ${conQuince ? reglaEnPalabras(regla) : 'El resto, un día antes del viaje.'}`
 }
 
 /**

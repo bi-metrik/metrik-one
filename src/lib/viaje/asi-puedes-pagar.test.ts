@@ -72,3 +72,24 @@ describe('totalDelDocumento: la pantalla suma lo mismo que el PDF', () => {
     expect(totalDelDocumento({ precioVenta: 4_052_000, ivaSobreIngresoPropio: false, iva: null })).toBeNull()
   })
 })
+
+describe('QA G15 · la regla en palabras es cierta para las filas', () => {
+  const e = { fechaSalida: '2027-06-18', hoy: '2026-11-03', regla: REGLA_POR_DEFECTO }
+
+  it('la «Compra antes del» cubre el 80 %: se dice la fecha del operador, no «quince días antes»', () => {
+    const r = asiPuedesPagar(9_280_000, e, [{ fecha: '2026-11-30', monto: 7_888_000, operador: 'TU RESERVA' }])
+    expect(r.filas!.map((f) => f.cuando)).toEqual(['al confirmar (anticipo)', 'hasta el 30 de noviembre', 'hasta el 17 de junio, un día antes del viaje'])
+    expect(r.regla).toBe('El 30 de noviembre es el último día para comprar el paquete con el operador. El resto, un día antes del viaje.')
+  })
+
+  it('si la fila de los quince días sigue, también va la regla de siempre', () => {
+    const r = asiPuedesPagar(9_280_000, e, [{ fecha: '2026-11-30', monto: 4_000_000, operador: null }])
+    expect(r.filas!.map((f) => f.cuando)).toContain('hasta el 3 de junio')
+    expect(r.regla).toBe(`El 30 de noviembre es el último día para comprar el paquete con el operador. ${reglaEnPalabras()}`)
+  })
+
+  it('sin hitos (o vencidos), la regla de siempre', () => {
+    expect(asiPuedesPagar(9_280_000, e).regla).toBe(reglaEnPalabras())
+    expect(asiPuedesPagar(9_280_000, e, [{ fecha: '2026-11-01', monto: 7_888_000, operador: null }]).regla).toBe(reglaEnPalabras())
+  })
+})
