@@ -22,6 +22,8 @@ export {
   fetchModelo,
   fetchModeloDocumentos,
   fetchModeloActas,
+  fetchModeloCapturas,
+  fetchModeloChat,
   crearFetchModelo,
   proveedorLLM,
   MODELO_HAIKU,

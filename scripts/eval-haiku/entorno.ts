@@ -5,6 +5,7 @@
  *   · escribir en Supabase (todo lo que no sea GET/HEAD contra *.supabase.co responde 403).
  */
 import { existsSync, readFileSync } from 'node:fs'
+import Module from 'node:module'
 import path from 'node:path'
 
 const RAIZ = path.resolve(__dirname, '../..')
@@ -27,6 +28,7 @@ export function cargarEntorno() {
   process.env.LLM_PROVEEDOR = 'anthropic'
   // El eval mide Haiku también en las familias que en producción siguen en Gemini por defecto.
   process.env.LLM_PROVEEDOR_DOCUMENTOS = 'anthropic'
+  process.env.LLM_PROVEEDOR_CAPTURAS = 'anthropic'
   process.env.LLM_PROVEEDOR_ACTAS = 'anthropic'
 }
 
@@ -48,4 +50,17 @@ export function blindarFetch(base: typeof fetch = globalThis.fetch) {
   }
   globalThis.fetch = blindado as typeof fetch
   return blindado
+}
+
+/**
+ * `import 'server-only'` sin Next: el paquete lo pone Next como módulo virtual y no está en node_modules, así que fuera
+ * de Next la importación revienta (`bloqueo-leer.ts`, `leer-imagen-captura.ts`). El arnés lo resuelve a un módulo vacío.
+ */
+export function permitirServerOnly() {
+  const M = Module as unknown as { _resolveFilename: (pedido: string, ...resto: unknown[]) => string }
+  const original = M._resolveFilename
+  M._resolveFilename = function (this: unknown, pedido: string, ...resto: unknown[]) {
+    if (pedido === 'server-only') return path.join(__dirname, 'server-only-vacio.js')
+    return original.call(this, pedido, ...resto)
+  }
 }

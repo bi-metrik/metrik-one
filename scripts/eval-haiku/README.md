@@ -50,4 +50,25 @@ con los tokens que reporta.
 ## Familias sin casos de la base
 
 - `decidir-destino`: la decisión del modelo no se guarda.
-- capturas (`detectar-tipo-captura`, `extraer-ranura`): la imagen llega como data URL y no se guarda.
+- capturas (`detectar-tipo-captura`, `extraer-ranura`): la imagen llega como data URL y no se guarda. Las de
+  Trappvel se miden con el banco de la QA (abajo).
+
+## Trappvel: el banco de la QA punta a punta (2026-11-04)
+
+`trappvel_conversacion` y `trappvel_captura` NO leen `casos/`: leen los 10 viajes ficticios de la QA del 2026-10-29
+(`proyectos/trappvel/clarity/qa/2026-10-29_punta-a-punta-10-viajes/viajes/NN-*/`, o la ruta de `TRAPPVEL_QA_DIR`).
+Nada de eso se copia al repo. El oráculo sale de cada `clave.md` (`trappvel.ts` lo lee); la vara de Gemini en
+«campos llenados» sale de las bitácoras de la misma carpeta.
+
+- `trappvel_conversacion`: el `conversacion.txt` por `leerChatConModelo` + `cargarChatEnBloque` (lo mismo que el
+  server action de «Pegar conversación»), con los campos de «Condiciones del viaje» de Trappvel leídos de la config
+  viva (solo GET con la llave de servicio). Hoy = 2026-10-29, el día de la QA.
+- `trappvel_captura`: cada PNG de la clave. Bloqueo → `leerPantallazoDeBloqueo('detectar')` (si la detección no da
+  la casilla, se lee otra vez con la casilla correcta: la detección y la lectura se califican aparte). A medida →
+  `detectarTipoDeCaptura` y `leerImagenDeCaptura` con el tipo de la clave.
+
+```bash
+npx tsx --conditions=react-server scripts/eval-haiku/correr.ts --familia trappvel_conversacion,trappvel_captura --paralelo 4
+```
+
+Los fallos de estas dos familias sí muestran los valores (los casos son ficticios).

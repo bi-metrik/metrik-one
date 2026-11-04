@@ -16,6 +16,7 @@ import {
   proveedorDe,
   sinCercas,
   modeloQueRespondio,
+  primerJson,
 } from './llm-anthropic.ts';
 import { esquemaCarga } from './agente/bandeja/extraccion.ts';
 import { CAMPOS_ARNES } from './agente/arnes/conjuntos.ts';
@@ -272,6 +273,29 @@ describe('crearFetchModelo', () => {
     expect((await res.json()).candidates[0].content.parts[0].text).toBe('{"a":"g"}');
   });
 
+  it('Haiku 401 y el respaldo en Gemini 402 (2026-11-04): el sitio recibe el error de Haiku, no el 402 de Gemini', async () => {
+    const real = vi.fn()
+      .mockResolvedValueOnce(respuestaA({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }, 401))
+      .mockResolvedValueOnce(respuestaA({ error: { code: 402, message: 'Your prepayment credits are depleted.' } }, 402));
+    const avisar = vi.fn();
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: conLlaveA, avisar });
+    const res = await f(URL_G, init);
+    expect(real).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(401);
+    expect(await res.text()).toMatch(/anthropic 401: invalid x-api-key/);
+    expect(avisar.mock.calls.flat().join(' ')).toMatch(/respaldo en Gemini también falló \(http 402\)/);
+  });
+
+  it('Haiku 529 y el respaldo en Gemini sin red: queda el 503 de Haiku (lo que los sitios reintentan)', async () => {
+    const real = vi.fn()
+      .mockResolvedValueOnce(respuestaA({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 529))
+      .mockRejectedValueOnce(new TypeError('fetch failed'));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: conLlaveA, avisar: () => {} });
+    const res = await f(URL_G, init);
+    expect(res.status).toBe(503);
+    expect(await res.text()).toMatch(/Overloaded/);
+  });
+
   it('la llave en la cabecera x-goog-api-key también habilita el respaldo; un error de red de Haiku va al respaldo', async () => {
     const real = vi.fn()
       .mockRejectedValueOnce(new TypeError('fetch failed'))
@@ -306,6 +330,37 @@ describe('crearFetchModelo', () => {
     const segundo = JSON.parse(real.mock.calls[1][1].body);
     expect(segundo.output_config).toBeUndefined();
     expect(segundo.system).toMatch(/JSON Schema/);
+  });
+
+  it('la gramática que ya se rechazó por grande no se vuelve a pedir: el segundo pedido va directo en el sistema', async () => {
+    const grande = respuestaA({ type: 'error', error: { type: 'invalid_request_error', message: 'The compiled grammar is too large, which would cause performance issues. Simplify your tool schemas or reduce the number of strict tools.' } }, 400);
+    const bien = () => respuestaA({ content: [{ type: 'text', text: '{"a":null}' }], stop_reason: 'end_turn' });
+    const real = vi.fn().mockResolvedValueOnce(grande).mockResolvedValueOnce(bien()).mockResolvedValueOnce(bien());
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined), avisar: () => {} });
+    await f(URL_G, init);
+    await f(URL_G, init);
+    expect(real).toHaveBeenCalledTimes(3);
+    const tercero = JSON.parse(real.mock.calls[2][1].body);
+    expect(tercero.output_config?.format).toBeUndefined();
+    expect(tercero.system).toMatch(/JSON Schema/);
+  });
+
+  it('esquema en el sistema: el texto que Haiku escribe después del JSON se quita (arnés de Trappvel, 2026-11-04)', async () => {
+    const real = vi.fn()
+      .mockResolvedValueOnce(respuestaA({ type: 'error', error: { type: 'invalid_request_error', message: 'output_config.format.schema: too complex' } }, 400))
+      .mockResolvedValueOnce(respuestaA({ content: [{ type: 'text', text: '```json\n{"a":"x {y}"}\n```\nNota: listo.' }], stop_reason: 'end_turn' }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined), avisar: () => {} });
+    const d = await (await f(URL_G, init)).json();
+    expect(JSON.parse(d.candidates[0].content.parts[0].text)).toEqual({ a: 'x {y}' });
+  });
+
+  it('esfuerzo fijo del sitio: manda sobre el thinkingConfig, solo en Haiku', async () => {
+    const real = vi.fn(async () => respuestaA({ content: [{ type: 'text', text: '{"a":null}' }], stop_reason: 'end_turn' }));
+    const f = crearFetchModelo({ fetch: real as unknown as typeof fetch, entorno: (k) => (k === 'ANTHROPIC_API_KEY' ? 'sk' : undefined), avisar: () => {}, esfuerzo: 'low' });
+    await f(URL_G, init);
+    const c = JSON.parse((real.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(c.output_config.effort).toBe('low');
+    expect(c.thinking).toEqual({ type: 'adaptive' });
   });
 
   it('el pedido de audio sigue en Gemini aunque haya llave', async () => {
@@ -425,3 +480,29 @@ describe('falloDeCuenta: la cuenta de Anthropic no atiende → respaldo en Gemin
     expect(falloDeCuenta(400, 'messages.2: tool_use ids were found without tool_result')).toBe(false)
   })
 })
+
+describe('primerJson', () => {
+  it('el JSON entero queda igual; con texto después o antes, sale el primer objeto completo', () => {
+    expect(primerJson('{"a":1}')).toBe('{"a":1}');
+    expect(primerJson('{"a":"}"} y algo más')).toBe('{"a":"}"}');
+    expect(primerJson('Aquí va: {"a":[1,{"b":"\\"x"}]} fin')).toBe('{"a":[1,{"b":"\\"x"}]}');
+  });
+  it('sin un objeto que se lea, lo deja como vino (el sitio decide)', () => {
+    expect(primerJson('nada')).toBe('nada');
+    expect(primerJson('{"a":')).toBe('{"a":');
+  });
+});
+
+describe('proveedorDe con heredaDe (LLM_PROVEEDOR_CAPTURAS → LLM_PROVEEDOR_DOCUMENTOS)', () => {
+  const o = { variable: 'LLM_PROVEEDOR_CAPTURAS', heredaDe: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' as const };
+  const ent = (e: Record<string, string>) => (k: string) => e[k];
+  it('sin ninguna: Gemini (lo de hoy); con documentos: lo que diga documentos', () => {
+    expect(proveedorDe(ent({}), o)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), o)).toBe('anthropic');
+  });
+  it('la de capturas manda sobre la heredada, y el global en gemini manda sobre todo', () => {
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_CAPTURAS: 'anthropic', LLM_PROVEEDOR_DOCUMENTOS: 'gemini' }), o)).toBe('anthropic');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_CAPTURAS: 'gemini', LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), o)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'gemini', LLM_PROVEEDOR_CAPTURAS: 'anthropic' }), o)).toBe('gemini');
+  });
+});

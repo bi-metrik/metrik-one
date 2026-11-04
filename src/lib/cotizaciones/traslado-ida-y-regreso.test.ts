@@ -160,3 +160,38 @@ describe('4 · trayectos que no son ida y regreso siguen preguntando', () => {
     ])?.total).toBe(20)
   })
 })
+
+describe('5 · trayectos SIN precio propio: las piernas de una sola reserva (arnés de Trappvel, 2026-11-04)', () => {
+  // «Precio total del vehículo (ida y vuelta): US$ 90.00» con una tabla Trayecto / Fecha / Hora sin precio por fila.
+  // Haiku lista los trayectos (Gemini los dejaba vacíos) y antes eso se volvía «¿Cuál de estas?».
+  it('ida y regreso con un solo total: se acepta con el total, sin preguntar', () => {
+    const r = evaluarLectura(TRASLADO, cruda({
+      trayectosReserva: [
+        { desde: AEROPUERTO, hasta: CIUDAD, fecha: '2027-04-10', hora: null, precio: null },
+        { desde: CIUDAD, hasta: AEROPUERTO, fecha: '2027-04-16', hora: '11:30', precio: null },
+      ],
+    }, { precio_total: v('90'), moneda: v('USD') }), CTX)
+    expect(r.ok).toBe(true)
+    expect(valor(r as Aceptacion, 'precio_total')).toBe('90')
+  })
+
+  it('dos piernas distintas (Termini → hotel, hotel → FCO) con un solo total: también se acepta', () => {
+    const r = evaluarLectura(TRASLADO, cruda({
+      trayectosReserva: [
+        { desde: 'Roma Termini', hasta: 'Hotel', fecha: '2027-07-10', hora: null, precio: null },
+        { desde: 'Hotel', hasta: 'Aeropuerto FCO', fecha: '2027-07-14', hora: null, precio: '' },
+      ],
+    }, { precio_total: v('145') }), CTX)
+    expect(r.ok).toBe(true)
+  })
+
+  it('si uno solo trae precio, sigue preguntando (no se sabe si son alternativas)', () => {
+    const r = evaluarLectura(TRASLADO, cruda({
+      trayectosReserva: [
+        { desde: AEROPUERTO, hasta: 'Hotel Ficticio A', fecha: null, hora: null, precio: '100000' },
+        { desde: 'Hotel Ficticio A', hasta: 'Hotel Ficticio B', fecha: null, hora: null, precio: null },
+      ],
+    }), CTX) as Rechazo
+    expect(r.codigo).toBe('RX1')
+  })
+})

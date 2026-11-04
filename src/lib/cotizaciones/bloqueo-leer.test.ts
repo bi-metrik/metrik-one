@@ -14,15 +14,19 @@ const detectado = { tipo: 'vuelo' as string | null }
 /** Lo que «devuelve el modelo» para el hotel; `null` = el fixture de Aliados. */
 const respuestaHotel = { valor: null as unknown }
 const prompts: string[] = []
+const opcionesDeteccion: unknown[] = []
 
 vi.mock('@/lib/server-keys', () => ({ getServerKey: () => 'llave-de-prueba' }))
 vi.mock('@/lib/ai/detectar-tipo-captura', () => ({
-  detectarTipoDeCaptura: async () => ({ data: { tipo: detectado.tipo, lugar: null, origen: null, destino: null } }),
+  detectarTipoDeCaptura: async (_b: unknown, _m: unknown, _k: unknown, opciones?: unknown) => {
+    opcionesDeteccion.push(opciones)
+    return { data: { tipo: detectado.tipo, lugar: null, origen: null, destino: null } }
+  },
 }))
 // Si algo intentara el lector genérico, la prueba lo ve: no debe cargarse nunca.
 vi.mock('@/lib/ai/extraer-ranura', () => { throw new Error('el lector genérico no se usa en un bloqueo') })
 vi.mock('@/lib/ai/modelo-llm', () => ({
-  fetchModeloDocumentos: async (_url: string, init: { body: string }) => {
+  fetchModeloCapturas: async (_url: string, init: { body: string }) => {
     const cuerpo = JSON.parse(init.body) as { system_instruction: { parts: { text: string }[] } }
     const prompt = cuerpo.system_instruction.parts[0].text
     prompts.push(prompt)
@@ -48,6 +52,11 @@ describe('lector del bloqueo con detección', () => {
     if (!r.ok || r.cual !== 'vuelo') throw new Error('debía leer el vuelo')
     expect(r.vuelo.tramos.length).toBeGreaterThan(0)
     expect(JSON.stringify(aliadosVuelos)).not.toMatch(/precio/i)
+  })
+  it('la detección se pide en modo paquete de bloqueo (2026-11-04: sin eso, Haiku decía «ninguno» a los 8 pantallazos)', async () => {
+    opcionesDeteccion.length = 0
+    await leerPantallazoDeBloqueo('detectar', IMAGEN)
+    expect(opcionesDeteccion).toEqual([{ paqueteDeBloqueo: true }])
   })
   it('un hotel (o un «paquete») detectado va a la casilla del hotel', async () => {
     detectado.tipo = 'paquete'
