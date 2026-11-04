@@ -1,6 +1,6 @@
 # Carrito persistente de los asistentes de venta
 
-**Estado:** propuesta, pendiente del visto de Mauricio · **Fecha:** 2026-11-04 · **Owner:** Max
+**Estado:** aprobada por Mauricio (4-nov), construida en `feat/carrito-persistente` · **Fecha:** 2026-11-04 · **Owner:** Max
 **Rama:** `feat/carrito-persistente` · **Reemplaza:** el borrador `feat/carrito-asistentes` (`afad8913`, carrito reconstruido desde la traza) y la tabla `ferreteria_links_bold`.
 
 ## 1. Por qué
@@ -130,11 +130,13 @@ Por qué no N negocios:
 - El embudo de ONE contaría 2 negocios por una compra: infla conteos y ticket promedio.
 - Es el modelo de todas las plataformas revisadas: un pedido con N líneas; la entrega se marca por pedido, con entrega parcial como excepción.
 
+- **Hallazgo al construir:** `registrarPagoEnNegocio` bloquea la misma referencia de pago en dos negocios distintos («No se puede cargar duplicada»). Con N negocios, el cobro `BOLD-<LNK>` del segundo producto habría fallado. El borrador `feat/carrito-asistentes` tenía ese defecto.
+
 Por qué la venta sigue siendo por línea: la ganancia y la liquidación mensual con Dimpro se miden por publicación (costo del día del producto). No se toca `liquidacion.ts`.
 
 Cambios que implica:
 1. Se quita `ferreteria_ventas_negocio_unico`; se agrega `ferreteria_ventas.carrito_linea_id` (único parcial): idempotencia por línea.
-2. `registrarPedido(lineas[], …)` en `ventas.ts`: inserta las ventas (cada una se anota en su línea apenas existe), crea UN negocio con el subtotal de productos, anota el negocio en las ventas y en el carrito, y registra UN cobro anticipado con referencia `BOLD-<LNK>`. `registrarVenta` (pantalla, Wompi) pasa a ser el caso de una línea: mismo código.
+2. `registrarPedido(lineas[], …)` en `ventas.ts`: inserta las ventas (cada una se anota en su línea apenas existe), crea UN negocio con el subtotal de productos, anota el negocio en las ventas y en el carrito, y registra UN cobro anticipado con referencia `BOLD-<LNK>`. `registrarVenta` (pantalla, Wompi) queda como estaba: una venta, un negocio. Se decidió al construir no tocarla, para no arriesgar esos dos caminos.
 3. Entrega y pago contra entrega por **negocio**: marcar una venta entregada marca todas las del mismo negocio y mueve el negocio una vez. En la pantalla, la venta muestra «parte de un pedido con N productos».
 4. El flete sigue fuera de la venta y del precio del negocio (decisión vigente del 29-oct: no es venta del producto); queda escrito en la nota del negocio y en el carrito.
 5. Reintento: carrito `pagado` con líneas a medias → las líneas con venta se respetan, las sin venta se insertan; con `negocio_id` ya anotado no se crea otro.
@@ -149,9 +151,11 @@ Cambios que implica:
 
 **Ventas (Dimpro):** `dominio-ventas.ts` implementa `CatalogoCarrito` con el catálogo de Ferretería y la tabla de flete; `proponer` y `confirmar_compra` leen el carrito de la base; `generar_link_pago` y `verificar_pago` leen `carrito_pagos`.
 
-**Servidor (Next):** `src/lib/carritos/pago-bold.ts` hace el reclamo/idempotencia genérico y llama al convertidor del `dominio` del carrito (`src/lib/ferreteria/carrito-a-venta.ts`). El webhook `/api/webhooks/bold/funciones/[workspace]` busca primero el `LNK_…` en `carrito_pagos`, igual que hoy en `ferreteria_links_bold`.
+**Servidor (Next):** `src/lib/carritos/pago-bold.ts` hace el reclamo y la idempotencia genéricos (puro, con dobles en las pruebas) y llama al convertidor del `dominio` del carrito; `src/lib/carritos/servidor.ts` lo cablea a la base. Ferretería: `src/lib/ferreteria/carrito-a-venta.ts` (+ `-servidor.ts`). Un link viejo cuyo carrito ya cambió no se registra solo: queda en `error` para revisión, aunque la plata haya entrado. El webhook `/api/webhooks/bold/funciones/[workspace]` busca primero el `LNK_…` en `carrito_pagos`, igual que hoy en `ferreteria_links_bold`.
 
 **Reglamento:** `proc.compra` deja de decir «un producto por pedido»: todo lo que el cliente lleve va en un carrito, un link y un flete. Va en un SQL nuevo `sql/dimpro/2026-11-0X_carrito.sql` generado por `semilla-sql-dimpro.ts`, **después** de `2026-11-04_cierra-sola.sql` (PR #1418): esta rama se rebasa sobre #1418 cuando entre.
+
+**Doble barrera ante un «sí» viejo:** el núcleo del asistente ya rechaza el botón de una propuesta superada («Ese botón ya no está vigente»); la versión del carrito en `carrito_emitir_pago` es la segunda, para el «sí» escrito o una carrera.
 
 ## 7. Fuera de alcance
 

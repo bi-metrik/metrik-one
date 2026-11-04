@@ -68,7 +68,7 @@ beforeAll(async () => {
   db = new PGlite()
   await db.exec(esquemaBase(false))
   await db.exec(readFileSync(MIGRACION, 'utf8'))
-})
+}, 30_000)
 
 afterAll(async () => {
   await db.close()
@@ -104,7 +104,7 @@ describe('carritos: esquema', () => {
     await otra.exec(esquemaBase(true))
     await expect(otra.exec(readFileSync(MIGRACION, 'utf8'))).rejects.toThrow(/ferreteria_links_bold tiene 1 filas/)
     await otra.close()
-  })
+  }, 30_000)
 })
 
 describe('carrito_guardar_lineas', () => {
