@@ -20,6 +20,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { PDF_SIN_PAGINAS, PDF_UNA_PAGINA } from '@/lib/documentos/__fixtures__/pdf'
+import { MENSAJES_ARCHIVO, MENSAJE_FALLA_NUESTRA, type MotivoArchivo } from '@/lib/documentos/aviso-archivo'
 import type { Reconocimiento } from '@/lib/documentos/tipo-documento'
 import {
   LECTURA_VENCE_MS,
@@ -51,7 +53,11 @@ const escenario: {
   /** Corre en medio de la extracción: simula otra subida mientras el modelo lee. */
   duranteExtraccion: (() => Promise<void>) | null
   extraccionLanza: boolean
-} = { tablas: {}, reconocimiento: null, duranteExtraccion: null, extraccionLanza: false }
+  /** El archivo que se sube (por defecto, un PDF de una página). */
+  archivo: Buffer | null
+  /** El modelo rechaza el archivo aunque pasó la revisión previa (lo que diga su 400). */
+  extraccionRechazaArchivo: MotivoArchivo | null
+} = { tablas: {}, reconocimiento: null, duranteExtraccion: null, extraccionLanza: false, archivo: null, extraccionRechazaArchivo: null }
 
 function valorEnRuta(f: Fila, columna: string): unknown {
   if (!columna.includes('->')) return f[columna]
@@ -67,7 +73,7 @@ function cliente() {
     storage: {
       from: () => ({
         download: async () => ({
-          data: new Blob([new Uint8Array([37, 80, 68, 70])], { type: 'application/pdf' }),
+          data: new Blob([new Uint8Array(escenario.archivo ?? PDF_UNA_PAGINA)], { type: 'application/pdf' }),
           error: null,
         }),
         remove: async () => ({ data: [], error: null }),
@@ -132,6 +138,9 @@ vi.mock('@/lib/ai/reintentar-extraccion', () => ({
       await f()
     }
     if (escenario.extraccionLanza) throw new Error('Gemini se cayó')
+    if (escenario.extraccionRechazaArchivo) {
+      return { data: null, error: 'Error de Gemini (400)', archivo: escenario.extraccionRechazaArchivo }
+    }
     return { data: { nit: { value: '900831342', confidence: 0.95, manual: false } } }
   },
 }))
@@ -146,7 +155,7 @@ vi.mock('@/lib/google-drive', () => ({
   },
   setFilePublicByLink: async () => {},
   deleteDriveFile: async (id: string) => { efectos.borradosDrive.push(id) },
-  downloadDriveFile: async () => Buffer.from('%PDF-1.4'),
+  downloadDriveFile: async () => escenario.archivo ?? (await import('@/lib/documentos/__fixtures__/pdf')).PDF_UNA_PAGINA,
   usaCredencialesDriveGlobales: async () => false,
   padresDeArchivoDrive: async () => null,
 }))
@@ -213,6 +222,8 @@ beforeEach(() => {
   escenario.reconocimiento = RUT
   escenario.duranteExtraccion = null
   escenario.extraccionLanza = false
+  escenario.archivo = null
+  escenario.extraccionRechazaArchivo = null
   sembrar()
   vi.spyOn(console, 'log').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -305,9 +316,58 @@ describe('procesarDocumento — lo que no prospera queda a la vista', () => {
     await correrAgendadas()
 
     expect(marca().estado).toBe('error')
-    expect(marca().error).toContain('Gemini se cayó')
+    // El detalle va al log; el cliente ve una falla nuestra, sin el nombre del proveedor.
+    expect(marca().error).toBe(MENSAJE_FALLA_NUESTRA)
+    expect(marca().error).not.toMatch(/gemini|anthropic|\d{3}/i)
     expect(marca().storage_path).toBe(RUTA) // para «Reintentar» sin volver a subir
     expect(fila().estado).toBe('pendiente')
+  })
+})
+
+describe('un archivo que no se puede leer (V0634) es del archivo, no del sistema', () => {
+  it('un PDF sin páginas se para antes de Drive y del modelo: el documento anterior queda intacto', async () => {
+    escenario.archivo = PDF_SIN_PAGINAS
+    await procesarDocumento(BLOQUE, NEG, RUTA, 'rut-sin-paginas.pdf')
+    await correrAgendadas()
+
+    expect(marca()).toMatchObject({ estado: 'error', error: MENSAJES_ARCHIVO.sin_paginas })
+    expect(efectos.extracciones).toBe(0)
+    expect(efectos.borradosDrive).toHaveLength(0)
+    expect(efectos.subidasDrive).toHaveLength(0)
+    expect((fila().data as Fila).drive_file_id).toBe('drv-viejo')
+    expect(fila().estado).toBe('completo')
+  })
+
+  it('un archivo de 0 bytes, igual', async () => {
+    escenario.archivo = Buffer.alloc(0)
+    await procesarDocumento(BLOQUE, NEG, RUTA, 'vacio.pdf')
+    await correrAgendadas()
+    expect(marca()).toMatchObject({ estado: 'error', error: MENSAJES_ARCHIVO.vacio })
+    expect(efectos.borradosDrive).toHaveLength(0)
+  })
+
+  it('reprocesar un PDF sin páginas no llama al modelo y dice que lo reemplacen', async () => {
+    escenario.archivo = PDF_SIN_PAGINAS
+    await reprocesarDocumento(BLOQUE, NEG)
+    await correrAgendadas()
+    expect(marca()).toMatchObject({ estado: 'error', error: MENSAJES_ARCHIVO.sin_paginas })
+    expect(efectos.extracciones).toBe(0)
+  })
+
+  it('si el modelo rechaza el archivo al reprocesar, el aviso es el del archivo, no «Error de Gemini (400)»', async () => {
+    escenario.extraccionRechazaArchivo = 'sin_paginas'
+    await reprocesarDocumento(BLOQUE, NEG)
+    await correrAgendadas()
+    expect(marca()).toMatchObject({ estado: 'error', error: MENSAJES_ARCHIVO.sin_paginas })
+  })
+
+  it('si el modelo rechaza el archivo en la carga, el bloque guarda el motivo para pedir reemplazarlo', async () => {
+    escenario.extraccionRechazaArchivo = 'danado'
+    await procesarDocumento(BLOQUE, NEG, RUTA, 'raro.pdf')
+    await correrAgendadas()
+    const data = fila().data as Fila
+    expect(data._extraction_status).toBe('failed')
+    expect(data._extraction_archivo).toBe('danado')
   })
 })
 
