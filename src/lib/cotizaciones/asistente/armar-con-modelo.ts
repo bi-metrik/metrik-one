@@ -1,6 +1,3 @@
-import { anthropic } from '@ai-sdk/anthropic'
-import { generateText, jsonSchema, Output, type LanguageModel } from 'ai'
-
 import { ESQUEMA_BORRADOR, ESQUEMA_BORRADOR_JSON, type BorradorCotizacion } from './borrador'
 import type { Solicitud } from './a-propuesta'
 
@@ -10,8 +7,7 @@ import type { Solicitud } from './a-propuesta'
  * Modelo (Mauricio, 2026-11-03, tras comparar en el piloto): `claude-haiku-5-5`. En los dos casos
  * reales sacó los totales exactos en 12 de 12 corridas, igual que `gemini-3.8-flash`, y cuesta entre
  * la mitad y un tercio (precios oficiales: platform.claude.com/docs/en/about-claude/pricing,
- * consultada el 2026-11-03). Va como el motor de tarifarios (`proveedores/motor.ts`): directo a
- * Anthropic si hay `ANTHROPIC_API_KEY`, si no por el AI Gateway con OIDC.
+ * consultada el 2026-11-03). Pide `ANTHROPIC_API_KEY`: no pasa por el AI Gateway (ver `armarConClaude`).
  * Gemini sigue disponible con `MODELO_ASISTENTE=gemini-…` y la llave de Gemini.
  */
 
@@ -44,7 +40,6 @@ export function partesDelCaso(solicitud: Solicitud, pantallazos: Pantallazo[]): 
 
 export interface UsoModelo {
   promptTokens: number
-  /** En Claude incluye el razonamiento; en Gemini va aparte en `pensamientoTokens`. */
   salidaTokens: number
   pensamientoTokens: number
   totalTokens: number
@@ -61,7 +56,7 @@ interface Args {
   manual: string
   solicitud: Solicitud
   pantallazos: Pantallazo[]
-  /** Solo para Gemini. Claude toma `ANTHROPIC_API_KEY` del entorno o el gateway. */
+  /** Solo para Gemini. Claude toma `ANTHROPIC_API_KEY` del entorno. */
   apiKey?: string
   presupuestoPensamiento?: number
   timeoutMs?: number
@@ -71,44 +66,56 @@ export function armarBorrador(args: Args): Promise<ResultadoArmado> {
   return MODELO_ASISTENTE.startsWith('gemini') ? armarConGemini(args) : armarConClaude(args)
 }
 
-/** Directo a Anthropic si hay llave; si no, el gateway (`claude-haiku-5-5` → `anthropic/claude-haiku-5.5`). */
-function modeloClaude(entorno: Record<string, string | undefined> = process.env): LanguageModel {
-  return entorno.ANTHROPIC_API_KEY?.trim()
-    ? anthropic(MODELO_ASISTENTE)
-    : `anthropic/${MODELO_ASISTENTE.replace(/-(\d+)-(\d+)$/, '-$1.$2')}`
-}
-
+/**
+ * Claude por la API de Mensajes, directo (sin AI SDK ni gateway). Dos cosas medidas en el piloto
+ * (2026-11-03) obligan a esta forma:
+ * - El esquema entero no cabe en la salida estricta (`output_config.format`): «The compiled grammar
+ *   is too large» (400), aun sin patrones, nulos ni enums. Va como herramienta no estricta.
+ * - Sin razonamiento, Haiku invirtió Económica y Recomendada en San Andrés en 3 de 3 corridas (los
+ *   totales cuadraban y solo salió un aviso). Con `@ai-sdk/anthropic` y la herramienta forzada, el
+ *   modelo no razonó ni con `effort: 'high'`. Aquí: razonamiento adaptativo + `tool_choice: auto` y
+ *   se exige que la respuesta termine en la herramienta.
+ */
 async function armarConClaude(args: Args): Promise<ResultadoArmado> {
-  const modelo = modeloClaude()
+  const llave = process.env.ANTHROPIC_API_KEY?.trim()
+  if (!llave) throw new Error('Falta ANTHROPIC_API_KEY')
+  const content = partesDelCaso(args.solicitud, args.pantallazos).map(p =>
+    'texto' in p
+      ? { type: 'text', text: p.texto }
+      : { type: 'image', source: { type: 'base64', media_type: p.imagen.mime, data: p.imagen.base64 } })
   const t0 = Date.now()
-  const r = await generateText({
-    model: modelo,
-    instructions: sistemaDelAsistente(args.manual),
-    output: Output.object({ schema: jsonSchema<BorradorCotizacion>(ESQUEMA_BORRADOR_JSON) }),
-    maxOutputTokens: 32_000,
-    maxRetries: 1,
-    abortSignal: AbortSignal.timeout(args.timeoutMs ?? 300_000),
-    messages: [{
-      role: 'user',
-      content: partesDelCaso(args.solicitud, args.pantallazos).map(p =>
-        'texto' in p
-          ? { type: 'text' as const, text: p.texto }
-          : { type: 'file' as const, data: p.imagen.base64, mediaType: p.imagen.mime, filename: p.imagen.nombre }),
-    }],
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    signal: AbortSignal.timeout(args.timeoutMs ?? 300_000),
+    headers: { 'content-type': 'application/json', 'x-api-key': llave, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: MODELO_ASISTENTE,
+      max_tokens: 32_000,
+      system: sistemaDelAsistente(args.manual),
+      messages: [{ role: 'user', content }],
+      tools: [{ name: 'entregar_borrador', description: 'Entrega el borrador final de la cotización.', input_schema: ESQUEMA_BORRADOR_JSON }],
+      tool_choice: { type: 'auto' },
+      thinking: { type: 'adaptive' },
+      output_config: { effort: 'high' },
+    }),
   })
   const ms = Date.now() - t0
-  if (r.finishReason !== 'stop') throw new Error(`El modelo terminó con ${r.finishReason}`)
-  const u = r.usage
+  if (!res.ok) throw new Error(`Modelo ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  const data = await res.json()
+  const entrega = (data.content ?? []).find((b: { type: string; name?: string }) => b.type === 'tool_use' && b.name === 'entregar_borrador')
+  if (!entrega) throw new Error(`El modelo no entregó el borrador (terminó con ${data.stop_reason})`)
+  const u = data.usage ?? {}
+  const pensamiento = u.output_tokens_details?.thinking_tokens ?? 0
   return {
-    borrador: r.output,
+    borrador: entrega.input as BorradorCotizacion,
     uso: {
-      promptTokens: u.inputTokens ?? 0,
-      salidaTokens: u.outputTokens ?? 0,
-      pensamientoTokens: 0,
-      totalTokens: u.totalTokens ?? 0,
+      promptTokens: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0),
+      salidaTokens: (u.output_tokens ?? 0) - pensamiento,
+      pensamientoTokens: pensamiento,
+      totalTokens: (u.input_tokens ?? 0) + (u.output_tokens ?? 0),
     },
     ms,
-    modelo: r.response?.modelId || MODELO_ASISTENTE,
+    modelo: data.model ?? MODELO_ASISTENTE,
   }
 }
 

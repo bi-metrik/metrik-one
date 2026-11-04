@@ -7,8 +7,8 @@
  *     --caso <dir con solicitud.json y *.png> --manual <manual.md> --casa <casa.json> \
  *     --salida <dir> [--corridas 3] [--sin-pdf] [--via-claude-cli]
  *
- * Modelo: el de `MODELO_ASISTENTE` (por defecto `claude-haiku-5-5`, con `ANTHROPIC_API_KEY` o el
- * gateway). `MODELO_ASISTENTE=gemini-…` pide `GEMINI_API_KEY`. `--via-claude-cli` manda el mismo
+ * Modelo: el de `MODELO_ASISTENTE` (por defecto `claude-haiku-5-5`, pide `ANTHROPIC_API_KEY`).
+ * `MODELO_ASISTENTE=gemini-…` pide `GEMINI_API_KEY`. `--via-claude-cli` manda el mismo
  * prompt y el mismo esquema por `claude -p` con la sesión de Claude Code de la máquina, para probar
  * sin llave de API: los tokens que reporta incluyen el contexto propio del CLI.
  *
