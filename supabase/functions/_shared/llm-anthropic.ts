@@ -291,7 +291,11 @@ export function esfuerzoDesdeGemini(tc: unknown): 'low' | 'medium' | 'high' | nu
  * El cuerpo de Gemini como cuerpo de la API de Mensajes. Pura. `ok:false` cuando el pedido trae algo que Haiku 5.5
  * no recibe (audio, video, imagen de un tipo o tamaño que la API no acepta): ese pedido sigue en Gemini.
  */
-export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MODELO_HAIKU): Traduccion {
+export function cuerpoAnthropicDesdeGemini(
+  cuerpo: unknown,
+  modelo: string = MODELO_HAIKU,
+  esfuerzoFijo?: 'low' | 'medium' | 'high',
+): Traduccion {
   if (!cuerpo || typeof cuerpo !== 'object') return { ok: false, motivo: 'cuerpo vacío' };
   const c = cuerpo as Record<string, unknown>;
   const contenidos = (Array.isArray(c.contents) ? c.contents : []) as ContenidoGemini[];
@@ -399,7 +403,7 @@ export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MOD
   }
 
   const maxSalida = typeof gc.maxOutputTokens === 'number' && gc.maxOutputTokens > 0 ? gc.maxOutputTokens : SALIDA_POR_DEFECTO;
-  const esfuerzo = herramientaForzada ? null : esfuerzoDesdeGemini(gc.thinkingConfig ?? gc.thinking_config);
+  const esfuerzo = herramientaForzada ? null : esfuerzoFijo ?? esfuerzoDesdeGemini(gc.thinkingConfig ?? gc.thinking_config);
   const outputConfig: Record<string, unknown> = {};
   if (esfuerzo) outputConfig.effort = esfuerzo;
   if (esquema) outputConfig.format = { type: 'json_schema', schema: esquema };
@@ -507,6 +511,12 @@ export interface OpcionesFetchModelo {
    */
   variable?: string;
   porDefecto?: ProveedorLLM;
+  /**
+   * Esfuerzo de pensamiento de Haiku para este sitio, en lugar del que sale del `thinkingConfig` de Gemini. Lo pide la
+   * lectura de documentos (SOE-038): el `thinkingBudget: 1024` de Gemini se traduce a `low`, y con `low` Haiku dejaba
+   * vacíos campos que sí estaban en el documento.
+   */
+  esfuerzo?: 'low' | 'medium' | 'high';
 }
 
 /** El proveedor que rige para un `fetchModelo` (global y, si la tiene, su familia). Pura. */
@@ -552,7 +562,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
     } catch {
       cuerpoGemini = null;
     }
-    const t = cuerpoAnthropicDesdeGemini(cuerpoGemini, modelo);
+    const t = cuerpoAnthropicDesdeGemini(cuerpoGemini, modelo, o.esfuerzo);
     if (!t.ok) {
       avisar(`[llm] pedido sin traducir a Anthropic (${t.motivo}): sigue en Gemini`);
       return real(entrada, init);
@@ -644,6 +654,12 @@ export const fetchModelo: typeof fetch = crearFetchModelo();
  * que el eval diga otra cosa.
  */
 export const fetchModeloDocumentos: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' });
+
+/**
+ * La lectura de campos de un documento (`extract-fields`): el mismo interruptor que `fetchModeloDocumentos`, con Haiku en
+ * esfuerzo `medium` (SOE-038, eval sobre 40 documentos reales de SOENA).
+ */
+export const fetchModeloExtraccion: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini', esfuerzo: 'medium' });
 
 /** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real: 8 de 12). */
 export const fetchModeloActas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' });

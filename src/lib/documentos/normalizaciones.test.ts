@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { CampoExtraccion, CampoResultado } from '@/lib/ai/extract-fields'
-import { aplicarNormalizaciones, normalizarNitYDv, CONFIANZA_REVISAR, campoProtegido } from './normalizaciones'
+import { aplicarNormalizaciones, normalizarNitYDv, CONFIANZA_REVISAR, campoProtegido, completarRazonSocialPersonaNatural } from './normalizaciones'
 
 /**
  * Normalización del NIT y el DV (2026-09-14).
@@ -84,6 +84,21 @@ describe('aplicarNormalizaciones — RUT con el DV pegado', () => {
     aplicarNormalizaciones(RUT_SOLICITANTE_2, r)
     expect(r.nit.value).toBe('16727057')
     expect(r.dv.value).toBe('9')
+  })
+
+  it('SOE-038 V0662: NIT y casilla 26 con el mismo DV pegado NO se recortan (no se distingue de V0309), el DV va a "Verificar"', () => {
+    // Haiku leyó el mismo número con el DV pegado en las casillas 5 y 26 (aquí, con el número sintético de arriba). Es la
+    // misma huella que V0309 (cédula limpia con el DV mal leído): recortar aquí recortaría allá. Lo que sí queda: el DV
+    // calculado, en ámbar, con el leído de testigo.
+    const r: Record<string, CampoResultado> = {
+      nit: leido('522172252'),
+      dv: leido('2'),
+      numero_identificacion: leido('522172252'),
+    }
+    aplicarNormalizaciones(RUT, r)
+    expect(r.nit.value).toBe('522172252')
+    expect(r.dv).toMatchObject({ leido: '2', confidence: CONFIANZA_REVISAR })
+    expect(r.dv.value).not.toBe('2')
   })
 
   it('un RUT limpio no se toca', () => {
@@ -215,5 +230,53 @@ describe('campos protegidos', () => {
     expect(campoProtegido({ value: null, confidence: 0.4, manual: true })).toBe(false)
     expect(campoProtegido({ value: '1', confidence: 1, manual: true })).toBe(true)
     expect(campoProtegido({ value: '1', confidence: 0.9, manual: false, edicion })).toBe(true)
+  })
+})
+
+describe('completarRazonSocialPersonaNatural (SOE-038, V0660)', () => {
+  const CAMPOS = ['razon_social', 'tipo_persona', 'primer_apellido', 'segundo_apellido', 'primer_nombre', 'otros_nombres'].map((s) => campo(s))
+
+  it('persona natural con la razón social vacía: apellidos y nombres, en el orden de las casillas 31 a 34', () => {
+    const r: Record<string, CampoResultado> = {
+      razon_social: { value: null, confidence: 0.9, manual: false },
+      tipo_persona: leido('Natural'),
+      primer_apellido: leido('GOMEZ', 0.97),
+      segundo_apellido: leido('RUIZ', 0.9),
+      primer_nombre: leido('ANA', 0.97),
+      otros_nombres: leido('LUCIA', 0.95),
+    }
+    expect(completarRazonSocialPersonaNatural(CAMPOS, r)).toBe('GOMEZ RUIZ ANA LUCIA')
+    expect(r.razon_social).toEqual({ value: 'GOMEZ RUIZ ANA LUCIA', confidence: 0.9, manual: false })
+  })
+
+  it('sin segundo apellido ni otros nombres: solo lo que hay', () => {
+    const r: Record<string, CampoResultado> = {
+      tipo_persona: leido('Natural'),
+      primer_apellido: leido('PEREZ'),
+      segundo_apellido: leido(null),
+      primer_nombre: leido('ANA'),
+    }
+    expect(completarRazonSocialPersonaNatural(CAMPOS, r)).toBe('PEREZ ANA')
+  })
+
+  it('no toca una razón social leída, una corregida a mano, ni la de una persona jurídica', () => {
+    const base = { tipo_persona: leido('Natural'), primer_apellido: leido('PEREZ'), primer_nombre: leido('ANA') }
+    const leida: Record<string, CampoResultado> = { ...base, razon_social: leido('PEREZ ANA MARIA') }
+    expect(completarRazonSocialPersonaNatural(CAMPOS, leida)).toBeNull()
+    expect(leida.razon_social.value).toBe('PEREZ ANA MARIA')
+
+    const editada: Record<string, CampoResultado> = {
+      ...base,
+      razon_social: { value: 'OTRA', confidence: 1, manual: true, edicion: { editado_por_id: 'u', editado_por_nombre: 'U', editado_en: '2026-11-04' } },
+    }
+    expect(completarRazonSocialPersonaNatural(CAMPOS, editada)).toBeNull()
+
+    const juridica: Record<string, CampoResultado> = { ...base, tipo_persona: leido('Jurídica'), razon_social: leido(null) }
+    expect(completarRazonSocialPersonaNatural(CAMPOS, juridica)).toBeNull()
+  })
+
+  it('un bloque sin las casillas de nombres (factura, certificado) no hace nada', () => {
+    const r: Record<string, CampoResultado> = { razon_social: leido(null), tipo_persona: leido('Natural') }
+    expect(completarRazonSocialPersonaNatural([campo('razon_social'), campo('tipo_persona')], r)).toBeNull()
   })
 })

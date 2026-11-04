@@ -79,6 +79,18 @@ describe('esfuerzoDesdeGemini', () => {
     expect(esfuerzoDesdeGemini({ thinkingLevel: 'MINIMAL' })).toBe('low');
     expect(esfuerzoDesdeGemini({ thinkingLevel: 'HIGH' })).toBe('high');
   });
+
+  it('un sitio puede fijar su esfuerzo (SOE-038: extract-fields en medium); sin fijarlo rige el thinkingConfig', () => {
+    const cuerpo = {
+      contents: [{ parts: [{ text: 'hola' }] }],
+      generationConfig: { thinkingConfig: { thinkingBudget: 1024 } },
+    };
+    const fijo = cuerpoAnthropicDesdeGemini(cuerpo, MODELO_HAIKU, 'medium');
+    const libre = cuerpoAnthropicDesdeGemini(cuerpo, MODELO_HAIKU);
+    expect(fijo.ok && fijo.cuerpo.output_config).toEqual({ effort: 'medium' });
+    expect(fijo.ok && fijo.cuerpo.thinking).toEqual({ type: 'adaptive' });
+    expect(libre.ok && libre.cuerpo.output_config).toEqual({ effort: 'low' });
+  });
 });
 
 describe('cuerpoAnthropicDesdeGemini', () => {

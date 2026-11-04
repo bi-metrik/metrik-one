@@ -13,7 +13,7 @@
 // marginal. Familia 2.5 → se controla con `thinkingBudget` numérico (la
 // config previa mezclaba `gemini-3.1-flash-lite` con `thinkingBudget:0`, que
 // es sintaxis de la familia 2.5 y en 3.x se ignora).
-import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
+import { fetchModeloExtraccion } from '@/lib/ai/modelo-llm'
 import { normalizarMontoExtraido } from './monto-extraido'
 import { revisarLetrasLeidas } from '@/lib/texto/texto-latino'
 import { serializarPersonas, type Persona } from '@/lib/documentos/personas'
@@ -131,6 +131,15 @@ function repairJson(text: string): string {
   return s
 }
 
+/**
+ * El valor sin espacios, o null si viene vacío o es texto de relleno. Haiku 5.5, con la salida estructurada que exige
+ * un texto, devolvía la palabra «null» para lo que no encontraba (SOE-038).
+ */
+export function sinRelleno(v: string): string | null {
+  const t = v.trim()
+  return !t || /^(null|none|n\/?a|undefined)$/i.test(t) ? null : t
+}
+
 // ── Build dynamic prompt ─────────────────────────────────────────────────────
 
 function buildPrompt(campos: CampoExtraccion[]): string {
@@ -151,9 +160,11 @@ REGLAS:
 - Para cada campo devuelve { "value": <valor>, "confidence": <0.0 a 1.0> }
 - Si un campo no está en el documento, usa { "value": null, "confidence": 0.0 }
 - NO dejes en null un campo que SÍ aparece en el documento. Búscalo en todo el documento (encabezado, pie, tablas, sellos, otra página) y aunque la etiqueta no sea exactamente la del campo (ej. "Fecha de expedición" puede venir como "Expedido el", "Fecha de emisión" o junto al lugar de expedición). Si se lee con dificultad, devuélvelo con confidence baja; null es solo para lo que de verdad no está
-- confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible)
+- confidence refleja certeza de lectura (1.0 = perfectamente legible, 0.5 = borroso pero probable, 0.0 = no visible). Es un número con DOS decimales como máximo (0.95, nunca 0.9533…)
+- Un valor con confidence menor a 0.70 se DESCARTA y una persona lo tiene que digitar a mano. Si el campo pide elegir o deducir siguiendo sus instrucciones (qué ciudad, qué línea, qué valor descontar) y encontraste la evidencia que piden, eso es certeza alta (0.85 o más), aunque el documento muestre también otras ciudades u otros valores. Si tienes un valor probable pero dudas, devuélvelo con 0.70 a 0.85 para que la persona lo revise; deja vacío solo lo que de verdad no está o no se puede leer
+- "value" nunca es la palabra "null", "N/A" ni un texto de relleno: si no hay dato, value es null
 - Limpia valores: sin espacios al inicio/final
-- NIT: devuélvelo SIN el dígito de verificación (DV), salvo que el campo diga explícitamente "completo" o "con DV". El DV es el dígito que va después del guion ("860.047.657-1" → "860047657") o el que la DIAN pone aparte en su propia casilla; si el documento lo muestra pegado al final sin guion, igual quítalo. La cédula de una persona natural no tiene DV: va completa
+- NIT: devuélvelo SIN el dígito de verificación (DV), salvo que el campo diga explícitamente "completo" o "con DV". El DV es el dígito que va después del guion ("860.047.657-1" → "860047657") o el que la DIAN pone aparte en su propia casilla; si el documento lo muestra pegado al final sin guion, igual quítalo. Cuando el DV tiene su propia casilla junto a la del NIT (el RUT: casillas 5 y 6), los dígitos se ven seguidos: el NIT termina en la última casilla ANTES de la del DV, y ese dígito NO va ni en el NIT ni en el número de identificación de la misma persona. La cédula de una persona natural no tiene DV: va completa
 - Números de identificación de personas o empresas (NIT, cédula): solo dígitos, sin puntos, guiones ni espacios. NO apliques esta regla a números de factura, radicados u otros códigos que legítimamente incluyen un prefijo o serie con letras: esos se devuelven COMPLETOS, con su prefijo y tal como aparecen (ej. si el documento muestra "FVM 3903", devuelve "FVM 3903", NUNCA solo "3903")
 - MONEDA COLOMBIANA (campos tipo currency): los valores monetarios están en pesos colombianos (COP). El separador de miles es el punto (.) y el separador decimal es la coma (,). Ejemplo: $1.500.000 = un millón quinientos mil. Devuelve SOLO el valor numérico entero sin puntos, comas ni símbolo $. Ejemplo: si ves "$1.500.000" o "1.500.000,00", devuelve "1500000"
 - Campos tipo numero (no currency): devuelve el número tal cual, sin formato de moneda
@@ -247,7 +258,7 @@ export async function extractFieldsFromDocument(
 
   let debugRaw = ''
   try {
-    const res = await fetchModeloDocumentos(url, {
+    const res = await fetchModeloExtraccion(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -337,7 +348,7 @@ export async function extractFieldsFromDocument(
       // modelo igual devolvió texto, se respeta tal cual: la lectura es tolerante.
       let value = campo.tipo === 'personas' && Array.isArray(field.value)
         ? serializarPersonas(field.value as Array<Partial<Persona>>) || null
-        : field.value !== null ? String(field.value).trim() || null : null
+        : field.value !== null ? sinRelleno(String(field.value)) : null
       const confidence = field.confidence ?? 0
 
       // Campos currency: pesos enteros como texto. La regla (y por qué los miles con
