@@ -182,6 +182,9 @@ thead { display: table-header-group; }
 .pagos .tot td { font: 700 9pt Poppins, sans-serif; color: var(--ink); border-bottom: 0; }
 .pagos td.r { font-weight: 700; }
 .pagos td, .pagos th { padding-top: 1mm; padding-bottom: 1mm; }
+/* QA G15: con fechas distintas por alternativa, un bloque de cuotas por alternativa, lado a lado. */
+.pagos-por { display:grid; gap: 3.7mm; align-items: start; }
+.pagos-por td.r { white-space: nowrap; }
 .sign { margin-top: 3mm; display:flex; justify-content: space-between; align-items: flex-end; break-inside: avoid; }
 .sign b.pop { font: 700 10.5pt Poppins, sans-serif; color: var(--ink); }
 .credits { font-size: 6.4pt; color: var(--mute); margin-top: 4mm; line-height: 1.35; }

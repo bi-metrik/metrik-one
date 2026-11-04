@@ -103,16 +103,47 @@ export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar, hi
         : `hasta el ${fechaLarga(c.fecha)}`
     return { monto: c.monto, cuando, llevas: completaMinimo && acumulado < Math.round(total) ? acumulado : null }
   })
-  return { ...base, filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
+  return { ...base, regla: reglaDelPlan(regla, cuotas, hitos ?? entrada.hitos ?? null, entrada.fechaSalida), filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
 }
 
 /**
- * «con esto cubres el 80 % (llevas $3.242.000)», o `null`. El formato de pesos lo pone quien pinta.
+ * QA G15 (2026-11-03): la regla en palabras tiene que ser cierta para ESTAS filas. Cuando una
+ * cuota cae en la «Compra antes del» del operador, «El 80 % quince días antes de salir» ya no
+ * describe el plan (el pago va antes, y a veces la fila de los quince días ni sale): se dice la
+ * fecha del operador y, solo si la fila de los quince días sigue, la regla de siempre.
+ */
+function reglaDelPlan(regla: ReglaPlan, cuotas: readonly { fecha: string }[], hitos: readonly HitoProveedor[] | null, fechaSalida: string): string {
+  const fechas = cuotas.slice(1).map((c) => c.fecha)
+  const deCompra = [...new Set((hitos ?? []).map((h) => h.fecha))].filter((f) => fechas.includes(f)).sort()
+  if (deCompra.length === 0) return reglaEnPalabras(regla)
+  // Vera (G15): al cliente no se le nombra al operador; cada fecha con su artículo.
+  const dias = deCompra.map((f) => `el ${fechaLarga(f)}`)
+  const lista = dias.length === 1 ? dias[0] : `${dias.slice(0, -1).join(', ')} y ${dias[dias.length - 1]}`
+  const compra = dias.length === 1
+    ? `${mayuscula(lista)} es la fecha límite para comprar el paquete a este precio.`
+    : `${mayuscula(lista)} son las fechas límite para comprar a este precio.`
+  const conQuince = fechas.includes(sumarDiasCivil(fechaSalida, -regla.dias_antes))
+  // Solo se habla del «resto» si queda la fila del saldo (la última cuota, el día antes de salir).
+  const conSaldo = fechas.length > 0 && fechas[fechas.length - 1] === sumarDiasCivil(fechaSalida, -1)
+  const cola = conQuince
+    ? conSaldo
+      ? reglaEnPalabras(regla)
+      : `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir.`
+    : conSaldo
+      ? 'El resto, un día antes del viaje.'
+      : ''
+  return cola ? `${compra} ${cola}` : compra
+}
+
+const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
+/**
+ * «con esto cubres el 80 %: llevas $3.242.000», o `null`. El formato de pesos lo pone quien pinta.
  * QA G14 (Vera): con la «Compra antes del» lo acumulado puede pasar del mínimo (7.888.000 de
  * 9.280.000 = 85 %), así que la nota dice que cubre la regla y cuánto lleva, no que lleva justo el 80 %.
  */
 export function notaDeFila(f: FilaAsiPuedesPagar, pctMinimo: number, pesos: (v: number) => string): string | null {
-  return f.llevas === null ? null : `con esto cubres el ${pctMinimo} % (llevas ${pesos(f.llevas)})`
+  return f.llevas === null ? null : `con esto cubres el ${pctMinimo} %: llevas ${pesos(f.llevas)}`
 }
 
 /** Lee `plan_pagos` de la línea para esta sección: `null` = apagado (el PDF queda como hoy). */
