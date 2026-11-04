@@ -14,7 +14,7 @@ export function ReactivarSuscripcion({ monto, hayCartera, soloLectura }: { monto
   const [error, setError] = useState<string | null>(null)
   const [pendiente, iniciar] = useTransition()
   return (
-    <section data-reactivar-suscripcion className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900 sm:p-5">
+    <section data-reactivar-suscripcion className="rounded-lg border border-border bg-white p-4 text-sm text-tinta sm:p-5">
       <p className="font-semibold">{t.titulo}</p>
       <p className="mt-1">{t.detalle}</p>
       {t.cartera && <p className="mt-1">{t.cartera}</p>}

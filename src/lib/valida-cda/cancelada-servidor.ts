@@ -508,7 +508,7 @@ export async function valorDeReactivacion(db: Db, sc: { id: string; parametros: 
 }
 
 /**
- * «Reactivar: pagar un período» (11.4). `contratoId` y `workspacePagadorId` salen de la sesión (la acción),
+ * «Reactivar la suscripción» (11.4). `contratoId` y `workspacePagadorId` salen de la sesión (la acción),
  * nunca del navegador. Devuelve el enlace vigente o uno nuevo.
  */
 export async function enlaceDeReactivacionCda(

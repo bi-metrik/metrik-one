@@ -126,7 +126,7 @@ describe('el día de la Cancelada en la transición (11.7): 31-dic', () => {
     expect(r.cuotasAnuladas).toEqual([{ servicioContratadoId: 'sc-caq', cuotaId: 'q4' }])
     // D8: el correo de facturación y la persona designada, sin repetir, con su fila en avisos_cliente.
     expect(x.enviados.map((m) => m.to).sort()).toEqual(['facturacion@cdacaqueta.co', 'gerencia@cdacaqueta.co'])
-    const asunto = `Valida: la suscripción de ${RS} está Cancelada desde el 31 de diciembre de 2026`
+    const asunto = `Valida: la suscripción de ${RS} está Cancelada desde el 31 de diciembre de 2026 y se reactiva con el pago de un período`
     expect(x.enviados.every((m) => m.subject === asunto)).toBe(true)
     expect(x.enviados[0].text).toContain('del 23 de octubre al 22 de noviembre de 2026 ($150.000) y el período del 23 de noviembre al 22 de diciembre de 2026 ($150.000)')
     expect(x.enviados[0].text).toContain('no se cobran (cláusula 2.5)')
@@ -191,7 +191,7 @@ describe('el primer período v1.5 (23-dic): Cancelada el 23-ene-2027', () => {
     const r = await x.correr('2027-01-23')
     expect(r.canceladas).toEqual([{ servicioContratadoId: 'sc-caq', canceladaDesde: '2027-01-23' }])
     expect(r.cuotasAnuladas.map((c) => c.cuotaId).sort()).toEqual(['q4', 'q5'])
-    expect(x.enviados[0].subject).toMatch(/Cancelada desde el 23 de enero de 2027$/)
+    expect(x.enviados[0].subject).toMatch(/Cancelada desde el 23 de enero de 2027 y se reactiva con el pago de un período$/)
     expect(x.enviados[0].text).not.toContain('11.7')
     expect(x.enviados[0].text).toContain('no se cobran (cláusula 2.5)')
   })

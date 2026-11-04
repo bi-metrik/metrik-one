@@ -195,6 +195,9 @@ export function planDeReactivacion(p: { fechaPago: string; montoPeriodo: number;
 // ⚠️ Textos propuestos por Max el 2026-11-04, pendientes de Sofía y del visto de Vera. Sin lenguaje de
 // amenaza y sin invitar a irse: dicen el estado, lo que sigue disponible y cómo volver.
 
+/** El nombre de todos los botones de reactivar: la pantalla, el bloque de `/suscripcion` y el correo (Sofía, 4-nov). */
+export const BOTON_REACTIVAR = 'Reactivar la suscripción'
+
 /** La pantalla de `/valida` con la suscripción Cancelada (11.3), para TODOS los usuarios, sin montos. */
 export function textosPantallaCancelada(p: { canceladaDesde: string; puedeReactivar: boolean }): {
   titulo: string
@@ -214,8 +217,8 @@ export function textosPantallaCancelada(p: { canceladaDesde: string; puedeReacti
     reactivar: p.puedeReactivar
       ? 'Para reactivarla, paga un período: corre desde el día del pago, que pasa a ser tu nueva fecha de renovación, y con el pago ' +
         'vuelven las consultas, el historial y los reportes (cláusula 11.4).'
-      : 'La persona designada por tu empresa puede reactivarla pagando un período desde la sección Suscripción.',
-    boton: p.puedeReactivar ? 'Reactivar: pagar un período' : null,
+      : 'Para volver a usarla, avísale a la persona designada de tu empresa: ella puede reactivarla pagando un período desde la sección Suscripción.',
+    boton: p.puedeReactivar ? BOTON_REACTIVAR : null,
   }
 }
 
@@ -254,7 +257,7 @@ export function textosBloqueReactivar(p: { monto: number | null; hayCartera: boo
     cartera: p.hayCartera
       ? 'Los períodos anteriores al 1 de diciembre de 2026 que no se pagaron aparecen abajo como saldo pendiente. Pagarlos no es condición para reactivar.'
       : null,
-    boton: 'Pagar un período',
+    boton: BOTON_REACTIVAR,
   }
 }
 
@@ -286,17 +289,18 @@ export interface DatosCorreoCancelada {
 }
 
 export function asuntoCorreoCancelada(d: Pick<DatosCorreoCancelada, 'razonSocial' | 'canceladaDesde'>): string {
-  return `Valida: la suscripción de ${d.razonSocial} está Cancelada desde el ${formatFechaLetras(d.canceladaDesde)}`
+  return `Valida: la suscripción de ${d.razonSocial} está Cancelada desde el ${formatFechaLetras(d.canceladaDesde)} y se reactiva con el pago de un período`
 }
 
 function parrafosCancelada(d: DatosCorreoCancelada): string[] {
   const p: string[] = [
     `Desde el ${formatFechaLetras(d.canceladaDesde)}, la suscripción de Valida de ${d.razonSocial} está Cancelada por falta de pago (cláusula 11.3 de los Términos).`,
-    'Mientras esté Cancelada, tu equipo puede entrar a la plataforma, pero no puede hacer consultas ni ver el historial ni los reportes.',
+    'Mientras esté Cancelada, tu equipo puede entrar a la plataforma, pero no puede hacer consultas ni ver el historial ni los reportes en la plataforma.',
+    `Para reactivarla, la persona designada entra a la sección Suscripción de MéTRIK ONE (${d.urlPagos}) y paga un período con el botón ` +
+      `«${BOTON_REACTIVAR}», que abre el enlace de pago. Tu nueva fecha de renovación será el día del pago y, con el pago, vuelven las ` +
+      'consultas, el historial y los reportes (cláusula 11.4).',
     'Tu información está guardada íntegra. Durante 10 años puedes pedir, sin costo, la exportación de tu bitácora y de tus reportes ' +
       `escribiendo desde un correo registrado a ${CORREO_METRIK}; la entregamos dentro de los 5 días hábiles siguientes (cláusula 9.3).`,
-    'Para reactivarla, la persona designada paga un período con el enlace de pago de la sección Suscripción de MéTRIK ONE: ' +
-      `${d.urlPagos}. Tu nueva fecha de renovación será el día del pago y, con el pago, vuelven las consultas, el historial y los reportes (cláusula 11.4).`,
   ]
   if (d.cartera.length > 0) {
     const lista = d.cartera.map((c) => `el período ${c.periodo} (${formatCOP(c.saldo)})`)
@@ -350,7 +354,7 @@ export function htmlCorreoCancelada(d: DatosCorreoCancelada): string {
   return htmlCorreo({
     titulo: 'Suscripción Cancelada',
     parrafos: parrafosCancelada(d),
-    boton: { texto: 'Ir a Suscripción', url: d.urlPagos },
+    boton: { texto: BOTON_REACTIVAR, url: d.urlPagos },
     razonSocial: d.razonSocial,
   })
 }
@@ -375,7 +379,8 @@ function parrafosTarjeta(d: DatosCorreoTarjeta): string[] {
     `Como la suscripción de Valida de ${d.razonSocial} quedó Cancelada el ${formatFechaLetras(d.canceladaDesde)}, le pedimos a la pasarela de pagos ` +
       `(ePayco) eliminar ${tarjeta} que estaba registrada para el pago automático (cláusula 11.3 de los Términos). Desde ese día no se hace ` +
       'ningún cobro automático a esa tarjeta.',
-    'Si reactivas la suscripción y quieres volver al pago automático, puedes registrar una tarjeta de nuevo en la sección Suscripción de MéTRIK ONE.',
+    'Puedes reactivar la suscripción en cualquier momento pagando un período en la sección Suscripción de MéTRIK ONE; si quieres volver al pago ' +
+      'automático, ahí mismo registras una tarjeta de nuevo.',
     `Si tienes alguna duda, escríbenos a ${CORREO_METRIK} o al WhatsApp ${WHATSAPP_METRIK}.`,
   ]
 }
@@ -385,5 +390,5 @@ export function textoCorreoTarjetaCancelada(d: DatosCorreoTarjeta): string {
 }
 
 export function htmlCorreoTarjetaCancelada(d: DatosCorreoTarjeta): string {
-  return htmlCorreo({ titulo: 'Tarjeta eliminada', parrafos: parrafosTarjeta(d), boton: null, razonSocial: d.razonSocial })
+  return htmlCorreo({ titulo: 'Pedimos eliminar tu tarjeta', parrafos: parrafosTarjeta(d), boton: null, razonSocial: d.razonSocial })
 }

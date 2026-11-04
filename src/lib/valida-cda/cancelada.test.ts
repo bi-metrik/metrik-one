@@ -4,6 +4,8 @@ import {
   asuntoCorreoCancelada,
   asuntoCorreoTarjetaCancelada,
   carteraDe,
+  htmlCorreoCancelada,
+  htmlCorreoTarjetaCancelada,
   cuotasParaAnular,
   planDeReactivacion,
   separarPorEpoca,
@@ -179,7 +181,7 @@ describe('lo que se dice', () => {
       ],
       hayAnulados: true,
     }
-    expect(asuntoCorreoCancelada(d)).toBe('Valida: la suscripción de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA está Cancelada desde el 31 de diciembre de 2026')
+    expect(asuntoCorreoCancelada(d)).toBe('Valida: la suscripción de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA está Cancelada desde el 31 de diciembre de 2026 y se reactiva con el pago de un período')
     expect(textoCorreoCancelada(d)).toMatchSnapshot()
     const sin = textoCorreoCancelada({ ...d, cartera: [], hayAnulados: false })
     expect(sin).not.toContain('11.7')
@@ -190,6 +192,12 @@ describe('lo que se dice', () => {
     const d = { razonSocial: 'CDA PRUEBA S.A.S.', canceladaDesde: '2026-12-31', ultimos4: '4242' }
     expect(asuntoCorreoTarjetaCancelada(d)).toBe('Valida: pedimos eliminar la tarjeta terminada en 4242 de la suscripción de CDA PRUEBA S.A.S.')
     expect(textoCorreoTarjetaCancelada(d)).toMatchSnapshot()
+    expect(htmlCorreoTarjetaCancelada(d)).toContain('<title>Pedimos eliminar tu tarjeta</title>')
+  })
+
+  it('el botón del correo de Cancelada se llama como el de la pantalla y lleva a Suscripción', () => {
+    const html = htmlCorreoCancelada({ razonSocial: 'X', canceladaDesde: '2026-12-31', urlPagos: 'https://x.metrikone.co/suscripcion?tab=pagos', cartera: [], hayAnulados: false })
+    expect(html).toMatch(/href="https:\/\/x\.metrikone\.co\/suscripcion\?tab=pagos"[^>]*>Reactivar la suscripción<\/a>/)
   })
 
   it('ningún texto amenaza ni invita a irse', () => {

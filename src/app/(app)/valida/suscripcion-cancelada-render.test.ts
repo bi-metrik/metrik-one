@@ -20,9 +20,9 @@ describe('la pantalla de la Cancelada', () => {
     expect(textoDe(html)).toBe(
       'La suscripción de Valida está Cancelada ' +
         'La suscripción está Cancelada desde el 31 de diciembre por falta de pago (cláusula 11.3 de los Términos). Mientras esté Cancelada no se pueden hacer consultas ni ver el historial ni los reportes en la plataforma. ' +
-        'Tu información está guardada íntegra. Durante 10 años puedes pedir, sin costo, la exportación de tu bitácora y de tus reportes escribiendo desde un correo registrado a mauricio.moreno@metrik.com.co (cláusula 9.3). ' +
         'Para reactivarla, paga un período: corre desde el día del pago, que pasa a ser tu nueva fecha de renovación, y con el pago vuelven las consultas, el historial y los reportes (cláusula 11.4). ' +
-        'Reactivar: pagar un período',
+        'Reactivar la suscripción ' +
+        'Tu información está guardada íntegra. Durante 10 años puedes pedir, sin costo, la exportación de tu bitácora y de tus reportes escribiendo desde un correo registrado a mauricio.moreno@metrik.com.co (cláusula 9.3).',
     )
     expect(html).toContain('data-reactivar-cda')
     expect(html).not.toMatch(/\$\d/)
@@ -32,7 +32,7 @@ describe('la pantalla de la Cancelada', () => {
     const html = renderToStaticMarkup(React.createElement(SuscripcionCancelada, { canceladaDesde: '2027-01-23', puedeReactivar: false }))
     expect(html).not.toContain('data-reactivar-cda')
     expect(textoDe(html)).toContain('Cancelada desde el 23 de enero')
-    expect(textoDe(html)).toContain('La persona designada por tu empresa puede reactivarla pagando un período desde la sección Suscripción.')
+    expect(textoDe(html)).toContain('Para volver a usarla, avísale a la persona designada de tu empresa: ella puede reactivarla pagando un período desde la sección Suscripción.')
   })
 })
 

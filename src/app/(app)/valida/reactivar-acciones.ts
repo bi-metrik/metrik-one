@@ -28,7 +28,7 @@ export async function pagarPeriodoReactivacion(): Promise<{ ok: true; url: strin
 }
 
 /**
- * «Reactivar: pagar un período» de un CDA con la suscripción Cancelada (Términos v1.5, 11.4). ⚠️ Endpoint
+ * «Reactivar la suscripción» de un CDA con la suscripción Cancelada (Términos v1.5, 11.4). ⚠️ Endpoint
  * alcanzable desde cualquier sesión: el contrato y el espacio salen de la sesión (`contextoSuscripcion`),
  * paga solo la persona designada del contrato y nunca en «Ver como».
  */

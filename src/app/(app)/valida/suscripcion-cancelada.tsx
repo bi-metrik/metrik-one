@@ -22,7 +22,6 @@ export function SuscripcionCancelada({ canceladaDesde, puedeReactivar }: { cance
         <div className="space-y-3 text-sm text-tinta">
           <h1 className="text-base font-semibold">{t.titulo}</h1>
           <p>{t.estado}</p>
-          <p>{t.informacion}</p>
           <p>{t.reactivar}</p>
           {error && <p className="text-xs text-red-700">{error}</p>}
           {t.boton && (
@@ -43,6 +42,7 @@ export function SuscripcionCancelada({ canceladaDesde, puedeReactivar }: { cance
               {pendiente ? 'Preparando el pago…' : t.boton}
             </button>
           )}
+          <p>{t.informacion}</p>
         </div>
       </div>
     </section>
