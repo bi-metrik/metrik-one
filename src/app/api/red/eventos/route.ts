@@ -8,7 +8,8 @@
  * - la persona (`staff.id`) SOLO si está en la lista explícita `PERSONAS_MEDIDAS`; el resto va
  *   sin identificador;
  * - el operador (sistema autónomo), resuelto por DNS desde la IP, que NO se registra;
- * - ciudad y región que pone Vercel, y el tipo de dispositivo.
+ * - ciudad, región y país (de Cloudflare si el pedido entró por ahí, si no de Vercel), la ruta
+ *   (`via`: 'cloudflare' | 'directo') y el tipo de dispositivo.
  *
  * Exige sesión: es lo que impide que cualquiera llene la medición. Sin sesión el middleware
  * responde 307 a /login y el navegador conserva el lote para la próxima.
@@ -21,7 +22,8 @@ import { usuarioDesdeToken } from '@/lib/supabase/claims-user'
 import { leerLoteRed } from '@/lib/red/eventos-servidor'
 import { MAX_BYTES_LOTE_RED } from '@/lib/red/eventos'
 import { esPilotoRed, personaMedida } from '@/lib/red/piloto'
-import { ipDelCliente, operadorDeIp } from '@/lib/red/operador'
+import { operadorDeIp } from '@/lib/red/operador'
+import { origenDelPedido, ubicacionDelPedido } from '@/lib/http/ip-cliente'
 import { tipoDeDispositivo } from '@/lib/rum/beacon'
 import { versionDelBuild } from '@/lib/version/build'
 
@@ -29,15 +31,6 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SIN_CUERPO = { 'Cache-Control': 'no-store' }
-
-function decodificar(v: string | null): string | undefined {
-  if (!v) return undefined
-  try {
-    return decodeURIComponent(v).slice(0, 80)
-  } catch {
-    return v.slice(0, 80)
-  }
-}
 
 export async function POST(request: Request) {
   const slug = request.headers.get('x-tenant-slug')
@@ -51,6 +44,7 @@ export async function POST(request: Request) {
   const lote = leerLoteRed(await request.text())
   if (!lote.ok) return new NextResponse(null, { status: lote.status, headers: SIN_CUERPO })
 
+  const origen = origenDelPedido(request.headers)
   const supabase = await createClient()
   const { user: usuario } = await usuarioDesdeToken(supabase)
   if (!usuario) return new NextResponse(null, { status: 401, headers: SIN_CUERPO })
@@ -62,7 +56,7 @@ export async function POST(request: Request) {
       .eq('profile_id', usuario.id)
       .maybeSingle()
       .then((r) => r.data as { id: string; full_name: string; workspaces: { slug: string } | null } | null),
-    operadorDeIp(ipDelCliente(request.headers)),
+    operadorDeIp(origen.ip),
   ])
 
   // La persona solo se identifica si su staff es DE ESTE workspace y está en la lista.
@@ -75,9 +69,8 @@ export async function POST(request: Request) {
     operador: operador?.marca ?? null,
     asn: operador?.asn ?? null,
     asn_nombre: operador?.nombre ?? null,
-    ciudad: decodificar(request.headers.get('x-vercel-ip-city')),
-    region: request.headers.get('x-vercel-ip-country-region')?.slice(0, 10),
-    pais: request.headers.get('x-vercel-ip-country')?.slice(0, 4),
+    via: origen.via,
+    ...ubicacionDelPedido(request.headers, origen.via),
     dispositivo: tipoDeDispositivo(request.headers.get('user-agent')),
     recibido: Date.now(),
     descartados: lote.descartados || undefined,

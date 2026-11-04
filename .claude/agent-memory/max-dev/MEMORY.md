@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [IP real detrás de Cloudflare (4-nov)](project_ip_cliente_cloudflare.md) — usar src/lib/http/ip-cliente.ts; geo CF exige el Managed Transform de Mik
 - ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave Anthropic 401 + respaldo; LLM_PROVEEDOR_CAPTURAS; chat en low
 - ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408/#1407; ronda 2: pregunta Pública/Neta por paquete (sin default), CHD por edad; foto sin hacer
 
