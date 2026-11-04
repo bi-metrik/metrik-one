@@ -39,7 +39,7 @@
 
 import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
 import type { ProximoPago } from '@/lib/valida-cda/pago-pendiente'
-import { fechaDiaMes, sumarDias, type EstadoMora } from '@/lib/valida-cda/plazos'
+import { fechaDiaMes, fechasDePagoV15, sumarDias, textoPagaHasta, type EstadoMora } from '@/lib/valida-cda/plazos'
 
 /**
  * ¿La persona ve la sección Suscripción (y la plata del contrato donde aparezca)? Solo si es la persona
@@ -113,8 +113,17 @@ export function resumenEstado(p: {
   hoy: string
   /** De qué suscripción se habla. Por defecto, Valida de los CDA. */
   producto?: 'valida_cda' | 'one'
+  /**
+   * La vigencia de la v1.5 del contrato (`vigenciaTransicion`) si los textos hablan su idioma
+   * (`hablaConLaV15`): «Suspendida por pago», «Cancelada» y la fecha de renovación en lugar del
+   * vencimiento (D7 del diseño del 4-nov). `null` o ausente: los textos de siempre.
+   */
+  transicion?: string | null
+  /** Cuántos períodos están en mora (`moraValidaCda().periodosEnMora`); con más de uno se dice que son varios. */
+  periodosEnMora?: number
 }): ResumenEstado {
   const esOne = p.producto === 'one'
+  const v15 = !esOne && p.transicion ? p.transicion : null
   if (p.terminos.estado === 'pendiente') {
     if (p.terminos.enPlazo && p.terminos.plazoHasta) {
       return {
@@ -144,6 +153,18 @@ export function resumenEstado(p: {
     }
   }
 
+  if (p.mora.estado === 'restringido' && v15) {
+    return {
+      estado: 'restringido',
+      tono: 'rojo',
+      chip: 'Suspendida por pago',
+      mensaje:
+        `La suscripción está Suspendida por pago desde el ${fechaDiaMes(p.mora.restringeDesde)}: no se pueden hacer consultas nuevas. ` +
+        `Al pagar, vuelven y tu fecha de renovación no cambia; si no, desde el ${fechaDiaMes(p.mora.corteDesde)} queda Cancelada.`,
+      requiereAccion: true,
+    }
+  }
+
   if (p.mora.estado === 'restringido' && !esOne) {
     return {
       estado: 'restringido',
@@ -159,6 +180,19 @@ export function resumenEstado(p: {
   if (p.mora.estado !== 'al_dia') {
     const periodo = p.pago?.estado === 'pendiente' ? periodoCorto(p.pago.concepto, p.pago.fechaVencimiento) : fechaDiaMes(p.mora.vencio)
     const restringeDesde = p.mora.estado === 'en_mora' ? p.mora.restringeDesde : null
+    if (v15 && restringeDesde) {
+      return {
+        estado: 'en_mora',
+        tono: 'ambar_fuerte',
+        chip: 'Período sin pagar',
+        mensaje:
+          (p.periodosEnMora ?? 1) > 1
+            ? `Hay ${p.periodosEnMora} períodos sin pagar, el primero del ${periodo}. Si no se pagan todos, desde el ` +
+              `${fechaDiaMes(restringeDesde)} la suscripción queda Suspendida por pago.`
+            : `Tu período del ${periodo} no está pagado. Si no se paga, desde el ${fechaDiaMes(restringeDesde)} la suscripción queda Suspendida por pago.`,
+        requiereAccion: true,
+      }
+    }
     return {
       estado: 'en_mora',
       tono: 'ambar_fuerte',
@@ -178,6 +212,28 @@ export function resumenEstado(p: {
       tono: 'gris',
       chip: 'Sin datos de pago',
       mensaje: 'No se pudo cargar el estado de tu pago en este momento.',
+      requiereAccion: false,
+    }
+  }
+
+  const fechasV15 = v15 && p.pago.estado === 'pendiente' ? fechasDePagoV15(p.pago, v15) : null
+  if (p.pago.estado === 'pendiente' && fechasV15) {
+    const periodo = periodoCorto(p.pago.concepto, p.pago.fechaVencimiento)
+    const pagaHasta = textoPagaHasta(fechasV15)
+    if (fechasV15.renovacion <= sumarDias(p.hoy, DIAS_AVISO_VENCIMIENTO)) {
+      return {
+        estado: 'por_vencer',
+        tono: 'ambar',
+        chip: 'Próxima a vencer',
+        mensaje: `Período del ${periodo} · ${pagaHasta} · Suspendida por pago desde el ${fechaDiaMes(fechasV15.suspendidaDesde)} si no se paga.`,
+        requiereAccion: true,
+      }
+    }
+    return {
+      estado: 'al_dia',
+      tono: 'verde',
+      chip: 'Al día',
+      mensaje: `Estás al día. Próximo período: del ${periodo} · ${pagaHasta.charAt(0).toLowerCase()}${pagaHasta.slice(1)}.`,
       requiereAccion: false,
     }
   }
@@ -217,10 +273,12 @@ export function tonoDelPunto(r: ResumenEstado): 'verde' | 'ambar' | 'rojo' | nul
  * La franja de una línea que ve en /valida quien maneja la suscripción, cuando hay algo que hacer.
  * `null` = nada que decir (al día, o un estado que ya cubren los avisos obligatorios de todos).
  */
-export function franjaValida(r: ResumenEstado, pago: ProximoPago | null): string | null {
+export function franjaValida(r: ResumenEstado, pago: ProximoPago | null, transicion: string | null = null): string | null {
+  const fechasV15 = pago?.estado === 'pendiente' ? fechasDePagoV15(pago, transicion) : null
   if (r.estado === 'por_vencer' && pago?.estado === 'pendiente') {
-    return `Tu cuota vence el ${fechaDiaMes(pago.fechaVencimiento)}`
+    // Con la v1.5, la fecha de renovación (D7), no el vencimiento guardado (el 27).
+    return fechasV15 ? textoPagaHasta(fechasV15) : `Tu cuota vence el ${fechaDiaMes(pago.fechaVencimiento)}`
   }
-  if (r.estado === 'en_mora' || r.estado === 'restringido') return 'Tienes una cuota vencida'
+  if (r.estado === 'en_mora' || r.estado === 'restringido') return transicion ? 'Tienes un período sin pagar' : 'Tienes una cuota vencida'
   return null
 }

@@ -106,7 +106,7 @@ function siguientesPasosCda(d: DatosAvisoEnlace): string | null {
   if (!d.tarjetaRechazada || !d.tarjetaCda) return null
   const partes: string[] = []
   if (d.tarjetaCda.reintento) partes.push(`Reintentamos el cobro a tu tarjeta el ${formatFechaLetras(d.tarjetaCda.reintento)}.`)
-  partes.push(`Si no se paga, las consultas nuevas se pausan desde el ${formatFechaLetras(d.tarjetaCda.pausaDesde)}.`)
+  partes.push(`Si no se paga, la suscripción queda Suspendida por pago desde el ${formatFechaLetras(d.tarjetaCda.pausaDesde)}.`)
   return partes.join(' ')
 }
 

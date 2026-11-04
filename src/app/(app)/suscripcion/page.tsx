@@ -121,6 +121,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         rechazoTarjeta={rechazoTarjeta}
         avisoTarjeta={pagoAutomatico?.tipo === 'activa' ? pagoAutomatico.fallo : null}
         tarjetaActiva={pagoAutomatico?.tipo === 'activa' ? pagoAutomatico.resumen : null}
+        transicion={ctx.transicion}
+        hoy={ctx.entrada.hoy}
       />
     ) : null
 
@@ -196,6 +198,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         pagos={
           <PestanaPagos
             carga={pagos}
+            transicion={ctx.transicion}
             pagoAutomatico={bloquePagar ? <PagoAutomatico vista={bloquePagar.automatico} mes={bloquePagar.mes} soloLectura={soloLectura} /> : null}
             opciones={
               opcionesPago?.tipo === 'ok' ? (

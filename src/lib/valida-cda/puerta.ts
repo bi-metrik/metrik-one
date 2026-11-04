@@ -15,7 +15,7 @@ import { designacionDelEspacio, documentosDelCliente, perfilReal } from '@/lib/v
 import { modificacionesPorAceptar } from '@/lib/valida-api/terminos'
 import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 import { leerCuentaCda, leerProximoPagoCda, type LecturaPago } from './pago-servidor'
-import { cuotasConEstado } from './pago-pendiente'
+import { cuotasConEstado, type ProximoPago } from './pago-pendiente'
 import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import {
@@ -24,6 +24,9 @@ import {
   enPlazoParaAceptar,
   estadoMora,
   mensajeConsultasRestringidas,
+  hablaConLaV15,
+  mensajeSuspendidaPorPago,
+  periodosImpagosCumplidos,
   mensajeSuspendidoPorMora,
   vigenciaRestriccion,
   vigenciaTransicion,
@@ -295,7 +298,18 @@ export async function terminosValidaPermitenOperar(): Promise<{ ok: true } | { o
 export type MoraValidaCda =
   /** No es un CDA que paga su contrato: la mora no se mide aquí. */
   | { tipo: 'no_aplica' }
-  | { tipo: 'ok'; lectura: LecturaPago; mora: EstadoMora }
+  | {
+      tipo: 'ok'
+      lectura: LecturaPago
+      mora: EstadoMora
+      /** La cuota del SERVICIO sobre la que se midió la mora (sin las de usuarios adicionales), si se pudo leer. */
+      pagoDelServicio?: ProximoPago | null
+      /**
+       * Cuántos períodos del servicio están en mora (con saldo, pasada su fecha de renovación). Solo con la
+       * v1.5 y la mora en curso; con más de uno, los avisos dicen que hay que pagarlos todos (gate de Vera).
+       */
+      periodosEnMora?: number
+    }
 
 async function resolverMora(): Promise<MoraValidaCda> {
   const e = await entradaValidaCda()
@@ -319,7 +333,22 @@ async function resolverMora(): Promise<MoraValidaCda> {
       : e.autoservicio
         ? estadoMora(delServicio.pago, e.hoy, '2000-01-01', REGLA_MORA_AUTOSERVICIO)
         : estadoMora(delServicio.pago, e.hoy, e.restriccionDesde, REGLA_MORA_CDA, e.transicionDesde)
-  return { tipo: 'ok', lectura, mora }
+  let periodosEnMora: number | undefined
+  if (mora.estado !== 'al_dia' && hablaConLaV15(e) && e.transicionDesde) {
+    const cuenta = await leerCuentaCda(e.servicioContratadoId)
+    if (cuenta.estado === 'ok') {
+      const tipos = new Map(cuenta.cuotas.map((c) => [c.numero, c.tipo]))
+      periodosEnMora = periodosImpagosCumplidos({
+        cuotas: cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: e.hoy, ahoraISO }),
+        tipoDeCuota: (n) => tipos.get(n),
+        ignorarTipos: TIPOS_CUOTA_SIN_MORA,
+        transicion: e.transicionDesde,
+        hoy: e.hoy,
+        dias: 1,
+      }).length
+    }
+  }
+  return { tipo: 'ok', lectura, mora, pagoDelServicio: delServicio.estado === 'ok' ? delServicio.pago : null, periodosEnMora }
 }
 
 /** La mora del contrato de Valida del espacio. Una sola lectura por request. */
@@ -375,7 +404,10 @@ export async function validaCdaPermiteConsultar(): Promise<{ ok: true } | { ok: 
   const operar = await validaCdaPermiteOperar()
   if (!operar.ok) return operar
   const m = await moraValidaCda()
-  if (m.tipo === 'ok' && m.mora.estado === 'restringido') return { ok: false, error: mensajeConsultasRestringidas(m.mora) }
+  if (m.tipo === 'ok' && m.mora.estado === 'restringido') {
+    const e = await entradaValidaCda()
+    return { ok: false, error: hablaConLaV15(e) ? mensajeSuspendidaPorPago(m.mora) : mensajeConsultasRestringidas(m.mora) }
+  }
   const v15 = await exigenciaV15Cda()
   if (v15.estado === 'exigida') return { ok: false, error: v15.mensaje }
   return { ok: true }
