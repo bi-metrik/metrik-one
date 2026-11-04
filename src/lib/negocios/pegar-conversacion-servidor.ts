@@ -4,7 +4,8 @@
  * Server action de «Pegar conversación» en el bloque de la solicitud. Ver `pegar-conversacion.ts`.
  *
  * Permiso: el mismo de editar el bloque (`guardEditarBloque`), revalidado aquí; el botón en pantalla es solo UX.
- * El modelo es el del bot (`GEMINI_ENTENDIMIENTO_MODEL`, mismo pedido en `_shared/lectura-gemini.ts`).
+ * El modelo es el del bot (`GEMINI_ENTENDIMIENTO_MODEL`, mismo pedido en `_shared/lectura-gemini.ts`), por
+ * `pegar-conversacion-modelo.ts`, que es lo mismo que mide el arnés de `scripts/eval-haiku/`.
  *
  * Datos personales: el chat NO se guarda. Va al modelo (como hoy los mensajes del bot) y de él quedan solo las frases
  * cortas que sostienen cada valor (la marca de sugerido o de conflicto, para que la comercial vea de dónde salió) y, en
@@ -25,10 +26,7 @@ import {
   cargarChatEnBloque, mensajesDelChat, normalizarChat, textoActividadChat, viajeParaModelo,
   MAX_ENTRADA_CARACTERES, type ResumenChat,
 } from '@/lib/negocios/pegar-conversacion'
-import { esquemaCarga, instruccionesCarga } from '../../../supabase/functions/_shared/agente/bandeja/extraccion.ts'
-import { mensajesDeTextos } from '../../../supabase/functions/_shared/agente/bandeja/carga.ts'
-import { textoParaModelo } from '../../../supabase/functions/_shared/wa-guardianes.ts'
-import { leerConGemini, MODELO_ENTENDIMIENTO_POR_DEFECTO } from '../../../supabase/functions/_shared/lectura-gemini.ts'
+import { leerChatConModelo } from '@/lib/negocios/pegar-conversacion-modelo'
 import type { CampoEntendible } from '../../../supabase/functions/_shared/wa-entendimiento-reglas.ts'
 import { aplanarBloques } from '@/lib/negocios/niveles-solicitud'
 import { camposCambiados, renombrarNegocioSiAplica } from '@/lib/negocios/nombre-automatico'
@@ -80,13 +78,7 @@ export async function pegarConversacion(negocioBloqueId: string, texto: string):
 
   const hoyISO = todayBogotaISO()
   const { valores: yaTiene } = aplanarBloques([{ fields, data: actual.data }])
-  const lectura = await leerConGemini({
-    apiKey: getServerKey('gemini'),
-    modelo: (process.env.GEMINI_ENTENDIMIENTO_MODEL || '').trim() || MODELO_ENTENDIMIENTO_POR_DEFECTO,
-    instrucciones: instruccionesCarga(fields, hoyISO, yaTiene, {}, { viaje }),
-    texto: `Mensajes:\n${textoParaModelo(mensajesDeTextos(mensajes))}`,
-    esquema: esquemaCarga(fields, { chat: true }),
-  })
+  const lectura = await leerChatConModelo({ fields, mensajes, hoyISO, yaTiene, viaje, apiKey: getServerKey('gemini') })
   if (lectura.error || lectura.json === null) {
     // Solo el código del error: el texto del chat no va a los logs.
     console.error('[pegar-conversacion] el modelo no respondió:', (lectura.error ?? 'sin lectura').slice(0, 60))

@@ -76,6 +76,21 @@ export const PROMPT_DETECCION =
   'null si no aparecen.\n' +
   'NUNCA inventes ni deduzcas lo que no está escrito en la imagen. Responde solo el JSON.'
 
+/**
+ * Cuando la captura llega a un PAQUETE DE BLOQUEO (`leerPantallazoDeBloqueo('detectar')`), ya se sabe que es una de las
+ * dos pantallas del paquete: la del hotel (con su tabla de precios por persona, que incluye el vuelo) o la de los
+ * vuelos (sin precio). Sin este párrafo la regla del «ninguno» para un paquete vuelo + hotel se las come a las dos:
+ * medido con Haiku el 2026-11-04 sobre el banco de la QA de Trappvel, 8 de 8 pantallazos de bloqueo salían «ninguno»
+ * y la asesora tenía que elegir la casilla a mano. Solo se agrega en ese camino: la bandeja de siempre no cambia.
+ */
+export const PARRAFO_PAQUETE_BLOQUEO =
+  '\n\nEsta captura es UNA de las dos pantallas de un PAQUETE DE BLOQUEO de un operador mayorista (cupo de vuelo + ' +
+  'hotel): la del hotel o la de los vuelos. Aquí la regla del paquete NO aplica:\n' +
+  '- hotel: la oferta del hotel del paquete (nombre del hotel, noches, plan, tabla de precios por persona o por ' +
+  'acomodación), aunque el precio incluya el vuelo o haya íconos de tiquete.\n' +
+  '- vuelo: los vuelos del paquete (aerolínea, tramos de ida y regreso, horarios), aunque NO tengan precio.\n' +
+  '- ninguno: solo si no es ninguna de las dos.'
+
 const ESQUEMA = {
   type: 'OBJECT',
   properties: {
@@ -141,7 +156,17 @@ export function rescatarCortada(texto: string): TipoDetectado | null {
   return normalizarDeteccion({ tipo, lugar: campo('lugar'), origen: campo('origen'), destino: campo('destino') })
 }
 
-async function unaLlamada(buffer: Buffer, mime: string, apiKey: string): Promise<ResultadoExtraccion<TipoDetectado>> {
+export interface OpcionesDeteccion {
+  /** La captura llegó a un paquete de bloqueo: es su hotel o sus vuelos (`PARRAFO_PAQUETE_BLOQUEO`). */
+  paqueteDeBloqueo?: boolean
+}
+
+/** El prompt de la detección: el de siempre, o con el párrafo del paquete de bloqueo. Puro. */
+export function promptDeteccion(opciones: OpcionesDeteccion = {}): string {
+  return opciones.paqueteDeBloqueo ? PROMPT_DETECCION + PARRAFO_PAQUETE_BLOQUEO : PROMPT_DETECCION
+}
+
+async function unaLlamada(buffer: Buffer, mime: string, apiKey: string, opciones: OpcionesDeteccion = {}): Promise<ResultadoExtraccion<TipoDetectado>> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
   try {
     const res = await fetchModelo(url, {
@@ -149,7 +174,7 @@ async function unaLlamada(buffer: Buffer, mime: string, apiKey: string): Promise
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: PROMPT_DETECCION }] },
+        system_instruction: { parts: [{ text: promptDeteccion(opciones) }] },
         contents: [{
           parts: [
             { text: '¿Qué componente del viaje muestra esta captura?' },
@@ -195,9 +220,10 @@ export async function detectarTipoDeCaptura(
   buffer: Buffer,
   mimeType: string,
   apiKey: string,
+  opciones: OpcionesDeteccion = {},
 ): Promise<ResultadoExtraccion<TipoDetectado>> {
   if (!apiKey) return { data: null, error: 'GEMINI_API_KEY no configurada en el servidor' }
   const mime = MIMES_SOPORTADOS[mimeType.toLowerCase()]
   if (!mime) return { data: null, error: `Tipo de imagen no soportado: ${mimeType}` }
-  return extraerConReintento(() => unaLlamada(buffer, mime, apiKey), 'detectar-tipo')
+  return extraerConReintento(() => unaLlamada(buffer, mime, apiKey, opciones), 'detectar-tipo')
 }

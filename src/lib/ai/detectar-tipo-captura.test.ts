@@ -28,3 +28,19 @@ describe('rescatarCortada', () => {
     expect(rescatarCortada('{"tipo": "ninguno", "lugar": "Bogot\n\n')?.tipo).toBeNull()
   })
 })
+
+describe('promptDeteccion · el paquete de bloqueo (2026-11-04)', () => {
+  it('sin opciones es el prompt de siempre, byte a byte', async () => {
+    const { promptDeteccion, PROMPT_DETECCION } = await import('./detectar-tipo-captura')
+    expect(promptDeteccion()).toBe(PROMPT_DETECCION)
+    expect(promptDeteccion({ paqueteDeBloqueo: false })).toBe(PROMPT_DETECCION)
+  })
+
+  it('en un bloqueo dice que el hotel con precio por persona es hotel y los vuelos sin precio son vuelo', async () => {
+    const { promptDeteccion, PROMPT_DETECCION, PARRAFO_PAQUETE_BLOQUEO } = await import('./detectar-tipo-captura')
+    const p = promptDeteccion({ paqueteDeBloqueo: true })
+    expect(p).toBe(PROMPT_DETECCION + PARRAFO_PAQUETE_BLOQUEO)
+    expect(p).toMatch(/aunque NO tengan precio/)
+    expect(p).toMatch(/aunque el precio incluya el vuelo/)
+  })
+})

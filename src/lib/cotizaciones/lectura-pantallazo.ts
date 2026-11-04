@@ -336,7 +336,14 @@ export function evaluarLectura(
   // Brief del 2026-10-29, punto 4 · el resumen de UN traslado con su ida y su regreso (el segundo
   // trayecto es el primero al revés) no es una lista para elegir: se juntan y se suman. Dos o más
   // trayectos que NO son ida y regreso siguen siendo «¿cuál?», aunque el modelo diga detalle único.
-  const trayectos = ranura.slug === 'traslado_detalle' ? cruda.trayectosReserva ?? [] : []
+  //
+  // 2026-11-04 (arnés de Trappvel con Haiku) · los trayectos SIN precio propio son las piernas de una sola reserva con
+  // un solo total («Aeropuerto → hotel» y «hotel → aeropuerto», «Precio total del vehículo (ida y vuelta): US$ 90»), no
+  // alternativas: una alternativa para escoger siempre trae su precio. Esos trayectos no rechazan la captura; se lee
+  // como el detalle único que es, con su total. Haiku los lista (el prompt pide los trayectos); Gemini los dejaba vacíos.
+  const trayectosLeidos = ranura.slug === 'traslado_detalle' ? cruda.trayectosReserva ?? [] : []
+  const sinPrecioPropio = trayectosLeidos.length > 0 && trayectosLeidos.every(t => !((parseMontoCop(t.precio) ?? 0) > 0))
+  const trayectos = sinPrecioPropio ? [] : trayectosLeidos
   const idaYRegreso = trayectos.length > 0 ? trasladoDeIdaYRegreso(trayectos) : null
   const variosTrayectos = trayectos.length >= 2 && !idaYRegreso
   const contradice = cruda.veredicto === 'detalle_unico' && !cruda.elegida && !reserva && !idaYRegreso

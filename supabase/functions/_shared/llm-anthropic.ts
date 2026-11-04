@@ -291,7 +291,16 @@ export function esfuerzoDesdeGemini(tc: unknown): 'low' | 'medium' | 'high' | nu
  * El cuerpo de Gemini como cuerpo de la API de Mensajes. Pura. `ok:false` cuando el pedido trae algo que Haiku 5.5
  * no recibe (audio, video, imagen de un tipo o tamaño que la API no acepta): ese pedido sigue en Gemini.
  */
-export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MODELO_HAIKU): Traduccion {
+export function cuerpoAnthropicDesdeGemini(
+  cuerpo: unknown,
+  modelo: string = MODELO_HAIKU,
+  esfuerzoFijo?: 'low' | 'medium' | 'high',
+  /**
+   * El esquema ya lo rechazó la salida estructurada por grande («The compiled grammar is too large», arnés de Trappvel
+   * 2026-11-04): va directo en el sistema, sin gastar la llamada que se sabe que da 400.
+   */
+  esquemaEnSistema = false,
+): Traduccion {
   if (!cuerpo || typeof cuerpo !== 'object') return { ok: false, motivo: 'cuerpo vacío' };
   const c = cuerpo as Record<string, unknown>;
   const contenidos = (Array.isArray(c.contents) ? c.contents : []) as ContenidoGemini[];
@@ -386,7 +395,10 @@ export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MOD
   const esquemaG = gc.responseJsonSchema ?? gc.response_json_schema ?? gc.responseSchema ?? gc.response_schema;
   const quiereJson = mime === 'application/json';
   // `responseSchema` (OpenAPI de Gemini) y `responseJsonSchema` (JSON Schema) pasan por la misma normalización.
-  const ajuste = quiereJson && esquemaG ? ajustarEsquema(esquemaJsonDesdeGemini(esquemaG)) : null;
+  const esquemaJ = quiereJson && esquemaG ? esquemaJsonDesdeGemini(esquemaG) : null;
+  const ajuste = esquemaJ
+    ? (esquemaEnSistema ? { modo: 'en_sistema' as const, esquema: esquemaJ } : ajustarEsquema(esquemaJ))
+    : null;
   const esquema = ajuste?.modo === 'estricto' ? ajuste.esquema : null;
 
   let sistema = textoDeSistema(c);
@@ -399,7 +411,7 @@ export function cuerpoAnthropicDesdeGemini(cuerpo: unknown, modelo: string = MOD
   }
 
   const maxSalida = typeof gc.maxOutputTokens === 'number' && gc.maxOutputTokens > 0 ? gc.maxOutputTokens : SALIDA_POR_DEFECTO;
-  const esfuerzo = herramientaForzada ? null : esfuerzoDesdeGemini(gc.thinkingConfig ?? gc.thinking_config);
+  const esfuerzo = herramientaForzada ? null : esfuerzoFijo ?? esfuerzoDesdeGemini(gc.thinkingConfig ?? gc.thinking_config);
   const outputConfig: Record<string, unknown> = {};
   if (esfuerzo) outputConfig.effort = esfuerzo;
   if (esquema) outputConfig.format = { type: 'json_schema', schema: esquema };
@@ -478,6 +490,51 @@ export function modeloQueRespondio(respuesta: unknown, pedido: string): string {
   return typeof v === 'string' && v.trim() ? v.trim() : pedido;
 }
 
+/**
+ * El primer valor JSON completo de un texto que no se deja leer entero: Haiku, con el esquema dicho en el sistema (sin
+ * salida estructurada), a veces escribe algo después del objeto o antes de él (arnés de Trappvel, 2026-11-04: «Unexpected
+ * non-whitespace character after JSON at position 2661»). Si el texto ya es JSON, o no hay un objeto o arreglo completo
+ * que se lea, lo devuelve igual: el sitio decide como siempre. Pura.
+ */
+export function primerJson(texto: string): string {
+  const t = texto.trim();
+  try {
+    JSON.parse(t);
+    return texto;
+  } catch {
+    // sigue
+  }
+  const inicio = t.search(/[[{]/);
+  if (inicio < 0) return texto;
+  let prof = 0;
+  let enCadena = false;
+  let escape = false;
+  for (let i = inicio; i < t.length; i++) {
+    const ch = t[i];
+    if (enCadena) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') enCadena = false;
+      continue;
+    }
+    if (ch === '"') enCadena = true;
+    else if (ch === '{' || ch === '[') prof++;
+    else if (ch === '}' || ch === ']') {
+      prof--;
+      if (prof === 0) {
+        const candidato = t.slice(inicio, i + 1);
+        try {
+          JSON.parse(candidato);
+          return candidato;
+        } catch {
+          return texto;
+        }
+      }
+    }
+  }
+  return texto;
+}
+
 /** Quita las cercas de código (```json … ```) que rodean un JSON. Pura. */
 export function sinCercas(texto: string): string {
   const m = texto.trim().match(/^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?\s*```$/);
@@ -506,14 +563,27 @@ export interface OpcionesFetchModelo {
    * diga `gemini` (el interruptor general siempre puede devolver todo a Gemini). Sin valor, rige `porDefecto`.
    */
   variable?: string;
+  /**
+   * Si `variable` no tiene valor, se mira esta antes de `porDefecto`. Las capturas de cotización
+   * (`LLM_PROVEEDOR_CAPTURAS`) heredan así `LLM_PROVEEDOR_DOCUMENTOS`: la variable nueva no cambia nada al desplegarse.
+   */
+  heredaDe?: string;
   porDefecto?: ProveedorLLM;
+  /**
+   * Esfuerzo de pensamiento de Haiku para este sitio, en lugar del que sale del `thinkingConfig` de Gemini. Lo pide la
+   * lectura de documentos (SOE-038): el `thinkingBudget: 1024` de Gemini se traduce a `low`, y con `low` Haiku dejaba
+   * vacíos campos que sí estaban en el documento.
+   */
+  esfuerzo?: 'low' | 'medium' | 'high';
 }
 
+const MAX_ESQUEMAS_RECHAZADOS = 200;
+
 /** El proveedor que rige para un `fetchModelo` (global y, si la tiene, su familia). Pura. */
-export function proveedorDe(entorno: Entorno, o: Pick<OpcionesFetchModelo, 'variable' | 'porDefecto'> = {}): ProveedorLLM {
+export function proveedorDe(entorno: Entorno, o: Pick<OpcionesFetchModelo, 'variable' | 'heredaDe' | 'porDefecto'> = {}): ProveedorLLM {
   if (proveedorLLM(entorno('LLM_PROVEEDOR')) === 'gemini') return 'gemini';
   if (!o.variable) return 'anthropic';
-  const v = (entorno(o.variable) ?? '').trim();
+  const v = (entorno(o.variable) ?? '').trim() || (o.heredaDe ? (entorno(o.heredaDe) ?? '').trim() : '');
   return v ? proveedorLLM(v) : (o.porDefecto ?? 'anthropic');
 }
 
@@ -537,6 +607,11 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
   const entorno = o.entorno ?? entornoPorDefecto;
   const avisar = o.avisar ?? ((m: string) => console.warn(m));
   const modelo = o.modelo ?? MODELO_HAIKU;
+  // Esquemas que la salida estructurada ya rechazó por grandes, en ESTE fetch (la llave es el esquema de Gemini tal
+  // cual). El siguiente pedido con el mismo esquema lo dice directo en el sistema y se ahorra el 400 (~0,5 s): en el
+  // arnés de Trappvel (2026-11-04) los 64 pedidos de la lectura de pantallazos daban «The compiled grammar is too large»
+  // primero.
+  const esquemasRechazados = new Set<string>();
   const fetchModelo = async (entrada: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const real = o.fetch ?? globalThis.fetch;
     const url = typeof entrada === 'string' ? entrada : entrada instanceof URL ? entrada.href : entrada.url;
@@ -552,7 +627,9 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
     } catch {
       cuerpoGemini = null;
     }
-    const t = cuerpoAnthropicDesdeGemini(cuerpoGemini, modelo);
+    const gc = (cuerpoGemini as { generationConfig?: Record<string, unknown> } | null)?.generationConfig;
+    const llaveEsquema = JSON.stringify(gc?.responseSchema ?? gc?.response_schema ?? gc?.responseJsonSchema ?? gc?.response_json_schema ?? null);
+    const t = cuerpoAnthropicDesdeGemini(cuerpoGemini, modelo, o.esfuerzo, esquemasRechazados.has(llaveEsquema));
     if (!t.ok) {
       avisar(`[llm] pedido sin traducir a Anthropic (${t.motivo}): sigue en Gemini`);
       return real(entrada, init);
@@ -560,14 +637,30 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
     // Respaldo SIEMPRE en Gemini (Mauricio, 2026-10-20): si Haiku falla por saturación, límite, servidor o red, el MISMO
     // pedido sale a Gemini con la llave que trae el sitio. Sin esa llave no hay respaldo, y queda en el log. Si el
     // tiempo del sitio ya se acabó (signal abortado), no hay respaldo: el sitio maneja su corte como siempre.
-    const alRespaldo = (motivo: string, fallo: () => Response | Promise<Response>): Response | Promise<Response> => {
+    //
+    // Si el respaldo TAMBIÉN falla, el sitio recibe el error de Haiku, no el de Gemini (2026-11-04): con la llave de
+    // Anthropic de Vercel inválida (401) y Gemini sin saldo (402), «Pegar conversación» registraba solo
+    // `GEMINI_HTTP_402` y parecía que el pedido nunca había ido a Haiku. El error de Haiku es la causa; el de Gemini
+    // queda en el aviso.
+    const alRespaldo = async (motivo: string, fallo: () => Response | Promise<Response>): Promise<Response> => {
       if (init?.signal?.aborted) return fallo();
       if (!pedidoTraeLlaveGemini(url, init)) {
         avisar(`[llm] Haiku falló (${motivo}) y no hay GEMINI_API_KEY: sin respaldo`);
         return fallo();
       }
       avisar(`[llm] Haiku falló (${motivo}): respaldo en Gemini`);
-      return real(entrada, init);
+      let r: Response;
+      try {
+        r = await real(entrada, init);
+      } catch (e) {
+        const nombre = (e as { name?: string })?.name ?? '';
+        if (nombre === 'AbortError' || nombre === 'TimeoutError' || init?.signal?.aborted) throw e;
+        avisar(`[llm] el respaldo en Gemini también falló (red: ${String(e).slice(0, 80)}); queda el error de Haiku (${motivo})`);
+        return fallo();
+      }
+      if (r.ok) return r;
+      avisar(`[llm] el respaldo en Gemini también falló (http ${r.status}); queda el error de Haiku (${motivo})`);
+      return fallo();
     };
     const llamar = (cuerpo: Record<string, unknown>) =>
       real(URL_ANTHROPIC, {
@@ -596,6 +689,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
         const oc = output_config?.effort ? { output_config: { effort: output_config.effort } } : {};
         const sistema = [resto.system, instruccionEsquemaEnSistema(esquema)]
           .filter(Boolean).join('\n\n');
+        if (esquemasRechazados.size < MAX_ESQUEMAS_RECHAZADOS) esquemasRechazados.add(llaveEsquema);
         avisar(`[llm] la salida estructurada rechazó el esquema; reintento con el esquema en el sistema: ${detalle.slice(0, 200)}`);
         limpiarCercas = true;
         res = await llamar({ ...resto, ...oc, system: sistema });
@@ -626,7 +720,7 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
     // para que el sitio reciba lo mismo que recibía (el eval de RUT dio «JSON no válido» por eso).
     if (limpiarCercas) {
       for (const parte of ((gem.candidates as Array<{ content: { parts: ParteGemini[] } }>)[0]?.content.parts ?? [])) {
-        if (typeof parte.text === 'string') parte.text = sinCercas(parte.text);
+        if (typeof parte.text === 'string') parte.text = primerJson(sinCercas(parte.text));
       }
     }
     return respuestaJson(gem, 200);
@@ -647,3 +741,18 @@ export const fetchModeloDocumentos: typeof fetch = crearFetchModelo({ variable: 
 
 /** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real: 8 de 12). */
 export const fetchModeloActas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' });
+
+/**
+ * Los pantallazos de la cotización (Trappvel): `extraer-ranura` (la lectura y las estrellas) y `bloqueo-leer` (los
+ * paquetes de bloqueo). `LLM_PROVEEDOR_CAPTURAS`; sin valor, hereda `LLM_PROVEEDOR_DOCUMENTOS` (y sin ninguna, Gemini),
+ * así que desplegarlo no mueve nada. Existe para poder pasar las capturas a Haiku sin mover los documentos de SOENA:
+ * el arnés de Trappvel (2026-11-04, 71 pantallazos del banco de la QA) dio con Haiku 439 de 439 campos.
+ */
+export const fetchModeloCapturas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_CAPTURAS', heredaDe: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' });
+
+/**
+ * «Pegar conversación» (`pegar-conversacion-modelo.ts`): el interruptor global, con Haiku en esfuerzo `low`. Sin
+ * pensamiento Haiku elegía mal el rango del presupuesto («unos 45 millones» → entre 5 y 8; arnés de Trappvel,
+ * 2026-11-04: 4 de 7 contra lo que puso Gemini; con `low`, 6 de 7). Gemini no cambia: el esfuerzo solo es de Haiku.
+ */
+export const fetchModeloChat: typeof fetch = crearFetchModelo({ esfuerzo: 'low' });
