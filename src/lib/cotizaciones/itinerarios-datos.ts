@@ -671,7 +671,7 @@ function aFila(data: any): FilaItinerario {
 export async function bloquesParaPDF(
   supabase: Supabase,
   cotizacionId: string,
-): Promise<{ nombre: string | null; orden: number; esPrincipal: boolean; itemIds: string[]; precio: number; reglas?: ReglasDelDocumento }[] | null> {
+): Promise<{ id: string; nombre: string | null; orden: number; esPrincipal: boolean; itemIds: string[]; precio: number; reglas?: ReglasDelDocumento }[] | null> {
   const ctx = await contextoDeCotizacion(supabase, cotizacionId)
   if (!ctx) return null
   const filas = await leerItinerarios(supabase, cotizacionId)
@@ -692,6 +692,8 @@ export async function bloquesParaPDF(
     // ESTA tarifa, y sus descuentos sobre el total salen con su descripción. Sin reglas, nada.
     const reglas = reglasDelDocumento(cascada)
     return {
+      // La tarifa: con ella el plan de pagos del documento lee sus hitos (`hitosDeTarifa`, QA G14).
+      id: fila.id,
       nombre: fila.nombre,
       orden: fila.orden,
       esPrincipal: fila.esPrincipal,

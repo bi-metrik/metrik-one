@@ -18,7 +18,7 @@ describe('asiPuedesPagar', () => {
       { monto: 810_000, cuando: 'hasta el 20 de noviembre, un día antes del viaje', llevas: null },
     ])
     expect(r.suma).toBe(4_052_000)
-    expect(notaDeFila(r.filas![1], r.pctMinimo, pesos)).toBe('con esto llevas el 80 % ($3.242.000)')
+    expect(notaDeFila(r.filas![1], r.pctMinimo, pesos)).toBe('con esto cubres el 80 % (llevas $3.242.000)')
   })
 
   it('las filas suman el total al peso, también con totales que no cierran en miles', () => {

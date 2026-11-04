@@ -43,9 +43,11 @@ import {
   mensajeConfirmacion,
   primerNombre,
   seccionesDeTerminos,
+  textoFaltaAnticipo,
   type TipoTitular,
 } from '@/lib/viaje/confirmacion'
 import type { TarifaConfirmable, VistaConfirmacion } from '@/lib/viaje/confirmacion-datos'
+import { lineaDeTarifaEnPanel } from '@/lib/viaje/nombre-tarifa'
 import {
   aplicarPrerreservaSiVencio,
   confirmarClienteViaje,
@@ -139,7 +141,8 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
 
   const tarifaElegida = conf ? vista.tarifas.find((t) => t.itinerarioId === conf.itinerario_id) : null
   // La tarifa única implícita (sin tarifas) no tiene nombre propio: se muestra el total a secas.
-  const nombreTarifa = conf?.tarifa_nombre ?? (tarifaElegida?.itinerarioId ? tarifaElegida.nombre : null)
+  // QA G14: nunca «Tarifa Tarifa»; un relleno o nada → «Total».
+  const nombreTarifa = lineaDeTarifaEnPanel(conf?.tarifa_nombre ?? (tarifaElegida?.itinerarioId ? (tarifaElegida.nombreCliente !== undefined ? tarifaElegida.nombreCliente : tarifaElegida.nombre) : null))
   const plan = vista.plan && vista.plan.estado === 'acordado' ? vista.plan : null
 
   return (
@@ -175,18 +178,23 @@ export default function ConfirmacionViajePanel({ vista, puedeConfirmar, esDirecc
         <div className="mt-3 space-y-3">
           <ul className="space-y-1.5">
             <Linea ok>El cliente confirmó el {fechaCorta(conf.fecha)}{conf.pantallazo ? ' (pantallazo)' : ''}</Linea>
-            <Linea ok>{nombreTarifa ? `Tarifa ${nombreTarifa}` : 'Total'} · {pesos(conf.total)}</Linea>
+            <Linea ok>{nombreTarifa ?? 'Total'} · {pesos(conf.total)}</Linea>
             <Linea ok={vista.estado.planVigente}>
               {plan
                 ? `Plan de pagos: ${plan.cuotas.length} cuota${plan.cuotas.length === 1 ? '' : 's'}, ${plan.dentro_de_regla ? 'dentro de la regla' : 'aprobado por dirección'}`
                 : 'Falta el plan de pagos acordado con el cliente.'}
             </Linea>
-            <Linea ok={vista.estado.anticipoConSoporte}>Anticipo con comprobante y cuenta donde entró</Linea>
+            {/* QA G14: con el anticipo a medias no queda ✓ y dice cuánto falta. */}
+            <Linea ok={vista.estado.anticipoConSoporte && !((vista.estado.anticipoFalta ?? 0) > 0)}>
+              {vista.estado.anticipoConSoporte && (vista.estado.anticipoFalta ?? 0) > 0
+                ? `Anticipo con comprobante y cuenta donde entró · ${textoFaltaAnticipo(vista.estado.anticipoFalta as number)}`
+                : 'Anticipo con comprobante y cuenta donde entró'}
+            </Linea>
           </ul>
 
           {pendientes.length > 0 && vista.enConfirmacion && (
             <p className="text-sm text-[#1A1A1A]">
-              <span className="font-medium">Sigue:</span> Cuando {nombre} pague el anticipo, pega aquí el comprobante.
+              <span className="font-medium">Sigue:</span> Cuando {nombre} pague {(vista.estado.anticipoFalta ?? 0) > 0 && vista.estado.anticipoConSoporte ? 'lo que falta del anticipo' : 'el anticipo'}, pega aquí el comprobante.
             </p>
           )}
 
@@ -352,7 +360,7 @@ export function HojaConfirmacion({ vista, onCerrar, onConfirmado, motivoAutoriza
     fechaRegreso: vista.viaje.fechaRegreso,
     composicion: vista.viaje.composicion,
     // La tarifa única no se nombra en el mensaje: el servidor tampoco la nombra.
-    tarifaNombre: tarifa?.itinerarioId ? tarifa.nombre : null,
+    tarifaNombre: tarifa?.itinerarioId ? (tarifa.nombreCliente !== undefined ? tarifa.nombreCliente : tarifa.nombre) : null,
     total,
     cuotas: normalizarCuotas(cuotas),
     fechaMinimo: v.fechaMinimo,

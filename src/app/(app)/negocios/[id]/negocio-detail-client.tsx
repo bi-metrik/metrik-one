@@ -57,6 +57,7 @@ import type { EtapaNoAplica } from '@/lib/negocios/ruta-descartada-negocio'
 import { MOTIVOS_PAUSA, MAX_DIAS_PAUSA, MAX_PAUSAS } from '@/lib/negocios/constants'
 import type { ConfigSeguimiento } from '@/lib/negocios/seguimiento'
 import type { CierreParaCerrar } from '@/lib/viaje/cierre-viaje'
+import { textoAvanceConAviso } from '@/lib/viaje/confirmacion'
 import { siguienteEtapaPorDefecto } from '@/lib/negocios/flujo'
 import { soloLecturaPorDatoLleno } from '@/lib/negocios/editable-si-vacio'
 import { completoCierraLaEdicion } from '@/lib/negocios/cierre-por-tipo'
@@ -91,6 +92,15 @@ import { LecturasProvider } from '@/lib/negocios/lecturas-contexto'
 import { rutaRepositorioNegocio } from '@/lib/almacenamiento/referencia'
 import { corregirLecturaDudosa } from '@/lib/actions/lectura-dudosa-actions'
 import { useIntencion } from '@/hooks/use-intencion'
+
+/**
+ * QA G14 (2026-11-03): el avance a mano que pasa con algo pendiente («Faltan $X del anticipo.», regla
+ * de Edgar) se anuncia en ámbar, no en verde, para que el equipo lo vea.
+ */
+function avisarAvance(texto: string, aviso: string | null | undefined) {
+  if (aviso) toast.warning(texto)
+  else toast.success(texto)
+}
 
 // Cada bloque y cada modal baja en su propio chunk, solo si este negocio lo pinta.
 // Antes iban todos en un chunk de ~484 KB que bajaba entero para abrir cualquier ficha
@@ -990,7 +1000,7 @@ function SelectorEtapa({
         setConfirmarModal(null)
         // El destino REAL lo resuelve el routing en el server; el toast lo nombra
         // (siguienteEtapa por orden puede no ser el destino cuando el routing salta).
-        toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`)
+        avisarAvance(textoAvanceConAviso(`Avanzado a: ${result.etapaDestinoNombre ?? siguienteEtapa.nombre}`, result.aviso), result.aviso)
         return true
       }
       return false
@@ -1054,7 +1064,7 @@ function SelectorEtapa({
         toast.error('La carpeta quedó guardada, pero el negocio no avanzó: ' + result.error)
         return false
       }
-      toast.success(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      avisarAvance(textoAvanceConAviso(`Carpeta guardada. Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`, result.aviso), result.aviso)
       return true
     })
   }
@@ -1092,7 +1102,7 @@ function SelectorEtapa({
         toast.error('El motivo quedó guardado, pero el negocio no avanzó: ' + result.error)
         return false
       }
-      toast.success(`Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`)
+      avisarAvance(textoAvanceConAviso(`Avanzado a: ${result.etapaDestinoNombre ?? nombreEtapa}`, result.aviso), result.aviso)
       return true
     })
   }
