@@ -13,6 +13,7 @@ import {
 import { referenciaEnlaceCobro } from './referencia-enlace'
 import { anclaDeFila, columnasDeAncla, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
 import { pctRetencionIvaDelEspacio, retencionIvaDeCuota } from './retencion-iva'
+import { separarPorEpoca } from '@/lib/valida-cda/cancelada'
 
 /** Cuánto vive un enlace desde que se genera. El ciclo manual de los CDA: se manda el 20, vence el 27. */
 export const DIAS_VIGENCIA_ENLACE = 7
@@ -35,6 +36,10 @@ export const DIAS_VIGENCIA_ENLACE = 7
  * cliente pagador es responsable de IVA, el enlace sale por el saldo MENOS la retención, y el cobro
  * programado queda con `monto` = el neto y `retencion_iva` = la retención, en «certificado
  * pendiente». Al pagarse, el reparto FIFO cuenta las dos cosas y la cuota queda en cero.
+ *
+ * Valida de los CDA (Términos v1.5, PR B del 4-nov-2026): una cuota anulada por la 2.5 no lleva enlace, y
+ * el reparto se hace dentro del plan de la cuota (`separarPorEpoca`): después de una reactivación (11.4)
+ * el pago del plan nuevo no tapa la cartera ni la cartera cuenta como pago del plan nuevo.
  */
 
 export type ResultadoEnlaceCuota =
@@ -68,12 +73,13 @@ export async function generarEnlacePagoCuota(
 
   const cuota = await db
     .from('plan_cobro_cuotas')
-    .select('id, numero, monto, iva, fecha_vencimiento, concepto_detalle, plan_cobro_id')
+    .select('id, numero, monto, iva, fecha_vencimiento, concepto_detalle, plan_cobro_id, anulada_at')
     .eq('id', p.cuotaId)
     .eq('workspace_id', p.workspaceId)
     .maybeSingle()
   if (cuota.error) return { ok: false, error: `No se pudo leer la cuota: ${cuota.error.message}` }
   if (!cuota.data) return { ok: false, error: 'Cuota no encontrada.' }
+  if (cuota.data.anulada_at) return { ok: false, error: `La cuota ${cuota.data.numero} está anulada: no se cobra.` }
 
   const plan = await db
     .from('planes_cobro')
@@ -88,9 +94,8 @@ export async function generarEnlacePagoCuota(
   const negocioId = ancla.tipo === 'negocio' ? ancla.id : null
   const suscripcionId = ancla.tipo === 'suscripcion' ? ancla.id : null
 
-  const contrato = await filtrarPorAncla(db.from('servicios_contratados').select('id'), ancla)
+  const contrato = await filtrarPorAncla(db.from('servicios_contratados').select('id, reactivada_desde, reactivacion_cobro_id'), ancla)
     .eq('workspace_id', p.workspaceId)
-    .limit(1)
   if (contrato.error) return { ok: false, error: `No se pudo leer el contrato: ${contrato.error.message}` }
   if ((contrato.data ?? []).length === 0) {
     return { ok: false, error: 'Esta cuota no es de un contrato de servicio: el cliente no tiene dónde ver el enlace.' }
@@ -98,13 +103,18 @@ export async function generarEnlacePagoCuota(
 
   // Las cuotas de TODOS los planes del negocio (o de la suscripción) y todos sus cobros: el reparto
   // FIFO los necesita.
-  const planes = await filtrarPorAncla(db.from('planes_cobro').select('id'), ancla).eq('workspace_id', p.workspaceId)
+  const planes = await filtrarPorAncla(db.from('planes_cobro').select('id, fecha_inicio'), ancla).eq('workspace_id', p.workspaceId)
   if (planes.error) return { ok: false, error: `No se pudieron leer los planes: ${planes.error.message}` }
-  const idsPlan = ((planes.data ?? []) as { id: string }[]).map((x) => x.id)
+  const filasPlan = (planes.data ?? []) as { id: string; fecha_inicio: string | null }[]
+  const idsPlan = filasPlan.map((x) => x.id)
+  const inicioDePlan = new Map(filasPlan.map((x) => [x.id, x.fecha_inicio]))
+  const filasContrato = (contrato.data ?? []) as { reactivada_desde?: string | null; reactivacion_cobro_id?: string | null }[]
+  const reactivadaDesde = filasContrato.map((c) => c.reactivada_desde).find((x): x is string => !!x) ?? null
+  const cobrosReactivacion = new Set(filasContrato.map((c) => c.reactivacion_cobro_id).filter((x): x is string => !!x))
 
   const cuotas = await db
     .from('plan_cobro_cuotas')
-    .select('id, numero, tipo, monto, fecha_vencimiento, concepto_detalle')
+    .select('id, numero, tipo, monto, fecha_vencimiento, concepto_detalle, plan_cobro_id, anulada_at')
     .in('plan_cobro_id', idsPlan)
     .eq('workspace_id', p.workspaceId)
   if (cuotas.error) return { ok: false, error: `No se pudieron leer las cuotas: ${cuotas.error.message}` }
@@ -143,8 +153,17 @@ export async function generarEnlacePagoCuota(
       }
     : null
 
-  const cuotasFifo: CuotaDeServicio[] = (
-    (cuotas.data ?? []) as { id: string; numero: number; tipo: string; monto: number | string; fecha_vencimiento: string; concepto_detalle: string | null }[]
+  const cuotasTodas = (
+    (cuotas.data ?? []) as {
+      id: string
+      numero: number
+      tipo: string
+      monto: number | string
+      fecha_vencimiento: string
+      concepto_detalle: string | null
+      plan_cobro_id?: string | null
+      anulada_at?: string | null
+    }[]
   ).map((c) => ({
     cuotaId: c.id,
     numero: c.numero,
@@ -154,13 +173,22 @@ export async function generarEnlacePagoCuota(
     concepto: c.concepto_detalle,
     enlacePagoUrl: null,
     enlacePagoExpira: null,
+    anulada: !!c.anulada_at,
+    planFechaInicio: c.plan_cobro_id ? (inicioDePlan.get(c.plan_cobro_id) ?? null) : null,
   }))
   // Mismo criterio de `mis_cobros_de_servicio`: anulado > sin fecha (programado) > pagado.
-  const cobrosFifo: CobroRecibido[] = filasCobro.map((c) => ({
+  const cobrosTodos = filasCobro.map((c) => ({
     monto: Number(c.monto ?? 0),
     retencionIva: Number(c.retencion_iva ?? 0),
-    estado: c.anulado_at ? 'anulado' : c.fecha === null ? 'programado' : 'pagado',
+    estado: (c.anulado_at ? 'anulado' : c.fecha === null ? 'programado' : 'pagado') as CobroRecibido['estado'],
+    planFechaInicio: c.plan_cobro_id ? (inicioDePlan.get(c.plan_cobro_id) ?? null) : null,
+    esReactivacion: cobrosReactivacion.has(c.id),
   }))
+  // El reparto, dentro del plan de la cuota: el vigente o el anterior a la reactivación (cartera).
+  const epocas = separarPorEpoca({ cuotas: cuotasTodas, cobros: cobrosTodos, reactivadaDesde })
+  const epoca = epocas.anterior.cuotas.some((c) => c.cuotaId === cuota.data.id) ? epocas.anterior : epocas.vigente
+  const cuotasFifo: CuotaDeServicio[] = epoca.cuotas
+  const cobrosFifo: CobroRecibido[] = epoca.cobros
 
   // La configuración del espacio: la retención de IVA que recibe (y, más abajo, la pasarela).
   const ws = await db.from('workspaces').select('config_extra').eq('id', p.workspaceId).maybeSingle()

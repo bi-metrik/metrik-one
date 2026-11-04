@@ -1,0 +1,53 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`lo que se dice > el correo de la Cancelada, con cartera y con períodos anulados 1`] = `
+"Hola.
+
+Desde el 31 de diciembre de 2026, la suscripción de Valida de CENTRO DE DIAGNOSTICO AUTOMOTOR DEL CAQUETA LIMITADA está Cancelada por falta de pago (cláusula 11.3 de los Términos).
+
+Mientras esté Cancelada, tu equipo puede entrar a la plataforma, pero no puede hacer consultas ni ver el historial ni los reportes.
+
+Tu información está guardada íntegra. Durante 10 años puedes pedir, sin costo, la exportación de tu bitácora y de tus reportes escribiendo desde un correo registrado a mauricio.moreno@metrik.com.co; la entregamos dentro de los 5 días hábiles siguientes (cláusula 9.3).
+
+Para reactivarla, la persona designada paga un período con el enlace de pago de la sección Suscripción de MéTRIK ONE: https://cda-caqueta.metrikone.co/suscripcion?tab=pagos. Tu nueva fecha de renovación será el día del pago y, con el pago, vuelven las consultas, el historial y los reportes (cláusula 11.4).
+
+Siguen pendientes los períodos que empezaron antes del 1 de diciembre de 2026 y no se pagaron (cláusula 11.7): el período del 23 de octubre al 22 de noviembre de 2026 ($150.000) y el período del 23 de noviembre al 22 de diciembre de 2026 ($150.000). No generan intereses ni recargos, y pagarlos no es condición para reactivar la suscripción.
+
+Los períodos que empezaron desde el 1 de diciembre de 2026 y no se pagaron no se cobran (cláusula 2.5).
+
+Si tienes alguna duda, escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.
+
+METRIK IA S.A.S."
+`;
+
+exports[`lo que se dice > el correo de la tarjeta afirma el pedido, no el resultado 1`] = `
+"Hola.
+
+Como la suscripción de Valida de CDA PRUEBA S.A.S. quedó Cancelada el 31 de diciembre de 2026, le pedimos a la pasarela de pagos (ePayco) eliminar la tarjeta terminada en 4242 que estaba registrada para el pago automático (cláusula 11.3 de los Términos). Desde ese día no se hace ningún cobro automático a esa tarjeta.
+
+Si reactivas la suscripción y quieres volver al pago automático, puedes registrar una tarjeta de nuevo en la sección Suscripción de MéTRIK ONE.
+
+Si tienes alguna duda, escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.
+
+METRIK IA S.A.S."
+`;
+
+exports[`lo que se dice > la pantalla, para la persona designada y para los demás 1`] = `
+{
+  "boton": "Reactivar: pagar un período",
+  "estado": "La suscripción está Cancelada desde el 31 de diciembre por falta de pago (cláusula 11.3 de los Términos). Mientras esté Cancelada no se pueden hacer consultas ni ver el historial ni los reportes en la plataforma.",
+  "informacion": "Tu información está guardada íntegra. Durante 10 años puedes pedir, sin costo, la exportación de tu bitácora y de tus reportes escribiendo desde un correo registrado a mauricio.moreno@metrik.com.co (cláusula 9.3).",
+  "reactivar": "Para reactivarla, paga un período: corre desde el día del pago, que pasa a ser tu nueva fecha de renovación, y con el pago vuelven las consultas, el historial y los reportes (cláusula 11.4).",
+  "titulo": "La suscripción de Valida está Cancelada",
+}
+`;
+
+exports[`lo que se dice > la pantalla, para la persona designada y para los demás 2`] = `
+{
+  "boton": null,
+  "estado": "La suscripción está Cancelada desde el 31 de diciembre por falta de pago (cláusula 11.3 de los Términos). Mientras esté Cancelada no se pueden hacer consultas ni ver el historial ni los reportes en la plataforma.",
+  "informacion": "Tu información está guardada íntegra. Durante 10 años puedes pedir, sin costo, la exportación de tu bitácora y de tus reportes escribiendo desde un correo registrado a mauricio.moreno@metrik.com.co (cláusula 9.3).",
+  "reactivar": "La persona designada por tu empresa puede reactivarla pagando un período desde la sección Suscripción.",
+  "titulo": "La suscripción de Valida está Cancelada",
+}
+`;

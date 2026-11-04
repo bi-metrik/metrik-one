@@ -36,6 +36,8 @@ import { PlanSuspendidoPorReverso } from './plan-suspendido-reverso';
 import { COOKIE_POSPONER_V15, esTerminosV15, pospuestaHoy, textosPantallaV15 } from '@/lib/valida-cda/terminos-v1-5';
 import { datosPantallaV15 } from '@/lib/valida-cda/terminos-v1-5-servidor';
 import { ConsultasExigenTerminosV15, TerminosV15Cda } from './terminos-v15-cda';
+import { TEXTO_SIN_SUSCRIPCION_VIGENTE } from '@/lib/valida-cda/cancelada';
+import { SuscripcionCancelada } from './suscripcion-cancelada';
 
 export const dynamic = 'force-dynamic';
 // El cargue masivo despierta su trabajador con `after()` desde las acciones de esta página
@@ -72,6 +74,24 @@ export default async function ValidaPage({ searchParams }: Props) {
         description="Sin esa verificación Valida no se abre. Intenta de nuevo en un momento."
       />
     );
+  }
+  // Contratos de Valida, todos terminados o cancelados: el módulo no opera (y no queda gratis).
+  if (entrada.tipo === 'sin_contrato_vigente') {
+    return <EmptyState title={TEXTO_SIN_SUSCRIPCION_VIGENTE.titulo} description={TEXTO_SIN_SUSCRIPCION_VIGENTE.detalle} />;
+  }
+  // Cancelada (Términos v1.5, 11.3): la guardada por el cron o, con la v1.5, el día 31 que el cron todavía
+  // no guardó. Manda sobre todo lo demás: ni consultas, ni historial, ni términos por aceptar; solo cómo
+  // pedir la información y cómo volver (11.4).
+  if (entrada.tipo === 'ok') {
+    let canceladaDesde = entrada.canceladaDesde;
+    if (!canceladaDesde && hablaConLaV15(entrada)) {
+      const m = await moraValidaCda();
+      if (m.tipo === 'ok' && m.mora.estado === 'suspendido') canceladaDesde = m.mora.corteDesde;
+    }
+    if (canceladaDesde) {
+      const designada = await puedeVerPagosCda(entrada);
+      return <SuscripcionCancelada canceladaDesde={canceladaDesde} puedeReactivar={designada && !entrada.impersonando} />;
+    }
   }
   if (entrada.tipo === 'ok' && entrada.estado.estado === 'sin_documentos') {
     return (

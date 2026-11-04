@@ -122,6 +122,27 @@ describe('los estados', () => {
     expect(r.mensaje).not.toMatch(/!|¡|urgente/i)
   })
 
+  it('Cancelada (Términos v1.5, 11.3): manda sobre la mora y dice cómo volver (11.4), sin montos', () => {
+    const r = resumenEstado({
+      terminos: APROBADA,
+      pago: pendiente('2026-10-27'),
+      mora: { estado: 'suspendido', vencio: '2026-11-30', corteDesde: '2026-12-31' },
+      hoy: '2026-12-31',
+      transicion: '2026-12-01',
+      canceladaDesde: '2026-12-31',
+    })
+    expect(r).toEqual({
+      estado: 'cancelada',
+      tono: 'rojo',
+      chip: 'Cancelada',
+      mensaje:
+        'La suscripción está Cancelada desde el 31-dic: no se pueden hacer consultas ni ver el historial. Se reactiva pagando un período, y tu nueva fecha de renovación será el día del pago.',
+      requiereAccion: true,
+    })
+    // La licencia de ONE no tiene Cancelada.
+    expect(resumenEstado({ terminos: APROBADA, pago: null, mora: { estado: 'al_dia' }, hoy: '2026-12-31', producto: 'one', canceladaDesde: '2026-12-31' }).estado).not.toBe('cancelada')
+  })
+
   it('la licencia de ONE no se restringe ni se pausa: vencida es vencida, sin prometer ni amenazar', () => {
     for (const mora of [
       { estado: 'en_mora' as const, vencio: '2026-10-05', restringeDesde: null, corteDesde: '2026-11-05' },

@@ -65,9 +65,14 @@
  * vencimiento (el 27, que no se toca en las filas): es su fecha de renovación (`fechasDePagoV15`): «paga
  * antes del 23-dic» para un período v1.5 y «paga a más tardar el 30-nov» para uno de la transición.
  *
- * Pendiente con fecha (antes del 31-dic-2026, la primera Cancelada posible por la 11.7): «Cancelada»
- * todavía es el cálculo `suspendido` (pantalla «Valida está pausada»), y la reactivación de la 11.4 (la
- * nueva fecha de renovación es el día del pago) no está construida en el cobro. Es el PR B del diseño.
+ * ## 6. La Cancelada guardada (PR B, 2026-11-04)
+ *
+ * El cálculo `suspendido` (D+31) solo dispara la Cancelada: el cron (paso 8e, `cancelada-servidor.ts`) la
+ * guarda en el contrato (`cancelada_desde`, contrato `pausado`) el mismo día, desde el 31-dic-2026 (la
+ * primera posible, por la 11.7), y desde ahí manda lo guardado: la pantalla de Cancelada y la reactivación
+ * de la 11.4 (plan nuevo desde el día del pago) viven en `cancelada.ts`. Con la v1.5, el `suspendido` que el
+ * cron todavía no guardó (las horas antes de la corrida) ya se muestra y se niega como Cancelada; «Valida
+ * está pausada» (`mensajeSuspendidoPorMora`) solo queda para los contratos sin la v1.5.
  */
 
 import type { ProximoPago } from './pago-pendiente'

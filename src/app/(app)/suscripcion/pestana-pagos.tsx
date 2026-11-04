@@ -6,6 +6,8 @@ import { fechaCorta, type CuotaConEstado, type EstadoCuota } from '@/lib/valida-
 import { fechaDiaMes, fechasDePagoV15, textoPagaHasta } from '@/lib/valida-cda/plazos'
 import type { PagoRecibidoCda } from '@/lib/valida-cda/pago-servidor'
 import type { ResultadoPagosCda } from '@/lib/valida-cda/pestanas-servidor'
+import { TEXTO_CARTERA } from '@/lib/valida-cda/cancelada'
+import { periodoEnLetrasConAnio } from '@/lib/valida-cda/aviso-suspendida'
 
 /**
  * La pestaña Pagos de `/suscripcion`: las cuotas del contrato (periodo, valor, vencimiento, estado,
@@ -42,8 +44,11 @@ export function PestanaPagos({
   opciones = null,
   pagoAutomatico = null,
   transicion = null,
+  reactivar = null,
 }: {
   carga: ResultadoPagosCda
+  /** «Reactivar la suscripción» (11.4) con la suscripción Cancelada: va primero y reemplaza las formas de pagar. */
+  reactivar?: React.ReactNode
   /** La vigencia de la v1.5 (`contextoSuscripcion().transicion`): la fecha de pago en lugar del vencimiento (D7). */
   transicion?: string | null
   opciones?: React.ReactNode
@@ -55,6 +60,7 @@ export function PestanaPagos({
 
   return (
     <div className="space-y-5">
+      {reactivar}
       {/* «Pagar el mes» y «Pagar 12 meses» (Plan Anual), cuando el contrato los tiene encendidos. */}
       {opciones}
       {pagoAutomatico}
@@ -95,6 +101,8 @@ export function PestanaPagos({
         )}
       </section>
 
+      {(carga.cartera ?? []).length > 0 && <Cartera cuotas={carga.cartera ?? []} />}
+
       <section data-pagos-cda className="rounded-lg border border-border bg-white p-4">
         <p className="text-sm font-semibold text-tinta">Pagos recibidos</p>
         {carga.pagos.length === 0 ? (
@@ -121,6 +129,34 @@ export function PestanaPagos({
         )}
       </section>
     </div>
+  )
+}
+
+/**
+ * La cartera (Términos v1.5, 11.7): períodos que empezaron antes del 1-dic-2026 y siguen sin pagar después de
+ * la Cancelada o de la reactivación. Sin intereses ni recargos (2.5) y sin condicionar nada: solo se ve y se
+ * paga. Los períodos desde el 1-dic que no se pagaron no aparecen: no se cobran.
+ */
+function Cartera({ cuotas }: { cuotas: CuotaConEstado[] }) {
+  return (
+    <section data-cartera-cda className="rounded-lg border border-border bg-white p-4">
+      <p className="text-sm font-semibold text-tinta">{TEXTO_CARTERA.titulo}</p>
+      <p className="mt-1 text-xs text-tinta-suave">{TEXTO_CARTERA.detalle}</p>
+      <ul className="mt-3 space-y-2 text-sm text-tinta">
+        {cuotas.map((c) => (
+          <li
+            key={`cartera-${c.cuotaId ?? c.numero}-${c.fechaVencimiento}`}
+            data-cartera-cuota={c.numero}
+            className="flex flex-col gap-2 border-t border-border pt-2 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <span>
+              Período {periodoEnLetrasConAnio(c) ?? `de la cuota ${c.numero}`} · <span className="font-semibold">{formatCOP(c.saldo)}</span>
+            </span>
+            {c.enlacePago ? <BotonPagar href={c.enlacePago} className="text-xs" /> : <span className="text-xs text-tinta-suave">{TEXTO_CARTERA.sinEnlace}</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
