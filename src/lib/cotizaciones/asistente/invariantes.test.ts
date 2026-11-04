@@ -51,6 +51,13 @@ describe('invariantes del borrador', () => {
     expect(errores(borrador([hotel({ distribucion: [{ acomodacion: 'Triple', habitaciones: 1, personasPorHabitacion: 2 }] })])).join()).toMatch(/no está en la tabla/)
   })
 
+  it('error si una versión más alta cuesta menos (hoteles cruzados)', () => {
+    const economica = hotel({ version: 'Económica', precios: [{ acomodacion: 'Doble', personasPorHabitacion: 2, precioPorPersona: 1_200_000 }], totalCalculadoPorElModelo: 2_400_000 })
+    expect(errores(borrador([economica, hotel({})])).join()).toMatch(/Recomendada .* cuesta menos que la Económica/)
+    const enOrden = hotel({ version: 'Superior', precios: [{ acomodacion: 'Doble', personasPorHabitacion: 2, precioPorPersona: 1_200_000 }], totalCalculadoPorElModelo: 2_400_000 })
+    expect(errores(borrador([hotel({}), enOrden]))).toEqual([])
+  })
+
   it('error si las noches del hotel no son las del vuelo', () => {
     expect(errores(borrador([hotel({ noches: 4 })])).join()).toMatch(/4 noches y el vuelo da 3/)
   })

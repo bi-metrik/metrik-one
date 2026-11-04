@@ -120,11 +120,16 @@ export function validarBorrador(b: BorradorCotizacion, viajeros: Viajeros): Vali
     ...b.antesDeViajar.map((t, i): [string, string] => [`antesDeViajar[${i}]`, t])]
   for (const [k, t] of textos) if (CODIGO_OPERADOR.test(t)) error(k, `Lleva un código del operador: «${t}».`)
 
-  // El orden de las versiones sigue al precio (no se reordena: se avisa).
-  const orden = VERSIONES.filter(v => totales[v] !== undefined).map(v => totales[v] as number)
-  if (orden.some((t, i) => i > 0 && t < orden[i - 1])) {
-    aviso('versiones', 'Una versión más alta cuesta menos que la anterior.')
-  }
+  // El orden de las versiones sigue al precio. No se reordena solo: el piloto (2026-11-03) mostró que
+  // el modelo puede cruzar dos hoteles entre versiones con los totales bien sumados, y así el PDF sale
+  // con la Recomendada más barata que la Económica. Frena el PDF hasta que la asesora lo corrija.
+  const conTotal = VERSIONES.filter(v => totales[v] !== undefined)
+  conTotal.forEach((v, i) => {
+    const anterior = conTotal[i - 1]
+    if (anterior && (totales[v] as number) < (totales[anterior] as number)) {
+      error('versiones', `La ${v} (${totales[v]}) cuesta menos que la ${anterior} (${totales[anterior]}): las versiones parecen cruzadas.`)
+    }
+  })
 
   for (const d of b.dudas) if (!d.queSePusoMientras?.trim()) aviso(`duda «${d.campo}»`, 'La duda no dice qué se puso mientras tanto.')
 
