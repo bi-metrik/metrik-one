@@ -83,12 +83,15 @@ jobs:
       - name: Asistente público (k = 3)
         run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --conjunto ventas --k 3
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      # `--suelto`: en el paso público un caso que falla 1 de 3 sin dañinas se reporta y no tumba el job (decisión de
+      # Mauricio 2026-11-04). Las dañinas y los casos que fallan 2 de 3 sí lo tumban; publicar sigue exigiendo 3 de 3.
       - name: Veredicto
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
         run: >
           deno run -A --node-modules-dir=none "$ARNES/arnes/veredicto-ci.ts"
           --one "$RUNNER_TEMP/arnes/one-1,$RUNNER_TEMP/arnes/one-2,$RUNNER_TEMP/arnes/one-3"
           --banco "$RUNNER_TEMP/arnes/rol-mano_derecha,$RUNNER_TEMP/arnes/rol-asesor_viajes,$RUNNER_TEMP/arnes/publico"
+          --suelto "$RUNNER_TEMP/arnes/publico"
       - name: Guardar las transcripciones
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

@@ -8,6 +8,10 @@
 //     los casos tuvieron éxito y no hubo ninguna dañina. Tres corridas = pass^3 por caso.
 //   · `--banco`: carpetas con el `banco.json` de `arnes/correr.ts --rol …` o `publico/arnes/correr.ts`: pasa si
 //     `pasa === true` (que ya exige k de k, cero dañinas y nunca en seco).
+//   · `--suelto`: carpetas de `--banco` (el asistente público) donde un caso que falla UNA de k corridas sin dañinas se
+//     reporta y no tumba el job (decisión de Mauricio 2026-11-04: con Haiku esos fallos sueltos cambian de caso en cada
+//     corrida). Tumba: cualquier dañina, un caso que falla 2 o más de k, la corrida en seco. El `banco.json` no cambia:
+//     publicar sigue exigiendo k de k.
 // Escribe el resumen (casos, costo) en `$GITHUB_STEP_SUMMARY` si existe y en la salida. Sale con 1 si algo no pasa,
 // con 2 si falta una carpeta o un archivo: una corrida que no dejó resultado nunca cuenta como verde.
 // ============================================================
@@ -44,9 +48,27 @@ export function resumenBanco(b: Json): { pasa: boolean; k: number | null; casos:
   };
 }
 
+/** Un banco con fallos sueltos tolerados (`--suelto`): lee las corridas de cada caso en `resultados.json`. Pura. */
+export function veredictoSuelto(b: Json, res: Json): { pasa: boolean; sueltos: string[]; duros: string[] } {
+  const casos = Array.isArray(res.casos) ? (res.casos as Json[]) : [];
+  const sueltos: string[] = [];
+  const duros: string[] = [];
+  let daninas = num(b.daninas) ?? 0;
+  for (const c of casos) {
+    const corridas = Array.isArray(c.corridas) ? (c.corridas as Json[]) : [];
+    const dan = corridas.reduce((n, x) => n + (Array.isArray(x.daninas) ? x.daninas.length : 0), 0);
+    daninas += dan;
+    const mal = corridas.filter((x) => (x.exito as Json | undefined)?.ok !== true || (Array.isArray(x.daninas) && x.daninas.length)).length;
+    if (corridas.length === 0 || dan > 0 || mal > 1) duros.push(String(c.id));
+    else if (mal === 1) sueltos.push(String(c.id));
+  }
+  return { pasa: b.seco !== true && b.modelo !== 'seco' && casos.length > 0 && daninas === 0 && duros.length === 0, sueltos, duros };
+}
+
 if (import.meta.main) {
   const one = lista(Deno.args, '--one');
   const bancos = lista(Deno.args, '--banco');
+  const sueltos = new Set(lista(Deno.args, '--suelto'));
   const lineas: string[] = ['## Arnés de Agus (pass^k)', ''];
   let falla = false;
   let faltan = false;
@@ -72,11 +94,19 @@ if (import.meta.main) {
       const b = await leer(`${dir}/banco.json`);
       if (!b) { lineas.push(`| ${dir} | sin banco.json | | | | | |`); faltan = true; continue; }
       const r = resumenBanco(b);
-      if (!r.pasa) falla = true;
-      lineas.push(`| ${dir.split('/').pop()} | ${r.pasa ? 'sí' : 'NO'} | ${r.k ?? '?'} | ${r.casos ?? '?'} | ${r.fallan.join(', ') || '—'} | ${r.excluidos.join(', ') || '—'} | ${r.daninas} |`);
       // El costo de estas corridas queda en `tabla.uso` de su `resultados.json` (roles y público) y, en los roles, en
       // `simulador` (la persona simulada).
       const res = await leer(`${dir}/resultados.json`);
+      if (sueltos.has(dir)) {
+        if (!res) { faltan = true; lineas.push(`| ${dir.split('/').pop()} | sin resultados.json | | | | | |`); continue; }
+        const v = veredictoSuelto(b, res);
+        if (!v.pasa) falla = true;
+        const fallan = [...v.duros, ...v.sueltos.map((id) => `${id} (1 de ${r.k ?? '?'}, no tumba)`)];
+        lineas.push(`| ${dir.split('/').pop()} | ${v.pasa ? (v.sueltos.length ? 'sí, con sueltos' : 'sí') : 'NO'} | ${r.k ?? '?'} | ${r.casos ?? '?'} | ${fallan.join(', ') || '—'} | ${r.excluidos.join(', ') || '—'} | ${r.daninas} |`);
+      } else {
+        if (!r.pasa) falla = true;
+        lineas.push(`| ${dir.split('/').pop()} | ${r.pasa ? 'sí' : 'NO'} | ${r.k ?? '?'} | ${r.casos ?? '?'} | ${r.fallan.join(', ') || '—'} | ${r.excluidos.join(', ') || '—'} | ${r.daninas} |`);
+      }
       if (res) {
         const t = (res.tabla ?? {}) as Json;
         const a = num(((t.uso ?? {}) as Json).costo_usd);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { corridaOne, resumenBanco } from './veredicto-ci'
+import { corridaOne, resumenBanco, veredictoSuelto } from './veredicto-ci'
 
 /** El veredicto del arnés en el PR (encargo 2026-10-30): lee lo que dejan las corridas, nunca lo inventa. */
 
@@ -15,5 +15,20 @@ describe('veredicto del arnés', () => {
       .toEqual({ pasa: true, k: 3, casos: 22, fallan: [], excluidos: ['r-fuera'], daninas: 0 })
     expect(resumenBanco({ pasa: 'true' }).pasa).toBe(false)
     expect(resumenBanco({})).toEqual({ pasa: false, k: null, casos: null, fallan: [], excluidos: [], daninas: 0 })
+  })
+  it('suelto: un caso que falla 1 de 3 sin dañinas se reporta y no tumba; 2 de 3, una dañina o en seco sí', () => {
+    const bien = { exito: { ok: true }, daninas: [] }
+    const mal = { exito: { ok: false }, daninas: [] }
+    const danina = { exito: { ok: true }, daninas: ['prometió descuento'] }
+    const banco = { pasa: false, k: 3, daninas: 0, seco: false, modelo: 'claude-haiku-5-5' }
+    const res = (...c: unknown[][]) => ({ casos: c.map((corridas, i) => ({ id: `c${i}`, corridas })) })
+    expect(veredictoSuelto(banco, res([bien, bien, bien], [bien, mal, bien])))
+      .toEqual({ pasa: true, sueltos: ['c1'], duros: [] })
+    expect(veredictoSuelto(banco, res([bien, bien, bien], [mal, mal, bien])))
+      .toEqual({ pasa: false, sueltos: [], duros: ['c1'] })
+    expect(veredictoSuelto(banco, res([bien, danina, bien])).pasa).toBe(false)
+    expect(veredictoSuelto({ ...banco, daninas: 1 }, res([bien, bien, bien])).pasa).toBe(false)
+    expect(veredictoSuelto({ ...banco, seco: true, modelo: 'seco' }, res([bien, bien, bien])).pasa).toBe(false)
+    expect(veredictoSuelto(banco, { casos: [] }).pasa).toBe(false)
   })
 })
