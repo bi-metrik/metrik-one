@@ -20,7 +20,7 @@ import { huecos } from '../../wa-entendimiento-reglas.ts';
 import type { CampoEntendible } from '../../wa-entendimiento-reglas.ts';
 import { cargarEnExistente, valorLegible } from '../../wa-carga-reglas.ts';
 import type { MensajeEntrega } from '../../wa-guardianes.ts';
-import { lineaDuda, validarCarga } from './extraccion.ts';
+import { SLUGS_CONTEO, lineaDuda, menoresSinContar, validarCarga } from './extraccion.ts';
 import type { Quitado, SugeridoAgente } from './extraccion.ts';
 import { textoComparable } from '../../perfil-contacto.ts';
 import type { HechoPerfil } from '../../perfil-contacto.ts';
@@ -362,10 +362,21 @@ export function propuestoDe(previo: unknown): Record<string, unknown> {
   return Object.fromEntries(Object.entries(planPrevio(previo).sugeridos).map(([k, s]) => [k, s.valor]));
 }
 
-/** La marca corta de lo que no está escrito tal cual: el comercial lo revisa antes de tocar. Pura. */
-function marcaComo(s: SugeridoAgente): string {
-  const como = s.como ?? (s.deduccion ? 'deducido' : undefined);
-  return como ? ` (${como})` : '';
+/** Cómo salió un sugerido si no está escrito tal cual (sin `como` pero con razón, deducido). Pura. */
+function comoDe(s: SugeridoAgente): string | undefined {
+  return s.como ?? (s.deduccion ? 'deducido' : undefined);
+}
+
+/**
+ * La línea del resumen de un campo que cambiaría. Lo que no está escrito tal cual lleva su marca corta; un conteo de
+ * pasajeros deducido o calculado va además resaltado (⚠️ y negrilla de WhatsApp): de él sale cuántos se cotizan, y el
+ * 2026-11-03 un «Niños: 0 (deducido)» pasó sin que nadie lo viera. Pura.
+ */
+export function lineaEntendido(slug: string, etiqueta: string, legible: string, s: SugeridoAgente): string {
+  const como = comoDe(s);
+  if (!como) return `${etiqueta}: ${legible}`;
+  if ((SLUGS_CONTEO as readonly string[]).includes(slug)) return `⚠️ *${etiqueta}: ${legible}* (${como}, confírmalo)`;
+  return `${etiqueta}: ${legible} (${como})`;
 }
 
 const sinValor = (v: unknown) => v === undefined || v === null || v === '';
@@ -401,6 +412,11 @@ export function planDeCarga(p: {
   for (const k of Object.keys(v.sugeridos)) delete quitar[k];
   // Del viaje solo se quita lo que el viaje tiene: lo que solo estaba propuesto ya salió de `sugeridos`.
   for (const k of Object.keys(quitar)) if (sinValor(yaTiene[k])) delete quitar[k];
+  // La invariante de menores también sobre la unión: un 0 de una propuesta anterior no vuelve a entrar si viajan menores.
+  const unido = { ...yaTiene, ...Object.fromEntries(Object.entries(sugeridos).map(([k, s]) => [k, s.valor])) };
+  if (menoresSinContar(v.hayMenores, unido)) {
+    for (const k of ['ninos', 'infantes']) if (sugeridos[k] && String(sugeridos[k].valor).trim() === '0') delete sugeridos[k];
+  }
 
   // Lo que cambiaría (en seco, como `cargar`): el resumen no repite lo que el viaje ya tiene.
   const meta = { entrega_id: 'agente', en: p.ahoraIso, origenDe: () => 'mensaje' as const };
@@ -416,7 +432,7 @@ export function planDeCarga(p: {
   }
   const entendido = campos.flatMap((f) => {
     const et = f.label ?? f.slug;
-    if (cambia.includes(f.slug)) return [`${et}: ${valorLegible(f, sugeridos[f.slug].valor)}${marcaComo(sugeridos[f.slug])}`];
+    if (cambia.includes(f.slug)) return [lineaEntendido(f.slug, et, valorLegible(f, sugeridos[f.slug].valor), sugeridos[f.slug])];
     if (quitados.includes(f.slug)) return [`${et}: se quita (${quitar[f.slug].razon ?? `«${quitar[f.slug].frase}»`})`];
     if (noQuitados.includes(f.slug)) return [`${et}: no lo quito, lo puso alguien en ONE (cámbialo allí)`];
     return [];
