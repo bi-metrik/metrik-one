@@ -11,6 +11,7 @@ import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/poli
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor';
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
 import { entradaValidaCda, exigenciaV15Cda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
+import { hablaConLaV15, periodoEnPalabras } from '@/lib/valida-cda/plazos';
 import ValidaClient from './valida-client';
 import { leerSaldoValida } from '@/lib/valida/credencial-servidor';
 import { registrarVistaAvisoModificacion } from '@/lib/valida-cda/aviso-modificacion-servidor';
@@ -205,6 +206,10 @@ export default async function ValidaPage({ searchParams }: Props) {
   const enPausa = estadoMora?.estado === 'suspendido' ? estadoMora : null;
   // Restringido (11.1): sin consultas nuevas, con el historial y las descargas abiertos.
   const restringido = estadoMora?.estado === 'restringido' ? estadoMora : null;
+  // Con la v1.5 (CDA), los textos de la cláusula 11: «Suspendida por pago» y el período impago.
+  const textosV15 = hablaConLaV15(entrada);
+  const pagoPendiente = mora.tipo === 'ok' && mora.pagoDelServicio?.estado === 'pendiente' ? mora.pagoDelServicio : null;
+  const avisoGraciaV15 = textosV15 ? { periodo: pagoPendiente ? periodoEnPalabras(pagoPendiente) : null } : null;
 
   // Modo vitrina (workspaces Valida-only): oculta la asociación a negocio en
   // consulta puntual / carga masiva / historial y quita la columna negocio_codigo
@@ -272,6 +277,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       ? franjaValida(
           suscripcion.resumen,
           suscripcion.pago?.estado === 'ok' ? suscripcion.pago.pago : null,
+          suscripcion.transicion,
         )
       : null;
   // El aviso del plazo de los Términos lo ven TODOS los usuarios del espacio: quien no es la persona
@@ -288,8 +294,8 @@ export default async function ValidaPage({ searchParams }: Props) {
         {suspension && <PlanSuspendidoPorReverso frases={frasesSuspension(suspension)} puedePagar={vePagos} />}
         {avisoPlazo}
         {avisoModificacion}
-        {enMora && <AvisoMora mora={enMora} pagar={autogestion && vePagos} />}
-        {restringidoVisible && <AvisoRestriccion mora={restringidoVisible} vePagos={vePagos} />}
+        {enMora && <AvisoMora mora={enMora} pagar={autogestion && vePagos} v15={avisoGraciaV15} />}
+        {restringidoVisible && <AvisoRestriccion mora={restringidoVisible} vePagos={vePagos} v15={textosV15} />}
         {franja && <FranjaSuscripcion texto={franja} />}
       </div>
     ) : null;
@@ -305,7 +311,7 @@ export default async function ValidaPage({ searchParams }: Props) {
       consultasEnPausa={enPausa ? <PausaPorMora mora={enPausa} vePagos={vePagos} /> : null}
       consultasRestringidas={
         restringido || suspension ? (
-          <ConsultasRestringidas />
+          <ConsultasRestringidas v15={textosV15 && !suspension} />
         ) : v15Exigida ? (
           <ConsultasExigenTerminosV15 mensaje={v15Exigida} />
         ) : null

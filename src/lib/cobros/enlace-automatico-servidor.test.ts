@@ -302,7 +302,7 @@ describe('planes que cobran con la tarjeta guardada (pasarela epayco)', () => {
       const m = r.enviar.mock.calls.map((c) => c[0]).find((x) => x.subject.startsWith('No pudimos'))!
       expect(m.subject).toBe('No pudimos cobrar tu período a la tarjeta terminada en 1234: puedes pagarlo en línea')
       expect(m.text).toMatch(/No pudimos cobrar el período del \d+ de \p{L}+ al \d+ de \p{L}+ de \d{4} de CDA Pruebas a tu tarjeta terminada en 1234\. Puedes pagarlo en línea desde la sección Suscripción de MéTRIK ONE\./u)
-      expect(m.text).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026. Si no se paga, las consultas nuevas se pausan desde el 6 de diciembre de 2026.')
+      expect(m.text).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026. Si no se paga, la suscripción queda Suspendida por pago desde el 6 de diciembre de 2026.')
       expect(m.html).toContain('Reintentamos el cobro a tu tarjeta el 26 de septiembre de 2026.')
     })
   })

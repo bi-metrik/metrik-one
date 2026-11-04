@@ -563,7 +563,7 @@ describe('la v1.5 publicada: transición de la cláusula 11.7 (bloqueante de Ver
     })
     escenario.hoy = '2026-12-06'
     const r = await validaCdaPermiteConsultar()
-    expect(!r.ok && r.error).toContain('restringidas desde el 6-dic')
+    expect(!r.ok && r.error).toContain('Suspendida por pago desde el 6 de diciembre')
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
     escenario.hoy = '2026-12-30'
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })

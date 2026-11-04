@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { designacionDelEspacio } from '@/lib/valida-api/terminos-servidor'
 import { leerProximoPagoCda, type LecturaPago } from '@/lib/valida-cda/pago-servidor'
 import { moraValidaCda } from '@/lib/valida-cda/puerta'
-import { estadoMora, type EstadoMora } from '@/lib/valida-cda/plazos'
+import { estadoMora, hablaConLaV15, type EstadoMora } from '@/lib/valida-cda/plazos'
 import { entradaSuscripcion, type EntradaOk, type ProductoSuscripcion } from './entrada-servidor'
 import { suscripcionEnPrueba } from './prueba-servidor'
 import { puedeOperarSuscripcion, puedeVerSuscripcion, resumenEstado, tonoDelPunto, type ResumenEstado, type TerminosDeEntrada } from './estado'
@@ -69,6 +69,11 @@ export type ContextoSuscripcion =
       contrato: ContratoSuscripcion
       pago: LecturaPago | null
       mora: EstadoMora
+      /**
+       * La vigencia de la v1.5 si los textos hablan su idioma (`hablaConLaV15`): la fecha de renovación en
+       * lugar del vencimiento y «Suspendida por pago». `null` en la licencia de ONE y sin la v1.5.
+       */
+      transicion: string | null
       resumen: ResumenEstado
     }
 
@@ -138,6 +143,8 @@ async function resolver(): Promise<ContextoSuscripcion> {
       ? { estado: 'aprobada' }
       : { estado: 'pendiente', plazoHasta: entrada.plazoTerminos, enPlazo: entrada.enPlazo }
 
+  const transicion = producto === 'valida_cda' && hablaConLaV15(entrada) ? entrada.transicionDesde : null
+
   return {
     tipo: 'ok',
     producto,
@@ -168,12 +175,14 @@ async function resolver(): Promise<ContextoSuscripcion> {
     },
     pago,
     mora,
+    transicion,
     resumen: resumenEstado({
       terminos,
       pago: pago && pago.estado === 'ok' ? pago.pago : null,
       mora,
       hoy: entrada.hoy,
       producto,
+      transicion,
     }),
   }
 }

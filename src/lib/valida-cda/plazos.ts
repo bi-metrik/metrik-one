@@ -56,9 +56,18 @@
  * aviso desde el 24-dic, Suspendida desde el 29-dic, Cancelada desde el 23-ene-2027. Una cuota sin período
  * en el concepto sigue midiéndose por su vencimiento (no hay de dónde sacar la renovación).
  *
- * Pendiente con fecha (antes del 23-ene-2027, la primera Cancelada posible): los textos todavía dicen
- * «restringidas» y «pausada», no «Suspendida por pago» y «Cancelada», y la reactivación de la 11.4 (la
- * nueva fecha de renovación es el día del pago) no está construida en el cobro.
+ * ## 5. Lo que se dice con la v1.5 (diseño del 4-nov-2026, D6 y D7, PR A)
+ *
+ * Con la v1.5 registrada (`transicion` no nula), los textos hablan el idioma de la cláusula 11: «Suspendida
+ * por pago» desde D+6 y «Cancelada» desde D+31 (`textoAvisoGraciaV15`, `textoAvisoSuspendida`,
+ * `mensajeSuspendidaPorPago`, `textoConsultasSuspendidas`). Sin la v1.5 (autoservicio, o un contrato que
+ * solo tiene la v1.4) siguen los de siempre. Lo que se muestra del pago de una cuota tampoco es su
+ * vencimiento (el 27, que no se toca en las filas): es su fecha de renovación (`fechasDePagoV15`): «paga
+ * antes del 23-dic» para un período v1.5 y «paga a más tardar el 30-nov» para uno de la transición.
+ *
+ * Pendiente con fecha (antes del 31-dic-2026, la primera Cancelada posible por la 11.7): «Cancelada»
+ * todavía es el cálculo `suspendido` (pantalla «Valida está pausada»), y la reactivación de la 11.4 (la
+ * nueva fecha de renovación es el día del pago) no está construida en el cobro. Es el PR B del diseño.
  */
 
 import type { ProximoPago } from './pago-pendiente'
@@ -303,4 +312,139 @@ export function mensajeSuspendidoPorMora(m: Extract<EstadoMora, { estado: 'suspe
     `Valida está pausada desde el ${fechaDiaMes(m.corteDesde)} por un pago de la suscripción vencido desde el ` +
     `${fechaDiaMes(m.vencio)}. Se reactiva cuando se registre el pago.`
   )
+}
+
+// ── La v1.5: «Suspendida por pago» y «Cancelada» (cláusulas 11.1 a 11.3 y 11.7) ─────────────────
+
+/**
+ * ¿Los textos de la mora hablan el idioma de la v1.5 («Suspendida por pago», «Cancelada»)? Solo un CDA (no
+ * autoservicio) con la v1.5 registrada y publicada (`transicionDesde`): es la versión que crea esos estados
+ * (cláusula 11). Recibe la entrada de la puerta (`entradaValidaCda`).
+ */
+export function hablaConLaV15(e: { tipo: string; autoservicio?: boolean; transicionDesde?: string | null }): boolean {
+  return e.tipo === 'ok' && e.autoservicio !== true && typeof e.transicionDesde === 'string' && FECHA.test(e.transicionDesde)
+}
+
+const MESES_LARGOS = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+] as const
+
+/** '2026-12-06' → '6 de diciembre'. Lo que no es una fecha sale tal cual. */
+export function fechaDiaMesLargo(iso: string): string {
+  const m = FECHA.exec(iso)
+  if (!m) return iso
+  const mes = MESES_LARGOS[Number(m[2]) - 1]
+  return mes ? `${Number(m[3])} de ${mes}` : iso
+}
+
+/** 'YYYY-MM-DD' de inicio y fin del período de una cuota, del concepto; `null` si no lo trae. */
+export function periodoDeCuota(c: { concepto: string | null; fechaVencimiento: string }): { desde: string; hasta: string } | null {
+  const p = leerPeriodoEnConcepto(c.concepto, c.fechaVencimiento)
+  return p?.desde && p.hasta && FECHA.test(p.desde) && FECHA.test(p.hasta) ? { desde: p.desde, hasta: p.hasta } : null
+}
+
+/** «del 23 de noviembre al 22 de diciembre», o `null` sin período en el concepto. */
+export function periodoEnPalabras(c: { concepto: string | null; fechaVencimiento: string }): string | null {
+  const p = periodoDeCuota(c)
+  return p ? `del ${fechaDiaMesLargo(p.desde)} al ${fechaDiaMesLargo(p.hasta)}` : null
+}
+
+/**
+ * Las fechas de pago de una cuota con la v1.5 (D7 del diseño del 4-nov): no su vencimiento guardado (el
+ * 27), sino su fecha de renovación para las cláusulas 11.1 a 11.3 (`vencimientoConTransicion`):
+ *
+ *   - período que empieza desde la vigencia de la v1.5: el inicio del período. Se paga ANTES de él
+ *     (cláusula 2.4: «se paga por anticipado»), `forma: 'antes_del'`;
+ *   - período de la transición (11.7): el 30-nov, o el vencimiento si fuera posterior. Se paga A MÁS
+ *     TARDAR ese día, `forma: 'a_mas_tardar'`.
+ *
+ * Suspendida por pago desde renovación + 6 y Cancelada desde renovación + 31, las mismas fechas de
+ * `estadoMora` con `REGLA_MORA_CDA`. `null` sin la v1.5 registrada: se dice el vencimiento de siempre.
+ */
+export interface FechasDePagoV15 {
+  renovacion: string
+  forma: 'antes_del' | 'a_mas_tardar'
+  suspendidaDesde: string
+  canceladaDesde: string
+}
+
+export function fechasDePagoV15(
+  c: { concepto: string | null; fechaVencimiento: string },
+  transicion: string | null,
+): FechasDePagoV15 | null {
+  if (!transicion || !FECHA.test(transicion)) return null
+  const renovacion = vencimientoConTransicion(c, transicion)
+  if (!FECHA.test(renovacion)) return null
+  const inicio = periodoDeCuota(c)?.desde ?? c.fechaVencimiento
+  return {
+    renovacion,
+    forma: inicio < transicion ? 'a_mas_tardar' : 'antes_del',
+    suspendidaDesde: sumarDias(renovacion, REGLA_MORA_CDA.diaRestriccion),
+    canceladaDesde: sumarDias(renovacion, REGLA_MORA_CDA.diaPausa),
+  }
+}
+
+/** «Paga antes del 23-dic» / «Paga a más tardar el 30-nov». */
+export function textoPagaHasta(f: FechasDePagoV15): string {
+  return f.forma === 'antes_del' ? `Paga antes del ${fechaDiaMes(f.renovacion)}` : `Paga a más tardar el ${fechaDiaMes(f.renovacion)}`
+}
+
+/**
+ * El aviso del día siguiente a la fecha de renovación (11.1), para TODOS, sin montos: el período impago y
+ * desde cuándo queda Suspendida por pago. `periodo` es el de la cuota impaga más vieja (`periodoEnPalabras`).
+ */
+export function textoAvisoGraciaV15(m: Extract<EstadoMora, { estado: 'en_mora' }>, periodo: string | null): string {
+  const impago = periodo ? `El período ${periodo} no está pagado.` : 'Hay un período de la suscripción sin pagar.'
+  if (!m.restringeDesde) {
+    return `${impago} Si no se paga, desde el ${fechaDiaMesLargo(m.corteDesde)} la suscripción queda Cancelada.`
+  }
+  return (
+    `${impago} Si no se paga, desde el ${fechaDiaMesLargo(m.restringeDesde)} la suscripción queda Suspendida por pago: ` +
+    `no podrás hacer consultas nuevas, pero sí entrar, ver tu historial y descargar tus reportes.`
+  )
+}
+
+/** La franja de Suspendida por pago (11.2) en `/valida`, para TODOS, sin montos. */
+export function textoAvisoSuspendida(m: Extract<EstadoMora, { estado: 'restringido' }>): string {
+  return (
+    `Suscripción Suspendida por pago desde el ${fechaDiaMesLargo(m.restringeDesde)}. No puedes hacer consultas nuevas. ` +
+    `Tu historial, tus reportes y la exportación de tu bitácora siguen disponibles. Si se paga, todo vuelve y tu ` +
+    `fecha de renovación no cambia. Si no se paga, desde el ${fechaDiaMesLargo(m.corteDesde)} la suscripción queda Cancelada.`
+  )
+}
+
+/** Lo que responde una consulta nueva (individual o masiva) con la suscripción Suspendida por pago. */
+export function mensajeSuspendidaPorPago(m: Extract<EstadoMora, { estado: 'restringido' }>): string {
+  return (
+    `La suscripción está Suspendida por pago desde el ${fechaDiaMesLargo(m.restringeDesde)}: no se pueden hacer ` +
+    `consultas nuevas. Tu historial, tus reportes y la bitácora siguen disponibles. Las consultas vuelven cuando ` +
+    `se registre el pago.`
+  )
+}
+
+/** En lugar del formulario de consulta puntual o masiva, con la suscripción Suspendida por pago. */
+export const TEXTO_CONSULTAS_SUSPENDIDAS = {
+  titulo: 'La suscripción está Suspendida por pago: no se pueden hacer consultas nuevas hasta que se registre el pago.',
+  detalle: 'En la pestaña Historial puedes ver y descargar los reportes ya generados y descargar la bitácora.',
+} as const
+
+/**
+ * Lo que la tarjeta del próximo pago y la pestaña Pagos dicen de una cuota con la v1.5 (D7): la fecha de
+ * pago (no el vencimiento guardado) y qué pasa si no se paga. `vencida` = ya pasó la fecha de renovación.
+ * `consecuencia` es `null` desde la Cancelada (sus textos son del PR B).
+ */
+export function textosPagoCuotaV15(f: FechasDePagoV15, hoy: string): { fecha: string; consecuencia: string | null; vencida: boolean } {
+  const vencida = f.renovacion < hoy
+  const fecha = !vencida
+    ? textoPagaHasta(f)
+    : f.forma === 'antes_del'
+      ? `Debía pagarse antes del ${fechaDiaMes(f.renovacion)}`
+      : `Debía pagarse a más tardar el ${fechaDiaMes(f.renovacion)}`
+  const consecuencia =
+    hoy < f.suspendidaDesde
+      ? `Si no se paga, la suscripción queda Suspendida por pago desde el ${fechaDiaMes(f.suspendidaDesde)}.`
+      : hoy < f.canceladaDesde
+        ? `La suscripción está Suspendida por pago desde el ${fechaDiaMes(f.suspendidaDesde)}.`
+        : null
+  return { fecha, consecuencia, vencida }
 }

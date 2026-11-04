@@ -3,6 +3,7 @@ import { formatCOP } from '@/lib/cobros/format'
 import { NOTA_IVA_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { etiquetaFuentePago } from '@/lib/suscripciones/pasarela/dominios'
 import { fechaCorta, type CuotaConEstado, type EstadoCuota } from '@/lib/valida-cda/pago-pendiente'
+import { fechaDiaMes, fechasDePagoV15, textoPagaHasta } from '@/lib/valida-cda/plazos'
 import type { PagoRecibidoCda } from '@/lib/valida-cda/pago-servidor'
 import type { ResultadoPagosCda } from '@/lib/valida-cda/pestanas-servidor'
 
@@ -40,8 +41,11 @@ export function PestanaPagos({
   carga,
   opciones = null,
   pagoAutomatico = null,
+  transicion = null,
 }: {
   carga: ResultadoPagosCda
+  /** La vigencia de la v1.5 (`contextoSuscripcion().transicion`): la fecha de pago en lugar del vencimiento (D7). */
+  transicion?: string | null
   opciones?: React.ReactNode
   /** «Pago automático con tarjeta» de un CDA (Términos v1.5, 2.4), junto a las formas de pagar. */
   pagoAutomatico?: React.ReactNode
@@ -65,7 +69,7 @@ export function PestanaPagos({
           <>
             <ul className="mt-3 space-y-3 sm:hidden">
               {carga.cuotas.map((c) => (
-                <TarjetaCuota key={`m-${c.numero}-${c.fechaVencimiento}`} cuota={c} />
+                <TarjetaCuota key={`m-${c.numero}-${c.fechaVencimiento}`} cuota={c} transicion={transicion} />
               ))}
             </ul>
             <div className="mt-3 hidden overflow-x-auto sm:block">
@@ -74,7 +78,7 @@ export function PestanaPagos({
                   <tr>
                     <th className="py-1 pr-3 font-medium">Periodo</th>
                     <th className="py-1 pr-3 font-medium">Valor</th>
-                    <th className="py-1 pr-3 font-medium">Vence</th>
+                    <th className="py-1 pr-3 font-medium">{transicion ? 'Fecha de pago' : 'Vence'}</th>
                     <th className="py-1 pr-3 font-medium">Estado</th>
                     <th className="py-1 pr-3 font-medium">Pago</th>
                     <th className="py-1 font-medium">Factura</th>
@@ -82,7 +86,7 @@ export function PestanaPagos({
                 </thead>
                 <tbody className="text-tinta">
                   {carga.cuotas.map((c) => (
-                    <FilaCuota key={`${c.numero}-${c.fechaVencimiento}`} cuota={c} />
+                    <FilaCuota key={`${c.numero}-${c.fechaVencimiento}`} cuota={c} transicion={transicion} />
                   ))}
                 </tbody>
               </table>
@@ -186,7 +190,25 @@ function Factura({ cuota: c }: { cuota: CuotaConEstado }) {
   )
 }
 
-function TarjetaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
+/**
+ * La fecha de pago de una cuota con la v1.5 (D7 del diseño del 4-nov): «antes del 23-dic» para un período
+ * que empieza desde la vigencia, «a más tardar el 30-nov» para uno de la transición todavía impago, y la
+ * línea de la Suspendida si queda saldo. Un período de la transición ya pagado conserva su vencimiento (se
+ * pagó bajo la versión anterior). `null` sin la v1.5: se dice el vencimiento de siempre.
+ */
+export function fechaDePagoCuota(c: CuotaConEstado, transicion: string | null): { fecha: string; suspendida: string | null } | null {
+  const f = fechasDePagoV15(c, transicion)
+  if (!f) return null
+  if (f.forma === 'a_mas_tardar' && c.estado === 'pagada') return null
+  const paga = textoPagaHasta(f)
+  return {
+    fecha: paga.charAt(0).toLowerCase() + paga.slice(1),
+    suspendida: c.estado === 'pagada' ? null : `Suspendida por pago desde el ${fechaDiaMes(f.suspendidaDesde)} si no se paga`,
+  }
+}
+
+function TarjetaCuota({ cuota: c, transicion }: { cuota: CuotaConEstado; transicion: string | null }) {
+  const v15 = fechaDePagoCuota(c, transicion)
   return (
     <li className="rounded-md border border-border p-3 text-sm text-tinta" data-cuota-movil={c.numero}>
       <p className="font-medium">{c.concepto ?? `Cuota ${c.numero}`}</p>
@@ -195,7 +217,10 @@ function TarjetaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
         <span className={CLASE_CUOTA[c.estado]}>{ETIQUETA_CUOTA[c.estado]}</span>
       </div>
       {c.estado === 'abonada' && <p className="text-xs text-tinta-suave">Faltan {formatCOP(c.saldo)}</p>}
-      <p className="mt-1 text-xs text-tinta-suave">Vence el {fechaCorta(c.fechaVencimiento)}</p>
+      <p className="mt-1 text-xs text-tinta-suave">
+        {v15 ? `Fecha de pago: ${v15.fecha}` : `Vence el ${fechaCorta(c.fechaVencimiento)}`}
+      </p>
+      {v15?.suspendida && <p className="text-xs text-tinta-suave">{v15.suspendida}</p>}
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
         <span>
           Factura: <Factura cuota={c} />
@@ -211,7 +236,8 @@ function TarjetaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
   )
 }
 
-function FilaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
+function FilaCuota({ cuota: c, transicion }: { cuota: CuotaConEstado; transicion: string | null }) {
+  const v15 = fechaDePagoCuota(c, transicion)
   return (
     <tr className="border-t border-border align-top" data-cuota={c.numero}>
       <td className="py-1.5 pr-3">{c.concepto ?? `Cuota ${c.numero}`}</td>
@@ -219,7 +245,10 @@ function FilaCuota({ cuota: c }: { cuota: CuotaConEstado }) {
         {formatCOP(c.monto)}
         {c.estado === 'abonada' && <span className="block text-tinta-suave">Faltan {formatCOP(c.saldo)}</span>}
       </td>
-      <td className="py-1.5 pr-3">{fechaCorta(c.fechaVencimiento)}</td>
+      <td className="py-1.5 pr-3">
+        {v15 ? v15.fecha : fechaCorta(c.fechaVencimiento)}
+        {v15?.suspendida && <span className="block text-tinta-suave">{v15.suspendida}</span>}
+      </td>
       <td className={`py-1.5 pr-3 ${CLASE_CUOTA[c.estado]}`}>{ETIQUETA_CUOTA[c.estado]}</td>
       <td className="py-1.5 pr-3">
         <Pago cuota={c} />
