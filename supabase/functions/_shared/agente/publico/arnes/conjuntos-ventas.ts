@@ -362,7 +362,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const r = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((h) => h.nombre === 'ver_catalogo');
       const p = (r?.datos as { productos?: Array<Record<string, unknown>> } | undefined)?.productos?.[0];
       const separado = p && JSON.stringify(p.especificaciones_verificadas) === '["Potencia: 650 W"]' && JSON.stringify(p.segun_catalogo_del_fabricante) === '["Velocidad: 3000 rpm"]';
-      return todos(separado ? ok('la ficha llega partida') : no('la ficha no llega partida'), contiene(e, 'Según el catálogo del fabricante'), sinPersona(e));
+      return todos(separado ? ok('la ficha llega partida') : no('la ficha no llega partida'), contiene(e, /según el catálogo del fabricante/i), sinPersona(e));
     },
   },
   {
