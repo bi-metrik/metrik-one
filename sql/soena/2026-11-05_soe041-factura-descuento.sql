@@ -11,7 +11,10 @@
 --      `valor_unitario_sin_iva`.
 --   3. `valor_unitario_sin_iva.derivar = { resta: [valor_antes_descuento, descuento] }`.
 --   4. `valor_iva.coherencia_pct = { de: [valor_unitario_sin_iva, valor_antes_descuento],
---      pct: [0.05, 0.19], tolerancia: 0.002 }`.
+--      pct: [0.05, 0.19], tolerancia: 0.0002 }`. Tolerancia
+--      estrecha a propósito: un descuento de 2 a 8 M sobre 100-260 M mueve el ratio menos de 0,2 pp, y
+--      el IVA se liquida exacto (medido en prod el 5-nov: entre ±0,0002 y ±0,002 solo caen V0263, V0326,
+--      V0552 con descuento sin restar, V0659 cubierta por la lista y V0204 protegida).
 --   El resto (orden, textos, demás llaves de config_extra) queda intacto, y se verifica.
 --
 -- MODO: por defecto es DRY-RUN (v_aplicar := false): hace todo, verifica y termina con
@@ -83,7 +86,7 @@ begin
       v_nuevos := v_nuevos || jsonb_build_array(v_c || jsonb_build_object('coherencia_pct', jsonb_build_object(
         'de', jsonb_build_array('valor_unitario_sin_iva', 'valor_antes_descuento'),
         'pct', jsonb_build_array(0.05, 0.19),
-        'tolerancia', 0.002)));
+        'tolerancia', 0.0002)));
       v_tocados := v_tocados + 1;
     else
       v_nuevos := v_nuevos || jsonb_build_array(v_c);

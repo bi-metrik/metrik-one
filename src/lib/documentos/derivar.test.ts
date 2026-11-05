@@ -24,7 +24,7 @@ const FACTURA: CampoExtraccion[] = [
   campo('valor_antes_descuento'),
   campo('descuento'),
   campo('valor_iva', {
-    coherencia_pct: { de: ['valor_unitario_sin_iva', 'valor_antes_descuento'], pct: [0.05, 0.19], tolerancia: 0.002 },
+    coherencia_pct: { de: ['valor_unitario_sin_iva', 'valor_antes_descuento'], pct: [0.05, 0.19], tolerancia: 0.0002 },
   }),
 ]
 
@@ -130,6 +130,29 @@ describe('SOE-041 — casos verificados contra el PDF', () => {
     expect(r.valor_unitario_sin_iva.value).toBe('112181429')
     expect(verificar(r.valor_unitario_sin_iva)).toBe(true)
     expect(verificar(r.valor_iva)).toBe(true)
+  })
+})
+
+describe('coherencia_pct — descuento NO extraído (el modelo devolvió 0 y el valor de lista)', () => {
+  // Con ±0,002 ninguno alertaba: 4,88 %, 4,84 % y 4,91 % quedan a menos de 0,2 pp del 5 %.
+  it.each([
+    ['V0263', '116805310', '5700752'],
+    ['V0326', '264661157', '12809917'],
+    ['V0552', '114371429', '5618571'],
+  ])('%s alerta por coherencia', (_caso, valor, iva) => {
+    const r = factura({ valor, antes: valor, descuento: '0', iva })
+    aplicarNormalizaciones(FACTURA, r)
+    expect(r.valor_unitario_sin_iva.value).toBe(valor)
+    expect(verificar(r.valor_iva)).toBe(true)
+    expect(verificar(r.valor_unitario_sin_iva)).toBe(true)
+  })
+
+  it('el default del código es el mismo ±0,0002 (config sin tolerancia)', () => {
+    const sinTol = FACTURA.map((c) => c.coherencia_pct
+      ? { ...c, coherencia_pct: { de: c.coherencia_pct.de, pct: c.coherencia_pct.pct } }
+      : c)
+    const r = factura({ valor: '116805310', antes: '116805310', descuento: '0', iva: '5700752' })
+    expect(revisarCoherenciaPct(sinTol, r)).toHaveLength(1)
   })
 })
 

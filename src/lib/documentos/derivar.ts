@@ -93,7 +93,8 @@ export interface AlertaCoherencia {
 /**
  * `coherencia_pct: { de, pct, tolerancia }` (SOE-041): el monto del campo dividido por alguna
  * de las bases presentes de `de` tiene que caer en algún `pct ± tolerancia` (absoluta sobre la
- * proporción, 0.002 por defecto). Dos bases cubren el IVA liquidado sobre el precio de lista
+ * proporción, 0.0002 por defecto: un descuento de 2 a 8 M sobre 100-260 M mueve la proporción
+ * menos de 0,2 pp, así que ±0,002 dejaba pasar V0263, V0326 y V0552; el IVA se liquida exacto). Dos bases cubren el IVA liquidado sobre el precio de lista
  * con el descuento después (V0126). Si no cuadra con ninguna, el campo y la primera base bajan
  * a «Verificar». Un monto en 0 o vacío con base presente también alerta (V0531).
  *
@@ -108,7 +109,7 @@ export function revisarCoherenciaPct(
   for (const campo of campos) {
     const cfg = campo.coherencia_pct
     if (!cfg || !cfg.de?.length || !cfg.pct?.length) continue
-    const tol = cfg.tolerancia ?? 0.002
+    const tol = cfg.tolerancia ?? 0.0002
     const bases: Record<string, number> = {}
     for (const s of cfg.de) {
       const n = parseMontoCop(resultado[s]?.value)
