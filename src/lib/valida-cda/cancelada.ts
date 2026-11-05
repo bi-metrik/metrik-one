@@ -295,7 +295,7 @@ export function asuntoCorreoCancelada(d: Pick<DatosCorreoCancelada, 'razonSocial
 function parrafosCancelada(d: DatosCorreoCancelada): string[] {
   const p: string[] = [
     `Desde el ${formatFechaLetras(d.canceladaDesde)}, la suscripción de Valida de ${d.razonSocial} está Cancelada por falta de pago (cláusula 11.3 de los Términos).`,
-    'Mientras esté Cancelada, tu equipo puede entrar a la plataforma, pero no puede hacer consultas ni ver el historial ni los reportes en la plataforma.',
+    'Mientras esté Cancelada, tu equipo puede entrar a la plataforma, pero allí no puede hacer consultas ni ver el historial ni los reportes.',
     `Para reactivarla, la persona designada entra a la sección Suscripción de MéTRIK ONE (${d.urlPagos}) y paga un período con el botón ` +
       `«${BOTON_REACTIVAR}», que abre el enlace de pago. Tu nueva fecha de renovación será el día del pago y, con el pago, vuelven las ` +
       'consultas, el historial y los reportes (cláusula 11.4).',
@@ -379,8 +379,8 @@ function parrafosTarjeta(d: DatosCorreoTarjeta): string[] {
     `Como la suscripción de Valida de ${d.razonSocial} quedó Cancelada el ${formatFechaLetras(d.canceladaDesde)}, le pedimos a la pasarela de pagos ` +
       `(ePayco) eliminar ${tarjeta} que estaba registrada para el pago automático (cláusula 11.3 de los Términos). Desde ese día no se hace ` +
       'ningún cobro automático a esa tarjeta.',
-    'Puedes reactivar la suscripción en cualquier momento pagando un período en la sección Suscripción de MéTRIK ONE; si quieres volver al pago ' +
-      'automático, ahí mismo registras una tarjeta de nuevo.',
+    'Tu empresa puede reactivar la suscripción en cualquier momento: la persona designada paga un período en la sección Suscripción de ' +
+      'MéTRIK ONE y, si quiere volver al pago automático, ahí mismo registra una tarjeta de nuevo.',
     `Si tienes alguna duda, escríbenos a ${CORREO_METRIK} o al WhatsApp ${WHATSAPP_METRIK}.`,
   ]
 }
