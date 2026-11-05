@@ -214,7 +214,7 @@ describe('interruptor apagado: el webhook no hace ni una consulta más que hoy',
     const u = await identificarRemitente(sb, '573000000001');
     expect(llamadas).toEqual(['rpc:wa_identify_user', 'from:workspaces', 'from:staff']);
     expect(u?.staff_id).toBe('st-x');
-    expect(columnas).toBe('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot');
+    expect(columnas).toBe('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot, entrega_bloqueo:config_extra->entrega_bloqueo->piloto');
     // Nulo (la llave no existe en `config_extra`): apagado.
     expect(interruptorDe(u!, () => undefined).activo).toBe(false);
   });
