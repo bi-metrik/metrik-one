@@ -58,12 +58,12 @@ describe('redactarTextoCliente', () => {
     vi.stubGlobal('fetch', fetchFalso)
 
     const r = await redactarTextoCliente(VIAJE, 'clave-de-prueba')
-    expect(r.modelo).toBe('gemini-2.5-flash')
+    expect(r.modelo).toBe('gemini-3.5-flash-lite')
     expect(r.texto.titular).toBe(RESPUESTA.titular)
     expect(r.texto.incluye).toEqual(RESPUESTA.incluye)
 
     const [url, init] = fetchFalso.mock.calls[0] as unknown as [string, { body: string }]
-    expect(url).toContain('gemini-2.5-flash:generateContent')
+    expect(url).toContain('gemini-3.5-flash-lite:generateContent')
     const body = JSON.parse(init.body)
     expect(body.generationConfig.responseMimeType).toBe('application/json')
     expect(body.generationConfig.responseSchema.required).toEqual(['titular', 'intro', 'incluye', 'antes_de_viajar'])

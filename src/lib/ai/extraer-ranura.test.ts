@@ -459,14 +459,14 @@ describe('estrellas · dos corridas que tienen que coincidir, y solo en la ranur
   it('un vuelo no llama a la detección', async () => {
     const llamadas = stub([fila(3)])
     const r = await extraerRanuraDesdeImagen(imagen, 'image/png', VUELO, 'k')
-    expect(llamadas.map(l => l.modelo)).toEqual(['gemini-2.5-flash'])
+    expect(llamadas.map(l => l.modelo)).toEqual(['gemini-3.5-flash-lite'])
     expect(r.data?.campos.estrellas).toBeUndefined()
   })
 
   it('el hotel: una lectura y DOS detecciones', async () => {
     const llamadas = stub([fila(3), fila(3)])
     await extraerRanuraDesdeImagen(imagen, 'image/png', HOTEL, 'k')
-    expect(llamadas.map(l => l.modelo).sort()).toEqual(['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash'])
+    expect(llamadas.map(l => l.modelo).sort()).toEqual(['gemini-3.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'])
   })
 })
 

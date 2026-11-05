@@ -732,29 +732,45 @@ export function crearFetchModelo(o: OpcionesFetchModelo = {}): typeof fetch {
 export const fetchModelo: typeof fetch = crearFetchModelo();
 
 /**
- * Lectura de documentos (extract-fields, reconocer-documento, parse-rut, parse-ve-docs, documento del cliente y
- * extraer-ranura). `LLM_PROVEEDOR_DOCUMENTOS`, por defecto `gemini`: el eval real del 2026-10-20 dio 91 % de campos
- * con Haiku y fallos que Gemini no tenía (campos visibles vacíos, NIT con DV), así que se queda en Gemini hasta
- * que el eval diga otra cosa.
+ * Las opciones de cada familia, exportadas para que la prueba mire las que usa producción y no una copia.
+ *
+ * Documentos y capturas van a Haiku por defecto desde el 2026-11-04 (decisión de Mauricio): los evals #1412
+ * (documentos de SOENA, Haiku a nivel de Gemini) y #1413 (71 pantallazos de Trappvel, 439 de 439 campos), y el
+ * retiro de `gemini-2.5-flash` (https://aistudio.google.com/docs/pricing: obsoleto; desde el 2026-12-01 Google lo
+ * enruta a `gemini-3.5-flash-lite`). La variable en `gemini` sigue devolviendo la familia a Gemini sin desplegar.
+ * Las actas se quedan en Gemini: el eval real con Haiku dio 8 de 12.
  */
-export const fetchModeloDocumentos: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' });
+export const OPCIONES_DOCUMENTOS = { variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'anthropic' } as const satisfies OpcionesFetchModelo;
+export const OPCIONES_ACTAS = { variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' } as const satisfies OpcionesFetchModelo;
+export const OPCIONES_CAPTURAS = {
+  variable: 'LLM_PROVEEDOR_CAPTURAS',
+  heredaDe: 'LLM_PROVEEDOR_DOCUMENTOS',
+  porDefecto: 'anthropic',
+} as const satisfies OpcionesFetchModelo;
+
+/**
+ * Lectura de documentos (extract-fields, reconocer-documento, parse-rut, parse-ve-docs, documento del cliente y
+ * extraer-ranura). `LLM_PROVEEDOR_DOCUMENTOS`, por defecto Haiku (eval #1412); `gemini` la devuelve a Gemini. El eval
+ * del 2026-10-20 (91 % con Haiku) es anterior al esfuerzo `medium` de `fetchModeloExtraccion` (SOE-038).
+ */
+export const fetchModeloDocumentos: typeof fetch = crearFetchModelo(OPCIONES_DOCUMENTOS);
 
 /**
  * La lectura de campos de un documento (`extract-fields`): el mismo interruptor que `fetchModeloDocumentos`, con Haiku en
  * esfuerzo `medium` (SOE-038, eval sobre 40 documentos reales de SOENA).
  */
-export const fetchModeloExtraccion: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini', esfuerzo: 'medium' });
+export const fetchModeloExtraccion: typeof fetch = crearFetchModelo({ ...OPCIONES_DOCUMENTOS, esfuerzo: 'medium' });
 
-/** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real: 8 de 12). */
-export const fetchModeloActas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' });
+/** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real con Haiku: 8 de 12). */
+export const fetchModeloActas: typeof fetch = crearFetchModelo(OPCIONES_ACTAS);
 
 /**
  * Los pantallazos de la cotización (Trappvel): `extraer-ranura` (la lectura y las estrellas) y `bloqueo-leer` (los
- * paquetes de bloqueo). `LLM_PROVEEDOR_CAPTURAS`; sin valor, hereda `LLM_PROVEEDOR_DOCUMENTOS` (y sin ninguna, Gemini),
- * así que desplegarlo no mueve nada. Existe para poder pasar las capturas a Haiku sin mover los documentos de SOENA:
- * el arnés de Trappvel (2026-11-04, 71 pantallazos del banco de la QA) dio con Haiku 439 de 439 campos.
+ * paquetes de bloqueo). `LLM_PROVEEDOR_CAPTURAS`; sin valor, hereda `LLM_PROVEEDOR_DOCUMENTOS`, y sin ninguna, Haiku:
+ * el arnés de Trappvel (2026-11-04, 71 pantallazos del banco de la QA) dio con Haiku 439 de 439 campos. Existe para
+ * poder mover las capturas sin mover los documentos de SOENA (o al revés).
  */
-export const fetchModeloCapturas: typeof fetch = crearFetchModelo({ variable: 'LLM_PROVEEDOR_CAPTURAS', heredaDe: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' });
+export const fetchModeloCapturas: typeof fetch = crearFetchModelo(OPCIONES_CAPTURAS);
 
 /**
  * «Pegar conversación» (`pegar-conversacion-modelo.ts`): el interruptor global, con Haiku en esfuerzo `low`. Sin

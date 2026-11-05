@@ -69,7 +69,7 @@ export function puertoCalificacionSupabase(db: Db): PuertoCalificacion {
 }
 
 // La URL solo le dice a `fetchModelo` que es un `generateContent`; el pedido va a Haiku 5.5 (sin llave de Gemini).
-const URL_PEDIDO = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'
+const URL_PEDIDO = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent'
 
 /** El juez de producción: Haiku 5.5 con salida JSON, sin respaldo. Nunca lanza. */
 export const juezHaiku: Juez = async ({ sistema, usuario }) => {
