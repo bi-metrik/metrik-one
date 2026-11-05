@@ -152,6 +152,8 @@ export function canalDeChatwoot(c: string | null): Canal {
   if (t.includes('instagram')) return 'instagram';
   if (t.includes('tiktok')) return 'tiktok';
   if (t.includes('whatsapp')) return 'whatsapp';
+  // `Channel::FacebookPage` es Messenger (Dimpro). Hasta el 5-nov caía en 'otro' y las 206 filas quedaron así.
+  if (t.includes('facebook')) return 'messenger';
   return 'otro';
 }
 

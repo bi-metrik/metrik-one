@@ -130,7 +130,7 @@ const texto = (v: unknown, d: string): string => (typeof v === 'string' && v.tri
 const numero = (v: unknown, d: number, min = 0, max = Number.POSITIVE_INFINITY): number =>
   (typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : d);
 const entero = (v: unknown): number | null => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
-const CANALES: Canal[] = ['instagram', 'tiktok', 'whatsapp', 'otro'];
+const CANALES: Canal[] = ['instagram', 'tiktok', 'whatsapp', 'messenger', 'otro'];
 const ESFUERZOS: Esfuerzo[] = ['low', 'medium', 'high'];
 
 function leerModelo(v: unknown): ConfigModeloPublico {

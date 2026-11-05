@@ -28,6 +28,7 @@ import { leerConfigPublico } from './config.ts';
 import type { EntranteNuevo, PuertosEntrada, WorkspacePublico } from './entrada.ts';
 import type { AlmacenPublico, AvisosInternos, Consentimiento, MensajeroChatwoot, ResultadoPublicar } from './puertos.ts';
 import { conDespliegue } from '../despliegue.ts';
+import { grabarToques } from '../../origen-anuncio.ts';
 import type { FilaPublica, LlaveConversacion, TrazaPublica } from './tipos.ts';
 import { llaveTexto } from './tipos.ts';
 import { urlFotoPermitida } from './ventas/catalogo-ventas.ts';
@@ -345,6 +346,9 @@ export function puertosEntradaSupabase(supabase: SupabaseClient, secreto: (slug:
       if (error || !data || data.turno_id || (data.adjunto as Fila | null)?.url) return false;
       const { error: e2 } = await supabase.from('chatwoot_conversacion').update({ adjunto: p.adjunto, clase: 'audio' }).eq('id', data.id);
       return !e2;
+    },
+    async grabarToque(t, workspaceId) {
+      await grabarToques(supabase, [t], 'chatwoot', workspaceId);
     },
     ahoraS: () => Math.floor(Date.now() / 1000),
     reloj: () => performance.now(),

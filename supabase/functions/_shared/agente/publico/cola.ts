@@ -630,7 +630,8 @@ const tituloNormal = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\
  * un botón viejo lo decide la lógica del toque, como con uno tocado. Solo en memoria (la fila guardada no cambia). Pura.
  */
 export function toquesPorTitulo(filas: FilaPublica[], canal: Canal): FilaPublica[] {
-  if (canal !== 'otro') return filas;
+  // 'otro' sigue contando: así se veía Messenger antes de reconocer `Channel::FacebookPage` (5-nov).
+  if (canal !== 'messenger' && canal !== 'otro') return filas;
   let ultima: FilaPublica | null = null;
   const out = filas.map((f) => {
     if (f.direccion === 'saliente' && !(f.ranura ?? '').startsWith('nota') && (f.opciones ?? []).length) { ultima = f; return f; }

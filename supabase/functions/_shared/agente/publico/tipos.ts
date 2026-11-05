@@ -15,7 +15,7 @@
 
 import type { FilaConversacion, Salida, Traza } from '../tipos.ts';
 
-export type Canal = 'instagram' | 'tiktok' | 'whatsapp' | 'otro';
+export type Canal = 'instagram' | 'tiktok' | 'whatsapp' | 'messenger' | 'otro';
 
 /** La conversación de Chatwoot: la llave del candado, de la cola y de la fila (no hay teléfono en IG ni TikTok). */
 export interface LlaveConversacion {
