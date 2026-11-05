@@ -136,6 +136,15 @@ export const TEXTOS_CARRITO: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: carrito, un link y un flete (4-nov)',
 };
 
+/** Banco del 5-nov (Haiku real, k=3): el «sí» a «¿Necesitas algo más?», el uso con las palabras del cliente y lo que no está en la ficha sin repetir datos. */
+export const CLAVES_BANCO_5NOV = ['alc.producto', 'alc.complemento', 'alc.especificacion'];
+export const TEXTOS_BANCO_5NOV: TextosActualizacion = {
+  titulo: 'Asistente de VENTAS de Dimpro tras el banco del 5-nov: el «sí» a «¿Necesitas algo más?» pregunta qué más (no es la\n-- autorización), el uso va con las palabras del cliente (no las de la pregunta) y lo que no está en la ficha no repite datos.',
+  uso: 'semilla-sql-dimpro.ts --banco-5nov',
+  despues: 'Va después de 2026-11-04_carrito.sql. Se publica con el banco que pasó (bot_publicar_reglamento con banco), no sin él.',
+  nota: 'asistente de ventas Dimpro: ajustes del banco del 5-nov',
+};
+
 /**
  * Banco con Haiku real (3-nov): el «ya pagué» sin link pasa a persona sin preguntar detalles, el link sin pedido sigue
  * la compra, el complemento rechazado no trae «¿Necesitas algo más?» y la pregunta de ver_catalogo va sola.
@@ -231,6 +240,7 @@ if (import.meta.main) {
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
     : Deno.args.includes('--cierra-sola') ? actualizacionSqlDimpro(CLAVES_CIERRA_SOLA, REGLAMENTO_DIMPRO, TEXTOS_CIERRA_SOLA)
     : Deno.args.includes('--banco-3nov') ? actualizacionSqlDimpro(CLAVES_BANCO_3NOV, REGLAMENTO_DIMPRO, TEXTOS_BANCO_3NOV)
+    : Deno.args.includes('--banco-5nov') ? actualizacionSqlDimpro(CLAVES_BANCO_5NOV, REGLAMENTO_DIMPRO, TEXTOS_BANCO_5NOV)
     : Deno.args.includes('--carrito') ? actualizacionSqlDimpro(CLAVES_CARRITO, REGLAMENTO_DIMPRO, TEXTOS_CARRITO)
     : Deno.args.includes('--saludo') ? actualizacionSqlDimpro(CLAVES_SALUDO, REGLAMENTO_DIMPRO, TEXTOS_SALUDO)
     : Deno.args.includes('--preguntas') ? actualizacionSqlDimpro(CLAVES_PREGUNTAS, REGLAMENTO_DIMPRO, TEXTOS_PREGUNTAS)
