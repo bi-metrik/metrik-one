@@ -738,10 +738,14 @@ export const fetchModelo: typeof fetch = crearFetchModelo();
  * (documentos de SOENA, Haiku a nivel de Gemini) y #1413 (71 pantallazos de Trappvel, 439 de 439 campos), y el
  * retiro de `gemini-2.5-flash` (https://aistudio.google.com/docs/pricing: obsoleto; desde el 2026-12-01 Google lo
  * enruta a `gemini-3.5-flash-lite`). La variable en `gemini` sigue devolviendo la familia a Gemini sin desplegar.
- * Las actas se quedan en Gemini: el eval real con Haiku dio 8 de 12.
+ * Las actas pasan a Haiku el 2026-11-05 (decisión de Mauricio), en esfuerzo `medium`: ver `fetchModeloActas`.
  */
 export const OPCIONES_DOCUMENTOS = { variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'anthropic' } as const satisfies OpcionesFetchModelo;
-export const OPCIONES_ACTAS = { variable: 'LLM_PROVEEDOR_ACTAS', porDefecto: 'gemini' } as const satisfies OpcionesFetchModelo;
+export const OPCIONES_ACTAS = {
+  variable: 'LLM_PROVEEDOR_ACTAS',
+  porDefecto: 'anthropic',
+  esfuerzo: 'medium',
+} as const satisfies OpcionesFetchModelo;
 export const OPCIONES_CAPTURAS = {
   variable: 'LLM_PROVEEDOR_CAPTURAS',
   heredaDe: 'LLM_PROVEEDOR_DOCUMENTOS',
@@ -761,7 +765,13 @@ export const fetchModeloDocumentos: typeof fetch = crearFetchModelo(OPCIONES_DOC
  */
 export const fetchModeloExtraccion: typeof fetch = crearFetchModelo({ ...OPCIONES_DOCUMENTOS, esfuerzo: 'medium' });
 
-/** Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto `gemini` (eval real con Haiku: 8 de 12). */
+/**
+ * Actas de reunión (`actas/generacion.ts`). `LLM_PROVEEDOR_ACTAS`, por defecto Haiku desde el 2026-11-05 (decisión de
+ * Mauricio); `gemini` la devuelve a Gemini. Esfuerzo `medium` en vez del `low` que sale del `thinkingLevel` del sitio:
+ * sobre las 4 actas de producción (2026-11-05, 2 corridas por nivel) el puntaje del arnés fue ruido en los tres niveles
+ * (7–9 de 12), y a ojo `medium` recogió compromisos que `low` dejó por fuera, al mismo costo; `high` triplicó la
+ * latencia sin arreglar lo que fallaba (tareas atribuidas a quien solo las enumeraba).
+ */
 export const fetchModeloActas: typeof fetch = crearFetchModelo(OPCIONES_ACTAS);
 
 /**
