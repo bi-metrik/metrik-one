@@ -8,6 +8,7 @@ import { getOperacionesBono } from '../operaciones-actions'
 import { puedeConfigurarBono } from '../operaciones-config-actions'
 import { BonoConfigModal } from './bono-config-modal'
 import { BonoDetalleDrawer, type IndicadorBono } from './bono-detalle-drawer'
+import { modoEnvio, reglaEnvio } from '@/lib/tableros/regla-envio'
 
 // Paleta MeTRIK (tokens del manual de marca, no Tailwind generico).
 const VERDE = 'var(--acento)'
@@ -270,9 +271,8 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
             <li>· <strong>Radicación ({P.peso_radicacion * 100} pts):</strong> radicar dentro
               de {P.horas_radicacion} horas {relojHabil ? 'hábiles' : 'corridas'} desde que se
               asigna el caso.</li>
-            <li>· <strong>Envío ({P.peso_envio === 0 ? 'suspendido' : `${P.peso_envio * 100} pts`}):</strong> dentro
-              de {P.horas_desde_certificado} h del certificado bancario y al
-              menos {P.horas_antes_cita} h antes de la cita.
+            <li>· <strong>Envío ({P.peso_envio === 0 ? 'suspendido' : `${P.peso_envio * 100} pts`}):</strong>{' '}
+              {reglaEnvio(P)}
               {P.peso_envio === 0 && ' Hoy no se está juzgando: no suma ni resta.'}</li>
             <li>· <strong>Correcciones ({P.peso_correcciones === 0 ? 'suspendido' : `${P.peso_correcciones * 100} pts`}):</strong> cada
               caso que <strong>pasa la etapa de envío</strong> cuenta como una radicación
@@ -307,10 +307,16 @@ export function TabOperacionesPersonas({ data: inicial }: { data: OperacionesBon
                 <strong> corridas</strong>, aunque lo acordado con operaciones fueron horas hábiles.
                 Se cambia en la configuración, sin tocar el sistema.</li>
             )}
-            <li>· Las <strong>{P.horas_antes_cita} h</strong> antes de la cita y
-              las <strong>{P.horas_desde_certificado} h</strong> desde el certificado bancario vienen
-              del archivo de cálculo, no de un acuerdo. Esas <strong>sí</strong> son horas corridas a
-              propósito: miden contra el calendario de la DIAN, no contra el de la oficina.</li>
+            {modoEnvio(P) === 'dia_habil_anterior' ? (
+              <li>· El día hábil anterior a la cita salta fines de semana y festivos colombianos
+                {P.jornada_sabado_habil ? ' (el sábado cuenta como hábil)' : ''}. La hora de corte es
+                hora de Colombia.</li>
+            ) : (
+              <li>· Las <strong>{P.horas_antes_cita} h</strong> antes de la cita y
+                las <strong>{P.horas_desde_certificado} h</strong> desde el certificado bancario vienen
+                del archivo de cálculo, no de un acuerdo. Esas <strong>sí</strong> son horas corridas a
+                propósito: miden contra el calendario de la DIAN, no contra el de la oficina.</li>
+            )}
           </ul>
         </div>
       )}
