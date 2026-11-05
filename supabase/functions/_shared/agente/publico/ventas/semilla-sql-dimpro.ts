@@ -137,9 +137,9 @@ export const TEXTOS_CARRITO: TextosActualizacion = {
 };
 
 /** Banco del 5-nov (Haiku real, k=3): el «sí» a «¿Necesitas algo más?», el uso con las palabras del cliente y lo que no está en la ficha sin repetir datos. */
-export const CLAVES_BANCO_5NOV = ['alc.producto', 'alc.complemento', 'alc.especificacion'];
+export const CLAVES_BANCO_5NOV = ['alc.producto', 'alc.complemento', 'alc.especificacion', 'rf.autorizacion'];
 export const TEXTOS_BANCO_5NOV: TextosActualizacion = {
-  titulo: 'Asistente de VENTAS de Dimpro tras el banco del 5-nov: el «sí» a «¿Necesitas algo más?» pregunta qué más (no es la\n-- autorización), el uso va con las palabras del cliente (no las de la pregunta) y lo que no está en la ficha no repite datos.',
+  titulo: 'Asistente de VENTAS de Dimpro tras el banco del 5-nov: el «sí» a «¿Necesitas algo más?» pregunta qué más (no es la\n-- autorización), el uso va con las palabras del cliente (no las de la pregunta) y lo que no está en la ficha no repite datos.\n-- rf.autorizacion sube a la versión de textos 2026-11-04.ensayo-2 (#1418 la subió en el código y no en la base).',
   uso: 'semilla-sql-dimpro.ts --banco-5nov',
   despues: 'Va después de 2026-11-04_carrito.sql. Se publica con el banco que pasó (bot_publicar_reglamento con banco), no sin él.',
   nota: 'asistente de ventas Dimpro: ajustes del banco del 5-nov',
