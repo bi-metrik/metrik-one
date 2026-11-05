@@ -15,8 +15,8 @@
 import { describe, expect, it } from 'vitest'
 
 import ghlRaw from './__fixtures__/bloqueo/tureserva-ghl-tres-columnas.json'
-import { MENSAJE_VUELO_VARIOS_OPERADORES, planDelPegado, type ContextoDeArmado, type LecturaParaArmar, type OpcionDeBloqueo, type PlanDeArmado } from './bloqueo-armado'
-import { hotelDesdeLectura, vueloDesdeLectura } from './bloqueo-extraccion'
+import { MENSAJE_VUELO_VARIOS_OPERADORES, mensajeVueloDelOperador, planDelPegado, type ContextoDeArmado, type LecturaParaArmar, type OpcionDeBloqueo, type PlanDeArmado } from './bloqueo-armado'
+import { ESQUEMA_VUELO_BLOQUEO, PROMPT_VUELO_BLOQUEO, hotelDesdeLectura, vueloDesdeLectura } from './bloqueo-extraccion'
 import { operadorInicialDelPaquete, operadoresDeLaSolicitud } from './bloqueo-operador'
 
 // ── Lo que «respondió» el modelo a cada pantallazo ─────────────────────────────
@@ -29,7 +29,7 @@ function hotel(raw: unknown): LecturaParaArmar {
 function vuelo(raw: unknown): LecturaParaArmar {
   const v = vueloDesdeLectura(raw)
   if (!v.ok) throw new Error(v.motivo)
-  return { cual: 'vuelo', vuelo: v.vuelo }
+  return { cual: 'vuelo', vuelo: v.vuelo, operador: v.operador }
 }
 
 const tramo = (aerolinea: string, numero: string, origen: string, destino: string, fecha: string) => ({
@@ -162,5 +162,98 @@ describe('viaje 02: la bandeja reparte por operador, no por orden de llegada', (
     expect(paquetes(simular([AVIANCA, GHL, DECAMERON], uno).opciones)).toEqual([
       'TU RESERVA | Avianca 8410 | Decameron Aquarium + GHL Relax Hotel Sunrise Beach',
     ])
+  })
+})
+
+// ── El vuelo también dice su operador (2026-11-05, segunda vuelta) ──────────────
+//
+// Los pantallazos de vuelo de los operadores traen el operador en el encabezado, como los de hotel:
+// «tureserva · Salidas en bloqueo» (Avianca) y «aliadostravel · Bloqueos» (LATAM). Con eso el vuelo
+// va al paquete de su operador y el viaje 02 queda en 2 paquetes sin que la asesora mueva nada.
+
+const vueloAv = { es_vuelo: true, tramos: [tramo('Avianca', '8410', 'BOG', 'ADZ', '2027-02-05'), tramo('Avianca', '8411', 'ADZ', 'BOG', '2027-02-10')] }
+const vueloLa = { es_vuelo: true, tramos: [tramo('LATAM', '4120', 'BOG', 'ADZ', '2027-02-05'), tramo('LATAM', '4121', 'ADZ', 'BOG', '2027-02-10')] }
+// Como lo escribe el encabezado (el logo en minúscula y pegado), no como la solicitud.
+const AVIANCA_TR = vuelo({ ...vueloAv, operador: 'tureserva' })
+const LATAM_AL = vuelo({ ...vueloLa, operador: 'aliadostravel' })
+const CON_OPERADOR: Record<string, LecturaParaArmar> = { Avianca: AVIANCA_TR, GHL, Decameron: DECAMERON, LATAM: LATAM_AL }
+
+describe('viaje 02: el vuelo con operador leído va al paquete de su operador', () => {
+  it('el lector del vuelo pide el operador (prompt y esquema) y la limpieza lo devuelve', () => {
+    expect(PROMPT_VUELO_BLOQUEO).toContain('- operador: el operador mayorista que vende el paquete')
+    expect(PROMPT_VUELO_BLOQUEO).toContain('NO es la aerolínea ni el hotel.')
+    expect(ESQUEMA_VUELO_BLOQUEO.properties).toHaveProperty('operador')
+    const v = vueloDesdeLectura({ ...vueloAv, operador: '  tureserva ' })
+    expect(v.ok && v.operador).toBe('tureserva')
+    const sin = vueloDesdeLectura(vueloAv)
+    expect(sin.ok && sin.operador).toBeNull()
+  })
+
+  it('las 24 órdenes de llegada dan 2 paquetes: Tu Reserva = Avianca + GHL, Aliados = LATAM + Decameron', () => {
+    for (const orden of permutaciones(Object.keys(CON_OPERADOR))) {
+      const { opciones } = simular(orden.map(n => CON_OPERADOR[n]))
+      expect(paquetes(opciones), orden.join(', ')).toEqual([
+        'ALIADOS TRAVEL | LATAM 4120 | Decameron Aquarium',
+        'TU RESERVA | Avianca 8410 | GHL Relax Hotel Sunrise Beach',
+      ])
+    }
+  })
+
+  it('el vuelo que llega después del hotel se pone en todas las opciones del paquete, sin tocar la tarifa', () => {
+    const sol = hotel({ es_oferta_de_hotel: true, hotel: 'Sol Caribe Campo', noches: 5, operador: 'TU RESERVA', precios_por_persona: [{ acomodacion: 'doble', precio: 2_000_000 }] })
+    const { opciones, planes } = simular([GHL, sol, DECAMERON])
+    // La asesora respondió Pública en el paquete de Tu Reserva.
+    const publica = { tipo: 'publica' as const, comision: { tipo: 'pct' as const, valor: 10 } }
+    for (const o of opciones) if (o.paquete?.operador === 'TU RESERVA') { o.tarifa = publica; o.paquete = { ...o.paquete, tarifaPorElegir: false } }
+    const plan = planDelPegado(opciones, AVIANCA_TR, CTX)
+    expect(planes[1].accion).toBe('nueva_opcion')
+    expect(plan.accion).toBe('actualizar')
+    if (plan.accion !== 'actualizar') return
+    const deTuReserva = opciones.filter(o => o.paquete?.operador === 'TU RESERVA').map(o => o.itemId).sort()
+    expect(plan.cambios.map(c => c.itemId).sort()).toEqual(deTuReserva)
+    for (const c of plan.cambios) {
+      expect(c.paquete.vuelo?.tramos[0].numeroVuelo).toBe('8410')
+      expect(c.paquete.tarifaPorElegir).toBe(false)
+      expect(c.paquete.hotel.hotel).toBeTruthy()
+    }
+  })
+
+  it('un paquete sin responder Pública / Neta sigue con la pregunta abierta al recibir su vuelo', () => {
+    const { opciones } = simular([GHL, AVIANCA_TR])
+    expect(opciones).toHaveLength(1)
+    expect(opciones[0].paquete!.tarifaPorElegir).toBe(true)
+    expect(opciones[0].tarifa).toBeNull()
+  })
+
+  it('el vuelo primero abre el paquete de su operador con el mensaje propio, y el hotel llega ahí', () => {
+    const { opciones, planes } = simular([LATAM_AL, DECAMERON])
+    expect(planes[0]).toMatchObject({ accion: 'nuevo_paquete', mensaje: mensajeVueloDelOperador('ALIADOS TRAVEL') })
+    expect(mensajeVueloDelOperador('ALIADOS TRAVEL')).toBe('Paquete nuevo de ALIADOS TRAVEL con este vuelo: los hoteles de ALIADOS TRAVEL que pegues van a este paquete.')
+    expect(planes[0].accion === 'nuevo_paquete' && planes[0].paquete.operador).toBe('ALIADOS TRAVEL')
+    expect(planes[1].accion).toBe('actualizar')
+    expect(paquetes(opciones)).toEqual(['ALIADOS TRAVEL | LATAM 4120 | Decameron Aquarium'])
+  })
+
+  it('un paquete del operador que ya tiene OTRO vuelo no se pisa: el vuelo abre paquete propio de ese operador', () => {
+    const otroAv = vuelo({ es_vuelo: true, operador: 'Tu Reserva', tramos: [tramo('Avianca', '9370', 'BOG', 'ADZ', '2027-02-05')] })
+    const { opciones, planes } = simular([GHL, AVIANCA_TR, otroAv])
+    expect(planes[2]).toMatchObject({ accion: 'nuevo_paquete', mensaje: mensajeVueloDelOperador('TU RESERVA') })
+    expect(paquetes(opciones)).toEqual([
+      'TU RESERVA | Avianca 8410 | GHL Relax Hotel Sunrise Beach',
+      'TU RESERVA | Avianca 9370 | sin hotel',
+    ])
+  })
+
+  it('un vuelo con operador que no es de la solicitud (la aerolínea) cuenta como no leído', () => {
+    const { opciones, planes } = simular([GHL, vuelo({ ...vueloAv, operador: 'Avianca' })])
+    expect(planes[1]).toMatchObject({ accion: 'nuevo_paquete', mensaje: MENSAJE_VUELO_VARIOS_OPERADORES })
+    expect(new Set(opciones.map(o => o.grupo)).size).toBe(2)
+  })
+
+  it('con UN operador en la solicitud el operador del vuelo no cambia nada', () => {
+    const uno: ContextoDeArmado = { ...CTX, operadorInicial: 'TU RESERVA', operadoresSolicitud: operadoresDeLaSolicitud('TU RESERVA') }
+    const con = simular([AVIANCA_TR, GHL, DECAMERON, LATAM_AL], uno)
+    const sin = simular([AVIANCA, GHL, DECAMERON, LATAM], uno)
+    expect(con.planes).toEqual(sin.planes)
   })
 })

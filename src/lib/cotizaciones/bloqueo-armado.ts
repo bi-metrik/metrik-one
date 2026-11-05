@@ -30,8 +30,12 @@
  *      - un hotel cuyo operador se leyó (y es uno de la solicitud) va al paquete de ese operador; si
  *        no hay, abre el suyo con ese operador;
  *      - un hotel sin operador leído abre su propio paquete (sin operador: la tarjeta lo pide);
- *      - un vuelo abre su propio paquete: su pantallazo no dice el operador, y juntarlo con un hotel
- *        sería adivinar. La asesora lo pone en el paquete que le toca.
+ *      - un vuelo con operador leído (el encabezado del pantallazo: «tureserva · Salidas en bloqueo»,
+ *        2026-11-05) va al paquete de ese operador que todavía no tiene vuelo, y se pone en TODAS sus
+ *        opciones; si no hay ninguno, abre el suyo con ese operador (y los hoteles de ese operador
+ *        llegan ahí). Un paquete que ya tiene OTRO vuelo no se pisa: el vuelo abre paquete propio;
+ *      - un vuelo sin operador leído abre su propio paquete: juntarlo con un hotel sería adivinar. La
+ *        asesora lo pone en el paquete que le toca.
  *    El resultado no depende del orden de llegada: un hotel nunca queda con el vuelo de otro operador.
  *
  * Puro: sin red y sin base. La escritura es de `pegarEnBloqueo` (`bloqueo-actions.ts`).
@@ -72,7 +76,8 @@ export interface TarifaDeOpcion {
 
 export type LecturaParaArmar =
   | { cual: 'hotel'; hotel: HotelBloqueo; incluye: IncluyeBloqueo; operador?: string | null }
-  | { cual: 'vuelo'; vuelo: VueloBloqueo }
+  /** `operador`: el del encabezado del pantallazo del vuelo, sin validar (2026-11-05). */
+  | { cual: 'vuelo'; vuelo: VueloBloqueo; operador?: string | null }
 
 export interface ContextoDeArmado {
   /** El operador con que nace un paquete nuevo (el único de la solicitud, o `null`). */
@@ -225,6 +230,11 @@ export const MENSAJE_VUELO_VARIOS_OPERADORES =
   'Paquete nuevo con este vuelo. El viaje tiene varios operadores y el vuelo no dice de cuál es: ' +
   'pégalo en la casilla «Vuelo» del paquete que le toca y borra este.'
 
+/** Lo que ve la asesora cuando un vuelo con operador leído abre el paquete de ese operador. */
+export function mensajeVueloDelOperador(operador: string): string {
+  return `Paquete nuevo de ${operador} con este vuelo: los hoteles de ${operador} que pegues van a este paquete.`
+}
+
 /** Lo que ve la asesora cuando un hotel abre su paquete sin operador leído (varios operadores). */
 export function mensajeHotelSinOperador(hotel: string | null): string {
   return `Paquete nuevo con ${hotel ?? 'este hotel'}. No se vio de qué operador es: elígelo en el paquete.`
@@ -287,7 +297,22 @@ function planConVariosOperadores(
     if (opciones.some(o => mismoVuelo(o.paquete?.vuelo ?? null, lectura.vuelo))) {
       return { accion: 'repetido', mensaje: 'Ese vuelo ya está en un paquete.' }
     }
-    return paqueteNuevo({ ...paqueteVacio(null), vuelo: lectura.vuelo }, MENSAJE_VUELO_VARIOS_OPERADORES)
+    const delVuelo = operadorDeLaLectura(lectura.operador ?? null, operadores)
+    if (!delVuelo) return paqueteNuevo({ ...paqueteVacio(null), vuelo: lectura.vuelo }, MENSAJE_VUELO_VARIOS_OPERADORES)
+    const kv = claveDeNombre(delVuelo)
+    // Los paquetes de ese operador que todavía no tienen vuelo; el de número más bajo, para que el
+    // resultado no dependa del orden. Uno que ya tiene otro vuelo no se pisa.
+    const sinVuelo = opciones.filter(o => claveDeNombre(o.paquete?.operador) === kv)
+      .filter(o => !vueloDe(opciones.filter(x => x.grupo === o.grupo)))
+    if (sinVuelo.length === 0) return paqueteNuevo({ ...paqueteVacio(delVuelo), vuelo: lectura.vuelo }, mensajeVueloDelOperador(delVuelo))
+    const numeroV = Math.min(...sinVuelo.map(o => o.numero))
+    const grupoV = sinVuelo.find(o => o.numero === numeroV)!.grupo
+    // El vuelo es de todo el paquete: va a todas sus opciones, con su tarifa y su pregunta intactas.
+    return {
+      accion: 'actualizar',
+      cambios: opciones.filter(o => o.grupo === grupoV)
+        .map(o => ({ itemId: o.itemId, paquete: { ...(o.paquete ?? paqueteVacio(delVuelo)), vuelo: lectura.vuelo } })),
+    }
   }
   const operador = operadorDeLaLectura(lectura.operador ?? null, operadores)
   if (!operador) return paqueteNuevo(conHotelLeido(paqueteVacio(null), lectura, ctx), mensajeHotelSinOperador(lectura.hotel.hotel))

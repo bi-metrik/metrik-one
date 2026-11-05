@@ -376,6 +376,8 @@ export const PROMPT_VUELO_BLOQUEO = [
   '',
   'Devuelve:',
   '- es_vuelo: false si la imagen no muestra vuelos (por ejemplo, es la oferta de un hotel).',
+  '- operador: el operador mayorista que vende el paquete, si su nombre o su logo se ve en la pantalla (ej. «Tu Reserva»,',
+  '  «Aliados Travel»); null si no se ve. NO es la aerolínea ni el hotel.',
   '- tramos: UNO por cada vuelo, en el orden en que aparecen. Para cada uno:',
   '  aerolinea (ver abajo), numero_vuelo (solo el número o',
   '  código, sin la palabra «vuelo»), origen y destino (el código de 3 letras o la ciudad, tal cual), fecha (la de',
@@ -399,6 +401,7 @@ export const ESQUEMA_VUELO_BLOQUEO = {
   type: 'object',
   properties: {
     es_vuelo: { type: 'boolean' },
+    operador: { type: 'string', ...NULO },
     tramos: {
       type: 'array',
       items: {
@@ -456,7 +459,8 @@ export function aerolineaLegible(v: unknown): string | null {
 }
 
 export type LecturaVueloBloqueo =
-  | { ok: true; vuelo: VueloBloqueo }
+  /** `operador`: el del encabezado del pantallazo (2026-11-05), sin validar; lo valida `operadorDeLaLectura`. */
+  | { ok: true; vuelo: VueloBloqueo; operador: string | null }
   | { ok: false; motivo: string }
 
 /** Lo que devolvió el modelo para el pantallazo del vuelo, saneado. */
@@ -484,5 +488,5 @@ export function vueloDesdeLectura(raw: unknown): LecturaVueloBloqueo {
     if (Object.values(tramo).some(x => x !== null)) tramos.push(tramo)
   }
   if (tramos.length === 0) return { ok: false, motivo: 'No se leyó ningún vuelo en ese pantallazo. Escríbelos a mano o pega otro.' }
-  return { ok: true, vuelo: { tramos: tramos.slice(0, 8) } }
+  return { ok: true, vuelo: { tramos: tramos.slice(0, 8) }, operador: textoCorto(raw.operador, 120) }
 }
