@@ -30,7 +30,7 @@
 -- NO toca datos de producción: no hay UPDATE ni INSERT sobre filas existentes. Las filas viejas de
 -- chatwoot_conversacion se quedan en 'otro' (cambiarlas es escribir en Dimpro: aparte y con su autorización).
 --
--- DRY-RUN: `DO $dry$ ... EXECUTE <este archivo> ... RAISE EXCEPTION 'DRY-RUN OK'` por la Management API. Se aplica
+-- DRY-RUN: este archivo dentro de un DO con EXECUTE que termina en RAISE EXCEPTION, por la Management API. Se aplica
 -- con visto de Mauricio ANTES del merge (el merge despliega solo).
 --
 -- epoca: no-rompe solo agrega tablas, funciones y disparadores, y amplía dos CHECK (nada que el código viejo espere desaparece)

@@ -116,8 +116,8 @@ export function toquesDeWhatsapp(payload: unknown, soloPhoneNumberId?: string): 
 }
 
 /**
- * Los toques de un webhook de Messenger (`object: 'page'`) o de Instagram (`object: 'instagram'`). Ignora los ecos
- * (mensajes nuestros). Nunca lanza. Pura. La usa la Fase B (`meta-origen`).
+ * Los toques de un webhook de Messenger (`object: 'page'`) o de Instagram (`object: 'instagram'`), en `messaging` y en
+ * `standby`. Ignora los ecos (mensajes nuestros). Nunca lanza. Pura. La usa la Fase B (`meta-origen`).
  */
 export function toquesDePagina(payload: unknown): ToqueOrigen[] {
   const out: ToqueOrigen[] = [];
@@ -128,7 +128,8 @@ export function toquesDePagina(payload: unknown): ToqueOrigen[] {
     for (const entry of lista(p.entry).map(obj)) {
       const alcance = texto(entry.id);
       if (!alcance) continue;
-      for (const ev of lista(entry.messaging).map(obj)) {
+      // `standby`: con el control de la conversación en otra app (Chatwoot), la nuestra recibe ahí lo mismo.
+      for (const ev of [...lista(entry.messaging), ...lista(entry.standby)].map(obj)) {
         const message = obj(ev.message);
         const postback = obj(ev.postback);
         if (message.is_echo === true) continue;

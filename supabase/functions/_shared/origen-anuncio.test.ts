@@ -110,6 +110,14 @@ describe('Messenger (object page)', () => {
     expect(t).toMatchObject({ mensajeId: 'm_pb', sourceType: 'SHORTLINK', ref: 'volante-feria', adId: null, sourceId: null })
   })
 
+  it('standby: la app sin el control de la conversación también lo lee', () => {
+    const [t] = toquesDePagina({ object: 'page', entry: [{ id: 'PAGE_ID', time: 1, standby: [{
+      sender: { id: 'PSID_4' }, recipient: { id: 'PAGE_ID' }, timestamp: 1,
+      message: { mid: 'm_sb', text: 'Hola', referral: { ad_id: '6045246247436', source: 'ADS', type: 'OPEN_THREAD' } },
+    }] }] })
+    expect(t).toMatchObject({ canal: 'messenger', idExterno: 'PSID_4', mensajeId: 'm_sb', adId: '6045246247436' })
+  })
+
   it('ignora el eco (mensaje nuestro) y los mensajes sin referral', () => {
     expect(toquesDePagina(evento({ sender: { id: 'PAGE_ID' }, recipient: { id: 'PSID_1' }, message: { mid: 'm_e', is_echo: true, referral: { ad_id: '1' } } }))).toEqual([])
     expect(toquesDePagina(evento({ sender: { id: 'PSID_1' }, recipient: { id: 'PAGE_ID' }, message: { mid: 'm_n', text: 'hola' } }))).toEqual([])
