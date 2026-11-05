@@ -82,6 +82,25 @@ function sumarDiasIso(iso: string, dias: number): string {
   return new Date(Date.UTC(a, m - 1, d + dias)).toISOString().slice(0, 10)
 }
 
+/**
+ * El hotel del paquete en la biblioteca de fotos (pedido de Mauricio del 2026-11-05: «no permite
+ * agregar fotos a los hoteles de los paquetes»). Es lo MISMO que la tarjeta del paquete pide y sube
+ * (`foto-hotel-paquete.tsx`) y lo que el documento busca (`claveDeHotel` sobre `hotelesDePaquetes`):
+ * el nombre GUARDADO del hotel y SIN ciudad, como sale en el documento (V6: la zona no es la ciudad).
+ * La llave queda `«hotel x|»`. Que la foto sea la del mismo hotel cotizado suelto en el destino del
+ * viaje lo resuelve el servidor al pintar la tarjeta: compara el nombre sin ciudad con la del destino
+ * (`reconocer`, `ciudadDelViaje`) y guarda la llave sin ciudad como alias de ese perfil, que el
+ * documento lee por la vista `fotos_catalogo_por_clave`.
+ *
+ * `aMano` va en falso a propósito: el paquete no tiene «foto en la opción» de respaldo, así que su
+ * hotel tiene que poder tener perfil propio. Y nunca lleva `proveedorId`: el `items.proveedor_id`
+ * del paquete es la ficha del OPERADOR, no la del hotel.
+ */
+export function pedidoFotoDelPaquete(p: PaqueteBloqueo | null): { tipo: 'hotel'; nombre: string; ciudad: null; aMano: false } | null {
+  const nombre = p?.hotel.hotel?.trim()
+  return nombre ? { tipo: 'hotel', nombre, ciudad: null, aMano: false } : null
+}
+
 /** El hotel de cada paquete de bloqueo, como la ficha de «Hospedaje». */
 export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: FechasDeRespaldo | null): HotelPDF[] {
   const out: HotelPDF[] = []
@@ -97,6 +116,7 @@ export function hotelesDePaquetes(items: readonly ItemConLectura[], respaldo?: F
       hotel: p.hotel.hotel,
       // V6 (QA del 2026-10-29): la zona («Centro», «Playa Bávaro») no es la ciudad. La propuesta
       // tomaba la zona como destino («DESTINOS: Centro»); sin ciudad, usa la del viaje.
+      // La llave de su foto en la biblioteca sale de aquí (`pedidoFotoDelPaquete`): `«hotel|»`.
       ciudad: null,
       zona: p.hotel.zona,
       habitacion: p.hotel.habitacion,

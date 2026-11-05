@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- [Foto del hotel del paquete de bloqueo (5-nov)](project_foto_hotel_paquete_bloqueo.md) — llave «hotel|» sin ciudad; proveedor_id = operador
 - ⚠️⚠️ [SOE-040: Envío por día hábil anterior (5-nov)](project_soe040_envio_dia_habil.md) — 20261105153000 aplicada 5-nov; sin 48 h del certificado; guardado falla sin migración
 - ⚠️ [Bandeja reparte por operador (5-nov)](project_bandeja_reparto_por_operador.md) — 2+ operadores: hotel y vuelo al paquete de su operador (encabezado)
 - ⚠️ [SOE-041: descuento de la factura lo resta el código (5-nov)](project_soe041_descuento_factura.md) — derivar.ts; SQL config SIN aplicar, después del deploy
