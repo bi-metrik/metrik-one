@@ -352,6 +352,6 @@ export function textoFalloTarjeta(p: { ultimos4: string | null; fechas: FechasDe
   const tarjeta = p.ultimos4 ? `tu tarjeta terminada en ${p.ultimos4}` : 'la tarjeta que registraste'
   const partes = [`No pudimos cobrar a ${tarjeta}. Puedes pagar con el enlace de pago.`]
   if (p.fechas.reintento) partes.push(`Reintentamos el ${diaYMes(p.fechas.reintento)}.`)
-  partes.push(`Si no se paga, las consultas nuevas se pausan desde el ${diaYMes(p.fechas.pausaDesde)}.`)
+  partes.push(`Si no se paga, la suscripción queda Suspendida por pago desde el ${diaYMes(p.fechas.pausaDesde)}.`)
   return partes.join(' ')
 }

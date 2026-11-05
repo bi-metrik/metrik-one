@@ -10,6 +10,8 @@ import { llamarValida, persistirConsulta, recalcularScoreNegocio } from '@/lib/v
 import { CODIGO_BUSQUEDA_INCOMPLETA } from '@/lib/valida/mensajes-error';
 import * as XLSX from 'xlsx';
 import { getCachedUser } from '@/lib/supabase/auth-user'
+import { todayBogotaISO } from '@/lib/dates/bogota';
+import { celdasBitacora, ENCABEZADO_BITACORA, nombreArchivoBitacora, type FilaBitacora } from '@/lib/valida/bitacora';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -464,6 +466,65 @@ export async function listarConsultasValida(
   });
 
   return { ok: true, consultas: items };
+}
+
+// ─── Bitácora completa (Términos del Plan CDA 9.3 y 11.2) ─────────────────
+
+/**
+ * Todas las consultas del espacio en un XLSX («Descargar bitácora (XLSX)» del Historial). La autoriza la
+ * puerta del historial (`accesoValida()` sin consulta nueva): abierta en Activa y en Suspendida por pago,
+ * cerrada en Cancelada. Ver `@/lib/valida/bitacora`.
+ */
+export async function descargarBitacoraValida(
+  opts: { sinNegocio?: boolean } = {},
+): Promise<{ ok: true; data: { base64: string; filename: string } } | { ok: false; error: string }> {
+  const acceso = await accesoValida();
+  if (!acceso.ok) return acceso;
+  const workspaceId = acceso.workspaceId;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const svc = createServiceClient() as any;
+
+  const filas: FilaBitacora[] = [];
+  // PostgREST entrega a lo sumo 1.000 filas por consulta: se pagina hasta la última.
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await svc
+      .from('valida_consultas')
+      .select('id, created_at, tipo, tipo_persona, nombre_consultado, documento_tipo, documento_numero, severidad, total_matches, valida_consulta_id, hash_reporte, created_by, negocio_id')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(desde, desde + 999);
+    if (error) return { ok: false, error: error.message };
+    filas.push(...((data ?? []) as FilaBitacora[]));
+    if (!data || data.length < 1000) break;
+  }
+
+  const usuarios = await resolverNombresUsuarios(svc, filas.map((f) => f.created_by));
+  let negocios: Map<string, string> | null = null;
+  if (opts.sinNegocio !== true) {
+    negocios = new Map();
+    const ids = Array.from(new Set(filas.map((f) => f.negocio_id).filter((x): x is string => !!x)));
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data } = await svc.from('negocios').select('id, codigo').eq('workspace_id', workspaceId).in('id', ids.slice(i, i + 500));
+      for (const n of (data ?? []) as Array<{ id: string; codigo: string }>) negocios.set(n.id, n.codigo);
+    }
+  }
+  const { data: ws } = await svc.from('workspaces').select('slug').eq('id', workspaceId).maybeSingle();
+
+  const encabezado: string[] = [...ENCABEZADO_BITACORA];
+  if (negocios) encabezado.push('negocio_codigo');
+  const hoja = XLSX.utils.aoa_to_sheet([encabezado, ...filas.map((f) => celdasBitacora(f, { usuarios, negocios }))]);
+  hoja['!cols'] = [
+    { wch: 17 }, { wch: 9 }, { wch: 12 }, { wch: 36 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 38 }, { wch: 66 }, { wch: 28 },
+    ...(negocios ? [{ wch: 16 }] : []),
+  ];
+  const libro = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(libro, hoja, 'Bitácora');
+  const buf = XLSX.write(libro, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+  return {
+    ok: true,
+    data: { base64: buf.toString('base64'), filename: nombreArchivoBitacora((ws?.slug as string | undefined) ?? null, todayBogotaISO()) },
+  };
 }
 
 export async function listarConsultasPorNegocio(

@@ -2,6 +2,7 @@ import { CalendarClock, CreditCard } from 'lucide-react'
 import { formatCOP } from '@/lib/cobros/format'
 import { NOTA_IVA_CDA } from '@/lib/valida-cda/redaccion-fiscal'
 import { fechaCorta } from '@/lib/valida-cda/pago-pendiente'
+import { fechasDePagoV15, textosPagoCuotaV15 } from '@/lib/valida-cda/plazos'
 import type { LecturaPago } from '@/lib/valida-cda/pago-servidor'
 import { PagarAhora } from './pagar-ahora'
 
@@ -23,8 +24,17 @@ export function TarjetaPago({
   rechazoTarjeta = null,
   avisoTarjeta = null,
   tarjetaActiva = null,
+  transicion = null,
+  hoy = null,
 }: {
   lectura: LecturaPago
+  /**
+   * La vigencia de la v1.5 (`contextoSuscripcion().transicion`) y el día de hoy en Bogotá: con las dos, la
+   * tarjeta dice la fecha de renovación («Paga antes del 23-dic») y desde cuándo queda Suspendida por pago,
+   * no el vencimiento guardado (D7 del diseño del 4-nov).
+   */
+  transicion?: string | null
+  hoy?: string | null
   /** Una suscripción sin enlace vigente: «Pagar ahora» pide el enlace ya (`pagarCuotaPendiente`). */
   pagarAhora?: boolean
   /** La respuesta del banco al cobrar la tarjeta guardada, si la rechazó. */
@@ -58,6 +68,9 @@ export function TarjetaPago({
   }
 
   const parcial = pago.abonado > 0
+  const fechasV15 = hoy ? fechasDePagoV15(pago, transicion) : null
+  const v15 = fechasV15 && hoy ? textosPagoCuotaV15(fechasV15, hoy) : null
+  const vencida = v15 ? v15.vencida : pago.vencida
 
   return (
     <section data-pago-cda="pendiente" className="rounded-lg border border-border bg-white p-4 sm:p-5">
@@ -65,7 +78,7 @@ export function TarjetaPago({
         <div className="flex items-start gap-3">
           <CreditCard className="mt-0.5 hidden h-5 w-5 shrink-0 text-acento sm:block" />
           <div className="min-w-0 space-y-1">
-            <h2 className="text-base font-semibold text-tinta">{pago.vencida ? 'Pago vencido' : 'Tu próximo pago'}</h2>
+            <h2 className="text-base font-semibold text-tinta">{vencida ? 'Pago vencido' : 'Tu próximo pago'}</h2>
             {pago.concepto && <p className="text-sm text-tinta">{pago.concepto}</p>}
             <p className="text-2xl font-bold text-tinta" data-monto>
               {formatCOP(pago.saldo)}
@@ -87,10 +100,15 @@ export function TarjetaPago({
                 medio.
               </p>
             )}
-            <p className={`flex items-center gap-1.5 text-sm ${pago.vencida ? 'font-semibold text-amber-800' : 'text-tinta'}`}>
+            <p className={`flex items-center gap-1.5 text-sm ${vencida ? 'font-semibold text-amber-800' : 'text-tinta'}`}>
               <CalendarClock className="h-4 w-4 shrink-0" />
-              {pago.vencida ? 'Venció el' : 'Vence el'} {fechaCorta(pago.fechaVencimiento)}
+              {v15 ? v15.fecha : `${pago.vencida ? 'Venció el' : 'Vence el'} ${fechaCorta(pago.fechaVencimiento)}`}
             </p>
+            {v15?.consecuencia && (
+              <p data-consecuencia-pago className="text-sm text-tinta">
+                {v15.consecuencia}
+              </p>
+            )}
           </div>
         </div>
 
@@ -114,10 +132,10 @@ export function TarjetaPago({
             <p className="max-w-xs text-sm text-tinta-suave" data-sin-enlace>
               {pago.enlaceVencido
                 ? 'El enlace de pago de esta cuota venció. MéTRIK te enviará uno nuevo.'
-                : pago.vencida
+                : vencida
                   ? // Prometer el enlace «antes del» una fecha ya pasada no tiene sentido.
                     'MéTRIK te enviará el enlace de pago de esta cuota.'
-                  : `El enlace de pago estará disponible antes del ${fechaCorta(pago.fechaVencimiento)}.`}
+                  : `El enlace de pago estará disponible antes del ${fechaCorta(fechasV15?.renovacion ?? pago.fechaVencimiento)}.`}
             </p>
           )}
         </div>

@@ -2,9 +2,12 @@ import Link from 'next/link'
 import { AlertTriangle, Ban, CalendarClock, FileText, PauseCircle } from 'lucide-react'
 import {
   mensajeSuspendidoPorMora,
+  TEXTO_CONSULTAS_SUSPENDIDAS,
+  textoAvisoGraciaV15,
   textoAvisoMora,
   textoAvisoRestriccion,
   textoAvisoPlazo,
+  textoAvisoSuspendida,
   type EstadoMora,
 } from '@/lib/valida-cda/plazos'
 import {
@@ -127,8 +130,14 @@ export function AvisoModificacionTerminos({
 export function AvisoMora({
   mora,
   pagar = false,
+  v15 = null,
 }: {
   mora: Extract<EstadoMora, { estado: 'en_mora' }>
+  /**
+   * Un CDA con la v1.5 (`hablaConLaV15`): el aviso de la 11.1 con el período impago y la fecha de
+   * Suspendida por pago. `periodo` es el de la cuota impaga más vieja, o `null` si su concepto no lo trae.
+   */
+  v15?: { periodo: string | null; cuantos?: number } | null
   /**
    * El botón «Pagar ahora» (a /suscripcion, donde se pide el enlace). Solo la cuenta autogestionada y
    * quien ve la plata; a los CDA el aviso les queda como siempre.
@@ -142,7 +151,7 @@ export function AvisoMora({
     >
       <div className="flex items-start gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-        <p className="font-semibold">{textoAvisoMora(mora)}</p>
+        <p className="font-semibold">{v15 ? textoAvisoGraciaV15(mora, v15.periodo, v15.cuantos ?? 1) : textoAvisoMora(mora)}</p>
       </div>
       {pagar && (
         <Link
@@ -164,18 +173,22 @@ export function AvisoMora({
 export function AvisoRestriccion({
   mora,
   vePagos,
+  v15 = false,
 }: {
   mora: Extract<EstadoMora, { estado: 'restringido' }>
   vePagos: boolean
+  /** Un CDA con la v1.5: la franja de Suspendida por pago (11.2). */
+  v15?: boolean
 }) {
   return (
     <section
       data-aviso-restriccion
+      data-suspendida-por-pago={v15 ? '' : undefined}
       className="flex items-start gap-3 rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-900"
     >
       <Ban className="mt-0.5 h-5 w-5 shrink-0" />
       <div className="space-y-1">
-        <p className="font-semibold">{textoAvisoRestriccion(mora)}</p>
+        <p className="font-semibold">{v15 ? textoAvisoSuspendida(mora) : textoAvisoRestriccion(mora)}</p>
         <p>
           {vePagos ? (
             <>
@@ -183,23 +196,38 @@ export function AvisoRestriccion({
               <Link href="/suscripcion?tab=pagos" className="font-semibold underline">
                 Suscripción
               </Link>{' '}
-              está la cuota vencida, con su enlace de pago.
+              {v15 ? 'están los períodos sin pagar, con su enlace de pago.' : 'está la cuota vencida, con su enlace de pago.'}
             </>
+          ) : v15 ? (
+            'La persona designada por tu empresa puede ver y pagar los períodos sin pagar.'
           ) : (
             'La persona designada por tu empresa puede ver y pagar la cuota.'
           )}
         </p>
+        {vePagos && v15 && (
+          <Link
+            href="/suscripcion?tab=pagos"
+            data-ir-a-pagos
+            className="mt-2 inline-flex h-9 items-center justify-center rounded-lg bg-acento px-4 text-sm font-semibold text-white"
+          >
+            Ir a Pagos
+          </Link>
+        )}
       </div>
     </section>
   )
 }
 
 /** En lugar del formulario de consulta puntual o masiva, con las consultas restringidas. */
-export function ConsultasRestringidas() {
+export function ConsultasRestringidas({ v15 = false }: { v15?: boolean }) {
   return (
     <section data-consultas-restringidas className="rounded-lg border border-border bg-white p-4 text-sm text-tinta sm:p-5">
-      <p className="font-semibold">Las consultas nuevas están restringidas hasta que se registre el pago.</p>
-      <p className="mt-1 text-tinta-suave">En la pestaña Historial puedes ver y descargar los reportes ya generados.</p>
+      <p className="font-semibold">
+        {v15 ? TEXTO_CONSULTAS_SUSPENDIDAS.titulo : 'Las consultas nuevas están restringidas hasta que se registre el pago.'}
+      </p>
+      <p className="mt-1 text-tinta-suave">
+        {v15 ? TEXTO_CONSULTAS_SUSPENDIDAS.detalle : 'En la pestaña Historial puedes ver y descargar los reportes ya generados.'}
+      </p>
     </section>
   )
 }

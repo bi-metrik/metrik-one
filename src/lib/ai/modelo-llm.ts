@@ -21,6 +21,7 @@
 export {
   fetchModelo,
   fetchModeloDocumentos,
+  fetchModeloExtraccion,
   fetchModeloActas,
   fetchModeloCapturas,
   fetchModeloChat,

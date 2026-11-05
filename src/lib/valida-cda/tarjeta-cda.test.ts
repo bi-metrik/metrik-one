@@ -209,7 +209,7 @@ describe('un cobro que no pasó: el reintento y la fecha de la pausa', () => {
     const f = fechasDelFallo({ cuota: CUOTAS[2], transicion: '2026-12-01', hoy: '2026-11-23' })
     expect(f).toEqual({ reintento: '2026-11-26', pausaDesde: '2026-12-06' })
     expect(textoFalloTarjeta({ ultimos4: '1234', fechas: f })).toBe(
-      'No pudimos cobrar a tu tarjeta terminada en 1234. Puedes pagar con el enlace de pago. Reintentamos el 26 de noviembre. Si no se paga, las consultas nuevas se pausan desde el 6 de diciembre.',
+      'No pudimos cobrar a tu tarjeta terminada en 1234. Puedes pagar con el enlace de pago. Reintentamos el 26 de noviembre. Si no se paga, la suscripción queda Suspendida por pago desde el 6 de diciembre.',
     )
   })
 
@@ -217,7 +217,7 @@ describe('un cobro que no pasó: el reintento y la fecha de la pausa', () => {
     const f = fechasDelFallo({ cuota: CUOTAS[3], transicion: '2026-12-01', hoy: '2026-12-26' })
     expect(f).toEqual({ reintento: null, pausaDesde: '2026-12-29' })
     expect(textoFalloTarjeta({ ultimos4: null, fechas: f })).toBe(
-      'No pudimos cobrar a la tarjeta que registraste. Puedes pagar con el enlace de pago. Si no se paga, las consultas nuevas se pausan desde el 29 de diciembre.',
+      'No pudimos cobrar a la tarjeta que registraste. Puedes pagar con el enlace de pago. Si no se paga, la suscripción queda Suspendida por pago desde el 29 de diciembre.',
     )
   })
 })

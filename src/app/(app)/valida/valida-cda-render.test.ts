@@ -197,6 +197,45 @@ describe('los avisos que ven todos (plazo y mora)', () => {
     expect(otro).toContain('La persona designada por tu empresa puede ver y pagar')
   })
 
+  it('con la v1.5: «Suspendida por pago» para todos, sin montos, y «Ir a Pagos» solo a quien paga', () => {
+    const mora = { estado: 'restringido' as const, vencio: '2026-11-30', restringeDesde: '2026-12-06', corteDesde: '2026-12-31' }
+    const html = renderToStaticMarkup(React.createElement(AvisoRestriccion, { mora, vePagos: true, v15: true }))
+    const t = texto(html)
+    expect(t).toContain('Suscripción Suspendida por pago desde el 6 de diciembre. No puedes hacer consultas nuevas.')
+    expect(t).toContain('la exportación de tu bitácora siguen disponibles')
+    expect(t).toContain('desde el 31 de diciembre la suscripción queda Cancelada')
+    expect(t).not.toContain('restringidas')
+    expect(t).not.toMatch(/\$/)
+    expect(html).toContain('data-ir-a-pagos')
+    expect(t).toContain('En Suscripción están los períodos sin pagar, con su enlace de pago.')
+    expect(t).not.toContain('cuota vencida')
+    const otro = texto(renderToStaticMarkup(React.createElement(AvisoRestriccion, { mora, vePagos: false, v15: true })))
+    expect(otro).toContain('La persona designada por tu empresa puede ver y pagar los períodos sin pagar.')
+    expect(otro).not.toContain('Ir a Pagos')
+    const formulario = texto(renderToStaticMarkup(React.createElement(ConsultasRestringidas, { v15: true })))
+    expect(formulario).toContain('La suscripción está Suspendida por pago')
+    expect(formulario).toContain('descargar la bitácora')
+    const gracia = { estado: 'en_mora' as const, vencio: '2026-11-30', restringeDesde: '2026-12-06', corteDesde: '2026-12-31' }
+    const aviso = texto(
+      renderToStaticMarkup(React.createElement(AvisoMora, { mora: gracia, v15: { periodo: 'del 23 de noviembre al 22 de diciembre' } })),
+    )
+    expect(aviso).toContain('El período del 23 de noviembre al 22 de diciembre no está pagado.')
+    expect(aviso).toContain('desde el 6 de diciembre la suscripción queda Suspendida por pago')
+  })
+
+  it('el Historial ofrece «Descargar bitácora (XLSX)» (cláusulas 9.3 y 11.2)', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ValidaClient, {
+        historialInicial: [],
+        errorHistorial: null,
+        modoVitrina: true,
+        consultasRestringidas: React.createElement(ConsultasRestringidas, { v15: true }),
+      }),
+    )
+    expect(html).toContain('data-descargar-bitacora')
+    expect(texto(html)).toContain('Descargar bitácora (XLSX)')
+  })
+
   it('restringido: abre en el Historial, con las pestañas, y sin el formulario de consulta', () => {
     const html = renderToStaticMarkup(
       React.createElement(ValidaClient, {
