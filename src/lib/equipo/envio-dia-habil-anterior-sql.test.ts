@@ -200,6 +200,18 @@ beforeAll(async () => {
   const corte = correcciones.indexOf('-- ── 6. Dirección')
   if (corte < 0) throw new Error('20261010113000 cambió de forma: no encuentro la sección 6')
   await db.exec(correcciones.slice(0, corte))
+  // Como está en producción (ensayo de SOE-040): en el RESUMEN la línea de `horas_antes_cita` de
+  // `cfg` lleva UN espacio antes de AS; en el DETALLE sigue alineada con varios. La migración tiene
+  // que encontrar el ancla en las dos formas.
+  await db.exec(`
+    do $$
+    declare v_def text := pg_get_functiondef('public.get_operaciones_bono_resumen(uuid,integer,integer)'::regprocedure);
+    begin
+      if position('d.horas_antes_cita)            AS horas_antes_cita,' in v_def) = 0 then
+        raise exception 'el resumen del repo cambió de forma';
+      end if;
+      execute replace(v_def, 'd.horas_antes_cita)            AS horas_antes_cita,', 'd.horas_antes_cita) AS horas_antes_cita,');
+    end $$;`)
   await db.exec(datos())
   await db.exec(`set prueba.ws = '${WS}'`)
 
@@ -337,6 +349,39 @@ describe('congelar meses pasados', () => {
     )
     expect(r.rows).toEqual([{ envio_modo: 'dia_habil_anterior', envio_hora_corte: 16 }])
   })
+})
+
+describe('ancla de cfg', () => {
+  it('parcha el resumen con un espacio y el detalle alineado, una sola vez cada uno', async () => {
+    for (const f of ['get_operaciones_bono_resumen', 'get_operaciones_bono_detalle']) {
+      const r = await db.query<{ n: number }>(
+        `select count(*)::int as n from regexp_matches(
+           pg_get_functiondef('public.${f}(uuid,integer,integer)'::regprocedure),
+           'COALESCE\\(m\\.envio_hora_corte, d\\.envio_hora_corte\\)', 'g')`,
+      )
+      expect(r.rows[0].n, f).toBe(1)
+    }
+  })
+
+  it('aborta si el ancla no está', async () => {
+    const otra = new PGlite()
+    try {
+      await otra.exec(ESQUEMA)
+      await otra.exec(leer('20260901000006_config_bono_por_mes.sql'))
+      await otra.exec(leer('20260901000007_detalle_bono_por_indicador.sql'))
+      await otra.exec(`
+        do $$
+        declare v_def text := pg_get_functiondef('public.get_operaciones_bono_resumen(uuid,integer,integer)'::regprocedure);
+        begin
+          -- Una forma que el ancla no reconoce (los argumentos al revés): tiene que abortar, no adivinar.
+          execute replace(v_def, 'COALESCE(m.horas_antes_cita, d.horas_antes_cita)            AS horas_antes_cita,',
+                                 'COALESCE(d.horas_antes_cita, m.horas_antes_cita) AS horas_antes_cita,');
+        end $$;`)
+      await expect(otra.exec(leer(MIGRACION))).rejects.toThrow(/ancla de cfg aparece 0 veces/)
+    } finally {
+      await otra.close()
+    }
+  }, 60_000)
 })
 
 describe('idempotencia', () => {

@@ -172,9 +172,11 @@ $$;
 
 do $$
 declare
-  -- a. cfg: el mismo ancla en las dos funciones.
-  v_viejo_cfg constant text := 'd.horas_antes_cita)            AS horas_antes_cita,';
-  v_nuevo_cfg constant text := $frag$d.horas_antes_cita)            AS horas_antes_cita,
+  -- a. cfg: el ancla se busca SIN depender de los espacios antes de AS. En producción el resumen
+  --    trae un solo espacio y el detalle varios (medido en el ensayo de SOE-040); un ancla literal
+  --    fallaba en el resumen. Se cuenta con regexp y tiene que aparecer exactamente una vez.
+  v_patron_cfg constant text := 'd\.horas_antes_cita\)\s+AS horas_antes_cita,';
+  v_nuevo_cfg constant text := $frag$d.horas_antes_cita) AS horas_antes_cita,
       -- SOE-040 envio: regla de Envio y hora de corte del modo «dia habil anterior».
       COALESCE(m.envio_modo, d.envio_modo)                    AS envio_modo,
       COALESCE(m.envio_hora_corte, d.envio_hora_corte)        AS envio_hora_corte,$frag$;
@@ -318,11 +320,11 @@ begin
     end if;
 
     -- a. cfg
-    v_n := (length(v_def) - length(replace(v_def, v_viejo_cfg, ''))) / length(v_viejo_cfg);
+    SELECT count(*) INTO v_n FROM regexp_matches(v_def, v_patron_cfg, 'g');
     if v_n <> 1 then
       raise exception '% cambió en producción: el ancla de cfg aparece % veces (se esperaba 1). Revisar a mano.', v_firmas[i], v_n;
     end if;
-    v_def := replace(v_def, v_viejo_cfg, v_nuevo_cfg);
+    v_def := regexp_replace(v_def, v_patron_cfg, replace(v_nuevo_cfg, E'\\', E'\\\\'));
 
     -- b. el bloque que juzga Envío
     v_ini := position((case i when 1 then v_ini_r else v_ini_d end) in v_def);
