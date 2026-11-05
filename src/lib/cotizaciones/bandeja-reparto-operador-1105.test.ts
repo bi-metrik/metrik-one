@@ -15,9 +15,23 @@
 import { describe, expect, it } from 'vitest'
 
 import ghlRaw from './__fixtures__/bloqueo/tureserva-ghl-tres-columnas.json'
-import { MENSAJE_VUELO_VARIOS_OPERADORES, mensajeVueloDelOperador, planDelPegado, type ContextoDeArmado, type LecturaParaArmar, type OpcionDeBloqueo, type PlanDeArmado } from './bloqueo-armado'
+import {
+  MENSAJE_VUELO_VARIOS_OPERADORES,
+  mensajeVueloDelOperador,
+  opcionesDelMismoPaquete,
+  paquetesConTarifaPorElegir,
+  paquetesDelBloqueo,
+  planDelPegado,
+  type ContextoDeArmado,
+  type LecturaParaArmar,
+  type OpcionDeBloqueo,
+  type PlanDeArmado,
+} from './bloqueo-armado'
 import { ESQUEMA_VUELO_BLOQUEO, PROMPT_VUELO_BLOQUEO, hotelDesdeLectura, vueloDesdeLectura } from './bloqueo-extraccion'
 import { operadorInicialDelPaquete, operadoresDeLaSolicitud } from './bloqueo-operador'
+import { itemsDelItinerario } from './itinerarios'
+import { aplicarPlan, planDeTarifas, type TarifaDelPlan } from './tarifas-por-pasos'
+import { recomendadaDe } from './tarifas'
 
 // ── Lo que «respondió» el modelo a cada pantallazo ─────────────────────────────
 
@@ -61,19 +75,25 @@ const CTX: ContextoDeArmado = {
   edadesNinos: [],
 }
 
-/** Aplica los planes sobre una cotización en memoria, como lo haría `pegarEnBloqueo`. */
+/**
+ * Aplica los planes sobre una cotización en memoria, como lo haría `pegarEnBloqueo`: un paquete nuevo
+ * entra en la ranura que dice el plan (`grupo`) y solo sin ella abre una (`crearRanuraConOpcion`).
+ */
 function simular(lecturas: LecturaParaArmar[], ctx = CTX) {
   const opciones: OpcionDeBloqueo[] = []
   const planes: PlanDeArmado[] = []
   for (const l of lecturas) {
     const p = planDelPegado(opciones, l, ctx)
     planes.push(p)
+    const orden = opciones.length + 1
     if (p.accion === 'nuevo_paquete') {
-      const numero = opciones.length ? Math.max(...opciones.map(o => o.numero)) + 1 : 1
-      opciones.push({ itemId: `it-${opciones.length + 1}`, grupo: `paquete ${numero}`, numero, paquete: p.paquete, tarifa: p.tarifa })
+      const enRanura = p.grupo ? opciones.find(o => o.grupo === p.grupo) : undefined
+      const numero = enRanura?.numero ?? (opciones.length ? Math.max(...opciones.map(o => o.numero)) + 1 : 1)
+      const grupo = enRanura?.grupo ?? (numero === 1 ? 'paquete de bloqueo' : `paquete de bloqueo ${numero}`)
+      opciones.push({ itemId: `it-${orden}`, grupo, numero, paquete: p.paquete, tarifa: p.tarifa, orden })
     } else if (p.accion === 'nueva_opcion') {
       const numero = opciones.find(o => o.grupo === p.grupo)!.numero
-      opciones.push({ itemId: `it-${opciones.length + 1}`, grupo: p.grupo, numero, paquete: p.paquete, tarifa: p.tarifa })
+      opciones.push({ itemId: `it-${orden}`, grupo: p.grupo, numero, paquete: p.paquete, tarifa: p.tarifa, orden })
     } else if (p.accion === 'actualizar') {
       for (const c of p.cambios) opciones.find(o => o.itemId === c.itemId)!.paquete = c.paquete
     }
@@ -81,11 +101,12 @@ function simular(lecturas: LecturaParaArmar[], ctx = CTX) {
   return { opciones, planes }
 }
 
-/** Cada paquete como lo vería la asesora: «operador | vuelo | hoteles». Ordenado: no depende del número. */
+/**
+ * Cada paquete como lo vería la asesora: «operador | vuelo | hoteles». Ordenado: no depende del número.
+ * Un paquete = mismo operador y mismo vuelo dentro de la ranura (`paquetesDelBloqueo`, 2026-11-05).
+ */
 function paquetes(opciones: readonly OpcionDeBloqueo[]): string[] {
-  const grupos = new Map<string, OpcionDeBloqueo[]>()
-  for (const o of opciones) grupos.set(o.grupo, [...(grupos.get(o.grupo) ?? []), o])
-  return [...grupos.values()].map(os => {
+  return paquetesDelBloqueo(opciones).map(p => p.opciones).map(os => {
     const v = os.find(o => o.paquete?.vuelo)?.paquete?.vuelo?.tramos[0]
     const hoteles = os.map(o => o.paquete?.hotel.hotel).filter(Boolean).sort().join(' + ')
     return `${os[0].paquete?.operador ?? '¿operador?'} | ${v ? `${v.aerolinea} ${v.numeroVuelo}` : 'sin vuelo'} | ${hoteles || 'sin hotel'}`
@@ -103,7 +124,7 @@ describe('viaje 02: la bandeja reparte por operador, no por orden de llegada', (
     const decameron = opciones.find(o => o.paquete?.hotel.hotel === 'Decameron Aquarium')!
     const ghl = opciones.find(o => o.paquete?.hotel.hotel === 'GHL Relax Hotel Sunrise Beach')!
     // Lo que pasó en producción: Decameron era otra opción del paquete de GHL, con el vuelo de Avianca.
-    expect(decameron.grupo).not.toBe(ghl.grupo)
+    expect(opcionesDelMismoPaquete(opciones, decameron.itemId)).not.toContain(ghl.itemId)
     expect(decameron.paquete!.vuelo).toBeNull()
     expect(ghl.paquete!.vuelo).toBeNull()
     expect(decameron.paquete!.operador).toBe('ALIADOS TRAVEL')
@@ -142,13 +163,16 @@ describe('viaje 02: la bandeja reparte por operador, no por orden de llegada', (
   it('un hotel sin operador leído abre su propio paquete (no se adivina) y lo dice', () => {
     const sinOperador = hotel({ ...ghlRaw, operador: null })
     const { opciones, planes } = simular([GHL, DECAMERON, hotel({ ...ghlRaw, hotel: 'Hotel Sin Logo', operador: null }), sinOperador])
-    expect(new Set(opciones.map(o => o.grupo)).size).toBe(4)
+    // Cada uno es un paquete nuevo, y todos compiten en la misma ranura del bloqueo.
+    expect(planes.map(p => p.accion)).toEqual(['nuevo_paquete', 'nuevo_paquete', 'nuevo_paquete', 'nuevo_paquete'])
+    expect(new Set(opciones.map(o => o.grupo)).size).toBe(1)
+    expect(opciones).toHaveLength(4)
     expect(planes[2]).toMatchObject({ accion: 'nuevo_paquete', mensaje: 'Paquete nuevo con Hotel Sin Logo. No se vio de qué operador es: elígelo en el paquete.' })
   })
 
   it('un operador leído que no es de la solicitud (la marca del hotel) cuenta como no leído', () => {
     const { opciones } = simular([GHL, hotel({ ...ghlRaw, hotel: 'Decameron Isleño', operador: 'Decameron' })])
-    expect(new Set(opciones.map(o => o.grupo)).size).toBe(2)
+    expect(paquetesDelBloqueo(opciones)).toHaveLength(2)
     expect(opciones[1].paquete!.operador).toBeNull()
   })
 
@@ -247,7 +271,7 @@ describe('viaje 02: el vuelo con operador leído va al paquete de su operador', 
   it('un vuelo con operador que no es de la solicitud (la aerolínea) cuenta como no leído', () => {
     const { opciones, planes } = simular([GHL, vuelo({ ...vueloAv, operador: 'Avianca' })])
     expect(planes[1]).toMatchObject({ accion: 'nuevo_paquete', mensaje: MENSAJE_VUELO_VARIOS_OPERADORES })
-    expect(new Set(opciones.map(o => o.grupo)).size).toBe(2)
+    expect(paquetesDelBloqueo(opciones)).toHaveLength(2)
   })
 
   it('con UN operador en la solicitud el operador del vuelo no cambia nada', () => {
@@ -255,5 +279,109 @@ describe('viaje 02: el vuelo con operador leído va al paquete de su operador', 
     const con = simular([AVIANCA_TR, GHL, DECAMERON, LATAM_AL], uno)
     const sin = simular([AVIANCA, GHL, DECAMERON, LATAM], uno)
     expect(con.planes).toEqual(sin.planes)
+  })
+})
+
+// ── Los paquetes COMPITEN, no se suman (reprueba en producción del 2026-11-05, viaje 02) ─────────────
+//
+// Con #1431 la bandeja armó bien los 2 paquetes, pero cada uno en su propia ranura: Tarifas los sumaba
+// en una sola tarifa («No hay nada que escoger… le llega una sola tarifa»; venta $19.946.588 =
+// $10.666.588 + $9.280.000). La asesora lo arregló con «Juntar como opción de…»: una ranura, Recomendada
+// y Opción 2. Ahora la bandeja lo deja así sola.
+
+/** El costo de cada paquete en la prueba: el de la bitácora (A = Tu Reserva, B = Aliados). */
+const COSTO: Record<string, number> = { 'TU RESERVA': 10_666_588, 'ALIADOS TRAVEL': 9_280_000 }
+
+/** Las tarifas que deja `planDeTarifas` (el cierre de toda acción por pasos) y el total de cada una. */
+function tarifasDe(opciones: readonly OpcionDeBloqueo[]) {
+  const items = opciones.map(o => ({ id: o.itemId, grupo: o.grupo, orden: o.orden ?? null, costo: COSTO[o.paquete?.operador ?? ''] ?? null }))
+  const costoDe = (id: string) => items.find(i => i.id === id)?.costo ?? null
+  let n = 0
+  const tarifas: TarifaDelPlan[] = aplicarPlan([], planDeTarifas({ antes: null, despues: { items, tarifas: [] }, costoDe }), () => `t${++n}`)
+  const total = (seleccion: string[]) => itemsDelItinerario(items, seleccion).reduce((s, id) => s + (costoDe(id) ?? 0), 0)
+  // Sin tarifas, el cliente recibe UNA sola: todo lo que hay en la cotización.
+  const totales = tarifas.length === 0 ? [total([])] : tarifas.map(t => total(t.seleccion))
+  return { tarifas, totales }
+}
+
+describe('viaje 02: los paquetes de los dos operadores compiten en UNA ranura', () => {
+  it('las 24 órdenes dejan 1 ranura con 2 paquetes-opción, y el segundo entra en la ranura del primero', () => {
+    for (const orden of permutaciones(Object.keys(CON_OPERADOR))) {
+      const { opciones, planes } = simular(orden.map(n => CON_OPERADOR[n]))
+      const nuevos = planes.filter(p => p.accion === 'nuevo_paquete')
+      expect(nuevos, orden.join(', ')).toHaveLength(2)
+      expect(nuevos[0].accion === 'nuevo_paquete' && nuevos[0].grupo, orden.join(', ')).toBeNull()
+      expect(nuevos[1].accion === 'nuevo_paquete' && nuevos[1].grupo, orden.join(', ')).toBe('paquete de bloqueo')
+      expect(new Set(opciones.map(o => o.grupo)), orden.join(', ')).toEqual(new Set(['paquete de bloqueo']))
+      expect(opciones, orden.join(', ')).toHaveLength(2)
+      expect(paquetes(opciones), orden.join(', ')).toEqual([
+        'ALIADOS TRAVEL | LATAM 4120 | Decameron Aquarium',
+        'TU RESERVA | Avianca 8410 | GHL Relax Hotel Sunrise Beach',
+      ])
+    }
+  })
+
+  it('las 24 órdenes: Tarifas tiene la Recomendada y la Opción 2, y ninguna suma A + B', () => {
+    for (const orden of permutaciones(Object.keys(CON_OPERADOR))) {
+      const { opciones } = simular(orden.map(n => CON_OPERADOR[n]))
+      const { tarifas, totales } = tarifasDe(opciones)
+      expect(tarifas, orden.join(', ')).toHaveLength(2)
+      expect(recomendadaDe(tarifas).fila, orden.join(', ')).not.toBeNull()
+      expect(tarifas.filter(t => t.nombre === null), orden.join(', ')).toHaveLength(1)
+      expect(tarifas.every(t => t.vaEnPropuesta), orden.join(', ')).toBe(true)
+      expect([...totales].sort((a, b) => a - b), orden.join(', ')).toEqual([9_280_000, 10_666_588])
+      expect(totales, orden.join(', ')).not.toContain(19_946_588)
+    }
+  })
+
+  it('cada paquete conserva su pregunta Pública / Neta: la bandeja hace dos, una por paquete', () => {
+    const { opciones } = simular([AVIANCA_TR, GHL, LATAM_AL, DECAMERON])
+    expect(opciones.every(o => o.paquete?.tarifaPorElegir === true)).toBe(true)
+    const lineas = opciones.map(o => ({ id: o.itemId, grupo: o.grupo, orden: o.orden, paquete: o.paquete }))
+    expect(paquetesConTarifaPorElegir(lineas)).toEqual([
+      { itemId: 'it-1', titulo: 'Paquete 1 · Avianca 8410' },
+      { itemId: 'it-2', titulo: 'Paquete 2 · LATAM 4120' },
+    ])
+    // Responder en uno no toca al otro (`elegirTarifaDelPaquete` escribe solo en su paquete).
+    expect(opcionesDelMismoPaquete(opciones, 'it-1')).toEqual(['it-1'])
+    expect(opcionesDelMismoPaquete(opciones, 'it-2')).toEqual(['it-2'])
+  })
+
+  it('un segundo hotel de Tu Reserva es otra opción de SU paquete, con su vuelo y la tarifa de su hermana', () => {
+    const sol = hotel({ es_oferta_de_hotel: true, hotel: 'Sol Caribe Campo', noches: 5, operador: 'TU RESERVA', precios_por_persona: [{ acomodacion: 'doble', precio: 2_000_000 }] })
+    const { opciones } = simular([AVIANCA_TR, GHL, LATAM_AL, DECAMERON])
+    const publica = { tipo: 'publica' as const, comision: { tipo: 'pct' as const, valor: 10 } }
+    opciones[0].tarifa = publica
+    opciones[0].paquete = { ...opciones[0].paquete!, tarifaPorElegir: undefined }
+    const plan = planDelPegado(opciones, sol, CTX)
+    expect(plan.accion).toBe('nueva_opcion')
+    if (plan.accion !== 'nueva_opcion') return
+    expect(plan.grupo).toBe('paquete de bloqueo')
+    expect(plan.paquete.vuelo?.tramos[0].numeroVuelo).toBe('8410')
+    expect(plan.paquete.operador).toBe('TU RESERVA')
+    expect(plan.tarifa).toEqual(publica)
+  })
+})
+
+describe('UN operador con otro vuelo: el segundo paquete también compite (SAN ANDRÉS)', () => {
+  const uno: ContextoDeArmado = { ...CTX, operadorInicial: 'TU RESERVA', operadoresSolicitud: operadoresDeLaSolicitud('TU RESERVA') }
+
+  it('vuelo + hotel, otro vuelo + hotel: 1 ranura, 2 paquetes, cada hotel con su vuelo', () => {
+    const { opciones, planes } = simular([AVIANCA, GHL, LATAM, DECAMERON], uno)
+    expect(planes.map(p => p.accion)).toEqual(['nuevo_paquete', 'actualizar', 'nuevo_paquete', 'actualizar'])
+    expect(new Set(opciones.map(o => o.grupo)).size).toBe(1)
+    expect(paquetes(opciones)).toEqual([
+      'TU RESERVA | Avianca 8410 | GHL Relax Hotel Sunrise Beach',
+      'TU RESERVA | LATAM 4120 | Decameron Aquarium',
+    ])
+  })
+
+  it('el hotel que llega después del segundo vuelo va al paquete de ese vuelo, no al primero', () => {
+    const sol = hotel({ es_oferta_de_hotel: true, hotel: 'Sol Caribe Campo', noches: 5, precios_por_persona: [{ acomodacion: 'doble', precio: 2_000_000 }] })
+    const { opciones } = simular([AVIANCA, GHL, LATAM, DECAMERON, sol], uno)
+    expect(paquetes(opciones)).toEqual([
+      'TU RESERVA | Avianca 8410 | GHL Relax Hotel Sunrise Beach',
+      'TU RESERVA | LATAM 4120 | Decameron Aquarium + Sol Caribe Campo',
+    ])
   })
 })
