@@ -1,6 +1,7 @@
 'use server'
 
 import { headers } from 'next/headers'
+import { ipDelCliente } from '@/lib/http/ip-cliente'
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getCachedUser } from '@/lib/supabase/auth-user'
@@ -59,7 +60,7 @@ export async function confirmarCobroAlConfirmar(agotada: boolean, huella: string
     return { ok: false, texto: textoTrasConfirmar('no_disponible', { valor: 0, ultimos4: null }) }
   }
   const h = await headers()
-  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip')?.trim() || null
+  const ip = ipDelCliente(h)
   try {
     const r = await cobrarAlConfirmar({ db: s.svc }, { workspaceId: s.workspaceId, usuarioId: s.usuarioId, agotada: agotada === true, ip, huella })
     revalidatePath('/valida')

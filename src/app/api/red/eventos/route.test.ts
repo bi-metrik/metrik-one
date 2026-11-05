@@ -14,7 +14,6 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }))
 vi.mock('@/lib/red/operador', () => ({
-  ipDelCliente: (h: Headers) => h.get('x-real-ip'),
   operadorDeIp: async (ip: string | null) => {
     ipConsultada = ip
     return { asn: 14080, nombre: 'Telmex Colombia S.A., CO', marca: 'Claro' }
@@ -34,7 +33,7 @@ afterEach(() => logSpy.mockRestore())
 
 const falla = { tipo: 'falla', id: 'f-1', t: 1_790_000_000_000, superficie: 'carga', ruta: '/negocios/[id]' }
 
-const enviar = (slug: string | null, cuerpo: unknown = { eventos: [falla] }) =>
+const enviar = (slug: string | null, cuerpo: unknown = { eventos: [falla] }, extra: Record<string, string> = {}) =>
   POST(
     new Request('https://soena.metrikone.co/api/red/eventos', {
       method: 'POST',
@@ -44,6 +43,7 @@ const enviar = (slug: string | null, cuerpo: unknown = { eventos: [falla] }) =>
         'x-real-ip': '186.81.102.19',
         'x-vercel-ip-city': 'Bogot%C3%A1',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0) Chrome/140',
+        ...extra,
       },
     }),
   )
@@ -77,6 +77,7 @@ describe('POST /api/red/eventos', () => {
       operador: 'Claro',
       asn: 14080,
       ciudad: 'Bogotá',
+      via: 'directo',
       dispositivo: 'escritorio',
       eventos: [falla],
     })
@@ -92,6 +93,24 @@ describe('POST /api/red/eventos', () => {
     staff = { id: 'staff-x', full_name: 'Jessica Tejada', workspaces: { slug: 'otro' } }
     await enviar('soena')
     expect(linea()).toMatchObject({ persona: null, persona_id: null })
+  })
+
+  it('por Cloudflare: operador desde cf-connecting-ip y ubicación de Cloudflare, nunca la del PoP', async () => {
+    const cf = {
+      'x-real-ip': '172.70.1.9',
+      'x-vercel-ip-city': 'Miami',
+      'x-vercel-ip-country-region': 'FL',
+      'x-vercel-ip-country': 'US',
+      'cf-connecting-ip': '181.51.2.3',
+    }
+    await enviar('soena', undefined, cf)
+    expect(ipConsultada).toBe('181.51.2.3')
+    expect(linea()).toMatchObject({ via: 'cloudflare', ciudad: null, region: null, pais: null })
+    expect(JSON.stringify(linea())).not.toContain('181.51.2.3')
+
+    logSpy.mockClear()
+    await enviar('soena', undefined, { ...cf, 'cf-ipcity': 'Zipaquir%C3%A1', 'cf-region-code': 'CUN', 'cf-ipcountry': 'CO' })
+    expect(linea()).toMatchObject({ via: 'cloudflare', ciudad: 'Zipaquirá', region: 'CUN', pais: 'CO' })
   })
 
   it('cuerpo roto: 400', async () => {
