@@ -177,8 +177,9 @@ export function instruccionesCarga(
     '   - Fechas: si no dicen el año, es la próxima vez que ocurre desde hoy. Calcula lo que se puede calcular con lo dicho y',
     '     con lo que el viaje ya tiene (con la salida y las noches sale el regreso). Un mes o una semana sin día no es una fecha.',
     '   - Pasajeros: entiende el grupo como lo describen. Infante es menor de 2 años y la edad manda sobre la palabra',
-    '     («un niño de año y medio» es 1 infante y 0 niños). Si queda claro quiénes viajan, pon 0 donde no hay nadie; si',
-    '     no, "' + POR_DEFINIR + '". Un total sin desglose («somos 4 con los niños») no se reparte.',
+    '     («un niño de año y medio» es 1 infante; «una menor de 4 años», 1 niño). Si hablan de un menor, niños + infantes',
+    '     ≥ 1. Si queda claro quiénes viajan, pon 0 donde no hay nadie; si no, "' + POR_DEFINIR + '". Un total sin desglose',
+    '     («somos 4 con los niños») no se reparte.',
     '   - Si se corrigen («2… mejor 3»), vale lo último. Si un dato del viaje cambia, devuelve el nuevo con su frase.',
     '   - Interpreta antes de preguntar: lo más probable, deducido, con su razón en calculo. Una ventana («entre el 21',
     `     de junio y el 4 de julio») no es fecha: salida y regreso en "${POR_DEFINIR}" y ella al texto.`,
@@ -247,6 +248,7 @@ export function esquemaCarga(fields: ReadonlyArray<CampoEntendible>, opts: { cha
         items: { type: 'object', properties: { n: { type: 'integer' }, clase: { type: 'string', enum: [...CLASES_MENSAJE] } }, required: ['n', 'clase'] },
       },
       citas: { type: 'array', items: { type: 'string' } },
+      menores: { type: 'integer', description: 'Cuántos menores de edad dicen que viajan. 0 si dicen que ninguno; omitir si nadie habló de eso.' },
       valores: { type: 'object', properties, required: campos.map((f) => f.slug) },
       dudas: {
         type: 'array',
@@ -292,6 +294,7 @@ export function esquemaCargaCompacta(fields: ReadonlyArray<CampoEntendible>, opt
         },
       },
       sin_dato: { type: 'array', items: { type: 'string', enum: slugs } },
+      menores: completo.properties.menores,
       dudas: completo.properties.dudas,
       ...(opts.chat ? { otros: completo.properties.otros } : {}),
       ...(opts.perfil ? { perfil: completo.properties.perfil } : {}),
@@ -346,6 +349,11 @@ export interface CargaValidada {
    * comercial.
    */
   perfil: HechoPerfil[];
+  /**
+   * ¿En lo que se dijo del viaje viajan menores? (lo declara el modelo en `menores`, o lo nombra un mensaje del viaje sin
+   * negarlo). Con menores, niños + infantes no pueden quedar en 0 (`menoresSinContar`).
+   */
+  hayMenores: boolean;
 }
 
 /** Una duda de la extracción: el campo, la pregunta y respuestas concretas. Se pregunta; no bloquea lo demás. */
@@ -430,6 +438,57 @@ function textosDelViaje(raw: Record<string, unknown>, textos: ReadonlyArray<stri
   return textos.filter((_, i) => deClases.includes(clases.get(i + 1) ?? 'cliente'));
 }
 
+// ── Invariante: un menor dicho no se cuenta en 0 ─────────────────────────────
+//
+// Falla en vivo del 2026-11-03 (bandeja de Trappvel): «2 adultos y una menor de 4 años». El modelo vio las dos frases y
+// en su propio cálculo escribió «se toma como niño de 4 años», pero devolvió niños 0 e infantes 0 («deducido»); se tocó
+// Anotar y la cotización salió por 2 adultos. El código no lee qué categoría es un menor (eso es del modelo), pero sí
+// impide que un valor deducido contradiga lo dicho: si viajan menores, niños + infantes ≥ 1.
+
+/** Los conteos de pasajeros: en el resumen, lo que no está escrito tal cual va resaltado. */
+export const SLUGS_CONTEO = ['adultos', 'ninos', 'infantes'] as const;
+const SLUG_NINOS = 'ninos';
+const SLUG_INFANTES = 'infantes';
+
+/** Una palabra que nombra a un menor (sobre `normalizarTexto`: sin tildes ni mayúsculas). */
+const RE_MENOR = /\b(?:menor(?:es|cit[oa]s?)?|nin[oa]s?|hij[oa]s?|bebes?|infantes?)\b/g;
+/** Justo antes, lo que lo niega: «sin niños», «ni bebés», «no van niños», «ningún menor». */
+const RE_NIEGA = /(?:\bsin|\bni|\bno(?: (?:van|viajan|hay|llevan|lleva|va|viaja))?|\bningun[oa]?|\bnada de)\s+(?:\S+\s+)?$/;
+
+/**
+ * ¿Algún mensaje nombra a un menor sin negarlo? Es la red de seguridad de la invariante, no una interpretación: nunca
+ * llena un campo, solo impide aceptar un 0 que lo contradice (en el peor caso, se pregunta). Pura.
+ */
+export function nombraMenores(textos: ReadonlyArray<string>): boolean {
+  return textos.some((t) => {
+    const n = normalizarTexto(t);
+    for (const m of n.matchAll(RE_MENOR)) {
+      if (!RE_NIEGA.test(n.slice(Math.max(0, (m.index ?? 0) - 24), m.index))) return true;
+    }
+    return false;
+  });
+}
+
+const enteroDe = (v: unknown): number | null => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'number' ? v : parsearNumeroColombiano(String(v));
+  return n === null || !Number.isFinite(n) ? null : n;
+};
+
+/**
+ * ¿Lo que quedaría en el viaje cuenta 0 niños y 0 infantes aunque viajan menores? Solo cuando los dos tienen número: con
+ * uno sin definir, todavía falta y se pregunta por el mínimo. Pura.
+ */
+export function menoresSinContar(hayMenores: boolean, quedaria: Record<string, unknown>): boolean {
+  if (!hayMenores) return false;
+  const n = enteroDe(quedaria[SLUG_NINOS]);
+  const i = enteroDe(quedaria[SLUG_INFANTES]);
+  return n !== null && i !== null && n + i === 0;
+}
+
+/** La pregunta cuando el conteo de menores contradice lo dicho. */
+export const DUDA_MENORES = '¿Cuántos menores van como niños (2 años o más) y cuántos como infantes (menores de 2)?';
+
 /**
  * Lo que el modelo devolvió, contra las invariantes. No interpreta el texto: no decide qué opción se nombró, ni si un
  * 0 está bien dicho, ni deriva fechas; eso es del modelo y lo ve el comercial en el resumen. Pura.
@@ -455,6 +514,7 @@ export function validarCarga(
     sugeridos: {}, quitar: {}, dudas: dudasDe(r.dudas, campos).filter((d) => !(opts.yaPreguntado ?? []).includes(d.campo)), descartados: [], historia: historiaDeCitas(r.citas, fuente.join('\n---\n')), otros: otrosDe(r.otros),
     // Lo de la persona lo cuenta el cliente o el comercial (no un tercero ni el ruido).
     perfil: separarHechos(r.perfil, textosDelViaje(r, textos, ['cliente', 'comercial'])).guardables,
+    hayMenores: (enteroDe(r.menores) ?? 0) > 0 || nombraMenores(fuente),
   };
   const descartar = (slug: string, motivo: string) => out.descartados.push({ slug, motivo });
   const tope = masMeses(opts.hoyISO, MESES_MAXIMOS);
@@ -515,11 +575,27 @@ export function validarCarga(
   const quedaria: Record<string, unknown> = { ...(opts.yaTiene ?? {}) };
   for (const k of Object.keys(out.quitar)) delete quedaria[k];
   for (const [k, x] of Object.entries(out.sugeridos)) quedaria[k] = x.valor;
+  // Si viajan menores, niños + infantes ≥ 1: el 0 propuesto que lo contradice no se acepta, y se pregunta.
+  if (menoresSinContar(out.hayMenores, quedaria)) {
+    for (const slug of [SLUG_NINOS, SLUG_INFANTES]) {
+      if (out.sugeridos[slug] && enteroDe(out.sugeridos[slug].valor) === 0) {
+        delete out.sugeridos[slug];
+        delete quedaria[slug];
+        descartar(slug, 'en 0 aunque en la conversación viajan menores');
+      }
+    }
+    const yaPreguntado = opts.yaPreguntado ?? [];
+    if (campos.some((f) => f.slug === SLUG_NINOS) && !out.dudas.some((d) => d.campo === SLUG_NINOS || d.campo === SLUG_INFANTES)
+      && !yaPreguntado.includes(SLUG_NINOS) && !yaPreguntado.includes(SLUG_INFANTES)) {
+      out.dudas.unshift({ campo: SLUG_NINOS, pregunta: DUDA_MENORES, opciones: [] });
+    }
+  }
   for (const f of campos) {
     if (out.sugeridos[f.slug] && f.pedir_si !== undefined && f.pedir_si !== null && !cumplePedirSi(f.pedir_si, quedaria)) {
       delete out.sugeridos[f.slug];
       descartar(f.slug, 'no aplica a este viaje (su condición en la config no se cumple)');
     }
   }
+
   return out;
 }
