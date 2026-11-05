@@ -13,6 +13,9 @@ import { cuotasConEstado, proximoPago, type CobroRecibido, type CuotaDeServicio 
 import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { separarPorEpoca } from './cancelada'
 import { estadoMora, REGLA_MORA_CDA, SLUG_TERMINOS_CDA, vigenciaRestriccion, vigenciaTransicion } from './plazos'
+import { todayBogotaISO } from '@/lib/dates/bogota'
+import { separarNoVendidas, type VentaV15 } from './venta-16-4'
+import { ventaV15DelContrato } from './venta-16-4-lectura'
 
 /**
  * Paso 8d del cron `procesar-planes-cobro`: el correo del día en que un CDA entra en Suspendida por pago
@@ -118,10 +121,14 @@ interface FilaCobro {
  * Las cuotas y lo recibido del PLAN VIGENTE del contrato, con la forma de las RPC del cliente
  * (`pago-servidor.ts`) y el mismo corte (`separarPorEpoca`): sin las cuotas anuladas por la 2.5 y, después
  * de una reactivación (11.4), solo el plan nuevo. Lo de antes va en `anterior` (la cartera de la 11.7).
+ *
+ * Con `venta` (16.4, `venta-16-4-servidor.ts`), las cuotas de períodos que METRIK no vende sin la v1.5
+ * aceptada salen de `cuotas` y van en `noVendidas`, como en la lectura del cliente (`pago-servidor.ts`).
  */
 export async function cuentaDelContrato(
   db: Db,
   sc: FilaContrato,
+  venta?: VentaV15,
 ): Promise<
   | {
       cuotas: CuotaDeServicio[]
@@ -132,6 +139,8 @@ export async function cuentaDelContrato(
       planDeCuota: Map<string, { planCobroId: string; numero: number }>
       /** Cuántas cuotas del contrato están anuladas (2.5). */
       anuladas: number
+      /** Las cuotas del plan vigente que no se venden (16.4), fuera de `cuotas`. Vacío sin `venta`. */
+      noVendidas: CuotaDeServicio[]
     }
   | { error: string }
 > {
@@ -187,8 +196,16 @@ export async function cuentaDelContrato(
   })
   // El tipo de cada cuota por su número, en el plan vigente (los números se repiten entre planes).
   const tipos = new Map(epocas.vigente.cuotas.map((q) => [q.numero, q.tipo]))
+  const { vendidas, noVendidas } = venta
+    ? separarNoVendidas(
+        epocas.vigente.cuotas,
+        cuotasConEstado({ cuotas: epocas.vigente.cuotas, cobros: epocas.vigente.cobros, hoy: todayBogotaISO(), ahoraISO: new Date().toISOString() }),
+        venta,
+      )
+    : { vendidas: epocas.vigente.cuotas, noVendidas: [] }
   return {
-    cuotas: epocas.vigente.cuotas,
+    noVendidas,
+    cuotas: vendidas,
     cobros: epocas.vigente.cobros,
     tipos,
     anterior: epocas.anterior,
@@ -240,7 +257,13 @@ export async function avisarSuspendidasPorPago(deps: DepsAvisoSuspendida): Promi
         continue
       }
 
-      const cuenta = await cuentaDelContrato(db, sc)
+      // 16.4: un período que METRIK no vendió no es mora (no hay Suspendida por él).
+      const venta = await ventaV15DelContrato(db, sc, ahoraISO)
+      if ('error' in venta) {
+        omitir(venta.error)
+        continue
+      }
+      const cuenta = await cuentaDelContrato(db, sc, venta)
       if ('error' in cuenta) {
         // Sin poder leer las cuotas no hay prueba de la mora: no se avisa (el criterio de la puerta).
         omitir(cuenta.error)

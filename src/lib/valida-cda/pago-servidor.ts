@@ -12,6 +12,9 @@ import {
   ultimoPagoDeCadaCuota,
 } from './pago-pendiente'
 import { carteraDe, separarPorEpoca, type MarcaDeCobro, type MarcaDeCuota } from './cancelada'
+import { documentosDelCliente } from '@/lib/valida-api/terminos-servidor'
+import { todayBogotaISO } from '@/lib/dates/bogota'
+import { separarNoVendidas, VENTA_SIN_V15, ventaDeDocumentos, type VentaV15 } from './venta-16-4'
 
 /**
  * Las cuotas y los pagos del contrato de un CDA, leídos SOLO por las RPC cerradas del cobrador:
@@ -32,6 +35,13 @@ import { carteraDe, separarPorEpoca, type MarcaDeCobro, type MarcaDeCuota } from
  * 16.4 y la pestaña Pagos leen eso, así que el pago de la reactivación nunca tapa una cuota vieja. Lo de
  * antes de la reactivación va en `anterior`, de donde sale la cartera (11.7). Sin las columnas nuevas de
  * las RPC (antes de la migración 20261104233000) todo es vigente, como siempre.
+ *
+ * ## Los períodos no vendidos (16.4, Emilio 5-nov)
+ *
+ * Del plan vigente salen también las cuotas de períodos que METRIK no vende sin la v1.5 aceptada
+ * (`venta-16-4.ts`, `separarNoVendidas`): no son mora, ni pago pendiente, ni deuda en Pagos. Van en
+ * `noVendidas`. La venta sale de los documentos de la sesión (`documentosDelCliente`); sin poder leerlos no
+ * se saca nada (como antes de esta regla).
  */
 
 interface FilaCuota {
@@ -96,6 +106,10 @@ export type LecturaCuenta =
       anterior?: { cuotas: CuotaDeServicio[]; cobros: CobroRecibido[] }
       /** El día de la reactivación del contrato, o `null`. */
       reactivadaDesde?: string | null
+      /** La base de la 16.4 y el día de la aceptación de la v1.5 (`VENTA_SIN_V15` sin v1.5 o sin poder leerla). */
+      venta?: VentaV15
+      /** Las cuotas del plan vigente que no se venden (16.4): fuera de `cuotas`. */
+      noVendidas?: CuotaDeServicio[]
     }
   | { estado: 'no_disponible'; motivo: 'base' | 'sin_migracion' }
 
@@ -177,9 +191,21 @@ async function leerCuenta(servicioContratadoId: string): Promise<LecturaCuenta> 
     })),
     reactivadaDesde,
   })
+  // 16.4: los períodos que METRIK no vende sin la v1.5 aceptada salen del plan vigente.
+  const docs = await documentosDelCliente()
+  const venta = docs.ok ? ventaDeDocumentos(docs.documentos) : VENTA_SIN_V15
+  const estados = cuotasConEstado({
+    cuotas: epocas.vigente.cuotas,
+    cobros: epocas.vigente.cobros,
+    hoy: todayBogotaISO(),
+    ahoraISO: new Date().toISOString(),
+  })
+  const { vendidas, noVendidas } = separarNoVendidas(epocas.vigente.cuotas, estados, venta)
   return {
     estado: 'ok',
-    cuotas: epocas.vigente.cuotas,
+    cuotas: vendidas,
+    noVendidas,
+    venta,
     cobros: epocas.vigente.cobros,
     anterior: epocas.anterior,
     reactivadaDesde,
