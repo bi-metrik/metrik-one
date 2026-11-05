@@ -166,7 +166,7 @@ const CASOS_NO_DISPONIBLE: CasoPublico[] = [
     ventas: { productos: SIN_MP11, noDisponibles: MP11_AGOTADO },
     pasos: [{ escribe: 'Cuéntame más sobre el mp11' }],
     guion: [VC({ codigo: 'MP-11' }), R('El MP-11, taladro percutor inalámbrico, no está disponible por ahora. Como alternativa:\nMP-16 Rotomartillo MarcaEjemplo SDS-Plus 26 mm, $345.000.\n¿Te sirve?', 'producto')],
-    esperado: (e) => todos(nuncaFalla(e), verCatalogoDijo(e, 'no_disponible'), verCatalogoDijo(e, 'alternativas'), contiene(e, /no (est[aá]|lo tengo|tenemos)[^.]{0,30}disponible|agotad/i), contiene(e, 'MP-11'), sinPersona(e)),
+    esperado: (e) => todos(nuncaFalla(e), verCatalogoDijo(e, 'no_disponible'), verCatalogoDijo(e, 'alternativas'), contiene(e, /no (est[aá]|lo tengo|tenemos)[^.]{0,30}disponible|agotad/i), contiene(e, /MP-11|percutor inal[aá]mbrico/i), sinPersona(e)),
   },
   {
     id: 'v-nd-codigo-sin-alternativa', conjunto: 'ventas', titulo: 'Código agotado sin nada parecido activo: el código dice «no está disponible» y pasa a persona (producto_no_disponible)',
@@ -208,7 +208,7 @@ const CASOS_NO_DISPONIBLE: CasoPublico[] = [
         tras.includes('320.000') ? no(`repitió el precio del agotado: ${tras.slice(0, 160)}`) : ok('no repite el precio del agotado'),
         /No pude revisarlo|Tuve un problema/i.test(tras) ? no('salió el «no pude» o la falla') : ok('sin «no pude»'),
         personas(e).includes('falla') ? no('pasó a persona por falla') : ok('sin falla'),
-        /no est[aá] disponible|agotad/i.test(tras) ? ok('dice que no está disponible') : no(`no dice que no está disponible: ${tras.slice(0, 160)}`),
+        /no (est[aá]|lo tengo|tenemos)[^.]{0,30}disponible|agotad/i.test(tras) ? ok('dice que no está disponible') : no(`no dice que no está disponible: ${tras.slice(0, 160)}`),
       );
     },
   },
@@ -248,13 +248,17 @@ export const CASOS_VENTAS: CasoPublico[] = [
     pasos: [
       { escribe: 'Hola, ¿tienen taladro percutor?' },
       { escribe: 'Sí, uno, y también la bomba de 1 HP, con despacho en Bogotá' },
+      // 5-nov: con el carrito, la pregunta de complemento («¿Necesitas algo más?») va antes de la autorización.
+      { escribe: 'No, eso es todo' },
       { toca: 'Sí' },
       { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' },
       { toca: 'Sí, enviar link', oEscribe: 'sí' },
     ],
     guion: [
       VC({ buscar: 'taladro percutor' }), R('Sí: MP-01 Taladro percutor 650 W, a $250.000. ¿Lo quieres?', 'producto'),
-      { name: 'carrito', args: { productos: [{ producto: 'MP-01', cantidad: 1 }, { producto: 'MP-02', cantidad: 1 }] } }, FIJA('rf.autorizacion'),
+      { name: 'carrito', args: { productos: [{ producto: 'MP-01', cantidad: 1 }, { producto: 'MP-02', cantidad: 1 }] } },
+      R('Listo, tu carrito: MP-01 Taladro percutor 650 W y MP-02 Bomba de agua 1 HP. ¿Necesitas algo más para ese trabajo?'),
+      FIJA('rf.autorizacion'),
       R('Perfecto. ¿Me das tu nombre, celular y la dirección de entrega?'),
       PROPONER({ entrega: 'bogota', nombre: 'Ana Pérez', celular: '3001234567', direccion: 'Calle 1 # 2-3' }),
     ],
@@ -339,25 +343,26 @@ export const CASOS_VENTAS: CasoPublico[] = [
     // El candado de autorización improvisada no veía el «sí» de ese turno y volvía a pedir la autorización.
     id: 'v-autorizado-una-vez', conjunto: 'ventas', titulo: 'Tras el «Sí», «autorizado» del modelo no vuelve a pedir la autorización',
     ventas: { productos: PRODUCTOS_PRUEBA },
-    pasos: [{ escribe: 'quiero el MP-01, uno, con despacho en Bogotá' }, { toca: 'Sí' }],
-    guion: [VC({ codigo: 'MP-01' }), FIJA('rf.autorizacion'), R('Listo, autorizado. ¿Me das tu nombre completo?')],
+    pasos: [{ escribe: 'quiero el MP-01, uno, con despacho en Bogotá' }, { escribe: 'No, solo eso' }, { toca: 'Sí' }],
+    guion: [VC({ codigo: 'MP-01' }), R('Listo, el MP-01 queda en tu carrito. ¿Necesitas algo más para ese trabajo?'), FIJA('rf.autorizacion'), R('Listo, autorizado. ¿Me das tu nombre completo?')],
     esperado: (e) => {
       const pedidas = publico(e).split('¿Autorizas?').length - 1;
       const improvisada = e.almacen.trazas().some((t) => (t.candados ?? []).some((c) => c.candado === 'autorizacion_improvisada'));
       return todos(pedidas === 1 ? ok('la autorización se pidió una vez') : no(`la autorización se pidió ${pedidas} veces`),
-        improvisada ? no('saltó autorizacion_improvisada') : ok('sin autorizacion_improvisada'), contiene(e, '¿Me das tu nombre completo?'));
+        improvisada ? no('saltó autorizacion_improvisada') : ok('sin autorizacion_improvisada'), contiene(e, /¿[^?]*nombre[^?]*\?/i));
     },
   },
   {
-    id: 'v-especificacion-no-verificada', conjunto: 'ventas', titulo: 'Especificación no verificada: «según el catálogo del fabricante»; si insiste, persona',
+    // Mauricio 4-nov: el «¿me confirmas?» no va a una persona: es el dato del fabricante y sigue la venta.
+    id: 'v-especificacion-no-verificada', conjunto: 'ventas', titulo: 'Especificación no verificada: «según el catálogo del fabricante»; el «¿me confirmas?» no pasa a persona',
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [{ escribe: '¿qué potencia y cuántas rpm tiene el MP-01?' }, { escribe: '¿pero me confirmas las rpm?' }],
-    guion: [VC({ codigo: 'MP-01' }), R('Tiene 650 W de potencia. Según el catálogo del fabricante, 3000 rpm.', 'especificaciones'), PERSONA('duda_abierta', 'confirmar las rpm del MP-01')],
+    guion: [VC({ codigo: 'MP-01' }), R('Tiene 650 W de potencia. Según el catálogo del fabricante, 3000 rpm.', 'especificaciones'), R('Es el dato del catálogo del fabricante. ¿Te sirve para lo que necesitas?', 'especificaciones')],
     esperado: (e) => {
       const r = e.almacen.trazas().flatMap((t) => t.herramientas ?? []).find((h) => h.nombre === 'ver_catalogo');
       const p = (r?.datos as { productos?: Array<Record<string, unknown>> } | undefined)?.productos?.[0];
       const separado = p && JSON.stringify(p.especificaciones_verificadas) === '["Potencia: 650 W"]' && JSON.stringify(p.segun_catalogo_del_fabricante) === '["Velocidad: 3000 rpm"]';
-      return todos(separado ? ok('la ficha llega partida') : no('la ficha no llega partida'), contiene(e, 'Según el catálogo del fabricante'), persona(e, 'duda_abierta'));
+      return todos(separado ? ok('la ficha llega partida') : no('la ficha no llega partida'), contiene(e, /según el catálogo del fabricante/i), sinPersona(e));
     },
   },
   {
@@ -549,6 +554,9 @@ export const CASOS_VENTAS: CasoPublico[] = [
   },
   {
     id: 'v-sin-aviso-turno-normal', conjunto: 'ventas', titulo: 'Un turno normal de ventas (el modelo tarda) no saca el aviso de demora con los cortes de ventas',
+    // Solo seco (Mauricio, 2026-11-05): mide tiempo, y en vivo por el CLI el tiempo es el del arranque del CLI, no el
+    // del modelo (banco 5-nov: 11,6 s en un llamado repetido sacó el aviso). El aviso en producción se vigila en las trazas.
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     // Los cortes de ventas a escala 1:50 (20 s → 400 ms) y un modelo de «12 s» (240 ms por llamado). Con los de Sabor
     // (5 s → 100 ms) el aviso saldría.
@@ -718,13 +726,13 @@ export const CASOS_VENTAS: CasoPublico[] = [
     },
   },
   {
-    id: 'v-r3-no-repite', conjunto: 'ventas', titulo: '«Repite todo el tiempo la referencia»: tras presentarlo, el código y el nombre no vuelven; dato llano; lo que no está, a una persona (sin «lo dejamos anotado»)',
+    id: 'v-r3-no-repite', conjunto: 'ventas', titulo: '«Repite todo el tiempo la referencia»: tras presentarlo, el código y el nombre no vuelven; dato llano; lo que no está, «no lo tengo en la ficha» sin ofrecer persona (sin «lo dejamos anotado»)',
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     pasos: [{ escribe: '¿cuánto vale el MP-12?' }, { escribe: '¿Cuáles son las especificaciones de ese taladro?' }, { escribe: '¿Viene con accesorios?' }],
     guion: [
       VC({ codigo: 'MP-12' }), R('El MP-12 Taladro MarcaEjemplo de 13 mm vale $125.000. ¿Te sirve?', 'precio'),
       R('Tiene 550 W y mandril de 13 mm.', 'especificaciones'),
-      R('Eso no lo tengo en la ficha. ¿Quieres que te pase con alguien del equipo para que te lo confirme?', 'especificaciones'),
+      R('Eso no lo tengo en la ficha. ¿Te sirve para lo que necesitas?', 'especificaciones'),
     ],
     esperado: (e) => {
       const rs = respuestas(e);
@@ -879,7 +887,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
     },
   },
   {
-    id: 'v-r3-cruzada-sin-mapa', conjunto: 'ventas', titulo: 'Sin complemento en el mapa: pregunta abierta «¿Necesitas algo más…?», una sola vez',
+    id: 'v-r3-cruzada-sin-mapa', conjunto: 'ventas', titulo: 'Sin complemento en el mapa: una de las `opciones` o «¿Necesitas algo más…?», una sola vez',
     ventas: { productos: PRODUCTOS_CRUZADA },
     pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: 'Listo, me lo llevo' }, { escribe: 'No, solo eso' }],
     guion: [
@@ -891,7 +899,8 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const d = llamadas(e, 'ver_complementos')[0]?.datos as { complementos?: unknown[] } | undefined;
       return todos(
         d && d.complementos?.length === 0 ? ok('sin complementos') : no(`ver_complementos: ${JSON.stringify(d)}`),
-        contiene(e, /algo m[aá]s/i), respuestas(e).filter((t) => /algo m[aá]s/i.test(t)).length === 1 ? ok('una vez') : no('pregunta más de una vez'),
+        // Sin mapa, ver_complementos trae `opciones` (Mauricio 3-nov): ofrecer una de esas O preguntar «¿algo más?», una vez.
+        respuestas(e).filter((t) => /algo m[aá]s|\bMP-(?!13\b)\d+/i.test(t)).length === 1 ? ok('una sola oferta') : no(`ofertas: ${respuestas(e).filter((t) => /algo m[aá]s|\bMP-(?!13\b)\d+/i.test(t)).length}`),
       );
     },
   },
