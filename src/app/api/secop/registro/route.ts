@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { crearEspacioSecop } from '@/lib/secop-registro/registro-servidor'
+import { ipDelCliente } from '@/lib/http/ip-cliente'
 
 /**
  * La ruta que crea el espacio ONE SECOP. Es de servidor por exigencia de la spec (§3.1: «la creación
@@ -14,16 +15,9 @@ import { crearEspacioSecop } from '@/lib/secop-registro/registro-servidor'
 
 export const dynamic = 'force-dynamic'
 
-/**
- * La IP del cliente. `x-forwarded-for` es una lista y el PRIMERO es el cliente; los siguientes son
- * los proxies. Tomar el último daría la IP de Vercel y el tope se dispararía para todo el mundo a la
- * vez. Es una señal de fricción, no una identidad: quien quiera rotarla puede.
- */
-function ipDelCliente(req: Request): string | null {
-  const xff = req.headers.get('x-forwarded-for')
-  const primera = xff?.split(',')[0]?.trim()
-  return primera || req.headers.get('x-real-ip') || null
-}
+// La IP del cliente (`ipDelCliente`) es una señal de fricción, no una identidad: quien quiera
+// rotarla puede. Detrás de Cloudflare sale de `cf-connecting-ip`, no la del PoP (si no, el tope se
+// dispararía para todo el mundo a la vez).
 
 export async function POST(req: Request) {
   let cuerpo: unknown
@@ -40,7 +34,7 @@ export async function POST(req: Request) {
     nombre: texto(c.nombre),
     slugPedido: texto(c.slug),
     identificacion: texto(c.identificacion),
-    ip: ipDelCliente(req),
+    ip: ipDelCliente(req.headers),
   })
 
   switch (r.tipo) {

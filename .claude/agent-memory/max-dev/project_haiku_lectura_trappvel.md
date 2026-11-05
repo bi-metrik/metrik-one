@@ -19,6 +19,12 @@ PR feat/haiku-lectura-trappvel (2026-11-04). Gemini de producción sin saldo (40
 - **Arnés:** `scripts/eval-haiku/trappvel.ts`, banco en `proyectos/trappvel/clarity/qa/2026-10-29_punta-a-punta-10-viajes/`.
   `node_modules` del repo principal no trae `sharp` (la lectura sale sin ampliar): en el worktree, `npm ci`.
 
+- **Ronda 2 (fix/haiku-trappvel-compra-antes, 4-nov):** la «compra antes del» de Tu Reserva («válido hasta el
+  30/11/2026») salía 1–2 de 6 en main: el arnés ×1 dio 4/4 por suerte. Un campo con fallo intermitente no se ve en
+  ×1: el arnés ahora lee 3 veces (`EVAL_REPETIR_COMPRA`). Oráculo de lo que la clave no anota = `_build/html/<viaje>/<png>.html`.
+  Bandeja general en Bloqueo: `detectarEnLaBandeja` (hotel/vuelo → `codigo: 'PAQUETE'` → `pegarEnBloqueo` con casilla);
+  `EVAL_BANDEJA_COMO_ANTES=1` mide main.
+
 **Why:** Mauricio quiere Trappvel en Haiku sin depender de Gemini; la decisión de qué variable prender es suya.
 **How to apply:** antes de tocar prompts de captura o chat, correr el arnés por familia; la sesión SOE-038 (#1412)
 también toca `llm-anthropic.ts` (`esfuerzo` en `crearFetchModelo`, `fetchModeloExtraccion`): mismo mecanismo, no otro.

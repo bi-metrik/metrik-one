@@ -1,6 +1,7 @@
 import 'server-only'
 import { cache } from 'react'
 import { headers } from 'next/headers'
+import { ipDelCliente } from '@/lib/http/ip-cliente'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getCachedUser } from '@/lib/supabase/auth-user'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -74,6 +75,6 @@ export const contextoValidaApi = cache(resolverContexto)
 /** IP y navegador de la petición, para la constancia de aceptación. */
 export async function origenPeticion(): Promise<{ ip: string | null; userAgent: string | null }> {
   const h = await headers()
-  const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || h.get('x-real-ip')?.trim() || null
+  const ip = ipDelCliente(h)
   return { ip, userAgent: h.get('user-agent') }
 }

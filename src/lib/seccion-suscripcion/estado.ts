@@ -40,6 +40,7 @@
 import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
 import type { ProximoPago } from '@/lib/valida-cda/pago-pendiente'
 import { fechaDiaMes, fechasDePagoV15, sumarDias, textoPagaHasta, type EstadoMora } from '@/lib/valida-cda/plazos'
+import { resumenCancelada } from '@/lib/valida-cda/cancelada'
 
 /**
  * ¿La persona ve la sección Suscripción (y la plata del contrato donde aparezca)? Solo si es la persona
@@ -74,6 +75,8 @@ export type EstadoSuscripcion =
   | 'en_mora'
   | 'restringido'
   | 'pausado'
+  /** Valida de los CDA, Términos v1.5, 11.3: guardada en el contrato (o el día 31 que el cron no guardó todavía). */
+  | 'cancelada'
   | 'desconocido'
 export type Tono = 'verde' | 'ambar' | 'ambar_fuerte' | 'rojo' | 'gris'
 
@@ -121,9 +124,15 @@ export function resumenEstado(p: {
   transicion?: string | null
   /** Cuántos períodos están en mora (`moraValidaCda().periodosEnMora`); con más de uno se dice que son varios. */
   periodosEnMora?: number
+  /** Desde cuándo la suscripción está Cancelada (11.3), o `null`. Manda sobre todo lo demás. */
+  canceladaDesde?: string | null
 }): ResumenEstado {
   const esOne = p.producto === 'one'
   const v15 = !esOne && p.transicion ? p.transicion : null
+  if (!esOne && p.canceladaDesde) {
+    const t = resumenCancelada(p.canceladaDesde)
+    return { estado: 'cancelada', tono: 'rojo', chip: t.chip, mensaje: t.mensaje, requiereAccion: true }
+  }
   if (p.terminos.estado === 'pendiente') {
     if (p.terminos.enPlazo && p.terminos.plazoHasta) {
       return {

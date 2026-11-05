@@ -241,6 +241,46 @@ export const CASOS_VENTAS: CasoPublico[] = [
     ),
   },
   {
+    // 4-nov, conversación 10: la batería y las puntas iban en dos links con dos fletes. Ahora: un carrito GUARDADO, un link,
+    // un flete. `proponer` no trae productos: los toma del carrito de la base, no de la conversación.
+    id: 'v-carrito-dos-productos', conjunto: 'ventas', titulo: 'Carrito de dos productos: queda guardado, un solo link de Bold con un solo flete',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [
+      { escribe: 'Hola, ¿tienen taladro percutor?' },
+      { escribe: 'Sí, uno, y también la bomba de 1 HP, con despacho en Bogotá' },
+      { toca: 'Sí' },
+      { escribe: 'Ana Pérez, 3001234567, Calle 1 # 2-3' },
+      { toca: 'Sí, enviar link', oEscribe: 'sí' },
+    ],
+    guion: [
+      VC({ buscar: 'taladro percutor' }), R('Sí: MP-01 Taladro percutor 650 W, a $250.000. ¿Lo quieres?', 'producto'),
+      { name: 'carrito', args: { productos: [{ producto: 'MP-01', cantidad: 1 }, { producto: 'MP-02', cantidad: 1 }] } }, FIJA('rf.autorizacion'),
+      R('Perfecto. ¿Me das tu nombre, celular y la dirección de entrega?'),
+      PROPONER({ entrega: 'bogota', nombre: 'Ana Pérez', celular: '3001234567', direccion: 'Calle 1 # 2-3' }),
+    ],
+    esperado: (e) => todos(
+      contiene(e, 'MP-01'), contiene(e, 'MP-02'), contiene(e, 'Total: $745.000'), links(e, 1),
+      e.ventas!.pedidos[0]?.cuerpo.amount.total_amount === 745000 ? ok('Bold cobra $745.000 (un flete)') : no(`Bold cobra ${e.ventas!.pedidos[0]?.cuerpo.amount.total_amount}`),
+      e.ventas!.links[0]?.lineas.map((l) => `${l.codigo}×${l.cantidad}`).join(',') === 'MP-01×1,MP-02×1' ? ok('el link congela las dos líneas del carrito') : no(`líneas del link: ${JSON.stringify(e.ventas!.links[0]?.lineas)}`),
+      e.ventas!.links[0]?.flete === 15000 ? ok('un solo flete') : no(`flete ${e.ventas!.links[0]?.flete}`),
+      e.ventas!.carritos.estado.carritos.length === 1 && e.ventas!.carritos.estado.carritos[0].estado === 'en_pago' ? ok('un carrito, en pago') : no(`carritos: ${JSON.stringify(e.ventas!.carritos.estado.carritos.map((c) => c.estado))}`),
+    ),
+  },
+  {
+    id: 'v-carrito-cambia-tras-resumen', conjunto: 'ventas', titulo: 'El cliente agrega algo después del resumen y toca el «Sí» viejo: no se cobra el resumen viejo',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [...HASTA_RESUMEN.pasos, { escribe: 'Espera, agrégame también la bomba de 1 HP' }, { toca: 'Sí, enviar link', oEscribe: 'sí' }],
+    guion: [
+      ...HASTA_RESUMEN.guion,
+      { name: 'carrito', args: { productos: [{ producto: 'MP-01', cantidad: 1 }, { producto: 'MP-02', cantidad: 1 }] } },
+      R('Listo: MP-01 Taladro percutor 650 W y MP-02 Bomba de agua 1 HP. ¿Seguimos con la entrega?'),
+    ],
+    esperado: (e) => todos(
+      links(e, 0), noContiene(e, 'checkout.bold.co'),
+      e.ventas!.carritos.estado.carritos[0]?.lineas.length === 2 ? ok('el carrito guardado tiene los dos') : no('el carrito no quedó con los dos'),
+    ),
+  },
+  {
     id: 'v-pagado-y-registrado', conjunto: 'ventas', titulo: '«Ya pagué» con la venta ya registrada por el webhook: la nota lo dice',
     ventas: { productos: PRODUCTOS_PRUEBA },
     pasos: [...HASTA_LINK.pasos, { hacer: (e) => { e.ventas!.pagar('LNK_PRUEBA1'); e.ventas!.registrar('LNK_PRUEBA1'); } }, { escribe: 'ya pagué' }],
@@ -293,6 +333,20 @@ export const CASOS_VENTAS: CasoPublico[] = [
     pasos: [{ escribe: '¿cuánto vale el MP-01?' }, { escribe: 'muy caro, ¿me lo dejas en 200 mil?' }],
     guion: [VC({ codigo: 'MP-01' }), R('El MP-01 Taladro percutor 650 W vale $250.000.', 'precio'), FIJA('rf.precio_autorizado')],
     esperado: (e) => todos(contiene(e, 'Esos son los precios autorizados.'), noContiene(e, /200[.]?000|200 mil/), sinPersona(e), sinPropuesta(e)),
+  },
+  {
+    // 4-nov (conversación 10): el «Sí» a la autorización y el modelo que contesta «Listo, autorizado…» en el mismo turno.
+    // El candado de autorización improvisada no veía el «sí» de ese turno y volvía a pedir la autorización.
+    id: 'v-autorizado-una-vez', conjunto: 'ventas', titulo: 'Tras el «Sí», «autorizado» del modelo no vuelve a pedir la autorización',
+    ventas: { productos: PRODUCTOS_PRUEBA },
+    pasos: [{ escribe: 'quiero el MP-01, uno, con despacho en Bogotá' }, { toca: 'Sí' }],
+    guion: [VC({ codigo: 'MP-01' }), FIJA('rf.autorizacion'), R('Listo, autorizado. ¿Me das tu nombre completo?')],
+    esperado: (e) => {
+      const pedidas = publico(e).split('¿Autorizas?').length - 1;
+      const improvisada = e.almacen.trazas().some((t) => (t.candados ?? []).some((c) => c.candado === 'autorizacion_improvisada'));
+      return todos(pedidas === 1 ? ok('la autorización se pidió una vez') : no(`la autorización se pidió ${pedidas} veces`),
+        improvisada ? no('saltó autorizacion_improvisada') : ok('sin autorizacion_improvisada'), contiene(e, '¿Me das tu nombre completo?'));
+    },
   },
   {
     id: 'v-especificacion-no-verificada', conjunto: 'ventas', titulo: 'Especificación no verificada: «según el catálogo del fabricante»; si insiste, persona',

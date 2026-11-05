@@ -1639,7 +1639,13 @@ export interface BloqueDelNegocio {
  * Los bloques `datos` del negocio con su config, en el orden de las etapas y de los bloques.
  * Un espejo (`compartido_con_origen`) no se escribe: su dato vive en la fila del origen.
  */
-export async function bloquesDatosDelNegocio(supabase: SupabaseClient, negocioId: string): Promise<BloqueDelNegocio[] | string> {
+export async function bloquesDatosDelNegocio(supabase: SupabaseClient, workspaceId: string, negocioId: string): Promise<BloqueDelNegocio[] | string> {
+  // `negocio_bloques` no tiene `workspace_id`: la empresa se comprueba en el negocio antes de leer sus bloques
+  // (guarda de misma empresa, 20261105170000). Con service_role el RLS no corre; esto es lo que lo reemplaza aquí.
+  const { data: neg, error: errNeg } = await supabase.from('negocios')
+    .select('id').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle();
+  if (errNeg) return `no se pudieron leer los bloques del negocio: ${errNeg.message}`;
+  if (!neg) return 'no se pudieron leer los bloques del negocio: el negocio no es de esta empresa';
   const { data, error } = await supabase.from('negocio_bloques')
     .select('id, data, updated_at, bloque_configs(orden, config_extra, bloque_definitions(tipo), etapas_negocio(orden))')
     .eq('negocio_id', negocioId);
@@ -1712,7 +1718,7 @@ async function cargarEnNegocioExistente(
     await volverAPreguntarNegocio(supabase, ent, opciones, 'Ese viaje ya no está abierto.');
     return;
   }
-  const bloques = await bloquesDatosDelNegocio(supabase, negocioId);
+  const bloques = await bloquesDatosDelNegocio(supabase, workspaceId, negocioId);
   if (typeof bloques === 'string') {
     await actualizar(supabase, ent.id as string, { estado: 'error', error: bloques });
     return;
@@ -2509,8 +2515,8 @@ export async function textoDeLaConsulta(
       return textoConsultaAmbigua('Lo que preguntas', dos.map(v => ({ linea: nombreDeViaje(v), cliente: v.cliente, destino: v.destino, nombre: v.nombre })));
     }
   }
-  const { data: neg } = await supabase.from('negocios').select('id, codigo, nombre, contactos(nombre), empresas(nombre)').eq('id', negocioId).maybeSingle();
-  const bloques = await bloquesDatosDelNegocio(supabase, negocioId);
+  const { data: neg } = await supabase.from('negocios').select('id, codigo, nombre, contactos(nombre), empresas(nombre)').eq('id', negocioId).eq('workspace_id', workspaceId).maybeSingle();
+  const bloques = await bloquesDatosDelNegocio(supabase, workspaceId, negocioId);
   if (!neg || typeof bloques === 'string') return 'No pude leer ese viaje. Pregúntame otra vez en un momento.';
   const fields = bloques.flatMap(b => b.fields);
   const valores = Object.assign({}, ...bloques.map(b => b.data)) as Record<string, unknown>;

@@ -8,6 +8,7 @@ import type { PasarelaAdapter } from '@/lib/suscripciones/pasarela/adapter'
 import { adapterPara } from '@/lib/suscripciones/pasarela/registro'
 import { asuntoAvisoEnlace, htmlAvisoEnlace, textoAvisoEnlace, type DatosAvisoEnlace } from './aviso-enlace-cuota'
 import {
+  carteraEnEspera,
   ESTADOS_CONTRATO_CON_COBRO,
   esRechazoEsperado,
   limiteVentana,
@@ -86,6 +87,8 @@ export interface ResumenEnlacesAutomaticos {
    * cobra sola. Después del rechazo sí lo reciben (Carmen §2.3, día 0).
    */
   conTarjetaSinRechazo: number
+  /** Cuotas de cartera de un CDA (11.7) que ya recibieron su enlace este mes: el siguiente sale al mes. */
+  carteraEnEspera?: number
 }
 
 // El remitente de cobro de MéTRIK (metrik.com.co), compartido con la cuenta de cobro.
@@ -126,6 +129,9 @@ interface FilaContrato {
   vigente_desde: string | null
   aceptante_designado_id: string | null
   workspace_pagador_id: string | null
+  /** 20261104233000 (Valida de los CDA): la suscripción Cancelada y su reactivación. */
+  cancelada_desde?: string | null
+  reactivada_desde?: string | null
 }
 
 export async function generarEnlacesAutomaticos(
@@ -149,7 +155,7 @@ export async function generarEnlacesAutomaticos(
     (desde, hasta) =>
       db
         .from('servicios_contratados')
-        .select('id, workspace_id, negocio_id, suscripcion_id, estado, vigente_desde, aceptante_designado_id, workspace_pagador_id')
+        .select('id, workspace_id, negocio_id, suscripcion_id, estado, vigente_desde, aceptante_designado_id, workspace_pagador_id, cancelada_desde, reactivada_desde')
         .in('estado', [...ESTADOS_CONTRATO_CON_COBRO])
         .order('id')
         .range(desde, hasta),
@@ -162,7 +168,7 @@ export async function generarEnlacesAutomaticos(
 
   // 2. Sus planes (activos o no: ver `enlace-automatico.ts`) y la configuración de cobros del espacio.
   //    Por las dos anclas: los de negocios y los de suscripciones.
-  type FilaPlan = { id: string; workspace_id: string; negocio_id: string | null; suscripcion_id?: string | null; pasarela: string | null }
+  type FilaPlan = { id: string; workspace_id: string; negocio_id: string | null; suscripcion_id?: string | null; pasarela: string | null; fecha_inicio?: string | null }
   const planesDe = (col: 'negocio_id' | 'suscripcion_id', ids: string[]) =>
     ids.length === 0
       ? Promise.resolve([] as FilaPlan[])
@@ -170,7 +176,7 @@ export async function generarEnlacesAutomaticos(
           (desde, hasta) =>
             db
               .from('planes_cobro')
-              .select('id, workspace_id, negocio_id, suscripcion_id, pasarela')
+              .select('id, workspace_id, negocio_id, suscripcion_id, pasarela, fecha_inicio')
               .in(col, ids)
               .order('id')
               .range(desde, hasta),
@@ -203,6 +209,8 @@ export async function generarEnlacesAutomaticos(
         .in('plan_cobro_id', planIds)
         // Una cuota en cero (usuarios adicionales de un período del Plan Anual, sin ninguno) no se cobra.
         .gt('monto', 0)
+        // Ni una anulada (Valida de los CDA, Términos v1.5, 2.5: el período no pagado no se cobra).
+        .is('anulada_at', null)
         .lte('fecha_vencimiento', limiteVentana(p.hoy))
         .order('id')
         .range(desde, hasta),
@@ -244,6 +252,29 @@ export async function generarEnlacesAutomaticos(
     ahoraMs: p.ahoraMs,
   })
   for (const d of seleccion.descartadas) resumen.descartadas[d.motivo] += 1
+
+  // 2b. La cartera de un CDA (11.7): con la suscripción Cancelada, o lo anterior a su reactivación (11.4).
+  // Sigue cobrable por enlace, pero el enlace y su correo salen una vez al mes, no cada semana.
+  const inicioDePlan = new Map(planesFilas.map((x) => [x.id, x.fecha_inicio ?? null]))
+  const expiraDeCuota = new Map(
+    cobros
+      .filter((c) => c.tipo_cobro === 'programado' && c.plan_cobro_id && c.numero_cuota !== null)
+      .map((c) => [`${c.plan_cobro_id}|${c.numero_cuota}`, c.enlace_pago_expira]),
+  )
+  const esCartera = (c: CuotaCandidata): boolean => {
+    const contrato = contratoDelAncla(contratos, { workspaceId: c.workspaceId, negocioId: c.negocioId, suscripcionId: c.suscripcionId ?? null })
+    if (!contrato) return false
+    if (contrato.cancelada_desde) return true
+    const inicio = inicioDePlan.get(c.planCobroId)
+    return !!contrato.reactivada_desde && !!inicio && inicio < contrato.reactivada_desde
+  }
+  {
+    const antes = seleccion.candidatas.length
+    seleccion.candidatas = seleccion.candidatas.filter(
+      (c) => !(esCartera(c) && carteraEnEspera(expiraDeCuota.get(`${c.planCobroId}|${c.numero}`), p.ahoraMs)),
+    )
+    resumen.carteraEnEspera = antes - seleccion.candidatas.length
+  }
 
   // 3a. Las cuotas que la tarjeta guardada ya rechazó: las de un plan que sigue en la tarjeta (cuota 2
   // en adelante) y las del primer cobro, cuyo plan volvió al enlace (Condiciones 7.5). Su correo dice

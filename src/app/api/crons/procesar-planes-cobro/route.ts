@@ -28,6 +28,7 @@ import { conciliarRegistrosConCobroPendiente, type ResumenRegistrosCobroPendient
 import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
 import { terminarSuspensionesVencidas, type ResumenTerminacion } from '@/lib/valida-registro/terminacion-servidor'
 import { avisarSuspendidasPorPago, type ResumenAvisoSuspendida } from '@/lib/valida-cda/aviso-suspendida-servidor'
+import { cancelarSuscripcionesVencidas, type ResumenCancelada } from '@/lib/valida-cda/cancelada-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -83,6 +84,11 @@ import { avisarSuspendidasPorPago, type ResumenAvisoSuspendida } from '@/lib/val
 //      Suspendida por pago, una vez por episodio, a los correos registrados y a la persona designada,
 //      con su fila en `avisos_cliente`. Despues del 6, 7 y 7c: un pago o un enlace de hoy ya cuentan
 //      (ver `src/lib/valida-cda/aviso-suspendida-servidor.ts`).
+//   8e. Valida de los CDA (Terminos v1.5, 11.3 y 2.5): el dia 31 desde la fecha de renovacion (31-dic-2026 la
+//      primera, por la 11.7) la suscripcion queda Cancelada GUARDADA: contrato `pausado` + `cancelada_desde`
+//      (nunca `terminado`), sin renovacion, las cuotas de periodos desde el 1-dic sin pagar anuladas, la
+//      tarjeta cerrada y borrada en ePayco, y los correos (Cancelada y tarjeta), una vez. Antes, cierra las
+//      reactivaciones pagadas (11.4) que el webhook no alcanzo (ver `src/lib/valida-cda/cancelada-servidor.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -644,6 +650,16 @@ export async function GET(req: NextRequest) {
     avisoSuspendidaError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 8e. Valida de los CDA: la Cancelada guardada y las reactivaciones pendientes (Términos v1.5, 11.3 y 11.4) ──
+  // Después del 8d: el día 31 ya no está en Suspendida, así que no recibe los dos correos el mismo día.
+  let cancelada: ResumenCancelada | null = null
+  let canceladaError: string | null = null
+  try {
+    cancelada = await cancelarSuscripcionesVencidas({ db: supabase, hoy: hoyStr, ahoraISO: hoy.toISOString(), enviarCorreo: enviarPorResend })
+  } catch (err) {
+    canceladaError = err instanceof Error ? err.message : String(err)
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -689,5 +705,7 @@ export async function GET(req: NextRequest) {
     terminacion_valida_error: terminacionError,
     aviso_suspendida: avisoSuspendida,
     aviso_suspendida_error: avisoSuspendidaError,
+    cancelada_valida: cancelada,
+    cancelada_valida_error: canceladaError,
   })
 }

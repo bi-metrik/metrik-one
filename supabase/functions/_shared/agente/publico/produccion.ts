@@ -67,6 +67,9 @@ async function soltar(supabase: SupabaseClient, clave: string): Promise<void> {
 
 // ── Almacén ──────────────────────────────────────────────────────────────────
 
+// Empresa en cada consulta (guarda de misma empresa, 20261105170000): las lecturas y los inserts llevan `workspace_id`.
+// Las actualizaciones por `id` (`cerrarTurno`, `completarTexto`, `enmascarar`, el adjunto) no lo llevan porque el id
+// sale de `leer` o de `reservarSalida` de este mismo turno, que ya fijaron la empresa; el puerto no la recibe.
 export function almacenChatwootSupabase(supabase: SupabaseClient): AlmacenPublico {
   return {
     async leer(l, desdeIso) {

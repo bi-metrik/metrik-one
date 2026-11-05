@@ -22,9 +22,22 @@
  *    paquete todavía no la tiene, hereda la pregunta. Otro vuelo = otro paquete = otra pregunta. Con
  *    Pública el total por personas es el precio al cliente.
  *
+ *  · VARIOS OPERADORES en la solicitud (QA de Trappvel del 2026-11-05, viaje 02): los 4 pantallazos
+ *    subidos juntos (vuelo Avianca + hotel GHL de Tu Reserva; vuelo LATAM + hotel Decameron de Aliados)
+ *    se armaban en el orden en que terminaba la detección: «Paquete 1 = Avianca + GHL + Decameron,
+ *    Paquete 2 = LATAM». El «paquete vigente» solo sirve cuando todo es de UN operador. Con varios, el
+ *    reparto va por OPERADOR y nunca se adivina (`planConVariosOperadores`):
+ *      - un hotel cuyo operador se leyó (y es uno de la solicitud) va al paquete de ese operador; si
+ *        no hay, abre el suyo con ese operador;
+ *      - un hotel sin operador leído abre su propio paquete (sin operador: la tarjeta lo pide);
+ *      - un vuelo abre su propio paquete: su pantallazo no dice el operador, y juntarlo con un hotel
+ *        sería adivinar. La asesora lo pone en el paquete que le toca.
+ *    El resultado no depende del orden de llegada: un hotel nunca queda con el vuelo de otro operador.
+ *
  * Puro: sin red y sin base. La escritura es de `pegarEnBloqueo` (`bloqueo-actions.ts`).
  */
 
+import { claveDeNombre, operadorDeLaLectura } from './bloqueo-operador'
 import {
   ACOMODACIONES,
   PERSONAS_POR_HABITACION,
@@ -68,11 +81,19 @@ export interface ContextoDeArmado {
   pasajeros: { adultos: number; ninos: number; infantes: number } | null
   /** Las edades de los niños que dice la Solicitud. */
   edadesNinos: readonly number[]
+  /**
+   * Los operadores que nombra la solicitud (`operadoresDeLaSolicitud`). Con DOS o más, el reparto va
+   * por operador (`planConVariosOperadores`). Ausente o con uno = el paquete vigente, como siempre.
+   */
+  operadoresSolicitud?: readonly string[]
 }
 
 export type PlanDeArmado =
-  /** Paquete nuevo (ranura nueva) con su primera opción. Siempre con la pregunta Pública / Neta. */
-  | { accion: 'nuevo_paquete'; paquete: PaqueteBloqueo; tarifa: null }
+  /**
+   * Paquete nuevo (ranura nueva) con su primera opción. Siempre con la pregunta Pública / Neta.
+   * `mensaje`: lo que ve la asesora, si no es el de siempre (viaje con varios operadores).
+   */
+  | { accion: 'nuevo_paquete'; paquete: PaqueteBloqueo; tarifa: null; mensaje?: string }
   /** Opción nueva (otro hotel) en el paquete vigente, con la tarifa de sus hermanas. */
   | { accion: 'nueva_opcion'; grupo: string; paquete: PaqueteBloqueo; tarifa: TarifaDeOpcion | null }
   /** Opciones que ya existen y cambian (la opción sin hotel, o el vuelo de todo el paquete). */
@@ -199,13 +220,92 @@ function tarifaDe(opciones: readonly OpcionDeBloqueo[]): TarifaDeOpcion | null {
   return opciones.find(o => o.tarifa)?.tarifa ?? null
 }
 
+/** Lo que ve la asesora cuando el vuelo abre su propio paquete en un viaje con varios operadores. */
+export const MENSAJE_VUELO_VARIOS_OPERADORES =
+  'Paquete nuevo con este vuelo. El viaje tiene varios operadores y el vuelo no dice de cuál es: ' +
+  'pégalo en la casilla «Vuelo» del paquete que le toca y borra este.'
+
+/** Lo que ve la asesora cuando un hotel abre su paquete sin operador leído (varios operadores). */
+export function mensajeHotelSinOperador(hotel: string | null): string {
+  return `Paquete nuevo con ${hotel ?? 'este hotel'}. No se vio de qué operador es: elígelo en el paquete.`
+}
+
+/** El paquete nuevo de la bandeja: siempre con la pregunta Pública / Neta, nunca con la del anterior. */
+function paqueteNuevo(base: PaqueteBloqueo, mensaje?: string): PlanDeArmado {
+  return { accion: 'nuevo_paquete', paquete: { ...base, tarifaPorElegir: true }, tarifa: null, ...(mensaje ? { mensaje } : {}) }
+}
+
+function conHotelLeido(base: PaqueteBloqueo, lectura: Extract<LecturaParaArmar, { cual: 'hotel' }>, ctx: ContextoDeArmado): PaqueteBloqueo {
+  return {
+    ...base,
+    hotel: { ...lectura.hotel, infante: lectura.hotel.infante ?? base.hotel.infante ?? null },
+    incluye: lectura.incluye,
+    distribucion: distribucionPorComposicion(lectura.hotel, ctx),
+  }
+}
+
+/**
+ * Un hotel en un paquete que YA existe (`paquete`: sus opciones): repetido, la opción sin hotel, u
+ * otra opción con el vuelo del paquete y la tarifa de sus hermanas.
+ */
+function hotelEnElPaquete(
+  paquete: readonly OpcionDeBloqueo[],
+  lectura: Extract<LecturaParaArmar, { cual: 'hotel' }>,
+  ctx: ContextoDeArmado,
+): PlanDeArmado {
+  const vuelo = vueloDe(paquete)
+  const tarifaHermanas = tarifaDe(paquete)
+  // El mismo hotel otra vez en el mismo paquete: no se duplica.
+  const nombre = norm(lectura.hotel.hotel)
+  if (nombre && paquete.some(o => tieneHotel(o.paquete) && norm(o.paquete!.hotel.hotel) === nombre && norm(o.paquete!.hotel.zona) === norm(lectura.hotel.zona))) {
+    return { accion: 'repetido', mensaje: `${lectura.hotel.hotel} ya es una opción de este paquete.` }
+  }
+  const libre = paquete.find(o => !tieneHotel(o.paquete))
+  if (libre) {
+    const base = libre.paquete ?? { ...paqueteVacio(ctx.operadorInicial), vuelo }
+    // Una opción sin respuesta en un paquete sin respuesta: la pregunta queda abierta.
+    const preguntar = !libre.tarifa && !tarifaHermanas
+    const lleno = conHotelLeido(base, lectura, ctx)
+    return { accion: 'actualizar', cambios: [{ itemId: libre.itemId, paquete: preguntar ? { ...lleno, tarifaPorElegir: true } : lleno }] }
+  }
+  const operador = paquete.find(o => o.paquete?.operador)?.paquete?.operador ?? ctx.operadorInicial
+  const nueva = conHotelLeido({ ...paqueteVacio(operador), vuelo }, lectura, ctx)
+  return { accion: 'nueva_opcion', grupo: paquete[0].grupo, paquete: tarifaHermanas ? nueva : { ...nueva, tarifaPorElegir: true }, tarifa: tarifaHermanas }
+}
+
+/**
+ * Viaje con VARIOS operadores (viaje 02, 2026-11-05): el reparto por operador, sin «paquete vigente».
+ * Determinista: el mismo conjunto de pantallazos arma los mismos paquetes en cualquier orden.
+ */
+function planConVariosOperadores(
+  opciones: readonly OpcionDeBloqueo[],
+  lectura: LecturaParaArmar,
+  ctx: ContextoDeArmado,
+  operadores: readonly string[],
+): PlanDeArmado {
+  if (lectura.cual === 'vuelo') {
+    if (opciones.some(o => mismoVuelo(o.paquete?.vuelo ?? null, lectura.vuelo))) {
+      return { accion: 'repetido', mensaje: 'Ese vuelo ya está en un paquete.' }
+    }
+    return paqueteNuevo({ ...paqueteVacio(null), vuelo: lectura.vuelo }, MENSAJE_VUELO_VARIOS_OPERADORES)
+  }
+  const operador = operadorDeLaLectura(lectura.operador ?? null, operadores)
+  if (!operador) return paqueteNuevo(conHotelLeido(paqueteVacio(null), lectura, ctx), mensajeHotelSinOperador(lectura.hotel.hotel))
+  const k = claveDeNombre(operador)
+  const delOperador = opciones.filter(o => claveDeNombre(o.paquete?.operador) === k)
+  if (delOperador.length === 0) return paqueteNuevo(conHotelLeido(paqueteVacio(operador), lectura, ctx))
+  // El paquete de ese operador (si hay varios, el de número más alto) con TODAS sus opciones.
+  const numero = Math.max(...delOperador.map(o => o.numero))
+  const grupo = delOperador.find(o => o.numero === numero)!.grupo
+  return hotelEnElPaquete(opciones.filter(o => o.grupo === grupo), lectura, ctx)
+}
+
 export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: LecturaParaArmar, ctx: ContextoDeArmado): PlanDeArmado {
+  const operadores = ctx.operadoresSolicitud ?? []
+  if (operadores.length >= 2) return planConVariosOperadores(opciones, lectura, ctx, operadores)
+
   const vigente = paqueteVigente(opciones)
   const vueloVigente = vueloDe(vigente)
-  // La opción nueva toma la respuesta de sus hermanas; sin respuesta, la pregunta sigue abierta.
-  const tarifaHermanas = tarifaDe(vigente)
-  // Un paquete nuevo NO hereda la del anterior (Mauricio, 2026-11-03): se pregunta otra vez.
-  const paqueteNuevo = (base: PaqueteBloqueo): PlanDeArmado => ({ accion: 'nuevo_paquete', paquete: { ...base, tarifaPorElegir: true }, tarifa: null })
 
   if (lectura.cual === 'vuelo') {
     if (vigente.length === 0) return paqueteNuevo({ ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
@@ -219,26 +319,6 @@ export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: Lec
     return paqueteNuevo({ ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
   }
 
-  const conHotel = (base: PaqueteBloqueo): PaqueteBloqueo => ({
-    ...base,
-    hotel: { ...lectura.hotel, infante: lectura.hotel.infante ?? base.hotel.infante ?? null },
-    incluye: lectura.incluye,
-    distribucion: distribucionPorComposicion(lectura.hotel, ctx),
-  })
-  if (vigente.length === 0) return paqueteNuevo(conHotel(paqueteVacio(ctx.operadorInicial)))
-  // El mismo hotel otra vez en el mismo paquete: no se duplica.
-  const nombre = norm(lectura.hotel.hotel)
-  if (nombre && vigente.some(o => tieneHotel(o.paquete) && norm(o.paquete!.hotel.hotel) === nombre && norm(o.paquete!.hotel.zona) === norm(lectura.hotel.zona))) {
-    return { accion: 'repetido', mensaje: `${lectura.hotel.hotel} ya es una opción de este paquete.` }
-  }
-  const libre = vigente.find(o => !tieneHotel(o.paquete))
-  if (libre) {
-    const base = libre.paquete ?? { ...paqueteVacio(ctx.operadorInicial), vuelo: vueloVigente }
-    // Una opción sin respuesta en un paquete sin respuesta: la pregunta queda abierta.
-    const preguntar = !libre.tarifa && !tarifaHermanas
-    return { accion: 'actualizar', cambios: [{ itemId: libre.itemId, paquete: preguntar ? { ...conHotel(base), tarifaPorElegir: true } : conHotel(base) }] }
-  }
-  const operador = vigente.find(o => o.paquete?.operador)?.paquete?.operador ?? ctx.operadorInicial
-  const nueva = conHotel({ ...paqueteVacio(operador), vuelo: vueloVigente })
-  return { accion: 'nueva_opcion', grupo: vigente[0].grupo, paquete: tarifaHermanas ? nueva : { ...nueva, tarifaPorElegir: true }, tarifa: tarifaHermanas }
+  if (vigente.length === 0) return paqueteNuevo(conHotelLeido(paqueteVacio(ctx.operadorInicial), lectura, ctx))
+  return hotelEnElPaquete(vigente, lectura, ctx)
 }

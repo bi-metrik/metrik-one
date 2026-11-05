@@ -365,7 +365,7 @@ export interface BloqueoDeBandeja {
    * pone en el paquete que toca (vuelo → paquete; hotel → opción del paquete vigente). Con él, el pegado
    * no pregunta a qué paquete va. `otroServicio`: no es hotel ni vuelo, va a la lectura de siempre.
    */
-  armar?: (dataUrl: string) => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>
+  armar?: (dataUrl: string, casilla?: 'hotel' | 'vuelo') => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>
   /**
    * Los paquetes con «¿Pública o Neta?» sin responder (Mauricio, 2026-11-03): UNO por paquete (su
    * primera opción), sin respuesta preseleccionada. Las opciones que entren después heredan la respuesta.
@@ -521,6 +521,9 @@ export default function BandejaCapturas({
     return t
   }, [])
 
+  // El camino al paquete de un viaje en Bloqueo (`alPaquete`, más abajo): la detección de la bandeja lo usa.
+  const alPaqueteVivo = useRef<(dataUrl: string, casilla?: 'hotel' | 'vuelo') => boolean>(() => false)
+
   /** Las acciones reales para una pasada de la captura `id`. */
   const dependencias = useCallback((id: string, dataUrl: string): DependenciasDeProceso => {
     const turno = turnos.current.get(id) ?? nuevoTurno(id)
@@ -549,6 +552,13 @@ export default function BandejaCapturas({
       }),
       vigente: () => turnos.current.get(id) === turno,
       informar: cambio => actualizar(id, cambio),
+      // Viaje en Bloqueo (prueba con Haiku del 2026-11-04): el hotel o el vuelo del paquete subido a la
+      // bandeja va al paquete, como el Ctrl+V; la fila sale y el aviso lo da el armado.
+      alPaquete: casilla => {
+        if (!alPaqueteVivo.current(dataUrl, casilla)) return false
+        actualizar(id, { estado: { fase: 'descartada' } })
+        return true
+      },
     }
   }, [actualizar, cotizacionId, nuevoTurno, porPasos])
 
@@ -596,11 +606,11 @@ export default function BandejaCapturas({
   // Los pegados que el servidor arma, UNO A LA VEZ: dos a la vez verían el mismo paquete vigente.
   const colaArmado = useRef<Promise<void>>(Promise.resolve())
   const [armando, setArmando] = useState(0)
-  const armarEnCola = useCallback((armar: NonNullable<BloqueoDeBandeja['armar']>, dataUrl: string) => {
+  const armarEnCola = useCallback((armar: NonNullable<BloqueoDeBandeja['armar']>, dataUrl: string, casilla?: 'hotel' | 'vuelo') => {
     setArmando(n => n + 1)
     colaArmado.current = colaArmado.current.then(async () => {
       try {
-        const r = await armar(dataUrl)
+        const r = await armar(dataUrl, casilla)
         if (r.ok) toast.success(r.mensaje)
         else if (r.otroServicio) agregarDesdeDataUrlVivo.current(dataUrl)
         else toast.error(r.error)
@@ -611,23 +621,25 @@ export default function BandejaCapturas({
       }
     })
   }, [])
-  const alPaquete = useCallback((dataUrl: string): boolean => {
+  /** `casilla`: ya se sabe si es el hotel o el vuelo (la detección de la bandeja, 2026-11-04). */
+  const alPaquete = useCallback((dataUrl: string, casilla?: 'hotel' | 'vuelo'): boolean => {
     const b = bloqueoVivo.current
     if (!b) return false
     if (b.armar) {
-      armarEnCola(b.armar, dataUrl)
+      armarEnCola(b.armar, dataUrl, casilla)
       raiz.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
       return true
     }
     const d = b.registro.destino()
     if (d.a === 'paquete') {
-      b.registro.entregar(d.itemId, dataUrl, d.casilla)
+      b.registro.entregar(d.itemId, dataUrl, casilla ?? d.casilla)
       return true
     }
     setPorUbicar(xs => [{ id: nuevoId(), dataUrl }, ...xs])
     raiz.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
     return true
   }, [armarEnCola])
+  useEffect(() => { alPaqueteVivo.current = alPaquete }, [alPaquete])
 
   /**
    * `alPaqueteSiBloqueo`: solo el Ctrl+V de la ventana va al paquete (Vera, 2026-10-29). Lo que
