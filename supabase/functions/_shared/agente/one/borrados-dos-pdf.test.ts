@@ -80,6 +80,34 @@ describe('dos PDF y gastos borrados en el historial (b-borrados-dos-pdf)', () =>
     expect(modelo.restantes()).toBe(0)
   })
 
+  it('la vuelta reemplazó a la ida antes del «Sí»: el turno de seguir sabe que la ida NO quedó hecha y la propone', async () => {
+    // Arnés ONE con Haiku, PR #1397 (corridas 41697341208 y 41703479873, 1 de 3 cada una): la ida estaba propuesta,
+    // «estos dos cárgalos» la reemplazó por la vuelta, el «Sí» registró la vuelta y en el turno de seguir Haiku llamó
+    // `terminar`: dio la ida por hecha («confirmó la propuesta de arriba», y arriba había dos).
+    let estadoSeguir = ''
+    const modelo = modeloGuionado([
+      (p) => ({ name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de ida', negocio: 'V1 26 5', soporte: numeroDe(p, 'recibo-uber.pdf') } } }),
+      (p) => ({ name: 'proponer', args: { accion: 'gasto', datos: { monto: 20389, categoria: 'transporte', descripcion: 'Uber de vuelta', negocio: 'V1 26 5', soporte: numeroDe(p, 'recibo-uber-vuelta.pdf') } } }),
+      (p) => {
+        estadoSeguir = textoDelTurno(p)
+        return { name: 'proponer', args: { accion: 'gasto', datos: { monto: 6880, categoria: 'transporte', descripcion: 'Uber de ida', negocio: 'V1 26 5', soporte: numeroDe(p, 'recibo-uber.pdf') } } }
+      },
+    ])
+    const e = await escenarioOne({ modelo, negocios: NEGOCIOS, lector: lectorSeco })
+    await e.juntos([{ documento: 'recibo-uber.pdf', archivo: PDF }, { documento: 'recibo-uber-vuelta.pdf', archivo: PDF, despuesMs: 2000 }])
+    await e.escribe('Estos dos cárgalos como gastos nuevos, vuélvelos a cargar')
+    const tras = await e.escribe('Sí')
+    expect(estadoSeguir).toContain('Lo que se registró: 💰 Gasto de $20.389')
+    expect(estadoSeguir).toMatch(/Se propuso y NO quedó hecho \(otra propuesta la reemplazó antes del toque; si fue para corregirla, ya no va\): 💰 Gasto de \$6\.880[^\n]*Uber de ida/)
+    // Solo la ida: ni la vuelta recién hecha ni la vigente salen como «no quedó hecho».
+    expect(estadoSeguir.match(/NO quedó hecho/g)).toHaveLength(1)
+    expect(tras[0].texto).toContain('✅ Gasto de $20.389 registrado')
+    expect(tras[0].texto).toContain('💰 Gasto de $6.880')
+    await e.toca('Registrar')
+    expect(e.puerto.gastos.map((g) => g.monto)).toEqual([20389, 6880])
+    expect(modelo.restantes()).toBe(0)
+  })
+
   it('tras «Sí», la ida repetida con el mismo recibo: el candado dice que ya quedó, y sigue con la vuelta', async () => {
     // Corrida 2 de 3 del PR #1388 (intento 2): Haiku volvió a proponer la ida con su #n de memoria; «pregunta si hay otro
     // soporte» lo llevó a preguntar por ese recibo en vez de proponer la vuelta, y los toques cayeron en «Eso ya quedó hecho».

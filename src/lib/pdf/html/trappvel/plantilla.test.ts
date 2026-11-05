@@ -556,3 +556,57 @@ describe('QA del #1359 · la versión compacta (solo se imprime si ahorra una ho
     for (const n of conPlan) expect(de).toContain(`<div class="dn"><small>DÍA</small>${n}</div>`)
   })
 })
+
+describe('QA G15 · «Cuánto pagan y cuándo» con la «Compra antes del» de cada paquete', () => {
+  // La reprueba del 2026-11-03: dos paquetes de operadores distintos, cada uno con su fecha de compra.
+  // A (ALIADOS TRAVEL) antes del 15/12/2026, B (TU RESERVA) antes del 30/11/2026; salida 18 jun 2027.
+  const TOTAL_A = 10_666_588
+  const TOTAL_B = 9_280_000
+  const hitoA = { fecha: '2026-12-15', monto: 9_067_000, operador: 'ALIADOS TRAVEL' }
+  const hitoB = { fecha: '2026-11-30', monto: 7_888_000, operador: 'TU RESERVA' }
+  const entradaDosPaquetes = (hitosPorTarifa: { fecha: string; monto: number; operador: string }[][]): EntradaModeloPropuesta => ({
+    ...ENTRADA_CURAZAO,
+    props: {
+      ...ENTRADA_CURAZAO.props,
+      itinerarios: [
+        { ...ENTRADA_CURAZAO.props.itinerarios![0], nombre: 'Paquete A', esPrincipal: true, precio: TOTAL_A },
+        { ...ENTRADA_CURAZAO.props.itinerarios![1], nombre: 'Paquete B', esPrincipal: false, precio: TOTAL_B },
+      ],
+      fiscal: { ...ENTRADA_CURAZAO.props.fiscal!, subtotal: TOTAL_A, totalBruto: TOTAL_A, teQueda: TOTAL_A },
+      asiPuedesPagar: { fechaSalida: '2027-06-18', hoy: '2026-11-03', regla: ENTRADA_CURAZAO.props.asiPuedesPagar!.regla, hitos: hitosPorTarifa[0], hitosPorTarifa },
+    },
+  })
+  const pagos = (e: EntradaModeloPropuesta) => {
+    const h = html(e)
+    const i = h.indexOf('>Cuánto pagan y cuándo<')
+    return texto(h.slice(i, h.indexOf('<div class="sec', i + 1) > -1 ? h.indexOf('<div class="sec', i + 1) : undefined))
+  }
+
+  it('cada paquete con SUS fechas: B paga 5.104.000 hasta el 30 de noviembre, no el 15 de diciembre', () => {
+    const t = pagos(entradaDosPaquetes([[hitoA], [hitoB]]))
+    expect(t).toMatch(/Paquete A .*Al confirmar \(anticipo\) \$ 3\.200\.000 Hasta el 15 de diciembre \$ 5\.867\.000 Hasta el 17 de junio, un día antes del viaje \$ 1\.599\.588 Total \$ 10\.666\.588/)
+    expect(t).toMatch(/Paquete B .*Al confirmar \(anticipo\) \$ 2\.784\.000 Hasta el 30 de noviembre \$ 5\.104\.000 Hasta el 17 de junio, un día antes del viaje \$ 1\.392\.000 Total \$ 9\.280\.000/)
+    // La fila compartida de hoy, que le ponía a B la fecha de A, ya no sale.
+    expect(t).not.toContain('$ 5.867.000 $ 5.104.000')
+  })
+
+  it('la nota de pie no dice «quince días antes de salir» cuando manda la fecha del operador', () => {
+    const t = pagos(entradaDosPaquetes([[hitoA], [hitoB]]))
+    expect(t).not.toContain('quince días antes de salir')
+    expect(t).toContain('Pueden repartirlo en más cuotas: lo acordamos con ustedes.')
+  })
+
+  it('una sola alternativa con fecha de compra: la nota de fila sin doble paréntesis y la regla sin el operador', () => {
+    const e = entradaDosPaquetes([[hitoA], [hitoB]])
+    const t = pagos({ ...e, props: { ...e.props, itinerarios: null } })
+    expect(t).toContain('Hasta el 15 de diciembre (con esto cubren el 80 %: llevan $ 9.067.000) $ 5.867.000')
+    expect(t).toContain('El 15 de diciembre es la fecha límite para comprar el paquete a este precio. El resto, un día antes del viaje.')
+    expect(t).not.toContain('operador')
+  })
+
+  it('con la misma fecha en los dos paquetes, una sola tabla como hoy y la nota del operador', () => {
+    const t = pagos(entradaDosPaquetes([[hitoA], [{ ...hitoB, fecha: hitoA.fecha }]]))
+    expect(t).toMatch(/Hasta el 15 de diciembre \$ 5\.867\.000 \$ 5\.104\.000/)
+    expect(t).not.toContain('quince días antes de salir')
+  })
+})

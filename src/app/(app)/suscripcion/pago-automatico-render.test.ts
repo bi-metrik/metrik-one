@@ -52,7 +52,7 @@ describe('el bloque de pago automático', () => {
     const html = pintar({
       tipo: 'activa',
       resumen: 'Pago automático activo · tarjeta terminada en 1234 · próximo cobro 23 de noviembre: $150.000',
-      fallo: 'No pudimos cobrar a tu tarjeta terminada en 1234. Puedes pagar con el enlace de pago. Reintentamos el 26 de noviembre. Si no se paga, las consultas nuevas se pausan desde el 6 de diciembre.',
+      fallo: 'No pudimos cobrar a tu tarjeta terminada en 1234. Puedes pagar con el enlace de pago. Reintentamos el 26 de noviembre. Si no se paga, la suscripción queda Suspendida por pago desde el 6 de diciembre.',
       pendiente: PENDIENTE,
     })
     const t = texto(html)

@@ -14,7 +14,7 @@ import { estadoSugerencia } from '@/lib/seccion-suscripcion/sustenta-servidor'
 import { accionesSobreUsuario, esAdministradorSinCosto } from '@/lib/usuarios-espacio/reglas'
 import { leerPagosCda, leerTerminosEmpresaCda } from '@/lib/valida-cda/pestanas-servidor'
 import { leerOpcionesPago } from '@/lib/valida-cda/plan-anual-servidor'
-import { vistaPagoAutomatico } from '@/lib/valida-cda/tarjeta-cda-servidor'
+import { vistaBloquePagar } from '@/lib/valida-cda/tarjeta-cda-servidor'
 import { OpcionesPago } from './opciones-pago'
 import { PagoAutomatico } from './pago-automatico'
 import { PestanaPagos } from './pestana-pagos'
@@ -72,16 +72,18 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
   // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
   const rechazoTarjeta = ctx.contrato.suscripcionId ? await rechazoDeLaTarjeta(ctx, createServiceClient()) : null
-  const [pagos, terminos, equipo, sugerencia, opcionesPago, pagoAutomatico] = await Promise.all([
+  const [pagos, terminos, equipo, sugerencia, opcionesPago, bloquePagar] = await Promise.all([
     leerPagosCda(ctx.entrada),
     esOne ? null : leerTerminosEmpresaCda(ctx.entrada),
     leerEquipo(ctx),
     esOne ? null : estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
     // El Plan Anual: solo Valida de los CDA, con términos aceptados y el contrato encendido.
     esOne || !aprobada ? null : leerOpcionesPago(ctx),
-    // El pago automático con tarjeta de los CDA (Términos v1.5, 2.4): solo la persona designada lo ve.
-    esOne || !aprobada ? null : vistaPagoAutomatico(ctx),
+    // El bloque «Pagar» de los CDA: la tarjeta (Términos v1.5, 2.4) y «Pagar solo este mes», que se
+    // excluyen (brief del 2026-11-03). Solo la persona designada lo ve.
+    esOne || !aprobada ? null : vistaBloquePagar(ctx),
   ])
+  const pagoAutomatico = bloquePagar?.automatico ?? null
 
   const { contrato, resumen } = ctx
   // El nombre fiscal del plan (Felipe, 2026-09-24), no el del catálogo, que todavía dice «Licencia».
@@ -118,6 +120,9 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         pagarAhora={!soloLectura && ofrecePagarAhora(ctx)}
         rechazoTarjeta={rechazoTarjeta}
         avisoTarjeta={pagoAutomatico?.tipo === 'activa' ? pagoAutomatico.fallo : null}
+        tarjetaActiva={pagoAutomatico?.tipo === 'activa' ? pagoAutomatico.resumen : null}
+        transicion={ctx.transicion}
+        hoy={ctx.entrada.hoy}
       />
     ) : null
 
@@ -193,10 +198,16 @@ export default async function SuscripcionPage({ searchParams }: Props) {
         pagos={
           <PestanaPagos
             carga={pagos}
-            pagoAutomatico={pagoAutomatico ? <PagoAutomatico vista={pagoAutomatico} soloLectura={soloLectura} /> : null}
+            transicion={ctx.transicion}
+            pagoAutomatico={bloquePagar ? <PagoAutomatico vista={bloquePagar.automatico} mes={bloquePagar.mes} soloLectura={soloLectura} /> : null}
             opciones={
               opcionesPago?.tipo === 'ok' ? (
-                <OpcionesPago opciones={opcionesPago} soloLectura={soloLectura} nombreSugerido={ctx.designadoNombre} />
+                // Con el bloque «Pagar», «Pagar el mes» vive allí (con la exclusión de la tarjeta): aquí no se repite.
+                <OpcionesPago
+                  opciones={bloquePagar ? { ...opcionesPago, mes: null } : opcionesPago}
+                  soloLectura={soloLectura}
+                  nombreSugerido={ctx.designadoNombre}
+                />
               ) : null
             }
           />

@@ -1,7 +1,7 @@
 import 'server-only'
 
 import { detectarTipoDeCaptura } from '@/lib/ai/detectar-tipo-captura'
-import { fetchModeloDocumentos } from '@/lib/ai/modelo-llm'
+import { fetchModeloCapturas } from '@/lib/ai/modelo-llm'
 import { extraerConReintento, type ResultadoExtraccion } from '@/lib/ai/reintentar-extraccion'
 import { getServerKey } from '@/lib/server-keys'
 import { huellaDeImagen } from './captura-repetida'
@@ -19,7 +19,7 @@ import { casillaDesdeDeteccion } from './bloqueo-pegado'
 /**
  * La lectura de los dos pantallazos de un paquete de bloqueo, SIN escribir nada (la escritura es de
  * `guardarPaqueteBloqueo`, después de que la asesora revisa y corrige). Una llamada por pantallazo, con
- * el mismo modelo, la misma puerta (`fetchModeloDocumentos`) y el mismo reintento que la lectura de
+ * el mismo modelo, la misma puerta (`fetchModeloCapturas`) y el mismo reintento que la lectura de
  * siempre (`extraer-ranura.ts`).
  *
  * Lo que devuelve el modelo pasa SIEMPRE por los saneadores puros de `bloqueo-extraccion.ts`: son los
@@ -49,7 +49,7 @@ export const MENSAJE_ELEGIR_CASILLA = 'No se reconoce si es el pantallazo del ho
 async function unaLlamada(base64: string, mime: string, prompt: string, esquema: unknown, apiKey: string): Promise<ResultadoExtraccion<unknown>> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent?key=${apiKey}`
   try {
-    const res = await fetchModeloDocumentos(url, {
+    const res = await fetchModeloCapturas(url, {
       method: 'POST',
       signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/json' },
@@ -96,7 +96,7 @@ export async function leerPantallazoDeBloqueo(pedido: 'hotel' | 'vuelo' | 'detec
 
   let cual: 'hotel' | 'vuelo'
   if (pedido === 'detectar') {
-    const d = await detectarTipoDeCaptura(Buffer.from(m[2].trim(), 'base64'), mime, apiKey)
+    const d = await detectarTipoDeCaptura(Buffer.from(m[2].trim(), 'base64'), mime, apiKey, { paqueteDeBloqueo: true })
     const casilla = casillaDesdeDeteccion(d.data?.tipo ?? null)
     if (!casilla) return { ok: false, mensaje: MENSAJE_ELEGIR_CASILLA, elegir: true, ...(d.error ? { detalle: d.error } : {}) }
     cual = casilla

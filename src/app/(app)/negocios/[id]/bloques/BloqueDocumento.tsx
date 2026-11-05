@@ -64,6 +64,7 @@ import {
   type RespuestaLectura,
   type TipoLectura,
 } from '@/lib/documentos/lectura-en-curso'
+import { MENSAJES_ARCHIVO, esAvisoDeArchivo, esMotivoArchivo, type MotivoArchivo } from '@/lib/documentos/aviso-archivo'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,13 +165,49 @@ function AvisoLecturaPanel({
   onReintentar,
   onConsultar,
   onCerrar,
+  onReemplazar,
 }: {
   aviso: AvisoLectura
   ocupado: boolean
   onReintentar: () => void
   onConsultar: () => void
   onCerrar: () => void
+  /** Elegir otro archivo. Sin él (modo de solo lectura sin permiso de reemplazar) no hay botón. */
+  onReemplazar?: () => void
 }) {
+  // El archivo está vacío, dañado o sin páginas: es de quien lo subió, no una caída del sistema.
+  // Ámbar y no rojo, y la salida es reemplazarlo: reintentar el mismo archivo falla igual (V0634).
+  if (esAvisoDeArchivo(aviso.mensaje)) {
+    return (
+      <div
+        role="alert"
+        data-aviso-lectura="archivo"
+        className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] text-amber-900">{aviso.mensaje}</p>
+          {onReemplazar && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                data-accion="reemplazar-archivo"
+                onClick={onReemplazar}
+                disabled={ocupado}
+                className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                <Upload className="h-3 w-3" />
+                Reemplazar
+              </button>
+            </div>
+          )}
+        </div>
+        <button type="button" onClick={onCerrar} title="Cerrar" className="shrink-0 text-amber-400 hover:text-amber-600">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )
+  }
   return (
     <div
       role="alert"
@@ -897,6 +934,10 @@ export default function BloqueDocumento({
   const [extractionStatus, setExtractionStatus] = useState<'ok' | 'failed' | 'no_key' | null>(
     () => (saved._extraction_status as 'ok' | 'failed' | 'no_key' | undefined) ?? null,
   )
+  // La lectura falló por el ARCHIVO (vacío, dañado, sin páginas): el banner pide reemplazarlo.
+  const [extractionArchivo, setExtractionArchivo] = useState<MotivoArchivo | null>(
+    () => (esMotivoArchivo(saved._extraction_archivo) ? saved._extraction_archivo : null),
+  )
 
   // En el modo de solo lectura la única relectura que se ofrece es la que llena huecos
   // (`soloHuecos`): no pisa un campo ni baja el estado. El reproceso completo, que
@@ -978,13 +1019,15 @@ export default function BloqueDocumento({
         if (b.file_name) setFileName(b.file_name)
         if (nuevosCampos) setCampos(nuevosCampos)
         setExtractionStatus(b.extraction_status)
+        setExtractionArchivo(b.extraction_archivo ?? null)
       }
       setUploadState('uploaded')
       setPendingStoragePath(null)
       if (!esCarga) {
         toast.success(releeSoloHuecos ? 'Documento leído de nuevo' : 'Documento reprocesado con IA')
       } else if (camposConfig.length > 0 && b?.extraction_status === 'failed') {
-        toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
+        if (b.extraction_archivo) toast.warning(MENSAJES_ARCHIVO[b.extraction_archivo])
+        else toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
       } else if (camposConfig.length > 0 && nuevosCampos) {
         if (Object.values(nuevosCampos).some(c => c?.manual)) toast.info('Algunos campos requieren verificación manual')
         else toast.success(`Datos extraídos de ${label}`)
@@ -1005,7 +1048,8 @@ export default function BloqueDocumento({
         setUploadState('error')
         setErrorMsg(msg)
       }
-      toast.error(msg)
+      if (esAvisoDeArchivo(msg)) toast.warning(msg)
+      else toast.error(msg)
       return
     }
 
@@ -1035,7 +1079,8 @@ export default function BloqueDocumento({
       setUploadState(driveUrl ? 'uploaded' : 'error')
       setErrorMsg(aviso.mensaje)
     }
-    toast.error(aviso.mensaje)
+    if (esAvisoDeArchivo(aviso.mensaje)) toast.warning(aviso.mensaje)
+    else toast.error(aviso.mensaje)
   }
 
   function consultarDeNuevo() {
@@ -1207,11 +1252,13 @@ export default function BloqueDocumento({
         setCampos(result.campos)
       }
       setExtractionStatus(result.extraction_status ?? null)
+      setExtractionArchivo(result.extraction_archivo ?? null)
       setUploadState('uploaded')
       setPendingStoragePath(null)
 
       if (camposConfig.length > 0 && result.extraction_status === 'failed') {
-        toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
+        if (result.extraction_archivo) toast.warning(MENSAJES_ARCHIVO[result.extraction_archivo])
+        else toast.error('La extracción con IA falló. Reintenta o completa los campos manualmente.')
       } else if (camposConfig.length > 0 && result.campos) {
         const hasManual = Object.values(result.campos).some(c => c.manual)
         if (hasManual) {
@@ -1473,10 +1520,13 @@ export default function BloqueDocumento({
             onReintentar={reintentarLectura}
             onConsultar={consultarDeNuevo}
             onCerrar={() => setAvisoLectura(null)}
+            onReemplazar={corregirGerencial && puedeCorregirVisible && causaDoc && driveUrl ? () => fileRef.current?.click() : undefined}
           />
         )}
         {uploadState === 'error' && errorMsg && !docRechazado && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{errorMsg}</p>
+          esAvisoDeArchivo(errorMsg)
+            ? <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-900">{errorMsg}</p>
+            : <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] text-red-700">{errorMsg}</p>
         )}
         {/* ── La lectura falló y el caso ya avanzó (SOE-029) ───────────────────────
             El banner de «Reintentar» vivía solo en el modo editable, y el de solo lectura
@@ -1630,6 +1680,7 @@ export default function BloqueDocumento({
           onReintentar={reintentarLectura}
           onConsultar={consultarDeNuevo}
           onCerrar={() => setAvisoLectura(null)}
+          onReemplazar={() => fileRef.current?.click()}
         />
       )}
 
@@ -1811,7 +1862,9 @@ export default function BloqueDocumento({
           className={`flex w-full items-center gap-3 rounded-lg border-2 border-dashed p-4 transition-colors ${
             fileDrop.isDragging
               ? 'border-primary bg-primary/5'
-              : 'border-red-300 bg-red-50/30 hover:border-red-400'
+              : esAvisoDeArchivo(errorMsg)
+                ? 'border-amber-300 bg-amber-50/30 hover:border-amber-400'
+                : 'border-red-300 bg-red-50/30 hover:border-red-400'
           }`}
         >
           <input
@@ -1825,18 +1878,46 @@ export default function BloqueDocumento({
             className="hidden"
           />
           <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0" />
-          <div className="text-left">
-            <span className="text-sm font-medium text-red-600">{label}</span>
-            <p className="text-[11px] text-red-500">
-              {errorMsg ?? 'Error al subir'}. Toca para intentar de nuevo.
-            </p>
-          </div>
+          {esAvisoDeArchivo(errorMsg) ? (
+            <div className="text-left">
+              <span className="text-sm font-medium text-amber-800">{label}</span>
+              <p className="text-[11px] text-amber-700">{errorMsg} Toca para elegir otro archivo.</p>
+            </div>
+          ) : (
+            <div className="text-left">
+              <span className="text-sm font-medium text-red-600">{label}</span>
+              <p className="text-[11px] text-red-500">
+                {errorMsg ?? 'Error al subir'}. Toca para intentar de nuevo.
+              </p>
+            </div>
+          )}
         </button>
       )}
 
       {/* Banner: la extracción IA falló — reintentar o llenar manual.
           Señal visible para que el bloque no quede 'pendiente' en silencio. */}
-      {camposConfig.length > 0 && uploadState === 'uploaded' && extractionStatus === 'failed' && (
+      {/* Falló por el ARCHIVO (vacío, dañado, sin páginas): ámbar y «Reemplazar», no «Reintentar»,
+          que relee el mismo archivo y falla igual (V0634). */}
+      {camposConfig.length > 0 && uploadState === 'uploaded' && extractionStatus === 'failed' && extractionArchivo && (
+        <div data-aviso-lectura="archivo" className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-amber-900">No se pudo leer el archivo</p>
+            <p className="mt-0.5 text-[11px] text-amber-800">
+              {MENSAJES_ARCHIVO[extractionArchivo]} También puedes completar los campos a mano.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
+          >
+            <Upload className="h-3 w-3" />
+            Reemplazar
+          </button>
+        </div>
+      )}
+      {camposConfig.length > 0 && uploadState === 'uploaded' && extractionStatus === 'failed' && !extractionArchivo && (
         <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50/50 p-3">
           <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">

@@ -17,6 +17,7 @@ import {
 import {
   buscarNegociosParaValida,
   consultarValida,
+  descargarBitacoraValida,
   descargarPDFConsultaValida,
   descargarPlantillaValida,
   listarConsultasValida,
@@ -1423,6 +1424,29 @@ function Historial({
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
   const [pending, startTransition] = useTransition();
+  const [bajandoBitacora, setBajandoBitacora] = useState(false);
+  const [errorBitacora, setErrorBitacora] = useState<string | null>(null);
+
+  // La bitácora completa del espacio (Términos del Plan CDA 9.3 y 11.2): no depende de los filtros.
+  async function descargarBitacora() {
+    setBajandoBitacora(true);
+    setErrorBitacora(null);
+    try {
+      const r = await descargarBitacoraValida({ sinNegocio: modoVitrina });
+      if (!r.ok) {
+        setErrorBitacora(r.error);
+        return;
+      }
+      triggerDownload(
+        base64ToBlob(r.data.base64, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+        r.data.filename,
+      );
+    } catch {
+      setErrorBitacora('No se pudo descargar la bitácora. Intenta de nuevo.');
+    } finally {
+      setBajandoBitacora(false);
+    }
+  }
 
   function aplicarFiltros() {
     startTransition(async () => {
@@ -1533,7 +1557,18 @@ function Historial({
           >
             Limpiar
           </button>
+          <button
+            type="button"
+            onClick={descargarBitacora}
+            disabled={bajandoBitacora}
+            data-descargar-bitacora
+            className="ml-auto inline-flex items-center gap-2 h-10 px-4 rounded-lg border border-[#E5E7EB] text-sm font-semibold text-tinta hover:bg-papel disabled:opacity-50 transition-colors"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            {bajandoBitacora ? 'Preparando…' : 'Descargar bitácora (XLSX)'}
+          </button>
         </div>
+        {errorBitacora && <ErrorBox msg={errorBitacora} />}
       </div>
 
       <HistorialTable consultas={consultas} error={error} mostrarNegocio={!modoVitrina} textoVacio={textoVacio} />

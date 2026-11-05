@@ -1,5 +1,6 @@
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { leerMarca, lecturaVigente, type RespuestaLectura } from './lectura-en-curso'
+import { esMotivoArchivo } from './aviso-archivo'
 
 /**
  * El estado de la lectura de un bloque documental, para la tarjeta que la espera.
@@ -38,6 +39,7 @@ export async function consultarLectura(negocioId: string, bloqueId: string): Pro
       file_name: (data.file_name as string | undefined) ?? null,
       campos: (data.campos as Record<string, unknown> | undefined) ?? null,
       extraction_status: (data._extraction_status as 'ok' | 'failed' | 'no_key' | undefined) ?? null,
+      extraction_archivo: esMotivoArchivo(data._extraction_archivo) ? data._extraction_archivo : null,
     },
   }
 }

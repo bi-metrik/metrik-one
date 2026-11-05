@@ -69,7 +69,7 @@ import {
 } from '@/lib/cotizaciones/revision-captura'
 import { leidosPorSlug } from '@/lib/cotizaciones/correcciones'
 import { definicionDeTipo, TIPOS_CON_PANTALLAZO, TIPOS_RANURA, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
-import { MENSAJE_PAQUETE_SIN_BLOQUEO, type RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
+import { BOTON_MARCAR_BLOQUEO, MENSAJE_PAQUETE_SIN_BLOQUEO, MENSAJE_PAQUETE_SIN_BLOQUEO_SIN_BOTON, type RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import type { Composicion, LecturaCasilla } from '@/lib/cotizaciones/tarifa-pasajero'
 import type { EventoProvisional } from '@/lib/cotizaciones/aceptar-optimista'
 import { PREGUNTA_AL_SALIR, saleDeLaPagina } from '@/lib/cotizaciones/aviso-al-salir'
@@ -366,6 +366,12 @@ export interface BloqueoDeBandeja {
    * no pregunta a qué paquete va. `otroServicio`: no es hotel ni vuelo, va a la lectura de siempre.
    */
   armar?: (dataUrl: string) => Promise<{ ok: true; mensaje: string } | { ok: false; error: string; otroServicio?: boolean }>
+  /**
+   * Los paquetes con «¿Pública o Neta?» sin responder (Mauricio, 2026-11-03): UNO por paquete (su
+   * primera opción), sin respuesta preseleccionada. Las opciones que entren después heredan la respuesta.
+   */
+  tarifasPorElegir?: { itemId: string; titulo: string }[]
+  elegirTarifa?: (itemId: string, tipo: 'publica' | 'neta') => Promise<{ ok: true } | { ok: false; error: string }>
 }
 
 let contador = 0
@@ -393,6 +399,7 @@ export default function BandejaCapturas({
   onVistaFresca,
   conTarifasDeProveedor = false,
   bloqueo = null,
+  marcarBloqueo = null,
 }: {
   cotizacionId: string
   /** Las líneas de la cotización: contra ellas se dice a dónde irá cada captura. */
@@ -443,6 +450,12 @@ export default function BandejaCapturas({
   conTarifasDeProveedor?: boolean
   /** Viaje en bloqueo: el pegado va al paquete (`BloqueoDeBandeja`). `null` = lo de siempre. */
   bloqueo?: BloqueoDeBandeja | null
+  /**
+   * «Marcar el viaje como Bloqueo» (2026-11-03): escribe la modalidad del negocio. Al volver la página
+   * con `bloqueo`, la captura que lo pidió se entrega al paquete sin volver a pegarla. `null` = el
+   * negocio no tiene el campo o la cotización no se edita: el mensaje de siempre, sin botón.
+   */
+  marcarBloqueo?: (() => Promise<{ ok: true } | { ok: false; error: string }>) | null
 }) {
   const router = useRouter()
   const refrescar = () => (onCambio ? onCambio() : router.refresh())
@@ -636,6 +649,33 @@ export default function BandejaCapturas({
   // «Otro servicio» desde la tarjeta del paquete: vuelve aquí, a la lectura de siempre.
   const registroDelBloqueo = bloqueo?.registro ?? null
   useEffect(() => registroDelBloqueo?.conectarBandeja(agregarDesdeDataUrl), [registroDelBloqueo, agregarDesdeDataUrl])
+
+  // «Marcar el viaje como Bloqueo»: las capturas que esperan a que la página vuelva con `bloqueo`.
+  const [esperanBloqueo, setEsperanBloqueo] = useState<{ id: string; dataUrl: string }[]>([])
+  const [marcando, setMarcando] = useState(false)
+  async function marcarYReprocesar(c: Captura) {
+    if (!marcarBloqueo || !c.dataUrl || marcando) return
+    setMarcando(true)
+    const r = await marcarBloqueo().catch(() => ({ ok: false as const, error: 'No se pudo marcar el viaje. Vuelve a intentarlo.' }))
+    setMarcando(false)
+    if (!r.ok) { toast.error(r.error); return }
+    nuevoTurno(c.id)
+    actualizar(c.id, { estado: { fase: 'descartada' } })
+    setEsperanBloqueo(xs => [...xs, { id: c.id, dataUrl: c.dataUrl! }])
+    refrescar()
+  }
+  useEffect(() => {
+    if (!bloqueo || esperanBloqueo.length === 0) return
+    const xs = esperanBloqueo
+    setEsperanBloqueo([])
+    for (const x of xs) {
+      // Con `armar` (2026-11-03) el servidor decide paquete u opción: va por `pegarEnBloqueo`.
+      // Sin él y sin ningún paquete todavía, se crea uno y la captura va a él («+ Paquete nuevo»).
+      if (!bloqueo.armar && bloqueo.registro.destino().a === 'elegir' && bloqueo.paquetes.length === 0) ubicar(x, 'nuevo')
+      else alPaquete(x.dataUrl)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `ubicar` lee el bloqueo vivo; corre al llegar `bloqueo`
+  }, [bloqueo, esperanBloqueo, alPaquete])
 
   function ubicar(x: { id: string; dataUrl: string }, a: { paquete: string } | 'nuevo' | 'otro' | 'nada') {
     setPorUbicar(xs => xs.filter(y => y.id !== x.id))
@@ -1261,7 +1301,11 @@ export default function BandejaCapturas({
                   // al vuelo del paquete y volvía a preguntar (SAN ANDRÉS, 2026-11-03). Se dice qué falta.
                   if (t === 'paquete' && !bloqueo) {
                     nuevoTurno(c.id)
-                    actualizar(c.id, { estado: { fase: 'rechazada', mensaje: MENSAJE_PAQUETE_SIN_BLOQUEO } })
+                    actualizar(c.id, {
+                      estado: marcarBloqueo
+                        ? { fase: 'rechazada', mensaje: MENSAJE_PAQUETE_SIN_BLOQUEO, marcarBloqueo: true }
+                        : { fase: 'rechazada', mensaje: MENSAJE_PAQUETE_SIN_BLOQUEO_SIN_BOTON },
+                    })
                     return
                   }
                   void procesar(c.id, c.dataUrl, t)
@@ -1273,6 +1317,8 @@ export default function BandejaCapturas({
                 onReemplazarPrecio={() => reemplazarPrecio(c)}
                 onVer={onOpcionCreada}
                 onAmpliar={ampliar}
+                onMarcarBloqueo={marcarBloqueo ? () => void marcarYReprocesar(c) : undefined}
+                marcandoBloqueo={marcando}
               />
             )
           })}
@@ -1283,6 +1329,13 @@ export default function BandejaCapturas({
           <span className={SPIN} aria-hidden />
           {armando === 1 ? 'Poniendo el pantallazo en el paquete…' : `Poniendo ${armando} pantallazos en los paquetes…`}
         </p>
+      )}
+      {bloqueo?.elegirTarifa && (bloqueo.tarifasPorElegir ?? []).length > 0 && (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tarifas-por-elegir>
+          {(bloqueo.tarifasPorElegir ?? []).map(pq => (
+            <PreguntaTarifa key={pq.itemId} itemId={pq.itemId} titulo={pq.titulo} elegir={bloqueo.elegirTarifa!} />
+          ))}
+        </ul>
       )}
       {porUbicar.length > 0 && bloqueo && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-por-ubicar-bloqueo>
@@ -1310,6 +1363,38 @@ export default function BandejaCapturas({
 }
 
 const NADA = () => {}
+
+/**
+ * «¿La tarifa del operador es Pública o Neta?», una vez por paquete armado por la bandeja (Mauricio,
+ * 2026-11-03). Sin respuesta preseleccionada: mientras no se responda, el paquete no lleva margen
+ * encima y no se puede enviar.
+ */
+function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
+  const [enviando, setEnviando] = useState<'publica' | 'neta' | null>(null)
+  async function responder(tipo: 'publica' | 'neta') {
+    if (enviando) return
+    setEnviando(tipo)
+    const r = await elegir(itemId, tipo).catch(() => ({ ok: false as const, error: 'No se pudo guardar. Vuelve a intentarlo.' }))
+    setEnviando(null)
+    if (!r.ok) toast.error(r.error)
+  }
+  return (
+    <li className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] p-2 text-[13px]" data-tarifa-por-elegir={itemId}>
+      <span className="min-w-0 flex-1">
+        <span className="font-semibold">{titulo}: ¿cómo viene la tarifa del operador?</span>
+        <span className="block text-xs text-[#6E6A62]">Vale para todos los hoteles de este paquete. Hasta que respondas, no se puede enviar.</span>
+      </span>
+      <span className="flex flex-wrap gap-1.5">
+        <button type="button" className={BTN} disabled={enviando !== null} data-elegir-tarifa="publica" onClick={() => void responder('publica')}>
+          {enviando === 'publica' ? 'Guardando…' : 'Pública (el precio ya trae la comisión)'}
+        </button>
+        <button type="button" className={BTN} disabled={enviando !== null} data-elegir-tarifa="neta" onClick={() => void responder('neta')}>
+          {enviando === 'neta' ? 'Guardando…' : 'Neta'}
+        </button>
+      </span>
+    </li>
+  )
+}
 
 /**
  * Lo que la fila de la cotización por pasos agrega (C5): la frase de a dónde va (tocable), su
@@ -1346,8 +1431,13 @@ export function FilaCaptura({
   onVer,
   onAmpliar,
   tiposElegibles = TIPOS_CON_PANTALLAZO,
+  onMarcarBloqueo,
+  marcandoBloqueo = false,
 }: {
   captura: Captura
+  /** «Marcar el viaje como Bloqueo» de la tarjeta rechazada por «no es Bloqueo» (2026-11-03). */
+  onMarcarBloqueo?: () => void
+  marcandoBloqueo?: boolean
   /**
    * Los tipos que se ofrecen cuando ONE no reconoce el pantallazo. La cotización por pasos suma
    * «Es otro servicio» (asistencia médica, seguro); la de siempre, los cuatro de siempre.
@@ -1506,6 +1596,14 @@ export function FilaCaptura({
         {e.reintentar && (
           <div className="mt-1 flex flex-wrap gap-2">
             <button type="button" onClick={onReintentar} className={BTN_PRIM} data-reintentar-captura>Reintentar</button>
+          </div>
+        )}
+        {e.marcarBloqueo && onMarcarBloqueo && (
+          <div className="mt-1 flex flex-wrap gap-2">
+            <button type="button" onClick={onMarcarBloqueo} className={BTN_PRIM} disabled={marcandoBloqueo} data-marcar-bloqueo>
+              {marcandoBloqueo && <span className={SPIN} aria-hidden />}
+              {BOTON_MARCAR_BLOQUEO}
+            </button>
           </div>
         )}
         {/* H19 · un rechazo de la lectura nunca deja la fila sin salida: se puede decir qué es. */}

@@ -182,7 +182,10 @@ import VistaPorPasos from '@/app/(app)/negocios/por-pasos/vista-por-pasos'
 import { AvisoVersionNueva } from '@/app/(app)/negocios/aviso-version-nueva'
 import { SeccionBloqueo, TarjetaPaqueteBloqueo } from '@/app/(app)/negocios/por-pasos/paquete-bloqueo'
 import { tarjetaDeOpcionEn } from '@/lib/cotizaciones/enfocar-comision'
-import { crearPaqueteBloqueo, paqueteEnPropuesta, pegarEnBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
+import { crearPaqueteBloqueo, elegirTarifaDelPaquete, paqueteEnPropuesta, pegarEnBloqueo } from '@/app/(app)/negocios/bloqueo-actions'
+import { paquetesConTarifaPorElegir } from '@/lib/cotizaciones/bloqueo-armado'
+import { cambiarModalidadDelViaje } from '@/app/(app)/negocios/modalidad-actions'
+import { ofreceMarcarBloqueo, type ValorModalidad } from '@/lib/cotizaciones/modalidad-campo'
 import { RegistroDePaquetes } from '@/lib/cotizaciones/bloqueo-pegado'
 import { edadesNinosDeLaSolicitud, leerPaqueteBloqueo, vueloParaReutilizar } from '@/lib/cotizaciones/bloqueo-paquete'
 import { incluyeDeOne, lineasQueSeCobran } from '@/lib/cotizaciones/incluye-por-one'
@@ -435,6 +438,11 @@ interface Props {
    */
   bloqueo?: { operador: string | null; edadesMenores?: string | null } | null
   /**
+   * El negocio tiene el campo «Modalidad» (`modalidad-campo.ts`), con su valor. Con él la bandeja
+   * ofrece «Marcar el viaje como Bloqueo» (2026-11-03). `null` = no lo tiene: nada cambia.
+   */
+  campoModalidad?: { valor: ValorModalidad | '' } | null
+  /**
    * H10-1: otra cotización del negocio ya está enviada. Con esta en borrador, el editor lo dice
    * arriba y «Enviar» la reemplaza (la enviada queda rechazada). `null` = no hay otra enviada.
    */
@@ -447,7 +455,7 @@ type PorPasosDeOpcion = { enTarifas: string[] | null; menuExtra: (cerrar: () => 
 /** Cuánto dura el «Deshacer» de un borrado de opción o de bloque (P12). */
 const ESPERA_DESHACER_MS = 6000
 
-export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, requisitosViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null, otraEnviada = null }: Props) {
+export default function CotizacionEditor({ oportunidadId, cotizacion, initialItems: itemsDeLaPagina, fiscalProfile, clientFiscal, backUrl, staffMembers, frozen, lineaId, umbrales = UMBRALES_MARGEN_POR_DEFECTO, itinerarios, pisoBloqueaAvance = false, politicaRecargo = RECARGO_POR_DEFECTO, composicionViaje = null, lineasPorTipo = false, adicionales: adicionalesDeLaPagina = ADICIONALES_VACIOS, salida = null, textoCliente = null, configIva = CONFIG_IVA_POR_DEFECTO, mostrarResumenFiscal = true, destinoViaje = null, requisitosViaje = null, fechasViaje = null, nivelDetalle = null, leidaEn = null, seguimiento = false, asiPuedesPagar: entradaPlan = null, porPasos = null, pedidoAutorizacion = null, pasoInicial = 1, motivoAutorizacionDatos = null, bloqueo = null, campoModalidad = null, otraEnviada = null }: Props) {
   // Abierto de entrada solo si hay un borrador de ONE esperando revisión: es lo único que
   // el equipo tiene que hacer aquí, y cerrado no lo vería.
   const [verTextoCliente, setVerTextoCliente] = useState(() => estadoDelTexto(textoCliente?.documento ?? null) === 'borrador')
@@ -3927,6 +3935,20 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               if (r.accion !== 'repetido') refrescar()
               return { ok: true as const, mensaje: r.mensaje }
             },
+            // «¿Pública o Neta?» una vez por paquete armado (2026-11-03), sin respuesta preseleccionada.
+            tarifasPorElegir: editable
+              ? paquetesConTarifaPorElegir(initialItems.map(i => ({ id: i.id, grupo: i.grupo, es_ajuste: i.es_ajuste, paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo) })))
+              : [],
+            elegirTarifa: async (itemId, tipo) => {
+              const r = await elegirTarifaDelPaquete(itemId, tipo)
+              if (!r.success) return { ok: false as const, error: r.error }
+              refrescar()
+              return { ok: true as const }
+            },
+          } : null}
+          marcarBloqueo={!bloqueo && ofreceMarcarBloqueo({ campoDisponible: !!campoModalidad, editable, porPasos: true }) ? async () => {
+            const r = await cambiarModalidadDelViaje(cotizacion.id, 'bloqueo')
+            return r.success ? { ok: true as const } : { ok: false as const, error: r.error }
           } : null}
         />
       )}
@@ -3949,7 +3971,11 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
               operador={bloqueo?.operador ?? null}
               pasajeros={composicionViaje ? { adultos: composicionViaje.adultos, ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null}
               edadesNinosSolicitud={edadesNinosDeLaSolicitud(bloqueo?.edadesMenores ?? null, composicionViaje ? { ninos: composicionViaje.ninos, infantes: composicionViaje.infantes } : null)}
-              vueloSugerido={vueloParaReutilizar(initialItems.filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle').map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
+              // El vuelo de SU paquete primero (mismo grupo); si no tiene, el de otro paquete.
+              vueloSugerido={vueloParaReutilizar(initialItems
+                .filter(i => i.id !== item.id && ranuraDeGrupo(i.grupo ?? null)?.slug === 'paquete_detalle')
+                .sort((a, b) => Number(b.grupo === item.grupo) - Number(a.grupo === item.grupo))
+                .map(i => leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo)))}
               onCambio={() => refrescar()}
               onEliminar={pp.onEliminar}
               registro={registroPaquetes}

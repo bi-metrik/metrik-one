@@ -5,6 +5,8 @@ import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { CreditCard } from 'lucide-react'
 import { useIntencion } from '@/hooks/use-intencion'
+import { formatCOP } from '@/lib/cobros/format'
+import { TEXTO_SOLO_ESTE_MES, type MesPorEnlace } from '@/lib/valida-cda/pago-unico'
 import {
   TEXTO_ACEPTA_V15,
   TEXTO_CONFIRMAR_QUITAR,
@@ -13,12 +15,19 @@ import {
   type VistaPagoAutomatico,
   type VistaPendiente,
 } from '@/lib/valida-cda/tarjeta-cda'
-import { pagarPendienteConTarjeta, quitarTarjetaPagoAutomatico } from './acciones'
+import { pagarPendienteConTarjeta, pagarSoloEsteMes, quitarTarjetaPagoAutomatico } from './acciones'
 
 /**
- * «Pago automático con tarjeta» en la pestaña Pagos de `/suscripcion`, junto a «Pagar el mes» y «Pagar 12
- * meses» (Términos v1.5, 2.4; diseño del 2026-10-30). Lo ve solo la persona designada (D1): la página no
- * lo pinta para nadie más y las acciones lo vuelven a exigir.
+ * El bloque «Pagar» de la pestaña Pagos de `/suscripcion` (brief del 2026-11-03): UN solo bloque con dos
+ * opciones que se excluyen, para que nadie pague el mismo período dos veces.
+ *
+ *   - Principal: «Pago automático con tarjeta» (Términos v1.5, 2.4; diseño del 2026-10-30).
+ *   - Secundaria: «Pagar solo este mes (PSE u otro medio)»: abre el enlace de la cuota o lo pide en ese
+ *     momento. Con la tarjeta activa solo aparece si la tarjeta no cobra esa cuota (lo atrasado) o ya la
+ *     rechazó (`mesPorEnlace`).
+ *
+ * Lo ve solo la persona designada (D1): la página no lo pinta para nadie más y las acciones lo vuelven a
+ * exigir.
  *
  *   - Sin la v1.5 aceptada (D2): lleva a aceptarla, sin formulario.
  *   - Sin tarjeta: «Registrar tarjeta» lleva a `/suscripcion/tarjeta`, la única página del espacio con la
@@ -29,9 +38,10 @@ import { pagarPendienteConTarjeta, quitarTarjetaPagoAutomatico } from './accione
 
 const BOTON = 'inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-semibold disabled:opacity-50'
 
-export function PagoAutomatico({ vista, soloLectura }: { vista: VistaPagoAutomatico; soloLectura: boolean }) {
+export function PagoAutomatico({ vista, mes = null, soloLectura }: { vista: VistaPagoAutomatico; mes?: MesPorEnlace | null; soloLectura: boolean }) {
   return (
-    <section data-pago-automatico={vista.tipo} className="space-y-3 rounded-lg border border-border bg-white p-4">
+    <section data-bloque-pagar data-pago-automatico={vista.tipo} className="space-y-3 rounded-lg border border-border bg-white p-4">
+      <p className="text-sm font-semibold text-tinta">Pagar</p>
       <p className="flex items-center gap-2 text-sm font-semibold text-tinta">
         <CreditCard className="h-4 w-4 shrink-0 text-acento" />
         Pago automático con tarjeta
@@ -61,7 +71,46 @@ export function PagoAutomatico({ vista, soloLectura }: { vista: VistaPagoAutomat
         </>
       )}
       {vista.tipo === 'activa' && <TarjetaActiva vista={vista} soloLectura={soloLectura} />}
+      {mes && <SoloEsteMes mes={mes} soloLectura={soloLectura} />}
     </section>
+  )
+}
+
+/** La opción secundaria: el enlace de la cuota (PSE u otro medio), el vigente o uno pedido en el momento. */
+function SoloEsteMes({ mes, soloLectura }: { mes: MesPorEnlace; soloLectura: boolean }) {
+  const [error, setError] = useState<string | null>(null)
+  const [pendiente, iniciar] = useTransition()
+  const etiqueta = `${TEXTO_SOLO_ESTE_MES} · ${formatCOP(mes.saldo)}`
+  return (
+    <div data-solo-este-mes className="space-y-1 border-t border-border pt-3">
+      {mes.enlace ? (
+        <a
+          href={mes.enlace}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`${BOTON} w-full border border-border text-tinta sm:w-auto ${soloLectura ? 'pointer-events-none opacity-50' : ''}`}
+        >
+          {etiqueta}
+        </a>
+      ) : (
+        <button
+          type="button"
+          disabled={soloLectura || pendiente}
+          onClick={() =>
+            iniciar(async () => {
+              setError(null)
+              const r = await pagarSoloEsteMes()
+              if (r.ok) window.location.assign(r.url)
+              else setError(r.error)
+            })
+          }
+          className={`${BOTON} w-full border border-border text-tinta sm:w-auto`}
+        >
+          {pendiente ? 'Preparando el pago…' : etiqueta}
+        </button>
+      )}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
   )
 }
 

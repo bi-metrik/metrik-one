@@ -56,6 +56,7 @@ import { claveTarifa } from '@/lib/cotizaciones/tarifas'
 import { siglasDeTramos } from '@/lib/cotizaciones/aerolineas'
 import { textoIvaIncluido } from '@/lib/fiscal/iva-cotizacion'
 import { asiPuedesPagar, type AsiPuedesPagar } from '@/lib/viaje/asi-puedes-pagar'
+import { conLexicoDeMarca } from '@/lib/cotizaciones/nombre-tarifa-marca'
 import type { AnticipoPropuesta } from './anticipo'
 import { destinatarioDeLaPropuesta, type ClienteDelNegocio, type Destinatario } from './destinatario'
 
@@ -394,9 +395,7 @@ const pesos = (v: number) =>
  * con el léxico de marca: «Premium» se dice «Superior».
  */
 export function nombreDeTarifaParaCliente(nombre: string | null | undefined, esPrincipal: boolean, posicion: number): string {
-  return tituloDeBloquePDF(nombre, esPrincipal, posicion).replace(/\bpremium\b/gi, (m) =>
-    m === m.toUpperCase() ? 'SUPERIOR' : m[0] === 'P' ? 'Superior' : 'superior',
-  )
+  return conLexicoDeMarca(tituloDeBloquePDF(nombre, esPrincipal, posicion))
 }
 
 export function claveDeTarifa(nombre: string | null | undefined): ClaveTarifa {
@@ -856,7 +855,8 @@ export function modeloDePropuesta({
           tarifa: t.indice,
           nombre: t.nombre,
           // La principal paga sobre el TOTAL impreso, como el plan de hoy; las demás sobre su precio.
-          plan: asiPuedesPagar(t.esPrincipal ? total : t.precio, entrada),
+          // QA G14: cada alternativa con SU «Compra antes del» (la de su paquete y su operador).
+          plan: asiPuedesPagar(t.esPrincipal ? total : t.precio, entrada, entrada.hitosPorTarifa?.[t.indice] ?? null),
         }))
       : [{ tarifa: null, nombre: null, plan: asiPuedesPagar(total, entrada) }]
 

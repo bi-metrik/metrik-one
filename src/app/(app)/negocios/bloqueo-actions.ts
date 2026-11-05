@@ -22,7 +22,7 @@ import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, proveed
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
-import { planDelPegado, type OpcionDeBloqueo, type PlanDeArmado, type TarifaDeOpcion } from '@/lib/cotizaciones/bloqueo-armado'
+import { grupoDelPaqueteVigente, planDelPegado, type OpcionDeBloqueo, type PlanDeArmado, type TarifaDeOpcion } from '@/lib/cotizaciones/bloqueo-armado'
 import { formaDesdeGrupo } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 
@@ -66,8 +66,9 @@ export async function crearPaqueteBloqueo(cotizacionId: string): Promise<{ succe
     .select('grupo, es_ajuste')
     .eq('cotizacion_id', cotizacionId)
   if (errItems) return { success: false, error: errItems.message as string }
-  const grupo = ((filas ?? []) as { grupo: string | null; es_ajuste: boolean | null }[])
-    .find(i => i.es_ajuste !== true && ranuraDeGrupo(i.grupo)?.slug === 'paquete_detalle')?.grupo ?? null
+  // «+ Paquete» agrega al paquete VIGENTE, el de número más alto (la regla del pegado, #1408), no al
+  // primero que aparezca (Trappvel, 2026-11-03).
+  const grupo = grupoDelPaqueteVigente((filas ?? []) as { grupo: string | null; es_ajuste: boolean | null }[])
 
   const r = grupo
     ? await agregarOpcionARanura(cotizacionId, normalizarGrupo(grupo) ?? grupo)
@@ -237,7 +238,14 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   if (!paquete) return { success: false, error: 'El paquete llegó incompleto. Recarga la página.' }
   // Las imágenes ya guardadas son las del servidor, no las que diga el navegador.
   const tarifa = leerTarifaPax(item.tarifa_pax)
-  const previas = leerPaqueteBloqueo(tarifa.bloqueo)?.imagenes ?? { hotel: null, vuelo: null }
+  const previo = leerPaqueteBloqueo(tarifa.bloqueo)
+  const previas = previo?.imagenes ?? { hotel: null, vuelo: null }
+  // «Pública o Neta» sin responder (2026-11-03): la pregunta sigue abierta hasta que llegue la
+  // respuesta; el navegador no la cierra con solo omitirla. Se abre solo donde nadie decidió: una
+  // tarjeta abierta desde antes de responder no la reabre.
+  const porElegir = !entrada.comision && (previo?.tarifaPorElegir === true || (paquete.tarifaPorElegir === true && !tarifa.tipoTarifa))
+  delete paquete.tarifaPorElegir
+  if (porElegir) paquete.tarifaPorElegir = true
   paquete.imagenes = { ...previas }
   for (const cual of ['hotel', 'vuelo'] as const) {
     const nueva = entrada.imagenes?.[cual]
@@ -291,6 +299,8 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
       delete siguiente.descuentoCliente
     }
   }
+  // Sin respuesta, el precio no lleva margen encima: no sale inflado como si fuera Neta.
+  if (porElegir) patch.margen_porcentaje = 0
   patch.tarifa_pax = siguiente
   const previa = typeof item.proveedor_id === 'string' ? item.proveedor_id : null
   const proveedorId = proveedorDelPaquete({ ficha, previa, fichas })
@@ -499,6 +509,47 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Pro
     ? (lectura.cual === 'vuelo' ? 'Paquete nuevo con este vuelo: los hoteles que pegues ahora van a este paquete.' : `Paquete nuevo con ${hotelLeido ?? 'este hotel'}.`)
     : `${hotelLeido ?? 'El hotel'} es otra opción del paquete.`
   return { success: true, accion: plan.accion, itemId: creada.itemId, mensaje }
+}
+
+/**
+ * La respuesta a «¿la tarifa del operador es Pública o Neta?» que hace la bandeja UNA vez por paquete
+ * (Mauricio, 2026-11-03). Se escribe en TODAS las opciones del paquete (la ranura de `itemId`) que no
+ * la tienen: las que tienen la pregunta abierta o ninguna decisión. Las que ya tienen la suya no se
+ * tocan. Escribe con `guardarPaqueteBloqueo` (mismas guardas, mismo costo, mismo margen).
+ */
+export async function elegirTarifaDelPaquete(
+  itemId: string,
+  tipo: 'publica' | 'neta',
+  comisionAgencia: ComisionEscrita | null = null,
+): Promise<{ success: true; opciones: number } | { success: false; error: string }> {
+  if (tipo !== 'publica' && tipo !== 'neta') return { success: false, error: 'Elige Pública o Neta.' }
+  const { supabase, workspaceId, error } = await getWorkspace()
+  if (error || !workspaceId) return { success: false, error: 'No autenticado' }
+  const sb = supabase as Supabase
+  const { data: item } = await sb.from('items').select('id, cotizacion_id, grupo, es_ajuste').eq('id', itemId).maybeSingle()
+  if (!item || item.es_ajuste === true || ranuraDeGrupo(item.grupo as string | null)?.slug !== 'paquete_detalle') {
+    return { success: false, error: 'Esta línea no es un paquete de bloqueo.' }
+  }
+  const grupo = normalizarGrupo(item.grupo as string) ?? (item.grupo as string)
+  const { data: filas, error: errItems } = await sb.from('items').select('id, grupo, es_ajuste, tarifa_pax').eq('cotizacion_id', item.cotizacion_id as string)
+  if (errItems) return { success: false, error: errItems.message as string }
+  const hermanas = ((filas ?? []) as { id: string; grupo: string | null; es_ajuste: boolean | null; tarifa_pax: unknown }[])
+    .filter(i => i.es_ajuste !== true && i.grupo && (normalizarGrupo(i.grupo) ?? i.grupo) === grupo)
+  let n = 0
+  for (const h of hermanas) {
+    const t = leerTarifaPax(h.tarifa_pax)
+    const paquete = leerPaqueteBloqueo(t.bloqueo)
+    if (!paquete) continue
+    if (!paquete.tarifaPorElegir && t.tipoTarifa) continue
+    const r = await guardarPaqueteBloqueo(h.id, {
+      paquete,
+      comision: tipo === 'publica' ? 'incluida' : 'por_incluir',
+      ...(tipo === 'publica' ? { comisionAgencia } : {}),
+    })
+    if (!r.success) return { success: false, error: r.error }
+    n += 1
+  }
+  return { success: true, opciones: n }
 }
 
 /** Pública / Neta decidida de una opción, con su comisión. `null` = sin decidir. */

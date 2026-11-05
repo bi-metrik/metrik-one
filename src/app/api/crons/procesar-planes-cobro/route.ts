@@ -27,6 +27,7 @@ import { enviarPorResend, procesarCobrosTrasPrueba, type ResumenCobroPrueba } fr
 import { conciliarRegistrosConCobroPendiente, type ResumenRegistrosCobroPendiente } from '@/lib/valida-registro/cargo-tardio-servidor'
 import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida-registro/suspension-servidor'
 import { terminarSuspensionesVencidas, type ResumenTerminacion } from '@/lib/valida-registro/terminacion-servidor'
+import { avisarSuspendidasPorPago, type ResumenAvisoSuspendida } from '@/lib/valida-cda/aviso-suspendida-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -78,6 +79,10 @@ import { terminarSuspensionesVencidas, type ResumenTerminacion } from '@/lib/val
 //      suscripcion cancelada y se pide a ePayco borrar la tarjeta. Sin correo al cliente; aviso interno.
 //      APAGADA en produccion (`TERMINACION_30_DIAS_APROBADA`): ahi solo registra `por_terminar` y avisa
 //      (ver `src/lib/valida-registro/terminacion-servidor.ts`).
+//   8d. Valida de los CDA (Terminos v1.5, 11.2): el correo del dia en que la suscripcion entra en
+//      Suspendida por pago, una vez por episodio, a los correos registrados y a la persona designada,
+//      con su fila en `avisos_cliente`. Despues del 6, 7 y 7c: un pago o un enlace de hoy ya cuentan
+//      (ver `src/lib/valida-cda/aviso-suspendida-servidor.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -630,6 +635,15 @@ export async function GET(req: NextRequest) {
     terminacionError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 8d. Valida de los CDA: el correo del día en que entra en Suspendida por pago (Términos v1.5, 11.2) ──
+  let avisoSuspendida: ResumenAvisoSuspendida | null = null
+  let avisoSuspendidaError: string | null = null
+  try {
+    avisoSuspendida = await avisarSuspendidasPorPago({ db: supabase, hoy: hoyStr, ahoraISO: hoy.toISOString(), enviarCorreo: enviarPorResend })
+  } catch (err) {
+    avisoSuspendidaError = err instanceof Error ? err.message : String(err)
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -673,5 +687,7 @@ export async function GET(req: NextRequest) {
     aviso_suspension_error: avisoSuspensionError,
     terminacion_valida: terminacion,
     terminacion_valida_error: terminacionError,
+    aviso_suspendida: avisoSuspendida,
+    aviso_suspendida_error: avisoSuspendidaError,
   })
 }

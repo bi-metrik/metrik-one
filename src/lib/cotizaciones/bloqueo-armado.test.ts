@@ -73,15 +73,25 @@ describe('SAN ANDRÉS: el vuelo y tres hoteles arman UN paquete con tres opcione
     expect(opciones).toHaveLength(1)
   })
 
-  it('la opción nueva hereda «Pública» y su comisión del paquete; sin decidir, queda el default', () => {
+  it('la opción nueva hereda «Pública» y su comisión del paquete; un paquete nuevo (otro vuelo) vuelve a preguntar', () => {
     const publica = { tipo: 'publica' as const, comision: { tipo: 'pct' as const, valor: 15 } }
     const { planes } = simular([vueloL(VUELO_AV), hotelL(KORAY)])
     expect(planes[0].accion === 'nuevo_paquete' && planes[0].tarifa).toBeNull()
     const { opciones } = simular([vueloL(VUELO_AV), hotelL(KORAY)])
     opciones[0].tarifa = publica
+    delete opciones[0].paquete!.tarifaPorElegir
     const { planes: siguientes } = simular([hotelL(ISLA_BONITA), vueloL(VUELO_OTRO)], CTX, opciones)
     expect(siguientes[0]).toMatchObject({ accion: 'nueva_opcion', tarifa: publica })
-    expect(siguientes[1]).toMatchObject({ accion: 'nuevo_paquete', tarifa: publica })
+    expect(siguientes[0].accion === 'nueva_opcion' && siguientes[0].paquete.tarifaPorElegir).toBeFalsy()
+    // Sin default (Mauricio, 2026-11-03): el paquete 2 no hereda la Pública del 1, pregunta.
+    expect(siguientes[1]).toMatchObject({ accion: 'nuevo_paquete', tarifa: null, paquete: { tarifaPorElegir: true } })
+  })
+
+  it('una sola pregunta por paquete: nace con el paquete y las opciones que entran sin respuesta la heredan', () => {
+    const { opciones, planes } = simular([vueloL(VUELO_AV), hotelL(KORAY), hotelL(ISLA_BONITA), vueloL(VUELO_OTRO), hotelL(SOL_CARIBE)])
+    expect(planes.map(p => p.accion)).toEqual(['nuevo_paquete', 'actualizar', 'nueva_opcion', 'nuevo_paquete', 'actualizar'])
+    expect(opciones.map(o => [o.numero, o.paquete!.tarifaPorElegir === true])).toEqual([[1, true], [1, true], [2, true]])
+    expect(opciones.every(o => o.tarifa === null || o.tarifa === undefined)).toBe(true)
   })
 })
 

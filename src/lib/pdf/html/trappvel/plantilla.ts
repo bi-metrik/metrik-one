@@ -99,6 +99,7 @@ export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
   quiereApartarViaje: string
   cuantoYCuando: string
   llevan: string
+  llevanMonto: string
   pieDePagos: string
   llegan: string
 }> = {
@@ -115,7 +116,8 @@ export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
     quiereApartarVersion: 'queremos apartar la versión',
     quiereApartarViaje: 'queremos apartar el viaje',
     cuantoYCuando: 'Cuánto pagan y cuándo',
-    llevan: 'con esto llevan el',
+    llevan: 'con esto cubren el',
+    llevanMonto: 'llevan',
     pieDePagos: 'Pueden repartirlo en más cuotas: lo acordamos con ustedes.',
     llegan: 'Llegan a ',
   },
@@ -132,7 +134,8 @@ export const TEXTOS_DE_VOZ: Record<VozDelDocumento, {
     quiereApartarVersion: 'quiero apartar la versión',
     quiereApartarViaje: 'quiero apartar el viaje',
     cuantoYCuando: 'Cuánto paga y cuándo',
-    llevan: 'con esto lleva el',
+    llevan: 'con esto cubre el',
+    llevanMonto: 'lleva',
     pieDePagos: 'Puede repartirlo en más cuotas: lo acordamos con usted.',
     llegan: 'Llega a ',
   },
@@ -1075,22 +1078,40 @@ function cuantoYCuando(m: ModeloPropuesta): string {
   const planes = m.precio.planes
   if (planes.length === 0) return ''
   const conFilas = planes.filter((p) => p.plan.filas !== null)
+  const voz = vozDe(m)
+  // La regla en palabras va solo si es la misma para todas (QA G15): con la «Compra antes del» de
+  // operadores distintos cada alternativa tiene la suya, y una sola nota mentiría sobre alguna.
+  const reglas = [...new Set(planes.map((p) => p.plan.regla))]
+  const pie = `<p class="small muted">${reglas.length === 1 ? `${esc(reglas[0])} ` : ''}${esc(voz.pieDePagos)}</p>`
+  const nombreDe = (p: (typeof planes)[number]) => {
+    const t = m.tarifas.find((x) => x.indice === p.tarifa)
+    return t ? `<span class="c${LETRA[t.clave]}">${esc(t.nombre)}</span>` : ''
+  }
+  const fechas = (p: (typeof planes)[number]) => (p.plan.filas ?? []).map((f) => f.cuando).join('|')
   let cuerpo: string
   if (conFilas.length === 0) {
     cuerpo = `<p class="small">${esc(planes[0].plan.regla)}</p>`
+  } else if (planes.length > 1 && planes.some((p) => fechas(p) !== fechas(planes[0]))) {
+    // QA G15: cada alternativa paga en SUS fechas (la «Compra antes del» de su operador). Una fila
+    // compartida le ponía a B la fecha de A: un bloque por alternativa, cada fecha junto a su monto.
+    const bloques = planes.map((p) => {
+      const filas = p.plan.filas
+        ? [
+            ...p.plan.filas.map((f) => `<tr><td>${esc(mayuscula(f.cuando))}</td><td class="r money">${esc(pesos(f.monto))}</td></tr>`),
+            `<tr class="tot"><td>Total</td><td class="r money">${esc(pesos(p.plan.suma))}</td></tr>`,
+          ]
+        : [`<tr><td colspan="2">${esc(p.plan.regla)}</td></tr>`]
+      return `<table class="tr pagos"><tr><th colspan="2">${nombreDe(p)}</th></tr>${filas.join('\n')}</table>`
+    })
+    cuerpo = `<div class="pagos-por" style="grid-template-columns:repeat(${Math.min(3, planes.length)},1fr)">${bloques.join('\n')}</div>${pie}`
   } else {
     const n = Math.max(...conFilas.map((p) => p.plan.filas!.length))
-    const cabecera = planes.length > 1
-      ? `<tr><th></th>${planes.map((p) => {
-          const t = m.tarifas.find((x) => x.indice === p.tarifa)
-          return `<th class="r">${t ? `<span class="c${LETRA[t.clave]}">${esc(t.nombre)}</span>` : ''}</th>`
-        }).join('')}</tr>`
-      : ''
+    const cabecera = planes.length > 1 ? `<tr><th></th>${planes.map((p) => `<th class="r">${nombreDe(p)}</th>`).join('')}</tr>` : ''
     const filas: string[] = []
     for (let i = 0; i < n; i++) {
       const ref = conFilas.find((p) => p.plan.filas![i])!.plan
       const f = ref.filas![i]
-      const nota = f.llevas === null ? null : `${vozDe(m).llevan} ${ref.pctMinimo} % (${pesos(f.llevas)})`
+      const nota = f.llevas === null ? null : `${voz.llevan} ${ref.pctMinimo} %: ${voz.llevanMonto} ${pesos(f.llevas)}`
       filas.push(
         `<tr><td><b>${esc(mayuscula(f.cuando))}</b>${nota && planes.length === 1 ? ` <span class="muted">(${esc(nota)})</span>` : ''}</td>${planes
           .map((p) => `<td class="r money">${p.plan.filas?.[i] ? esc(pesos(p.plan.filas[i].monto)) : ''}</td>`)
@@ -1099,9 +1120,9 @@ function cuantoYCuando(m: ModeloPropuesta): string {
     }
     filas.push(`<tr class="tot"><td>Total</td>${planes.map((p) => `<td class="r money">${esc(pesos(p.plan.suma))}</td>`).join('')}</tr>`)
     // El total va en el mismo bloque que las cuotas: nunca se separa de ellas.
-    cuerpo = `<table class="tr pagos">${cabecera}${filas.join('\n')}</table><p class="small muted">${esc(conFilas[0].plan.regla)} ${esc(vozDe(m).pieDePagos)}</p>`
+    cuerpo = `<table class="tr pagos">${cabecera}${filas.join('\n')}</table>${pie}`
   }
-  return `<div class="sec nobr">${encabezadoDeSeccion('cal', vozDe(m).cuantoYCuando, null)}${cuerpo}</div>`
+  return `<div class="sec nobr">${encabezadoDeSeccion('cal', voz.cuantoYCuando, null)}${cuerpo}</div>`
 }
 
 /**

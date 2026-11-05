@@ -16,10 +16,14 @@ import { TARIFA_UNICA, totalSinTarifas } from './total-confirmacion'
 import { registrarActividad } from '@/lib/activity/registrar-actividad'
 import { configPlanPagos, huellaPlan, normalizarCuotas, type CuotaPlan, type HitoProveedor, type ReglaPlan } from './plan-pagos'
 import { hitosDeTarifa, hitosPorTarifa } from './hitos-proveedor'
+import { etiquetasDelSelector, nombreUtilDeTarifa } from './nombre-tarifa'
+import { nombresUtilesDeTarifas } from './nombre-tarifa-datos'
 import {
   esAnticipoConSoporte,
   GATES_CONFIRMACION,
+  faltaDelAnticipo,
   gatesConfirmacionPendientes,
+  textoFaltaAnticipo,
   leerPrerreserva,
   MOTIVO_PRERRESERVA_VENCIDA,
   prerreservaVencida,
@@ -43,7 +47,13 @@ export interface TarifaConfirmable {
    * cotización (`totalSinTarifas`) y se confirma con `itinerarioId: null`.
    */
   itinerarioId: string | null
+  /** Cómo la ve el equipo en la hoja (nunca vacío): el nombre útil, o «Opción N». */
   nombre: string
+  /**
+   * QA G14 · lo que va en el mensaje al cliente y en el panel: el nombre propio que dice algo, o el
+   * hotel del paquete de la tarifa; `null` = la línea no sale (nunca «Tarifa»). `nombre-tarifa.ts`.
+   */
+  nombreCliente?: string | null
   esRecomendada: boolean
   precio: number | null
   motivo: string | null
@@ -302,9 +312,10 @@ export async function estadoConfirmacion(
   args: { workspaceId: string; negocioId: string; metadata: Record<string, unknown> | null },
 ): Promise<EstadoConfirmacion> {
   const confirmado = !!(args.metadata?.confirmacion_cliente as Record<string, unknown> | undefined)?.registrada_at
-  const planVigente = await planVigenteDe(db, args.negocioId, await planAcordado(db, args.negocioId))
+  const acordado = await planAcordado(db, args.negocioId)
+  const planVigente = await planVigenteDe(db, args.negocioId, acordado)
   const cobros = await cobrosDelNegocio(db, args.workspaceId, args.negocioId)
-  return { confirmado, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte) }
+  return { confirmado, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte), anticipoFalta: faltaDelAnticipo(acordado?.cuotas, cobros) }
 }
 
 interface EtapaLinea { id: string; nombre: string; numero: number; orden: number; config_extra: Record<string, unknown> | null }
@@ -382,7 +393,19 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
       if (unica.ok) tarifas = [{ itinerarioId: null, nombre: TARIFA_UNICA, esRecomendada: false, precio: unica.total, motivo: null }]
       else if (!unica.sinTotal) errorTarifas = unica.error
     } else if (precios.ok) {
-      tarifas = precios.tarifas.map((t) => ({ itinerarioId: t.itinerarioId, nombre: t.nombre ?? 'Tarifa', esRecomendada: t.esRecomendada, precio: t.precio, motivo: t.motivo }))
+      // QA G14: la opción sin nombre propio salía como «Tarifa» y el cliente leía «*Tarifa:* Tarifa».
+      const utiles = await nombresUtilesDeTarifas(db, String(cot.id))
+      const nombresCliente = precios.tarifas.map((t) =>
+        utiles.has(t.itinerarioId) ? utiles.get(t.itinerarioId)! : nombreUtilDeTarifa(t.nombre, [], null))
+      const etiquetas = etiquetasDelSelector(nombresCliente)
+      tarifas = precios.tarifas.map((t, i) => ({
+        itinerarioId: t.itinerarioId,
+        nombre: etiquetas[i],
+        nombreCliente: nombresCliente[i],
+        esRecomendada: t.esRecomendada,
+        precio: t.precio,
+        motivo: t.motivo,
+      }))
     } else {
       errorTarifas = precios.error
     }
@@ -433,7 +456,12 @@ export async function leerVistaConfirmacion(db: Db, workspaceId: string, negocio
     confirmacion,
     titular,
     prerreserva,
-    estado: { confirmado: !!confirmacion?.registrada_at, planVigente, anticipoConSoporte: cobros.some(esAnticipoConSoporte) },
+    estado: {
+      confirmado: !!confirmacion?.registrada_at,
+      planVigente,
+      anticipoConSoporte: cobros.some(esAnticipoConSoporte),
+      anticipoFalta: faltaDelAnticipo((planes.find((p) => p.estado === 'acordado') ?? null)?.cuotas, cobros),
+    },
     gates: gatesDe(etapaConf ?? undefined),
     gateMensajes: ((etapaConf?.config_extra as { gate_messages?: Record<string, string> } | null)?.gate_messages ?? {}) as Record<string, string>,
     etapaConfirmacion: etapaConf ? { id: etapaConf.id, nombre: etapaConf.nombre, numero: etapaConf.numero } : null,
@@ -714,6 +742,26 @@ export async function prerreservasVencidas(svc: Db, ahoraMs: number): Promise<Ar
       return !!p && Date.parse(p.vence_at) <= ahoraMs
     })
     .map((n) => ({ workspaceId: n.workspace_id, negocioId: n.id }))
+}
+
+/**
+ * QA G14 (2026-11-03) · el aviso al avanzar A MANO desde una etapa que pide `anticipo_con_soporte`
+ * con el anticipo a medias: «Faltan $1.284.000 del anticipo.». No frena (regla de Edgar, #1380);
+ * `null` si la etapa no pide el anticipo, si no hay ningún pago con soporte (eso lo dice el gate)
+ * o si la cuota del anticipo está cubierta.
+ */
+export async function avisoAnticipoIncompleto(
+  db: Db,
+  args: { workspaceId: string; negocioId: string; gates: readonly string[] },
+): Promise<string | null> {
+  if (!args.gates.includes('anticipo_con_soporte')) return null
+  const [acordado, cobros] = await Promise.all([
+    planAcordado(db, args.negocioId),
+    cobrosDelNegocio(db, args.workspaceId, args.negocioId),
+  ])
+  if (!cobros.some(esAnticipoConSoporte)) return null
+  const falta = faltaDelAnticipo(acordado?.cuotas, cobros)
+  return falta > 0 ? textoFaltaAnticipo(falta) : null
 }
 
 /**

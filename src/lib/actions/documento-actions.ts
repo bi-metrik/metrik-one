@@ -42,6 +42,8 @@ import {
 import { esReemplazoHaciaAtras } from '@/lib/documentos/reemplazo-hacia-atras'
 import { extraerDriveFileId } from '@/lib/compliance/documentos'
 import { mimeEfectivo } from '@/lib/documentos/mime'
+import { MENSAJES_ARCHIVO, MENSAJE_FALLA_NUESTRA, mensajeDeLectura, type MotivoArchivo } from '@/lib/documentos/aviso-archivo'
+import { revisarArchivo } from '@/lib/documentos/revisar-archivo'
 import { checkSeSalta, sociedadAcompananteSeSalta } from '@/lib/documentos/check-opcional'
 import type { CondicionBloque } from '@/lib/negocios/condicion-bloque'
 import { cerrarDevolucionAlCompletar } from '@/lib/negocios/cerrar-devolucion'
@@ -95,7 +97,7 @@ async function extractWithRetry(
   campos: CampoExtraccion[],
   apiKey: string,
   tag: string,
-): Promise<{ data: Record<string, CampoResultado> | null; error?: string }> {
+): Promise<{ data: Record<string, CampoResultado> | null; error?: string; archivo?: MotivoArchivo }> {
   return extraerConReintento(
     () => extractFieldsFromDocument(buffer, mimeType, campos, apiKey),
     tag,
@@ -116,15 +118,16 @@ async function reconocerParaBloque(
   mimeType: string,
   expectativa: ExpectativaDocumento | null,
   apiKey: string | undefined,
-): Promise<Reconocimiento | null> {
-  if (!expectativa || !apiKey) return null
-  const { data, error } = await reconocerDocumento(buffer, mimeEfectivo(buffer, mimeType), apiKey)
+): Promise<{ reconocimiento: Reconocimiento | null; archivo?: MotivoArchivo }> {
+  if (!expectativa || !apiKey) return { reconocimiento: null }
+  const { data, error, archivo } = await reconocerDocumento(buffer, mimeEfectivo(buffer, mimeType), apiKey)
   if (!data) {
-    // Un lector que no responde NO frena al operador: se anota y se sigue.
+    // Un lector que no responde NO frena al operador: se anota y se sigue. Salvo que lo que
+    // rechazó sea el ARCHIVO (sin páginas, dañado): eso tampoco lo va a leer la extracción.
     console.warn('[documento] no se pudo identificar el documento:', error)
-    return null
+    return { reconocimiento: null, ...(archivo ? { archivo } : {}) }
   }
-  return data
+  return { reconocimiento: data }
 }
 
 // ── Cross-check: validacion cruzada contra datos extraidos de otros bloques ──
@@ -465,6 +468,8 @@ type ResultadoProcesar = {
   campos?: Record<string, CampoResultado>
   extraction_status?: 'ok' | 'failed' | 'no_key'
   extraction_error?: string
+  /** La lectura falló por el archivo (vacío, dañado, sin páginas…): hay que reemplazarlo. */
+  extraction_archivo?: MotivoArchivo
   /**
    * Presente SOLO cuando el bloque se rechazó porque el archivo no es el documento que
    * espera. La pantalla lo pinta para que el operador vea QUÉ llegó, no solo que falló.
@@ -772,6 +777,8 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
     // El archivo bajado para identificar se reusa más abajo en el camino de ONE, para
     // no pagar dos descargas del mismo objeto.
     let bufferPrecargado: Buffer | null = null
+    // Si el archivo ya pasó por `revisarArchivo` (no se revisa dos veces).
+    let archivoRevisado = false
 
     if (expectativa && apiKeyGemini) {
       if (esReferenciaExterna(storagePath)) {
@@ -790,7 +797,13 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
       }
 
       if (bufferPrecargado) {
-        reconocimiento = await reconocerParaBloque(bufferPrecargado, mimeType, expectativa, apiKeyGemini)
+        // Un archivo que no se puede leer se para AQUÍ, antes de borrar el que el bloque ya tenía.
+        const revision = await revisarArchivo(bufferPrecargado, mimeType)
+        if (!revision.ok) return fallar(revision.mensaje)
+        archivoRevisado = true
+        const r = await reconocerParaBloque(bufferPrecargado, mimeType, expectativa, apiKeyGemini)
+        if (r.archivo) return fallar(MENSAJES_ARCHIVO[r.archivo])
+        reconocimiento = r.reconocimiento
       }
     }
 
@@ -856,6 +869,15 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
         buffer = Buffer.from(arrayBuf)
       }
       console.log(`[documento] Step 1 OK: ${(buffer.length / 1024).toFixed(0)}KB`)
+
+      // ── 1b. ¿Se puede leer? Va antes del paso 4b, que borra el archivo anterior de Drive:
+      //    un PDF vacío, dañado o sin páginas no puede llevarse por delante el documento bueno
+      //    (V0634, 2026-11-04). Solo si el bloque lee el documento.
+      if (!archivoRevisado && (camposExtraccion.length > 0 || expectativa)) {
+        const revision = await revisarArchivo(buffer, mimeType)
+        if (!revision.ok) return fallar(revision.mensaje)
+        archivoRevisado = true
+      }
 
       // ── 3. Obtener drive_folder_id del workspace ────────────────────────
       const { data: workspace } = await db(supabase)
@@ -968,12 +990,18 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
     let camposResult: Record<string, CampoResultado> | null = null
     let extraccionStatus: 'ok' | 'failed' | 'no_key' | null = null
     let extraccionError: string | null = null
+    let extraccionArchivo: MotivoArchivo | null = null
 
     if (camposExtraccion.length > 0) {
       console.log(`[documento] Step 9: AI extraction (${camposExtraccion.length} campos)...`)
       const apiKey = apiKeyGemini
       if (apiKey) {
-        const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'documento')
+        // El almacenamiento externo llega aquí sin haber revisado el archivo (se consolidó arriba):
+        // si no se puede leer, no se gasta la llamada al modelo.
+        const revision = archivoRevisado ? null : await revisarArchivo(buffer, mimeType)
+        const extraction = revision && !revision.ok
+          ? { data: null, error: `archivo: ${revision.motivo}`, archivo: revision.motivo }
+          : await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'documento')
         if (extraction.data) {
           camposResult = extraction.data
           // Normalización determinista post-extracción. Incluye la del NIT y el DV, que
@@ -986,6 +1014,7 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
         } else {
           extraccionStatus = 'failed'
           extraccionError = extraction.error ?? 'Extracción AI falló'
+          extraccionArchivo = extraction.archivo ?? null
           console.error('[documento] Step 9 WARN:', extraccionError)
         }
       } else {
@@ -997,6 +1026,9 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
       newData._extraction_status = extraccionStatus
       if (extraccionError) newData._extraction_error = extraccionError
       else delete newData._extraction_error
+      // Qué tiene el archivo, cuando la lectura falló por él: la tarjeta pide reemplazarlo.
+      if (extraccionArchivo) newData._extraction_archivo = extraccionArchivo
+      else delete newData._extraction_archivo
     }
 
     // ── 9b. Cross-check contra datos de otros bloques ───────────────────
@@ -1106,10 +1138,12 @@ async function leerCarga(ctx: ContextoCarga): Promise<ResultadoProcesar> {
       campos: camposResult ?? undefined,
       extraction_status: extraccionStatus ?? undefined,
       extraction_error: extraccionError ?? undefined,
+      extraction_archivo: extraccionArchivo ?? undefined,
     }
   } catch (err) {
     console.error('[documento-actions] Error:', err)
-    return fallar(`Error: ${String(err).slice(0, 200)}`)
+    // El detalle (que puede nombrar al proveedor) queda en el log; el cliente ve una falla nuestra.
+    return fallar(MENSAJE_FALLA_NUESTRA)
   }
 }
 
@@ -1336,7 +1370,11 @@ async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesa
     // documento equivocado siembra datos, y tiene que pasar por el mismo control.
     // Aquí no hay paso destructivo previo: el archivo ya está guardado y no se toca.
     const expectativa = expectativaDeDocumento(configExtra)
-    const reconocimiento = await reconocerParaBloque(buffer, mimeType, expectativa, apiKey)
+    // Un archivo que no se puede leer no se manda al modelo: reintentarlo falla igual.
+    const revision = await revisarArchivo(buffer, mimeType)
+    if (!revision.ok) return fallar(revision.mensaje)
+    const { reconocimiento, archivo: archivoRechazado } = await reconocerParaBloque(buffer, mimeType, expectativa, apiKey)
+    if (archivoRechazado) return fallar(MENSAJES_ARCHIVO[archivoRechazado])
     const veredicto = veredictoDocumento(expectativa, reconocimiento)
     if (!veredicto.acepta && expectativa && reconocimiento) {
       console.warn(
@@ -1355,7 +1393,11 @@ async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesa
     console.log(`[reprocesar] AI extraction (${camposExtraccion.length} campos)...`)
     const extraction = await extractWithRetry(buffer, mimeType, camposExtraccion, apiKey, 'reprocesar')
     if (!extraction.data) {
-      return fallar(extraction.error ?? 'Error en extracción AI')
+      // Lo que ve el cliente: el archivo, si es del archivo; si no, una falla nuestra, sin el
+      // nombre del proveedor ni el código (V0634 vio «Error de Gemini (400)»). El detalle queda
+      // en el log de `extract-fields`.
+      console.error('[reprocesar] extracción falló:', extraction.error)
+      return fallar(mensajeDeLectura(extraction.archivo))
     }
 
     // 5. Merge con data existente preservando campos manuales. La fila se relee: mientras
@@ -1413,6 +1455,7 @@ async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesa
       _lectura: { ...marca, estado: 'lista', terminada_at: now } satisfies MarcaLectura,
     }
     delete newData._extraction_error
+    delete newData._extraction_archivo
     if (reconocimiento) {
       newData._documento = { ...reconocimiento, motivo: veredicto.motivo, visto_at: now }
     }
@@ -1441,7 +1484,8 @@ async function leerReproceso(ctx: ContextoReproceso): Promise<ResultadoReprocesa
     return { success: true, campos: mergedCampos }
   } catch (err) {
     console.error('[reprocesar-documento] Error:', err)
-    return fallar(`Error: ${String(err).slice(0, 200)}`)
+    // El detalle (que puede nombrar al proveedor) queda en el log; el cliente ve una falla nuestra.
+    return fallar(MENSAJE_FALLA_NUESTRA)
   }
 }
 

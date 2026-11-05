@@ -34,6 +34,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { PDF_UNA_PAGINA } from '@/lib/documentos/__fixtures__/pdf'
 import type { Reconocimiento } from '@/lib/documentos/tipo-documento'
 
 type Fila = Record<string, unknown>
@@ -78,7 +79,7 @@ function cliente() {
       from: () => ({
         download: async (path: string) => {
           efectos.descargas.push(path)
-          return { data: new Blob([new Uint8Array([37, 80, 68, 70])], { type: 'application/pdf' }), error: null }
+          return { data: new Blob([new Uint8Array(PDF_UNA_PAGINA)], { type: 'application/pdf' }), error: null }
         },
         remove: async (paths: string[]) => {
           efectos.borradosStorage.push(...paths)
@@ -175,7 +176,7 @@ vi.mock('@/lib/google-drive', () => ({
   },
   setFilePublicByLink: async () => {},
   deleteDriveFile: async (id: string) => { efectos.borradosDrive.push(id) },
-  downloadDriveFile: async () => Buffer.from('%PDF-1.4'),
+  downloadDriveFile: async () => (await import('@/lib/documentos/__fixtures__/pdf')).PDF_UNA_PAGINA,
   usaCredencialesDriveGlobales: async () => false,
   padresDeArchivoDrive: async () => null,
 }))

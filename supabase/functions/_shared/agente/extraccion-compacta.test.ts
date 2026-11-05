@@ -75,7 +75,7 @@ describe('el esquema compacto de la extracción', () => {
     expect(esquemaCargaCompacta(CAMPOS_ARNES, { chat: true }).properties).toHaveProperty('otros')
   })
 
-  it('el prompt compacto cambia solo lo que se devuelve y no pasa del tope de 1.200 tokens', () => {
+  it('el prompt compacto cambia solo lo que se devuelve y no pasa del tope de 1.220 tokens', () => {
     const hoy = instruccionesCarga([], HOY)
     const p = instruccionesCarga([], HOY, {}, {}, undefined, { compacta: true })
     expect(p).toContain('sin_dato: el slug de CADA campo que queda en "por_definir". Todo campo va en datos o en sin_dato, en uno solo.')
@@ -84,7 +84,8 @@ describe('el esquema compacto de la extracción', () => {
     // Las reglas de interpretación son las mismas.
     expect(p).toContain('Interpretar no es inventar')
     expect(p).toContain('Infante es menor de 2 años')
-    expect(Math.ceil(p.length / 4)).toBeLessThanOrEqual(1200)
+    // 1.220 desde el 2026-11-04: +18 tokens por la invariante de menores (falla en vivo del 2026-11-03).
+    expect(Math.ceil(p.length / 4)).toBeLessThanOrEqual(1220)
   })
 
   it('la salida compacta es más corta que la de hoy aun con 8 de 14 campos llenos (estimado: 4 caracteres por token)', () => {

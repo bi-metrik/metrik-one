@@ -12,7 +12,7 @@
  * nadie arma esto y el PDF no cambia.
  */
 
-import { configPlanPagos, planSugerido, REGLA_POR_DEFECTO, sumarDiasCivil, type ReglaPlan } from './plan-pagos'
+import { configPlanPagos, planSugerido, REGLA_POR_DEFECTO, sumarDiasCivil, type HitoProveedor, type ReglaPlan } from './plan-pagos'
 
 /** Lo que el PDF y la pantalla necesitan para armar la sección, además del total. */
 export interface EntradaAsiPuedesPagar {
@@ -21,6 +21,18 @@ export interface EntradaAsiPuedesPagar {
   /** Hoy en Bogotá, `YYYY-MM-DD`. */
   hoy: string
   regla: ReglaPlan
+  /**
+   * QA G14 (2026-11-03): los pagos al proveedor con fecha límite (la «Compra antes del» del
+   * paquete) de la tarifa cuyo total se imprime (la Recomendada, o la cotización sin tarifas). Los
+   * MISMOS que mira el plan de «El cliente confirmó» (`hitosPorTarifa`/`hitosDeTarifa`): sin ellos
+   * la propuesta decía otras fechas que las que el cliente recibe al confirmar.
+   */
+  hitos?: HitoProveedor[] | null
+  /**
+   * Los hitos de cada tarifa de la propuesta, en el orden de `itinerarios` del PDF. Cada alternativa
+   * (paquete A con un operador, B con otro) arma su plan con SU fecha.
+   */
+  hitosPorTarifa?: HitoProveedor[][] | null
 }
 
 export interface FilaAsiPuedesPagar {
@@ -65,10 +77,14 @@ export function reglaEnPalabras(regla: ReglaPlan = REGLA_POR_DEFECTO): string {
   return `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir y el resto un día antes del viaje.`
 }
 
-export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar): AsiPuedesPagar {
+/**
+ * @param hitos Los de una alternativa en particular; sin ellos, los de la entrada (la tarifa cuyo
+ *   total se imprime).
+ */
+export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar, hitos?: readonly HitoProveedor[] | null): AsiPuedesPagar {
   const regla = entrada.regla ?? REGLA_POR_DEFECTO
   const base = { regla: reglaEnPalabras(regla), pctMinimo: regla.pct_minimo, pie: PIE_ASI_PUEDES_PAGAR }
-  const cuotas = planSugerido({ total, fechaSalida: entrada.fechaSalida, hoy: entrada.hoy, regla })
+  const cuotas = planSugerido({ total, fechaSalida: entrada.fechaSalida, hoy: entrada.hoy, regla, hitos: hitos ?? entrada.hitos ?? null })
   if (!cuotas || cuotas.length === 0 || !entrada.fechaSalida) return { ...base, filas: null, suma: 0 }
 
   // El saldo vence el día anterior a la salida (decisión 2026-10-29).
@@ -87,12 +103,47 @@ export function asiPuedesPagar(total: number, entrada: EntradaAsiPuedesPagar): A
         : `hasta el ${fechaLarga(c.fecha)}`
     return { monto: c.monto, cuando, llevas: completaMinimo && acumulado < Math.round(total) ? acumulado : null }
   })
-  return { ...base, filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
+  return { ...base, regla: reglaDelPlan(regla, cuotas, hitos ?? entrada.hitos ?? null, entrada.fechaSalida), filas, suma: filas.reduce((a, f) => a + f.monto, 0) }
 }
 
-/** «con esto llevas el 80 % ($3.242.000)», o `null`. El formato de pesos lo pone quien pinta. */
+/**
+ * QA G15 (2026-11-03): la regla en palabras tiene que ser cierta para ESTAS filas. Cuando una
+ * cuota cae en la «Compra antes del» del operador, «El 80 % quince días antes de salir» ya no
+ * describe el plan (el pago va antes, y a veces la fila de los quince días ni sale): se dice la
+ * fecha del operador y, solo si la fila de los quince días sigue, la regla de siempre.
+ */
+function reglaDelPlan(regla: ReglaPlan, cuotas: readonly { fecha: string }[], hitos: readonly HitoProveedor[] | null, fechaSalida: string): string {
+  const fechas = cuotas.slice(1).map((c) => c.fecha)
+  const deCompra = [...new Set((hitos ?? []).map((h) => h.fecha))].filter((f) => fechas.includes(f)).sort()
+  if (deCompra.length === 0) return reglaEnPalabras(regla)
+  // Vera (G15): al cliente no se le nombra al operador; cada fecha con su artículo.
+  const dias = deCompra.map((f) => `el ${fechaLarga(f)}`)
+  const lista = dias.length === 1 ? dias[0] : `${dias.slice(0, -1).join(', ')} y ${dias[dias.length - 1]}`
+  const compra = dias.length === 1
+    ? `${mayuscula(lista)} es la fecha límite para comprar el paquete a este precio.`
+    : `${mayuscula(lista)} son las fechas límite para comprar a este precio.`
+  const conQuince = fechas.includes(sumarDiasCivil(fechaSalida, -regla.dias_antes))
+  // Solo se habla del «resto» si queda la fila del saldo (la última cuota, el día antes de salir).
+  const conSaldo = fechas.length > 0 && fechas[fechas.length - 1] === sumarDiasCivil(fechaSalida, -1)
+  const cola = conQuince
+    ? conSaldo
+      ? reglaEnPalabras(regla)
+      : `El ${regla.pct_minimo} % ${diasEnPalabras(regla.dias_antes)} días antes de salir.`
+    : conSaldo
+      ? 'El resto, un día antes del viaje.'
+      : ''
+  return cola ? `${compra} ${cola}` : compra
+}
+
+const mayuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
+
+/**
+ * «con esto cubres el 80 %: llevas $3.242.000», o `null`. El formato de pesos lo pone quien pinta.
+ * QA G14 (Vera): con la «Compra antes del» lo acumulado puede pasar del mínimo (7.888.000 de
+ * 9.280.000 = 85 %), así que la nota dice que cubre la regla y cuánto lleva, no que lleva justo el 80 %.
+ */
 export function notaDeFila(f: FilaAsiPuedesPagar, pctMinimo: number, pesos: (v: number) => string): string | null {
-  return f.llevas === null ? null : `con esto llevas el ${pctMinimo} % (${pesos(f.llevas)})`
+  return f.llevas === null ? null : `con esto cubres el ${pctMinimo} %: llevas ${pesos(f.llevas)}`
 }
 
 /** Lee `plan_pagos` de la línea para esta sección: `null` = apagado (el PDF queda como hoy). */

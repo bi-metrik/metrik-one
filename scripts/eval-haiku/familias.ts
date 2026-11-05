@@ -4,6 +4,7 @@
  * La llave de Gemini que piden las firmas es un relleno: ninguna llamada a Gemini sale (la bloquea `entorno.ts`).
  */
 import { comparar, parecido, type ComparacionCampo } from './comparar'
+import { trappvelCaptura, trappvelConversacion } from './trappvel'
 
 export interface Caso {
   familia: string
@@ -147,6 +148,8 @@ export const FAMILIAS: Record<string, Corrida> = {
   documento,
   rut,
   acta,
+  trappvel_conversacion: trappvelConversacion,
+  trappvel_captura: trappvelCaptura,
 }
 
 /** Casos de demostración para la prueba en seco (`--demo --mock`): sin base, sin Drive, sin datos de clientes. */

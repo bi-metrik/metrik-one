@@ -72,7 +72,7 @@ describe('mensaje de confirmación (Noor §7.1 con C1, D-9, X1)', () => {
   it('repite tarifa, total, cada cuota con fecha y monto, la fecha del 80 %, las cuentas, el recargo y las condiciones (F2-11)', () => {
     expect(texto).toContain('Carolina, ¿todo bien con esto?')
     expect(texto).toContain('*Tu viaje:* San Andrés y Providencia, 4 dic al 9 dic · 2 adultos y 1 infante.')
-    expect(texto).toContain('*Tarifa:* Recomendada')
+    expect(texto).toContain('*Opción elegida:* Recomendada')
     expect(texto).toContain('*Total:* $9.165.000')
     expect(texto).toContain('1. $2.750.000 · hoy, 13 oct (anticipo)')
     expect(texto).toContain('2. $4.582.000 · 19 nov')

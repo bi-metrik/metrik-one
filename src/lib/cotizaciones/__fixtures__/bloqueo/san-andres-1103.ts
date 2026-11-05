@@ -20,28 +20,35 @@ export const VUELO_OTRO: VueloBloqueo = {
   ],
 }
 
-function hotel(nombre: string, zona: string, triple: number, cuadruple: number, doble: number, sencilla: number): HotelBloqueo {
+type Fila = [acomodacion: 'sencilla' | 'doble' | 'triple' | 'cuadruple', precio: number]
+type Chd = [edadMin: number, edadMax: number, precio: number]
+
+/** Un hotel como lo deja la lectura: la tabla «Precios por persona» y los CHD por rango de edad. */
+export function hotelAtn(nombre: string, zona: string, noches: number, plan: string, temporada: string, precios: Fila[], chd: Chd[]): HotelBloqueo {
+  const ninos = chd.map(([edadMin, edadMax, precio]) => ({ precio, edadMin, edadMax }))
   return {
     ...hotelVacio(),
     hotel: nombre,
     zona,
-    noches: 4,
-    habitacion: 'Estandar',
-    planAlimentacion: 'Desayuno y cena',
-    temporada: 'Alta',
-    precios: [
-      { acomodacion: 'triple', precioPorPersona: triple },
-      { acomodacion: 'cuadruple', precioPorPersona: cuadruple },
-      { acomodacion: 'doble', precioPorPersona: doble },
-      { acomodacion: 'sencilla', precioPorPersona: sencilla },
-    ],
-    nino: { precio: 2246083, edadMin: 4, edadMax: 11 },
+    noches,
+    habitacion: 'Estandar -Standar',
+    planAlimentacion: plan,
+    temporada,
+    precios: precios.map(([acomodacion, precioPorPersona]) => ({ acomodacion, precioPorPersona })),
+    nino: ninos[0] ?? null,
+    ...(ninos.length >= 2 ? { ninosPorEdad: ninos } : {}),
   }
 }
 
-export const KORAY = hotel('Koray Hotel', 'Zona LA ROCOSA - KORAY', 2441205, 2441205, 2489985, 3507059)
-export const ISLA_BONITA = hotel('Hotel Isla Bonita', 'Zona SAN LUIS', 2294863, 2294863, 2400000, 3300000)
-export const SOL_CARIBE = hotel('Hotel Sol Caribe San Andres', 'Zona URBANA-CENTRO', 3110717, 3110717, 3200000, 4500000)
+const PAM = '(P.A.M.) Desayuno y Cena'
+
+// Las tablas de los pantallazos 7, 8 y 9 (ATN 1988-P).
+export const KORAY = hotelAtn('Koray Hotel', 'Zona LA ROCOSA - KORAY', 4, PAM, 'Alta | Promo',
+  [['triple', 2441205], ['cuadruple', 2441205], ['doble', 2489985], ['sencilla', 3507059]], [[2, 3, 1124132], [4, 11, 2246083]])
+export const ISLA_BONITA = hotelAtn('Hotel Isla Bonita', 'Zona SAN LUIS', 4, PAM, 'Alta | Promo',
+  [['triple', 2294863], ['cuadruple', 2294863], ['doble', 2343644], ['sencilla', 3214376]], [[2, 3, 1124132], [4, 11, 2099741]])
+export const SOL_CARIBE = hotelAtn('Hotel Sol Caribe San Andres', 'Zona URBANA-CENTRO', 4, '(FULL) Desayuno, Almuerzo y Cena', 'Alta | Promo',
+  [['doble', 3110717], ['triple', 3110717], ['sencilla', 3479010]], [[2, 2, 1100961], [3, 11, 2105839]])
 
 export const INCLUYE: IncluyeBloqueo = {
   casillas: { tiquete_aereo: true, alimentacion: true, planes_tours: null, traslados: true, seguro_medico: true },

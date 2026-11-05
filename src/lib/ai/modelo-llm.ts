@@ -21,7 +21,10 @@
 export {
   fetchModelo,
   fetchModeloDocumentos,
+  fetchModeloExtraccion,
   fetchModeloActas,
+  fetchModeloCapturas,
+  fetchModeloChat,
   crearFetchModelo,
   proveedorLLM,
   MODELO_HAIKU,

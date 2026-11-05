@@ -3,6 +3,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ContextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor'
 import { puedeVerSuscripcion } from '@/lib/seccion-suscripcion/estado'
 import { anotarEnAncla } from '@/lib/suscripciones-producto/bitacora'
+import type { Ancla } from '@/lib/suscripciones-producto/ancla'
+import { generarEnlacePagoCuota } from '@/lib/cobros/enlace-pago-cuota-servidor'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
   eliminarTarjetasEpayco,
@@ -17,6 +19,8 @@ import { origenPeticion } from '@/lib/valida-api/contexto'
 import { cobrarCuotaConTarjeta, type ResultadoCobroToken } from '@/lib/valida-registro/cobro-token-servidor'
 import { leerTarjeta, pagadorParaGuardar, textoProblemaTarjeta } from '@/lib/valida-registro/metodo-pago'
 import { cuotasConEstado, type CuotaConEstado } from './pago-pendiente'
+import { cuotasConEnlaceARetirar, mesPorEnlace, TEXTO_MES_EN_TARJETA, textoPagoPorEnlaceEnCurso, type MesPorEnlace } from './pago-unico'
+import { anotarCargoSaltado, pagoPorEnlaceDeLaCuota, retirarEnlaceDeCuota, type DepsPagoUnico } from './pago-unico-servidor'
 import { leerCuentaCda, type LecturaCuenta } from './pago-servidor'
 import {
   diaDeRenovacion,
@@ -68,6 +72,10 @@ export interface DepsTarjetaCda {
   eliminarTarjeta?: (ref: string) => Promise<{ ok: true; borradas: number } | { ok: false; error: string }>
   origen?: () => Promise<{ ip: string | null; userAgent: string | null }>
   cobrar?: (p: { cobradorId: string; cuotaId: string; intento: number; manual: true }) => Promise<ResultadoCobroToken>
+  /** La consulta del enlace de Bold antes de cobrar con la tarjeta (`pago-unico-servidor.ts`). */
+  consultarEnlace?: DepsPagoUnico['consultarEnlace']
+  /** «Pagar solo este mes» sin enlace vigente: lo pide en el momento (`generarEnlacePagoCuota`). */
+  generarEnlace?: (p: { workspaceId: string; cuotaId: string }) => Promise<{ ok: true; url: string } | { ok: false; error: string }>
 }
 
 const NO_DISPONIBLE = 'No se pudo leer tu suscripción. Intenta de nuevo en un momento.'
@@ -127,27 +135,124 @@ function textoDelPendiente(pendientes: ReturnType<typeof pendientesFueraDeLaTarj
 
 /** El bloque de la pestaña Pagos, o `null` si no se muestra (no es un CDA, ePayco apagado, sin v1.5 publicada). */
 export async function vistaPagoAutomatico(ctx: Ctx, deps: DepsTarjetaCda = {}): Promise<VistaPagoAutomatico | null> {
+  const v = await vistaBloquePagar(ctx, deps)
+  return v?.automatico ?? null
+}
+
+/**
+ * El bloque «Pagar» de la pestaña Pagos (brief del 2026-11-03): el pago automático con tarjeta como opción
+ * principal y «Pagar solo este mes (PSE u otro medio)» como secundaria, con la exclusión mutua de
+ * `pago-unico.ts`. `null` si no se muestra (no es un CDA, ePayco apagado, sin v1.5 publicada, o no es la
+ * persona designada) o si no se pudo leer.
+ */
+export async function vistaBloquePagar(ctx: Ctx, deps: DepsTarjetaCda = {}): Promise<{ automatico: VistaPagoAutomatico; mes: MesPorEnlace | null } | null> {
+  const v = await armarBloque(ctx, deps)
+  return v.tipo === 'ok' ? { automatico: v.automatico, mes: v.mes } : null
+}
+
+type Bloque = { tipo: 'no_aplica' } | { tipo: 'error' } | { tipo: 'ok'; automatico: VistaPagoAutomatico; mes: MesPorEnlace | null }
+
+async function armarBloque(ctx: Ctx, deps: DepsTarjetaCda): Promise<Bloque> {
   try {
     const r = await base(ctx, deps)
-    if (!r.ok) return r.aceptaV15 ? { tipo: 'acepta_v15' } : null
-    const { db, hoy, cuotas, dia } = r.b
-    const tarjeta = await tarjetaCdaDelContrato(db, ctx.contrato.id)
-    if (!tarjeta) return { tipo: 'sin_tarjeta' }
-
-    const resumen = textoTarjetaActiva(tarjeta.ultimos4, proximoCobroTarjeta({ cuotas, cobroDesde: tarjeta.cobroDesde, hoy, diaRenovacion: dia }))
-    const fallo = await falloVigente(db, tarjeta, cuotas, hoy)
-    const pendientes = pendientesFueraDeLaTarjeta(cuotas, tarjeta.cobroDesde)
-    let pendiente: Extract<VistaPagoAutomatico, { tipo: 'activa' }>['pendiente'] = null
-    if (pendientes.length > 0) {
-      pendiente = pendienteCobrableConTarjeta(pendientes)
-        ? { cobrable: true, pregunta: PREGUNTA_PENDIENTE, ...textoDelPendiente(pendientes, tarjeta.ultimos4) }
-        : { cobrable: false, texto: textoPendiente(pendientes) }
+    if (!r.ok) {
+      if (!r.aceptaV15) return r.oculto ? { tipo: 'no_aplica' } : { tipo: 'error' }
+      // Sin la v1.5 no hay tarjeta posible: «Pagar solo este mes» es la cuota más vieja con saldo.
+      const cuotas = await cuotasDelContrato(ctx, deps)
+      if (!cuotas) return { tipo: 'error' }
+      return { tipo: 'ok', automatico: { tipo: 'acepta_v15' }, mes: mesPorEnlace({ cuotas, tarjeta: null, rechazadas: new Set(), conCargo: new Set() }) }
     }
-    return { tipo: 'activa', resumen, fallo, pendiente }
+    const { db, cuotas } = r.b
+    const tarjeta = await tarjetaCdaDelContrato(db, ctx.contrato.id)
+    if (!tarjeta) {
+      return { tipo: 'ok', automatico: { tipo: 'sin_tarjeta' }, mes: mesPorEnlace({ cuotas, tarjeta: null, rechazadas: new Set(), conCargo: new Set() }) }
+    }
+    const intentos = await intentosDelPlan(db, tarjeta.planCobroId)
+    if (!intentos) return { tipo: 'error' }
+    return {
+      tipo: 'ok',
+      automatico: await vistaConTarjeta(r.b, tarjeta),
+      mes: mesPorEnlace({ cuotas, tarjeta, ...intentos }),
+    }
   } catch (e) {
     console.error('[tarjeta-cda] vista:', e instanceof Error ? e.message : e)
-    return null
+    return { tipo: 'error' }
   }
+}
+
+/** Las cuotas con su estado, sin pasar por la v1.5 (la usa el bloque cuando todavía no está aceptada). */
+async function cuotasDelContrato(ctx: Ctx, deps: DepsTarjetaCda): Promise<CuotaConEstado[] | null> {
+  const cuenta = await (deps.cuenta ?? leerCuentaCda)(ctx.entrada.servicioContratadoId)
+  if (cuenta.estado !== 'ok') return null
+  const ahoraISO = new Date(deps.ahoraMs ?? Date.now()).toISOString()
+  return cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: ctx.entrada.hoy, ahoraISO })
+}
+
+/** Los números de cuota con un intento de la tarjeta rechazado, y con uno en curso, pendiente o aprobado. */
+async function intentosDelPlan(db: Db, planCobroId: string): Promise<{ rechazadas: Set<number>; conCargo: Set<number> } | null> {
+  const r = await db.from('cobro_intentos_tarjeta').select('numero_cuota, resultado').eq('plan_cobro_id', planCobroId)
+  if (r.error) return null
+  const filas = (r.data ?? []) as { numero_cuota: number; resultado: string | null }[]
+  return {
+    rechazadas: new Set(filas.filter((f) => f.resultado === 'rechazado').map((f) => f.numero_cuota)),
+    conCargo: new Set(filas.filter((f) => f.resultado === 'en_curso' || f.resultado === 'pendiente' || f.resultado === 'aprobado').map((f) => f.numero_cuota)),
+  }
+}
+
+/**
+ * «Pagar solo este mes (PSE u otro medio)»: el enlace de la cuota que `mesPorEnlace` deja pagar por enlace,
+ * el vigente o uno nuevo. `null` si el bloque no aplica a este contrato (quien llama sigue con su camino
+ * de siempre); con la tarjeta cobrando esa cuota, un error que lo dice.
+ */
+export async function enlaceSoloEsteMes(ctx: Ctx, deps: DepsTarjetaCda = {}): Promise<Resultado<{ url: string }> | null> {
+  let v = await armarBloque(ctx, deps)
+  // Quien no ve el bloque (no es la persona designada) igual puede pedir «Pagar el mes»: la exclusión con
+  // una tarjeta activa del contrato no depende de quién la pide.
+  if (v.tipo === 'no_aplica') v = await bloqueSinVista(ctx, deps)
+  if (v.tipo === 'no_aplica') return null
+  if (v.tipo === 'error') return { ok: false, error: NO_DISPONIBLE }
+  if (!v.mes) {
+    return { ok: false, error: v.automatico.tipo === 'activa' ? TEXTO_MES_EN_TARJETA : 'No hay una cuota pendiente para pagar.' }
+  }
+  if (v.mes.enlace) return { ok: true, url: v.mes.enlace }
+  const generar =
+    deps.generarEnlace ??
+    (async (p: { workspaceId: string; cuotaId: string }) => {
+      const g = await generarEnlacePagoCuota(p, { db: (deps.db ?? createServiceClient()) as SupabaseClient })
+      return g.ok ? { ok: true as const, url: g.url } : { ok: false as const, error: g.error }
+    })
+  return generar({ workspaceId: ctx.contrato.cobradorId, cuotaId: v.mes.cuotaId })
+}
+
+/** Solo la exclusión, sin la vista: hay tarjeta activa en el contrato → qué cuota admite enlace. */
+async function bloqueSinVista(ctx: Ctx, deps: DepsTarjetaCda): Promise<Bloque> {
+  try {
+    if (ctx.producto !== 'valida_cda') return { tipo: 'no_aplica' }
+    const db = (deps.db ?? createServiceClient()) as Db
+    const tarjeta = await tarjetaCdaDelContrato(db, ctx.contrato.id)
+    if (!tarjeta) return { tipo: 'no_aplica' }
+    const [cuotas, intentos] = await Promise.all([cuotasDelContrato(ctx, deps), intentosDelPlan(db, tarjeta.planCobroId)])
+    if (!cuotas || !intentos) return { tipo: 'error' }
+    return { tipo: 'ok', automatico: { tipo: 'activa', resumen: '', fallo: null, pendiente: null }, mes: mesPorEnlace({ cuotas, tarjeta, ...intentos }) }
+  } catch (e) {
+    console.error('[tarjeta-cda] exclusión sin vista:', e instanceof Error ? e.message : e)
+    return { tipo: 'error' }
+  }
+}
+
+/** La vista con la tarjeta activa: el resumen, el aviso de un cobro rechazado y lo atrasado (D3). */
+async function vistaConTarjeta(b: Base, tarjeta: TarjetaCda): Promise<VistaPagoAutomatico> {
+  const { db, hoy, cuotas, dia } = b
+  const resumen = textoTarjetaActiva(tarjeta.ultimos4, proximoCobroTarjeta({ cuotas, cobroDesde: tarjeta.cobroDesde, hoy, diaRenovacion: dia }))
+  const fallo = await falloVigente(db, tarjeta, cuotas, hoy)
+  const pendientes = pendientesFueraDeLaTarjeta(cuotas, tarjeta.cobroDesde)
+  let pendiente: Extract<VistaPagoAutomatico, { tipo: 'activa' }>['pendiente'] = null
+  if (pendientes.length > 0) {
+    pendiente = pendienteCobrableConTarjeta(pendientes)
+      ? { cobrable: true, pregunta: PREGUNTA_PENDIENTE, ...textoDelPendiente(pendientes, tarjeta.ultimos4) }
+      : { cobrable: false, texto: textoPendiente(pendientes) }
+  }
+  return { tipo: 'activa', resumen, fallo, pendiente }
 }
 
 /**
@@ -295,6 +400,18 @@ export async function registrarTarjetaCda(
   }
   if (previa) await borrarEnEpayco(db, previa, deps)
 
+  // Lo que la tarjeta va a cobrar sola ya no ofrece enlace (brief del 2026-11-03). Lo atrasado lo conserva.
+  for (const numeroCuota of cuotasConEnlaceARetirar(r.b.cuotas, previa?.cobroDesde ?? hoy)) {
+    await retirarEnlaceDeCuota(db, {
+      cobradorId: ctx.contrato.cobradorId,
+      planCobroId: plan.id,
+      numeroCuota,
+      ancla: anclaDelContrato(ctx),
+      motivo: 'la cobra la tarjeta registrada en su fecha de renovación',
+      ahoraMs,
+    })
+  }
+
   await anotarEnAncla(
     db,
     {
@@ -307,6 +424,10 @@ export async function registrarTarjetaCda(
     'tarjeta-cda',
   )
   return { ok: true, ultimos4 }
+}
+
+function anclaDelContrato(ctx: Ctx): Ancla | null {
+  return ctx.contrato.negocioId ? { tipo: 'negocio', id: ctx.contrato.negocioId } : null
 }
 
 /** Pide a ePayco borrar la tarjeta cerrada y deja la respuesta en su fila. Nunca lanza. */
@@ -391,6 +512,26 @@ export async function cobrarPendienteConTarjeta(ctx: Ctx, huella: unknown, deps:
     return { ok: false, error: 'Lo pendiente cambió mientras lo leías. Recarga la página y vuelve a revisarlo.' }
   }
 
+  // El otro camino (brief del 2026-11-03): con un pago por el enlace de Bold en curso de cualquiera de esos
+  // períodos no se cobra NINGUNO. Después se retiran sus enlaces, para que la pantalla no ofrezca los dos.
+  const ancla = anclaDelContrato(ctx)
+  for (const p of pendientes) {
+    const e = await pagoPorEnlaceDeLaCuota(db, { cobradorId: ctx.contrato.cobradorId, planCobroId: t.planCobroId, numeroCuota: p.numero }, deps)
+    if (e.tipo === 'libre') continue
+    await anotarCargoSaltado(db, { cobradorId: ctx.contrato.cobradorId, ancla, numeroCuota: p.numero, estado: e, manual: true })
+    return { ok: false, error: textoPagoPorEnlaceEnCurso(p.periodo, e) }
+  }
+  for (const p of pendientes) {
+    await retirarEnlaceDeCuota(db, {
+      cobradorId: ctx.contrato.cobradorId,
+      planCobroId: t.planCobroId,
+      numeroCuota: p.numero,
+      ancla,
+      motivo: 'la persona designada pidió cobrarla con la tarjeta',
+      ahoraMs: r.b.ahoraMs,
+    })
+  }
+
   const cobrar =
     deps.cobrar ??
     ((p: { cobradorId: string; cuotaId: string; intento: number; manual: true }) =>
@@ -407,6 +548,7 @@ export async function cobrarPendienteConTarjeta(ctx: Ctx, huella: unknown, deps:
       continue
     }
     const antes = cobrado > 0 ? `Se cobraron ${pesos(cobrado)}. ` : ''
+    if (res.tipo === 'pago_por_enlace') return { ok: false, error: `${antes}${textoPagoPorEnlaceEnCurso(p.periodo, res.estado)}` }
     if (res.tipo === 'pendiente' || res.tipo === 'pendiente_previo') {
       return { ok: true, texto: `${antes}El cobro del período ${p.periodo} quedó en revisión en ePayco: te avisamos cuando se confirme.` }
     }
