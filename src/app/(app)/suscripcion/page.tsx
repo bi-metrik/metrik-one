@@ -82,7 +82,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
   const rechazoTarjeta = ctx.contrato.suscripcionId ? await rechazoDeLaTarjeta(ctx, createServiceClient()) : null
   const [pagos, terminos, equipo, sugerencia, opcionesPago, bloquePagar] = await Promise.all([
-    leerPagosCda(ctx.entrada),
+    // Con la v1.5 aceptada tarde (16.4), lo de la 11.7 sin pagar va a la cartera, como con la Cancelada.
+    leerPagosCda(ctx.entrada, { carteraDeTransicion: v15Tarde }),
     esOne ? null : leerTerminosEmpresaCda(ctx.entrada),
     leerEquipo(ctx),
     esOne ? null : estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
