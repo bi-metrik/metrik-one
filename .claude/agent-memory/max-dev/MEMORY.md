@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- [Foto del hotel del paquete de bloqueo (5-nov)](project_foto_hotel_paquete_bloqueo.md) — llave «hotel|» sin ciudad; proveedor_id = operador
 - ⚠️ [Bandeja reparte por operador (5-nov)](project_bandeja_reparto_por_operador.md) — 2+ operadores: hotel al de su operador, vuelo paquete propio
 - ⚠️ [SOE-041: descuento de la factura lo resta el código (5-nov)](project_soe041_descuento_factura.md) — derivar.ts; SQL config SIN aplicar, después del deploy
 - ⚠️ [IP real detrás de Cloudflare (4-nov)](project_ip_cliente_cloudflare.md) — usar src/lib/http/ip-cliente.ts; geo CF exige el Managed Transform de Mik
