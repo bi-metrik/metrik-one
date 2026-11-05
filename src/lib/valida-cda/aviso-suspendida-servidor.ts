@@ -11,6 +11,7 @@ import {
 } from './aviso-suspendida'
 import { cuotasConEstado, proximoPago, type CobroRecibido, type CuotaDeServicio } from './pago-pendiente'
 import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
+import { separarPorEpoca } from './cancelada'
 import { estadoMora, REGLA_MORA_CDA, SLUG_TERMINOS_CDA, vigenciaRestriccion, vigenciaTransicion } from './plazos'
 
 /**
@@ -73,14 +74,21 @@ function urlPagosPorDefecto(slug: string): string {
   return `https://${slug}.${base}/suscripcion?tab=pagos`
 }
 
-interface FilaContrato {
+export interface FilaContrato {
   id: string
   workspace_id: string
   workspace_pagador_id: string | null
   empresa_id: string | null
   negocio_id: string | null
   aceptante_designado_id: string | null
+  /** 20261104233000: la reactivación (11.4) y el cobro de su enlace. */
+  reactivada_desde?: string | null
+  reactivacion_cobro_id?: string | null
 }
+
+/** Las columnas del contrato que leen el paso 8d y el 8e. */
+export const COLUMNAS_CONTRATO_CDA =
+  'id, workspace_id, workspace_pagador_id, empresa_id, negocio_id, aceptante_designado_id, reactivada_desde, reactivacion_cobro_id'
 
 interface FilaCuota {
   id: string
@@ -90,9 +98,11 @@ interface FilaCuota {
   monto: number | string
   fecha_vencimiento: string
   concepto_detalle: string | null
+  anulada_at?: string | null
 }
 
 interface FilaCobro {
+  id?: string
   plan_cobro_id: string | null
   numero_cuota: number | null
   monto: number | string | null
@@ -104,32 +114,50 @@ interface FilaCobro {
   enlace_pago_expira: string | null
 }
 
-/** Las cuotas y lo recibido del contrato, con la forma de las RPC del cliente (`pago-servidor.ts`). */
-async function cuentaDelContrato(
+/**
+ * Las cuotas y lo recibido del PLAN VIGENTE del contrato, con la forma de las RPC del cliente
+ * (`pago-servidor.ts`) y el mismo corte (`separarPorEpoca`): sin las cuotas anuladas por la 2.5 y, después
+ * de una reactivación (11.4), solo el plan nuevo. Lo de antes va en `anterior` (la cartera de la 11.7).
+ */
+export async function cuentaDelContrato(
   db: Db,
   sc: FilaContrato,
-): Promise<{ cuotas: CuotaDeServicio[]; cobros: CobroRecibido[]; tipos: Map<number, string> } | { error: string }> {
-  const planes = await db.from('planes_cobro').select('id').eq('negocio_id', sc.negocio_id).eq('workspace_id', sc.workspace_id)
+): Promise<
+  | {
+      cuotas: CuotaDeServicio[]
+      cobros: CobroRecibido[]
+      tipos: Map<number, string>
+      anterior: { cuotas: CuotaDeServicio[]; cobros: CobroRecibido[] }
+      /** El id de cada cuota del plan vigente → su plan y su número (para anularla). */
+      planDeCuota: Map<string, { planCobroId: string; numero: number }>
+      /** Cuántas cuotas del contrato están anuladas (2.5). */
+      anuladas: number
+    }
+  | { error: string }
+> {
+  const planes = await db.from('planes_cobro').select('id, fecha_inicio').eq('negocio_id', sc.negocio_id).eq('workspace_id', sc.workspace_id)
   if (planes.error) return { error: `planes: ${planes.error.message}` }
-  const ids = ((planes.data ?? []) as { id: string }[]).map((p) => p.id)
+  const filasPlan = (planes.data ?? []) as { id: string; fecha_inicio?: string | null }[]
+  const ids = filasPlan.map((p) => p.id)
+  const inicioDePlan = new Map(filasPlan.map((p) => [p.id, p.fecha_inicio ?? null]))
   const [cuotasR, cobrosR] = await Promise.all([
     ids.length === 0
       ? Promise.resolve({ data: [], error: null })
       : db
           .from('plan_cobro_cuotas')
-          .select('id, plan_cobro_id, numero, tipo, monto, fecha_vencimiento, concepto_detalle')
+          .select('id, plan_cobro_id, numero, tipo, monto, fecha_vencimiento, concepto_detalle, anulada_at')
           .in('plan_cobro_id', ids),
     db
       .from('cobros')
-      .select('plan_cobro_id, numero_cuota, monto, monto_anulado, anulado_at, fecha, retencion_iva, enlace_pago_url, enlace_pago_expira')
+      .select('id, plan_cobro_id, numero_cuota, monto, monto_anulado, anulado_at, fecha, retencion_iva, enlace_pago_url, enlace_pago_expira')
       .eq('negocio_id', sc.negocio_id),
   ])
   if (cuotasR.error) return { error: `cuotas: ${cuotasR.error.message}` }
   if (cobrosR.error) return { error: `cobros: ${cobrosR.error.message}` }
   const cobros = (cobrosR.data ?? []) as FilaCobro[]
-  const tipos = new Map<number, string>()
-  const cuotas = ((cuotasR.data ?? []) as FilaCuota[]).map((q): CuotaDeServicio => {
-    tipos.set(q.numero, q.tipo)
+  const planDeCuota = new Map<string, { planCobroId: string; numero: number }>()
+  const cuotas = ((cuotasR.data ?? []) as FilaCuota[]).map((q) => {
+    planDeCuota.set(q.id, { planCobroId: q.plan_cobro_id, numero: q.numero })
     // El enlace vive en el cobro programado de ESA cuota; uno anulado no ofrece enlace (como la RPC).
     const c = cobros.find((x) => x.plan_cobro_id === q.plan_cobro_id && x.numero_cuota === q.numero && !x.anulado_at)
     return {
@@ -141,19 +169,31 @@ async function cuentaDelContrato(
       concepto: q.concepto_detalle,
       enlacePagoUrl: c?.enlace_pago_url ?? null,
       enlacePagoExpira: c?.enlace_pago_expira ?? null,
+      anulada: !!q.anulada_at,
+      planFechaInicio: inicioDePlan.get(q.plan_cobro_id) ?? null,
     }
   })
-  return {
+  const epocas = separarPorEpoca({
     cuotas,
+    cobros: cobros.map((c) => ({
+      // Un cobro anulado vale 0 en `monto` y su valor vive en `monto_anulado` (como la RPC); no cuenta igual.
+      monto: Number((Number(c.monto) || 0) === 0 ? (c.monto_anulado ?? c.monto ?? 0) : c.monto),
+      estado: (c.anulado_at ? 'anulado' : c.fecha === null ? 'programado' : 'pagado') as CobroRecibido['estado'],
+      retencionIva: Number(c.retencion_iva ?? 0),
+      planFechaInicio: c.plan_cobro_id ? (inicioDePlan.get(c.plan_cobro_id) ?? null) : null,
+      esReactivacion: !!c.id && c.id === sc.reactivacion_cobro_id,
+    })),
+    reactivadaDesde: sc.reactivada_desde ?? null,
+  })
+  // El tipo de cada cuota por su número, en el plan vigente (los números se repiten entre planes).
+  const tipos = new Map(epocas.vigente.cuotas.map((q) => [q.numero, q.tipo]))
+  return {
+    cuotas: epocas.vigente.cuotas,
+    cobros: epocas.vigente.cobros,
     tipos,
-    cobros: cobros.map(
-      (c): CobroRecibido => ({
-        // Un cobro anulado vale 0 en `monto` y su valor vive en `monto_anulado` (como la RPC); no cuenta igual.
-        monto: Number((Number(c.monto) || 0) === 0 ? (c.monto_anulado ?? c.monto ?? 0) : c.monto),
-        estado: c.anulado_at ? 'anulado' : c.fecha === null ? 'programado' : 'pagado',
-        retencionIva: Number(c.retencion_iva ?? 0),
-      }),
-    ),
+    anterior: epocas.anterior,
+    planDeCuota,
+    anuladas: cuotas.filter((q) => q.anulada).length,
   }
 }
 
@@ -164,7 +204,7 @@ export async function avisarSuspendidasPorPago(deps: DepsAvisoSuspendida): Promi
 
   const contratos = await db
     .from('servicios_contratados')
-    .select('id, workspace_id, workspace_pagador_id, empresa_id, negocio_id, aceptante_designado_id')
+    .select(COLUMNAS_CONTRATO_CDA)
     .eq('servicio_slug', SERVICIO_CDA)
     .eq('estado', 'activo')
   if (contratos.error) throw new Error(`contratos CDA: ${contratos.error.message}`)

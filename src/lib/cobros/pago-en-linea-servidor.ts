@@ -200,6 +200,11 @@ export function repoPagoEnLinea(
       // vencimiento a la llave de la prueba). No aplica a ningún espacio que no venga del registro.
       const ciclo = detalleCiclo(await abrirCicloSiCorresponde(cobro.id, { db: dbCliente }))
       if (ciclo) partes.push(ciclo)
+      // Valida de los CDA: el pago del enlace «Reactivar» (Términos v1.5, 11.4) crea el plan nuevo desde el
+      // día del pago y vuelve el contrato a activo. Sin una reactivación pendiente con ese cobro, no hace nada.
+      const { reactivarCdaSiCorresponde } = await import('@/lib/valida-cda/cancelada-servidor')
+      const reactivacion = await reactivarCdaSiCorresponde(dbCliente, cobro.id)
+      if (reactivacion) partes.push({ revisar: reactivacion.revisar, detalle: reactivacion.detalle })
       // Un cargo con la tarjeta guardada que ePayco dejó pendiente y aprobó después: cierra el intento,
       // el registro de Valida y manda el C3. Sin un cargo pendiente, no hace nada. Import dinámico: el
       // módulo del cargo importa este (ciclo de módulos).
