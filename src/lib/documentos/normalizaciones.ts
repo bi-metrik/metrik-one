@@ -16,6 +16,10 @@
  *     `completarRazonSocialPersonaNatural`.
  *  3. `dv_desde_nit` (opt-in por campo) — recalcula el DV sobre el NIT ya limpio.
  *  4. `divipola_desde_nombres` (opt-in por campo) — códigos de ubicación desde nombres.
+ *  5. `derivar` (opt-in por campo) — el valor sale de una resta de otros dos campos leídos.
+ *     Ver `derivarCampos`.
+ *  6. `coherencia_pct` (opt-in por campo) — alerta si un monto no es el porcentaje esperado
+ *     de su base (IVA ↔ valor). Corre DESPUÉS de `derivar`. Ver `revisarCoherenciaPct`.
  *
  * ⚠️ Ninguna pasada pisa un campo PROTEGIDO: uno con `edicion` (lo tocó una persona) o
  * con `manual: true` y valor. El segundo caso solo existe después del merge de
@@ -33,35 +37,15 @@ import {
   nitCompletoSinDvDoble,
   sinPrefijoDeTipo,
 } from '@/lib/dian/prefijo-tipo-documento'
+import { CONFIANZA_REVISAR, bajarConfianza, campoProtegido } from './confianza'
+import { derivarCampos, revisarCoherenciaPct } from './derivar'
 
-/**
- * Confianza de un campo que una persona tiene que mirar.
- *
- * Cae en la banda "Verificar" de la pantalla (0.70 a 0.89, en ámbar) a propósito, y no
- * por debajo de 0.70: los formularios DIAN descartan como FALTANTE todo campo bajo ese
- * umbral (`resolverCamposFuente`). Un NIT dudoso bloquearía el 1668 de cada cliente de
- * Bancolombia, cuyo NIT es justo el caso ambiguo. Se quiere que la persona lo vea, no
- * frenar el trámite.
- */
-export const CONFIANZA_REVISAR = 0.75
-
-/** ¿Lo tocó una persona? Ver el aviso del encabezado. */
-export function campoProtegido(c: CampoResultado | undefined | null): boolean {
-  if (!c) return false
-  if (c.edicion) return true
-  return c.manual === true && c.value != null && c.value !== ''
-}
-
-/**
- * Baja a "Verificar" sin quitar el valor. No hace falta un piso de 0.70: a esta
- * función solo llegan campos NO protegidos con valor, y esos salen de una extracción
- * fresca, donde todo valor bajo 0.70 ya se forzó a null (`extract-fields.ts`).
- * Medido por mutación el 2026-09-14: un piso explícito no cambiaba ningún resultado.
- */
-function bajarConfianza(c: CampoResultado): void {
-  c.confidence = Math.min(c.confidence, CONFIANZA_REVISAR)
-  c.manual = false
-}
+// Los ayudantes de confianza y las pasadas 5 y 6 viven aparte porque la pantalla también
+// los usa (recalcular un derivado al corregir una fuente) y este archivo arrastra el
+// catálogo DIVIPOLA. Se re-exportan para no mover a quien ya los importa de aquí.
+export { CONFIANZA_REVISAR, campoProtegido }
+export { derivarCampos, revisarCoherenciaPct } from './derivar'
+export type { CambioDerivado, AlertaCoherencia } from './derivar'
 
 export interface CambioNitDv {
   campo: 'nit' | 'dv'
@@ -302,5 +286,13 @@ export function aplicarNormalizaciones(
       if (cr) { cr.value = nuevo; cr.confidence = 1 }
       else resultado[campo.slug] = { value: nuevo, confidence: 1, manual: false }
     }
+  }
+  // Pasada 5: campos derivados (resta de dos campos leídos).
+  for (const c of derivarCampos(campos, resultado)) {
+    console.warn(`[documento] derivar ${c.campo}: "${c.antes}" → "${c.despues}" (${c.motivo})`)
+  }
+  // Pasada 6: coherencia porcentual (IVA ↔ valor), sobre el valor ya derivado.
+  for (const a of revisarCoherenciaPct(campos, resultado)) {
+    console.warn(`[documento] coherencia_pct ${a.campo}: "${a.valor}" no cuadra con ${JSON.stringify(a.bases)}`)
   }
 }
