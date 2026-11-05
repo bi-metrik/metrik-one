@@ -22,6 +22,7 @@ import {
   type Reconocimiento,
 } from '@/lib/documentos/tipo-documento'
 import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
+import { derivarCampos } from '@/lib/documentos/derivar'
 import { completarCampos, faltanCampos } from '@/lib/documentos/completar-campos'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
@@ -1586,6 +1587,11 @@ export async function actualizarCampoDocumento(
       editado_por_nombre: editorNombre,
       editado_en: new Date().toISOString(),
     },
+  }
+  // Corregir una fuente de un campo derivado (SOE-041: el valor antes de descuento o el
+  // descuento) recalcula el resultado, salvo que una persona ya lo haya fijado a mano.
+  for (const c of derivarCampos(camposExtraccion, campos, slug)) {
+    console.warn(`[documento] derivar ${c.campo} tras corregir ${slug}: "${c.antes}" → "${c.despues}" (${c.motivo})`)
   }
   currentData.campos = campos
 

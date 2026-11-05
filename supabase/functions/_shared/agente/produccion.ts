@@ -60,6 +60,8 @@ export function almacenSupabase(supabase: SupabaseClient): Almacen {
       return (data ?? []) as FilaConversacion[];
     },
     async cerrarTurno(p) {
+      // Sin `.eq('workspace_id', …)`: el puerto no recibe la empresa, y `filas`, `filaTraza` y `salientes` salen de
+      // `leer`, que ya filtró por empresa y teléfono. Un wamid es único en Meta.
       const r = await Promise.all([
         supabase.from('wa_conversacion').update({ turno_id: p.turnoId }).in('id', p.filas),
         supabase.from('wa_conversacion').update({ traza: conDespliegue(p.traza) }).eq('id', p.filaTraza),
@@ -259,7 +261,7 @@ export function puertoBandejaSupabase(
       .eq('workspace_id', workspaceId).eq('codigo', codigo).maybeSingle();
     if (error) return 'error';
     if (!neg) return null;
-    const bloques = await bloquesDatosDelNegocio(supabase, neg.id as string);
+    const bloques = await bloquesDatosDelNegocio(supabase, workspaceId, neg.id as string);
     if (typeof bloques === 'string') return 'error';
     const { fields, valores } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
     const n = calcularNiveles(fields as CampoEntendible[], valores);
@@ -323,7 +325,7 @@ export function puertoBandejaSupabase(
     async linea() {
       const cfg = await configDeLinea(supabase, workspaceId);
       if (typeof cfg === 'string') return 'la línea de la bandeja';
-      const { data } = await supabase.from('lineas_negocio').select('nombre').eq('id', cfg.lineaId).maybeSingle();
+      const { data } = await supabase.from('lineas_negocio').select('nombre').eq('id', cfg.lineaId).eq('workspace_id', workspaceId).maybeSingle();
       return String(data?.nombre ?? 'la línea de la bandeja');
     },
     porNombre: (t) => fichasPorNombre(supabase, workspaceId, t),
@@ -348,12 +350,12 @@ export function puertoBandejaSupabase(
         responsable: { staffId: p.responsableId, asignadoPor },
       });
       if (typeof r === 'string') throw new Error(r);
-      const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).maybeSingle();
+      const { data } = await supabase.from('negocios').select('codigo, nombre').eq('id', r.negocioId).eq('workspace_id', workspaceId).maybeSingle();
       return { id: r.negocioId, codigo: String(data?.codigo ?? ''), nombre: String(data?.nombre ?? '') };
     },
     async prepararCarga(viajeId, textos, previo, oc) {
       const pedido = oc?.pedido ?? [];
-      const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
+      const bloques = await bloquesDatosDelNegocio(supabase, workspaceId, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const { fields, valores: yaTiene } = aplanarBloques(bloques.map((b) => ({ fields: b.fields, data: b.data })));
       const campos = fields as CampoEntendible[];
@@ -381,7 +383,7 @@ export function puertoBandejaSupabase(
     },
     async cargar(viajeId, plan) {
       const { sugeridos, historia, quitar } = plan as PlanCarga;
-      const bloques = await bloquesDatosDelNegocio(supabase, viajeId);
+      const bloques = await bloquesDatosDelNegocio(supabase, workspaceId, viajeId);
       if (typeof bloques === 'string') throw new Error(bloques);
       const meta = { entrega_id: 'agente', en: new Date().toISOString(), origenDe: () => 'mensaje' as const };
       const vistos = new Set<string>();
@@ -404,7 +406,7 @@ export function puertoBandejaSupabase(
       }
       // El nombre automático del viaje sigue a sus campos (destino, fechas), si nadie lo renombró a mano.
       if (escritos.length || quitados.length) await renombrarSegunPlantilla(supabase, viajeId, [...escritos, ...quitados]);
-      const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).maybeSingle();
+      const { data: neg } = await supabase.from('negocios').select('codigo').eq('id', viajeId).eq('workspace_id', workspaceId).maybeSingle();
       const { error } = await supabase.from('activity_log').insert({
         workspace_id: workspaceId, entidad_tipo: 'negocio', entidad_id: viajeId, tipo: 'cambio_sistema', autor_id: staffId,
         // `activity_log.contenido` tiene CHECK de 280 caracteres en producción (medido el 2026-10-07): más largo, el
@@ -428,7 +430,7 @@ export function puertoBandejaSupabase(
       if (!est.texto?.id) return { estado: 'sin_texto' };
       const [ws, txt] = await Promise.all([
         supabase.from('workspaces').select('slug, name, config_extra').eq('id', workspaceId).maybeSingle(),
-        supabase.from('autorizacion_datos_textos').select('variables, mensajes').eq('id', est.texto.id).maybeSingle(),
+        supabase.from('autorizacion_datos_textos').select('variables, mensajes').eq('id', est.texto.id).eq('workspace_id', workspaceId).maybeSingle(),
       ]);
       const slug = ws.data?.slug as string | undefined;
       if (!slug) return 'error';

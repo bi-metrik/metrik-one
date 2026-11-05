@@ -162,7 +162,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     expect(t4[0].texto).toContain('• Adultos: 2')
     expect(t4[0].texto).toContain('• Infantes: 1')
     // El grupo lo entendió el modelo: 0 niños sin que nadie escribiera «sin niños».
-    expect(t4[0].texto).toContain('• Niños: 0')
+    expect(t4[0].texto).toContain('• ⚠️ *Niños: 0* (deducido, confírmalo)')
     expect(t4[0].texto).not.toMatch(/Reenvíame/)
     expect(t4[0].texto).toMatch(/Falta para cotizar: Ciudad de salida, Categoría de hotel\./)
     // La extracción vio lo que dijo antes de abrir (no solo el último mensaje), la fecha de hoy y las opciones.
@@ -179,7 +179,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     const r5 = t5[0].texto
     expect(r5.split('\n').filter((l) => l.startsWith('¿Lo anoto en'))).toHaveLength(1)
     expect(r5).toContain('• Infantes: 1')
-    expect(r5).toContain('• Niños: 0')
+    expect(r5).toContain('• ⚠️ *Niños: 0* (deducido, confírmalo)')
     expect(r5).toContain('• Fecha de regreso: 7 dic')
     expect(r5).toContain('• Categoría de hotel: 4 estrellas')
     expect(r5).toContain('• Requisitos especiales: Hotel de 3 o 4 estrellas')
@@ -192,7 +192,7 @@ describe('segunda falla en vivo 2026-10-07: lo dicho se acumula y se guarda', ()
     // 6. «salen desde medellín» 3 s después, antes de tocar: la nueva lleva TODO más la ciudad.
     const t6 = await e.escribe(M6, { despuesMs: 3_000 })
     const r6 = t6[0].texto
-    for (const l of ['• Ciudad de salida: Medellín', '• Fecha de salida: 3 dic', '• Fecha de regreso: 7 dic', '• Adultos: 2', '• Niños: 0', '• Infantes: 1', '• Categoría de hotel: 4 estrellas', '• Requisitos especiales: Hotel de 3 o 4 estrellas']) {
+    for (const l of ['• Ciudad de salida: Medellín', '• Fecha de salida: 3 dic', '• Fecha de regreso: 7 dic', '• Adultos: 2', '• ⚠️ *Niños: 0* (deducido, confírmalo)', '• Infantes: 1', '• Categoría de hotel: 4 estrellas', '• Requisitos especiales: Hotel de 3 o 4 estrellas']) {
       expect(r6).toContain(l)
     }
     expect(r6).toContain('Con esto queda el mínimo para cotizar.')
@@ -307,7 +307,7 @@ describe('planDeCarga: el código respeta lo que clasificó el modelo', () => {
       extraer: async ({ textos }) => crudo(textos, { adultos: { valor: '2', frase: 'él con su esposa', calculo: 'él y su esposa' } }),
     })
     const prep = await puerto.prepararCarga('v-9', t)
-    expect(prep.entendido).toEqual(['Adultos: 2 (deducido)'])
+    expect(prep.entendido).toEqual(['⚠️ *Adultos: 2* (deducido, confírmalo)'])
     await puerto.cargar('v-9', prep.plan)
     expect(puerto.viajes[0].datos.adultos).toBe(2)
   })

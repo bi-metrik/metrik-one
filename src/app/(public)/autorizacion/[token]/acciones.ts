@@ -11,6 +11,7 @@
  */
 
 import { headers } from 'next/headers'
+import { ipDelCliente } from '@/lib/http/ip-cliente'
 import { responderAutorizacion, MENSAJE_RESPUESTA } from '@/lib/autorizacion-datos/servidor'
 import { medioDesdeParam } from '@/lib/autorizacion-datos/texto'
 
@@ -22,7 +23,7 @@ export async function responderEnlace(input: {
   medio: string | null
 }): Promise<{ ok: true; copiaEnviada: boolean } | { ok: false; error: string }> {
   const h = await headers()
-  const ip = (h.get('x-forwarded-for') ?? '').split(',')[0].trim() || h.get('x-real-ip') || null
+  const ip = ipDelCliente(h)
   const r = await responderAutorizacion({
     token: String(input.token ?? ''),
     slug: h.get('x-tenant-slug'),

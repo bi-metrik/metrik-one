@@ -14,6 +14,10 @@
 //
 // Los logs de runtime de Vercel duran 30 dias. Para el antes/despues del service worker: la
 // columna `sw%` dice que parte del tiempo medido la pagina estaba controlada por el SW.
+//
+// Columna `via` (desde 2026-11-04): 'cloudflare' si el pedido entro por Cloudflare for SaaS,
+// 'directo' si llego a Vercel sin intermediario. Las lineas viejas no la traen: se deduce del ASN
+// (13335 = la IP que vio Vercel era de Cloudflare, o sea que el operador de esas lineas es el PoP).
 
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -46,6 +50,9 @@ export function lotesDeLogs(lineas) {
   return lotes
 }
 
+const ASN_CLOUDFLARE = 13335
+const viaDe = (lote) => lote.via ?? (lote.asn === ASN_CLOUDFLARE ? 'cloudflare' : 'directo')
+
 const dia = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: TZ })
 const fechaEvento = (e) => (e.tipo === 'pulso' ? e.t1 : e.tipo === 'corte' ? e.inicio : e.t)
 
@@ -60,17 +67,18 @@ function fila() {
   }
 }
 
-/** Agrega por dia (Bogota) + persona + operador. Los eventos se cuentan una vez por `id`. */
+/** Agrega por dia (Bogota) + persona + operador + via. Los eventos se cuentan una vez por `id`. */
 export function resumir(lotes) {
   const vistos = new Set()
   const grupos = new Map()
   for (const lote of lotes) {
     const persona = lote.persona ?? '(sin identificar)'
     const operador = lote.operador ?? lote.asn_nombre ?? '(operador?)'
+    const via = viaDe(lote)
     for (const e of lote.eventos ?? []) {
       if (!e?.id || vistos.has(e.id)) continue
       vistos.add(e.id)
-      const clave = `${dia(fechaEvento(e))}|${persona}|${operador}`
+      const clave = `${dia(fechaEvento(e))}|${persona}|${operador}|${via}`
       if (!grupos.has(clave)) grupos.set(clave, fila())
       const g = grupos.get(clave)
       if (e.tipo === 'pulso') {
@@ -98,12 +106,13 @@ export function resumir(lotes) {
   }
   return [...grupos.entries()]
     .map(([clave, g]) => {
-      const [fecha, persona, operador] = clave.split('|')
+      const [fecha, persona, operador, via] = clave.split('|')
       const mediana = (xs) => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null)
       return {
         fecha,
         persona,
         operador,
+        via,
         minutosMedidos: Math.round(g.minutos),
         swPct: g.minutos > 0 ? Math.round((g.swMs / 60_000 / g.minutos) * 100) : 0,
         vercel: { sondas: g.vercel.n, perdidas: g.vercel.perdidas, p95Mediana: mediana(g.vercel.p95) },
@@ -112,7 +121,7 @@ export function resumir(lotes) {
         fallas: g.fallas,
       }
     })
-    .sort((a, b) => (a.fecha + a.persona + a.operador).localeCompare(b.fecha + b.persona + b.operador))
+    .sort((a, b) => (a.fecha + a.persona + a.operador + a.via).localeCompare(b.fecha + b.persona + b.operador + b.via))
 }
 
 const pct = (a, n) => (n ? `${((a / n) * 100).toFixed(1)}%` : '-')
@@ -120,7 +129,7 @@ const pct = (a, n) => (n ? `${((a / n) * 100).toFixed(1)}%` : '-')
 export function tabla(filas) {
   const out = []
   out.push(
-    ['fecha', 'persona', 'operador', 'min', 'sw%', 'perd.Vercel', 'perd.control', 'p95V', 'p95C', 'cortes', 'internet', 'soloVercel', 'seg', 'max', 'fallas']
+    ['fecha', 'persona', 'operador', 'via', 'min', 'sw%', 'perd.Vercel', 'perd.control', 'p95V', 'p95C', 'cortes', 'internet', 'soloVercel', 'seg', 'max', 'fallas']
       .join('\t'),
   )
   for (const f of filas) {
@@ -132,6 +141,7 @@ export function tabla(filas) {
         f.fecha,
         f.persona,
         f.operador,
+        f.via,
         f.minutosMedidos,
         f.swPct,
         pct(f.vercel.perdidas, f.vercel.sondas),

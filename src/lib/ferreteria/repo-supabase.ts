@@ -211,6 +211,11 @@ export function repoSupabase(db: SupabaseClient = createServiceClient() as unkno
       const { error } = await db.from('ferreteria_ventas').delete().eq('workspace_id', ws).eq('id', id)
       lanzar('borrar venta', error)
     },
+    async ventasPorNegocio(ws, negocioId) {
+      const { data, error } = await db.from('ferreteria_ventas').select('*').eq('workspace_id', ws).eq('negocio_id', negocioId).order('created_at')
+      lanzar('ventas del negocio', error)
+      return ((data ?? []) as Record<string, unknown>[]).map(aVenta)
+    },
     async conversacionPorId(ws, id) {
       const { data, error } = await db.from('ferreteria_conversaciones').select('*').eq('workspace_id', ws).eq('id', id).maybeSingle()
       lanzar('conversación por id', error)

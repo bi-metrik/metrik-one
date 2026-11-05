@@ -441,7 +441,10 @@ export type ResultadoPegadoEnBloqueo =
  * paquete vigente, con las habitaciones según los viajeros de la Solicitud. Lee con el lector del
  * bloqueo y escribe con `guardarPaqueteBloqueo` (mismas guardas, mismo costo, mismas tarifas).
  */
-export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Promise<ResultadoPegadoEnBloqueo> {
+export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casilla?: 'hotel' | 'vuelo'): Promise<ResultadoPegadoEnBloqueo> {
+  // `casilla`: la bandeja general ya detectó que es el hotel o el vuelo del paquete (`detectarCaptura`,
+  // 2026-11-04): se lee directo con esa casilla, sin volver a detectar (dos detecciones podían no coincidir).
+  const pedido = casilla === 'hotel' || casilla === 'vuelo' ? casilla : 'detectar'
   if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -449,7 +452,7 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Pro
   const b = await exigirBloqueo(sb, cotizacionId)
   if (!b.ok) return { success: false, error: b.error }
 
-  const lectura = await leerPantallazoDeBloqueo('detectar', dataUrl)
+  const lectura = await leerPantallazoDeBloqueo(pedido, dataUrl)
   if (!lectura.ok) return lectura.elegir ? { success: false, error: lectura.mensaje, otroServicio: true } : { success: false, error: lectura.mensaje }
 
   const { data: filas, error: errItems } = await sb

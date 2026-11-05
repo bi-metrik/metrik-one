@@ -22,6 +22,11 @@
  *
  * La ganancia se congela al registrar (costo del día de la venta). La parte de MeTRIK no se
  * calcula aquí: es mensual (`liquidacion.ts`).
+ *
+ * ── Pedido del carrito (4-nov) ──────────────────────────────────────────────────────
+ * Un carrito pagado del asistente de ventas es UN negocio con una venta por línea (`registrarPedido`): un pago, un
+ * cliente, un paquete. La venta sigue siendo por publicación (ganancia y liquidación por producto). Entrega y pago contra
+ * entrega se marcan por negocio: marcar una venta marca todas las de su negocio.
  */
 import { conAutor } from './nucleo'
 import {
@@ -236,7 +241,10 @@ export async function marcarVentaEntregada(
     if (err) return { ok: false, mensaje: `El negocio no pasó a Entregado: ${err}` }
   }
   const entregada = { ...venta, entregada_at: ahoraIso }
-  await repo.actualizarVenta(ws, venta.id, { entregada_at: ahoraIso })
+  // Un pedido es un paquete: se entregan todas las ventas del negocio.
+  for (const v of await hermanas(repo, ws, venta)) {
+    if (!v.entregada_at) await repo.actualizarVenta(ws, v.id, { entregada_at: ahoraIso })
+  }
 
   const r = await alinearNegocio(negocios, entregada)
   if (!r.ok) return { ok: true, cerrado: false, aviso: `Entrega registrada, pero ${r.mensaje.charAt(0).toLowerCase()}${r.mensaje.slice(1)}` }
@@ -261,17 +269,207 @@ export async function registrarPagoDeVenta(
   if (fecha > hoyISO) return { ok: false, mensaje: 'La fecha del pago no puede ser futura.' }
   if (fecha < venta.fecha_venta) return { ok: false, mensaje: 'El pago no puede ser anterior a la venta.' }
 
+  // Un pedido se paga entero: el cobro es la suma de sus ventas, y todas quedan pagadas.
+  const delNegocio = (await hermanas(repo, ws, venta)).filter((v) => !v.fecha_primer_pago)
   const pub = await repo.publicacionPorId(ws, venta.publicacion_id)
   const err = await negocios.registrarPago(venta.negocio_id, {
-    monto: venta.precio_final,
+    monto: delNegocio.reduce((s, v) => s + Number(v.precio_final), 0),
     fecha,
     referencia: referenciaPago(pub?.codigo ?? 'MP', venta.id),
   })
   if (err) return { ok: false, mensaje: `El pago no quedó en el negocio: ${err}` }
   const pagada = { ...venta, fecha_primer_pago: fecha }
-  await repo.actualizarVenta(ws, venta.id, { fecha_primer_pago: fecha })
+  for (const v of delNegocio) await repo.actualizarVenta(ws, v.id, { fecha_primer_pago: fecha })
 
   const r = await alinearNegocio(negocios, pagada)
   if (!r.ok) return { ok: true, cerrado: false, aviso: `Pago registrado, pero ${r.mensaje.charAt(0).toLowerCase()}${r.mensaje.slice(1)}` }
   return { ok: true, cerrado: r.cerrado }
+}
+
+/** Las ventas del mismo negocio (ella incluida). Sin negocio, solo ella. */
+async function hermanas(repo: RepoFerreteria, ws: string, venta: VentaFila & { id: string }): Promise<(VentaFila & { id: string })[]> {
+  if (!venta.negocio_id) return [venta]
+  const vs = await repo.ventasPorNegocio(ws, venta.negocio_id)
+  return vs.some((v) => v.id === venta.id) ? vs : [venta, ...vs]
+}
+
+// ── Pedido del carrito del asistente ─────────────────────────────────────────
+
+/** Una línea del carrito pagado: la publicación, sus unidades, la foto del precio y la venta si ya existe (reintento). */
+export interface LineaPedidoVenta {
+  lineaId: string
+  pub: PublicacionFila
+  cantidad: number
+  precioUnitario: number
+  ventaId: string | null
+}
+
+export interface EntradaPedido {
+  lineas: LineaPedidoVenta[]
+  /** El negocio ya creado por un intento anterior (reintento tras un corte), o null. */
+  negocioId: string | null
+  fecha_venta: string
+  ruta: RutaVenta
+  comprador_nombre: string
+  comprador_telefono: string | null
+  /** La conversación de origen (de la primera línea: `ferreteria_conversaciones` es por publicación). */
+  conversacion_id: string | null
+  /** La referencia del cobro (`BOLD-<LNK>`): una sola, del pedido entero. */
+  referencia_pago: string
+  flete: number
+  direccion: string | null
+}
+
+export function nombreNegocioPedido(pubs: Array<Pick<PublicacionFila, 'codigo' | 'titulo'>>): string {
+  if (pubs.length === 1) return nombreNegocioVenta(pubs[0])
+  const nombre = `Pedido ${pubs.map((p) => p.codigo).join(' + ')}`
+  return nombre.length > 120 ? `${nombre.slice(0, 119)}…` : nombre
+}
+
+/**
+ * Registra un carrito pagado: una venta anticipada por línea y UN negocio con el subtotal de productos (el flete no es
+ * venta: queda en la nota del negocio) y UN cobro con la referencia del pago.
+ *
+ * Idempotente para el reintento de Bold tras un corte a mitad:
+ *   · cada venta se anota en su línea APENAS se inserta (`anotarVenta`); una línea con venta existente no se repite, y la
+ *     base impide dos ventas por línea (`ferreteria_ventas_carrito_linea_unica`);
+ *   · el negocio se anota en el carrito apenas se crea (`anotarNegocio`); con `negocioId` no se crea otro;
+ *   · el cobro con la misma referencia en el mismo negocio no se duplica (`registrarPagoEnNegocio`).
+ * Si el negocio no se puede crear, las ventas de este pedido que quedaron sin negocio se borran y las líneas se sueltan:
+ * no queda nada a medias. Lo de después del negocio (precio, responsable, cobro) se devuelve como aviso.
+ */
+export async function registrarPedido(
+  repo: RepoFerreteria,
+  negocios: PuertoNegocios,
+  ws: string,
+  pedido: EntradaPedido,
+  autor: Autor,
+  hoyISO: string,
+  opciones: {
+    anotarVenta(lineaId: string, ventaId: string | null): Promise<void>
+    anotarNegocio(negocioId: string): Promise<void>
+  },
+): Promise<{ ok: true; negocioId: string; ventaIds: string[]; ganancia: number; avisos: string[] } | Fallo> {
+  if (!pedido.lineas.length) return { ok: false, mensaje: 'El pedido no tiene productos.' }
+  if (!FECHA.test(pedido.fecha_venta) || pedido.fecha_venta > hoyISO) return { ok: false, mensaje: 'La fecha de la venta no es válida.' }
+  if (!(RUTAS_VENTA as readonly string[]).includes(pedido.ruta)) return { ok: false, mensaje: 'Ruta desconocida.' }
+  for (const l of pedido.lineas) {
+    if (!Number.isInteger(l.cantidad) || l.cantidad < 1 || l.cantidad > 50) return { ok: false, mensaje: `${l.pub.codigo}: la cantidad tiene que ser un entero entre 1 y 50.` }
+    if (!(l.precioUnitario > 0)) return { ok: false, mensaje: `${l.pub.codigo}: el precio tiene que ser mayor que cero.` }
+  }
+
+  // Costo del día de cada línea ANTES de escribir nada: sin lista vigente no se registra ninguna.
+  const costos = new Map<string, number>()
+  for (const l of pedido.lineas) {
+    const cs = (await repo.costos(ws, l.pub.producto_id)).map((c) => ({ ...c, costo_f: Number(c.costo_f) }))
+    const c = costoEnFecha(cs, pedido.fecha_venta)
+    if (!c) return { ok: false, mensaje: `${l.pub.codigo}: no hay una lista de costos vigente en la fecha de la venta.` }
+    costos.set(l.lineaId, c.costo_f)
+  }
+
+  let negocioId = pedido.negocioId
+  const comprador = pedido.comprador_nombre.trim() || null
+  const insertadas: string[] = []
+  const ventaIds: string[] = []
+  let ganancia = 0
+  for (const [i, l] of pedido.lineas.entries()) {
+    const precio = Math.round(l.precioUnitario) * l.cantidad
+    const costo = costos.get(l.lineaId)!
+    if (l.ventaId) {
+      const previa = await repo.ventaPorId(ws, l.ventaId)
+      if (previa) {
+        ventaIds.push(previa.id)
+        ganancia += Number(previa.ganancia)
+        continue
+      }
+      await opciones.anotarVenta(l.lineaId, null)
+    }
+    const g = gananciaPorVenta(precio, costo * l.cantidad)
+    const venta = await repo.insertarVenta({
+      workspace_id: ws,
+      publicacion_id: l.pub.id,
+      conversacion_id: i === 0 ? pedido.conversacion_id : null,
+      fecha_venta: pedido.fecha_venta,
+      fecha_primer_pago: pedido.fecha_venta,
+      precio_final: precio,
+      costo_dia: costo,
+      ganancia: g,
+      ruta: pedido.ruta,
+      forma_pago: 'anticipado',
+      comprador_nombre: comprador,
+      negocio_id: negocioId,
+      entregada_at: null,
+      registrado_por: autor.tipo === 'persona' ? autor.id : null,
+      carrito_linea_id: l.lineaId,
+      ...(l.cantidad > 1 ? { cantidad: l.cantidad } : {}),
+    })
+    try {
+      await opciones.anotarVenta(l.lineaId, venta.id)
+    } catch (e) {
+      await repo.borrarVenta(ws, venta.id)
+      throw e
+    }
+    insertadas.push(venta.id)
+    ventaIds.push(venta.id)
+    ganancia += g
+  }
+
+  const pubs = pedido.lineas.map((l) => l.pub)
+  const subtotal = pedido.lineas.reduce((s, l) => s + Math.round(l.precioUnitario) * l.cantidad, 0)
+  const nuevo = !negocioId
+  if (!negocioId) {
+    const creado = await negocios.crear({
+      nombre: nombreNegocioPedido(pubs),
+      precio: subtotal,
+      compradorNombre: comprador,
+      compradorTelefono: pedido.comprador_telefono?.trim() || null,
+    })
+    if (!creado.ok) {
+      // Nada a medias: las ventas sin negocio se borran y sus líneas se sueltan.
+      for (const [i, l] of pedido.lineas.entries()) {
+        const v = await repo.ventaPorId(ws, ventaIds[i])
+        if (v && !v.negocio_id) {
+          await opciones.anotarVenta(l.lineaId, null)
+          await repo.borrarVenta(ws, v.id)
+        }
+      }
+      return { ok: false, mensaje: `No se pudo crear el negocio del pedido: ${creado.error}` }
+    }
+    negocioId = creado.negocioId
+    await opciones.anotarNegocio(negocioId)
+  }
+  for (const id of ventaIds) {
+    const v = await repo.ventaPorId(ws, id)
+    if (v && v.negocio_id !== negocioId) await repo.actualizarVenta(ws, id, { negocio_id: negocioId })
+  }
+
+  const avisos: string[] = []
+  const errPrecio = await negocios.fijarPrecioAprobado(negocioId, subtotal)
+  if (errPrecio) avisos.push(`El precio aprobado del negocio no quedó escrito: ${errPrecio}`)
+  if (nuevo) {
+    const errResp = await negocios.asignarResponsable(negocioId)
+    if (errResp) avisos.push(`El negocio quedó sin responsable: ${errResp}`)
+  }
+  const errPago = await negocios.registrarPago(negocioId, { monto: subtotal, fecha: pedido.fecha_venta, referencia: pedido.referencia_pago })
+  if (errPago) avisos.push(`El pago anticipado no quedó en el negocio: ${errPago}. Regístralo desde el negocio.`)
+
+  if (insertadas.length) {
+    await repo.insertarEventos(pedido.lineas.filter((_, i) => insertadas.includes(ventaIds[i])).map((l) =>
+      conAutor(ws, l.pub.id, autor, {
+        tipo: 'venta',
+        campo: null,
+        valor_anterior: null,
+        valor_nuevo: `precio ${Math.round(l.precioUnitario) * l.cantidad} · pedido de ${pedido.lineas.length} producto(s) · ${pedido.ruta} · anticipado`,
+        motivo: null,
+      })))
+  }
+  if (nuevo) {
+    const detalle = pedido.lineas.map((l) => `${l.pub.codigo} × ${l.cantidad} (${formatoPesos(Math.round(l.precioUnitario) * l.cantidad)})`).join(', ')
+    await negocios.anotar(
+      negocioId,
+      `Pedido del asistente de ventas: ${detalle}. Productos ${formatoPesos(subtotal)}, flete ${formatoPesos(pedido.flete)} (no es venta), ` +
+        `ganancia ${formatoPesos(ganancia)}. Pago anticipado ${pedido.referencia_pago}, ${pedido.ruta === 'despacho' ? `despacho${pedido.direccion ? ` a ${pedido.direccion}` : ''}` : 'recoge en punto'}.`,
+    )
+  }
+  return { ok: true, negocioId, ventaIds, ganancia, avisos }
 }

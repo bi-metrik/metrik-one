@@ -58,6 +58,21 @@ export interface CampoExtraccion {
   /** Para `dv_desde_nit`: slug del campo que contiene el NIT/cédula base desde el
    *  cual recalcular el DV. Default `nit`. */
   normalizar_desde?: string
+  /**
+   * El valor del campo lo calcula el CÓDIGO a partir de otros campos leídos (el modelo lee
+   * lo impreso, el código hace la aritmética). Hoy solo `resta: [a, b]` = a − b, y solo
+   * cuando b > 0: con b en 0 o vacío se deja lo que leyó el modelo. Caso que lo motivó
+   * (SOE-041): la factura del vehículo, valor antes de descuento − descuento. Ver
+   * `derivarCampos` en `@/lib/documentos/normalizaciones`.
+   */
+  derivar?: { resta: [string, string] }
+  /**
+   * Alerta de coherencia porcentual: el valor del campo dividido por alguna de las bases
+   * (`de`) tiene que caer en algún `pct ± tolerancia`. Si no, el campo y la primera base
+   * bajan a «Verificar». Solo alerta: no recalcula ni borra. Caso: IVA ↔ valor de la
+   * factura (SOE-041). Ver `revisarCoherenciaPct`.
+   */
+  coherencia_pct?: { de: string[]; pct: number[]; tolerancia?: number }
 }
 
 /** Marca de edición manual (trazabilidad para auditoría): quién y cuándo tocó
@@ -80,6 +95,11 @@ export interface CampoResultado {
    * perdía al recalcular. Ver `normalizarNitYDv` y `votos.ts`.
    */
   leido?: string
+  /**
+   * El valor lo calculó el código (`derivar` en la config del campo), no el modelo.
+   * `leido` es lo que había devuelto el modelo para este mismo campo, como testigo.
+   */
+  derivado?: { formula: string; leido: string | null }
   /**
    * De dónde salió el valor cuando no es lo que leyó la IA. `texto_pdf`: la IA leyó otra
    * cosa (queda en `leido`) y se tomó el valor impreso en la capa de texto del PDF, que

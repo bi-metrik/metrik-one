@@ -2,11 +2,12 @@
 
 ## Project memories
 
+- ⚠️ [SOE-041: descuento de la factura lo resta el código (5-nov)](project_soe041_descuento_factura.md) — derivar.ts; SQL config SIN aplicar, después del deploy
+- ⚠️ [IP real detrás de Cloudflare (4-nov)](project_ip_cliente_cloudflare.md) — usar src/lib/http/ip-cliente.ts; geo CF exige el Managed Transform de Mik
 - ⚠️⚠️ [Cancelada guardada y reactivación de Valida CDA (PR B)](project_valida_cancelada_guardada.md) — 20261104233000 SIN aplicar, antes del merge; época por `reactivada_desde`
 - ⚠️⚠️ [Suspendida por pago, PR A (4-nov)](project_valida_suspendida_pr_a.md) — paso 8d; hablaConLaV15 en plazos (no puerta); PR B antes del 31-dic
-- ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave Anthropic 401 + respaldo; LLM_PROVEEDOR_CAPTURAS; chat en low
+- ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave 401 + respaldo; ×1 no ve fallos intermitentes; bandeja en Bloqueo → PAQUETE
 - ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408/#1407; ronda 2: pregunta Pública/Neta por paquete (sin default), CHD por edad; foto sin hacer
-
 - ⚠️ [Vacacional/Negocios y nombre del PDF (3-nov)](project_vacacional_nombre_pdf.md) — option_labels aditivo; SQL de config SIN aplicar; nombre para todos
 - ⚠️⚠️ [Pago automático tarjeta CDA (30-oct)](project_valida_cda_tarjeta_epayco.md) — 20261030220000 SIN aplicar; día 0 = inicio del período; quien debe no renueva
 - ⚠️⚠️ [SOE-035: RC-3 en solo_iva y sobrepagos (30-oct)](project_soe035_rc3_solo_iva.md) — 20261030163500 SIN aplicar; comparar viewdef de prod; <= $1.000 en a_tarifa = sin_tarifa

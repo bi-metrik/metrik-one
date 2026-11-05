@@ -38,4 +38,15 @@ describe('arnés del asistente público (seco)', () => {
     expect(rep.corte1.corte1Ms).toBeGreaterThanOrEqual(5000)
     expect(rep.corte1.corte1Ms).toBeLessThanOrEqual(8000)
   }, 30_000)
+
+  it('el reporte suma tokens y costo de todas las corridas (lo lee el veredicto del PR)', async () => {
+    const rs = await Promise.all(TODOS_LOS_CASOS.slice(0, 2).map((c) => correrCaso(c, { modelo: null, k: 2 })))
+    const sinPrecio = reporte(rs, 2)
+    expect(sinPrecio.uso.llamados).toBeGreaterThan(0)
+    expect(sinPrecio.uso.costo_usd).toBeNull()
+    expect(sinPrecio.uso.sin_precio).toEqual(['guion'])
+    const conPrecio = reporte(rs, 2, [{ modelo: 'guion', entrada: 0.1, salida: 0.5, cache: null }])
+    expect(conPrecio.uso.llamados).toBe(sinPrecio.uso.llamados)
+    expect(conPrecio.uso.costo_usd).toBeGreaterThan(0)
+  }, 30_000)
 })

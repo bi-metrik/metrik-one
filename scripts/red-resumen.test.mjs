@@ -45,4 +45,17 @@ describe('resumen del piloto de red', () => {
     expect(r.fallas).toEqual({ carga: { total: 2, recuperadas: 1 } })
     expect(tabla([r])).toContain('carga:2(1 solas)')
   })
+
+  it('separa la ruta: via de la linea, o deducida del ASN de Cloudflare en las viejas', () => {
+    const viejaCf = { ws: 'soena', persona: null, operador: 'CLOUDFLARENET - Cloudflare, Inc.', asn: 13335, eventos: [pulso('p1')] }
+    const viejaDirecta = { ...lote(null, [pulso('p2')]), asn: 10620 }
+    const nueva = { ...lote(null, [pulso('p3')]), asn: 10620, via: 'cloudflare' }
+    const filas = resumir([viejaCf, viejaDirecta, nueva])
+    expect(filas.map((f) => [f.operador, f.via])).toEqual([
+      ['Claro', 'cloudflare'],
+      ['Claro', 'directo'],
+      ['CLOUDFLARENET - Cloudflare, Inc.', 'cloudflare'],
+    ])
+    expect(tabla(filas).split('\n')[0]).toContain('operador\tvia\t')
+  })
 })

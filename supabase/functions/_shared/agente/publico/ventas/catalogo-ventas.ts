@@ -485,6 +485,11 @@ export function totalPedido(precio: number, cantidad: number, flete: number): nu
   return Math.round(precio) * cantidad + Math.round(flete);
 }
 
+/** El total de un carrito: la suma de cada precio × cantidad + UN solo flete (4-nov). Pura. */
+export function totalCarrito(lineas: ReadonlyArray<{ precio: number; cantidad: number }>, flete: number): number {
+  return lineas.reduce((s, l) => s + Math.round(l.precio) * l.cantidad, 0) + Math.round(flete);
+}
+
 // ── El producto que ya no está disponible (3-nov) ───────────────────────────
 
 /**

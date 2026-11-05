@@ -12,7 +12,8 @@ import type { DepsPublico } from '../cola.ts';
 import { escenarioPublico, reglamentoSabor } from '../escenario.ts';
 import type { EscenarioPublico } from '../escenario.ts';
 import { REGLAMENTO_SABOR } from '../reglamento-sabor.ts';
-import type { PrecioModelo } from '../../uso.ts';
+import { sumarUso } from '../../uso.ts';
+import type { PrecioModelo, UsoMes } from '../../uso.ts';
 import type { ConfigPublico } from '../config.ts';
 import { calificarPublico, corte1Propuesto, percentil } from './calificar.ts';
 import { REGLAMENTO_DIMPRO } from '../ventas/reglamento-dimpro.ts';
@@ -53,7 +54,7 @@ export async function correrUnaVez(caso: CasoPublico, o: OpcionesCorrida): Promi
   if (caso.soloCodigo) {
     let exito;
     try { exito = await caso.soloCodigo(); } catch (err) { exito = { ok: false, motivo: String(err).slice(0, 200) }; }
-    return { id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo, exito, daninas: [], atajadas: [], internos: [], demoras: 0, turnosModelo: 0, personas: [], transcripcion: [] };
+    return { id: caso.id, conjunto: caso.conjunto, titulo: caso.titulo, exito, daninas: [], atajadas: [], internos: [], demoras: 0, turnosModelo: 0, usos: [], personas: [], transcripcion: [] };
   }
   const baseFichas = o.fichasBase ?? (caso.ventas ? REGLAMENTO_DIMPRO : REGLAMENTO_SABOR);
   const reglamento = await reglamentoSabor(caso.fichas ? caso.fichas(baseFichas) : baseFichas);
@@ -114,11 +115,13 @@ export interface Reporte {
   corte1: ReturnType<typeof corte1Propuesto>;
   demoras: number;
   turnosModelo: number;
+  /** Tokens y costo de todas las corridas (el agente; el arnés público no tiene persona simulada). */
+  uso: UsoMes;
   personasPorMotivo: Record<string, number>;
   fallan: Array<{ id: string; conjunto: string; titulo: string; corridasMal: number; motivo: string; daninas: string[]; transcripcion: string[] }>;
 }
 
-export function reporte(rs: ResultadoPassK[], k: number): Reporte {
+export function reporte(rs: ResultadoPassK[], k: number, precios: PrecioModelo[] = []): Reporte {
   const todas = rs.flatMap((r) => r.corridas);
   const internos = todas.flatMap((r) => r.internos);
   const porConjunto: Reporte['porConjunto'] = {};
@@ -138,6 +141,7 @@ export function reporte(rs: ResultadoPassK[], k: number): Reporte {
     corte1: corte1Propuesto(internos),
     demoras: todas.reduce((n, r) => n + r.demoras, 0),
     turnosModelo: todas.reduce((n, r) => n + r.turnosModelo, 0),
+    uso: sumarUso(todas.flatMap((r) => r.usos.map((uso) => ({ tipo: 'modelo' as const, bot: 'asistente-publico', uso }))), precios),
     personasPorMotivo,
     fallan: rs.filter((r) => !r.pasa).map((r) => {
       const mala = r.corridas.find((c) => !c.exito.ok || c.daninas.length) ?? r.corridas[0];
