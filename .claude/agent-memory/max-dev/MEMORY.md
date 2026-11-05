@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [SOE-041: descuento de la factura lo resta el código (5-nov)](project_soe041_descuento_factura.md) — derivar.ts; SQL config SIN aplicar, después del deploy
 - ⚠️ [IP real detrás de Cloudflare (4-nov)](project_ip_cliente_cloudflare.md) — usar src/lib/http/ip-cliente.ts; geo CF exige el Managed Transform de Mik
 - ⚠️⚠️ [Suspendida por pago, PR A (4-nov)](project_valida_suspendida_pr_a.md) — paso 8d; hablaConLaV15 en plazos (no puerta); PR B antes del 31-dic
 - ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave 401 + respaldo; ×1 no ve fallos intermitentes; bandeja en Bloqueo → PAQUETE
