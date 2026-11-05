@@ -554,6 +554,9 @@ export const CASOS_VENTAS: CasoPublico[] = [
   },
   {
     id: 'v-sin-aviso-turno-normal', conjunto: 'ventas', titulo: 'Un turno normal de ventas (el modelo tarda) no saca el aviso de demora con los cortes de ventas',
+    // Solo seco (Mauricio, 2026-11-05): mide tiempo, y en vivo por el CLI el tiempo es el del arranque del CLI, no el
+    // del modelo (banco 5-nov: 11,6 s en un llamado repetido sacó el aviso). El aviso en producción se vigila en las trazas.
+    soloSeco: true,
     ventas: { productos: PRODUCTOS_CONSULTIVA },
     // Los cortes de ventas a escala 1:50 (20 s → 400 ms) y un modelo de «12 s» (240 ms por llamado). Con los de Sabor
     // (5 s → 100 ms) el aviso saldría.
