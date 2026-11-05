@@ -29,6 +29,7 @@ import type { OperacionesBonoData } from '../operaciones-types'
 import {
   getEtapasParaBono, guardarConfigBonoMes, type ConfigBonoMes,
 } from '../operaciones-config-actions'
+import { HORA_CORTE_POR_DEFECTO, horaCorteTexto, modoEnvio, type EnvioModo } from '@/lib/tableros/regla-envio'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
@@ -58,6 +59,8 @@ type Formulario = {
   radicacion_reloj: 'habil' | 'corrido'
   horas_desde_certificado: string
   horas_antes_cita: string
+  envio_modo: EnvioModo
+  envio_hora_corte: string
   etapa_radicacion_dian_orden: string
   correcciones_cobertura: 'devolucion_dian' | 'cualquier_reproceso'
   bono_max_pct: string
@@ -85,6 +88,8 @@ function desdeParametros(P: OperacionesBonoData['parametros']): Formulario {
     radicacion_reloj: (P.radicacion_reloj ?? 'habil') as 'habil' | 'corrido',
     horas_desde_certificado: String(P.horas_desde_certificado),
     horas_antes_cita: String(P.horas_antes_cita),
+    envio_modo: modoEnvio(P),
+    envio_hora_corte: String(P.envio_hora_corte ?? HORA_CORTE_POR_DEFECTO),
     etapa_radicacion_dian_orden: String(P.etapa_radicacion_dian_orden ?? ''),
     correcciones_cobertura: P.correcciones_cobertura,
     bono_max_pct: p100(P.bono_max_pct),
@@ -158,6 +163,11 @@ export function BonoConfigModal({
       toast.error('Con un certificado malo no se pueden ganar más puntos que sin ninguno.')
       return
     }
+    const corte = num(f.envio_hora_corte)
+    if (f.envio_modo === 'dia_habil_anterior' && !(Number.isInteger(corte) && corte >= 1 && corte <= 24)) {
+      toast.error('La hora de corte del envío tiene que ser una hora en punto entre 1 y 24.')
+      return
+    }
     const etapa = num(f.etapa_radicacion_dian_orden)
     if (!Number.isFinite(etapa)) {
       toast.error('Falta elegir la etapa que cuenta como radicación ante la DIAN.')
@@ -181,6 +191,10 @@ export function BonoConfigModal({
       radicacion_reloj: f.radicacion_reloj,
       horas_desde_certificado: num(f.horas_desde_certificado),
       horas_antes_cita: num(f.horas_antes_cita),
+      envio_modo: f.envio_modo,
+      // En el modo de horas la hora de corte no se usa, pero viaja igual: la fila del mes se
+      // guarda completa y así no se pierde lo que estaba escrito.
+      envio_hora_corte: Number.isFinite(corte) ? corte : HORA_CORTE_POR_DEFECTO,
       etapa_radicacion_dian_orden: etapa,
       correcciones_cobertura: f.correcciones_cobertura,
       bono_max_pct: frac(f.bono_max_pct),
@@ -284,11 +298,36 @@ export function BonoConfigModal({
                   { valor: 'habil', texto: 'Horas hábiles (descuenta festivos)' },
                   { valor: 'corrido', texto: 'Horas corridas (calendario)' },
                 ]} />
-              <Campo etiqueta="Envío: desde el certificado" sufijo="h"
-                valor={f.horas_desde_certificado} onChange={set('horas_desde_certificado')} />
-              <Campo etiqueta="Envío: antes de la cita" sufijo="h"
-                valor={f.horas_antes_cita} onChange={set('horas_antes_cita')}
-                ayuda="Estas horas son corridas: miden contra el calendario de la DIAN." />
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <Selector etiqueta="Envío a tiempo si se envía al cliente" valor={f.envio_modo}
+                  onChange={(v) => setF((p) => ({ ...p, envio_modo: v as EnvioModo }))}
+                  opciones={[
+                    {
+                      valor: 'dia_habil_anterior',
+                      texto: `Antes de las ${horaCorteTexto(Number.isFinite(num(f.envio_hora_corte))
+                        ? num(f.envio_hora_corte) : HORA_CORTE_POR_DEFECTO)} del día hábil anterior a la cita`,
+                    },
+                    {
+                      valor: 'horas_antes_cita',
+                      texto: `Al menos ${f.horas_antes_cita || '—'} horas antes de la cita`,
+                    },
+                  ]} />
+              </div>
+              {f.envio_modo === 'dia_habil_anterior' ? (
+                <Campo etiqueta="Hora de corte" sufijo="hora de Colombia, 1 a 24"
+                  valor={f.envio_hora_corte} onChange={set('envio_hora_corte')}
+                  ayuda="Si la cita es lunes o el día después de un festivo, el día hábil anterior es el último día hábil antes de ella. Con esta regla no se mide el plazo desde el certificado bancario." />
+              ) : (
+                <>
+                  <Campo etiqueta="Envío: antes de la cita" sufijo="h"
+                    valor={f.horas_antes_cita} onChange={set('horas_antes_cita')}
+                    ayuda="Estas horas son corridas: miden contra el calendario de la DIAN." />
+                  <Campo etiqueta="Envío: desde el certificado" sufijo="h"
+                    valor={f.horas_desde_certificado} onChange={set('horas_desde_certificado')} />
+                </>
+              )}
             </div>
           </Seccion>
 

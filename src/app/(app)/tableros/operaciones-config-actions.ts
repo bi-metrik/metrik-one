@@ -33,6 +33,7 @@ const CAMPOS = [
   'peso_radicacion', 'peso_envio', 'peso_correcciones',
   'piso_operativo', 'techo_operativo',
   'horas_radicacion', 'horas_desde_certificado', 'horas_antes_cita',
+  'envio_modo', 'envio_hora_corte',
   'radicacion_reloj', 'jornada_inicio_hora', 'jornada_fin_hora', 'jornada_sabado_habil',
   'correcciones_cobertura', 'etapa_radicacion_dian_orden',
   'bono_max_pct', 'bono_max_pct_director', 'piso_director', 'techo_director',
@@ -78,6 +79,7 @@ const RANGO: Partial<Record<CampoConfigBono, [number, number]>> = {
   piso_operativo: [0, 1], techo_operativo: [0.01, 1],
   piso_director: [0, 1], techo_director: [0.01, 1],
   horas_radicacion: [1, 8760], horas_desde_certificado: [1, 8760], horas_antes_cita: [1, 8760],
+  envio_hora_corte: [1, 24],
   jornada_inicio_hora: [0, 23], jornada_fin_hora: [1, 24],
   etapa_radicacion_dian_orden: [1, 999],
   bono_max_pct: [0, 1], bono_max_pct_director: [0, 1],
@@ -93,6 +95,12 @@ function validar(v: Record<string, unknown>): string | null {
   }
   if (v.radicacion_reloj !== undefined && !['habil', 'corrido'].includes(String(v.radicacion_reloj))) {
     return 'El reloj de radicación solo puede ser hábil o corrido.'
+  }
+  if (v.envio_modo !== undefined && !['horas_antes_cita', 'dia_habil_anterior'].includes(String(v.envio_modo))) {
+    return 'La regla de envío no es válida.'
+  }
+  if (v.envio_hora_corte !== undefined && !Number.isInteger(Number(v.envio_hora_corte))) {
+    return 'La hora de corte del envío tiene que ser una hora en punto.'
   }
   if (v.correcciones_cobertura !== undefined
       && !['devolucion_dian', 'cualquier_reproceso'].includes(String(v.correcciones_cobertura))) {
