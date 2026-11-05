@@ -11,6 +11,7 @@ import {
   exigenciaV15,
   fechaExigeAceptacion,
   finUltimoPeriodoPagado,
+  pagadasA,
   periodosPendientesAntesDe,
   pospuestaHoy,
   textoExigidaV15,
@@ -295,6 +296,43 @@ describe('las variables de la pantalla salen del dato', () => {
       expect(exige('2027-01-16', fin(600000), '2027-01-16')).toBe('no_exigida')
       expect(exige('2027-01-16', fin(600000), '2027-01-22')).toBe('no_exigida')
       expect(exige('2027-01-16', fin(600000), '2027-01-23')).toBe('exigida')
+    })
+
+    // Un pago con su fecha, para el reparto que dice cuándo quedó pagada cada cuota.
+    const pago = (monto: number, fecha: string, n: number) => ({ cobroId: `p${n}`, fecha, monto, estado: 'pagado' as const, fuente: null, reciboDescargable: false })
+    const conFechas = (cuotas: CuotaDeServicio[], pagos: ReturnType<typeof pago>[], hoy: string) =>
+      cuotasConEstado({ cuotas, cobros: pagos, hoy, ahoraISO: `${hoy}T15:00:00Z` })
+
+    it('solo cuenta lo pagado a más tardar en la fecha base: pagar cada mes sin aceptar no aplaza la 16.4 (gate de Vera)', () => {
+      // Los otros tres (base 16-ene) pagan cada mes sin aceptar.
+      const cuotas = [...CUOTAS, cuota(5, '2027-01-27', '23-ene al 22-feb'), cuota(6, '2027-02-27', '23-feb al 22-mar')]
+      const pagos = [pago(600000, '2026-12-20', 1), pago(150000, '2027-01-25', 2), pago(150000, '2027-02-25', 3)]
+      const todas = conFechas(cuotas, pagos, '2027-03-01')
+      expect(finUltimoPeriodoPagado(todas)).toBe('2027-03-22')
+      const f = finUltimoPeriodoPagado(pagadasA(todas, pagos, '2027-01-16'))
+      expect(f).toBe('2027-01-22')
+      expect(fechaExigeAceptacion('2027-01-16', f)).toBe('2027-01-23')
+    })
+
+    it('un período pagado ANTES de la fecha base sí la corre aunque empiece después (no se bloquea un período pagado)', () => {
+      // Maxitec (base 22-dic) paga el 20-dic el período del 23-dic al 22-ene.
+      const pagos = [pago(450000, '2026-11-20', 1), pago(150000, '2026-12-20', 2)]
+      const f = finUltimoPeriodoPagado(pagadasA(conFechas(CUOTAS, pagos, '2026-12-21'), pagos, '2026-12-22'))
+      expect(fechaExigeAceptacion('2026-12-22', f)).toBe('2027-01-23')
+    })
+
+    it('reactivada (11.4) sin aceptar la v1.5: el plan nuevo solo corre la fecha si se pagó antes de la base', () => {
+      const planNuevo = [cuota(1, '2027-01-10', '10-ene al 9-feb'), cuota(2, '2027-02-10', '10-feb al 9-mar')]
+      // Reactivó el 10-ene (antes de la base del 16-ene) y pagó el 10-feb: exigida desde el 10-feb.
+      const antes = [pago(150000, '2027-01-10', 1), pago(150000, '2027-02-10', 2)]
+      const f = finUltimoPeriodoPagado(pagadasA(conFechas(planNuevo, antes, '2027-02-15'), antes, '2027-01-16'))
+      expect(f).toBe('2027-02-09')
+      expect(exige('2027-01-16', f, '2027-02-10')).toBe('exigida')
+      // Reactivó el 20-ene (después de la base): se exige desde el primer día.
+      const despues = [pago(150000, '2027-01-20', 1)]
+      const g = finUltimoPeriodoPagado(pagadasA(conFechas(planNuevo.slice(0, 1), despues, '2027-01-20'), despues, '2027-01-16'))
+      expect(g).toBe(null)
+      expect(exige('2027-01-16', g, '2027-01-20')).toBe('exigida')
     })
 
     it('sin ningún período pagado, la fecha base', () => {

@@ -29,7 +29,7 @@
 import { leerPeriodoEnConcepto } from '@/lib/cobros/periodo-en-concepto'
 import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 import { CORREO_TERMINACION, diaDePublicacion, fechaLarga } from './modificacion-terminos'
-import type { CuotaConEstado } from './pago-pendiente'
+import { ultimoPagoDeCadaCuota, type CuotaConEstado, type PagoParaReparto } from './pago-pendiente'
 import { esVersionCdaDesde, sumarDias } from './plazos'
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/
@@ -133,6 +133,25 @@ export function periodosPendientesAntesDe(cuotas: readonly CuotaConEstado[], vig
       corto: p?.corto ?? `cuota que vence el ${fechaLarga(c.fechaVencimiento)}`,
       saldo: c.saldo,
     }))
+}
+
+/**
+ * 16.4: las cuotas que ya estaban pagadas el día `fecha` (la fecha base): pagadas, y con el último pago que
+ * las cubrió (el mismo reparto de la pestaña Pagos, `ultimoPagoDeCadaCuota`) a más tardar ese día. Una cuota
+ * pagada sin fecha de pago legible cuenta (no se bloquea un período que podría estar pagado).
+ *
+ * Es el tope de `finUltimoPeriodoPagado` para la 16.4: sin él, cada período pagado DESPUÉS de la fecha base
+ * (la renovación de cada mes, o el plan nuevo de una reactivación, 11.4) corría la fecha exigible al fin del
+ * período siguiente y la aceptación nunca se exigía (gate de Vera, 4-nov). Un período pagado antes de la fecha
+ * base, aunque empiece después, sí la corre: ese no se bloquea.
+ */
+export function pagadasA(cuotas: readonly CuotaConEstado[], pagos: readonly PagoParaReparto[], fecha: string): CuotaConEstado[] {
+  const ultimos = ultimoPagoDeCadaCuota(cuotas, pagos)
+  return cuotas.filter((c, i) => {
+    if (c.estado !== 'pagada') return false
+    const f = ultimos[i]?.fecha
+    return !f || f.slice(0, 10) <= fecha
+  })
 }
 
 /** El último día del período pagado más reciente, o `null` si no hay ninguno con período legible. */
