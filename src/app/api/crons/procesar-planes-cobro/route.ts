@@ -29,6 +29,7 @@ import { avisarSuspensionesProximas, type ResumenSuspension } from '@/lib/valida
 import { terminarSuspensionesVencidas, type ResumenTerminacion } from '@/lib/valida-registro/terminacion-servidor'
 import { avisarSuspendidasPorPago, type ResumenAvisoSuspendida } from '@/lib/valida-cda/aviso-suspendida-servidor'
 import { cancelarSuscripcionesVencidas, type ResumenCancelada } from '@/lib/valida-cda/cancelada-servidor'
+import { procesarPeriodosNoVendidos, type ResumenVenta164 } from '@/lib/valida-cda/venta-16-4-servidor'
 
 // Cron diario — Procesa planes_cobro activos:
 //   1. Genera cobros programados con fecha_esperada = T+3 dias si no existe ya la cuota
@@ -89,6 +90,12 @@ import { cancelarSuscripcionesVencidas, type ResumenCancelada } from '@/lib/vali
 //      (nunca `terminado`), sin renovacion, las cuotas de periodos desde el 1-dic sin pagar anuladas, la
 //      tarjeta cerrada y borrada en ePayco, y los correos (Cancelada y tarjeta), una vez. Antes, cierra las
 //      reactivaciones pagadas (11.4) que el webhook no alcanzo (ver `src/lib/valida-cda/cancelada-servidor.ts`).
+//   8f. Valida de los CDA (Terminos v1.5, 16.4; Emilio 5-nov): sin la v1.5 aceptada, la cuota de un periodo que
+//      METRIK no vendio (empieza desde la fecha base del texto registrado) se anula al terminar su periodo, con
+//      motivo «16.4: …», y el plan deja de renovarse; el contrato sigue activo (no es la clausula 11). El
+//      periodo pagado igual (transferencia) se presta y se avisa una vez que el siguiente no se vende sin la
+//      v1.5 (ver `src/lib/valida-cda/venta-16-4-servidor.ts`). El enlace, el boton y la renovacion ya no
+//      ofrecen esos periodos (`generarEnlacePagoCuota`, `renovar-ciclo.ts`).
 //
 // Spec: docs/specs/2026-04-26_mc-ebitda-capa-fiscal-simplificada.md (extension B/Fase 1)
 //       docs/specs/2026-09-08_suscripciones-cobro-automatico.md (paso 5)
@@ -660,6 +667,15 @@ export async function GET(req: NextRequest) {
     canceladaError = err instanceof Error ? err.message : String(err)
   }
 
+  // ── 8f. Valida de los CDA: los períodos no vendidos por la 16.4 (Emilio, 5-nov) ──
+  let venta164: ResumenVenta164 | null = null
+  let venta164Error: string | null = null
+  try {
+    venta164 = await procesarPeriodosNoVendidos({ db: supabase, hoy: hoyStr, ahoraISO: hoy.toISOString(), enviarCorreo: enviarPorResend })
+  } catch (err) {
+    venta164Error = err instanceof Error ? err.message : String(err)
+  }
+
   return NextResponse.json({
     ok: true,
     fecha: hoyStr,
@@ -707,5 +723,7 @@ export async function GET(req: NextRequest) {
     aviso_suspendida_error: avisoSuspendidaError,
     cancelada_valida: cancelada,
     cancelada_valida_error: canceladaError,
+    venta_16_4: venta164,
+    venta_16_4_error: venta164Error,
   })
 }

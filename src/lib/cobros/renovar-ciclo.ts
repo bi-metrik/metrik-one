@@ -36,10 +36,14 @@
  *      decisión, no un efecto del cron.
  *   7. **El calendario tiene que cuadrar**: el periodo que el concepto de la última cuota dice pagar
  *      tiene que ser el que se deduce de `fecha_inicio`. Si no, una persona lo mira.
+ *   8. **La 16.4 de Valida de los CDA** (Emilio, 5-nov-2026): sin la v1.5 aceptada no nace la cuota de un
+ *      periodo que empieza desde la fecha base del CDA, ni ninguna después de un periodo no vendido
+ *      (`venta-16-4.ts`).
  */
 
 import { diaMes, sumarDias, sumarMeses } from './enrolar-ciclo'
 import { leerPeriodoEnConcepto, quitarPeriodo } from './periodo-en-concepto'
+import { periodoSeVende, type VentaV15 } from '@/lib/valida-cda/venta-16-4'
 
 /** Los módulos cuyo cobro por ciclo se renueva solo. Sumar uno es una decisión de Mauricio. */
 export const MODULOS_CON_RENOVACION_AUTOMATICA = ['valida_consulta', 'business'] as const
@@ -91,6 +95,8 @@ export interface PlanCandidatoRenovacion {
   /** El negocio tiene más de un plan con `auto_renovar`: no se sabe cuál renovar. */
   variosPlanes: boolean
   cuotas: CuotaDelPlan[]
+  /** Valida de los CDA: la base de la 16.4 y la aceptación de la v1.5. Ausente = no aplica. */
+  ventaV15?: VentaV15 | null
 }
 
 export interface CuotaNueva {
@@ -115,6 +121,7 @@ export type MotivoNoRenovar =
   | 'vigencia_terminada'
   | 'siguiente_vencida'
   | 'calendario_irregular'
+  | 'v15_sin_aceptar'
 
 export type PlanRenovacion =
   | { tipo: 'renovar'; cuota: CuotaNueva; totalCuotas: number; fechaFin: string }
@@ -188,6 +195,14 @@ export function planearRenovacion(p: PlanCandidatoRenovacion, hoy: string): Plan
   if (vence >= sumarMeses(p.fechaInicio, mUltima + 2)) return { tipo: 'no', motivo: 'calendario_irregular' }
 
   if (p.vigenteHasta && desde > p.vigenteHasta) return { tipo: 'no', motivo: 'vigencia_terminada' }
+  if (p.ventaV15) {
+    const venta = p.ventaV15
+    const inicioDe = (c: CuotaDelPlan) => leerPeriodoEnConcepto(c.concepto_detalle, c.fecha_vencimiento)?.desde ?? c.fecha_vencimiento
+    // La suscripción no continuó: ni el periodo nuevo ni ninguno después de uno sin vender (16.4).
+    if (!periodoSeVende(venta, desde) || serie.some((c) => !c.pagada && !periodoSeVende(venta, inicioDe(c)))) {
+      return { tipo: 'no', motivo: 'v15_sin_aceptar' }
+    }
+  }
   if (vence < hoy) return { tipo: 'no', motivo: 'siguiente_vencida' }
 
   const base =

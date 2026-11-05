@@ -14,6 +14,13 @@ import { referenciaEnlaceCobro } from './referencia-enlace'
 import { anclaDeFila, columnasDeAncla, filtrarPorAncla } from '@/lib/suscripciones-producto/ancla'
 import { pctRetencionIvaDelEspacio, retencionIvaDeCuota } from './retencion-iva'
 import { separarPorEpoca } from '@/lib/valida-cda/cancelada'
+import { cuotasConEstado } from '@/lib/valida-cda/pago-pendiente'
+import { periodoEnPalabras } from '@/lib/valida-cda/plazos'
+import { errorPeriodoNoVendido, noVendidas } from '@/lib/valida-cda/venta-16-4'
+import { ventaV15DelContrato } from '@/lib/valida-cda/venta-16-4-lectura'
+
+/** El servicio de Valida de los CDA (`servicios_contratados.servicio_slug`): el único con la 16.4. */
+const SERVICIO_VALIDA_CDA = 'valida-cda-licencia'
 
 /** Cuánto vive un enlace desde que se genera. El ciclo manual de los CDA: se manda el 20, vence el 27. */
 export const DIAS_VIGENCIA_ENLACE = 7
@@ -40,6 +47,11 @@ export const DIAS_VIGENCIA_ENLACE = 7
  * Valida de los CDA (Términos v1.5, PR B del 4-nov-2026): una cuota anulada por la 2.5 no lleva enlace, y
  * el reparto se hace dentro del plan de la cuota (`separarPorEpoca`): después de una reactivación (11.4)
  * el pago del plan nuevo no tapa la cartera ni la cartera cuenta como pago del plan nuevo.
+ *
+ * La 16.4 (Emilio, 5-nov-2026): sin la v1.5 aceptada no se genera el enlace de un período que METRIK no vende
+ * (`venta-16-4.ts`, `noVendidas`). Es el único camino del enlace (cron, botón de Suscripción, «Pagar el mes»
+ * y la ficha), así que ninguno lo ofrece. Sin poder leer la aceptación, tampoco: un enlace de más vendería
+ * un período que la 16.4 no deja vender.
  */
 
 export type ResultadoEnlaceCuota =
@@ -94,7 +106,10 @@ export async function generarEnlacePagoCuota(
   const negocioId = ancla.tipo === 'negocio' ? ancla.id : null
   const suscripcionId = ancla.tipo === 'suscripcion' ? ancla.id : null
 
-  const contrato = await filtrarPorAncla(db.from('servicios_contratados').select('id, reactivada_desde, reactivacion_cobro_id'), ancla)
+  const contrato = await filtrarPorAncla(
+    db.from('servicios_contratados').select('id, estado, servicio_slug, empresa_id, negocio_id, reactivada_desde, reactivacion_cobro_id'),
+    ancla,
+  )
     .eq('workspace_id', p.workspaceId)
   if (contrato.error) return { ok: false, error: `No se pudo leer el contrato: ${contrato.error.message}` }
   if ((contrato.data ?? []).length === 0) {
@@ -189,6 +204,21 @@ export async function generarEnlacePagoCuota(
   const epoca = epocas.anterior.cuotas.some((c) => c.cuotaId === cuota.data.id) ? epocas.anterior : epocas.vigente
   const cuotasFifo: CuotaDeServicio[] = epoca.cuotas
   const cobrosFifo: CobroRecibido[] = epoca.cobros
+
+  // 16.4: el período que METRIK no vende sin la v1.5 aceptada no recibe enlace (ni el correo que lo acompaña).
+  const contratoCda = (
+    (contrato.data ?? []) as { estado?: string; servicio_slug?: string; empresa_id?: string | null; negocio_id?: string | null }[]
+  )
+    .filter((c) => c.servicio_slug === SERVICIO_VALIDA_CDA)
+    .sort((a, b) => Number(b.estado === 'activo') - Number(a.estado === 'activo'))[0]
+  if (contratoCda) {
+    const venta = await ventaV15DelContrato(db, { empresa_id: contratoCda.empresa_id ?? null, negocio_id: contratoCda.negocio_id ?? null })
+    if ('error' in venta) return { ok: false, error: `No se pudo leer la aceptación de la v1.5 de los Términos: ${venta.error}` }
+    const estados = cuotasConEstado({ cuotas: cuotasFifo, cobros: cobrosFifo, hoy: todayBogotaISO(new Date(ahoraMs)), ahoraISO: new Date(ahoraMs).toISOString() })
+    if (noVendidas(estados, venta).some((c) => c.cuotaId === cuota.data.id)) {
+      return { ok: false, error: errorPeriodoNoVendido(periodoEnPalabras({ concepto: cuota.data.concepto_detalle, fechaVencimiento: cuota.data.fecha_vencimiento })) }
+    }
+  }
 
   // La configuración del espacio: la retención de IVA que recibe (y, más abajo, la pasarela).
   const ws = await db.from('workspaces').select('config_extra').eq('id', p.workspaceId).maybeSingle()

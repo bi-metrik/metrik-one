@@ -451,10 +451,27 @@ describe('interruptor por familia (LLM_PROVEEDOR_DOCUMENTOS, LLM_PROVEEDOR_ACTAS
     expect(proveedorDe(ent({}))).toBe('anthropic');
   });
 
-  it('actas: siguen en Gemini sin valor (eval 8 de 12); con valor manda la variable', () => {
-    expect(proveedorDe(ent({}), OPCIONES_ACTAS)).toBe('gemini');
-    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'anthropic' }), OPCIONES_ACTAS)).toBe('gemini');
-    expect(proveedorDe(ent({ LLM_PROVEEDOR_ACTAS: 'anthropic' }), OPCIONES_ACTAS)).toBe('anthropic');
+  it('actas: sin valor, Haiku (desde el 2026-11-05); la variable en gemini las devuelve a Gemini', () => {
+    expect(proveedorDe(ent({}), OPCIONES_ACTAS)).toBe('anthropic');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'anthropic' }), OPCIONES_ACTAS)).toBe('anthropic');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_ACTAS: 'gemini' }), OPCIONES_ACTAS)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'gemini' }), OPCIONES_ACTAS)).toBe('gemini');
+  });
+
+  it('un fetch de actas sin la variable va a Anthropic con esfuerzo medium, aunque el sitio pida thinkingLevel low', async () => {
+    const real = vi.fn(async () => respuestaA({ content: [{ type: 'text', text: '{"a":"x"}' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }));
+    const f = crearFetchModelo({ ...OPCIONES_ACTAS, fetch: real as unknown as typeof fetch, entorno: ent({ ANTHROPIC_API_KEY: 'sk' }) });
+    await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG({ generationConfig: { ...cuerpoG().generationConfig, thinkingConfig: { thinkingLevel: 'low' } } })) });
+    const [url, init] = real.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('api.anthropic.com');
+    expect(JSON.parse(String(init.body)).output_config.effort).toBe('medium');
+  });
+
+  it('un fetch de actas con la variable en gemini no toca a Anthropic aunque haya llave', async () => {
+    const real = vi.fn(async () => respuestaA({ ok: 1 }));
+    const f = crearFetchModelo({ ...OPCIONES_ACTAS, fetch: real as unknown as typeof fetch, entorno: ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR_ACTAS: 'gemini' }) });
+    await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG()) });
+    expect(real.mock.calls[0][0]).toBe(URL_G);
   });
 
   it('el global en gemini devuelve todo a Gemini, aunque la familia diga anthropic', () => {

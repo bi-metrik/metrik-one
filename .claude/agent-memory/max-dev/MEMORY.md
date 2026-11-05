@@ -28,6 +28,7 @@
 - ⚠️⚠️ [Términos CDA v1.5 por aviso (1-nov)](project_valida_terminos_v15.md) — transición 11.7 en plazos.ts; 16.4 SIN construir (22-dic); 20261029190000 opcional
 - ⚠️⚠️ [Asistente de ventas Dimpro + Bold (29-oct)](project_dimpro_asistente_ventas_bold.md) — 20261029150000 y sql/dimpro APLICADOS en prod (29-oct, bot activo:false); solo Messenger 151556; forma_pago sigue anticipado
 - ⚠️ [SOE-033: plantillas DJ y Relación (29-oct)](project_soe033_plantillas_dj_relacion.md) — #1329; 20261029114700 APLICADA (29-oct); copia campos de la DJ viva; DJ coprop. 2 págs
+- ⚠️⚠️ [Valida CDA: 16.4 al vender un período (5-nov)](project_valida_16_4_venta_periodo.md) — corte en generarEnlacePagoCuota; no vendido ≠ Cancelada; antes del 19-dic
 - ⚠️⚠️ [Decisiones D1–D6 de la cotización (29-oct)](project_decisiones_1029_cotizacion.md) — batería #1338; sin exención de Públicas; comisión obligatoria; 0 = sin dato; tarifa por paquete
 - ⚠️⚠️ [Regla de fotos de la propuesta (29-oct)](project_regla_fotos_propuesta.md) — #1357 paneles+alto común, #1358 portada, #1365 Rec=medio; foto Curazao sin cargar
 - ⚠️ [COT-0008: 5 ajustes de Alejandra (29-oct)](project_cot0008_ajustes_alejandra.md) — #1330/1333/1334/1337 (#1339 cerrado); reparto por precio en #1348
@@ -76,7 +77,7 @@
 - ⚠️ [Bot ONE: soporte en foto/PDF leído](project_wa_soporte_pdf_agente.md) — documento = clase 'otro' + media; lectura aparte; ventana 5 s; arnés s-* sin correr
 - ⚠️⚠️ [Modo agente ONE en todo workspace](project_agente_one_todo_workspace.md) — #1226; deploy de wa-webhook lo enciende en todos; AGENTE_ONE=off; eval Haiku 6/6 limpio (21-oct)
 - ⚠️ [Actas: Notas de Gemini nuevas y cron sin actas (5-nov)](project_actas_notas_gemini_y_cron.md) — sin actas por filtros, no parser; export cambió sin tocar el Doc
-- ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217 mergeado (ea16c7d2); respaldo Gemini; VE apagado; documentos/actas en Gemini por defecto
+- ⚠️⚠️ [Gemini → Haiku 5.5 (fetchModelo)](project_migracion_haiku_55.md) — #1217; respaldo Gemini; VE apagado; todo en Haiku (actas medium, 5-nov); parser de Notas arreglado en #1438
 - ⚠️⚠️ [Tarifas extraídas en la cotización](project_tarifas_en_cotizacion.md) — preselección solo en un servicio; iva_pct null; tarifario sin MAYÚSCULA; día dedupe por id
 - ⚠️⚠️ [Suscripciones multiproducto (#1191)](project_suscripciones_multiproducto.md) — 10 migraciones aplicadas (180000 sin ver); backfill SIN correr; cobro por lista de correos
 - ⚠️ [Alta autogestionada de Valida](project_valida_alta_autogestionada.md) — pila #1104→#1169 dentro de #1191; sus migraciones YA aplicadas (20-oct); canal 'registro'

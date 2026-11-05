@@ -103,7 +103,7 @@ export function expiraEnlaceAnualMs(desde: string): number {
 /** Lo mínimo que tiene que vivir un enlace recién generado para ofrecerlo. */
 const VIDA_MINIMA_ENLACE_MS = 2 * 60 * 60 * 1000
 
-export type MotivoSinOferta = 'apagado' | 'precio_distinto' | 'fuera_de_plazo' | 'cuotas_vencidas' | 'plan_activo' | 'sin_tiempo'
+export type MotivoSinOferta = 'apagado' | 'precio_distinto' | 'fuera_de_plazo' | 'cuotas_vencidas' | 'plan_activo' | 'sin_tiempo' | 'acepta_v15'
 
 /** El precio mensual sobre el que está escrito el 11 x 12 ($1.800.000 de lista = 12 x $150.000). */
 export const PRECIO_MENSUAL_PLAN_ANUAL = PLAN_ANUAL.precioLista / PLAN_ANUAL.periodos
@@ -115,6 +115,9 @@ export const TEXTO_SIN_OFERTA: Record<MotivoSinOferta, string> = {
   cuotas_vencidas: 'Para elegir el plan anual primero hay que pagar las cuotas vencidas.',
   plan_activo: 'Tu suscripción ya tiene un plan anual vigente.',
   sin_tiempo: 'Hoy termina el período en curso: el plan anual se puede elegir desde mañana.',
+  // 16.4 (Emilio, 5-nov): sin la v1.5 aceptada no se vende ningún período que empiece desde la fecha base.
+  acepta_v15:
+    'Para elegir el plan anual primero hay que aceptar la versión 1.5 de los Términos (cláusula 16.4). La persona designada la acepta en Valida.',
 }
 
 /**

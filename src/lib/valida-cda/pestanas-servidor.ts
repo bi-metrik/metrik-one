@@ -21,7 +21,11 @@ export type ResultadoPagosCda =
   | LecturaPestanaPagos
   | { estado: 'sin_acceso'; razon: string }
 
-export async function leerPagosCda(e: EntradaValidaCda): Promise<ResultadoPagosCda> {
+/**
+ * `carteraDeTransicion`: el CDA que aceptó la v1.5 tarde y vuelve a empezar (16.4, `noContinuaCda`) ve lo de
+ * la 11.7 sin pagar como saldo pendiente, igual que con la Cancelada: pagarlo no es condición para volver.
+ */
+export async function leerPagosCda(e: EntradaValidaCda, opciones: { carteraDeTransicion?: boolean } = {}): Promise<ResultadoPagosCda> {
   if (e.tipo !== 'ok' || e.estado.estado !== 'aprobada' || !e.servicioContratadoId) {
     return { estado: 'sin_acceso', razon: 'Los pagos se ven cuando tu empresa acepte los términos.' }
   }
@@ -33,7 +37,7 @@ export async function leerPagosCda(e: EntradaValidaCda): Promise<ResultadoPagosC
   }
   return leerPestanaPagosCda(e.servicioContratadoId, e.hoy, undefined, {
     transicion: hablaConLaV15(e) ? e.transicionDesde : null,
-    cancelada: e.canceladaDesde !== null,
+    cancelada: e.canceladaDesde !== null || opciones.carteraDeTransicion === true,
   })
 }
 
