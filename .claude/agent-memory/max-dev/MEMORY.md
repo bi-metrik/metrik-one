@@ -4,7 +4,7 @@
 
 - ⚠️ [IP real detrás de Cloudflare (4-nov)](project_ip_cliente_cloudflare.md) — usar src/lib/http/ip-cliente.ts; geo CF exige el Managed Transform de Mik
 - ⚠️⚠️ [Suspendida por pago, PR A (4-nov)](project_valida_suspendida_pr_a.md) — paso 8d; hablaConLaV15 en plazos (no puerta); PR B antes del 31-dic
-- ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave Anthropic 401 + respaldo; LLM_PROVEEDOR_CAPTURAS; chat en low
+- ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave 401 + respaldo; ×1 no ve fallos intermitentes; bandeja en Bloqueo → PAQUETE
 - ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408/#1407; ronda 2: pregunta Pública/Neta por paquete (sin default), CHD por edad; foto sin hacer
 
 - ⚠️ [Vacacional/Negocios y nombre del PDF (3-nov)](project_vacacional_nombre_pdf.md) — option_labels aditivo; SQL de config SIN aplicar; nombre para todos

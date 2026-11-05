@@ -320,6 +320,29 @@ const nombreDe = (lectura: string, i: number) => lectura.split('·')[i]?.replace
 /** El texto entero de lo que se leyó, para buscar números de vuelo y noches sin depender del campo exacto. */
 const textoDe = (x: unknown) => JSON.stringify(x ?? null)
 
+/**
+ * El HTML del que salió el PNG (`_build/html/<viaje>/<png>.html` del banco): el oráculo de lo que la clave no
+ * anota (la «compra antes del», si el vuelo dice «Directo» o «conexión»). `null` si no está.
+ */
+export function htmlDelPng(rutaPng: string): string | null {
+  const dir = carpetaQa()
+  if (!dir) return null
+  const viaje = path.basename(path.dirname(path.dirname(rutaPng)))
+  const ruta = path.join(dir, '_build', 'html', viaje, path.basename(rutaPng).replace(/\.png$/, '.html'))
+  return existsSync(ruta) ? readFileSync(ruta, 'utf8') : null
+}
+
+const MESES: Record<string, string> = { ene: '01', feb: '02', mar: '03', abr: '04', may: '05', jun: '06', jul: '07', ago: '08', sep: '09', oct: '10', nov: '11', dic: '12' }
+
+/** «Compra antes del 15-Dic-2026», «compra anticipada válido hasta el 30/11/2026» → AAAA-MM-DD. `null` si no lo dice. */
+export function compraAntesDeHtml(html: string): string | null {
+  const t = html.replace(/<[^>]+>/g, ' ')
+  const m = /(?:compra antes del|v[aá]lid[oa] hasta el)\s+(\d{1,2})[-/ ]([A-Za-z]{3}|\d{1,2})[-/ ](\d{4})/i.exec(t)
+  if (!m) return null
+  const mes = /^\d+$/.test(m[2]) ? m[2].padStart(2, '0') : MESES[m[2].toLowerCase()]
+  return mes ? `${m[3]}-${mes}-${m[1].padStart(2, '0')}` : null
+}
+
 async function dataUrl(ruta: string): Promise<string> {
   return `data:image/png;base64,${readFileSync(ruta).toString('base64')}`
 }
@@ -338,6 +361,22 @@ export async function trappvelCaptura(c: Caso): Promise<ResultadoFamilia> {
     let r = await leerPantallazoDeBloqueo('detectar', url)
     const detectada = r.ok ? r.cual : r.elegir ? `(elegir${r.detalle ? `: ${r.detalle}` : ''})` : `(falló: ${r.mensaje})`
     campos.push(comparar('casilla_detectada', cual, detectada))
+    // La bandeja general de un viaje en Bloqueo (prueba del 2026-11-04): lo que hace `detectarCaptura`.
+    // `EVAL_BANDEJA_COMO_ANTES=1` mide main: la detección de siempre, sin camino al paquete.
+    {
+      const buffer = readFileSync(String(c.entrada.ruta))
+      let bandeja: string
+      if (process.env.EVAL_BANDEJA_COMO_ANTES === '1') {
+        const { detectarTipoDeCaptura } = await import('../../src/lib/ai/detectar-tipo-captura')
+        const d = await detectarTipoDeCaptura(buffer, 'image/png', LLAVE_RELLENO)
+        bandeja = d.data?.tipo ? `(lectura de siempre: ${d.data.tipo})` : `(no se reconoce${d.error ? `: ${d.error}` : ''})`
+      } else {
+        const { detectarEnLaBandeja } = await import('../../src/lib/cotizaciones/deteccion-bandeja')
+        const d = await detectarEnLaBandeja(buffer, 'image/png', LLAVE_RELLENO, true)
+        bandeja = d.casilla ?? (d.deteccion.data?.tipo ? `(lectura de siempre: ${d.deteccion.data.tipo})` : '(no se reconoce)')
+      }
+      campos.push(comparar('bandeja_general', cual, bandeja))
+    }
     if (!r.ok || r.cual !== cual) r = await leerPantallazoDeBloqueo(cual, url)
     if (!r.ok) return { campos, error: `${r.mensaje}${r.detalle ? ` — ${r.detalle}` : ''}`.slice(0, 300) }
     if (r.cual === 'hotel') {
@@ -356,12 +395,30 @@ export async function trappvelCaptura(c: Caso): Promise<ResultadoFamilia> {
       if (chd !== null) campos.push(comparar('precio_chd', chd, h.nino?.precio ?? null))
       const inf = precioBloqueo(fila.lectura, /INF/)
       if (inf !== null) campos.push(comparar('precio_inf', inf, h.infante?.precio ?? null))
+      // La «compra antes del» (prueba del 2026-11-04: Tu Reserva la escribe «válido hasta el 30/11/2026»).
+      const html = htmlDelPng(String(c.entrada.ruta))
+      // Una sola lectura no basta: en main Haiku la leía 1 o 2 veces de 6 (y la corrida ×1 del 2026-11-04 salió 4/4
+      // por suerte). Se lee `EVAL_REPETIR_COMPRA` veces (3 por defecto) y vale solo si TODAS la traen.
+      if (html) {
+        const esperada = compraAntesDeHtml(html)
+        const veces = Math.max(1, Number(process.env.EVAL_REPETIR_COMPRA ?? 3) || 1)
+        const extra = await Promise.all(Array.from({ length: veces - 1 }, () => leerPantallazoDeBloqueo('hotel', url)))
+        const leidas = [h.compraAntesDe ?? null, ...extra.map((x) => (x.ok && x.cual === 'hotel' ? x.hotel.compraAntesDe ?? null : '(falló)'))]
+        campos.push(campoLibre('compra_antes_de', esperada, leidas.join(' '), leidas.every((x) => x === esperada)))
+      }
+      // Los íconos que solo describen la estadía («5 noches», «Playa») no son servicios: no van a «sin identificar».
+      campos.push(campoLibre('iconos_sin_identificar', 0, r.incluye.sinIdentificar.map((x) => x.descripcion).join(' | ') || 0, r.incluye.sinIdentificar.length === 0))
     } else {
       const nums = numerosDeVuelo(fila.lectura)
       const t = r.vuelo.tramos
       campos.push(comparar('n_tramos', nums.length, t.length))
       campos.push(campoLibre('numeros_vuelo', nums.join(' '), t.map((x) => x.numeroVuelo).join(' '), nums.every((n) => t.some((x) => numeroIgual(x.numeroVuelo, n)))))
       campos.push(campoLibre('fechas_tramos', clave.fechas.inicio, t.map((x) => x.fecha).join(' '), !!clave.fechas.inicio && t.some((x) => x.fecha === clave.fechas.inicio)))
+      // Cada fila del itinerario es un vuelo; sin «conexión» ni «escala» escritas, todos son directos.
+      const html = htmlDelPng(String(c.entrada.ruta))
+      if (html && !/conexi[oó]n|escala/i.test(html)) {
+        campos.push(campoLibre('directo', 'todos', t.map((x) => x.escalas).join(' '), t.every((x) => x.escalas === 0)))
+      }
     }
     return { campos }
   }

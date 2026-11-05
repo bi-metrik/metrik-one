@@ -82,7 +82,7 @@ export interface CambioDeCaptura {
 
 export type Deteccion =
   | { ok: true; tipo: TipoRanura; lugar: string | null; origen: string | null; destino: string | null }
-  | { ok: false; codigo: string; mensaje: string }
+  | { ok: false; codigo: string; mensaje: string; casilla?: 'hotel' | 'vuelo' }
 
 export type LecturaDeBorrador =
   | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
@@ -110,6 +110,11 @@ export interface DependenciasDeProceso {
   /** ¿Esta pasada sigue importando? `false` = el asesor quitó la captura. */
   vigente: () => boolean
   informar: (cambio: CambioDeCaptura) => void
+  /**
+   * Viaje en Bloqueo: la detección dijo que es el hotel o el vuelo de un paquete (`codigo: 'PAQUETE'`).
+   * `true` = la bandeja ya lo llevó al paquete (la fila sale). Sin esto, o con `false`, la fila dice dónde ponerlo.
+   */
+  alPaquete?: (casilla: 'hotel' | 'vuelo') => boolean
 }
 
 /**
@@ -223,6 +228,12 @@ export async function procesarCaptura(deps: DependenciasDeProceso, tipoElegido?:
         : { ok: false, codigo: 'LECTURA', mensaje: esErrorDeEnvio(e) ? MENSAJE_DETECCION_SIN_RED : DETECCION_CAIDA }
     }
     if (!deps.vigente()) return
+    if (!r.ok && r.codigo === 'PAQUETE' && r.casilla) {
+      // Prueba con Haiku del 2026-11-04: nunca «No se reconoce qué es» a un hotel o un vuelo del paquete.
+      if (deps.alPaquete?.(r.casilla)) return
+      deps.informar({ estado: { fase: 'rechazada', mensaje: r.mensaje }, abierta: true })
+      return
+    }
     if (!r.ok) {
       deps.informar(r.codigo === 'SIN_TIPO' || r.codigo === 'LECTURA'
         ? { estado: { fase: 'eligiendo_tipo', motivo: r.mensaje }, abierta: true }

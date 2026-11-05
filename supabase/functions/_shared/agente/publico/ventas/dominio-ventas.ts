@@ -58,6 +58,22 @@ export const VER_COMPLEMENTOS = 'ver_complementos';
 /** Los cierres de ventas cuya salida escribe el código (no el modelo): no pasan por la lista blanca ni la guarda de plata. */
 export const CIERRES_DEL_CODIGO_VENTAS = [GENERAR_LINK_PAGO, VERIFICAR_PAGO, CONFIRMAR_COMPRA];
 
+// El asistente cierra la venta solo: no ofrece pasar a una persona (Mauricio, 4-nov). En vivo (conversación 10) ofreció
+// «¿Quieres que una persona del equipo te confirme…?» dos veces ante un dato que no estaba en la ficha. El paso a persona
+// sale solo por pasar_a_persona (los casos del reglamento) o por respuesta_fija; lo que escribe el modelo no lo ofrece.
+const OFRECE_PERSONA = [
+  /\b(te|lo|la|los)\s+(paso|pase|pasamos|pasemos|comunico|comunique|conecto|conecte)\s+con\b/,
+  /\bpasart?e\s+con\b/,
+  /\b(quieres|prefieres|te gustaria|deseas)\s+(que\s+)?(te\s+)?(pase|pasemos|comunique|conecte|hablar con|una persona|alguien|un asesor)/,
+  /\b(una persona|alguien|un asesor)( del equipo)?\s+(te|se)\s+(lo\s+|la\s+)?(confirme|confirma|confirmara|ayude|ayuda|atienda|atiende|revise|revisa)\b/,
+];
+
+/** ¿El texto del modelo le ofrece al cliente pasar con una persona? Pura. */
+export function ofrecePersona(texto: string): boolean {
+  const n = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return OFRECE_PERSONA.some((re) => re.test(n));
+}
+
 /**
  * ¿El último mensaje del cliente fue el «sí» a la autorización de datos? Ese «sí» es una respuesta entendida, nunca
  * motivo de `no_entiende` (Dimpro, 3-nov: autorizó y el modelo lo pasó a persona por no entender). Pura.
@@ -250,7 +266,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   const lecturas: DeclaracionHerramienta[] = [
     {
       name: 'ver_catalogo',
-      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; si el cliente insiste en que se las confirmes, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Con el uso dicho, antes de recomendar puede devolver \`falta\` (energia o presupuesto) con la \`pregunta\` que toca: hazla sola, y con la respuesta vuelve a llamarla pasando \`energia\` o \`presupuesto\`. Al final devuelve ${MAX_RECOMENDADOS} productos como mucho (uno preciso o dos para escoger): recomienda solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si devuelve \`no_disponible\` o \`catalogo_vacio\` (el producto existe pero no está publicado hoy, o no hay nada publicado), haz lo que dice su \`que_hacer\`: nunca su precio ni su ficha, aunque estén en la conversación. Si no aparece lo que pide, no ofrezcas otro como si fuera el mismo: pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
+      description: `Busca en el catálogo de productos publicados: por texto libre (\`buscar\`, p. ej. «taladro», «bomba 1 HP») o por el código de la publicación (\`codigo\`, p. ej. MP-12). Pasa en \`uso\` para qué lo quiere el cliente, si ya lo dijo (p. ej. «metal, de cable», «concreto», «hogar», «inalámbrico», «estructura metálica»). Devuelve como máximo ${MAX_SUGERENCIAS} productos, los que mejor encajan, con código, producto, marca, precio, las especificaciones VERIFICADAS (las puedes afirmar) y las que son «según el catálogo del fabricante» (si las dices, dilo así; no ofrezcas una persona: solo si el cliente insiste en que alguien se las confirme, pasa a persona con duda_abierta). Si hay más de ${MAX_SUGERENCIAS} y no pasaste \`uso\`, no devuelve productos sino \`preguntar_uso\` con los tipos que hay (y, si la trae, la \`pregunta\` que toca hacer): haz UNA sola pregunta y, con la respuesta, vuelve a llamarla con \`buscar\` y \`uso\`. Con el uso dicho, antes de recomendar puede devolver \`falta\` (energia o presupuesto) con la \`pregunta\` que toca: hazla sola, y con la respuesta vuelve a llamarla pasando \`energia\` o \`presupuesto\`. Al final devuelve ${MAX_RECOMENDADOS} productos como mucho (uno preciso o dos para escoger): recomienda solo esos. Úsala antes de decir cualquier precio o dato de un producto. El precio es el publicado: nunca lo calcules, redondees ni negocies. Si devuelve \`no_disponible\` o \`catalogo_vacio\` (el producto existe pero no está publicado hoy, o no hay nada publicado), haz lo que dice su \`que_hacer\`: nunca su precio ni su ficha, aunque estén en la conversación. Si no aparece lo que pide, díselo y recomienda lo que sí sirva para ese trabajo, como alternativa y no como si fuera el mismo; solo si nada le sirve y quiere justo ese, pasa a persona con no_en_catalogo. Cada producto trae \`tiene_foto\`: si lo nombras con su código y tiene foto, la foto sale sola después de tu mensaje; si no tiene, no prometas foto. No pegues links de fotos.`,
       parameters: {
         type: 'object',
         properties: {
@@ -270,7 +286,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     },
     {
       name: 'consultar_reglas',
-      description: `Las políticas publicadas, por clave: ${claves.join(', ')}. Si devuelve \`sin_dato\`, no adivines: pasa a persona con duda_abierta.`,
+      description: `Las políticas publicadas, por clave: ${claves.join(', ')}. Si devuelve \`sin_dato\`, no adivines: dile que ese dato no lo tienes y sigue con la venta; solo si insiste en que alguien se lo confirme, pasa a persona con duda_abierta.`,
       parameters: { type: 'object', properties: { clave: { type: 'string', enum: claves } }, required: ['clave'] },
     },
   ];
@@ -315,6 +331,9 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     bot: BOT_PUBLICO,
     // Una propuesta de compra vence con cualquier otro mensaje del bot: un «sí» viejo no crea un link.
     propuestaVenceConRespuesta: true,
+    revisarRespuesta: (salida) => (ofrecePersona([salida.texto, ...('opciones' in salida ? salida.opciones.map((o) => o.titulo) : [])].join('\n'))
+      ? 'No le ofrezcas pasar con una persona: tu trabajo es cerrar la venta tú. Si no tienes el dato, dilo y sigue con lo que sí sabes hacia la compra. Si el cliente pidió una persona o es un caso de paso_a_persona, usa pasar_a_persona.'
+      : null),
     topesResultado: { ver_catalogo: TOPE_VER_CATALOGO_VENTAS },
     lecturas,
     acciones: ['compra'],
@@ -352,13 +371,13 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
           };
         }
         if (sug.tipo === 'sugerir' && sug.ninguno) {
-          return { ok: true, datos: { productos: [], ninguno_para_ese_uso: true, nota: 'Hay de lo que busca, pero ninguno es para ese uso según el catálogo. Díselo así, sin ofrecer otro como si sirviera, y pregúntale si quiere que lo atienda una persona del equipo (si dice que sí: pasar_a_persona motivo no_en_catalogo).' } };
+          return { ok: true, datos: { productos: [], ninguno_para_ese_uso: true, nota: 'Hay de lo que busca, pero ninguno es para ese uso según el catálogo. Díselo así, sin ofrecer otro como si sirviera ni ofrecerle una persona; pregúntale qué trabajo va a hacer o si busca otra cosa. Solo si insiste en ese producto: pasar_a_persona motivo no_en_catalogo.' } };
         }
         if (!sug.productos.length) {
           const nd = await noDisponible();
           if (nd.length) return { ok: true, datos: respuestaNoDisponible(nd, alternativasA(nd[0], ps)) };
         }
-        if (!sug.productos.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. No ofrezcas otro como si fuera el mismo: si lo quiere, pasar_a_persona con motivo no_en_catalogo.' } };
+        if (!sug.productos.length) return { ok: true, datos: { productos: [], nota: 'No está en el catálogo. Díselo, sin ofrecer otro como si fuera el mismo ni ofrecerle una persona: pregúntale para qué trabajo lo necesita y búscale lo que sí sirva. Solo si insiste en justo ese producto: pasar_a_persona con motivo no_en_catalogo.' } };
         if (sug.tipo === 'codigo') return { ok: true, datos: { productos: sug.productos.map(productoParaModelo) } };
         const pref: Preferencias = {
           energia: ['cable', 'inalambrico', 'cualquiera'].includes(String(args.energia)) ? args.energia as Preferencias['energia'] : null,
@@ -428,7 +447,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         const clave = String(args.clave ?? '');
         if (!claves.includes(clave)) return { ok: false, datos: null, error: `Clave desconocida. Usa una de: ${claves.join(', ')}.` };
         const p = r.fichas.find((f) => f.clave === `pol.${clave}`);
-        if (!p) return { ok: true, datos: { clave, sin_dato: true, que_hacer: 'No hay ficha: pasar_a_persona con motivo duda_abierta. No adivines.' } };
+        if (!p) return { ok: true, datos: { clave, sin_dato: true, que_hacer: 'No hay ficha: no adivines. Dile que ese dato no lo tienes y sigue con la venta; solo si insiste en que alguien se lo confirme, pasar_a_persona con motivo duda_abierta.' } };
         return { ok: true, datos: { clave, politica: p.hacer } };
       }
       return { ok: false, datos: null, error: `No existe la herramienta «${nombre}».` };
@@ -439,7 +458,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const filas = filasDe(ctx);
       const aut = estadoAutorizacion(filas, 'general');
       if (aut.estado !== 'si') {
-        return { ok: false, error: `Falta la autorización de datos (${aut.estado === 'no' ? 'dijo que no: no tomes datos y ofrece una persona' : 'pídela con respuesta_fija rf.autorizacion antes de tomar nombre, celular o dirección'}).`, candado: 'sin_autorizacion' };
+        return { ok: false, error: `Falta la autorización de datos (${aut.estado === 'no' ? 'dijo que no: no tomes datos; dile que sin ellos no puedes armar el pedido' : 'pídela con respuesta_fija rf.autorizacion antes de tomar nombre, celular o dirección'}).`, candado: 'sin_autorizacion' };
       }
       // Lo que falta, dicho campo por campo (30-oct: sin `producto`, el error era «no es un código de ver_catalogo» y el
       // modelo volvía a buscar el producto en vez de completar los datos).
@@ -528,8 +547,8 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const g = estadoAutorizacion(filas, 'general');
       const pasados = motivosYaPasados(filas);
       const compras = comprasConfirmadas(filas);
-      const lineaG = g.estado === 'si' ? 'sí (sigue con lo que falte del pedido: cantidad y entrega si no las ha dicho, luego nombre, celular y dirección si es despacho; un «sí» a la autorización no es una duda ni motivo para pasar a persona)'
-        : g.estado === 'no' ? 'dijo que no: no tomes datos personales; sigue informando y ofrece una persona'
+      const lineaG = g.estado === 'si' ? 'sí (sigue con lo que falte del pedido: cantidad y entrega si no las ha dicho, luego nombre, celular y dirección si es despacho; un «sí» a la autorización no es una duda)'
+        : g.estado === 'no' ? 'dijo que no: no tomes datos personales; sigue informando, sin ofrecer una persona'
           : g.estado === 'pedida' ? 'pedida, sin respuesta: no pidas datos personales'
             : 'no pedida: antes de pedir nombre, celular o dirección, llama respuesta_fija rf.autorizacion';
       const u = compras.at(-1);
@@ -546,7 +565,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         ...(pasados.includes('despachar') ? ['El pago ya está confirmado y el despacho lo tiene el equipo: no vuelvas a verificar ni a pedir el pago.'] : []),
         ...(pasados.length ? [`Ya pasó a persona por: ${[...new Set(pasados)].join(', ')}.`] : []),
         ...(!pasados.length && porQueYaSalio(filas) ? [ultimoFuePorQue(filas)
-          ? 'Tu último mensaje fue la pregunta de para qué quiere una persona. Si pide algo que resuelves, contéstalo y ofrécele otra vez pasar con una persona. Si insiste: pasar_a_persona motivo pide_persona.'
+          ? 'Tu último mensaje fue la pregunta de para qué quiere una persona. Si pide algo que resuelves, contéstalo y sigue con la venta, sin volver a ofrecerle la persona. Si insiste: pasar_a_persona motivo pide_persona.'
           : 'Ya le preguntaste por qué quiere una persona: no lo vuelvas a preguntar.'] : []),
       ];
     },
