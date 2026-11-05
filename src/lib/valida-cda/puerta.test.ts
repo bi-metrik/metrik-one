@@ -726,6 +726,17 @@ describe('la exigencia de la v1.5 desde la fecha de la 16.4 (Maxitec: 22-dic-202
     }
   })
 
+  it('un abono parcial al período no vendido tampoco es mora (Vera)', async () => {
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV, DIC], error: null }
+    escenario.cobros = pagos(500000)
+    for (const hoy of ['2026-12-29', '2027-01-23']) {
+      escenario.hoy = hoy
+      const m = await moraValidaCda()
+      expect(m.tipo === 'ok' && m.mora.estado, hoy).toBe('al_dia')
+      expect(await validaCdaPermiteOperar(), hoy).toEqual({ ok: true })
+    }
+  })
+
   it('pagado por transferencia sin aceptar: se presta hasta el 22-ene; desde el 23-ene se exige', async () => {
     escenario.cuotas = { data: [CUOTA_1, OCT, NOV, DIC], error: null }
     escenario.cobros = pagos(600000)
@@ -748,8 +759,9 @@ describe('la exigencia de la v1.5 desde la fecha de la 16.4 (Maxitec: 22-dic-202
     expect(await validaCdaPermiteConsultar()).toEqual({
       ok: false,
       error:
-        'MAXITEC S.A.S. ya aceptó la versión 1.5 de los Términos. Para volver a consultar en Valida, la persona designada paga un ' +
-        'período en la sección Suscripción: corre desde el día del pago, que pasa a ser tu nueva fecha de renovación.',
+        'MAXITEC S.A.S. ya aceptó la versión 1.5 de los Términos, gracias. Para volver a consultar en Valida falta un paso: que la ' +
+        'persona designada pague un período en la sección Suscripción. El período corre desde el día del pago, que pasa a ser tu ' +
+        'nueva fecha de renovación.',
     })
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
   })

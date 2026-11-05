@@ -1,13 +1,19 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`textos nuevos > el bloque de Suscripción y el correo del período prestado 1`] = `
-"Hola, equipo de MAXITEC S.A.S.:
+exports[`textos nuevos > el bloque de Suscripción y el correo del período prestado 1`] = `"Valida: recibimos tu pago del período del 23 de diciembre al 22 de enero; acepta la versión 1.5 para continuar después"`;
 
-Registramos el pago del período del 23 de diciembre al 22 de enero. Durante ese período puedes seguir haciendo consultas en Valida.
+exports[`textos nuevos > el bloque de Suscripción y el correo del período prestado 2`] = `
+"Hola.
 
-MAXITEC S.A.S. todavía no ha aceptado la versión 1.5 de los Términos. Por la cláusula 16.4, la suscripción continúa después de este período solo si se acepta: el período siguiente no se ofrece ni se cobra sin esa aceptación.
+Gracias, registramos el pago del período del 23 de diciembre al 22 de enero. Durante ese período puedes seguir haciendo consultas en Valida.
 
-La persona designada por tu empresa la acepta en Valida: https://maxitec.metrikone.co/valida.
+Para continuar sin interrupción, la persona designada por tu empresa acepta la versión 1.5 en Valida: https://maxitec.metrikone.co/valida.
+
+Por la cláusula 16.4, la suscripción continúa después de este período solo si MAXITEC S.A.S. acepta la versión 1.5 de los Términos a más tardar el 23 de enero de 2027: sin esa aceptación, el período siguiente no se ofrece ni se cobra.
+
+¿Dudas? Escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.
 
 METRIK IA S.A.S. · NIT 902.079.601-9 · mauricio.moreno@metrik.com.co"
 `;
+
+exports[`textos nuevos > el bloque de Suscripción y el correo del período prestado 3`] = `"<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1A1A1A;max-width:640px"><p>Hola.</p><p>Gracias, registramos el pago del período del 23 de diciembre al 22 de enero. Durante ese período puedes seguir haciendo consultas en Valida.</p><p>Para continuar sin interrupción, la persona designada por tu empresa acepta la versión 1.5 en Valida: https://maxitec.metrikone.co/valida.</p><p><a href="https://maxitec.metrikone.co/valida" style="display:inline-block;background:#10B981;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold">Leer y aceptar en Valida</a></p><p>Por la cláusula 16.4, la suscripción continúa después de este período solo si MAXITEC S.A.S. acepta la versión 1.5 de los Términos a más tardar el 23 de enero de 2027: sin esa aceptación, el período siguiente no se ofrece ni se cobra.</p><p>¿Dudas? Escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.</p><p style="font-size:12px;color:#6B7280">METRIK IA S.A.S. · NIT 902.079.601-9 · mauricio.moreno@metrik.com.co</p></div>"`;

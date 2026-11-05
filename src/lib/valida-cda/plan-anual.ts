@@ -116,7 +116,8 @@ export const TEXTO_SIN_OFERTA: Record<MotivoSinOferta, string> = {
   plan_activo: 'Tu suscripción ya tiene un plan anual vigente.',
   sin_tiempo: 'Hoy termina el período en curso: el plan anual se puede elegir desde mañana.',
   // 16.4 (Emilio, 5-nov): sin la v1.5 aceptada no se vende ningún período que empiece desde la fecha base.
-  acepta_v15: 'Para elegir el plan anual primero hay que aceptar la versión 1.5 de los Términos (cláusula 16.4).',
+  acepta_v15:
+    'Para elegir el plan anual primero hay que aceptar la versión 1.5 de los Términos (cláusula 16.4). La persona designada la acepta en Valida.',
 }
 
 /**

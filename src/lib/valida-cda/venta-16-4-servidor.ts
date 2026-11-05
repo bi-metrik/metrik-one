@@ -55,6 +55,8 @@ export interface ResumenVenta164 {
   /** Contratos con la v1.5 sin aceptar (o aceptada después de la base). */
   sinAceptar: number
   cuotasAnuladas: { servicioContratadoId: string; cuotaId: string }[]
+  /** No vendidas con un abono parcial al terminar su período: no se anulan solas, las mira una persona. */
+  conAbono: { servicioContratadoId: string; cuotaId: string }[]
   renovacionApagada: string[]
   /** Períodos que empiezan desde la base, pagados sin la v1.5: se prestan. */
   prestados: { servicioContratadoId: string; desde: string }[]
@@ -80,6 +82,7 @@ export async function procesarPeriodosNoVendidos(deps: DepsVenta164): Promise<Re
     revisados: 0,
     sinAceptar: 0,
     cuotasAnuladas: [],
+    conAbono: [],
     renovacionApagada: [],
     prestados: [],
     correos: [],
@@ -122,17 +125,38 @@ export async function procesarPeriodosNoVendidos(deps: DepsVenta164): Promise<Re
       // 1. Los no vendidos cuyo período ya terminó: se anulan (16.4) y el plan deja de renovarse.
       // También lo de antes de una reactivación (el CDA que aceptó tarde y volvió a empezar): su período no
       // vendido queda en el plan viejo y se anula igual al terminar.
+      // El reparto con el abono de cada una: el del plan vigente completo (vendidas y no vendidas).
+      const vigentes = noVendidas(
+        cuotasConEstado({ cuotas: [...cuenta.cuotas, ...cuenta.noVendidas], cobros: cuenta.cobros, hoy: deps.hoy, ahoraISO }),
+        venta,
+      )
       const anteriores = noVendidas(
         cuotasConEstado({ cuotas: cuenta.anterior.cuotas, cobros: cuenta.anterior.cobros, hoy: deps.hoy, ahoraISO }),
         venta,
       )
       let anuladas = 0
-      for (const c of [...cuenta.noVendidas, ...anteriores]) {
+      for (const c of [...vigentes, ...anteriores]) {
         const per = periodoDeCuota(c)
         const cuotaId = c.cuotaId ?? null
         if (!per || per.hasta >= deps.hoy || !cuotaId) continue
         const donde = cuenta.planDeCuota.get(cuotaId)
         if (!donde) continue
+        // Con un abono parcial no se anula sola (Vera): ni mora ni anulación; la revisa una persona.
+        if (c.abonado > 0) {
+          resumen.conAbono.push({ servicioContratadoId: sc.id, cuotaId })
+          const texto =
+            `Valida, 16.4: el período del ${per.desde} al ${per.hasta} no se vendió (sin la v1.5 aceptada) y tiene un abono parcial de ` +
+            `$${Math.round(c.abonado).toLocaleString('es-CO')}. No se anula solo ni cuenta como mora: revisar a mano (prestar el período o devolver el abono).`
+          const ya = await db.from('activity_log').select('id').eq('entidad_id', sc.negocio_id).eq('contenido', texto.slice(0, 280)).limit(1)
+          if (!ya.error && (ya.data ?? []).length === 0) {
+            await anotarEnAncla(
+              db,
+              { ancla: { tipo: 'negocio', id: sc.negocio_id }, workspaceId: sc.workspace_id, tipo: 'valida_periodo_no_vendido_abono', texto, datos: { cuota_id: cuotaId } },
+              'venta-16-4',
+            )
+          }
+          continue
+        }
         const r = await anularCuota(db, { cuotaId, planCobroId: donde.planCobroId, numero: donde.numero, ahoraISO, motivo: MOTIVO_ANULACION_16_4 })
         if (!r.ok) {
           resumen.fallidos.push({ servicioContratadoId: sc.id, error: r.error })

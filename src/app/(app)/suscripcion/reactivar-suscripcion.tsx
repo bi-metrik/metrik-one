@@ -22,7 +22,7 @@ export function ReactivarSuscripcion({
   /** `v15_tarde`: aceptó la v1.5 después de la base de la 16.4 y vuelve a empezar (mismo flujo, otro texto). */
   variante?: 'cancelada' | 'v15_tarde'
 }) {
-  const t = variante === 'v15_tarde' ? textosBloquePagarPeriodo({ monto }) : textosBloqueReactivar({ monto, hayCartera })
+  const t = variante === 'v15_tarde' ? textosBloquePagarPeriodo({ monto, hayCartera }) : textosBloqueReactivar({ monto, hayCartera })
   const [error, setError] = useState<string | null>(null)
   const [pendiente, iniciar] = useTransition()
   return (

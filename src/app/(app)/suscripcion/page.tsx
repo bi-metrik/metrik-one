@@ -130,7 +130,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
     ) : cancelada ? (
       <ReactivarSuscripcion monto={montoReactivacion} hayCartera={hayCartera} soloLectura={soloLectura} />
     ) : v15Tarde ? (
-      <ReactivarSuscripcion monto={montoReactivacion} hayCartera={false} soloLectura={soloLectura} variante="v15_tarde" />
+      <ReactivarSuscripcion monto={montoReactivacion} hayCartera={hayCartera} soloLectura={soloLectura} variante="v15_tarde" />
     ) : ctx.pago ? (
       <TarjetaPago
         lectura={ctx.pago}

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { planearRenovacion, type PlanCandidatoRenovacion } from '@/lib/cobros/renovar-ciclo'
 import type { CuotaConEstado } from './pago-pendiente'
 import {
+  aceptarAMasTardar,
+  asuntoCorreoPrestado,
+  htmlCorreoPrestado,
   diaBogota,
   noVendidas,
   periodoSeVende,
@@ -61,8 +64,9 @@ describe('noVendidas', () => {
     expect(noVendidas(cuotas, { ...MAXITEC, aceptadaEl: '2027-01-10' }).map((c) => c.numero)).toEqual([4, 5])
     const pagada = [estado(4, '2026-12-27', '23-dic al 22-ene', 150000)]
     expect(noVendidas(pagada, MAXITEC)).toEqual([])
+    // Un abono PARCIAL no la vende (Vera): sigue fuera de la mora.
     const abonada = [estado(4, '2026-12-27', '23-dic al 22-ene', 50000)]
-    expect(noVendidas(abonada, MAXITEC)).toEqual([])
+    expect(noVendidas(abonada, MAXITEC).map((c) => c.numero)).toEqual([4])
   })
 })
 
@@ -125,15 +129,28 @@ describe('la renovación no crea la cuota de un período que no se vende', () =>
 
 describe('textos nuevos', () => {
   it('el bloque de Suscripción y el correo del período prestado', () => {
-    expect(textosBloquePagarPeriodo({ monto: 150000 })).toEqual({
+    expect(textosBloquePagarPeriodo({ monto: 150000, hayCartera: false })).toEqual({
       titulo: 'Pagar un período',
       detalle:
-        'Pagas un período de $150.000. Corre desde el día del pago, que pasa a ser tu nueva fecha de renovación, y con el pago vuelven las consultas.',
+        'Con el pago vuelven las consultas. Pagas un período de $150.000, que corre desde el día del pago; esa fecha pasa a ser tu nueva fecha de renovación.',
       cartera: null,
       boton: 'Pagar un período desde hoy',
     })
-    expect(
-      textoCorreoPrestado({ razonSocial: 'MAXITEC S.A.S.', desde: '2026-12-23', hasta: '2027-01-22', urlValida: 'https://maxitec.metrikone.co/valida' }),
-    ).toMatchSnapshot()
+    expect(textosBloquePagarPeriodo({ monto: 150000, hayCartera: true }).cartera).toBe(
+      'Los períodos anteriores al 1 de diciembre de 2026 que no se pagaron aparecen abajo como saldo pendiente. Pagarlos no es condición para volver a consultar.',
+    )
+    const d = { razonSocial: 'MAXITEC S.A.S.', desde: '2026-12-23', hasta: '2027-01-22', urlValida: 'https://maxitec.metrikone.co/valida' }
+    expect(asuntoCorreoPrestado(d)).toMatchSnapshot()
+    expect(textoCorreoPrestado(d)).toMatchSnapshot()
+    expect(htmlCorreoPrestado(d)).toMatchSnapshot()
+  })
+
+  it('la fecha «a más tardar» del correo es la misma con que se decide si el período siguiente se vende', () => {
+    expect(aceptarAMasTardar('2027-01-22')).toBe('2027-01-23')
+    expect(periodoSeVende({ ...MAXITEC, aceptadaEl: aceptarAMasTardar('2027-01-22') }, '2027-01-23')).toBe(true)
+    expect(periodoSeVende({ ...MAXITEC, aceptadaEl: '2027-01-24' }, '2027-01-23')).toBe(false)
+    expect(textoCorreoPrestado({ razonSocial: 'X', desde: '2026-12-23', hasta: '2027-01-22', urlValida: 'u' })).toContain(
+      'a más tardar el 23 de enero de 2027',
+    )
   })
 })

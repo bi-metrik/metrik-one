@@ -181,7 +181,11 @@ describe('16.4: el enlace de Maxitec del período 23-dic–22-ene (base 22-dic)'
     }
     const lunes = await cronEnlace(tablas(MAXITEC), '2026-12-21')
     expect(lunes.resumen.omitidas).toEqual([
-      { cuotaId: 'q4', motivo: 'El período del 23 de diciembre al 22 de enero no se vende sin la versión 1.5 de los Términos aceptada (cláusula 16.4).' },
+      {
+        cuotaId: 'q4',
+        motivo:
+          'Para pagar el período del 23 de diciembre al 22 de enero primero hay que aceptar la versión 1.5 de los Términos (cláusula 16.4). La persona designada la acepta en Valida.',
+      },
     ])
     expect(lunes.resumen.errores).toEqual([])
   })
@@ -275,6 +279,27 @@ describe('16.4: el período no vendido se anula al terminar (paso 8f)', () => {
   })
 })
 
+describe('16.4: un abono PARCIAL a un período no vendido (Vera)', () => {
+  it('no es mora (ni Suspendida ni Cancelada), no se anula solo y deja una nota para revisión manual, una vez', async () => {
+    const t = tablas(MAXITEC)
+    ;(t.cobros as Fila[]).push({ ...pagado(4, '2026-12-26'), id: 'c4', monto: 50000 })
+    const d = crearDoble(t)
+    const deps = (hoy: string) => ({ db: d.db, hoy, ahoraISO: `${hoy}T12:00:00Z`, correoDePersona: async () => null, enviarCorreo: async () => ({ ok: true as const, id: 're' }) })
+    expect((await avisarSuspendidasPorPago(deps('2026-12-29'))).suspendidos).toBe(0)
+    expect((await cancelarSuscripcionesVencidas(deps('2027-01-23'))).canceladas).toEqual([])
+    const r = await procesarPeriodosNoVendidos(deps('2027-01-23'))
+    expect(r.cuotasAnuladas).toEqual([])
+    expect(r.conAbono).toEqual([{ servicioContratadoId: 'sc-cda', cuotaId: 'q4' }])
+    expect(fila(t, 'plan_cobro_cuotas', 'q4').anulada_at).toBe(null)
+    const notas = (t.activity_log as Fila[]).filter((a) => String(a.contenido).includes('abono parcial'))
+    expect(notas).toHaveLength(1)
+    expect(String(notas[0].contenido)).toContain('del 2026-12-23 al 2027-01-22 no se vendió (sin la v1.5 aceptada) y tiene un abono parcial de $50.000')
+    await procesarPeriodosNoVendidos(deps('2027-01-24'))
+    expect((t.activity_log as Fila[]).filter((a) => String(a.contenido).includes('abono parcial'))).toHaveLength(1)
+    expect(fila(t, 'servicios_contratados', 'sc-cda')).toMatchObject({ estado: 'activo', cancelada_desde: null })
+  })
+})
+
 describe('16.4: el período pagado de todos modos (transferencia) se presta', () => {
   it('no se anula, y se avisa una vez que el siguiente no se vende sin la v1.5', async () => {
     const t = tablas(MAXITEC)
@@ -284,10 +309,10 @@ describe('16.4: el período pagado de todos modos (transferencia) se presta', ()
     expect(r.prestados).toEqual([{ servicioContratadoId: 'sc-cda', desde: '2026-12-23' }])
     expect(x.correos.map((m) => m.to).sort()).toEqual(['facturacion@cda.test', 'gerencia@cda.test'])
     expect(x.correos[0].subject).toBe(
-      'Valida: recibimos el pago del período del 23 de diciembre al 22 de enero; el siguiente necesita la versión 1.5 de los Términos',
+      'Valida: recibimos tu pago del período del 23 de diciembre al 22 de enero; acepta la versión 1.5 para continuar después',
     )
     expect(x.correos[0].text).toContain('Durante ese período puedes seguir haciendo consultas en Valida.')
-    expect(x.correos[0].text).toContain('el período siguiente no se ofrece ni se cobra sin esa aceptación')
+    expect(x.correos[0].text).toContain('a más tardar el 23 de enero de 2027: sin esa aceptación, el período siguiente no se ofrece ni se cobra.')
     expect(x.correos[0].text).toContain('https://maxitec.metrikone.co/valida')
     await x.correr('2026-12-28')
     expect(x.correos).toHaveLength(2)

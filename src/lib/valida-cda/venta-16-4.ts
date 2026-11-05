@@ -44,7 +44,8 @@
 import type { DocumentoContractual } from '@/lib/valida-api/resultados'
 import { escaparHtml } from '@/lib/usuarios-espacio/correo'
 import type { CuotaConEstado } from './pago-pendiente'
-import { fechaDiaMesLargo, periodoDeCuota } from './plazos'
+import { fechaLarga } from './modificacion-terminos'
+import { fechaDiaMesLargo, periodoDeCuota, sumarDias } from './plazos'
 import { datosDelTextoV15, esTerminosV15, pesos } from './terminos-v1-5'
 
 /** El motivo con que se anula la cuota de un período que METRIK no vendió (16.4). */
@@ -97,8 +98,12 @@ export function inicioDeCuota(c: { concepto: string | null; fechaVencimiento: st
 
 /**
  * Las cuotas no vendidas, con el mismo reparto de lo pagado que la pestaña Pagos (`cuotasConEstado`): sin
- * ningún abono, y de un período que no se vende o posterior a uno no vendido (la suscripción no continuó:
- * lo que sigue tampoco se vende hasta volver a empezar). Una cuota con plata no es «no vendida»: se presta.
+ * pagar del todo, y de un período que no se vende o posterior a uno no vendido (la suscripción no continuó:
+ * lo que sigue tampoco se vende hasta volver a empezar). Una cuota PAGADA no es «no vendida»: se presta.
+ *
+ * Una con un abono PARCIAL sí lo es (revisión de Vera): no entra a la mora, porque un CDA nunca queda
+ * Suspendida ni Cancelada por un período que METRIK no ofreció. El cron no la anula sola: queda para revisión
+ * manual con una nota en el negocio (`venta-16-4-servidor.ts`).
  */
 export function noVendidas<C extends Pick<CuotaConEstado, 'concepto' | 'fechaVencimiento' | 'abonado' | 'estado'>>(
   estados: readonly C[],
@@ -109,8 +114,7 @@ export function noVendidas<C extends Pick<CuotaConEstado, 'concepto' | 'fechaVen
   const out: C[] = []
   let corte = false
   for (const c of orden) {
-    const conPlata = c.estado === 'pagada' || c.abonado > 0
-    if (conPlata) continue
+    if (c.estado === 'pagada') continue
     if (corte || !periodoSeVende(v, inicioDeCuota(c))) {
       corte = true
       out.push(c)
@@ -172,8 +176,9 @@ export function suscripcionNoContinua(p: {
 
 // ── Textos ───────────────────────────────────────────────────────────────────────────────
 
-/** Lo que se le suma a la persona designada en la pantalla de la 16.4 exigida (anexo A, final). */
-export const TEXTO_DESIGNADA_ACEPTA_Y_PAGA = 'Cuando la aceptes, pagas un período y vuelven las consultas.'
+/** Lo que se le suma a la persona designada en la pantalla de la 16.4 exigida (anexo A, final; Sofía y Vera). */
+export const TEXTO_DESIGNADA_ACEPTA_Y_PAGA =
+  'Acéptala y paga un período: con eso vuelven las consultas. Si la aceptas el día en que empieza tu período, vuelven desde la aceptación.'
 
 /** Lo que responde «Pagar un período» / «Reactivar» sin la v1.5 aceptada, desde la base. */
 export const TEXTO_REACTIVAR_EXIGE_V15 =
@@ -182,8 +187,9 @@ export const TEXTO_REACTIVAR_EXIGE_V15 =
 /** Lo que responde una consulta nueva (y lo que ve la pantalla) con la v1.5 aceptada tarde y sin período. */
 export function textoNoContinua(razonSocial: string | null): string {
   return (
-    `${razonSocial ?? 'Tu empresa'} ya aceptó la versión 1.5 de los Términos. Para volver a consultar en Valida, la persona ` +
-    'designada paga un período en la sección Suscripción: corre desde el día del pago, que pasa a ser tu nueva fecha de renovación.'
+    `${razonSocial ?? 'Tu empresa'} ya aceptó la versión 1.5 de los Términos, gracias. Para volver a consultar en Valida falta un ` +
+    'paso: que la persona designada pague un período en la sección Suscripción. El período corre desde el día del pago, que pasa a ' +
+    'ser tu nueva fecha de renovación.'
   )
 }
 
@@ -191,20 +197,31 @@ export function textoNoContinua(razonSocial: string | null): string {
 export const BOTON_PAGAR_PERIODO = 'Pagar un período desde hoy'
 
 /** El bloque de `/suscripcion` para volver a empezar después de aceptar tarde (la forma de `textosBloqueReactivar`). */
-export function textosBloquePagarPeriodo(p: { monto: number | null }): { titulo: string; detalle: string; cartera: null; boton: string } {
+export function textosBloquePagarPeriodo(p: { monto: number | null; hayCartera: boolean }): {
+  titulo: string
+  detalle: string
+  cartera: string | null
+  boton: string
+} {
   return {
     titulo: 'Pagar un período',
     detalle:
-      `${p.monto ? `Pagas un período de ${pesos(p.monto)}.` : 'Pagas un período.'} Corre desde el día del pago, que pasa a ser tu nueva ` +
-      'fecha de renovación, y con el pago vuelven las consultas.',
-    cartera: null,
+      `Con el pago vuelven las consultas. ${p.monto ? `Pagas un período de ${pesos(p.monto)}` : 'Pagas un período'}, que corre desde el ` +
+      'día del pago; esa fecha pasa a ser tu nueva fecha de renovación.',
+    cartera: p.hayCartera
+      ? 'Los períodos anteriores al 1 de diciembre de 2026 que no se pagaron aparecen abajo como saldo pendiente. Pagarlos no es ' +
+        'condición para volver a consultar.'
+      : null,
     boton: BOTON_PAGAR_PERIODO,
   }
 }
 
 /** Lo que responde el enlace (cron o botón) de un período que no se vende. */
 export function errorPeriodoNoVendido(periodo: string | null): string {
-  return `El período ${periodo ?? 'de esta cuota'} no se vende sin la versión 1.5 de los Términos aceptada (cláusula 16.4).`
+  return (
+    `Para pagar el período ${periodo ?? 'de esta cuota'} primero hay que aceptar la versión 1.5 de los Términos (cláusula 16.4). ` +
+    'La persona designada la acepta en Valida.'
+  )
 }
 
 export interface DatosCorreoPrestado {
@@ -218,17 +235,26 @@ export interface DatosCorreoPrestado {
 
 /** El correo al registrar el pago de un período posterior a la base sin la v1.5 aceptada (16.4, Emilio (c)). */
 export function asuntoCorreoPrestado(d: DatosCorreoPrestado): string {
-  return `Valida: recibimos el pago del período del ${fechaDiaMesLargo(d.desde)} al ${fechaDiaMesLargo(d.hasta)}; el siguiente necesita la versión 1.5 de los Términos`
+  return `Valida: recibimos tu pago del período del ${fechaDiaMesLargo(d.desde)} al ${fechaDiaMesLargo(d.hasta)}; acepta la versión 1.5 para continuar después`
+}
+
+/**
+ * El último día para aceptar sin que se pierda el período siguiente: el día en que empieza (el siguiente al
+ * fin del pagado). Es la misma fecha con que decide `periodoSeVende` (aceptada a más tardar el día de inicio).
+ */
+export function aceptarAMasTardar(hasta: string): string {
+  return sumarDias(hasta, 1)
 }
 
 function parrafosPrestado(d: DatosCorreoPrestado): string[] {
   return [
-    `Hola, equipo de ${d.razonSocial}:`,
-    `Registramos el pago del período del ${fechaDiaMesLargo(d.desde)} al ${fechaDiaMesLargo(d.hasta)}. Durante ese período ` +
+    'Hola.',
+    `Gracias, registramos el pago del período del ${fechaDiaMesLargo(d.desde)} al ${fechaDiaMesLargo(d.hasta)}. Durante ese período ` +
       'puedes seguir haciendo consultas en Valida.',
-    `${d.razonSocial} todavía no ha aceptado la versión 1.5 de los Términos. Por la cláusula 16.4, la suscripción continúa ` +
-      `después de este período solo si se acepta: el período siguiente no se ofrece ni se cobra sin esa aceptación.`,
-    `La persona designada por tu empresa la acepta en Valida: ${d.urlValida}.`,
+    `Para continuar sin interrupción, la persona designada por tu empresa acepta la versión 1.5 en Valida: ${d.urlValida}.`,
+    `Por la cláusula 16.4, la suscripción continúa después de este período solo si ${d.razonSocial} acepta la versión 1.5 de los ` +
+      `Términos a más tardar el ${fechaLarga(aceptarAMasTardar(d.hasta))}: sin esa aceptación, el período siguiente no se ofrece ni se cobra.`,
+    '¿Dudas? Escríbenos a mauricio.moreno@metrik.com.co o al WhatsApp +57 315 950 9103.',
     'METRIK IA S.A.S. · NIT 902.079.601-9 · mauricio.moreno@metrik.com.co',
   ]
 }
@@ -246,7 +272,11 @@ export function htmlCorreoPrestado(d: DatosCorreoPrestado): string {
       .map((x) => `<p>${escaparHtml(x)}</p>`)
       .join('') +
     `<p><a href="${escaparHtml(d.urlValida)}" style="display:inline-block;background:#10B981;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;font-weight:bold">Leer y aceptar en Valida</a></p>` +
-    `<p style="font-size:12px;color:#6B7280">${escaparHtml(p[4])}</p>` +
+    p
+      .slice(3, 5)
+      .map((x) => `<p>${escaparHtml(x)}</p>`)
+      .join('') +
+    `<p style="font-size:12px;color:#6B7280">${escaparHtml(p[5])}</p>` +
     `</div>`
   )
 }
