@@ -124,8 +124,8 @@ describe('tercera falla en vivo 2026-10-07: una preferencia no es un valor y cor
     expect(linea(r1)[0]).toBe(`¿Lo anoto en ${COD} · QUITO?`)
     expect(linea(r1)).toContain('¿Lo dejo como nota o es un rango? (Menos de $3 millones / Entre $3 y $5 millones / Solo como nota)')
     expect(linea(r1)).toContain('• Fecha de regreso: 27 ene (calculado)')
-    expect(linea(r1)).toContain('• Adultos: 3 (calculado)')
-    expect(linea(r1)).toContain('• Infantes: 1 (deducido)')
+    expect(linea(r1)).toContain('• ⚠️ *Adultos: 3* (calculado, confírmalo)')
+    expect(linea(r1)).toContain('• ⚠️ *Infantes: 1* (deducido, confírmalo)')
     // Lo escrito tal cual no lleva marca.
     expect(linea(r1)).toContain('• Fecha de salida: 17 ene')
     expect(linea(r1)).toContain('• Niños: 2')
@@ -343,12 +343,13 @@ describe('las dudas de la extracción', () => {
     const p = instruccionesCarga([], '2026-10-09')
     expect(p).toMatch(/Interpretar no es inventar: un campo del que nadie habló queda en "por_definir" aunque se pueda suponer \(el\s+presupuesto/)
     expect(p).toContain('La frase de un valor habla de ESE campo.')
-    expect(p).toMatch(/Infante es menor de 2 años y la edad manda sobre la palabra\s+\(«un niño de año y medio» es 1 infante y 0 niños\)/)
+    expect(p).toMatch(/Infante es menor de 2 años y la edad manda sobre la palabra\s+\(«un niño de año y medio» es 1 infante; «una menor de 4 años», 1 niño\)/)
     const esquema = esquemaCarga([{ slug: 'adultos', tipo: 'numero', label: 'Adultos' }] as CampoEntendible[]) as { properties: { valores: { properties: Record<string, { properties: { frase: { description?: string } } }> } } }
     expect(esquema.properties.valores.properties.adultos.properties.frase.description).toContain('hablan de ESTE campo')
   })
 
-  it('la parte fija del prompt de la extracción no pasa de 1.200 tokens (4 caracteres por token)', () => {
-    expect(Math.ceil(instruccionesCarga([], '2026-10-08').length / 4)).toBeLessThanOrEqual(1200)
+  // 1.220 desde el 2026-11-04: +18 tokens para que un menor dicho no quede en 0 niños y 0 infantes (falla en vivo del 2026-11-03).
+  it('la parte fija del prompt de la extracción no pasa de 1.220 tokens (4 caracteres por token)', () => {
+    expect(Math.ceil(instruccionesCarga([], '2026-10-08').length / 4)).toBeLessThanOrEqual(1220)
   })
 })

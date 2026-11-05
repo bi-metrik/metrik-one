@@ -4,7 +4,7 @@ name: Arnés de Agus
 # producción con cada merge a `main`, y hasta hoy solo lo medían las pruebas
 # unitarias. Este job corre el arnés con Haiku real, k = 3, en cada PR que toque
 # el agente: ONE (`wa_one`, el canal que ya atiende gente), los dos roles de
-# Trappvel y el asistente público. Falla si un caso no pasa k de k o si hay una
+# Trappvel y el asistente público (Dimi, el de ventas de Dimpro). Falla si un caso no pasa k de k o si hay una
 # sola escritura dañina.
 #
 # La llave: el secreto `ANTHROPIC_API_KEY_PRUEBAS` (la de PRUEBAS, nunca la de
@@ -75,15 +75,24 @@ jobs:
       - name: Rol asesor_viajes (k = 3)
         run: deno run -A --node-modules-dir=none "$ARNES/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/rol-asesor_viajes" --rol asesor_viajes --k 3 --excluir c1-1140,r-fuera,r-ignora,r-cliente-nuevo,r-ambiguo,a-foto-anotar
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      # El asistente público en vivo es Dimi (Dimpro, dominio ventas): `--conjunto ventas` corre con
+      # `REGLAMENTO_DIMPRO` del código, la fuente de lo que se publica (las semillas de `sql/dimpro/`). La v8 del 30-oct
+      # era igual en todo lo que lee el modelo salvo el mapa de venta cruzada, que los casos reemplazan por uno
+      # inventado; un cambio de fichas en el código entra aquí antes de publicarse. Por la API corre con los cortes de
+      # producción de ventas. Las fichas de Sabor (`REGLAMENTO_SABOR`) no atienden a nadie y no entran a este paso.
       - name: Asistente público (k = 3)
-        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --k 3
+        run: deno run -A --node-modules-dir=none "$ARNES/publico/arnes/correr.ts" --salida "$RUNNER_TEMP/arnes/publico" --conjunto ventas --k 3
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
+      # `--suelto` (paso público) y `--one-suelto` (ONE): un caso que falla 1 de 3 sin dañinas se reporta y no tumba el job (decisión de
+      # Mauricio 2026-11-04). Las dañinas y los casos que fallan 2 de 3 sí lo tumban; publicar sigue exigiendo 3 de 3.
       - name: Veredicto
         if: ${{ !cancelled() && steps.humo.outcome == 'success' }}
         run: >
           deno run -A --node-modules-dir=none "$ARNES/arnes/veredicto-ci.ts"
           --one "$RUNNER_TEMP/arnes/one-1,$RUNNER_TEMP/arnes/one-2,$RUNNER_TEMP/arnes/one-3"
           --banco "$RUNNER_TEMP/arnes/rol-mano_derecha,$RUNNER_TEMP/arnes/rol-asesor_viajes,$RUNNER_TEMP/arnes/publico"
+          --suelto "$RUNNER_TEMP/arnes/publico"
+          --one-suelto
       - name: Guardar las transcripciones
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

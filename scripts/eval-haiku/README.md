@@ -73,6 +73,11 @@ npx tsx --conditions=react-server scripts/eval-haiku/correr.ts --familia trappve
 
 Los fallos de estas dos familias sí muestran los valores (los casos son ficticios).
 
+En los pantallazos de bloqueo se mide además (2026-11-04): `bandeja_general` (lo que hace la bandeja general de un
+viaje en Bloqueo; `EVAL_BANDEJA_COMO_ANTES=1` mide el comportamiento de antes), `compra_antes_de` leída
+`EVAL_REPETIR_COMPRA` veces (3 por defecto; vale solo si todas la traen), `directo` e `iconos_sin_identificar`. Lo que
+la clave no anota sale del HTML del que se generó cada PNG (`_build/html/<viaje>/<png>.html`).
+
 ## Documentos de SOENA (SOE-038)
 
 `soena-documentos.ts` corre `extractFieldsFromDocument` (con las normalizaciones y el reintento de producción) sobre

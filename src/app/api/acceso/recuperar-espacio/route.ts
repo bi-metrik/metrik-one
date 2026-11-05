@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { LimiteEnMemoria } from '@/lib/acceso-espacio/limite'
+import { ipDelCliente } from '@/lib/http/ip-cliente'
 import {
   correoSolicitado,
   depsRecuperarReales,
@@ -26,12 +27,6 @@ export const dynamic = 'force-dynamic'
 const POR_IP = new LimiteEnMemoria(10, 15 * 60_000)
 const POR_CORREO = new LimiteEnMemoria(3, 60 * 60_000)
 
-function ipDelCliente(req: Request): string | null {
-  // El PRIMERO de `x-forwarded-for` es el cliente; el último es Vercel.
-  const primera = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  return primera || req.headers.get('x-real-ip') || null
-}
-
 export async function POST(req: Request) {
   let cuerpo: unknown
   try {
@@ -44,7 +39,7 @@ export async function POST(req: Request) {
 
   const ahora = Date.now()
   // La IP primero: una IP que ya pasó su tope no sigue gastando el cupo del correo.
-  if (!POR_IP.permitir(ipDelCliente(req) ?? 'sin-ip', ahora) || !POR_CORREO.permitir(correo, ahora)) {
+  if (!POR_IP.permitir(ipDelCliente(req.headers) ?? 'sin-ip', ahora) || !POR_CORREO.permitir(correo, ahora)) {
     console.warn('[acceso-espacio] tope de solicitudes alcanzado')
     return NextResponse.json({ ok: true })
   }
