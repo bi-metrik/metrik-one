@@ -96,7 +96,10 @@ const CAMPOS = [
   { slug: 'numero_factura', label: 'Número de factura', tipo: 'texto', descripcion_ai: 'número', required: true },
 ]
 
-function montar(modo: 'editable' | 'visible') {
+function montar(
+  modo: 'editable' | 'visible',
+  campos: Array<Record<string, unknown>> = CAMPOS,
+) {
   const instancia = {
     id: 'nb1',
     estado: 'pendiente',
@@ -104,11 +107,10 @@ function montar(modo: 'editable' | 'visible') {
       drive_url: 'https://drive.example/factura.pdf',
       file_name: 'factura.pdf',
       _extraction_status: 'ok',
-      campos: {
-        modelo: { value: '2025', confidence: 0.95 },
-        ciudad_venta: { value: null, confidence: 0, manual: true },
-        numero_factura: { value: null, confidence: 0, manual: true },
-      },
+      campos: Object.fromEntries(campos.map(c => [
+        c.slug as string,
+        c.slug === 'modelo' ? { value: '2025', confidence: 0.95 } : { value: null, confidence: 0, manual: true },
+      ])),
     },
   }
   return act(async () => {
@@ -119,7 +121,7 @@ function montar(modo: 'editable' | 'visible') {
       instancia: instancia as never,
       modo,
       userRole: 'operator',
-      configExtra: { label: 'Factura venta vehículo', campos_extraccion: CAMPOS as never, editar_extraidos: true },
+      configExtra: { label: 'Factura venta vehículo', campos_extraccion: campos as never, editar_extraidos: true },
       esResponsable: true,
     }))
   })
@@ -221,5 +223,70 @@ describe('SOE-038 · el texto completo se guarda (corrección en modo visible)',
     await perderFoco(ciudad)
     await soltarTodo()
     expect(ultimoDe('ciudad_venta')).toBe('pereira')
+  })
+})
+
+// ── Formato antes de guardar: un relleno no destraba el bloque ─────────────────────────────
+//
+// Al limpiar SOENA aparecieron, además de las letras sueltas, rellenos escritos a propósito
+// para destrabar el bloque: NIT «1», fecha «1», número de factura «0», partida arancelaria
+// «X» (la config dice que siempre es «0000»). ONE los guardaba y daba el documento por
+// completo. Ahora el campo avisa ahí mismo y no manda nada al servidor.
+
+const CAMPOS_FACTURA = [
+  { slug: 'fecha_factura', label: 'Fecha de la factura', tipo: 'fecha', descripcion_ai: 'fecha', required: true },
+  { slug: 'nit_proveedor', label: 'NIT del proveedor', tipo: 'texto', descripcion_ai: 'nit', required: true },
+  { slug: 'numero_factura', label: 'Número de factura', tipo: 'texto', descripcion_ai: 'número', required: true, min_caracteres: 3 },
+  { slug: 'partida_arancelaria', label: 'Partida arancelaria', tipo: 'texto', descripcion_ai: '0000', required: true, valor_fijo: '0000' },
+]
+
+const aviso = () => contenedor.querySelector('[role="alert"]')?.textContent ?? null
+
+describe('SOE-038 · formato antes de guardar', () => {
+  it.each([
+    ['fecha_factura', '1', 0, 'fecha completa'],
+    ['nit_proveedor', '1', 1, 'al menos 6 dígitos'],
+    ['numero_factura', '0', 2, 'mínimo 3'],
+    ['partida_arancelaria', 'X', 3, '«0000»'],
+  ])('%s = «%s» no se guarda y el campo avisa', async (slug, relleno, i, texto) => {
+    await montar('editable', CAMPOS_FACTURA)
+    const input = inputs()[i as number]
+    await teclear(input, relleno as string)
+    await perderFoco(input)
+    await soltarTodo()
+    expect(guardados.filter(g => g.slug === slug)).toEqual([])
+    expect(aviso()).toContain(texto)
+  })
+
+  it('la fecha escrita como la escribe la gente se guarda en AAAA-MM-DD y el aviso se va', async () => {
+    await montar('editable', CAMPOS_FACTURA)
+    const fecha = inputs()[0]
+    await teclear(fecha, '1')
+    await perderFoco(fecha)
+    expect(aviso()).not.toBeNull()
+
+    await act(async () => { fecha.value = '' })
+    await teclear(fecha, '17/03/2026')
+    await perderFoco(fecha)
+    await soltarTodo()
+    expect(ultimoDe('fecha_factura')).toBe('2026-03-17')
+    expect(fecha.value).toBe('2026-03-17')
+    expect(aviso()).toBeNull()
+  })
+
+  it('los valores reales pasan tal cual', async () => {
+    await montar('editable', CAMPOS_FACTURA)
+    const [, nit, numero, partida] = inputs()
+    await teclear(nit, '800218155')
+    await perderFoco(nit)
+    await teclear(numero, 'VVBE/3575')
+    await perderFoco(numero)
+    await teclear(partida, '0000')
+    await perderFoco(partida)
+    await soltarTodo()
+    expect(ultimoDe('nit_proveedor')).toBe('800218155')
+    expect(ultimoDe('numero_factura')).toBe('VVBE/3575')
+    expect(ultimoDe('partida_arancelaria')).toBe('0000')
+    expect(aviso()).toBeNull()
   })
 })

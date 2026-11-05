@@ -73,6 +73,16 @@ export interface CampoExtraccion {
    * factura (SOE-041). Ver `revisarCoherenciaPct`.
    */
   coherencia_pct?: { de: string[]; pct: number[]; tolerancia?: number }
+  /**
+   * El campo siempre vale esto (ej. la partida arancelaria de SOENA, «0000»). Una corrección
+   * a mano con otro valor no se guarda. Ver `validarFormatoCampo`.
+   */
+  valor_fijo?: string
+  /**
+   * Largo mínimo de una corrección a mano (sin espacios en los bordes). Frena los rellenos
+   * («0», «1») en campos de texto sin formato propio, como el número de factura.
+   */
+  min_caracteres?: number
 }
 
 /** Marca de edición manual (trazabilidad para auditoría): quién y cuándo tocó
