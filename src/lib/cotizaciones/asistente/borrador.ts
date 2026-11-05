@@ -129,7 +129,7 @@ export const ESQUEMA_BORRADOR = obj({
     temporada: strN,
     ninosGratis: S('OBJECT', {
       nullable: true,
-      description: 'La nota de niños gratis del pantallazo («1 niño gratis de 0 a 5 años»), o null si no hay',
+      description: 'La nota de niños gratis del pantallazo («1 niño gratis hasta los 5»), con su rango de edad, o null si no hay',
       properties: { texto: str, edadDesde: S('INTEGER', { nullable: true }), edadHasta: S('INTEGER', { nullable: true }) },
       required: ['texto', 'edadDesde', 'edadHasta'],
       propertyOrdering: ['texto', 'edadDesde', 'edadHasta'],
