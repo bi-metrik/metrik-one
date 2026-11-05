@@ -27,6 +27,7 @@ export function EstadoVenta({ venta }: { venta: VentaDetalle }) {
       </Link>
       {!n.abierto && <span className="text-muted-foreground"> · cerrado</span>}
       {n.codigo && <span className="text-muted-foreground"> · {n.codigo}</span>}
+      {n.ventas > 1 && <span className="text-muted-foreground"> · pedido de {n.ventas} productos</span>}
     </span>
   )
 }
@@ -70,7 +71,7 @@ export function AccionesVenta({ venta, hoy }: { venta: VentaDetalle; hoy: string
   if (!venta.entregada_at) {
     return (
       <button type="button" className={boton} disabled={pendiente} onClick={() => correr(() => marcarVentaEntregadaAction(venta.id))}>
-        Marcar entregada
+        {n.ventas > 1 ? 'Marcar pedido entregado' : 'Marcar entregada'}
       </button>
     )
   }

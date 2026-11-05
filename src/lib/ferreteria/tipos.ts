@@ -156,6 +156,11 @@ export interface VentaFila {
    * sigue registrando las ventas de siempre.
    */
   cantidad?: number
+  /**
+   * La línea del carrito del asistente de la que salió (migración 20261104210000). Solo la escribe el pago del carrito:
+   * un carrito pagado es UN negocio con una venta por línea.
+   */
+  carrito_linea_id?: string | null
   created_at?: string
 }
 
@@ -280,5 +285,7 @@ export interface RepoFerreteria {
   actualizarVenta(ws: string, id: string, cambios: CambiosVenta): Promise<void>
   /** Solo para deshacer una venta cuyo negocio no se pudo crear. */
   borrarVenta(ws: string, id: string): Promise<void>
+  /** Las ventas de un negocio (un pedido del carrito tiene varias), por orden de registro. */
+  ventasPorNegocio(ws: string, negocioId: string): Promise<(VentaFila & { id: string })[]>
   conversacionPorId(ws: string, id: string): Promise<(ConversacionFila & { id: string }) | null>
 }
