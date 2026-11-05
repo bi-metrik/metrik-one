@@ -145,7 +145,8 @@ export async function leerTablero(db: Db, ws: string, hoy: string): Promise<Tabl
 /** Una venta con el estado REAL de su negocio en ONE (para ver si quedó atrasado). */
 export type VentaDetalle = VentaFila & {
   id: string
-  negocio: { id: string; codigo: string | null; paso: PasoVenta | null; abierto: boolean } | null
+  /** `ventas`: cuántas ventas tiene el negocio (más de una = un pedido del carrito del asistente). */
+  negocio: { id: string; codigo: string | null; paso: PasoVenta | null; abierto: boolean; ventas: number } | null
 }
 
 export interface Detalle {
@@ -182,8 +183,14 @@ async function negociosDeVentas(db: Db, ws: string, ids: string[]): Promise<Map<
       if (typeof paso === 'string' && (PASOS_VENTA as readonly string[]).includes(paso)) pasos.set(e.id, paso as PasoVenta)
     }
   }
+  // Un pedido del carrito es un negocio con varias ventas (se entregan y se pagan juntas).
+  const { data: delNegocio, error: errV } = await db.from('ferreteria_ventas').select('negocio_id').eq('workspace_id', ws).in('negocio_id', ids)
+  lanzar('ventas de los negocios', errV)
+  const cuenta = new Map<string, number>()
+  for (const v of (delNegocio ?? []) as { negocio_id: string }[]) cuenta.set(v.negocio_id, (cuenta.get(v.negocio_id) ?? 0) + 1)
   for (const n of filas) {
     out.set(n.id, {
+      ventas: cuenta.get(n.id) ?? 1,
       id: n.id,
       codigo: n.codigo,
       paso: n.etapa_actual_id ? (pasos.get(n.etapa_actual_id) ?? null) : null,

@@ -148,6 +148,10 @@ export function repoEnMemoria(estado: EstadoMemoria = estadoVacio(), reloj: () =
     },
     async insertarVenta(fila) {
       comprobarVenta(fila)
+      // ferreteria_ventas_carrito_linea_unica: una línea del carrito, a lo sumo una venta.
+      if (fila.carrito_linea_id && estado.ventas.some((x) => x.carrito_linea_id === fila.carrito_linea_id)) {
+        throw new Error('duplicate key: ferreteria_ventas_carrito_linea_unica')
+      }
       const nueva = { ...copia(fila), id: nuevoId('venta') }
       estado.ventas.push(nueva)
       return copia(nueva)
@@ -161,13 +165,13 @@ export function repoEnMemoria(estado: EstadoMemoria = estadoVacio(), reloj: () =
       if (!v) return
       const nueva = { ...v, ...copia(cambios) }
       comprobarVenta(nueva)
-      if (nueva.negocio_id && estado.ventas.some((x) => x.id !== id && x.negocio_id === nueva.negocio_id)) {
-        throw new Error('duplicate key: ferreteria_ventas_negocio_unico')
-      }
       Object.assign(v, nueva)
     },
     async borrarVenta(ws, id) {
       estado.ventas = estado.ventas.filter((x) => !(x.workspace_id === ws && x.id === id))
+    },
+    async ventasPorNegocio(ws, negocioId) {
+      return copia(estado.ventas.filter((x) => x.workspace_id === ws && x.negocio_id === negocioId)) as (VentaFila & { id: string })[]
     },
     async conversacionPorId(ws, id) {
       const c = estado.conversaciones.find((x) => x.workspace_id === ws && x.id === id)
