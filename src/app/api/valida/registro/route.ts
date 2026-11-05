@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { crearEspacioValida } from '@/lib/valida-registro/registro-servidor'
+import { ipDelCliente } from '@/lib/http/ip-cliente'
 
 /**
  * Alta autogestionada de Valida (`/valida/empezar`). Ruta de API y no server action por la IP, igual
@@ -10,12 +11,6 @@ import { crearEspacioValida } from '@/lib/valida-registro/registro-servidor'
  */
 
 export const dynamic = 'force-dynamic'
-
-function ipDelCliente(req: Request): string | null {
-  // El PRIMERO de `x-forwarded-for` es el cliente; el último es Vercel.
-  const primera = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  return primera || req.headers.get('x-real-ip') || null
-}
 
 export async function POST(req: Request) {
   let cuerpo: unknown
@@ -37,7 +32,7 @@ export async function POST(req: Request) {
     codigoAfi: texto(c.codigo_afi) || null,
     ref: texto(c.ref) || null,
     utm: c.utm,
-    ip: ipDelCliente(req),
+    ip: ipDelCliente(req.headers),
     // Solo el token de ePayco.js, el titular y el celular; el servidor lo valida (`leerTarjeta`).
     tarjeta: c.tarjeta,
   })

@@ -723,11 +723,12 @@ export async function unTurnoPublico(d: DepsPublico): Promise<boolean> {
   // 8b''. El modelo no pide la autorización con sus palabras: el texto legal es fijo (§5.2). Visto en la corrida real
   // (2026-10-21): «¿autorizas que tomemos tus datos…? [Sí | No]» escrito por el modelo, sin link ni versión; el «no» que
   // siguió no quedó como prueba. Si su respuesta habla de autorizar y no hay un «sí» registrado, sale la fija. El «sí» de
-  // ESTE turno cuenta aunque todavía no esté en las filas (Dimpro, 4-nov: «Listo, autorizado…» tras el «Sí» volvió a pedir
-  // la autorización y el cliente tuvo que decir «Sí» dos veces).
+  // ESTE turno (el botón que se acaba de tocar) viene en `r.autorizacion`, no en `filas`: sin mirarlo, un «Gracias por
+  // autorizar» tras el «Sí» volvía a pedir la autorización (arnés con Haiku real, 3-nov).
   let pide = r.pide ?? null;
+  const siEnEsteTurno = r.autorizacion?.tipo === 'general' && r.autorizacion.respuesta === 'si';
   if (salida && r.delModelo && salida === r.salida && /autoriz/.test(salida.texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
-    && estadoAutorizacion(filas, 'general').estado !== 'si' && !(r.autorizacion?.tipo === 'general' && r.autorizacion.respuesta === 'si')) {
+    && !siEnEsteTurno && estadoAutorizacion(filas, 'general').estado !== 'si') {
     traza.candados = [...(traza.candados ?? []), { candado: 'autorizacion_improvisada', detalle: salida.texto.slice(0, 200) }];
     salida = salidaAutorizacion(d.reglamento, 'general', varsDe(d));
     traza.respuesta_fija = 'rf.autorizacion';

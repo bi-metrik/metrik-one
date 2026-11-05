@@ -547,7 +547,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const g = estadoAutorizacion(filas, 'general');
       const pasados = motivosYaPasados(filas);
       const compras = comprasConfirmadas(filas);
-      const lineaG = g.estado === 'si' ? 'sí (sigue con lo que falte del pedido: cantidad y entrega si no las ha dicho, luego nombre, celular y dirección si es despacho)'
+      const lineaG = g.estado === 'si' ? 'sí (sigue con lo que falte del pedido: cantidad y entrega si no las ha dicho, luego nombre, celular y dirección si es despacho; un «sí» a la autorización no es una duda)'
         : g.estado === 'no' ? 'dijo que no: no tomes datos personales; sigue informando, sin ofrecer una persona'
           : g.estado === 'pedida' ? 'pedida, sin respuesta: no pidas datos personales'
             : 'no pedida: antes de pedir nombre, celular o dirección, llama respuesta_fija rf.autorizacion';
@@ -557,7 +557,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
       const enCurso = productoEnCurso(filas);
       return [
         ...(pausa !== null && pausa >= HORAS_CONVERSACION_NUEVA ? [`El cliente vuelve después de ${Math.floor(pausa)} h sin escribir: si solo saluda o no dice qué quiere, tómalo como una conversación nueva: salúdalo y pregúntale qué está buscando, sin decir «de nuevo» y sin suponer el producto de antes. Si su mensaje sigue claramente lo de antes, retómalo.`] : []),
-        ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
+        ...(fotos.length ? [`Fotos de los productos ya consultados: ${fotos.map((f) => `${f.codigo} ${f.tieneFoto ? (f.enviada ? 'con foto (ya enviada; si la vuelve a pedir, nómbralo y sale otra vez)' : 'con foto') : 'SIN foto'}`).join('; ')}. Si pide la foto de uno con foto, nómbralo con su código (la foto sale después de tu mensaje); si no tiene, dile «De ese no tengo foto por ahora». Nunca digas «el sistema te envía» ni «si ya la recibiste».`] : []),
         `Autorización de datos para la compra: ${lineaG}.`,
         ...(u ? [`Compra confirmada: ${u.datos.codigo} × ${u.datos.cantidad}, total ${pesos(Number(u.datos.total))}; ${u.link ? 'el link de pago ya salió (si dice que pagó: verificar_pago; si no le llegó: generar_link_pago)' : 'sin link de pago'}.`] : []),
         ...(enCurso ? [`Ya presentaste el ${enCurso}: si siguen hablando de ese, no repitas su código ni su nombre completo; dile «ese», el tipo («ese taladro») o la marca, o nada. El código vuelve solo para mandar su foto o si hay varios en juego.`] : []),
@@ -578,8 +578,10 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         if (!REPETIBLES.includes(motivo) && motivosYaPasados(filas).includes(motivo)) {
           return { ok: false, error: `Esta conversación ya pasó a persona por «${motivo}»: atiéndela tú.`, candado: 'motivo_repetido' };
         }
-        if (motivo === 'no_entiende' && acabaDeAutorizar(filas)) {
-          return { ok: false, error: 'Su «sí» responde la autorización de datos: sí lo entendiste. Sigue con lo que falte del pedido (cantidad y entrega si no las ha dicho; luego nombre, celular y dirección si es despacho).', candado: 'no_entiende_tras_autorizar' };
+        // Un «sí» solo a la autorización no es algo que no se entienda (#1398) ni una duda (arnés con Haiku real 3-nov: la
+        // pasaba a persona como duda_abierta o falla en 1 de cada 3 compras).
+        if ((motivo === 'no_entiende' || motivo === 'duda_abierta' || motivo === 'falla') && acabaDeAutorizar(filas)) {
+          return { ok: false, error: 'Su «sí» responde la autorización de datos: sí lo entendiste y no es una duda. Sigue con lo que falte del pedido (cantidad y entrega si no las ha dicho; luego nombre, celular y dirección si es despacho).', candado: `${motivo}_tras_autorizar` };
         }
         const texto = (motivo === 'duda_abierta' ? respuestaFija(r, 'rf.duda_abierta') : '') || respuestaFija(r, `rf.persona.${motivo}`) || respuestaFija(r, 'rf.persona');
         if (motivo === 'producto_no_disponible') {

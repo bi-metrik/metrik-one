@@ -41,13 +41,11 @@ export function marcaDeOperador(nombre: string): string {
   return nombre.replace(/,\s*[A-Z]{2}$/, '').slice(0, 60)
 }
 
-/** La IP del cliente según las cabeceras de Vercel. Solo se usa para la consulta; no se guarda. */
-export function ipDelCliente(headers: Headers): string | null {
-  const real = headers.get('x-real-ip')?.trim()
-  if (real) return real
-  const xff = headers.get('x-forwarded-for')?.split(',')[0]?.trim()
-  return xff || null
-}
+/**
+ * La IP del cliente vive en `@/lib/http/ip-cliente` (sabe distinguir Cloudflare de Vercel directo);
+ * se reexporta para no romper a quien la importaba de aquí. Solo se usa para la consulta; no se guarda.
+ */
+export { ipDelCliente } from '@/lib/http/ip-cliente'
 
 /** El nombre DNS de la consulta de origen, y la clave de cache (el prefijo, no la IP). */
 export function consultaDeOrigen(ip: string): { nombre: string; clave: string } | null {
