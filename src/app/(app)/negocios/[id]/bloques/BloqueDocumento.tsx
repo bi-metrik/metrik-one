@@ -26,6 +26,7 @@ import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from
 import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { faltanCampos } from '@/lib/documentos/completar-campos'
 import { derivarCampos } from '@/lib/documentos/derivar'
+import { validarFormatoCampo } from '@/lib/documentos/formato-campo'
 import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
@@ -562,8 +563,22 @@ function CamposExtraidos({
 }) {
   const { encolar, guardando } = useFilaDeGuardado()
   const lecturas = useLecturas()
+  const [errores, setErrores] = useState<Record<string, string>>({})
 
-  const handleCommit = (slug: string, value: string) => {
+  const handleCommit = (slug: string, texto: string, input?: HTMLInputElement) => {
+    const config = camposConfig.find(c => c.slug === slug)
+    const formato = config ? validarFormatoCampo(config, texto) : { ok: true as const, valor: texto }
+    if (!formato.ok) {
+      setErrores(e => ({ ...e, [slug]: formato.mensaje }))
+      return
+    }
+    setErrores(e => {
+      if (!(slug in e)) return e
+      const { [slug]: _, ...resto } = e
+      return resto
+    })
+    const value = formato.valor
+    if (input && input.value !== value) input.value = value
     onUpdate(slug, value)
     encolar(async () => {
       const res = await actualizarCampoDocumento(
@@ -630,14 +645,18 @@ function CamposExtraidos({
                     <input
                       type="text"
                       defaultValue={campo?.value ?? ''}
-                      onBlur={e => handleCommit(config.slug, e.target.value)}
+                      onBlur={e => handleCommit(config.slug, e.target.value, e.target)}
                       placeholder={isManual ? 'Completar manualmente' : undefined}
+                      aria-invalid={errores[config.slug] ? true : undefined}
                       className={inputClass}
                     />
                   )}
                 </div>
                 <CopyButton value={campo?.value} />
               </div>
+              {errores[config.slug] && (
+                <p role="alert" className="text-xs text-red-600">{errores[config.slug]}</p>
+              )}
             </div>
           )
         })}
@@ -673,8 +692,17 @@ function EditableCampoVisible({
   // `useFilaDeGuardado`).
   const { encolar } = useFilaDeGuardado()
   const isCurrency = config.tipo === 'currency'
+  const [error, setError] = useState<string | null>(null)
 
-  const handleCommit = (value: string) => {
+  const handleCommit = (texto: string, input?: HTMLInputElement) => {
+    const formato = validarFormatoCampo(config, texto)
+    if (!formato.ok) {
+      setError(formato.mensaje)
+      return
+    }
+    setError(null)
+    const value = formato.valor
+    if (input && input.value !== value) input.value = value
     onUpdate(config.slug, value)
     encolar(async () => {
       const res = await actualizarCampoDocumento(
@@ -694,25 +722,29 @@ function EditableCampoVisible({
     `w-full rounded-md border border-amber-200 bg-amber-50/30 px-3 py-2 text-base transition-all placeholder:text-muted-foreground/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 disabled:opacity-60 ${isCurrency ? 'tabular-nums text-right' : ''}`
 
   return (
-    <div className="flex items-center gap-1.5">
-      <div className="flex-1 min-w-0">
-        {isCurrency ? (
-          <CurrencyField
-            rawValue={campo?.value ?? null}
-            onCommit={handleCommit}
-            placeholder="$0"
-            className={inputClass}
-          />
-        ) : (
-          <input
-            type="text"
-            defaultValue={campo?.value ?? ''}
-            onBlur={e => handleCommit(e.target.value)}
-            className={inputClass}
-          />
-        )}
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <div className="flex-1 min-w-0">
+          {isCurrency ? (
+            <CurrencyField
+              rawValue={campo?.value ?? null}
+              onCommit={val => handleCommit(val)}
+              placeholder="$0"
+              className={inputClass}
+            />
+          ) : (
+            <input
+              type="text"
+              defaultValue={campo?.value ?? ''}
+              onBlur={e => handleCommit(e.target.value, e.target)}
+              aria-invalid={error ? true : undefined}
+              className={inputClass}
+            />
+          )}
+        </div>
+        <CopyButton value={campo?.value} />
       </div>
-      <CopyButton value={campo?.value} />
+      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }

@@ -23,6 +23,7 @@ import {
 } from '@/lib/documentos/tipo-documento'
 import { aplicarNormalizaciones } from '@/lib/documentos/normalizaciones'
 import { derivarCampos } from '@/lib/documentos/derivar'
+import { validarFormatoCampo } from '@/lib/documentos/formato-campo'
 import { completarCampos, faltanCampos } from '@/lib/documentos/completar-campos'
 import { createSubfolderPath, uploadFileToDrive, setFilePublicByLink, deleteDriveFile, downloadDriveFile } from '@/lib/google-drive'
 import { type EstadoVigencia, type CriterioVigencia } from '@/lib/documentos/vigencia'
@@ -1506,8 +1507,16 @@ export async function actualizarCampoDocumento(
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
 
   // Validar que slug existe en camposExtraccion
-  const slugValido = camposExtraccion.some(c => c.slug === slug)
-  if (!slugValido) return { success: false, error: 'Campo no válido' }
+  const configCampo = camposExtraccion.find(c => c.slug === slug)
+  if (!configCampo) return { success: false, error: 'Campo no válido' }
+
+  // Formato antes de guardar (SOE-038): un relleno («1», «0», «X») no destraba el bloque.
+  // La fecha y los números salen normalizados. Ver `validarFormatoCampo`.
+  {
+    const formato = validarFormatoCampo(configCampo, value)
+    if (!formato.ok) return { success: false, error: formato.mensaje }
+    value = formato.valor
+  }
 
   // Bloqueo de todo ONE (`texto-latino.ts`): los dobles cirílicos/griegos se guardan latinos;
   // un campo oficial con una letra que no se puede escribir no se guarda.
