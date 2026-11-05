@@ -9,6 +9,7 @@ import type {
   SupervisorOperaciones,
 } from '../../../tableros/operaciones-types'
 import { formatFecha } from '@/lib/dates/bogota'
+import { reglaEnvio } from '@/lib/tableros/regla-envio'
 
 const VERDE = 'var(--acento)'
 const CARBON = 'var(--tinta)'
@@ -130,7 +131,7 @@ export default function OperacionesPerfilClient({
                 ? `Hubo ${persona.envio.eventos} envío(s), pero ninguno tiene registrada la fecha de la cita DIAN contra la cual medirlo.`
                 : 'No hubo envíos que medir en el mes.')
               : `${persona.envio.a_tiempo} de ${persona.envio.medibles} a tiempo`}
-            regla={`Dentro de ${P.horas_desde_certificado} h del certificado bancario y ${P.horas_antes_cita} h antes de la cita`}
+            regla={reglaEnvio(P).replace(/\.$/, '')}
           />
           <TarjetaIndicador
             titulo="Correcciones de la DIAN"

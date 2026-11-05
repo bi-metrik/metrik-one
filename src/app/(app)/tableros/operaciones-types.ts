@@ -129,6 +129,14 @@ export interface ParametrosBono {
   jornada_sabado_habil?: boolean
   horas_desde_certificado: number
   horas_antes_cita: number
+  /**
+   * Regla de Envio (SOE-040). `horas_antes_cita` (default): `horas_desde_certificado` y
+   * `horas_antes_cita`, corridas. `dia_habil_anterior`: a mas tardar `envio_hora_corte` (hora de
+   * Bogota) del dia habil anterior a la cita, sin la condicion del certificado.
+   */
+  envio_modo?: 'horas_antes_cita' | 'dia_habil_anterior'
+  /** Hora de Bogota (1-24) del modo `dia_habil_anterior`. Default 17. */
+  envio_hora_corte?: number
   bono_max_pct_director: number
   piso_director: number
   techo_director: number
@@ -221,6 +229,10 @@ export interface EnvioDetalle {
   horas_antes_cita: number | null
   /** null = no se pudo juzgar porque falta una de las dos referencias. */
   a_tiempo: boolean | null
+  /** La regla con que se juzgo el caso (la del mes). Ausente antes de SOE-040. */
+  envio_modo?: 'horas_antes_cita' | 'dia_habil_anterior'
+  /** Hora de corte del dia habil anterior a la cita. null sin cita. */
+  limite_envio?: string | null
   /**
    * Cual de las dos condiciones fallo, o cual referencia falta. Sin esto un caso
    * incumplido obliga a rehacer las dos cuentas a mano para saber por que lo es.
