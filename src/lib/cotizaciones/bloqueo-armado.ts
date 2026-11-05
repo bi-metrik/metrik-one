@@ -38,6 +38,16 @@
  *        asesora lo pone en el paquete que le toca.
  *    El resultado no depende del orden de llegada: un hotel nunca queda con el vuelo de otro operador.
  *
+ *  · LOS PAQUETES COMPITEN, NO SE SUMAN (reprueba de Trappvel del 2026-11-05, viaje 02): un bloqueo es
+ *    UN viaje a un destino y sus paquetes son alternativas para el cliente. Con cada paquete en su propia
+ *    ranura, Tarifas los sumaba en una sola tarifa (A + B), y la asesora tenía que «Juntar como opción
+ *    de…». Ahora el paquete nuevo es OTRA OPCIÓN de la ranura del bloqueo que ya existe (`grupo` del plan;
+ *    solo el primero abre la ranura): cada opción es una tarifa (D5), la Recomendada y la «Opción 2».
+ *    Vale para varios operadores y para UN operador con otro vuelo. Dentro de la ranura, un PAQUETE son
+ *    las opciones con el mismo operador y el mismo vuelo (`paquetesDelBloqueo`): a él van sus hoteles, su
+ *    vuelo y su pregunta Pública / Neta. Nada se guarda aparte: sale de lo que ya dice cada opción, y así
+ *    lo que la asesora juntó a mano antes se lee igual.
+ *
  * Puro: sin red y sin base. La escritura es de `pegarEnBloqueo` (`bloqueo-actions.ts`).
  */
 
@@ -67,6 +77,19 @@ export interface OpcionDeBloqueo {
   paquete: PaqueteBloqueo | null
   /** Pública / Neta de la opción (`tarifa_pax.tipoTarifa`) y su comisión. `null` = sin decidir. */
   tarifa?: TarifaDeOpcion | null
+  /** El orden de la línea (`items.orden`). Sin él, el de la lista. */
+  orden?: number | null
+}
+
+/**
+ * Un PAQUETE del bloqueo: las opciones de una misma ranura con el mismo operador y el mismo vuelo
+ * (2026-11-05). Varios paquetes viven en UNA ranura y compiten como opciones.
+ */
+export interface PaqueteDelBloqueo {
+  clave: string
+  grupo: string
+  numero: number
+  opciones: OpcionDeBloqueo[]
 }
 
 export interface TarifaDeOpcion {
@@ -95,10 +118,11 @@ export interface ContextoDeArmado {
 
 export type PlanDeArmado =
   /**
-   * Paquete nuevo (ranura nueva) con su primera opción. Siempre con la pregunta Pública / Neta.
+   * Paquete nuevo con su primera opción. Siempre con la pregunta Pública / Neta. `grupo`: la ranura del
+   * bloqueo donde entra como OTRA OPCIÓN que compite (2026-11-05); `null` = no hay ranura: se abre.
    * `mensaje`: lo que ve la asesora, si no es el de siempre (viaje con varios operadores).
    */
-  | { accion: 'nuevo_paquete'; paquete: PaqueteBloqueo; tarifa: null; mensaje?: string }
+  | { accion: 'nuevo_paquete'; grupo: string | null; paquete: PaqueteBloqueo; tarifa: null; mensaje?: string }
   /** Opción nueva (otro hotel) en el paquete vigente, con la tarifa de sus hermanas. */
   | { accion: 'nueva_opcion'; grupo: string; paquete: PaqueteBloqueo; tarifa: TarifaDeOpcion | null }
   /** Opciones que ya existen y cambian (la opción sin hotel, o el vuelo de todo el paquete). */
@@ -173,13 +197,59 @@ function vueloDe(opciones: readonly OpcionDeBloqueo[]): VueloBloqueo | null {
   return null
 }
 
+function claveDeVuelo(v: VueloBloqueo | null | undefined): string {
+  return v && v.tramos.length > 0 ? v.tramos.map(claveDeTramo).sort().join(';') : ''
+}
+
+/**
+ * Los paquetes del bloqueo, en el orden en que se abrieron (ranura y orden de la línea): las opciones
+ * de una ranura con el mismo operador y el mismo vuelo son UN paquete. Una opción que nunca se guardó
+ * («+ Paquete» recién creado) es del último paquete de su ranura, como antes de este cambio.
+ */
+export function paquetesDelBloqueo(opciones: readonly OpcionDeBloqueo[]): PaqueteDelBloqueo[] {
+  const ordenadas = opciones
+    .map((o, i) => ({ o, i }))
+    .sort((a, b) => a.o.numero - b.o.numero || (a.o.orden ?? a.i) - (b.o.orden ?? b.i) || a.i - b.i)
+    .map(x => x.o)
+  const salida: PaqueteDelBloqueo[] = []
+  const porClave = new Map<string, PaqueteDelBloqueo>()
+  for (const o of ordenadas) {
+    let p = o.paquete ? undefined : [...salida].reverse().find(x => x.grupo === o.grupo)
+    if (!p) {
+      const clave = `${o.grupo}|${claveDeNombre(o.paquete?.operador)}|${claveDeVuelo(o.paquete?.vuelo)}`
+      p = porClave.get(clave)
+      if (!p) {
+        p = { clave, grupo: o.grupo, numero: o.numero, opciones: [] }
+        porClave.set(clave, p)
+        salida.push(p)
+      }
+    }
+    p.opciones.push(o)
+  }
+  return salida
+}
+
+/** Los ids de las opciones del mismo paquete que `itemId` (él incluido). Vacío si no está. */
+export function opcionesDelMismoPaquete(opciones: readonly OpcionDeBloqueo[], itemId: string): string[] {
+  return paquetesDelBloqueo(opciones).find(p => p.opciones.some(o => o.itemId === itemId))?.opciones.map(o => o.itemId) ?? []
+}
+
+/** La ranura donde entra un paquete nuevo: la del bloqueo (la de número más alto). `null` = no hay. */
+function ranuraDelBloqueo(opciones: readonly OpcionDeBloqueo[]): string | null {
+  if (opciones.length === 0) return null
+  const numero = Math.max(...opciones.map(o => o.numero))
+  return opciones.find(o => o.numero === numero)!.grupo
+}
+
+function operadorDelPaquete(p: PaqueteDelBloqueo): string | null {
+  return p.opciones.find(o => o.paquete?.operador)?.paquete?.operador ?? null
+}
+
 const norm = (s: string | null | undefined) => (s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toUpperCase()
 
-/** Las opciones del paquete vigente (la ranura de número más alto), en su orden. */
+/** Las opciones del paquete vigente (el último que se abrió, `paquetesDelBloqueo`), en su orden. */
 export function paqueteVigente(opciones: readonly OpcionDeBloqueo[]): OpcionDeBloqueo[] {
-  if (opciones.length === 0) return []
-  const numero = Math.max(...opciones.map(o => o.numero))
-  return opciones.filter(o => o.numero === numero)
+  return paquetesDelBloqueo(opciones).at(-1)?.opciones ?? []
 }
 
 /**
@@ -196,26 +266,32 @@ export function grupoDelPaqueteVigente(filas: readonly { grupo: string | null; e
   return mejor?.grupo ?? null
 }
 
+/** Las líneas de la ranura «Paquete de bloqueo» como opciones del armado (sin tarifa). */
+export function opcionesDeLasLineas(
+  lineas: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; orden?: number | null; paquete: PaqueteBloqueo | null }[],
+): OpcionDeBloqueo[] {
+  return lineas
+    .filter(l => l.es_ajuste !== true && !!l.grupo && ranuraDeGrupo(l.grupo)?.slug === 'paquete_detalle')
+    .map(l => ({ itemId: l.id, grupo: l.grupo as string, numero: formaDesdeGrupo(l.grupo)?.numero ?? 1, paquete: l.paquete, orden: l.orden ?? null }))
+}
+
 /**
- * Los paquetes con «¿Pública o Neta?» sin responder: UNO por paquete (la ranura), con la primera opción
- * que tiene la pregunta abierta y un título para la bandeja («Paquete 2 · AV 9370»). En orden de número.
+ * Los paquetes con «¿Pública o Neta?» sin responder: UNO por paquete (`paquetesDelBloqueo`), con la
+ * primera opción que tiene la pregunta abierta y un título para la bandeja («Paquete 2 · AV 9370»). El
+ * número es el del paquete en el bloqueo, en el orden en que se abrieron.
  */
 export function paquetesConTarifaPorElegir(
-  lineas: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; paquete: PaqueteBloqueo | null }[],
+  lineas: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; orden?: number | null; paquete: PaqueteBloqueo | null }[],
 ): { itemId: string; titulo: string }[] {
-  const porGrupo = new Map<string, { itemId: string; numero: number; vuelo: VueloBloqueo | null }>()
-  for (const l of lineas) {
-    if (l.es_ajuste === true || !l.grupo || ranuraDeGrupo(l.grupo)?.slug !== 'paquete_detalle') continue
-    if (!l.paquete?.tarifaPorElegir || porGrupo.has(l.grupo)) continue
-    porGrupo.set(l.grupo, { itemId: l.id, numero: formaDesdeGrupo(l.grupo)?.numero ?? 1, vuelo: l.paquete.vuelo })
-  }
-  return [...porGrupo.values()]
-    .sort((a, b) => a.numero - b.numero)
-    .map(x => {
-      const t = x.vuelo?.tramos[0]
-      const vuelo = t ? [t.aerolinea, t.numeroVuelo].filter(Boolean).join(' ') : ''
-      return { itemId: x.itemId, titulo: `Paquete ${x.numero}${vuelo ? ` · ${vuelo}` : ''}` }
-    })
+  const out: { itemId: string; titulo: string }[] = []
+  paquetesDelBloqueo(opcionesDeLasLineas(lineas)).forEach((p, i) => {
+    const abierta = p.opciones.find(o => o.paquete?.tarifaPorElegir)
+    if (!abierta) return
+    const t = vueloDe(p.opciones)?.tramos[0]
+    const vuelo = t ? [t.aerolinea, t.numeroVuelo].filter(Boolean).join(' ') : ''
+    out.push({ itemId: abierta.itemId, titulo: `Paquete ${i + 1}${vuelo ? ` · ${vuelo}` : ''}` })
+  })
+  return out
 }
 
 // ── El plan ───────────────────────────────────────────────────────────────────
@@ -240,9 +316,18 @@ export function mensajeHotelSinOperador(hotel: string | null): string {
   return `Paquete nuevo con ${hotel ?? 'este hotel'}. No se vio de qué operador es: elígelo en el paquete.`
 }
 
-/** El paquete nuevo de la bandeja: siempre con la pregunta Pública / Neta, nunca con la del anterior. */
-function paqueteNuevo(base: PaqueteBloqueo, mensaje?: string): PlanDeArmado {
-  return { accion: 'nuevo_paquete', paquete: { ...base, tarifaPorElegir: true }, tarifa: null, ...(mensaje ? { mensaje } : {}) }
+/**
+ * El paquete nuevo de la bandeja: siempre con la pregunta Pública / Neta, nunca con la del anterior. Entra
+ * como otra opción de la ranura del bloqueo (compite, no se suma); solo el primero la abre.
+ */
+function paqueteNuevo(opciones: readonly OpcionDeBloqueo[], base: PaqueteBloqueo, mensaje?: string): PlanDeArmado {
+  return {
+    accion: 'nuevo_paquete',
+    grupo: ranuraDelBloqueo(opciones),
+    paquete: { ...base, tarifaPorElegir: true },
+    tarifa: null,
+    ...(mensaje ? { mensaje } : {}),
+  }
 }
 
 function conHotelLeido(base: PaqueteBloqueo, lectura: Extract<LecturaParaArmar, { cual: 'hotel' }>, ctx: ContextoDeArmado): PaqueteBloqueo {
@@ -298,31 +383,27 @@ function planConVariosOperadores(
       return { accion: 'repetido', mensaje: 'Ese vuelo ya está en un paquete.' }
     }
     const delVuelo = operadorDeLaLectura(lectura.operador ?? null, operadores)
-    if (!delVuelo) return paqueteNuevo({ ...paqueteVacio(null), vuelo: lectura.vuelo }, MENSAJE_VUELO_VARIOS_OPERADORES)
+    if (!delVuelo) return paqueteNuevo(opciones, { ...paqueteVacio(null), vuelo: lectura.vuelo }, MENSAJE_VUELO_VARIOS_OPERADORES)
     const kv = claveDeNombre(delVuelo)
-    // Los paquetes de ese operador que todavía no tienen vuelo; el de número más bajo, para que el
+    // El paquete de ese operador que todavía no tiene vuelo; el primero que se abrió, para que el
     // resultado no dependa del orden. Uno que ya tiene otro vuelo no se pisa.
-    const sinVuelo = opciones.filter(o => claveDeNombre(o.paquete?.operador) === kv)
-      .filter(o => !vueloDe(opciones.filter(x => x.grupo === o.grupo)))
-    if (sinVuelo.length === 0) return paqueteNuevo({ ...paqueteVacio(delVuelo), vuelo: lectura.vuelo }, mensajeVueloDelOperador(delVuelo))
-    const numeroV = Math.min(...sinVuelo.map(o => o.numero))
-    const grupoV = sinVuelo.find(o => o.numero === numeroV)!.grupo
+    const sinVuelo = paquetesDelBloqueo(opciones)
+      .find(p => claveDeNombre(operadorDelPaquete(p)) === kv && !vueloDe(p.opciones))
+    if (!sinVuelo) return paqueteNuevo(opciones, { ...paqueteVacio(delVuelo), vuelo: lectura.vuelo }, mensajeVueloDelOperador(delVuelo))
     // El vuelo es de todo el paquete: va a todas sus opciones, con su tarifa y su pregunta intactas.
     return {
       accion: 'actualizar',
-      cambios: opciones.filter(o => o.grupo === grupoV)
+      cambios: sinVuelo.opciones
         .map(o => ({ itemId: o.itemId, paquete: { ...(o.paquete ?? paqueteVacio(delVuelo)), vuelo: lectura.vuelo } })),
     }
   }
   const operador = operadorDeLaLectura(lectura.operador ?? null, operadores)
-  if (!operador) return paqueteNuevo(conHotelLeido(paqueteVacio(null), lectura, ctx), mensajeHotelSinOperador(lectura.hotel.hotel))
+  if (!operador) return paqueteNuevo(opciones, conHotelLeido(paqueteVacio(null), lectura, ctx), mensajeHotelSinOperador(lectura.hotel.hotel))
   const k = claveDeNombre(operador)
-  const delOperador = opciones.filter(o => claveDeNombre(o.paquete?.operador) === k)
-  if (delOperador.length === 0) return paqueteNuevo(conHotelLeido(paqueteVacio(operador), lectura, ctx))
-  // El paquete de ese operador (si hay varios, el de número más alto) con TODAS sus opciones.
-  const numero = Math.max(...delOperador.map(o => o.numero))
-  const grupo = delOperador.find(o => o.numero === numero)!.grupo
-  return hotelEnElPaquete(opciones.filter(o => o.grupo === grupo), lectura, ctx)
+  const delOperador = paquetesDelBloqueo(opciones).filter(p => claveDeNombre(operadorDelPaquete(p)) === k)
+  if (delOperador.length === 0) return paqueteNuevo(opciones, conHotelLeido(paqueteVacio(operador), lectura, ctx))
+  // El paquete de ese operador (si hay varios, el último que se abrió) con TODAS sus opciones.
+  return hotelEnElPaquete(delOperador[delOperador.length - 1].opciones, lectura, ctx)
 }
 
 export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: LecturaParaArmar, ctx: ContextoDeArmado): PlanDeArmado {
@@ -333,7 +414,7 @@ export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: Lec
   const vueloVigente = vueloDe(vigente)
 
   if (lectura.cual === 'vuelo') {
-    if (vigente.length === 0) return paqueteNuevo({ ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
+    if (vigente.length === 0) return paqueteNuevo(opciones, { ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
     if (!vueloVigente) {
       return {
         accion: 'actualizar',
@@ -341,9 +422,10 @@ export function planDelPegado(opciones: readonly OpcionDeBloqueo[], lectura: Lec
       }
     }
     if (mismoVuelo(vueloVigente, lectura.vuelo)) return { accion: 'repetido', mensaje: 'Ese vuelo ya está en el paquete.' }
-    return paqueteNuevo({ ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
+    // Otro vuelo = otro paquete, que COMPITE con el anterior en la misma ranura (2026-11-05).
+    return paqueteNuevo(opciones, { ...paqueteVacio(ctx.operadorInicial), vuelo: lectura.vuelo })
   }
 
-  if (vigente.length === 0) return paqueteNuevo(conHotelLeido(paqueteVacio(ctx.operadorInicial), lectura, ctx))
+  if (vigente.length === 0) return paqueteNuevo(opciones, conHotelLeido(paqueteVacio(ctx.operadorInicial), lectura, ctx))
   return hotelEnElPaquete(vigente, lectura, ctx)
 }

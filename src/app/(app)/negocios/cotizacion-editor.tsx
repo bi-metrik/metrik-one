@@ -3937,7 +3937,7 @@ export default function CotizacionEditor({ oportunidadId, cotizacion, initialIte
             },
             // «¿Pública o Neta?» una vez por paquete armado (2026-11-03), sin respuesta preseleccionada.
             tarifasPorElegir: editable
-              ? paquetesConTarifaPorElegir(initialItems.map(i => ({ id: i.id, grupo: i.grupo, es_ajuste: i.es_ajuste, paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo) })))
+              ? paquetesConTarifaPorElegir(initialItems.map(i => ({ id: i.id, grupo: i.grupo, es_ajuste: i.es_ajuste, orden: i.orden, paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo) })))
               : [],
             elegirTarifa: async (itemId, tipo) => {
               const r = await elegirTarifaDelPaquete(itemId, tipo)
