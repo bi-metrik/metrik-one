@@ -18,5 +18,6 @@ describe('fichas del banco del 5-nov', () => {
     expect(ficha('alc.producto').hacer).toMatch(/con SUS palabras y no con las de tu pregunta/)
     expect(ficha('alc.especificacion').hacer).toMatch(/sin volver a decir datos que ya le diste/)
     expect(ficha('alc.especificacion').hacer).not.toMatch(/lo que sí sabes/)
+    expect(ficha('proc.compra').hacer).toMatch(/si ya la dijo en cualquier mensaje, como «con despacho en Bogotá» o «lo recojo», NO la preguntes/)
   })
 })
