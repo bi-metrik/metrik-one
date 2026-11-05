@@ -25,6 +25,7 @@ import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { faltanCampos } from '@/lib/documentos/completar-campos'
+import { derivarCampos } from '@/lib/documentos/derivar'
 import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
@@ -1337,10 +1338,14 @@ export default function BloqueDocumento({
   }
 
   const handleCampoUpdate = (slug: string, value: string) => {
-    setCampos(prev => ({
-      ...prev,
-      [slug]: { value: value || null, confidence: 1.0, manual: true },
-    }))
+    setCampos(prev => {
+      const next = structuredClone(prev)
+      next[slug] = { value: value || null, confidence: 1.0, manual: true }
+      // Mismo recálculo que hace el servidor al guardar (SOE-041): corregir el valor antes
+      // de descuento o el descuento mueve el valor derivado sin recargar la página.
+      derivarCampos(camposConfig, next, slug)
+      return next
+    })
   }
 
   // Drop de archivo (modo editable): suelta sobre la zona = mismo flujo que el
