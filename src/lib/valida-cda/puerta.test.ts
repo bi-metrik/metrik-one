@@ -698,29 +698,6 @@ describe('la exigencia de la v1.5 desde la fecha de la 16.4 (Maxitec: 22-dic-202
     expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2026-12-23' })
   })
 
-  it('lo pagado DESPUÉS de la fecha base no aplaza la 16.4 (gate de Vera); lo pagado antes sí', async () => {
-    escenario.cuotas = { data: [CUOTA_1, OCT, NOV, cuota(4, '2026-12-27', '23-dic al 22-ene')], error: null }
-    escenario.hoy = '2026-12-26'
-    // El período del 23-dic se pagó el 24-dic, después de la base del 22-dic: se exige desde el 23-dic.
-    escenario.cobros = {
-      data: [
-        { cobro_id: 'p2', monto: '150000', estado: 'pagado', fecha: '2026-12-24' },
-        { cobro_id: 'p1', monto: '450000', estado: 'pagado', fecha: '2026-11-20' },
-      ],
-      error: null,
-    }
-    expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2026-12-23' })
-    // Pagado el 20-dic, antes de la base: no se bloquea ese período, se exige desde el 23-ene.
-    escenario.cobros = {
-      data: [
-        { cobro_id: 'p2', monto: '150000', estado: 'pagado', fecha: '2026-12-20' },
-        { cobro_id: 'p1', monto: '450000', estado: 'pagado', fecha: '2026-11-20' },
-      ],
-      error: null,
-    }
-    expect(await exigenciaV15Cda()).toEqual({ estado: 'no_exigida' })
-  })
-
   it('aceptada la v1.5, consulta igual pasada la fecha', async () => {
     escenario.documentos = [
       DOC_ACEPTADO_HASTA_V14,

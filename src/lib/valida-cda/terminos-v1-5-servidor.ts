@@ -6,7 +6,6 @@ import {
   datosDelTextoV15,
   fechaExigeAceptacion,
   finUltimoPeriodoPagado,
-  pagadasA,
   periodosPendientesAntesDe,
   type DatosPantallaV15,
 } from './terminos-v1-5'
@@ -33,6 +32,6 @@ export async function datosPantallaV15(p: {
   return {
     ...base,
     periodos: { estado: 'ok', periodos: periodosPendientesAntesDe(cuotas, p.doc.vigenteDesde.slice(0, 10)) },
-    fechaExige: fechaExigeAceptacion(texto.exigeDesde, finUltimoPeriodoPagado(texto.exigeDesde ? pagadasA(cuotas, cuenta.pagosVigentes ?? cuenta.pagos, texto.exigeDesde) : cuotas)),
+    fechaExige: fechaExigeAceptacion(texto.exigeDesde, finUltimoPeriodoPagado(cuotas)),
   }
 }

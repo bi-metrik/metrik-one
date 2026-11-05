@@ -39,7 +39,6 @@ import {
   esTerminosV15,
   exigenciaV15,
   finUltimoPeriodoPagado,
-  pagadasA,
   textoExigidaV15,
   type ExigenciaV15,
 } from './terminos-v1-5'
@@ -400,12 +399,7 @@ async function resolverExigenciaV15(): Promise<ExigenciaV15Cda> {
   const finPagado =
     cuenta?.estado === 'ok'
       ? finUltimoPeriodoPagado(
-          // Solo lo que ya estaba pagado en la fecha base (16.4): pagar después no aplaza la exigencia.
-          pagadasA(
-            cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: e.hoy, ahoraISO: new Date().toISOString() }),
-            cuenta.pagosVigentes ?? cuenta.pagos,
-            texto.exigeDesde,
-          ),
+          cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: e.hoy, ahoraISO: new Date().toISOString() }),
         )
       : 'sin_dato'
   const r = exigenciaV15({ base: texto.exigeDesde, finPagado, hoy: e.hoy })
