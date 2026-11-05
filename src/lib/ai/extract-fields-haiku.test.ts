@@ -52,15 +52,30 @@ describe('extract-fields con Haiku (LLM_PROVEEDOR_DOCUMENTOS=anthropic)', () => 
     expect(r.data?.fecha_expedicion.value).toBe('2026-01-15')
   })
 
-  it('sin la variable de documentos, el mismo pedido sigue en Gemini aunque haya llave de Anthropic', async () => {
+  it('sin la variable de documentos, el pedido va a Haiku (defecto desde el 2026-11-04)', async () => {
+    // vitest.config.ts fija LLM_PROVEEDOR=gemini para todas las pruebas: aquí se suelta el global, no la familia.
     vi.stubEnv('LLM_PROVEEDOR', 'anthropic')
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-prueba')
+    const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify({
+      content: [{ type: 'text', text: '{"nit":{"value":"860047657","confidence":0.95},"fecha_expedicion":{"value":null,"confidence":0}}' }],
+      stop_reason: 'end_turn', usage: { input_tokens: 100, output_tokens: 30 },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', f)
+    await extractFieldsFromDocument(PNG_1X1, 'image/png', campos, 'g')
+    expect(f.mock.calls[0][0]).toBe('https://api.anthropic.com/v1/messages')
+  })
+
+  it('con LLM_PROVEEDOR_DOCUMENTOS=gemini el pedido sigue en Gemini 3.5 Flash-Lite aunque haya llave de Anthropic', async () => {
+    vi.stubEnv('LLM_PROVEEDOR', 'anthropic')
+    vi.stubEnv('LLM_PROVEEDOR_DOCUMENTOS', 'gemini')
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-prueba')
     const f = vi.fn(async (_u: string, _i?: RequestInit) => new Response(JSON.stringify({
       candidates: [{ content: { parts: [{ text: '{"nit":{"value":"860047657","confidence":0.95},"fecha_expedicion":{"value":null,"confidence":0}}' }] }, finishReason: 'STOP' }],
     }), { status: 200 }))
     vi.stubGlobal('fetch', f)
     await extractFieldsFromDocument(PNG_1X1, 'image/png', campos, 'g')
-    expect(String(f.mock.calls[0][0])).toMatch(/^https:\/\/generativelanguage\.googleapis\.com\//)
+    expect(String(f.mock.calls[0][0])).toMatch(/^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\/gemini-3\.5-flash-lite:generateContent/)
+    expect(JSON.parse(String(f.mock.calls[0][1]?.body)).generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' })
   })
 })
 

@@ -14,6 +14,9 @@ import {
   promoverOpcionales,
   LIMITE_OPCIONALES,
   proveedorDe,
+  OPCIONES_ACTAS,
+  OPCIONES_CAPTURAS,
+  OPCIONES_DOCUMENTOS,
   sinCercas,
   modeloQueRespondio,
   primerJson,
@@ -438,22 +441,37 @@ describe('presupuesto del esquema (400 «too many optional parameters»)', () =>
 
 describe('interruptor por familia (LLM_PROVEEDOR_DOCUMENTOS, LLM_PROVEEDOR_ACTAS)', () => {
   const ent = (v: Record<string, string>) => (k: string) => v[k];
-  const docs = { variable: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' as const };
+  const docs = OPCIONES_DOCUMENTOS;
 
-  it('sin valor rige el de la familia (gemini); con valor manda la familia', () => {
-    expect(proveedorDe(ent({}), docs)).toBe('gemini');
-    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'anthropic' }), docs)).toBe('gemini');
+  it('documentos: sin valor, Haiku (desde el 2026-11-04); la variable en gemini la devuelve a Gemini', () => {
+    expect(proveedorDe(ent({}), docs)).toBe('anthropic');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'anthropic' }), docs)).toBe('anthropic');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'gemini' }), docs)).toBe('gemini');
     expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), docs)).toBe('anthropic');
     expect(proveedorDe(ent({}))).toBe('anthropic');
   });
 
+  it('actas: siguen en Gemini sin valor (eval 8 de 12); con valor manda la variable', () => {
+    expect(proveedorDe(ent({}), OPCIONES_ACTAS)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'anthropic' }), OPCIONES_ACTAS)).toBe('gemini');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_ACTAS: 'anthropic' }), OPCIONES_ACTAS)).toBe('anthropic');
+  });
+
   it('el global en gemini devuelve todo a Gemini, aunque la familia diga anthropic', () => {
+    expect(proveedorDe(ent({ LLM_PROVEEDOR: 'gemini' }), docs)).toBe('gemini');
     expect(proveedorDe(ent({ LLM_PROVEEDOR: 'gemini', LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), docs)).toBe('gemini');
   });
 
-  it('un fetch de documentos sin la variable no toca a Anthropic aunque haya llave', async () => {
-    const real = vi.fn(async () => respuestaA({ ok: 1 }));
+  it('un fetch de documentos sin la variable va a Anthropic si hay llave', async () => {
+    const real = vi.fn(async () => respuestaA({ content: [{ type: 'text', text: '{"a":"x"}' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }));
     const f = crearFetchModelo({ ...docs, fetch: real as unknown as typeof fetch, entorno: ent({ ANTHROPIC_API_KEY: 'sk' }) });
+    await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG()) });
+    expect(String((real.mock.calls[0] as unknown[])[0])).toContain('api.anthropic.com');
+  });
+
+  it('un fetch de documentos con la variable en gemini no toca a Anthropic aunque haya llave', async () => {
+    const real = vi.fn(async () => respuestaA({ ok: 1 }));
+    const f = crearFetchModelo({ ...docs, fetch: real as unknown as typeof fetch, entorno: ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR_DOCUMENTOS: 'gemini' }) });
     await f(URL_G, { method: 'POST', body: JSON.stringify(cuerpoG()) });
     expect(real.mock.calls[0][0]).toBe(URL_G);
   });
@@ -506,11 +524,12 @@ describe('primerJson', () => {
 });
 
 describe('proveedorDe con heredaDe (LLM_PROVEEDOR_CAPTURAS → LLM_PROVEEDOR_DOCUMENTOS)', () => {
-  const o = { variable: 'LLM_PROVEEDOR_CAPTURAS', heredaDe: 'LLM_PROVEEDOR_DOCUMENTOS', porDefecto: 'gemini' as const };
+  const o = OPCIONES_CAPTURAS;
   const ent = (e: Record<string, string>) => (k: string) => e[k];
-  it('sin ninguna: Gemini (lo de hoy); con documentos: lo que diga documentos', () => {
-    expect(proveedorDe(ent({}), o)).toBe('gemini');
+  it('sin ninguna: Haiku (desde el 2026-11-04); con documentos: lo que diga documentos', () => {
+    expect(proveedorDe(ent({}), o)).toBe('anthropic');
     expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), o)).toBe('anthropic');
+    expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'gemini' }), o)).toBe('gemini');
   });
   it('la de capturas manda sobre la heredada, y el global en gemini manda sobre todo', () => {
     expect(proveedorDe(ent({ LLM_PROVEEDOR_CAPTURAS: 'anthropic', LLM_PROVEEDOR_DOCUMENTOS: 'gemini' }), o)).toBe('anthropic');

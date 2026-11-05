@@ -26,10 +26,12 @@ import { casillaDesdeDeteccion } from './bloqueo-pegado'
  * que prueban los fixtures.
  */
 
-const MODELO = 'gemini-2.5-flash'
+/** `gemini-2.5-flash` quedó obsoleto (desde el 2026-12-01 Google lo enruta a 3.5-flash-lite): se pide explícito. */
+const MODELO = 'gemini-3.5-flash-lite'
 const TIMEOUT_MS = 25_000
 const MAX_OUTPUT_TOKENS = 8_192
-const THINKING_BUDGET = 1024
+/** La familia 3.x usa `thinkingLevel` (antes `thinkingBudget: 1024`); en Haiku los dos dan esfuerzo `low`. */
+const THINKING_LEVEL = 'low'
 
 const MIMES: Record<string, string> = {
   'image/png': 'image/png',
@@ -61,7 +63,7 @@ async function unaLlamada(base64: string, mime: string, prompt: string, esquema:
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
           responseSchema: esquema,
-          thinkingConfig: { thinkingBudget: THINKING_BUDGET },
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         },
       }),
     })

@@ -46,13 +46,15 @@ import type {
 import { extraerConReintento, type ResultadoExtraccion } from './reintentar-extraccion'
 
 /**
- * Mismo modelo que el extractor de documentos: `gemini-2.5-flash` con thinking.
+ * Mismo modelo que el extractor de documentos: `gemini-3.5-flash-lite` con thinking (antes
+ * `gemini-2.5-flash`, obsoleto: desde el 2026-12-01 Google lo enruta a 3.5-flash-lite). Es el
+ * respaldo: por defecto la lectura va a Haiku (`fetchModeloCapturas`).
  *
  * El juicio que hace falta aquí es semántico, no de legibilidad: distinguir un listado
  * de resultados de un detalle de itinerario, y saber si el número grande de la pantalla
  * es el total o el precio por pasajero. Eso lo resuelve el razonamiento, no el OCR.
  */
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 
 /**
  * Presupuesto de salida. El thinking se cobra del MISMO `maxOutputTokens` que el JSON.
@@ -67,7 +69,8 @@ const GEMINI_MODEL = 'gemini-2.5-flash'
  * gastado, no lo reservado.
  */
 const MAX_OUTPUT_TOKENS = 24_576
-const THINKING_BUDGET = 2048
+/** La familia 3.x usa `thinkingLevel` (antes `thinkingBudget: 2048`); en Haiku los dos dan esfuerzo `low`. */
+const THINKING_LEVEL = 'low'
 
 /**
  * Tope de reloj por intento.
@@ -1080,7 +1083,7 @@ async function unaLlamada(
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
           responseSchema: construirEsquema(ranura, opciones),
-          thinkingConfig: { thinkingBudget: THINKING_BUDGET },
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         },
       }),
     })

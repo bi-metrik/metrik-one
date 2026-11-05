@@ -5,8 +5,9 @@
 // ver alcance.ts para el recorte del preludio) y produce un acta formal: resumen,
 // decisiones y compromisos agrupados por responsable.
 //
-// Modelo y patron copiados de src/lib/ai/extract-fields.ts: gemini-2.5-flash con
-// thinking encendido a presupuesto acotado (1024) + responseSchema para forzar
+// Modelo y patron copiados de src/lib/ai/extract-fields.ts: gemini-3.5-flash-lite con
+// thinking acotado (thinkingLevel 'low'; antes gemini-2.5-flash con thinkingBudget 1024,
+// retirado: desde el 2026-12-01 Google enruta 2.5-flash a 3.5-flash-lite) + responseSchema para forzar
 // JSON valido — un prompt de texto libre no es confiable para esto (ver el
 // gotcha de CLAUDE.md: "Auto-extraccion AI con reintento... responseSchema
 // fuerza JSON valido en Gemini... elimina 'JSON invalido de Gemini'").
@@ -21,7 +22,7 @@
 import { fetchModeloActas } from '@/lib/ai/modelo-llm'
 import type { CandidataActa } from './seleccion'
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 
 export interface CompromisoActa {
   responsable: string
@@ -132,7 +133,7 @@ export async function generarActa(
         maxOutputTokens: 8192,
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
-        thinkingConfig: { thinkingBudget: 1024 },
+        thinkingConfig: { thinkingLevel: 'low' },
       },
     }),
   })
