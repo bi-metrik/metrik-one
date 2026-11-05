@@ -1,6 +1,6 @@
 ---
 name: bandeja-reparto-por-operador
-description: Viaje en bloqueo con 2+ operadores en la solicitud — la bandeja reparte por operador leído del hotel; el vuelo abre su propio paquete (5-nov)
+description: Viaje en bloqueo con 2+ operadores en la solicitud — la bandeja reparte por operador leído del hotel Y del vuelo (encabezado del pantallazo); 5-nov
 metadata:
   type: project
 ---
@@ -14,7 +14,12 @@ un vuelo SIEMPRE abre paquete propio (la lectura del vuelo no trae operador). Vi
 **Why:** el orden de llegada de la detección juntaba Decameron (Aliados) con el vuelo de Avianca (Tu Reserva).
 El brief pidió no adivinar: mejor paquetes separados que la asesora junta.
 
-**How to apply:** el siguiente paso natural es leer `operador` también en el pantallazo del VUELO
-(PROMPT/ESQUEMA_VUELO_BLOQUEO) para juntar vuelo + hotel solos; eso cambia el prompt y pide arnés real
-(lo corre Mauricio). Opcionales sin hacer: «Recomendada», confirmación de «Borrar paquete»
+Segunda vuelta (feat/bloqueo-vuelo-lee-operador, 5-nov): el vuelo YA lee `operador` (encabezado
+«tureserva · Salidas en bloqueo» / «aliadostravel · Bloqueos»). Vuelo con operador de la solicitud →
+todas las opciones del paquete de ese operador SIN vuelo (el de número más bajo); si no hay, abre uno con
+ese operador. Paquete con otro vuelo no se pisa. Sin operador leído: paquete propio como antes. Viaje 02 = 2
+paquetes en las 24 órdenes. El prompt cambiado NO se probó contra el modelo: lo prueba Mauricio en ONE.
+
+**How to apply:** asimetría pendiente: el hotel va al paquete del operador de número MÁS ALTO y el vuelo al
+sin vuelo de número MÁS BAJO; solo importa con 2+ paquetes del mismo operador. Opcionales sin hacer: «Recomendada», confirmación de «Borrar paquete»
 (paquete-bloqueo.tsx), título del aviso de tarifa (`paquetesConTarifaPorElegir`).
