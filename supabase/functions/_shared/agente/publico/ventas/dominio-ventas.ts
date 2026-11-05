@@ -315,6 +315,9 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
   /** «El MP-17, taladro percutor inalámbrico Dongcheng, no está disponible por ahora.» (o sin catálogo, que no hay nada). */
   async function lineaNoDisponible(codigo: string, pidio: string): Promise<{ texto: string; codigo: string | null; estado: string | null }> {
     const [activos, nd] = await Promise.all([o.puertos.catalogo(), o.puertos.noDisponibles()]);
+    // Sin catálogo y sin código: no hay nada publicado. La búsqueda por `pidio` («qué tienen para vender») atinaba a un
+    // agotado cualquiera y el cliente leía «El MP-16 … no está disponible» sin haberlo pedido (banco 5-nov).
+    if (!activos.length && !codigo.trim()) return { texto: 'Por ahora no tengo productos disponibles para la venta.', codigo: null, estado: null };
     const p = (codigo.trim() ? productoPorCodigo(nd, codigo) : null) ?? (codigo.trim() ? null : buscarProductos(nd, { buscar: pidio, codigo: null }, 1)[0] ?? null);
     if (p && !productoPorCodigo(activos, p.codigo)) return { texto: `El ${nombreCorto(p)}, no está disponible por ahora.`, codigo: p.codigo, estado: p.estado };
     if (!activos.length) return { texto: 'Por ahora no tengo productos disponibles para la venta.', codigo: null, estado: null };

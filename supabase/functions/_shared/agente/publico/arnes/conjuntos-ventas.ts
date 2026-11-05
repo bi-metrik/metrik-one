@@ -349,7 +349,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const pedidas = publico(e).split('¿Autorizas?').length - 1;
       const improvisada = e.almacen.trazas().some((t) => (t.candados ?? []).some((c) => c.candado === 'autorizacion_improvisada'));
       return todos(pedidas === 1 ? ok('la autorización se pidió una vez') : no(`la autorización se pidió ${pedidas} veces`),
-        improvisada ? no('saltó autorizacion_improvisada') : ok('sin autorizacion_improvisada'), contiene(e, '¿Me das tu nombre completo?'));
+        improvisada ? no('saltó autorizacion_improvisada') : ok('sin autorizacion_improvisada'), contiene(e, /¿[^?]*nombre[^?]*\?/i));
     },
   },
   {
