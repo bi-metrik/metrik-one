@@ -44,7 +44,7 @@ describe('falla 1: la «compra antes del» como la escribe cada operador', () =>
     expect(PROMPT_HOTEL_BLOQUEO).toMatch(/playa \(olas/)
   })
   it('un vuelo del itinerario del bloqueo sin escala anotada es directo', () => {
-    expect(PROMPT_VUELO_BLOQUEO).toMatch(/no anota escala ni conexión.*directo = true/s)
+    expect(PROMPT_VUELO_BLOQUEO).toMatch(/no anota escala ni conexión[\s\S]*directo = true/)
   })
 })
 
