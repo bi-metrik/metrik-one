@@ -3,6 +3,7 @@
 ## Project memories
 
 - ⚠️⚠️ [Suspendida por pago, PR A (4-nov)](project_valida_suspendida_pr_a.md) — paso 8d; hablaConLaV15 en plazos (no puerta); PR B antes del 31-dic
+- ⚠️⚠️ [Haiku por defecto y retiro de 2.5-flash (#1429, 5-nov)](project_haiku_defecto_retiro_25flash.md) — vars Vercel ocultas mandan; intérprete WA sin tocar
 - ⚠️⚠️ [Lecturas de Trappvel con Haiku (4-nov)](project_haiku_lectura_trappvel.md) — 402 = llave Anthropic 401 + respaldo; LLM_PROVEEDOR_CAPTURAS; chat en low
 - ⚠️ [Bandeja arma paquetes de bloqueo (3-nov)](project_bloqueo_armado_bandeja.md) — #1408/#1407; ronda 2: pregunta Pública/Neta por paquete (sin default), CHD por edad; foto sin hacer
 
