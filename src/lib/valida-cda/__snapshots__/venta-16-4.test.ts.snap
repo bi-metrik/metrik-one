@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`textos nuevos > el bloque de Suscripción y el correo del período prestado 1`] = `
+"Hola, equipo de MAXITEC S.A.S.:
+
+Registramos el pago del período del 23 de diciembre al 22 de enero. Durante ese período puedes seguir haciendo consultas en Valida.
+
+MAXITEC S.A.S. todavía no ha aceptado la versión 1.5 de los Términos. Por la cláusula 16.4, la suscripción continúa después de este período solo si se acepta: el período siguiente no se ofrece ni se cobra sin esa aceptación.
+
+La persona designada por tu empresa la acepta en Valida: https://maxitec.metrikone.co/valida.
+
+METRIK IA S.A.S. · NIT 902.079.601-9 · mauricio.moreno@metrik.com.co"
+`;

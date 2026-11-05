@@ -209,5 +209,5 @@ export function seleccionarCuotasParaEnlace(p: {
  * pagos anteriores, por ejemplo). No es una falla del cron: es la decisión de `decidirEnlaceCuota`.
  */
 export function esRechazoEsperado(error: string): boolean {
-  return /ya quedó cubierta|ya está pagada|está anulado|no tiene monto/i.test(error)
+  return /ya quedó cubierta|ya está pagada|está anulado|no tiene monto|no se vende sin la versión 1\.5/i.test(error)
 }

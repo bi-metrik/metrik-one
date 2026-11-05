@@ -709,6 +709,63 @@ describe('la exigencia de la v1.5 desde la fecha de la 16.4 (Maxitec: 22-dic-202
     expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
   })
 
+  // 16.4 al vender un período (Emilio, 5-nov): la cuota 4 de Maxitec (23-dic–22-ene) existe pero no se vende.
+  const DIC = cuota(4, '2026-12-27', '23-dic al 22-ene')
+
+  it('el período no vendido no es mora: sin Suspendida el 29-dic ni Cancelada el 23-ene; manda la 16.4', async () => {
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV, DIC], error: null }
+    escenario.cobros = pagos(450000)
+    for (const hoy of ['2026-12-29', '2027-01-23', '2027-02-10']) {
+      escenario.hoy = hoy
+      const m = await moraValidaCda()
+      expect(m.tipo === 'ok' && m.mora.estado, hoy).toBe('al_dia')
+      // Opera (historial y reportes); no consulta por la 16.4, no por pago.
+      expect(await validaCdaPermiteOperar(), hoy).toEqual({ ok: true })
+      const r = await validaCdaPermiteConsultar()
+      expect(r.ok ? '' : r.error, hoy).toMatch(/^Para seguir consultando en Valida, MAXITEC S\.A\.S\. necesita aceptar/)
+    }
+  })
+
+  it('pagado por transferencia sin aceptar: se presta hasta el 22-ene; desde el 23-ene se exige', async () => {
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV, DIC], error: null }
+    escenario.cobros = pagos(600000)
+    escenario.hoy = '2027-01-22'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    escenario.hoy = '2027-01-23'
+    expect(await exigenciaV15Cda()).toMatchObject({ estado: 'exigida', desde: '2027-01-23' })
+  })
+
+  it('aceptada tarde (10-ene) sin período vendido que cubra hoy: no consulta hasta pagar un período desde el pago', async () => {
+    escenario.documentos = [
+      DOC_ACEPTADO_HASTA_V14,
+      { ...DOC_V14, vigenteHasta: '2026-11-30' },
+      { ...V15, aceptadoAt: '2027-01-10T15:00:00Z', aceptadoPor: 'Alba', aceptadoCanal: 'modulo' },
+    ]
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV, DIC], error: null }
+    escenario.cobros = pagos(450000)
+    escenario.hoy = '2027-01-10'
+    expect(await exigenciaV15Cda()).toEqual({ estado: 'no_exigida' })
+    expect(await validaCdaPermiteConsultar()).toEqual({
+      ok: false,
+      error:
+        'MAXITEC S.A.S. ya aceptó la versión 1.5 de los Términos. Para volver a consultar en Valida, la persona designada paga un ' +
+        'período en la sección Suscripción: corre desde el día del pago, que pasa a ser tu nueva fecha de renovación.',
+    })
+    expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+  })
+
+  it('aceptada tarde, pero con el período en curso pagado por transferencia: nada cambia', async () => {
+    escenario.documentos = [
+      DOC_ACEPTADO_HASTA_V14,
+      { ...DOC_V14, vigenteHasta: '2026-11-30' },
+      { ...V15, aceptadoAt: '2027-01-10T15:00:00Z', aceptadoPor: 'Alba', aceptadoCanal: 'modulo' },
+    ]
+    escenario.cuotas = { data: [CUOTA_1, OCT, NOV, DIC], error: null }
+    escenario.cobros = pagos(600000)
+    escenario.hoy = '2027-01-10'
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+  })
+
   it('sin poder leer las cuotas no se exige: no hay prueba de que no haya un período pagado', async () => {
     escenario.cuotas = { data: null, error: { message: 'caída' } }
     escenario.hoy = '2026-12-22'

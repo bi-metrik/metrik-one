@@ -10,7 +10,9 @@ import { armarEstadoEntradaPagina } from '@/lib/valida-api/entrada-aprobacion';
 import { POLITICA_DATOS_VALIDA, textoAvisoPolitica } from '@/lib/valida-api/politica';
 import { contextoSuscripcion } from '@/lib/seccion-suscripcion/contexto-servidor';
 import { franjaValida } from '@/lib/seccion-suscripcion/estado';
-import { entradaValidaCda, exigenciaV15Cda, moraValidaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
+import { entradaValidaCda, exigenciaV15Cda, moraValidaCda, noContinuaCda, puedeVerPagosCda } from '@/lib/valida-cda/puerta';
+import { TEXTO_DESIGNADA_ACEPTA_Y_PAGA } from '@/lib/valida-cda/venta-16-4';
+import { ConsultasNoContinua } from './consultas-no-continua';
 import { hablaConLaV15, periodoEnPalabras } from '@/lib/valida-cda/plazos';
 import ValidaClient from './valida-client';
 import { leerSaldoValida } from '@/lib/valida/credencial-servidor';
@@ -151,7 +153,10 @@ export default async function ValidaPage({ searchParams }: Props) {
   let avisoModificacion: React.ReactNode = null;
   // Desde la fecha de la 16.4, la v1.5 sin aceptar niega las consultas nuevas; el historial sigue abierto.
   const exigencia = await exigenciaV15Cda();
-  const v15Exigida = exigencia.estado === 'exigida' ? exigencia.mensaje : null;
+  // A la persona designada, la pantalla le suma cómo vuelve (16.4, Emilio 5-nov): aceptar y pagar un período.
+  const designadaV15 = exigencia.estado === 'exigida' ? await puedeVerPagosCda(entrada) : false;
+  const v15Exigida =
+    exigencia.estado === 'exigida' ? (designadaV15 ? `${exigencia.mensaje} ${TEXTO_DESIGNADA_ACEPTA_Y_PAGA}` : exigencia.mensaje) : null;
   if (entrada.tipo === 'ok' && entrada.modificaciones.length > 0) {
     const firmaModificacion =
       entrada.modificacion?.estado === 'pendiente' && entrada.modificacion.aceptante?.puede === true;
@@ -221,7 +226,9 @@ export default async function ValidaPage({ searchParams }: Props) {
 
   // La mora (cláusula 11) y quién ve la plata. Una sola lectura de cuotas y pagos por request, sin
   // caché entre requests: el pago aprobado levanta la restricción en la navegación siguiente.
-  const [mora, vePagos] = await Promise.all([moraValidaCda(), puedeVerPagosCda(entrada)]);
+  const [mora, vePagos, continuidad] = await Promise.all([moraValidaCda(), puedeVerPagosCda(entrada), noContinuaCda()]);
+  // 16.4: aceptó la v1.5 tarde y ningún período vendido cubre hoy: vuelve a empezar con un período.
+  const noContinua = continuidad.estado === 'no_continua' ? continuidad.mensaje : null;
   const estadoMora = mora.tipo === 'ok' ? mora.mora : null;
   const enPausa = estadoMora?.estado === 'suspendido' ? estadoMora : null;
   // Restringido (11.1): sin consultas nuevas, con el historial y las descargas abiertos.
@@ -326,7 +333,7 @@ export default async function ValidaPage({ searchParams }: Props) {
     <ValidaClient
       historialInicial={historial?.ok ? historial.consultas : []}
       errorHistorial={historial && !historial.ok ? historial.error : null}
-      tutorialNuncaVisto={!enPausa && !restringido && !suspension && !v15Exigida && tutorialProgress === null}
+      tutorialNuncaVisto={!enPausa && !restringido && !suspension && !v15Exigida && !noContinua && tutorialProgress === null}
       negocioInicial={modoVitrina ? null : negocioInicial}
       modoVitrina={modoVitrina}
       encabezado={encabezado}
@@ -336,6 +343,11 @@ export default async function ValidaPage({ searchParams }: Props) {
           <ConsultasRestringidas v15={textosV15 && !suspension} />
         ) : v15Exigida ? (
           <ConsultasExigenTerminosV15 mensaje={v15Exigida} />
+        ) : noContinua ? (
+          <ConsultasNoContinua
+            mensaje={noContinua}
+            puedePagar={vePagos && entrada.tipo === 'ok' && !entrada.impersonando}
+          />
         ) : null
       }
       saldo={saldo}

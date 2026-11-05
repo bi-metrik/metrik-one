@@ -23,6 +23,7 @@ import { TarjetaPago } from './tarjeta-pago'
 import { SuscripcionEnPruebaVista } from './suscripcion-en-prueba'
 import { ReactivarSuscripcion } from './reactivar-suscripcion'
 import { valorDeReactivacion } from '@/lib/valida-cda/cancelada-servidor'
+import { noContinuaCda } from '@/lib/valida-cda/puerta'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,6 +74,9 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   // Cancelada (Términos v1.5, 11.3): en lugar de la tarjeta de pago y de las formas de pagar, «Reactivar»
   // (11.4) con el valor de un período. Sin tarjeta ni Plan Anual mientras tanto.
   const cancelada = !esOne && ctx.canceladaDesde !== null
+  // 16.4 (Emilio, 5-nov): aceptó la v1.5 tarde y ningún período vendido cubre hoy: vuelve a empezar con un
+  // período desde el día del pago, por el mismo camino de la reactivación.
+  const v15Tarde = !esOne && !cancelada && (await noContinuaCda()).estado === 'no_continua'
 
   // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
   // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
@@ -88,7 +92,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
     // excluyen (brief del 2026-11-03). Solo la persona designada lo ve.
     esOne || !aprobada || cancelada ? null : vistaBloquePagar(ctx),
   ])
-  const montoReactivacion = cancelada
+  const montoReactivacion = cancelada || v15Tarde
     ? await valorDeReactivacion(createServiceClient(), { id: ctx.contrato.id, parametros: ctx.contrato.parametros })
     : null
   const hayCartera = pagos.estado === 'ok' && (pagos.cartera ?? []).length > 0
@@ -125,6 +129,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
       </section>
     ) : cancelada ? (
       <ReactivarSuscripcion monto={montoReactivacion} hayCartera={hayCartera} soloLectura={soloLectura} />
+    ) : v15Tarde ? (
+      <ReactivarSuscripcion monto={montoReactivacion} hayCartera={false} soloLectura={soloLectura} variante="v15_tarde" />
     ) : ctx.pago ? (
       <TarjetaPago
         lectura={ctx.pago}
