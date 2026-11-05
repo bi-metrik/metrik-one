@@ -5,7 +5,10 @@
 // ver alcance.ts para el recorte del preludio) y produce un acta formal: resumen,
 // decisiones y compromisos agrupados por responsable.
 //
-// Modelo y patron copiados de src/lib/ai/extract-fields.ts: gemini-3.5-flash-lite con
+// Modelo: el pedido se arma en forma de Gemini y sale por fetchModeloActas, que desde el
+// 2026-11-05 lo manda a Claude Haiku 5.5 en esfuerzo 'medium' (decision de Mauricio; ver
+// llm-anthropic.ts). Con LLM_PROVEEDOR_ACTAS=gemini vuelve al respaldo de abajo.
+// Respaldo Gemini, patron copiado de src/lib/ai/extract-fields.ts: gemini-3.5-flash-lite con
 // thinking acotado (thinkingLevel 'low'; antes gemini-2.5-flash con thinkingBudget 1024,
 // retirado: desde el 2026-12-01 Google enruta 2.5-flash a 3.5-flash-lite) + responseSchema para forzar
 // JSON valido — un prompt de texto libre no es confiable para esto (ver el
