@@ -884,7 +884,7 @@ export const CASOS_VENTAS: CasoPublico[] = [
     },
   },
   {
-    id: 'v-r3-cruzada-sin-mapa', conjunto: 'ventas', titulo: 'Sin complemento en el mapa: pregunta abierta «¿Necesitas algo más…?», una sola vez',
+    id: 'v-r3-cruzada-sin-mapa', conjunto: 'ventas', titulo: 'Sin complemento en el mapa: una de las `opciones` o «¿Necesitas algo más…?», una sola vez',
     ventas: { productos: PRODUCTOS_CRUZADA },
     pasos: [{ escribe: '¿cuánto vale el MP-13?' }, { escribe: 'Listo, me lo llevo' }, { escribe: 'No, solo eso' }],
     guion: [
@@ -896,7 +896,8 @@ export const CASOS_VENTAS: CasoPublico[] = [
       const d = llamadas(e, 'ver_complementos')[0]?.datos as { complementos?: unknown[] } | undefined;
       return todos(
         d && d.complementos?.length === 0 ? ok('sin complementos') : no(`ver_complementos: ${JSON.stringify(d)}`),
-        contiene(e, /algo m[aá]s/i), respuestas(e).filter((t) => /algo m[aá]s/i.test(t)).length === 1 ? ok('una vez') : no('pregunta más de una vez'),
+        // Sin mapa, ver_complementos trae `opciones` (Mauricio 3-nov): ofrecer una de esas O preguntar «¿algo más?», una vez.
+        respuestas(e).filter((t) => /algo m[aá]s|\bMP-(?!13\b)\d+/i.test(t)).length === 1 ? ok('una sola oferta') : no(`ofertas: ${respuestas(e).filter((t) => /algo m[aá]s|\bMP-(?!13\b)\d+/i.test(t)).length}`),
       );
     },
   },
