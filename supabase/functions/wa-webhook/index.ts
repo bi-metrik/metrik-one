@@ -3,6 +3,7 @@
 // Receives Meta webhook, identifies user, parses intent, routes
 // ============================================================
 
+import { atenderEntregaBloqueo } from '../_shared/entrega-bloqueo.ts';
 import { getServiceClient } from '../_shared/supabase-client.ts';
 import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
@@ -332,6 +333,11 @@ async function processMessage(message: IncomingMessage): Promise<void> {
   // 1a-agente. El núcleo conversacional (opt-in por workspace: `config_extra.bot_conversacional.agente`, que llega en la
   //     misma lectura que identifica al remitente). Prendido, atiende lo del equipo con el modelo y sus herramientas; las
   //     escrituras solo con un toque. Apagado, no hace ni una consulta y todo sigue como hoy. Ver `_shared/wa-agente.ts`.
+  // 1a-bloqueo. La entrega única del bloqueo (opt-in: `config_extra.entrega_bloqueo.piloto`, que llega en la misma lectura que
+  //     identifica al remitente). La asesora entrega el pedido (texto y pantallazos), confirma una vez y recibe el PDF.
+  //     Apagado no hace ni una consulta; lo que no es de un pedido de bloqueo sigue al agente. Ver `_shared/entrega-bloqueo.ts`.
+  if (await atenderEntregaBloqueo(supabase, user, message)) return;
+
   if (await atenderConAgente(supabase, user, message)) return;
 
   // 1a-int. Intérprete conversacional (opt-in por workspace: `config_extra.bot_conversacional`, que

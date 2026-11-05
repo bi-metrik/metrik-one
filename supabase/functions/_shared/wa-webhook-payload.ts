@@ -234,6 +234,8 @@ export function extraerEntrante(
     // Solo cuando es cierto: asi un mensaje normal sale identico a como salia antes.
     if (msg.context?.forwarded === true || msg.context?.frequently_forwarded === true) mensaje.reenviado = true;
     if (msg.context?.frequently_forwarded === true) mensaje.reenviado_muchas_veces = true;
+    // La cita (responder a un mensaje): solo cuando la hay, para que un mensaje normal salga idéntico.
+    if (msg.context?.id && !msg.context.forwarded && !msg.context.frequently_forwarded) mensaje.contexto_wamid = msg.context.id;
     if (bsuid) mensaje.user_id = bsuid;
     if (username) mensaje.username = username;
     return { tipo: 'con_telefono', mensaje };

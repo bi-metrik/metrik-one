@@ -51,7 +51,15 @@ export interface HotelBorrador {
   habitacion: string
   regimenEnPantallazo: string | null
   regimen: string
+  /**
+   * La temporada COPIADA LITERAL del pantallazo («*A*ALTA 2026», «Alta | Promo»), sin limpiar. El
+   * código compara su año con el del viaje (entrega única, 2026-11-04): el modelo la escribía unas
+   * veces «Alta» y otras «Alta 2026», y así a veces ni veía el año. `temporada` es la limpia.
+   */
+  temporadaEnPantallazo: string | null
   temporada: string | null
+  /** La nota de niños gratis del pantallazo, si la hay, con su rango de edad. El código decide si aplica. */
+  ninosGratis: { texto: string; edadDesde: number | null; edadHasta: number | null } | null
   codigoTarifa: string | null
   /** `YYYY-MM-DD` o null */
   compraAntesDe: string | null
@@ -117,7 +125,16 @@ export const ESQUEMA_BORRADOR = obj({
     version: S('STRING', { enum: [...VERSIONES] }),
     nombreEnPantallazo: str, nombre: str, zonaEnPantallazo: strN, zona: strN,
     noches: int, habitacion: str, regimenEnPantallazo: strN, regimen: str,
-    temporada: strN, codigoTarifa: strN, compraAntesDe: strN,
+    temporadaEnPantallazo: S('STRING', { nullable: true, description: 'La temporada copiada letra por letra del pantallazo, con su año si lo trae («*A*ALTA 2026»). Sin limpiar.' }),
+    temporada: strN,
+    ninosGratis: S('OBJECT', {
+      nullable: true,
+      description: 'La nota de niños gratis del pantallazo («1 niño gratis de 0 a 5 años»), o null si no hay',
+      properties: { texto: str, edadDesde: S('INTEGER', { nullable: true }), edadHasta: S('INTEGER', { nullable: true }) },
+      required: ['texto', 'edadDesde', 'edadHasta'],
+      propertyOrdering: ['texto', 'edadDesde', 'edadHasta'],
+    }),
+    codigoTarifa: strN, compraAntesDe: S('STRING', { nullable: true, description: 'AAAA-MM-DD' }),
     tipoTarifa: S('STRING', { enum: ['publica', 'neta', 'desconocida'] }),
     precios: arr(obj({ acomodacion: str, personasPorHabitacion: int, precioPorPersona: int })),
     ninos: arr(obj({ rango: str, precio: int })),

@@ -5,7 +5,7 @@ import { totalDelHotel, validarBorrador } from './invariantes'
 const hotel = (over: Partial<HotelBorrador>): HotelBorrador => ({
   pantallazo: 2, version: 'Recomendada', nombreEnPantallazo: 'Mar Azul', nombre: 'Hotel Mar Azul',
   zonaEnPantallazo: 'Zona NORTE 2027', zona: 'Zona Norte', noches: 3, habitacion: 'Doble estándar',
-  regimenEnPantallazo: '(P.A.M.) Desayuno y Cena', regimen: 'Desayuno y cena', temporada: null, codigoTarifa: null,
+  regimenEnPantallazo: '(P.A.M.) Desayuno y Cena', regimen: 'Desayuno y cena', temporadaEnPantallazo: null, temporada: null, ninosGratis: null, codigoTarifa: null,
   compraAntesDe: null, tipoTarifa: 'publica',
   precios: [{ acomodacion: 'Doble', personasPorHabitacion: 2, precioPorPersona: 1_000_001 }, { acomodacion: 'Sencilla', personasPorHabitacion: 1, precioPorPersona: 1_500_000 }],
   ninos: [{ rango: 'CHD 2-11 años', precio: 400_000 }],
