@@ -24,6 +24,7 @@ import type {
 } from '../operaciones-types'
 import { getOperacionesDetalle } from '../operaciones-actions'
 import { CICLO_SIN_RETORNO } from '@/lib/negocios/atribucion-reproceso'
+import { modoEnvio, reglaEnvio } from '@/lib/tableros/regla-envio'
 
 const CARBON = 'var(--tinta)'
 const GRIS = 'var(--tinta-suave)'
@@ -50,6 +51,15 @@ const fecha = (iso: string | null) =>
 
 const soloFecha = (iso: string | null) =>
   iso === null ? '—' : new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+
+/** El límite de envío se dice en hora de Bogotá, que es como lo calcula la base. */
+const fechaBogota = (iso: string | null | undefined) =>
+  !iso
+    ? '—'
+    : new Date(iso).toLocaleString('es-CO', {
+        weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+        hour12: true, timeZone: 'America/Bogota',
+      })
 
 export function BonoDetalleDrawer({
   persona, indicador, periodo, parametros: P, onClose, onCambiarIndicador,
@@ -137,7 +147,7 @@ export function BonoDetalleDrawer({
               <ListaRadicacion detalle={detalle} horas={P.horas_radicacion}
                 habil={(P.radicacion_reloj ?? 'habil') === 'habil'} />
             ) : indicador === 'envio' ? (
-              <ListaEnvio detalle={detalle} />
+              <ListaEnvio detalle={detalle} P={P} />
             ) : indicador === 'correcciones' ? (
               <ListaCorrecciones detalle={detalle} />
             ) : (
@@ -169,7 +179,7 @@ function Encabezado({ persona: p, indicador, P, suspendido }: {
     indicador === 'radicacion'
       ? `Radicar dentro de ${P.horas_radicacion} horas ${habil ? 'hábiles' : 'corridas'} desde que se asigna el caso.`
       : indicador === 'envio'
-        ? `Enviar dentro de ${P.horas_desde_certificado} h del certificado bancario y al menos ${P.horas_antes_cita} h antes de la cita.`
+        ? reglaEnvio(P)
         : indicador === 'correcciones'
           ? 'Cada caso que pasa la etapa de envío cuenta como una radicación ante la DIAN. Solo las devoluciones por error propio bajan el indicador.'
           : `Sin certificados malos se gana completo. Con ${P.calidad_malos_pierde_todo} o más se pierde todo el bono del mes.`
@@ -283,25 +293,34 @@ function ListaRadicacion({ detalle, horas, habil }: {
   )
 }
 
-function ListaEnvio({ detalle }: { detalle: OperacionesDetalleData }) {
+function ListaEnvio({ detalle, P }: {
+  detalle: OperacionesDetalleData
+  P: OperacionesBonoData['parametros']
+}) {
   if (detalle.envios.length === 0) return <Vacio texto="No envió documentación en el mes." />
   return (
     <ul className="space-y-2">
-      {detalle.envios.map(e => (
-        <Caso key={e.negocio_id} id={e.negocio_id} codigo={e.codigo} nombre={e.nombre}
-          estado={e.a_tiempo}
-          lineas={[
-            `Enviado ${fecha(e.envio)}`,
-            `Certificado ${soloFecha(e.cert_bancario)} · cita ${soloFecha(e.cita)}`,
-            ...(e.motivo ? [e.motivo] : []),
-          ]}
-          etiquetas={[
-            ...(e.horas_desde_cert !== null
-              ? [{ texto: `${e.horas_desde_cert} h del certificado`, tono: 'neutro' as const }] : []),
-            ...(e.horas_antes_cita !== null
-              ? [{ texto: `${e.horas_antes_cita} h antes de la cita`, tono: 'neutro' as const }] : []),
-          ]} />
-      ))}
+      {detalle.envios.map(e => {
+        // La regla con que la BASE juzgó el caso (viene en el detalle), no la que la pantalla
+        // supone: así la lista no puede decir una cosa y el porcentaje otra.
+        const porDia = (e.envio_modo ?? modoEnvio(P)) === 'dia_habil_anterior'
+        return (
+          <Caso key={e.negocio_id} id={e.negocio_id} codigo={e.codigo} nombre={e.nombre}
+            estado={e.a_tiempo}
+            lineas={[
+              `Enviado ${fecha(e.envio)}`,
+              `Certificado ${soloFecha(e.cert_bancario)} · cita ${soloFecha(e.cita)}`,
+              ...(porDia && e.limite_envio ? [`Límite ${fechaBogota(e.limite_envio)}`] : []),
+              ...(e.motivo ? [e.motivo] : []),
+            ]}
+            etiquetas={porDia ? [] : [
+              ...(e.horas_desde_cert !== null
+                ? [{ texto: `${e.horas_desde_cert} h del certificado`, tono: 'neutro' as const }] : []),
+              ...(e.horas_antes_cita !== null
+                ? [{ texto: `${e.horas_antes_cita} h antes de la cita`, tono: 'neutro' as const }] : []),
+            ]} />
+        )
+      })}
     </ul>
   )
 }
