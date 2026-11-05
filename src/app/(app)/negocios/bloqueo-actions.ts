@@ -475,7 +475,7 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
   const pasajeros = c ? { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes } : null
   const plan = planDelPegado(opciones, lectura.cual === 'hotel'
     ? { cual: 'hotel', hotel: lectura.hotel, incluye: lectura.incluye, operador: lectura.operador ?? null }
-    : { cual: 'vuelo', vuelo: lectura.vuelo }, {
+    : { cual: 'vuelo', vuelo: lectura.vuelo, operador: lectura.operador ?? null }, {
     operadorInicial: operadorInicialDelPaquete(b.operador),
     // Con varios operadores en la solicitud el reparto va por operador (viaje 02, 2026-11-05).
     operadoresSolicitud: operadoresDeLaSolicitud(b.operador),

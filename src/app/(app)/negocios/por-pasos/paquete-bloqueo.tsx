@@ -283,7 +283,13 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         return { ...x, ...(leido ? { operador: leido } : {}), hotel: { ...r.hotel, infante: r.hotel.infante ?? x.hotel.infante ?? null }, incluye: r.incluye }
       })
     }
-    else cambiar(x => ({ ...x, vuelo: r.vuelo }))
+    else {
+      cambiar(x => {
+        // Igual que el hotel: el operador del encabezado del pantallazo del vuelo (2026-11-05).
+        const leido = !x.operador || esOperadorMezclado(x.operador) ? operadorDeLaLectura(r.operador ?? null, candidatos) : null
+        return { ...x, ...(leido ? { operador: leido } : {}), vuelo: r.vuelo }
+      })
+    }
   }
 
   /** Con las dos casillas vacías (o llenas), ONE decide con la detección; si no sabe, pregunta. */
