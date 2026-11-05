@@ -74,6 +74,11 @@ export type ContextoSuscripcion =
        * lugar del vencimiento y «Suspendida por pago». `null` en la licencia de ONE y sin la v1.5.
        */
       transicion: string | null
+      /**
+       * Desde cuándo la suscripción de Valida está Cancelada (Términos v1.5, 11.3): la guardada por el cron
+       * o, con la v1.5, el día 31 que todavía no guardó. `null` = no está Cancelada.
+       */
+      canceladaDesde: string | null
       resumen: ResumenEstado
     }
 
@@ -146,6 +151,10 @@ async function resolver(): Promise<ContextoSuscripcion> {
       : { estado: 'pendiente', plazoHasta: entrada.plazoTerminos, enPlazo: entrada.enPlazo }
 
   const transicion = producto === 'valida_cda' && hablaConLaV15(entrada) ? entrada.transicionDesde : null
+  const canceladaDesde =
+    producto !== 'valida_cda'
+      ? null
+      : (entrada.canceladaDesde ?? (transicion && mora.estado === 'suspendido' ? mora.corteDesde : null))
 
   return {
     tipo: 'ok',
@@ -178,6 +187,7 @@ async function resolver(): Promise<ContextoSuscripcion> {
     pago,
     mora,
     transicion,
+    canceladaDesde,
     resumen: resumenEstado({
       terminos,
       pago: pago && pago.estado === 'ok' ? pago.pago : null,
@@ -186,6 +196,7 @@ async function resolver(): Promise<ContextoSuscripcion> {
       producto,
       transicion,
       periodosEnMora,
+      canceladaDesde,
     }),
   }
 }

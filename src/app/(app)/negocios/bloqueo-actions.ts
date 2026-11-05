@@ -18,7 +18,7 @@ import { leerModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
 import { leerPantallazoDeBloqueo, type LecturaBloqueo } from '@/lib/cotizaciones/bloqueo-leer'
 import { costoDelPaquete, descripcionDelPaquete, edadesNinosDeLaSolicitud, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { guardarImagenDeCaptura } from '@/lib/cotizaciones/imagen-captura'
-import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
+import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, operadoresDeLaSolicitud, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
@@ -477,6 +477,8 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
     ? { cual: 'hotel', hotel: lectura.hotel, incluye: lectura.incluye, operador: lectura.operador ?? null }
     : { cual: 'vuelo', vuelo: lectura.vuelo }, {
     operadorInicial: operadorInicialDelPaquete(b.operador),
+    // Con varios operadores en la solicitud el reparto va por operador (viaje 02, 2026-11-05).
+    operadoresSolicitud: operadoresDeLaSolicitud(b.operador),
     pasajeros,
     edadesNinos: edadesNinosDeLaSolicitud(edadesMenores ?? null, pasajeros ? { ninos: pasajeros.ninos, infantes: pasajeros.infantes } : null),
   })
@@ -509,7 +511,7 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
   const e = await guardar(creada.itemId, plan.paquete, plan.tarifa)
   if (e) return { success: false, error: e }
   const mensaje = plan.accion === 'nuevo_paquete'
-    ? (lectura.cual === 'vuelo' ? 'Paquete nuevo con este vuelo: los hoteles que pegues ahora van a este paquete.' : `Paquete nuevo con ${hotelLeido ?? 'este hotel'}.`)
+    ? plan.mensaje ?? (lectura.cual === 'vuelo' ? 'Paquete nuevo con este vuelo: los hoteles que pegues ahora van a este paquete.' : `Paquete nuevo con ${hotelLeido ?? 'este hotel'}.`)
     : `${hotelLeido ?? 'El hotel'} es otra opción del paquete.`
   return { success: true, accion: plan.accion, itemId: creada.itemId, mensaje }
 }

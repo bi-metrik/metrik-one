@@ -181,11 +181,62 @@ describe('a quién aplica', () => {
     expect(await entradaValidaCda()).toEqual({ tipo: 'libre' })
   })
 
-  it('un contrato cancelado o terminado ya no pide términos', async () => {
+  it('contratos de Valida todos cancelados o terminados: el módulo se cierra, no queda gratis (Emilio, 4-nov)', async () => {
     for (const estado of ['cancelado', 'terminado']) {
       escenario.servicios = { data: [{ ...CONTRATO_CDA, estado }], error: null }
-      expect(await entradaValidaCda()).toEqual({ tipo: 'libre' })
+      expect(await entradaValidaCda()).toEqual({ tipo: 'sin_contrato_vigente' })
+      const t = await terminosValidaPermitenOperar()
+      expect(t.ok).toBe(false)
+      expect(!t.ok && t.error).toContain('no está vigente')
+      const o = await validaCdaPermiteOperar()
+      expect(o.ok).toBe(false)
     }
+  })
+
+  it('un contrato cancelado AL LADO de uno activo (los 4 CDA hoy) no cierra nada: manda el activo', async () => {
+    escenario.servicios = {
+      data: [
+        { ...CONTRATO_CDA, estado: 'cancelado', servicio_contratado_id: '99999999-9999-4999-8999-999999999999', vigente_desde: '2026-09-30' },
+        { ...CONTRATO_CDA },
+      ],
+      error: null,
+    }
+    const e = await entradaValidaCda()
+    expect(e.tipo).toBe('ok')
+    expect(e.tipo === 'ok' && e.servicioContratadoId).toBe(SC)
+    expect(e.tipo === 'ok' && e.canceladaDesde).toBe(null)
+  })
+
+  it('la Cancelada guardada (11.3): contrato pausado con cancelada_desde niega todo el módulo con su texto', async () => {
+    escenario.documentos = [DOC_ACEPTADO]
+    escenario.servicios = { data: [{ ...CONTRATO_CDA, estado: 'pausado', cancelada_desde: '2026-12-31' }], error: null }
+    const e = await entradaValidaCda()
+    expect(e.tipo === 'ok' && e.canceladaDesde).toBe('2026-12-31')
+    const o = await validaCdaPermiteOperar()
+    expect(o).toEqual({
+      ok: false,
+      error:
+        'La suscripción de Valida está Cancelada desde el 31 de diciembre por falta de pago: no se pueden hacer consultas ni ver el historial ni los reportes. Se reactiva pagando un período desde la sección Suscripción.',
+    })
+    expect((await validaCdaPermiteConsultar()).ok).toBe(false)
+  })
+
+  it('reactivada (11.4): la mora mira solo el plan nuevo; la deuda vieja no restringe ni pausa (D3, Emilio)', async () => {
+    escenario.documentos = [DOC_ACEPTADO]
+    escenario.hoy = '2027-01-15'
+    const vieja = { ...CUOTA_1, cuota_id: 'q-vieja', numero: 2, fecha_vencimiento: '2026-10-27', concepto: 'periodo del 23-oct al 22-nov', plan_fecha_inicio: '2026-09-23', reactivada_desde: '2027-01-10', anulada: false }
+    const anulada = { ...vieja, cuota_id: 'q-anulada', numero: 4, fecha_vencimiento: '2026-12-27', concepto: 'periodo del 23-dic al 22-ene', anulada: true }
+    const nueva = { ...CUOTA_1, cuota_id: 'q-nueva', numero: 1, fecha_vencimiento: '2027-01-10', concepto: 'periodo del 10-ene al 9-feb', plan_fecha_inicio: '2027-01-10', reactivada_desde: '2027-01-10', anulada: false }
+    escenario.cuotas = { data: [vieja, anulada, nueva], error: null }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado', plan_fecha_inicio: '2027-01-10', es_reactivacion: true, reactivada_desde: '2027-01-10' }], error: null }
+    expect(await validaCdaPermiteConsultar()).toEqual({ ok: true })
+    const m = await moraValidaCda()
+    expect(m.tipo === 'ok' && m.mora.estado).toBe('al_dia')
+    // CONTROL: sin el corte (RPC de antes de la migración), la cuota vieja se lleva el pago y la nueva queda vencida.
+    escenario.cuotas = { data: [vieja, nueva].map(({ plan_fecha_inicio: _p, reactivada_desde: _r, anulada: _a, ...x }) => x), error: null }
+    escenario.cobros = { data: [{ monto: '150000', estado: 'pagado' }], error: null }
+    const m2 = await moraValidaCda()
+    expect(m2.tipo === 'ok' && m2.mora.estado).not.toBe('al_dia')
   })
 
   it('sin el módulo, o sin sesión, no hay puerta que abrir', async () => {
@@ -569,9 +620,10 @@ describe('la v1.5 publicada: transición de la cláusula 11.7 (bloqueante de Ver
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
     escenario.hoy = '2026-12-30'
     expect(await validaCdaPermiteOperar()).toEqual({ ok: true })
+    // El día 31 es la Cancelada (11.3, 11.7), aunque el cron todavía no la haya guardado.
     escenario.hoy = '2026-12-31'
     const p = await validaCdaPermiteOperar()
-    expect(!p.ok && p.error).toContain('pausada desde el 31-dic')
+    expect(!p.ok && p.error).toContain('Cancelada desde el 31 de diciembre')
   })
 
   it('CONTROL: sin la v1.5 registrada, la v1.4 restringe el 6-nov y pausa el 27-nov', async () => {

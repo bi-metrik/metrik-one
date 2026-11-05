@@ -32,6 +32,27 @@ import { enlaceVigente, pasarelaDeEnlaces } from './enlace-pago-cuota'
 /** Con cuánta anticipación al vencimiento se genera el enlace. Igual a su vigencia: el ciclo del 20 al 27. */
 export const DIAS_ANTICIPACION_ENLACE = 7
 
+/**
+ * La cartera de un CDA (Términos v1.5, 11.7: períodos de antes del 1-dic-2026 que siguen sin pagar después
+ * de la Cancelada o de la reactivación) recibe su enlace y su correo a lo sumo una vez cada tantos días, no
+ * cada vez que vence el enlace (revisión de Emilio del 4-nov: recordatorios con frecuencia razonable,
+ * mensual). El enlace vive `DIAS_ANTICIPACION_ENLACE` días; el siguiente sale cuando pasaron estos desde
+ * que se generó el anterior.
+ */
+export const DIAS_ENTRE_ENLACES_CARTERA = 30
+
+/**
+ * ¿La cuota de cartera espera todavía su próximo enlace? Sí si su cobro programado tuvo un enlace generado
+ * hace menos de `DIAS_ENTRE_ENLACES_CARTERA` días (su vencimiento menos la vigencia de 7 días).
+ */
+export function carteraEnEspera(enlacePagoExpira: string | null | undefined, ahoraMs: number): boolean {
+  if (!enlacePagoExpira) return false
+  const expira = Date.parse(enlacePagoExpira)
+  if (Number.isNaN(expira)) return false
+  const generado = expira - DIAS_ANTICIPACION_ENLACE * 86_400_000
+  return ahoraMs - generado < DIAS_ENTRE_ENLACES_CARTERA * 86_400_000
+}
+
 /** Estados del contrato que siguen recibiendo cobros. */
 export const ESTADOS_CONTRATO_CON_COBRO = ['activo', 'pausado'] as const
 

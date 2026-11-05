@@ -356,3 +356,70 @@ describe('generarEnlacesAutomaticos sobre una suscripción (suscripciones_produc
     expect(r.resumen.generados).toEqual([])
   })
 })
+
+describe('Valida de los CDA: la Cancelada y la cartera (Términos v1.5, 2.5, 11.4 y 11.7)', () => {
+  const P = (desde: string, hasta: string) => `Suscripción VALIDA · Plan CDA — periodo del ${desde} al ${hasta}`
+  /** Caquetá el 12-ene-2027 (el 11 es festivo): Cancelada el 31-dic y reactivada el 10-ene; cartera de la transición sin pagar. */
+  function reactivada(): Tablas {
+    return tablasBase({
+      servicios_contratados: [
+        {
+          id: 'sc1', workspace_id: 'wsM', negocio_id: 'n1', estado: 'activo', vigente_desde: '2026-09-01',
+          aceptante_designado_id: 'p1', workspace_pagador_id: 'wsC', cancelada_desde: null, reactivada_desde: '2027-01-10', reactivacion_cobro_id: 'cR',
+        },
+      ],
+      planes_cobro: [
+        { id: 'plan1', workspace_id: 'wsM', negocio_id: 'n1', total_cuotas: 4, pasarela: 'bold', activo: false, fecha_inicio: '2026-09-23' },
+        { id: 'plan2', workspace_id: 'wsM', negocio_id: 'n1', total_cuotas: 1, pasarela: 'bold', activo: false, fecha_inicio: '2027-01-10' },
+      ],
+      plan_cobro_cuotas: [
+        { id: 'q1', workspace_id: 'wsM', plan_cobro_id: 'plan1', numero: 1, tipo: 'cuota', monto: 150000, fecha_vencimiento: '2026-09-30', concepto_detalle: P('23-sep', '22-oct') },
+        { id: 'q2', workspace_id: 'wsM', plan_cobro_id: 'plan1', numero: 2, tipo: 'cuota', monto: 150000, fecha_vencimiento: '2026-10-27', concepto_detalle: P('23-oct', '22-nov') },
+        { id: 'q4', workspace_id: 'wsM', plan_cobro_id: 'plan1', numero: 4, tipo: 'cuota', monto: 150000, fecha_vencimiento: '2026-12-27', concepto_detalle: P('23-dic', '22-ene'), anulada_at: '2026-12-31T12:00:00Z' },
+        { id: 'n1q', workspace_id: 'wsM', plan_cobro_id: 'plan2', numero: 1, tipo: 'cuota', monto: 150000, fecha_vencimiento: '2027-01-10', concepto_detalle: P('10-ene', '9-feb') },
+        { id: 'n2q', workspace_id: 'wsM', plan_cobro_id: 'plan2', numero: 2, tipo: 'cuota', monto: 150000, fecha_vencimiento: '2027-02-10', concepto_detalle: P('10-feb', '9-mar') },
+      ],
+      cobros: [
+        { id: 'c1', workspace_id: 'wsM', negocio_id: 'n1', plan_cobro_id: 'plan1', numero_cuota: 1, tipo_cobro: 'programado', monto: 150000, fecha: '2026-10-02', retencion_iva: 0 },
+        // El pago de la reactivación, ya atado al plan nuevo.
+        { id: 'cR', workspace_id: 'wsM', negocio_id: 'n1', plan_cobro_id: 'plan2', numero_cuota: 1, tipo_cobro: 'programado', monto: 150000, fecha: '2027-01-10', retencion_iva: 0 },
+        // El período siguiente del plan nuevo, pagado por adelantado: tampoco tapa la cartera.
+        { id: 'cP2', workspace_id: 'wsM', negocio_id: 'n1', plan_cobro_id: 'plan2', numero_cuota: 2, tipo_cobro: 'programado', monto: 150000, fecha: '2027-01-11', retencion_iva: 0 },
+      ],
+    })
+  }
+
+  it('la cuota anulada (2.5) no recibe enlace; la cartera sí, por su saldo, sin que el pago de la reactivación la tape', async () => {
+    const r = await correr(reactivada(), { hoy: '2027-01-12', ahoraMs: Date.parse('2027-01-12T15:00:00Z') })
+    expect(r.resumen.generados.map((g) => g.cuotaId)).toEqual(['q2'])
+    expect(r.pasarela.crear.mock.calls[0][0]).toMatchObject({ monto: 150000 })
+    expect(r.resumen.candidatas).toBe(1)
+    expect(r.resumen.omitidas).toEqual([])
+    expect(r.resumen.errores).toEqual([])
+  })
+
+  it('la cartera recibe su enlace y su correo una vez al mes, no cada semana', async () => {
+    const t = reactivada()
+    await correr(t, { hoy: '2027-01-12', ahoraMs: Date.parse('2027-01-12T15:00:00Z') })
+    // Vencido el enlace (7 días), a las 2 semanas no se repite...
+    const r2 = await correr(t, { hoy: '2027-01-26', ahoraMs: Date.parse('2027-01-26T15:00:00Z') })
+    expect(r2.pasarela.crear).not.toHaveBeenCalled()
+    expect(r2.enviar).not.toHaveBeenCalled()
+    expect(r2.resumen.carteraEnEspera).toBe(1)
+    // ...y al mes sí.
+    const r3 = await correr(t, { hoy: '2027-02-12', ahoraMs: Date.parse('2027-02-12T15:00:00Z') })
+    expect(r3.resumen.generados.map((g) => g.cuotaId)).toContain('q2')
+  })
+
+  it('con la suscripción Cancelada (contrato pausado), lo de la transición es cartera: mensual', async () => {
+    const t = reactivada()
+    t.servicios_contratados[0] = { ...t.servicios_contratados[0], estado: 'pausado', cancelada_desde: '2026-12-31', reactivada_desde: null }
+    t.planes_cobro = t.planes_cobro.filter((p) => p.id === 'plan1')
+    t.plan_cobro_cuotas = t.plan_cobro_cuotas.filter((q) => q.plan_cobro_id === 'plan1')
+    t.cobros = t.cobros.filter((c) => c.id === 'c1')
+    const r1 = await correr(t, { hoy: '2027-01-04', ahoraMs: Date.parse('2027-01-04T15:00:00Z') })
+    expect(r1.resumen.generados.map((g) => g.cuotaId)).toEqual(['q2'])
+    const r2 = await correr(t, { hoy: '2027-01-18', ahoraMs: Date.parse('2027-01-18T15:00:00Z') })
+    expect(r2.resumen.generados).toEqual([])
+  })
+})
