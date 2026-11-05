@@ -68,6 +68,15 @@ const recibiendo = (e: EntregaAbierta, ahora: Date) =>
   e.estado === 'recibiendo' && ahora.getTime() - Date.parse(e.ultimaEn) <= MINUTOS_RECIBIENDO * 60_000
 const esperandoRespuesta = (e: EntregaAbierta) => e.estado === 'por_confirmar' || e.estado === 'frenado'
 
+/**
+ * El nombre que trae el texto del pedido («bloqueo para Laura Gómez, 2 adultos» → «Laura Gómez»), para rotular un
+ * pedido que todavía no tiene código. `null` si no lo dice.
+ */
+export function clienteDelTexto(texto: string | null | undefined): string | null {
+  const m = /\bpara\s+(?:la\s+señora\s+|el\s+señor\s+|la\s+sra\.?\s+|el\s+sr\.?\s+)?(\p{Lu}[\p{L}'-]+(?:\s+\p{Lu}[\p{L}'-]+)?)/u.exec(String(texto ?? ''))
+  return m ? m[1] : null
+}
+
 /** El título de un botón para un pedido: «COT-2026-0015» o el cliente, en 20 caracteres. */
 export function tituloDeEntrega(e: Pick<EntregaAbierta, 'codigo' | 'cliente'>): string {
   const t = e.codigo ? `${e.codigo.replace(/^COT-\d{4}-0*/, 'COT ')}${e.cliente ? ` ${e.cliente.split(/\s+/)[0]}` : ''}` : (e.cliente ?? 'Pedido en curso')

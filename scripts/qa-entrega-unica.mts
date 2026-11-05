@@ -11,7 +11,7 @@
  */
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
-import { decidirAncla, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from '../supabase/functions/_shared/entrega-bloqueo-ancla'
+import { clienteDelTexto, decidirAncla, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from '../supabase/functions/_shared/entrega-bloqueo-ancla'
 import { procesarPedido, procesarRespuesta, responderTipo, type Deps, type Entrega, type Salida } from '../src/lib/cotizaciones/entrega-unica/flujo'
 import { llamadorAnthropic } from '../src/lib/cotizaciones/entrega-unica/llamada'
 import { entregaNueva, puertoEnMemoria } from '../src/lib/cotizaciones/entrega-unica/puerto-memoria'
@@ -50,7 +50,7 @@ function chat(puerto: ReturnType<typeof puertoEnMemoria>, deps: Deps) {
     .map(e => {
       const pz = puerto.estado.piezas.filter(p => p.entregaId === e.id)
       return {
-        id: e.id, codigo: e.codigo, cliente: e.salida?.requisitos.cliente ?? null, estado: e.estado as EntregaAbierta['estado'],
+        id: e.id, codigo: e.codigo, cliente: e.salida?.requisitos.cliente ?? pz.filter(p => p.direccion === 'entrante' && p.tipo === 'texto').map(p => clienteDelTexto(p.texto)).find(Boolean) ?? null, estado: e.estado as EntregaAbierta['estado'],
         wamids: pz.map(p => p.wamid).filter((x): x is string => !!x),
         tieneEncabezado: pz.some(p => p.direccion === 'entrante' && p.tipo === 'texto' && tieneSenalDeBloqueo(p.texto)),
         ultimaEn: pz.map(p => p.en).sort().at(-1) ?? new Date(reloj).toISOString(),

@@ -148,6 +148,9 @@ function conTarifa(b: BorradorCotizacion | null, tarifa: 'publica' | 'neta' | nu
   return { ...b, hoteles, dudas }
 }
 
+/** «sí», «Sí.», «ok», «listo», «dale», «correcto», «perfecto». */
+export const SI_LIMPIO = /^\s*(s[ií]|ok|listo|dale|correcto|perfecto)\s*[.!👍]*\s*$/iu
+
 const errores = (v: Validado | null) => (v?.hallazgos ?? []).filter(h => h.nivel === 'error')
 
 export async function procesarPedido(entregaId: string, deps: Deps): Promise<Salida[]> {
@@ -265,9 +268,12 @@ export async function procesarRespuesta(entregaId: string, respuesta: string, de
     if (e.negocioId) await puerto.actualizarViaje(e.negocioId, requisitos)
 
     const preguntas = preguntasQueBloquean({ requisitos, borrador, redaccion: s.redaccion, hoy: pedido.hoy, resueltas })
-    if (s.noEntendido || preguntas.length > 0 || !borrador) {
+    // Un «sí» limpio a un mensaje sin preguntas no tiene nada que no se entienda: qué bloquea lo decide el código
+    // (el modelo convirtió en «noEntendido» dudas que el código ya había descartado, QA del 2026-11-04).
+    const noEntendido = SI_LIMPIO.test(respuesta) && e.preguntas.length === 0 ? null : s.noEntendido
+    if (noEntendido || preguntas.length > 0 || !borrador) {
       const texto = [
-        s.noEntendido ? `${codigo} · ${s.noEntendido}` : null,
+        noEntendido ? `${codigo} · ${noEntendido}` : null,
         preguntas.length || !borrador ? mensajeDeConfirmacion({ codigo, requisitos, borrador, preguntas, faltaCelularCliente: false }) : null,
       ].filter(Boolean).join('\n\n')
       await puerto.guardarEntrega(e.id, { estado: 'por_confirmar', salida, preguntas, resueltas: [...resueltas], uso, tiempos })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decidirAncla, pareceRespuesta, tieneSenalDeBloqueo, tituloDeEntrega, type EntregaAbierta } from './entrega-bloqueo-ancla'
+import { clienteDelTexto, decidirAncla, pareceRespuesta, tieneSenalDeBloqueo, tituloDeEntrega, type EntregaAbierta } from './entrega-bloqueo-ancla'
 
 /** El ancla del pedido (brief del 2026-11-04): lo citado va a su hilo; lo suelto, solo sin duda; si no, se pregunta. */
 
@@ -82,5 +82,13 @@ describe('decidirAncla', () => {
     expect(decidirAncla(b('eb|tipo|bloqueo|E1'), [], 'p', AHORA)).toEqual({ accion: 'tipo', entregaId: 'E1', tipo: 'bloqueo' })
     expect(decidirAncla(b('eb|asignar|nuevo|pz3'), [], 'p', AHORA)).toEqual({ accion: 'asignar', entregaId: 'nuevo', piezaId: 'pz3' })
     expect(decidirAncla(b('ag|p|xyz'), [], 'p', AHORA)).toEqual({ accion: 'otro' })
+  })
+})
+
+describe('clienteDelTexto', () => {
+  it('saca el nombre del pedido para rotular el botón', () => {
+    expect(clienteDelTexto('Trappi, bloqueo para Laura Gomez, van 2 adultos')).toBe('Laura Gomez')
+    expect(clienteDelTexto('Cotización para la señora Marta Ruiz')).toBe('Marta Ruiz')
+    expect(clienteDelTexto('te mando los pantallazos')).toBeNull()
   })
 })

@@ -14,7 +14,7 @@
 // ============================================================
 
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
-import { decidirAncla, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from './entrega-bloqueo-ancla.ts';
+import { clienteDelTexto, decidirAncla, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from './entrega-bloqueo-ancla.ts';
 import { firmarCuerpo } from './entrega-bloqueo-firma.ts';
 import { bajarMedia, subirSoporte } from './wa-media.ts';
 import { sendButtons, sendDocument, sendTextoConId } from './wa-respond.ts';
@@ -49,7 +49,8 @@ async function abiertas(supabase: SupabaseClient, ws: string, telefono: string):
     const suyas = piezas.filter(p => p.entrega_id === f.id);
     return {
       id: f.id as string, codigo: (f.codigo as string | null) ?? null,
-      cliente: ((f.salida as { requisitos?: { cliente?: string } } | null)?.requisitos?.cliente) ?? null,
+      cliente: ((f.salida as { requisitos?: { cliente?: string } } | null)?.requisitos?.cliente)
+        ?? suyas.filter(p => p.direccion === 'entrante' && p.tipo === 'texto').map(p => clienteDelTexto(p.texto as string | null)).find(Boolean) ?? null,
       estado: f.estado as EntregaAbierta['estado'],
       wamids: suyas.map(p => p.wamid as string | null).filter((x): x is string => !!x),
       tieneEncabezado: suyas.some(p => p.direccion === 'entrante' && p.tipo === 'texto' && tieneSenalDeBloqueo(p.texto as string | null)),

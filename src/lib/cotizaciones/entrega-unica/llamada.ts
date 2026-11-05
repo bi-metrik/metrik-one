@@ -30,6 +30,7 @@ Aplica lo que ella dijo y devuelve los requisitos y el borrador COMPLETOS ya cor
 - Si da los viajeros, ponlos en "viajeros" y arma el borrador con la acomodación que corresponda (manual de cotización).
 - Si un niño queda gratis en un hotel («sí aplica» a la nota de niños gratis), NO lo saques de ese hotel: agrega en "ninos" un rango «Gratis» con precio 0 y asígnalo ahí en "ninosAsignados". Todo viajero tiene que quedar acomodado en cada hotel.
 - En "respuestas", una entrada por pregunta numerada que ella contestó (o que el «sí» cubre).
+- Las dudas del borrador que el sistema NO le preguntó no bloquean: esa decisión ya la tomó el sistema. No las conviertas en "noEntendido".
 - Si algo no se entiende o no se puede aplicar, dilo en "noEntendido" con la pregunta que le harías. No inventes.`
 
 export interface PedidoParaModelo {
