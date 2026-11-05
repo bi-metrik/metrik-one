@@ -136,13 +136,13 @@ Esta transcripción editable se generó por computadora y puede contener errores
     expect(t.vacia).toBe(false)
     expect(t.cuerpo).not.toContain('Metodología de trabajo')
     expect(t.cuerpo).not.toContain('Resumen')
-    // Antes de la primera intervencion quedan la fecha y el titulo repetido
-    // (la linea "Titulo - Transcripcion" que separa Notas del cuerpo real);
-    // ninguna de las dos tiene el patron "Hablante: texto", asi que
-    // alcance.ts las descarta igual al extraer intervenciones.
-    expect(t.cuerpo).toContain('contacto trappvel: Hola, Mauricio. ¿Me escuchas bien?')
-    const primeraLinea = t.cuerpo.split('\n')[0]
-    expect(primeraLinea).not.toMatch(/^[^:\n]{2,60}:\s+\S/)
+    // La fecha y la linea "Titulo - Transcripcion" que siguen al corte
+    // tampoco son habla: el cuerpo arranca en la primera intervencion.
+    expect(t.cuerpo.startsWith('contacto trappvel: Hola, Mauricio. ¿Me escuchas bien?')).toBe(true)
+    expect(t.cuerpo).not.toContain('ago 19, 2026')
+    expect(t.titulo).toBe('Alejandra Lancheros - Trappvel x MéTRIK')
+    // Sin bloque "Asistentes": los nombres salen de quien habla.
+    expect(t.asistentes).toEqual(['contacto trappvel', 'Mauricio Moreno'])
   })
 
   it('una reunion de 18 minutos no pasa el umbral de una hora', () => {
@@ -221,5 +221,138 @@ describe('parseTranscripcion sobre el export real de Drive', () => {
     expect(t.cuerpo).not.toContain('finalizó después de')
     expect(t.cuerpo).not.toContain('se generó automáticamente')
     expect(t.cuerpo.split('\n')).toHaveLength(5)
+  })
+})
+
+// Forma de las Notas de Gemini que exporta Drive hoy (SINTETICA: misma
+// estructura que el export text/plain medido el 2026-11-05, texto inventado).
+// La linea suelta "Transcripcion" ya no existe: arriba queda la fila de
+// pestanas "Registros de la reunion Transcripcion" y el corte real es
+// "<titulo> - Transcripcion". Con CRLF y BOM, como llega de Drive.
+const NOTAS_NUEVAS = [
+  '﻿sept 4, 2026',
+  'Revisión de flujos - Acme x MéTRIK',
+  'Invitado Ana Pérez Mauricio Moreno ana@acme.example',
+  'Archivos adjuntos Revisión de flujos - Acme x MéTRIK',
+  'Registros de la reunión Transcripción ',
+  '',
+  'Resumen',
+  'Ana Pérez y Mauricio Moreno revisaron el flujo de despacho.',
+  '',
+  'Próximos pasos',
+  '* [Mauricio Moreno] Flujo: enviar el diagrama corregido.',
+  '',
+  'Detalles',
+  '* Revisión del diagrama - Transcripción',
+  '* Cuello de botella: Ana Pérez explica que el cierre se hace a mano.',
+  '',
+  'Revisa las notas de Gemini para asegurarte de que sean precisas.',
+  'sept 4, 2026',
+  'Revisión de flujos - Acme x MéTRIK - Transcripción',
+  '00:00:06',
+  '',
+  'Ana Pérez: Hola, Mauricio.',
+  'Mauricio Moreno: Hola, Ana. ¿Me escuchas?',
+  'Ana Pérez: Sí, perfecto.',
+  '00:05:00',
+  'Mauricio Moreno: Empecemos por el despacho.',
+  '',
+  'La transcripción finalizó después de 01:16:13',
+  '',
+  'Esta transcripción editable se generó por computadora y puede contener errores.',
+].join('\r\n')
+
+describe('parseTranscripcion sobre las Notas de Gemini nuevas', () => {
+  it('corta en "<titulo> - Transcripcion" y no en la fila de pestanas', () => {
+    const t = parseTranscripcion(NOTAS_NUEVAS)
+    expect(t.vacia).toBe(false)
+    expect(t.cuerpo.split('\n')).toEqual([
+      'Ana Pérez: Hola, Mauricio.',
+      'Mauricio Moreno: Hola, Ana. ¿Me escuchas?',
+      'Ana Pérez: Sí, perfecto.',
+      'Mauricio Moreno: Empecemos por el despacho.',
+    ])
+    expect(t.duracionSegundos).toBe(76 * 60 + 13)
+  })
+
+  it('el resumen y los pasos de Gemini no se cuelan como habla', () => {
+    const t = parseTranscripcion(NOTAS_NUEVAS)
+    expect(t.cuerpo).not.toContain('Resumen')
+    expect(t.cuerpo).not.toContain('Cuello de botella')
+    expect(t.cuerpo).not.toContain('Flujo: enviar')
+  })
+
+  it('toma el titulo del corte (con sus guiones) y los asistentes de quien habla', () => {
+    const t = parseTranscripcion(NOTAS_NUEVAS)
+    expect(t.titulo).toBe('Revisión de flujos - Acme x MéTRIK')
+    expect(t.asistentes).toEqual(['Ana Pérez', 'Mauricio Moreno'])
+  })
+
+  it('una vineta del resumen que termina en "- Transcripcion" no es el corte', () => {
+    // Si la vineta contara, el cuerpo arrancaria en el resumen.
+    const sinCorte = NOTAS_NUEVAS.replace('Revisión de flujos - Acme x MéTRIK - Transcripción\r\n', '')
+    const t = parseTranscripcion(sinCorte)
+    expect(t.cuerpo).toBe('')
+    expect(t.vacia).toBe(true)
+  })
+
+  it('con solo la fila de pestanas no inventa cuerpo', () => {
+    const t = parseTranscripcion('sept 4, 2026\nRegistros de la reunión Transcripción\nResumen\nAna Pérez: dijo algo.\n')
+    expect(t.cuerpo).toBe('')
+    expect(t.vacia).toBe(true)
+  })
+})
+
+describe('parseTranscripcion: variantes del encabezado y lineas del cuerpo', () => {
+  const HABLA = 'Ana Pérez: Uno.\nMauricio Moreno: Dos.\nAna Pérez: Tres.'
+
+  it.each([
+    ['TRANSCRIPCIÓN'],
+    ['Transcripcion'],
+    ['transcripción'],
+    ['Tema - Acme x MeTRIK - TRANSCRIPCION'],
+    ['Tema – transcripción'],
+    ['Tema—Transcripción'],
+    ['## **Transcripción**'],
+  ])('acepta "%s" como corte', (encabezado) => {
+    const t = parseTranscripcion(`Tema\nAsistentes\nAna Pérez, Mauricio Moreno\n${encabezado}\n00:00:01\n${HABLA}\n`)
+    expect(t.cuerpo).toBe(HABLA)
+    expect(t.vacia).toBe(false)
+  })
+
+  it('acepta la tilde descompuesta (NFD) que a veces trae el export', () => {
+    const t = parseTranscripcion(`Tema\n${'Transcripción'.normalize('NFD')}\n${HABLA}\n`)
+    expect(t.cuerpo).toBe(HABLA)
+  })
+
+  it('no confunde con el corte una linea que solo contiene "transcripcion"', () => {
+    const t = parseTranscripcion(`Tema\nTranscripciones pendientes\nLa transcripción de ayer\n${HABLA}\n`)
+    expect(t.cuerpo).toBe('')
+  })
+
+  it('una linea "Transcripcion" o "Asistentes" despues de la primera intervencion es cuerpo', () => {
+    const texto = [
+      'Tema', 'Asistentes', 'Ana Pérez, Mauricio Moreno', 'Transcripción',
+      'Ana Pérez: Uno.',
+      'Transcripción',
+      'Mauricio Moreno: Dos.',
+      'Asistentes',
+      'Ana Pérez: Tres.',
+      'Tema - Transcripción',
+      'Mauricio Moreno: Cuatro.',
+    ].join('\n')
+    const t = parseTranscripcion(texto)
+    expect(t.asistentes).toEqual(['Ana Pérez', 'Mauricio Moreno'])
+    expect(t.cuerpo.split('\n')).toEqual([
+      'Ana Pérez: Uno.', 'Transcripción', 'Mauricio Moreno: Dos.', 'Asistentes',
+      'Ana Pérez: Tres.', 'Tema - Transcripción', 'Mauricio Moreno: Cuatro.',
+    ])
+  })
+
+  it('una intervencion que termina en "- transcripcion" es habla, no corte', () => {
+    const texto = `Tema\nTranscripción\nAna Pérez: Te mando el enlace - transcripción\n${HABLA}\n`
+    const t = parseTranscripcion(texto)
+    expect(t.cuerpo.split('\n')[0]).toBe('Ana Pérez: Te mando el enlace - transcripción')
+    expect(t.cuerpo.split('\n')).toHaveLength(4)
   })
 })
