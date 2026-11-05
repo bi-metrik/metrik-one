@@ -18,7 +18,7 @@ import { leerModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
 import { leerPantallazoDeBloqueo, type LecturaBloqueo } from '@/lib/cotizaciones/bloqueo-leer'
 import { costoDelPaquete, descripcionDelPaquete, edadesNinosDeLaSolicitud, leerPaqueteBloqueo, type PaqueteBloqueo } from '@/lib/cotizaciones/bloqueo-paquete'
 import { guardarImagenDeCaptura } from '@/lib/cotizaciones/imagen-captura'
-import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
+import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, operadoresDeLaSolicitud, proveedorDelPaquete, type FichaDeOperador } from '@/lib/cotizaciones/bloqueo-operador'
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
@@ -441,7 +441,10 @@ export type ResultadoPegadoEnBloqueo =
  * paquete vigente, con las habitaciones según los viajeros de la Solicitud. Lee con el lector del
  * bloqueo y escribe con `guardarPaqueteBloqueo` (mismas guardas, mismo costo, mismas tarifas).
  */
-export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Promise<ResultadoPegadoEnBloqueo> {
+export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casilla?: 'hotel' | 'vuelo'): Promise<ResultadoPegadoEnBloqueo> {
+  // `casilla`: la bandeja general ya detectó que es el hotel o el vuelo del paquete (`detectarCaptura`,
+  // 2026-11-04): se lee directo con esa casilla, sin volver a detectar (dos detecciones podían no coincidir).
+  const pedido = casilla === 'hotel' || casilla === 'vuelo' ? casilla : 'detectar'
   if (!(await exigirModulo(REQUISITO.clarity)).ok) return { success: false, error: MENSAJE_MODULO_NO_ACTIVO }
   const { supabase, workspaceId, error } = await getWorkspace()
   if (error || !workspaceId) return { success: false, error: 'No autenticado' }
@@ -449,7 +452,7 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Pro
   const b = await exigirBloqueo(sb, cotizacionId)
   if (!b.ok) return { success: false, error: b.error }
 
-  const lectura = await leerPantallazoDeBloqueo('detectar', dataUrl)
+  const lectura = await leerPantallazoDeBloqueo(pedido, dataUrl)
   if (!lectura.ok) return lectura.elegir ? { success: false, error: lectura.mensaje, otroServicio: true } : { success: false, error: lectura.mensaje }
 
   const { data: filas, error: errItems } = await sb
@@ -472,8 +475,10 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Pro
   const pasajeros = c ? { adultos: c.adultos, ninos: c.ninos, infantes: c.infantes } : null
   const plan = planDelPegado(opciones, lectura.cual === 'hotel'
     ? { cual: 'hotel', hotel: lectura.hotel, incluye: lectura.incluye, operador: lectura.operador ?? null }
-    : { cual: 'vuelo', vuelo: lectura.vuelo }, {
+    : { cual: 'vuelo', vuelo: lectura.vuelo, operador: lectura.operador ?? null }, {
     operadorInicial: operadorInicialDelPaquete(b.operador),
+    // Con varios operadores en la solicitud el reparto va por operador (viaje 02, 2026-11-05).
+    operadoresSolicitud: operadoresDeLaSolicitud(b.operador),
     pasajeros,
     edadesNinos: edadesNinosDeLaSolicitud(edadesMenores ?? null, pasajeros ? { ninos: pasajeros.ninos, infantes: pasajeros.infantes } : null),
   })
@@ -506,7 +511,7 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string): Pro
   const e = await guardar(creada.itemId, plan.paquete, plan.tarifa)
   if (e) return { success: false, error: e }
   const mensaje = plan.accion === 'nuevo_paquete'
-    ? (lectura.cual === 'vuelo' ? 'Paquete nuevo con este vuelo: los hoteles que pegues ahora van a este paquete.' : `Paquete nuevo con ${hotelLeido ?? 'este hotel'}.`)
+    ? plan.mensaje ?? (lectura.cual === 'vuelo' ? 'Paquete nuevo con este vuelo: los hoteles que pegues ahora van a este paquete.' : `Paquete nuevo con ${hotelLeido ?? 'este hotel'}.`)
     : `${hotelLeido ?? 'El hotel'} es otra opción del paquete.`
   return { success: true, accion: plan.accion, itemId: creada.itemId, mensaje }
 }

@@ -314,7 +314,7 @@ function VueloDelCliente({ v, general }: { v: VueloPDF; general: boolean }) {
  * Pegar o soltar sobre una foto AGREGA otra al perfil si cabe; «Ver fotos» abre el perfil para
  * ordenar o quitar.
  */
-function FotoDeTarjeta({
+export function FotoDeTarjeta({
   fotoRef,
   editable,
   subiendo,

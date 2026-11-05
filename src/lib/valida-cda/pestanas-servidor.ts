@@ -7,6 +7,7 @@ import { documentosDelCliente } from '@/lib/valida-api/terminos-servidor'
 import { leerPestanaPagosCda, type LecturaPestanaPagos } from './pago-servidor'
 import { puedeVerPagosCda, type EntradaValidaCda } from './puerta'
 import { terminosAceptadosPorEmpresa } from './terminos-empresa'
+import { hablaConLaV15 } from './plazos'
 
 /**
  * Lo que cargan las pestañas Pagos y Términos de `/valida` del CDA, el mismo patrón de Valida API:
@@ -30,7 +31,10 @@ export async function leerPagosCda(e: EntradaValidaCda): Promise<ResultadoPagosC
       razon: 'Los pagos los ve la persona designada por tu empresa.',
     }
   }
-  return leerPestanaPagosCda(e.servicioContratadoId, e.hoy)
+  return leerPestanaPagosCda(e.servicioContratadoId, e.hoy, undefined, {
+    transicion: hablaConLaV15(e) ? e.transicionDesde : null,
+    cancelada: e.canceladaDesde !== null,
+  })
 }
 
 export async function leerTerminosEmpresaCda(e: EntradaValidaCda): Promise<ResultadoTerminosAprobados> {

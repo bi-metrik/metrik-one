@@ -118,6 +118,24 @@ export const TEXTOS_PREGUNTAS: TextosActualizacion = {
   nota: 'asistente de ventas Dimpro: preguntas primero, uno o dos (30-oct)',
 };
 
+/** Cierra sola (Mauricio, 4-nov): no ofrece pasar a una persona; solo pasa en los casos del reglamento o si la piden. */
+export const CLAVES_CIERRA_SOLA = ['alc.producto', 'alc.especificacion', 'alc.duda_abierta', 'inv.cierras_tu', 'persona.pide', 'rf.bienvenida', 'rf.autorizacion_no', 'rf.persona_por_que'];
+export const TEXTOS_CIERRA_SOLA: TextosActualizacion = {
+  titulo: 'Dimi cierra la venta solo (4-nov): no ofrece pasar a una persona; si no tiene un dato lo dice y sigue vendiendo.\n-- Pasa a persona solo en los casos del reglamento o si el cliente la pide. El aviso de entrada ya no ofrece «persona».',
+  uso: 'semilla-sql-dimpro.ts --cierra-sola',
+  despues: 'DESPUÉS del deploy de chatwoot-agente con el candado que no deja salir la oferta de una persona.',
+  nota: 'asistente de ventas Dimpro: cierra la venta solo, sin ofrecer la persona (4-nov)',
+};
+
+/** El carrito (Mauricio, 4-nov): todo lo que el cliente lleva va en un carrito guardado, un link y un flete. */
+export const CLAVES_CARRITO = ['proc.compra', 'alc.complemento'];
+export const TEXTOS_CARRITO: TextosActualizacion = {
+  titulo: 'El carrito del asistente de VENTAS de Dimpro (4-nov): todo lo que el cliente lleva va en un carrito guardado en ONE,\n-- un solo link de Bold y un solo flete. Antes, cada pedido era de UN producto (dos productos = dos links y dos fletes).',
+  uso: 'semilla-sql-dimpro.ts --carrito',
+  despues: 'DESPUÉS de aplicar la migración 20261104210000_carritos_asistentes y del deploy de chatwoot-agente con la herramienta `carrito` guardada. Va después de 2026-11-04_cierra-sola.sql.',
+  nota: 'asistente de ventas Dimpro: carrito, un link y un flete (4-nov)',
+};
+
 /**
  * Banco con Haiku real (3-nov): el «ya pagué» sin link pasa a persona sin preguntar detalles, el link sin pedido sigue
  * la compra, el complemento rechazado no trae «¿Necesitas algo más?» y la pregunta de ver_catalogo va sola.
@@ -211,7 +229,9 @@ $$;
 if (import.meta.main) {
   const iMapa = Deno.args.indexOf('--complementos');
   const sql = iMapa >= 0 ? complementosSqlDimpro(JSON.parse(Deno.readTextFileSync(Deno.args[iMapa + 1])), `mapa de venta cruzada (${Deno.args[iMapa + 1].split('/').pop()})`)
+    : Deno.args.includes('--cierra-sola') ? actualizacionSqlDimpro(CLAVES_CIERRA_SOLA, REGLAMENTO_DIMPRO, TEXTOS_CIERRA_SOLA)
     : Deno.args.includes('--banco-3nov') ? actualizacionSqlDimpro(CLAVES_BANCO_3NOV, REGLAMENTO_DIMPRO, TEXTOS_BANCO_3NOV)
+    : Deno.args.includes('--carrito') ? actualizacionSqlDimpro(CLAVES_CARRITO, REGLAMENTO_DIMPRO, TEXTOS_CARRITO)
     : Deno.args.includes('--saludo') ? actualizacionSqlDimpro(CLAVES_SALUDO, REGLAMENTO_DIMPRO, TEXTOS_SALUDO)
     : Deno.args.includes('--preguntas') ? actualizacionSqlDimpro(CLAVES_PREGUNTAS, REGLAMENTO_DIMPRO, TEXTOS_PREGUNTAS)
     : Deno.args.includes('--nombre') ? actualizacionSqlDimpro(CLAVES_NOMBRE, REGLAMENTO_DIMPRO, TEXTOS_NOMBRE)

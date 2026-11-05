@@ -41,7 +41,8 @@ import { hotelesDePaquetes, vuelosDePaquetes } from './bloqueo-documento'
 import { incluyeConPropias } from './incluye-por-one'
 import type { ParrafoViejo } from './parrafo-viejo'
 
-export const MODELO_REDACTOR = 'gemini-2.5-flash'
+/** `gemini-2.5-flash` quedó obsoleto (desde el 2026-12-01 Google lo enruta a 3.5-flash-lite): se pide explícito. */
+export const MODELO_REDACTOR = 'gemini-3.5-flash-lite'
 
 /** Lo que se imprime. */
 export interface TextoCliente {

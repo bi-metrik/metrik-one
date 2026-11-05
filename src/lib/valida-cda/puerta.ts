@@ -33,6 +33,7 @@ import {
   type EstadoMora,
 } from './plazos'
 import { TERMINOS_PLAN as TERMINOS_AUTOSERVICIO } from '@/lib/valida-registro/terminos-plan'
+import { mensajeCancelada, TEXTO_SIN_SUSCRIPCION_VIGENTE } from './cancelada'
 import {
   datosDelTextoV15,
   esTerminosV15,
@@ -106,6 +107,16 @@ import {
  * voluntaria, de que la persona designada la acepte (`modificacion`) con el mismo mecanismo y la misma
  * constancia de la entrada.
  *
+ * ## Cancelada y sin suscripción vigente (PR B, 2026-11-04)
+ *
+ *   - Con `cancelada_desde` en el contrato (cláusula 11.3, la pone el cron), el espacio entra a `/valida`
+ *     y ve la pantalla de Cancelada, pero ninguna acción del módulo opera: ni consultas, ni historial, ni
+ *     PDF (`validaCdaPermiteOperar`). La 11.4 la reactiva con el pago de un período.
+ *   - Un espacio cuyos contratos de Valida están TODOS `terminado` o `cancelado` ya no es `libre`: es
+ *     `sin_contrato_vigente` y el módulo se niega entero (revisión de Emilio: si no, terminar un contrato
+ *     por la 12.3 le dejaría Valida abierta gratis). Un espacio SIN contratos sigue `libre` (AFI, metrik,
+ *     la prueba del registro autogestionado).
+ *
  * La mora solo se mide para el espacio que PAGA (las RPC de cuotas no responden a un beneficiario) y,
  * a diferencia de los términos, NO cierra ante una lectura caída: pausar a un cliente exige la
  * prueba de la deuda, y «no pude leer las cuotas» no lo es. La tarjeta de pago dice que no cargó.
@@ -113,6 +124,8 @@ import {
 
 export type EntradaValidaCda =
   | { tipo: 'libre' }
+  /** Tiene contratos de Valida, todos `terminado` o `cancelado`: el módulo no opera. */
+  | { tipo: 'sin_contrato_vigente' }
   | { tipo: 'sin_sesion' }
   | { tipo: 'sin_modulo' }
   | { tipo: 'no_disponible' }
@@ -167,6 +180,11 @@ export type EntradaValidaCda =
        * ni alguien de otro espacio). Solo así su vista del aviso cuenta como constancia del preaviso.
        */
       usuarioDelCliente: boolean
+      /**
+       * Desde cuándo la suscripción está Cancelada (cláusula 11.3, `servicios_contratados.cancelada_desde`
+       * del contrato que manda), o `null`. Con fecha, ninguna acción del módulo opera.
+       */
+      canceladaDesde: string | null
     }
 
 /** Lo que devuelve `mis_servicios()`, con los campos que la puerta usa. */
@@ -178,6 +196,9 @@ interface FilaServicio {
   vigente_desde: string
   /** Nace en 20260924010000; ausente antes de esa migración, que es lo mismo que sin plazo. */
   terminos_plazo_hasta?: string | null
+  /** Nacen en 20261104233000; ausentes antes, que es lo mismo que sin Cancelada ni reactivación. */
+  cancelada_desde?: string | null
+  reactivada_desde?: string | null
 }
 
 /** El orden con que la base y el servidor eligen EL contrato del espacio: activo, y el más reciente. */
@@ -208,10 +229,12 @@ async function resolver(): Promise<EntradaValidaCda> {
     if (!esFuncionAusente(servicios.error)) console.error('[valida-cda] mis_servicios:', servicios.error.message)
     return { tipo: 'no_disponible' }
   }
-  const contratos = ((servicios.data ?? []) as FilaServicio[]).filter(
-    (s) => s.modulo === 'valida_consulta' && !ESTADOS_SIN_TERMINOS.has(s.estado),
-  )
-  if (contratos.length === 0) return { tipo: 'libre' }
+  const deValida = ((servicios.data ?? []) as FilaServicio[]).filter((s) => s.modulo === 'valida_consulta')
+  const contratos = deValida.filter((s) => !ESTADOS_SIN_TERMINOS.has(s.estado))
+  // Sin ningún contrato de Valida, la puerta no aplica. Con contratos, todos terminados o cancelados, el
+  // módulo se cierra: un contrato terminado no da Valida gratis.
+  if (deValida.length === 0) return { tipo: 'libre' }
+  if (contratos.length === 0) return { tipo: 'sin_contrato_vigente' }
 
   const [docs, aceptaciones, perfil] = await Promise.all([
     documentosDelCliente(),
@@ -248,7 +271,9 @@ async function resolver(): Promise<EntradaValidaCda> {
 
   const pagado = contratos.filter((c) => c.es_pagador === true).sort(porVigencia)
   // El plazo del MISMO contrato que decide quién firma (`designacionDelEspacio`, `versionContratada`).
-  const plazoTerminos = [...contratos].sort(porVigencia)[0]?.terminos_plazo_hasta ?? null
+  const queManda = [...contratos].sort(porVigencia)[0]
+  const plazoTerminos = queManda?.terminos_plazo_hasta ?? null
+  const cancelada = queManda?.cancelada_desde
 
   return {
     tipo: 'ok',
@@ -269,6 +294,7 @@ async function resolver(): Promise<EntradaValidaCda> {
     autoservicio: documentos.some((d) => d.slug === TERMINOS_AUTOSERVICIO.slug),
     usuarioDelCliente:
       perfil !== null && !perfil.platformAdmin && perfil.workspaceId === workspaceId && impersonating !== true,
+    canceladaDesde: typeof cancelada === 'string' && /^\d{4}-\d{2}-\d{2}/.test(cancelada) ? cancelada.slice(0, 10) : null,
   }
 }
 
@@ -287,6 +313,7 @@ export const MENSAJE_TERMINOS_PENDIENTES =
 export async function terminosValidaPermitenOperar(): Promise<{ ok: true } | { ok: false; error: string }> {
   const e = await entradaValidaCda()
   if (e.tipo === 'libre') return { ok: true }
+  if (e.tipo === 'sin_contrato_vigente') return { ok: false, error: `${TEXTO_SIN_SUSCRIPCION_VIGENTE.titulo}. ${TEXTO_SIN_SUSCRIPCION_VIGENTE.detalle}` }
   if (e.tipo === 'ok' && e.estado.estado === 'aprobada') return { ok: true }
   if (e.tipo === 'ok' && e.estado.estado === 'pendiente' && e.enPlazo) return { ok: true }
   if (e.tipo === 'no_disponible' || (e.tipo === 'ok' && e.estado.estado === 'no_disponible')) {
@@ -388,10 +415,16 @@ export const exigenciaV15Cda = cache(resolverExigenciaV15)
  * restricción de los 5 días NO cierra aquí: la cláusula 11.1 deja el histórico abierto.
  */
 export async function validaCdaPermiteOperar(): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Cancelada (11.3): manda sobre los términos y la mora; se sale pagando un período (11.4).
+  const e = await entradaValidaCda()
+  if (e.tipo === 'ok' && e.canceladaDesde) return { ok: false, error: mensajeCancelada(e.canceladaDesde) }
   const terminos = await terminosValidaPermitenOperar()
   if (!terminos.ok) return terminos
   const m = await moraValidaCda()
-  if (m.tipo === 'ok' && m.mora.estado === 'suspendido') return { ok: false, error: mensajeSuspendidoPorMora(m.mora) }
+  if (m.tipo === 'ok' && m.mora.estado === 'suspendido') {
+    // Con la v1.5 el día 31 es la Cancelada (11.3), aunque el cron todavía no la haya guardado.
+    return { ok: false, error: hablaConLaV15(e) ? mensajeCancelada(m.mora.corteDesde) : mensajeSuspendidoPorMora(m.mora) }
+  }
   return { ok: true }
 }
 

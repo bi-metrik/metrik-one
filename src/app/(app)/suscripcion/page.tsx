@@ -21,6 +21,8 @@ import { PestanaPagos } from './pestana-pagos'
 import SuscripcionClient, { type PestanaSuscripcion } from './suscripcion-client'
 import { TarjetaPago } from './tarjeta-pago'
 import { SuscripcionEnPruebaVista } from './suscripcion-en-prueba'
+import { ReactivarSuscripcion } from './reactivar-suscripcion'
+import { valorDeReactivacion } from '@/lib/valida-cda/cancelada-servidor'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,6 +70,9 @@ export default async function SuscripcionPage({ searchParams }: Props) {
   const tabInicial = PESTANAS.find((p) => p === tab) ?? 'resumen'
   const aprobada = ctx.entrada.estado.estado === 'aprobada'
   const esOne = ctx.producto === 'one'
+  // Cancelada (Términos v1.5, 11.3): en lugar de la tarjeta de pago y de las formas de pagar, «Reactivar»
+  // (11.4) con el valor de un período. Sin tarjeta ni Plan Anual mientras tanto.
+  const cancelada = !esOne && ctx.canceladaDesde !== null
 
   // La licencia de ONE no tiene términos publicados que releer ni oferta de Sustenta (es para los CDA).
   // Una suscripción cuya tarjeta rechazó el banco: se dice en la tarjeta de pago (2026-10-19).
@@ -78,11 +83,15 @@ export default async function SuscripcionPage({ searchParams }: Props) {
     leerEquipo(ctx),
     esOne ? null : estadoSugerencia({ workspaceId: ctx.workspaceId, usuarioId: ctx.usuarioId, ahora: new Date() }),
     // El Plan Anual: solo Valida de los CDA, con términos aceptados y el contrato encendido.
-    esOne || !aprobada ? null : leerOpcionesPago(ctx),
+    esOne || !aprobada || cancelada ? null : leerOpcionesPago(ctx),
     // El bloque «Pagar» de los CDA: la tarjeta (Términos v1.5, 2.4) y «Pagar solo este mes», que se
     // excluyen (brief del 2026-11-03). Solo la persona designada lo ve.
-    esOne || !aprobada ? null : vistaBloquePagar(ctx),
+    esOne || !aprobada || cancelada ? null : vistaBloquePagar(ctx),
   ])
+  const montoReactivacion = cancelada
+    ? await valorDeReactivacion(createServiceClient(), { id: ctx.contrato.id, parametros: ctx.contrato.parametros })
+    : null
+  const hayCartera = pagos.estado === 'ok' && (pagos.cartera ?? []).length > 0
   const pagoAutomatico = bloquePagar?.automatico ?? null
 
   const { contrato, resumen } = ctx
@@ -114,6 +123,8 @@ export default async function SuscripcionPage({ searchParams }: Props) {
           ctx.designadoNombre && <p className="mt-1">La persona designada para aceptarlos es {ctx.designadoNombre}.</p>
         )}
       </section>
+    ) : cancelada ? (
+      <ReactivarSuscripcion monto={montoReactivacion} hayCartera={hayCartera} soloLectura={soloLectura} />
     ) : ctx.pago ? (
       <TarjetaPago
         lectura={ctx.pago}
@@ -199,6 +210,7 @@ export default async function SuscripcionPage({ searchParams }: Props) {
           <PestanaPagos
             carga={pagos}
             transicion={ctx.transicion}
+            reactivar={cancelada ? <ReactivarSuscripcion monto={montoReactivacion} hayCartera={hayCartera} soloLectura={soloLectura} /> : null}
             pagoAutomatico={bloquePagar ? <PagoAutomatico vista={bloquePagar.automatico} mes={bloquePagar.mes} soloLectura={soloLectura} /> : null}
             opciones={
               opcionesPago?.tipo === 'ok' ? (

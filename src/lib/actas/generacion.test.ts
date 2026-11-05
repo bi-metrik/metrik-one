@@ -94,7 +94,7 @@ describe('generarActa', () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body)
     expect(body.system_instruction.parts[0].text).toContain('Mauricio Moreno')
     expect(body.system_instruction.parts[0].text).toContain('Daniela Játiva Castro')
-    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 1024 })
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' })
   })
 
   it('repara JSON con coma colgante antes de rendirse', async () => {

@@ -24,7 +24,8 @@ import {
   type TipoReconocido,
 } from '@/lib/documentos/tipo-documento'
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
+/** `gemini-2.5-flash` quedó obsoleto (desde el 2026-12-01 Google lo enruta a 3.5-flash-lite): se pide explícito. */
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
 
 const SUPPORTED_MIMES: Record<string, string> = {
   'application/pdf': 'application/pdf',
@@ -111,12 +112,13 @@ export async function reconocerDocumento(
           temperature: 0,
           // Identificar un documento es una pregunta de una sola pasada, pero el
           // presupuesto de pensamiento se descuenta del de salida (ver el gotcha de
-          // MAX_TOKENS en `extract-fields`): 512 de pensamiento y 2048 de techo dejan
-          // sitio de sobra para un JSON de tres llaves.
+          // MAX_TOKENS en `extract-fields`): pensamiento en nivel bajo (familia 3.x;
+          // antes `thinkingBudget: 512`) y 2048 de techo dejan sitio de sobra para un
+          // JSON de tres llaves.
           maxOutputTokens: 2048,
           responseMimeType: 'application/json',
           responseSchema,
-          thinkingConfig: { thinkingBudget: 512 },
+          thinkingConfig: { thinkingLevel: 'low' },
         },
       }),
     })

@@ -6,7 +6,9 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspace } from '@/lib/actions/get-workspace'
 import { getServerKey } from '@/lib/server-keys'
 import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos/exigir-modulo'
-import { detectarTipoDeCaptura } from '@/lib/ai/detectar-tipo-captura'
+import { detectarEnLaBandeja, mensajePaqueteEnBandeja } from '@/lib/cotizaciones/deteccion-bandeja'
+import { leerModalidadDelViaje } from '@/lib/cotizaciones/bloqueo-modalidad'
+import type { CasillaPaquete } from '@/lib/cotizaciones/bloqueo-pegado'
 import { MENSAJE_SIN_DETECCION } from '@/lib/cotizaciones/proceso-captura'
 import { normalizarGrupo } from '@/lib/cotizaciones/itinerarios'
 import {
@@ -314,6 +316,11 @@ export type ResultadoDeteccion =
       ranuras: RanuraConLugar[]
     }
   | { ok: false; codigo: 'SIN_TIPO' | 'CONTEXTO' | 'MODULO' | 'CONFIG' | 'IMAGEN' | 'LECTURA'; mensaje: string }
+  /**
+   * Viaje en Bloqueo (prueba con Haiku del 2026-11-04): es el hotel o el vuelo de un paquete. La bandeja
+   * lo lleva al paquete (`pegarEnBloqueo` con la casilla); si no puede, muestra `mensaje`.
+   */
+  | { ok: false; codigo: 'PAQUETE'; casilla: CasillaPaquete; mensaje: string }
 
 /**
  * ¿De qué es este pantallazo, y en qué ranura podría ir? (pasos 1 y 2 del flujo de Noor).
@@ -335,7 +342,11 @@ export async function detectarCaptura(cotizacionId: string, dataUrl: string): Pr
   const apiKey = getServerKey('gemini')
   if (!apiKey) return { ok: false, codigo: 'CONFIG', mensaje: 'Falta configurar la lectura de capturas. Avísale a MeTRIK.' }
 
-  const r = await detectarTipoDeCaptura(Buffer.from(m[2], 'base64'), m[1], apiKey)
+  // En un viaje en Bloqueo el hotel y el vuelo son del paquete (`deteccion-bandeja.ts`). La modalidad se
+  // lee en paralelo con la detección; un viaje a medida hace la misma llamada de siempre.
+  const enBloqueo = leerModalidadDelViaje(c.supabase, c.cotizacion.negocio_id).then(x => !x.error && x.modalidad.bloqueo)
+  const { deteccion: r, casilla } = await detectarEnLaBandeja(Buffer.from(m[2], 'base64'), m[1], apiKey, enBloqueo)
+  if (casilla) return { ok: false, codigo: 'PAQUETE', casilla, mensaje: mensajePaqueteEnBandeja(casilla) }
   // Brief del 2026-10-05, punto 8: no es una falla que la persona tenga que arreglar. La bandeja
   // pide el tipo con los botones «Es hotel», «Es vuelo»… y con eso la lectura sigue.
   if (!r.data) {

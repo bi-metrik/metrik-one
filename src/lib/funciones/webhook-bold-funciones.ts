@@ -16,15 +16,16 @@ import 'server-only'
  *   3. El pago se registra con `funcion_registrar_pago` (idempotente por referencia: el reintento de Bold no paga dos
  *      veces). La referencia es el `LNK_…` del link, que es lo que Bold trae en `data.metadata.reference`.
  *
- *   4. Antes de eso, si el `LNK_…` es de un link del ASISTENTE DE VENTAS de Ferretería (`ferreteria_links_bold`, Dimpro,
- *      29-oct), el pago va a `atenderPagoBoldFerreteria`: registra la venta de Ferretería con su negocio (una vez por
- *      link) y no toca `funcion_pagos`. Un mismo workspace puede tener los dos: el despacho es por la tabla, no por slug.
+ *   4. Antes de eso, si el `LNK_…` es de un link del CARRITO de un asistente de ventas (`carrito_pagos`, Dimpro, 4-nov),
+ *      el pago va a `atenderPagoBoldCarrito`: el convertidor del dominio del carrito registra la venta (Ferretería: un
+ *      negocio con una venta por línea), una vez por link, y no toca `funcion_pagos`. Un mismo workspace puede tener los
+ *      dos: el despacho es por la tabla, no por slug.
  *
  * Ninguna llave ni firma va a la respuesta ni a los logs.
  */
 import { parsearEventoBold } from '@/lib/suscripciones/pasarela/bold'
 import { createServiceClient } from '@/lib/supabase/server'
-import { atenderPagoBoldFerreteria } from '@/lib/ferreteria/bold-pagos-servidor'
+import { atenderPagoBoldCarrito } from '@/lib/carritos/servidor'
 import {
   CLAVES_BOLD,
   DIAS_SECRETA_ANTERIOR,
@@ -125,7 +126,7 @@ export async function atenderWebhookBoldFunciones(
   // Un pago que no salió de un link (datáfono, QR, botón) no es de funciones.
   if (!evento.referencia || !RE_LINK.test(evento.referencia)) return { status: 200, body: { ok: true, ignorado: 'sin_link' } }
 
-  const ferreteria = deps.ferreteria !== undefined ? deps.ferreteria : deps.cliente ? null : atenderPagoBoldFerreteria
+  const ferreteria = deps.ferreteria !== undefined ? deps.ferreteria : deps.cliente ? null : atenderPagoBoldCarrito
   if (ferreteria) {
     // Un link de Ferretería responde aquí (su 500 incluido). Si ni siquiera se pudo saber si era de Ferretería, se
     // registra en el log y el pago sigue por funciones: un pago de Sabor no se queda sin registrar por la tabla de Dimpro.

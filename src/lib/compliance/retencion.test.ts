@@ -120,6 +120,14 @@ const CLASIFICACION: Record<string, Clasificacion> = {
       '2026-10-29), ítem 4: la copia de la bitácora y los reportes se pide sin costo durante 10 años ' +
       '(cláusula 9.3, Ley 962 de 2005, art. 28). Es el texto aprobado del anexo: va literal.',
   },
+  'src/lib/valida-cda/cancelada.ts': {
+    tipo: 'plazo',
+    declara: 'literal',
+    razon:
+      'la pantalla y el correo de la suscripción Cancelada de los CDA (Términos Plan CDA v1.5, 11.3 y 9.3; ' +
+      'PR B del diseño del 2026-11-04): la exportación de la bitácora y los reportes se pide sin costo ' +
+      'durante 10 años (Ley 962 de 2005, art. 28). Repite el plazo de la 9.3 del texto aceptado: va literal.',
+  },
   'src/lib/compliance/vinculacion-publica.ts': {
     tipo: 'plazo',
     declara: 'derivado',

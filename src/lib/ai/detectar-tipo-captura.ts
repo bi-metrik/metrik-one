@@ -27,9 +27,13 @@ import { fetchModelo } from '@/lib/ai/modelo-llm'
 import { extraerConReintento, type ResultadoExtraccion } from './reintentar-extraccion'
 import { esTipoConPantallazo, type TipoRanura } from '@/lib/cotizaciones/ranuras-cotizacion'
 
-const GEMINI_MODEL = 'gemini-2.5-flash'
-/** Clasificar no necesita pensar mucho: el presupuesto bajo es lo que la hace rápida. */
-const THINKING_BUDGET = 512
+/** `gemini-2.5-flash` quedó obsoleto (desde el 2026-12-01 Google lo enruta a 3.5-flash-lite): se pide explícito. */
+const GEMINI_MODEL = 'gemini-3.5-flash-lite'
+/**
+ * Clasificar no necesita pensar mucho: el nivel bajo es lo que la hace rápida. La familia 3.x usa `thinkingLevel`
+ * (antes `thinkingBudget: 512` de la 2.5); en Haiku los dos se traducen a esfuerzo `low`.
+ */
+const THINKING_LEVEL = 'low'
 /**
  * La respuesta son ~30 tokens y el pensamiento ~300. El tope NO es holgura: cuando el modelo se
  * enreda (ver `rescatarCortada`) escribe saltos de línea hasta el tope, y con 4.096 eso eran dos
@@ -186,7 +190,7 @@ async function unaLlamada(buffer: Buffer, mime: string, apiKey: string, opciones
           maxOutputTokens: MAX_OUTPUT_TOKENS,
           responseMimeType: 'application/json',
           responseSchema: ESQUEMA,
-          thinkingConfig: { thinkingBudget: THINKING_BUDGET },
+          thinkingConfig: { thinkingLevel: THINKING_LEVEL },
         },
       }),
     })

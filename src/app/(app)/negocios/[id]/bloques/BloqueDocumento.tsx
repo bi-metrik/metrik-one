@@ -25,6 +25,7 @@ import { createClient } from '@/lib/supabase/client'
 import { procesarDocumento, actualizarCampoDocumento, reprocesarDocumento } from '@/lib/actions/documento-actions'
 import { copiaDeSoloLectura } from '@/lib/negocios/copia-heredada'
 import { faltanCampos } from '@/lib/documentos/completar-campos'
+import { derivarCampos } from '@/lib/documentos/derivar'
 import { prepararSubidaExterna, descartarSubidaExterna } from '@/lib/actions/almacenamiento-actions'
 import { useAlmacenamientoExterno } from '@/lib/almacenamiento/contexto'
 import { subirAUrlFirmada } from '@/lib/almacenamiento/subir-navegador'
@@ -415,6 +416,34 @@ function EdicionBadge({ edicion }: { edicion: CampoEdicion }) {
   )
 }
 
+// ── Guardado de campos a mano: en fila y sin bloquear la escritura ────────────
+//
+// SOE-038 (2026-11-04). Cada campo guarda en `onBlur` lo que tiene en ese instante. Antes,
+// mientras el guardado viajaba, TODOS los campos de la tarjeta quedaban `disabled`: una
+// pérdida de foco a mitad de palabra (cambiar de ventana para mirar el PDF, el
+// autocompletar del navegador, Tab mientras el campo anterior guardaba) guardaba el
+// prefijo, el input se desactivaba, el navegador le quitaba el foco y el resto de lo
+// escrito no entraba. En SOENA quedaron ciudades «B», «p», «C» y números de factura «1».
+//
+// Ahora el campo nunca se desactiva: la persona sigue escribiendo y el siguiente `onBlur`
+// guarda el texto completo. Los guardados salen DE A UNO y en orden, porque el servidor lee
+// y reescribe el JSON entero del bloque: dos escrituras cruzadas se pisarían, y el valor
+// viejo podría llegar después del nuevo.
+function useFilaDeGuardado() {
+  const cola = useRef<Promise<void>>(Promise.resolve())
+  const [pendientes, setPendientes] = useState(0)
+  const encolar = (tarea: () => Promise<void>) => {
+    setPendientes(n => n + 1)
+    cola.current = cola.current
+      .then(tarea)
+      .catch(err => {
+        toast.error(err instanceof Error && err.message ? `No se confirmó: ${err.message}` : 'No se confirmó el guardado')
+      })
+      .finally(() => setPendientes(n => n - 1))
+  }
+  return { encolar, guardando: pendientes > 0 }
+}
+
 // ── Currency helpers ──────────────────────────────────────────────────────────
 
 const fmtCOP = (v: number) =>
@@ -450,7 +479,7 @@ function CurrencyField({
 }: {
   rawValue: string | null
   onCommit: (rawValue: string) => void
-  disabled: boolean
+  disabled?: boolean
   placeholder?: string
   className: string
 }) {
@@ -531,27 +560,28 @@ function CamposExtraidos({
   /** El archivo del documento: con él se reconoce qué campos usa un voto entre fuentes. */
   archivo?: string | null
 }) {
-  const [saving, setSaving] = useState(false)
+  const { encolar, guardando } = useFilaDeGuardado()
   const lecturas = useLecturas()
 
-  const handleCommit = async (slug: string, value: string) => {
+  const handleCommit = (slug: string, value: string) => {
     onUpdate(slug, value)
-    setSaving(true)
-    const res = await actualizarCampoDocumento(
-      negocioBloqueId,
-      negocioId,
-      slug,
-      value,
-      camposConfig,
-    )
-    setSaving(false)
-    if (!res.success) toast.error(res.error ?? 'Error guardando campo')
+    encolar(async () => {
+      const res = await actualizarCampoDocumento(
+        negocioBloqueId,
+        negocioId,
+        slug,
+        value,
+        camposConfig,
+      )
+      if (!res.success) toast.error(res.error ?? 'Error guardando campo')
+    })
   }
 
   return (
     <div className="border-t pt-3 space-y-2">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
         Campos extraídos
+        {guardando && <Loader2 className="h-3 w-3 animate-spin" aria-label="Guardando" />}
       </p>
       <div className="space-y-1.5">
         {camposConfig.map(config => {
@@ -593,7 +623,6 @@ function CamposExtraidos({
                     <CurrencyField
                       rawValue={campo?.value ?? null}
                       onCommit={val => handleCommit(config.slug, val)}
-                      disabled={saving}
                       placeholder={isManual ? '$0' : undefined}
                       className={inputClass}
                     />
@@ -603,12 +632,11 @@ function CamposExtraidos({
                       defaultValue={campo?.value ?? ''}
                       onBlur={e => handleCommit(config.slug, e.target.value)}
                       placeholder={isManual ? 'Completar manualmente' : undefined}
-                      disabled={saving}
                       className={inputClass}
                     />
                   )}
                 </div>
-                <CopyButton value={campo?.value} disabled={saving} />
+                <CopyButton value={campo?.value} />
               </div>
             </div>
           )
@@ -641,23 +669,25 @@ function EditableCampoVisible({
   /** Causa + sesión cuando el bloque es de una etapa ya superada. */
   correccion?: { causa: string; sesion_id: string }
 }) {
-  const [saving, setSaving] = useState(false)
+  // Fila propia del campo, sin desactivar el input mientras guarda (SOE-038, ver
+  // `useFilaDeGuardado`).
+  const { encolar } = useFilaDeGuardado()
   const isCurrency = config.tipo === 'currency'
 
-  const handleCommit = async (value: string) => {
+  const handleCommit = (value: string) => {
     onUpdate(config.slug, value)
-    setSaving(true)
-    const res = await actualizarCampoDocumento(
-      negocioBloqueId,
-      negocioId,
-      config.slug,
-      value,
-      camposConfig,
-      correccion,
-    )
-    setSaving(false)
-    if (!res.success) toast.error(res.error ?? 'Error guardando campo')
-    else toast.success('Valor actualizado')
+    encolar(async () => {
+      const res = await actualizarCampoDocumento(
+        negocioBloqueId,
+        negocioId,
+        config.slug,
+        value,
+        camposConfig,
+        correccion,
+      )
+      if (!res.success) toast.error(res.error ?? 'Error guardando campo')
+      else toast.success('Valor actualizado')
+    })
   }
 
   const inputClass =
@@ -670,7 +700,6 @@ function EditableCampoVisible({
           <CurrencyField
             rawValue={campo?.value ?? null}
             onCommit={handleCommit}
-            disabled={saving}
             placeholder="$0"
             className={inputClass}
           />
@@ -679,12 +708,11 @@ function EditableCampoVisible({
             type="text"
             defaultValue={campo?.value ?? ''}
             onBlur={e => handleCommit(e.target.value)}
-            disabled={saving}
             className={inputClass}
           />
         )}
       </div>
-      <CopyButton value={campo?.value} disabled={saving} />
+      <CopyButton value={campo?.value} />
     </div>
   )
 }
@@ -1310,10 +1338,14 @@ export default function BloqueDocumento({
   }
 
   const handleCampoUpdate = (slug: string, value: string) => {
-    setCampos(prev => ({
-      ...prev,
-      [slug]: { value: value || null, confidence: 1.0, manual: true },
-    }))
+    setCampos(prev => {
+      const next = structuredClone(prev)
+      next[slug] = { value: value || null, confidence: 1.0, manual: true }
+      // Mismo recálculo que hace el servidor al guardar (SOE-041): corregir el valor antes
+      // de descuento o el descuento mueve el valor derivado sin recargar la página.
+      derivarCampos(camposConfig, next, slug)
+      return next
+    })
   }
 
   // Drop de archivo (modo editable): suelta sobre la zona = mismo flujo que el

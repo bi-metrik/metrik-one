@@ -1,7 +1,7 @@
 // ============================================================
 // El texto del documento del cliente, redactado por Gemini (Trappvel)
 //
-// Patrón de src/lib/actas/generacion.ts: gemini-2.5-flash con thinking acotado (1024) y
+// Patrón de src/lib/actas/generacion.ts: gemini-3.5-flash-lite con thinking acotado ('low') y
 // `responseSchema` para forzar JSON válido. La clave llega por parámetro desde la server
 // action (`getServerKey('gemini')`): una lib no lee process.env.
 //
@@ -68,7 +68,7 @@ export async function redactarTextoCliente(
         maxOutputTokens: 8192,
         responseMimeType: 'application/json',
         responseSchema: RESPONSE_SCHEMA,
-        thinkingConfig: { thinkingBudget: 1024 },
+        thinkingConfig: { thinkingLevel: 'low' },
       },
     }),
   })

@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { ajustarReglasDelPaquete, crearPaqueteBloqueo, guardarPaqueteBloqueo, leerPantallazoBloqueo, operadoresDelDirectorio, type ImagenNueva, type ReglasDelPaquete } from '@/app/(app)/negocios/bloqueo-actions'
 import { claveDeNombre, esOperadorMezclado, operadorDeLaLectura, operadorInicialDelPaquete, operadoresDeLaSolicitud } from '@/lib/cotizaciones/bloqueo-operador'
 import { CampoComision, ReglasDeOpcion } from '@/app/(app)/negocios/por-pasos/reglas-de-opcion'
+import { FotoDelHotelDelPaquete } from '@/app/(app)/negocios/por-pasos/foto-hotel-paquete'
 import { comisionEscrita, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
 import { EVENTO_ENFOCAR_COMISION, type DetalleEnfocarComision } from '@/lib/cotizaciones/enfocar-comision'
 import type { ReglasDeLinea } from '@/lib/cotizaciones/totales'
@@ -283,7 +284,13 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
         return { ...x, ...(leido ? { operador: leido } : {}), hotel: { ...r.hotel, infante: r.hotel.infante ?? x.hotel.infante ?? null }, incluye: r.incluye }
       })
     }
-    else cambiar(x => ({ ...x, vuelo: r.vuelo }))
+    else {
+      cambiar(x => {
+        // Igual que el hotel: el operador del encabezado del pantallazo del vuelo (2026-11-05).
+        const leido = !x.operador || esOperadorMezclado(x.operador) ? operadorDeLaLectura(r.operador ?? null, candidatos) : null
+        return { ...x, ...(leido ? { operador: leido } : {}), vuelo: r.vuelo }
+      })
+    }
   }
 
   /** Con las dos casillas vacías (o llenas), ONE decide con la detección; si no sabe, pregunta. */
@@ -518,6 +525,13 @@ export function TarjetaPaqueteBloqueo(p: PropsTarjetaPaquete) {
               </label>
             </div>
           </fieldset>
+
+          {/* La foto del hotel del paquete (2026-11-05): la biblioteca del espacio, como el hotel suelto. */}
+          <FotoDelHotelDelPaquete
+            guardado={guardado}
+            editable={p.editable}
+            nombreSinGuardar={!!guardado?.hotel.hotel?.trim() && (h.hotel?.trim() ?? '') !== guardado.hotel.hotel.trim()}
+          />
 
           {/* ── Precios por persona y distribución ── */}
           <fieldset disabled={!p.editable} className="space-y-1">

@@ -6304,6 +6304,8 @@ export type Database = {
           calidad_malos_pierde_todo: number
           calidad_tramo: number
           correcciones_cobertura: string
+          envio_hora_corte: number
+          envio_modo: string
           etapa_radicacion_dian_orden: number
           horas_antes_cita: number
           horas_desde_certificado: number
@@ -6330,6 +6332,8 @@ export type Database = {
           calidad_malos_pierde_todo?: number
           calidad_tramo?: number
           correcciones_cobertura?: string
+          envio_hora_corte?: number
+          envio_modo?: string
           etapa_radicacion_dian_orden?: number
           horas_antes_cita?: number
           horas_desde_certificado?: number
@@ -6356,6 +6360,8 @@ export type Database = {
           calidad_malos_pierde_todo?: number
           calidad_tramo?: number
           correcciones_cobertura?: string
+          envio_hora_corte?: number
+          envio_modo?: string
           etapa_radicacion_dian_orden?: number
           horas_antes_cita?: number
           horas_desde_certificado?: number
@@ -6396,6 +6402,8 @@ export type Database = {
           calidad_tramo: number
           correcciones_cobertura: string
           created_at: string
+          envio_hora_corte: number
+          envio_modo: string
           etapa_radicacion_dian_orden: number
           horas_antes_cita: number
           horas_desde_certificado: number
@@ -6426,6 +6434,8 @@ export type Database = {
           calidad_tramo?: number
           correcciones_cobertura?: string
           created_at?: string
+          envio_hora_corte?: number
+          envio_modo?: string
           etapa_radicacion_dian_orden?: number
           horas_antes_cita?: number
           horas_desde_certificado?: number
@@ -6456,6 +6466,8 @@ export type Database = {
           calidad_tramo?: number
           correcciones_cobertura?: string
           created_at?: string
+          envio_hora_corte?: number
+          envio_modo?: string
           etapa_radicacion_dian_orden?: number
           horas_antes_cita?: number
           horas_desde_certificado?: number
