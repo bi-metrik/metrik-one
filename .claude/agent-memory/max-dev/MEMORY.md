@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- ⚠️ [Bandeja reparte por operador (5-nov)](project_bandeja_reparto_por_operador.md) — 2+ operadores: hotel al de su operador, vuelo paquete propio
 - ⚠️ [SOE-041: descuento de la factura lo resta el código (5-nov)](project_soe041_descuento_factura.md) — derivar.ts; SQL config SIN aplicar, después del deploy
 - ⚠️ [IP real detrás de Cloudflare (4-nov)](project_ip_cliente_cloudflare.md) — usar src/lib/http/ip-cliente.ts; geo CF exige el Managed Transform de Mik
 - ⚠️⚠️ [Suspendida por pago, PR A (4-nov)](project_valida_suspendida_pr_a.md) — paso 8d; hablaConLaV15 en plazos (no puerta); PR B antes del 31-dic
