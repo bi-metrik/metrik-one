@@ -83,10 +83,11 @@ const RE_SUFIJO_TRANSCRIPT = /-\s*Transcript\s*$/i
  * Meet no siempre genera el documento "- Transcript": la reunion
  * "Alejandra Lancheros - Trappvel x MeTRIK" (2026-08-19) quedo solo con
  * Grabacion y Notas de Gemini. El documento de Notas trae igual la
- * transcripcion completa mas abajo (exportada a texto plano, sin markdown:
- * el mismo tratamiento de `parseTranscripcion` ya la separa del resumen
- * porque el encabezado "Transcripcion" solo aparece una vez, como linea
- * suelta, antes del cuerpo real). Se usa SOLO cuando no hay "- Transcript".
+ * transcripcion completa mas abajo (exportada a texto plano, sin markdown).
+ * `parseTranscripcion` la separa del resumen: hasta septiembre de 2026 por la
+ * linea suelta "Transcripcion"; hoy Drive la exporta sin esa linea y el corte
+ * es "<titulo> - Transcripcion" (ver transcripcion.ts). Se usa SOLO cuando no
+ * hay "- Transcript".
  *
  * El titulo del ADJUNTO de Calendar es el literal fijo "Notas de Gemini"
  * (medido contra el evento real, sin el nombre del evento ni fecha) — NO el

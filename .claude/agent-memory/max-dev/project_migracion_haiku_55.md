@@ -1,6 +1,6 @@
 ---
 name: migracion-haiku-55
-description: Gemini → Claude Haiku 5.5 en ONE (PR #1217, 2026-10-20) — traductor en un solo archivo, interruptor LLM_PROVEEDOR; actas a Haiku medium (2026-11-05); parser de Notas de Gemini roto
+description: Gemini → Claude Haiku 5.5 en ONE (PR #1217, 2026-10-20) — traductor en un solo archivo, interruptor LLM_PROVEEDOR; actas a Haiku medium (2026-11-05); parser de Notas arreglado en #1438
 metadata:
   type: project
 ---
@@ -42,4 +42,4 @@ Actualización 2026-11-05: actas a Haiku por defecto (`OPCIONES_ACTAS` con `esfu
 arnés es parecido a Gemini, no calidad: en 4 actas da 7–9/12 en low, medium y high (ruido). A ojo el fallo de Haiku
 es atribuir tareas a quien solo las enumera, no inventar fechas. **Gotcha:** las Notas de Gemini de Meet ya no traen
 la línea «Transcripción» sola (viene «Registros de la reunión Transcripción» y «<título> - Transcripción»):
-`parseTranscripcion` da cuerpo vacío en 2 de las 4 transcripciones de prod. Sin arreglar al 2026-11-05.
+`parseTranscripcion` da cuerpo vacío en 2 de las 4 transcripciones de prod. Arreglado en #1438 (ver [[project-actas-notas-gemini-y-cron]]).

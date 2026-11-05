@@ -64,9 +64,33 @@ const RE_FIN = /La (?:reuni[oó]n|transcripci[oó]n) finaliz[oó] despu[eé]s de
 const RE_MARCA_TIEMPO = /^(\d{1,2}):(\d{2}):(\d{2})$/
 const RE_INTERVENCION = /^[^:\n]{2,60}:\s+\S/
 
-const ENCABEZADO_ASISTENTES = /^asistentes$/i
-const ENCABEZADO_CUERPO = /^transcripci[oó]n$/i
-const PIE = /^esta transcripci[oó]n editable/i
+// Los encabezados se comparan sobre la linea en `llano` (minusculas, sin
+// tildes), asi que "Transcripción", "TRANSCRIPCION" y "transcripcion" son lo
+// mismo.
+const ENCABEZADO_ASISTENTES = /^asistentes$/
+// Formato del documento "- Transcript" y de las Notas de Gemini hasta
+// septiembre de 2026: la palabra sola.
+const ENCABEZADO_CUERPO = /^transcripcion$/
+// Formato de las Notas de Gemini que exporta Drive hoy (medido el 2026-11-05
+// sobre las Notas del 4 y 5 de septiembre, sin cambios desde que se crearon):
+// la linea suelta "Transcripcion" desaparecio y el corte quedo en
+// "<titulo> - Transcripcion", justo antes de la primera marca de tiempo. El
+// titulo puede traer guiones propios ("Tema - Cliente x MeTRIK"): el que
+// cuenta es el ultimo. El guion corto exige espacio antes (sin espacio es una
+// palabra compuesta, "pre-transcripcion"); la raya larga no.
+const SEPARADOR_TITULO = String.raw`(?:\s+[-–—]|\s*[–—])\s*`
+const ENCABEZADO_CUERPO_CON_TITULO = new RegExp(String.raw`^(.*\S)${SEPARADOR_TITULO}transcripcion$`)
+const COLA_TRANSCRIPCION = new RegExp(String.raw`${SEPARADOR_TITULO}\S+$`)
+// Ojo: arriba del resumen, las Notas traen la fila de pestanas del documento
+// ("Registros de la reunion Transcripcion"). NO es el corte (debajo viene el
+// resumen, que no es habla) y ninguna de las dos expresiones la toma: no es la
+// palabra sola ni lleva guion.
+const PIE = /^esta transcripcion editable/
+
+/** Minusculas y sin tildes, solo para comparar contra los encabezados. */
+function llano(linea: string): string {
+  return linea.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+}
 
 function aSegundos(h: string, m: string, s: string): number {
   return Number(h) * 3600 + Number(m) * 60 + Number(s)
@@ -94,17 +118,43 @@ export function parseTranscripcion(texto: string): TranscripcionParseada {
   // la respuesta correcta: no se inventa una transcripcion que no esta.
   let zona: 'cabecera' | 'asistentes' | 'cuerpo' = 'cabecera'
   let ultimaMarca: string | null = null
+  // Los encabezados solo cuentan ANTES de la primera intervencion. Despues,
+  // una linea que diga "Transcripcion" (o "Asistentes", o termine en
+  // "- transcripcion") es habla o ruido del cuerpo, no un corte: tomarla como
+  // encabezado partiria la reunion o mandaria el resto a la lista de
+  // asistentes.
+  let hayIntervencion = false
 
   for (const linea of lineas) {
     if (!linea) continue
 
-    if (ENCABEZADO_ASISTENTES.test(linea)) {
-      zona = 'asistentes'
-      continue
-    }
-    if (ENCABEZADO_CUERPO.test(linea)) {
-      zona = 'cuerpo'
-      continue
+    if (!hayIntervencion) {
+      const l = llano(linea)
+      if (zona !== 'cuerpo' && ENCABEZADO_ASISTENTES.test(l)) {
+        zona = 'asistentes'
+        continue
+      }
+      // Una vineta del resumen nunca es el corte. Y ya dentro del cuerpo (Notas
+      // viejas: "Transcripcion" suelta y luego "<titulo> - Transcripcion"), una
+      // linea con forma de intervencion es habla aunque termine en
+      // "- transcripcion".
+      const conTitulo =
+        /^[*•-]\s/.test(linea) || (zona === 'cuerpo' && RE_INTERVENCION.test(linea))
+          ? null
+          : l.match(ENCABEZADO_CUERPO_CON_TITULO)
+      if (ENCABEZADO_CUERPO.test(l) || conTitulo) {
+        // Lo que se junto entre un encabezado y otro (en las Notas viejas, la
+        // fecha entre "Transcripcion" y "<titulo> - Transcripcion") no es habla.
+        cuerpoLineas.length = 0
+        if (conTitulo) {
+          // El titulo del encabezado es el del evento; el de la primera linea,
+          // en las Notas, es la fecha. Se recorta del original para no perder
+          // mayusculas ni tildes.
+          titulo = linea.replace(COLA_TRANSCRIPCION, '').trim()
+        }
+        zona = 'cuerpo'
+        continue
+      }
     }
 
     if (zona === 'cabecera') {
@@ -117,13 +167,24 @@ export function parseTranscripcion(texto: string): TranscripcionParseada {
       continue
     }
 
-    if (PIE.test(linea)) continue
+    if (PIE.test(llano(linea))) continue
     if (RE_FIN.test(linea)) continue
     if (RE_MARCA_TIEMPO.test(linea)) {
       ultimaMarca = linea
       continue
     }
+    if (RE_INTERVENCION.test(linea)) hayIntervencion = true
     cuerpoLineas.push(linea)
+  }
+
+  // Las Notas de Gemini no traen bloque "Asistentes" (solo una linea
+  // "Invitado ..." sin separadores). Sin el, los nombres salen de quien habla.
+  if (asistentes.length === 0) {
+    for (const l of cuerpoLineas) {
+      if (!RE_INTERVENCION.test(l)) continue
+      const nombre = l.slice(0, l.indexOf(':')).trim()
+      if (!asistentes.includes(nombre)) asistentes.push(nombre)
+    }
   }
 
   let duracionSegundos: number | null = null
