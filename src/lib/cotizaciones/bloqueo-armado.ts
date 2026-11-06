@@ -277,21 +277,33 @@ export function opcionesDeLasLineas(
 
 /**
  * Los paquetes con «¿Pública o Neta?» sin responder: UNO por paquete (`paquetesDelBloqueo`), con la
- * primera opción que tiene la pregunta abierta y un título para la bandeja («Paquete 2 · AV 9370»). El
- * número es el del paquete en el bloqueo, en el orden en que se abrieron.
+ * primera opción que tiene la pregunta abierta, un título para la bandeja y lo que abarca la respuesta.
+ *
+ * Desde el 2026-11-05 los paquetes son OPCIONES de una misma ranura: en pantalla hay UN paquete con
+ * varias opciones, así que «Paquete 1 · …» / «Paquete 2 · …» no se veía en ningún lado (N-H3-1, N-H4-1
+ * de la QA de Trappvel). El título es el OPERADOR y el vuelo («TU RESERVA · Avianca 8410»); sin operador,
+ * el número del paquete en el orden en que se abrieron, como antes («Paquete 2 · AV 9370»).
  */
 export function paquetesConTarifaPorElegir(
   lineas: readonly { id: string; grupo?: string | null; es_ajuste?: boolean | null; orden?: number | null; paquete: PaqueteBloqueo | null }[],
-): { itemId: string; titulo: string }[] {
-  const out: { itemId: string; titulo: string }[] = []
+): { itemId: string; titulo: string; alcance: string }[] {
+  const out: { itemId: string; titulo: string; alcance: string }[] = []
   paquetesDelBloqueo(opcionesDeLasLineas(lineas)).forEach((p, i) => {
     const abierta = p.opciones.find(o => o.paquete?.tarifaPorElegir)
     if (!abierta) return
     const t = vueloDe(p.opciones)?.tramos[0]
     const vuelo = t ? [t.aerolinea, t.numeroVuelo].filter(Boolean).join(' ') : ''
-    out.push({ itemId: abierta.itemId, titulo: `Paquete ${i + 1}${vuelo ? ` · ${vuelo}` : ''}` })
+    const operador = p.opciones.map(o => o.paquete?.operador?.trim() ?? '').find(Boolean) ?? ''
+    const cabeza = operador ? operador.toLocaleUpperCase('es-CO') : `Paquete ${i + 1}`
+    out.push({ itemId: abierta.itemId, titulo: `${cabeza}${vuelo ? ` · ${vuelo}` : ''}`, alcance: alcanceDeLaPregunta(operador ? cabeza : null, vuelo !== '') })
   })
   return out
+}
+
+/** A qué hoteles vale la respuesta Pública / Neta: los del operador (con su vuelo), o los del paquete. */
+function alcanceDeLaPregunta(operador: string | null, conVuelo: boolean): string {
+  if (!operador) return 'Vale para todos los hoteles de este paquete.'
+  return conVuelo ? `Vale para todos los hoteles de ${operador} con este vuelo.` : `Vale para todos los hoteles de ${operador}.`
 }
 
 // ── El plan ───────────────────────────────────────────────────────────────────

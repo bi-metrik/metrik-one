@@ -134,7 +134,19 @@ describe('«¿Pública o Neta?» abierta frena el envío', () => {
       { id: 'a2', grupo: g1, paquete: con(VUELO_AV) },
       { id: 'b2', grupo: g2, paquete: sin },
       { id: 'h', grupo: 'hotel', paquete: con(VUELO_AV) },
-    ])).toEqual([{ itemId: 'a1', titulo: 'Paquete 1 · AV 9376' }, { itemId: 'b1', titulo: 'Paquete 2 · AV 9370' }])
+    ])).toEqual([
+      { itemId: 'a1', titulo: 'ATN · AV 9376', alcance: 'Vale para todos los hoteles de ATN con este vuelo.' },
+      { itemId: 'b1', titulo: 'ATN · AV 9370', alcance: 'Vale para todos los hoteles de ATN con este vuelo.' },
+    ])
+    // Sin operador, el número del paquete, como antes (y sin vuelo, sin « · »).
+    const sinOperador = (v: typeof VUELO_AV | null) => ({ ...paqueteVacio(null), vuelo: v, tarifaPorElegir: true })
+    expect(paquetesConTarifaPorElegir([
+      { id: 'a1', grupo: g1, paquete: sinOperador(VUELO_AV) },
+      { id: 'b1', grupo: g2, paquete: sinOperador(null) },
+    ])).toEqual([
+      { itemId: 'a1', titulo: 'Paquete 1 · AV 9376', alcance: 'Vale para todos los hoteles de este paquete.' },
+      { itemId: 'b1', titulo: 'Paquete 2', alcance: 'Vale para todos los hoteles de este paquete.' },
+    ])
     expect(paquetesConTarifaPorElegir([{ id: 'a1', grupo: g1, paquete: sin }])).toEqual([])
   })
 })
