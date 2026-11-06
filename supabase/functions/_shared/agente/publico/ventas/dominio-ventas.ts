@@ -347,7 +347,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
     },
     declaracionCarrito({
       maxUnidades: MAX_UNIDADES, codigo: 'el código MP-xx',
-      extra: 'Con lo que devuelve, dile cómo va su carrito en un mensaje corto (una línea por producto) y ciérralo con la venta cruzada: si aún no se la hiciste, lo que te diga ver_complementos (el complemento con su razón, o «¿Necesitas algo más para ese trabajo?»); si ya se la hiciste, sigue con el paso que toca de la compra. Nunca «¿quieres algo más o seguimos?».',
+      extra: 'Con lo que devuelve, dile cómo va su carrito en un mensaje corto (una línea por producto) y ciérralo con lo que te diga ver_complementos, sin «¿quieres algo más o seguimos?».',
     }),
     {
       name: 'consultar_reglas',
@@ -490,7 +490,7 @@ export function dominioVentas(o: OpcionesDominioVentas): Dominio {
         };
         return await usarCarrito(o.puertos.carritos, convDeContexto(ctx), resolver, args, {
           pesos,
-          queHacer: 'Dile cómo va su carrito: una línea por producto (código, nombre corto, unidades y precio) y el subtotal, que no incluye el flete. Ciérralo con la venta cruzada: si aún no se la hiciste, lo que te diga ver_complementos (el complemento con su razón, o «¿Necesitas algo más para ese trabajo?»); si ya se la hiciste, sigue con el paso que toca de la compra, sin «¿quieres algo más o seguimos?». Todo va en un solo link de pago.',
+          queHacer: 'Dile cómo va su carrito: una línea por producto (código, nombre corto, unidades y precio) y el subtotal, que no incluye el flete. Ciérralo con lo que te diga ver_complementos, sin «¿quieres algo más o seguimos?». Todo va en un solo link de pago.',
         });
       }
       if (nombre === VER_COMPLEMENTOS) {

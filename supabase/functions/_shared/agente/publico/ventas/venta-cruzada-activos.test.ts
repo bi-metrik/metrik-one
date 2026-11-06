@@ -35,6 +35,6 @@ describe('venta cruzada de los productos activos', () => {
   it('el carrito cierra con la venta cruzada, no con «¿quieres algo más o seguimos?»', () => {
     const src = readFileSync(join(process.cwd(), 'supabase/functions/_shared/agente/publico/ventas/dominio-ventas.ts'), 'utf8')
     expect(src).not.toMatch(/pregúntale si quiere algo más o seguimos|Pregúntale si quiere algo más o seguimos/)
-    expect(src.match(/ciérralo con la venta cruzada|Ciérralo con la venta cruzada/g)?.length).toBe(2)
+    expect(src.match(/ciérralo con lo que te diga ver_complementos|Ciérralo con lo que te diga ver_complementos/g)?.length).toBe(2)
   })
 })
