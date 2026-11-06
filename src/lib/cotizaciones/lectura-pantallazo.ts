@@ -33,7 +33,7 @@
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
-import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
+import { camposMinimos, etiquetaDeAviso, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
 import { ciudadEsLugarDelNombre } from './ciudad-actividad'
 import { estrellasDesdeTexto } from './estrellas'
 import { tramosDeCampos, textoDeTramo } from './tramos-vuelo'
@@ -525,6 +525,24 @@ export function evaluarLectura(
     }
   }
 
+  // Trappvel (2026-11-06) · la tarjeta de hotel no dice si el precio es de toda la reserva o por
+  // persona («$2.905.882 · 4 Días 3 Noches - 2 Huéspedes»), y el lector devuelve base_precio en
+  // null. Si la captura trae precio y moneda, se toma TOTAL, marcado y con aviso, en vez de
+  // rechazar: es lo que dice la tarjeta a la vista de cualquiera. Con tabla por tipo de pasajero
+  // no hace falta (el total ya es el de la tabla) y a mano lo decide la persona en el formulario.
+  if (ranura.slug === 'hotel_detalle' && !contexto.manual && (cruda.porTipoPax ?? []).length === 0) {
+    const base = porSlug.get('base_precio')
+    if (base && base.valor === null && porSlug.get('precio_total')?.valor != null && porSlug.get('moneda')?.valor != null) {
+      base.valor = 'total'
+      base.alertaRevision = true
+      base.confidence = 0
+      avisosDelItem.push(
+        'La captura no dice si el precio es de toda la reserva o por persona: se toma como total de la estadía. ' +
+        'Confírmalo contra el proveedor.',
+      )
+    }
+  }
+
   // RX3 antes que RX2 aunque `moneda` sea un mínimo más: es el error más caro del
   // motor y su instrucción es distinta (se puede indicar a mano, no hace falta otra
   // captura). Agruparlo con los demás faltantes lo escondería en una lista.
@@ -555,7 +573,7 @@ export function evaluarLectura(
     const descriptivos = todosFaltantes.filter(def => !faltantes.includes(def))
     if (descriptivos.length > 0) {
       avisosDelItem.push(
-        `La captura no muestra: ${descriptivos.map(d => d.label.toLowerCase()).join(', ')}. ` +
+        `La captura no muestra: ${descriptivos.map(etiquetaDeAviso).join(', ')}. ` +
         'La línea conserva los datos que ya tiene: complétalos si hace falta.',
       )
     }
@@ -592,7 +610,7 @@ function instruccionRX1(ranura: DefinicionRanura): string {
 }
 
 function instruccionRX2(faltantes: CampoRanura[]): string {
-  const lista = faltantes.map(f => f.label.toLowerCase()).join(', ')
+  const lista = faltantes.map(etiquetaDeAviso).join(', ')
   return faltantes.length === 1
     ? `No se ve ${lista}. Sube una captura que lo incluya.`
     : `No se ven estos datos: ${lista}. Sube una captura que los incluya.`
