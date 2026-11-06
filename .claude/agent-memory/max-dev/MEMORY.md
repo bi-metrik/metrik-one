@@ -2,6 +2,7 @@
 
 ## Project memories
 
+- [Hotel sin base_precio = total con aviso (6-nov)](project_hotel_precio_sin_base.md) — label es llave; frases con label_aviso; hash DE_MAIN
 - [Foto del hotel del paquete de bloqueo (5-nov)](project_foto_hotel_paquete_bloqueo.md) — llave «hotel|» sin ciudad; proveedor_id = operador
 - ⚠️⚠️ [SOE-040: Envío por día hábil anterior (5-nov)](project_soe040_envio_dia_habil.md) — 20261105153000 aplicada 5-nov; sin 48 h del certificado; guardado falla sin migración
 - ⚠️ [Bandeja reparte por operador (5-nov)](project_bandeja_reparto_por_operador.md) — paquetes en UNA ranura (compiten); paquete = operador + vuelo derivado
