@@ -67,6 +67,7 @@ vi.mock('@/lib/valida-cda/puerta', () => ({
   },
   moraValidaCda: async () => ({ tipo: 'no_aplica' }),
   puedeVerPagosCda: async () => false,
+  noContinuaCda: async () => ({ estado: 'continua' }),
 }))
 vi.mock('@/lib/valida-api/terminos-servidor', () => ({
   designacionDelEspacio: async () => ({

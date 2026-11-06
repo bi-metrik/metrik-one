@@ -114,6 +114,10 @@ export async function middleware(request: NextRequest) {
   // solo manda el correo que el sistema habría mandado solo (ver `app/api/autorizacion-datos`).
   if (pathname === '/api/autorizacion-datos/al-crear') return NextResponse.next()
 
+  // La entrega única del bloqueo (webhook de WhatsApp → app, sin sesión). La ruta exige la firma
+  // HMAC con la llave de servicio (`_shared/entrega-bloqueo-firma.ts`): sin ella responde 401.
+  if (pathname === '/api/interno/entrega-bloqueo') return NextResponse.next()
+
   // Ensayo de Chromium (PR 0 de la propuesta de Trappvel): SOLO en un preview, que ya está
   // detrás del SSO de Vercel, para medir el arranque en frío con `vercel curl` sin sesión de
   // ONE. Imprime un fixture del repo. En producción sigue el camino normal (sesión) y la ruta

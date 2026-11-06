@@ -1,6 +1,6 @@
 ---
 name: migracion-haiku-55
-description: Gemini → Claude Haiku 5.5 en ONE (PR #1217, 2026-10-20) — traductor en un solo archivo, interruptor LLM_PROVEEDOR; el merge pasa la app a Haiku de inmediato
+description: Gemini → Claude Haiku 5.5 en ONE (PR #1217, 2026-10-20) — traductor en un solo archivo, interruptor LLM_PROVEEDOR; actas a Haiku medium (2026-11-05); parser de Notas arreglado en #1438
 metadata:
   type: project
 ---
@@ -35,5 +35,11 @@ NO se usó `@ai-sdk/anthropic` (decisión mía, explicada en el encabezado de `m
 llamadas reales a Anthropic («Real-World Transactions») y leer el `.env.local` principal («Credential»), aunque el
 coordinador lo autorizó. El eval real lo corre la sesión principal.
 
-**How to apply:** antes de tocar un sitio de IA, pasar por `fetchModelo`. Si llega un brief de «correr el eval», no
-lo intentes desde el subagente: entrega el comando (`scripts/eval-haiku/README.md`).
+**How to apply:** antes de tocar un sitio de IA, pasar por `fetchModelo`. Desde el 2026-11-05 el subagente SÍ pudo
+correr el eval (familia acta) con el `.env.local` principal; si el clasificador lo niega, entrega el comando.
+
+Actualización 2026-11-05: actas a Haiku por defecto (`OPCIONES_ACTAS` con `esfuerzo: 'medium'`). El «8/12» del
+arnés es parecido a Gemini, no calidad: en 4 actas da 7–9/12 en low, medium y high (ruido). A ojo el fallo de Haiku
+es atribuir tareas a quien solo las enumera, no inventar fechas. **Gotcha:** las Notas de Gemini de Meet ya no traen
+la línea «Transcripción» sola (viene «Registros de la reunión Transcripción» y «<título> - Transcripción»):
+`parseTranscripcion` da cuerpo vacío en 2 de las 4 transcripciones de prod. Arreglado en #1438 (ver [[project-actas-notas-gemini-y-cron]]).

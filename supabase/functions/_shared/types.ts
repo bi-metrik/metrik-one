@@ -186,6 +186,8 @@ export interface WaUser {
     bot_conversacional?: unknown;
     /** `config_extra.aviso_datos_bot` (la puerta del aviso de datos, `aviso-datos-bot.ts`). Ausente = apagada. */
     aviso_datos_bot?: unknown;
+    /** `config_extra.entrega_bloqueo.piloto` (la entrega única del bloqueo, `entrega-bloqueo.ts`). Ausente = apagada. */
+    entrega_bloqueo?: unknown;
   } | null;
 }
 
@@ -221,6 +223,11 @@ export interface IncomingMessage {
   flow_response?: string; // JSON string del Flow completado (nfm_reply.response_json)
   location?: { latitude: number; longitude: number; name?: string; address?: string };
   wa_message_id?: string; // wamid del mensaje entrante (marcar leido / indicador "escribiendo")
+  /**
+   * `context.id` de Meta: el wamid del mensaje que la persona CITÓ al responder (o del mensaje con los botones, en un
+   * toque). Ausente = no citó nada. Lo usa el ancla de la entrega única del bloqueo (`entrega-bloqueo-ancla.ts`).
+   */
+  contexto_wamid?: string;
   /** `context.forwarded` de Meta: el usuario reenvio este mensaje. Ausente = no reenviado. */
   reenviado?: boolean;
   /** `context.frequently_forwarded` de Meta (reenviado muchas veces en cadena). */

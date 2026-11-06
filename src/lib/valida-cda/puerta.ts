@@ -42,6 +42,7 @@ import {
   textoExigidaV15,
   type ExigenciaV15,
 } from './terminos-v1-5'
+import { suscripcionNoContinua, textoNoContinua } from './venta-16-4'
 
 /**
  * La puerta de Valida para los CDA: antes de consultar listas, la persona designada por la empresa
@@ -97,6 +98,13 @@ import {
  * consultas nuevas (`exigenciaV15Cda`, cobrada en `validaCdaPermiteConsultar`). No cierra el módulo: el
  * historial, los reportes y la exportación de la 9.3 siguen abiertos. Sin poder leer las cuotas no se
  * exige (ver `exigenciaV15` en `terminos-v1-5.ts`).
+ *
+ * ## El período que METRIK no vendió (16.4, Emilio 5-nov)
+ *
+ * Sin la v1.5 aceptada, los períodos que empiezan desde la base no se venden: sus cuotas salen de la mora
+ * (`leerCuentaCda` ya no las devuelve en `cuotas`), así que no hay Suspendida ni Cancelada por ellas. Si el
+ * CDA la acepta tarde y ningún período vendido cubre hoy, no hay consultas nuevas hasta que pague un período
+ * desde el día del pago (`noContinuaCda`).
  *
  * ## Una modificación por aviso NUNCA cierra (2026-10-07, dictamen de Emilio)
  *
@@ -409,6 +417,28 @@ async function resolverExigenciaV15(): Promise<ExigenciaV15Cda> {
 /** La exigencia de la v1.5 (16.4) para el espacio. Una sola evaluación por request. */
 export const exigenciaV15Cda = cache(resolverExigenciaV15)
 
+export type NoContinuaCda = { estado: 'continua' } | { estado: 'no_continua'; mensaje: string }
+
+/**
+ * 16.4 (Emilio, 5-nov): el CDA aceptó la v1.5 después de la base y ningún período vendido cubre hoy (el que
+ * empezó sin la aceptación no se vendió). No hay consultas nuevas hasta pagar un período desde el día del pago
+ * (`pagarPeriodoReactivacionCda`). El historial y los reportes siguen, como con la 16.4 exigida. Sin poder
+ * leer las cuotas, no se cierra nada.
+ */
+async function resolverNoContinua(): Promise<NoContinuaCda> {
+  const e = await entradaValidaCda()
+  if (e.tipo !== 'ok' || !e.servicioContratadoId || e.canceladaDesde) return { estado: 'continua' }
+  const cuenta = await leerCuentaCda(e.servicioContratadoId)
+  if (cuenta.estado !== 'ok' || !cuenta.venta) return { estado: 'continua' }
+  if (!suscripcionNoContinua({ venta: cuenta.venta, hoy: e.hoy, vendidas: cuenta.cuotas })) return { estado: 'continua' }
+  const docs = await documentosDelCliente()
+  const v15 = docs.ok ? docs.documentos.find(esTerminosV15) : undefined
+  return { estado: 'no_continua', mensaje: textoNoContinua(v15 ? datosDelTextoV15(v15.textoMd).razonSocial : null) }
+}
+
+/** ¿La suscripción continuó después de la 16.4? Una sola evaluación por request. */
+export const noContinuaCda = cache(resolverNoContinua)
+
 /**
  * ¿El espacio puede operar Valida (entrar, listar, ver y descargar reportes)? La pregunta que hacen la
  * página y TODAS las acciones: los términos (con su plazo) y, después, la mora de más de 30 días. La
@@ -443,6 +473,8 @@ export async function validaCdaPermiteConsultar(): Promise<{ ok: true } | { ok: 
   }
   const v15 = await exigenciaV15Cda()
   if (v15.estado === 'exigida') return { ok: false, error: v15.mensaje }
+  const continua = await noContinuaCda()
+  if (continua.estado === 'no_continua') return { ok: false, error: continua.mensaje }
   return { ok: true }
 }
 

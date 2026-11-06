@@ -22,7 +22,7 @@ import { fichaDelOperador, operadorAlGuardar, operadorInicialDelPaquete, operado
 import { aMayusculas } from '@/lib/negocios/mayusculas'
 import { motivoDescuentoInvalido } from '@/lib/cotizaciones/reglas-margen'
 import { comisionEscrita, conComision, motivoComisionInvalida, type ComisionEscrita } from '@/lib/cotizaciones/tarifa-publica'
-import { grupoDelPaqueteVigente, planDelPegado, type OpcionDeBloqueo, type PlanDeArmado, type TarifaDeOpcion } from '@/lib/cotizaciones/bloqueo-armado'
+import { grupoDelPaqueteVigente, opcionesDeLasLineas, opcionesDelMismoPaquete, planDelPegado, type OpcionDeBloqueo, type PlanDeArmado, type TarifaDeOpcion } from '@/lib/cotizaciones/bloqueo-armado'
 import { formaDesdeGrupo } from '@/lib/cotizaciones/ranuras-cotizacion'
 import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
 
@@ -457,10 +457,10 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
 
   const { data: filas, error: errItems } = await sb
     .from('items')
-    .select('id, grupo, es_ajuste, tarifa_pax')
+    .select('id, grupo, es_ajuste, orden, tarifa_pax')
     .eq('cotizacion_id', cotizacionId)
   if (errItems) return { success: false, error: errItems.message as string }
-  const opciones: OpcionDeBloqueo[] = ((filas ?? []) as { id: string; grupo: string | null; es_ajuste: boolean | null; tarifa_pax: unknown }[])
+  const opciones: OpcionDeBloqueo[] = ((filas ?? []) as { id: string; grupo: string | null; es_ajuste: boolean | null; orden: number | null; tarifa_pax: unknown }[])
     .filter(i => i.es_ajuste !== true && ranuraDeGrupo(i.grupo)?.slug === 'paquete_detalle')
     .map(i => ({
       itemId: i.id,
@@ -468,6 +468,7 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
       numero: formaDesdeGrupo(i.grupo)?.numero ?? 1,
       paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo),
       tarifa: tarifaDeOpcion(leerTarifaPax(i.tarifa_pax)),
+      orden: i.orden ?? null,
     }))
 
   const { viaje, edadesMenores } = await leerViajeDelNegocio(sb, b.negocioId)
@@ -504,7 +505,9 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
     return { success: true, accion: 'actualizar', itemId: plan.cambios[0]?.itemId ?? null, mensaje }
   }
 
-  const creada = plan.accion === 'nuevo_paquete'
+  // Un paquete nuevo es otra OPCIÓN de la ranura del bloqueo (compite con los demás, no se suma; viaje 02,
+  // 2026-11-05). Solo el primero abre la ranura.
+  const creada = plan.grupo === null
     ? await crearRanuraConOpcion(cotizacionId, 'paquete')
     : await agregarOpcionARanura(cotizacionId, plan.grupo)
   if (!creada.success) return { success: false, error: creada.error }
@@ -518,8 +521,9 @@ export async function pegarEnBloqueo(cotizacionId: string, dataUrl: string, casi
 
 /**
  * La respuesta a «¿la tarifa del operador es Pública o Neta?» que hace la bandeja UNA vez por paquete
- * (Mauricio, 2026-11-03). Se escribe en TODAS las opciones del paquete (la ranura de `itemId`) que no
- * la tienen: las que tienen la pregunta abierta o ninguna decisión. Las que ya tienen la suya no se
+ * (Mauricio, 2026-11-03). Se escribe en TODAS las opciones del paquete de `itemId` (mismo operador y
+ * mismo vuelo en la ranura, `paquetesDelBloqueo`: desde el 2026-11-05 varios paquetes comparten ranura)
+ * que no la tienen: las que tienen la pregunta abierta o ninguna decisión. Las que ya tienen la suya no se
  * tocan. Escribe con `guardarPaqueteBloqueo` (mismas guardas, mismo costo, mismo margen).
  */
 export async function elegirTarifaDelPaquete(
@@ -535,11 +539,15 @@ export async function elegirTarifaDelPaquete(
   if (!item || item.es_ajuste === true || ranuraDeGrupo(item.grupo as string | null)?.slug !== 'paquete_detalle') {
     return { success: false, error: 'Esta línea no es un paquete de bloqueo.' }
   }
-  const grupo = normalizarGrupo(item.grupo as string) ?? (item.grupo as string)
-  const { data: filas, error: errItems } = await sb.from('items').select('id, grupo, es_ajuste, tarifa_pax').eq('cotizacion_id', item.cotizacion_id as string)
+  const { data: filas, error: errItems } = await sb.from('items').select('id, grupo, es_ajuste, orden, tarifa_pax').eq('cotizacion_id', item.cotizacion_id as string)
   if (errItems) return { success: false, error: errItems.message as string }
-  const hermanas = ((filas ?? []) as { id: string; grupo: string | null; es_ajuste: boolean | null; tarifa_pax: unknown }[])
-    .filter(i => i.es_ajuste !== true && i.grupo && (normalizarGrupo(i.grupo) ?? i.grupo) === grupo)
+  const lineas = ((filas ?? []) as { id: string; grupo: string | null; es_ajuste: boolean | null; orden: number | null; tarifa_pax: unknown }[])
+    .map(i => ({ ...i, grupo: i.grupo ? normalizarGrupo(i.grupo) ?? i.grupo : null }))
+  const delPaquete = new Set(opcionesDelMismoPaquete(
+    opcionesDeLasLineas(lineas.map(i => ({ ...i, paquete: leerPaqueteBloqueo(leerTarifaPax(i.tarifa_pax).bloqueo) }))),
+    itemId,
+  ))
+  const hermanas = lineas.filter(i => delPaquete.has(i.id))
   let n = 0
   for (const h of hermanas) {
     const t = leerTarifaPax(h.tarifa_pax)

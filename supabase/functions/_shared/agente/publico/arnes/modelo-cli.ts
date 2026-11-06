@@ -97,6 +97,11 @@ export function modeloCli(o: OpcionesCli): Modelo {
       const t0 = performance.now();
       const uso = (ok: boolean, extra: Partial<UsoLlamado> = {}): UsoLlamado => ({ modelo: o.modelo, entrada: 0, salida: 0, razonamiento: 0, cache: 0, ms: Math.round(performance.now() - t0), ok, ...extra });
       try {
+        // El CLI normal da 2 vueltas (la respuesta + la salida estructurada). Con más, el modelo intentó usar como
+        // herramienta del CLI una del núcleo (`--tools ""` no la tiene), la vio fallar y contestó «el catálogo no
+        // respondió» → persona por falla. Eso no pasa por la API (devuelve la llamada directo): se repite el llamado,
+        // hasta 2 veces, en vez de contarlo como respuesta del bot (banco 5-nov: 165 mil tokens en un solo llamado).
+        for (let intento = 0; ; intento++) {
         const hijo = new Deno.Command(o.binario ?? 'claude', {
           args: ['-p', '--model', o.modelo, '--output-format', 'json', '--tools', '', '--no-session-persistence', '--setting-sources', '',
             '--system-prompt', sistemaConHerramientas(p, permitidas), '--json-schema', JSON.stringify(esquemaLlamadas(permitidas))],
@@ -110,6 +115,7 @@ export function modeloCli(o: OpcionesCli): Modelo {
         const txt = new TextDecoder().decode(r.stdout);
         let d: Record<string, unknown>;
         try { d = JSON.parse(txt); } catch { return { ok: false, motivo: `cli: salida que no es JSON (código ${r.code})`, usos: [uso(false, { motivo: new TextDecoder().decode(r.stderr).slice(0, 200) })] }; }
+        if (Number(d.num_turns ?? 0) > 2 && intento < 2) continue;
         const u = (d.usage ?? {}) as Record<string, number>;
         const tokens = { entrada: (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), salida: u.output_tokens ?? 0, cache: u.cache_read_input_tokens ?? 0 };
         const so = d.structured_output as { llamadas?: Array<{ name?: string; args?: Record<string, unknown> }> } | undefined;
@@ -123,6 +129,7 @@ export function modeloCli(o: OpcionesCli): Modelo {
           mensaje: { role: 'model', modelo: o.modelo, parts: llamadas.map((l, i) => ({ functionCall: { name: l.name!, args: l.args ?? {}, id: `cli_${Date.now()}_${i}` } })) },
           usos: [uso(true, tokens)],
         };
+        }
       } catch (e) {
         return { ok: false, motivo: `cli: ${String(e).slice(0, 100)}`, usos: [uso(false)] };
       } finally {

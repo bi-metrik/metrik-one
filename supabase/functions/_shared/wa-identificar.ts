@@ -145,10 +145,11 @@ async function leerWorkspace(
   modules?: Record<string, unknown> | null;
   bot_conversacional?: unknown;
   aviso_datos_bot?: unknown;
+  entrega_bloqueo?: unknown;
 } | null> {
   const { data, error } = await supabase
     .from('workspaces')
-    .select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot')
+    .select('subscription_status, modules, bot_conversacional:config_extra->bot_conversacional, aviso_datos_bot:config_extra->aviso_datos_bot, entrega_bloqueo:config_extra->entrega_bloqueo->piloto')
     .eq('id', workspaceId)
     .single();
   if (error) {

@@ -198,6 +198,12 @@ export async function leerOpcionesPago(ctx: Ctx, ahoraMs: number = Date.now()): 
   }
 
   const plazo = plazoAnual(hoy, ctx.contrato.vigenteDesde)
+  // 16.4 (Emilio, 5-nov): sin la v1.5 aceptada no se vende ningún período que empiece desde la fecha base, y
+  // el plan anual vende doce.
+  const venta = cuenta.venta
+  if (venta?.base && plazo.hasta >= venta.base && venta.aceptadaEl === null) {
+    return { tipo: 'ok', mes, anual: { estado: 'no_disponible', motivo: 'acepta_v15', texto: TEXTO_SIN_OFERTA.acepta_v15 } }
+  }
   const oferta = ofertaPlanAnual({
     habilitado: true,
     precioMensual: typeof ctx.contrato.parametros.precio_mensual === 'number' ? ctx.contrato.parametros.precio_mensual : null,

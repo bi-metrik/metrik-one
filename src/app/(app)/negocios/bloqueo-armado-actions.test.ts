@@ -153,14 +153,16 @@ describe('pegarEnBloqueo · SAN ANDRÉS, 3 adultos', () => {
     expect(leerTarifaPax(tablas.items[2].tarifa_pax).tipoTarifa).toMatchObject({ comisionPct: 15 })
   })
 
-  it('un segundo vuelo abre el paquete 2 con sus propios hoteles', async () => {
+  it('un segundo vuelo abre el paquete 2 con sus propios hoteles, como otra opción de la MISMA ranura (compite, no se suma)', async () => {
     const r = await pegar(vuelo(VUELO_AV, 'v1'), hotel(KORAY, 'h1'), vuelo(VUELO_OTRO, 'v2'), hotel(SOL_CARIBE, 'h3'), hotel(ISLA_BONITA, 'h2'))
     expect(r.map(x => x.success && x.accion)).toEqual(['nuevo_paquete', 'actualizar', 'nuevo_paquete', 'actualizar', 'nueva_opcion'])
+    // Viaje 02 (2026-11-05): con el paquete 2 en su propia ranura, Tarifas sumaba los dos.
+    expect(new Set(tablas.items.map(i => i.grupo)).size).toBe(1)
     const ps = paquetes()
     expect(ps.map(p => [p.numero, p.paquete!.hotel.hotel, p.paquete!.vuelo!.tramos[0].numeroVuelo])).toEqual([
       [1, 'Koray Hotel', '9376'],
-      [2, 'Hotel Sol Caribe San Andres', '9370'],
-      [2, 'Hotel Isla Bonita', '9370'],
+      [1, 'Hotel Sol Caribe San Andres', '9370'],
+      [1, 'Hotel Isla Bonita', '9370'],
     ])
   })
 
@@ -193,12 +195,21 @@ describe('«¿Pública o Neta?» una vez por paquete (Mauricio, 2026-11-03)', ()
     await pegar(vuelo(VUELO_AV, 'v1'), hotel(KORAY, 'h1'))
     await elegirTarifaDelPaquete(tablas.items[0].id as string, 'publica')
     await pegar(vuelo(VUELO_OTRO, 'v2'), hotel(SOL_CARIBE, 'h3'))
-    expect(paquetes().map(p => [p.numero, p.tipo, p.pregunta])).toEqual([[1, 'publica', false], [2, null, true]])
+    // Los dos paquetes comparten la ranura (2026-11-05), y cada uno tiene su pregunta.
+    expect(paquetes().map(p => [p.numero, p.tipo, p.pregunta])).toEqual([[1, 'publica', false], [1, null, true]])
     await elegirTarifaDelPaquete(tablas.items[1].id as string, 'neta')
     const ps = paquetes()
-    expect(ps.map(p => [p.numero, p.tipo, p.pregunta])).toEqual([[1, 'publica', false], [2, 'neta', false]])
+    expect(ps.map(p => [p.numero, p.tipo, p.pregunta])).toEqual([[1, 'publica', false], [1, 'neta', false]])
     // Neta: hereda el margen de la cotización (null), ya no el 0 de la espera.
     expect(ps[1].margen).toBeNull()
+  })
+
+  it('dos paquetes en la misma ranura, los dos sin responder: responder uno deja abierta la pregunta del otro', async () => {
+    await pegar(vuelo(VUELO_AV, 'v1'), hotel(KORAY, 'h1'), vuelo(VUELO_OTRO, 'v2'), hotel(SOL_CARIBE, 'h3'))
+    expect(new Set(tablas.items.map(i => i.grupo)).size).toBe(1)
+    const r = await elegirTarifaDelPaquete(tablas.items[0].id as string, 'publica')
+    expect(r).toEqual({ success: true, opciones: 1 })
+    expect(paquetes().map(p => [p.tipo, p.pregunta])).toEqual([['publica', false], [null, true]])
   })
 
   it('«Guardar paquete» sin responder no cierra la pregunta; una tarjeta abierta desde antes no la reabre', async () => {

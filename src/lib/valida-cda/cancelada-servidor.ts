@@ -28,6 +28,8 @@ import { cuotasConEstado, proximoPago } from './pago-pendiente'
 import { TIPOS_CUOTA_SIN_MORA } from './plan-anual'
 import { estadoMora, REGLA_MORA_CDA, SLUG_TERMINOS_CDA, vigenciaRestriccion, vigenciaTransicion } from './plazos'
 import { COLUMNAS_TARJETA_CDA, deFilaTarjetaCda, esTablaAusente, type TarjetaCda } from './tarjeta-cda-lectura'
+import { reactivacionExigeV15, suscripcionNoContinua, TEXTO_REACTIVAR_EXIGE_V15, type VentaV15 } from './venta-16-4'
+import { ventaV15DelContrato } from './venta-16-4-lectura'
 
 /**
  * Paso 8e del cron `procesar-planes-cobro` y la reactivación de Valida de los CDA (Términos del Plan CDA
@@ -84,7 +86,7 @@ export interface ResumenCancelada {
   /** Períodos desde el 1-dic con un abono parcial: no se anulan solos, los mira una persona. */
   conAbono: { servicioContratadoId: string; cuotaId: string | null }[]
   tarjetasCerradas: { servicioContratadoId: string; borradoEpayco: boolean }[]
-  correos: { servicioContratadoId: string; tipo: 'cancelada' | 'tarjeta'; destino: string }[]
+  correos: { servicioContratadoId: string; tipo: 'cancelada' | 'tarjeta' | 'prestado_16_4'; destino: string }[]
   yaAvisados: number
   reactivadas: { servicioContratadoId: string; desde: string }[]
   omitidos: { servicioContratadoId: string; motivo: string }[]
@@ -117,7 +119,7 @@ async function vigencias(db: Db, empresaId: string, ahoraISO: string): Promise<{
 }
 
 /** Los correos registrados (15.1) y la persona designada, sin repetir; la razón social y el espacio. */
-async function destinatarios(
+export async function destinatarios(
   db: Db,
   sc: FilaContrato,
   deps: Pick<DepsCancelada, 'correoDePersona'>,
@@ -156,10 +158,10 @@ async function destinatarios(
  * mismo asunto y destino que no quedó `fallido` ya es el aviso (el criterio del paso 8d). Sin poder leer lo
  * ya enviado no se manda: un correo de más al cliente es peor que uno tarde.
  */
-async function enviarUnaVez(
+export async function enviarUnaVez(
   db: Db,
   deps: Pick<DepsCancelada, 'enviarCorreo'>,
-  p: { sc: FilaContrato; tipo: 'cancelada' | 'tarjeta'; destinos: string[]; asunto: string; texto: string; html: string; llave: string },
+  p: { sc: FilaContrato; tipo: 'cancelada' | 'tarjeta' | 'prestado_16_4'; destinos: string[]; asunto: string; texto: string; html: string; llave: string },
   resumen: ResumenCancelada,
 ): Promise<void> {
   const previos = await db
@@ -204,11 +206,18 @@ async function enviarUnaVez(
   }
 }
 
-/** Anula la cuota (2.5) y su cobro programado sin pagar. Idempotente: lo ya anulado no se toca. */
-async function anularCuota(db: Db, p: { cuotaId: string; planCobroId: string; numero: number; ahoraISO: string }): Promise<{ ok: true; anulada: boolean } | { ok: false; error: string }> {
+/**
+ * Anula la cuota (2.5, o la 16.4 con su motivo) y su cobro programado sin pagar. Idempotente: lo ya anulado
+ * no se toca.
+ */
+export async function anularCuota(
+  db: Db,
+  p: { cuotaId: string; planCobroId: string; numero: number; ahoraISO: string; motivo?: string },
+): Promise<{ ok: true; anulada: boolean } | { ok: false; error: string }> {
+  const motivo = p.motivo ?? MOTIVO_ANULACION_2_5
   const q = await db
     .from('plan_cobro_cuotas')
-    .update({ anulada_at: p.ahoraISO, anulacion_motivo: MOTIVO_ANULACION_2_5 })
+    .update({ anulada_at: p.ahoraISO, anulacion_motivo: motivo })
     .eq('id', p.cuotaId)
     .is('anulada_at', null)
     .select('id')
@@ -226,7 +235,7 @@ async function anularCuota(db: Db, p: { cuotaId: string; planCobroId: string; nu
   for (const fila of (c.data ?? []) as { id: string; monto: number | string | null }[]) {
     const u = await db
       .from('cobros')
-      .update({ monto: 0, monto_anulado: Number(fila.monto ?? 0), anulado_at: p.ahoraISO, anulacion_motivo: MOTIVO_ANULACION_2_5 })
+      .update({ monto: 0, monto_anulado: Number(fila.monto ?? 0), anulado_at: p.ahoraISO, anulacion_motivo: motivo })
       .eq('id', fila.id)
       .is('fecha', null)
       .is('anulado_at', null)
@@ -335,7 +344,8 @@ export async function cancelarSuscripcionesVencidas(deps: DepsCancelada): Promis
     .from('servicios_contratados')
     .select('id, reactivacion_cobro_id')
     .eq('servicio_slug', SERVICIO_CDA)
-    .not('cancelada_desde', 'is', null)
+    // Cancelados y, desde la 16.4, los que vuelven a empezar sin Cancelada: `reactivarCdaSiCorresponde`
+    // reconoce el pago ya cerrado y no hace nada.
     .not('reactivacion_cobro_id', 'is', null)
   if (pendientes.error) throw new Error(`reactivaciones pendientes: ${pendientes.error.message}`)
   for (const p of (pendientes.data ?? []) as { id: string; reactivacion_cobro_id: string }[]) {
@@ -376,13 +386,21 @@ export async function cancelarSuscripcionesVencidas(deps: DepsCancelada): Promis
         continue
       }
       const transicion = v.transicion
-      const cuenta = await cuentaDelContrato(db, fila)
+      // 16.4: un período que METRIK no vendió no es mora (no hay Cancelada por él).
+      const venta = await ventaV15DelContrato(db, fila, ahoraISO)
+      if ('error' in venta) {
+        omitir(venta.error)
+        continue
+      }
+      const cuenta = await cuentaDelContrato(db, fila, venta)
       if ('error' in cuenta) {
         // Sin poder leer las cuotas no hay prueba de la mora: no se cancela (el criterio de la puerta).
         omitir(cuenta.error)
         continue
       }
-      const estados = cuotasConEstado({ cuotas: cuenta.cuotas, cobros: cuenta.cobros, hoy: deps.hoy, ahoraISO })
+      // La anulación de la 2.5 y la cartera miran TODO el plan vigente, incluidos los no vendidos (16.4): con
+      // la Cancelada, un período desde el 1-dic sin pagar se anula por la 2.5, se haya vendido o no.
+      const estados = cuotasConEstado({ cuotas: [...cuenta.cuotas, ...cuenta.noVendidas], cobros: cuenta.cobros, hoy: deps.hoy, ahoraISO })
 
       // 1. El día 31: el contrato queda Cancelado (pausado + cancelada_desde).
       let canceladaDesde = fila.cancelada_desde
@@ -508,6 +526,25 @@ export async function valorDeReactivacion(db: Db, sc: { id: string; parametros: 
 }
 
 /**
+ * ¿El CDA puede pagar hoy un período desde el día del pago (el flujo de la reactivación)? Con la suscripción
+ * Cancelada (11.4), sí, salvo que desde la base de la 16.4 no haya aceptado la v1.5. Sin Cancelada, solo si
+ * aceptó la v1.5 tarde y ningún período vendido cubre hoy (`suscripcionNoContinua`).
+ */
+export async function puedePagarPeriodoNuevo(
+  db: Db,
+  c: FilaContrato & { cancelada_desde: string | null },
+  hoy: string,
+): Promise<{ ok: true; venta: VentaV15 } | { ok: false; error: string }> {
+  const venta = await ventaV15DelContrato(db, c)
+  if ('error' in venta) return { ok: false, error: NO_DISPONIBLE }
+  if (reactivacionExigeV15(venta, hoy)) return { ok: false, error: TEXTO_REACTIVAR_EXIGE_V15 }
+  if (c.cancelada_desde) return { ok: true, venta }
+  const cuenta = await cuentaDelContrato(db, c, venta)
+  if ('error' in cuenta) return { ok: false, error: NO_DISPONIBLE }
+  return suscripcionNoContinua({ venta, hoy, vendidas: cuenta.cuotas }) ? { ok: true, venta } : { ok: false, error: NO_CANCELADA }
+}
+
+/**
  * «Reactivar la suscripción» (11.4). `contratoId` y `workspacePagadorId` salen de la sesión (la acción),
  * nunca del navegador. Devuelve el enlace vigente o uno nuevo.
  */
@@ -519,21 +556,22 @@ export async function enlaceDeReactivacionCda(
   const ahoraMs = deps.ahoraMs ?? Date.now()
   const sc = await db
     .from('servicios_contratados')
-    .select('id, workspace_id, negocio_id, parametros, cancelada_desde, reactivacion_cobro_id')
+    .select(`${COLUMNAS_CONTRATO_CDA}, parametros, cancelada_desde`)
     .eq('id', p.contratoId)
     .eq('workspace_pagador_id', p.workspacePagadorId)
     .eq('servicio_slug', SERVICIO_CDA)
     .maybeSingle()
   if (sc.error) return { ok: false, error: NO_DISPONIBLE }
-  const c = sc.data as {
-    id: string
-    workspace_id: string
-    negocio_id: string | null
+  const c = sc.data as (FilaContrato & {
     parametros: Record<string, unknown> | null
     cancelada_desde: string | null
     reactivacion_cobro_id: string | null
-  } | null
-  if (!c || !c.cancelada_desde || !c.negocio_id) return { ok: false, error: NO_CANCELADA }
+  }) | null
+  if (!c || !c.negocio_id) return { ok: false, error: NO_CANCELADA }
+  // 16.4 (Emilio, 5-nov): desde la base, sin la v1.5 aceptada no se vende el período de la reactivación. Y un
+  // CDA que la aceptó tarde, sin período vendido que cubra hoy, vuelve a empezar por este mismo camino.
+  const permiso = await puedePagarPeriodoNuevo(db, c, todayBogotaISO(new Date(ahoraMs)))
+  if (!permiso.ok) return permiso
   const monto = await valorDeReactivacion(db, c)
   if (!monto) return { ok: false, error: 'No encontramos el valor de tu período. Escríbenos y lo resolvemos.' }
 
@@ -544,8 +582,12 @@ export async function enlaceDeReactivacionCda(
     const r = await db.from('cobros').select('id, fecha, anulado_at, monto, enlace_pago_url, enlace_pago_expira').eq('id', cobroId).maybeSingle()
     if (r.error) return { ok: false, error: NO_DISPONIBLE }
     const f = r.data as { fecha: string | null; anulado_at: string | null; monto: number | string; enlace_pago_url: string | null; enlace_pago_expira: string | null } | null
-    if (f?.fecha && !f.anulado_at) return { ok: false, error: 'Ya recibimos el pago del período: la suscripción se reactiva en unos minutos.' }
-    if (!f || f.anulado_at || Math.round(Number(f.monto)) !== monto) {
+    // Un pago de una reactivación anterior que ya se cerró (`reactivada_desde` = su fecha) no es de esta.
+    const yaUsado = !!f?.fecha && !f.anulado_at && c.reactivada_desde === f.fecha
+    if (f?.fecha && !f.anulado_at && !yaUsado) return { ok: false, error: 'Ya recibimos el pago del período: la suscripción se reactiva en unos minutos.' }
+    if (yaUsado) {
+      cobroId = null
+    } else if (!f || f.anulado_at || Math.round(Number(f.monto)) !== monto) {
       if (f && !f.anulado_at) {
         // El valor cambió (un usuario adicional): el cobro viejo no queda como deuda.
         await db
@@ -605,7 +647,8 @@ export async function enlaceDeReactivacionCda(
     if (nuevo.error || !nuevo.data?.id) return { ok: false, error: NO_DISPONIBLE }
     const id = nuevo.data.id as string
     // Se guarda en el contrato si nadie dejó otro en el medio; si no, el que sobra se anula sin pago.
-    const base = db.from('servicios_contratados').update({ reactivacion_cobro_id: id }).eq('id', c.id).not('cancelada_desde', 'is', null)
+    const enEstado = db.from('servicios_contratados').update({ reactivacion_cobro_id: id }).eq('id', c.id)
+    const base = c.cancelada_desde ? enEstado.not('cancelada_desde', 'is', null) : enEstado.is('cancelada_desde', null)
     const u = await (c.reactivacion_cobro_id ? base.eq('reactivacion_cobro_id', c.reactivacion_cobro_id) : base.is('reactivacion_cobro_id', null)).select('id')
     if (u.error || (u.data ?? []).length === 0) {
       await db
@@ -650,19 +693,29 @@ export async function reactivarCdaSiCorresponde(
   const db = dbCliente as Db
   const r = await db
     .from('servicios_contratados')
-    .select('id, workspace_id, negocio_id, parametros, cancelada_desde, reactivacion_cobro_id')
+    .select('id, workspace_id, negocio_id, parametros, cancelada_desde, reactivada_desde, reactivacion_cobro_id')
     .eq('reactivacion_cobro_id', cobroId)
     .eq('servicio_slug', SERVICIO_CDA)
     .maybeSingle()
   if (r.error) return { revisar: true, detalle: `Reactivación de Valida: no se pudo leer el contrato (${r.error.message}).` }
-  const sc = r.data as { id: string; workspace_id: string; negocio_id: string | null; parametros: Record<string, unknown> | null; cancelada_desde: string | null } | null
+  const sc = r.data as {
+    id: string
+    workspace_id: string
+    negocio_id: string | null
+    parametros: Record<string, unknown> | null
+    cancelada_desde: string | null
+    reactivada_desde?: string | null
+  } | null
   if (!sc || !sc.negocio_id) return null
-  if (!sc.cancelada_desde) return null // ya reactivada
 
   const cr = await db.from('cobros').select('id, fecha, anulado_at, plan_cobro_id, monto').eq('id', cobroId).maybeSingle()
   if (cr.error) return { revisar: true, detalle: `Reactivación de Valida: no se pudo leer el pago (${cr.error.message}).` }
   const cobro = cr.data as { id: string; fecha: string | null; anulado_at: string | null; plan_cobro_id: string | null; monto: number | string } | null
   if (!cobro || !cobro.fecha || cobro.anulado_at) return null
+  // Ya reactivada con ESTE pago: su plan existe y el contrato dice esa fecha. Sin `cancelada_desde` también se
+  // reactiva: el CDA que aceptó la v1.5 tarde vuelve a empezar por este camino (16.4, Emilio 5-nov).
+  const reactivadaAntes = sc.reactivada_desde ?? null
+  if (cobro.plan_cobro_id && reactivadaAntes === cobro.fecha) return null
 
   // 1. El plan nuevo desde el día del pago (11.4 y 11.5), si todavía no existe.
   let planId = cobro.plan_cobro_id
@@ -713,14 +766,24 @@ export async function reactivarCdaSiCorresponde(
       planId = nuevoPlan
     }
   }
+  // Los planes viejos del negocio dejan de renovarse (con la Cancelada ya lo estaban; con la 16.4, si el CDA
+  // aceptó tarde, el viejo podía seguir encendido): dos planes encendidos frenan la renovación de los dos.
+  const viejos = await db.from('planes_cobro').update({ auto_renovar: false }).eq('negocio_id', sc.negocio_id).eq('workspace_id', sc.workspace_id).eq('auto_renovar', true).neq('id', planId)
+  if (viejos.error) console.error('[reactivacion-cda] apagar la renovación de los planes viejos:', viejos.error.message)
 
   // 2. El contrato vuelve a activo, con la nueva fecha de renovación.
-  const u = await db
+  // La guarda: el contrato sigue como se leyó (Cancelado, o con la misma fecha de reactivación).
+  const upd = db
     .from('servicios_contratados')
     .update({ estado: 'activo', cancelada_desde: null, reactivada_desde: cobro.fecha })
     .eq('id', sc.id)
-    .not('cancelada_desde', 'is', null)
-    .select('id')
+    .eq('reactivacion_cobro_id', cobroId)
+  const conGuarda = sc.cancelada_desde
+    ? upd.not('cancelada_desde', 'is', null)
+    : reactivadaAntes
+      ? upd.is('cancelada_desde', null).eq('reactivada_desde', reactivadaAntes)
+      : upd.is('cancelada_desde', null).is('reactivada_desde', null)
+  const u = await conGuarda.select('id')
   if (u.error) return { revisar: true, detalle: `Reactivación de Valida: el plan nuevo quedó, pero no se pudo reactivar el contrato (${u.error.message}).` }
   if ((u.data ?? []).length === 0) return null
   await anotarEnAncla(

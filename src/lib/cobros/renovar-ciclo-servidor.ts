@@ -8,6 +8,11 @@ import {
   type CuotaDelPlan,
   type MotivoNoRenovar,
 } from './renovar-ciclo'
+import { ventaV15DelContrato } from '@/lib/valida-cda/venta-16-4-lectura'
+import type { VentaV15 } from '@/lib/valida-cda/venta-16-4'
+
+/** Valida de los CDA: el único servicio con la 16.4 (la v1.5 de sus Términos). */
+const SERVICIO_VALIDA_CDA = 'valida-cda-licencia'
 
 /**
  * Paso 6b del cron diario: el plan de un contrato por ciclo con `auto_renovar` recibe su cuota
@@ -47,6 +52,7 @@ interface FilaContrato {
   parametros: Record<string, unknown> | null
   vigente_desde: string | null
   vigente_hasta: string | null
+  empresa_id?: string | null
 }
 
 interface FilaPlan {
@@ -93,7 +99,7 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
     (desde, hasta) =>
       db
         .from('servicios_contratados')
-        .select('id, workspace_id, negocio_id, suscripcion_id, estado, servicio_slug, parametros, vigente_desde, vigente_hasta')
+        .select('id, workspace_id, negocio_id, suscripcion_id, estado, servicio_slug, parametros, vigente_desde, vigente_hasta, empresa_id')
         .in('servicio_slug', [...moduloPorSlug.keys()])
         .order('id')
         .range(desde, hasta),
@@ -204,6 +210,16 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
   for (const p of planes) {
     const llave = `${p.workspace_id}|${llaveDeFila(p)}`
     const contrato = contratoPorAncla.get(llave) ?? null
+    // 16.4 (Valida de los CDA): la base y la aceptación de la v1.5. Sin poder leerlas no se renueva.
+    let ventaV15: VentaV15 | null = null
+    if (contrato?.servicio_slug === SERVICIO_VALIDA_CDA && p.auto_renovar && contrato.estado === 'activo') {
+      const v = await ventaV15DelContrato(db, { empresa_id: contrato.empresa_id ?? null, negocio_id: contrato.negocio_id })
+      if ('error' in v) {
+        resumen.errores.push({ planCobroId: p.id, error: v.error })
+        continue
+      }
+      ventaV15 = v
+    }
     const decision = planearRenovacion(
       {
         planId: p.id,
@@ -220,6 +236,7 @@ export async function renovarPlanesPorCiclo(deps: { db: SupabaseClient; hoy: str
         planAnualEnCurso: conPlanAnual.has(p.id),
         variosPlanes: (planesPorAncla.get(llave) ?? 0) > 1,
         cuotas: cuotasPorPlan.get(p.id) ?? [],
+        ventaV15,
       },
       deps.hoy,
     )

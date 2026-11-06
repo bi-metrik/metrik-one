@@ -21,7 +21,7 @@ describe('fichas del banco con Haiku real (3-nov)', () => {
   })
 
   it('el complemento rechazado no trae otra oferta; la pregunta de ver_catalogo va sola', () => {
-    expect(ficha('alc.complemento').hacer).toMatch(/sin «¿Necesitas algo más\?» ni otra oferta/)
+    expect(ficha('alc.complemento').hacer).toMatch(/sin «¿Necesitas algo más\?», sin «¿quieres algo más o seguimos\?» ni otra oferta/)
     expect(ficha('alc.producto').hacer).toMatch(/Si ver_catalogo trae `pregunta`, esa es LA pregunta del mensaje/)
   })
 
