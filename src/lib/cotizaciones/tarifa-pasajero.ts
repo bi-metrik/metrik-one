@@ -331,6 +331,12 @@ export interface LecturaCasilla {
    */
   monedaAsumida?: boolean
   /**
+   * La captura no decía si el precio es de todos o de uno (`base_precio`): `elegido` = lo dijo la
+   * persona en la bandeja; `un_pasajero` = el viaje es de uno y se tomó total. Ausente = lo leyó
+   * el modelo. Rastro, no freno (Trappvel, 2026-11-06).
+   */
+  basePrecioOrigen?: 'elegido' | 'un_pasajero'
+  /**
    * Huella del archivo que se leyó (`huellaDeImagen`): la bandeja la compara para no procesar
    * dos veces el mismo pantallazo (P10). La imagen sigue sin guardarse; solo su huella.
    * Ausente en las lecturas anteriores al 2026-09-23.
