@@ -24,3 +24,9 @@ cubre las lecturas.
 - Abierto, sin tocar: tras el reverso no hay `valida_prueba`, así que `consultarValida` no reconoce el
   401 como corte y guarda una fila `error` en el historial. La consulta sí queda bloqueada.
 - Ver [[project-valida-reverso-corta-plan]].
+- QA de punta a punta SIN correr: el guion está como comentario en #1315 (28-oct). `cda-pruebas`
+  (475da39a…) NO tenía llave, cliente de Valida ni consultas: el guion siembra todo. La llave se genera
+  dentro de una sentencia SQL de ONE (Vault) y a Valida viaja solo el sha256: así nunca se imprime.
+  `scripts/setup-valida-workspace.ts` SÍ imprime la llave en claro: no usarlo para pruebas.
+- Brief duplicado: dos sesiones recibieron el mismo encargo; la primera mergeó #83/#1315 antes de que
+  la segunda empezara. Antes de construir, buscar el PR por tema (`gh pr list --state all --search`).
