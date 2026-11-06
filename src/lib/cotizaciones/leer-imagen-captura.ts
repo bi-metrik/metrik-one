@@ -4,9 +4,9 @@ import { extraerRanuraDesdeImagen, type OpcionesDeLectura } from '@/lib/ai/extra
 import { getServerKey } from '@/lib/server-keys'
 import { huellaDeImagen } from './captura-repetida'
 import { construirLecturaCasilla } from './lectura-casilla'
-import { evaluarLectura } from './lectura-pantallazo'
+import { evaluarLectura, type ContextoLectura } from './lectura-pantallazo'
 import type { DefinicionRanura } from './ranuras-pantallazo'
-import type { LecturaCasilla } from './tarifa-pasajero'
+import { totalPasajeros, type LecturaCasilla } from './tarifa-pasajero'
 import type { ViajeDelNegocio } from './viaje-negocio'
 
 /**
@@ -21,7 +21,19 @@ import type { ViajeDelNegocio } from './viaje-negocio'
  */
 export type LecturaDeImagen =
   | { ok: true; leida: LecturaCasilla }
-  | { ok: false; codigo: string; mensaje: string; detalle?: string; opciones?: { nombre: string; precio: string | null }[] }
+  | {
+    ok: false
+    codigo: string
+    mensaje: string
+    detalle?: string
+    opciones?: { nombre: string; precio: string | null }[]
+    /**
+     * Solo faltaba `base_precio` (Trappvel, 2026-11-06): la MISMA lectura ya juzgada con cada
+     * respuesta posible («Es el total» / «Es por persona»). Quien sabe preguntar (la bandeja) la
+     * ofrece; elegir NO vuelve a llamar al modelo. Los demás caminos ven el RX2 de siempre.
+     */
+    eleccionBase?: { valor: string; leida: LecturaCasilla }[]
+  }
 
 export async function leerImagenDeCaptura(args: {
   ranura: DefinicionRanura
@@ -55,7 +67,7 @@ export async function leerImagenDeCaptura(args: {
     }
   }
 
-  const veredicto = evaluarLectura(ranura, lectura.data, {
+  const contexto: ContextoLectura = {
     fechasViaje: viaje.fechas,
     monedaIndicada: monedaIndicada ?? null,
     soloMinimosDeCosto: true,
@@ -63,9 +75,25 @@ export async function leerImagenDeCaptura(args: {
     // como supuesta, y `confirmarTarifaPorPasajero` no deja pasar el costo hasta que una
     // persona la acepte o la cambie. Este es el único camino con ese freno.
     monedaSiFalta: 'COP',
-  })
+    // Un viaje de un pasajero no pregunta si el precio es de todos o de uno.
+    pasajeros: viaje.composicion ? totalPasajeros(viaje.composicion) : null,
+  }
+  const veredicto = evaluarLectura(ranura, lectura.data, contexto)
+  const leidaEn = new Date().toISOString()
   if (!veredicto.ok) {
     const opciones = veredicto.opciones ?? []
+    // Solo faltaba `base_precio`: la lectura ya hecha se juzga con cada respuesta posible, sin
+    // volver al modelo. Cada una sale como una lectura completa, lista para firmar.
+    const eleccionBase: { valor: string; leida: LecturaCasilla }[] = []
+    for (const valor of veredicto.basePorElegir ?? []) {
+      const v = evaluarLectura(ranura, lectura.data, { ...contexto, basePrecioElegido: valor })
+      if (!v.ok) continue
+      eleccionBase.push({ valor, leida: construirLecturaCasilla(ranura, v, leidaEn, viaje.composicion) })
+    }
+    if (eleccionBase.length > 0) {
+      const huella = await huellaDeImagen(dataUrl)
+      if (huella) for (const e of eleccionBase) e.leida.huellaImagen = huella
+    }
     return {
       ok: false,
       codigo: veredicto.codigo,
@@ -74,11 +102,12 @@ export async function leerImagenDeCaptura(args: {
       mensaje: opciones.length > 0 ? '¿Cuál de estas? La captura trae varias opciones: toca la que vas a cotizar.' : veredicto.instruccion,
       detalle: veredicto.motivo,
       ...(opciones.length > 0 ? { opciones } : {}),
+      ...(eleccionBase.length > 0 ? { eleccionBase } : {}),
     }
   }
 
   // Un precio por persona sin ocupación en la imagen se multiplica por los del viaje.
-  const leida = construirLecturaCasilla(ranura, veredicto, new Date().toISOString(), viaje.composicion)
+  const leida = construirLecturaCasilla(ranura, veredicto, leidaEn, viaje.composicion)
   // La huella del archivo, para que la bandeja no procese dos veces el mismo pantallazo (P10).
   const huella = await huellaDeImagen(dataUrl)
   if (huella) leida.huellaImagen = huella

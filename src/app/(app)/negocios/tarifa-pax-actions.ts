@@ -48,7 +48,9 @@ import { margenDelProveedor, margenDeLineaSegunConvencion } from '@/lib/cotizaci
 import { origenDelMargen } from '@/lib/cotizaciones/margen-vista'
 import { comisionDelPantallazo, comisionEscrita, conComision, lecturaTraeComision, margenAlElegirTipo, motivoComisionInvalida, propuestaDelPantallazo, type ComisionEscrita, type TipoTarifa } from '@/lib/cotizaciones/tarifa-publica'
 import { CONVENCION_MARGEN_POR_DEFECTO, type ConvencionMargen } from '@/lib/cotizaciones/precio-item'
-import { leerViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { leerViajeDelNegocio, type ViajeDelNegocio } from '@/lib/cotizaciones/viaje-negocio'
+import { etiquetaDeBasePrecio, preguntaDeBasePrecio } from '@/lib/cotizaciones/lectura-pantallazo'
+import type { EleccionDeBase } from '@/lib/cotizaciones/proceso-captura'
 import { nombreAlConfirmarLectura } from '@/lib/cotizaciones/nombre-linea'
 import { esCorregible } from '@/lib/cotizaciones/correcciones'
 import { casillasConEstadia, firmaDeEstadia, lecturaConEstadia } from '@/lib/cotizaciones/estadia'
@@ -359,7 +361,8 @@ export async function leerCasillaDeItem(
   }
 
   const leidaR = await leerImagenDeCaptura({ ranura, dataUrl, viaje, monedaIndicada, enfoque })
-  if (!leidaR.ok) return leidaR
+  // La casilla no sabe preguntar «¿es el total o por persona?»: ve el RX2 de siempre.
+  if (!leidaR.ok) return { ok: false, codigo: leidaR.codigo, mensaje: leidaR.mensaje, detalle: leidaR.detalle, ...(leidaR.opciones ? { opciones: leidaR.opciones } : {}) }
   const leida = leidaR.leida
 
   // El pantallazo se guarda con la opción que lo usa (`imagen-captura.ts`). Si la lectura no
@@ -574,7 +577,15 @@ async function lineasDeCotizacion(supabase: unknown, cotizacionId: string): Prom
 
 export type ResultadoBorrador =
   | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
-  | { ok: false; codigo: string; mensaje: string; detalle?: string; opciones?: { nombre: string; precio: string | null }[] }
+  | {
+    ok: false
+    codigo: string
+    mensaje: string
+    detalle?: string
+    opciones?: { nombre: string; precio: string | null }[]
+    /** Solo faltaba `base_precio`: la pregunta y una lectura FIRMADA por respuesta (`EleccionDeBase`). */
+    eleccionBase?: EleccionDeBase
+  }
 
 /**
  * Lee un pantallazo de la bandeja SIN escribir nada: ni ranura, ni opción, ni habitación.
@@ -619,17 +630,48 @@ export async function leerCapturaEnBorrador(
     ...(reservaVariasHabitaciones ? { opciones: { reservaVariasHabitaciones: true } } : {}),
     ...(trasladoIdaYRegreso ? { opciones: { trasladoIdaYRegreso: true } } : {}),
   })
-  if (!r.ok) return r
-  const leida = r.leida
+  if (!r.ok) {
+    const { eleccionBase: porElegir, ...rechazo } = r
+    if (!porElegir || porElegir.length === 0) return rechazo
+    // Trappvel (2026-11-06) · solo faltaba si el precio es de todos o de uno: cada respuesta ya
+    // es una lectura completa. Se valida y se firma cada una, igual que una lectura aceptada, y
+    // la bandeja pregunta. Elegir es tomar una de estas: no hay otra llamada al modelo.
+    const firmadas: EleccionDeBase['opciones'] = []
+    let primerFallo: ResultadoBorrador | null = null
+    for (const { valor, leida } of porElegir) {
+      const f = firmarLecturaDeBandeja(cotizacionId, tipo, ranura.slug, leida, ctx.viaje)
+      if (!f.ok) {
+        primerFallo ??= f
+        continue
+      }
+      firmadas.push({ valor, etiqueta: etiquetaDeBasePrecio(valor), lectura: f.lectura, lecturaJson: f.lecturaJson, firma: f.firma, alertas: f.alertas })
+    }
+    if (firmadas.length === 0) return primerFallo ?? rechazo
+    return { ...rechazo, eleccionBase: { pregunta: preguntaDeBasePrecio(ranura), opciones: firmadas } }
+  }
+  return firmarLecturaDeBandeja(cotizacionId, tipo, ranura.slug, r.leida, ctx.viaje)
+}
+
+/**
+ * Valida una lectura de la bandeja contra su ocupación y la firma para «Aceptar». La misma para
+ * la lectura de siempre y para cada respuesta de «¿es el total o por persona?».
+ */
+function firmarLecturaDeBandeja(
+  cotizacionId: string,
+  tipo: TipoRanura,
+  ranuraSlug: string,
+  leida: LecturaCasilla,
+  viaje: ViajeDelNegocio,
+): ResultadoBorrador {
   // La misma validación que tenía la captura al leerse sobre su opción vacía: contra la
   // ocupación que ella misma dice, o la del viaje si no la dice. El rechazo sale AHORA, no
   // al aceptar.
-  const propia = composicionDeLectura(leida) ?? ctx.viaje.composicion
-  const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug: ranura.slug })
+  const propia = composicionDeLectura(leida) ?? viaje.composicion
+  const v = validarLecturaEnCasilla({ clave: 'grupo_completo', lectura: leida, composicion: propia, casillas: {}, ranuraSlug })
   if (!v.ok) return { ok: false, codigo: v.codigo, mensaje: v.mensaje }
   // Una actividad fuera de las fechas del viaje se avisa en la fila (punto 5 del brief del
   // 2026-10-01). Es un aviso: la captura entra igual.
-  const fueraDelViaje = tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(fechaDeActividad(leida), ctx.viaje.fechas) : null
+  const fueraDelViaje = tipo === 'actividad' ? avisoFechaActividadFueraDelViaje(fechaDeActividad(leida), viaje.fechas) : null
   leida.alertas = sumarAlertas(leida.alertas, v.alertas, fueraDelViaje ? [fueraDelViaje] : [])
   // Una asistencia médica leída de un pantallazo queda marcada igual que la escrita a mano.
   if (tipo === 'otro') marcarAsistenciaMedica(tipo, leida)

@@ -126,9 +126,14 @@ export function construirLecturaCasilla(
   // la necesita, ya sin los conteos que no hablan de personas).
   const avisosDelPrecio: string[] = []
   let total: number
+  // `por_pax` sin pasajeros en la captura (el vuelo del GDS de Trappvel, 2026-11-06): el
+  // multiplicador de siempre usa `pax` de la imagen y, sin él, multiplicaba por 1. Se cuenta como
+  // un precio por persona: las personas de la línea.
+  const porPaxSinPax = valor('base_precio') === 'por_pax' && entero(valor('pax')) === null && sinOcupacion
+    && !!composicionSiFalta && totalPasajeros(composicionSiFalta) > 0
   if (porTipo.length > 0) {
     total = aceptacion.totalGeneral ?? numeroLeido(valor('precio_total')) ?? porTipo.reduce((a, f) => a + f.subtotal, 0)
-  } else if (precioEsPorPersona(ranura, valor('base_precio'))) {
+  } else if (precioEsPorPersona(ranura, valor('base_precio')) || porPaxSinPax) {
     // Precio POR PERSONA (Trappvel, 2026-11-03): el costo es ese precio por cada persona, nunca el
     // de la reserva. Las personas son las de la captura; si no las muestra, las de la línea.
     const precio = numeroLeido(valor('precio_total')) ?? 0
@@ -216,6 +221,7 @@ export function construirLecturaCasilla(
     descripcion,
     leidaEn,
     ...(monedaAsumida ? { monedaAsumida: true } : {}),
+    ...(aceptacion.basePrecioOrigen ? { basePrecioOrigen: aceptacion.basePrecioOrigen } : {}),
     ...(aceptacion.habitacionesReserva ? { habitacionesReserva: aceptacion.habitacionesReserva } : {}),
   }
 }
