@@ -90,6 +90,16 @@ const QA = BLOQUES[4]
 const HOY = todayBogotaISO()
 const MANANA = sumarDias(HOY, 1)
 
+/**
+ * Las fechas del sembrado, relativas a HOY con los mismos saltos que había en producción el 2026-10-29
+ * (v1.3 desde el 24-sep hasta el 5-nov; v1.4 publicada el 7-oct, vigente desde el 6-nov). Con fechas
+ * fijas la prueba vencía: desde el 6-nov la v1.3 ya no estaba vigente y la base negaba su aceptación.
+ */
+const V13_DESDE = sumarDias(HOY, -35)
+const V13_HASTA = sumarDias(HOY, 7)
+const V14_DESDE = sumarDias(HOY, 8)
+const V14_PUBLICADA = `${sumarDias(HOY, -22)} 12:59:50-05`
+
 /** El bloque con otro día de publicación y, si se pide, fuera de ensayo. */
 function preparar(b: Bloque, o: { ensayo: boolean; publicacion: string }): string {
   let sql = b.sql
@@ -120,8 +130,8 @@ function aceptar(b: Bloque, o: { documento: string; version: string; pdf: string
 }
 
 /**
- * Lo que hay en producción el 2026-10-29: la v1.3 aceptada (vigente hasta el 5-nov) y la v1.4 por aviso
- * publicada el 7-oct (vigente desde el 6-nov). El Carmen y Puertotest aceptaron también la v1.4. CDA
+ * Lo que hay en producción el 2026-10-29, corrido a HOY: la v1.3 aceptada (vigente unos días más) y la
+ * v1.4 por aviso ya publicada (vigente desde el día siguiente al fin de la v1.3). El Carmen y Puertotest aceptaron también la v1.4. CDA
  * Pruebas: solo su v1.1 aceptada.
  */
 function sembrar(b: Bloque, aceptoV14: boolean): string {
@@ -153,14 +163,14 @@ function sembrar(b: Bloque, aceptoV14: boolean): string {
     insert into public.documentos_contractuales_versiones
       (id, workspace_id, linea_id, slug, alcance, empresa_id, titulo, version, texto_md, texto_sha256, pdf_path, pdf_sha256, vigente_desde, vigente_hasta)
     values ('${b.anterior}', '${WS_METRIK}', '${LINEA_VALIDA}', 'terminos-suscripcion-valida-cda', 'cliente', '${b.empresa}', '${TITULO}',
-            'v1.3', '# Términos v1.3 ${b.slug}', '${t13}', '${b.slug}/v13.pdf', '${b.anteriorPdf}', date '2026-09-24', date '2026-11-05');
+            'v1.3', '# Términos v1.3 ${b.slug}', '${t13}', '${b.slug}/v13.pdf', '${b.anteriorPdf}', date '${V13_DESDE}', date '${V13_HASTA}');
     ${aceptar(b, { documento: b.anterior, version: 'v1.3', pdf: b.anteriorPdf, texto: t13 })};
     insert into public.documentos_contractuales_versiones
       (id, workspace_id, linea_id, slug, alcance, empresa_id, titulo, version, texto_md, texto_sha256, pdf_path, pdf_sha256,
        vigente_desde, rige_por_aviso, reemplaza_version_id, publicada_at)
     values ('${b.previa}', '${WS_METRIK}', '${LINEA_VALIDA}', 'terminos-suscripcion-valida-cda', 'cliente', '${b.empresa}', '${TITULO}',
-            'v1.4', '# Términos v1.4 ${b.slug}', '${t14}', '${b.slug}/v14.pdf', '${b.previaPdf}', date '2026-11-06', true,
-            '${b.anterior}', timestamptz '2026-10-07 12:59:50-05');
+            'v1.4', '# Términos v1.4 ${b.slug}', '${t14}', '${b.slug}/v14.pdf', '${b.previaPdf}', date '${V14_DESDE}', true,
+            '${b.anterior}', timestamptz '${V14_PUBLICADA}');
     ${aceptoV14 ? `${aceptar(b, { documento: b.previa, version: 'v1.4', pdf: b.previaPdf, texto: t14 })};` : ''}`
 }
 
@@ -390,7 +400,7 @@ describe('la publicación programada de los 4 CDA (y la de QA)', () => {
   })
 
   it('la v1.3 (que la v1.4 reemplazó) no se toca', async () => {
-    expect(await vigenteHasta(CDAS[0].anterior)).toBe('2026-11-05')
+    expect(await vigenteHasta(CDAS[0].anterior)).toBe(V13_HASTA)
   })
 
   it('una segunda corrida no duplica', async () => {

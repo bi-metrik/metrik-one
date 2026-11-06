@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { firmaValida } from '../../../../../supabase/functions/_shared/entrega-bloqueo-firma.ts'
+import { motivoRechazo, VARIABLE_SECRETO } from '../../../../../supabase/functions/_shared/entrega-bloqueo-firma.ts'
 import { procesarPedido, procesarRespuesta, responderTipo, type Salida } from '@/lib/cotizaciones/entrega-unica/flujo'
 import { llamadorAnthropic } from '@/lib/cotizaciones/entrega-unica/llamada'
 import { puertoSupabase } from '@/lib/cotizaciones/entrega-unica/puerto-supabase'
@@ -16,7 +16,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /**
  * ENTREGA ÚNICA DEL BLOQUEO: el webhook de WhatsApp le pasa aquí un pedido ya anclado (`entregas_bloqueo`)
  * y recibe los mensajes que tiene que mandarle a la ASESORA (nunca a la clienta). Sin sesión: el cuerpo
- * llega firmado con la llave de servicio (`entrega-bloqueo-firma.ts`).
+ * llega firmado con `ENTREGA_BLOQUEO_SECRETO` (`entrega-bloqueo-firma.ts`).
  *
  *   { accion: 'pedido', entregaId }                       → la llamada al modelo y el guardado en ONE
  *   { accion: 'respuesta', entregaId, texto }             → aplica su respuesta, chequeo y PDF
@@ -24,9 +24,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  */
 export async function POST(request: Request) {
   const cuerpo = await request.text()
-  const llave = process.env.SUPABASE_SERVICE_ROLE_KEY ?? ''
-  if (!(await firmaValida(llave, cuerpo, request.headers.get('x-firma-entrega')))) {
-    return NextResponse.json({ error: 'firma' }, { status: 401 })
+  const firma = request.headers.get('x-firma-entrega')
+  const motivo = await motivoRechazo(process.env[VARIABLE_SECRETO] ?? '', cuerpo, firma)
+  if (motivo) {
+    // Sin secretos ni firma en el registro: solo el motivo y la diferencia de reloj, si la hay.
+    const t = Number(/^t=(\d+),/.exec(firma?.trim() ?? '')?.[1])
+    console.error(`[entrega-bloqueo] firma rechazada: ${motivo}${Number.isFinite(t) ? ` (desfase ${Math.round((Date.now() - t) / 1000)} s)` : ''}`)
+    return NextResponse.json({ error: 'firma', motivo }, { status: 401 })
   }
   let p: { accion?: string; entregaId?: string; texto?: string; tipo?: string }
   try { p = JSON.parse(cuerpo) } catch { return NextResponse.json({ error: 'json' }, { status: 400 }) }

@@ -4,7 +4,14 @@
  * «Pegar conversación»: botón del bloque de la solicitud y su cuadro. La comercial pega el chat (o sube el .txt que
  * exporta WhatsApp, o el .zip de la exportación: solo se lee el .txt) y ONE llena el bloque con valores SUGERIDOS. Sin
  * paso de confirmación aparte: lo sugerido se confirma o se corrige en el mismo bloque, como lo que llega del bot.
- * Al terminar, el mismo cuadro muestra el resumen. Ver `lib/negocios/pegar-conversacion.ts`.
+ * Al terminar, el resumen («Lo que entendí») queda DENTRO del bloque, no en un cuadro encima. Ver
+ * `lib/negocios/pegar-conversacion.ts`.
+ *
+ * Por qué no es un cuadro (N-H4-2, QA de Trappvel del 2026-11-05): el resumen pide «confírmalo con un toque o
+ * corrígelo escribiendo encima», pero era un `fixed inset-0` con fondo semitransparente sobre toda la página: los
+ * campos se veían debajo y un clic caía en el fondo, no en la casilla. Lo que se tecleaba no llegaba a ningún
+ * campo (sin `onChange` no hay guardado) y nada avisaba. Ahora el cuadro solo existe mientras se pega y se lee;
+ * con el resumen, los campos del bloque se escriben y se guardan como siempre.
  */
 
 import { useRef, useState } from 'react'
@@ -125,91 +132,102 @@ export default function PegarConversacion({
     })
   }
 
+  function pegarOtra() {
+    setResumen(null)
+    setAbierto(true)
+  }
+
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setAbierto(true)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] bg-white px-2.5 py-1 text-[11px] font-medium text-tinta hover:bg-papel transition-colors"
-        data-boton-pegar-conversacion
-      >
-        <MessageSquareText className="h-3.5 w-3.5 text-acento" />
-        Pegar conversación
-      </button>
-      {abierto && (
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={pegarOtra}
+          className="inline-flex items-center gap-1.5 rounded-md border border-[#E5E7EB] bg-white px-2.5 py-1 text-[11px] font-medium text-tinta hover:bg-papel transition-colors"
+          data-boton-pegar-conversacion
+        >
+          <MessageSquareText className="h-3.5 w-3.5 text-acento" />
+          Pegar conversación
+        </button>
+      </div>
+      {/* «Lo que entendí»: en el bloque, sin tapar los campos (ver el encabezado del archivo). */}
+      {resumen && (
+        <section className="rounded-lg border border-[#E5E7EB] bg-papel p-3" aria-label="Lo que entendí" data-resumen-en-bloque>
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-sm font-semibold text-tinta">Lo que entendí</h3>
+            <button type="button" onClick={cerrar} aria-label="Cerrar" className="rounded p-1 text-tinta-suave hover:bg-white">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mt-2 max-h-72 overflow-y-auto"><ResumenPegado r={resumen} /></div>
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={pegarOtra} className="flex-1 rounded-md border border-[#E5E7EB] bg-white py-1.5 text-xs font-medium text-tinta hover:bg-papel">
+              Pegar otra
+            </button>
+            <button type="button" onClick={cerrar} className="flex-1 rounded-md bg-acento py-1.5 text-xs font-medium text-white hover:bg-acento-hover">
+              Listo
+            </button>
+          </div>
+        </section>
+      )}
+      {abierto && !resumen && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label="Pegar conversación">
           <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-t-2xl bg-white p-5 shadow-xl sm:rounded-2xl">
             <div className="flex items-start justify-between gap-2">
-              <h3 className="text-base font-semibold text-tinta">{resumen ? 'Lo que entendí' : 'Pegar conversación'}</h3>
+              <h3 className="text-base font-semibold text-tinta">Pegar conversación</h3>
               <button type="button" onClick={cerrar} disabled={isPending} aria-label="Cerrar" className="rounded p-1 text-tinta-suave hover:bg-papel disabled:opacity-40">
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {resumen ? (
-              <>
-                <div className="mt-3 overflow-y-auto"><ResumenPegado r={resumen} /></div>
-                <div className="mt-4 flex gap-2">
-                  <button type="button" onClick={() => setResumen(null)} className="flex-1 rounded-md border border-[#E5E7EB] py-2 text-sm font-medium text-tinta hover:bg-papel">
-                    Pegar otra
-                  </button>
-                  <button type="button" onClick={cerrar} className="flex-1 rounded-md bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover">
-                    Listo
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="mt-1 text-xs text-tinta-suave">
-                  Pega el chat con el cliente (con o sin fecha y nombre) o sube el archivo de «Exportar chat» de WhatsApp.
-                  ONE llena lo que entienda de este viaje como sugerido; lo que ya está escrito no se pisa.
-                </p>
-                <textarea
-                  value={texto}
-                  onChange={(e) => { setTexto(e.target.value); setArchivo(null) }}
-                  disabled={isPending}
-                  rows={10}
-                  placeholder="Pega aquí la conversación…"
-                  className="mt-3 w-full resize-y rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
-                  data-texto-chat
-                />
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <input
-                    ref={inputRef}
-                    type="file"
-                    accept=".txt,.zip,text/plain,application/zip"
-                    className="hidden"
-                    onChange={(e) => { void elegirArchivo(e.target.files?.[0]) }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => inputRef.current?.click()}
-                    disabled={isPending}
-                    className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-acento hover:bg-[var(--acento-tinte)] disabled:opacity-50"
-                  >
-                    <Upload className="h-3.5 w-3.5" />
-                    Subir chat exportado (.txt o .zip)
-                  </button>
-                  {archivo && <span className="text-[11px] text-tinta-suave">{archivo}</span>}
-                </div>
-                {error && <p className="mt-2 text-[11px] text-red-600" role="alert">{error}</p>}
-                <div className="mt-4 flex gap-2">
-                  <button type="button" onClick={cerrar} disabled={isPending} className="flex-1 rounded-md border border-[#E5E7EB] py-2 text-sm font-medium text-tinta hover:bg-papel disabled:opacity-50">
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={leer}
-                    disabled={!texto.trim() || isPending}
-                    className="flex-1 rounded-md bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:opacity-50"
-                  >
-                    {isPending ? 'Leyendo la conversación…' : 'Llenar el viaje'}
-                  </button>
-                </div>
-              </>
-            )}
+            <p className="mt-1 text-xs text-tinta-suave">
+              Pega el chat con el cliente (con o sin fecha y nombre) o sube el archivo de «Exportar chat» de WhatsApp.
+              ONE llena lo que entienda de este viaje como sugerido; lo que ya está escrito no se pisa.
+            </p>
+            <textarea
+              value={texto}
+              onChange={(e) => { setTexto(e.target.value); setArchivo(null) }}
+              disabled={isPending}
+              rows={10}
+              placeholder="Pega aquí la conversación…"
+              className="mt-3 w-full resize-y rounded-lg border border-[#E5E7EB] px-3 py-2 text-xs text-tinta focus:border-acento focus:outline-none focus:ring-2 focus:ring-acento/15 disabled:opacity-60"
+              data-texto-chat
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".txt,.zip,text/plain,application/zip"
+                className="hidden"
+                onChange={(e) => { void elegirArchivo(e.target.files?.[0]) }}
+              />
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                disabled={isPending}
+                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-acento hover:bg-[var(--acento-tinte)] disabled:opacity-50"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Subir chat exportado (.txt o .zip)
+              </button>
+              {archivo && <span className="text-[11px] text-tinta-suave">{archivo}</span>}
+            </div>
+            {error && <p className="mt-2 text-[11px] text-red-600" role="alert">{error}</p>}
+            <div className="mt-4 flex gap-2">
+              <button type="button" onClick={cerrar} disabled={isPending} className="flex-1 rounded-md border border-[#E5E7EB] py-2 text-sm font-medium text-tinta hover:bg-papel disabled:opacity-50">
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={leer}
+                disabled={!texto.trim() || isPending}
+                className="flex-1 rounded-md bg-acento py-2 text-sm font-medium text-white hover:bg-acento-hover disabled:opacity-50"
+              >
+                {isPending ? 'Leyendo la conversación…' : 'Llenar el viaje'}
+              </button>
+            </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

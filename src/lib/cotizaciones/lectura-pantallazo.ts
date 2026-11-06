@@ -33,7 +33,7 @@
 import { parseMontoCop } from '@/lib/negocios/monto-cop'
 
 import type { CampoRanura, DefinicionRanura } from './ranuras-pantallazo'
-import { camposMinimos, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
+import { camposMinimos, etiquetaDeAviso, MINIMOS_DE_COSTO } from './ranuras-pantallazo'
 import { ciudadEsLugarDelNombre } from './ciudad-actividad'
 import { estrellasDesdeTexto } from './estrellas'
 import { tramosDeCampos, textoDeTramo } from './tramos-vuelo'
@@ -219,6 +219,17 @@ export interface ContextoLectura {
    * (`LecturaCasilla.costoPendiente`) para que nadie la costee en cero. Solo con `manual`.
    */
   sinCosto?: boolean
+  /**
+   * Lo que la persona dijo del precio cuando la captura no lo dice (Trappvel, 2026-11-06): «Es el
+   * total» o «Es por persona». Solo cuenta si la lectura dejó `base_precio` vacío y es una de las
+   * opciones de la ranura. Lo dijo una persona: no se marca para revisión.
+   */
+  basePrecioElegido?: string | null
+  /**
+   * Cuántos pasajeros tiene el viaje (la ocupación que ya usa la cotización). Con uno solo, un
+   * precio sin `base_precio` es el total: «total» y «por persona» dan lo mismo y no se pregunta.
+   */
+  pasajeros?: number | null
 }
 
 /**
@@ -246,6 +257,33 @@ export interface Rechazo {
    * ausente = no hay de dónde elegir.
    */
   opciones?: { nombre: string; precio: string | null }[]
+  /**
+   * RX2 donde lo ÚNICO que falta es `base_precio` y todo lo demás para costear está (Trappvel,
+   * 2026-11-06: la pantalla del GDS no dice si el precio es de todos o de uno). Ninguna otra
+   * captura lo va a resolver: se le pregunta a la persona con estas opciones (las del enum de la
+   * ranura) y la lectura se vuelve a juzgar con `ContextoLectura.basePrecioElegido`, sin volver a
+   * llamar al modelo. Ausente = RX2 de siempre.
+   */
+  basePorElegir?: string[]
+}
+
+/** La pregunta cuando la captura no dice qué representa el precio (`Rechazo.basePorElegir`). */
+export function preguntaDeBasePrecio(ranura: Pick<DefinicionRanura, 'slug'>): string {
+  return ranura.slug === 'vuelo_detalle'
+    ? '¿Ese precio es de todos los pasajeros o de uno solo?'
+    : '¿Ese precio es de todas las personas o de una sola?'
+}
+
+/** El botón de cada valor del enum `base_precio`, en palabras de quien cotiza. */
+export function etiquetaDeBasePrecio(valor: string): string {
+  switch (valor) {
+    case 'total': return 'Es el total'
+    case 'por_pax':
+    case 'por_persona': return 'Es por persona'
+    case 'por_noche': return 'Es por noche'
+    case 'por_persona_noche': return 'Es por persona y por noche'
+    default: return valor
+  }
 }
 
 /**
@@ -277,6 +315,8 @@ export interface CampoLeido {
    * (hoy solo la moneda, `ContextoLectura.monedaSiFalta`). Nadie lo ha dicho todavía.
    */
   supuesto?: boolean
+  /** El valor no está en la imagen: lo eligió la persona en la bandeja (hoy solo `base_precio`). */
+  elegido?: boolean
 }
 
 export interface Aceptacion {
@@ -290,6 +330,12 @@ export interface Aceptacion {
   totalGeneral: number | null
   /** El registro de una reserva de varias habitaciones con un total. Ausente en las demás. */
   habitacionesReserva?: HabitacionDeReserva[]
+  /**
+   * La captura no decía qué representa el precio y `base_precio` no lo leyó el modelo:
+   * `elegido` = lo dijo la persona; `un_pasajero` = el viaje es de uno y se tomó total.
+   * Ausente = lo leyó el modelo (o es hotel, con su propio aviso).
+   */
+  basePrecioOrigen?: 'elegido' | 'un_pasajero'
 }
 
 export type VeredictoLectura = Aceptacion | Rechazo
@@ -525,6 +571,52 @@ export function evaluarLectura(
     }
   }
 
+  // Trappvel (2026-11-06) · la tarjeta de hotel no dice si el precio es de toda la reserva o por
+  // persona («$2.905.882 · 4 Días 3 Noches - 2 Huéspedes»), y el lector devuelve base_precio en
+  // null. Si la captura trae precio y moneda, se toma TOTAL, marcado y con aviso, en vez de
+  // rechazar: es lo que dice la tarjeta a la vista de cualquiera. Con tabla por tipo de pasajero
+  // no hace falta (el total ya es el de la tabla) y a mano lo decide la persona en el formulario.
+  if (ranura.slug === 'hotel_detalle' && !contexto.manual && (cruda.porTipoPax ?? []).length === 0) {
+    const base = porSlug.get('base_precio')
+    if (base && base.valor === null && porSlug.get('precio_total')?.valor != null && porSlug.get('moneda')?.valor != null) {
+      base.valor = 'total'
+      base.alertaRevision = true
+      base.confidence = 0
+      avisosDelItem.push(
+        'La captura no dice si el precio es de toda la reserva o por persona: se toma como total de la estadía. ' +
+        'Confírmalo contra el proveedor.',
+      )
+    }
+  }
+
+  // Trappvel (2026-11-06) · fuera del hotel (vuelo del GDS: «COP 4,666,438», sin pasajeros) la
+  // captura tampoco dice si el precio es de todos o de uno, y aquí NO se supone total: cotizar a la
+  // mitad del costo es peor que preguntar. Se resuelve solo si la persona ya lo dijo
+  // (`basePrecioElegido`) o si el viaje es de UN pasajero (total y por persona dan lo mismo). Si
+  // no, más abajo sale el RX2 con `basePorElegir` y la bandeja pregunta.
+  let basePrecioOrigen: Aceptacion['basePrecioOrigen']
+  const defBase = ranura.campos.find(d => d.slug === 'base_precio')
+  if (ranura.slug !== 'hotel_detalle' && !contexto.manual && defBase?.min === true && (cruda.porTipoPax ?? []).length === 0) {
+    const base = porSlug.get('base_precio')
+    const conPrecio = porSlug.get('precio_total')?.valor != null && porSlug.get('moneda')?.valor != null
+    const opciones = defBase.opciones ?? []
+    const elegido = (contexto.basePrecioElegido ?? '').trim()
+    if (base && base.valor === null && conPrecio) {
+      const personas = personasDeLaCaptura(new Map(campos.map(c => [c.slug, c.valor]))) ?? contexto.pasajeros ?? null
+      if (elegido !== '' && opciones.includes(elegido)) {
+        base.valor = elegido
+        base.alertaRevision = false
+        base.elegido = true
+        base.confidence = 1
+        basePrecioOrigen = 'elegido'
+      } else if (personas === 1 && opciones.includes('total')) {
+        base.valor = 'total'
+        base.confidence = CONFIANZA_MINIMA
+        basePrecioOrigen = 'un_pasajero'
+      }
+    }
+  }
+
   // RX3 antes que RX2 aunque `moneda` sea un mínimo más: es el error más caro del
   // motor y su instrucción es distinta (se puede indicar a mano, no hace falta otra
   // captura). Agruparlo con los demás faltantes lo escondería en una lista.
@@ -555,17 +647,23 @@ export function evaluarLectura(
     const descriptivos = todosFaltantes.filter(def => !faltantes.includes(def))
     if (descriptivos.length > 0) {
       avisosDelItem.push(
-        `La captura no muestra: ${descriptivos.map(d => d.label.toLowerCase()).join(', ')}. ` +
+        `La captura no muestra: ${descriptivos.map(etiquetaDeAviso).join(', ')}. ` +
         'La línea conserva los datos que ya tiene: complétalos si hace falta.',
       )
     }
   }
   if (faltantes.length > 0) {
+    // Solo falta `base_precio` y lo demás para costear está: se le pregunta a la persona.
+    const soloBase = faltantes.length === 1 && faltantes[0].slug === 'base_precio'
+      && ranura.slug !== 'hotel_detalle' && !contexto.manual && !tieneTablaPorTipo
+      && porSlug.get('precio_total')?.valor != null
+      && (faltantes[0].opciones ?? []).length >= 2
     return {
       ok: false,
       codigo: 'RX2',
       motivo: `Faltan campos mínimos: ${faltantes.map(f => f.slug).join(', ')}.`,
       instruccion: instruccionRX2(faltantes),
+      ...(soloBase ? { basePorElegir: [...(faltantes[0].opciones ?? [])] } : {}),
     }
   }
 
@@ -578,6 +676,7 @@ export function evaluarLectura(
     porTipoPax: cruda.porTipoPax ?? [],
     totalGeneral: cruda.totalGeneral ?? null,
     ...(reserva ? { habitacionesReserva: reserva } : {}),
+    ...(basePrecioOrigen ? { basePrecioOrigen } : {}),
   }
 }
 
@@ -592,7 +691,7 @@ function instruccionRX1(ranura: DefinicionRanura): string {
 }
 
 function instruccionRX2(faltantes: CampoRanura[]): string {
-  const lista = faltantes.map(f => f.label.toLowerCase()).join(', ')
+  const lista = faltantes.map(etiquetaDeAviso).join(', ')
   return faltantes.length === 1
     ? `No se ve ${lista}. Sube una captura que lo incluya.`
     : `No se ven estos datos: ${lista}. Sube una captura que los incluya.`

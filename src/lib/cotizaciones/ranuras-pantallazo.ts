@@ -94,6 +94,18 @@ export interface CampoRanura {
    * y se guarda como los demás—, pero el prompt y el esquema de la lectura no lo nombran.
    */
   aparte?: boolean
+  /**
+   * Cómo se nombra el campo DENTRO de una frase de aviso («No se ve <esto>»), cuando el
+   * `label` no sirve ahí. El `label` es un rótulo de casilla («El precio mostrado es») y,
+   * además, la llave con que se guardan y se releen los campos (`ficha-linea.ts`,
+   * `correcciones.ts`): no se cambia. Sin este campo, el aviso usa el `label` en minúscula.
+   */
+  label_aviso?: string
+}
+
+/** El nombre del campo dentro de una frase de aviso (ver `CampoRanura.label_aviso`). */
+export function etiquetaDeAviso(def: Pick<CampoRanura, 'label' | 'label_aviso'>): string {
+  return def.label_aviso ?? def.label.toLowerCase()
 }
 
 export interface DefinicionRanura {
@@ -141,6 +153,7 @@ const MONEDA: CampoRanura = {
 const PRECIO_TOTAL: CampoRanura = {
   slug: 'precio_total',
   label: 'Precio',
+  label_aviso: 'el precio',
   tipo: 'currency',
   min: true,
   descripcion_ai:
@@ -515,10 +528,14 @@ const EQUIPAJE: CampoRanura[] = [
 ]
 
 /** El enum que decide si el número leído se multiplica o no (R-P6). */
-function basePrecio(opciones: string[], nota: string): CampoRanura {
+function basePrecio(opciones: string[], nota: string, cierre?: string): CampoRanura {
   return {
     slug: 'base_precio',
     label: 'El precio mostrado es',
+    // «No se ve el precio mostrado es.» era el aviso de RX2 hasta el 2026-11-06.
+    label_aviso: opciones.includes('por_noche')
+      ? 'si el precio es de toda la estadía, por noche o por persona'
+      : 'si el precio es por persona o de todas las personas',
     tipo: 'enum',
     min: true,
     alerta_revision: true,
@@ -526,7 +543,7 @@ function basePrecio(opciones: string[], nota: string): CampoRanura {
     descripcion_ai:
       `Qué representa el número de precio_total. ${nota} ` +
       `Responde exactamente uno de: ${opciones.join(', ')}. ` +
-      'Si la pantalla no lo dice con claridad, devuelve null en vez de suponer.',
+      (cierre ?? 'Si la pantalla no lo dice con claridad, devuelve null en vez de suponer.'),
   }
 }
 
@@ -685,6 +702,13 @@ const HOTEL: DefinicionRanura = {
       'total = es el precio de toda la estadía para todas las personas; por_noche = es el precio de una sola noche ' +
         'para todas; por_persona = es el precio de UNA persona por toda la estadía («por persona», «p/p», «pp», ' +
         '«valor por persona en acomodación doble/triple»); por_persona_noche = es el de una persona por una noche.',
+      // Trappvel (2026-11-06): con «null si no lo dice con claridad» el lector devolvía null en
+      // TODA tarjeta de hotel («$2.905.882 · 4 Días 3 Noches - 2 Huéspedes»), y RX2 la rechazaba.
+      // Si de todos modos llega null, `lectura-pantallazo.ts` toma total con aviso (red).
+      'Un precio mostrado junto a la estadía y la ocupación («4 días 3 noches - 2 huéspedes», «1 x Habitación ' +
+        'standard por 2 adultos», «3 noches, 2 adultos») SIN decir «por persona» ni «por noche» es total: es lo ' +
+        'que cuesta esa reserva. Devuelve null solo si de verdad no se puede saber (ej. un número suelto sin ' +
+        'estadía ni ocupación al lado).',
     ),
     ...COSTO_AGENCIA,
   ],

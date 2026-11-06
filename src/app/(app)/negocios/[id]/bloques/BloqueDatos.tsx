@@ -945,7 +945,7 @@ export default function BloqueDatos({
       <IndicadoresSolicitud fields={fields} valores={values} />
       {/* Pegar la conversación con el cliente: llena el bloque con sugeridos (solo en un bloque de solicitud). */}
       {!corrigiendo && declaraNiveles(fields) && (
-        <div className="flex justify-end">
+        <div>
           <PegarConversacion
             negocioBloqueId={negocioBloqueId}
             antes={async () => {
