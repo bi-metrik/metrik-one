@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { candadoDeCron } from '@/lib/idempotencia/candado-cron'
 import { createServiceClient } from '@/lib/supabase/server'
 import { seleccionarDelDia, type ReunionDescartada } from '@/lib/actas/seleccion'
-import { generarActa } from '@/lib/actas/generacion'
+import { faltaLlaveDeActas, generarActa } from '@/lib/actas/generacion'
 import { enviarActa, fechaReunionISO, MODO_ENVIO_DEFAULT } from '@/lib/actas/envio'
 
 // Cron diario: genera y envia el acta de cada reunion candidata del dia
@@ -50,9 +50,15 @@ export async function GET(req: NextRequest) {
   const otraCorrida = await candadoDeCron('actas-diarias', req)
   if (otraCorrida) return otraCorrida
 
+  // Las actas van a Claude Haiku por defecto (fetchModeloActas): ahí GEMINI_API_KEY es solo el respaldo y puede faltar
+  // (Mauricio, 2026-11-06). Si resuelven a Gemini, sigue siendo obligatoria.
   const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    return NextResponse.json({ error: 'GEMINI_API_KEY no configurada en el servidor' }, { status: 503 })
+  const falta = faltaLlaveDeActas(apiKey)
+  if (falta) {
+    return NextResponse.json({ error: falta }, { status: 503 })
+  }
+  if (!apiKey?.trim()) {
+    console.warn('[actas-diarias] sin GEMINI_API_KEY: las actas van a Claude Haiku sin respaldo en Gemini')
   }
 
   const supabase = createServiceClient()

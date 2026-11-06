@@ -14,6 +14,7 @@ import {
   promoverOpcionales,
   LIMITE_OPCIONALES,
   proveedorDe,
+  haikuActivo,
   OPCIONES_ACTAS,
   OPCIONES_CAPTURAS,
   OPCIONES_DOCUMENTOS,
@@ -449,6 +450,17 @@ describe('interruptor por familia (LLM_PROVEEDOR_DOCUMENTOS, LLM_PROVEEDOR_ACTAS
     expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'gemini' }), docs)).toBe('gemini');
     expect(proveedorDe(ent({ LLM_PROVEEDOR_DOCUMENTOS: 'anthropic' }), docs)).toBe('anthropic');
     expect(proveedorDe(ent({}))).toBe('anthropic');
+  });
+
+  it('haikuActivo: sin opciones mira solo el global; con OPCIONES_ACTAS, también la familia y la llave', () => {
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: 'sk' }))).toBe(true);
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR: 'gemini' }))).toBe(false);
+    expect(haikuActivo(ent({}))).toBe(false);
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR_ACTAS: 'gemini' }))).toBe(true);
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: 'sk' }), OPCIONES_ACTAS)).toBe(true);
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR_ACTAS: 'gemini' }), OPCIONES_ACTAS)).toBe(false);
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR: 'gemini' }), OPCIONES_ACTAS)).toBe(false);
+    expect(haikuActivo(ent({ ANTHROPIC_API_KEY: ' ' }), OPCIONES_ACTAS)).toBe(false);
   });
 
   it('actas: sin valor, Haiku (desde el 2026-11-05); la variable en gemini las devuelve a Gemini', () => {

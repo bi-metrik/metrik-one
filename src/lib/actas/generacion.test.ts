@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { generarActa } from './generacion'
+import { faltaLlaveDeActas, generarActa } from './generacion'
 import type { CandidataActa } from './seleccion'
 import type { ReunionCalendario } from './calendario'
 
@@ -52,9 +52,14 @@ function respuestaGemini(payload: unknown, finishReason = 'STOP') {
 describe('generarActa', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn())
+    // Las pruebas de abajo van por el camino de Gemini: sin llave de Anthropic, fetchModeloActas no traduce.
+    vi.stubEnv('ANTHROPIC_API_KEY', '')
+    vi.stubEnv('LLM_PROVEEDOR', '')
+    vi.stubEnv('LLM_PROVEEDOR_ACTAS', '')
   })
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('lanza si no hay apiKey', async () => {
@@ -160,5 +165,74 @@ describe('generarActa', () => {
     })
 
     await expect(generarActa(candidata(), 'fake-key')).rejects.toThrow('Error de Gemini (500)')
+  })
+})
+
+describe('la llave que exigen las actas (faltaLlaveDeActas)', () => {
+  const ent = (v: Record<string, string>) => (k: string) => v[k]
+
+  it('Haiku activo (por defecto, con ANTHROPIC_API_KEY): no exige GEMINI_API_KEY', () => {
+    expect(faltaLlaveDeActas(undefined, ent({ ANTHROPIC_API_KEY: 'sk' }))).toBeNull()
+    expect(faltaLlaveDeActas('', ent({ ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR_ACTAS: 'anthropic' }))).toBeNull()
+  })
+
+  it('las actas resuelven a Gemini: exige GEMINI_API_KEY como siempre', () => {
+    for (const e of <Record<string, string>[]>[
+      { ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR_ACTAS: 'gemini' },
+      { ANTHROPIC_API_KEY: 'sk', LLM_PROVEEDOR: 'gemini' },
+    ]) {
+      expect(faltaLlaveDeActas(undefined, ent(e))).toMatch(/GEMINI_API_KEY no configurada.*van a Gemini/)
+      expect(faltaLlaveDeActas('g', ent(e))).toBeNull()
+    }
+    // Sin la llave de Anthropic, fetchModeloActas sigue en Gemini: con su llave, sale.
+    expect(faltaLlaveDeActas('g', ent({}))).toBeNull()
+  })
+
+  it('sin ninguna llave utilizable: el mensaje nombra las dos', () => {
+    expect(faltaLlaveDeActas(undefined, ent({}))).toBe(
+      'Sin llave de modelo para las actas: falta ANTHROPIC_API_KEY (Claude Haiku) y GEMINI_API_KEY (respaldo en Gemini)',
+    )
+    expect(faltaLlaveDeActas('  ', ent({ ANTHROPIC_API_KEY: '  ' }))).toMatch(/falta ANTHROPIC_API_KEY/)
+  })
+})
+
+describe('generarActa con Haiku y sin GEMINI_API_KEY', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('sale solo a Anthropic, sin pedido a Gemini, y devuelve el acta', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-prueba')
+    vi.stubEnv('LLM_PROVEEDOR', '')
+    vi.stubEnv('LLM_PROVEEDOR_ACTAS', '')
+    const payload = { resumen: 'Se hablo del plan.', decisiones: ['Seguir'], compromisos: [] }
+    const mockFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            content: [{ type: 'text', text: JSON.stringify(payload) }],
+            stop_reason: 'end_turn',
+            usage: { input_tokens: 10, output_tokens: 10 },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    )
+    vi.stubGlobal('fetch', mockFetch)
+
+    const acta = await generarActa(candidata(), undefined)
+    expect(acta.resumen).toBe('Se hablo del plan.')
+    expect(acta.decisiones).toEqual(['Seguir'])
+    const urls = mockFetch.mock.calls.map((c) => String((c as unknown[])[0]))
+    expect(urls).toEqual(['https://api.anthropic.com/v1/messages'])
+  })
+
+  it('con las actas en Gemini y sin su llave, no llama a nadie', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-prueba')
+    vi.stubEnv('LLM_PROVEEDOR_ACTAS', 'gemini')
+    const mockFetch = vi.fn()
+    vi.stubGlobal('fetch', mockFetch)
+    await expect(generarActa(candidata(), '')).rejects.toThrow('GEMINI_API_KEY no configurada')
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 })
