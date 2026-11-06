@@ -43,7 +43,8 @@ export interface ClienteFunciones {
 /** Los datos que viajan a `funcion_apartar`. Sin mesa, sin puesto y sin MONTO: la base rechaza uno con `dato_no_admitido`. Pura. */
 export function datosDeApartado(p: PropuestaApartado): Record<string, unknown> {
   return {
-    canal: p.canal,
+    // `funcion_apartar` no conoce 'messenger' (20261022170000): va como 'otro', que es como llegaba antes del 5-nov.
+    canal: p.canal === 'messenger' ? 'otro' : p.canal,
     chatwoot_cuenta_id: p.llave.cuentaId,
     chatwoot_conversacion_id: p.llave.conversacionId,
     nombre: p.nombre,

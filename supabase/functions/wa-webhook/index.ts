@@ -9,6 +9,7 @@ import { parseMessage, getLastParseTelemetry } from '../_shared/wa-parse.ts';
 import { transcribeAudio } from '../_shared/wa-transcribe.ts';
 import { sendTextMessage, sendTextMessageABsuid, sendButtons, enBackground } from '../_shared/wa-respond.ts';
 import { extraerEntrante, extraerStatuses } from '../_shared/wa-webhook-payload.ts';
+import { grabarToques, toquesDeWhatsapp } from '../_shared/origen-anuncio.ts';
 import { verificarFirmaMeta } from '../_shared/wa-firma.ts';
 import type { MensajeSinTelefono } from '../_shared/wa-webhook-payload.ts';
 import {
@@ -75,6 +76,14 @@ Deno.serve(async (req) => {
       const payload = JSON.parse(body);
 
       const propioPhoneNumberId = Deno.env.get('WHATSAPP_PHONE_NUMBER_ID');
+
+      // Origen del anuncio (encargo max-agus-origen-anuncio): Meta manda el `referral` SOLO en el primer mensaje
+      // después del clic. Se graba antes de cualquier otra lógica, aunque el remitente no esté registrado, y en
+      // segundo plano: un fallo al grabarlo se registra y no toca la respuesta ni el resto del flujo.
+      const toques = toquesDeWhatsapp(payload, propioPhoneNumberId);
+      if (toques.length > 0) {
+        enBackground(grabarToques(getServiceClient(), toques, 'wa-webhook'));
+      }
 
       // Acuses de entrega. Van primero y no compiten con los mensajes: un webhook trae
       // `messages` o `statuses`, nunca los dos. Antes caian en el `return 200` de abajo

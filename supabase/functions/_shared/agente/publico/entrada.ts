@@ -17,6 +17,8 @@ import type { MensajeChatwoot } from './chatwoot-webhook.ts';
 import type { ConfigPublico } from './config.ts';
 import { inboxRegistrado } from './config.ts';
 import type { Canal, FilaPublica, LlaveConversacion } from './tipos.ts';
+import { toqueDeChatwoot } from '../../origen-anuncio.ts';
+import type { ToqueOrigen } from '../../origen-anuncio.ts';
 
 export const DIAS_DEDUPLICACION = 7;
 
@@ -45,6 +47,11 @@ export interface PuertosEntrada {
   registrarCierre(p: { llave: LlaveConversacion; inboxId: number | null; canal: Canal }): Promise<boolean>;
   /** Completa la URL del audio de un mensaje ya guardado y sin atender. true = cambió algo. */
   completarAudio(p: { workspaceId: string; cuentaId: number; mensajeId: number; adjunto: NonNullable<FilaPublica['adjunto']> }): Promise<boolean>;
+  /**
+   * Graba el toque de origen del anuncio (el `referral` de Meta que Chatwoot reenvía, hoy solo en WhatsApp). Nunca
+   * lanza: un fallo se registra y el mensaje sigue su camino. Opcional para las pruebas que no lo miran.
+   */
+  grabarToque?(t: ToqueOrigen, workspaceId: string): Promise<void>;
   ahoraS(): number;
   reloj(): number;
 }
@@ -81,6 +88,15 @@ export async function recibir(req: { slug: string | null; cuerpo: string; firma:
   const m = leerPayload(cuerpo);
   const ws = await p.workspace(req.slug);
   if (!ws || !ws.config.activo) return { status: 200, motivo: 'asistente apagado o workspace sin configurar' };
+  // Origen del anuncio: antes de los filtros (aunque luego se filtre el mensaje), porque Meta lo manda una sola vez.
+  const toque = toqueDeChatwoot(cuerpo);
+  if (toque && p.grabarToque) {
+    try {
+      await p.grabarToque(toque, ws.id);
+    } catch (e) {
+      console.error('[chatwoot-agente] no se pudo grabar el origen del anuncio:', e);
+    }
+  }
   const cierre = cierreDeChatwoot(cuerpo);
   if (cierre) {
     if (ws.config.cuentaId === null || (cierre.cuentaId !== null && cierre.cuentaId !== ws.config.cuentaId)) return { status: 200, motivo: 'cierre de otra cuenta' };
