@@ -1381,7 +1381,7 @@ const NADA = () => {}
  * 2026-11-03). Sin respuesta preseleccionada: mientras no se responda, el paquete no lleva margen
  * encima y no se puede enviar.
  */
-function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
+function PreguntaTarifa({ itemId, titulo, alcance, elegir }: { itemId: string; titulo: string; alcance?: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
   const [enviando, setEnviando] = useState<'publica' | 'neta' | null>(null)
   async function responder(tipo: 'publica' | 'neta') {
     if (enviando) return

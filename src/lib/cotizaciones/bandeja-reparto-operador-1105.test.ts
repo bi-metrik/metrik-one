@@ -387,3 +387,110 @@ describe('UN operador con otro vuelo: el segundo paquete también compite (SAN A
     ])
   })
 })
+
+// ── M-H2-2: la Recomendada no la decide el orden de llegada (QA de Trappvel del 2026-11-05) ─────────
+//
+// En G14 la Recomendada salió Aliados; en las reprueba, Tu Reserva, con los mismos pantallazos: era el
+// primer paquete que la bandeja terminaba de leer. Ahora ONE la propone con la regla de la Recomendada de
+// vuelos y hoteles (`indiceRecomendada`: con dos opciones, la más cara) sobre el costo de cada paquete.
+// La simulación sigue al servidor: `pegarEnBloqueo` crea la opción en 0 y `guardarPaqueteBloqueo` la
+// guarda y cierra con la foto de ANTES; cada guardado puede cambiar el costo (llega el vuelo después).
+
+/** Costo de cada parte. A mitad de camino Aliados con hotel solo cuesta MÁS que Tu Reserva con hotel solo. */
+const PARTE: Record<string, { hotel: number; vuelo: number }> = {
+  'TU RESERVA': { hotel: 6_000_000, vuelo: 4_666_588 },
+  'ALIADOS TRAVEL': { hotel: 7_000_000, vuelo: 2_280_000 },
+}
+const costoDeOpcion = (o: OpcionDeBloqueo) => {
+  const p = PARTE[o.paquete?.operador ?? '']
+  if (!p) return 0
+  return (o.paquete?.hotel.hotel ? p.hotel : 0) + (o.paquete?.vuelo?.tramos.length ? p.vuelo : 0)
+}
+
+type Estado = { items: { id: string; grupo: string; orden: number; costo: number }[]; tarifas: TarifaDelPlan[] }
+
+/** Un cierre por pasos: el plan de `planDeTarifas` con la foto de antes, aplicado en memoria. */
+function cerrar(antes: Estado | null, despues: Estado, n: { v: number }): Estado {
+  const costoDe = (id: string) => despues.items.find(i => i.id === id)?.costo ?? null
+  const costoAntesDe = antes ? (id: string) => antes.items.find(i => i.id === id)?.costo ?? costoDe(id) : undefined
+  const plan = planDeTarifas({ antes, despues, costoDe, costoAntesDe })
+  return { items: despues.items, tarifas: aplicarPlan(despues.tarifas, plan, () => `t${++n.v}`) }
+}
+
+/** La bandeja pega las lecturas en este orden, como el servidor: opción en 0, guardado, cierre con `antes`. */
+function pegarEnOrden(lecturas: LecturaParaArmar[]): { estado: Estado; opciones: OpcionDeBloqueo[] } {
+  const opciones: OpcionDeBloqueo[] = []
+  let estado: Estado = { items: [], tarifas: [] }
+  const n = { v: 0 }
+  const guardar = (o: OpcionDeBloqueo) => {
+    const antes = estado
+    const items = antes.items.map(i => (i.id === o.itemId ? { ...i, costo: costoDeOpcion(o) } : i))
+    estado = cerrar(antes, { items, tarifas: antes.tarifas }, n)
+  }
+  for (const l of lecturas) {
+    const p = planDelPegado(opciones, l, CTX)
+    if (p.accion === 'nuevo_paquete' || p.accion === 'nueva_opcion') {
+      const orden = opciones.length + 1
+      const grupo = p.grupo ?? 'paquete de bloqueo'
+      const o: OpcionDeBloqueo = { itemId: `it-${orden}`, grupo, numero: 1, paquete: p.paquete, tarifa: p.tarifa, orden }
+      opciones.push(o)
+      // `agregarOpcionARanura` / `crearRanuraConOpcion`: la línea nace en 0 y no cierra.
+      estado = { items: [...estado.items, { id: o.itemId, grupo, orden, costo: 0 }], tarifas: estado.tarifas }
+      guardar(o)
+    } else if (p.accion === 'actualizar') {
+      for (const c of p.cambios) {
+        const o = opciones.find(x => x.itemId === c.itemId)!
+        o.paquete = c.paquete
+        guardar(o)
+      }
+    }
+  }
+  return { estado, opciones }
+}
+
+const operadorDe = (opciones: readonly OpcionDeBloqueo[], tarifa: { seleccion: string[] } | null) =>
+  opciones.find(o => tarifa?.seleccion.includes(o.itemId))?.paquete?.operador ?? null
+
+describe('M-H2-2 · la Recomendada de un bloqueo no depende del orden de llegada', () => {
+  it('las 24 órdenes: la Recomendada es la misma (con dos paquetes, el más caro: Tu Reserva)', () => {
+    for (const orden of permutaciones(Object.keys(CON_OPERADOR))) {
+      const { estado, opciones } = pegarEnOrden(orden.map(k => CON_OPERADOR[k]))
+      expect(estado.tarifas, orden.join(', ')).toHaveLength(2)
+      expect(operadorDe(opciones, recomendadaDe(estado.tarifas).fila), orden.join(', ')).toBe('TU RESERVA')
+      // Cada tarifa con su paquete, las dos en la propuesta.
+      const llevan = estado.tarifas.map(t => operadorDe(opciones, t)).sort()
+      expect(llevan, orden.join(', ')).toEqual(['ALIADOS TRAVEL', 'TU RESERVA'])
+      expect(estado.tarifas.every(t => t.vaEnPropuesta), orden.join(', ')).toBe(true)
+      // La Recomendada conserva el primer lugar.
+      const rec = recomendadaDe(estado.tarifas).fila!
+      expect(Math.min(...estado.tarifas.map(t => t.orden)), orden.join(', ')).toBe(rec.orden)
+    }
+  })
+
+  it('si la asesora escoge otra Recomendada, un guardado posterior no se la cambia', () => {
+    const { estado, opciones } = pegarEnOrden([GHL, AVIANCA_TR, DECAMERON, LATAM_AL])
+    const rec = recomendadaDe(estado.tarifas).fila!
+    const otra = estado.tarifas.find(t => t.id !== rec.id)!
+    const aliados = opciones.find(o => o.paquete?.operador === 'ALIADOS TRAVEL')!.itemId
+    const tuReserva = opciones.find(o => o.paquete?.operador === 'TU RESERVA')!.itemId
+    // Escoge el paquete de Aliados en la pestaña de la Recomendada (la otra toma el que quedó libre).
+    const n = { v: 10 }
+    const escogido = cerrar(estado, { items: estado.items, tarifas: estado.tarifas.map(t => (t.id === rec.id ? { ...t, seleccion: [aliados] } : t)) }, n)
+    expect(escogido.tarifas.find(t => t.id === rec.id)!.seleccion).toEqual([aliados])
+    expect(escogido.tarifas.find(t => t.id === otra.id)!.seleccion).toEqual([tuReserva])
+    // Después se guarda Tu Reserva con otro costo (responde Pública / Neta): la Recomendada sigue en Aliados.
+    const items = escogido.items.map(i => (i.id === tuReserva ? { ...i, costo: 12_000_000 } : i))
+    const tras = cerrar(escogido, { items, tarifas: escogido.tarifas }, n)
+    expect(tras.tarifas.find(t => t.id === rec.id)!.seleccion).toEqual([aliados])
+  })
+
+  it('un paquete que la asesora sacó de la propuesta no se vuelve Recomendada solo', () => {
+    const { estado, opciones } = pegarEnOrden([GHL, AVIANCA_TR, DECAMERON, LATAM_AL])
+    const aliados = opciones.find(o => o.paquete?.operador === 'ALIADOS TRAVEL')!.itemId
+    const sacado = estado.tarifas.map(t => (t.seleccion.includes(aliados) ? { ...t, vaEnPropuesta: false } : t))
+    // Aliados sube de precio y sería el más caro: no va en la propuesta, no compite.
+    const items = estado.items.map(i => (i.id === aliados ? { ...i, costo: 20_000_000 } : i))
+    const tras = cerrar({ items: estado.items, tarifas: sacado }, { items, tarifas: sacado }, { v: 20 })
+    expect(operadorDe(opciones, recomendadaDe(tras.tarifas).fila)).toBe('TU RESERVA')
+  })
+})
