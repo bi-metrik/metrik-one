@@ -17,7 +17,7 @@ import {
   rubrosPropuestos,
   type LecturaCruda,
 } from './lectura-pantallazo'
-import { ranuraDeGrupo, ranuraPorSlug } from './ranuras-pantallazo'
+import { etiquetaDeAviso, ranuraDeGrupo, ranuraPorSlug, slugsDeRanura } from './ranuras-pantallazo'
 
 const VUELO = ranuraPorSlug('vuelo_detalle')!
 const HOTEL = ranuraPorSlug('hotel_detalle')!
@@ -681,8 +681,13 @@ describe('tarifa por pasajero · las reglas aprobadas el 2026-09-16', () => {
       porTipoPax: [{ tipo: 'adulto' as const, cantidad: 2, subtotal_tipo: 360, moneda: 'USD', confidence: 1 }],
       totalGeneral: 360,
     }
-    expect(evaluarLectura(HOTEL, cruda, { soloMinimosDeCosto: true }).ok).toBe(true)
-    expect(evaluarLectura(HOTEL, { ...cruda, porTipoPax: [] }, { soloMinimosDeCosto: true }).ok).toBe(false)
+    const conTabla = evaluarLectura(HOTEL, cruda, { soloMinimosDeCosto: true })
+    expect(conTabla.ok).toBe(true)
+    // Con la tabla, base_precio queda como vino: la red de abajo no aplica ni avisa.
+    if (conTabla.ok) {
+      expect(conTabla.campos.find(c => c.slug === 'base_precio')?.valor).toBeNull()
+      expect(conTabla.avisos.join(' ')).not.toContain('de toda la reserva o por persona')
+    }
   })
 
   it('7.3: impuestos en destino son nota, no costo', () => {
@@ -703,5 +708,115 @@ describe('tarifa por pasajero · las reglas aprobadas el 2026-09-16', () => {
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.avisos.join(' ')).toContain('no dice si el precio incluye impuestos')
+  })
+})
+
+describe('Hotel sin base_precio (Trappvel, 2026-11-06): se toma total, marcado', () => {
+  // La tarjeta real: «DECAMERON CARTAGENA … $2.905.882 · 4 Días 3 Noches - 2 Huéspedes». No dice
+  // «total», y el lector devolvía null: RX2 rechazaba TODOS los hoteles de la bandeja.
+  const tarjeta = () => hotelOk({
+    hotel: v('Decameron Cartagena'),
+    ciudad: v('Cartagena'),
+    tipo_habitacion: v('Habitación Estándar 1 Cama King'),
+    ocupacion: v('2 Huéspedes'),
+    moneda: v('COP'),
+    precio_total: v('2905882'),
+    base_precio: v(null, 0),
+  })
+
+  for (const [nombre, contexto] of [
+    ['cargue de siempre', {}],
+    ['por casillas', { soloMinimosDeCosto: true }],
+  ] as const) {
+    it(`${nombre}: acepta con total, alerta, confianza 0 y aviso`, () => {
+      const r = evaluarLectura(HOTEL, tarjeta(), contexto)
+      expect(r.ok).toBe(true)
+      if (!r.ok) return
+      expect(r.campos.find(c => c.slug === 'base_precio')).toMatchObject({
+        valor: 'total',
+        alertaRevision: true,
+        confidence: 0,
+      })
+      expect(r.avisos).toContain(
+        'La captura no dice si el precio es de toda la reserva o por persona: se toma como total de la estadía. ' +
+        'Confírmalo contra el proveedor.',
+      )
+    })
+  }
+
+  it('lo que el lector sí dijo no se toca ni se avisa', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ base_precio: v('por_persona') }))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.campos.find(c => c.slug === 'base_precio')?.valor).toBe('por_persona')
+    expect(r.avisos.join(' ')).not.toContain('de toda la reserva o por persona')
+  })
+
+  it('sin precio sigue siendo RX2 (no hay qué tomar como total)', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ base_precio: v(null, 0), precio_total: v(null, 0) }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.codigo).toBe('RX2')
+    expect(r.motivo).toContain('precio_total')
+    expect(r.motivo).toContain('base_precio')
+  })
+
+  it('sin moneda sigue siendo RX3', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ base_precio: v(null, 0), moneda: v(null, 0) }))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.codigo).toBe('RX3')
+  })
+
+  it('a mano no se supone: el formulario lo pide', () => {
+    const r = evaluarLectura(HOTEL, hotelOk({ base_precio: v(null, 0) }), { manual: true })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.codigo).toBe('RX2')
+  })
+
+  it('solo hotel: un vuelo sin base_precio sigue siendo RX2', () => {
+    const r = evaluarLectura(VUELO, vueloOk({ base_precio: v(null, 0) }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.codigo).toBe('RX2')
+    expect(r.motivo).toContain('base_precio')
+  })
+})
+
+describe('RX2 · el aviso se lee como una frase', () => {
+  it('base_precio no arma «No se ve el precio mostrado es.»', () => {
+    const r = evaluarLectura(VUELO, vueloOk({ base_precio: v(null, 0) }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.instruccion).toBe(
+      'No se ve si el precio es por persona o de todas las personas. Sube una captura que lo incluya.',
+    )
+    expect(r.instruccion).not.toContain('mostrado es')
+  })
+
+  it('el precio va con su artículo, también en plural', () => {
+    const r = evaluarLectura(VUELO, vueloOk({ precio_total: v(null, 0), base_precio: v(null, 0) }))
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.instruccion).toBe(
+      'No se ven estos datos: el precio, si el precio es por persona o de todas las personas. ' +
+      'Sube una captura que los incluya.',
+    )
+  })
+
+  it('el hotel nombra sus cuatro bases', () => {
+    const base = HOTEL.campos.find(c => c.slug === 'base_precio')!
+    expect(base.label).toBe('El precio mostrado es') // llave de guardado: no cambia
+    expect(base.label_aviso).toBe('si el precio es de toda la estadía, por noche o por persona')
+  })
+
+  it('ningún mínimo de ninguna ranura arma un aviso que termine en verbo suelto', () => {
+    const slugs = slugsDeRanura()
+    expect(slugs.length).toBeGreaterThanOrEqual(7)
+    for (const slug of slugs) {
+      const ranura = ranuraPorSlug(slug)!
+      for (const def of ranura.campos.filter(c => c.min)) {
+        expect(etiquetaDeAviso(def), `${ranura.slug}.${def.slug}`).not.toMatch(/\b(es|son|está)$/)
+      }
+    }
   })
 })

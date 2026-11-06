@@ -159,7 +159,8 @@ describe('con el interruptor apagado el lector es el de siempre, byte a byte', (
     // QA Trappvel G13 (ronda 3, V-17 y V-13): la unidad del cargo admite por persona, y el hotel y la
     // actividad leen el pago en destino que no es del hotel (`pago_destino_otro`). Cambio buscado.
     // SAN ANDRÉS (2026-11-03): `base_precio` del hotel admite por_persona y por_persona_noche.
-    hotel_detalle: 'ba431a6455b0110155c9c732f942677e4fc64e22e07d994224490c4b74e36421',
+    // Hotel sin base_precio (2026-11-06): la tarjeta con estadía y ocupación sin «por persona» es total.
+    hotel_detalle: '1bfa02cac86f934d92bb5d8f4fc5fc0f380cf9cc8acd21d3b4e2a0667c9d6af6',
     actividad_detalle: 'aa882bb90712e395a7c9c38e3edee45ee0ad09c15d99dd6c206e304371e57085',
     traslado_detalle: 'c6166410ec33220ba1d1c0ba1185815325cab98f9529907e8a9571321e009927',
     otro_detalle: 'b2450381b66f3ec58e7cd98923a6c042e122625ed9fe01b4f2c2f92bd34088d6',

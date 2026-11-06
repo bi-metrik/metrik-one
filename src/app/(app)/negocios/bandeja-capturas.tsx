@@ -15,6 +15,7 @@ import {
   type ResultadoAceptarCaptura,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import {
+  elegirBasePrecio,
   leerCaptura,
   MENSAJE_DETECCION_SIN_RED,
   procesarCaptura,
@@ -22,6 +23,7 @@ import {
   type ComoQueda,
   type DependenciasDeProceso,
   type EstadoDeProceso,
+  type OpcionDeBase,
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
 import {
@@ -220,7 +222,7 @@ export function conteoDeBandeja(capturas: readonly Pick<Captura, 'estado'>[]): {
   for (const c of capturas) {
     const f = c.estado.fase
     if (f === 'mirando' || f === 'leyendo' || f === 'aceptando') leyendo += 1
-    else if (f === 'lista' || f === 'parecida' || f === 'otro_precio' || f === 'eligiendo_tipo' || f === 'eligiendo_opcion' || f === 'rechazada') porAceptar += 1
+    else if (f === 'lista' || f === 'parecida' || f === 'otro_precio' || f === 'eligiendo_tipo' || f === 'eligiendo_opcion' || f === 'eligiendo_base' || f === 'rechazada') porAceptar += 1
   }
   return { porAceptar, leyendo }
 }
@@ -250,7 +252,7 @@ const FASES_CON_BORRADOR = new Set(['lista', 'parecida', 'otro_precio'])
  */
 export function enElAireCaptura(c: Pick<Captura, 'estado' | 'borrador'>): boolean {
   const f = c.estado.fase
-  return f === 'mirando' || f === 'leyendo' || f === 'aceptando' || f === 'eligiendo_opcion'
+  return f === 'mirando' || f === 'leyendo' || f === 'aceptando' || f === 'eligiendo_opcion' || f === 'eligiendo_base'
     || (FASES_CON_BORRADOR.has(f) && !!c.borrador)
 }
 
@@ -370,7 +372,7 @@ export interface BloqueoDeBandeja {
    * Los paquetes con «¿Pública o Neta?» sin responder (Mauricio, 2026-11-03): UNO por paquete (su
    * primera opción), sin respuesta preseleccionada. Las opciones que entren después heredan la respuesta.
    */
-  tarifasPorElegir?: { itemId: string; titulo: string }[]
+  tarifasPorElegir?: { itemId: string; titulo: string; alcance?: string }[]
   elegirTarifa?: (itemId: string, tipo: 'publica' | 'neta') => Promise<{ ok: true } | { ok: false; error: string }>
 }
 
@@ -967,6 +969,12 @@ export default function BandejaCapturas({
     void leerCaptura(dependencias(c.id, c.dataUrl), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, o)
   }
 
+  /** «Es el total» / «Es por persona»: la lectura de esa respuesta ya vino firmada; no se vuelve a leer. */
+  function elegirBase(c: Captura, o: OpcionDeBase) {
+    if (!c.tipo || c.estado.fase !== 'eligiendo_base') return
+    elegirBasePrecio(dependencias(c.id, c.dataUrl), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, o)
+  }
+
   /**
    * «Aceptar» (H2/H3/H4). Va por `fetch` y no por la server action (ver la ruta), en fila con
    * las demás aceptaciones. La fila cambia en el acto; al volver dice dónde quedó.
@@ -1325,6 +1333,7 @@ export default function BandejaCapturas({
                 tiposElegibles={porPasos ? TIPOS_RANURA : TIPOS_CON_PANTALLAZO}
                 onReintentar={() => reintentar(c)}
                 onElegirOpcion={o => elegirOpcion(c, o)}
+                onElegirBase={o => elegirBase(c, o)}
                 onAgregarIgual={() => agregarIgual(c)}
                 onReemplazarPrecio={() => reemplazarPrecio(c)}
                 onVer={onOpcionCreada}
@@ -1345,7 +1354,7 @@ export default function BandejaCapturas({
       {bloqueo?.elegirTarifa && (bloqueo.tarifasPorElegir ?? []).length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tarifas-por-elegir>
           {(bloqueo.tarifasPorElegir ?? []).map(pq => (
-            <PreguntaTarifa key={pq.itemId} itemId={pq.itemId} titulo={pq.titulo} elegir={bloqueo.elegirTarifa!} />
+            <PreguntaTarifa key={pq.itemId} itemId={pq.itemId} titulo={pq.titulo} alcance={pq.alcance} elegir={bloqueo.elegirTarifa!} />
           ))}
         </ul>
       )}
@@ -1381,7 +1390,7 @@ const NADA = () => {}
  * 2026-11-03). Sin respuesta preseleccionada: mientras no se responda, el paquete no lleva margen
  * encima y no se puede enviar.
  */
-function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
+function PreguntaTarifa({ itemId, titulo, alcance, elegir }: { itemId: string; titulo: string; alcance?: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
   const [enviando, setEnviando] = useState<'publica' | 'neta' | null>(null)
   async function responder(tipo: 'publica' | 'neta') {
     if (enviando) return
@@ -1394,7 +1403,7 @@ function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: st
     <li className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] p-2 text-[13px]" data-tarifa-por-elegir={itemId}>
       <span className="min-w-0 flex-1">
         <span className="font-semibold">{titulo}: ¿cómo viene la tarifa del operador?</span>
-        <span className="block text-xs text-[#6E6A62]">Vale para todos los hoteles de este paquete. Hasta que respondas, no se puede enviar.</span>
+        <span className="block text-xs text-[#6E6A62]">{alcance ?? 'Vale para todos los hoteles de este paquete.'} Hasta que respondas, no se puede enviar.</span>
       </span>
       <span className="flex flex-wrap gap-1.5">
         <button type="button" className={BTN} disabled={enviando !== null} data-elegir-tarifa="publica" onClick={() => void responder('publica')}>
@@ -1438,6 +1447,7 @@ export function FilaCaptura({
   onElegirTipo = NADA,
   onReintentar = NADA,
   onElegirOpcion = NADA,
+  onElegirBase,
   onAgregarIgual = NADA,
   onReemplazarPrecio = NADA,
   onVer,
@@ -1467,6 +1477,8 @@ export function FilaCaptura({
   /** «Reintentar» de una fila que no llegó a ONE: la misma imagen, sin volver a pegarla. */
   onReintentar?: () => void
   onElegirOpcion?: (o: { nombre: string; precio: string | null }) => void
+  /** «Es el total» / «Es por persona» cuando la captura no lo dice. */
+  onElegirBase?: (o: OpcionDeBase) => void
   /** P10 · «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   onAgregarIgual?: () => void
   /** P10 · «Reemplazar el precio de Opción N». */
@@ -1591,6 +1603,24 @@ export function FilaCaptura({
             <button key={`${o.nombre}|${o.precio ?? ''}`} type="button" onClick={() => onElegirOpcion(o)} className={`${BTN} justify-between text-left`}>
               <span className="min-w-0 flex-1 truncate">{o.nombre}</span>
               {o.precio && <span className="shrink-0 tabular-nums">{o.precio}</span>}
+            </button>
+          ))}
+        </div>
+      </>,
+      quitar,
+    )
+  }
+  if (e.fase === 'eligiendo_base') {
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        {estado(e.pregunta)}
+        <span className="text-[13px] text-[#6E6A62]">La captura no lo dice. Elige y la tarifa queda con eso.</span>
+        <div className="mt-1 flex flex-wrap gap-2" data-elegir-base-precio>
+          {e.opciones.map(o => (
+            <button key={o.valor} type="button" onClick={() => onElegirBase?.(o)} className={BTN} data-base-precio={o.valor}>
+              {o.etiqueta}
             </button>
           ))}
         </div>
