@@ -338,9 +338,11 @@ describe('viaje 02: los paquetes de los dos operadores compiten en UNA ranura', 
     const { opciones } = simular([AVIANCA_TR, GHL, LATAM_AL, DECAMERON])
     expect(opciones.every(o => o.paquete?.tarifaPorElegir === true)).toBe(true)
     const lineas = opciones.map(o => ({ id: o.itemId, grupo: o.grupo, orden: o.orden, paquete: o.paquete }))
+    // N-H3-1 / N-H4-1 (QA del 2026-11-05): en pantalla hay UN paquete con dos opciones; la pregunta se
+    // rotula por operador y vuelo, no «Paquete 1 / Paquete 2».
     expect(paquetesConTarifaPorElegir(lineas)).toEqual([
-      { itemId: 'it-1', titulo: 'Paquete 1 · Avianca 8410' },
-      { itemId: 'it-2', titulo: 'Paquete 2 · LATAM 4120' },
+      { itemId: 'it-1', titulo: 'TU RESERVA · Avianca 8410', alcance: 'Vale para todos los hoteles de TU RESERVA con este vuelo.' },
+      { itemId: 'it-2', titulo: 'ALIADOS TRAVEL · LATAM 4120', alcance: 'Vale para todos los hoteles de ALIADOS TRAVEL con este vuelo.' },
     ])
     // Responder en uno no toca al otro (`elegirTarifaDelPaquete` escribe solo en su paquete).
     expect(opcionesDelMismoPaquete(opciones, 'it-1')).toEqual(['it-1'])

@@ -370,7 +370,7 @@ export interface BloqueoDeBandeja {
    * Los paquetes con «¿Pública o Neta?» sin responder (Mauricio, 2026-11-03): UNO por paquete (su
    * primera opción), sin respuesta preseleccionada. Las opciones que entren después heredan la respuesta.
    */
-  tarifasPorElegir?: { itemId: string; titulo: string }[]
+  tarifasPorElegir?: { itemId: string; titulo: string; alcance?: string }[]
   elegirTarifa?: (itemId: string, tipo: 'publica' | 'neta') => Promise<{ ok: true } | { ok: false; error: string }>
 }
 
@@ -1345,7 +1345,7 @@ export default function BandejaCapturas({
       {bloqueo?.elegirTarifa && (bloqueo.tarifasPorElegir ?? []).length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" data-tarifas-por-elegir>
           {(bloqueo.tarifasPorElegir ?? []).map(pq => (
-            <PreguntaTarifa key={pq.itemId} itemId={pq.itemId} titulo={pq.titulo} elegir={bloqueo.elegirTarifa!} />
+            <PreguntaTarifa key={pq.itemId} itemId={pq.itemId} titulo={pq.titulo} alcance={pq.alcance} elegir={bloqueo.elegirTarifa!} />
           ))}
         </ul>
       )}
@@ -1381,7 +1381,7 @@ const NADA = () => {}
  * 2026-11-03). Sin respuesta preseleccionada: mientras no se responda, el paquete no lleva margen
  * encima y no se puede enviar.
  */
-function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
+function PreguntaTarifa({ itemId, titulo, alcance, elegir }: { itemId: string; titulo: string; alcance?: string; elegir: NonNullable<BloqueoDeBandeja['elegirTarifa']> }) {
   const [enviando, setEnviando] = useState<'publica' | 'neta' | null>(null)
   async function responder(tipo: 'publica' | 'neta') {
     if (enviando) return
@@ -1394,7 +1394,7 @@ function PreguntaTarifa({ itemId, titulo, elegir }: { itemId: string; titulo: st
     <li className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E9C98F] bg-[#FBF1E2] p-2 text-[13px]" data-tarifa-por-elegir={itemId}>
       <span className="min-w-0 flex-1">
         <span className="font-semibold">{titulo}: ¿cómo viene la tarifa del operador?</span>
-        <span className="block text-xs text-[#6E6A62]">Vale para todos los hoteles de este paquete. Hasta que respondas, no se puede enviar.</span>
+        <span className="block text-xs text-[#6E6A62]">{alcance ?? 'Vale para todos los hoteles de este paquete.'} Hasta que respondas, no se puede enviar.</span>
       </span>
       <span className="flex flex-wrap gap-1.5">
         <button type="button" className={BTN} disabled={enviando !== null} data-elegir-tarifa="publica" onClick={() => void responder('publica')}>
