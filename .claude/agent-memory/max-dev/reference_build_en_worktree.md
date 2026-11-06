@@ -21,3 +21,6 @@ Receta sin tocar el repo principal:
 **Más simple para vitest (2026-10-12, C0):** `npm ci --no-audit --no-fund` dentro del worktree (14 s, 956
 paquetes) deja un `node_modules` real y al día; el principal seguía sin `unpdf`. Gitignored: no ensucia el PR.
 Borrarlo al cerrar igual que los symlinks.
+
+**2026-11-06:** el `node_modules` del repo principal está VACÍO (directorio sin entradas desde el 3-nov): el symlink
+da «Cannot find module 'vitest/config'». Ir directo a `npm ci --prefer-offline --ignore-scripts` (15 s).
