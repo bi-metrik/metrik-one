@@ -57,6 +57,11 @@ export function tieneSenalDeBloqueo(texto: string | null | undefined): boolean {
   return /\bbloqueos?\b|\baliados\b|\btu\s*reserva\b|paquete\s+del\s+operador/i.test(String(texto ?? ''))
 }
 
+/** ¿El pedido trae al menos un pantallazo? Sin ninguno no se cotiza: los precios salen de los del operador. */
+export function tienePantallazo(piezas: ReadonlyArray<{ tipo?: unknown }>): boolean {
+  return piezas.some(p => p.tipo === 'imagen')
+}
+
 /** Un texto corto que contesta («sí», «sí, 1 pública», «2 no aplica», «no, son 3»). */
 export function pareceRespuesta(texto: string | null | undefined): boolean {
   const t = String(texto ?? '').trim().toLowerCase()

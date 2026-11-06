@@ -14,14 +14,23 @@
 // ============================================================
 
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
-import { clienteDelTexto, decidirAncla, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from './entrega-bloqueo-ancla.ts';
-import { firmarCuerpo } from './entrega-bloqueo-firma.ts';
+import { clienteDelTexto, decidirAncla, tienePantallazo, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from './entrega-bloqueo-ancla.ts';
+import { firmarCuerpo, VARIABLE_SECRETO } from './entrega-bloqueo-firma.ts';
 import { bajarMedia, subirSoporte } from './wa-media.ts';
 import { sendButtons, sendDocument, sendTextoConId } from './wa-respond.ts';
 import { transcribeAudio } from './wa-transcribe.ts';
 
 /** Espera tras el último mensaje antes de procesar: la asesora manda texto y pantallazos en ráfaga. */
 export const SILENCIO_MS = 20_000;
+
+/**
+ * Un pedido sin ningún pantallazo no se cotiza (los precios salen de los pantallazos del operador). Tras el silencio
+ * se espera esto MÁS; si sigue sin pantallazos y nadie escribió, se le piden a la asesora. 20 s + 100 s ≈ 2 min desde
+ * su último mensaje: cabe en una sola ejecución del webhook (el tope de una Edge Function en segundo plano es 400 s).
+ */
+export const ESPERA_PANTALLAZOS_MS = 100_000;
+
+export const PIDE_PANTALLAZOS = 'Recibí el pedido, pero me faltan los pantallazos del operador: el del vuelo y uno por cada hotel. Mándamelos seguidos (o respondiendo este mensaje) y armo la cotización.';
 
 export interface PilotoEntrega { activo: boolean; telefonos: string[] }
 
@@ -79,14 +88,20 @@ async function pedirALaApp(supabase: SupabaseClient, user: WaUser, telefono: str
   const { data: ws } = await supabase.from('workspaces').select('slug').eq('id', user.workspace_id).single();
   const base = (Deno.env.get('APP_BASE_DOMAIN') || 'metrikone.co').trim();
   const texto = JSON.stringify(cuerpo);
-  const firma = await firmarCuerpo(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', texto);
+  const secreto = Deno.env.get(VARIABLE_SECRETO) ?? '';
   let salidas: Array<Fila> = [];
   try {
+    if (!secreto) throw new Error(`falta el secreto ${VARIABLE_SECRETO} en las Edge Functions`);
+    const firma = await firmarCuerpo(secreto, texto);
     const res = await fetch(`https://${ws?.slug}.${base}/api/interno/entrega-bloqueo`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-firma-entrega': firma }, body: texto,
       signal: AbortSignal.timeout(290_000),
     });
-    if (!res.ok) throw new Error(`la app respondió ${res.status}`);
+    if (!res.ok) {
+      // La ruta dice por qué rechazó la firma (`motivo`), nunca el secreto.
+      const motivo = res.status === 401 ? ((await res.json().catch(() => ({}))) as Fila).motivo : null;
+      throw new Error(`la app respondió ${res.status}${motivo ? ` (firma: ${motivo})` : ''}`);
+    }
     salidas = ((await res.json()).salidas ?? []) as Fila[];
   } catch (e) {
     console.error('[entrega-bloqueo] la app no procesó el pedido:', String(e).slice(0, 300));
@@ -130,6 +145,21 @@ async function procesarTrasSilencio(supabase: SupabaseClient, user: WaUser, tele
   if (ent?.tentativa) await supabase.from('entregas_bloqueo').update({ tentativa: false }).eq('id', entregaId);
   if (ult?.id !== piezaId) return true; // llegó otra después: esa procesa
   if (!['recibiendo', 'tipo_por_confirmar', 'por_confirmar'].includes(ent?.estado as string)) return true;
+  if (!tienePantallazo(piezas)) {
+    // Sin pantallazos no se cotiza: se espera un poco más y, si no llegan, se le piden (no se llama a la app).
+    await espera(ESPERA_PANTALLAZOS_MS);
+    const { data: ult2 } = await supabase.from('entregas_bloqueo_piezas').select('id').eq('entrega_id', entregaId).eq('direccion', 'entrante')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (ult2?.id !== piezaId) return true; // llegó algo: esa pieza decide
+    const { data: e2 } = await supabase.from('entregas_bloqueo').select('estado').eq('id', entregaId).single();
+    if (e2?.estado !== 'recibiendo') return true;
+    const wamid = await sendTextoConId(telefono, PIDE_PANTALLAZOS, { origen: 'bot', intent: 'entrega_bloqueo', workspaceId: user.workspace_id });
+    await guardarPieza(supabase, { workspace_id: user.workspace_id, entrega_id: entregaId, telefono, direccion: 'saliente', wamid, tipo: 'texto', texto: PIDE_PANTALLAZOS })
+      .catch(e => console.error('[entrega-bloqueo] sin la pieza saliente:', String(e)));
+    // La pieza saliente cuenta como el último mensaje del hilo: reabre los `MINUTOS_RECIBIENDO` en que los
+    // pantallazos sueltos caen a este pedido.
+    return true;
+  }
   if (ent?.estado === 'por_confirmar') await supabase.from('entregas_bloqueo').update({ estado: 'recibiendo' }).eq('id', entregaId).eq('estado', 'por_confirmar');
   await pedirALaApp(supabase, user, telefono, { accion: 'pedido', entregaId });
   return true;

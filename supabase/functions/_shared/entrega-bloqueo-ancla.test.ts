@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clienteDelTexto, decidirAncla, pareceRespuesta, tieneSenalDeBloqueo, tituloDeEntrega, type EntregaAbierta } from './entrega-bloqueo-ancla'
+import { clienteDelTexto, decidirAncla, pareceRespuesta, tienePantallazo, tieneSenalDeBloqueo, tituloDeEntrega, type EntregaAbierta } from './entrega-bloqueo-ancla'
 
 /** El ancla del pedido (brief del 2026-11-04): lo citado va a su hilo; lo suelto, solo sin duda; si no, se pregunta. */
 
@@ -90,5 +90,12 @@ describe('clienteDelTexto', () => {
     expect(clienteDelTexto('Trappi, bloqueo para Laura Gomez, van 2 adultos')).toBe('Laura Gomez')
     expect(clienteDelTexto('Cotización para la señora Marta Ruiz')).toBe('Marta Ruiz')
     expect(clienteDelTexto('te mando los pantallazos')).toBeNull()
+  })
+})
+
+describe('tienePantallazo', () => {
+  it('un pedido que solo trae el audio transcrito no se cotiza: faltan los pantallazos', () => {
+    expect(tienePantallazo([{ tipo: 'texto' }])).toBe(false)
+    expect(tienePantallazo([{ tipo: 'texto' }, { tipo: 'imagen' }])).toBe(true)
   })
 })
