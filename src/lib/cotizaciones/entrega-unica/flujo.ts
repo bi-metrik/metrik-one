@@ -4,7 +4,7 @@ import type { Pantallazo, UsoModelo } from '@/lib/cotizaciones/asistente/armar-c
 import type { Casa } from '@/lib/cotizaciones/asistente/a-propuesta'
 import type { Requisitos, SalidaEntrega } from './esquema'
 import type { Llamador, PedidoParaModelo } from './llamada'
-import { llavePregunta, preguntasQueBloquean, tarifaSabida, viajerosCompletos, type Pregunta } from './preguntas'
+import { llavePregunta, sinElAsistente, preguntasQueBloquean, tarifaSabida, viajerosCompletos, type Pregunta } from './preguntas'
 import { mensajeDeConfirmacion, mensajeDelPdf, mensajeFrenado, PREGUNTA_TIPO } from './mensaje'
 
 /**
@@ -164,7 +164,7 @@ export async function procesarPedido(entregaId: string, deps: Deps): Promise<Sal
 
     let r = await deps.modelo.armar(pedido)
     uso.push({ ...r.uso, ms: r.ms, modelo: r.modelo, fase: 'armar' })
-    let salida = r.salida
+    let salida = sinElAsistente(r.salida)
     if (e.tipoConfirmado) salida = { ...salida, requisitos: { ...salida.requisitos, tipoViaje: 'bloqueo' } }
     const tiempos: Tiempos = { ...e.tiempos, modelo: puerto.ahora().toISOString() }
 
@@ -182,7 +182,8 @@ export async function procesarPedido(entregaId: string, deps: Deps): Promise<Sal
     if (errores(validado).length > 0) {
       r = await deps.modelo.armar(pedido)
       uso.push({ ...r.uso, ms: r.ms, modelo: r.modelo, fase: 'rearmar' })
-      const otra = e.tipoConfirmado ? { ...r.salida, requisitos: { ...r.salida.requisitos, tipoViaje: 'bloqueo' as const } } : r.salida
+      const otra0 = sinElAsistente(r.salida)
+      const otra = e.tipoConfirmado ? { ...otra0, requisitos: { ...otra0.requisitos, tipoViaje: 'bloqueo' as const } } : otra0
       const v2 = chequeo(otra)
       if (otra.requisitos.tipoViaje === 'bloqueo' && errores(v2).length < errores(validado).length) {
         salida = otra
@@ -248,7 +249,7 @@ export async function procesarRespuesta(entregaId: string, respuesta: string, de
     const tiempos: Tiempos = { ...e.tiempos, respuesta: puerto.ahora().toISOString() }
     const r = await deps.modelo.aplicar(pedido, e.salida!, e.preguntas, respuesta)
     const uso = [...e.uso, { ...r.uso, ms: r.ms, modelo: r.modelo, fase: 'aplicar' }]
-    const s = r.salida
+    const s = sinElAsistente(r.salida)
     // Las que contestó, por número de la pregunta que se le hizo.
     const resueltas = new Set(e.resueltas)
     for (const x of s.respuestas) {

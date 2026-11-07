@@ -14,7 +14,7 @@
 // ============================================================
 
 import type { IncomingMessage, SupabaseClient, WaUser } from './types.ts';
-import { clienteDelTexto, decidirAncla, tienePantallazo, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from './entrega-bloqueo-ancla.ts';
+import { avisoDeEspera, clienteDelTexto, decidirAncla, tienePantallazo, tieneSenalDeBloqueo, type EntregaAbierta, type MensajeEntrante } from './entrega-bloqueo-ancla.ts';
 import { firmarCuerpo, VARIABLE_SECRETO } from './entrega-bloqueo-firma.ts';
 import { bajarMedia, subirSoporte } from './wa-media.ts';
 import { sendButtons, sendDocument, sendTextoConId } from './wa-respond.ts';
@@ -30,6 +30,7 @@ export const SILENCIO_MS = 20_000;
  */
 export const ESPERA_PANTALLAZOS_MS = 100_000;
 
+export const PISTAS_AUDIO = 'Palabras que pueden aparecer: Trappi (el nombre del asistente; el audio suele empezar llamándolo así: «Trappi, bloqueo para…»).';
 export const PIDE_PANTALLAZOS = 'Recibí el pedido, pero me faltan los pantallazos del operador: el del vuelo y uno por cada hotel. Mándamelos seguidos (o respondiendo este mensaje) y armo la cotización.';
 
 export interface PilotoEntrega { activo: boolean; telefonos: string[] }
@@ -125,6 +126,21 @@ async function enviarBotones(telefono: string, texto: string, botones: { id: str
   return await sendButtons(telefono, texto, botones.slice(0, 3).map(b => ({ id: b.id, title: [...b.titulo].slice(0, 20).join('') })));
 }
 
+/** Avisa que va a tardar antes de la llamada larga a la app (modelo + PDF). Si falla el envío, sigue igual. */
+async function avisarEspera(supabase: SupabaseClient, user: WaUser, telefono: string, entregaId: string, texto: string): Promise<void> {
+  try {
+    const wamid = await sendTextoConId(telefono, texto, { origen: 'bot', intent: 'entrega_bloqueo', workspaceId: user.workspace_id });
+    await guardarPieza(supabase, { workspace_id: user.workspace_id, entrega_id: entregaId, telefono, direccion: 'saliente', wamid, tipo: 'texto', texto });
+  } catch (e) {
+    console.error('[entrega-bloqueo] sin el aviso de espera:', String(e).slice(0, 200));
+  }
+}
+
+async function piezasEntrantes(supabase: SupabaseClient, entregaId: string): Promise<Fila[]> {
+  const { data } = await supabase.from('entregas_bloqueo_piezas').select('tipo, texto').eq('entrega_id', entregaId).eq('direccion', 'entrante');
+  return (data ?? []) as Fila[];
+}
+
 /** Tras el silencio: si esta pieza sigue siendo la última de su pedido, lo procesa. */
 async function procesarTrasSilencio(supabase: SupabaseClient, user: WaUser, telefono: string, entregaId: string, piezaId: string): Promise<boolean> {
   await espera(SILENCIO_MS);
@@ -161,6 +177,7 @@ async function procesarTrasSilencio(supabase: SupabaseClient, user: WaUser, tele
     return true;
   }
   if (ent?.estado === 'por_confirmar') await supabase.from('entregas_bloqueo').update({ estado: 'recibiendo' }).eq('id', entregaId).eq('estado', 'por_confirmar');
+  await avisarEspera(supabase, user, telefono, entregaId, avisoDeEspera('pedido', piezas));
   await pedirALaApp(supabase, user, telefono, { accion: 'pedido', entregaId });
   return true;
 }
@@ -179,7 +196,8 @@ export async function atenderEntregaBloqueo(supabase: SupabaseClient, user: WaUs
   try {
     let texto = message.text || null;
     if (message.type === 'audio' && message.audio_id) {
-      const t = await transcribeAudio(message.audio_id);
+      // «Trappi» es el asistente: la asesora suele empezar el audio llamándolo (2026-11-07 salió «Tratvi»).
+      const t = await transcribeAudio(message.audio_id, { pistas: PISTAS_AUDIO });
       texto = t.text || null;
       if (!texto) return false;
     }
@@ -213,10 +231,12 @@ export async function atenderEntregaBloqueo(supabase: SupabaseClient, user: WaUs
       }
       case 'responder': {
         await guardarPieza(supabase, { ...base, entrega_id: d.entregaId });
+        await avisarEspera(supabase, user, message.phone, d.entregaId, avisoDeEspera('respuesta'));
         await pedirALaApp(supabase, user, message.phone, { accion: 'respuesta', entregaId: d.entregaId, texto: texto ?? '' });
         return true;
       }
       case 'tipo': {
+        if (d.tipo === 'bloqueo') await avisarEspera(supabase, user, message.phone, d.entregaId, avisoDeEspera('pedido', await piezasEntrantes(supabase, d.entregaId)));
         await pedirALaApp(supabase, user, message.phone, { accion: 'tipo', entregaId: d.entregaId, tipo: d.tipo });
         return true;
       }

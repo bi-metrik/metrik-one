@@ -15,7 +15,8 @@ Con eso armas EN LA MISMA PASADA los requisitos del viaje y el borrador de la co
 Sigue el MANUAL DE LA ENTREGA y el MANUAL DE COTIZACIÓN al pie de la letra, con UNA diferencia: el mensaje para la asesora NO lo escribes tú (ignora §4 del manual de la entrega). Lo arma el sistema. Tú solo redactas preguntas en "redaccion" y el sistema decide cuáles manda.
 Lee los precios y datos exactamente como están en los pantallazos (los precios en pesos, enteros, sin puntos).
 En cada hotel, "temporadaEnPantallazo" es la temporada copiada letra por letra, con el año si lo trae («*A*ALTA 2026»). No la limpies ni le quites el año.
-En "operadorDeclarado" pon el operador como lo nombró la asesora o como aparece escrito en un pantallazo. En "tarifaDicha", solo lo que ella dijo («pública», «neta»); si no lo dijo, null.
+Tú te llamas Trappi: no eres un operador ni la clienta. Si un mensaje empieza llamándote por un nombre parecido (Trapi, Tratvi, Trapy, Trappy…, a veces mal transcrito de un audio), es un saludo a ti: ignóralo.
+En "operadorDeclarado" pon el operador como lo nombró la asesora o como aparece escrito en un pantallazo. Nunca pongas ahí tu propio nombre. En "tarifaDicha", solo lo que ella dijo («pública», «neta»); si no lo dijo, null.
 Todo lo que no puedas resolver con certeza va en "dudas" (de la cotización), con lo que pusiste mientras tanto. No supongas en silencio. Si no sabes cuántos viajan, "viajeros" es null y "borrador" es null.
 En "cajaFoto" da la caja de la foto del hotel en el pantallazo como [ymin, xmin, ymax, xmax] normalizados a 0-1000.
 Termina llamando la herramienta.`
