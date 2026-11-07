@@ -28,12 +28,37 @@ export interface OpcionDeLectura {
   precio: string | null
 }
 
+/**
+ * La captura no dice si el precio es de todos o de uno (Trappvel, 2026-11-06: el vuelo del GDS
+ * con «COP 4,666,438» y sin pasajeros). Ninguna otra captura lo resuelve: se le pregunta a la
+ * persona. Cada respuesta trae su lectura YA firmada por el servidor (la misma lectura del modelo,
+ * juzgada con ese `base_precio`): elegir es tomarla, sin otra llamada.
+ */
+export interface OpcionDeBase {
+  /** El valor del enum `base_precio` de la ranura («total», «por_pax»). */
+  valor: string
+  /** El botón: «Es el total», «Es por persona». */
+  etiqueta: string
+  lectura: LecturaCasilla
+  lecturaJson: string
+  firma: string
+  alertas: string[]
+}
+
+export interface EleccionDeBase {
+  /** «¿Ese precio es de todos los pasajeros o de uno solo?» */
+  pregunta: string
+  opciones: OpcionDeBase[]
+}
+
 export type EstadoDeProceso =
   | { fase: 'mirando' }
   | { fase: 'leyendo' }
   | { fase: 'lista'; alertas: string[] }
   | { fase: 'eligiendo_tipo'; motivo: string }
   | { fase: 'eligiendo_opcion'; mensaje: string; opciones: OpcionDeLectura[] }
+  /** ¿El precio es de todos o de uno? Con las lecturas listas para cada respuesta. */
+  | { fase: 'eligiendo_base'; pregunta: string; opciones: OpcionDeBase[] }
   /**
    * `reintentar`: no fue la captura sino la conexión (caso Alejandra, 2026-10-05). La fila
    * ofrece «Reintentar» con la misma imagen: volver a buscar el pantallazo y pegarlo es lo
@@ -86,7 +111,7 @@ export type Deteccion =
 
 export type LecturaDeBorrador =
   | { ok: true; lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] }
-  | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[]; reintentar?: boolean; codigo?: string }
+  | { ok: false; mensaje: string; detalle?: string; opciones?: OpcionDeLectura[]; reintentar?: boolean; codigo?: string; eleccionBase?: EleccionDeBase }
 
 /** Cómo entra una captura a Componentes: habitación de una opción, otra opción o ranura nueva. */
 export type ComoQueda = 'habitacion' | 'hermana' | 'nueva'
@@ -182,6 +207,16 @@ export async function leerCaptura(
       deps.informar({ estado: { fase: 'eligiendo_opcion', mensaje: lectura.mensaje, opciones: lectura.opciones ?? [] }, abierta: true })
       return
     }
+    // Solo falta si el precio es de todos o de uno: se pregunta, con las lecturas ya hechas.
+    if (lectura.eleccionBase && lectura.eleccionBase.opciones.length > 0) {
+      deps.informar({
+        estado: { fase: 'eligiendo_base', pregunta: lectura.eleccionBase.pregunta, opciones: lectura.eleccionBase.opciones },
+        leida: null,
+        borrador: null,
+        abierta: true,
+      })
+      return
+    }
     // H19 (prueba Europa, 2026-10-14) · «no es un vuelo»: el AVE Madrid→Barcelona se detectó
     // como vuelo, la lectura lo rechazó y la fila quedaba sin salida. Que no sea lo que se creyó
     // no es un callejón: se pregunta qué es, con los mismos botones que una captura sin detectar.
@@ -196,6 +231,16 @@ export async function leerCaptura(
     })
     return
   }
+  aLaFila(deps, tipo, pistas, lectura)
+}
+
+/** Una lectura firmada a la fila: dónde iría, si se parece a algo, y lista para «Aceptar». */
+function aLaFila(
+  deps: DependenciasDeProceso,
+  tipo: TipoRanura,
+  pistas: Pistas,
+  lectura: { lectura: LecturaCasilla; lecturaJson: string; firma: string; alertas: string[] },
+) {
   const borrador: Borrador = { tipo, lectura: lectura.lectura, lecturaJson: lectura.lecturaJson, firma: lectura.firma, pistas }
   const r = deps.revisar(borrador)
   deps.informar({
@@ -207,6 +252,16 @@ export async function leerCaptura(
     // Lo que se pregunta se muestra abierto: nunca se decide en silencio.
     ...(r.pregunta ? { abierta: true } : {}),
   })
+}
+
+/**
+ * «Es el total» / «Es por persona» (Trappvel, 2026-11-06): la lectura de esa respuesta, que ya
+ * vino firmada con la pregunta, pasa a la fila como cualquier lectura. NO llama a `deps.leer`:
+ * cada llamada al modelo gasta cuota de producción y la respuesta ya estaba.
+ */
+export function elegirBasePrecio(deps: DependenciasDeProceso, tipo: TipoRanura, pistas: Pistas, opcion: OpcionDeBase): void {
+  if (!deps.vigente()) return
+  aLaFila(deps, tipo, pistas, opcion)
 }
 
 /** El recorrido completo. Con `tipoElegido` se salta la detección (el asesor dijo qué es). */

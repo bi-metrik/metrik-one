@@ -15,17 +15,37 @@
 // gotcha de CLAUDE.md: "Auto-extraccion AI con reintento... responseSchema
 // fuerza JSON valido en Gemini... elimina 'JSON invalido de Gemini'").
 //
-// IMPORTANTE (mismo criterio que extract-fields.ts): apiKey se recibe por
+// IMPORTANTE (mismo criterio que extract-fields.ts): apiKey (la de Gemini) se recibe por
 // parametro desde el caller (server action / route), nunca se lee
 // process.env aqui — no esta garantizado disponible en libs en Vercel.
+// Desde el 2026-11-06 (decision de Mauricio) puede faltar: si las actas van a Haiku
+// (`haikuActivo(…, OPCIONES_ACTAS)`, que lee el entorno igual que fetchModeloActas), el acta sale
+// sin llave de Gemini y sin respaldo. Ver `faltaLlaveDeActas`.
 //
 // Server-only.
 // ============================================================
 
-import { fetchModeloActas } from '@/lib/ai/modelo-llm'
+import { entornoPorDefecto, fetchModeloActas, haikuActivo, OPCIONES_ACTAS, proveedorDe } from '@/lib/ai/modelo-llm'
 import type { CandidataActa } from './seleccion'
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite'
+
+/**
+ * ¿Falta la llave del modelo que van a usar las actas? Devuelve el mensaje de error, o null si se puede generar.
+ * El proveedor sale de la misma regla que `fetchModeloActas` (`LLM_PROVEEDOR_ACTAS`, `LLM_PROVEEDOR`,
+ * `ANTHROPIC_API_KEY`): con Haiku activo la llave de Gemini es solo el respaldo y puede faltar.
+ */
+export function faltaLlaveDeActas(
+  apiKeyGemini: string | null | undefined,
+  entorno: (k: string) => string | undefined = entornoPorDefecto,
+): string | null {
+  if (haikuActivo(entorno, OPCIONES_ACTAS)) return null
+  if ((apiKeyGemini ?? '').trim()) return null
+  if (proveedorDe(entorno, OPCIONES_ACTAS) === 'gemini') {
+    return 'GEMINI_API_KEY no configurada en el servidor: las actas van a Gemini (LLM_PROVEEDOR_ACTAS o LLM_PROVEEDOR en gemini)'
+  }
+  return 'Sin llave de modelo para las actas: falta ANTHROPIC_API_KEY (Claude Haiku) y GEMINI_API_KEY (respaldo en Gemini)'
+}
 
 export interface CompromisoActa {
   responsable: string
@@ -111,11 +131,10 @@ const RESPONSE_SCHEMA = {
  */
 export async function generarActa(
   candidata: CandidataActa,
-  apiKey: string,
+  apiKey: string | null | undefined,
 ): Promise<ActaGenerada> {
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY no configurada en el servidor')
-  }
+  const falta = faltaLlaveDeActas(apiKey)
+  if (falta) throw new Error(falta)
 
   const cuerpo = candidata.transcripcion.cuerpo
   if (!cuerpo.trim()) {
@@ -123,7 +142,9 @@ export async function generarActa(
   }
 
   const systemPrompt = buildPrompt(candidata.transcripcion.asistentes)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`
+  // Sin llave de Gemini la URL va sin `?key=`: fetchModeloActas la manda a Haiku y, si Haiku falla, avisa que no hay respaldo.
+  const llave = (apiKey ?? '').trim()
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent${llave ? `?key=${llave}` : ''}`
 
   const res = await fetchModeloActas(url, {
     method: 'POST',

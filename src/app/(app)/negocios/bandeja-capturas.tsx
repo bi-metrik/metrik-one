@@ -15,6 +15,7 @@ import {
   type ResultadoAceptarCaptura,
 } from '@/app/(app)/negocios/tarifa-pax-actions'
 import {
+  elegirBasePrecio,
   leerCaptura,
   MENSAJE_DETECCION_SIN_RED,
   procesarCaptura,
@@ -22,6 +23,7 @@ import {
   type ComoQueda,
   type DependenciasDeProceso,
   type EstadoDeProceso,
+  type OpcionDeBase,
   type Pistas,
 } from '@/lib/cotizaciones/proceso-captura'
 import {
@@ -220,7 +222,7 @@ export function conteoDeBandeja(capturas: readonly Pick<Captura, 'estado'>[]): {
   for (const c of capturas) {
     const f = c.estado.fase
     if (f === 'mirando' || f === 'leyendo' || f === 'aceptando') leyendo += 1
-    else if (f === 'lista' || f === 'parecida' || f === 'otro_precio' || f === 'eligiendo_tipo' || f === 'eligiendo_opcion' || f === 'rechazada') porAceptar += 1
+    else if (f === 'lista' || f === 'parecida' || f === 'otro_precio' || f === 'eligiendo_tipo' || f === 'eligiendo_opcion' || f === 'eligiendo_base' || f === 'rechazada') porAceptar += 1
   }
   return { porAceptar, leyendo }
 }
@@ -250,7 +252,7 @@ const FASES_CON_BORRADOR = new Set(['lista', 'parecida', 'otro_precio'])
  */
 export function enElAireCaptura(c: Pick<Captura, 'estado' | 'borrador'>): boolean {
   const f = c.estado.fase
-  return f === 'mirando' || f === 'leyendo' || f === 'aceptando' || f === 'eligiendo_opcion'
+  return f === 'mirando' || f === 'leyendo' || f === 'aceptando' || f === 'eligiendo_opcion' || f === 'eligiendo_base'
     || (FASES_CON_BORRADOR.has(f) && !!c.borrador)
 }
 
@@ -967,6 +969,12 @@ export default function BandejaCapturas({
     void leerCaptura(dependencias(c.id, c.dataUrl), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, o)
   }
 
+  /** «Es el total» / «Es por persona»: la lectura de esa respuesta ya vino firmada; no se vuelve a leer. */
+  function elegirBase(c: Captura, o: OpcionDeBase) {
+    if (!c.tipo || c.estado.fase !== 'eligiendo_base') return
+    elegirBasePrecio(dependencias(c.id, c.dataUrl), c.tipo, c.pistas ?? { lugar: null, origen: null, destino: null }, o)
+  }
+
   /**
    * «Aceptar» (H2/H3/H4). Va por `fetch` y no por la server action (ver la ruta), en fila con
    * las demás aceptaciones. La fila cambia en el acto; al volver dice dónde quedó.
@@ -1325,6 +1333,7 @@ export default function BandejaCapturas({
                 tiposElegibles={porPasos ? TIPOS_RANURA : TIPOS_CON_PANTALLAZO}
                 onReintentar={() => reintentar(c)}
                 onElegirOpcion={o => elegirOpcion(c, o)}
+                onElegirBase={o => elegirBase(c, o)}
                 onAgregarIgual={() => agregarIgual(c)}
                 onReemplazarPrecio={() => reemplazarPrecio(c)}
                 onVer={onOpcionCreada}
@@ -1438,6 +1447,7 @@ export function FilaCaptura({
   onElegirTipo = NADA,
   onReintentar = NADA,
   onElegirOpcion = NADA,
+  onElegirBase,
   onAgregarIgual = NADA,
   onReemplazarPrecio = NADA,
   onVer,
@@ -1467,6 +1477,8 @@ export function FilaCaptura({
   /** «Reintentar» de una fila que no llegó a ONE: la misma imagen, sin volver a pegarla. */
   onReintentar?: () => void
   onElegirOpcion?: (o: { nombre: string; precio: string | null }) => void
+  /** «Es el total» / «Es por persona» cuando la captura no lo dice. */
+  onElegirBase?: (o: OpcionDeBase) => void
   /** P10 · «Agregar igual» / «Agregar como otra opción» / «Es una habitación más». */
   onAgregarIgual?: () => void
   /** P10 · «Reemplazar el precio de Opción N». */
@@ -1591,6 +1603,24 @@ export function FilaCaptura({
             <button key={`${o.nombre}|${o.precio ?? ''}`} type="button" onClick={() => onElegirOpcion(o)} className={`${BTN} justify-between text-left`}>
               <span className="min-w-0 flex-1 truncate">{o.nombre}</span>
               {o.precio && <span className="shrink-0 tabular-nums">{o.precio}</span>}
+            </button>
+          ))}
+        </div>
+      </>,
+      quitar,
+    )
+  }
+  if (e.fase === 'eligiendo_base') {
+    return fila(
+      miniatura,
+      <>
+        {tituloFila}
+        {estado(e.pregunta)}
+        <span className="text-[13px] text-[#6E6A62]">La captura no lo dice. Elige y la tarifa queda con eso.</span>
+        <div className="mt-1 flex flex-wrap gap-2" data-elegir-base-precio>
+          {e.opciones.map(o => (
+            <button key={o.valor} type="button" onClick={() => onElegirBase?.(o)} className={BTN} data-base-precio={o.valor}>
+              {o.etiqueta}
             </button>
           ))}
         </div>

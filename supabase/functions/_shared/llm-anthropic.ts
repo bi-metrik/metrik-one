@@ -75,9 +75,15 @@ export function esUrlGemini(url: string): boolean {
   return /^https:\/\/generativelanguage\.googleapis\.com\/.+:generateContent/.test(url);
 }
 
-/** ¿Los pedidos de Gemini van hoy a Haiku? (proveedor `anthropic` y llave puesta). */
-export function haikuActivo(entorno: Entorno = entornoPorDefecto): boolean {
-  return proveedorLLM(entorno('LLM_PROVEEDOR')) === 'anthropic' && !!(entorno('ANTHROPIC_API_KEY') ?? '').trim();
+/**
+ * ¿Los pedidos de Gemini van hoy a Haiku? (proveedor `anthropic` y llave puesta). Sin opciones mira solo el interruptor
+ * global; con las de una familia (p. ej. `OPCIONES_ACTAS`) aplica la misma regla que `crearFetchModelo` con ellas.
+ */
+export function haikuActivo(
+  entorno: Entorno = entornoPorDefecto,
+  o: Pick<OpcionesFetchModelo, 'variable' | 'heredaDe' | 'porDefecto'> = {},
+): boolean {
+  return proveedorDe(entorno, o) === 'anthropic' && !!(entorno('ANTHROPIC_API_KEY') ?? '').trim();
 }
 
 /** ¿El pedido de Gemini trae su llave (en `?key=` o en `x-goog-api-key`)? Sin ella no hay respaldo posible. */
