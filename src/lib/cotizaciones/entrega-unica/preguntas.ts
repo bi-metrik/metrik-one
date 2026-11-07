@@ -118,3 +118,41 @@ function textoPorDefecto(p: Omit<Pregunta, 'numero' | 'texto'>, b: BorradorCotiz
     case 'ninosGratis': return `En ${hotel} ${p.motivo.split(': ').slice(1).join(': ')} ¿Aplica? Mientras tanto cobré al niño.`
   }
 }
+
+// ── «Trappi» no es un operador ─────────────────────────────────────────────────────────────────────
+// Prueba real del 2026-11-07: el audio empezaba «Trappi, bloqueo para…», la transcripción dijo «Tratvi», el
+// modelo lo puso como operador y la pregunta salió «¿La tarifa de Tratvi es pública o neta?».
+
+const plano = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z]/g, '')
+
+function distancia(a: string, b: string): number {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    let diag = d[0]
+    d[0] = i
+    for (let j = 1; j <= b.length; j++) {
+      const arriba = d[j]
+      d[j] = Math.min(d[j] + 1, d[j - 1] + 1, diag + (a[i - 1] === b[j - 1] ? 0 : 1))
+      diag = arriba
+    }
+  }
+  return d[b.length]
+}
+
+/** ¿Es el nombre del asistente (o una transcripción parecida: Trapi, Tratvi, Trapy, Trappy…)? */
+export function esNombreDelAsistente(s: string | null | undefined): boolean {
+  const p = plano(String(s ?? ''))
+  return p.length >= 4 && distancia(p, 'trappi') <= 2
+}
+
+/** Si el modelo tomó el nombre del asistente por operador: operador null y fuera las redacciones que lo nombran. */
+export function sinElAsistente<T extends { requisitos: Requisitos; redaccion: Redaccion[] }>(s: T): T {
+  const op = s.requisitos.operadorDeclarado
+  if (!esNombreDelAsistente(op)) return s
+  const nombre = plano(op!)
+  return {
+    ...s,
+    requisitos: { ...s.requisitos, operadorDeclarado: null },
+    redaccion: s.redaccion.filter(r => !r.pregunta.split(/\s+/).some(w => plano(w) === nombre)),
+  }
+}

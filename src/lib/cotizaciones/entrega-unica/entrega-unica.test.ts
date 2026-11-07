@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { BorradorCotizacion, HotelBorrador } from '@/lib/cotizaciones/asistente/borrador'
 import type { Requisitos, SalidaEntrega, SalidaRespuesta } from './esquema'
-import { aniosDeLaTemporada, preguntasQueBloquean, tarifaSabida, llavePregunta } from './preguntas'
+import { aniosDeLaTemporada, esNombreDelAsistente, preguntasQueBloquean, sinElAsistente, tarifaSabida, llavePregunta } from './preguntas'
 import { lineaDeLoQueEntendi, mensajeDeConfirmacion } from './mensaje'
 import { pasaACotizacion, procesarPedido, procesarRespuesta, responderTipo, totalesAlCliente } from './flujo'
 import type { Llamador } from './llamada'
@@ -200,5 +200,27 @@ describe('el flujo punta a punta con la base en memoria', () => {
     const { puerto, modelo, llamadas } = montar({ requisitos: req({ operadorDeclarado: 'Aliados' }), redaccion: [], borrador: tres() })
     await Promise.all([procesarPedido('ent-1', { puerto, modelo }), procesarPedido('ent-1', { puerto, modelo })])
     expect(llamadas).toEqual(['armar'])
+  })
+})
+
+describe('«Trappi» no es un operador (prueba del 2026-11-07)', () => {
+  it('reconoce el nombre y sus transcripciones parecidas', () => {
+    for (const n of ['Trappi', 'trapi', 'Tratvi', 'Trapy', 'Trappy', 'TRAPPI.']) expect(esNombreDelAsistente(n), n).toBe(true)
+    for (const n of ['Aliados', 'bloqueo de aliados', 'Travel', 'Trappvel', null, '']) expect(esNombreDelAsistente(n), String(n)).toBe(false)
+  })
+  it('lo saca del operador y de las preguntas que lo nombran; la tarifa vuelve a preguntarse con el texto del código', () => {
+    const s = sinElAsistente({
+      requisitos: req({ operadorDeclarado: 'Tratvi' }),
+      redaccion: [{ clave: 'tarifa' as const, pantallazo: null, pregunta: '¿La tarifa de Tratvi es pública o neta?' }],
+      borrador: tres(),
+    })
+    expect(s.requisitos.operadorDeclarado).toBeNull()
+    expect(s.redaccion).toEqual([])
+    const q = preguntasQueBloquean({ requisitos: s.requisitos, borrador: s.borrador, redaccion: s.redaccion, hoy: '2026-11-04' })
+    expect(q.find(p => p.clave === 'tarifa')?.texto).toBe('¿La tarifa es pública o neta? Mientras tanto la dejé como pública.')
+  })
+  it('un operador de verdad no se toca', () => {
+    const e = { requisitos: req({ operadorDeclarado: 'Aliados' }), redaccion: [], borrador: null }
+    expect(sinElAsistente(e)).toBe(e)
   })
 })

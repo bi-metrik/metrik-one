@@ -150,3 +150,17 @@ export function decidirAncla(m: MensajeEntrante, abiertas: ReadonlyArray<Entrega
       : 'No sé a qué cotización va este mensaje. ¿Para cuál es?',
   }
 }
+
+/**
+ * El aviso de que va a tardar (pedido de Mauricio tras la prueba del 2026-11-07: del último mensaje al resumen pasan
+ * cerca de 2 minutos y la asesora no debe creer que se perdió el contacto). Sale justo antes de llamar a la app.
+ * Solo a la asesora, como todo lo de la entrega.
+ */
+export function avisoDeEspera(fase: 'pedido' | 'respuesta', piezas: ReadonlyArray<{ tipo?: unknown; texto?: unknown }> = []): string {
+  if (fase === 'respuesta') return 'Recibido. Estoy aplicando tus respuestas y armando el PDF; me toma un par de minutos.'
+  const n = piezas.filter(p => p.tipo === 'imagen').length
+  const cliente = piezas.map(p => clienteDelTexto(p.texto as string | null)).find(Boolean)
+  const de = cliente ? ` de ${cliente}` : ''
+  const con = n === 1 ? ' con 1 pantallazo' : n > 1 ? ` con ${n} pantallazos` : ''
+  return `Recibí el pedido${de}${con}. Estoy armando la cotización, me toma unos 2 minutos.`
+}

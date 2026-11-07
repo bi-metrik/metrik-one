@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clienteDelTexto, decidirAncla, pareceRespuesta, tienePantallazo, tieneSenalDeBloqueo, tituloDeEntrega, type EntregaAbierta } from './entrega-bloqueo-ancla'
+import { avisoDeEspera, clienteDelTexto, decidirAncla, pareceRespuesta, tienePantallazo, tieneSenalDeBloqueo, tituloDeEntrega, type EntregaAbierta } from './entrega-bloqueo-ancla'
 
 /** El ancla del pedido (brief del 2026-11-04): lo citado va a su hilo; lo suelto, solo sin duda; si no, se pregunta. */
 
@@ -97,5 +97,16 @@ describe('tienePantallazo', () => {
   it('un pedido que solo trae el audio transcrito no se cotiza: faltan los pantallazos', () => {
     expect(tienePantallazo([{ tipo: 'texto' }])).toBe(false)
     expect(tienePantallazo([{ tipo: 'texto' }, { tipo: 'imagen' }])).toBe(true)
+  })
+})
+
+describe('avisoDeEspera (prueba del 2026-11-07)', () => {
+  it('dice de quién es el pedido y cuántos pantallazos trae', () => {
+    const piezas = [{ tipo: 'texto', texto: 'Trappi, bloqueo para Katrin Prueba, 3 personas' }, ...Array.from({ length: 4 }, () => ({ tipo: 'imagen', texto: null }))]
+    expect(avisoDeEspera('pedido', piezas)).toBe('Recibí el pedido de Katrin Prueba con 4 pantallazos. Estoy armando la cotización, me toma unos 2 minutos.')
+  })
+  it('sin nombre ni pantallazos sigue avisando', () => {
+    expect(avisoDeEspera('pedido', [])).toBe('Recibí el pedido. Estoy armando la cotización, me toma unos 2 minutos.')
+    expect(avisoDeEspera('respuesta')).toMatch(/aplicando tus respuestas/)
   })
 })
