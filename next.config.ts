@@ -109,6 +109,13 @@ const nextConfig: NextConfig = {
       './node_modules/@sparticuz/chromium/bin/**/*',
       './src/lib/pdf/chromium/fuentes/**/*',
     ],
+    // Entrega única del bloqueo (Trappvel): la ruta interna que llama el webhook imprime el PDF de la
+    // cotización con Chromium en la segunda vuelta. Sin esto, en Vercel: «The input directory
+    // /var/task/node_modules/@sparticuz/chromium/bin does not exist» (prueba real 2026-11-07).
+    '/api/interno/entrega-bloqueo': [
+      './node_modules/@sparticuz/chromium/bin/**/*',
+      './src/lib/pdf/chromium/fuentes/**/*',
+    ],
     '/api/plantillas-documento/*': [
       './node_modules/@sparticuz/chromium/bin/**/*',
       './src/lib/pdf/chromium/fuentes/**/*',
