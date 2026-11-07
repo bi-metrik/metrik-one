@@ -8,7 +8,10 @@
 
 import { calcularCascada } from './totales'
 import { contextoDeCotizacion, leerItinerarios, type ContextoCotizacion, type FilaItinerario } from './itinerarios-datos'
-import { planDeTarifas, planVacio, type EstadoDeTarifas, type PlanDeTarifas } from './tarifas-por-pasos'
+import { cascadaDeItinerario, ranurasConAlternativas } from './itinerarios'
+import { ranuraDeGrupo } from './ranuras-pantallazo'
+import { topeDelPresupuesto } from './presupuesto-del-viaje'
+import { planDeTarifas, planVacio, type ClienteDelBloqueo, type EstadoDeTarifas, type PlanDeTarifas } from './tarifas-por-pasos'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Supabase = any
@@ -18,6 +21,8 @@ export interface FotoDeTarifas {
   filas: FilaItinerario[]
   estado: EstadoDeTarifas
   costoDe: (id: string) => number | null
+  /** Solo en un viaje en bloqueo con paquetes: el total al cliente por paquete y el presupuesto (M-H2-2). */
+  bloqueo?: ClienteDelBloqueo
 }
 
 /** El costo de cada línea con sus adicionales, de la MISMA cascada que pinta la pantalla. */
@@ -36,6 +41,7 @@ export async function fotoDeTarifas(supabase: Supabase, cotizacionId: string): P
   if (!ctx) return null
   if (filas === null) return null
   const costos = costosDe(ctx)
+  const bloqueo = await clienteDelBloqueo(supabase, ctx)
   return {
     ctx,
     filas,
@@ -44,7 +50,42 @@ export async function fotoDeTarifas(supabase: Supabase, cotizacionId: string): P
       tarifas: filas.map(f => ({ id: f.id, nombre: f.nombre, orden: f.orden, vaEnPropuesta: f.vaEnPropuesta, seleccion: f.seleccion })),
     },
     costoDe: id => costos.get(id) ?? null,
+    ...(bloqueo ? { bloqueo } : {}),
   }
+}
+
+/**
+ * Viaje en bloqueo (M-H2-2): el total al cliente de la tarifa que lleva cada paquete (la cascada del
+ * documento, sobre los ítems de esa tarifa) y el tope del presupuesto de la solicitud. Sin ranura de
+ * paquetes, `undefined` y ninguna consulta de más. Si la solicitud no se puede leer, sin presupuesto
+ * (la Recomendada sale por la regla de antes) y no se frena la acción.
+ */
+async function clienteDelBloqueo(supabase: Supabase, ctx: ContextoCotizacion): Promise<ClienteDelBloqueo | undefined> {
+  const ranura = ranurasConAlternativas(ctx.items).find(r => ranuraDeGrupo(r.grupo)?.slug === 'paquete_detalle')
+  if (!ranura) return undefined
+  const totales = new Map(
+    ranura.candidatos.map(id => {
+      const c = cascadaDeItinerario(ctx.items, [id], ctx.params)
+      return [id, { venta: c.precioVenta, margenPct: c.margenRealPct }] as const
+    }),
+  )
+  return { totalDe: id => totales.get(id) ?? null, tope: await leerTopeDelPresupuesto(supabase, ctx.negocioId) }
+}
+
+async function leerTopeDelPresupuesto(supabase: Supabase, negocioId: string | null): Promise<number | null> {
+  if (!negocioId) return null
+  const { data, error } = await supabase
+    .from('negocio_bloques')
+    .select('presupuesto:data->>presupuesto')
+    .eq('negocio_id', negocioId)
+  if (error) {
+    console.warn('[tarifas-por-pasos] no se pudo leer el presupuesto de la solicitud:', (error as { message: string }).message)
+    return null
+  }
+  for (const f of (data ?? []) as { presupuesto: unknown }[]) {
+    if (typeof f.presupuesto === 'string' && f.presupuesto.trim() !== '') return topeDelPresupuesto(f.presupuesto)
+  }
+  return null
 }
 
 /**
@@ -66,6 +107,7 @@ export async function sincronizarTarifas(
     despues: despues.estado,
     costoDe: despues.costoDe,
     costoAntesDe: args.antes ? (id => args.antes!.costoDe(id) ?? despues.costoDe(id)) : undefined,
+    bloqueo: { despues: despues.bloqueo, antes: args.antes?.bloqueo },
   })
   if (planVacio(plan)) return { ok: true, plan, despues }
 

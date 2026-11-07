@@ -54,6 +54,13 @@ function constructor(tabla: string) {
         .filter(o => o.itinerario_id === f.id)
         .map(o => ({ item_id: o.item_id }))
     }
+    // Un campo de `negocio_bloques.data` con alias (`presupuesto:data->>presupuesto`), como lo lee PostgREST.
+    if (tabla === 'negocio_bloques') {
+      for (const m of columnas.matchAll(/(\w+):data->>?(\w+)/g)) {
+        const v = (f.data as Record<string, unknown> | null | undefined)?.[m[2]]
+        salida[m[1]] = v === undefined ? null : m[0].includes('->>') && v !== null && typeof v !== 'string' ? String(v) : v
+      }
+    }
     if (tabla === 'bloque_configs' && columnas.includes('bloque_definitions')) {
       salida.bloque_definitions = { tipo: f.tipo }
     }

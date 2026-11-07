@@ -304,7 +304,7 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   if (porElegir) patch.margen_porcentaje = 0
   patch.tarifa_pax = siguiente
   // La foto de ANTES (M-H2-2): con ella el plan sabe si la Recomendada seguía en el paquete que ONE
-  // proponía por precio y, si este guardado cambia los costos, la mueve al que propone ahora. Si no se
+  // proponía (dentro del presupuesto) y, si este guardado cambia los precios, la mueve al que propone ahora. Si no se
   // pudo leer, el plan sigue como antes (sin mover la Recomendada).
   const antes = await fotoDeTarifas(sb, item.cotizacion_id as string).catch(() => null)
   const previa = typeof item.proveedor_id === 'string' ? item.proveedor_id : null
