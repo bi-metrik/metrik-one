@@ -170,6 +170,11 @@ export function planDeTarifas(args: {
   costoDe: (id: string) => number | null
   /** Para la propuesta de ANTES (el costo de una opción ya borrada). Por defecto, `costoDe`. */
   costoAntesDe?: (id: string) => number | null
+  /**
+   * Solo viajes en bloqueo (M-H2-2): lo que paga el cliente por la tarifa con cada paquete y el tope
+   * de su presupuesto, después y antes de la acción. Sin esto, la Recomendada sale por la intermedia.
+   */
+  bloqueo?: { despues?: ClienteDelBloqueo; antes?: ClienteDelBloqueo }
 }): PlanDeTarifas {
   const { despues, costoDe } = args
   const antes = args.antes ?? despues
@@ -179,7 +184,14 @@ export function planDeTarifas(args: {
   const ranuras = ranurasConAlternativas(despues.items)
   // Viaje en bloqueo con varios paquetes (D5 de Mauricio, 2026-10-29): una tarifa por paquete.
   const paquetes = ranuras.find(r => esRanuraDePaquete(r.grupo))
-  if (paquetes) return planDeTarifasDeBloqueo(despues, paquetes.candidatos, args.antes)
+  if (paquetes) {
+    return planDeTarifasDeBloqueo(despues, paquetes.candidatos, args.antes, {
+      costoDe,
+      costoAntesDe,
+      cliente: args.bloqueo?.despues,
+      clienteAntes: args.bloqueo?.antes ?? args.bloqueo?.despues,
+    })
+  }
   const ranurasAntes = new Map(ranurasConAlternativas(antes.items).map(r => [r.grupo, r]))
   const hayCombinables = ranuras.some(r => r.combinable)
 
@@ -446,8 +458,27 @@ function repartoPorPrecio<T>(args: {
  *  · si dos tarifas nombran el mismo paquete, se lo queda la que lo ACABA de escoger (la que no lo
  *    nombraba en `antes`); la otra toma el que quedó libre. Sin eso, escoger en la Opción 3 el paquete
  *    de la Opción 2 se deshacía solo (ganaba la de menor `orden`).
+ *  · **qué paquete lleva la Recomendada lo propone ONE, no el orden de llegada** (M-H2-2 de la QA de
+ *    Trappvel, 2026-11-05): con dos operadores la Recomendada era el primer paquete que la bandeja
+ *    terminaba de leer (Aliados en una corrida, Tu Reserva en la otra, con los mismos pantallazos).
+ *    La regla es la de Trappvel del 2026-09-14, confirmada por Mauricio el 2026-11-06 para bloqueo:
+ *    «la de mejor experiencia dentro del presupuesto del cliente y, a igual experiencia, la de mayor
+ *    margen» (`paqueteRecomendado`). Es la propuesta «viva» de la decisión A: mientras la Recomendada
+ *    siga en el paquete que ONE propuso, se rehace cuando cambian los paquetes o sus precios (llega el
+ *    vuelo, se responde Pública / Neta). Si la asesora la cambió, no se toca. Sin costos (`costoDe`
+ *    ausente o todo en 0), la del menor `orden`, como antes.
  */
-export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: readonly string[], antes: EstadoDeTarifas | null = null): PlanDeTarifas {
+export function planDeTarifasDeBloqueo(
+  despues: EstadoDeTarifas,
+  paquetes: readonly string[],
+  antes: EstadoDeTarifas | null = null,
+  precios: {
+    costoDe?: (id: string) => number | null
+    costoAntesDe?: (id: string) => number | null
+    cliente?: ClienteDelBloqueo
+    clienteAntes?: ClienteDelBloqueo
+  } = {},
+): PlanDeTarifas {
   const plan = vacio()
   const otras = ranurasConAlternativas(despues.items).filter(r => !esRanuraDePaquete(r.grupo))
   const tarifas = [...despues.tarifas].sort((a, b) => a.orden - b.orden)
@@ -490,6 +521,30 @@ export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: reado
     const p = libres.shift()
     if (p) { paqueteDe.set(t, p); duena.set(p, t) } else sinLugar.add(t)
   }
+  // La propuesta viva de la Recomendada (M-H2-2): si la Recomendada seguía en el paquete que ONE
+  // proponía ANTES de la acción y la acción no se lo cambió, pasa al que ONE propone ahora. El que lo
+  // tenía toma el de la Recomendada (las marcas siguen al paquete, más abajo).
+  if (rec && antes && precios.costoDe) {
+    const suyoAntes = paqueteAntes.get(rec.id) ?? null
+    const paquetesAntes = ranurasConAlternativas(antes.items).find(r => esRanuraDePaquete(r.grupo))?.candidatos ?? []
+    const propuestoAntes = paqueteRecomendado(paquetesAntes, antes.tarifas, recomendadaDe(antes.tarifas).fila?.id ?? null, precios.costoAntesDe ?? precios.costoDe, precios.clienteAntes)
+    const suyo = paqueteDe.get(rec) ?? null
+    if (suyo !== null && suyo === suyoAntes && suyo === propuestoAntes) {
+      const ahora = paqueteRecomendado(paquetes, tarifas.map(t => ({ ...t, seleccion: [paqueteDe.get(t) ?? ''] })), rec.id, precios.costoDe, precios.cliente)
+      if (ahora !== null && ahora !== suyo) {
+        const otra = duena.get(ahora)
+        if (otra) {
+          paqueteDe.set(otra, suyo)
+          duena.set(suyo, otra)
+        } else {
+          libres.splice(libres.indexOf(ahora), 1, suyo)
+          duena.delete(suyo)
+        }
+        paqueteDe.set(rec, ahora)
+        duena.set(ahora, rec)
+      }
+    }
+  }
   const paqueteDeLaRec = rec ? paqueteDe.get(rec) ?? null : null
   for (const t of sinLugar) paqueteDe.set(t, paqueteDeLaRec ?? paquetes[0])
 
@@ -521,15 +576,85 @@ export function planDeTarifasDeBloqueo(despues: EstadoDeTarifas, paquetes: reado
     if (va !== t.vaEnPropuesta) plan.marcas.push({ itinerarioId: t.id, vaEnPropuesta: va })
   }
 
-  // Los paquetes que todavía no tienen tarifa: una cada uno, en la propuesta.
+  // Los paquetes que todavía no tienen tarifa: una cada uno, en la propuesta. Si todavía no hay
+  // Recomendada, nace con el paquete que ONE propone (M-H2-2), y con el primer `orden`.
   let orden = tarifas.reduce((m, t) => Math.max(m, t.orden), 0)
   let hayRec = rec !== null
+  if (!hayRec && libres.length > 1 && precios.costoDe) {
+    const propuesto = paqueteRecomendado(libres, [], null, precios.costoDe, precios.cliente)
+    if (propuesto !== null) libres.sort((a, b) => (a === propuesto ? -1 : b === propuesto ? 1 : 0))
+  }
   for (const p of libres) {
     const nombre: NombreTarifa | null = hayRec ? null : 'Recomendada'
     hayRec = true
     plan.crear.push({ nombre, orden: ++orden, vaEnPropuesta: true, seleccion: [p, ...otras.map(r => eleccionDe(r, []))] })
   }
   return plan
+}
+
+/**
+ * Lo que el cliente pagaría por la tarifa que lleva cada paquete, y el tope de su presupuesto.
+ * `totalDe(id)`: el total de la tarifa con ese paquete (la misma cascada del documento) y su margen
+ * real; `null` si no se pudo calcular. `tope`: `topeDelPresupuesto` (pesos; `Infinity` sin techo;
+ * `null` sin presupuesto).
+ */
+export interface ClienteDelBloqueo {
+  totalDe: (id: string) => { venta: number; margenPct: number | null } | null
+  tope: number | null
+}
+
+/**
+ * El paquete que ONE propone para la Recomendada de un bloqueo (M-H2-2; regla de Trappvel del
+ * 2026-09-14, confirmada por Mauricio el 2026-11-06 para bloqueo).
+ *
+ * Compiten los paquetes que van en la propuesta: el de la Recomendada, los que no tienen tarifa y los
+ * de las tarifas marcadas; uno que la asesora sacó no vuelve solo. Un paquete sin costo no compite
+ * (todavía no se leyó). `null` = ninguno tiene costo (queda lo de antes: el menor `orden`).
+ *
+ * «Experiencia»: los paquetes de un bloqueo no traen puntaje de experiencia (`puntaje_experiencia` y
+ * `nivel_servicio` de la decisión del 2026-09-14 nunca se construyeron) y son el mismo destino, las
+ * mismas fechas y el mismo grupo. Lo único que los distingue con un dato es lo que paga el cliente: se
+ * toma el TOTAL AL CLIENTE como señal de experiencia (más caro = más servicio). Es un sustituto
+ * declarado, no un puntaje; cuando exista el puntaje, entra aquí.
+ *
+ *  · con presupuesto y alguno dentro (total ≤ tope): el de mayor total; a igual total, el de mayor
+ *    margen; a igual margen, el primero por orden;
+ *  · con presupuesto y ninguno dentro: el más barato (es también el más cercano por encima del tope);
+ *  · sin presupuesto (o sin totales): la regla de antes, la intermedia (`indiceRecomendada`, decisión
+ *    del 2026-10-29; con dos, el más caro), sobre el total al cliente o, sin él, sobre el costo.
+ */
+function paqueteRecomendado(
+  paquetes: readonly string[],
+  tarifas: readonly TarifaDelPlan[],
+  recId: string | null,
+  costoDe: (id: string) => number | null,
+  cliente: ClienteDelBloqueo | undefined,
+): string | null {
+  const fuera = new Set(
+    tarifas.filter(t => t.id !== recId && !t.vaEnPropuesta).flatMap(t => t.seleccion.filter(id => paquetes.includes(id))),
+  )
+  for (const t of tarifas) if (t.id === recId) for (const id of t.seleccion) fuera.delete(id)
+  const compiten = paquetes
+    .map((id, orden) => ({ id, orden, costo: costoDe(id) ?? 0, total: cliente?.totalDe(id) ?? null }))
+    .filter(c => !fuera.has(c.id) && c.costo > 0)
+  if (compiten.length === 0) return null
+  const conTotal = cliente && compiten.every(c => c.total !== null && c.total.venta > 0)
+  const precioDe = (c: (typeof compiten)[number]) => (conTotal ? c.total!.venta : c.costo)
+  const tope = conTotal ? cliente!.tope : null
+
+  if (tope !== null) {
+    const dentro = compiten.filter(c => precioDe(c) <= tope)
+    if (dentro.length > 0) {
+      const margen = (c: (typeof compiten)[number]) => c.total?.margenPct ?? -Infinity
+      return [...dentro].sort((a, b) => (precioDe(b) - precioDe(a)) || (margen(b) - margen(a)) || (a.orden - b.orden))[0].id
+    }
+    return [...compiten].sort((a, b) => (precioDe(a) - precioDe(b)) || (a.orden - b.orden))[0].id
+  }
+
+  const orden = [...compiten].sort((a, b) => (precioDe(a) - precioDe(b)) || (a.orden - b.orden))
+  // Todos al mismo precio: el precio no escoge nada; queda el primero por orden, como antes.
+  if (orden.every(c => precioDe(c) === precioDe(orden[0]))) return orden[0].id
+  return orden[indiceRecomendada(orden.map(precioDe))].id
 }
 
 /**

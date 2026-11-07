@@ -7,6 +7,7 @@ import { exigirModulo, MENSAJE_MODULO_NO_ACTIVO, REQUISITO } from '@/lib/modulos
 import { recalcularTotales } from '@/app/(app)/negocios/cotizacion-actions'
 import { cerrarAccionPorPasos } from '@/lib/cotizaciones/por-pasos-cierre'
 import { leerItinerarios } from '@/lib/cotizaciones/itinerarios-datos'
+import { fotoDeTarifas } from '@/lib/cotizaciones/tarifas-por-pasos-datos'
 import { recomendadaDe } from '@/lib/cotizaciones/tarifas'
 import { agregarOpcionARanura, crearRanuraConOpcion } from '@/app/(app)/negocios/ranura-actions'
 import { exigirPorPasos } from '@/lib/cotizaciones/por-pasos-datos'
@@ -302,6 +303,10 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   // Sin respuesta, el precio no lleva margen encima: no sale inflado como si fuera Neta.
   if (porElegir) patch.margen_porcentaje = 0
   patch.tarifa_pax = siguiente
+  // La foto de ANTES (M-H2-2): con ella el plan sabe si la Recomendada seguía en el paquete que ONE
+  // proponía (dentro del presupuesto) y, si este guardado cambia los precios, la mueve al que propone ahora. Si no se
+  // pudo leer, el plan sigue como antes (sin mover la Recomendada).
+  const antes = await fotoDeTarifas(sb, item.cotizacion_id as string).catch(() => null)
   const previa = typeof item.proveedor_id === 'string' ? item.proveedor_id : null
   const proveedorId = proveedorDelPaquete({ ficha, previa, fichas })
   if ('proveedor_id' in item && proveedorId !== previa) patch.proveedor_id = proveedorId
@@ -309,7 +314,7 @@ export async function guardarPaqueteBloqueo(itemId: string, entrada: EntradaPaqu
   const { error: errUpd } = await sb.from('items').update(patch).eq('id', itemId)
   if (errUpd) return { success: false, error: errUpd.message as string }
   // D5 (2026-10-29): las tarifas siguen a los paquetes (cada uno con la suya); después, el total.
-  const c = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId: item.cotizacion_id as string, antes: null })
+  const c = await cerrarAccionPorPasos(sb, { workspaceId, cotizacionId: item.cotizacion_id as string, antes })
   if (!c.success) return { success: false, error: c.error }
   if (cot.negocio_id) revalidatePath(`/negocios/${cot.negocio_id}`)
   return { success: true, paquete, costo: costo.total, falta: costo.falta, fichaOperador: ficha?.nombre ?? null, ...(descuentoQuitado ? { descuentoQuitado } : {}) }

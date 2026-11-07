@@ -2,7 +2,7 @@
 
 ## Project memories
 
-- ⚠️ [Recomendada del bloqueo por precio (6-nov)](project_recomendada_bloqueo_por_precio.md) — rama aparte sin PR; espera decisión; toca PDF y 11 casos e2e
+- ⚠️ [Recomendada del bloqueo dentro del presupuesto (6-nov)](project_recomendada_bloqueo_presupuesto.md) — precio = proxy de experiencia; sin presupuesto = intermedia
 - [Elegir base_precio en la bandeja (6-nov)](project_elegir_base_precio.md) — N lecturas firmadas, sin re-leer; 1 pax = total; por_pax sin pax ×1 arreglado
 - [Hotel sin base_precio = total con aviso (6-nov)](project_hotel_precio_sin_base.md) — label es llave; frases con label_aviso; hash DE_MAIN
 - [Foto del hotel del paquete de bloqueo (5-nov)](project_foto_hotel_paquete_bloqueo.md) — llave «hotel|» sin ciudad; proveedor_id = operador

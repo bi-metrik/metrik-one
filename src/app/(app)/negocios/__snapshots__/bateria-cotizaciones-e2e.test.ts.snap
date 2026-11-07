@@ -37,22 +37,22 @@ exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen
   ],
   "opciones": [
     {
-      "bajoPiso": true,
-      "lineas": [
-        "HOTEL ARENA FICTICIO",
-      ],
-      "margen": null,
-      "nombre": "Recomendada",
-      "total": 6000000,
-    },
-    {
       "bajoPiso": false,
       "lineas": [
         "HOTEL CORAL FICTICIO",
       ],
       "margen": 15,
-      "nombre": "Opción 2",
+      "nombre": "Recomendada",
       "total": 8470588,
+    },
+    {
+      "bajoPiso": true,
+      "lineas": [
+        "HOTEL ARENA FICTICIO",
+      ],
+      "margen": null,
+      "nombre": "Opción 2",
+      "total": 6000000,
     },
     {
       "bajoPiso": false,
@@ -67,17 +67,17 @@ exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen
   "pdf": [
     {
       "lineas": [
-        "Hotel Arena Ficticio",
+        "Hotel Coral Ficticio",
       ],
       "nombre": "Recomendada",
-      "precio": 6000000,
+      "precio": 8470588,
     },
     {
       "lineas": [
-        "Hotel Coral Ficticio",
+        "Hotel Arena Ficticio",
       ],
       "nombre": null,
-      "precio": 8470588,
+      "precio": 6000000,
     },
     {
       "lineas": [
@@ -87,7 +87,7 @@ exports[`(a) bloqueo San Andrés: 3 paquetes, uno Pública sin comisión, margen
       "precio": 9882353,
     },
   ],
-  "valorTotal": 6000000,
+  "valorTotal": 8470588,
 }
 `;
 

@@ -342,33 +342,35 @@ describe('D5 · la asesora saca un paquete de la propuesta y lo vuelve a poner (
   let inicial: Resultado
   beforeAll(async () => { inicial = await correr(caso) }, 60_000)
 
-  it('los tres paquetes salen, cada uno con su precio', () => {
-    expect(opciones(inicial)).toEqual(['hotel arena ficticio', 'hotel coral ficticio', 'hotel palma ficticio'])
+  it('los tres paquetes salen, cada uno con su precio; la Recomendada, primero', () => {
+    // M-H2-2 (decisión del 2026-11-06): sin presupuesto en la solicitud, ONE propone la intermedia
+    // por precio (Coral: 8,47 M entre Arena 6 M y Palma 9,88 M), no el primero que se pegó (Arena).
+    expect(opciones(inicial)).toEqual(['hotel coral ficticio', 'hotel arena ficticio', 'hotel palma ficticio'])
   })
 
   it('sacar el segundo lo quita del PDF sin borrarlo; ponerlo otra vez lo devuelve igual', async () => {
-    const coral = idDe('Hotel Coral Ficticio')
-    expect(await paqueteEnPropuesta(coral, false)).toEqual({ success: true })
+    const arena = idDe('Hotel Arena Ficticio')
+    expect(await paqueteEnPropuesta(arena, false)).toEqual({ success: true })
     const sin = await medir(caso)
-    expect(opciones(sin)).toEqual(['hotel arena ficticio', 'hotel palma ficticio'])
-    expect((base.tablas.items as Fila[]).some(i => i.id === coral)).toBe(true)
-    expect(await paqueteEnPropuesta(coral, true)).toEqual({ success: true })
+    expect(opciones(sin)).toEqual(['hotel coral ficticio', 'hotel palma ficticio'])
+    expect((base.tablas.items as Fila[]).some(i => i.id === arena)).toBe(true)
+    // Sin la Pública sin comisión en la propuesta, ya no frena por su comisión.
+    expect(sin.motivos).not.toContain('comision_publica')
+    expect(await paqueteEnPropuesta(arena, true)).toEqual({ success: true })
     const con = await medir(caso)
     expect(opcionesDelPdf(con.props)).toEqual(opcionesDelPdf(inicial.props))
   }, 60_000)
 
   it('sacar el de la Recomendada le pasa la Recomendada al siguiente que va; el total es el de ese', async () => {
-    const arena = idDe('Hotel Arena Ficticio')
-    expect(await paqueteEnPropuesta(arena, false)).toEqual({ success: true })
+    const coral = idDe('Hotel Coral Ficticio')
+    expect(await paqueteEnPropuesta(coral, false)).toEqual({ success: true })
     const r = await medir(caso)
-    expect(opciones(r)).toEqual(['hotel coral ficticio', 'hotel palma ficticio'])
+    expect(opciones(r)).toEqual(['hotel arena ficticio', 'hotel palma ficticio'])
     const rec = r.props.itinerarios!.find(b => b.esPrincipal)!
-    expect(rec.items.map(i => clave(i.nombre))).toEqual(['hotel coral ficticio'])
+    expect(rec.items.map(i => clave(i.nombre))).toEqual(['hotel arena ficticio'])
     expect(r.valorTotal).toBe(rec.precio)
-    // Sin la Pública sin comisión en la propuesta, ya no frena por su comisión.
-    expect(r.motivos).not.toContain('comision_publica')
     // Y vuelve.
-    expect(await paqueteEnPropuesta(arena, true)).toEqual({ success: true })
+    expect(await paqueteEnPropuesta(coral, true)).toEqual({ success: true })
     expect(opciones(await medir(caso))).toHaveLength(3)
   }, 60_000)
 
@@ -380,9 +382,45 @@ describe('D5 · la asesora saca un paquete de la propuesta y lo vuelve a poner (
   }, 60_000)
 })
 
+// ── M-H2-2 (2026-11-06): la Recomendada de un bloqueo, dentro del presupuesto de la solicitud ──────
+
+describe('M-H2-2 · la Recomendada del bloqueo sale del presupuesto de la solicitud (acciones reales)', () => {
+  const caso = CASOS.find(c => c.clave === 'a-bloqueo-san-andres')!
+  // Al cliente: Arena 6.000.000, Coral 8.470.588, Palma 9.882.353.
+  const conPresupuesto = (valor: string): CasoBateria => ({
+    ...caso,
+    tablas: () => ({ ...caso.tablas(), negocio_bloques: [{ id: 'nb-presupuesto', negocio_id: 'neg-bateria-a', data: { presupuesto: valor } }] }),
+  })
+  const recomendadaDelPdf = (r: Resultado) => r.props.itinerarios!.find(b => b.esPrincipal)!.items.map(i => clave(i.nombre))
+
+  it('«Entre $5 y $8 millones»: solo Arena cabe; es la Recomendada y el total del documento', async () => {
+    const r = await correr(conPresupuesto('5m_8m'))
+    expect(recomendadaDelPdf(r)).toEqual(['hotel arena ficticio'])
+    expect(r.valorTotal).toBe(6_000_000)
+  }, 60_000)
+
+  it('«Entre $8 y $12 millones»: caben los tres; la de mayor total, Palma', async () => {
+    const r = await correr(conPresupuesto('8m_12m'))
+    expect(recomendadaDelPdf(r)).toEqual(['hotel palma ficticio'])
+    expect(opcionesDelPdf(r.props).map(o => clave(o.lineas[0]))).toEqual(['hotel palma ficticio', 'hotel arena ficticio', 'hotel coral ficticio'])
+  }, 60_000)
+
+  it('«Menos de $3 millones»: ninguno cabe; el más barato, Arena', async () => {
+    const r = await correr(conPresupuesto('menos_3m'))
+    expect(recomendadaDelPdf(r)).toEqual(['hotel arena ficticio'])
+  }, 60_000)
+
+  it('«Aún no tiene presupuesto definido»: la intermedia, Coral', async () => {
+    const r = await correr(conPresupuesto('sin_definir'))
+    expect(recomendadaDelPdf(r)).toEqual(['hotel coral ficticio'])
+  }, 60_000)
+})
+
 describe('D3 · la comisión del paquete Público, en % o en pesos, levanta el freno (acciones reales)', () => {
   const caso = CASOS.find(c => c.clave === 'a-bloqueo-san-andres')!
   const arena = () => (base.tablas.items as Fila[]).find(i => clave(i.nombre as string) === 'hotel arena ficticio')!.id as string
+  /** La opción del paquete Público (Arena). Desde M-H2-2 no es la Recomendada: lo es Coral, la intermedia. */
+  const deArena = (r: Resultado) => r.sujetosDelMotor.find(s => s.lineas.map(clave).includes('hotel arena ficticio'))!
   beforeAll(async () => { await correr(caso) }, 60_000)
 
   it('sin comisión frena; con 15 % entra al margen general con ella y el PDF sale limpio', async () => {
@@ -391,15 +429,14 @@ describe('D3 · la comisión del paquete Público, en % o en pesos, levanta el f
     const r = await medir(caso)
     expect(r.motivos).toEqual([])
     expect(r.borrador).toBe(false)
-    const rec = r.sujetosDelMotor.find(s => s.nombre === 'Recomendada')!
     // Cliente 6.000.000; agencia 6.000.000 − 900.000.
-    expect(rec.margen!).toBeCloseTo(15, 6)
+    expect(deArena(r).margen!).toBeCloseTo(15, 6)
   }, 60_000)
 
   it('en pesos: $300.000 sobre $6.000.000 es un 5 %: bajo el piso del 12 %, pide la autorización', async () => {
     expect(await ajustarReglasDelPaquete(arena(), { comisionMonto: 300_000 })).toEqual({ success: true })
     const r = await medir(caso)
-    expect(r.sujetosDelMotor.find(s => s.nombre === 'Recomendada')!.margen!).toBeCloseTo(5, 6)
+    expect(deArena(r).margen!).toBeCloseTo(5, 6)
     expect(r.motivos).toEqual(['margen'])
   }, 60_000)
 
@@ -423,16 +460,17 @@ describe('QA del #1342 · bloqueo con un paquete Público (acciones reales)', ()
 
   it('defecto 1 · el costo junto a «ganas» es lo que paga la agencia: precio público menos la comisión', async () => {
     const supabase = clienteFalso()
-    const recomendada = async () => {
+    // La tarifa del paquete Público (Arena); desde M-H2-2 la Recomendada es Coral (la intermedia).
+    const deArena = async () => {
       const ctx = (await contextoDeCotizacion(supabase, caso.cotizacionId))!
       const filas = (await leerItinerarios(supabase, caso.cotizacionId))!
-      const rec = filas.find(f => f.nombre === 'Recomendada')!
+      const rec = filas.find(f => f.seleccion.includes(idDe('Hotel Arena Ficticio')))!
       return cascadaDeItinerario(ctx.items, rec.seleccion, ctx.params, rec.id)
     }
     // Sin comisión no se sabe lo que paga la agencia (D3): nada de «ganas $0».
-    expect(costoDeAgencia(await recomendada())).toBeNull()
+    expect(costoDeAgencia(await deArena())).toBeNull()
     expect(await ajustarReglasDelPaquete(idDe('Hotel Arena Ficticio'), { comisionMonto: 250_000 })).toEqual({ success: true })
-    const c = await recomendada()
+    const c = await deArena()
     expect(c.precioVenta).toBe(6_000_000)
     expect(costoDeAgencia(c)).toBe(5_750_000)
     expect(c.precioVenta - costoDeAgencia(c)!).toBe(250_000)
@@ -451,14 +489,14 @@ describe('QA del #1342 · bloqueo con un paquete Público (acciones reales)', ()
     const enLaPantalla = (r.props.itinerarios ?? []).map(b => visibles.get(tarifaDelBloque(filas, b)))
     expect(enLaPantalla).toEqual(delDocumento)
     expect(enLaPantalla).toEqual(['Recomendada', 'Opción 2', 'Opción 3'])
-    // Con el segundo fuera, el tercero es «Opción 2» en los dos lados.
-    expect(await paqueteEnPropuesta(idDe('Hotel Coral Ficticio'), false)).toEqual({ success: true })
+    // Con el segundo fuera (Arena: la Recomendada es Coral desde M-H2-2), el tercero es «Opción 2» en los dos lados.
+    expect(await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), false)).toEqual({ success: true })
     const sin = await medir(caso)
     const filas2 = (await leerItinerarios(clienteFalso(), caso.cotizacionId))!
     const v2 = nombresVisiblesDeTarifas(filas2)
     expect((sin.props.itinerarios ?? []).map(b => v2.get(tarifaDelBloque(filas2, b))))
       .toEqual([...sin.modelo.tarifas].sort((a, b) => a.indice - b.indice).map(t => t.nombre))
-    expect(await paqueteEnPropuesta(idDe('Hotel Coral Ficticio'), true)).toEqual({ success: true })
+    expect(await paqueteEnPropuesta(idDe('Hotel Arena Ficticio'), true)).toEqual({ success: true })
   }, 60_000)
 
   describe('defecto 3 · «Incluido» al final del PDF sin texto revisado', () => {
@@ -707,10 +745,21 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
   const tarifaDe = async (n: string) => (await leerItinerarios(clienteFalso(), caso.cotizacionId))!.find(f => f.seleccion.includes(idDe(n)))!
   const recomendada = async () => (await leerItinerarios(clienteFalso(), caso.cotizacionId))!.find(f => f.nombre === 'Recomendada')!
   const grupo = () => (base.tablas.items as Fila[]).find(i => i.id === idDe(GAVIOTA))!.grupo as string
+  /**
+   * M-H2-2 (decisión del 2026-11-06): sin presupuesto en la solicitud ONE propone la intermedia por precio
+   * (Decamar, entre Sol y Gaviota), no el primero que se pegó. En la prueba real la Recomendada era Gaviota:
+   * la asesora la escoge, y desde ahí ONE no se la cambia.
+   */
+  const asesoraEscogeGaviota = async () => {
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'va', [SOL]: 'va', [DECAMAR]: 'recomendada' })
+    expect((await elegirOpcionEnTarifa((await recomendada()).id, grupo(), idDe(GAVIOTA))).success).toBe(true)
+    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'va', [DECAMAR]: 'va' })
+  }
   beforeEach(async () => { await correr(caso) }, 60_000)
 
   it('defecto 1 · cada versión con sus fechas y sus noches en «Hospedaje» (4 y 5 noches)', async () => {
     // Dos versiones, como la prueba real: la Recomendada es de 5 noches y la Opción 2, de 4.
+    await asesoraEscogeGaviota()
     expect(await paqueteEnPropuesta(idDe(DECAMAR), false)).toEqual({ success: true })
     const r = await medir(caso)
     const h = htmlDePropuesta(r.modelo, RECURSOS)
@@ -731,6 +780,7 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
 
   it('defecto 4 · en el día a día cada regreso cae en su día y dice de qué versión es; la ida común sale una vez', async () => {
     // Recomendada (Gaviota) regresa el 23; la Opción 2 (Sol), el 22. Antes el del 22 salía como de todas.
+    await asesoraEscogeGaviota()
     expect(await paqueteEnPropuesta(idDe(DECAMAR), false)).toEqual({ success: true })
     const r = await medir(caso)
     const indice = (nombre: string) => r.modelo.tarifas.find(t => t.nombre === nombre)!.indice
@@ -780,7 +830,7 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
   }, 60_000)
 
   it('defecto 3 · sacar la Recomendada y escoger una tercera como Recomendada deja cada marca con su paquete', async () => {
-    expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'va', [DECAMAR]: 'va' })
+    await asesoraEscogeGaviota()
     // 1. Sacar Gaviota (la Recomendada): la Recomendada pasa al siguiente que va.
     expect(await paqueteEnPropuesta(idDe(GAVIOTA), false)).toEqual({ success: true })
     expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'no va', [SOL]: 'recomendada', [DECAMAR]: 'va' })
@@ -800,6 +850,7 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
   }, 60_000)
 
   it('defecto 3 · entre dos opciones (sin la Recomendada) la marca también sigue al paquete, y «Deshacer» la devuelve', async () => {
+    await asesoraEscogeGaviota()
     expect(await paqueteEnPropuesta(idDe(SOL), false)).toEqual({ success: true })
     expect(await estadoDeLosPaquetes()).toEqual({ [GAVIOTA]: 'recomendada', [SOL]: 'no va', [DECAMAR]: 'va' })
     // En la tarifa de Decamar (la de mayor orden) se escoge Sol: antes se deshacía sola (ganaba la de menor orden).
@@ -817,6 +868,7 @@ describe('Prueba real del #1359 · bloqueo de tres paquetes (acciones reales)', 
   }, 60_000)
 
   it('defecto 3 · un paquete nuevo va en la propuesta aunque su tarifa viniera de un paquete fuera', async () => {
+    await asesoraEscogeGaviota()
     expect(await paqueteEnPropuesta(idDe(SOL), false)).toEqual({ success: true })
     const creado = await crearPaqueteBloqueo(caso.cotizacionId)
     expect(creado.success).toBe(true)
